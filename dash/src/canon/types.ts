@@ -281,6 +281,7 @@ export type SessionRow = {
   branch?: string | null
   started?: string | null
   ended?: string | null
+  summary?: Record<string, unknown>
   /** The analysis output the dashboard reads. */
   payload: unknown
 }

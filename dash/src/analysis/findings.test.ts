@@ -3,14 +3,15 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { afterEach, describe, expect, it } from 'vitest'
+import crypto from 'node:crypto'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { computeRankScore, detectCompactionHazard, detectDormantToolSchema, detectDuplicateToolCall, detectFindings, detectInactiveSkillReference, detectOversizedToolResult, detectPrefixCacheBreak, detectUnboundedDelegation, lintRecommendationD8, rankFindings, type Finding } from './findings.js'
 import {
   CanonStore,
   SCHEMA_VERSION,
 } from '../canon/store.js'
-import type { CanonicalRecord } from '../canon/types.js'
+import type { CanonicalRecord, ContentPart } from '../canon/types.js'
 import { KyberBridge } from '../server/bridge.js'
 import { handleKyberRequest } from '../server/routes.js'
 
@@ -30,7 +31,15 @@ afterEach(() => {
 })
 
 // Helper generating a minimal mock CanonicalRecord
-function makeMockRecord(overrides: Partial<CanonicalRecord> = {}): CanonicalRecord {
+type MockRecordOverrides = Omit<Partial<CanonicalRecord>, 'parts'> & {
+  parts?: readonly (ContentPart & { truncated?: boolean })[]
+  attributes?: Record<string, unknown>
+}
+
+// Helper generating a minimal mock CanonicalRecord
+function makeMockRecord(
+  overrides: MockRecordOverrides = {},
+): CanonicalRecord & { attributes?: Record<string, unknown> } {
   return {
     spanId: overrides.spanId ?? `span-${Math.random().toString(36).slice(2, 9)}`,
     traceId: overrides.traceId ?? 'trace-test',
@@ -56,6 +65,7 @@ function makeMockRecord(overrides: Partial<CanonicalRecord> = {}): CanonicalReco
     parts: overrides.parts,
     raw: overrides.raw,
     sessionId: overrides.sessionId ?? 'session-test-1',
+    ...(overrides.attributes ? { attributes: overrides.attributes } : {}),
   }
 }
 
@@ -92,9 +102,9 @@ describe('Decision D5: Finding Contract Compliance field-for-field', () => {
     expect(typeof finding.estimatedWasteTokens).toBe('number')
     expect(finding.estimatedWasteTokens).toBeGreaterThan(0)
     expect(typeof finding.recommendation).toBe('string')
-    expect(typeof finding.errorBar.lower).toBe('number')
-    expect(typeof finding.errorBar.upper).toBe('number')
-    expect(finding.errorBar.lower).toBeLessThanOrEqual(finding.errorBar.upper)
+    expect(typeof finding.errorBar!.lower).toBe('number')
+    expect(typeof finding.errorBar!.upper).toBe('number')
+    expect(finding.errorBar!.lower).toBeLessThanOrEqual(finding.errorBar!.upper)
     expect(typeof finding.outcomeRiskCaveat).toBe('string')
   })
 })
@@ -144,7 +154,7 @@ describe('Detector 1: dormant-tool-schema', () => {
     expect(f.evidenceLinks[0]?.spanId).toBe('turn-1')
     expect(f.evidenceLinks[1]?.spanId).toBe('turn-3')
     expect(f.estimatedWasteTokens).toBeGreaterThan(0)
-    expect(f.errorBar.lower).toBeLessThanOrEqual(f.errorBar.upper)
+    expect(f.errorBar!.lower).toBeLessThanOrEqual(f.errorBar!.upper)
   })
 
   it('does NOT flag tool schema if tool is invoked in any turn', () => {
@@ -193,6 +203,59 @@ describe('Detector 1: dormant-tool-schema', () => {
     })
 
     expect(findings.length).toBe(0)
+  })
+
+  it('flags uninvoked tools when session declares tools but only child tool.invoke records invoke a subset', () => {
+    const tools = [
+      { name: 'Bash', description: 'Run bash commands' },
+      { name: 'Read', description: 'Read file contents' },
+      { name: 'Write', description: 'Write file contents' },
+      { name: 'Glob', description: 'Find matching files' },
+    ]
+    const toolDefsPart = {
+      part: 'tool_definitions' as const,
+      text: JSON.stringify(tools),
+    }
+
+    const turn1 = makeMockRecord({
+      spanId: 'turn-1',
+      op: 'llm.invoke',
+      parts: [toolDefsPart],
+    })
+    const childInvoke = makeMockRecord({
+      spanId: 'tool-invoke-1',
+      parentSpanId: 'turn-1',
+      op: 'tool.invoke',
+      name: 'tool.invoke',
+      attributes: {
+        'gen_ai.tool.name': 'Bash',
+      },
+      raw: {
+        'gen_ai.tool.name': 'Bash',
+        arguments: { command: 'echo hello' },
+      },
+    })
+    const turn2 = makeMockRecord({
+      spanId: 'turn-2',
+      op: 'llm.invoke',
+      parts: [toolDefsPart],
+    })
+    const turn3 = makeMockRecord({
+      spanId: 'turn-3',
+      op: 'llm.invoke',
+      parts: [toolDefsPart],
+    })
+
+    const findings = detectDormantToolSchema({
+      records: [turn1, childInvoke, turn2, turn3],
+    })
+
+    const flaggedTools = findings.map((f) => f.title)
+    expect(findings.length).toBe(3)
+    expect(flaggedTools.some((t) => t.includes('"Bash"'))).toBe(false)
+    expect(flaggedTools.some((t) => t.includes('"Read"'))).toBe(true)
+    expect(flaggedTools.some((t) => t.includes('"Write"'))).toBe(true)
+    expect(flaggedTools.some((t) => t.includes('"Glob"'))).toBe(true)
   })
 })
 
@@ -258,9 +321,212 @@ describe('Detector 2: duplicate-tool-call', () => {
 
     expect(findings.length).toBe(0)
   })
+
+  it('does NOT flag identical tool calls across different sessions', () => {
+    const call1 = makeMockRecord({
+      spanId: 'tool-call-s1',
+      sessionId: 'session-1',
+      op: 'tool.invoke',
+      name: 'git_status',
+      raw: { arguments: {} },
+    })
+    const call2 = makeMockRecord({
+      spanId: 'tool-call-s2',
+      sessionId: 'session-2',
+      op: 'tool.invoke',
+      name: 'git_status',
+      raw: { arguments: {} },
+    })
+
+    const findings = detectDuplicateToolCall({
+      records: [call1, call2],
+    })
+
+    expect(findings.length).toBe(0)
+  })
+
+  it('derives waste tokens from gen_ai.tool.result_bytes when reported tokens are 0', () => {
+    const call1 = makeMockRecord({
+      spanId: 'tool-call-1',
+      sessionId: 'session-1',
+      op: 'tool.invoke',
+      name: 'read_file',
+      raw: { arguments: { path: '/src/main.ts' } },
+      tokens: { freshInput: 0, cacheRead: 0, cacheCreation: 0, output: 0, reportedInput: 0, reportedOutput: 0 },
+      attributes: { 'gen_ai.tool.result_bytes': 12000 },
+    })
+    const call2 = makeMockRecord({
+      spanId: 'tool-call-2',
+      sessionId: 'session-1',
+      op: 'tool.invoke',
+      name: 'read_file',
+      raw: { arguments: { path: '/src/main.ts' }, 'gen_ai.tool.result_bytes': 12000 },
+      tokens: { freshInput: 0, cacheRead: 0, cacheCreation: 0, output: 0, reportedInput: 0, reportedOutput: 0 },
+      attributes: { 'gen_ai.tool.result_bytes': 12000 },
+    })
+
+    const findings = detectDuplicateToolCall({
+      records: [call1, call2],
+    })
+
+    expect(findings.length).toBe(1)
+    expect(findings[0]!.estimatedWasteTokens).toBe(3000)
+    expect(findings[0]!.sessionId).toBe('session-1')
+  })
+
+  it('does NOT fabricate 250 tokens when tokens cannot be derived, marking estimatedWasteTokens undefined and measurementClass coverage-gap', () => {
+    const call1 = makeMockRecord({
+      spanId: 'tool-call-1',
+      sessionId: 'session-1',
+      op: 'tool.invoke',
+      name: 'read_file',
+      raw: { arguments: { path: '/src/main.ts' } },
+      tokens: { freshInput: 0, cacheRead: 0, cacheCreation: 0, output: 0, reportedInput: 0, reportedOutput: 0 },
+    })
+    const call2 = makeMockRecord({
+      spanId: 'tool-call-2',
+      sessionId: 'session-1',
+      op: 'tool.invoke',
+      name: 'read_file',
+      raw: { arguments: { path: '/src/main.ts' } },
+      tokens: { freshInput: 0, cacheRead: 0, cacheCreation: 0, output: 0, reportedInput: 0, reportedOutput: 0 },
+    })
+
+    const findings = detectDuplicateToolCall({
+      records: [call1, call2],
+    })
+
+    expect(findings.length).toBe(1)
+    expect(findings[0]!.estimatedWasteTokens).toBeUndefined()
+    expect(findings[0]!.measurementClass).toBe('coverage-gap')
+    expect(findings[0]!.rankScore).toBe(0)
+  })
+
+  it('keys duplicates on the full-arguments hash when present, not the truncated stored prefix', () => {
+    const zeroed = { freshInput: 0, cacheRead: 0, cacheCreation: 0, output: 0, reportedInput: 0, reportedOutput: 0 }
+    // Both records store the same 64KB-truncated arguments object; only the
+    // producer hash distinguishes the full pre-truncation arguments.
+    const truncatedArgs = { path: 'src/file.ts', content: 'Z'.repeat(1000) }
+    const mk = (spanId: string, argsHash: string) =>
+      makeMockRecord({
+        spanId,
+        sessionId: 'session-1',
+        op: 'tool.invoke',
+        name: 'Write',
+        raw: {
+          arguments: truncatedArgs,
+          'gen_ai.tool.arguments_hash': argsHash,
+          'gen_ai.tool.arguments_truncated': true,
+        },
+        tokens: zeroed,
+        parts: [],
+      })
+
+    // Different full arguments sharing a truncated prefix: not duplicates.
+    expect(detectDuplicateToolCall({ records: [mk('a', 'hash-one'), mk('b', 'hash-two')] })).toHaveLength(0)
+    // Same full-argument hash: a genuine duplicate.
+    expect(detectDuplicateToolCall({ records: [mk('a', 'hash-same'), mk('b', 'hash-same')] })).toHaveLength(1)
+  })
+
+  it('detects duplicate child tool.invoke records within session turns', () => {
+    const turn1 = makeMockRecord({
+      spanId: 'llm-turn-1',
+      op: 'llm.invoke',
+    })
+    const child1 = makeMockRecord({
+      spanId: 'llm-turn-1-t0',
+      parentSpanId: 'llm-turn-1',
+      op: 'tool.invoke',
+      name: 'tool.invoke',
+      attributes: {
+        'gen_ai.tool.name': 'read_file',
+      },
+      raw: {
+        'gen_ai.tool.name': 'read_file',
+        arguments: { path: '/src/main.ts' },
+      },
+      tokens: { freshInput: 0, cacheRead: 0, cacheCreation: 0, output: 0, reportedInput: 0, reportedOutput: 0 },
+    })
+    const turn2 = makeMockRecord({
+      spanId: 'llm-turn-2',
+      op: 'llm.invoke',
+    })
+    const child2 = makeMockRecord({
+      spanId: 'llm-turn-2-t0',
+      parentSpanId: 'llm-turn-2',
+      op: 'tool.invoke',
+      name: 'tool.invoke',
+      attributes: {
+        'gen_ai.tool.name': 'read_file',
+      },
+      raw: {
+        'gen_ai.tool.name': 'read_file',
+        arguments: { path: '/src/main.ts' },
+      },
+      tokens: { freshInput: 0, cacheRead: 0, cacheCreation: 0, output: 0, reportedInput: 0, reportedOutput: 0 },
+    })
+
+    const findings = detectDuplicateToolCall({
+      records: [turn1, child1, turn2, child2],
+    })
+
+    expect(findings.length).toBe(1)
+    const f = findings[0]!
+    expect(f.detectorId).toBe('duplicate-tool-call')
+    expect(f.confidence).toBe('deterministic')
+    expect(f.title).toContain('read_file')
+    expect(f.title).not.toContain('tool.invoke')
+    expect(f.evidenceLinks.length).toBeGreaterThanOrEqual(2)
+    expect(f.evidenceLinks[0]?.spanId).toBe('llm-turn-1-t0')
+    expect(f.evidenceLinks[1]?.spanId).toBe('llm-turn-2-t0')
+  })
+  it("hashes tool call arguments with sha256 when building duplicate detection keys", () => {
+    const createHashSpy = vi.spyOn(crypto, "createHash")
+
+    const call1 = makeMockRecord({
+      spanId: "tool-call-1",
+      op: "tool.invoke",
+      name: "write_file",
+      raw: { arguments: { path: "/tmp/test.txt", content: "large content payload ".repeat(100) } },
+    })
+    const call2 = makeMockRecord({
+      spanId: "tool-call-2",
+      op: "tool.invoke",
+      name: "write_file",
+      raw: { arguments: { path: "/tmp/test.txt", content: "large content payload ".repeat(100) } },
+    })
+
+    const findings = detectDuplicateToolCall({
+      records: [call1, call2],
+    })
+
+    expect(findings.length).toBe(1)
+    expect(createHashSpy).toHaveBeenCalledWith("sha256")
+    createHashSpy.mockRestore()
+  })
+
 })
 
 describe('Detector 3: oversized-tool-result', () => {
+  it('reads result_bytes from raw when attributes are present but carry no byte count', () => {
+    // The hand-rolled attribute read used to stop at a present-but-keyless
+    // attributes map and never consult raw. The truncated part means the
+    // content in hand cannot size the result, so the raw fallback must run.
+    const toolRecord = makeMockRecord({
+      spanId: 'tool-res-raw-bytes',
+      op: 'tool.invoke',
+      name: 'fetch_api',
+      attributes: { 'gen_ai.tool.name': 'fetch_api' },
+      parts: [{ part: 'tool_result_content', text: 'short', truncated: true }],
+      raw: { result: 'short', 'gen_ai.tool.result_bytes': 20000 },
+    })
+
+    const findings = detectOversizedToolResult({ records: [toolRecord] })
+
+    expect(findings.length).toBe(1)
+    expect(findings[0]!.title).toContain('20000 bytes')
+  })
+
   it('flags tool outputs exceeding token/byte budgets with low yield', () => {
     const bigContent = 'x'.repeat(12000)
     const toolRecord = makeMockRecord({
@@ -316,6 +582,195 @@ describe('Detector 3: oversized-tool-result', () => {
     })
 
     expect(findings.length).toBe(0)
+  })
+
+  it('flags child tool.invoke record when original unclipped result exceeds 100KB even if parts is truncated to 64KB', () => {
+    const unclippedBytes = 120 * 1024 // 120KB > 100KB
+    const truncated64k = 'a'.repeat(64 * 1024) // 64KB truncated part
+
+    const turn = makeMockRecord({
+      spanId: 'llm-turn-1',
+      op: 'llm.invoke',
+    })
+    const toolRecord = makeMockRecord({
+      spanId: 'tool-child-1',
+      parentSpanId: 'llm-turn-1',
+      op: 'tool.invoke',
+      name: 'fetch_logs',
+      parts: [
+        {
+          part: 'tool_result_content',
+          text: truncated64k,
+          truncated: true,
+          tokens: 16_384,
+        },
+      ],
+      attributes: {
+        'gen_ai.tool.name': 'fetch_logs',
+        'gen_ai.tool.result_bytes': unclippedBytes,
+      },
+      raw: {
+        'gen_ai.tool.name': 'fetch_logs',
+        'gen_ai.tool.result_bytes': unclippedBytes,
+        result: truncated64k,
+      },
+    })
+
+    const findings = detectOversizedToolResult({
+      records: [turn, toolRecord],
+      tokenThreshold: 25 * 1024,
+      charThreshold: 100 * 1024,
+    })
+
+    expect(findings.length).toBe(1)
+    const f = findings[0]!
+    expect(f.detectorId).toBe('oversized-tool-result')
+    expect(f.confidence).toBe('deterministic')
+    expect(f.evidenceLinks[0]?.spanId).toBe('tool-child-1')
+    expect(f.estimatedWasteTokens).toBeGreaterThanOrEqual(5_000)
+    expect(f.mechanism).toContain('fetch_logs')
+  })
+
+  it('differentiates UTF-8 multi-byte characters from byte limits and reports bytes', () => {
+    const multiByteText = '日'.repeat(5000)
+    const toolRecord = makeMockRecord({
+      spanId: 'tool-res-multibyte',
+      op: 'tool.invoke',
+      name: 'fetch_data',
+      parts: [
+        {
+          part: 'tool_result_content',
+          text: multiByteText,
+          tokens: 1500,
+        },
+      ],
+    })
+
+    const findings = detectOversizedToolResult({
+      records: [toolRecord],
+      tokenThreshold: 2000,
+      charThreshold: 8000,
+      byteThreshold: 8000,
+    })
+
+    expect(findings.length).toBe(1)
+    const f = findings[0]!
+    expect(f.title).toContain('bytes exceeding budget')
+    expect(f.title).not.toContain('characters')
+    expect(f.mechanism).toContain('15000 bytes')
+  })
+
+  it('does NOT flag tool result that exactly matches thresholds (strictly >)', () => {
+    const text = 'a'.repeat(8000)
+    const toolRecord = makeMockRecord({
+      spanId: 'tool-res-exact',
+      op: 'tool.invoke',
+      name: 'fetch_data',
+      parts: [
+        {
+          part: 'tool_result_content',
+          text,
+          tokens: 2000,
+        },
+      ],
+    })
+
+    const findings = detectOversizedToolResult({
+      records: [toolRecord],
+      tokenThreshold: 2000,
+      charThreshold: 8000,
+      byteThreshold: 8000,
+    })
+
+    expect(findings.length).toBe(0)
+  })
+
+  it('reports the character arm when charThreshold is tighter than the byte threshold', () => {
+    // ASCII content: 200 characters == 200 bytes, so the byte arm (8000)
+    // stays quiet and the character arm (100) fires with its own unit.
+    const toolRecord = makeMockRecord({
+      spanId: 'tool-res-chars',
+      op: 'tool.invoke',
+      name: 'fetch_api',
+      parts: [{ part: 'tool_result_content', text: 'x'.repeat(200), tokens: 50 }],
+    })
+
+    const findings = detectOversizedToolResult({
+      records: [toolRecord],
+      tokenThreshold: 2000,
+      charThreshold: 100,
+      byteThreshold: 8000,
+    })
+
+    expect(findings.length).toBe(1)
+    expect(findings[0]!.title).toContain('200 characters')
+  })
+
+  it('does NOT access lazy record.raw when record.name already holds the tool name', () => {
+    let rawAccessed = false
+    const toolRecord = makeMockRecord({
+      spanId: 'tool-res-lazy',
+      op: 'tool.invoke',
+      name: 'my_tool',
+      parts: [
+        {
+          part: 'tool_result_content',
+          text: 'a'.repeat(9000),
+        },
+      ],
+    })
+    Object.defineProperty(toolRecord, 'raw', {
+      get() {
+        rawAccessed = true
+        return {}
+      },
+    })
+
+    const findings = detectOversizedToolResult({
+      records: [toolRecord],
+    })
+
+    expect(findings.length).toBe(1)
+    expect(rawAccessed).toBe(false)
+  })
+
+  it('detectFindings fires oversized-tool-result when child tool.invoke has gen_ai.tool.result_bytes exceeding 100KB', () => {
+    const unclippedBytes = 150 * 1024 // 150KB
+    const turn = makeMockRecord({ spanId: 'turn-1', op: 'llm.invoke' })
+    const toolRecord = makeMockRecord({
+      spanId: 'tool-child-2',
+      parentSpanId: 'turn-1',
+      op: 'tool.invoke',
+      name: 'Bash',
+      parts: [
+        {
+          part: 'tool_result_content',
+          text: 'x'.repeat(64 * 1024),
+          truncated: true,
+        },
+      ],
+      attributes: {
+        'gen_ai.tool.name': 'Bash',
+        'gen_ai.tool.result_bytes': unclippedBytes,
+      },
+      raw: {
+        'gen_ai.tool.name': 'Bash',
+        'gen_ai.tool.result_bytes': unclippedBytes,
+        result: 'x'.repeat(64 * 1024),
+      },
+    })
+
+    const allFindings = detectFindings({
+      records: [turn, toolRecord],
+      oversizedToolResult: {
+        tokenThreshold: 25 * 1024,
+        charThreshold: 100 * 1024,
+      },
+    })
+
+    const oversizedFinding = allFindings.find((f) => f.detectorId === 'oversized-tool-result')
+    expect(oversizedFinding).toBeDefined()
+    expect(oversizedFinding?.evidenceLinks[0]?.spanId).toBe('tool-child-2')
   })
 })
 

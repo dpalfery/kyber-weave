@@ -701,6 +701,20 @@ describe('CanonStore detector_version stamp & Decision D17 compliance', () => {
     store.close()
   })
 
+  it('stamps DETECTOR_VERSION 2 so pre-coverage-gap (fabricated-250) findings recompute', () => {
+    // The duplicate-tool-call 250-token fallback was removed in favour of
+    // unmeasured coverage-gap findings; a store stamped 1 must report
+    // outdated so those stale numbers recompute instead of being served.
+    expect(DETECTOR_VERSION).toBe(2)
+    const path = tempStorePath()
+    const store = new CanonStore(path)
+    store.setDetectorVersion(1)
+    expect(store.getDetectorVersion()).toBe(1)
+    expect(store.hasCurrentDetectorVersion()).toBe(false)
+    expect(store.isDetectorOutdated()).toBe(true)
+    store.close()
+  })
+
   it('detects outdated detector_version and flags that recomputation is required', () => {
     const path = tempStorePath()
     const store = new CanonStore(path)

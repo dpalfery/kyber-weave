@@ -1263,6 +1263,240 @@ describe('timeline shape from the canonical store', () => {
   })
 })
 
+
+describe('AgentSessionDashboard: Issue #180 Task 8 Dashboard UI Verification', () => {
+  it('renders tool-call count when summary.tool_calls = 5 in Overview card and not a dash', () => {
+    const sessionWith5ToolCalls: AgentSessionPayload = {
+      ...sampleSession,
+      summary: {
+        ...sampleSession.summary,
+        tool_calls: 5,
+        tools_invoked: 3,
+      },
+    }
+
+    const tree = AgentSessionDashboard({ session: sessionWith5ToolCalls })
+    const metric = findElementByTestId(tree, 'metric-tool-calls')
+    const html = renderHtml(metric)
+    expect(html).toContain('data-measured="true"')
+    expect(html).toContain('>5<')
+    expect(html).not.toContain('>—<')
+    expect(html).toContain('3 distinct invoked')
+  })
+
+  it('renders dash with honest unmeasured tooltip when summary.tool_calls is undefined for legacy session or unmeasured harness', () => {
+    const legacySession: AgentSessionPayload = {
+      ...sampleSession,
+      harness: 'claude-code',
+      summary: {
+        ...sampleSession.summary,
+        tool_calls: undefined,
+        tools_invoked: undefined,
+      },
+    }
+
+    const tree = AgentSessionDashboard({ session: legacySession })
+    const metric = findElementByTestId(tree, 'metric-tool-calls')
+    const html = renderHtml(metric)
+    expect(html).toContain('data-measured="false"')
+    expect(html).toContain('>—<')
+    expect(html).not.toContain('>0<')
+    expect(html).toContain('Tool invocation count was not reported by claude-code.')
+  })
+
+  it('renders tool invocations with name and status badge in timeline call tree when session contains tool.invoke records', () => {
+    const sessionWithToolInvokes: AgentSessionPayload = {
+      ...sampleSession,
+      timeline: [
+        {
+          spanId: 'root-span-1',
+          name: 'invoke_agent',
+          op: 'invoke_agent',
+          kind: 'agent',
+          durationMs: 5000,
+          offsetMs: 0,
+          children: [
+            {
+              spanId: 'tool-span-1',
+              parentId: 'root-span-1',
+              name: 'Bash',
+              op: 'tool.invoke',
+              kind: 'tool',
+              durationMs: 350,
+              offsetMs: 100,
+              status: 'ok',
+              attributes: {
+                'gen_ai.tool.name': 'Bash',
+                'gen_ai.tool.status': 'ok',
+                'gen_ai.tool.call_id': 'call_1',
+              },
+              children: [],
+            },
+            {
+              spanId: 'tool-span-2',
+              parentId: 'root-span-1',
+              name: 'Read',
+              op: 'tool.invoke',
+              kind: 'tool',
+              durationMs: 120,
+              offsetMs: 500,
+              status: 'error',
+              attributes: {
+                'gen_ai.tool.name': 'Read',
+                'gen_ai.tool.status': 'error',
+                'gen_ai.tool.call_id': 'call_2',
+              },
+              children: [],
+            },
+          ],
+        },
+      ],
+    }
+
+    const html = renderHtml(<AgentSessionDashboard session={sessionWithToolInvokes} />)
+    const treeView = html.slice(html.indexOf('data-testid="timeline-tree-view"'))
+
+    // Verify tool invocation names and durations render in call tree
+    expect(treeView).toContain('Bash')
+    expect(treeView).toContain('350ms')
+    expect(treeView).toContain('Read')
+    expect(treeView).toContain('120ms')
+
+    // Verify status badges render for tool invocations
+    expect(treeView).toMatch(/data-testid="status-badge"[^>]*>\s*ok\s*</i)
+    expect(treeView).toMatch(/data-testid="status-badge"[^>]*>\s*error\s*</i)
+  })
+  it("formats tools_offered and tools_invoked properly when provided as string arrays", () => {
+    const sessionWithArrayTools: AgentSessionPayload = {
+      ...sampleSession,
+      summary: {
+        ...sampleSession.summary,
+        tool_calls: 3,
+        tools_offered: ["toolA", "toolB"],
+        tools_invoked: ["toolA"],
+      },
+    }
+
+    const html = renderHtml(<AgentSessionDashboard session={sessionWithArrayTools} />)
+    const idx = html.indexOf("Tools Offered");
+    const offeredMetric = html.slice(idx, idx + 400);
+
+    // Card value should format as count 2, not "—"
+    expect(offeredMetric).toContain(">2<")
+    // Subtitle should format as "1 never called", not "NaN never called"
+    expect(offeredMetric).toContain("1 never called")
+    expect(offeredMetric).not.toContain("NaN")
+  })
+
+  it('does NOT render schema-waste-banner and reports unmeasured invocations when tools_invoked is undefined', () => {
+    const sessionWithUnmeasuredInvocations: AgentSessionPayload = {
+      ...sampleSession,
+      summary: {
+        ...sampleSession.summary,
+        tools_offered: ['toolA', 'toolB'],
+        tools_invoked: undefined,
+      },
+    }
+
+    const html = renderHtml(<AgentSessionDashboard session={sessionWithUnmeasuredInvocations} />)
+    expect(html).not.toContain('data-testid="schema-waste-banner"')
+    expect(html).not.toContain('tools were never called')
+    const offeredCard = html.slice(html.indexOf('Tools Offered'), html.indexOf('Tools Offered') + 300)
+    expect(offeredCard).toContain('invocations not reported')
+    expect(offeredCard).not.toContain('never called')
+  })
+
+  it('safely handles non-string node.status in timeline without throwing', () => {
+    const sessionWithMalformedStatus: AgentSessionPayload = {
+      ...sampleSession,
+      timeline: [
+        {
+          spanId: 'span-bad-status',
+          name: 'tool_call',
+          op: 'tool.invoke',
+          kind: 'tool',
+          durationMs: 100,
+          offsetMs: 0,
+          status: true as unknown as string,
+          attributes: {},
+          children: [],
+        },
+      ],
+    }
+
+    expect(() => {
+      renderHtml(<AgentSessionDashboard session={sessionWithMalformedStatus} />)
+    }).not.toThrow()
+  })
+
+  it("computes unusedOfferedCount via set difference and renders waste banner for string arrays (Threads 6 & 7)", () => {
+    const sessionWithArrayTools: AgentSessionPayload = {
+      ...sampleSession,
+      summary: {
+        ...sampleSession.summary,
+        tool_calls: 3,
+        tools_offered: ["toolA", "toolB"],
+        tools_invoked: ["toolA", "toolX"],
+        unused_schema_per_turn: 500,
+        schema_tokens_per_turn: 2000,
+      },
+    }
+
+    const html = renderHtml(<AgentSessionDashboard session={sessionWithArrayTools} />)
+    const idx = html.indexOf("Tools Offered")
+    const offeredMetric = html.slice(idx, idx + 400)
+
+    // Card subtitle should say "1 never called", NOT "0 never called"
+    expect(offeredMetric).toContain("1 never called")
+    expect(offeredMetric).not.toContain("0 never called")
+
+    // Waste banner MUST be rendered because 1 offered tool was never called!
+    expect(html).toContain('data-testid="schema-waste-banner"')
+    expect(html).toContain("1 of 2 tools were never called.")
+  })
+
+  it("styles timeline status badges according to failure/success/neutral classifications (Thread 8)", () => {
+    const sessionWithStatuses: AgentSessionPayload = {
+      ...sampleSession,
+      timeline: [
+        {
+          spanId: "root-span-1",
+          parentId: null,
+          name: "assistant",
+          op: "llm.turn",
+          kind: "turn",
+          durationMs: 1000,
+          children: [
+            { spanId: "c1", parentId: "root-span-1", name: "t1", op: "tool.invoke", kind: "tool", durationMs: 10, status: "error", children: [] },
+            { spanId: "c2", parentId: "root-span-1", name: "t2", op: "tool.invoke", kind: "tool", durationMs: 10, status: "failure", children: [] },
+            { spanId: "c3", parentId: "root-span-1", name: "t3", op: "tool.invoke", kind: "tool", durationMs: 10, status: "fatal", children: [] },
+            { spanId: "c4", parentId: "root-span-1", name: "t4", op: "tool.invoke", kind: "tool", durationMs: 10, status: "ok", children: [] },
+            { spanId: "c5", parentId: "root-span-1", name: "t5", op: "tool.invoke", kind: "tool", durationMs: 10, status: "success", children: [] },
+            { spanId: "c6", parentId: "root-span-1", name: "t6", op: "tool.invoke", kind: "tool", durationMs: 10, status: "unset", children: [] },
+            { spanId: "c7", parentId: "root-span-1", name: "t7", op: "tool.invoke", kind: "tool", durationMs: 10, status: "unknown", children: [] },
+          ],
+        },
+      ],
+    }
+
+    const html = renderHtml(<AgentSessionDashboard session={sessionWithStatuses} />)
+    const treeView = html.slice(html.indexOf('data-testid="timeline-tree-view"'))
+
+    // error, failure, fatal must have red classes
+    expect(treeView).toMatch(/data-testid="status-badge"[^>]*text-red-[^>]*>\s*error\s*</i)
+    expect(treeView).toMatch(/data-testid="status-badge"[^>]*text-red-[^>]*>\s*failure\s*</i)
+    expect(treeView).toMatch(/data-testid="status-badge"[^>]*text-red-[^>]*>\s*fatal\s*</i)
+
+    // ok, success must have green (emerald) classes
+    expect(treeView).toMatch(/data-testid="status-badge"[^>]*text-emerald-[^>]*>\s*ok\s*</i)
+    expect(treeView).toMatch(/data-testid="status-badge"[^>]*text-emerald-[^>]*>\s*success\s*</i)
+
+    // unset, unknown must have neutral muted classes (NOT emerald or red)
+    expect(treeView).toMatch(/data-testid="status-badge"[^>]*text-muted-foreground[^>]*>\s*unset\s*</i)
+    expect(treeView).toMatch(/data-testid="status-badge"[^>]*text-muted-foreground[^>]*>\s*unknown\s*</i)
+  })
+});
+
 // Issue #184: the drawer resolves strictly 0-based transport through the shared
 // helper — explicit identity first, array position only for rows that carry
 // neither `index` nor `turn`. Never a neighbor.

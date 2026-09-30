@@ -315,8 +315,11 @@ describe('projectCanonicalStore: projection-time repricing (issue #186, U9)', ()
   const sessionCost = (store: CanonStore, id: string) =>
     (store.getSessionPayload(id) as { summary: { cost: CostBlock } }).summary.cost
 
-  it('keeps SCHEMA_VERSION at 14 (U9: no schema bump)', () => {
-    expect(SCHEMA_VERSION).toBe(14)
+  // U9's no-bump assertion held at 14 until the duplicate-tool-call
+  // coverage-gap fix (PR #226) made finding waste nullable (v15) so an
+  // unmeasured finding persists NULL instead of a fabricated number.
+  it('keeps SCHEMA_VERSION at 15 (U9: no schema bump beyond the nullable finding waste)', () => {
+    expect(SCHEMA_VERSION).toBe(15)
   })
 
   it('reprices a stale {unknown,no_rate} claude-code turn, rewrites cost_json, and the session cost agrees', async () => {

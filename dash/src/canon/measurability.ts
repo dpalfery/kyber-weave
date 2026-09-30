@@ -163,7 +163,7 @@ const SURVEY_FAMILY: Readonly<Record<string, string>> = {
   'kilo-vscode-legacy': 'kilo-code',
 }
 
-function surveyFamily(harness: string): string {
+export function surveyFamily(harness: string): string {
   const canonical = normalizeHarnessName(harness)
   if (canonical === 'gemini') return 'gemini'
   return SURVEY_FAMILY[canonical] ?? canonical

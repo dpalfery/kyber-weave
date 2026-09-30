@@ -1,13 +1,15 @@
-import { readdirSync, statSync } from 'fs'
+import { readFileSync, readdirSync, statSync } from 'fs'
 import { readFile, readdir, stat } from 'fs/promises'
-import { basename, delimiter as pathDelimiter, join, resolve } from 'path'
+import { basename, delimiter as pathDelimiter, extname, join, resolve, sep } from 'path'
 import { homedir } from 'os'
 import { createHash } from 'crypto'
 
-import type { Provider, ProbeRoot, SessionSource, SessionParser } from './types.js'
+import type { Provider, ProbeRoot, SessionSource, SessionParser, ParsedProviderCall } from './types.js'
+import type { DateRange, ToolCall } from '../types.js'
 import { getShortModelName } from '../pricing/models.js'
 import { readConfig } from '../config.js'
 import { FS_SCAN_CONCURRENCY, mapWithConcurrency } from '../ingest/fs-utils.js'
+import { extractBashCommands } from '../ingest/bash-utils.js'
 
 export type ClaudeConfigSource = {
   id: string
@@ -262,6 +264,139 @@ async function resolveCoworkSpaceName(workspaceDir: string, sessionId: string): 
   return null
 }
 
+/** The `message.usage` block of one transcript line, when it is an assistant turn. */
+export function claudeUsageOf(rawLine: string): Record<string, unknown> | undefined {
+  let record: Record<string, unknown>
+  try {
+    const parsed: unknown = JSON.parse(rawLine)
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined
+    record = parsed as Record<string, unknown>
+  } catch {
+    return undefined
+  }
+  if (record['type'] !== 'assistant') return undefined
+  const message = record['message']
+  if (message === null || typeof message !== 'object' || Array.isArray(message)) return undefined
+  const usage = (message as Record<string, unknown>)['usage']
+  if (usage === null || usage === undefined || typeof usage !== 'object' || Array.isArray(usage)) {
+    return undefined
+  }
+  return usage as Record<string, unknown>
+}
+
+/** A finite non-negative counter, or 0 — never a fabricated estimate. */
+export function claudeCount(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0
+}
+
+export function claudeText(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() !== '' ? value.trim() : undefined
+}
+
+/**
+ * Read one Claude Code transcript as provider calls — one per assistant turn.
+ */
+export function loadClaudeCalls(filePath: string): ParsedProviderCall[] {
+  let lines: string[]
+  try {
+    lines = readFileSync(filePath, 'utf-8').split(/\r?\n/)
+  } catch {
+    return []
+  }
+
+  const calls: ParsedProviderCall[] = []
+  const fileStem = basename(filePath, extname(filePath))
+  let index = 0
+
+  for (const rawLine of lines) {
+    const usage = claudeUsageOf(rawLine)
+    if (usage === undefined) continue
+
+    let record: Record<string, unknown>
+    try {
+      record = JSON.parse(rawLine) as Record<string, unknown>
+    } catch {
+      continue
+    }
+    const message = record['message'] as Record<string, unknown> | undefined
+    if (!message) continue
+    const sessionId = claudeText(record['sessionId']) ?? fileStem
+    // `uuid` is the transcript's own per-record identity; the index keeps the
+    // key unique for a transcript that omits it.
+    const messageId = claudeText(record['uuid']) ?? claudeText(message['id']) ?? `turn-${index}`
+    index += 1
+
+    const serverToolUse = usage['server_tool_use']
+    const webSearchRequests =
+      serverToolUse !== null && typeof serverToolUse === 'object' && !Array.isArray(serverToolUse)
+        ? claudeCount((serverToolUse as Record<string, unknown>)['web_search_requests'])
+        : 0
+
+    const tools: string[] = []
+    const bashCommands: string[] = []
+    const toolSequence: ToolCall[][] = []
+    const turnToolCalls: ToolCall[] = []
+
+    const content = message['content']
+    if (Array.isArray(content)) {
+      for (const block of content) {
+        if (block !== null && typeof block === 'object' && !Array.isArray(block)) {
+          const blockObj = block as Record<string, unknown>
+          if (blockObj['type'] === 'tool_use') {
+            const name = typeof blockObj['name'] === 'string' ? blockObj['name'].trim() : ''
+            if (name) {
+              tools.push(name)
+              const tc: ToolCall = { tool: name }
+              const input = blockObj['input']
+              if (input !== null && typeof input === 'object' && !Array.isArray(input)) {
+                const inputObj = input as Record<string, unknown>
+                if (typeof inputObj['file_path'] === 'string') tc.file = inputObj['file_path']
+                else if (typeof inputObj['path'] === 'string') tc.file = inputObj['path']
+
+                if (name === 'Bash') {
+                  const cmd = inputObj['command']
+                  if (typeof cmd === 'string' && cmd.trim()) {
+                    tc.command = cmd
+                    bashCommands.push(...extractBashCommands(cmd))
+                  }
+                }
+              }
+              turnToolCalls.push(tc)
+            }
+          }
+        }
+      }
+    }
+    if (turnToolCalls.length > 0) {
+      toolSequence.push(turnToolCalls)
+    }
+
+    calls.push({
+      provider: 'claude',
+      model: claudeText(message['model']) ?? 'unknown',
+      inputTokens: claudeCount(usage['input_tokens']),
+      outputTokens: claudeCount(usage['output_tokens']),
+      cacheCreationInputTokens: claudeCount(usage['cache_creation_input_tokens']),
+      cacheReadInputTokens: claudeCount(usage['cache_read_input_tokens']),
+      cachedInputTokens: claudeCount(usage['cache_read_input_tokens']),
+      reasoningTokens: 0,
+      webSearchRequests,
+      costUSD: 0,
+      costIsEstimated: true,
+      tools,
+      bashCommands,
+      ...(toolSequence.length > 0 ? { toolSequence } : {}),
+      timestamp: claudeText(record['timestamp']) ?? new Date(0).toISOString(),
+      speed: claudeText(usage['speed']) === 'fast' ? 'fast' : 'standard',
+      deduplicationKey: `claude:${sessionId}:${messageId}`,
+      sessionId,
+      userMessage: '',
+    })
+  }
+
+  return calls
+}
+
 export const claude: Provider = {
   name: 'claude',
   displayName: 'Claude',
@@ -348,20 +483,13 @@ export const claude: Provider = {
 
     for (const desktopBase of getDesktopSessionsDirs()) {
       const desktopDirs = await findDesktopProjectDirs(desktopBase)
-      const sep = desktopBase.includes('\\') ? '\\' : '/'
-      // Desktop / Cowork sessions belong to no CLAUDE_CONFIG_DIR. Tag them with a
-      // distinct source so a per-config view can account for them as their own
-      // "Claude Desktop" bucket instead of silently dropping them (which made
-      // sum-of-configs < All).
-      const desktopSourceId = 'claude-desktop:' + createHash('sha256').update(resolve(desktopBase)).digest('hex').slice(0, 16)
       for (const dirPath of desktopDirs) {
         const resolved = resolve(dirPath)
         if (seenProjectDirs.has(resolved)) continue
         seenProjectDirs.add(resolved)
 
-        // For Claude Desktop local-agent-mode (Cowork) sessions, the project dir
-        // lives inside local_<sessionId>/.claude/projects/. We resolve the space
-        // name from the sibling .json and spaces.json so it groups correctly.
+        const desktopSourceId = 'claude-desktop:' + createHash('sha256').update(resolved).digest('hex').slice(0, 16)
+
         // Path structure: <desktopBase>/<appId>/<workspaceId>/local_<id>/.claude/projects/<slug>
         let projectName = basename(dirPath)
         const resolvedBase = resolve(desktopBase)
@@ -397,9 +525,48 @@ export const claude: Provider = {
     return sources
   },
 
-  createSessionParser(): SessionParser {
+  createSessionParser(source: SessionSource, seenKeys: Set<string>, dateRange?: DateRange): SessionParser {
     return {
-      async *parse() {},
+      async *parse(): AsyncGenerator<ParsedProviderCall> {
+        let isFile = false
+        try {
+          isFile = statSync(source.path).isFile()
+        } catch {
+          return
+        }
+
+        const files: string[] = []
+        if (isFile) {
+          files.push(source.path)
+        } else {
+          try {
+            const entries = readdirSync(source.path, { recursive: true, encoding: 'utf8' })
+            for (const entry of entries) {
+              const str = typeof entry === 'string' ? entry : String(entry)
+              if (str.endsWith('.jsonl')) {
+                files.push(join(source.path, str))
+              }
+            }
+          } catch {
+            return
+          }
+        }
+
+        for (const file of files) {
+          for (const call of loadClaudeCalls(file)) {
+            if (seenKeys.has(call.deduplicationKey)) continue
+            if (dateRange) {
+              const ts = new Date(call.timestamp).getTime()
+              if (dateRange.start && ts < new Date(dateRange.start).getTime()) continue
+              if (dateRange.end && ts > new Date(dateRange.end).getTime()) continue
+            }
+            seenKeys.add(call.deduplicationKey)
+            yield call
+          }
+        }
+      },
     }
   },
 }
+
+export default claude
