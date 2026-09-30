@@ -268,7 +268,12 @@ function adaptTimelineNode(node: SessionTimelineNode, parentId: string | null = 
     durationMs: node.durationMs ?? 0,
     kind: node.kind ?? node.op ?? 'span',
     name: node.name ?? 'unnamed',
-    status: (node.status as string | undefined) ?? (node.attributes?.['gen_ai.tool.status'] as string | undefined),
+    status:
+      typeof node.status === 'string'
+        ? node.status
+        : typeof node.attributes?.['gen_ai.tool.status'] === 'string'
+          ? (node.attributes['gen_ai.tool.status'] as string)
+          : undefined,
     attributes: node.attributes ?? node.raw_attributes ?? {},
     isSubagent: Boolean(node.isSubagent || node.attributes?.['subagent.session_id']),
     isAuxiliary: Boolean(node.isAuxiliary || node.attributes?.['kyber.auxiliary']),
@@ -630,9 +635,9 @@ export function AgentSessionContent({
     : (typeof u.tools_offered === 'number' ? u.tools_offered : undefined)
   const toolsInvokedCount = invokedList !== undefined
     ? invokedList.length
-    : (typeof u.tools_invoked === 'number' ? u.tools_invoked : 0)
+    : (typeof u.tools_invoked === 'number' ? u.tools_invoked : undefined)
   const invokedSet = invokedList !== undefined ? new Set(invokedList) : null
-  const unusedOfferedCount = toolsOfferedCount != null
+  const unusedOfferedCount = toolsOfferedCount != null && toolsInvokedCount != null
     ? (offeredList !== undefined && invokedSet !== null
         ? offeredList.filter((name) => !invokedSet.has(name)).length
         : Math.max(0, toolsOfferedCount - toolsInvokedCount))
@@ -1054,7 +1059,9 @@ export function AgentSessionContent({
             </div>
             <div className="mt-0.5 text-[11px] text-tertiary-foreground truncate">
               {toolsOfferedCount != null
-                ? `${unusedOfferedCount ?? 0} never called`
+                ? (toolsInvokedCount != null && unusedOfferedCount != null
+                    ? `${unusedOfferedCount} never called`
+                    : 'invocations not reported')
                 : `not exported by ${session.harness || 'adapter'}`}
             </div>
           </Card>
@@ -1098,7 +1105,7 @@ export function AgentSessionContent({
         </div>
 
         {/* Waste Callout Banner */}
-        {toolsOfferedCount != null && unusedOfferedCount != null && unusedOfferedCount > 0 && (
+        {toolsOfferedCount != null && toolsInvokedCount != null && unusedOfferedCount != null && unusedOfferedCount > 0 && (
           <div
             className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-foreground/90 space-y-1"
             data-testid="schema-waste-banner"
@@ -1136,8 +1143,8 @@ export function AgentSessionContent({
         {/* Tools Ranking */}
         <SchemaCostRanking
           schema={(session as { schema?: SchemaCostAnalysis }).schema}
-          // The payload's tools rows carry no name today; the ranking table's
-          // row type still expects one and labels empty cells where absent.
+          // The payload's tools rows carry names and total_schema_cost when available;
+          // the ranking table renders them or falls back where absent.
           tools={toolRows as unknown as SchemaCostToolRow[]}
           onSelectTool={openDrawerForTool}
         />

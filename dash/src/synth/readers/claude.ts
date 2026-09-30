@@ -283,9 +283,13 @@ export function readClaudeSession(source: string | readonly string[]): ClaudeSes
       } else if (type === 'tool_use') {
         const id = typeof blockObj['id'] === 'string' ? blockObj['id'] : ''
         const name = typeof blockObj['name'] === 'string' ? blockObj['name'] : ''
-        const input = (blockObj['input'] !== null && blockObj['input'] !== undefined)
-          ? (blockObj['input'] as Record<string, unknown> | string)
-          : {}
+        const rawInput = blockObj['input']
+        const input: Record<string, unknown> | string =
+          typeof rawInput === 'string'
+            ? rawInput
+            : (rawInput !== null && typeof rawInput === 'object' && !Array.isArray(rawInput))
+              ? (rawInput as Record<string, unknown>)
+              : {}
         if (id !== '' || name !== '') {
           toolCalls.push({
             id,

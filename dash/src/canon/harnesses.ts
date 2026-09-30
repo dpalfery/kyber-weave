@@ -151,16 +151,19 @@ function digestSessions(store: CanonStore, harness: string): SessionDigest {
     // and invoked tools. If tools_offered was unobserved, do not fabricate 100% yield
     // from invocation-only tools (schema_tokens === 0).
     if (summary && Array.isArray(summary.tools_offered)) {
-      digest.totalDefinedTools += summary.tools_offered.length
-      const offeredSet = new Set(summary.tools_offered)
-      if (Array.isArray(summary.tools_invoked)) {
-        const invokedOffered = summary.tools_invoked.filter((t) => offeredSet.has(t))
-        digest.totalInvokedTools += invokedOffered.length
-      } else if (Array.isArray(payload.tools)) {
-        digest.totalInvokedTools += payload.tools.filter(
-          (t: { name?: string; invocations?: number }) =>
-            (t.invocations ?? 0) > 0 && (t.name !== undefined ? offeredSet.has(t.name) : true),
-        ).length
+      const invocationsObserved = Array.isArray(summary.tools_invoked) || Array.isArray(payload.tools)
+      if (invocationsObserved) {
+        digest.totalDefinedTools += summary.tools_offered.length
+        const offeredSet = new Set(summary.tools_offered)
+        if (Array.isArray(summary.tools_invoked)) {
+          const invokedOffered = summary.tools_invoked.filter((t) => offeredSet.has(t))
+          digest.totalInvokedTools += invokedOffered.length
+        } else if (Array.isArray(payload.tools)) {
+          digest.totalInvokedTools += payload.tools.filter(
+            (t: { name?: string; invocations?: number }) =>
+              (t.invocations ?? 0) > 0 && (t.name !== undefined ? offeredSet.has(t.name) : true),
+          ).length
+        }
       }
     } else if (Array.isArray(payload.tools) && payload.tools.length > 0) {
       const defined = payload.tools.filter(

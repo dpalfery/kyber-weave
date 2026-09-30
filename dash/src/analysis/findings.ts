@@ -330,6 +330,11 @@ export function extractToolDefinitionsFromRecord(record: CanonicalRecord): { nam
 }
 
 function attributeOf(record: CanonicalRecord, keys: readonly string[]): string | undefined {
+  if (record.op === 'tool.invoke' && record.name && record.name !== 'tool.invoke') {
+    if (keys.includes('gen_ai.tool.name') || keys.includes('tool.name')) {
+      return record.name
+    }
+  }
   const recAny = record as unknown as { attributes?: Record<string, unknown> }
   const attrs = recAny.attributes
   if (attrs && typeof attrs === 'object') {
@@ -530,7 +535,7 @@ export type DuplicateToolCallInput = {
   runId?: string
   sessionId?: string
   records?: readonly CanonicalRecord[]
-  calls?: readonly { name: string; arguments?: unknown; spanId?: string; turnIndex?: number; tokens?: number }[]
+  calls?: readonly { name: string; arguments?: unknown; spanId?: string; turnIndex?: number; tokens?: number; sessionId?: string }[]
   outcome?: OutcomeBlock
 }
 
@@ -552,6 +557,7 @@ export function detectDuplicateToolCall(input: DuplicateToolCallInput): Finding[
     spanId: string
     turnIndex: number
     tokens: number
+    sessionId?: string
   }
 
   const calls: NormalizedCall[] = []
@@ -563,16 +569,35 @@ export function detectDuplicateToolCall(input: DuplicateToolCallInput): Finding[
       turnIdx++
     } else if (r.op === 'tool.invoke') {
       const toolName =
+        (r.name && r.name !== 'tool.invoke' ? r.name : undefined) ??
         attributeOf(r, ['gen_ai.tool.name', 'tool.name']) ??
-        (r.name !== 'tool.invoke' ? r.name : 'tool.invoke')
+        'tool.invoke'
       const args = r.raw && typeof r.raw === 'object' ? (r.raw as Record<string, unknown>)['arguments'] : undefined
-      const tokens = r.tokens.reportedInput + r.tokens.output || 250
+      let tokens = r.tokens.reportedInput + r.tokens.output
+      if (!tokens) {
+        const resultBytes = numberAttributeOf(r, ['gen_ai.tool.result_bytes'])
+        if (resultBytes && resultBytes > 0) {
+          tokens = Math.ceil(resultBytes / 4)
+        } else if (r.parts && r.parts.length > 0) {
+          const textLen = r.parts.reduce((acc, p) => acc + (p.text?.length ?? 0), 0)
+          if (textLen > 0) {
+            tokens = Math.ceil(textLen / 4)
+          }
+        } else if (r.raw && typeof r.raw === 'object') {
+          const rawRes = (r.raw as Record<string, unknown>)['result'] ?? (r.raw as Record<string, unknown>)['output']
+          if (typeof rawRes === 'string' && rawRes.length > 0) {
+            tokens = Math.ceil(rawRes.length / 4)
+          }
+        }
+      }
+      tokens = tokens || 250
       calls.push({
         name: toolName.trim(),
         args: serializeToolArgs(args),
         spanId: r.spanId,
         turnIndex: turnIdx,
         tokens,
+        sessionId: r.sessionId ?? sessionId,
       })
     }
   }
@@ -587,6 +612,7 @@ export function detectDuplicateToolCall(input: DuplicateToolCallInput): Finding[
         spanId: c.spanId ?? `tool-call-span-${i}`,
         turnIndex: c.turnIndex ?? i,
         tokens: c.tokens ?? 250,
+        sessionId: c.sessionId ?? sessionId,
       })
     }
   }
@@ -596,7 +622,8 @@ export function detectDuplicateToolCall(input: DuplicateToolCallInput): Finding[
   for (let i = 0; i < calls.length; i++) {
     const call = calls[i]!
     const hashedArgs = crypto.createHash('sha256').update(call.args).digest('hex')
-    const key = `${call.name}::${hashedArgs}`
+    const callSessionId = call.sessionId ?? sessionId ?? ''
+    const key = `${callSessionId}::${call.name}::${hashedArgs}`
 
     if (seenMap.has(key)) {
       const firstCall = seenMap.get(key)!
@@ -628,7 +655,7 @@ export function detectDuplicateToolCall(input: DuplicateToolCallInput): Finding[
         id: `finding-duplicate-call-${call.name}-${call.spanId}`,
         detectorId: 'duplicate-tool-call',
         title: `Duplicate Tool Call: Identical invocation of "${call.name}"`,
-        mechanism: `The tool "${call.name}" was executed multiple times with identical arguments in the same session without intermediate state changes, repeating ${wasteTokens} tokens of redundant call and result payloads.`,
+        mechanism: `The tool "${call.name}" was executed multiple times with identical arguments in the same session, repeating ${wasteTokens} tokens of redundant call and result payloads.`,
         evidenceLinks,
         confidence: 'deterministic',
         estimatedWasteTokens: wasteTokens,
@@ -639,7 +666,7 @@ export function detectDuplicateToolCall(input: DuplicateToolCallInput): Finding[
         },
         outcomeRiskCaveat,
         runId,
-        sessionId,
+        sessionId: call.sessionId ?? sessionId,
         rankScore,
         measurementClass: 'deterministic',
         confidenceBasis: 'Deterministically measured by hashing tool names and whitespace-normalized arguments across execution spans.',
@@ -666,16 +693,19 @@ export type OversizedToolResultInput = {
     content: string | unknown
     tokens?: number
     characters?: number
+    bytes?: number
     spanId?: string
     turnIndex?: number
   }[]
   tokenThreshold?: number
   charThreshold?: number
+  byteThreshold?: number
   outcome?: OutcomeBlock
 }
 
 export const DEFAULT_FINDING_TOKEN_THRESHOLD = 2000
 export const DEFAULT_FINDING_CHAR_THRESHOLD = 8000
+export const DEFAULT_FINDING_BYTE_THRESHOLD = 8000
 
 /**
  * Detector 3: oversized-tool-result
@@ -691,15 +721,18 @@ export function detectOversizedToolResult(input: OversizedToolResultInput): Find
 
   const tokenThreshold = input.tokenThreshold ?? DEFAULT_FINDING_TOKEN_THRESHOLD
   const charThreshold = input.charThreshold ?? DEFAULT_FINDING_CHAR_THRESHOLD
+  const byteThreshold = input.byteThreshold ?? DEFAULT_FINDING_BYTE_THRESHOLD
 
   type ResultItem = {
     toolName: string
     text: string
     tokens: number
     chars: number
+    bytes: number
     spanId: string
     turnIndex: number
     consumingSpanId?: string
+    sessionId?: string
   }
 
   const items: ResultItem[] = []
@@ -730,21 +763,37 @@ export function detectOversizedToolResult(input: OversizedToolResultInput): Find
       }
 
       const toolName =
+        (r.name && r.name !== 'tool.invoke' ? r.name : undefined) ??
         attributeOf(r, ['gen_ai.tool.name', 'tool.name']) ??
-        (r.name !== 'tool.invoke' ? r.name : 'tool')
-      const resultBytes = numberAttributeOf(r, ['gen_ai.tool.result_bytes'])
-      const chars = Math.max(content.length, resultBytes ?? 0)
-      const estTokens = Math.max(tokens, resultBytes !== undefined ? Math.ceil(resultBytes / 4) : 0)
+        'tool'
+      const isTruncated = r.parts?.some(p => (p as { truncated?: boolean }).truncated) ?? false
+      const recAny = r as unknown as { attributes?: Record<string, unknown> }
+      let resultBytes: number | undefined
+      if (recAny.attributes && typeof recAny.attributes === 'object') {
+        const val = recAny.attributes['gen_ai.tool.result_bytes']
+        if (typeof val === 'number' && Number.isFinite(val)) resultBytes = val
+        else if (typeof val === 'string') {
+          const num = Number(val)
+          if (Number.isFinite(num)) resultBytes = num
+        }
+      } else if (isTruncated || !content) {
+        resultBytes = numberAttributeOf(r, ['gen_ai.tool.result_bytes'])
+      }
+      const chars = content.length
+      const bytes = resultBytes ?? Buffer.byteLength(content, 'utf8')
+      const estTokens = tokens > 0 ? tokens : (resultBytes !== undefined ? Math.ceil(resultBytes / 4) : Math.ceil(bytes / 4))
 
-      if (chars > 0 || content.length > 0) {
+      if (chars > 0 || bytes > 0 || content.length > 0) {
         items.push({
           toolName,
           text: content,
           tokens: estTokens || Math.ceil(chars / 4),
           chars,
+          bytes,
           spanId: r.spanId,
           turnIndex: currentTurnIndex,
           consumingSpanId: lastLlmSpanId || r.spanId,
+          sessionId: r.sessionId ?? sessionId,
         })
       }
     }
@@ -755,31 +804,53 @@ export function detectOversizedToolResult(input: OversizedToolResultInput): Find
       const res = input.results[i]!
       const content = typeof res.content === 'string' ? res.content : JSON.stringify(res.content ?? '')
       const chars = res.characters ?? content.length
+      const bytes = res.bytes ?? Buffer.byteLength(content, 'utf8')
       const tokens = res.tokens ?? Math.ceil(chars / 4)
       items.push({
         toolName: res.toolName ?? 'tool',
         text: content,
         tokens,
         chars,
+        bytes,
         spanId: res.spanId ?? `result-span-${i}`,
         turnIndex: res.turnIndex ?? i,
         consumingSpanId: `llm-consuming-span-${i}`,
+        sessionId,
       })
     }
   }
 
   for (const item of items) {
-    const isOversized = item.tokens > tokenThreshold || item.chars >= charThreshold
-    if (!isOversized) continue
+    const tokenExceeded = item.tokens > tokenThreshold
+    const charExceeded = item.chars > charThreshold
+    const byteExceeded = item.bytes > byteThreshold
+    if (!tokenExceeded && !charExceeded && !byteExceeded) continue
 
-    const excessTokens = Math.max(100, item.tokens - tokenThreshold)
+    let titleExceeded = ''
+    let thresholdDesc = ''
+    let excessTokens = 0
+
+    if (tokenExceeded) {
+      titleExceeded = `${item.tokens} tokens`
+      thresholdDesc = `${tokenThreshold} tokens`
+      excessTokens = Math.max(100, item.tokens - tokenThreshold)
+    } else if (byteExceeded) {
+      titleExceeded = `${item.bytes} bytes`
+      thresholdDesc = `${byteThreshold} bytes`
+      excessTokens = Math.max(100, Math.ceil((item.bytes - byteThreshold) / 4))
+    } else {
+      titleExceeded = `${item.chars} characters`
+      thresholdDesc = `${charThreshold} characters`
+      excessTokens = Math.max(100, Math.ceil((item.chars - charThreshold) / 4))
+    }
+
     const estimatedWasteTokens = excessTokens
 
     const evidenceLinks: FindingEvidenceLink[] = [
       {
         spanId: item.spanId,
         turnIndex: item.turnIndex,
-        description: `Tool "${item.toolName}" returned oversized output (${item.tokens} tokens, ${item.chars} characters), exceeding threshold (${tokenThreshold} tokens).`,
+        description: `Tool "${item.toolName}" returned oversized output (${item.tokens} tokens, ${item.chars} characters, ${item.bytes} bytes), exceeding threshold (${thresholdDesc}).`,
       },
       {
         spanId: item.consumingSpanId || item.spanId,
@@ -800,8 +871,8 @@ export function detectOversizedToolResult(input: OversizedToolResultInput): Find
     findings.push({
       id: `finding-oversized-result-${item.toolName}-${item.spanId}`,
       detectorId: 'oversized-tool-result',
-      title: `Oversized Tool Result: "${item.toolName}" returned ${item.tokens} tokens exceeding budget`,
-      mechanism: `Tool "${item.toolName}" injected ${item.tokens} tokens (${item.chars} characters) into context in a single output, exceeding the ${tokenThreshold} token limit and increasing per-turn re-read overhead by ${estimatedWasteTokens} tokens.`,
+      title: `Oversized Tool Result: "${item.toolName}" returned ${titleExceeded} exceeding budget`,
+      mechanism: `Tool "${item.toolName}" injected ${item.tokens} tokens (${item.chars} characters, ${item.bytes} bytes) into context in a single output, exceeding the ${thresholdDesc} limit and increasing per-turn re-read overhead by ${estimatedWasteTokens} tokens.`,
       evidenceLinks,
       confidence: 'deterministic',
       estimatedWasteTokens,
@@ -812,10 +883,10 @@ export function detectOversizedToolResult(input: OversizedToolResultInput): Find
       },
       outcomeRiskCaveat,
       runId,
-      sessionId,
+      sessionId: item.sessionId ?? sessionId,
       rankScore,
       measurementClass: 'deterministic',
-      confidenceBasis: 'Deterministically measured by comparing tool result byte and token lengths against configured thresholds.',
+      confidenceBasis: 'Deterministically measured by comparing tool result byte, character, and token lengths against configured thresholds.',
       whatWouldRaiseIt: 'Deterministic measurement; confidence is at ceiling.',
     })
   }

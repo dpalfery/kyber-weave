@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 // Tests for the span synthesizer (task 9.1; R1.1, R1.4, R1.5). The three
 // acceptance criteria are the three load-bearing describe blocks below:
 //
@@ -604,7 +605,8 @@ describe('Task 5 — child tool.invoke span generation and result truncation', (
     const bashRecord = toolRecords.find((r) => r.name === 'Bash')
     expect(bashRecord).toBeDefined()
     expect(bashRecord?.parentSpanId).toBe(parent!.spanId)
-    expect(bashRecord?.spanId).toBe(`${parent!.spanId}-t0`)
+    const bashHash = createHash('sha256').update(`tu_bash:Bash:${JSON.stringify({ command: 'git status' })}`).digest('hex').slice(0, 12)
+    expect(bashRecord?.spanId).toBe(`${parent!.spanId}-t${bashHash}`)
     expect(bashRecord?.attributes?.['gen_ai.tool.name']).toBe('Bash')
     expect(bashRecord?.attributes?.['gen_ai.tool.call_id']).toBe('tu_bash')
     expect(bashRecord?.attributes?.['gen_ai.tool.status']).toBe('ok')
@@ -615,7 +617,8 @@ describe('Task 5 — child tool.invoke span generation and result truncation', (
     const readRecord = toolRecords.find((r) => r.name === 'Read')
     expect(readRecord).toBeDefined()
     expect(readRecord?.parentSpanId).toBe(parent!.spanId)
-    expect(readRecord?.spanId).toBe(`${parent!.spanId}-t1`)
+    const readHash = createHash('sha256').update(`tu_read:Read:${JSON.stringify({ path: 'src/synth/synth.ts' })}`).digest('hex').slice(0, 12)
+    expect(readRecord?.spanId).toBe(`${parent!.spanId}-t${readHash}`)
     expect(readRecord?.attributes?.['gen_ai.tool.name']).toBe('Read')
     expect(readRecord?.attributes?.['gen_ai.tool.call_id']).toBe('tu_read')
     expect(readRecord?.attributes?.['gen_ai.tool.status']).toBe('ok')
@@ -903,5 +906,111 @@ describe('Task 5 — child tool.invoke span generation and result truncation', (
     expect(toolRecord?.status).toBe("unset")
     expect(toolRecord?.attributes?.["gen_ai.tool.status"]).toBe("unset")
     expect((toolRecord?.raw as Record<string, unknown>)?.[ "gen_ai.tool.status"]).toBe("unset")
+  })
+  it("derives stable child span id from tool identity so regrouped turns retain identical span ids (Thread 8)", () => {
+    const synthesizer = new Synthesizer()
+    const parsedCall = call({
+      provider: "claude",
+      sessionId: "s-t8-stable",
+      deduplicationKey: "claude:s-t8-stable:t-1",
+    })
+    const toolA = { id: "tu_a", name: "Bash", arguments: { command: "ls" } }
+    const toolB = { id: "tu_b", name: "Read", arguments: { path: "a.txt" } }
+
+    const turn1: ReaderTurn = {
+      parts: [],
+      toolCalls: [toolA, toolB],
+      toolResults: [],
+    }
+    const turn2: ReaderTurn = {
+      parts: [],
+      toolCalls: [toolB, toolA],
+      toolResults: [],
+    }
+
+    const records1 = synthesizer.synthesize([parsedCall], [turn1])
+    const records2 = synthesizer.synthesize([parsedCall], [turn2])
+
+    const a1 = records1.find((r) => r.name === "Bash")
+    const a2 = records2.find((r) => r.name === "Bash")
+    const b1 = records1.find((r) => r.name === "Read")
+    const b2 = records2.find((r) => r.name === "Read")
+
+    expect(a1?.spanId).toBe(a2?.spanId)
+    expect(b1?.spanId).toBe(b2?.spanId)
+    expect(a1?.spanId).not.toBe(b1?.spanId)
+  })
+
+  it("bounds raw.arguments to MAX_TOOL_ARGUMENTS_BYTES (64KB) and records gen_ai.tool.arguments_bytes (Thread 9)", () => {
+    const synthesizer = new Synthesizer()
+    const parsedCall = call({
+      provider: "claude",
+      sessionId: "s-t9-args-bound",
+      deduplicationKey: "claude:s-t9-args-bound:t-1",
+    })
+    const largeArgs = "Y".repeat(150_000)
+    const readerTurn: ReaderTurn = {
+      parts: [],
+      toolCalls: [
+        { id: "tu_huge_args", name: "Write", arguments: largeArgs },
+      ],
+      toolResults: [],
+    }
+
+    const records = synthesizer.synthesize([parsedCall], [readerTurn])
+    const toolRecord = records.find((r) => r.op === "tool.invoke") as ToolInvokeRecord | undefined
+
+    expect(toolRecord).toBeDefined()
+    expect(toolRecord?.attributes?.["gen_ai.tool.arguments_bytes"]).toBe(150_000)
+    const raw = toolRecord?.raw as Record<string, unknown>
+    const boundArgs = raw["arguments"] as string
+    expect(Buffer.byteLength(boundArgs, "utf8")).toBeLessThanOrEqual(65_536)
+  })
+
+  it("derives duration from paired toolCall and toolResult timestamps or marks unmeasured (Thread 10)", () => {
+    const synthesizer = new Synthesizer()
+    const parsedCall = call({
+      provider: "claude",
+      sessionId: "s-t10-duration",
+      deduplicationKey: "claude:s-t10-duration:t-1",
+    })
+    const readerTurn: ReaderTurn = {
+      parts: [],
+      toolCalls: [
+        {
+          id: "tu_timed",
+          name: "Bash",
+          arguments: { command: "sleep 2" },
+          timestamp: "2026-09-01T12:00:00.000Z",
+        },
+        {
+          id: "tu_untimed",
+          name: "Read",
+          arguments: { path: "file.txt" },
+        },
+      ],
+      toolResults: [
+        {
+          toolCallId: "tu_timed",
+          content: "ok",
+          timestamp: "2026-09-01T12:00:02.500Z",
+        },
+        {
+          toolCallId: "tu_untimed",
+          content: "file content",
+        },
+      ],
+    }
+
+    const records = synthesizer.synthesize([parsedCall], [readerTurn])
+    const timedSpan = records.find((r) => r.name === "Bash")
+    const untimedSpan = records.find((r) => r.name === "Read")
+
+    expect(timedSpan?.durationMs).toBe(2500)
+    expect(timedSpan?.measurability?.duration).toBe("derived")
+
+    expect(untimedSpan?.durationMs).toBe(0)
+    expect(typeof untimedSpan?.measurability?.duration).toBe("object")
+    expect((untimedSpan?.measurability?.duration as { availability: string })?.availability).toBe("not_measurable")
   })
 });

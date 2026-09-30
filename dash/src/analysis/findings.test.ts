@@ -322,6 +322,58 @@ describe('Detector 2: duplicate-tool-call', () => {
     expect(findings.length).toBe(0)
   })
 
+  it('does NOT flag identical tool calls across different sessions', () => {
+    const call1 = makeMockRecord({
+      spanId: 'tool-call-s1',
+      sessionId: 'session-1',
+      op: 'tool.invoke',
+      name: 'git_status',
+      raw: { arguments: {} },
+    })
+    const call2 = makeMockRecord({
+      spanId: 'tool-call-s2',
+      sessionId: 'session-2',
+      op: 'tool.invoke',
+      name: 'git_status',
+      raw: { arguments: {} },
+    })
+
+    const findings = detectDuplicateToolCall({
+      records: [call1, call2],
+    })
+
+    expect(findings.length).toBe(0)
+  })
+
+  it('derives waste tokens from gen_ai.tool.result_bytes when reported tokens are 0', () => {
+    const call1 = makeMockRecord({
+      spanId: 'tool-call-1',
+      sessionId: 'session-1',
+      op: 'tool.invoke',
+      name: 'read_file',
+      raw: { arguments: { path: '/src/main.ts' } },
+      tokens: { freshInput: 0, cacheRead: 0, cacheCreation: 0, output: 0, reportedInput: 0, reportedOutput: 0 },
+      attributes: { 'gen_ai.tool.result_bytes': 12000 },
+    })
+    const call2 = makeMockRecord({
+      spanId: 'tool-call-2',
+      sessionId: 'session-1',
+      op: 'tool.invoke',
+      name: 'read_file',
+      raw: { arguments: { path: '/src/main.ts' }, 'gen_ai.tool.result_bytes': 12000 },
+      tokens: { freshInput: 0, cacheRead: 0, cacheCreation: 0, output: 0, reportedInput: 0, reportedOutput: 0 },
+      attributes: { 'gen_ai.tool.result_bytes': 12000 },
+    })
+
+    const findings = detectDuplicateToolCall({
+      records: [call1, call2],
+    })
+
+    expect(findings.length).toBe(1)
+    expect(findings[0]!.estimatedWasteTokens).toBe(3000)
+    expect(findings[0]!.sessionId).toBe('session-1')
+  })
+
   it('detects duplicate child tool.invoke records within session turns', () => {
     const turn1 = makeMockRecord({
       spanId: 'llm-turn-1',
@@ -504,6 +556,88 @@ describe('Detector 3: oversized-tool-result', () => {
     expect(f.evidenceLinks[0]?.spanId).toBe('tool-child-1')
     expect(f.estimatedWasteTokens).toBeGreaterThanOrEqual(5_000)
     expect(f.mechanism).toContain('fetch_logs')
+  })
+
+  it('differentiates UTF-8 multi-byte characters from byte limits and reports bytes', () => {
+    const multiByteText = '日'.repeat(5000)
+    const toolRecord = makeMockRecord({
+      spanId: 'tool-res-multibyte',
+      op: 'tool.invoke',
+      name: 'fetch_data',
+      parts: [
+        {
+          part: 'tool_result_content',
+          text: multiByteText,
+          tokens: 1500,
+        },
+      ],
+    })
+
+    const findings = detectOversizedToolResult({
+      records: [toolRecord],
+      tokenThreshold: 2000,
+      charThreshold: 8000,
+      byteThreshold: 8000,
+    })
+
+    expect(findings.length).toBe(1)
+    const f = findings[0]!
+    expect(f.title).toContain('bytes exceeding budget')
+    expect(f.title).not.toContain('characters')
+    expect(f.mechanism).toContain('15000 bytes')
+  })
+
+  it('does NOT flag tool result that exactly matches thresholds (strictly >)', () => {
+    const text = 'a'.repeat(8000)
+    const toolRecord = makeMockRecord({
+      spanId: 'tool-res-exact',
+      op: 'tool.invoke',
+      name: 'fetch_data',
+      parts: [
+        {
+          part: 'tool_result_content',
+          text,
+          tokens: 2000,
+        },
+      ],
+    })
+
+    const findings = detectOversizedToolResult({
+      records: [toolRecord],
+      tokenThreshold: 2000,
+      charThreshold: 8000,
+      byteThreshold: 8000,
+    })
+
+    expect(findings.length).toBe(0)
+  })
+
+  it('does NOT access lazy record.raw when record.name already holds the tool name', () => {
+    let rawAccessed = false
+    const toolRecord = makeMockRecord({
+      spanId: 'tool-res-lazy',
+      op: 'tool.invoke',
+      name: 'my_tool',
+      parts: [
+        {
+          part: 'tool_result_content',
+          text: 'a'.repeat(9000),
+        },
+      ],
+    })
+    Object.defineProperty(toolRecord, 'raw', {
+      get() {
+        rawAccessed = true
+        return {}
+      },
+    })
+
+    const findings = detectOversizedToolResult({
+      records: [toolRecord],
+    })
+
+    expect(findings.length).toBe(1)
+    expect(rawAccessed).toBe(false)
   })
 
   it('detectFindings fires oversized-tool-result when child tool.invoke has gen_ai.tool.result_bytes exceeding 100KB', () => {

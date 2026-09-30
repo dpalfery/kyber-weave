@@ -281,7 +281,6 @@ describe('claudeReader', () => {
     ])
   })
 
-
   it('does not infer or default toolsOffered from static profiles (honest unobservability)', async () => {
     const path = writeTranscript([
       {
@@ -357,5 +356,32 @@ describe('claudeReader', () => {
       }),
     ])
     expect(session.toolsOffered).toBeUndefined()
+  })
+
+  it('guards non-object and non-string input in tool_use blocks, defaulting to empty object (Thread 13)', () => {
+    const rawLines = [
+      JSON.stringify({
+        type: 'assistant',
+        sessionId: 'claude-guard-input',
+        message: {
+          role: 'assistant',
+          content: [
+            { type: 'tool_use', id: 'tu_num', name: 'ToolNum', input: 42 },
+            { type: 'tool_use', id: 'tu_arr', name: 'ToolArr', input: ['invalid', 'array'] },
+            { type: 'tool_use', id: 'tu_bool', name: 'ToolBool', input: true },
+            { type: 'tool_use', id: 'tu_str', name: 'ToolStr', input: 'valid-string' },
+            { type: 'tool_use', id: 'tu_obj', name: 'ToolObj', input: { key: 'val' } },
+          ],
+        },
+      }),
+    ]
+
+    const session = readClaudeSession(rawLines) as unknown as ReaderTurn
+    expect(session.toolCalls).toHaveLength(5)
+    expect(session.toolCalls?.[0]?.arguments).toEqual({})
+    expect(session.toolCalls?.[1]?.arguments).toEqual({})
+    expect(session.toolCalls?.[2]?.arguments).toEqual({})
+    expect(session.toolCalls?.[3]?.arguments).toBe('valid-string')
+    expect(session.toolCalls?.[4]?.arguments).toEqual({ key: 'val' })
   })
 })

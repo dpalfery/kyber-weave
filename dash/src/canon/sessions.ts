@@ -158,85 +158,67 @@ function toolDefinitionsOf(
  * array left unsplit ranks as one tool whose name is the entire blob, which
  * is how "[{\"name\": \"define_subagent\"}, ...]" ends up in a cost table.
  */
-function expandDefinitions(text: string): { name: string; text: string }[] {
+function extractToolDefinitionsFromText(text: string): { name: string; text: string }[] {
+  if (!text || !text.trim()) return []
   let parsed: unknown
   try {
     parsed = JSON.parse(text)
   } catch {
-    return [{ name: text, text }]
+    // Non-JSON content (plain text, YAML, truncated write):
+    // Preserved for token residence as a counted-but-unnamed entry without
+    // promoting the raw text to a tool name.
+    return [{ name: "", text }]
   }
 
-  const one = (value: unknown): { name: string; text: string } => {
-    const asText = typeof value === 'string' ? value : JSON.stringify(value)
-    if (value !== null && typeof value === 'object') {
-      const named = (value as { name?: unknown; function?: { name?: unknown } })
-      if (typeof named.name === 'string') return { name: named.name, text: asText }
-      // OpenAI-shaped definitions nest the name under `function`.
-      if (typeof named.function?.name === 'string') return { name: named.function.name, text: asText }
+  const items: unknown[] = Array.isArray(parsed)
+    ? parsed
+    : (parsed !== null && typeof parsed === "object" && Array.isArray((parsed as Record<string, unknown>).tools))
+      ? ((parsed as Record<string, unknown>).tools as unknown[])
+      : [parsed]
+
+  const results: { name: string; text: string }[] = []
+  for (const item of items) {
+    if (typeof item === "string" && item.trim()) {
+      results.push({ name: item.trim(), text: item })
+    } else if (item !== null && typeof item === "object") {
+      const obj = item as { name?: unknown; function?: { name?: unknown } }
+      const itemText = JSON.stringify(item)
+      if (typeof obj.name === "string" && obj.name.trim()) {
+        results.push({ name: obj.name.trim(), text: itemText })
+      } else if (typeof obj.function?.name === "string" && obj.function.name.trim()) {
+        results.push({ name: obj.function.name.trim(), text: itemText })
+      } else {
+        results.push({ name: "", text: itemText })
+      }
     }
-    return { name: asText, text: asText }
   }
+  return results
+}
 
-  return Array.isArray(parsed) ? parsed.map(one) : [one(parsed)]
+function expandDefinitions(text: string): { name: string; text: string }[] {
+  return extractToolDefinitionsFromText(text)
 }
 
 /** Tool names the session actually called, from its tool spans. */
 function invocationsOf(records: readonly CanonicalRecord[]): string[] {
   return records
-    .filter((record) => record.op === 'tool.invoke')
-    .map((record) => attributeOf(record, ['gen_ai.tool.name', 'tool.name']) ?? record.name)
+    .filter((record) => record.op === "tool.invoke")
+    .map((record) => attributeOf(record, ["gen_ai.tool.name", "tool.name"]) ?? record.name)
 }
 
 /** Offered tool names declared in tool-definition parts across the session. */
 function extractOfferedToolNames(parts: readonly { text: string }[]): string[] {
   const names = new Set<string>()
   for (const part of parts) {
-    if (!part.text || !part.text.trim()) continue
-    let parsed: unknown
-    try {
-      parsed = JSON.parse(part.text)
-    } catch {
-      const trimmed = part.text.trim()
-      if (trimmed) names.add(trimmed)
-      continue
-    }
-
-    const addOne = (val: unknown) => {
-      if (typeof val === 'string' && val.trim()) {
-        names.add(val.trim())
-      } else if (val !== null && typeof val === 'object') {
-        const obj = val as { name?: unknown; function?: { name?: unknown } }
-        if (typeof obj.name === 'string' && obj.name.trim()) {
-          names.add(obj.name.trim())
-        } else if (typeof obj.function?.name === 'string' && obj.function.name.trim()) {
-          names.add(obj.function.name.trim())
-        }
-      }
-    }
-
-    if (Array.isArray(parsed)) {
-      for (const item of parsed) addOne(item)
-    } else if (parsed !== null && typeof parsed === 'object') {
-      const obj = parsed as Record<string, unknown>
-      if (Array.isArray(obj.tools)) {
-        for (const item of obj.tools) addOne(item)
-      } else {
-        addOne(parsed)
+    for (const def of extractToolDefinitionsFromText(part.text)) {
+      if (def.name && def.name.trim()) {
+        names.add(def.name.trim())
       }
     }
   }
   return Array.from(names)
 }
 
-/**
- * Whether a group of records says anything at all. The live collector stores
- * every span it receives, including ones that arrive with no attributes and
- * no counters -- 15,535 of them in the measured corpus, every one stamped
- * `op: llm.invoke` and `harness: unattributed` by a receiver that hard-codes
- * both. Building sessions out of those manufactures a session list of
- * near-empty rows. They are skipped here; the receiver should quarantine them
- * at ingest instead, which is a separate fix.
- */
 function hasEvidence(records: readonly CanonicalRecord[]): boolean {
   // A session is a conversation with a model. A trace carrying no model call
   // is not one, however many spans it holds: the receiver ingests everything
@@ -275,10 +257,12 @@ export type AsadContextBucket = {
 
 export type AsadTool = {
   name?: string
+  server?: string
   schema_tokens: number
   invocations: number
   turns_resident: number
   errors?: number
+  total_schema_cost?: number
 }
 
 export type AsadServer = {
@@ -469,6 +453,8 @@ export function buildSessionRow(
         invocations: invocationsCount,
         turns_resident: turnsResident,
         errors: errorCount,
+        ...(tool.cost !== undefined ? { total_schema_cost: tool.cost } : {}),
+        ...(definition?.server !== undefined ? { server: definition.server } : {}),
       }
     }
     return {

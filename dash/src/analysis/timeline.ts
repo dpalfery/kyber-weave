@@ -44,6 +44,7 @@ export type TimelineNode = {
   durationMs: number
   kind: string
   name: string
+  status?: string
   /** The harness-emitted attribute map the record preserved, for inspection (R9.2). */
   attributes: Record<string, unknown>
   /** This span carries subagent evidence (name, operation, or attribute). */
@@ -182,6 +183,7 @@ export function buildTimeline(spans: CanonicalRecord[]): TimelineNode {
         durationMs: record.durationMs,
         kind: record.kind,
         name: record.name,
+        ...(typeof record.status === 'string' && record.status ? { status: record.status } : {}),
         attributes,
         isSubagent: isSubagentRecord(record),
         isAuxiliary: false,

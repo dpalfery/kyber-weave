@@ -1,6 +1,6 @@
 import { readFileSync, readdirSync, statSync } from 'fs'
 import { readFile, readdir, stat } from 'fs/promises'
-import { basename, delimiter as pathDelimiter, extname, join, resolve } from 'path'
+import { basename, delimiter as pathDelimiter, extname, join, resolve, sep } from 'path'
 import { homedir } from 'os'
 import { createHash } from 'crypto'
 
@@ -483,20 +483,13 @@ export const claude: Provider = {
 
     for (const desktopBase of getDesktopSessionsDirs()) {
       const desktopDirs = await findDesktopProjectDirs(desktopBase)
-      const sep = desktopBase.includes('\\') ? '\\' : '/'
-      // Desktop / Cowork sessions belong to no CLAUDE_CONFIG_DIR. Tag them with a
-      // distinct source so a per-config view can account for them as their own
-      // "Claude Desktop" bucket instead of silently dropping them (which made
-      // sum-of-configs < All).
-      const desktopSourceId = 'claude-desktop:' + createHash('sha256').update(resolve(desktopBase)).digest('hex').slice(0, 16)
       for (const dirPath of desktopDirs) {
         const resolved = resolve(dirPath)
         if (seenProjectDirs.has(resolved)) continue
         seenProjectDirs.add(resolved)
 
-        // For Claude Desktop local-agent-mode (Cowork) sessions, the project dir
-        // lives inside local_<sessionId>/.claude/projects/. We resolve the space
-        // name from the sibling .json and spaces.json so it groups correctly.
+        const desktopSourceId = 'claude-desktop:' + createHash('sha256').update(resolved).digest('hex').slice(0, 16)
+
         // Path structure: <desktopBase>/<appId>/<workspaceId>/local_<id>/.claude/projects/<slug>
         let projectName = basename(dirPath)
         const resolvedBase = resolve(desktopBase)
@@ -547,10 +540,11 @@ export const claude: Provider = {
           files.push(source.path)
         } else {
           try {
-            const entries = readdirSync(source.path)
+            const entries = readdirSync(source.path, { recursive: true, encoding: 'utf8' })
             for (const entry of entries) {
-              if (entry.endsWith('.jsonl')) {
-                files.push(join(source.path, entry))
+              const str = typeof entry === 'string' ? entry : String(entry)
+              if (str.endsWith('.jsonl')) {
+                files.push(join(source.path, str))
               }
             }
           } catch {
@@ -561,12 +555,12 @@ export const claude: Provider = {
         for (const file of files) {
           for (const call of loadClaudeCalls(file)) {
             if (seenKeys.has(call.deduplicationKey)) continue
-            seenKeys.add(call.deduplicationKey)
             if (dateRange) {
               const ts = new Date(call.timestamp).getTime()
               if (dateRange.start && ts < new Date(dateRange.start).getTime()) continue
               if (dateRange.end && ts > new Date(dateRange.end).getTime()) continue
             }
+            seenKeys.add(call.deduplicationKey)
             yield call
           }
         }
@@ -574,3 +568,5 @@ export const claude: Provider = {
     }
   },
 }
+
+export default claude

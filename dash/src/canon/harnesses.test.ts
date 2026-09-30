@@ -481,6 +481,30 @@ describe('buildHarnessRollup — Tool yield aggregation', () => {
 
     store.close()
   })
+
+  it('reports tool_yield as not_measurable (null) when session tools_offered is present but invocations were not observed (Thread 4)', () => {
+    const store = new CanonStore(':memory:')
+
+    store.upsertSession({
+      sessionId: 'sess-offered-no-invocations',
+      harness: 'copilot',
+      payload: {
+        id: 'sess-offered-no-invocations',
+        session_id: 'sess-offered-no-invocations',
+        harness: 'copilot',
+        summary: {
+          total_input: 1000,
+          tools_offered: ['ToolA', 'ToolB'],
+        },
+      },
+    })
+
+    const rollup = buildHarnessRollup(store, 'copilot')
+    expect(rollup.toolYield).toBeNull()
+    expect(isNotMeasurable(rollup.measurability['tool_yield'])).toBe(true)
+
+    store.close()
+  })
 })
 
 describe('buildHarnessRollup — Delegation overhead aggregation', () => {

@@ -50,9 +50,11 @@ import type { ParsedProviderCall } from '../providers/types.js'
 export type { ParsedProviderCall } from '../providers/types.js'
 import {
   contentFromParts,
+  notMeasurable,
   type CanonicalRecord,
   type ContentPart,
   type CostBlock,
+  type MetricAvailability,
   type TokenUsage,
 } from '../canon/types.js'
 import { exclusiveConvention, inclusiveConvention } from '../canon/adapters/copilot.js'
@@ -422,6 +424,9 @@ export function synthesizeCall(
 /** Maximum bytes of tool result content stored in content parts before truncation (64KB). */
 export const MAX_TOOL_RESULT_BYTES = 65_536
 
+/** Maximum bytes of tool arguments stored in raw before truncation (64KB). */
+export const MAX_TOOL_ARGUMENTS_BYTES = 65_536
+
 /**
  * Truncate a UTF-8 string to at most \`maxBytes\`, cutting strictly at a valid UTF-8 code point boundary.
  */
@@ -458,12 +463,50 @@ export function synthesizeToolCall(
   const resultBytes = toolResult?.content !== undefined
     ? Buffer.byteLength(toolResult.content, 'utf8')
     : undefined
+
+  const serializedArgs = typeof toolCall.arguments === 'string'
+    ? toolCall.arguments
+    : JSON.stringify(toolCall.arguments ?? {})
+  const argsBytes = Buffer.byteLength(serializedArgs, 'utf8')
+
+  let boundedArguments = toolCall.arguments
+  if (typeof toolCall.arguments === 'string') {
+    if (argsBytes > MAX_TOOL_ARGUMENTS_BYTES) {
+      boundedArguments = truncateUtf8(toolCall.arguments, MAX_TOOL_ARGUMENTS_BYTES)
+    }
+  } else if (toolCall.arguments !== null && typeof toolCall.arguments === 'object') {
+    if (argsBytes > MAX_TOOL_ARGUMENTS_BYTES) {
+      boundedArguments = truncateUtf8(serializedArgs, MAX_TOOL_ARGUMENTS_BYTES)
+    }
+  }
+
+  let durationMs = 0
+  let durationAvailability: MetricAvailability = notMeasurable('Tool duration was not reported in telemetry.')
+  if (toolCall.durationMs !== undefined && Number.isFinite(toolCall.durationMs)) {
+    durationMs = Math.max(0, toolCall.durationMs)
+    durationAvailability = 'measured'
+  } else if (toolCall.timestamp && toolResult?.timestamp) {
+    const callTime = new Date(toolCall.timestamp).getTime()
+    const resTime = new Date(toolResult.timestamp).getTime()
+    const diff = resTime - callTime
+    if (Number.isFinite(diff) && diff >= 0) {
+      durationMs = diff
+      durationAvailability = 'derived'
+    }
+  }
+
   const attributes: Record<string, unknown> = {
     'gen_ai.tool.name': toolCall.name,
     'gen_ai.tool.call_id': toolCall.id,
     'gen_ai.tool.status': status,
     ...(resultBytes !== undefined
       ? { 'gen_ai.tool.result_bytes': resultBytes }
+      : {}),
+    ...(toolCall.arguments !== undefined
+      ? { 'gen_ai.tool.arguments_bytes': argsBytes }
+      : {}),
+    ...(durationAvailability === 'measured' || durationAvailability === 'derived'
+      ? { 'gen_ai.tool.duration_ms': durationMs }
       : {}),
   }
 
@@ -495,8 +538,13 @@ export function synthesizeToolCall(
   const provider = call?.provider ?? (nameParts.length > 1 ? nameParts[0] : parentRecord.harness)
   const model = call?.model ?? (nameParts.length > 1 ? nameParts.slice(1).join(':') : undefined)
 
+  const toolHash = createHash('sha256')
+    .update(`${toolCall.id || index}:${toolCall.name}:${serializedArgs}`)
+    .digest('hex')
+    .slice(0, 12)
+
   return {
-    spanId: `${parentRecord.spanId}-t${index}`,
+    spanId: `${parentRecord.spanId}-t${toolHash}`,
     traceId: parentRecord.traceId,
     parentSpanId: parentRecord.spanId,
     source: parentRecord.source,
@@ -510,7 +558,7 @@ export function synthesizeToolCall(
     op: 'tool.invoke',
     kind: 'internal',
     timestamp: toolCall.timestamp ?? parentRecord.timestamp,
-    durationMs: toolCall.durationMs ?? 0,
+    durationMs,
     status,
     tokens: {
       freshInput: 0,
@@ -523,19 +571,19 @@ export function synthesizeToolCall(
     content: {},
     parts,
     cost: { basis: 'unknown', status: 'no_rate' },
+    measurability: {
+      ...parentRecord.measurability,
+      duration: durationAvailability,
+    },
     attributes,
     raw: {
       ...attributes,
-      arguments: toolCall.arguments,
+      arguments: boundedArguments,
       result: parts[0]?.text,
     },
   }
 }
 
-/**
- * Synthesize child `tool.invoke` canonical records for all tool calls in a turn,
- * pairing each with its corresponding tool result by tool call id.
- */
 export function synthesizeToolCalls(
   parentRecord: CanonicalRecord,
   call: ParsedProviderCall,

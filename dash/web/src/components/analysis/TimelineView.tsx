@@ -72,7 +72,8 @@ function NodeRow({
           <span className="shrink-0 rounded bg-violet-500/15 px-1.5 py-0.5 text-[10px] font-medium text-violet-700">auxiliary</span>
         )}
         {node.status && (() => {
-          const s = node.status.toLowerCase()
+          const s = typeof node.status === 'string' ? node.status.toLowerCase() : ''
+          if (!s) return null
           const badgeClass =
             s === 'error' || s === 'failure' || s === 'fatal'
               ? 'bg-red-500/15 text-red-700 dark:text-red-400'

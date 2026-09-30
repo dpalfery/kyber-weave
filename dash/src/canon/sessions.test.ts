@@ -550,6 +550,57 @@ describe('buildSessionRow', () => {
     expect(measuredSession.summary?.tools_invoked).toEqual(['Bash'])
     expect(measuredSession.payload.summary.tools_invoked).toEqual(['Bash'])
   })
+
+  it('populates total_schema_cost on named tools rows in session payload when tools are invoked (Thread 1)', () => {
+    const parentWithDefs = turn('turn-defs-cost', [
+      { part: 'tool_definitions', text: JSON.stringify([{ name: 'Bash', description: 'Execute shell command' }]) },
+    ])
+    const tool = toolInvoke('tool-cost-1', 'turn-defs-cost', 'Bash')
+    const session = sessionRow(
+      buildSessionRow('sess-cost-check', [parentWithDefs, tool], approximateO200kBase),
+    )
+
+    expect(session.payload.tools).toBeDefined()
+    const bashTool = session.payload.tools?.find((t) => t.name === 'Bash')
+    expect(bashTool).toBeDefined()
+    expect(bashTool?.name).toBe('Bash')
+    expect(bashTool?.total_schema_cost).toBeDefined()
+    expect(bashTool?.total_schema_cost).toBeGreaterThan(0)
+  })
+
+  it('extracts tool definitions wrapped in {"tools":[...]} consistently (Thread 2)', () => {
+    const wrappedDefs = JSON.stringify({
+      tools: [
+        { name: 'ToolA', description: 'First tool' },
+        { name: 'ToolB', description: 'Second tool' },
+      ],
+    })
+    const parent = turn('turn-wrapped-defs', [
+      { part: 'tool_definitions', text: wrappedDefs },
+    ])
+    const tool = toolInvoke('tool-wrapped-1', 'turn-wrapped-defs', 'ToolA')
+    const session = sessionRow(
+      buildSessionRow('sess-wrapped-defs', [parent, tool], approximateO200kBase),
+    )
+
+    expect(session.summary?.tools_offered).toEqual(['ToolA', 'ToolB'])
+    const toolNames = session.payload.tools?.map((t) => t.name)
+    expect(toolNames).toContain('ToolA')
+    expect(toolNames).toContain('ToolB')
+    expect(toolNames?.some((n) => n && n.includes('{'))).toBe(false)
+  })
+
+  it('does not promote unparseable / non-JSON tool definitions text into tool names (Thread 3)', () => {
+    const badPart = turn('turn-bad-defs', [
+      { part: 'tool_definitions', text: '--- non-json YAML or raw catalogue ---' },
+    ])
+    const session = sessionRow(
+      buildSessionRow('sess-bad-defs', [badPart], approximateO200kBase),
+    )
+
+    expect(session.summary?.tools_offered).toEqual([])
+    expect(session.payload.tools?.some((t) => t.name?.includes('non-json'))).toBe(false)
+  })
 })
 
 describe('buildSessions', () => {

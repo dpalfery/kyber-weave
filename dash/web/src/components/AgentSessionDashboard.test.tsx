@@ -1388,6 +1388,47 @@ describe('AgentSessionDashboard: Issue #180 Task 8 Dashboard UI Verification', (
     expect(offeredMetric).not.toContain("NaN")
   })
 
+  it('does NOT render schema-waste-banner and reports unmeasured invocations when tools_invoked is undefined', () => {
+    const sessionWithUnmeasuredInvocations: AgentSessionPayload = {
+      ...sampleSession,
+      summary: {
+        ...sampleSession.summary,
+        tools_offered: ['toolA', 'toolB'],
+        tools_invoked: undefined,
+      },
+    }
+
+    const html = renderHtml(<AgentSessionDashboard session={sessionWithUnmeasuredInvocations} />)
+    expect(html).not.toContain('data-testid="schema-waste-banner"')
+    expect(html).not.toContain('tools were never called')
+    const offeredCard = html.slice(html.indexOf('Tools Offered'), html.indexOf('Tools Offered') + 300)
+    expect(offeredCard).toContain('invocations not reported')
+    expect(offeredCard).not.toContain('never called')
+  })
+
+  it('safely handles non-string node.status in timeline without throwing', () => {
+    const sessionWithMalformedStatus: AgentSessionPayload = {
+      ...sampleSession,
+      timeline: [
+        {
+          spanId: 'span-bad-status',
+          name: 'tool_call',
+          op: 'tool.invoke',
+          kind: 'tool',
+          durationMs: 100,
+          offsetMs: 0,
+          status: true as unknown as string,
+          attributes: {},
+          children: [],
+        },
+      ],
+    }
+
+    expect(() => {
+      renderHtml(<AgentSessionDashboard session={sessionWithMalformedStatus} />)
+    }).not.toThrow()
+  })
+
   it("computes unusedOfferedCount via set difference and renders waste banner for string arrays (Threads 6 & 7)", () => {
     const sessionWithArrayTools: AgentSessionPayload = {
       ...sampleSession,
