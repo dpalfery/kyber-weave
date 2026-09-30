@@ -783,6 +783,35 @@ const HARNESS_PREFIX_SURVEY: ReadonlyMap<SurveyedHarness, Omit<PrefixAvailabilit
 ])
 
 /**
+ * Whether a harness's telemetry vocabulary includes a cache counter (review
+ * follow-up on issues #183/#185/#187: Copilot C2/C3, Kilo K1, Kilo 7).
+ *
+ * Only an uncatalogued harness — `not_measurable` with `assumed`
+ * confidence, e.g. claude-desktop or synthetic fixtures — falls back to the
+ * data, so real counters keep their measured figures. Every catalogued
+ * harness answers from its survey record: `unsupported` is a verified
+ * negative (Cursor, Aider, Windsurf export no cache counters, so their
+ * stored zeros are absence, not measured zeros), and every other status
+ * consults its per-counter flags (Codex is `supported` yet exports no
+ * cache-creation counter; Codex/Gemini/Antigravity creation stays absent).
+ */
+export function harnessExportsCacheCounter(harness: string, counter: 'read' | 'creation'): boolean {
+  const availability = cacheAvailability(harness)
+  // Only an uncatalogued harness (`not_measurable` with `assumed`
+  // confidence) falls back to the data — a documented negative is a
+  // verified record even when its status is not literally `unsupported`
+  // (re-review #2: Kilo 7 — OpenCode is catalogued `not_measurable` with
+  // documented confidence, and its absent counters are absence, not data).
+  if (availability.confidence === 'assumed') return true
+  if (availability.status === 'unsupported') return false
+  // The per-counter flags are the record for every other catalogued
+  // harness — Codex is `supported` yet exports no cache-creation counter,
+  // and treating `supported` as both-true minted fake "on 0 turns"
+  // coverage (re-review: Kilo 1).
+  return counter === 'read' ? availability.cacheRead : availability.cacheCreation
+}
+
+/**
  * Return the typed cache counter availability and confidence tag for a harness.
  */
 export function cacheAvailability(harness: string): CacheAvailability {

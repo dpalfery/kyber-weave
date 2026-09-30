@@ -196,6 +196,19 @@ export function Scorecard({
             <span className="text-density-2xs italic text-tertiary-foreground/80">
               (derived)
             </span>
+            {/* Review re-review #2 (Kilo 4): a partial total is marked in
+                visible text, not a hover-only title — and the gap may be
+                turns or tokens, not only cost, so the wording says so. */}
+            {secondaryCost.partial === true && (
+              <span
+                className="text-density-2xs italic text-tertiary-foreground/80"
+                data-testid="secondary-cost-partial"
+                title="Partial total: some sessions in this run lack measured figures"
+                tabIndex={0}
+              >
+                (partial)
+              </span>
+            )}
           </div>
         )}
       </div>

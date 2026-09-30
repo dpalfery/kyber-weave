@@ -228,6 +228,55 @@ describe('Decision D13 — Run boundary derivation', () => {
     expect(runs[0]!.workingDirectory).toBeNull()
     store.close()
   })
+
+  // Issue #183: the harness emits session ids that already carry its own name
+  // (`claude-desktop:<uuid>`), and the session_fallback composition prefixed the
+  // harness a second time, emitting `derived:<harness>:<harness>:<id>`. The
+  // harness segment appears exactly once.
+  it('carries the harness segment once in session_fallback derived run ids', async () => {
+    const store = new CanonStore(':memory:')
+
+    store.upsert(
+      makeRecord('dbl-1', {
+        harness: 'claude-desktop',
+        sessionId: 'claude-desktop:12f4dea4-33da-4f71-bbda-40e48f22e553',
+        timestamp: '2026-09-30T14:46:57.725Z',
+        raw: {}, // no cwd, no run id
+      }),
+    )
+
+    await buildRuns(store)
+
+    const runs = store.listRuns()
+    expect(runs).toHaveLength(1)
+    expect(runs[0]!.runId).toBe(
+      'derived:claude-desktop:12f4dea4-33da-4f71-bbda-40e48f22e553',
+    )
+    expect(runs[0]!.groupingRule).toBe('session_fallback')
+
+    // A second rebuild is stable: same id, no duplicate rows.
+    await buildRuns(store)
+    expect(store.listRuns()).toHaveLength(1)
+    expect(store.listRuns()[0]!.runId).toBe(runs[0]!.runId)
+
+    // A stale doubled id from an earlier build is pruned, not left to haunt
+    // the run list.
+    store.upsertRun({
+      runId: 'derived:claude-desktop:claude-desktop:12f4dea4-33da-4f71-bbda-40e48f22e553',
+      harness: 'claude-desktop',
+      groupingBasis: 'derived',
+      groupingRule: 'session_fallback',
+      executionCount: 1,
+    })
+    expect(store.listRuns()).toHaveLength(2)
+    await buildRuns(store)
+    const after = store.listRuns()
+    expect(after).toHaveLength(1)
+    expect(after[0]!.runId).toBe(
+      'derived:claude-desktop:12f4dea4-33da-4f71-bbda-40e48f22e553',
+    )
+    store.close()
+  })
 })
 
 describe('Parent/child execution linkage & execution trees', () => {
