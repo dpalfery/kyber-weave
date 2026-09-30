@@ -563,6 +563,29 @@ describe('schema migration v14 -> v15 (refresh coverage window)', () => {
       store.close()
     }
   })
+
+  it('leaves a v14-stamped store without a refresh_run table alone instead of throwing a raw driver error', () => {
+    // Review PR #230 (kilo nux5n): migration 14 must copy migration 12's
+    // sqlite_master guard — on a store whose stamp says v14 but which holds
+    // no refresh_run table, the step is a no-op rather than an unconditional
+    // ALTER TABLE that throws a raw driver error.
+    const dir = mkdtempSync(join(tmpdir(), 'kyber-migration-v14-absent-'))
+    dirs.push(dir)
+    const path = join(dir, 'canon.db')
+    new CanonStore(path).close()
+
+    const setup = new DatabaseSync(path)
+    setup.exec('DROP TABLE refresh_run')
+    setup.prepare('UPDATE metadata SET value = ? WHERE key = ?').run('14', 'schema_version')
+    setup.close()
+
+    const store = new CanonStore(path)
+    try {
+      expect(store.getMetadata('schema_version')).toBe(String(SCHEMA_VERSION))
+    } finally {
+      store.close()
+    }
+  })
 })
 
 describe('Cond2 14→15 safety probe (old binary on new schema)', () => {

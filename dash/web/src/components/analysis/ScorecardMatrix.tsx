@@ -24,17 +24,6 @@ export interface ScorecardMatrixRow {
   family?: string | null
   /** Verbatim zero-data reason off the rollup payload, or null when covered. */
   noDataReason?: string | null
-  /**
-   * Per-harness checkpoint unit counts by status. Accepted for type
-   * compatibility with the served payload; rendered by the ingest panel
-   * (T9), never summed here.
-   */
-  checkpointSummary?: {
-    ok: number
-    partial: number
-    failed: number
-    unavailable: number
-  } | null
 }
 
 /**
@@ -48,6 +37,11 @@ export interface ScorecardCoverageWindow {
   historyWeeks?: number | null
   coveredFrom?: string | null
   coveredThrough?: string | null
+  /**
+   * Last successful refresh, carried so a fresh store (null — nothing ever
+   * recorded) never reads as a legacy run whose window metadata is null.
+   */
+  lastSuccessAt?: string | null
 }
 
 export interface ScorecardMatrixProps {
@@ -99,6 +93,31 @@ function shortDate(iso: string | null | undefined): string | null {
 }
 
 /**
+ * The coverage window sentence every surface states (issues #189/#199).
+ * One owner for one fact: the matrix banner and the ingest panel both read
+ * this rather than formatting the same three fields with different rules.
+ * Only a positive safe integer with both bounds is a window; a null window
+ * with no recorded success is a fresh store, with a success a legacy run.
+ */
+export function formatCoverageWindow(window: ScorecardCoverageWindow): string {
+  const historyWeeks = window.historyWeeks ?? null
+  const from = shortDate(window.coveredFrom)
+  const through = shortDate(window.coveredThrough)
+  if (
+    typeof historyWeeks === 'number' &&
+    Number.isSafeInteger(historyWeeks) &&
+    historyWeeks > 0
+  ) {
+    const range = from !== null && through !== null ? ` (${from} → ${through})` : ''
+    return `Coverage: last ${historyWeeks} week${historyWeeks === 1 ? '' : 's'}${range}`
+  }
+  if ((window.lastSuccessAt ?? null) === null) {
+    return 'Coverage window unknown (no successful refresh recorded)'
+  }
+  return 'Coverage window unknown (recorded before window tracking)'
+}
+
+/**
  * Coverage banner (issue #189): the persisted window plus how many listed
  * harnesses hold no records in it. Counts rows that exist; the family sums
  * nothing, so no aggregate is fabricated here either.
@@ -112,19 +131,9 @@ function CoverageBanner({
   noDataCount: number
   totalCount: number
 }) {
-  const { historyWeeks, coveredFrom, coveredThrough } = coverage
-  const from = shortDate(coveredFrom)
-  const through = shortDate(coveredThrough)
   return (
     <p className="text-density-xs text-muted-foreground mt-density-hair leading-density" data-testid="coverage-banner">
-      {typeof historyWeeks === 'number' && Number.isFinite(historyWeeks) ? (
-        <>
-          Coverage: last {historyWeeks} week{historyWeeks === 1 ? '' : 's'}
-          {from !== null && through !== null ? ` (${from} → ${through})` : ''}
-        </>
-      ) : (
-        <>Coverage window unknown (recorded before window tracking)</>
-      )}
+      {formatCoverageWindow(coverage)}
       {noDataCount > 0 && (
         <>
           {' — '}
@@ -250,6 +259,32 @@ export function ScorecardMatrix({
     familyGroups.set(family, group)
   }
 
+  // Zero-data rows keep their drill control: the harnesses an operator most
+  // wants to investigate are exactly the ones with nothing in the window.
+  const noDataSection = noDataRows.length > 0 && (
+    <div className="mt-chrome-sm border-t border-border/60 pt-chrome-sm" data-testid="matrix-no-data">
+      <h4 className="text-density-xs font-semibold uppercase tracking-density text-tertiary-foreground">
+        No records in coverage window ({noDataRows.length})
+      </h4>
+      <ul className="mt-density-hair flex flex-col gap-density-hair">
+        {noDataRows.map((row) => (
+          <li key={row.harness} className="text-density-xs text-muted-foreground leading-density">
+            <button
+              type="button"
+              onClick={() => onSelectHarness?.(row.harness)}
+              data-testid={`drill-harness-${row.harness}`}
+              className="rounded-chrome px-chrome-xs py-chrome-sm text-left hover:bg-interactive-secondary/30"
+            >
+              <span className="font-semibold text-foreground">{rowDisplayName(row)}</span>
+              {' — '}
+              {noDataReasonOf(row)}
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+
   return (
     <Card className={cn('p-chrome', className)} data-testid="scorecard-matrix">
       <div className="flex items-center justify-between border-b border-border/60 pb-chrome-sm mb-chrome-sm">
@@ -277,10 +312,15 @@ export function ScorecardMatrix({
             <Skeleton key={i} className="h-12 w-full" />
           ))}
         </div>
-      ) : rows.length === 0 ? (
-        <p className="text-density-xs text-muted-foreground">
-          No harnesses observed in rollups or runs.
-        </p>
+      ) : dataRows.length === 0 ? (
+        <>
+          <p className="text-density-xs text-muted-foreground" data-testid="matrix-empty">
+            {rows.length === 0
+              ? 'No harnesses observed in rollups or runs.'
+              : 'No harnesses with records in the coverage window.'}
+          </p>
+          {noDataSection}
+        </>
       ) : (
         <>
         <div className="overflow-x-auto">
@@ -317,22 +357,7 @@ export function ScorecardMatrix({
             ))}
           </div>
         </div>
-        {noDataRows.length > 0 && (
-          <div className="mt-chrome-sm border-t border-border/60 pt-chrome-sm" data-testid="matrix-no-data">
-            <h4 className="text-density-xs font-semibold uppercase tracking-density text-tertiary-foreground">
-              No records in coverage window ({noDataRows.length})
-            </h4>
-            <ul className="mt-density-hair flex flex-col gap-density-hair">
-              {noDataRows.map((row) => (
-                <li key={row.harness} className="text-density-xs text-muted-foreground leading-density">
-                  <span className="font-semibold text-foreground">{rowDisplayName(row)}</span>
-                  {' — '}
-                  {noDataReasonOf(row)}
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
+        {noDataSection}
         </>
       )}
     </Card>

@@ -342,4 +342,29 @@ describe('startOtlpCollectorService ingest_log', () => {
       await service.close()
     }
   })
+
+  it('keeps an accepted batch when the audit write throws (audit never fails ingest)', async () => {
+    // Review PR #230 (kilo nux45): the audit write ran unguarded inside the
+    // sink, so a locked audit table failed the whole batch — and the writer
+    // requeued it, appending another audit row on retry. An audit row must
+    // never fail the ingest it audits.
+    const service = await startOtlpCollectorService({ port: 0, dbPath: ':memory:' })
+    try {
+      const auditWrite = service.canon.logIngest
+      service.canon.logIngest = () => {
+        throw new Error('audit table locked')
+      }
+      try {
+        await service.writer.enqueue([
+          claimableSpan({ spanId: 'audit-fail-1', resource: { 'service.name': 'svc-a' } }),
+        ])
+        await service.writer.flush()
+      } finally {
+        service.canon.logIngest = auditWrite
+      }
+      expect(service.canon.count()).toBeGreaterThan(0)
+    } finally {
+      await service.close()
+    }
+  })
 })

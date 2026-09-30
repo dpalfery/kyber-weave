@@ -9,7 +9,7 @@ Window: last 7 days
 
 - **Store:** \`canon.db\`
 - **Refresh:** never
-- **Coverage window:** unknown (recorded before window tracking)
+- **Coverage window:** unknown (no successful refresh recorded)
 - **Quarantine:** 0
 - **Problems:** 0
 - **Harnesses:** none in the window

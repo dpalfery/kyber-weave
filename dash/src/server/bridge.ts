@@ -12,6 +12,7 @@ import { refreshProcessIsAlive } from '../canon/refresh-run.js'
 import {
   CanonStore,
   decompressRaw,
+  normalizeHistoryWeeks,
   toFinding,
   toPrediction,
   toRecord,
@@ -1969,10 +1970,11 @@ export class KyberBridge {
           completedAt: row.completed_at,
           pid: Number(row.pid),
           summary: row.summary,
-          historyWeeks:
-            row.history_weeks === null || row.history_weeks === undefined
-              ? null
-              : Number(row.history_weeks),
+          // A non-numeric column value reads as unknown (never NaN): the
+          // shared normalizer holds for both halves of the seam.
+          historyWeeks: normalizeHistoryWeeks(
+            typeof row.history_weeks === 'number' ? row.history_weeks : null,
+          ),
         }
       } catch {
         return undefined
@@ -2539,20 +2541,24 @@ export class KyberBridge {
    */
   getIngestActivity(): IngestActivity {
     if (this.store) {
-      const recordCounts = new Map<string, number>()
-      for (const record of this.store.listAll()) {
-        recordCounts.set(record.source, (recordCounts.get(record.source) ?? 0) + 1)
+      // The store half degrades exactly like the file half below: a broken
+      // or locked store reads as unknown receiver activity, never a throw —
+      // /coverage promises graceful degradation on both configurations.
+      // Counts come from GROUP BY aggregates, never from inflating the
+      // corpus through listAll() or paging the unbounded audit log.
+      try {
+        const recordCounts = this.store.countBySource()
+        const logSums = this.store.ingestLogSums()
+        let lastReceivedAt: string | null = null
+        for (const { lastAt } of logSums.values()) {
+          if (lastAt !== null && (lastReceivedAt === null || lastAt > lastReceivedAt)) {
+            lastReceivedAt = lastAt
+          }
+        }
+        return buildIngestActivity(recordCounts, logSums, lastReceivedAt)
+      } catch {
+        return { status: 'unknown', reason: 'no receiver activity recorded', sources: [], lastReceivedAt: null }
       }
-      const logSums = new Map<string, { total: number; lastAt: string | null }>()
-      let lastReceivedAt: string | null = null
-      for (const entry of this.store.getIngestLog()) {
-        const current = logSums.get(entry.source) ?? { total: 0, lastAt: null }
-        current.total += entry.count
-        if (current.lastAt === null || entry.timestamp > current.lastAt) current.lastAt = entry.timestamp
-        logSums.set(entry.source, current)
-        if (lastReceivedAt === null || entry.timestamp > lastReceivedAt) lastReceivedAt = entry.timestamp
-      }
-      return buildIngestActivity(recordCounts, logSums, lastReceivedAt)
     }
 
     const db = this.getDb()
@@ -2603,14 +2609,22 @@ export class KyberBridge {
    * single `getDb()` handle (raw file) — never a second store handle.
    * `partial` rows (including zero-record ones) are returned verbatim;
    * display grouping is the caller's concern (T8), not this seam's.
+   * `null` means the read failed or the table is absent (unknown) — an
+   * empty array means the read succeeded and no units exist. Callers must
+   * not render zeros for null: that is the fabricated zero the
+   * honest-unobservability rule forbids.
    * </remarks>
    */
-  getSourceCheckpointStatuses(harnessId?: string): SourceCheckpoint[] {
+  getSourceCheckpointStatuses(harnessId?: string): SourceCheckpoint[] | null {
     if (this.store) {
-      return this.store.listSourceCheckpoints(harnessId)
+      try {
+        return this.store.listSourceCheckpoints(harnessId)
+      } catch {
+        return null
+      }
     }
     const db = this.getDb()
-    if (!this.hasTable(db, 'source_checkpoint')) return []
+    if (!this.hasTable(db, 'source_checkpoint')) return null
     try {
       const rows = (
         harnessId === undefined
@@ -2618,6 +2632,41 @@ export class KyberBridge {
           : db!.prepare('SELECT * FROM source_checkpoint WHERE harness_id = ? ORDER BY source_key').all(harnessId)
       ) as unknown as SourceCheckpointRow[]
       return rows.map(toSourceCheckpoint)
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   * Quarantine counts by reason (T5 coverage seam).
+   *
+   * Aggregated in SQL (`GROUP BY reason`) on whichever handle this bridge
+   * owns — the coverage endpoint must not materialize the quarantine table
+   * to tally it. A null reason groups as `'unknown'`, never dropped. An
+   * unreadable table reads as no rows, matching `getQuarantineCount`'s
+   * zero-on-absent contract for this seam.
+   */
+  getQuarantineCountsByReason(): Array<{ reason: string; count: number }> {
+    if (this.store) {
+      try {
+        return this.store.quarantineCountsByReason()
+      } catch {
+        return []
+      }
+    }
+    const db = this.getDb()
+    if (!this.hasTable(db, 'quarantine')) return []
+    try {
+      const rows = db!
+        .prepare(
+          `SELECT COALESCE(reason, 'unknown') AS reason, COUNT(*) AS n
+           FROM quarantine GROUP BY reason ORDER BY n DESC, reason ASC`,
+        )
+        .all() as Array<{ reason: unknown; n: unknown }>
+      return rows.map((row) => ({
+        reason: typeof row.reason === 'string' && row.reason !== '' ? row.reason : 'unknown',
+        count: typeof row.n === 'number' ? row.n : Number(row.n) || 0,
+      }))
     } catch {
       return []
     }

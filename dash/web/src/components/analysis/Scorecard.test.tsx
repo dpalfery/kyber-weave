@@ -591,6 +591,69 @@ describe('ScorecardMatrix honesty (issues #189/#199, T10)', () => {
     expect(html).not.toContain('Coverage: last 2 weeks')
   })
 
+  it('distinguishes a fresh store from a legacy tracked run in the banner', () => {
+    // Review PR #230 (copilot numsQ): historyWeeks null means two different
+    // things — carry lastSuccessAt so a fresh store never reads as a legacy run.
+    const fresh = renderToStaticMarkup(
+      <ScorecardMatrix
+        rows={[{ harness: 'pi', name: 'Pi', sampleCount: 2 }]}
+        coverage={{ historyWeeks: null, coveredFrom: null, coveredThrough: null, lastSuccessAt: null }}
+      />,
+    )
+    expect(fresh).toContain('no successful refresh recorded')
+    expect(fresh).not.toContain('recorded before window tracking')
+
+    const legacy = renderToStaticMarkup(
+      <ScorecardMatrix
+        rows={[{ harness: 'pi', name: 'Pi', sampleCount: 2 }]}
+        coverage={{
+          historyWeeks: null,
+          coveredFrom: null,
+          coveredThrough: null,
+          lastSuccessAt: '2026-09-19T11:00:00.000Z',
+        }}
+      />,
+    )
+    expect(legacy).toContain('recorded before window tracking')
+    expect(legacy).not.toContain('no successful refresh recorded')
+  })
+
+  it('keeps zero-data rows interactive so the harnesses needing investigation stay clickable', () => {
+    // Review PR #230 (kilo nux52): moving zero-data rows out of MatrixRow
+    // dropped their drill control — the no-data section must wire the same
+    // selection. Static markup pins the button; the handler is MatrixRow's.
+    const reason = 'No collectable runs or sessions recorded for harness "copilot-cli".'
+    const html = renderToStaticMarkup(
+      <ScorecardMatrix
+        rows={[
+          { harness: 'pi', name: 'Pi', sampleCount: 2 },
+          { harness: 'copilot-cli', name: 'GitHub Copilot CLI', sampleCount: 0, noDataReason: reason },
+        ]}
+        coverage={windowed}
+        onSelectHarness={() => {}}
+      />,
+    )
+    expect(html).toContain('data-testid="matrix-no-data"')
+    expect(html).toContain('drill-harness-copilot-cli')
+    expect(html).toContain('<button')
+  })
+
+  it('shows the empty state (not a header-only grid) when every row is zero-data', () => {
+    // Review PR #230 (kilo nux56): the heading counts data rows while the
+    // empty state keyed off all rows — a fresh install rendered column
+    // headings above nothing under a heading reading (0).
+    const reason = 'No collectable runs or sessions recorded.'
+    const html = renderToStaticMarkup(
+      <ScorecardMatrix
+        rows={[{ harness: 'copilot-cli', name: 'GitHub Copilot CLI', sampleCount: 0, noDataReason: reason }]}
+        coverage={windowed}
+      />,
+    )
+    expect(html).toContain('Harness diagnostic matrix (0)')
+    expect(html).toContain('data-testid="matrix-empty"')
+    expect(html).toContain('data-testid="matrix-no-data"')
+  })
+
   it('groups zero-data rows under their verbatim reason and stops claiming live data for them', () => {
     const reason = 'No collectable runs or sessions recorded for harness "copilot-cli".'
     const html = renderToStaticMarkup(

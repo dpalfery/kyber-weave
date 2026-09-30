@@ -7,7 +7,7 @@ Window: last 7 days
 Data coverage
   Store:      canon.db
   Refresh:    never
-  Coverage window: unknown (recorded before window tracking)
+  Coverage:   unknown (no successful refresh recorded)
   Harnesses:  none in the window
   Quarantine: 0
   Problems:   0
@@ -35,7 +35,7 @@ Window: last 7 days
 Data coverage
   Store:      canon.db
   Refresh:    2026-09-19T11:00:00.000Z (1h ago)
-  Coverage window: unknown (recorded before window tracking)
+  Coverage:   unknown (recorded before window tracking)
   Harnesses:
     claude-code      detected        1 session
   Quarantine: 0
@@ -111,7 +111,7 @@ Window: last 7 days
 Data coverage
   Store:      canon.db
   Refresh:    2026-09-19T11:00:00.000Z (1h ago)
-  Coverage window: unknown (recorded before window tracking)
+  Coverage:   unknown (recorded before window tracking)
   Harnesses:
     claude-code      1 session
   Quarantine: 0
@@ -160,7 +160,7 @@ Window: last 7 days
 Data coverage
   Store:      canon.db
   Refresh:    2026-09-19T11:00:00.000Z (1h ago)
-  Coverage window: unknown (recorded before window tracking)
+  Coverage:   unknown (recorded before window tracking)
   Harnesses:
     claude-code      1 session
   Quarantine: 0
@@ -213,7 +213,7 @@ Data coverage
   Store:      canon.db
   Refresh:    2026-09-17T10:00:00.000Z (2d ago)
   Last fail:  2026-09-19T10:00:00.000Z: 2 of 6 source job(s) failed
-  Coverage window: unknown (recorded before window tracking)
+  Coverage:   unknown (recorded before window tracking)
   Harnesses:
     claude-code      1 session
   Quarantine: 0
@@ -261,7 +261,7 @@ Window: last 7 days
 Data coverage
   Store:      canon.db
   Refresh:    2026-09-19T11:00:00.000Z (1h ago)
-  Coverage window: unknown (recorded before window tracking)
+  Coverage:   unknown (recorded before window tracking)
   Harnesses:
     cursor           1 session
   Quarantine: 0

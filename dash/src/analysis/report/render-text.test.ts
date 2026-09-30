@@ -135,7 +135,7 @@ describe('renderText display rules', () => {
     }
     const out = renderText(report, { color: false })
     expect(out).toContain(
-      'Coverage window: last 2 weeks (2026-09-05T11:00:00.000Z → 2026-09-19T11:00:00.000Z)',
+      'Coverage:   last 2 weeks (2026-09-05T11:00:00.000Z → 2026-09-19T11:00:00.000Z)',
     )
   })
 
@@ -148,8 +148,55 @@ describe('renderText display rules', () => {
       coveredThrough: null,
     }
     const out = renderText(report, { color: false })
-    expect(out).toContain('Coverage window: unknown (recorded before window tracking)')
+    expect(out).toContain('Coverage:   unknown (recorded before window tracking)')
     expect(out).not.toContain('last 2 weeks')
     expect(out).not.toContain('last 0 weeks')
+  })
+
+  it('distinguishes a fresh store (no successful refresh) from a legacy tracked run (T3)', () => {
+    // Review PR #230 (copilot numrA): lastSuccessAt null means no refresh
+    // was ever recorded — that must not read as a legacy pre-window run.
+    const report = loadFixture('full')
+    report.coverage!.refresh = {
+      ...report.coverage!.refresh,
+      lastSuccessAt: null,
+      historyWeeks: null,
+      coveredFrom: null,
+      coveredThrough: null,
+    }
+    const out = renderText(report, { color: false })
+    expect(out).toContain('Coverage:   unknown (no successful refresh recorded)')
+    expect(out).not.toContain('recorded before window tracking')
+  })
+
+  it.each([0, -1, 1.5, Number.NaN])('never renders a non-positive-integer window %p as last N weeks', (historyWeeks) => {
+    // Review PR #230 (kilo nux5v): a stored 0 sails through a !== null guard
+    // and prints `last 0 weeks` — the exact string the contract forbids.
+    const report = loadFixture('full')
+    report.coverage!.refresh = {
+      ...report.coverage!.refresh,
+      historyWeeks,
+      coveredFrom: '2026-09-19T11:00:00.000Z',
+      coveredThrough: '2026-09-19T11:00:00.000Z',
+    }
+    const out = renderText(report, { color: false })
+    expect(out).not.toContain(`last ${String(historyWeeks)} week`)
+    expect(out).toMatch(/^  Coverage:   unknown/m)
+  })
+
+  it('pads the window row to the shared 12-character label column', () => {
+    // Review PR #230 (kilo nux5x): every other row in this section pads its
+    // label — the window row must return a body, not bake in its own label.
+    const report = loadFixture('full')
+    report.coverage!.refresh = {
+      ...report.coverage!.refresh,
+      historyWeeks: 2,
+      coveredFrom: '2026-09-05T11:00:00.000Z',
+      coveredThrough: '2026-09-19T11:00:00.000Z',
+    }
+    const out = renderText(report, { color: false })
+    expect(out).toContain(
+      'Coverage:   last 2 weeks (2026-09-05T11:00:00.000Z → 2026-09-19T11:00:00.000Z)',
+    )
   })
 })

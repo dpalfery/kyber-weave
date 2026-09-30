@@ -1097,13 +1097,112 @@ describe('KyberBridge: T4 coverage read seam (plan docs/plans/2026-09-30-issues-
       try {
         const statuses = bridge.getSourceCheckpointStatuses()
         expect(statuses).toHaveLength(2)
-        const partial = statuses.find((entry) => entry.sourceKey === 'session:partial-unit')
+        const partial = statuses?.find((entry) => entry.sourceKey === 'session:partial-unit')
         expect(partial?.lastStatus).toBe('partial')
         expect(partial?.recordCount).toBe(0)
         expect(bridge.getSourceCheckpointStatuses('pi')).toHaveLength(2)
         expect(bridge.getSourceCheckpointStatuses('cursor')).toEqual([])
         // Read-only: the read added no checkpoints.
         expect(store.listSourceCheckpoints()).toHaveLength(before)
+      } finally {
+        bridge.close()
+      }
+    } finally {
+      store.close()
+    }
+  })
+
+  it('reads a non-numeric file-backed history_weeks as unknown, never NaN', () => {
+    // Review PR #230 (kilo nux5R): Number('junk') is NaN, and NaN ?? null is
+    // still NaN — the file branch must use the shared normalizer so a bad
+    // value reads as unknown, matching the store mapper and the contract.
+    const canonDb = new DatabaseSync(':memory:')
+    try {
+      canonDb.exec(`
+        CREATE TABLE refresh_run (
+          id TEXT PRIMARY KEY,
+          started_at TEXT NOT NULL,
+          completed_at TEXT,
+          status TEXT NOT NULL,
+          pid INTEGER NOT NULL,
+          trigger TEXT NOT NULL,
+          summary TEXT,
+          history_weeks TEXT
+        );
+      `)
+      canonDb
+        .prepare(
+          'INSERT INTO refresh_run (id, started_at, completed_at, status, pid, trigger, summary, history_weeks) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        )
+        .run('bad-weeks', '2026-09-12T00:00:00.000Z', '2026-09-12T00:30:00.000Z', 'success', process.pid, 'cli', 'ok', 'junk')
+      const bridge = new KyberBridge({ canonDb })
+      try {
+        const state = bridge.getRefreshState()
+        expect(state.historyWeeks).toBeNull()
+        expect(state.coveredFrom).toBeNull()
+        expect(state.coveredThrough).toBeNull()
+      } finally {
+        bridge.close()
+      }
+    } finally {
+      try {
+        canonDb.close()
+      } catch {
+        // KyberBridge.close() already closed the injected handle.
+      }
+    }
+  })
+
+  it('degrades to unknown receiver status when the injected store read throws', () => {
+    // Review PR #230 (kilo nux5H): the file branch documents reads as no
+    // receiver activity, not a throw — the store branch must degrade
+    // identically instead of turning /coverage into a 500.
+    const store = new CanonStore(':memory:')
+    const bridge = new KyberBridge({ canonPath: ':memory:', store })
+    store.close()
+    try {
+      const activity = bridge.getIngestActivity()
+      expect(activity.status).toBe('unknown')
+    } finally {
+      bridge.close()
+    }
+  })
+
+  it('returns null checkpoint statuses when the checkpoint table is absent or unreadable', () => {
+    // Review PR #230 (kilo nux5Z): [] must mean "read fine, no units" — a
+    // failed or impossible read is null (unknown) so routes never fabricate
+    // {ok: 0, partial: 0, failed: 0, unavailable: 0} for unreadable coverage.
+    const canonDb = new DatabaseSync(':memory:')
+    try {
+      const bridge = new KyberBridge({ canonDb })
+      try {
+        expect(bridge.getSourceCheckpointStatuses()).toBeNull()
+      } finally {
+        bridge.close()
+      }
+    } finally {
+      try {
+        canonDb.close()
+      } catch {
+        // KyberBridge.close() already closed the injected handle.
+      }
+    }
+  })
+
+  it('tallies quarantine reasons with GROUP BY on both the store and file handles', () => {
+    // Review PR #230 (copilot numrV / kilo nux5e): the coverage endpoint must
+    // not materialize the quarantine table to count reasons.
+    const store = new CanonStore(':memory:')
+    try {
+      store.quarantine('span-q1', ['pi'], 'unclaimed')
+      store.quarantine('span-q2', ['pi'], 'unclaimed')
+      store.quarantine('span-q3', ['copilot'], 'non-model span: health check')
+      const bridge = new KyberBridge({ canonPath: ':memory:', store })
+      try {
+        expect(bridge.getQuarantineCountsByReason()).toEqual([
+          { reason: 'unclaimed', count: 2 },
+          { reason: 'non-model span: health check', count: 1 },
+        ])
       } finally {
         bridge.close()
       }

@@ -240,6 +240,7 @@ function toReportMeasurability(
  */
 function buildCoverage(
   bridge: KyberBridge,
+  scope: ReportScope,
   scoped: readonly SessionSummary[],
   windowed: readonly SessionSummary[],
   storePath: string,
@@ -264,7 +265,22 @@ function buildCoverage(
     }))
 
   const hints: string[] = []
-  if (scoped.length === 0) {
+  // An empty narrowed set has two different causes with two different
+  // remedies: a filter that matches nothing (name the filter and the day
+  // window) versus a day window that holds nothing at all (name the ingest
+  // window). Suggesting `--history-weeks` for a filter emptiness prescribes
+  // rows nobody asked for; suggesting `--days` for an empty ingest window
+  // misses the refresh that would fill it.
+  const hasFilter =
+    scope.harness !== undefined || scope.sessionId !== undefined || scope.runId !== undefined
+  if (scoped.length === 0 && hasFilter && windowed.length > 0) {
+    const naming = [scope.harness, scope.sessionId, scope.runId].filter(
+      (part): part is string => part !== undefined,
+    )
+    hints.push(
+      `No session matches the filter (${naming.join(', ')}). Loosen the filter or widen the report window with --days ${scope.days}.`,
+    )
+  } else if (scoped.length === 0) {
     hints.push(
       'No session in the window. Run `kyberdash dash refresh --history-weeks <n>` to widen the coverage window.',
     )
@@ -570,6 +586,7 @@ export function buildContextReport(
     // session and run filters the inventory must ignore (R8.8).
     report.coverage = buildCoverage(
       bridge,
+      scope,
       scoped,
       sessionsInScope(allSessions, { days: scope.days }, now),
       options.storePath ?? 'canon.db',

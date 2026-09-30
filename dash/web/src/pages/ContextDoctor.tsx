@@ -16,6 +16,7 @@ import {
   FindingList,
   BaselineSelect,
   ScorecardMatrix,
+  formatCoverageWindow,
 } from '../components/analysis/index.js'
 import type { ScorecardMatrixRow, ScorecardCoverageWindow } from '../components/analysis/ScorecardMatrix.js'
 
@@ -91,7 +92,12 @@ function isObservedHarness(harness: string): boolean {
 export function formatCoverageAgo(iso: string, nowMs: number = Date.now()): string {
   const then = Date.parse(iso)
   if (!Number.isFinite(then)) return 'unknown age'
-  const minutes = Math.floor(Math.max(0, nowMs - then) / 60000)
+  const deltaMs = nowMs - then
+  // A timestamp in the future (clock skew, NTP correction) is data the
+  // panel cannot place — folding it into `just now` would claim fresh
+  // arrival for a time that has not happened yet.
+  if (deltaMs < 0) return 'in the future (clock skew)'
+  const minutes = Math.floor(deltaMs / 60000)
   if (minutes < 1) return 'just now'
   if (minutes < 60) return `${minutes}m ago`
   const hours = Math.floor(minutes / 60)
@@ -112,10 +118,6 @@ export function formatCoverageAgo(iso: string, nowMs: number = Date.now()): stri
 export function CoverageIngestPanel({ coverage }: { coverage: KyberCoverage }) {
   const { refresh, ingest, quarantineByReason, checkpoints } = coverage
   const partialUnits = checkpoints.filter((unit) => unit.lastStatus === 'partial')
-  const windowKnown =
-    refresh.historyWeeks !== null &&
-    refresh.historyWeeks !== undefined &&
-    Number.isFinite(refresh.historyWeeks)
   const receiverLine =
     ingest.status === 'unknown'
       ? 'no receiver activity recorded — receiver status is not observable from this page'
@@ -133,9 +135,7 @@ export function CoverageIngestPanel({ coverage }: { coverage: KyberCoverage }) {
         Ingest coverage
       </h3>
       <p className="text-density-xs text-muted-foreground mt-density-hair leading-density" data-testid="coverage-window">
-        {windowKnown
-          ? `Coverage window: last ${refresh.historyWeeks} weeks (${refresh.coveredFrom ?? 'range unknown'} → ${refresh.coveredThrough ?? 'range unknown'})`
-          : 'coverage window unknown (recorded before window tracking)'}
+        {formatCoverageWindow(refresh)}
       </p>
       <p className="text-density-xs text-muted-foreground mt-density-hair leading-density" data-testid="coverage-last-received">
         {receiverLine}
@@ -147,7 +147,6 @@ export function CoverageIngestPanel({ coverage }: { coverage: KyberCoverage }) {
               key={entry.source}
               data-testid="coverage-source-row"
               data-raw-source={entry.source}
-              title={`stored source: ${entry.source}`}
               className="flex flex-wrap items-baseline justify-between gap-density-cluster text-density-xs"
             >
               <span data-testid="coverage-source-label">{entry.display || entry.source}</span>
@@ -267,6 +266,9 @@ export function ContextDoctor({
           historyWeeks: refreshFacts.historyWeeks,
           coveredFrom: refreshFacts.coveredFrom,
           coveredThrough: refreshFacts.coveredThrough,
+          // A fresh store (null) must not read as a legacy tracked run in
+          // the banner — the window formatter distinguishes the two.
+          lastSuccessAt: refreshFacts.lastSuccessAt,
         }
 
   const harnesses = useMemo((): ScorecardMatrixRow[] => {

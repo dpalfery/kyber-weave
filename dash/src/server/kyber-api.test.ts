@@ -973,6 +973,80 @@ describe('Backend Contract Tests: /api/kyber/* Endpoints', () => {
         store.close()
       }
     })
+
+    it('marks a harness with only pre-window sessions as no-data for the window (issue #189)', async () => {
+      // Review PR #230 (copilot numrn): noDataReason comes from the all-time
+      // rollup, so a harness with only pre-window history reads as covered.
+      // With a known refresh window, per-harness session timestamps decide.
+      const canonDb = new DatabaseSync(':memory:')
+      try {
+        canonDb.exec(`
+          CREATE TABLE refresh_run (
+            id TEXT PRIMARY KEY, started_at TEXT NOT NULL, completed_at TEXT,
+            status TEXT NOT NULL, pid INTEGER NOT NULL, trigger TEXT NOT NULL,
+            summary TEXT, history_weeks INTEGER
+          );
+          CREATE TABLE harness_rollup (
+            harness TEXT PRIMARY KEY, sample_count INTEGER NOT NULL DEFAULT 0,
+            context_pressure_median REAL, context_pressure_p95 REAL,
+            cache_hit_rate REAL, tool_yield REAL, delegation_overhead REAL,
+            field_coverage REAL, measurability_json TEXT NOT NULL, payload TEXT
+          );
+          CREATE TABLE session (
+            session_id TEXT PRIMARY KEY, harness TEXT NOT NULL, label TEXT,
+            is_subagent INTEGER NOT NULL DEFAULT 0, parent_session TEXT,
+            agent_name TEXT, repo TEXT, branch TEXT,
+            started TEXT, ended TEXT, payload TEXT NOT NULL
+          );
+        `)
+        canonDb
+          .prepare(
+            'INSERT INTO refresh_run (id, started_at, completed_at, status, pid, trigger, summary, history_weeks) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+          )
+          .run('win-run', '2026-09-30T00:00:00.000Z', '2026-09-30T00:30:00.000Z', 'success', 1234, 'cli', 'ok', 2)
+        const rollup = (harness: string, sampleCount: number) =>
+          canonDb
+            .prepare(
+              'INSERT INTO harness_rollup (harness, sample_count, measurability_json, payload) VALUES (?, ?, ?, ?)',
+            )
+            .run(harness, sampleCount, '{}', JSON.stringify({ sessionCount: sampleCount }))
+        rollup('pi', 2)
+        rollup('oldie', 3)
+        const session = (id: string, harness: string, started: string) =>
+          canonDb
+            .prepare(
+              'INSERT INTO session (session_id, harness, started, ended, payload) VALUES (?, ?, ?, ?, ?)',
+            )
+            .run(id, harness, started, started, '{}')
+        // Window is [2026-09-16, 2026-09-30]: pi inside it, oldie before it.
+        session('sess-pi-1', 'pi', '2026-09-20T12:00:00.000Z')
+        session('sess-old-1', 'oldie', '2026-08-01T12:00:00.000Z')
+        session('sess-old-2', 'oldie', '2026-08-15T12:00:00.000Z')
+        // No source_checkpoint table: unreadable coverage is null, never zeros.
+        const windowBridge = new KyberBridge({ canonDb })
+        const windowServer = await runWebDashboard({ port: 0, open: false, kyberBridge: windowBridge, writeStdout: () => {} })
+        try {
+          const windowBase = `http://127.0.0.1:${(windowServer.address() as AddressInfo).port}`
+          const res = await fetch(`${windowBase}/api/kyber/harnesses`)
+          expect(res.status).toBe(200)
+          const body = (await res.json()) as { harnesses: Array<Record<string, unknown>> }
+          const byId = new Map(body.harnesses.map((row) => [row.harness, row]))
+          expect(byId.get('pi')?.noDataReason).toBeNull()
+          expect(byId.get('oldie')?.noDataReason).toMatch(/no .* coverage window/i)
+          expect(byId.get('pi')?.checkpointSummary).toBeNull()
+          expect(byId.get('oldie')?.checkpointSummary).toBeNull()
+        } finally {
+          await new Promise<void>((resolve) => windowServer.close(() => resolve()))
+          windowBridge.close()
+        }
+      } finally {
+        try {
+          canonDb.close()
+        } catch {
+          // The bridge already closed the injected handle.
+        }
+      }
+    })
   })
 
   describe('Backward-compatible endpoints (/context, /schema, /timeline)', () => {

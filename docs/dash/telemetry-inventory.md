@@ -123,7 +123,12 @@ reason, never as zero, per [honest unobservability](../rules/honest-unobservabil
   history, including legacy `unattributed` and `codeburn/*` rows) with `ingest_log`
   sums and `MAX(timestamp)` as `lastReceivedAt`. No rows in either table yields
   `{ status: 'unknown' }` with "no receiver activity recorded"; receiver liveness is
-  never claimed from this page.
+  never claimed from this page. `ingest_log.count` sizes the arriving batch, not the
+  accepted subset: quarantined and rejected traffic still counts as received, and
+  `otlp:logs` rows never produced a stored record. `GET /api/kyber/meta` exposes
+  those sums as `sources[].seen`/`sources[].new`, so `new` means received-since-logging
+  began, not newly stored records — read it as receiver activity, never as corpus
+  growth. The audit write is fenced so it can never fail the ingest it audits.
 - **Coverage route.** `GET /api/kyber/coverage` returns the refresh window, the
   ingest activity above, per-reason quarantine counts, and `source_checkpoint`
   statuses including `partial` ("N sources partial (problems recorded, coverage

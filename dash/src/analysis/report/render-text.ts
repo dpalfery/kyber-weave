@@ -10,6 +10,7 @@ import { Chalk } from 'chalk'
 
 import { DIMENSION_KEYS, DIMENSION_NAMES } from '../scorecard.js'
 import { BUCKET_KEYS } from './build.js'
+import { formatCoverageWindowBody } from './coverage-window.js'
 import {
   formatMeasured,
   isUnmeasurable,
@@ -62,28 +63,6 @@ function detectedFor(report: ContextReport, harness: string): boolean | undefine
   return report.detection?.find((row) => row.harness === harness)?.detected
 }
 
-/**
- * The ingest coverage window line (plan T3).
- *
- * A tracked run prints `Coverage window: last N weeks (<from> → <through>)`.
- * A pre-window-tracking run (null) states `coverage window unknown (recorded
- * before window tracking)` — never the current default, never 0.
- */
-function refreshWindowText(refresh: {
-  historyWeeks?: number | null
-  coveredFrom?: string | null
-  coveredThrough?: string | null
-}): string {
-  const historyWeeks = refresh.historyWeeks ?? null
-  const coveredFrom = refresh.coveredFrom ?? null
-  const coveredThrough = refresh.coveredThrough ?? null
-  if (historyWeeks !== null && coveredFrom !== null && coveredThrough !== null) {
-    const weeks = `last ${historyWeeks} week${historyWeeks === 1 ? '' : 's'}`
-    return `Coverage window: ${weeks} (${coveredFrom} → ${coveredThrough})`
-  }
-  return 'Coverage window: unknown (recorded before window tracking)'
-}
-
 export function renderText(report: ContextReport, options?: { color?: boolean }): string {
   const color = options?.color ?? shouldColorText()
   const c = new Chalk({ level: color ? 1 : 0 })
@@ -117,7 +96,9 @@ export function renderText(report: ContextReport, options?: { color?: boolean })
     if (coverage.refresh.inProgress !== null) {
       push(`  In progress: pid ${coverage.refresh.inProgress.pid} since ${coverage.refresh.inProgress.since}`)
     }
-    push(`  ${refreshWindowText(coverage.refresh)}`)
+    // The window formatter returns a body; the label pads into the section's
+    // shared 12-character column like every other row here.
+    push(`  Coverage:   ${formatCoverageWindowBody(coverage.refresh)}`)
     if (coverage.harnesses.length === 0) {
       push('  Harnesses:  none in the window')
     } else {

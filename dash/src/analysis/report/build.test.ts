@@ -671,6 +671,18 @@ describe('refresh coverage window (plan 2026-09-30-issues-189-198-199 T3)', () =
     expect(hints).toContain('kyberdash dash refresh --history-weeks')
   })
 
+  it('names the filter (not the ingest window) when a filter empties an otherwise populated window', () => {
+    // Review PR #230 (kilo nux5u): the hint fired on the filter-narrowed set,
+    // so filtering to a harness with no sessions prescribed widening the
+    // ingest window — a remedy for a different emptiness. The day window is
+    // the other candidate remedy, and it is the one named here.
+    const bridge = bridgeOf({ sessions: [session({ session_id: 'pi-only', harness: 'pi' })] })
+    const report = build(bridge, { days: 7, harness: 'codex' })
+    const hints = report.coverage!.hints.join(' ')
+    expect(hints).not.toContain('--history-weeks')
+    expect(hints).toMatch(/codex|--days/)
+  })
+
   it('reads a pre-window-tracking run as null, never 2 or 0', () => {
     // A pre-migration run (or a pre-T4 bridge) carries no window keys at all:
     // the report must normalise the absence to null, never undefined, 2 or 0.

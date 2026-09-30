@@ -134,13 +134,24 @@ export async function startOtlpCollectorService(opts: CollectorOptions = {}): Pr
       // Counts size the arriving batch, not the accepted subset, so
       // quarantined traffic still counts as received. Never a liveness
       // claim — an empty log reads as unknown downstream.
+      // The audit write is fenced: an audit row must never fail the ingest
+      // it audits (a throw here used to requeue the whole batch, duplicating
+      // audit rows on retry). Counts are arrival tallies — see
+      // docs/dash/telemetry-inventory.md for the received-vs-stored contract.
       if (spans.length > 0) {
-        const perSource = new Map<string, number>()
-        for (const span of spans) {
-          const source = toRawSpan(span).source
-          perSource.set(source, (perSource.get(source) ?? 0) + 1)
+        try {
+          const perSource = new Map<string, number>()
+          for (const span of spans) {
+            const source = toRawSpan(span).source
+            perSource.set(source, (perSource.get(source) ?? 0) + 1)
+          }
+          for (const [source, count] of perSource) canon.logIngest(source, count)
+        } catch (err) {
+          console.error(
+            chalk.red('[ingest] audit write failed; batch already committed:'),
+            err instanceof Error ? err.message : String(err),
+          )
         }
-        for (const [source, count] of perSource) canon.logIngest(source, count)
       }
       const detail = [
         `${outcome.accepted} accepted`,
@@ -163,7 +174,17 @@ export async function startOtlpCollectorService(opts: CollectorOptions = {}): Pr
       // batch, so last-received reflects any receiver request. Spans stay
       // the per-source attribution source; logs share the single
       // 'otlp:logs' key. Same store handle, after ingestLogBatch returns.
-      if (logs.length > 0) canon.logIngest('otlp:logs', logs.length)
+      // Fenced like the span audit above: never fail the ingest for the row.
+      if (logs.length > 0) {
+        try {
+          canon.logIngest('otlp:logs', logs.length)
+        } catch (err) {
+          console.error(
+            chalk.red('[ingest] audit write failed; batch already committed:'),
+            err instanceof Error ? err.message : String(err),
+          )
+        }
+      }
       console.log(chalk.dim(
         `[${new Date().toLocaleTimeString()}] Ingested ${logs.length} logs ` +
         `(${outcome.enriched} enriched, ${outcome.pending} pending, ${outcome.quarantined} quarantined)`,

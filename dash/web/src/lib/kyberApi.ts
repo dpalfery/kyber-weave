@@ -550,7 +550,13 @@ export interface KyberHarnessSummary {
   family?: string | null
   /** Verbatim zero-data reason off the rollup payload, or null when covered. */
   noDataReason?: string | null
-  /** Per-harness source-checkpoint unit counts by status via the T4 seam. */
+  /**
+   * Per-harness source-checkpoint unit counts by status, served for API
+   * consumers (null when the checkpoint read is impossible — unknown, never
+   * zeros). The dashboard's checkpoint surface is the ingest panel's global
+   * `KyberCoverage.checkpoints` list, not this per-row rollup — no web
+   * surface renders this field, so the matrix row type does not carry it.
+   */
   checkpointSummary?: {
     ok: number
     partial: number

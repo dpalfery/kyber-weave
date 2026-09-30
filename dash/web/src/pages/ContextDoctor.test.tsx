@@ -201,7 +201,62 @@ describe('ContextDoctor ingest + coverage panel (issues #189/#198/#199, T9)', ()
 
   it('renders an unknown coverage window when the run predates window tracking', () => {
     const html = renderWithQuery(<ContextDoctor initialCoverage={UNKNOWN_COVERAGE} />)
-    expect(html).toContain('coverage window unknown')
+    expect(html).toContain('Coverage window unknown')
     expect(html).not.toContain('last 0 weeks')
+  })
+
+  it('states a fresh store distinctly from a legacy tracked run', () => {
+    // Review PR #230 (copilot numso): historyWeeks null on a fresh store
+    // (lastSuccessAt null) must not read as a run recorded before tracking.
+    const fresh = renderWithQuery(<ContextDoctor initialCoverage={UNKNOWN_COVERAGE} />)
+    expect(fresh).toContain('no successful refresh recorded')
+
+    const legacyCoverage: KyberCoverage = {
+      ...UNKNOWN_COVERAGE,
+      refresh: { ...UNKNOWN_COVERAGE.refresh, lastSuccessAt: '2026-09-19T11:00:00.000Z' },
+    }
+    const legacy = renderWithQuery(<ContextDoctor initialCoverage={legacyCoverage} />)
+    expect(legacy).toContain('recorded before window tracking')
+    expect(legacy).not.toContain('no successful refresh recorded')
+  })
+
+  it('keeps the raw stored source out of user-visible tooltips', () => {
+    // Review PR #230 (copilot nums8): the audit-only data attribute stays,
+    // but the browser tooltip must not leak the raw codeburn/ namespace.
+    const html = renderWithQuery(<ContextDoctor initialCoverage={KNOWN_COVERAGE} />)
+    expect(html).toContain('data-raw-source="codeburn/pi"')
+    expect(html).not.toContain('title="stored source:')
+  })
+
+  it('states the window once, with short dates and correct plurals', () => {
+    // Review PR #230 (kilo nux6A): the panel formatted the same three fields
+    // a second time with raw ISO stamps and a hardcoded plural — it now
+    // reads the matrix banner's shared formatter.
+    const oneWeek: KyberCoverage = {
+      ...KNOWN_COVERAGE,
+      refresh: {
+        ...KNOWN_COVERAGE.refresh,
+        historyWeeks: 1,
+        coveredFrom: '2026-09-23T20:52:54.000Z',
+        coveredThrough: '2026-09-30T20:52:54.000Z',
+      },
+    }
+    const html = renderWithQuery(<ContextDoctor initialCoverage={oneWeek} />)
+    expect(html).toContain('last 1 week (2026-09-23 → 2026-09-30)')
+    expect(html).not.toContain('last 1 weeks')
+    expect(html).not.toContain('2026-09-23T20:52:54.000Z → 2026-09-30T20:52:54.000Z')
+  })
+})
+
+describe('formatCoverageAgo (ingest panel)', () => {
+  it('reads a future timestamp as clock skew, never as just now', async () => {
+    // Review PR #230 (kilo nux6E): Math.max(0, ...) folded future stamps
+    // into `just now` — a claim the data does not support.
+    const { formatCoverageAgo } = await import('./ContextDoctor.js')
+    expect(formatCoverageAgo('2026-09-30T20:00:00.000Z', Date.parse('2026-09-30T19:00:00.000Z'))).toMatch(
+      /future|clock skew/i,
+    )
+    expect(formatCoverageAgo('2026-09-30T20:00:00.000Z', Date.parse('2026-09-30T20:00:30.000Z'))).toBe('just now')
+    expect(formatCoverageAgo('not-a-timestamp')).toBe('unknown age')
   })
 })

@@ -350,6 +350,29 @@ describe('CanonStore refresh runs', () => {
       store.close()
     }
   })
+
+  it.each([0, -2, 1.5, Number.NaN, Number.POSITIVE_INFINITY])(
+    'stores a non-positive-safe-integer window (%p) as unknown, never verbatim',
+    (historyWeeks) => {
+      // Review PR #230 (kilo nux5h/nux5v): the persistence seam is what every
+      // surface reads, so `absent is not zero` must hold in the database —
+      // otherwise a hand-edited row renders `last 0 weeks`.
+      const store = new CanonStore(':memory:')
+      try {
+        store.startRefreshRun({
+          id: `bad-window-${String(historyWeeks)}`,
+          startedAt: new Date().toISOString(),
+          pid: process.pid,
+          trigger: 'cli',
+          historyWeeks,
+        })
+
+        expect(store.latestRefreshRun('running')?.historyWeeks).toBeNull()
+      } finally {
+        store.close()
+      }
+    },
+  )
 })
 
 describe('CanonStore quarantine, problems, and ingest log', () => {
@@ -580,6 +603,58 @@ describe('CanonStore quarantine, problems, and ingest log', () => {
       expect(entry.source).toBe('pi:agent-7f3')
       expect(entry.count).toBe(30)
       expect(entry.timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T/)
+    }
+  })
+
+  it('normalizes a blank ingest source to the unnamed-receiver key', () => {
+    // Review PR #230 (kilo nux45): service.name arrives over the network, so
+    // the persistence seam normalizes it — blank becomes the shared unnamed
+    // key rather than a distinct empty-string cardinality entry.
+    const store = new CanonStore(':memory:')
+    try {
+      store.logIngest('   ', 5)
+
+      expect(store.getIngestLog()).toHaveLength(1)
+      expect(store.getIngestLog()[0]?.source).toBe('otlp')
+    } finally {
+      store.close()
+    }
+  })
+
+  it('tallies quarantine reasons in SQL without materializing rows', () => {
+    // Review PR #230 (copilot numrV / kilo nux5e): the coverage endpoint must
+    // not read every quarantine row to count reasons — the store aggregates
+    // with GROUP BY and folds a null reason into 'unknown', never dropping it.
+    const store = new CanonStore(':memory:')
+    try {
+      store.quarantine('span-1', ['pi'], 'unclaimed')
+      store.quarantine('span-2', ['pi'], 'unclaimed')
+      store.quarantine('span-3', ['copilot'], 'non-model span: health check')
+
+      expect(store.quarantineCountsByReason()).toEqual([
+        { reason: 'unclaimed', count: 2 },
+        { reason: 'non-model span: health check', count: 1 },
+      ])
+    } finally {
+      store.close()
+    }
+  })
+
+  it('sums ingest activity per source in SQL with recency', () => {
+    // Review PR #230 (kilo nux5E): the coverage path must not inflate every
+    // ingest_log row — sums and recency come from one GROUP BY query.
+    const store = new CanonStore(':memory:')
+    try {
+      store.logIngest('pi', 3)
+      store.logIngest('pi', 4)
+      store.logIngest('copilot', 1)
+
+      const sums = store.ingestLogSums()
+      expect(sums.get('pi')?.total).toBe(7)
+      expect(sums.get('pi')?.lastAt).toMatch(/^\d{4}-\d{2}-\d{2}T/)
+      expect(sums.get('copilot')?.total).toBe(1)
+    } finally {
+      store.close()
     }
   })
 })
