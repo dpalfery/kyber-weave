@@ -1087,6 +1087,55 @@ export class KyberBridge {
   }
 
   /**
+   * Per-harness latest session time as epoch ms (coverage-window seam).
+   *
+   * <remarks>
+   * The harness window check needs one fact per harness — the latest
+   * timestamped session — not the session table. This seam reads only the
+   * narrow `(harness, started, ended)` columns and folds them into a
+   * per-harness maximum in one pass, so payload blobs are never pulled
+   * across the bridge. Recency is `ended ?? started` parsed to epoch ms
+   * (the report's `sessionAt` precedence in `analysis/report/build.ts`):
+   * epoch comparison sorts `+02:00`-offset stamps correctly where a raw
+   * string compare does not. A harness with no parseable timestamp is
+   * absent from the map — unknown, never 0.
+   * </remarks>
+   */
+  getLatestSessionTimeByHarness(): Map<string, number> {
+    const latest = new Map<string, number>()
+    const track = (harness: unknown, started: unknown, ended: unknown): void => {
+      if (typeof harness !== 'string' || harness === '') return
+      const stamp = (typeof ended === 'string' ? ended : null) ?? (typeof started === 'string' ? started : null)
+      if (stamp === null) return
+      const at = Date.parse(stamp)
+      if (!Number.isFinite(at)) return
+      const prev = latest.get(harness)
+      if (prev === undefined || at > prev) latest.set(harness, at)
+    }
+    if (this.store) {
+      try {
+        for (const session of this.store.listSessions()) {
+          track(session.harness, session.started, session.ended)
+        }
+      } catch {
+        return new Map<string, number>()
+      }
+      return latest
+    }
+    const db = this.getDb()
+    if (!this.hasTable(db, 'session')) return latest
+    try {
+      const rows = db!
+        .prepare('SELECT harness, started, ended FROM session')
+        .all() as Array<{ harness: unknown; started: unknown; ended: unknown }>
+      for (const row of rows) track(row.harness, row.started, row.ended)
+    } catch {
+      return new Map<string, number>()
+    }
+    return latest
+  }
+
+  /**
    * Get the full precomputed view payload for a given session ID.
    * The canonical session payload is returned without route-level adaptation.
    * Strings longer than maxLen are safely truncated to prevent oversized JSON responses.
@@ -1972,9 +2021,7 @@ export class KyberBridge {
           summary: row.summary,
           // A non-numeric column value reads as unknown (never NaN): the
           // shared normalizer holds for both halves of the seam.
-          historyWeeks: normalizeHistoryWeeks(
-            typeof row.history_weeks === 'number' ? row.history_weeks : null,
-          ),
+          historyWeeks: normalizeHistoryWeeks('history_weeks' in row ? row.history_weeks : null),
         }
       } catch {
         return undefined

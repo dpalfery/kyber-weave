@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'http'
-import type { KyberBridge, SessionSummary } from './bridge.js'
+import type { KyberBridge } from './bridge.js'
 import { runContextReview, type ReviewRequest } from '../analysis/review.js'
 import { createReviewProvider } from '../analysis/review-providers/index.js'
 import { recordPrediction } from '../analysis/calibration.js'
@@ -186,40 +186,43 @@ function checkpointSummaryOf(statuses: readonly SourceCheckpoint[] | null): {
  *
  * The rollup reason is all-time: a harness with only pre-window history
  * carries no reason and would read as covered. When the refresh window is
- * known, the harness's own session timestamps decide — any timestamped
- * session at or after `coveredFrom` keeps the verbatim state; timestamped
- * sessions all older than the window override it with a windowed reason.
+ * known, the harness's own latest session timestamp decides — a latest
+ * timestamp at or after `coveredFrom` keeps the verbatim state; a latest
+ * timestamp older than the window overrides it with a windowed reason.
  * Anything else (unknown window, unreadable sessions, no timestamped
  * sessions at all) keeps the verbatim reason: absence of evidence is not
- * evidence of absence. ISO timestamps compare chronologically as strings.
+ * evidence of absence. Recency is `ended ?? started` parsed to epoch ms,
+ * matching the report's `sessionAt` (`analysis/report/build.ts`): the end
+ * is what "in the window" means, and epoch comparison sorts offset stamps
+ * (`+02:00`) chronologically where a raw string compare does not.
  */
 function inWindowNoDataReason(
   harness: string,
-  sessions: readonly SessionSummary[],
+  latestByHarness: ReadonlyMap<string, number>,
   coveredFrom: string | null,
   verbatim: string | null,
 ): string | null {
   if (verbatim !== null || coveredFrom === null) return verbatim
-  let timestamped = 0
-  for (const session of sessions) {
-    if (session.harness !== harness) continue
-    const at = session.started ?? session.ended
-    if (at === null || !Number.isFinite(Date.parse(at))) continue
-    timestamped += 1
-    if (at >= coveredFrom) return null
-  }
-  if (timestamped === 0) return verbatim
+  const floor = Date.parse(coveredFrom)
+  if (!Number.isFinite(floor)) return verbatim
+  const latest = latestByHarness.get(harness)
+  if (latest === undefined) return verbatim
+  if (latest >= floor) return null
   return `No sessions in coverage window (since ${coveredFrom})`
 }
 
 /**
- * The persisted window bound plus the sessions that decide per-harness
- * in-window state, or nulls when either is unknowable. Reads are fenced so
- * a locked store degrades to verbatim reasons rather than a 500.
+ * The persisted window bound plus the per-harness latest session times that
+ * decide per-harness in-window state, or nulls when either is unknowable.
+ * Reads are fenced so a locked store degrades to verbatim reasons rather
+ * than a 500. The session times come from the bridge's capped
+ * `getLatestSessionTimeByHarness` seam (narrow columns folded to a
+ * per-harness maximum): this context must never materialize the session
+ * table via an uncapped `listSessions()`.
  */
 function windowContextOf(bridge: KyberBridge): {
   coveredFrom: string | null
-  sessions: SessionSummary[]
+  latestByHarness: ReadonlyMap<string, number>
 } {
   let coveredFrom: string | null = null
   try {
@@ -227,15 +230,15 @@ function windowContextOf(bridge: KyberBridge): {
   } catch {
     coveredFrom = null
   }
-  let sessions: SessionSummary[] = []
+  let latestByHarness: ReadonlyMap<string, number> = new Map<string, number>()
   if (coveredFrom !== null) {
     try {
-      sessions = bridge.listSessions()
+      latestByHarness = bridge.getLatestSessionTimeByHarness()
     } catch {
-      sessions = []
+      latestByHarness = new Map<string, number>()
     }
   }
-  return { coveredFrom, sessions }
+  return { coveredFrom, latestByHarness }
 }
 
 function groupCheckpointsByHarness(statuses: readonly SourceCheckpoint[]): Map<string, SourceCheckpoint[]> {
@@ -658,7 +661,7 @@ export function handleKyberRequest(
     // the window proves the harness has only pre-window history (#189); and
     // `checkpointSummary` counts source-checkpoint units by status via the T4 seam
     // (null when that read is impossible — unknown, never zeros).
-    const { coveredFrom, sessions } = windowContextOf(bridge)
+    const { coveredFrom, latestByHarness } = windowContextOf(bridge)
     // A failed checkpoint read is unknown for every row (null); a
     // successful read with no units for this harness is genuinely zero.
     const allCheckpoints = bridge.getSourceCheckpointStatuses()
@@ -667,7 +670,7 @@ export function handleKyberRequest(
     const harnesses = bridge.listHarnessRollups().map((row) => ({
       ...row,
       family: harnessFamily(row.harness),
-      noDataReason: inWindowNoDataReason(row.harness, sessions, coveredFrom, noDataReasonOf(row)),
+      noDataReason: inWindowNoDataReason(row.harness, latestByHarness, coveredFrom, noDataReasonOf(row)),
       checkpointSummary:
         checkpointsByHarness === null
           ? null
@@ -703,13 +706,13 @@ export function handleKyberRequest(
     // Same coverage facts as the list endpoint, so the two agree (R11.14).
     // The window override applies here too: a pre-window-only harness reads
     // as no-data on the detail route exactly as on the list route.
-    const { coveredFrom: detailCoveredFrom, sessions: detailSessions } = windowContextOf(bridge)
+    const { coveredFrom: detailCoveredFrom, latestByHarness: detailLatest } = windowContextOf(bridge)
     sendKyberJson(res, 200, {
       ...rollup,
       family: harnessFamily(rollup.harness),
       noDataReason: inWindowNoDataReason(
         rollup.harness,
-        detailSessions,
+        detailLatest,
         detailCoveredFrom,
         noDataReasonOf(rollup),
       ),

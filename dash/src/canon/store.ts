@@ -288,12 +288,6 @@ CREATE INDEX IF NOT EXISTS prediction_by_run ON prediction (run_id);
 CREATE INDEX IF NOT EXISTS prediction_by_created_at ON prediction (created_at);
 ` + SOURCE_STATE_SQL + REFRESH_RUN_SQL
 
-/**
- * In-place upgrades, keyed by the version they upgrade FROM. Each runs inside
- * one transaction and leaves the store at `key + 1`. `SCHEMA_SQL` cannot do
- * this work: every statement in it is `IF NOT EXISTS`, so an existing table
- * never gains a column.
- */
 /** Map a `refresh_run` row out of SQLite's column names. */
 function toRefreshRunRow(row: Record<string, unknown>): RefreshRunRow {
   return {
@@ -338,6 +332,12 @@ export function normalizeIngestSource(source: string): string {
   return trimmed.length > 256 ? trimmed.slice(0, 256) : trimmed
 }
 
+/**
+ * In-place upgrades, keyed by the version they upgrade FROM. Each runs inside
+ * one transaction and leaves the store at `key + 1`. `SCHEMA_SQL` cannot do
+ * this work: every statement in it is `IF NOT EXISTS`, so an existing table
+ * never gains a column.
+ */
 export const MIGRATIONS: Record<number, (db: Database) => void> = {
   // v1 -> v2: structured content parts. v1 stored content as a flat string
   // per bucket, which has nowhere to put the ground-truth MCP server a tool
