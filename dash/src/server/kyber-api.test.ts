@@ -8,7 +8,9 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { runWebDashboard } from '../cli/web.js'
 import { CanonStore } from '../canon/store.js'
-import type { CanonicalRecord } from '../canon/types.js'
+import { projectCanonicalStore } from '../canon/projection.js'
+import { loadPricing } from '../pricing/models.js'
+import type { CanonicalRecord, CostBlock } from '../canon/types.js'
 import { KyberBridge } from './bridge.js'
 
 const asadShape = JSON.parse(
@@ -40,7 +42,7 @@ describe('Backend Contract Tests: /api/kyber/* Endpoints', () => {
       total_cache_read: 800,
       total_cache_creation: 200,
       schema_tokens_per_turn: 150,
-      cost: { usd: 0.12, basis: 'published_rates', status: 'ok' },
+      cost: { basis: 'published', status: 'priced', value: 0.12, currency: 'USD' },
       models: ['gpt-4o'],
       duration_ms: 900000,
     },
@@ -161,7 +163,7 @@ describe('Backend Contract Tests: /api/kyber/* Endpoints', () => {
       request_count: 2,
       total_input: 2000,
       total_output: 600,
-      cost: { usd: 0.06, basis: 'published_rates', status: 'ok' },
+      cost: { basis: 'published', status: 'no_rate' },
       models: ['gemini-1.5-pro'],
       duration_ms: 600000,
     },
@@ -448,11 +450,20 @@ describe('Backend Contract Tests: /api/kyber/* Endpoints', () => {
       expect(copilotSession?.branch).toBe('main')
       expect(copilotSession?.turn_count).toBe(4)
       expect(copilotSession?.cost_usd).toBe(0.12)
+      expect(copilotSession?.cost).toEqual({
+        basis: 'published',
+        status: 'priced',
+        value: 0.12,
+        currency: 'USD',
+      })
       expect(copilotSession?.total_input).toBe(4000)
 
       const geminiSession = body.sessions.find((s) => s.session_id === 'sess-gemini-002')
       expect(geminiSession).toBeDefined()
       expect(geminiSession?.harness).toBe('gemini')
+      // An unpriced block exposes its reason and no invented figure.
+      expect(geminiSession?.cost_usd).toBeNull()
+      expect(geminiSession?.cost).toMatchObject({ basis: 'published', status: 'no_rate' })
     })
 
     it('serves no session payload route for a record-only group', async () => {
@@ -523,7 +534,7 @@ describe('Backend Contract Tests: /api/kyber/* Endpoints', () => {
       expect(body.id).toBe('sess-copilot-001')
       expect(body.harness).toBe('copilot')
       expect(body.label).toBe('Copilot Test Session')
-      expect(body.summary.cost.usd).toBe(0.12)
+      expect(body.summary.cost.value).toBe(0.12)
       expect(Array.isArray(body.tools)).toBe(true)
       expect(body.tools.length).toBe(2)
       expect(body.context.measurable).toBe(true)
@@ -909,5 +920,70 @@ describe('Backend Contract Tests: /api/kyber/* Endpoints', () => {
         expect(body).toEqual({ error: 'Not found' })
       }
     })
+  })
+})
+
+// Issue #186 Defect B (plan T11 RED -> T12 GREEN): a store seeded with stale {unknown,no_rate}
+// records must serve priced / partial / out_of_scope session costs after one projection (U9).
+describe('GET /api/kyber/sessions: projection-time repricing (issue #186)', () => {
+  it('lists repriced session costs for stale claude/codex/copilot records after projection', async () => {
+    await loadPricing()
+    const stale: CostBlock = { basis: 'unknown', status: 'no_rate' }
+    const tokens = { freshInput: 100_000, cacheRead: 200_000, cacheCreation: 10_000, output: 20_000, reportedInput: 310_000, reportedOutput: 20_000 }
+    const turn = (id: string, session: string, harness: string, model: string, minute: number): CanonicalRecord => ({
+      spanId: id,
+      traceId: `trace-${session}`,
+      parentSpanId: null,
+      sessionId: session,
+      source: 'synthetic',
+      harness,
+      name: `turn ${id}`,
+      op: 'llm.invoke',
+      kind: 'client',
+      timestamp: `2026-09-04T11:${String(minute).padStart(2, '0')}:00.000Z`,
+      durationMs: 100,
+      status: 'ok',
+      tokens,
+      content: {},
+      cost: stale,
+      raw: { model },
+    })
+    const directory = mkdtempSync(join(tmpdir(), 'kyber-api-reprice-'))
+    const canonPath = join(directory, 'canon.db')
+    const store = new CanonStore(canonPath)
+    store.upsertMany([
+      turn('r-cc', 'repriced-claude', 'claude-code', 'claude-opus-5', 0),
+      turn('r-cx', 'repriced-codex', 'codex', 'gpt-5.6-luna', 1),
+      turn('r-cp', 'repriced-copilot', 'copilot', 'claude-sonnet-5-5', 2),
+      turn('r-mx1', 'repriced-mixed', 'claude-code', 'claude-opus-5', 3),
+      turn('r-mx2', 'repriced-mixed', 'claude-code', 'totally-fictional-model-x', 4),
+      turn('r-zc', 'repriced-zcode', 'zcode', 'claude-opus-5', 5),
+    ])
+    await projectCanonicalStore(store)
+    const bridge = new KyberBridge({ canonPath, store })
+    const srv = await runWebDashboard({ port: 0, open: false, kyberBridge: bridge, writeStdout: () => {} })
+    try {
+      const url = `http://127.0.0.1:${(srv.address() as AddressInfo).port}/api/kyber/sessions`
+      const body = (await (await fetch(url)).json()) as {
+        sessions: Array<{ session_id: string; cost: { basis: string; status: string; value?: number }; cost_usd: number | null }>
+      }
+      const byId = new Map(body.sessions.map((s) => [s.session_id, s]))
+      for (const id of ['repriced-claude', 'repriced-codex', 'repriced-copilot']) {
+        expect(byId.get(id)?.cost).toMatchObject({ status: 'priced' })
+        expect(byId.get(id)?.cost_usd).toBeGreaterThan(0)
+      }
+      expect(byId.get('repriced-mixed')?.cost).toMatchObject({ basis: 'published', status: 'partial' })
+      // Other harnesses keep their current figure (Q1 additive).
+      expect(byId.get('repriced-zcode')?.cost).toMatchObject({ basis: 'unknown', status: 'no_rate' })
+      // The list and the cost tile read the same rewritten cost_json.
+      const tile = store.costContributionsForSessions(['repriced-claude'])
+      expect(tile[0]).toMatchObject({ status: 'priced' })
+      expect(tile[0].value).toBeCloseTo(byId.get('repriced-claude')!.cost_usd!, 10)
+    } finally {
+      await new Promise<void>((resolve) => srv.close(() => resolve()))
+      bridge.close()
+      store.close()
+      rmSync(directory, { recursive: true, force: true })
+    }
   })
 })
