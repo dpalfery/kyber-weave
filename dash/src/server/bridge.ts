@@ -7,6 +7,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { createRequire } from 'node:module'
 import { APPROXIMATE_TOKENIZER, tokenizerName } from '../canon/tokens.js'
+import { normalizeHarnessName } from '../canon/measurability.js'
 import type { CostBlock } from '../canon/types.js'
 import { refreshProcessIsAlive } from '../canon/refresh-run.js'
 import {
@@ -47,10 +48,15 @@ export type FindingsPage = {
   total: number
   limit?: number
   offset: number
-  /** Per-detector counts over the narrowed set ignoring paging. */
+  /** Per-detector counts over the run/session/harness scope, ignoring paging and the detector filter. */
   detectorCounts: Record<string, number>
   /** Sessions with an unreported context window in the harness scope. */
   unknownWindowSessions: number
+}
+
+/** A positive finite page number, floored; anything else is absent (paging lives in the bridge). */
+function validPageNumber(value: number | undefined): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.floor(value) : undefined
 }
 import {
   CANONICAL_CONTENT_KEYS,
@@ -1899,12 +1905,17 @@ export class KyberBridge {
    */
   listFindings(options?: { runId?: string; sessionId?: string; detector?: string; harness?: string; limit?: number; offset?: number }): Finding[] {
     if (this.store) {
+      // Paging lives here, not in the store (review): slice the narrowed
+      // set so `limit` keeps the contract it always had on this method.
       const findings = this.store.listFindings(options?.runId, options?.sessionId, {
         ...(options?.detector !== undefined ? { detector: options.detector } : {}),
         ...(options?.harness !== undefined ? { harness: options.harness } : {}),
-        ...(options?.limit !== undefined ? { limit: options.limit } : {}),
-        ...(options?.offset !== undefined ? { offset: options.offset } : {}),
       })
+      const offset = validPageNumber(options?.offset) ?? 0
+      const limit = validPageNumber(options?.limit)
+      if (offset > 0 || limit !== undefined) {
+        return findings.slice(offset, limit === undefined ? undefined : offset + limit)
+      }
       return findings
     }
 
@@ -1936,10 +1947,12 @@ export class KyberBridge {
         // the narrowed set so `total` stays comparable across paths.
         let findings = rows.map(toFinding)
         if (options?.harness) {
-          const want = options.harness.trim().toLowerCase()
+          // Same fold rule as `CanonStore.listFindings` (review): legacy
+          // front-end names answer under their folded owner.
+          const want = normalizeHarnessName(options.harness)
           findings = findings.filter((finding) => {
             const have = (finding as { harness?: unknown }).harness
-            return typeof have === 'string' && have.toLowerCase() === want
+            return typeof have === 'string' && normalizeHarnessName(have) === want
           })
         }
         const offset = typeof options?.offset === 'number' && options.offset > 0 ? Math.floor(options.offset) : 0
@@ -1978,9 +1991,20 @@ export class KyberBridge {
       ...(options?.detector !== undefined ? { detector: options.detector } : {}),
       ...(options?.harness !== undefined ? { harness: options.harness } : {}),
     })
+    // Per-detector counts stay scoped to run/session/harness but never to
+    // the detector being browsed (review): narrowing the list must not
+    // evaporate the chips that narrow it. `total` below stays narrowed.
+    const countBase =
+      options?.detector === undefined
+        ? narrowed
+        : this.listFindings({
+            ...(options?.runId !== undefined ? { runId: options.runId } : {}),
+            ...(options?.sessionId !== undefined ? { sessionId: options.sessionId } : {}),
+            ...(options?.harness !== undefined ? { harness: options.harness } : {}),
+          })
     const detectorCounts: Record<string, number> = {}
     for (const id of DETECTOR_IDS) detectorCounts[id] = 0
-    for (const finding of narrowed) {
+    for (const finding of countBase) {
       detectorCounts[finding.detectorId] = (detectorCounts[finding.detectorId] ?? 0) + 1
     }
     const offset = typeof options?.offset === 'number' && Number.isFinite(options.offset) && options.offset > 0
@@ -2036,15 +2060,64 @@ export class KyberBridge {
           'default',
       ).length
     }
-    if (this.store) return this.store.countUnknownWindowSessions(harness)
+    // Harness and workspace scopes read the persisted rollups (review): the
+    // count was derived at build time, so each findings request does not
+    // JSON-parse every session payload. With no rollups built yet (fresh
+    // store), fall back to the direct session scan below.
+    if (this.store) {
+      if (harness !== undefined && harness !== '') {
+        const rollup = this.store.getHarnessRollup(normalizeHarnessName(harness))
+        const count = (rollup?.payload as { unknownWindowSessions?: unknown } | undefined)?.unknownWindowSessions
+        if (typeof count === 'number') return count
+      } else {
+        const rollups = this.store.listHarnessRollups()
+        if (rollups.length > 0) {
+          return rollups.reduce((sum, rollup) => {
+            const count = (rollup.payload as { unknownWindowSessions?: unknown } | undefined)?.unknownWindowSessions
+            return sum + (typeof count === 'number' ? count : 0)
+          }, 0)
+        }
+      }
+      return this.store.countUnknownWindowSessions(harness)
+    }
     const db = this.getDb()
+    // Built rollups first (review): one small table, no session-blob scan.
+    if (this.hasTable(db, 'harness_rollup')) {
+      try {
+        const payloadOf = (payload: unknown): number | undefined => {
+          if (typeof payload !== 'string') return undefined
+          try {
+            const parsed = JSON.parse(payload) as { unknownWindowSessions?: unknown }
+            return typeof parsed.unknownWindowSessions === 'number' ? parsed.unknownWindowSessions : undefined
+          } catch {
+            return undefined
+          }
+        }
+        if (harness !== undefined && harness !== '') {
+          const row = db!
+            .prepare('SELECT payload FROM harness_rollup WHERE harness = ?')
+            .get(normalizeHarnessName(harness)) as unknown as { payload: unknown } | undefined
+          const count = payloadOf(row?.payload)
+          if (count !== undefined) return count
+        } else {
+          const rows = db!.prepare('SELECT payload FROM harness_rollup').all() as unknown as {
+            payload: unknown
+          }[]
+          if (rows.length > 0) {
+            return rows.reduce((sum, row) => sum + (payloadOf(row.payload) ?? 0), 0)
+          }
+        }
+      } catch (err) {
+        console.warn('[KyberBridge] Failed reading unknown-window counts from rollups:', err)
+      }
+    }
     if (!this.hasTable(db, 'session')) return 0
     try {
       const conds = [`json_extract(payload, '$.context.contextLimitSource') = 'default'`]
       const params: (string | number)[] = []
       if (harness !== undefined && harness !== '') {
         conds.push('LOWER(harness) = LOWER(?)')
-        params.push(harness)
+        params.push(normalizeHarnessName(harness))
       }
       const row = db!
         .prepare(`SELECT COUNT(*) AS n FROM session WHERE ${conds.join(' AND ')}`)

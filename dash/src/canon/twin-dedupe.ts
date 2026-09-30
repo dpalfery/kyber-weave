@@ -14,16 +14,17 @@ import type { CanonicalRecord } from './types.js'
 // comes from the file row when the OTel row carries no parts, and values are
 // never summed across sources for the same turn.
 //
-// The rule is deliberately conservative: only a file row paired with a
-// non-file row is provably the same turn observed twice. Two identical rows
-// from the same source kind (two OTLP rows, two file rows) could be genuine
-// retries and are always kept — dropping telemetry the rule cannot prove
+// The rule is deliberately conservative: a file row paired with a
+// non-file row over identical reported counters is treated as the same turn
+// observed twice. Two identical rows from the same source kind (two OTLP
+// rows, two file rows) could be genuine retries and are always kept — dropping telemetry the rule cannot prove
 // duplicated would trade a known over-count for a silent under-count.
 //
 // Matching is exact-counter only: same-turn observations whose counters
 // differ (e.g. the cursor twin's overlapping output figures, issue #231) are
-// left alone. The canonical architecture states this boundary where the
-// contract is described.
+// left alone, as are turns that reported no usage at all (their shared
+// all-zero key identifies nothing). The canonical architecture states this
+// boundary where the contract is described.
 
 /**
  * Maximum timestamp gap for two rows to be the same turn observed twice.
@@ -53,6 +54,18 @@ function timestampMs(record: CanonicalRecord): number {
 
 function hasParts(record: CanonicalRecord): boolean {
   return (record.parts !== undefined && record.parts.length > 0) || Object.keys(record.content).length > 0
+}
+
+/** True when a turn reported no usage at all: identical for every such turn, so nothing to match on. */
+function isUnreportedCounters(tokens: CanonicalRecord['tokens']): boolean {
+  return (
+    tokens.freshInput === 0 &&
+    tokens.cacheRead === 0 &&
+    tokens.cacheCreation === 0 &&
+    tokens.output === 0 &&
+    tokens.reportedInput === 0 &&
+    tokens.reportedOutput === 0
+  )
 }
 
 /**
@@ -122,6 +135,9 @@ function collapseCluster(
   transplant: Map<CanonicalRecord, CanonicalRecord>,
 ): void {
   if (cluster.length === 0) return
+  // Zero-counter rows share one key by construction (`0:0:0:0:0:0`) across
+  // unrelated turns: with nothing to match on, the whole cluster is kept.
+  if (cluster.every((record) => isUnreportedCounters(record.tokens))) return
   const otels = cluster.filter((record) => !isFileSource(record.source))
   const files = cluster.filter((record) => isFileSource(record.source))
   if (otels.length === 0 || files.length === 0) return

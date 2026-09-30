@@ -135,18 +135,23 @@ function digestSessions(store: CanonStore, harness: string): SessionDigest {
       if (context.derivedCounts) digest.anyDerived = true
     } else if (!windowUnknown && Array.isArray(payload.turns) && payload.turns.length > 0) {
       // Legacy fallback path: pressures can only be derived when the payload
-      // names a real window. A missing window is unknown, not 200,000.
+      // names a real window (default-sourced payloads still carry the
+      // 200,000 fallback as `contextLimit`, so the provenance check above
+      // is what keeps them out). A missing window is unknown, not 200,000 —
+      // and the skip ends here: cache, tool and delegation totals below stay
+      // measurable whatever the window did.
       const limit = Number(payload.context?.contextLimit ?? NaN)
-      if (!Number.isFinite(limit) || limit <= 0) continue
-      const pressures = payload.turns
-        .map((t: unknown) => {
-          const input = (t as { input?: number })?.input
-          return typeof input === 'number' ? input / limit : undefined
-        })
-        .filter((pressure: unknown): pressure is number => typeof pressure === 'number' && Number.isFinite(pressure))
-      if (pressures.length > 0) {
-        digest.peakPressures.push(Math.max(...pressures))
-        digest.anyDerived = true
+      if (Number.isFinite(limit) && limit > 0) {
+        const pressures = payload.turns
+          .map((t: unknown) => {
+            const input = (t as { input?: number })?.input
+            return typeof input === 'number' ? input / limit : undefined
+          })
+          .filter((pressure: unknown): pressure is number => typeof pressure === 'number' && Number.isFinite(pressure))
+        if (pressures.length > 0) {
+          digest.peakPressures.push(Math.max(...pressures))
+          digest.anyDerived = true
+        }
       }
     }
 
@@ -396,6 +401,10 @@ export function buildRollupForHarness(store: CanonStore, harness: string): Harne
       sessionCount: sessions.length,
       runCount: runs.length,
       executionCount: executions.length,
+      // Persisted for the findings envelope (issue #191, review): reading
+      // the count off the rollup avoids JSON-parsing every session payload
+      // on each `/api/kyber/findings` request.
+      unknownWindowSessions: digest.unknownWindowSessions,
       dimensions: {
         contextPressureMedian: {
           value: contextPressureMedian,

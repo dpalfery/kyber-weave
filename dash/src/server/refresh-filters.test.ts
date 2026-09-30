@@ -77,6 +77,14 @@ describe('T8 API filters against a temporary refreshed DB', () => {
     // Issue #182: folded front-ends seed no rollup of their own.
     expect(ids).not.toContain('cursor-agent')
     expect(ids).not.toContain('claude-desktop')
+    // The fold unites derived rows; it must not lose the twin's records:
+    // the cursor-agent job's fixture session ingests under the folded owner.
+    const cursorSessions = json(
+      bridge,
+      'http://127.0.0.1/api/kyber/sessions?harness=cursor',
+    ) as { sessions: Array<{ session_id?: string; sessionId?: string }> }
+    const cursorIds = cursorSessions.sessions.map((s) => s.session_id ?? s.sessionId)
+    expect(cursorIds).toContain('cursor-agent-1')
 
     const allRuns = json(bridge, 'http://127.0.0.1/api/kyber/runs') as {
       runs: Array<{ runId: string; harness: string }>

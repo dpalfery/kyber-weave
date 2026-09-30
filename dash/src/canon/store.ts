@@ -82,8 +82,13 @@ export const SCHEMA_VERSION = 14
 
 /**
  * Version of the diagnostic signal and finding detector suite (Decision D17).
- * When detectors change, this version stamp is bumped to force automatic
- * recomputation of derived findings and signals over stored canonical records.
+ * An informational stamp identifying which detector semantics built a store's
+ * derived rows, so tooling and operators can tell a stale finding table from
+ * a fresh one. It does not itself trigger recomputation: every build
+ * (`buildSessions`, `buildRuns`, `buildFindings`, `buildHarnessRollup`) is
+ * authoritative and rewrites its derived rows, pruning what detectors no
+ * longer emit. Bump it whenever detector semantics change and say so in the
+ * PR, so the stamp stays a truthful witness instead of a forgotten counter.
  */
 export const DETECTOR_VERSION = 2
 
@@ -912,21 +917,11 @@ INSERT OR REPLACE INTO records (
 `
 
 /** Server-side finding filters (issue #191): detector and harness narrow the
- * set; offset/limit page it. `total`/`detectorCounts` callers re-query
- * without limit/offset over the same narrowed set. */
+ * set. Paging lives in the bridge (`listFindingsPage`), which slices the
+ * narrowed set once `total` is known — one owner, not two (review). */
 export type FindingsListOptions = {
   detector?: string
   harness?: string
-  limit?: number
-  offset?: number
-}
-
-function validLimit(limit: number | undefined): number | undefined {
-  return typeof limit === 'number' && Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : undefined
-}
-
-function validOffset(offset: number | undefined): number {
-  return typeof offset === 'number' && Number.isFinite(offset) && offset > 0 ? Math.floor(offset) : 0
 }
 
 export class CanonStore {
@@ -2071,7 +2066,7 @@ export class CanonStore {
     return row === undefined ? undefined : toFinding(row)
   }
 
-/** List findings, optionally filtered by runId or sessionId; ordered by rank_score DESC. */
+  /** List findings, optionally filtered by runId or sessionId; ordered by rank_score DESC. */
   listFindings(runId?: string, sessionId?: string, options?: FindingsListOptions): Finding[] {
     let query = 'SELECT * FROM finding'
     const params: string[] = []
@@ -2102,16 +2097,13 @@ export class CanonStore {
     const rows = this.db.prepare(query).all(...params) as FindingDbRow[]
     let findings = rows.map(toFinding)
     if (options?.harness !== undefined && options.harness !== '') {
-      const want = options.harness.trim().toLowerCase()
+      // One rule in both halves of the envelope (review): the request folds
+      // the way derived values are stamped (`cursor-agent` is `cursor`).
+      const want = normalizeHarnessName(options.harness)
       findings = findings.filter((finding) => {
         const have = (finding as { harness?: unknown }).harness
-        return typeof have === 'string' && have.toLowerCase() === want
+        return typeof have === 'string' && normalizeHarnessName(have) === want
       })
-    }
-    const offset = validOffset(options?.offset)
-    const limit = validLimit(options?.limit)
-    if (offset > 0 || limit !== undefined) {
-      findings = findings.slice(offset, limit === undefined ? undefined : offset + limit)
     }
     return findings
   }

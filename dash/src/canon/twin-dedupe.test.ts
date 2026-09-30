@@ -193,3 +193,38 @@ describe('dedupeTwinTurns repeated identical turns (review)', () => {
     expect(out[1]!.parts).toEqual([{ part: 'system_prompt', text: 'second turn context' }])
   })
 })
+
+describe('dedupeTwinTurns unreported counters (review)', () => {
+  it('keeps zero-counter turns from both collectors (review)', () => {
+    // An `llm.invoke` that reports no usage stamps 0:0:0:0:0:0 — identical
+    // for every such turn. Zero counters are nothing to match on, so the
+    // file row is kept even beside an OTel row seconds apart.
+    const zero = {
+      freshInput: 0,
+      cacheRead: 0,
+      cacheCreation: 0,
+      output: 0,
+      reportedInput: 0,
+      reportedOutput: 0,
+    }
+    const out = dedupeTwinTurns([
+      llmInvoke('otel-zero', {
+        source: 'claude-code-desktop',
+        harness: 'claude-code',
+        timestamp: '2026-09-23T22:43:53.540Z',
+        tokens: { ...zero },
+        content: {},
+      }),
+      llmInvoke('synth:zero', {
+        source: 'codeburn/claude-desktop',
+        harness: 'claude-desktop',
+        timestamp: '2026-09-23T22:43:58.783Z',
+        tokens: { ...zero },
+        content: { system_prompt: 'hello' },
+        parts: [{ part: 'system_prompt', text: 'hello' }],
+      }),
+    ])
+
+    expect(out.map((r) => r.spanId)).toEqual(['otel-zero', 'synth:zero'])
+  })
+})

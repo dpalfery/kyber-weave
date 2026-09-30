@@ -11,6 +11,7 @@ import {
   SCHEMA_VERSION,
 } from '../canon/store.js'
 import type { CanonicalRecord } from '../canon/types.js'
+import { buildHarnessRollup } from '../canon/harnesses.js'
 import { KyberBridge } from '../server/bridge.js'
 import { handleKyberRequest } from '../server/routes.js'
 
@@ -1437,10 +1438,13 @@ describe('Server Bridge & API Route: /api/kyber/findings', () => {
     const page = bridge.listFindingsPage({ detector: 'duplicate-tool-call' })
     expect(page.findings).toHaveLength(12)
     expect(page.total).toBe(12)
+    // Counts stay scoped to harness/run/session but never to the detector
+    // being browsed (review): narrowing the list must not evaporate the
+    // chips that narrow it.
     expect(page.detectorCounts).toMatchObject({
       'duplicate-tool-call': 12,
-      'compaction-hazard': 0,
-      'dormant-tool-schema': 0,
+      'compaction-hazard': 10,
+      'dormant-tool-schema': 8,
     })
 
     const harnessed = bridge.listFindingsPage({ harness: 'cursor' })
@@ -1484,11 +1488,45 @@ describe('Server Bridge & API Route: /api/kyber/findings', () => {
     session('s-unknown-1', 'default')
     session('s-unknown-2', 'default')
     session('s-legacy', undefined)
+    // Production serves the count off built rollups (review); the session
+    // scan below is the fresh-store fallback.
+    buildHarnessRollup(store)
     const bridge = new KyberBridge({ canonPath: path, store })
 
     expect(bridge.listFindingsPage({}).unknownWindowSessions).toBe(2)
     expect(bridge.listFindingsPage({ harness: 'cursor' }).unknownWindowSessions).toBe(2)
     expect(bridge.listFindingsPage({ harness: 'claude-code' }).unknownWindowSessions).toBe(0)
+
+    bridge.close()
+    store.close()
+  })
+
+  it('normalizes folded front-end names before filtering (review)', () => {
+    // `cursor-agent` is `cursor` at the derived layer (issue #182): a query
+    // under the legacy name must answer under the folded owner in every half
+    // of the envelope — findings and counts alike.
+    const path = tempStorePath()
+    const store = new CanonStore(path)
+    store.upsertFinding({
+      id: 'f-fold-1',
+      detectorId: 'duplicate-tool-call',
+      title: 't',
+      mechanism: 'm',
+      evidenceLinks: [],
+      confidence: 'deterministic',
+      estimatedWasteTokens: 100,
+      recommendation: 'r',
+      errorBar: { lower: 80, upper: 120 },
+      outcomeRiskCaveat: 'c',
+      rankScore: 100,
+      payload: { harness: 'cursor' },
+    })
+    const bridge = new KyberBridge({ canonPath: path, store })
+
+    expect(bridge.listFindingsPage({ harness: 'cursor-agent' }).total).toBe(1)
+    expect(bridge.listFindingsPage({ harness: 'cursor-agent' }).unknownWindowSessions).toBe(
+      bridge.listFindingsPage({ harness: 'cursor' }).unknownWindowSessions,
+    )
 
     bridge.close()
     store.close()
