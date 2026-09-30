@@ -176,6 +176,18 @@ export type SessionSummaryFigures = Map<
 >
 
 /**
+ * Adapt streamed session payloads for the digest without retaining them:
+ * each payload is pulled, digested, and released before the next loads.
+ */
+function* asadPayloads(
+  source: Generator<{ payload: SessionPayload & { context?: unknown } }>,
+): Generator<AsadSessionPayload> {
+  for (const { payload } of source) {
+    yield payload as unknown as AsadSessionPayload
+  }
+}
+
+/**
  * Measured run figures. `costStatus` marks a cost subtotal; `partial` marks
  * any subtotal — a linked session with no summary, or a figure missing from
  * some of the run's summaries. Both are present only when partial.
@@ -2602,13 +2614,9 @@ export class KyberBridge {
     } = {},
   ): Scorecard | undefined {
     const executions = preload.executions ?? this.listExecutions(runId)
-    const bridge = this
-    function* payloads(): Generator<AsadSessionPayload> {
-      for (const { payload } of bridge.streamRunSessionPayloads(executions)) {
-        yield payload as unknown as AsadSessionPayload
-      }
-    }
-    const digest = digestSessionPayloads(payloads())
+    const digest = digestSessionPayloads(
+      asadPayloads(this.streamRunSessionPayloads(executions)),
+    )
     if (digest.count === 0) return undefined
     const run = this.getRun(runId)
     const harness = run?.harness ?? 'unknown'
