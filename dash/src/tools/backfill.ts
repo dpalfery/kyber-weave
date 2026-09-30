@@ -39,6 +39,13 @@ export type BackfillOptions = {
   onProgress?: (done: number, total: number) => void
   /** Rows between progress callbacks. */
   progressEvery?: number
+  /**
+   * Restrict renormalization to traces containing records from these
+   * sources. File-sourced rows carry no OTLP fingerprint, so an unscoped
+   * pass would quarantine the whole file corpus as unclaimed (issue #195:
+   * the live repair must touch only `agy` traces). Unset means every trace.
+   */
+  sources?: readonly string[]
 }
 
 /**
@@ -155,18 +162,22 @@ export function renormalizeRecords(store: CanonStore, options: BackfillOptions =
   const report: RenormalizeReport = { traces: 0, reattributed: 0, unchanged: 0, unclaimed: 0 }
 
   for (const traceId of traceIds) {
-    report.traces += 1
     const records = store.recordsForTrace(traceId)
-    const withRaw = records.filter(
+    if (options.sources !== undefined) {
+      const wanted = options.sources
+      if (!records.some((record) => wanted.includes(record.source))) continue
+    }
+    report.traces += 1
+    const recordsWithRaw = records.filter(
       (record): record is CanonicalRecord & { raw: Record<string, unknown> } =>
         record.raw !== undefined && record.raw !== null && typeof record.raw === 'object',
     )
-    if (withRaw.length === 0) continue
+    if (recordsWithRaw.length === 0) continue
 
-    const explicitGemini = withRaw.filter(
+    const explicitGemini = recordsWithRaw.filter(
       (record) => (record.raw as Record<string, unknown>)['gen_ai.system'] === 'gemini',
     )
-    const grouped = withRaw.filter(
+    const grouped = recordsWithRaw.filter(
       (record) => (record.raw as Record<string, unknown>)['gen_ai.system'] !== 'gemini',
     )
     for (const record of explicitGemini) ingestBatch([toOtlpSpan(record)], store)
@@ -187,7 +198,7 @@ export function renormalizeRecords(store: CanonStore, options: BackfillOptions =
         deleteDerivedSessions(store, record)
       }
     }
-    for (const before of withRaw) {
+    for (const before of recordsWithRaw) {
       const after = store.get(before.spanId)
       if (after === undefined) {
         if (store.getQuarantine(before.spanId)?.reason === 'unclaimed') report.unclaimed += 1
