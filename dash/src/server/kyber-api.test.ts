@@ -1454,3 +1454,268 @@ describe('GET /api/kyber/sessions: projection-time repricing (issue #186)', () =
     }
   })
 })
+
+describe('GET /api/kyber/run/:id delegation with sessionless execution (polish Kilo C)', () => {
+  // An execution with no sessionId contributes no totals. In run scope it is
+  // unknown — not a silent zero that lets the root's tokens alone certify a
+  // measured 0%.
+  it('reports delegation unobservable when an execution has no session', async () => {
+    const store = new CanonStore(':memory:')
+    store.upsertMany([
+      {
+        spanId: 'ns-t1',
+        traceId: 'trace-ns',
+        parentSpanId: null,
+        sessionId: 'nosess-session',
+        source: 'synthetic',
+        harness: 'copilot',
+        name: 'canonical run turn',
+        op: 'llm.invoke',
+        kind: 'client',
+        timestamp: '2026-09-04T12:00:00.000Z',
+        durationMs: 100,
+        status: 'ok',
+        tokens: {
+          freshInput: 1000,
+          cacheRead: 0,
+          cacheCreation: 0,
+          output: 100,
+          reportedInput: 1000,
+          reportedOutput: 100,
+        },
+        content: {},
+        parts: [{ part: 'system_prompt', text: 'sys', tokens: 100 }],
+        cost: { basis: 'unknown', status: 'no_rate' },
+        raw: { model: 'gpt-4o', cwd: '/repo' },
+      },
+    ])
+    await buildSessions(store)
+    await buildRuns(store)
+    const runId = store.listRuns('copilot')[0]!.runId
+    const [root] = store.listExecutions(runId)
+    store.upsertExecutions([
+      {
+        executionId: 'exec-without-session',
+        runId,
+        sessionId: null,
+        parentExecutionId: null,
+        harness: 'copilot',
+        agentName: null,
+        isRoot: false,
+        started: null,
+        ended: null,
+        parentLinkage: 'measured',
+      },
+    ])
+    expect(root).toBeDefined()
+
+    const nosessBridge = new KyberBridge({ canonPath: ':memory:', store })
+    const nosessServer = await runWebDashboard({ port: 0, open: false, kyberBridge: nosessBridge, writeStdout: () => {} })
+    try {
+      const nosessBase = `http://127.0.0.1:${(nosessServer.address() as AddressInfo).port}`
+      const res = await fetch(`${nosessBase}/api/kyber/run/${encodeURIComponent(runId)}`)
+      expect(res.status).toBe(200)
+      const body = (await res.json()) as {
+        scorecard: Record<string, { value: number | null; reason?: string }>
+      }
+      expect(body.scorecard.delegationOverhead?.value).toBeNull()
+      expect(body.scorecard.delegationOverhead?.reason).toContain(runId)
+    } finally {
+      await new Promise<void>((resolve) => nosessServer.close(() => resolve()))
+      nosessBridge.close()
+      store.close()
+    }
+  })
+})
+
+describe('GET /api/kyber/run/:id shared-session streaming (thread bridge.ts:2516)', () => {
+  // Grouping executions by session streams one payload per distinct session
+  // per pass — two executions sharing a session must not double the parses.
+  it('parses a shared session once per turns pass', async () => {
+    const inner = new CanonStore(':memory:')
+    inner.upsertMany([
+      {
+        spanId: 'sh-t1',
+        traceId: 'trace-sh',
+        parentSpanId: null,
+        sessionId: 'shared-session',
+        source: 'synthetic',
+        harness: 'copilot',
+        name: 'canonical run turn',
+        op: 'llm.invoke',
+        kind: 'client',
+        timestamp: '2026-09-04T12:00:00.000Z',
+        durationMs: 100,
+        status: 'ok',
+        tokens: {
+          freshInput: 1000,
+          cacheRead: 0,
+          cacheCreation: 0,
+          output: 100,
+          reportedInput: 1000,
+          reportedOutput: 100,
+        },
+        content: {},
+        parts: [{ part: 'system_prompt', text: 'sys', tokens: 100 }],
+        cost: { basis: 'unknown', status: 'no_rate' },
+        raw: { model: 'gpt-4o', cwd: '/repo' },
+      },
+    ])
+    await buildSessions(inner)
+    await buildRuns(inner)
+    const runId = inner.listRuns('copilot')[0]!.runId
+    const [only] = inner.listExecutions(runId)
+    inner.upsertExecutions([
+      {
+        executionId: 'exec-share-b',
+        runId,
+        sessionId: 'shared-session',
+        parentExecutionId: null,
+        harness: 'copilot',
+        agentName: null,
+        isRoot: false,
+        started: null,
+        ended: null,
+        parentLinkage: 'measured',
+      },
+    ])
+    expect(only).toBeDefined()
+    inner.close()
+
+    let payloadReads = 0
+    class CountingStore extends CanonStore {
+      override getSessionPayload(sessionId: string): unknown | undefined {
+        payloadReads += 1
+        return super.getSessionPayload(sessionId)
+      }
+    }
+    const store = new CountingStore(':memory:')
+    store.upsertMany([
+      {
+        spanId: 'sh-t1',
+        traceId: 'trace-sh',
+        parentSpanId: null,
+        sessionId: 'shared-session',
+        source: 'synthetic',
+        harness: 'copilot',
+        name: 'canonical run turn',
+        op: 'llm.invoke',
+        kind: 'client',
+        timestamp: '2026-09-04T12:00:00.000Z',
+        durationMs: 100,
+        status: 'ok',
+        tokens: {
+          freshInput: 1000,
+          cacheRead: 0,
+          cacheCreation: 0,
+          output: 100,
+          reportedInput: 1000,
+          reportedOutput: 100,
+        },
+        content: {},
+        parts: [{ part: 'system_prompt', text: 'sys', tokens: 100 }],
+        cost: { basis: 'unknown', status: 'no_rate' },
+        raw: { model: 'gpt-4o', cwd: '/repo' },
+      },
+    ])
+    await buildSessions(store)
+    await buildRuns(store)
+    store.upsertExecutions([
+      {
+        executionId: 'exec-share-b',
+        runId,
+        sessionId: 'shared-session',
+        parentExecutionId: null,
+        harness: 'copilot',
+        agentName: null,
+        isRoot: false,
+        started: null,
+        ended: null,
+        parentLinkage: 'measured',
+      },
+    ])
+
+    const shareBridge = new KyberBridge({ canonPath: ':memory:', store })
+    try {
+      // Turns still stream per execution (two rows), but the shared payload
+      // parses once.
+      expect(shareBridge.getRunTurns(runId)).toHaveLength(2)
+      expect(payloadReads).toBe(1)
+    } finally {
+      shareBridge.close()
+      store.close()
+    }
+  })
+})
+
+describe('GET /api/kyber/runs executions scoping (thread routes.ts:562)', () => {
+  // The list must not materialize the whole execution corpus and filter in
+  // memory: executions are read per listed run.
+  it('reads executions per listed run, never unfiltered', async () => {
+    const inner = new CanonStore(':memory:')
+    const usage: CanonicalRecord['tokens'] = {
+      freshInput: 800,
+      cacheRead: 200,
+      cacheCreation: 0,
+      output: 100,
+      reportedInput: 1000,
+      reportedOutput: 100,
+    }
+    const rec = (spanId: string, sessionId: string, harness: string): CanonicalRecord => ({
+      spanId,
+      traceId: `trace-${sessionId}`,
+      parentSpanId: null,
+      sessionId,
+      source: 'synthetic',
+      harness,
+      name: 'canonical run turn',
+      op: 'llm.invoke',
+      kind: 'client',
+      timestamp: '2026-09-04T12:00:00.000Z',
+      durationMs: 100,
+      status: 'ok',
+      tokens: usage,
+      content: {},
+      parts: [{ part: 'system_prompt', text: 'sys', tokens: 600 }],
+      cost: { basis: 'published', status: 'priced', value: 0.01, currency: 'USD' },
+      raw: { model: 'gpt-4o', cwd: '/repo' },
+    })
+    inner.upsertMany([rec('e-t1', 'exec-scope-a', 'copilot'), rec('e-t2', 'exec-scope-b', 'gemini')])
+    await buildSessions(inner)
+    await buildRuns(inner)
+    const copilotRunId = inner.listRuns('copilot')[0]!.runId
+    inner.close()
+
+    const listCalls: Array<string | undefined> = []
+    class CountingExecutionsStore extends CanonStore {
+      override listExecutions(runId?: string): import('../canon/types.js').ExecutionRow[] {
+        listCalls.push(runId)
+        return super.listExecutions(runId)
+      }
+    }
+    const store = new CountingExecutionsStore(':memory:')
+    store.upsertMany([rec('e-t1', 'exec-scope-a', 'copilot'), rec('e-t2', 'exec-scope-b', 'gemini')])
+    await buildSessions(store)
+    await buildRuns(store)
+
+    const execBridge = new KyberBridge({ canonPath: ':memory:', store })
+    const execServer = await runWebDashboard({ port: 0, open: false, kyberBridge: execBridge, writeStdout: () => {} })
+    try {
+      const execBase = `http://127.0.0.1:${(execServer.address() as AddressInfo).port}`
+      const res = await fetch(`${execBase}/api/kyber/runs?harness=copilot`)
+      expect(res.status).toBe(200)
+      const body = (await res.json()) as { runs: Array<{ runId: string }> }
+      expect(body.runs).toHaveLength(1)
+      expect(body.runs[0]!.runId).toBe(copilotRunId)
+      // Every executions read names a listed run; the unfiltered full-corpus
+      // read never happens.
+      expect(listCalls.length).toBeGreaterThan(0)
+      expect(listCalls.every((runId) => runId !== undefined)).toBe(true)
+      expect(listCalls).toContain(copilotRunId)
+    } finally {
+      await new Promise<void>((resolve) => execServer.close(() => resolve()))
+      execBridge.close()
+      store.close()
+    }
+  })
+})

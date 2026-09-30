@@ -2498,23 +2498,36 @@ export class KyberBridge {
   }
 
   /**
-   * Session payloads behind executions, streamed one at a time (review
-   * re-review on issue #183: Kilo 4 — payloads can be hundreds of MB, so no
-   * consumer may hold every session of the run at once). Each yielded payload
-   * is droppable as soon as the consumer advances: callers must process it
-   * inline and never retain it past the iteration.
+   * Session payloads behind executions, streamed one distinct session at a
+   * time (review re-review on issue #183: Kilo 4, plus the open thread on
+   * shared sessions — payloads can be hundreds of MB, so no consumer may
+   * hold every session of the run at once, nor parse one session per
+   * execution sharing it). Executions are grouped by session first: each
+   * distinct payload parses once per pass, then yields one
+   * (execution, payload) pair per group member so turns still stream per
+   * execution. Each yielded payload is droppable as soon as the consumer
+   * advances: callers must process it inline and never retain it past the
+   * iteration.
    */
   *streamRunSessionPayloads(
     executions: readonly ExecutionRow[],
   ): Generator<{ execution: ExecutionRow; payload: SessionPayload & { context?: unknown } }> {
-    // No dedup: turns are emitted per execution, so an execution always sees
-    // its session's turns even where two executions share one session. The
-    // peak stays one payload either way.
+    const bySession = new Map<string, ExecutionRow[]>()
     for (const execution of executions) {
       const sessionId = execution.sessionId
+      // An execution with no session carries no payload to stream; the
+      // executions list itself (kept by callers) still sees it.
       if (typeof sessionId !== 'string' || sessionId.length === 0) continue
+      const group = bySession.get(sessionId) ?? []
+      group.push(execution)
+      bySession.set(sessionId, group)
+    }
+    for (const [sessionId, group] of bySession) {
       const payload = this.getSessionPayload(sessionId)
-      if (payload !== null) yield { execution, payload }
+      if (payload === null) continue
+      for (const execution of group) {
+        yield { execution, payload }
+      }
     }
   }
 

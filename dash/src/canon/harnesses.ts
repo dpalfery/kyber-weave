@@ -398,6 +398,10 @@ export function assembleRollup(
           } else {
             unknownTokens += 1
           }
+        } else {
+          // Polish (Kilo C): an execution with no session has no totals to
+          // know — unknown, not a silent zero beside measured sessions.
+          unknownTokens += 1
         }
 
         if (isChild) {

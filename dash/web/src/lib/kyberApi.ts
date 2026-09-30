@@ -622,6 +622,8 @@ export interface KyberRunTurn {
   inputTokens?: number
   outputTokens?: number
   costUsd?: number | null
+  /** The turn's own cost block is partial — its figure is real but incomplete. */
+  costStatus?: 'partial'
   contextPressure?: number | null
   cacheHitRatio?: number | null
   timestamp?: string | null

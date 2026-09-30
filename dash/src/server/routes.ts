@@ -558,16 +558,17 @@ export function handleKyberRequest(
     // (review follow-up: Kilo K2, Copilot C9): all executions, one summary
     // query, per-run sums through the shared `sumSessionFigures` derivation.
     const listedRuns = bridge.listRuns(harnessParam)
-    // Review re-review (Kilo 6): with ?harness= set, only the listed runs'
-    // executions and sessions are read — never the whole corpus.
-    const listedRunIds = new Set(listedRuns.map((run) => run.runId))
+    // Executions are read per listed run — small indexed rows, never the
+    // whole corpus materialized and filtered in memory (open thread on
+    // routes.ts:562). One summary batch then covers every listed session.
     const executionsByRun = new Map<string, string[]>()
-    for (const execution of bridge.listExecutions()) {
-      if (!listedRunIds.has(execution.runId)) continue
-      if (typeof execution.sessionId !== 'string' || execution.sessionId.length === 0) continue
-      const group = executionsByRun.get(execution.runId) ?? []
-      group.push(execution.sessionId)
-      executionsByRun.set(execution.runId, group)
+    for (const run of listedRuns) {
+      const group: string[] = []
+      for (const execution of bridge.listExecutions(run.runId)) {
+        if (typeof execution.sessionId !== 'string' || execution.sessionId.length === 0) continue
+        group.push(execution.sessionId)
+      }
+      executionsByRun.set(run.runId, group)
     }
     const listedSessionIds = [...new Set([...executionsByRun.values()].flat())]
     const listedSummaries = bridge.sessionSummaryFigures(listedSessionIds)

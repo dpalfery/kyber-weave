@@ -784,15 +784,16 @@ const HARNESS_PREFIX_SURVEY: ReadonlyMap<SurveyedHarness, Omit<PrefixAvailabilit
 
 /**
  * Whether a harness's telemetry vocabulary includes a cache counter (review
- * follow-up on issues #183/#185/#187: Copilot C2/C3, Kilo K1).
+ * follow-up on issues #183/#185/#187: Copilot C2/C3, Kilo K1, Kilo 7).
  *
- * `unsupported` is a verified negative (Cursor, Aider, Windsurf export no
- * cache counters, so their stored zeros are absence, not measured zeros).
- * `partial` carries per-counter flags (Codex/Gemini/Antigravity export no
- * cache-creation counter). Anything else — `supported`, or uncatalogued
- * (`not_measurable`/`assumed`, e.g. claude-desktop, synthetic fixtures) —
- * falls back to the data, so an uncatalogued harness with real counters
- * keeps its measured figures.
+ * Only an uncatalogued harness — `not_measurable` with `assumed`
+ * confidence, e.g. claude-desktop or synthetic fixtures — falls back to the
+ * data, so real counters keep their measured figures. Every catalogued
+ * harness answers from its survey record: `unsupported` is a verified
+ * negative (Cursor, Aider, Windsurf export no cache counters, so their
+ * stored zeros are absence, not measured zeros), and every other status
+ * consults its per-counter flags (Codex is `supported` yet exports no
+ * cache-creation counter; Codex/Gemini/Antigravity creation stays absent).
  */
 export function harnessExportsCacheCounter(harness: string, counter: 'read' | 'creation'): boolean {
   const availability = cacheAvailability(harness)

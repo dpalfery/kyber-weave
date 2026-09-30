@@ -310,9 +310,9 @@ describe('RunDetail cost honesty', () => {
     expect(html).toContain('partial')
   })
 
-  // Re-review #2 (Kilo 4): `partial: true` alone — the gap is turns or
-  // tokens, not cost — still shows the visible marker.
-  it('shows the visible marker for a non-cost partial', () => {
+  // Final polish (Kilo A): the cost marker is cost-precise — a turns-only
+  // gap marks no cost cell.
+  it('shows no cost marker when only turns are partial', () => {
     const qc = createTestQueryClient()
     const html = renderHtml(
       <QueryClientProvider client={qc}>
@@ -323,6 +323,25 @@ describe('RunDetail cost honesty', () => {
             costUsd: 0.015,
             partial: true,
             partialFields: ['turnCount'],
+          }}
+        />
+      </QueryClientProvider>,
+    )
+
+    expect(html).not.toContain('data-testid="secondary-cost-partial"')
+  })
+
+  it('shows the cost marker when the cost itself is partial', () => {
+    const qc = createTestQueryClient()
+    const html = renderHtml(
+      <QueryClientProvider client={qc}>
+        <RunDetail
+          runId="run-zero"
+          initialRun={{
+            ...pricedZeroRun,
+            costUsd: 0.015,
+            partial: true,
+            partialFields: ['costUsd'],
           }}
         />
       </QueryClientProvider>,
@@ -360,5 +379,34 @@ describe('RunDetail partial visibility', () => {
     )
 
     expect(html).toContain('data-testid="secondary-cost-partial"')
+  })
+})
+
+// Final polish (Kilo B): a partial turn cost carries its own marker.
+describe('RunDetail turn cost partial', () => {
+  beforeEach(() => {
+    clearHooks()
+  })
+
+  it('marks a partial turn cost beside the figure', () => {
+    const qc = createTestQueryClient()
+    const html = renderHtml(
+      <QueryClientProvider client={qc}>
+        <RunDetail
+          runId="run-zero"
+          initialRun={{
+            runId: 'run-zero',
+            harness: 'copilot',
+            groupingBasis: 'explicit',
+            executionTree: [],
+            executions: [],
+            findings: [],
+            turns: [{ turnIndex: 0, model: 'gpt-4o', tokens: 100, costUsd: 0.01, costStatus: 'partial' }],
+          }}
+        />
+      </QueryClientProvider>,
+    )
+
+    expect(html).toContain('data-testid="turn-cost-partial-0"')
   })
 })
