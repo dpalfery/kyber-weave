@@ -306,13 +306,24 @@ export {
 export function costBlockFor(call: ParsedProviderCall): CostBlock {
   if (call.costUSD !== 0 && Number.isFinite(call.costUSD)) {
     return {
-      basis: call.costIsEstimated === true ? 'published' : 'harness',
+      // Every Copilot figure from a parser is LiteLLM-derived (API list rates) whatever its
+      // costIsEstimated flag, so it is never harness-reported (R5.2/R5.3): it is re-priced from
+      // the credits table. Only the genuine reader marks `costHarnessReported` and stays harness,
+      // and it sets the marker only when the row has a real cost_usd. Copilot without the marker
+      // defaults to published so a forgotten flag never leaves a LiteLLM-derived figure at API
+      // list rates presented as harness-reported (R5.3).
+      basis:
+        call.costIsEstimated === true || (call.provider === 'copilot' && call.costHarnessReported !== true)
+          ? 'published'
+          : 'harness',
       status: 'priced',
       value: call.costUSD,
       currency: 'USD',
       byModel: { [call.model]: call.costUSD },
     }
   }
+  // A published-rate provider's zero figure is a rate gap, not a missing basis.
+  if (call.costIsEstimated === true) return { basis: 'published', status: 'no_rate' }
   return { basis: 'unknown', status: 'no_rate' }
 }
 

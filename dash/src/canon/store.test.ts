@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, it, vi } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -6,7 +6,7 @@ import { DatabaseSync } from 'node:sqlite'
 
 import { CanonStore, SCHEMA_VERSION, compressRaw } from './store.js'
 import type { RecordProvenance, SourceCheckpoint } from './source-state.js'
-import { TOKEN_SUM_MISMATCH, notMeasurable, type CanonicalRecord, type TokenUsage } from './types.js'
+import { TOKEN_SUM_MISMATCH, notMeasurable, type CanonicalRecord, type CostBlock, type TokenUsage } from './types.js'
 
 // The measured floor the store exists to break (R12.4): 2.9 GB across 37,623
 // spans is roughly 78 KB of raw payload per span, uncompressed. A record whose
@@ -957,6 +957,76 @@ describe('source checkpoint and provenance', () => {
       'cli-1',
     ])
 
+    store.close()
+  })
+})
+
+// PR #225 review follow-up (comment 4149313577), plan T1 RED -> T2 GREEN: projection-time repricing
+// writes a session's changed cost blocks back in ONE transaction (`setCosts`), not one autocommit
+// UPDATE per record. Same BEGIN/COMMIT/ROLLBACK pattern as `upsertMany`.
+describe('CanonStore.setCosts (batched cost write-back)', () => {
+  const STALE = { basis: 'unknown', status: 'no_rate' } as const
+  const priced = (value: number) => ({ basis: 'published', status: 'priced', value, currency: 'USD' }) as const
+
+  function seeded(): CanonStore {
+    const store = new CanonStore(':memory:')
+    store.upsertMany(['c-1', 'c-2', 'c-3'].map((spanId) => record({ spanId, cost: STALE })))
+    return store
+  }
+
+  it('writes every given block in a single transaction', () => {
+    const store = seeded()
+    const db = (store as unknown as { db: DatabaseSync }).db
+    const exec = db.exec.bind(db)
+    const statements: string[] = []
+    const spy = vi.spyOn(db, 'exec').mockImplementation((sql: string) => {
+      statements.push(sql)
+      return exec(sql)
+    })
+    try {
+      store.setCosts([
+        { spanId: 'c-1', cost: priced(1) },
+        { spanId: 'c-2', cost: priced(2) },
+        { spanId: 'c-3', cost: priced(3) },
+      ])
+    } finally {
+      spy.mockRestore()
+    }
+    expect(statements.filter((s) => s === 'BEGIN')).toHaveLength(1)
+    expect(statements.filter((s) => s === 'COMMIT')).toHaveLength(1)
+    expect(store.get('c-1')?.cost).toEqual(priced(1))
+    expect(store.get('c-2')?.cost).toEqual(priced(2))
+    expect(store.get('c-3')?.cost).toEqual(priced(3))
+    store.close()
+  })
+
+  it('changes nothing for an empty list', () => {
+    const store = seeded()
+    const db = (store as unknown as { db: DatabaseSync }).db
+    const before = (db.prepare('SELECT COUNT(*) AS n FROM records WHERE cost_json = ?').get(JSON.stringify(STALE)) as { n: number }).n
+    store.setCosts([])
+    const after = (db.prepare('SELECT COUNT(*) AS n FROM records WHERE cost_json = ?').get(JSON.stringify(STALE)) as { n: number }).n
+    expect(after).toBe(before)
+    expect(after).toBe(3)
+    store.close()
+  })
+
+  it('rolls back the whole batch when a later block cannot be serialized', () => {
+    const store = seeded()
+    const bad = { basis: 'published', status: 'priced', value: 1n } as unknown as CostBlock
+    expect(() =>
+      store.setCosts([
+        { spanId: 'c-1', cost: priced(1) },
+        { spanId: 'c-2', cost: priced(2) },
+        { spanId: 'c-3', cost: bad },
+      ]),
+    ).toThrow()
+    expect(store.get('c-1')?.cost).toEqual(STALE)
+    expect(store.get('c-2')?.cost).toEqual(STALE)
+    expect(store.get('c-3')?.cost).toEqual(STALE)
+    // The connection is usable afterwards: no transaction was left open.
+    store.setCosts([{ spanId: 'c-1', cost: priced(9) }])
+    expect(store.get('c-1')?.cost).toEqual(priced(9))
     store.close()
   })
 })
