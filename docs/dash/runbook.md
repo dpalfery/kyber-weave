@@ -347,9 +347,12 @@ Antigravity CLI and Antigravity IDE; and each Copilot client. Labels describe th
 future or unknown harness IDs use their stored ID as the label and remain selectable.
 **Agent Sessions (All)** restores sessions across harnesses.
 
+Tabs are ordered by harness ID and do not move when a new session lands. The All
+sentinel is reserved: a stored harness ID of `agent-all` never gets a tab of its own.
+
 If the selected harness is unavailable or disappears when the inventory refreshes, the
 selection falls back to All. An empty inventory keeps the All tab and displays
-**No sessions found for this harness.** Open a session row to inspect its dashboard, or use
+**No sessions found.** Open a session row to inspect its dashboard, or use
 a child session's parent link to open its parent. Switching harness tabs collapses the
 expanded session.
 

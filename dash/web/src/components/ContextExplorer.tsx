@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 
-import { type ContextProvider } from '../lib/api.js'
 import { fetchKyberSessions, type KyberSessionSummary } from '../lib/kyberApi.js'
 import { cn, usd } from '../lib/utils.js'
 import { Card } from './ui/card.js'
@@ -9,10 +8,16 @@ import { Skeleton } from './ui/skeleton.js'
 import { AgentSessionDashboard } from './AgentSessionDashboard.js'
 import { formatCostFigure, normalizeCostBlock } from './SessionCostPanel.js'
 
+// Canonical harness IDs are open — the store may report any ID — so this type
+// constrains nothing on purpose, and the All sentinel is the one fixed value.
 export type ExplorerProvider = string
 
-// Keep the All callback sentinel compatible with the established provider contract.
-const ALL_PROVIDER: Extract<ContextProvider, 'agent-all'> = 'agent-all'
+// The All callback sentinel is compatible with the established provider contract,
+// and doubles as the only inbound spelling of All: a parent that captures
+// `onHarnessChange` and feeds it back needs no translation. A harness ID that is
+// not in the inventory falls back to All, so an unknown inbound value degrades
+// to All rather than to a phantom empty tab.
+export const ALL_PROVIDER = 'agent-all' as const
 
 // Labels never determine membership or merge canonical harness identities.
 const HARNESS_LABELS: Record<string, string> = {
@@ -187,12 +192,20 @@ export function ContextExplorer({
     staleTime: 30_000,
   })
 
-  const harnesses = [...new Set(kyberData?.map((s) => s.harness).filter((h): h is string => Boolean(h)))]
+  // Sort so the tab strip is stable: the store returns started DESC, which would
+  // otherwise slide every tab right as a new session lands, moving the tab a user
+  // is mid-click on. Excluding the sentinel keeps the inventory provably disjoint
+  // from the All tab, so no session can mint a second tab sharing its key.
+  const harnesses = [...new Set(
+    kyberData
+      ?.map((s) => s.harness)
+      .filter((h): h is string => Boolean(h) && h !== ALL_PROVIDER),
+  )].sort()
   const providers = [
     { key: ALL_PROVIDER, label: 'Agent Sessions (All)' },
     ...harnesses.map((key) => ({ key, label: Object.hasOwn(HARNESS_LABELS, key) ? HARNESS_LABELS[key] : key })),
   ]
-  const selectedProvider = activeHarness === 'all' ? ALL_PROVIDER : activeHarness ?? localProvider
+  const selectedProvider = activeHarness ?? localProvider
   const provider = harnesses.includes(selectedProvider) ? selectedProvider : ALL_PROVIDER
   const sessions = provider === ALL_PROVIDER ? kyberData : kyberData?.filter((s) => s.harness === provider)
 
@@ -242,7 +255,10 @@ export function ContextExplorer({
           <>
             {sessions?.length === 0 && (
               <p className="px-4 py-6 text-sm text-tertiary-foreground" data-testid="explorer-empty">
-                No sessions found for this harness.
+                {/* All is the default and the only state that can actually be empty, so
+                    the harness-specific wording would assert a selection that is not in
+                    play. Keep it for a real subset. */}
+                {provider === ALL_PROVIDER ? 'No sessions found.' : 'No sessions found for this harness.'}
               </p>
             )}
             {sessions?.map((s) => {

@@ -60,7 +60,6 @@ describe('ContextExplorer Claude Code canonical-session integration', () => {
   it.each(['agent-all', 'claude-code'])('renders Claude Code in %s and expands AgentSessionDashboard', (activeHarness) => {
     const queryClient = createQueryClient()
     queryClient.setQueryData(['kyber-sessions'], [claudeSession])
-    queryClient.setQueryData(['kyber-sessions', null], [claudeSession])
     queryClient.setQueryData(['kyber-session', claudeSession.session_id], {
       id: claudeSession.session_id,
       session_id: claudeSession.session_id,
@@ -79,6 +78,9 @@ describe('ContextExplorer Claude Code canonical-session integration', () => {
     )
     expect(explorerHtml).toContain('data-testid="agent-session-row-sess-claude-canonical"')
     expect(explorerHtml).toContain('Canonical Claude session')
+    // The tab is derived from the single unfiltered ['kyber-sessions'] cache seeded
+    // above, so assert it rather than seeding a second key nothing reads.
+    expect(explorerHtml).toContain('data-testid="provider-tab-claude-code"')
 
     const expandedHtml = renderHtml(
       <QueryClientProvider client={queryClient}>
