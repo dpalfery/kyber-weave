@@ -45,3 +45,9 @@ tokio = { version = "1", features = ["macros", "process", "io-util", "time", "rt
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_UI_WindowsAndMessaging"] }
+
+# GTK 0.18 still requires glib 0.18. GHSA-wrw7-89jp-8q8g is fixed by the
+# upstream VariantStrIter backport in this exact crate version. Remove this
+# patch after Tauri's Linux stack resolves to glib >= 0.20.
+[patch.crates-io]
+glib = { path = "../vendor/glib-0.18.5" }
