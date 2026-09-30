@@ -233,16 +233,17 @@ export function RunDetail({
       delegationOverhead: adaptServedDimension('delegationOverhead', served),
       continuity: adaptServedDimension('continuity', served),
     }
+    // A partial run total is marked visibly (Scorecard renders the flag),
+    // whether the gap is cost or any other figure (re-review: Kilo 5).
+    const runPartial = run?.costStatus === 'partial' || run?.partial === true
     return {
       dimensions,
       secondaryCost: {
         costUsd: run?.costUsd ?? null,
         // A priced zero is derived, not missing; a partial sum says so.
-        basis:
-          run?.costStatus === 'partial'
-            ? 'run_summary (partial: some sessions unpriced)'
-            : 'run_summary',
+        basis: runPartial ? 'run_summary (partial: incomplete run total)' : 'run_summary',
         status: run?.costUsd != null ? 'derived' : 'not_measurable',
+        ...(runPartial ? { partial: true as const } : {}),
       },
     }
   }, [run])

@@ -514,8 +514,11 @@ export function buildSessionRow(
     harnessExportsCacheCounter(harness, 'read')
       ? totals.cacheRead / summaryTotalInput
       : undefined
+  // Review re-review (Kilo 2): the ratio beside this already requires input
+  // > 0 — a measured zero input emits neither key.
   const cacheCreationCoverage =
     typeof summaryTotalInput === 'number' &&
+    summaryTotalInput > 0 &&
     turnRecords.length > 0 &&
     harnessExportsCacheCounter(harness, 'creation')
       ? turnRecords.filter((record) => record.tokens.cacheCreation > 0).length

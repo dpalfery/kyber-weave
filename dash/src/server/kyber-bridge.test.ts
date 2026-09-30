@@ -897,14 +897,23 @@ describe('KyberBridge run figures review follow-ups', () => {
     session('sess-eur', { basis: 'published', status: 'priced', value: 0.05, currency: 'EUR' })
     session('sess-legacy', { usd: 0.12, basis: 'published_rates', status: 'ok' })
     session('sess-norate', { basis: 'unknown', status: 'no_rate' })
+    // Re-review Kilo 5: a `partial` block still carries a priced figure.
+    session('sess-partial', { basis: 'published', status: 'partial', value: 0.03, currency: 'USD' })
 
     const bridge = new KyberBridge({ canonPath: ':memory:', store })
     try {
-      const figures = bridge.sessionSummaryFigures(['sess-usd', 'sess-eur', 'sess-legacy', 'sess-norate'])
+      const figures = bridge.sessionSummaryFigures([
+        'sess-usd',
+        'sess-eur',
+        'sess-legacy',
+        'sess-norate',
+        'sess-partial',
+      ])
       expect(figures.get('sess-usd')?.costUsd).toBe(0.05)
       expect(figures.get('sess-eur')?.costUsd).toBeUndefined()
       expect(figures.get('sess-legacy')?.costUsd).toBe(0.12)
       expect(figures.get('sess-norate')?.costUsd).toBeUndefined()
+      expect(figures.get('sess-partial')?.costUsd).toBe(0.03)
     } finally {
       bridge.close()
       store.close()
@@ -932,6 +941,7 @@ describe('KyberBridge run figures review follow-ups', () => {
         turnCount: 2,
         costUsd: 0.01,
         costStatus: 'partial',
+        partial: true,
       })
       // Every session priced: complete, no marker.
       expect(
@@ -942,6 +952,77 @@ describe('KyberBridge run figures review follow-ups', () => {
     } finally {
       bridge.close()
       store.close()
+    }
+  })
+
+  // Re-review Kilo 5: turn/input/output totals are subtotals when a linked
+  // session contributes no figures — marked, not complete-looking.
+  it('marks non-cost totals partial when a linked session is missing', () => {
+    const store = new CanonStore(':memory:')
+    store.upsertSession({
+      sessionId: 'sess-only',
+      harness: 'copilot',
+      payload: { id: 'sess-only', summary: { turn_count: 2, total_input: 500 } },
+    })
+    const bridge = new KyberBridge({ canonPath: ':memory:', store })
+    try {
+      const summaries = bridge.sessionSummaryFigures(['sess-only'])
+      // A linked session with no summary row at all: subtotal.
+      expect(sumSessionFigures(summaries, ['sess-only', 'sess-gone'])).toEqual({
+        turnCount: 2,
+        totalInput: 500,
+        partial: true,
+      })
+      // Every linked session accounted for: complete, no marker.
+      expect(sumSessionFigures(summaries, ['sess-only'])).toEqual({
+        turnCount: 2,
+        totalInput: 500,
+      })
+    } finally {
+      bridge.close()
+      store.close()
+    }
+  })
+
+  // Re-review Kilo 7: in direct-DB mode json_extract yields null (not
+  // undefined) for a missing currency — a priced block without one must
+  // still read as USD, exactly as store mode treats it.
+  it('keeps a priced block without currency in direct-DB mode', () => {
+    const canonDb = new DatabaseSync(':memory:')
+    canonDb.exec(`
+      CREATE TABLE session (
+        session_id TEXT PRIMARY KEY, harness TEXT NOT NULL, label TEXT,
+        is_subagent INTEGER DEFAULT 0, parent_session TEXT, agent_name TEXT,
+        repo TEXT, branch TEXT, started TEXT, ended TEXT, payload TEXT
+      );
+    `)
+    canonDb
+      .prepare('INSERT INTO session VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(
+        'sess-nocur',
+        'copilot',
+        'no currency',
+        0,
+        null,
+        null,
+        null,
+        null,
+        '2026-09-04T00:00:00.000Z',
+        null,
+        JSON.stringify({
+          id: 'sess-nocur',
+          summary: {
+            turn_count: 1,
+            cost: { basis: 'published', status: 'priced', value: 0.07 },
+          },
+        }),
+      )
+    const bridge = new KyberBridge({ canonDb })
+    try {
+      expect(bridge.sessionSummaryFigures(['sess-nocur']).get('sess-nocur')?.costUsd).toBe(0.07)
+    } finally {
+      // Bridge owns the passed database handle.
+      bridge.close()
     }
   })
 })

@@ -477,6 +477,8 @@ export interface ScorecardData {
     costUsd?: number | null
     basis?: string
     status?: DiagnosticAvailability
+    /** Visible "(partial)" marker when the total is a subtotal. */
+    partial?: boolean
   }
 }
 
@@ -561,6 +563,8 @@ export interface KyberRunSummary {
   costUsd?: number | null
   /** Present only when `costUsd` sums priced sessions beside unpriced ones. */
   costStatus?: 'partial'
+  /** Present when any run figure is a subtotal over incomplete sessions. */
+  partial?: boolean
   outcome?: {
     status?: string
     exitCode?: number | null

@@ -797,7 +797,12 @@ const HARNESS_PREFIX_SURVEY: ReadonlyMap<SurveyedHarness, Omit<PrefixAvailabilit
 export function harnessExportsCacheCounter(harness: string, counter: 'read' | 'creation'): boolean {
   const availability = cacheAvailability(harness)
   if (availability.status === 'unsupported') return false
-  if (availability.status === 'partial') {
+  // Review re-review (Kilo 1): the per-counter flags are the record for
+  // every catalogued harness — Codex is `supported` yet exports no
+  // cache-creation counter, and treating `supported` as both-true minted
+  // fake "on 0 turns" coverage. Only an uncatalogued harness
+  // (`not_measurable`/`assumed`) falls back to the data.
+  if (availability.status === 'supported' || availability.status === 'partial') {
     return counter === 'read' ? availability.cacheRead : availability.cacheCreation
   }
   return true

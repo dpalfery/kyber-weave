@@ -195,6 +195,45 @@ describe('buildSessionRow', () => {
     expect(JSON.stringify(summary)).not.toContain('"cache_hit_ratio":0')
   })
 
+  // Review re-review (Kilo 1): Codex is `supported` yet exports no
+  // cache-creation counter, so coverage stays absent while the read ratio
+  // (which Codex does export) is still emitted.
+  it('omits creation coverage where the harness vocabulary holds no such counter', () => {
+    const row = buildSessionRow(
+      'sess-codex-cache',
+      [
+        turn('x1', [{ part: 'system_prompt', text: 'a'.repeat(400) }], {
+          harness: 'codex',
+          tokens: tokens({ freshInput: 900, cacheRead: 300, cacheCreation: 0, reportedInput: 1200 }),
+        }),
+      ],
+      approximateO200kBase,
+    )
+    const summary = sessionPayload(row).summary as Record<string, unknown>
+    expect(summary.total_input).toBe(1200)
+    expect(summary.cache_hit_ratio as number).toBeCloseTo(0.25, 5)
+    expect('cache_creation_coverage' in summary).toBe(false)
+  })
+
+  // Review re-review (Kilo 2): the ratio beside coverage already requires
+  // input > 0; a measured zero input emits neither key.
+  it('omits cache figures when the measured input is zero', () => {
+    const row = buildSessionRow(
+      'sess-zero-input',
+      [
+        turn('z1', [{ part: 'system_prompt', text: 'a'.repeat(400) }], {
+          harness: 'copilot',
+          tokens: tokens({ freshInput: 0, cacheRead: 0, cacheCreation: 0, output: 0, reportedInput: 0 }),
+        }),
+      ],
+      approximateO200kBase,
+    )
+    const summary = sessionPayload(row).summary as Record<string, unknown>
+    expect(summary.total_input).toBe(0)
+    expect('cache_hit_ratio' in summary).toBe(false)
+    expect('cache_creation_coverage' in summary).toBe(false)
+  })
+
   // Review (Copilot C2/C3): Cursor declares no cache counters, so even with a
   // measured input the cache figures are absent — never a 0% ratio or an
   // "on 0 turns" count beside stored zeros.

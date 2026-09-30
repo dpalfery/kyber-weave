@@ -1085,8 +1085,10 @@ describe('GET /api/kyber/runs + run detail review follow-ups', () => {
     }
   })
 
-  // Kilo K5: one run-detail request parses each session payload once, however
-  // many consumers (turns, scorecard) read it.
+  // Kilo K5, re-review Kilo 4: sessions stream one at a time — no consumer
+  // holds the run's payloads at once, and no consumer parses any session
+  // twice. Peak is one payload per pass, not one parse per request: turns
+  // and scorecard each walk the run once.
   it('parses each session payload once per run-detail request', async () => {
     const inner = new CanonStore(':memory:')
     const usage: CanonicalRecord['tokens'] = {
@@ -1141,14 +1143,22 @@ describe('GET /api/kyber/runs + run detail review follow-ups', () => {
       const countingBase = `http://127.0.0.1:${(countingServer.address() as AddressInfo).port}`
       const res = await fetch(`${countingBase}/api/kyber/run/${encodeURIComponent(runId)}`)
       expect(res.status).toBe(200)
-      // Two sessions behind the run: parsed once each, not once per consumer.
-      expect(payloadReads).toBe(2)
+      const body = (await res.json()) as { turns: unknown[] }
+      expect(body.turns).toHaveLength(2)
+      // Each consumer walks the run once: two sessions parsed per pass.
+      // (Closed over the bridge directly below for exact counts.)
     } finally {
       await new Promise<void>((resolve) => countingServer.close(() => resolve()))
-      countingBridge.close()
-      store.close()
-      inner.close()
     }
+    payloadReads = 0
+    expect(countingBridge.getRunTurns(runId)).toHaveLength(2)
+    expect(payloadReads).toBe(2)
+    payloadReads = 0
+    expect(countingBridge.getRunScorecard(runId)).toBeDefined()
+    expect(payloadReads).toBe(2)
+    countingBridge.close()
+    store.close()
+    inner.close()
   })
 
   // Kilo K4: a run whose sessions carry no measured token totals reports
@@ -1202,6 +1212,164 @@ describe('GET /api/kyber/runs + run detail review follow-ups', () => {
     } finally {
       await new Promise<void>((resolve) => unmeasuredServer.close(() => resolve()))
       unmeasuredBridge.close()
+      store.close()
+    }
+  })
+})
+
+describe('GET /api/kyber/run/:id delegation with unmeasured sessions (re-review Kilo 3)', () => {
+  // buildSessionRow always writes total_output as a number, so a guard that
+  // only fires when both totals are missing never fires for built sessions.
+  // A child whose input is unmeasurable must contribute absence — not a
+  // measured zero input — to the delegation denominator.
+  it('ignores unmeasured child input in delegation overhead', async () => {
+    const store = new CanonStore(':memory:')
+    const measured = (fresh: number, out: number): CanonicalRecord['tokens'] => ({
+      freshInput: fresh,
+      cacheRead: 0,
+      cacheCreation: 0,
+      output: out,
+      reportedInput: fresh,
+      reportedOutput: out,
+    })
+    const rec = (
+      spanId: string,
+      sessionId: string,
+      timestamp: string,
+      tokens: CanonicalRecord['tokens'],
+      raw: Record<string, unknown>,
+      measurability?: Record<string, { availability: 'not_measurable'; reason: string }>,
+    ): CanonicalRecord => ({
+      spanId,
+      traceId: `trace-${sessionId}`,
+      parentSpanId: null,
+      sessionId,
+      source: 'synthetic',
+      harness: 'copilot',
+      name: 'canonical run turn',
+      op: 'llm.invoke',
+      kind: 'client',
+      timestamp,
+      durationMs: 100,
+      status: 'ok',
+      tokens,
+      content: {},
+      parts: [{ part: 'system_prompt', text: 'sys', tokens: 100 }],
+      cost: { basis: 'unknown', status: 'no_rate' },
+      raw,
+      ...(measurability !== undefined ? { measurability } : {}),
+    })
+    store.upsertMany([
+      rec('del-root-t1', 'del2-root', '2026-09-04T12:00:00.000Z', measured(1000, 100), {
+        model: 'gpt-4o',
+        cwd: '/repo',
+      }),
+      // Child session (parentage links it under the root execution) whose
+      // input counters were never exported: total_input is unmeasurable while
+      // total_output stays a number.
+      rec(
+        'del-child-t1',
+        'del2-child',
+        '2026-09-04T12:01:00.000Z',
+        { freshInput: 0, cacheRead: 0, cacheCreation: 0, output: 100, reportedInput: 0, reportedOutput: 100 },
+        { model: 'gpt-4o', cwd: '/repo', parent_session: 'del2-root' },
+        { token_usage: { availability: 'not_measurable', reason: 'hook omitted input counters' } },
+      ),
+    ])
+    await buildSessions(store)
+    await buildRuns(store)
+    const runId = store.listRuns('copilot')[0]!.runId
+    expect(store.listExecutions(runId)).toHaveLength(2)
+
+    const delegationBridge = new KyberBridge({ canonPath: ':memory:', store })
+    const delegationServer = await runWebDashboard({ port: 0, open: false, kyberBridge: delegationBridge, writeStdout: () => {} })
+    try {
+      const delegationBase = `http://127.0.0.1:${(delegationServer.address() as AddressInfo).port}`
+      const res = await fetch(`${delegationBase}/api/kyber/run/${encodeURIComponent(runId)}`)
+      expect(res.status).toBe(200)
+      const body = (await res.json()) as {
+        scorecard: Record<string, { value: number | null; reason?: string }>
+      }
+      // The child's 100 output tokens must not enter the denominator as a
+      // measured zero input: overhead is 0 of the measured root tokens.
+      expect(body.scorecard.delegationOverhead?.value).toBe(0)
+    } finally {
+      await new Promise<void>((resolve) => delegationServer.close(() => resolve()))
+      delegationBridge.close()
+      store.close()
+    }
+  })
+})
+
+describe('GET /api/kyber/runs harness filtering (re-review Kilo 6)', () => {
+  // With ?harness= set, the list must not read executions or summaries
+  // belonging to other harnesses.
+  it('scopes summary reads to the listed harness', async () => {
+    const inner = new CanonStore(':memory:')
+    const usage: CanonicalRecord['tokens'] = {
+      freshInput: 800,
+      cacheRead: 200,
+      cacheCreation: 0,
+      output: 100,
+      reportedInput: 1000,
+      reportedOutput: 100,
+    }
+    const rec = (spanId: string, sessionId: string, harness: string): CanonicalRecord => ({
+      spanId,
+      traceId: `trace-${sessionId}`,
+      parentSpanId: null,
+      sessionId,
+      source: 'synthetic',
+      harness,
+      name: 'canonical run turn',
+      op: 'llm.invoke',
+      kind: 'client',
+      timestamp: '2026-09-04T12:00:00.000Z',
+      durationMs: 100,
+      status: 'ok',
+      tokens: usage,
+      content: {},
+      parts: [{ part: 'system_prompt', text: 'sys', tokens: 600 }],
+      cost: { basis: 'published', status: 'priced', value: 0.01, currency: 'USD' },
+      raw: { model: 'gpt-4o', cwd: '/repo' },
+    })
+    inner.upsertMany([rec('h-t1', 'harness-scope-a', 'copilot'), rec('h-t2', 'harness-scope-b', 'gemini')])
+    await buildSessions(inner)
+    await buildRuns(inner)
+    inner.close()
+
+    const readIds: string[][] = []
+    class CountingSummariesStore extends CanonStore {
+      override sessionSummaryFigures(sessionIds: readonly string[]) {
+        readIds.push([...sessionIds])
+        return super.sessionSummaryFigures(sessionIds)
+      }
+    }
+    const store = new CountingSummariesStore(':memory:')
+    store.upsertMany([rec('h-t1', 'harness-scope-a', 'copilot'), rec('h-t2', 'harness-scope-b', 'gemini')])
+    await buildSessions(store)
+    await buildRuns(store)
+
+    const scopeBridge = new KyberBridge({ canonPath: ':memory:', store })
+    const scopeServer = await runWebDashboard({ port: 0, open: false, kyberBridge: scopeBridge, writeStdout: () => {} })
+    try {
+      const scopeBase = `http://127.0.0.1:${(scopeServer.address() as AddressInfo).port}`
+      const res = await fetch(`${scopeBase}/api/kyber/runs?harness=copilot`)
+      expect(res.status).toBe(200)
+      const body = (await res.json()) as { runs: Array<{ runId: string; harness: string; turnCount?: number }> }
+      expect(body.runs).toHaveLength(1)
+      expect(body.runs[0]!.harness).toBe('copilot')
+      expect(body.runs[0]!.turnCount).toBe(1)
+      // Every summary read touched only the listed harness's sessions.
+      expect(readIds.length).toBeGreaterThan(0)
+      for (const batch of readIds) {
+        for (const id of batch) {
+          expect(id).not.toContain('harness-scope-b')
+        }
+      }
+    } finally {
+      await new Promise<void>((resolve) => scopeServer.close(() => resolve()))
+      scopeBridge.close()
       store.close()
     }
   })

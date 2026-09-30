@@ -310,3 +310,34 @@ describe('RunDetail cost honesty', () => {
     expect(html).toContain('partial')
   })
 })
+
+// Review re-review (Kilo 5): the partial marker must be visible text, not a
+// hover-only title.
+describe('RunDetail partial visibility', () => {
+  beforeEach(() => {
+    clearHooks()
+  })
+
+  it('shows a visible partial marker for a partial run total', () => {
+    const qc = createTestQueryClient()
+    const html = renderHtml(
+      <QueryClientProvider client={qc}>
+        <RunDetail
+          runId="run-zero"
+          initialRun={{
+            runId: 'run-zero',
+            harness: 'copilot',
+            groupingBasis: 'explicit',
+            costUsd: 0.015,
+            costStatus: 'partial',
+            executionTree: [],
+            executions: [],
+            findings: [],
+          }}
+        />
+      </QueryClientProvider>,
+    )
+
+    expect(html).toContain('data-testid="secondary-cost-partial"')
+  })
+})

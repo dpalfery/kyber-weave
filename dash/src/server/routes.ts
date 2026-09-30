@@ -558,8 +558,12 @@ export function handleKyberRequest(
     // (review follow-up: Kilo K2, Copilot C9): all executions, one summary
     // query, per-run sums through the shared `sumSessionFigures` derivation.
     const listedRuns = bridge.listRuns(harnessParam)
+    // Review re-review (Kilo 6): with ?harness= set, only the listed runs'
+    // executions and sessions are read — never the whole corpus.
+    const listedRunIds = new Set(listedRuns.map((run) => run.runId))
     const executionsByRun = new Map<string, string[]>()
     for (const execution of bridge.listExecutions()) {
+      if (!listedRunIds.has(execution.runId)) continue
       if (typeof execution.sessionId !== 'string' || execution.sessionId.length === 0) continue
       const group = executionsByRun.get(execution.runId) ?? []
       group.push(execution.sessionId)
@@ -603,15 +607,15 @@ export function handleKyberRequest(
     const findings = bridge.listFindings({ runId: id })
     // Issue #183: the detail payload serves what its views need — measured
     // per-turn rows, enriched run figures, and a run-scoped scorecard — so
-    // the turn table and scorecard render figures instead of dashes. Each
-    // session is read once and shared (review follow-up: Kilo K5/K7, Copilot
-    // C1): one payload map, one summary map, one shared sum derivation.
-    const payloads = bridge.runSessionPayloads(executions)
-    const summaries = bridge.sessionSummaryFigures([...payloads.keys()])
-    const figures = sumSessionFigures(
-      summaries,
-      executions.map((exec) => exec.sessionId),
-    )
+    // the turn table and scorecard render figures instead of dashes. Summaries
+    // batch once (review follow-up: Kilo K7); session payloads stream one at
+    // a time inside the turns and scorecard builders (re-review: Kilo 4), so
+    // the route never holds the run's payloads at once.
+    const detailSessionIds = executions
+      .map((exec) => exec.sessionId)
+      .filter((sessionId): sessionId is string => typeof sessionId === 'string')
+    const summaries = bridge.sessionSummaryFigures(detailSessionIds)
+    const figures = sumSessionFigures(summaries, detailSessionIds)
     const enrichedExecutions = executions.map((exec) => {
       const sessionFigures = exec.sessionId !== null && exec.sessionId !== undefined
         ? summaries.get(exec.sessionId)
@@ -627,8 +631,8 @@ export function handleKyberRequest(
       executionTree,
       executions: enrichedExecutions,
       findings,
-      turns: bridge.getRunTurns(id, { executions, payloads }),
-      scorecard: bridge.getRunScorecard(id, { executions, payloads, summaries }) ?? null,
+      turns: bridge.getRunTurns(id, executions),
+      scorecard: bridge.getRunScorecard(id, { executions, summaries }) ?? null,
     })
     return true
   }

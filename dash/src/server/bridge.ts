@@ -175,13 +175,18 @@ export type SessionSummaryFigures = Map<
   { turnCount?: number; totalInput?: number; totalOutput?: number; costUsd?: number }
 >
 
-/** Measured run figures; `costStatus` is present only for a partial sum. */
+/**
+ * Measured run figures. `costStatus` marks a cost subtotal; `partial` marks
+ * any subtotal — a linked session with no summary, or a figure missing from
+ * some of the run's summaries. Both are present only when partial.
+ */
 export type RunMeasuredFigures = {
   turnCount?: number
   totalInput?: number
   totalOutput?: number
   costUsd?: number
   costStatus?: 'partial'
+  partial?: true
 }
 
 /**
@@ -189,6 +194,10 @@ export type RunMeasuredFigures = {
  * Anything unpriced stays absent; a priced non-USD block stays absent too —
  * serving euros under a dollar formatter is mislabelling (review follow-up:
  * Copilot C4). The legacy `usd` shape predates currency and names dollars.
+ * A `partial` block still carries a priced figure for its priced portion
+ * (re-review: Kilo 5) — the run-level partial marker, not this function,
+ * says the total is incomplete. In direct-DB mode a missing currency reads
+ * as null rather than undefined (re-review: Kilo 7); both mean "unnamed".
  */
 export function pricedUsd(
   status: unknown,
@@ -196,12 +205,12 @@ export function pricedUsd(
   currency: unknown,
   legacyUsd: unknown,
 ): number | undefined {
-  if (status !== 'priced' && status !== 'ok') return undefined
+  if (status !== 'priced' && status !== 'ok' && status !== 'partial') return undefined
   const figure = (candidate: unknown): number | undefined =>
     typeof candidate === 'number' && Number.isFinite(candidate) ? candidate : undefined
   const priced = figure(value) ?? figure(legacyUsd)
   if (priced === undefined) return undefined
-  if (figure(value) !== undefined && currency !== undefined && currency !== 'USD') return undefined
+  if (figure(value) !== undefined && currency != null && currency !== 'USD') return undefined
   return priced
 }
 
@@ -210,7 +219,9 @@ export function pricedUsd(
  * and the run detail share (review follow-up on issue #183: Kilo K7).
  * Coverage is tracked, not assumed (Kilo K3, Copilot C5): a session without
  * a priced figure makes the sum partial, and a run with no priced figure at
- * all carries no cost — never $0.
+ * all carries no cost — never $0. The same holds beyond cost (re-review:
+ * Kilo 5): a linked session with no summary row, or a figure present in
+ * some summaries but missing in others, marks the whole run `partial`.
  */
 export function sumSessionFigures(
   summaries: ReadonlyMap<string, { turnCount?: number; totalInput?: number; totalOutput?: number; costUsd?: number }>,
@@ -227,26 +238,36 @@ export function sumSessionFigures(
   let seenInput = false
   let seenOutput = false
   let pricedSessions = 0
+  let presentSummaries = 0
+  const fieldSeen = { turnCount: 0, totalInput: 0, totalOutput: 0, costUsd: 0 }
   for (const sessionId of uniqueIds) {
     const figures = summaries.get(sessionId)
     if (figures === undefined) continue
+    presentSummaries += 1
     if (figures.turnCount !== undefined) {
       turnCount += figures.turnCount
       seenTurns = true
+      fieldSeen.turnCount += 1
     }
     if (figures.totalInput !== undefined) {
       totalInput += figures.totalInput
       seenInput = true
+      fieldSeen.totalInput += 1
     }
     if (figures.totalOutput !== undefined) {
       totalOutput += figures.totalOutput
       seenOutput = true
+      fieldSeen.totalOutput += 1
     }
     if (figures.costUsd !== undefined) {
       costUsd += figures.costUsd
       pricedSessions += 1
+      fieldSeen.costUsd += 1
     }
   }
+  const partialFields = (Object.keys(fieldSeen) as Array<keyof typeof fieldSeen>).some(
+    (field) => fieldSeen[field] > 0 && fieldSeen[field] < presentSummaries,
+  )
   return {
     ...(seenTurns ? { turnCount } : {}),
     ...(seenInput ? { totalInput } : {}),
@@ -255,6 +276,7 @@ export function sumSessionFigures(
     // A priced figure beside an unpriced session is a subtotal wearing a
     // total's suit — mark it partial so the views can say so.
     ...(pricedSessions > 0 && pricedSessions < uniqueIds.length ? { costStatus: 'partial' as const } : {}),
+    ...(presentSummaries < uniqueIds.length || partialFields ? { partial: true as const } : {}),
   }
 }
 
@@ -2398,23 +2420,24 @@ export class KyberBridge {
   }
 
   /**
-   * Full session payloads behind executions, parsed once and shared by
-   * caller (review follow-up on issue #183: Kilo K5, Copilot C1 — the run
-   * detail route used to parse every session payload twice, once for turns
-   * and once for the scorecard).
+   * Session payloads behind executions, streamed one at a time (review
+   * re-review on issue #183: Kilo 4 — payloads can be hundreds of MB, so no
+   * consumer may hold every session of the run at once). Each yielded payload
+   * is droppable as soon as the consumer advances: callers must process it
+   * inline and never retain it past the iteration.
    */
-  runSessionPayloads(
+  *streamRunSessionPayloads(
     executions: readonly ExecutionRow[],
-  ): Map<string, SessionPayload & { context?: unknown }> {
-    const payloads = new Map<string, SessionPayload & { context?: unknown }>()
+  ): Generator<{ execution: ExecutionRow; payload: SessionPayload & { context?: unknown } }> {
+    // No dedup: turns are emitted per execution, so an execution always sees
+    // its session's turns even where two executions share one session. The
+    // peak stays one payload either way.
     for (const execution of executions) {
       const sessionId = execution.sessionId
       if (typeof sessionId !== 'string' || sessionId.length === 0) continue
-      if (payloads.has(sessionId)) continue
       const payload = this.getSessionPayload(sessionId)
-      if (payload !== null) payloads.set(sessionId, payload)
+      if (payload !== null) yield { execution, payload }
     }
-    return payloads
   }
 
   /**
@@ -2469,38 +2492,26 @@ export class KyberBridge {
    * an index-equality join would land on a neighbor wherever an unmeasured
    * turn exists; a length mismatch omits every pressure rather than guessing.
    * `turnIndex` keeps the #184 transport convention: 0-based per execution.
-   * Payloads may be preloaded (the detail route parses each session once and
-   * shares the map with the scorecard); otherwise they are loaded here.
+   * Sessions stream one at a time (review re-review: Kilo 4): each payload —
+   * and its span-cost query — is dropped before the next session loads, so
+   * the peak stays one payload however large the run's sessions are.
    */
-  getRunTurns(
-    runId: string,
-    preload: {
-      executions?: readonly ExecutionRow[]
-      payloads?: ReadonlyMap<string, SessionPayload & { context?: unknown }>
-    } = {},
-  ): RunTurnRow[] {
+  getRunTurns(runId: string, executions?: readonly ExecutionRow[]): RunTurnRow[] {
     const rows: RunTurnRow[] = []
-    const executions = preload.executions ?? this.listExecutions(runId)
-    const payloads = preload.payloads ?? this.runSessionPayloads(executions)
-    const spanIds: string[] = []
-    for (const payload of payloads.values()) {
-      for (const turn of Array.isArray(payload.turns) ? payload.turns : []) {
-        const spanId = (turn as Record<string, unknown>)?.spanId
-        if (typeof spanId === 'string' && spanId.length > 0) spanIds.push(spanId)
-      }
-    }
-    const costs = this.readSpanCosts(spanIds)
+    const runExecutions = executions ?? this.listExecutions(runId)
 
     const number = (value: unknown): number | undefined =>
       typeof value === 'number' && Number.isFinite(value) ? value : undefined
-    for (const execution of executions) {
-      const payload = execution.sessionId !== null && execution.sessionId !== undefined
-        ? payloads.get(execution.sessionId)
-        : undefined
-      if (payload === undefined) continue
+    for (const { execution, payload } of this.streamRunSessionPayloads(runExecutions)) {
       const turns = (Array.isArray(payload.turns) ? payload.turns : []) as Array<
         Record<string, unknown>
       >
+      const spanIds: string[] = []
+      for (const turn of turns) {
+        const spanId = turn.spanId
+        if (typeof spanId === 'string' && spanId.length > 0) spanIds.push(spanId)
+      }
+      const costs = this.readSpanCosts(spanIds)
       // Measured turns in payload order; the engine's context turns are built
       // from exactly this subset in this order, so position j here is
       // `TurnPressure.index` j + 1 there. The position→slot map keeps the
@@ -2578,26 +2589,29 @@ export class KyberBridge {
    * own sessions (issue #183, Q2). Reasons are scoped to the run, so a run
    * whose sessions exported cache counters can never inherit the
    * harness-level claim that they did not. Absent sessions mean no scorecard.
-   * Executions, payloads and summaries may be preloaded (the detail route
-   * assembles them once); otherwise they are loaded here.
+   * Sessions stream through the digest one at a time (review re-review:
+   * Kilo 4) — `digestSessionPayloads` pulls each payload from the generator
+   * and releases it before the next loads, so the peak stays one payload.
+   * Executions and summaries may be preloaded; otherwise they are loaded here.
    */
   getRunScorecard(
     runId: string,
     preload: {
       executions?: readonly ExecutionRow[]
-      payloads?: ReadonlyMap<string, SessionPayload & { context?: unknown }>
       summaries?: SessionSummaryFigures
     } = {},
   ): Scorecard | undefined {
     const executions = preload.executions ?? this.listExecutions(runId)
-    const payloadBySession = preload.payloads ?? this.runSessionPayloads(executions)
-    const payloads = [...payloadBySession.values()].map(
-      (payload) => payload as unknown as AsadSessionPayload,
-    )
-    if (payloads.length === 0) return undefined
+    const bridge = this
+    function* payloads(): Generator<AsadSessionPayload> {
+      for (const { payload } of bridge.streamRunSessionPayloads(executions)) {
+        yield payload as unknown as AsadSessionPayload
+      }
+    }
+    const digest = digestSessionPayloads(payloads())
+    if (digest.count === 0) return undefined
     const run = this.getRun(runId)
     const harness = run?.harness ?? 'unknown'
-    const digest = digestSessionPayloads(payloads)
     const summaries =
       preload.summaries ??
       this.sessionSummaryFigures(
@@ -2606,7 +2620,7 @@ export class KyberBridge {
           .filter((id): id is string => typeof id === 'string' && id.length > 0),
       )
     const rollup = assembleRollup(harness, digest, {
-      sessionCount: payloads.length,
+      sessionCount: digest.count,
       runCount: 1,
       executionCount: executions.length,
       executions: executions.map((exec) => ({
@@ -2618,13 +2632,13 @@ export class KyberBridge {
       tokenTotals: (sessionId) => {
         const figures = summaries.get(sessionId)
         if (figures === undefined) return undefined
-        // Review follow-up (Kilo K4): an unmeasured session contributes
-        // absence, not a measured zero, to the delegation denominator.
-        if (figures.totalInput === undefined && figures.totalOutput === undefined) {
-          return undefined
-        }
+        // Review re-review (Kilo 3): buildSessionRow always writes
+        // total_output as a number, so "both missing" never fires for built
+        // sessions. Without a measured input the session's token share is
+        // unknown — absence, not a measured zero input beside output.
+        if (figures.totalInput === undefined) return undefined
         return {
-          input: figures.totalInput ?? 0,
+          input: figures.totalInput,
           output: figures.totalOutput ?? 0,
         }
       },

@@ -196,6 +196,17 @@ export function Scorecard({
             <span className="text-density-2xs italic text-tertiary-foreground/80">
               (derived)
             </span>
+            {/* Review re-review (Kilo 5): a partial total is marked in
+                visible text, not a hover-only title. */}
+            {secondaryCost.partial === true && (
+              <span
+                className="text-density-2xs italic text-tertiary-foreground/80"
+                data-testid="secondary-cost-partial"
+                title="Partial total: some sessions in this run are unpriced"
+              >
+                (partial)
+              </span>
+            )}
           </div>
         )}
       </div>

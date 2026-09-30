@@ -397,12 +397,12 @@ export function HarnessDetail({
                           (review follow-up: Copilot C7, Kilo K3). */}
                       <td
                         className="py-2.5 px-3 text-right font-mono tabular-nums text-muted-foreground/80"
-                        title={r.costStatus === 'partial' ? 'Partial total: some sessions in this run are unpriced' : undefined}
+                        title={r.costStatus === 'partial' || r.partial === true ? 'Partial total: some sessions in this run are unpriced' : undefined}
                       >
                         {r.costUsd != null ? (
                           <>
                             {usd(r.costUsd)}
-                            {r.costStatus === 'partial' && (
+                            {(r.costStatus === 'partial' || r.partial === true) && (
                               <span className="ml-1 italic">(partial)</span>
                             )}
                           </>
