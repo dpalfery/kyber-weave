@@ -313,6 +313,13 @@ describe('antigravity provider helpers', () => {
     expect(provider.modelDisplayName('Gemini 3.5 Flash (High)')).toBe('Gemini 3.5 Flash')
   })
 
+  it('displays the live Gemini 3.8 Flash (High) model as its base model', () => {
+    // Issue #195: the live agy corpus reports this model id.
+    const provider = createAntigravityProvider()
+
+    expect(provider.modelDisplayName('Gemini 3.8 Flash (High)')).toBe('Gemini 3.8 Flash')
+  })
+
   it('captures exact Antigravity CLI statusLine usage as fallback calls', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'codeburn-antigravity-statusline-'))
     process.env['KYBERDASH_CACHE_DIR'] = dir

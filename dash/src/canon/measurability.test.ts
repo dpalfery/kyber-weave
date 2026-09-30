@@ -177,6 +177,14 @@ describe('getMeasurability — the OTLP path (R10.1)', () => {
     // Structure is pi's telemetry's to supply; only definitions are missing.
     expect(contextCompositionAvailability(measurability)).toBe('measured')
   })
+
+  it('declares Antigravity cache_creation not measurable from the adapter, matching the file side', () => {
+    // Issue #195: once the OTLP vote can stamp `antigravity`, the OTLP
+    // baseline must state the same cache-creation gap the file side states.
+    const measurability = getMeasurability(OTLP_SOURCE, 'antigravity')
+    expectNotMeasurable(measurability['cache_creation'])
+    expect(measurability['token_usage']).toBe('measured')
+  })
 })
 
 // ---------------------------------------------------------------------------
