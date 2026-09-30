@@ -81,6 +81,8 @@ export interface KyberSessionSummary {
   total_output?: number | null
   cost_usd?: number | null
   costUsd?: number | null
+  /** Canonical cost block (issue #186): basis + status + optional value. */
+  cost?: { basis: string; status: string; value?: number; currency?: string }
   models?: string[]
   problems?: number
 }

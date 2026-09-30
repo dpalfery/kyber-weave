@@ -911,3 +911,63 @@ describe('timeline attributes are not re-stored in the payload', () => {
     store.close()
   })
 })
+
+describe('session cost totals (issue #186)', () => {
+  const priced = (value: number): CanonicalRecord['cost'] => ({
+    basis: 'published',
+    status: 'priced',
+    value,
+    currency: 'USD',
+    byModel: { 'claude-opus-5': value },
+  })
+  const toolSpan = (spanId: string): CanonicalRecord =>
+    turn(spanId, [], {
+      op: 'tool.execute',
+      name: 'tool_call',
+      parentSpanId: 's1',
+      cost: { basis: 'unknown', status: 'no_rate' },
+    })
+  const costOf = (row: { payload: unknown }) =>
+    (row.payload as { summary: { cost: unknown } }).summary.cost
+  const problemsOf = (row: { payload: unknown }) =>
+    (row.payload as { problems: Array<{ code?: string }> }).problems
+
+  it('totals one priced turn, one unpriced published turn and a non-turn span as partial', () => {
+    const row = buildSessionRow(
+      'sess-1',
+      [
+        turn('s1', [], { cost: priced(0.25) }),
+        turn('s2', [], { cost: { basis: 'published', status: 'no_rate' } }),
+        toolSpan('t1'),
+      ],
+      approximateO200kBase,
+    )
+
+    expect(costOf(row)).toMatchObject({ basis: 'published', status: 'partial', value: 0.25 })
+  })
+
+  it('makes no cost claim for a non-turn span', () => {
+    const row = buildSessionRow(
+      'sess-1',
+      [turn('s1', [], { cost: priced(0.25) }), toolSpan('t1')],
+      approximateO200kBase,
+    )
+
+    expect(costOf(row)).toMatchObject({ basis: 'published', status: 'priced', value: 0.25 })
+  })
+
+  it('records COST_BASIS_MISMATCH in the payload when harness and published turns mix', () => {
+    const row = buildSessionRow(
+      'sess-1',
+      [
+        turn('s1', [], { cost: priced(0.25) }),
+        turn('s2', [], {
+          cost: { basis: 'harness', status: 'priced', value: 0.5, currency: 'USD' },
+        }),
+      ],
+      approximateO200kBase,
+    )
+
+    expect(problemsOf(row).map((p) => p.code)).toContain('COST_BASIS_MISMATCH')
+  })
+})

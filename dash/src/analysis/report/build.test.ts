@@ -44,6 +44,7 @@ function session(overrides: Partial<SessionSummary> = {}): SessionSummary {
     total_input: 1000,
     total_output: 200,
     cost_usd: null,
+    cost: { basis: 'unknown', status: 'no_rate' },
     models: [],
     problems: 0,
     ...overrides,

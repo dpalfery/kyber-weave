@@ -54,6 +54,12 @@ const MANUAL_ENTRIES = {
   // exact gpt-5.6 tuple (Sol-tier: $5/$30 per million, 1.25x cache-write).
   'gpt-5.6-codex':          [5e-6, 3e-5, 6.25e-6, 5e-7],
   'gpt-5.6-codex-max':      [5e-6, 3e-5, 6.25e-6, 5e-7],
+  // claude-sonnet-5-5 and gpt-6-luna (#186): not yet in the LiteLLM/models.dev
+  // source the bundled snapshot was built from; rates and provenance are in
+  // src/pricing/data/pricing-provenance.json. gpt-6-luna publishes no cache-write
+  // rate (null in the snapshot), which the parser treats as 0.
+  'claude-sonnet-5-5':      [2e-6, 1e-5, 2.5e-6, 2e-7],
+  'gpt-6-luna':             [1e-7, 5e-7, 0, 1e-8],
 }
 
 const snapshot = {}

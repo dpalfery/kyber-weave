@@ -7,6 +7,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { createRequire } from 'node:module'
 import { APPROXIMATE_TOKENIZER, tokenizerName } from '../canon/tokens.js'
+import type { CostBlock } from '../canon/types.js'
 import { refreshProcessIsAlive } from '../canon/refresh-run.js'
 import {
   CanonStore,
@@ -36,6 +37,7 @@ import {
   type RunComparisonOptions,
 } from '../analysis/compare.js'
 import type { Finding } from '../analysis/findings.js'
+import { COPILOT_CREDITS_SOURCE } from '../canon/copilot-rates.js'
 import {
   CANONICAL_CONTENT_KEYS,
   type CanonicalContent,
@@ -105,7 +107,10 @@ export type SessionSummary = {
   request_count: number | null
   total_input: number | null
   total_output: number | null
+  /** USD figure; non-null only for a priced USD block. */
   cost_usd: number | null
+  /** The canonical cost block with its basis and status. */
+  cost: { basis: string; status: string; value?: number; currency?: string }
   models: string[]
   problems: number
 }
@@ -153,11 +158,7 @@ export type ParsedSummary = {
   total_cache_read?: number | null
   total_cache_creation?: number | null
   schema_tokens_per_turn?: number | null
-  cost?: {
-    usd?: number | null
-    basis?: string | null
-    status?: string | null
-  } | null
+  cost?: CostBlock | null
   models?: string[] | null
 }
 
@@ -345,6 +346,15 @@ export type KyberMetaResult = {
     source: string | null
     retrieved: string | null
     note: string | null
+    /** The two distinct rate tables in play; the flat fields above describe `copilot_credits` only. */
+    tables: Array<{
+      id: string
+      source: string
+      retrieved: string
+      applies_to: string[]
+      credit_usd?: number
+      note?: string
+    }>
   }
   harnesses: Record<string, unknown>
   sources: Array<{ origin: string; seen: number; new: number }>
@@ -1077,6 +1087,16 @@ export class KyberBridge {
           }
 
           summ = summ ?? {}
+          const block = summ.cost
+          const cost: SessionSummary['cost'] =
+            block && typeof block === 'object' && block.basis && block.status
+              ? {
+                  basis: block.basis,
+                  status: block.status,
+                  ...(typeof block.value === 'number' ? { value: block.value } : {}),
+                  ...(typeof block.currency === 'string' ? { currency: block.currency } : {}),
+                }
+              : { basis: 'unknown', status: 'no_rate' }
           list.push({
             session_id: row.session_id,
             harness: row.harness,
@@ -1092,7 +1112,11 @@ export class KyberBridge {
             request_count: summ.request_count ?? null,
             total_input: summ.total_input ?? null,
             total_output: summ.total_output ?? null,
-            cost_usd: summ.cost?.usd ?? null,
+            cost_usd:
+              cost.status === 'priced' && cost.currency === 'USD' && typeof cost.value === 'number'
+                ? cost.value
+                : null,
+            cost,
             models: Array.isArray(summ.models) ? summ.models : [],
             problems: problemsCount,
           })
@@ -2732,12 +2756,30 @@ export class KyberBridge {
     }
 
     // Rates info
-    let ratesInfo: KyberMetaResult['rates'] = {
-      credit_usd: 0.01,
-      source: 'https://docs.github.com/copilot/reference/copilot-billing/models-and-pricing',
-      retrieved: '2026-08-06',
-      note: "Rates transcribed from GitHub's published models-and-pricing table (USD per 1M tokens x100 = credits per 1M).",
+    const copilotTable: KyberMetaResult['rates']['tables'][number] = {
+      id: 'copilot_credits',
+      source: COPILOT_CREDITS_SOURCE.url,
+      retrieved: COPILOT_CREDITS_SOURCE.retrieved,
+      credit_usd: COPILOT_CREDITS_SOURCE.credit_usd,
+      applies_to: ['copilot'],
+      note: "GitHub's published models-and-pricing table (USD per 1M tokens x100 = credits per 1M).",
     }
+    const publishedTable: KyberMetaResult['rates']['tables'][number] = {
+      id: 'published',
+      source: 'https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json',
+      retrieved: '2026-09-30',
+      applies_to: ['claude-code', 'codex'],
+      note: 'Bundled LiteLLM pricing snapshot (USD per token).',
+    }
+    let ratesInfo: KyberMetaResult['rates'] = {
+      credit_usd: copilotTable.credit_usd ?? 0.01,
+      source: copilotTable.source,
+      retrieved: copilotTable.retrieved,
+      note: 'Flat fields describe the Copilot credits table only; see tables for the published (LiteLLM) and copilot_credits tables.',
+      tables: [publishedTable, copilotTable],
+    }
+    // A ratesPath override replaces the flat Copilot-credits fields and the copilot_credits entry
+    // (they describe the same table); the published LiteLLM entry is never overridden.
     if (this.ratesPath !== undefined && existsSync(this.ratesPath)) {
       try {
         const raw = readFileSync(this.ratesPath, 'utf8')
@@ -2747,6 +2789,15 @@ export class KyberBridge {
           source: parsed.source ?? ratesInfo.source,
           retrieved: parsed.retrieved ?? ratesInfo.retrieved,
           note: parsed.note ?? ratesInfo.note,
+          tables: [
+            publishedTable,
+            {
+              ...copilotTable,
+              credit_usd: parsed.credit_usd ?? copilotTable.credit_usd,
+              source: parsed.source ?? copilotTable.source,
+              retrieved: parsed.retrieved ?? copilotTable.retrieved,
+            },
+          ],
         }
       } catch {}
     }
