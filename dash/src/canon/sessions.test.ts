@@ -218,6 +218,163 @@ describe('buildSessionRow', () => {
     expect(context.turns?.[0]?.residual?.tokens).toBeGreaterThanOrEqual(0)
   })
 
+  // Issue #185: the summary never carried `cache_hit_ratio` or
+  // `cache_creation_coverage`, so the session tiles rendered '—' and "on 0 turns"
+  // beside measured totals. Both are emitted from measured figures only.
+  it('emits measured cache_hit_ratio and cache_creation_coverage in the summary', () => {
+    const row = buildSessionRow(
+      'sess-cache',
+      [
+        turn('c1', [{ part: 'system_prompt', text: 'a'.repeat(400) }], {
+          harness: 'copilot',
+          tokens: tokens({ freshInput: 99000, cacheRead: 1700000, cacheCreation: 1000, reportedInput: 1800000 }),
+        }),
+        turn('c2', [{ part: 'system_prompt', text: 'b'.repeat(400) }], {
+          harness: 'copilot',
+          tokens: tokens({ freshInput: 9000, cacheRead: 86000, cacheCreation: 5000, reportedInput: 100000 }),
+        }),
+        turn('c3', [{ part: 'system_prompt', text: 'c'.repeat(400) }], {
+          harness: 'copilot',
+          tokens: tokens({ freshInput: 0, cacheRead: 0, cacheCreation: 0, output: 50, reportedInput: 0 }),
+        }),
+      ],
+      approximateO200kBase,
+    )
+    const summary = sessionPayload(row).summary as Record<string, unknown>
+    expect(summary.total_input).toBe(1900000)
+    expect(summary.total_cache_read).toBe(1786000)
+    expect(summary.cache_hit_ratio as number).toBeCloseTo(0.94, 4)
+    expect(summary.cache_creation_coverage).toBe(2)
+  })
+
+  it('omits cache_hit_ratio when input is unmeasurable, never zero', () => {
+    const unavailableCounter = {
+      availability: 'not_measurable' as const,
+      reason: 'Cursor hook events do not include input-token counters.',
+    }
+    const row = buildSessionRow(
+      'sess-cache-unmeasurable',
+      [
+        turn('cu1', [], {
+          source: 'cursor-hook',
+          harness: 'cursor',
+          tokens: tokens({ freshInput: 0, reportedInput: 0 }),
+          measurability: { token_usage: unavailableCounter },
+        }),
+      ],
+      approximateO200kBase,
+    )
+    const summary = sessionPayload(row).summary as Record<string, unknown>
+    expect(summary.total_input).toEqual(unavailableCounter)
+    expect('cache_hit_ratio' in summary).toBe(false)
+    // Review (Kilo K1 / Copilot C3): coverage with it — turns existing is not
+    // a measured counter.
+    expect('cache_creation_coverage' in summary).toBe(false)
+    expect(JSON.stringify(summary)).not.toContain('"cache_hit_ratio":0')
+  })
+
+  // Review re-review #2 (Kilo 7): OpenCode is catalogued `not_measurable`
+  // with documented confidence — a verified negative, not an uncatalogued
+  // gap — so its cache figures stay absent like any unsupported harness.
+  it('omits cache figures for a documented-unmeasurable harness', () => {
+    const row = buildSessionRow(
+      'sess-opencode-cache',
+      [
+        turn('o1', [{ part: 'system_prompt', text: 'a'.repeat(400) }], {
+          harness: 'opencode',
+          tokens: tokens({ freshInput: 1200, cacheRead: 0, cacheCreation: 0, reportedInput: 1200 }),
+        }),
+      ],
+      approximateO200kBase,
+    )
+    const summary = sessionPayload(row).summary as Record<string, unknown>
+    expect(summary.total_input).toBe(1200)
+    expect('cache_hit_ratio' in summary).toBe(false)
+    expect('cache_creation_coverage' in summary).toBe(false)
+  })
+
+  // Review re-review (Kilo 1): Codex is `supported` yet exports no
+  // cache-creation counter, so coverage stays absent while the read ratio
+  // (which Codex does export) is still emitted.
+  it('omits creation coverage where the harness vocabulary holds no such counter', () => {
+    const row = buildSessionRow(
+      'sess-codex-cache',
+      [
+        turn('x1', [{ part: 'system_prompt', text: 'a'.repeat(400) }], {
+          harness: 'codex',
+          tokens: tokens({ freshInput: 900, cacheRead: 300, cacheCreation: 0, reportedInput: 1200 }),
+        }),
+      ],
+      approximateO200kBase,
+    )
+    const summary = sessionPayload(row).summary as Record<string, unknown>
+    expect(summary.total_input).toBe(1200)
+    expect(summary.cache_hit_ratio as number).toBeCloseTo(0.25, 5)
+    expect('cache_creation_coverage' in summary).toBe(false)
+  })
+
+  // Review re-review (Kilo 2): the ratio beside coverage already requires
+  // input > 0; a measured zero input emits neither key.
+  it('omits cache figures when the measured input is zero', () => {
+    const row = buildSessionRow(
+      'sess-zero-input',
+      [
+        turn('z1', [{ part: 'system_prompt', text: 'a'.repeat(400) }], {
+          harness: 'copilot',
+          tokens: tokens({ freshInput: 0, cacheRead: 0, cacheCreation: 0, output: 0, reportedInput: 0 }),
+        }),
+      ],
+      approximateO200kBase,
+    )
+    const summary = sessionPayload(row).summary as Record<string, unknown>
+    expect(summary.total_input).toBe(0)
+    expect('cache_hit_ratio' in summary).toBe(false)
+    expect('cache_creation_coverage' in summary).toBe(false)
+  })
+
+  // Review (Copilot C2/C3): Cursor declares no cache counters, so even with a
+  // measured input the cache figures are absent — never a 0% ratio or an
+  // "on 0 turns" count beside stored zeros.
+  it('omits cache figures for a harness that exports no cache counters', () => {
+    const row = buildSessionRow(
+      'sess-cursor-cache',
+      [
+        turn('cc1', [{ part: 'system_prompt', text: 'a'.repeat(400) }], {
+          source: 'cursor-hook',
+          harness: 'cursor',
+          tokens: tokens({ freshInput: 1200, cacheRead: 0, cacheCreation: 0, reportedInput: 1200 }),
+        }),
+      ],
+      approximateO200kBase,
+    )
+    const summary = sessionPayload(row).summary as Record<string, unknown>
+    expect(summary.total_input).toBe(1200)
+    expect('cache_hit_ratio' in summary).toBe(false)
+    expect('cache_creation_coverage' in summary).toBe(false)
+  })
+
+  // Issue #187: the engine's measured per-turn input never reached the wire —
+  // `TurnPressure` carries no input figure — so the composition view fell back to
+  // `bucketedTokens` and reported residual 0.0% for unattributed input.
+  it('carries the measured per-turn input on serialized context turns', () => {
+    const row = buildSessionRow(
+      'sess-reported',
+      [
+        turn('r1', [{ part: 'system_prompt', text: 'short', tokens: 124 }], {
+          tokens: tokens({ freshInput: 66600, cacheRead: 0, cacheCreation: 0, reportedInput: 66600 }),
+        }),
+      ],
+      approximateO200kBase,
+    )
+    const context = sessionPayload(row).context
+    const wire = JSON.parse(JSON.stringify(context)) as {
+      turns: Array<{ reported_input?: unknown; residual?: { tokens: number } }>
+    }
+    expect(wire.turns).toHaveLength(1)
+    expect(wire.turns[0]!.reported_input).toBe(66600)
+    expect(wire.turns[0]!.residual?.tokens).toBe(66600 - 124)
+  })
+
   it('ranks each tool in an aggregate catalogue, not the catalogue as one tool', () => {
     // Harnesses send the whole tool list as a single JSON array. Left
     // unsplit it ranks as one tool whose name is the entire blob.

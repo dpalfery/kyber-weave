@@ -917,3 +917,68 @@ describe('extractNormalizedContextTurns — server attribution', () => {
     expect(rows[0]?.servers).toEqual({ context7: 2000 })
   })
 })
+
+// Issue #187: a turn whose measured input dwarfs its buckets must show the
+// gap as residual — never "Residual: 0.0%" — and a composition with no
+// measured input basis must say so instead of printing a zero.
+describe('SessionSpendCharts residual honesty (issue #187)', () => {
+  it('attributes the engine residual instead of reporting 0.0%', () => {
+    const data: ContextCompositionData = {
+      measurable: true,
+      contextLimit: 200000,
+      turns: [
+        {
+          index: 1,
+          buckets: { system_prompt: 124 },
+          reported_input: 66600,
+          residual: { tokens: 66476, attribution: 'tokenizer_drift' },
+        },
+      ],
+    }
+    const rows = extractNormalizedContextTurns(data)
+    expect(rows).toHaveLength(1)
+    expect(rows[0]!.buckets.residual).toBe(66476)
+    expect(rows[0]!.hasMeasuredInput).toBe(true)
+
+    const text = normalizedRenderText(React.createElement(ContextCompositionChart, { context: data }))
+    expect(text).toContain('Residual: 99.8')
+    expect(text).not.toContain('Residual: 0.0')
+  })
+
+  it('renders not measurable instead of 0.0% with no measured input basis', () => {
+    const data: ContextCompositionData = {
+      measurable: true,
+      contextLimit: 200000,
+      turns: [{ index: 1, buckets: { system_prompt: 124 } }],
+    }
+    const rows = extractNormalizedContextTurns(data)
+    expect(rows).toHaveLength(1)
+    expect(rows[0]!.hasMeasuredInput).toBe(false)
+
+    const text = normalizedRenderText(React.createElement(ContextCompositionChart, { context: data }))
+    expect(text).toContain('not measurable')
+    expect(text).not.toContain('0.0%')
+  })
+
+  it('keeps a fully-bucketed turn at a measured 0.0%', () => {
+    const data: ContextCompositionData = {
+      measurable: true,
+      contextLimit: 200000,
+      turns: [
+        {
+          index: 1,
+          buckets: { system_prompt: 124 },
+          reported_input: 124,
+          residual: { tokens: 0, attribution: 'tokenizer_drift' },
+        },
+      ],
+    }
+    const rows = extractNormalizedContextTurns(data)
+    expect(rows[0]!.buckets.residual).toBe(0)
+    expect(rows[0]!.hasMeasuredInput).toBe(true)
+
+    const text = normalizedRenderText(React.createElement(ContextCompositionChart, { context: data }))
+    expect(text).toContain('Residual: 0.0')
+    expect(text).not.toContain('not measurable')
+  })
+})

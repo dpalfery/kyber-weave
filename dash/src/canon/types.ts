@@ -324,6 +324,32 @@ export type ExecutionRow = {
   payload?: unknown
 }
 
+/**
+ * One measured turn row served on the run detail payload (issue #183).
+ *
+ * Every figure is measured or omitted — never 0 for unmeasured data.
+ * `turnIndex` keeps the #184 transport convention: 0-based per execution.
+ */
+export type RunTurnRow = {
+  turnIndex: number
+  executionId?: string
+  sessionId?: string
+  model?: string
+  /** Input + output when both are measured. */
+  tokens?: number
+  inputTokens?: number
+  outputTokens?: number
+  /** Priced figure only; absent when the turn's cost block is unpriced. */
+  costUsd?: number
+  /** The turn's own cost block is partial — its figure is real but incomplete. */
+  costStatus?: 'partial'
+  /** Joined positionally from the session's context turns; omitted on mismatch. */
+  contextPressure?: number
+  /** cache_read ÷ input when input > 0. */
+  cacheHitRatio?: number
+  timestamp?: string
+}
+
 /** Hierarchical node in the execution tree. */
 export type ExecutionTreeNode = ExecutionRow & {
   children: ExecutionTreeNode[]

@@ -794,7 +794,10 @@ describe('sessionTokenTotals', () => {
     store.close()
   })
 
-  it('treats a not_measurable total as zero rather than coercing the object', () => {
+  // Open thread harnesses.ts:416 — a not_measurable total is absence shaped
+  // as an object, not a zero. Coercing it feeds an invented 0 into the
+  // delegation denominator, so the accessor reports unknown instead.
+  it('reports unknown when either total is not_measurable', () => {
     const store = new CanonStore(':memory:')
     store.upsertSession({
       sessionId: 's1',
@@ -812,7 +815,7 @@ describe('sessionTokenTotals', () => {
       },
     })
 
-    expect(store.sessionTokenTotals('s1')).toEqual({ input: 0, output: 7 })
+    expect(store.sessionTokenTotals('s1')).toBeUndefined()
     store.close()
   })
 

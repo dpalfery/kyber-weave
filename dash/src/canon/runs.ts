@@ -88,6 +88,21 @@ export type DeriveRunIdentityOptions = {
 }
 
 /**
+ * The seed for a `derived:` run id, with one leading harness segment removed.
+ *
+ * Native session ids may already carry the harness name
+ * (`claude-desktop:<uuid>`), and composing the harness onto them a second time
+ * minted `derived:<harness>:<harness>:<id>` (issue #183). Stripping one leading
+ * segment keeps the harness exactly once; a seed that merely contains the name
+ * elsewhere is untouched, and callers that pass an explicit `fallbackRunId`
+ * keep full control of it.
+ */
+function derivedRunSeed(harness: string, seed: string): string {
+  const prefix = `${harness}:`
+  return seed.startsWith(prefix) ? seed.slice(prefix.length) : seed
+}
+
+/**
  * Derives run identity for a record or set of records following Decision D13.
  * If the harness emitted an explicit run identifier, groupingBasis is 'explicit'.
  * Otherwise, groupingBasis is ALWAYS 'derived' with the applied heuristic rule named.
@@ -149,7 +164,7 @@ export function deriveRunIdentity(
   // Fallback: one-session or one-execution derived run
   const fallback = options?.fallbackRunId ?? first.sessionId ?? first.traceId ?? first.spanId
   return {
-    runId: `derived:${first.harness}:${fallback}`,
+    runId: `derived:${first.harness}:${derivedRunSeed(first.harness, fallback)}`,
     groupingBasis: 'derived',
     groupingRule: 'session_fallback',
     workingDirectory: cwd,
@@ -507,7 +522,7 @@ export async function buildRuns(
       for (const cand of harnessCandidates) {
         plannedRuns.push({
           run: {
-            runId: `derived:${harness}:${cand.executionId}`,
+            runId: `derived:${harness}:${derivedRunSeed(harness, cand.executionId)}`,
             harness,
             label: cand.agentName ?? cand.executionId,
             groupingBasis: 'derived',
@@ -613,7 +628,7 @@ export async function buildRuns(
     for (const cand of noCwd) {
       plannedRuns.push({
         run: {
-          runId: `derived:${harness}:${cand.executionId}`,
+          runId: `derived:${harness}:${derivedRunSeed(harness, cand.executionId)}`,
           harness,
           label: cand.agentName ?? cand.executionId,
           groupingBasis: 'derived',

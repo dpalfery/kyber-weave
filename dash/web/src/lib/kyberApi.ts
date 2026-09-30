@@ -242,8 +242,10 @@ export interface KyberContextTurn {
   freshInput: number
   freshJumpFactor?: number
   freshInputJump?: { previous: number; factor: number }
-  // Read defensively: the bucket drill-down probes a reported-input figure on
-  // turn rows too, though the engine's TurnPressure does not carry one.
+  // The engine's measured per-turn input, served since issue #187
+  // (`serializeContext` emits the engine's `inputTokens` under this key).
+  // Read defensively all the same: legacy rows predate it, and the bucket
+  // drill-down probes a reported-input figure on turn rows too.
   reported_input?: KyberMeasuredFigure
   // Read defensively: legacy rows numbered turns under `turn`.
   turn?: number
@@ -477,6 +479,8 @@ export interface ScorecardData {
     costUsd?: number | null
     basis?: string
     status?: DiagnosticAvailability
+    /** Visible "(partial)" marker when the total is a subtotal. */
+    partial?: boolean
   }
 }
 
@@ -562,6 +566,12 @@ export interface KyberRunSummary {
   totalInput?: number | null
   totalOutput?: number | null
   costUsd?: number | null
+  /** Present only when `costUsd` sums priced sessions beside unpriced ones. */
+  costStatus?: 'partial'
+  /** Present when any run figure is a subtotal over incomplete sessions. */
+  partial?: boolean
+  /** Names exactly which run figures are subtotals, so views mark the right cells. */
+  partialFields?: Array<'turnCount' | 'totalInput' | 'totalOutput' | 'costUsd'>
   outcome?: {
     status?: string
     exitCode?: number | null
@@ -571,7 +581,13 @@ export interface KyberRunSummary {
     reason?: string
   } | null
   findingCount?: number
-  scorecard?: ScorecardData
+  /**
+   * Engine-served scorecard dimensions (R11.14: the engine derives, the
+   * browser renders). Harness rows carry the harness rollup's scorecard;
+   * run rows carry the run-scoped scorecard (issue #183, Q2) whose reasons
+   * are scoped to the run, never a claim about harness telemetry.
+   */
+  scorecard?: ServedHarnessScorecard
   payload?: Record<string, unknown>
 }
 
@@ -609,6 +625,8 @@ export interface KyberRunTurn {
   inputTokens?: number
   outputTokens?: number
   costUsd?: number | null
+  /** The turn's own cost block is partial — its figure is real but incomplete. */
+  costStatus?: 'partial'
   contextPressure?: number | null
   cacheHitRatio?: number | null
   timestamp?: string | null
@@ -642,6 +660,8 @@ export async function fetchRun(runId: string): Promise<KyberRunDetail> {
     executionTree?: KyberExecutionSummary[]
     executions?: KyberExecutionSummary[]
     findings?: KyberFinding[]
+    turns?: KyberRunTurn[]
+    scorecard?: ServedHarnessScorecard
   }>(`/api/kyber/run/${encodeURIComponent(runId)}`)
 
   const run = json.run ?? (json as unknown as KyberRunSummary)
@@ -650,6 +670,10 @@ export async function fetchRun(runId: string): Promise<KyberRunDetail> {
     executionTree: json.executionTree ?? [],
     executions: json.executions ?? [],
     findings: json.findings ?? [],
+    // Issue #183: the detail payload serves measured turn rows and a
+    // run-scoped scorecard; both ride through when present.
+    ...(Array.isArray(json.turns) ? { turns: json.turns } : {}),
+    ...(json.scorecard && typeof json.scorecard === 'object' ? { scorecard: json.scorecard } : {}),
   }
 }
 

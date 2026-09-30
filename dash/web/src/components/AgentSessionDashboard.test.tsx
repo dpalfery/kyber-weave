@@ -1536,3 +1536,26 @@ describe('findContextTurn (shared 1-based context lookup)', () => {
     expect(findContextTurn(rows, 2)).toEqual({ turn: 2 })
   })
 })
+
+// Issue #185: a legacy payload carrying cache creation but no coverage count
+// must not print "on 0 turns" — absence is not a measured zero.
+describe('AgentSessionDashboard cache tiles (issue #185)', () => {
+  it('renders honest absence instead of "on 0 turns" when coverage is unreported', () => {
+    const { summary, ...rest } = sampleSession
+    const legacy = {
+      ...rest,
+      summary: {
+        ...summary,
+        total_cache_creation: 10800000,
+        cache_creation_coverage: undefined,
+        cache_hit_ratio: undefined,
+      },
+    }
+    const html = renderHtml(<AgentSessionDashboard session={legacy} />)
+
+    expect(html).toContain('Cache Creation')
+    expect(html).not.toContain('on 0 turns')
+    // The ratio tile falls back to its honest dash without a served ratio.
+    expect(html).toContain('Cache Hit Ratio')
+  })
+})
