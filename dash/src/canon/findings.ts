@@ -10,6 +10,7 @@
 // `execution`: a rebuild is authoritative, and rows the detectors no longer emit are pruned.
 
 import { detectFindings } from '../analysis/findings.js'
+import { dedupeTwinTurns } from './twin-dedupe.js'
 import { CanonStore } from './store.js'
 import type { CanonicalRecord } from './types.js'
 
@@ -36,15 +37,19 @@ export function buildFindings(store: CanonStore): BuildFindingsReport {
   const identities = store.sessionIdentities()
 
   for (const run of store.listRuns()) {
-    const records: CanonicalRecord[] = []
+    const gathered: CanonicalRecord[] = []
     for (const execution of store.listExecutions(run.runId)) {
       const sessionId = execution.sessionId ?? execution.executionId
       const share = identities.shareOf(sessionId)
-      records.push(
+      gathered.push(
         ...(share === undefined ? store.recordsForSession(sessionId) : store.recordsForShare(share.key, share.harness)),
       )
     }
-    if (records.length === 0) continue
+    if (gathered.length === 0) continue
+    // Twin collectors describe the same turns twice (issue #182, ADR 0009
+    // D4): detectors that count or sum across turns (duplicate-tool-call,
+    // unbounded-delegation) would read one conversation as two.
+    const records = dedupeTwinTurns(gathered)
 
     report.runsExamined += 1
 

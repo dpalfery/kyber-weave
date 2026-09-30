@@ -10,6 +10,7 @@
 import {
   harnessDimensionAvailability,
   isExcludedHarnessIdentity,
+  normalizeHarnessName,
 } from './measurability.js'
 import { HARNESS_DESCRIPTORS } from '../refresh/registry.js'
 import { CanonStore } from './store.js'
@@ -90,6 +91,8 @@ type SessionDigest = {
   peakPressures: number[]
   /** Whether any session's pressure came from derived rather than measured counts. */
   anyDerived: boolean
+  /** Sessions whose context window no source reported (issue #181). */
+  unknownWindowSessions: number
   totalCacheRead: number
   totalInput: number
   totalDefinedTools: number
@@ -102,6 +105,7 @@ function digestSessions(store: CanonStore, harness: string): SessionDigest {
     count: 0,
     peakPressures: [],
     anyDerived: false,
+    unknownWindowSessions: 0,
     totalCacheRead: 0,
     totalInput: 0,
     totalDefinedTools: 0,
@@ -116,15 +120,24 @@ function digestSessions(store: CanonStore, harness: string): SessionDigest {
     digest.count += 1
 
     // Context pressure: the peak of a session's per-turn pressures.
+    // Pressures measured against the guessed 200,000 default window are
+    // skipped (issue #181, honest unobservability): a ratio against an
+    // unreported denominator presented as harness pressure is the same
+    // fabrication the compaction detector stopped emitting.
     const context = payload.context
-    if (context && context.measurable === true && Array.isArray(context.turns) && context.turns.length > 0) {
+    const windowUnknown = (context as { contextLimitSource?: string } | undefined)?.contextLimitSource === 'default'
+    if (windowUnknown) digest.unknownWindowSessions += 1
+    if (context && context.measurable === true && !windowUnknown && Array.isArray(context.turns) && context.turns.length > 0) {
       const pressures = context.turns
         .map((t: unknown) => (t as { pressure?: number })?.pressure)
         .filter((pressure: unknown): pressure is number => typeof pressure === 'number' && Number.isFinite(pressure))
       if (pressures.length > 0) digest.peakPressures.push(Math.max(...pressures))
       if (context.derivedCounts) digest.anyDerived = true
-    } else if (Array.isArray(payload.turns) && payload.turns.length > 0) {
-      const limit = Number(payload.context?.contextLimit ?? 200_000)
+    } else if (!windowUnknown && Array.isArray(payload.turns) && payload.turns.length > 0) {
+      // Legacy fallback path: pressures can only be derived when the payload
+      // names a real window. A missing window is unknown, not 200,000.
+      const limit = Number(payload.context?.contextLimit ?? NaN)
+      if (!Number.isFinite(limit) || limit <= 0) continue
       const pressures = payload.turns
         .map((t: unknown) => {
           const input = (t as { input?: number })?.input
@@ -253,9 +266,14 @@ export function buildRollupForHarness(store: CanonStore, harness: string): Harne
       measurability['context_pressure_median'] = classTag
       measurability['context_pressure_p95'] = classTag
     } else {
-      const notMeas = notMeasurable(
-        `No measurable turns found in recorded sessions for harness "${harness}".`,
-      )
+      // Sessions exist but none names a window its pressures were measured
+      // against: say so, so an empty gauge cannot read as "all clear".
+      const notMeas =
+        digest.unknownWindowSessions > 0
+          ? notMeasurable(
+              `No source reported a context window for ${digest.unknownWindowSessions} recorded session(s) for harness "${harness}"; pressure is unmeasurable, not zero.`,
+            )
+          : notMeasurable(`No measurable turns found in recorded sessions for harness "${harness}".`)
       measurability['context_pressure'] = notMeas
       measurability['context_pressure_median'] = notMeas
       measurability['context_pressure_p95'] = notMeas
@@ -427,7 +445,12 @@ export function buildHarnessRollup(
     return row
   }
 
-  const registered = HARNESS_DESCRIPTORS.map((descriptor) => descriptor.harnessId)
+  const registered = Array.from(
+    // Folded front-ends seed no rollup of their own (issue #182): a row that
+    // can never gain a session is dead UI beside the harness it merged into.
+    // Refresh jobs still collect under the raw names; the derived layer folds.
+    new Set(HARNESS_DESCRIPTORS.map((descriptor) => normalizeHarnessName(descriptor.harnessId))),
+  )
   const observed = store.listHarnesses().filter((harness) => !isExcludedHarnessIdentity(harness))
   const allHarnesses = Array.from(new Set([...registered, ...observed])).sort()
 

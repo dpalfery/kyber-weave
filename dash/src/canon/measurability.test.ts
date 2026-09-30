@@ -440,7 +440,7 @@ describe('cacheAvailability and prefixAvailability (Task E4)', () => {
     expect(normalizeHarnessName('Claude-Code')).toBe('claude-code')
     expect(normalizeHarnessName('copilot-chat')).toBe('copilot-vscode')
     expect(normalizeHarnessName('copilot-cli')).toBe('copilot-cli')
-    expect(normalizeHarnessName('cursor-agent')).toBe('cursor-agent')
+    expect(normalizeHarnessName('cursor-agent')).toBe('cursor')
     expect(normalizeHarnessName('cascade')).toBe('windsurf')
     expect(normalizeHarnessName('roo')).toBe('roo-code')
     expect(normalizeHarnessName('cline-cli')).toBe('cline-cli')

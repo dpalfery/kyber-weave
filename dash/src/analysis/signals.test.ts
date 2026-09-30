@@ -696,6 +696,10 @@ describe('CanonStore detector_version stamp & Decision D17 compliance', () => {
     expect(store.getMetadata('schema_version')).toBe(String(SCHEMA_VERSION))
     expect(store.getMetadata('detector_version')).toBe(String(DETECTOR_VERSION))
     expect(store.getDetectorVersion()).toBe(DETECTOR_VERSION)
+    // Issues #181/#182/#191 changed detector semantics (honest compaction
+    // windows, folded harness identity, rebuilt findings): the stamp proves
+    // a store's findings were built after the change.
+    expect(DETECTOR_VERSION).toBe(2)
     expect(store.hasCurrentDetectorVersion()).toBe(true)
     expect(store.isDetectorOutdated()).toBe(false)
     store.close()

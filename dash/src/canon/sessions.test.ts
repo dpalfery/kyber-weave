@@ -619,10 +619,11 @@ describe('canonical harness on derived sessions', () => {
   }
 
   it('stamps the canonical harness, not the front-end name', () => {
+    // Issue #182: cursor-agent folds onto cursor at the derived layer.
     const row = buildSessionRow('s1', [aliased('a1', 'cursor-agent', 's1')], approximateO200kBase)
 
-    expect(row.harness).toBe('cursor-agent')
-    expect((row.payload as { harness: string }).harness).toBe('cursor-agent')
+    expect(row.harness).toBe('cursor')
+    expect((row.payload as { harness: string }).harness).toBe('cursor')
   })
 
   it('maps a generic Claude client to unclassified rather than guessing CLI', () => {
@@ -639,12 +640,13 @@ describe('canonical harness on derived sessions', () => {
 
     await buildSessions(store)
 
-    expect(store.listSessions('cursor-agent')).toHaveLength(1)
-    expect(store.listSessions('cursor')).toHaveLength(0)
+    expect(store.listSessions('cursor')).toHaveLength(1)
+    expect(store.listSessions('cursor-agent')).toHaveLength(0)
     store.close()
   })
 
-  it('builds separate sessions when the same native id arrives on split surfaces', async () => {
+  it('merges twin front-ends into one session and one run', async () => {
+    // Issue #182: one native id on cursor + cursor-agent is one session.
     const store = new CanonStore(':memory:')
     store.upsertMany([
       aliased('a1', 'cursor', 'sess-alias'),
@@ -653,12 +655,12 @@ describe('canonical harness on derived sessions', () => {
 
     const report = await buildSessions(store)
 
-    expect(report.built).toBe(2)
-    expect(store.sessionCount()).toBe(2)
+    expect(report.built).toBe(1)
+    expect(store.sessionCount()).toBe(1)
     expect(store.listSessions('cursor')).toHaveLength(1)
-    expect(store.listSessions('cursor-agent')).toHaveLength(1)
+    expect(store.listSessions('cursor-agent')).toHaveLength(0)
     const runs = store.listRuns()
-    expect(runs).toHaveLength(2)
+    expect(runs).toHaveLength(1)
     for (const run of runs) {
       expect(store.listExecutions(run.runId).length).toBeGreaterThan(0)
     }

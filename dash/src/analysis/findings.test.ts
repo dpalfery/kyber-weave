@@ -401,6 +401,46 @@ describe('Detector 5: compaction-hazard', () => {
     expect(f.evidenceLinks.length).toBeGreaterThanOrEqual(2)
   })
 
+  it('emits no finding when no source reported a window (issue #181)', () => {
+    // 190,000 tokens is 95% of the 200,000 fallback, but the fallback is a
+    // guess, not a measurement: an unknown window must surface as unknown
+    // (honest unobservability), never as a deterministic 95% finding.
+    const turn1 = makeMockRecord({
+      spanId: 'turn-early',
+      tokens: { freshInput: 100_000, cacheRead: 0, cacheCreation: 0, output: 100, reportedInput: 100_000, reportedOutput: 100 },
+    })
+    const turn2 = makeMockRecord({
+      spanId: 'turn-peak',
+      tokens: { freshInput: 190_000, cacheRead: 0, cacheCreation: 0, output: 100, reportedInput: 190_000, reportedOutput: 100 },
+    })
+
+    expect(makeMockRecord({}).raw).toBeUndefined()
+    const findings = detectCompactionHazard({ records: [turn1, turn2] })
+
+    expect(findings).toHaveLength(0)
+  })
+
+  it('downgrades a peak above the reported window instead of claiming a percentage (issue #181)', () => {
+    // A 1,278,417-token "single-turn peak" against a reported 200,000
+    // window (639%) is physically impossible for one turn's context: the
+    // attribution aggregates child calls. The spend is real signal, but the
+    // single-turn reading is not deterministic.
+    const turn = makeMockRecord({
+      spanId: 'turn-peak',
+      raw: { 'gen_ai.request.max_context_tokens': 200_000 },
+      tokens: { freshInput: 1_278_417, cacheRead: 0, cacheCreation: 0, output: 100, reportedInput: 1_278_417, reportedOutput: 100 },
+    })
+
+    const findings = detectCompactionHazard({ records: [turn] })
+
+    expect(findings).toHaveLength(1)
+    const f = findings[0]!
+    expect(f.confidence).toBe('heuristic')
+    expect(f.measurementClass).toBe('inferred')
+    expect(f.mechanism).toMatch(/aggregat/i)
+    expect(f.payload?.contextLimitSource).toBe('reported')
+  })
+
   it('does NOT flag when peak tokens remain below 85%', () => {
     const turn = makeMockRecord({
       spanId: 'turn-normal',
@@ -759,12 +799,14 @@ describe('Detector 5: compaction-hazard', () => {
       spanId: 'claude-early',
       sessionId: 'mixed-sess',
       harness: 'claude',
+      raw: { 'gen_ai.request.max_context_tokens': 200_000 },
       tokens: { freshInput: 100_000, cacheRead: 0, cacheCreation: 0, output: 100, reportedInput: 100_000, reportedOutput: 100 },
     })
     const claudeTurn2 = makeMockRecord({
       spanId: 'claude-peak',
       sessionId: 'mixed-sess',
       harness: 'claude',
+      raw: { 'gen_ai.request.max_context_tokens': 200_000 },
       tokens: { freshInput: 190_000, cacheRead: 0, cacheCreation: 0, output: 100, reportedInput: 190_000, reportedOutput: 100 },
     })
 
@@ -772,14 +814,16 @@ describe('Detector 5: compaction-hazard', () => {
       records: [geminiTurn, claudeTurn1, claudeTurn2],
     })
 
-    // The claude session fires against its own (default) 200,000 window:
+    // The claude session fires against its own reported 200,000 window:
     // 190,000 is 20,000 over the 85% line — not 19% of a borrowed window.
+    // (Issue #181: had no turn reported a window, there would be no finding
+    // at all rather than a default-window one.)
     expect(findings.length).toBe(1)
     const f = findings[0]!
     expect(f.sessionId).toBe('mixed-sess')
     expect(f.estimatedWasteTokens).toBe(20_000)
     expect(f.payload?.contextLimit).toBe(200_000)
-    expect(f.payload?.contextLimitSource).toBe('default')
+    expect(f.payload?.contextLimitSource).toBe('reported')
   })
 
   it('does NOT flag a session whose reported window keeps its peak below 85%', () => {
@@ -855,7 +899,7 @@ describe('Detector 5: compaction-hazard', () => {
     expect(f.payload?.contextLimitSource).toBe('reported')
   })
 
-  it('marks a finding measured against the default window with contextLimitSource "default"', () => {
+  it('emits no finding when only the default window would apply (issue #181)', () => {
     const turn1 = makeMockRecord({
       spanId: 'turn-early',
       op: 'llm.invoke',
@@ -871,12 +915,10 @@ describe('Detector 5: compaction-hazard', () => {
       records: [turn1, turn2],
     })
 
-    // No record reports a window, so the fallback default applies — and the
-    // payload has to say so instead of presenting 200,000 as a measurement.
-    expect(findings.length).toBe(1)
-    const f = findings[0]!
-    expect(f.payload?.contextLimit).toBe(200_000)
-    expect(f.payload?.contextLimitSource).toBe('default')
+    // No record reports a window, so there is no honest denominator: the
+    // detector stays silent instead of presenting the 200,000 fallback as a
+    // measurement (honest unobservability, issue #181).
+    expect(findings.length).toBe(0)
   })
 })
 
@@ -1359,6 +1401,94 @@ describe('Server Bridge & API Route: /api/kyber/findings', () => {
     const detailParsed = JSON.parse(detailBody)
     expect(detailParsed.id).toBe('f-api-1')
     expect(detailParsed.detectorId).toBe('dormant-tool-schema')
+
+    bridge.close()
+    store.close()
+  })
+
+  it('filters by detector and harness server-side with paged envelope (issue #191)', () => {
+    // 30 findings: 12 duplicate-tool-call, 10 compaction-hazard,
+    // 8 dormant-tool-schema, alternating cursor / claude-code owners.
+    const path = tempStorePath()
+    const store = new CanonStore(path)
+    const detectors = [
+      ...Array<string>(12).fill('duplicate-tool-call'),
+      ...Array<string>(10).fill('compaction-hazard'),
+      ...Array<string>(8).fill('dormant-tool-schema'),
+    ]
+    detectors.forEach((detectorId, i) => {
+      store.upsertFinding({
+        id: `f-page-${i}`,
+        detectorId: detectorId as Finding['detectorId'],
+        title: `Finding ${i}`,
+        mechanism: 'm',
+        evidenceLinks: [],
+        confidence: 'deterministic',
+        estimatedWasteTokens: 100,
+        recommendation: 'r',
+        errorBar: { lower: 80, upper: 120 },
+        outcomeRiskCaveat: 'c',
+        rankScore: 1000 - i,
+        payload: { harness: i % 2 === 0 ? 'Cursor' : 'claude-code' },
+      })
+    })
+    const bridge = new KyberBridge({ canonPath: path, store })
+
+    const page = bridge.listFindingsPage({ detector: 'duplicate-tool-call' })
+    expect(page.findings).toHaveLength(12)
+    expect(page.total).toBe(12)
+    expect(page.detectorCounts).toMatchObject({
+      'duplicate-tool-call': 12,
+      'compaction-hazard': 0,
+      'dormant-tool-schema': 0,
+    })
+
+    const harnessed = bridge.listFindingsPage({ harness: 'cursor' })
+    expect(harnessed.total).toBe(15)
+    expect(harnessed.findings.every((f) => (f as unknown as { harness?: unknown }).harness?.toString().toLowerCase() === 'cursor')).toBe(true)
+
+    const second = bridge.listFindingsPage({ limit: 10, offset: 10 })
+    expect(second.findings).toHaveLength(10)
+    expect(second.total).toBe(30)
+    expect(second.limit).toBe(10)
+    expect(second.offset).toBe(10)
+    expect(second.findings[0]?.id).toBe('f-page-10')
+    const counted = Object.values(second.detectorCounts).reduce((a, b) => a + b, 0)
+    expect(counted).toBe(30)
+
+    // The envelope is additive: legacy `findings` readers keep working.
+    expect(Array.isArray(second.findings)).toBe(true)
+    expect(second.findings[0]?.detectorId).toBe('duplicate-tool-call')
+
+    bridge.close()
+    store.close()
+  })
+
+  it('counts sessions with an unknown context window (issue #191, condition 3)', () => {
+    const path = tempStorePath()
+    const store = new CanonStore(path)
+    const session = (id: string, source: string | undefined) =>
+      store.upsertSession({
+        sessionId: id,
+        harness: 'cursor',
+        payload: {
+          context: {
+            measurable: true,
+            contextLimit: 200_000,
+            ...(source === undefined ? {} : { contextLimitSource: source }),
+            turns: [],
+          },
+        },
+      })
+    session('s-known', 'reported')
+    session('s-unknown-1', 'default')
+    session('s-unknown-2', 'default')
+    session('s-legacy', undefined)
+    const bridge = new KyberBridge({ canonPath: path, store })
+
+    expect(bridge.listFindingsPage({}).unknownWindowSessions).toBe(2)
+    expect(bridge.listFindingsPage({ harness: 'cursor' }).unknownWindowSessions).toBe(2)
+    expect(bridge.listFindingsPage({ harness: 'claude-code' }).unknownWindowSessions).toBe(0)
 
     bridge.close()
     store.close()

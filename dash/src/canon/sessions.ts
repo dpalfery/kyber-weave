@@ -18,6 +18,7 @@ import { auxiliarySpend, buildTimeline, subagentSessions } from '../analysis/tim
 import { measuredInput, sumCosts } from './cost.js'
 import { contextLimitOf } from './context-window.js'
 import { groupByCanonicalHarness, normalizeHarnessName } from './measurability.js'
+import { dedupeTwinTurns } from './twin-dedupe.js'
 import { buildFindings } from './findings.js'
 import { buildHarnessRollup } from './harnesses.js'
 import { buildRuns } from './runs.js'
@@ -302,8 +303,16 @@ export async function buildSessions(store: CanonStore): Promise<BuildSessionsRep
         report.skipped += 1
         continue
       }
+      // Twin front-end collectors describe the same turns twice (issue #182,
+      // ADR 0009 D4): collapse same-turn observations before the row sums
+      // them, or the merged session double-counts one conversation.
+      const merged = dedupeTwinTurns(records)
+      if (merged.length === 0 || !hasEvidence(merged)) {
+        report.skipped += 1
+        continue
+      }
       const sessionId = identities.claim(key.key, harness)
-      store.upsertSession(buildSessionRow(sessionId, records, countTokens))
+      store.upsertSession(buildSessionRow(sessionId, merged, countTokens))
       built.add(sessionId)
       report.built += 1
     }

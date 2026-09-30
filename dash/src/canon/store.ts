@@ -85,7 +85,7 @@ export const SCHEMA_VERSION = 14
  * When detectors change, this version stamp is bumped to force automatic
  * recomputation of derived findings and signals over stored canonical records.
  */
-export const DETECTOR_VERSION = 1
+export const DETECTOR_VERSION = 2
 
 /**
  * The whole schema, as code. `CREATE ... IF NOT EXISTS` throughout so
@@ -910,6 +910,24 @@ INSERT OR REPLACE INTO records (
   measurability_json, parts_json, raw
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
+
+/** Server-side finding filters (issue #191): detector and harness narrow the
+ * set; offset/limit page it. `total`/`detectorCounts` callers re-query
+ * without limit/offset over the same narrowed set. */
+export type FindingsListOptions = {
+  detector?: string
+  harness?: string
+  limit?: number
+  offset?: number
+}
+
+function validLimit(limit: number | undefined): number | undefined {
+  return typeof limit === 'number' && Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : undefined
+}
+
+function validOffset(offset: number | undefined): number {
+  return typeof offset === 'number' && Number.isFinite(offset) && offset > 0 ? Math.floor(offset) : 0
+}
 
 export class CanonStore {
   private readonly db: Database
@@ -2035,8 +2053,8 @@ export class CanonStore {
     return row === undefined ? undefined : toFinding(row)
   }
 
-  /** List findings, optionally filtered by runId or sessionId; ordered by rank_score DESC. */
-  listFindings(runId?: string, sessionId?: string): Finding[] {
+/** List findings, optionally filtered by runId or sessionId; ordered by rank_score DESC. */
+  listFindings(runId?: string, sessionId?: string, options?: FindingsListOptions): Finding[] {
     let query = 'SELECT * FROM finding'
     const params: string[] = []
     const conditions: string[] = []
@@ -2049,6 +2067,14 @@ export class CanonStore {
       conditions.push('session_id = ?')
       params.push(sessionId)
     }
+    // `detector_id` is a real column, so it filters in SQL. `harness` rides
+    // in the finding payload (canon/findings.ts stamps it) and filters after
+    // the round-trip below — no migration, and legacy rows without a harness
+    // simply match no harness filter rather than every one.
+    if (options?.detector !== undefined && options.detector !== '') {
+      conditions.push('detector_id = ?')
+      params.push(options.detector)
+    }
 
     if (conditions.length > 0) {
       query += ` WHERE ${conditions.join(' AND ')}`
@@ -2056,7 +2082,40 @@ export class CanonStore {
     query += ' ORDER BY rank_score DESC, id ASC'
 
     const rows = this.db.prepare(query).all(...params) as FindingDbRow[]
-    return rows.map(toFinding)
+    let findings = rows.map(toFinding)
+    if (options?.harness !== undefined && options.harness !== '') {
+      const want = options.harness.trim().toLowerCase()
+      findings = findings.filter((finding) => {
+        const have = (finding as { harness?: unknown }).harness
+        return typeof have === 'string' && have.toLowerCase() === want
+      })
+    }
+    const offset = validOffset(options?.offset)
+    const limit = validLimit(options?.limit)
+    if (offset > 0 || limit !== undefined) {
+      findings = findings.slice(offset, limit === undefined ? undefined : offset + limit)
+    }
+    return findings
+  }
+
+  /**
+   * Sessions whose context window no source reported (issue #191, condition
+   * 3): the count that keeps a suppressed-default findings list from reading
+   * as "all clear". Reads the provenance the session builder persists
+   * (`payload.context.contextLimitSource`); legacy payloads without it are
+   * not counted either way.
+   */
+  countUnknownWindowSessions(harness?: string): number {
+    const conditions = [`json_extract(payload, '$.context.contextLimitSource') = 'default'`]
+    const params: string[] = []
+    if (harness !== undefined && harness !== '') {
+      conditions.push('harness = ?')
+      params.push(normalizeHarnessName(harness))
+    }
+    const row = this.db
+      .prepare(`SELECT COUNT(*) AS n FROM session WHERE ${conditions.join(' AND ')}`)
+      .get(...params) as { n: number } | undefined
+    return row?.n ?? 0
   }
 
   /** Delete one finding by id. */

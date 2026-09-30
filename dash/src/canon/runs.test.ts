@@ -593,3 +593,36 @@ describe('Schema migration & store accessors', () => {
     store.close()
   })
 })
+
+describe('Issue #182 — twin front-ends build one run', () => {
+  it('merges claude-code and claude-desktop shares of one key into a single run', async () => {
+    // Live evidence 2026-09-30: one session key under both surfaces is one
+    // harness reached through two collectors. Disjoint counters here so the
+    // ADR 0009 same-turn dedupe stays out of it: the fold alone must unite
+    // the shares.
+    const store = new CanonStore(':memory:')
+    store.upsertMany([
+      makeRecord('cc-1', {
+        source: 'claude-code-desktop',
+        harness: 'claude-code',
+        sessionId: 'twin-key',
+        timestamp: '2026-09-23T22:43:53.540Z',
+      }),
+      makeRecord('cd-1', {
+        source: 'codeburn/claude-desktop',
+        harness: 'claude-desktop',
+        sessionId: 'twin-key',
+        timestamp: '2026-09-23T22:43:58.783Z',
+        tokens: tokens({ freshInput: 2000, cacheRead: 0, reportedInput: 2000 }),
+      }),
+    ])
+
+    await buildRuns(store)
+
+    const runs = store.listRuns()
+    expect(runs).toHaveLength(1)
+    expect(runs[0]!.harness).toBe('claude-code')
+    expect(store.listExecutions()).toHaveLength(1)
+    store.close()
+  })
+})

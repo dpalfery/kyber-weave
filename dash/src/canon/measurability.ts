@@ -151,10 +151,8 @@ const SURVEY_FAMILY: Readonly<Record<string, string>> = {
   'copilot-vscode': 'copilot',
   'copilot-jetbrains': 'copilot',
   'copilot-agent': 'copilot',
-  'cursor-agent': 'cursor',
   'cline-cli': 'cline',
   'claude-cli': 'claude-code',
-  'claude-desktop': 'claude-code',
   'claude-unclassified': 'claude-code',
   'codex-cli': 'codex',
   'codex-desktop': 'codex',
@@ -170,20 +168,26 @@ function surveyFamily(harness: string): string {
 }
 
 /**
- * Canonical persisted harness id. Split client surfaces stay distinct.
- * Gemini remains the excluded identity string so callers can refuse it;
- * it is never seeded into rollups or derived session/run rows.
+ * Canonical persisted harness id. Twin front-ends of one harness fold onto
+ * the owner (`claude-desktop` → `claude-code`, `cursor-agent` → `cursor`):
+ * one harness reached through two collectors is one harness (issue #182),
+ * and the store comment at `store.ts:sessionKeys` already asserts the
+ * equivalence. Raw records keep the front-end string as provenance; every
+ * derived surface follows this id. Gemini remains the excluded identity
+ * string so callers can refuse it; it is never seeded into rollups or
+ * derived session/run rows.
  */
 export function normalizeHarnessName(harness: string): string {
   const lower = harness.trim().toLowerCase()
-  if (lower === 'claude-cli' || lower === 'claude-desktop' || lower === 'claude-unclassified') return lower
+  if (lower === 'claude-cli' || lower === 'claude-unclassified') return lower
+  if (lower === 'claude-desktop') return 'claude-code'
   if (lower === 'claude' || lower === 'claude-code') return lower === 'claude' ? 'claude-unclassified' : 'claude-code'
   if (lower === 'copilot-cli' || lower === 'copilot-vscode' || lower === 'copilot-jetbrains' || lower === 'copilot-agent') {
     return lower
   }
   if (lower === 'copilot-chat') return 'copilot-vscode'
   if (lower === 'copilot' || lower === 'github-copilot') return 'copilot'
-  if (lower === 'cursor-agent') return 'cursor-agent'
+  if (lower === 'cursor-agent') return 'cursor'
   if (lower === 'cursor') return 'cursor'
   if (lower === 'windsurf' || lower === 'cascade') return 'windsurf'
   if (lower === 'roo' || lower === 'roo-code' || lower === 'roo-cline') return 'roo-code'

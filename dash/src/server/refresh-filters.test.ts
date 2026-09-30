@@ -8,6 +8,7 @@ import { isNotMeasurable, type MetricAvailability } from '../canon/types.js'
 import { KyberBridge } from './bridge.js'
 import { handleKyberRequest } from './routes.js'
 import {
+  DERIVED_HARNESSES,
   POPULATED_HARNESSES,
   USER_CANON,
   refreshTempCanon,
@@ -71,20 +72,23 @@ describe('T8 API filters against a temporary refreshed DB', () => {
 
     const ids = list.harnesses.map((row) => row.harness)
     expect(ids).not.toContain('gemini')
-    for (const harness of POPULATED_HARNESSES) {
+    for (const harness of DERIVED_HARNESSES) {
       expect(ids).toContain(harness)
     }
+    // Issue #182: folded front-ends seed no rollup of their own.
+    expect(ids).not.toContain('cursor-agent')
+    expect(ids).not.toContain('claude-desktop')
 
     const allRuns = json(bridge, 'http://127.0.0.1/api/kyber/runs') as {
       runs: Array<{ runId: string; harness: string }>
     }
     const populatedRuns = allRuns.runs.filter((run) =>
-      (POPULATED_HARNESSES as readonly string[]).includes(run.harness),
+      (DERIVED_HARNESSES as readonly string[]).includes(run.harness),
     )
     expect(populatedRuns.length).toBeGreaterThan(0)
 
     const perHarnessCounts = new Map<string, number>()
-    for (const harness of POPULATED_HARNESSES) {
+    for (const harness of DERIVED_HARNESSES) {
       const filtered = json(
         bridge,
         `http://127.0.0.1/api/kyber/runs?harness=${encodeURIComponent(harness)}`,
@@ -93,7 +97,7 @@ describe('T8 API filters against a temporary refreshed DB', () => {
       expect(filtered.runs.every((run) => run.harness === harness)).toBe(true)
       perHarnessCounts.set(harness, filtered.runs.length)
 
-      const foreign = POPULATED_HARNESSES.filter((other) => other !== harness)
+      const foreign = DERIVED_HARNESSES.filter((other) => other !== harness)
       for (const other of foreign) {
         expect(filtered.runs.some((run) => run.harness === other)).toBe(false)
       }

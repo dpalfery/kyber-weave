@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { POPULATED_HARNESSES, USER_CANON } from './refresh-filters-world.js'
+import { DERIVED_HARNESSES, USER_CANON } from './refresh-filters-world.js'
 
 /**
  * Isolated browser acceptance for refresh filters. Starts its own dashboard
@@ -89,7 +89,9 @@ test('T8 Context Doctor filters split identities from the temp refreshed DB', as
   }
   writeFileSync(join(scratch, 'harnesses.json'), JSON.stringify(payload, null, 2))
 
-  for (const harness of POPULATED_HARNESSES) {
+  // Derived harness ids (issue #182): refresh jobs still collect under
+  // front-end names, but rollups and runs carry the folded owner.
+  for (const harness of DERIVED_HARNESSES) {
     const row = payload.harnesses.find((entry) => entry.harness === harness)
     expect(row, `${harness} missing from rollups`).toBeTruthy()
     expect(row!.sampleCount).toBeGreaterThan(0)

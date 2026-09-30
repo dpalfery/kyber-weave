@@ -11,6 +11,7 @@
 // an explicit explanation.
 
 import { groupByCanonicalHarness, isFileSource, measurabilityFor } from './measurability.js'
+import { dedupeTwinTurns } from './twin-dedupe.js'
 import { deriveOutcome, type OutcomeBlock } from './outcome.js'
 import { CanonStore } from './store.js'
 import { notMeasurable } from './types.js'
@@ -407,7 +408,11 @@ export async function buildRuns(
   const candidates: ExecutionCandidate[] = []
   for (const sessionKey of store.sessionKeys()) {
     const grouped = groupByCanonicalHarness(store.recordsForSession(sessionKey.key))
-    for (const [harness, records] of grouped) {
+    for (const [harness, shareRecords] of grouped) {
+      // Same twin-collector collapse as `buildSessions` (issue #182, ADR
+      // 0009 D4): the candidate's records must be the merged share's turns,
+      // not both collectors' copies stacked.
+      const records = dedupeTwinTurns(shareRecords)
       if (records.length === 0 || !hasTurnEvidence(records)) {
         continue
       }

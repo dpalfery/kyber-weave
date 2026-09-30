@@ -476,6 +476,15 @@ $$\text{Rank Score} = \text{Estimated Recoverable Waste} \times \text{Outcome Ri
 An inferred finding can never outrank a deterministic finding of comparable size. Recoverable
 waste is an estimate tied to a specific recommended action.
 
+Two honest-measurement contracts govern what the engine will not claim. The compaction-hazard
+detector fires only against a reported context window: an unreported window suppresses the
+finding (pressure surfaces as unmeasurable instead), and a single-turn peak above the reported
+window is downgraded to inferred with an aggregate-attribution caveat rather than printed as a
+deterministic percentage. Twin front-end collectors (`claude-desktop` onto `claude-code`,
+`cursor-agent` onto `cursor`) fold onto one canonical harness id, and same-turn observations
+across collectors collapse per ADR 0009 source precedence (OTLP counters win; values are never
+summed across sources for the same turn) instead of double-counting one conversation.
+
 Findings are materialized in `canon.db` at session/run build time with a `detector_version` schema
 stamp (Decision D17), forcing automatic recomputation whenever detectors are updated.
 
@@ -554,7 +563,7 @@ The web dashboard server wires HTTP requests directly to `KyberBridge`:
 | `/api/kyber/session/:id` | `GET` | `SessionPayload` | Full session payload with turns, context, tools, and timeline. |
 | `/api/kyber/session/:id/content` | `GET` | `SessionContent` | Full canonical content for an inspected session part. |
 | `/api/kyber/session/:id/turn/:index/content` | `GET` | `TurnContentResult` | Full unclipped assembled context for a specific turn (D4). |
-| `/api/kyber/findings` | `GET` | `{ findings: Finding[] }` | Ranked findings; supports `?runId=`, `?sessionId=`. |
+| `/api/kyber/findings` | `GET` | `{ findings: Finding[], total, limit, offset, detectorCounts, unknownWindowSessions }` | Ranked findings; supports `?runId=`, `?sessionId=`, `?harness=`, `?detector=`, `?limit=`, `?offset=`. `total`/`detectorCounts` describe the narrowed set ignoring paging; `unknownWindowSessions` counts sessions with an unreported context window in scope. |
 | `/api/kyber/finding/:id` | `GET` | `Finding` | Single finding detail with evidence rows and risk caveats. |
 | `/api/kyber/predictions` | `GET`, `POST` | `{ predictions: Prediction[] }` | Query or record prediction calibration entries. |
 | `/api/kyber/calibration` | `GET` | `CalibrationSummary` | Calibration curve and scoring summary. |

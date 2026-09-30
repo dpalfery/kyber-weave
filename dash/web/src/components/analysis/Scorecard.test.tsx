@@ -404,7 +404,7 @@ describe('Pages Smoke Rendering: Context Doctor, HarnessDetail, RunDetail', () =
             measurability: { token_usage: 'measured' },
           },
         ]}
-        initialFindings={[]}
+        initialFindings={{ findings: [], total: 0, offset: 0, detectorCounts: {}, unknownWindowSessions: 0 }}
       />,
     )
 
@@ -552,6 +552,16 @@ describe('ContextPressureStrip & BaselineSelect', () => {
     )
     expect(unmeasuredHtml).toContain('Window size unrecorded')
     expect(unmeasuredHtml).toContain('—')
+  })
+
+  it('names the compaction threshold matching the detector contract (issue #181)', () => {
+    // The detector fires at 85% of the window (`detectCompactionHazard`); the
+    // gauge caption must agree with the finding text, not say ~75%.
+    const measuredHtml = renderToStaticMarkup(
+      <ContextPressureStrip pressureMedian={0.65} pressureP95={0.88} />,
+    )
+    expect(measuredHtml).toContain('Compaction threshold (~85%)')
+    expect(measuredHtml).not.toContain('~75%')
   })
 
   it('renders BaselineSelect with default baseline options', () => {

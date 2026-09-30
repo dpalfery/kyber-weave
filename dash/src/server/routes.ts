@@ -395,15 +395,24 @@ export function handleKyberRequest(
     }
     const runId = (url.searchParams.get('runId') ?? url.searchParams.get('run_id') ?? '').trim() || undefined
     const sessionId = (url.searchParams.get('sessionId') ?? url.searchParams.get('session_id') ?? '').trim() || undefined
+    const detector = (url.searchParams.get('detector') ?? '').trim() || undefined
+    const harness = (url.searchParams.get('harness') ?? '').trim() || undefined
     const limitParam = url.searchParams.get('limit')
     const limit = limitParam ? parseInt(limitParam, 10) : undefined
+    const offsetParam = url.searchParams.get('offset')
+    const offset = offsetParam ? parseInt(offsetParam, 10) : undefined
 
-    const findings = bridge.listFindings({
+    // Paged envelope (issue #191): `findings` keeps its shape; `total`,
+    // `detectorCounts` and `unknownWindowSessions` describe the narrowed set.
+    const page = bridge.listFindingsPage({
       runId,
       sessionId,
+      detector,
+      harness,
       limit: limit && !isNaN(limit) ? limit : undefined,
+      offset: offset && !isNaN(offset) ? offset : undefined,
     })
-    sendKyberJson(res, 200, { findings })
+    sendKyberJson(res, 200, page)
     return true
   }
 

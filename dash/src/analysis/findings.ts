@@ -12,7 +12,7 @@
 // 5. Decision D16: skill utilisation findings are stamped at low confidence ('heuristic') and ranked last.
 
 import { normalizeWhitespace, hashNormalized } from './signals.js'
-import { contextLimitOf, DEFAULT_CONTEXT_LIMIT } from '../canon/context-window.js'
+import { contextLimitOf } from '../canon/context-window.js'
 import { canonicalHarnessId, normalizeHarnessName, type SessionIdentities } from '../canon/measurability.js'
 import type { CanonicalRecord } from '../canon/types.js'
 import type { OutcomeBlock } from '../canon/outcome.js'
@@ -32,6 +32,17 @@ export type DetectorId =
   | 'compaction-hazard'
   | 'unbounded-delegation'
   | 'inactive-skill-reference'
+
+/** Every detector id, for zero-filled per-detector counts (issue #191). */
+export const DETECTOR_IDS: readonly DetectorId[] = [
+  'dormant-tool-schema',
+  'duplicate-tool-call',
+  'oversized-tool-result',
+  'prefix-cache-break',
+  'compaction-hazard',
+  'unbounded-delegation',
+  'inactive-skill-reference',
+]
 
 /**
  * Confidence level for findings (Decision D5).
@@ -1037,6 +1048,11 @@ export function detectCompactionHazard(input: CompactionHazardInput): Finding[] 
       input.contextLimit !== undefined
         ? { contextLimit: input.contextLimit, contextLimitSource: 'reported' as const }
         : contextLimitOf(group.records)
+    // Issue #181 (honest unobservability): a ratio against the guessed
+    // default window is not a measurement. With no reported window there is
+    // no finding — the "window unreported" state is surfaced where
+    // pressure is shown, not as a deterministic percentage.
+    if (window.contextLimitSource === 'default') continue
     const limit = window.contextLimit
 
     let peakTurn: TurnContext = group.turns[0]!
@@ -1050,6 +1066,13 @@ export function detectCompactionHazard(input: CompactionHazardInput): Finding[] 
     if (peakTurn.tokens > thresholdTokens) {
       const ratio = peakTurn.tokens / limit
       const estimatedWasteTokens = peakTurn.tokens - thresholdTokens
+      // Issue #181: a peak above the reported window itself is physically
+      // impossible for one turn's context — the attribution aggregates
+      // child calls. The spend is real, but the single-turn reading is
+      // inferred, never deterministic.
+      const overWindow = peakTurn.tokens > limit
+      const confidence: FindingConfidence = overWindow ? 'heuristic' : 'deterministic'
+      const measurementClass = overWindow ? ('inferred' as const) : ('deterministic' as const)
 
       // Link prior turn and peak turn
       const priorTurn = group.turns.find((t) => t.turnIndex !== peakTurn.turnIndex) ?? group.turns[0]!
@@ -1074,25 +1097,29 @@ export function detectCompactionHazard(input: CompactionHazardInput): Finding[] 
         'Abrupt context compaction or summarization risks discarding early user constraints or domain definitions.',
       )
 
-      const rankScore = computeRankScore(estimatedWasteTokens, 'deterministic', discount)
+      const rankScore = computeRankScore(estimatedWasteTokens, confidence, discount)
 
       // The raw window stays in the parenthetical (it is what the ratio was
       // computed against); the trailing sentence names the window and where it
-      // came from, so a default denominator cannot pose as a measurement.
+      // came from. The default branch is gone with the default skip above:
+      // every emitted finding was measured against a reported window.
       const windowPhrase =
-        input.contextLimit !== undefined
-          ? 'declared by the caller'
-          : window.contextLimitSource === 'reported'
-            ? 'reported by session telemetry'
-            : `the ${DEFAULT_CONTEXT_LIMIT.toLocaleString('en-US')} default; no source reported a window`
+        input.contextLimit !== undefined ? 'declared by the caller' : 'reported by session telemetry'
+
+      // An over-window peak aggregates child calls into one turn's number
+      // (issue #181): say so in the mechanism rather than printing a
+      // physically impossible percentage as a deterministic claim.
+      const aggregateCaveat = overWindow
+        ? ` The peak exceeds the reported window itself, so the turn's token attribution likely aggregates child calls rather than one turn's context; the spend is measured, the single-turn reading is inferred.`
+        : ''
 
       findings.push({
         id: `finding-compaction-hazard-${group.sessionId}-${peakTurn.spanId}`,
         detectorId: 'compaction-hazard',
         title: `Compaction Hazard: Context consumption reached ${Math.round(ratio * 100)}% of window without summarization plan`,
-        mechanism: `Peak context consumption reached ${peakTurn.tokens} tokens (${Math.round(ratio * 100)}% of ${limit} token window), exceeding the 85% safety boundary without active compaction or summarization. Window of record: ${limit.toLocaleString('en-US')} tokens (${windowPhrase}).`,
+        mechanism: `Peak context consumption reached ${peakTurn.tokens} tokens (${Math.round(ratio * 100)}% of ${limit} token window), exceeding the 85% safety boundary without active compaction or summarization. Window of record: ${limit.toLocaleString('en-US')} tokens (${windowPhrase}).${aggregateCaveat}`,
         evidenceLinks,
-        confidence: 'deterministic',
+        confidence,
         estimatedWasteTokens,
         recommendation,
         errorBar: {
@@ -1103,9 +1130,13 @@ export function detectCompactionHazard(input: CompactionHazardInput): Finding[] 
         runId,
         sessionId: group.sessionId,
         rankScore,
-        measurementClass: 'deterministic',
-        confidenceBasis: 'Deterministically measured by comparing the session peak turn input tokens against the context window in effect for that session.',
-        whatWouldRaiseIt: 'Deterministic measurement; confidence is at ceiling.',
+        measurementClass,
+        confidenceBasis: overWindow
+          ? 'Peak turn input tokens exceed the reported context window, so single-turn attribution is inferred (likely aggregate of child calls) rather than measured.'
+          : 'Deterministically measured by comparing the session peak turn input tokens against the context window in effect for that session.',
+        whatWouldRaiseIt: overWindow
+          ? 'Harness emission of per-turn input counters that reconcile with the reported window.'
+          : 'Deterministic measurement; confidence is at ceiling.',
         payload: {
           contextLimit: limit,
           contextLimitSource: window.contextLimitSource,

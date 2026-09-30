@@ -5,6 +5,7 @@ import {
   fetchHarnesses,
   fetchRuns,
   fetchFindings,
+  type FindingsPage,
   type KyberHarnessSummary,
   type KyberFinding,
 } from '../lib/kyberApi.js'
@@ -18,7 +19,7 @@ import type { ScorecardMatrixRow } from '../components/analysis/ScorecardMatrix.
 
 export interface ContextDoctorProps {
   initialHarnesses?: KyberHarnessSummary[]
-  initialFindings?: KyberFinding[]
+  initialFindings?: FindingsPage
   onSelectHarness?: (harnessId: string) => void
   onSelectRun?: (runId: string, harnessId?: string) => void
   onSelectFinding?: (findingId: string) => void
@@ -36,6 +37,10 @@ export type HarnessCatalogEntry = {
  * table, NOT the list of tabs: the tab strip is built from the harnesses the
  * store actually holds (see `useHarnessTabs`), so a harness collected on this
  * machine is never hidden because it was missing from a hardcoded list.
+ *
+ * Folded front-ends have no entry (issue #182, Q5): `cursor-agent` is
+ * `cursor` at the derived layer, so a label here would imply a tab that no
+ * longer exists.
  */
 export const HARNESS_DISPLAY_NAMES: Readonly<Record<string, string>> = {
   all: 'All Harnesses',
@@ -47,7 +52,6 @@ export const HARNESS_DISPLAY_NAMES: Readonly<Record<string, string>> = {
   antigravity: 'Antigravity',
   codex: 'Codex',
   cursor: 'Cursor',
-  'cursor-agent': 'Cursor Agent',
   opencode: 'OpenCode',
   'kilo-code': 'Kilo Code',
   'roo-code': 'Roo Code',
@@ -72,6 +76,9 @@ function isObservedHarness(harness: string): boolean {
   return harness.length > 0 && harness !== 'all'
 }
 
+/** Page size for the workspace findings browser (issue #191). */
+export const FINDINGS_PAGE_SIZE = 25
+
 /**
  * Renders the Context Doctor landing page with workspace findings and a
  * per-harness diagnostic scorecard.
@@ -85,6 +92,9 @@ export function ContextDoctor({
   onSelectTurn,
 }: ContextDoctorProps) {
   const [baseline, setBaseline] = useState('none')
+  const [detectorFilter, setDetectorFilter] = useState<string | undefined>(undefined)
+  const [harnessFilter, setHarnessFilter] = useState<string | undefined>(undefined)
+  const [visibleLimit, setVisibleLimit] = useState(FINDINGS_PAGE_SIZE)
 
   // Query live harnesses
   const { data: harnessesData, isLoading: loadingHarnesses } = useQuery({
@@ -102,11 +112,29 @@ export function ContextDoctor({
     queryFn: () => fetchRuns(),
   })
 
-  // Query live findings across the entire workspace
-  const { data: findingsData, isLoading: loadingFindings } = useQuery({
+  // Headline findings across the entire workspace (top-5 card below).
+  const { data: headlineData, isLoading: loadingFindings } = useQuery({
     queryKey: ['kyber-findings-workspace'],
     queryFn: () => fetchFindings({ limit: 10 }),
     initialData: initialFindings,
+  })
+
+  // Full workspace browser (issue #191): server-side detector/harness
+  // filters with per-detector counts over the narrowed set. When no filter
+  // is active the headline envelope already carries the whole answer, so no
+  // second request fires.
+  const browserActive =
+    detectorFilter !== undefined || harnessFilter !== undefined || visibleLimit !== FINDINGS_PAGE_SIZE
+  const { data: browserData, isLoading: loadingBrowser } = useQuery({
+    queryKey: ['kyber-findings-browser', detectorFilter ?? '', harnessFilter ?? '', visibleLimit],
+    queryFn: () =>
+      fetchFindings({
+        ...(detectorFilter !== undefined ? { detector: detectorFilter } : {}),
+        ...(harnessFilter !== undefined ? { harness: harnessFilter } : {}),
+        limit: visibleLimit,
+      }),
+    enabled: browserActive && initialFindings === undefined,
+    initialData: browserActive ? undefined : initialFindings,
   })
 
   const harnesses = useMemo((): ScorecardMatrixRow[] => {
@@ -120,8 +148,21 @@ export function ContextDoctor({
     }))
   }, [harnessesData, runsData])
 
-  const findings = findingsData ?? []
+  const headline: KyberFinding[] = headlineData?.findings ?? []
+  const browser: FindingsPage | undefined = browserActive ? browserData : headlineData
+  const browserFindings: KyberFinding[] = browser?.findings ?? []
+  const browserTotal = browser?.total ?? 0
+  const detectorCounts = browser?.detectorCounts ?? {}
+  const unknownWindowSessions = browser?.unknownWindowSessions ?? 0
   const loadingMatrix = loadingHarnesses || (!harnessesData?.length && loadingRuns)
+
+  const detectorChips = useMemo(
+    () =>
+      Object.entries(detectorCounts)
+        .filter(([, count]) => count > 0)
+        .sort(([, a], [, b]) => b - a),
+    [detectorCounts],
+  )
 
   return (
     <div className="flex flex-col gap-density-stack" data-testid="page-context-doctor">
@@ -146,7 +187,7 @@ export function ContextDoctor({
         <Skeleton className="h-44 w-full" />
       ) : (
         <FindingList
-          findings={findings}
+          findings={headline}
           maxItems={5}
           title="Highest-Leverage Workspace Findings"
           description="Ranked by estimated waste, outcome risk, and confidence. Deterministic evidence beats inferred claims."
@@ -155,6 +196,88 @@ export function ContextDoctor({
           onSelectExecution={(execId) => onSelectRun?.(execId)}
         />
       )}
+
+      {/* Full workspace findings browser (issue #191): every finding is one */}
+      {/* filter or page away, with per-detector counts — the 49 */}
+      {/* duplicate-tool-call findings are no longer invisible. */}
+      <section aria-label="All workspace findings" data-testid="all-workspace-findings">
+        <div className="flex flex-wrap items-baseline justify-between gap-density-cluster">
+          <h3 className="font-display text-density-base font-semibold text-foreground">
+            All Workspace Findings ({browserTotal})
+          </h3>
+          <label className="text-density-xs text-muted-foreground">
+            Harness:{' '}
+            <select
+              data-testid="findings-harness-filter"
+              value={harnessFilter ?? ''}
+              onChange={(event) => {
+                setHarnessFilter(event.target.value === '' ? undefined : event.target.value)
+                setVisibleLimit(FINDINGS_PAGE_SIZE)
+              }}
+            >
+              <option value="">All harnesses</option>
+              {harnesses.map((row) => (
+                <option key={row.harness} value={row.harness}>
+                  {row.name ?? harnessDisplayName(row.harness)}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        {unknownWindowSessions > 0 && (
+          <p data-testid="unknown-window-banner" className="text-density-xs text-muted-foreground mt-density-hair">
+            {unknownWindowSessions} session{unknownWindowSessions === 1 ? '' : 's'} with unknown context
+            window — pressure unmeasurable, not zero. Findings are suppressed for these sessions until a
+            source reports a window.
+          </p>
+        )}
+
+        <div className="flex flex-wrap gap-density-cluster mt-density-hair" data-testid="findings-detector-chips">
+          {detectorChips.map(([detector, count]) => {
+            const active = detectorFilter === detector
+            return (
+              <button
+                key={detector}
+                type="button"
+                data-testid={`findings-detector-chip-${detector}`}
+                aria-pressed={active}
+                title={active ? `Clear ${detector} filter` : `Show only ${detector} findings`}
+                onClick={() => {
+                  setDetectorFilter(active ? undefined : detector)
+                  setVisibleLimit(FINDINGS_PAGE_SIZE)
+                }}
+              >
+                {detector} ×{count}
+              </button>
+            )
+          })}
+        </div>
+
+        {loadingBrowser ? (
+          <Skeleton className="h-44 w-full" />
+        ) : (
+          <>
+            <FindingList
+              findings={browserFindings}
+              title=""
+              description="Server-ranked across the workspace; filters narrow the set before paging."
+              onSelectFinding={onSelectFinding}
+              onSelectTurn={(turnIdx, execId) => onSelectTurn?.(turnIdx, execId)}
+              onSelectExecution={(execId) => onSelectRun?.(execId)}
+            />
+            {browserFindings.length < browserTotal && (
+              <button
+                type="button"
+                data-testid="findings-load-more"
+                onClick={() => setVisibleLimit((n) => n + FINDINGS_PAGE_SIZE)}
+              >
+                Load more ({browserFindings.length} of {browserTotal})
+              </button>
+            )}
+          </>
+        )}
+      </section>
 
       <ScorecardMatrix
         rows={harnesses}

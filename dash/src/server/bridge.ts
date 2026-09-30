@@ -36,6 +36,20 @@ import {
   type RunComparisonOptions,
 } from '../analysis/compare.js'
 import type { Finding } from '../analysis/findings.js'
+import { DETECTOR_IDS } from '../analysis/findings.js'
+
+/** Paged findings envelope served at `GET /api/kyber/findings` (issue #191). */
+export type FindingsPage = {
+  findings: Finding[]
+  /** Size of the narrowed set ignoring paging. */
+  total: number
+  limit?: number
+  offset: number
+  /** Per-detector counts over the narrowed set ignoring paging. */
+  detectorCounts: Record<string, number>
+  /** Sessions with an unreported context window in the harness scope. */
+  unknownWindowSessions: number
+}
 import {
   CANONICAL_CONTENT_KEYS,
   type CanonicalContent,
@@ -1859,12 +1873,14 @@ export class KyberBridge {
   /**
    * List ranked findings optionally filtered by runId or sessionId.
    */
-  listFindings(options?: { runId?: string; sessionId?: string; limit?: number }): Finding[] {
+  listFindings(options?: { runId?: string; sessionId?: string; detector?: string; harness?: string; limit?: number; offset?: number }): Finding[] {
     if (this.store) {
-      const findings = this.store.listFindings(options?.runId, options?.sessionId)
-      if (typeof options?.limit === 'number' && options.limit > 0) {
-        return findings.slice(0, Math.floor(options.limit))
-      }
+      const findings = this.store.listFindings(options?.runId, options?.sessionId, {
+        ...(options?.detector !== undefined ? { detector: options.detector } : {}),
+        ...(options?.harness !== undefined ? { harness: options.harness } : {}),
+        ...(options?.limit !== undefined ? { limit: options.limit } : {}),
+        ...(options?.offset !== undefined ? { offset: options.offset } : {}),
+      })
       return findings
     }
 
@@ -1882,16 +1898,32 @@ export class KyberBridge {
           conds.push('session_id = ?')
           params.push(options.sessionId)
         }
+        if (options?.detector) {
+          conds.push('detector_id = ?')
+          params.push(options.detector)
+        }
         if (conds.length > 0) {
           sql += ' WHERE ' + conds.join(' AND ')
         }
         sql += ' ORDER BY rank_score DESC, id ASC'
-        if (typeof options?.limit === 'number' && options.limit > 0) {
-          sql += ' LIMIT ?'
-          params.push(Math.floor(options.limit))
-        }
         const rows = db!.prepare(sql).all(...(params as (string | number)[])) as unknown as FindingDbRow[]
-        return rows.map(toFinding)
+        // `harness` rides in the payload JSON and filters after the
+        // round-trip (same rule as `CanonStore.listFindings`); paging slices
+        // the narrowed set so `total` stays comparable across paths.
+        let findings = rows.map(toFinding)
+        if (options?.harness) {
+          const want = options.harness.trim().toLowerCase()
+          findings = findings.filter((finding) => {
+            const have = (finding as { harness?: unknown }).harness
+            return typeof have === 'string' && have.toLowerCase() === want
+          })
+        }
+        const offset = typeof options?.offset === 'number' && options.offset > 0 ? Math.floor(options.offset) : 0
+        if (offset > 0 || (typeof options?.limit === 'number' && options.limit > 0)) {
+          const limit = typeof options?.limit === 'number' && options.limit > 0 ? Math.floor(options.limit) : undefined
+          findings = findings.slice(offset, limit === undefined ? undefined : offset + limit)
+        }
+        return findings
       } catch (err) {
         console.warn('[KyberBridge] Failed querying findings from canon.db:', err)
         return []
@@ -1899,6 +1931,73 @@ export class KyberBridge {
     }
 
     return []
+  }
+
+  /**
+   * Paged findings envelope for the workspace view (issue #191): the
+   * narrowed `findings` slice plus `total` and per-detector counts over the
+   * narrowed set ignoring paging, so the Context Doctor can show every
+   * finding and `unknownWindowSessions` keeps a suppressed-default list
+   * from reading as "all clear". Additive: `findings` rows are unchanged.
+   */
+  listFindingsPage(options?: {
+    runId?: string
+    sessionId?: string
+    detector?: string
+    harness?: string
+    limit?: number
+    offset?: number
+  }): FindingsPage {
+    const narrowed = this.listFindings({
+      ...(options?.runId !== undefined ? { runId: options.runId } : {}),
+      ...(options?.sessionId !== undefined ? { sessionId: options.sessionId } : {}),
+      ...(options?.detector !== undefined ? { detector: options.detector } : {}),
+      ...(options?.harness !== undefined ? { harness: options.harness } : {}),
+    })
+    const detectorCounts: Record<string, number> = {}
+    for (const id of DETECTOR_IDS) detectorCounts[id] = 0
+    for (const finding of narrowed) {
+      detectorCounts[finding.detectorId] = (detectorCounts[finding.detectorId] ?? 0) + 1
+    }
+    const offset = typeof options?.offset === 'number' && Number.isFinite(options.offset) && options.offset > 0
+      ? Math.floor(options.offset)
+      : 0
+    const limit = typeof options?.limit === 'number' && Number.isFinite(options.limit) && options.limit > 0
+      ? Math.floor(options.limit)
+      : undefined
+    return {
+      findings: narrowed.slice(offset, limit === undefined ? undefined : offset + limit),
+      total: narrowed.length,
+      ...(limit === undefined ? {} : { limit }),
+      offset,
+      detectorCounts,
+      unknownWindowSessions: this.countUnknownWindowSessions(options?.harness),
+    }
+  }
+
+  /**
+   * Sessions whose context window no source reported, optionally scoped to
+   * one harness (issue #191, condition 3).
+   */
+  countUnknownWindowSessions(harness?: string): number {
+    if (this.store) return this.store.countUnknownWindowSessions(harness)
+    const db = this.getDb()
+    if (!this.hasTable(db, 'session')) return 0
+    try {
+      const conds = [`json_extract(payload, '$.context.contextLimitSource') = 'default'`]
+      const params: (string | number)[] = []
+      if (harness !== undefined && harness !== '') {
+        conds.push('LOWER(harness) = LOWER(?)')
+        params.push(harness)
+      }
+      const row = db!
+        .prepare(`SELECT COUNT(*) AS n FROM session WHERE ${conds.join(' AND ')}`)
+        .get(...params) as unknown as { n: number } | undefined
+      return row?.n ?? 0
+    } catch (err) {
+      console.warn('[KyberBridge] Failed counting unknown-window sessions:', err)
+      return 0
+    }
   }
 
   /**

@@ -648,23 +648,43 @@ export async function fetchRun(runId: string): Promise<KyberRunDetail> {
   }
 }
 
+/** Paged findings envelope served at `GET /api/kyber/findings` (issue #191). */
+export interface FindingsPage {
+  findings: KyberFinding[]
+  total: number
+  limit?: number
+  offset: number
+  detectorCounts: Record<string, number>
+  unknownWindowSessions: number
+}
+
 export async function fetchFindings(opts?: {
   runId?: string
   sessionId?: string
   harness?: string
+  detector?: string
   limit?: number
-}): Promise<KyberFinding[]> {
+  offset?: number
+}): Promise<FindingsPage> {
   const params = new URLSearchParams()
   if (opts?.runId) params.set('runId', opts.runId)
   if (opts?.sessionId) params.set('sessionId', opts.sessionId)
+  // Harness and detector filter server-side (issue #191): the client-side
+  // post-filter is gone, so a workspace query actually sees every finding.
+  if (opts?.harness) params.set('harness', opts.harness)
+  if (opts?.detector) params.set('detector', opts.detector)
   if (opts?.limit) params.set('limit', String(opts.limit))
+  if (opts?.offset) params.set('offset', String(opts.offset))
   const qs = params.toString()
-  const json = await fetchJson<{ findings: KyberFinding[] }>(`/api/kyber/findings${qs ? `?${qs}` : ''}`)
-  let list = json.findings ?? []
-  if (opts?.harness) {
-    list = list.filter((f) => !f.harness || f.harness.toLowerCase() === opts.harness!.toLowerCase())
+  const json = await fetchJson<FindingsPage>(`/api/kyber/findings${qs ? `?${qs}` : ''}`)
+  return {
+    findings: json.findings ?? [],
+    total: typeof json.total === 'number' ? json.total : (json.findings ?? []).length,
+    ...(json.limit !== undefined ? { limit: json.limit } : {}),
+    offset: typeof json.offset === 'number' ? json.offset : 0,
+    detectorCounts: json.detectorCounts ?? {},
+    unknownWindowSessions: typeof json.unknownWindowSessions === 'number' ? json.unknownWindowSessions : 0,
   }
-  return list
 }
 
 export async function fetchFinding(findingId: string): Promise<KyberFinding> {
