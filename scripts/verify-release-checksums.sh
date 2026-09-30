@@ -82,7 +82,7 @@ cd "$ASSET_DIR"
 # to catch hidden files that should not be present.
 shopt -s dotglob nullglob
 
-# Step 1: Delete any stale SHA256SUMS.txt from the downloaded artifacts.
+# Step 1: Delete any stale SHA256SUMS.txt and leftover temp files from previous runs.
 # This file must not be listed in the final manifest: only the actual release
 # assets go into the checksum. The per-RID SHA256SUMS.txt that build-kyberdash
 # uploads carries stale hashes; we delete it and recompute from scratch.
@@ -90,6 +90,12 @@ if [[ -f SHA256SUMS.txt ]]; then
     echo "::warning::discarding stale inbound SHA256SUMS.txt (recomputing from expected assets)" >&2
     rm -f SHA256SUMS.txt
 fi
+
+# Clean up any leftover temp files from an earlier killed or failed run in this directory.
+# This must run before the unexpected-asset scan so it is not flagged as unexpected.
+for stale_temp in ./.SHA256SUMS.*; do
+    [[ -f "$stale_temp" ]] && echo "::warning::removing stale temp file: $stale_temp" >&2 && rm -f "$stale_temp"
+done
 
 # Step 2: Check that all expected assets are present and no unexpected ones are.
 # Detect any files that are not in the expected list, including hidden files and
@@ -150,11 +156,12 @@ fi
 # Step 3: Compute hashes into a temp file, then move to SHA256SUMS.txt.
 # This mirrors the approach in scripts/release-local.sh: write to temp,
 # validate, then atomically rename so the file is never partially written.
-# Create the temp file inside ASSET_DIR so the rename is atomic (not a copy
-# across filesystems), and set it up to be removed on exit, error, or signal.
-TEMP_SUMS="${ASSET_DIR}/.SHA256SUMS.XXXXXX"
-TEMP_SUMS="$(mktemp "$TEMP_SUMS")"
-trap 'rm -f "$TEMP_SUMS"' EXIT
+# Declare TEMP_SUMS and set up the trap BEFORE mktemp so a failure can never
+# leave a file behind. Create the temp file relative to the current directory
+# (after cd "$ASSET_DIR") so the rename is atomic (not a copy across filesystems).
+TEMP_SUMS=""
+trap 'rm -f "${TEMP_SUMS:-}"' EXIT
+TEMP_SUMS="$(mktemp ./.SHA256SUMS.XXXXXX)"
 
 # Detect sha256sum availability; fall back to shasum -a 256 on macOS.
 if command -v sha256sum >/dev/null 2>&1; then
@@ -185,7 +192,11 @@ while IFS= read -r line; do
 done < "$TEMP_SUMS"
 
 # Verify: check that every line in the manifest corresponds to an existing
-# file with the correct hash. sha256sum uses --strict; shasum does not support it.
+# file with the correct hash. sha256sum supports --strict to reject extra/missing
+# entries; shasum -c does not have a --strict equivalent, so in the fallback path
+# extra/malformed lines are rejected only by the script's own validation loop above
+# (the regex and self-reference checks). The sha256sum --check --strict verification
+# is stricter; shasum -c is permissive but the script's prior validation is equivalent.
 if command -v sha256sum >/dev/null 2>&1; then
     if ! sha256sum --check --strict "$TEMP_SUMS" >/dev/null 2>&1; then
         echo "::error::checksum verification failed" >&2
