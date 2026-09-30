@@ -6,7 +6,7 @@ status: current
 component: KyberDash
 source-root: dash
 owner: dpalfery
-last-reviewed: 2026-09-29
+last-reviewed: 2026-09-30
 code-refs:
   - registerKyberCommands
   - refreshHarnessSources
@@ -354,6 +354,28 @@ controls appear on Usage only.
 - **Usage**: Device spend overview, multi-provider cost rollups, top projects, daily spend, Share.
 - **Quarantine**: Quarantined spans holding unrecognized namespaces or malformed attributes.
 - **Problems**: Recorded token reconciliation mismatches, validation anomalies, and parser errors.
+
+#### Sessions harness tabs
+
+Open **Sessions** in the sidebar. **Agent Sessions (All)** is selected initially and shows
+sessions across all available harnesses. The other tabs come from the canonical session
+inventory: each distinct nonempty harness ID with sessions gets one tab, regardless of how
+many sessions share that ID. A harness without sessions has no tab.
+
+Select a harness tab to show only sessions with that exact harness ID. Client variants stay
+separate: Claude Code, Claude Desktop and Claude CLI; Codex Desktop and Codex CLI;
+Antigravity CLI and Antigravity IDE; and each Copilot client. Labels describe the tabs;
+future or unknown harness IDs use their stored ID as the label and remain selectable.
+**Agent Sessions (All)** restores sessions across harnesses.
+
+Tabs are ordered by harness ID and do not move when a new session lands. The All
+sentinel is reserved: a stored harness ID of `agent-all` never gets a tab of its own.
+
+If the selected harness is unavailable or disappears when the inventory refreshes, the
+selection falls back to All. An empty inventory keeps the All tab and displays
+**No sessions found.** Open a session row to inspect its dashboard, or use
+a child session's parent link to open its parent. Switching harness tabs collapses the
+expanded session.
 
 #### Querying REST Endpoints Directly
 

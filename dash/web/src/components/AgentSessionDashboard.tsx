@@ -889,7 +889,11 @@ export function AgentSessionContent({
             </div>
             <div className="mt-0.5 text-[11px] text-tertiary-foreground truncate">
               {u.total_cache_creation != null
-                ? `on ${u.cache_creation_coverage ?? 0} turns`
+                ? (u.cache_creation_coverage != null
+                    // Issue #185: a legacy payload without the count must not
+                    // print "on 0 turns" — absence is not a measured zero.
+                    ? `on ${u.cache_creation_coverage} turns`
+                    : 'turn coverage unreported')
                 : 'not emitted'}
             </div>
           </Card>

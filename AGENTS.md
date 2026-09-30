@@ -83,7 +83,7 @@ understand or locate code:
 <!-- CODEGRAPH_END -->
 
 **Missing index.** If there is no `.codegraph/` directory, this repository authorizes
-`codegraph init -y .` from the repository root without further approval. This approval
+`codegraph init .` from the repository root without further approval. This approval
 covers only repository-local initialization; installing CodeGraph or other system-wide
 tools remains the user's decision.
 

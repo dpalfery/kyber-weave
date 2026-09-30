@@ -6,9 +6,14 @@ import { join } from 'node:path'
 
 import {
   KyberBridge,
+  dedupedRunSessions,
+  sumSessionFigures,
+  type SessionSummaryFigures,
   _clip,
 } from './bridge.js'
 import { CanonStore } from '../canon/store.js'
+import { buildSessions } from '../canon/sessions.js'
+import { buildRuns } from '../canon/runs.js'
 import type { CanonicalRecord } from '../canon/types.js'
 import { buildContextReport } from '../analysis/report/build.js'
 
@@ -276,7 +281,7 @@ describe('KyberBridge: in-memory minimal tables fixture (CI verified)', () => {
         total_cache_read: 200,
         total_cache_creation: 100,
         schema_tokens_per_turn: 50,
-        cost: { basis: 'published', status: 'priced', value: 0.05, currency: 'USD' },
+        cost: { usd: 0.05, basis: 'published_rates', status: 'priced', value: 0.05, currency: 'USD' },
         models: ['gpt-4o'],
       },
       problems: ['prob-1'],
@@ -290,7 +295,7 @@ describe('KyberBridge: in-memory minimal tables fixture (CI verified)', () => {
         request_count: 2,
         total_input: 400,
         total_output: 200,
-        cost: { basis: 'published', status: 'priced', value: 0.02, currency: 'USD' },
+        cost: { usd: 0.02, basis: 'published_rates', status: 'priced', value: 0.02, currency: 'USD' },
         models: ['gpt-4o'],
       },
     })
@@ -374,7 +379,7 @@ describe('KyberBridge: in-memory minimal tables fixture (CI verified)', () => {
         total_output: 300,
         total_cache_read: 0,
         total_cache_creation: 0,
-        cost: { basis: 'published', status: 'priced', value: 0.03, currency: 'USD' },
+        cost: { usd: 0.03, basis: 'published_rates' },
         models: ['gemini-1.5-pro'],
       },
     })
@@ -387,7 +392,7 @@ describe('KyberBridge: in-memory minimal tables fixture (CI verified)', () => {
         request_count: 2,
         total_input: 400,
         total_output: 200,
-        cost: { basis: 'published', status: 'priced', value: 0.02, currency: 'USD' },
+        cost: { usd: 0.02, basis: 'published_rates', status: 'priced', value: 0.02, currency: 'USD' },
         models: ['gpt-4o'],
       },
     })
@@ -479,7 +484,6 @@ describe('KyberBridge: in-memory minimal tables fixture (CI verified)', () => {
     expect(newest.total_input).toBe(1000)
     expect(newest.total_output).toBe(500)
     expect(newest.cost_usd).toBe(0.05)
-    expect(newest.cost).toEqual({ basis: 'published', status: 'priced', value: 0.05, currency: 'USD' })
     expect(newest.models).toEqual(['gpt-4o'])
     expect(newest.problems).toBe(1)
   })
@@ -1211,6 +1215,303 @@ describe('KyberBridge: T4 coverage read seam (plan docs/plans/2026-09-30-issues-
     }
   })
 })
+
+describe('KyberBridge run figures review follow-ups', () => {
+  // Copilot C4: a priced non-USD block is omitted, never served as dollars.
+  // The legacy `usd` shape predates currency and names dollars.
+  it('serves costUsd only for USD-priced figures', () => {
+    const store = new CanonStore(':memory:')
+    const session = (id: string, cost: unknown): void => {
+      store.upsertSession({
+        sessionId: id,
+        harness: 'copilot',
+        payload: {
+          id,
+          summary: { turn_count: 1, total_input: 100, total_output: 10, cost },
+        },
+      })
+    }
+    session('sess-usd', { basis: 'published', status: 'priced', value: 0.05, currency: 'USD' })
+    session('sess-eur', { basis: 'published', status: 'priced', value: 0.05, currency: 'EUR' })
+    session('sess-legacy', { usd: 0.12, basis: 'published_rates', status: 'ok' })
+    session('sess-norate', { basis: 'unknown', status: 'no_rate' })
+    // Re-review Kilo 5: a `partial` block still carries a priced figure.
+    session('sess-partial', { basis: 'published', status: 'partial', value: 0.03, currency: 'USD' })
+
+    const bridge = new KyberBridge({ canonPath: ':memory:', store })
+    try {
+      const figures = bridge.sessionSummaryFigures([
+        'sess-usd',
+        'sess-eur',
+        'sess-legacy',
+        'sess-norate',
+        'sess-partial',
+      ])
+      expect(figures.get('sess-usd')?.costUsd).toBe(0.05)
+      expect(figures.get('sess-eur')?.costUsd).toBeUndefined()
+      expect(figures.get('sess-legacy')?.costUsd).toBe(0.12)
+      expect(figures.get('sess-norate')?.costUsd).toBeUndefined()
+      expect(figures.get('sess-partial')?.costUsd).toBe(0.03)
+    } finally {
+      bridge.close()
+      store.close()
+    }
+  })
+
+  // Kilo K3 / Copilot C5: a priced figure beside an unpriced session is a
+  // partial sum wearing a total's suit — mark it, or omit when nothing priced.
+  it('marks partial run costs and omits unpriced ones', () => {
+    const store = new CanonStore(':memory:')
+    const session = (id: string, cost: unknown): void => {
+      store.upsertSession({
+        sessionId: id,
+        harness: 'copilot',
+        payload: { id, summary: { turn_count: 1, cost } },
+      })
+    }
+    session('sess-p1', { basis: 'published', status: 'priced', value: 0.01, currency: 'USD' })
+    session('sess-p2', { basis: 'unknown', status: 'no_rate' })
+
+    const bridge = new KyberBridge({ canonPath: ':memory:', store })
+    try {
+      const summaries = bridge.sessionSummaryFigures(['sess-p1', 'sess-p2'])
+      expect(sumSessionFigures(summaries, ['sess-p1', 'sess-p2'])).toEqual({
+        turnCount: 2,
+        costUsd: 0.01,
+        costStatus: 'partial',
+        partial: true,
+        partialFields: ['costUsd'],
+      })
+      // Every session priced: complete, no marker.
+      expect(
+        sumSessionFigures(summaries, ['sess-p1']),
+      ).toEqual({ turnCount: 1, costUsd: 0.01 })
+      // Nothing priced: absent, never $0.
+      expect(sumSessionFigures(summaries, ['sess-p2'])).toEqual({ turnCount: 1 })
+    } finally {
+      bridge.close()
+      store.close()
+    }
+  })
+
+  // Re-review #2 (Kilo B): when every session's cost block is partial, the
+  // priced count equals the linked count, so neither marker fires and the
+  // total looks complete. A per-session partial flag marks it.
+  it('marks cost partial when every session is partial', () => {
+    const store = new CanonStore(':memory:')
+    const session = (id: string): void => {
+      store.upsertSession({
+        sessionId: id,
+        harness: 'copilot',
+        payload: {
+          id,
+          summary: {
+            turn_count: 1,
+            cost: { basis: 'published', status: 'partial', value: 0.02, currency: 'USD' },
+          },
+        },
+      })
+    }
+    session('sess-ap1')
+    session('sess-ap2')
+    const bridge = new KyberBridge({ canonPath: ':memory:', store })
+    try {
+      const summaries = bridge.sessionSummaryFigures(['sess-ap1', 'sess-ap2'])
+      expect(summaries.get('sess-ap1')?.costUsd).toBe(0.02)
+      // costStatus marks the partial cost; no general `partial` flag — both
+      // sessions are otherwise fully accounted for.
+      expect(sumSessionFigures(summaries, ['sess-ap1', 'sess-ap2'])).toEqual({
+        turnCount: 2,
+        costUsd: 0.04,
+        costStatus: 'partial',
+      })
+    } finally {
+      bridge.close()
+      store.close()
+    }
+  })
+
+  // Re-review #2 (Kilo 4): a field present in some summaries and missing in
+  // others names exactly which cells are subtotals.
+  it('names partially-covered fields', () => {
+    const summaries: SessionSummaryFigures = new Map([
+      ['s-a', { turnCount: 2, totalInput: 500, totalOutput: 50 }],
+      ['s-b', { turnCount: 3 }],
+    ])
+    expect(sumSessionFigures(summaries, ['s-a', 's-b'])).toEqual({
+      turnCount: 5,
+      totalInput: 500,
+      totalOutput: 50,
+      partial: true,
+      partialFields: ['totalInput', 'totalOutput'],
+    })
+  })
+
+  // Re-review Kilo 5: turn/input/output totals are subtotals when a linked
+  // session contributes no figures — marked, not complete-looking.
+  it('marks non-cost totals partial when a linked session is missing', () => {
+    const store = new CanonStore(':memory:')
+    store.upsertSession({
+      sessionId: 'sess-only',
+      harness: 'copilot',
+      payload: { id: 'sess-only', summary: { turn_count: 2, total_input: 500 } },
+    })
+    const bridge = new KyberBridge({ canonPath: ':memory:', store })
+    try {
+      const summaries = bridge.sessionSummaryFigures(['sess-only'])
+      // A linked session with no summary row at all: subtotal.
+      expect(sumSessionFigures(summaries, ['sess-only', 'sess-gone'])).toEqual({
+        turnCount: 2,
+        totalInput: 500,
+        partial: true,
+        partialFields: ['turnCount', 'totalInput'],
+      })
+      // Every linked session accounted for: complete, no marker.
+      expect(sumSessionFigures(summaries, ['sess-only'])).toEqual({
+        turnCount: 2,
+        totalInput: 500,
+      })
+    } finally {
+      bridge.close()
+      store.close()
+    }
+  })
+
+  // Re-review Kilo 7: in direct-DB mode json_extract yields null (not
+  // undefined) for a missing currency — a priced block without one must
+  // still read as USD, exactly as store mode treats it.
+  it('keeps a priced block without currency in direct-DB mode', () => {
+    const canonDb = new DatabaseSync(':memory:')
+    canonDb.exec(`
+      CREATE TABLE session (
+        session_id TEXT PRIMARY KEY, harness TEXT NOT NULL, label TEXT,
+        is_subagent INTEGER DEFAULT 0, parent_session TEXT, agent_name TEXT,
+        repo TEXT, branch TEXT, started TEXT, ended TEXT, payload TEXT
+      );
+    `)
+    canonDb
+      .prepare('INSERT INTO session VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(
+        'sess-nocur',
+        'copilot',
+        'no currency',
+        0,
+        null,
+        null,
+        null,
+        null,
+        '2026-09-04T00:00:00.000Z',
+        null,
+        JSON.stringify({
+          id: 'sess-nocur',
+          summary: {
+            turn_count: 1,
+            cost: { basis: 'published', status: 'priced', value: 0.07 },
+          },
+        }),
+      )
+    const bridge = new KyberBridge({ canonDb })
+    try {
+      expect(bridge.sessionSummaryFigures(['sess-nocur']).get('sess-nocur')?.costUsd).toBe(0.07)
+    } finally {
+      // Bridge owns the passed database handle.
+      bridge.close()
+    }
+  })
+})
+
+describe('KyberBridge run session streaming (re-review #2 Kilo 4/5)', () => {
+  // The generator is lazy: pulling one session parses exactly one payload.
+  // An eager shared Map would parse every session up front.
+  it('streams one payload at a time', async () => {
+    const store = new CanonStore(':memory:')
+    const rec = (spanId: string, sessionId: string): import('../canon/types.js').CanonicalRecord => ({
+      spanId,
+      traceId: `trace-${sessionId}`,
+      parentSpanId: null,
+      sessionId,
+      source: 'synthetic',
+      harness: 'copilot',
+      name: 'canonical run turn',
+      op: 'llm.invoke',
+      kind: 'client',
+      timestamp: '2026-09-04T12:00:00.000Z',
+      durationMs: 100,
+      status: 'ok',
+      tokens: {
+        freshInput: 800,
+        cacheRead: 200,
+        cacheCreation: 0,
+        output: 100,
+        reportedInput: 1000,
+        reportedOutput: 100,
+      },
+      content: {},
+      parts: [{ part: 'system_prompt', text: 'sys', tokens: 600 }],
+      cost: { basis: 'published', status: 'priced', value: 0.01, currency: 'USD' },
+      raw: { model: 'gpt-4o', cwd: '/repo' },
+    })
+    store.upsertMany([rec('st-t1', 'stream-a'), rec('st-t2', 'stream-b')])
+    await buildSessions(store)
+    await buildRuns(store)
+    const runId = store.listRuns('copilot')[0]!.runId
+
+    let payloadReads = 0
+    class CountingStore extends CanonStore {
+      override getSessionPayload(sessionId: string): unknown | undefined {
+        payloadReads += 1
+        return super.getSessionPayload(sessionId)
+      }
+    }
+    const counting = new CountingStore(':memory:')
+    counting.upsertMany([rec('st-t1', 'stream-a'), rec('st-t2', 'stream-b')])
+    await buildSessions(counting)
+    await buildRuns(counting)
+
+    const bridge = new KyberBridge({ canonPath: ':memory:', store: counting })
+    try {
+      const executions = counting.listExecutions(runId)
+      expect(executions).toHaveLength(2)
+      const stream = bridge.streamRunSessionPayloads(executions)
+      const first = stream.next()
+      expect(first.done).toBe(false)
+      // One pull, one parse — the second session is untouched.
+      expect(payloadReads).toBe(1)
+    } finally {
+      bridge.close()
+      store.close()
+      counting.close()
+    }
+  })
+
+  // Two executions sharing one session digest it once, not twice.
+  it('deduplicates shared sessions for the digest', () => {
+    const exec = (id: string): import('../canon/types.js').ExecutionRow => ({
+      executionId: id,
+      runId: 'run-dedup',
+      sessionId: 'sess-shared',
+      parentExecutionId: null,
+      harness: 'copilot',
+      agentName: null,
+      isRoot: true,
+      started: null,
+      ended: null,
+      parentLinkage: 'measured',
+    })
+    function* source(): Generator<{
+      execution: import('../canon/types.js').ExecutionRow
+      payload: Record<string, unknown> & { context?: unknown }
+    }> {
+      const payload = { id: 'sess-shared' }
+      yield { execution: exec('exec-1'), payload }
+      yield { execution: exec('exec-2'), payload }
+    }
+    const seen = [...dedupedRunSessions(source())]
+    expect(seen).toHaveLength(1)
+    expect(seen[0]!.execution.executionId).toBe('exec-1')
+  })
+})
+
 
 describe('KyberBridge.listSessions cost mapping (issue #186)', () => {
   let db: InstanceType<typeof DatabaseSync>

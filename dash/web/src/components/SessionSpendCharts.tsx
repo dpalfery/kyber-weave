@@ -253,6 +253,10 @@ export function contextSegments(row: {
 export function normalizeContextBuckets(
   rawBuckets: Record<string, number | null | undefined> = {},
   reportedInput?: number,
+  // Issue #187: the engine's measured residual for the turn. The served
+  // buckets carry no residual key, so without this seed the gap between the
+  // measured input and the buckets reconciles to a false zero.
+  engineResidual = 0,
 ): Record<ContextBucketKey, number> {
   const result: Record<ContextBucketKey, number> = {
     system_prompt: 0,
@@ -303,6 +307,10 @@ export function normalizeContextBuckets(
     }
   }
 
+  if (Number.isFinite(engineResidual) && engineResidual > 0) {
+    result.residual += engineResidual
+  }
+
   // Account for unattributed residual when reported input exceeds sum of known buckets
   if (reportedInput && reportedInput > 0) {
     const known =
@@ -325,6 +333,12 @@ export function extractNormalizedContextTurns(context?: ContextCompositionData |
   total: number
   pressure?: number
   headroom?: number
+  /**
+   * Issue #187: whether the row stands on a measured input basis (a served
+   * `reported_input`, or an engine-measured residual). Without one the
+   * aggregate renders not-measurable instead of a 0.0% residual.
+   */
+  hasMeasuredInput: boolean
   /** Ground-truth per-MCP-server tool-definition tokens, when attributed. */
   servers?: Record<string, number>
   /** Tool-definition tokens belonging to no server (the harness's built-ins). */
@@ -345,8 +359,29 @@ export function extractNormalizedContextTurns(context?: ContextCompositionData |
         return sum + v
       }, 0)
       const fallbackReported = (known + residualTokens) > 0 ? (known + residualTokens) : undefined
-      const reported = t.reported_input ?? t.bucketedTokens ?? fallbackReported
-      const buckets = normalizeContextBuckets(t.buckets ?? {}, reported)
+      // Issue #187: the measured input wins over `bucketedTokens` — the old
+      // preference reconciled buckets against themselves and forced residual
+      // zero. An engine-measured residual is itself a measured basis.
+      const measuredInput =
+        typeof t.reported_input === 'number' && Number.isFinite(t.reported_input)
+          ? t.reported_input
+          : undefined
+      const engineMeasuredTotal = residualTokens > 0 ? known + residualTokens : undefined
+      const reported = measuredInput ?? engineMeasuredTotal ?? t.bucketedTokens ?? fallbackReported
+      const hasMeasuredInput = (measuredInput ?? engineMeasuredTotal) !== undefined
+      // A legacy bucket map can carry the residual under its own key while
+      // `t.residual` names the same figure — seeding both would count it
+      // twice. The engine's buckets never carry a residual key, so the seed
+      // applies exactly when the buckets do not already hold it.
+      const bucketsHoldResidual = Object.keys(rawBuckets).some((key) => {
+        const lowered = key.toLowerCase().trim()
+        return lowered === 'residual' || lowered.includes('unattributed') || lowered.includes('drift')
+      })
+      const buckets = normalizeContextBuckets(
+        t.buckets ?? {},
+        reported,
+        bucketsHoldResidual ? 0 : residualTokens,
+      )
       const total = Object.values(buckets).reduce((sum, v) => sum + v, 0)
       // The analysis emits `toolDefinitionsByServer` as a Map, which survives
       // the API as a plain object. Either shape is accepted; anything else is
@@ -368,6 +403,7 @@ export function extractNormalizedContextTurns(context?: ContextCompositionData |
         total: Math.max(total, reported ?? 0),
         pressure: t.pressure,
         headroom: t.headroom,
+        hasMeasuredInput,
         ...(servers !== undefined && Object.keys(servers).length > 0 ? { servers } : {}),
         ...(builtinToolTokens !== undefined ? { builtinToolTokens } : {}),
       }
@@ -380,6 +416,7 @@ export function extractNormalizedContextTurns(context?: ContextCompositionData |
     reportedInput: number
     buckets: Record<ContextBucketKey, number>
     total: number
+    hasMeasuredInput: boolean
   }> = []
 
   if (context.first) {
@@ -392,6 +429,11 @@ export function extractNormalizedContextTurns(context?: ContextCompositionData |
       reportedInput: Math.max(reported, total),
       buckets,
       total: Math.max(reported, total),
+      // Issue #187: the edge snapshots carry a measured basis only when the
+      // engine served one.
+      hasMeasuredInput:
+        typeof context.first.reported_input === 'number' &&
+        Number.isFinite(context.first.reported_input),
     })
   }
 
@@ -405,6 +447,9 @@ export function extractNormalizedContextTurns(context?: ContextCompositionData |
       reportedInput: Math.max(reported, total),
       buckets,
       total: Math.max(reported, total),
+      hasMeasuredInput:
+        typeof context.last.reported_input === 'number' &&
+        Number.isFinite(context.last.reported_input),
     })
   }
 
@@ -974,16 +1019,20 @@ export function ContextCaveat({
   derivedCounts,
   derivedModel,
   residualPct,
+  // Issue #187: false when no turn carried a measured input basis — the
+  // caveat then states the gap instead of printing a 0.0% residual.
+  residualMeasurable = true,
   unmeasuredTurns,
   hasServerAttribution,
 }: {
   derivedCounts?: boolean
   derivedModel?: string
   residualPct: number
+  residualMeasurable?: boolean
   unmeasuredTurns?: number
   hasServerAttribution: boolean
 }) {
-  const heavyDrift = derivedCounts === true && residualPct > 15
+  const heavyDrift = derivedCounts === true && residualMeasurable && residualPct > 15
 
   return (
     <div
@@ -995,7 +1044,13 @@ export function ContextCaveat({
           : 'border-border bg-interactive-secondary/40 text-tertiary-foreground',
       )}
     >
-      {derivedCounts === false ? (
+      {!residualMeasurable ? (
+        <span data-testid="context-caveat-unmeasured-residual">
+          The residual is <strong>not measurable</strong> for this session: no turn carried a measured
+          input basis to reconcile the buckets against. What the buckets do not account for is
+          unattributed, not zero.
+        </span>
+      ) : derivedCounts === false ? (
         <span data-testid="context-caveat-measured">
           Bucket sizes are <strong>reported by the harness</strong>, not estimated. The residual of{' '}
           <span className="tabular-nums">{residualPct.toFixed(1)}%</span> is input the harness did not
@@ -1115,10 +1170,14 @@ export function ContextCompositionChart({
     ...rows.flatMap((r) => CONTEXT_BUCKET_KEYS.map((k) => r.buckets[k])),
   )
 
-  // Residual percentage calculations
-  const totalResidual = rows.reduce((s, r) => s + r.buckets.residual, 0)
-  const totalAllTokens = rows.reduce((s, r) => s + r.total, 0)
-  const avgResidualPct = totalAllTokens > 0 ? (totalResidual / totalAllTokens) * 100 : 0
+  // Residual percentage calculations (issue #187): only over rows standing on
+  // a measured input basis. Without one the header renders not-measurable —
+  // never a 0.0% that reads as fully attributed.
+  const measuredRows = rows.filter((r) => r.hasMeasuredInput)
+  const totalResidual = measuredRows.reduce((s, r) => s + r.buckets.residual, 0)
+  const totalAllTokens = measuredRows.reduce((s, r) => s + r.total, 0)
+  const residualMeasurable = measuredRows.length > 0 && totalAllTokens > 0
+  const avgResidualPct = residualMeasurable ? (totalResidual / totalAllTokens) * 100 : 0
 
   return (
     <div
@@ -1209,7 +1268,11 @@ export function ContextCompositionChart({
           ) : (
             <>
               Residual:{' '}
-              <span className="font-semibold tabular-nums text-foreground">{avgResidualPct.toFixed(1)}%</span>
+              {residualMeasurable ? (
+                <span className="font-semibold tabular-nums text-foreground">{avgResidualPct.toFixed(1)}%</span>
+              ) : (
+                <span className="font-semibold tabular-nums text-foreground">not measurable</span>
+              )}
             </>
           )}
         </div>
@@ -1219,6 +1282,7 @@ export function ContextCompositionChart({
         derivedCounts={context.derivedCounts}
         derivedModel={context.derivedModel}
         residualPct={avgResidualPct}
+        residualMeasurable={residualMeasurable}
         unmeasuredTurns={(context as { unmeasuredTurns?: number }).unmeasuredTurns}
         hasServerAttribution={legendSegments.some((segment) => segment.server !== undefined)}
       />
