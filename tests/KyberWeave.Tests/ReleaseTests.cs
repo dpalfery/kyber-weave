@@ -1675,70 +1675,98 @@ public sealed class ReleaseTests
             sandbox.WriteArchive(asset, "dummy content for " + asset);
         }
 
-        // Create a shim directory with only a sha256sum shim that exits 3.
+        // Create a shim directory OUTSIDE the asset dir with a sha256sum shim that exits 3.
         // This forces failure after mktemp but before mv, triggering the trap.
-        string shimDir = Path.Combine(sandbox.Root, ".shim");
-        Directory.CreateDirectory(shimDir);
-
-        string sha256sumShim = Path.Combine(shimDir, "sha256sum");
-        File.WriteAllText(sha256sumShim, "#!/bin/sh\nexit 3\n");
-        if (!OperatingSystem.IsWindows())
+        string shimDir = Directory.CreateTempSubdirectory("kyber-weave-trap-test-shim-").FullName;
+        try
         {
-            File.SetUnixFileMode(sha256sumShim, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            string sha256sumShim = Path.Combine(shimDir, "sha256sum");
+            File.WriteAllText(sha256sumShim, "#!/bin/sh\nexit 3\n");
+            if (!OperatingSystem.IsWindows())
+            {
+                File.SetUnixFileMode(sha256sumShim, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            }
+
+            // Run the script with PATH containing the shim dir and standard system paths.
+            // This ensures mktemp and rm resolve, and the failing sha256sum shim takes precedence.
+            ProcessStartInfo startInfo = new("/bin/bash")
+            {
+                RedirectStandardInput = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false
+            };
+            startInfo.EnvironmentVariables["PATH"] = shimDir + Path.PathSeparator + "/usr/bin:/bin";
+            startInfo.ArgumentList.Add(
+                Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "verify-release-checksums.sh"));
+            startInfo.ArgumentList.Add(sandbox.Root);
+            startInfo.ArgumentList.Add(version);
+
+            ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+
+            // Script must exit non-zero when the hash command fails.
+            Assert.NotEqual(0, result.ExitCode);
+
+            // Verify that the failure occurred during hashing (not due to missing tools).
+            Assert.DoesNotContain("unexpected release asset", result.StandardError, StringComparison.Ordinal);
+            Assert.DoesNotContain("command not found", result.StandardError, StringComparison.Ordinal);
+
+            // Trap must have cleaned up any temp files despite the hash failure.
+            string[] tempFiles = Directory.GetFiles(sandbox.Root, ".SHA256SUMS.*");
+            Assert.Empty(tempFiles);
+
+            // No manifest must be created when hashing fails.
+            Assert.False(File.Exists(Path.Combine(sandbox.Root, "SHA256SUMS.txt")));
         }
-
-        // Run the script with PATH containing only the shim (sha256sum will fail).
-        ProcessStartInfo startInfo = new("/bin/bash")
+        finally
         {
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false
-        };
-        startInfo.EnvironmentVariables["PATH"] = shimDir;
-        startInfo.ArgumentList.Add(
-            Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "verify-release-checksums.sh"));
-        startInfo.ArgumentList.Add(sandbox.Root);
-        startInfo.ArgumentList.Add(version);
-
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
-
-        // Script must exit non-zero when the hash command fails.
-        Assert.NotEqual(0, result.ExitCode);
-
-        // Trap must have cleaned up any temp files despite the hash failure.
-        string[] tempFiles = Directory.GetFiles(sandbox.Root, ".SHA256SUMS.*");
-        Assert.Empty(tempFiles);
-
-        // No manifest must be created when hashing fails.
-        Assert.False(File.Exists(Path.Combine(sandbox.Root, "SHA256SUMS.txt")));
+            try
+            {
+                Directory.Delete(shimDir, true);
+            }
+            catch
+            {
+                // best-effort cleanup
+            }
+        }
     }
 
     /// <summary>
     /// When sha256sum is not available, the script must fall back to shasum -a 256
-    /// and produce an identical manifest. This test builds a minimal shim directory
-    /// containing only the tools the script needs, excluding sha256sum, to force
-    /// the fallback on all platforms. Skipped if shasum or required tools are unavailable.
+    /// and produce an identical manifest. This test builds a hermetic bin directory
+    /// OUTSIDE the asset dir, containing symlinks only to the tools the script needs,
+    /// excluding sha256sum to force the fallback on all platforms. Skipped if shasum
+    /// or required tools are unavailable.
     /// </summary>
     [Fact]
     public void VerifyReleaseChecksumsUsesShaSumFallbackWhenSha256sumUnavailable()
     {
         SkipOnWindows();
 
-        // Check if shasum is available; skip if not.
-        ProcessStartInfo checkShasum = new("/bin/bash")
+        // Resolve absolute paths for tools under the ambient PATH.
+        // These are the external commands the script invokes: rm, mktemp, chmod, mv, shasum.
+        var toolsToResolve = new[] { "rm", "mktemp", "chmod", "mv", "shasum" };
+        var toolPaths = new Dictionary<string, string>();
+
+        foreach (string tool in toolsToResolve)
         {
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false
-        };
-        checkShasum.ArgumentList.Add("-c");
-        checkShasum.ArgumentList.Add("command -v shasum >/dev/null 2>&1");
-        ProcessResult checkResult = ProcessRunner.Run(checkShasum, string.Empty);
-        if (checkResult.ExitCode != 0)
-        {
-            throw SkipException.ForSkip("shasum not available; fallback test skipped.");
+            ProcessStartInfo resolveInfo = new("/bin/bash")
+            {
+                RedirectStandardInput = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false
+            };
+            resolveInfo.ArgumentList.Add("-c");
+            resolveInfo.ArgumentList.Add("command -v " + tool);
+            ProcessResult resolveResult = ProcessRunner.Run(resolveInfo, string.Empty);
+
+            if (resolveResult.ExitCode != 0)
+            {
+                throw SkipException.ForSkip($"Required tool '{tool}' not found in PATH; fallback test skipped.");
+            }
+
+            toolPaths[tool] = resolveResult.StandardOutput.Trim();
         }
 
         using Sandbox sandbox = new();
@@ -1751,7 +1779,7 @@ public sealed class ReleaseTests
             sandbox.WriteArchive(asset, "dummy content for " + asset);
         }
 
-        // Run with full PATH to get baseline manifest.
+        // Run with full PATH to get baseline manifest using sha256sum (if available) or shasum.
         ProcessStartInfo normalInfo = new("/bin/bash")
         {
             RedirectStandardInput = true,
@@ -1769,49 +1797,118 @@ public sealed class ReleaseTests
         string manifestPath = Path.Combine(sandbox.Root, "SHA256SUMS.txt");
         string baselineManifest = File.ReadAllText(manifestPath);
 
-        // Clean up and re-run with a restricted PATH that has shasum but not sha256sum.
-        // On this system, sha256sum is in /usr/local/opt/gnu-coreutils/libexec/gnubin
-        // (Homebrew) or similar non-standard locations, while shasum is in /usr/bin.
-        File.Delete(manifestPath);
-
-        ProcessStartInfo fallbackInfo = new("/bin/bash")
+        // Create a hermetic bin directory with symlinks only to required tools (no sha256sum).
+        string hermBinDir = Directory.CreateTempSubdirectory("kyber-weave-fallback-test-bin-").FullName;
+        try
         {
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false
-        };
-        // Restrict PATH to exclude non-standard directories where sha256sum might be.
-        fallbackInfo.EnvironmentVariables["PATH"] = "/bin:/usr/bin:/usr/local/bin";
-        fallbackInfo.ArgumentList.Add(
-            Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "verify-release-checksums.sh"));
-        fallbackInfo.ArgumentList.Add(sandbox.Root);
-        fallbackInfo.ArgumentList.Add(version);
-        ProcessResult fallbackResult = ProcessRunner.Run(fallbackInfo, string.Empty);
+            foreach (var kvp in toolPaths)
+            {
+                string tool = kvp.Key;
+                string toolPath = kvp.Value;
 
-        // Verify sha256sum is not in the restricted PATH used by the script.
-        ProcessStartInfo verifySha256sumAbsent = new("/bin/bash")
+                // On some systems, toolPath might be an absolute path; on others it might be relative.
+                // Ensure it's absolute by running command -v again in a subshell if needed.
+                if (!Path.IsPathRooted(toolPath))
+                {
+                    ProcessStartInfo resolveAbsInfo = new("/bin/sh")
+                    {
+                        RedirectStandardInput = true,
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true,
+                        UseShellExecute = false
+                    };
+                    resolveAbsInfo.ArgumentList.Add("-c");
+                    resolveAbsInfo.ArgumentList.Add($"exec -a ignored bash -c 'command -v {tool}' | head -1");
+                    ProcessResult resolveAbsResult = ProcessRunner.Run(resolveAbsInfo, string.Empty);
+                    if (resolveAbsResult.ExitCode == 0)
+                    {
+                        toolPath = resolveAbsResult.StandardOutput.Trim();
+                    }
+                }
+
+                // Confirm the resolved path exists and is executable.
+                if (string.IsNullOrWhiteSpace(toolPath) || !File.Exists(toolPath))
+                {
+                    throw SkipException.ForSkip($"Tool '{tool}' resolved to invalid path '{toolPath}'; fallback test skipped.");
+                }
+
+                // Create symlink in hermetic dir.
+                string symLinkPath = Path.Combine(hermBinDir, tool);
+                try
+                {
+                    File.CreateSymbolicLink(symLinkPath, toolPath);
+                }
+                catch (Exception ex)
+                {
+                    throw SkipException.ForSkip($"Failed to create symlink for '{tool}': {ex.Message}; fallback test skipped.");
+                }
+            }
+
+            // Clean up baseline manifest and re-run with hermetic PATH that has shasum but not sha256sum.
+            File.Delete(manifestPath);
+
+            ProcessStartInfo fallbackInfo = new("/bin/bash")
+            {
+                RedirectStandardInput = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false
+            };
+            fallbackInfo.EnvironmentVariables["PATH"] = hermBinDir;
+            fallbackInfo.ArgumentList.Add(
+                Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "verify-release-checksums.sh"));
+            fallbackInfo.ArgumentList.Add(sandbox.Root);
+            fallbackInfo.ArgumentList.Add(version);
+            ProcessResult fallbackResult = ProcessRunner.Run(fallbackInfo, string.Empty);
+
+            // Verify sha256sum is not available in the hermetic PATH.
+            ProcessStartInfo verifySha256sumAbsent = new("/bin/bash")
+            {
+                RedirectStandardInput = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false
+            };
+            verifySha256sumAbsent.EnvironmentVariables["PATH"] = hermBinDir;
+            verifySha256sumAbsent.ArgumentList.Add("-c");
+            verifySha256sumAbsent.ArgumentList.Add("command -v sha256sum >/dev/null 2>&1");
+            ProcessResult verifySha256Result = ProcessRunner.Run(verifySha256sumAbsent, string.Empty);
+            Assert.NotEqual(0, verifySha256Result.ExitCode);
+
+            // Verify shasum IS available in the hermetic PATH.
+            ProcessStartInfo verifyShasumPresent = new("/bin/bash")
+            {
+                RedirectStandardInput = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false
+            };
+            verifyShasumPresent.EnvironmentVariables["PATH"] = hermBinDir;
+            verifyShasumPresent.ArgumentList.Add("-c");
+            verifyShasumPresent.ArgumentList.Add("command -v shasum >/dev/null 2>&1");
+            ProcessResult verifyShasumResult = ProcessRunner.Run(verifyShasumPresent, string.Empty);
+            Assert.Equal(0, verifyShasumResult.ExitCode);
+
+            Assert.Equal(0, fallbackResult.ExitCode);
+
+            string fallbackManifest = File.ReadAllText(manifestPath);
+
+            // Manifest bytes must be identical (both paths produce the same hash output in the same format).
+            Assert.Equal(baselineManifest, fallbackManifest);
+        }
+        finally
         {
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false
-        };
-        verifySha256sumAbsent.EnvironmentVariables["PATH"] = "/bin:/usr/bin:/usr/local/bin";
-        verifySha256sumAbsent.ArgumentList.Add("-c");
-        verifySha256sumAbsent.ArgumentList.Add("command -v sha256sum");
-        ProcessResult verifyResult = ProcessRunner.Run(verifySha256sumAbsent, string.Empty);
-        Assert.NotEqual(0, verifyResult.ExitCode);
-
-        Assert.Equal(0, fallbackResult.ExitCode);
-
-        string fallbackManifest = File.ReadAllText(manifestPath);
-
-        // Manifest bytes must be identical (both paths produce the same hash output in the same format).
-        Assert.Equal(baselineManifest, fallbackManifest);
+            try
+            {
+                Directory.Delete(hermBinDir, true);
+            }
+            catch
+            {
+                // best-effort cleanup
+            }
+        }
     }
 
-    // ---- --with-menubar
     // ---- --with-menubar (task 9.2, Requirement 12.7) ----
 
     /// <summary>The argv --with-menubar must produce, asserted by two tests.</summary>
