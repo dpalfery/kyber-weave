@@ -4,7 +4,7 @@ title: Kyber-Weave Plan Inventory
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-09-29
+last-reviewed: 2026-09-30
 ---
 
 # Kyber-Weave Plan Inventory
@@ -17,8 +17,7 @@ A plan is open only while it is built. The pull request that finishes it archive
 
 ## Active Plans
 
-| Plan | Status | Date | Goal |
-|---|---|---|---|
+No active plans.
 
 Pipeline T9 and spine S-docs harvested 2026-09-13 into [dash/architecture.md](../dash/architecture.md), [dash/runbook.md](../dash/runbook.md), [dash/telemetry-inventory.md](../dash/telemetry-inventory.md), [ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md), and [ADR 0018](../adr/0018-kyberdash-content-retention-purge.md). ADRs 0012–0015 remain the spine harvest (0014 notes that `kyber purge-content` was not shipped). Residual risks (T8 live-source coverage, findings client-side harness filter) live on the archived plans — they are not shipped claims.
 
@@ -26,6 +25,7 @@ Pipeline T9 and spine S-docs harvested 2026-09-13 into [dash/architecture.md](..
 
 | Plan | Status | Date | Archive Date | Canonical Docs / Harvested ADRs | Goal |
 |---|---|---|---|---|---|
+| [2026-09-30-github-issue-188-sessions-harness-tabs.md](../archive/plans/2026-09-30-github-issue-188-sessions-harness-tabs.md) | Archived | 2026-09-30 | 2026-09-30 | [Sessions harness tabs runbook](../dash/runbook.md#sessions-harness-tabs), [closeout evidence](../archive/plans/2026-09-30-github-issue-188-sessions-harness-tabs.md#closeout-evidence); no ADR | Fix [issue #188](https://github.com/dpalfery/kyber-weave/issues/188): observed canonical harness IDs drive distinct Sessions tabs and exact filtering; default/fallback All. Development mode: test-first. Complete: focused 35/35, full Dash 3,712 tests, all 15 declared gates PASS, council APPROVE / LOW with no findings. |
 | [2026-09-28-kyber-utilities-status-line-slice.md](../archive/plans/2026-09-28-kyber-utilities-status-line-slice.md) | Complete | 2026-09-28 | 2026-09-29 | [kyber-utilities/README.md](../kyber-utilities/README.md), [kyber-utilities/onboarding.md](../kyber-utilities/onboarding.md), [ADR 0026](../adr/0026-kyber-utilities-owned-files-not-settings.md) | First Kyber Utilities slice (`kyber-weave utilities statusline deploy\|status\|doctor\|remove`, with its own component and receipt). Imports Claude Code, `agy`, and Pi status lines, and deploys them at per-user scope on macOS and Linux with manual activation guidance. Development mode: test-first. Complete: all gates, 2,487/2,488 .NET tests passed (1 designed skip), 3,683 Dash tests passed, 2026-09-29. |
 | [2026-09-28-kyberdash-sea-release-integrity.md](../archive/plans/2026-09-28-kyberdash-sea-release-integrity.md) | Complete | 2026-09-28 | 2026-09-29 | [dash/runbook.md](../dash/runbook.md), [distribution.md](../distribution.md), [dash/architecture.md](../dash/architecture.md); no ADR — decisions D1–D3 are recorded in the plan ([ADR 0020](../adr/0020-kyberdash-one-time-fork.md) decision 4 stays true under D1-A) | Fix [issue #157](https://github.com/dpalfery/kyber-weave/issues/157): a released `kyberdash web` serves the embedded web dashboard instead of the not-built page, `kyberdash menubar` records the absolute `process.execPath` as `kyberdashPath` (D3-A), and the web server's `KyberBridge` follows the file at `canon.db`'s path — opened once it exists, reopened when replaced by a different device/inode, dropped when removed (D2-B). Development mode: test-first. Complete: three code-review council passes (the first two REQUEST_CHANGES with findings fixed and independently re-audited PASS; the third found and fixed one more finding, with its mechanical verdict driven solely by the environment-only `docs-drift` gate — no CodeGraph index in this checkout), 2026-09-29. |
 | [2026-09-29-pr-158-defects.md](../archive/plans/2026-09-29-pr-158-defects.md) | Complete | 2026-09-29 | 2026-09-29 | [kyber-squad/skill-resource-dispositions.md](../kyber-squad/skill-resource-dispositions.md); no ADR | Implement fixes for four static defects identified during CodeRabbit review of PR #158. Development mode: test-first. Complete: all 2,389 tests pass, docs validated. |
