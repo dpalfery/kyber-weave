@@ -8,6 +8,7 @@ import { SessionSpendCharts, CONTEXT_BUCKET_LABELS } from './SessionSpendCharts.
 import { SchemaCostRanking, type SchemaCostAnalysis, type SchemaCostToolRow } from './SchemaCostRanking.js'
 import { TimelineView, type TimelineNode, type CostBlock } from './analysis/TimelineView.js'
 import { SessionCostPanel } from './SessionCostPanel.js'
+import { findContextTurn, findTurnByTransport } from '../lib/kyberApi.js'
 import type {
   KyberContextBucket,
   KyberContextTurn,
@@ -475,29 +476,26 @@ export function AgentSessionContent({
     (turnIndex: number, bucketName?: string) => {
       setSelectedSpanId(undefined)
       const turns = session?.turns || []
-      const turn = turns.find(
-        (t, i) =>
-          t.index === turnIndex ||
-          t.turn === turnIndex ||
-          i === turnIndex ||
-          i + 1 === turnIndex
-      )
+      // Shared strict lookup (issue #184 review): explicit identity first,
+      // position only for rows carrying neither.
+      const turn = findTurnByTransport(turns, turnIndex)
       if (!turn) return
 
-      const turnNum = turn.index ?? turn.turn ?? turnIndex
       if (bucketName) {
         const ctx = session?.context
         const contextTurns: KyberContextTurn[] = ctx?.measurable ? ctx.turns : []
+        // Context rows carry the engine's 1-based numbering (`TurnPressure.index`,
+        // legacy `turn`); the transport `turnIndex` is 0-based, so compare in
+        // 1-based space with the shared strict lookup.
+        const oneBased = turnIndex + 1
+        // Edge fallbacks compare in 1-based space (issue #184 review): the
+        // first turn reads `ctx.first`, the final turn `ctx.last`. Any other
+        // turn without a context row falls back to its own buckets below —
+        // never to the opposite edge of the session.
         const ctxTurn: KyberContextTurn | KyberContextBucket | undefined =
-          contextTurns.find(
-            (ct, i) =>
-              ct.turn === turnNum ||
-              ct.index === turnNum ||
-              i === turnNum ||
-              i + 1 === turnNum
-          ) ||
-          (turnNum === 1 ? ctx?.first : undefined) ||
-          ctx?.last
+          findContextTurn(contextTurns, oneBased) ||
+          (oneBased === 1 ? ctx?.first : undefined) ||
+          (oneBased === turns.length ? ctx?.last : undefined)
 
         const rawBuckets = ctxTurn?.buckets ?? turn.buckets ?? {}
         const tokens = Number(rawBuckets[bucketName] ?? turn[bucketName] ?? 0)
@@ -521,7 +519,8 @@ export function AgentSessionContent({
             ? turn.content[bucketName]
             : (turn[bucketName] ?? (typeof turn.content === 'string' ? turn.content : turn))
 
-        setDrawerTitle(`Turn ${turnNum} · ${bucketName}`)
+        // Issue #184: transport `turnIndex` is 0-based; humans see 1-based.
+        setDrawerTitle(`Turn ${turnIndex + 1} · ${bucketName}`)
         setDrawerSubtitle(
           `Bucket analysis · ${turn.model ? `Model: ${turn.model} · ` : ''}${fmtTokens(total || turn.cumulative_input || turn.input)} total tokens`
         )
@@ -538,7 +537,8 @@ export function AgentSessionContent({
           context: ctx as KyberSessionContext,
         })
       } else {
-        setDrawerTitle(`Turn ${turnNum}`)
+        // Issue #184: transport `turnIndex` is 0-based; humans see 1-based.
+        setDrawerTitle(`Turn ${turnIndex + 1}`)
         setDrawerSubtitle(
           `${turn.model ? `Model: ${turn.model} · ` : ''}${formatDuration(turn.durationMs)}`
         )

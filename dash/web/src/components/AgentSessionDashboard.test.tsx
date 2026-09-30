@@ -11,6 +11,7 @@ import {
   formatDuration,
   formatCredits,
 } from './AgentSessionDashboard.js'
+import { findContextTurn, findTurnByTransport } from '../lib/kyberApi.js'
 import { SessionInspectorDrawer } from './SessionInspectorDrawer.js'
 import type { TimelineNode } from './analysis/TimelineView.js'
 import type { KyberSessionContext } from '../lib/kyberApi.js'
@@ -151,7 +152,8 @@ const sampleSession: AgentSessionPayload = {
   ],
   turns: [
     {
-      index: 1,
+      // 0-based payload `index`, matching the served contract (issue #184).
+      index: 0,
       spanId: 'turn-span-1',
       model: 'claude-3-5-sonnet',
       durationMs: 4200,
@@ -168,7 +170,7 @@ const sampleSession: AgentSessionPayload = {
       },
     },
     {
-      index: 2,
+      index: 1,
       spanId: 'turn-span-2',
       model: 'claude-3-5-sonnet',
       durationMs: 5100,
@@ -897,7 +899,8 @@ describe('AgentSessionDashboard: Interaction & Drawer Integration', () => {
       }
       findSpendCharts(turnTree)
       expect(spendCharts).not.toBeNull()
-      ;(spendCharts!.props as { onSelectTurn: (i: number, b?: string) => void }).onSelectTurn(1, 'tool_definitions')
+      // 0-based transport: the first turn is index 0 (issue #184).
+      ;(spendCharts!.props as { onSelectTurn: (i: number, b?: string) => void }).onSelectTurn(0, 'tool_definitions')
       expect((drawerFrom(renderWithState())!.props as { contentRequest?: unknown }).contentRequest).toEqual({
         sessionId: 'sess-abc-123',
         span: 'turn-span-1',
@@ -998,7 +1001,7 @@ describe('AgentSessionDashboard: Interaction & Drawer Integration', () => {
     }
   })
 
-  it('opens drawer for turn when onSelectTurn is invoked on SessionSpendCharts with 1-based index and populates bucket analysis data', () => {
+  it('opens drawer for turn when onSelectTurn is invoked on SessionSpendCharts with a 0-based index and populates bucket analysis data', () => {
     let capturedOpen = false
     let capturedTitle = ''
     let capturedContent: unknown = null
@@ -1035,20 +1038,20 @@ describe('AgentSessionDashboard: Interaction & Drawer Integration', () => {
 
       expect(spendChartsEl).not.toBeNull()
 
-      // 1-based turn lookup: Turn 1
-      ;(spendChartsEl!.props as { onSelectTurn: (i: number, b?: string) => void }).onSelectTurn(1)
+      // 0-based transport lookup: index 0 is the human-facing Turn 1 (issue #184).
+      ;(spendChartsEl!.props as { onSelectTurn: (i: number, b?: string) => void }).onSelectTurn(0)
       expect(capturedOpen).toBe(true)
       expect(capturedTitle).toBe('Turn 1')
       expect((capturedContent as { spanId?: string }).spanId).toBe('turn-span-1')
 
-      // 1-based turn lookup: Turn 2
-      ;(spendChartsEl!.props as { onSelectTurn: (i: number, b?: string) => void }).onSelectTurn(2)
+      // 0-based transport lookup: index 1 is Turn 2.
+      ;(spendChartsEl!.props as { onSelectTurn: (i: number, b?: string) => void }).onSelectTurn(1)
       expect(capturedOpen).toBe(true)
       expect(capturedTitle).toBe('Turn 2')
       expect((capturedContent as { spanId?: string }).spanId).toBe('turn-span-2')
 
-      // 1-based turn lookup with bucket: tool_definitions
-      ;(spendChartsEl!.props as { onSelectTurn: (i: number, b?: string) => void }).onSelectTurn(1, 'tool_definitions')
+      // 0-based turn lookup with bucket: tool_definitions
+      ;(spendChartsEl!.props as { onSelectTurn: (i: number, b?: string) => void }).onSelectTurn(0, 'tool_definitions')
       expect(capturedOpen).toBe(true)
       expect(capturedTitle).toBe('Turn 1 · tool_definitions')
       expect(capturedContent).toBeDefined()
@@ -1081,6 +1084,84 @@ describe('AgentSessionDashboard: Interaction & Drawer Integration', () => {
       expect(drawerHtml).toContain('2.8K')
       expect(drawerHtml).toContain('45.5K')
       expect(drawerHtml).toContain('6.2%')
+    } finally {
+      if (reactInternals?.H) {
+        reactInternals.H.useState = origState
+      }
+    }
+  })
+
+  it('shows the first-turn edge counts, not the last, for Turn 1 when context.turns is empty (issue #184 review)', () => {
+    const edgeSession: AgentSessionPayload = {
+      ...sampleSession,
+      turns: [
+        {
+          index: 0,
+          spanId: 'turn-span-1',
+          model: 'claude-3-5-sonnet',
+          buckets: { tool_definitions: 100 },
+        },
+      ],
+      context: {
+        measurable: true,
+        contextLimit: 200000,
+        turns: [],
+        residualTotal: 0,
+        derivedCounts: false,
+        freshJumpFactor: 2,
+        flaggedTurns: [],
+        sessionAccumulationRate: 0,
+        unmeasuredTurns: 0,
+        first: {
+          buckets: { tool_definitions: 111 },
+          reported_input: 111,
+        },
+        last: {
+          buckets: { tool_definitions: 999 },
+          reported_input: 999,
+        },
+      },
+    }
+
+    let capturedTitle = ''
+    let capturedContent: unknown = null
+
+    const reactInternals = internalsOf()
+    const origState = reactInternals?.H?.useState
+    if (reactInternals?.H) {
+      reactInternals.H.useState = (initial: unknown) => {
+        if (typeof initial === 'boolean') {
+          return [false, () => {}]
+        }
+        if (typeof initial === 'string') {
+          return [capturedTitle, (t: string) => { capturedTitle = t }]
+        }
+        return [capturedContent, (c: unknown) => { capturedContent = c }]
+      }
+    }
+
+    try {
+      const tree = AgentSessionContent({ session: edgeSession })
+      let spendChartsEl: React.ReactElement | null = null
+      const walk = (node: unknown): void => {
+        if (!React.isValidElement(node)) return
+        const props = node.props as Record<string, unknown> | undefined
+        if (props?.onSelectTurn && props?.session) {
+          spendChartsEl = node
+          return
+        }
+        if (props?.children) {
+          React.Children.forEach(props.children, walk)
+        }
+      }
+      walk(tree)
+      expect(spendChartsEl).not.toBeNull()
+
+      ;(spendChartsEl!.props as { onSelectTurn: (i: number, b?: string) => void }).onSelectTurn(0, 'tool_definitions')
+      expect(capturedTitle).toBe('Turn 1 · tool_definitions')
+      const bucketData = capturedContent as { tokens?: number; total?: number }
+      expect(bucketData.tokens).toBe(111)
+      expect(bucketData.total).toBe(111)
     } finally {
       if (reactInternals?.H) {
         reactInternals.H.useState = origState
@@ -1307,3 +1388,43 @@ describe('AgentSessionDashboard: Issue #180 Task 8 Dashboard UI Verification', (
     expect(offeredMetric).not.toContain("NaN")
   })
 });
+
+// Issue #184: the drawer resolves strictly 0-based transport through the shared
+// helper — explicit identity first, array position only for rows that carry
+// neither `index` nor `turn`. Never a neighbor.
+describe('findTurnByTransport (shared drawer lookup)', () => {
+  it('matches a 0-based index row and the positional fallback', () => {
+    expect(findTurnByTransport([{ index: 4 }], 4)).toEqual({ index: 4 })
+    expect(findTurnByTransport([{}, {}], 1)).toEqual({})
+    expect(findTurnByTransport([{ index: 3 }], 4)).toBeUndefined()
+  })
+
+  it('matches a legacy 1-based turn row via turn - 1 only', () => {
+    expect(findTurnByTransport([{ turn: 5 }], 4)).toEqual({ turn: 5 })
+    expect(findTurnByTransport([{ turn: 5 }], 5)).toBeUndefined()
+  })
+
+  it('prefers explicit identity over an earlier positional match (issue #184 review)', () => {
+    const rows = [{ turn: 2, spanId: 'span-a' }, { turn: 1, spanId: 'span-b' }]
+    expect(findTurnByTransport(rows, 0)).toEqual({ turn: 1, spanId: 'span-b' })
+    expect(findTurnByTransport(rows, 1)).toEqual({ turn: 2, spanId: 'span-a' })
+  })
+
+  it('never serves a neighboring identified row positionally', () => {
+    expect(findTurnByTransport([{ index: 7 }, { index: 8 }], 0)).toBeUndefined()
+  })
+})
+
+describe('findContextTurn (shared 1-based context lookup)', () => {
+  it('matches engine 1-based index and legacy turn, then position', () => {
+    expect(findContextTurn([{ index: 2 }], 2)).toEqual({ index: 2 })
+    expect(findContextTurn([{ turn: 2 }], 2)).toEqual({ turn: 2 })
+    expect(findContextTurn([{}, {}], 2)).toEqual({})
+  })
+
+  it('prefers explicit identity over an earlier positional match (issue #184 review)', () => {
+    const rows = [{ turn: 2 }, { turn: 1 }]
+    expect(findContextTurn(rows, 1)).toEqual({ turn: 1 })
+    expect(findContextTurn(rows, 2)).toEqual({ turn: 2 })
+  })
+})

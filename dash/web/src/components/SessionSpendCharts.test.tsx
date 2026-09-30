@@ -489,7 +489,8 @@ describe('ContextCompositionChart', () => {
 
     if (sysSegment && typeof sysSegment.props.onClick === 'function') {
       sysSegment.props.onClick({ stopPropagation: vi.fn() })
-      expect(onSelect).toHaveBeenCalledWith(1, 'system_prompt')
+      // Row label is the 1-based `Turn #1`; transport is 0-based (issue #184).
+      expect(onSelect).toHaveBeenCalledWith(0, 'system_prompt')
     }
   })
 
@@ -560,7 +561,8 @@ describe('ContextCompositionChart', () => {
     const onSelect = vi.fn()
     const element = React.createElement(ContextCompositionChart, {
       context: sampleContext,
-      selectedTurnIndex: 2,
+      // 0-based transport index for the second turn (issue #184).
+      selectedTurnIndex: 1,
       onSelectTurn: onSelect,
     })
 
@@ -578,7 +580,7 @@ describe('ContextCompositionChart', () => {
 
     if (toolDefLegend && typeof toolDefLegend.props.onClick === 'function') {
       toolDefLegend.props.onClick({ stopPropagation: vi.fn() } as { stopPropagation: () => void })
-      expect(onSelect).toHaveBeenCalledWith(2, 'tool_definitions')
+      expect(onSelect).toHaveBeenCalledWith(1, 'tool_definitions')
     }
   })
 
@@ -603,7 +605,7 @@ describe('ContextCompositionChart', () => {
       sysSegment.props.onKeyDown({ key: 'Enter', preventDefault, stopPropagation })
       expect(preventDefault).toHaveBeenCalled()
       expect(stopPropagation).toHaveBeenCalled()
-      expect(onSelect).toHaveBeenCalledWith(1, 'system_prompt')
+      expect(onSelect).toHaveBeenCalledWith(0, 'system_prompt')
     }
   })
 
@@ -732,6 +734,69 @@ describe('ContextCompositionChart', () => {
     const element = React.createElement(ContextCompositionChart, { context: sampleContext })
 
     expect(hasTestId(element, 'context-caveat-no-servers')).toBe(true)
+  })
+
+  it('emits a 0-based transport index when a 1-based row label is clicked (issue #184)', () => {
+    const onSelect = vi.fn()
+    const element = React.createElement(ContextCompositionChart, {
+      context: sampleContext,
+      onSelectTurn: onSelect,
+    })
+
+    const rowLabel = findAllElements(
+      element,
+      (el) => el.props['role'] === 'button' && renderText(el) === 'Turn #2',
+    )[0]
+    expect(rowLabel).toBeDefined()
+    expect(renderText(element)).toContain('Turn #2')
+
+    if (rowLabel && typeof rowLabel.props.onClick === 'function') {
+      rowLabel.props.onClick()
+      expect(onSelect).toHaveBeenCalledWith(1)
+    }
+  })
+
+  it('defaults a legend click to the first row as a 0-based index (issue #184)', () => {
+    const onSelect = vi.fn()
+    const element = React.createElement(ContextCompositionChart, {
+      context: sampleContext,
+      onSelectTurn: onSelect,
+    })
+
+    const legendItems = findAllElements(
+      element,
+      (el) =>
+        el.props['role'] === 'button' &&
+        typeof el.props.children === 'object' &&
+        el.props.tabIndex === 0,
+    )
+    const toolDefLegend = legendItems.find((item) => renderText(item).includes('Tool definitions'))
+    expect(toolDefLegend).toBeDefined()
+
+    if (toolDefLegend && typeof toolDefLegend.props.onClick === 'function') {
+      toolDefLegend.props.onClick({ stopPropagation: vi.fn() } as { stopPropagation: () => void })
+      expect(onSelect).toHaveBeenCalledWith(0, 'tool_definitions')
+    }
+  })
+
+  it('highlights the row matching a 0-based selectedTurnIndex (issue #184)', () => {
+    const element = React.createElement(ContextCompositionChart, {
+      context: sampleContext,
+      selectedTurnIndex: 1,
+      onSelectTurn: vi.fn(),
+    })
+
+    const selected = findAllElements(
+      element,
+      (el) => el.props['data-testid'] === 'context-turn-2',
+    )[0]
+    const unselected = findAllElements(
+      element,
+      (el) => el.props['data-testid'] === 'context-turn-1',
+    )[0]
+    expect(selected).toBeDefined()
+    expect(String(selected!.props.className)).toContain('ring-1')
+    expect(String(unselected!.props.className)).not.toContain('ring-1')
   })
 })
 

@@ -205,6 +205,10 @@ cd dash/tray/src-tauri && cargo fmt --check && cargo clippy -- -D warnings && ca
 built CLI, build `dash/dist/cli.js` first (`npm --prefix dash run build:cli`) and point
 `KYBERDASH_BIN` at it.
 
+Deployed shape (per-user, no administrator rights). The Windows installer is unsigned; see
+[Windows: unsigned binaries and SmartScreen](../install.md#windows-unsigned-binaries-and-smartscreen)
+for verification and SmartScreen guidance.
+
 The Linux source build uses GTK 0.18 through Tauri. Its `glib 0.18.5` dependency is
 patched locally for [GHSA-wrw7-89jp-8q8g](https://github.com/advisories/GHSA-wrw7-89jp-8q8g):
 `src-tauri/Cargo.toml` points Cargo at `tray/vendor/glib-0.18.5`, and
@@ -214,7 +218,7 @@ that Cargo resolves the local crate. The published tray remains macOS and Window
 Remove the patch only after a Tauri update resolves the Linux graph to `glib >= 0.20.0`
 and the Linux gates pass.
 
-Deployed shape (per-user, no administrator rights). On Windows the NSIS installer installs
+On Windows the NSIS installer installs
 for the current user and a `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` value starts
 the tray at login (`dash/tray/src-tauri/src/autostart.rs`). On macOS:
 

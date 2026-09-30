@@ -693,6 +693,20 @@ describe('ContentPane Component (Decision D4 & D14 Compliance)', () => {
     expect(html).toContain('data-testid="empty-content-pane"')
   })
 
+  it('names the session, turn, and span when a resolved turn recorded no content (issue #184)', () => {
+    const element = React.createElement(ContentPane, {
+      text: '',
+      label: 'Conversation History',
+      context: { sessionId: 'sess-1', turnIndex: 5, spanId: 'span-5' },
+    })
+    const html = renderHtml(element)
+
+    expect(html).toContain('data-testid="empty-content-pane"')
+    expect(html).toContain('No content recorded')
+    expect(html).toContain('span-5')
+    expect(html).toContain('turn 5')
+  })
+
   it('Decision D4 compliance: renders not-measurable pane stating reason and no fake placeholder', () => {
     const reasonText = 'System prompt not measurable: upstream gateway hides raw system prompt.'
     const element = React.createElement(ContentPane, {
@@ -753,7 +767,8 @@ describe('ContextInspector Component', () => {
     const html = renderHtml(element)
 
     expect(html).toContain('data-testid="context-inspector"')
-    expect(html).toContain('Turn 2')
+    // Issue #184: 0-based `turnIndex: 2` renders as human-facing `Turn 3`.
+    expect(html).toContain('Turn 3')
     expect(html).toContain('claude-3-7-sonnet-20250219')
     expect(html).toContain('Whole Turn')
     expect(html).toContain('System Prompt')
@@ -874,5 +889,27 @@ describe('ContextInspector Component', () => {
 
     expect(html).toContain('data-testid="context-inspector-error"')
     expect(html).toContain('Unable to load unclipped context.')
+  })
+
+  it('shows measured per-turn token counts in the header when turnTokens is provided (issue #184)', () => {
+    const element = React.createElement(ContextInspector, {
+      data: sampleTurnContent,
+      turnTokens: { input: 850, output: 120, fresh: 40, cacheRead: 810 },
+    })
+    const html = renderHtml(element)
+
+    expect(html).toContain('data-testid="turn-token-figures"')
+    expect(html).toContain('850')
+    expect(html).toContain('120')
+  })
+
+  it('states plainly when turn token figures are absent, never estimating (issue #184)', () => {
+    const element = React.createElement(ContextInspector, {
+      data: sampleTurnContent,
+    })
+    const html = renderHtml(element)
+
+    expect(html).not.toContain('data-testid="turn-token-figures"')
+    expect(html).toContain('data-testid="turn-token-figures-absent"')
   })
 })
