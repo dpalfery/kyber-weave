@@ -151,10 +151,11 @@ function digestSessions(store: CanonStore, harness: string): SessionDigest {
     // and invoked tools. If tools_offered was unobserved, do not fabricate 100% yield
     // from invocation-only tools (schema_tokens === 0).
     if (summary && Array.isArray(summary.tools_offered)) {
-      const invocationsObserved =
-        (Array.isArray(summary.tools_invoked) && summary.tools_invoked.length > 0) ||
-        (Array.isArray(payload.tools) &&
-          payload.tools.some((t: { invocations?: number }) => (t.invocations ?? 0) > 0))
+      // Measurability, not values: a present tools_invoked — even an empty
+      // one — means the producer observed invocations (a measured zero),
+      // while an absent one means the invocation side was never exported
+      // and the session must not enter the denominator at all.
+      const invocationsObserved = Array.isArray(summary.tools_invoked)
       if (invocationsObserved) {
         digest.totalDefinedTools += summary.tools_offered.length
         const offeredSet = new Set(summary.tools_offered)

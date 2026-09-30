@@ -483,6 +483,49 @@ describe('buildHarnessRollup — Tool yield aggregation', () => {
     store.close()
   })
 
+  it('reports tool_yield 0 measured when the session measured zero invocations (tools_invoked [])', () => {
+    // A present-but-empty tools_invoked is a measured zero, not an unobserved
+    // side: the denominator accrues and the yield is honestly 0. Driven
+    // through buildSessionRow so the shape is one the producer emits (a
+    // session whose records declare tool_calls measurability but carry no
+    // tool spans).
+    const store = new CanonStore(':memory:')
+
+    const parentMeasuredZero: CanonicalRecord = {
+      spanId: 'span-parent-zero',
+      traceId: 'trace-1',
+      parentSpanId: null,
+      source: 'copilot',
+      harness: 'copilot',
+      sessionId: 'sess-offered-zero-invocations',
+      name: 'copilot:chat',
+      op: 'llm.invoke',
+      kind: 'server',
+      timestamp: '2026-09-03T10:00:00.000Z',
+      durationMs: 100,
+      status: 'ok',
+      tokens: { freshInput: 100, cacheRead: 0, cacheCreation: 0, output: 50, reportedInput: 100, reportedOutput: 50 },
+      content: {},
+      parts: [
+        {
+          part: 'tool_definitions',
+          text: JSON.stringify([{ name: 'ToolA' }, { name: 'ToolB' }]),
+          order: 0,
+        },
+      ],
+      cost: { basis: 'published', status: 'priced', value: 0.002, currency: 'USD' },
+      measurability: { token_usage: 'measured', tool_calls: 'measured' },
+    }
+    const sessionRow = buildSessionRow('sess-offered-zero-invocations', [parentMeasuredZero], (s) => s.length)
+    store.upsertSession(sessionRow)
+
+    const rollup = buildHarnessRollup(store, 'copilot')
+    expect(rollup.toolYield).toBe(0)
+    expect(rollup.measurability['tool_yield']).toBe('measured')
+
+    store.close()
+  })
+
   it('reports tool_yield as not_measurable (null) when session tools_offered is present but invocations were not observed (Thread 4)', () => {
     const store = new CanonStore(':memory:')
 

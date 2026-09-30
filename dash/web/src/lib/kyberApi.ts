@@ -497,7 +497,9 @@ export interface KyberFinding {
   // Absent for unmeasured (coverage-gap) findings: render '—', never zero.
   estimatedWasteTokens?: number
   recommendation: string
-  errorBar: {
+  // Absent for unmeasured (coverage-gap) findings alongside the waste
+  // estimate; every consumer already guards with `finding.errorBar &&`.
+  errorBar?: {
     lower: number
     upper: number
   }

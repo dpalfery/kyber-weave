@@ -58,6 +58,10 @@ import {
   type TokenUsage,
 } from '../canon/types.js'
 import { exclusiveConvention, inclusiveConvention } from '../canon/adapters/copilot.js'
+// The detector keys duplicates on serializeToolArgs; the producer reuses the
+// same canonical form so both identities agree by construction. Acyclic:
+// analysis/findings.ts never imports synth (it reads canonical records).
+import { serializeToolArgs } from '../analysis/findings.js'
 import { FILE_SOURCE_PREFIX, measurabilityFor } from '../canon/measurability.js'
 import type {
   ReaderToolCall,
@@ -599,12 +603,13 @@ export function synthesizeToolCall(
     ...(toolCall.arguments !== undefined
       ? { 'gen_ai.tool.arguments_bytes': argsBytes }
       : {}),
-    // Identity of the FULL pre-truncation arguments: duplicate detection
-    // keys on this hash when present, so two calls that differ only past
-    // the 64KB prefix never share an identity. It rides into `raw` with the
+    // Identity of the FULL pre-truncation arguments in canonical form, so
+    // whitespace variants (`{"a":1}` vs `{ "a": 1 }`) share an identity.
+    // Emitted only when truncated: complete arguments are compared by the
+    // detector in normalised form already. It rides into `raw` with the
     // rest of the attributes, which is what survives the store.
-    ...(toolCall.arguments !== undefined
-      ? { 'gen_ai.tool.arguments_hash': createHash('sha256').update(serializedArgs).digest('hex') }
+    ...(argsTruncated
+      ? { 'gen_ai.tool.arguments_hash': createHash('sha256').update(serializeToolArgs(toolCall.arguments), 'utf8').digest('hex') }
       : {}),
     ...(argsTruncated ? { 'gen_ai.tool.arguments_truncated': true } : {}),
     ...(durationAvailability === 'measured' || durationAvailability === 'derived'

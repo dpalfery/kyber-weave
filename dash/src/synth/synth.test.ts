@@ -1005,6 +1005,54 @@ describe('Task 5 — child tool.invoke span generation and result truncation', (
     expect(Buffer.byteLength(boundArgs.content as string, "utf8")).toBeLessThanOrEqual(65_536)
   })
 
+  it("hashes the canonical arguments form so whitespace variants share an identity", () => {
+    // The same call serialized with different spacing must hash alike;
+    // the producer hash previously covered the verbatim string.
+    const big = "Z".repeat(70_000)
+    const compact = `{"path":"src/file.ts","content":"${big}"}`
+    const spaced = `{ "path" : "src/file.ts" , "content" : "${big}" }`
+    const hashFor = (args: string): unknown => {
+      const synthesizer = new Synthesizer()
+      const parsedCall = call({
+        provider: "claude",
+        sessionId: "s-hash-canon",
+        deduplicationKey: "claude:s-hash-canon:t-1",
+      })
+      const records = synthesizer.synthesize([parsedCall], [{
+        parts: [],
+        toolCalls: [{ id: "tu_hash", name: "Write", arguments: args }],
+        toolResults: [],
+      }])
+      const toolRecord = records.find((r) => r.op === "tool.invoke") as ToolInvokeRecord | undefined
+      expect(toolRecord?.attributes?.["gen_ai.tool.arguments_truncated"]).toBe(true)
+      return toolRecord?.attributes?.["gen_ai.tool.arguments_hash"]
+    }
+
+    expect(typeof hashFor(compact)).toBe("string")
+    expect(hashFor(compact)).toBe(hashFor(spaced))
+  })
+
+  it("omits arguments_hash when arguments fit untruncated", () => {
+    // The detector already compares complete arguments in normalised form;
+    // the producer hash exists only to identify truncated arguments.
+    const synthesizer = new Synthesizer()
+    const parsedCall = call({
+      provider: "claude",
+      sessionId: "s-hash-omitted",
+      deduplicationKey: "claude:s-hash-omitted:t-1",
+    })
+    const records = synthesizer.synthesize([parsedCall], [{
+      parts: [],
+      toolCalls: [{ id: "tu_small", name: "Read", arguments: { path: "src/file.ts" } }],
+      toolResults: [],
+    }])
+    const toolRecord = records.find((r) => r.op === "tool.invoke") as ToolInvokeRecord | undefined
+
+    expect(toolRecord).toBeDefined()
+    expect(toolRecord?.attributes?.["gen_ai.tool.arguments_truncated"]).toBeUndefined()
+    expect(toolRecord?.attributes?.["gen_ai.tool.arguments_hash"]).toBeUndefined()
+  })
+
   it("derives duration from paired toolCall and toolResult timestamps or marks unmeasured (Thread 10)", () => {
     const synthesizer = new Synthesizer()
     const parsedCall = call({

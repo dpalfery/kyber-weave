@@ -85,7 +85,10 @@ export const SCHEMA_VERSION = 15
  * When detectors change, this version stamp is bumped to force automatic
  * recomputation of derived findings and signals over stored canonical records.
  */
-export const DETECTOR_VERSION = 1
+// Bumped to 2 when duplicate-tool-call stopped fabricating 250 waste tokens
+// for underivable sizes (coverage-gap findings carry no estimate): stores
+// stamped 1 recompute instead of serving stale fabricated numbers.
+export const DETECTOR_VERSION = 2
 
 /**
  * The whole schema, as code. `CREATE ... IF NOT EXISTS` throughout so
