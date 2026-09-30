@@ -88,13 +88,13 @@ If there is no `.codegraph/` directory:
   runs `codegraph init -y` when CLAUDE_CODE_REMOTE=true): initialize once per session
   with `codegraph init -y .` (standing approval covers repo-local actions only: builds
   and project-local dependencies; no system-wide installs; leave tracked files alone).
-- If blocked (no `codegraph` on `PATH`, no write access, a read-only role): report the
-  blocker under GAPS and proceed with text search (Grep, Glob), stating in the result
-  that CodeGraph was unavailable; the conductor relays the blocker and stops that path.
-- If the index is unusable after initialization: report the blocker under GAPS and fall
-  back to text search (Grep, Glob), stating in the result that CodeGraph was unavailable;
-  the conductor relays the blocker and stops that path. Note in the result that `docs
-  drift` was skipped for want of an index rather than passed.
+- If blocked (no `codegraph` on `PATH`, no write access, a read-only role).
+- If the index is unusable after initialization.
+
+In either case: report the blocker under GAPS and fall back to text search (Grep, Glob),
+stating in the result that CodeGraph was unavailable; the conductor relays the blocker
+and stops that path. When the index is unusable after initialization, also note in the
+result that `docs drift` was skipped for want of an index rather than passed.
 
 See issue #221, "Missing-dependency handling", for the blocker->fix->retry loop.
 
