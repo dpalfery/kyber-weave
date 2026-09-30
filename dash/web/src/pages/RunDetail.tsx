@@ -436,7 +436,8 @@ export function RunDetail({
                             )}
                           >
                             <td className="py-2 px-2 font-mono text-primary">
-                              #{turn.turnIndex}
+                              {/* Issue #184: transport stays 0-based `turnIndex`; humans see 1-based. */}
+                              Turn #{turn.turnIndex + 1}
                             </td>
                             <td className="py-2 px-2 font-mono text-[11px] text-foreground truncate max-w-[120px]">
                               {turn.model || '—'}

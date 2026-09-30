@@ -519,8 +519,9 @@ describe('Pages Smoke Rendering: Context Doctor, HarnessDetail, RunDetail', () =
     expect(html).toContain('Planner Agent')
     expect(html).toContain('Coder Subagent')
     expect(html).toContain('turns-panel')
-    expect(html).toContain('#1')
-    expect(html).toContain('#2')
+    // Issue #184: 0-based `turnIndex` 1/2 render as human-facing `Turn #2`/`Turn #3`.
+    expect(html).toContain('Turn #2')
+    expect(html).toContain('Turn #3')
   })
 })
 
