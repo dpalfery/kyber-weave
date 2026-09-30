@@ -255,10 +255,9 @@ export function ContextExplorer({
           <>
             {sessions?.length === 0 && (
               <p className="px-4 py-6 text-sm text-tertiary-foreground" data-testid="explorer-empty">
-                {/* All is the default and the only state that can actually be empty, so
-                    the harness-specific wording would assert a selection that is not in
-                    play. Keep it for a real subset. */}
-                {provider === ALL_PROVIDER ? 'No sessions found.' : 'No sessions found for this harness.'}
+                {/* The empty state can only be All: `harnesses` is derived from these rows
+                    by a non-empty filter, so any selected subset already has a session. */}
+                No sessions found.
               </p>
             )}
             {sessions?.map((s) => {

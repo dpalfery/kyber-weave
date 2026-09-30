@@ -1,5 +1,3 @@
-import { readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
@@ -9,8 +7,6 @@ import * as ContextExplorerModule from './ContextExplorer.js'
 import { AgentSessionRow, ContextExplorer } from './ContextExplorer.js'
 import type { KyberSessionSummary } from '../lib/kyberApi.js'
 import { formatCostFigure, normalizeCostBlock } from './SessionCostPanel.js'
-
-const source = readFileSync(fileURLToPath(new URL('./ContextExplorer.tsx', import.meta.url)), 'utf8')
 
 type InventoryQuery = {
   queryKey: readonly unknown[]
@@ -259,7 +255,6 @@ describe('ContextExplorer canonical harness inventory', () => {
     expect(tabIds(tree)).toEqual(['agent-all'])
     expect(html(tree)).toContain('data-testid="explorer-empty"')
     expect(html(tree)).toContain('No sessions found.')
-    expect(html(tree)).not.toContain('No sessions found for this harness.')
   })
   it('preserves the loading state until the canonical response arrives', () => {
     expect(html(renderExplorer())).toContain('data-testid="explorer-loading"')
@@ -276,7 +271,9 @@ describe('ContextExplorer canonical harness inventory', () => {
     const byAge = [...canonicalHarnesses].sort((a, b) => a.localeCompare(b)).reverse()
     mockSessions([...byAge.map((harness) => session(harness)), ...byAge.map((harness) => session(harness, '-old'))])
     const tree = await loadExplorer()
-    expect([...tabIdSequence(tree)]).toEqual(['agent-all', ...canonicalHarnesses].sort())
+    // All is pinned first and only the harness IDs are sorted; a harness sorting
+    // ahead of "agent-all" must not move All out of position.
+    expect([...tabIdSequence(tree)]).toEqual(['agent-all', ...[...canonicalHarnesses].sort()])
   })
   it('never lets a stored agent-all harness mint a second All tab', async () => {
     mockSessions([...inventory, { ...session('agent-all') }])
@@ -408,14 +405,17 @@ describe('AgentSessionRow row cost cell (issue #186)', () => {
 })
 
 describe('ContextExplorer removed surface', () => {
-  it('does not retain a tree-detail or context-window-toggle path', () => {
+  it('does not export a tree-detail or context-window-toggle component', () => {
     expect(ContextExplorerModule).not.toHaveProperty('TreeTable')
     expect(ContextExplorerModule).not.toHaveProperty('SessionDetails')
     expect(ContextExplorerModule).not.toHaveProperty('SessionDetailsBoundary')
-    expect(source).not.toContain('fetchContextTree')
-    expect(source).not.toContain('/api/context/tree')
-    expect(source).not.toContain("'context-tree'")
-    expect(source).not.toContain('Live window')
-    expect(source).not.toContain('Full history')
+  })
+  it('never requests the context-tree endpoint', async () => {
+    // Behavioural guard through the mocked HTTP boundary. Asserting that five literal
+    // strings are absent from the source file would pass on a renamed helper or a
+    // moved fetch while the feature it polices came straight back.
+    const fetchMock = mockSessions()
+    await loadExplorer()
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).not.toContain('/api/context/tree')
   })
 })
