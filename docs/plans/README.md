@@ -17,7 +17,9 @@ A plan is open only while it is built. The pull request that finishes it archive
 
 ## Active Plans
 
-_No active plans._
+| Plan | Status | Date | Goal |
+|---|---|---|---|
+| [2026-09-30-issues-189-198-199.md](2026-09-30-issues-189-198-199.md) | Draft | 2026-09-30 | Make KyberDash ingest coverage visible and honest across [#189](https://github.com/dpalfery/kyber-weave/issues/189), [#198](https://github.com/dpalfery/kyber-weave/issues/198), [#199](https://github.com/dpalfery/kyber-weave/issues/199) in one PR: persist and surface the `dash refresh` coverage window, record and expose OTLP collector activity (`ingest_log`, per-source counts, last-received-or-unknown), and surface checkpoint `partial` state, display-level Claude family grouping, and non-`codeburn/` source display names — no new parsers, no default-window change. Development mode: test-first. |
 
 Pipeline T9 and spine S-docs harvested 2026-09-13 into [dash/architecture.md](../dash/architecture.md), [dash/runbook.md](../dash/runbook.md), [dash/telemetry-inventory.md](../dash/telemetry-inventory.md), [ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md), and [ADR 0018](../adr/0018-kyberdash-content-retention-purge.md). ADRs 0012–0015 remain the spine harvest (0014 notes that `kyber purge-content` was not shipped). Residual risks (T8 live-source coverage, findings client-side harness filter) live on the archived plans — they are not shipped claims.
 
