@@ -1744,7 +1744,7 @@ public sealed class ReleaseTests
         SkipOnWindows();
 
         // Resolve absolute paths for tools under the ambient PATH.
-        // These are the external commands the script invokes: rm, mktemp, chmod, mv, shasum.
+        // These are external commands the script runs on the shasum-fallback success path (usage-error paths, which call basename, are not exercised).
         var toolsToResolve = new[] { "rm", "mktemp", "chmod", "mv", "shasum" };
         var toolPaths = new Dictionary<string, string>();
 
@@ -1806,28 +1806,8 @@ public sealed class ReleaseTests
                 string tool = kvp.Key;
                 string toolPath = kvp.Value;
 
-                // On some systems, toolPath might be an absolute path; on others it might be relative.
-                // Ensure it's absolute by running command -v again in a subshell if needed.
-                if (!Path.IsPathRooted(toolPath))
-                {
-                    ProcessStartInfo resolveAbsInfo = new("/bin/sh")
-                    {
-                        RedirectStandardInput = true,
-                        RedirectStandardOutput = true,
-                        RedirectStandardError = true,
-                        UseShellExecute = false
-                    };
-                    resolveAbsInfo.ArgumentList.Add("-c");
-                    resolveAbsInfo.ArgumentList.Add($"exec -a ignored bash -c 'command -v {tool}' | head -1");
-                    ProcessResult resolveAbsResult = ProcessRunner.Run(resolveAbsInfo, string.Empty);
-                    if (resolveAbsResult.ExitCode == 0)
-                    {
-                        toolPath = resolveAbsResult.StandardOutput.Trim();
-                    }
-                }
-
-                // Confirm the resolved path exists and is executable.
-                if (string.IsNullOrWhiteSpace(toolPath) || !File.Exists(toolPath))
+                // Confirm the resolved path exists, is absolute, and is executable.
+                if (string.IsNullOrWhiteSpace(toolPath) || !File.Exists(toolPath) || !Path.IsPathRooted(toolPath))
                 {
                     throw SkipException.ForSkip($"Tool '{tool}' resolved to invalid path '{toolPath}'; fallback test skipped.");
                 }
