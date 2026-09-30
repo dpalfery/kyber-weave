@@ -12,6 +12,7 @@ import { FindingList, getFindingRankScore } from './FindingList.js'
 import { HierarchyBreadcrumb } from './HierarchyBreadcrumb.js'
 import { ContextPressureStrip } from './ContextPressureStrip.js'
 import { BaselineSelect } from './BaselineSelect.js'
+import { ScorecardMatrix } from './ScorecardMatrix.js'
 import { ContextDoctor } from '../../pages/ContextDoctor.js'
 import { HarnessDetail } from '../../pages/HarnessDetail.js'
 import { RunDetail } from '../../pages/RunDetail.js'
@@ -559,5 +560,91 @@ describe('ContextPressureStrip & BaselineSelect', () => {
     expect(html).toContain('baseline-select')
     expect(html).toContain('Harness Median')
     expect(html).toContain('Workspace Median (All Harnesses)')
+  })
+})
+
+describe('ScorecardMatrix honesty (issues #189/#199, T10)', () => {
+  const windowed = {
+    historyWeeks: 2 as number | null,
+    coveredFrom: '2026-09-16T00:00:00.000Z',
+    coveredThrough: '2026-09-30T00:00:00.000Z',
+  }
+
+  it('renders the coverage window banner, never a bare matrix', () => {
+    const html = renderToStaticMarkup(
+      <ScorecardMatrix
+        rows={[{ harness: 'pi', name: 'Pi', sampleCount: 2 }]}
+        coverage={windowed}
+      />,
+    )
+    expect(html).toContain('Coverage: last 2 weeks')
+  })
+
+  it('states an unknown window honestly instead of inventing one', () => {
+    const html = renderToStaticMarkup(
+      <ScorecardMatrix
+        rows={[{ harness: 'pi', name: 'Pi', sampleCount: 2 }]}
+        coverage={{ historyWeeks: null, coveredFrom: null, coveredThrough: null }}
+      />,
+    )
+    expect(html).toContain('Coverage window unknown')
+    expect(html).not.toContain('Coverage: last 2 weeks')
+  })
+
+  it('groups zero-data rows under their verbatim reason and stops claiming live data for them', () => {
+    const reason = 'No collectable runs or sessions recorded for harness "copilot-cli".'
+    const html = renderToStaticMarkup(
+      <ScorecardMatrix
+        rows={[
+          { harness: 'pi', name: 'Pi', sampleCount: 2 },
+          { harness: 'copilot-cli', name: 'GitHub Copilot CLI', sampleCount: 0, noDataReason: reason },
+        ]}
+        coverage={windowed}
+      />,
+    )
+    // The verbatim rollup reason stays visible — never a dash-filled row or a `0 sessions` claim.
+    // (React HTML-escapes the double quotes; the text is otherwise word-for-word.)
+    expect(html).toContain('No collectable runs or sessions recorded for harness')
+    expect(html).toContain('&quot;copilot-cli&quot;')
+    expect(html).toContain('data-testid="matrix-no-data"')
+    expect(html).not.toContain('0 sessions')
+    // The caption no longer asserts every row is a live harness.
+    expect(html).not.toContain('per live harness')
+  })
+
+  it('groups Claude split identities under one family with per-origin counts and no summed total', () => {
+    const html = renderToStaticMarkup(
+      <ScorecardMatrix
+        rows={[
+          { harness: 'claude-cli', name: 'Claude CLI', sampleCount: 3, family: 'claude-code' },
+          { harness: 'claude-desktop', name: 'Claude Desktop', sampleCount: 5, family: 'claude-code' },
+          { harness: 'claude-code', name: 'Claude Code', sampleCount: 7, family: 'claude-code' },
+          { harness: 'pi', name: 'Pi', sampleCount: 2, family: 'pi' },
+        ]}
+        coverage={windowed}
+      />,
+    )
+    // One family section, every canonical origin id still visible and distinct.
+    expect(html).toContain('claude-code')
+    expect(html).toContain('drill-harness-claude-cli')
+    expect(html).toContain('drill-harness-claude-desktop')
+    expect(html).toContain('drill-harness-claude-code')
+    // Per-origin counts stay visible; the family sums nothing (3+5+7=15 never renders).
+    expect(html).toContain('3')
+    expect(html).toContain('5')
+    expect(html).toContain('7')
+    expect(html).not.toContain('15 samples')
+    expect(html).not.toContain('15 sessions')
+  })
+
+  it('never renders the raw codeburn/ storage namespace as a harness', () => {
+    const html = renderToStaticMarkup(
+      <ScorecardMatrix rows={[{ harness: 'codeburn/claude-desktop' }]} coverage={windowed} />,
+    )
+    // No user-visible text — element content or accessible label — carries the prefix.
+    expect(html).not.toContain('>codeburn/')
+    expect(html).not.toContain('aria-label="codeburn/')
+    // The canonical id still rides along for drill-down filtering and auditability.
+    expect(html).toContain('drill-harness-codeburn/claude-desktop')
   })
 })

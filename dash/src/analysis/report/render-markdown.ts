@@ -53,6 +53,28 @@ function detectedFor(report: ContextReport, harness: string): boolean | undefine
   return report.detection?.find((row) => row.harness === harness)?.detected
 }
 
+/**
+ * The ingest coverage window body (plan T3).
+ *
+ * A tracked run prints `last N weeks (<from> → <through>)`.
+ * A pre-window-tracking run (null) states `unknown (recorded before window
+ * tracking)` — never the current default, never 0.
+ */
+function coverageWindowBody(refresh: {
+  historyWeeks?: number | null
+  coveredFrom?: string | null
+  coveredThrough?: string | null
+}): string {
+  const historyWeeks = refresh.historyWeeks ?? null
+  const coveredFrom = refresh.coveredFrom ?? null
+  const coveredThrough = refresh.coveredThrough ?? null
+  if (historyWeeks !== null && coveredFrom !== null && coveredThrough !== null) {
+    const weeks = `last ${historyWeeks} week${historyWeeks === 1 ? '' : 's'}`
+    return `${weeks} (${coveredFrom} → ${coveredThrough})`
+  }
+  return 'unknown (recorded before window tracking)'
+}
+
 export function renderMarkdown(report: ContextReport): string {
   const lines: string[] = []
   const push = (line = ''): void => {
@@ -85,6 +107,7 @@ export function renderMarkdown(report: ContextReport): string {
     if (coverage.refresh.inProgress !== null) {
       push(`- **In progress:** pid ${coverage.refresh.inProgress.pid} since ${coverage.refresh.inProgress.since}`)
     }
+    push(`- **Coverage window:** ${coverageWindowBody(coverage.refresh)}`)
     push(`- **Quarantine:** ${coverage.quarantineCount === null ? 'unavailable' : coverage.quarantineCount}`)
     push(`- **Problems:** ${coverage.problemCount === null ? 'unavailable' : coverage.problemCount}`)
     if (coverage.harnesses.length === 0) {

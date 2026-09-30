@@ -78,7 +78,7 @@ import {
  * corpus is the expensive thing here and re-collecting it is not always
  * possible.
  */
-export const SCHEMA_VERSION = 14
+export const SCHEMA_VERSION = 15
 
 /**
  * Version of the diagnostic signal and finding detector suite (Decision D17).
@@ -291,6 +291,7 @@ CREATE INDEX IF NOT EXISTS prediction_by_created_at ON prediction (created_at);
  */
 /** Map a `refresh_run` row out of SQLite's column names. */
 function toRefreshRunRow(row: Record<string, unknown>): RefreshRunRow {
+  const historyWeeks = row['history_weeks']
   return {
     id: String(row['id']),
     startedAt: String(row['started_at']),
@@ -299,6 +300,9 @@ function toRefreshRunRow(row: Record<string, unknown>): RefreshRunRow {
     pid: Number(row['pid']),
     trigger: String(row['trigger']) as RefreshTrigger,
     summary: row['summary'] === null ? null : String(row['summary']),
+    // Rows written before migration 14→15 carry NULL (or no column at all
+    // on a store that has not migrated): the window is unknown, never 0.
+    historyWeeks: historyWeeks === null || historyWeeks === undefined ? null : Number(historyWeeks),
   }
 }
 
@@ -478,6 +482,17 @@ export const MIGRATIONS: Record<number, (db: Database) => void> = {
   // v13 -> v14: existing stores used a span/code key, so rekey their surviving
   // rows before a new diagnostic at a different location can be recorded.
   13: (db) => rekeyProblems(db),
+  // v14 -> v15: persist the ingest coverage window per refresh run
+  // (issues #189/#198/#199 plan, T1). The window is what discards most
+  // history, and no surface can state it while `refresh_run` carries no
+  // column for it. Existing rows gain a NULL column — window unknown, which
+  // readers state as such rather than as 0 or the current default.
+  14: (db) => {
+    const columns = db.prepare('PRAGMA table_info(refresh_run)').all() as { name: string }[]
+    if (!columns.some((column) => column.name === 'history_weeks')) {
+      db.exec('ALTER TABLE refresh_run ADD COLUMN history_weeks INTEGER')
+    }
+  },
 }
 
 /** Stable per-span/code/location key; rows without a span keep their independent legacy identity. */
@@ -1132,13 +1147,19 @@ export class CanonStore {
     startedAt: string
     pid: number
     trigger: RefreshTrigger
+    /**
+     * The ingest window, in weeks, this run will cover. Optional so callers
+     * that predate window tracking (and the orchestrator until T2) keep
+     * compiling; an omitted window persists as NULL = unknown.
+     */
+    historyWeeks?: number | null
   }): string {
     this.db
       .prepare(
-        `INSERT INTO refresh_run (id, started_at, completed_at, status, pid, trigger, summary)
-         VALUES (?, ?, NULL, 'running', ?, ?, NULL)`,
+        `INSERT INTO refresh_run (id, started_at, completed_at, status, pid, trigger, summary, history_weeks)
+         VALUES (?, ?, NULL, 'running', ?, ?, NULL, ?)`,
       )
-      .run(input.id, input.startedAt, input.pid, input.trigger)
+      .run(input.id, input.startedAt, input.pid, input.trigger, input.historyWeeks ?? null)
     return input.id
   }
 

@@ -170,6 +170,47 @@ function surveyFamily(harness: string): string {
 }
 
 /**
+ * Display-level family for a harness id (decision D3, issue #199).
+ *
+ * <remarks>
+ * Split client surfaces stay distinct in stored data, rollup keys, and API
+ * filters — this wraps the existing survey vocabulary only so surfaces can
+ * group the Claude rows under one family label while keeping each
+ * canonical id (and its per-origin count) visible beside it.
+ * </remarks>
+ */
+export function harnessFamily(harness: string): string {
+  return surveyFamily(harness)
+}
+
+/** Where a stored source name arrived from — a label, never a rewritten id. */
+export type SourceKind = 'local-file' | 'otlp' | 'legacy-unattributed'
+
+/**
+ * Honest rendering of a stored source name with its raw value attached.
+ *
+ * <remarks>
+ * The `codeburn/` prefix stays in stored data (emitters and canon rows
+ * carry it); only rendering strips it. OTLP names render verbatim and the
+ * deprecated `unattributed` rows are labeled legacy so no surface reads
+ * them as a harness. Callers keep `raw` alongside `display` for auditability
+ * and must not fabricate aggregates across origins.
+ * </remarks>
+ */
+export type SourceDisplay = { display: string; raw: string; kind: SourceKind }
+
+/** Split a stored source name into its display form without rewriting storage. */
+export function sourceDisplayName(source: string): SourceDisplay {
+  if (isFileSource(source)) {
+    return { display: source.slice(FILE_SOURCE_PREFIX.length), raw: source, kind: 'local-file' }
+  }
+  if (source.trim().toLowerCase() === 'unattributed') {
+    return { display: 'unattributed (legacy)', raw: source, kind: 'legacy-unattributed' }
+  }
+  return { display: source, raw: source, kind: 'otlp' }
+}
+
+/**
  * Canonical persisted harness id. Split client surfaces stay distinct.
  * Gemini remains the excluded identity string so callers can refuse it;
  * it is never seeded into rollups or derived session/run rows.

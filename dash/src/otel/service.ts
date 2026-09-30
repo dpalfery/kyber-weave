@@ -8,7 +8,7 @@ import { IngestWriter, type SignalBatchSink } from './writer.js'
 import { CanonStore } from '../canon/store.js'
 import { CanonicalProjectionScheduler } from '../canon/projection.js'
 import { readUsageCounters, exclusiveConvention, canonicalContent } from '../canon/adapters/copilot.js'
-import { ingestBatch } from '../canon/ingest.js'
+import { ingestBatch, toRawSpan } from '../canon/ingest.js'
 import {
   DEFAULT_PENDING_TTL_MS,
   ingestLogBatch,
@@ -126,6 +126,22 @@ export async function startOtlpCollectorService(opts: CollectorOptions = {}): Pr
       // what one stored export batch is — so live ingest and a rebuild from
       // exports travel identical code and land identical rows.
       const outcome = ingestBatch(spans, canon)
+      // Record receiver activity for the ingest panel (T6): one audit row
+      // per distinct span source in the decoded batch, grouped exactly as
+      // the pipeline groups it (`toRawSpan` — service.name, 'otlp' when
+      // unnamed). Written after ingestBatch returns on this same store
+      // handle: no new connection, no second projection, no schema change.
+      // Counts size the arriving batch, not the accepted subset, so
+      // quarantined traffic still counts as received. Never a liveness
+      // claim — an empty log reads as unknown downstream.
+      if (spans.length > 0) {
+        const perSource = new Map<string, number>()
+        for (const span of spans) {
+          const source = toRawSpan(span).source
+          perSource.set(source, (perSource.get(source) ?? 0) + 1)
+        }
+        for (const [source, count] of perSource) canon.logIngest(source, count)
+      }
       const detail = [
         `${outcome.accepted} accepted`,
         outcome.quarantined > 0 ? `${outcome.quarantined} quarantined` : null,
@@ -143,6 +159,11 @@ export async function startOtlpCollectorService(opts: CollectorOptions = {}): Pr
     },
     upsertLogs: (logs: readonly OtlpLog[]) => {
       const outcome = ingestLogBatch(logs, canon)
+      // Log batches count as receiver activity (D4): one audit row per
+      // batch, so last-received reflects any receiver request. Spans stay
+      // the per-source attribution source; logs share the single
+      // 'otlp:logs' key. Same store handle, after ingestLogBatch returns.
+      if (logs.length > 0) canon.logIngest('otlp:logs', logs.length)
       console.log(chalk.dim(
         `[${new Date().toLocaleTimeString()}] Ingested ${logs.length} logs ` +
         `(${outcome.enriched} enriched, ${outcome.pending} pending, ${outcome.quarantined} quarantined)`,

@@ -9,11 +9,12 @@ Window: last 7 days
 
 - **Store:** \`canon.db\`
 - **Refresh:** never
+- **Coverage window:** unknown (recorded before window tracking)
 - **Quarantine:** 0
 - **Problems:** 0
 - **Harnesses:** none in the window
 
-> No session in the window. Run \`kyberdash dash refresh\` to read local harness history.
+> No session in the window. Run \`kyberdash dash refresh --history-weeks <n>\` to widen the coverage window.
 
 > No successful refresh recorded. Run \`kyberdash dash refresh\`.
 
@@ -46,6 +47,7 @@ Window: last 7 days
 
 - **Store:** \`canon.db\`
 - **Refresh:** 2026-09-19T11:00:00.000Z (1h ago)
+- **Coverage window:** unknown (recorded before window tracking)
 - **Quarantine:** 0
 - **Problems:** 0
 
@@ -150,6 +152,7 @@ Window: last 7 days
 
 - **Store:** \`canon.db\`
 - **Refresh:** 2026-09-19T11:00:00.000Z (1h ago)
+- **Coverage window:** unknown (recorded before window tracking)
 - **Quarantine:** 0
 - **Problems:** 0
 
@@ -216,6 +219,7 @@ Window: last 7 days
 
 - **Store:** \`canon.db\`
 - **Refresh:** 2026-09-19T11:00:00.000Z (1h ago)
+- **Coverage window:** unknown (recorded before window tracking)
 - **Quarantine:** 0
 - **Problems:** 0
 
@@ -289,6 +293,7 @@ Window: last 7 days
 - **Store:** \`canon.db\`
 - **Refresh:** 2026-09-17T10:00:00.000Z (2d ago)
 - **Last fail:** 2026-09-19T10:00:00.000Z: 2 of 6 source job(s) failed
+- **Coverage window:** unknown (recorded before window tracking)
 - **Quarantine:** 0
 - **Problems:** 0
 
@@ -355,6 +360,7 @@ Window: last 7 days
 
 - **Store:** \`canon.db\`
 - **Refresh:** 2026-09-19T11:00:00.000Z (1h ago)
+- **Coverage window:** unknown (recorded before window tracking)
 - **Quarantine:** 0
 - **Problems:** 0
 

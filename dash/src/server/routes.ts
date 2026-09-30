@@ -14,6 +14,8 @@ import {
   type ReportSection,
 } from '../analysis/report/types.js'
 import { createRequire } from 'node:module'
+import { harnessFamily } from '../canon/measurability.js'
+import type { SourceCheckpoint } from '../canon/source-state.js'
 
 /** The build this server is, carried on `/meta` so a client can check it (R6.7). */
 const KYBERDASH_VERSION = String(
@@ -120,6 +122,69 @@ function parseTurnContentPath(pathname: string): { sessionId: string; turnIndex:
     sessionId: decodeURIComponent(sessionIdRaw).trim(),
     turnIndex,
   }
+}
+
+/**
+ * Verbatim zero-data reason off a rollup payload, or null when the row holds
+ * data (T8, issues #189/#199). Zero-data rows keep their rollup reason
+ * word-for-word: no surface may render `0 sessions` where the truth is none
+ * in the coverage window.
+ */
+function noDataReasonOf(row: { payload?: unknown }): string | null {
+  if (row.payload !== null && typeof row.payload === 'object' && 'reason' in row.payload) {
+    const reason = (row.payload as { reason?: unknown }).reason
+    if (typeof reason === 'string' && reason.trim() !== '') return reason
+  }
+  return null
+}
+
+/**
+ * Per-harness checkpoint-unit counts by status (T8, read via the T4 seam).
+ *
+ * <remarks>
+ * `unchanged` units hold reusable coverage so they count as `ok`;
+ * `invalidated` units need reprocessing so they count as `failed`; any other
+ * status reads as `unavailable` rather than being dropped. These are unit
+ * counts — record counts are never summed and nothing is merged across
+ * harnesses, so family grouping (D3) sums nothing.
+ * </remarks>
+ */
+function checkpointSummaryOf(statuses: readonly SourceCheckpoint[]): {
+  ok: number
+  partial: number
+  failed: number
+  unavailable: number
+} {
+  const summary = { ok: 0, partial: 0, failed: 0, unavailable: 0 }
+  for (const status of statuses) {
+    switch (status.lastStatus) {
+      case 'ok':
+      case 'unchanged':
+        summary.ok += 1
+        break
+      case 'partial':
+        summary.partial += 1
+        break
+      case 'failed':
+      case 'invalidated':
+        summary.failed += 1
+        break
+      default:
+        summary.unavailable += 1
+        break
+    }
+  }
+  return summary
+}
+
+function groupCheckpointsByHarness(statuses: readonly SourceCheckpoint[]): Map<string, SourceCheckpoint[]> {
+  const byHarness = new Map<string, SourceCheckpoint[]>()
+  for (const status of statuses) {
+    const list = byHarness.get(status.harnessId) ?? []
+    list.push(status)
+    byHarness.set(status.harnessId, list)
+  }
+  return byHarness
 }
 
 function sendKyberJson(res: ServerResponse, status: number, body: unknown): void {
@@ -358,6 +423,33 @@ export function handleKyberRequest(
     return true
   }
 
+  // Ingest coverage (plan docs/plans/2026-09-30-issues-189-198-199 T5,
+  // issues #189/#198/#199). Refresh window, receiver activity, quarantine
+  // reasons, and checkpoint statuses in one read-only payload — every count
+  // comes from a row that exists, and anything unrecorded reads as unknown.
+  if (url.pathname === '/api/kyber/coverage') {
+    if (req.method !== 'GET') {
+      sendKyberJson(res, 405, { error: 'Method Not Allowed' })
+      return true
+    }
+    const refresh = bridge.getRefreshState()
+    const ingest = bridge.getIngestActivity()
+    // Per-reason counts must cover every quarantine row, not the inspector's
+    // default page — hence the uncapped read over the bridge's own handle
+    // (no second store). A null reason groups as 'unknown', never dropped.
+    const quarantineCounts = new Map<string, number>()
+    for (const entry of bridge.getQuarantine(Number.MAX_SAFE_INTEGER)) {
+      const reason = entry.reason ?? 'unknown'
+      quarantineCounts.set(reason, (quarantineCounts.get(reason) ?? 0) + 1)
+    }
+    const quarantineByReason = [...quarantineCounts.entries()]
+      .map(([reason, count]) => ({ reason, count }))
+      .sort((a, b) => b.count - a.count || (a.reason < b.reason ? -1 : a.reason > b.reason ? 1 : 0))
+    const checkpoints = bridge.getSourceCheckpointStatuses()
+    sendKyberJson(res, 200, { refresh, ingest, quarantineByReason, checkpoints })
+    return true
+  }
+
   // The one report every surface reads (Decision D2, R7.1, R7.5).
   if (url.pathname === '/api/kyber/report') {
     if (req.method !== 'GET') {
@@ -503,8 +595,15 @@ export function handleKyberRequest(
     }
     // `scorecard` is served rather than left for each client to derive: the report and
     // this endpoint must agree on dimensions (R11.14), which one derivation guarantees.
+    // `family` is the T7 display-only label (D3 — rows stay per-origin, nothing is
+    // summed); `noDataReason` keeps the rollup's verbatim zero-data reason; and
+    // `checkpointSummary` counts source-checkpoint units by status via the T4 seam.
+    const checkpointsByHarness = groupCheckpointsByHarness(bridge.getSourceCheckpointStatuses())
     const harnesses = bridge.listHarnessRollups().map((row) => ({
       ...row,
+      family: harnessFamily(row.harness),
+      noDataReason: noDataReasonOf(row),
+      checkpointSummary: checkpointSummaryOf(checkpointsByHarness.get(row.harness) ?? []),
       scorecard: buildScorecard(row),
     }))
     sendKyberJson(res, 200, { harnesses })
@@ -533,7 +632,14 @@ export function handleKyberRequest(
       sendKyberJson(res, 404, { error: 'Harness not found' })
       return true
     }
-    sendKyberJson(res, 200, { ...rollup, scorecard: buildScorecard(rollup) })
+    // Same coverage facts as the list endpoint, so the two agree (R11.14).
+    sendKyberJson(res, 200, {
+      ...rollup,
+      family: harnessFamily(rollup.harness),
+      noDataReason: noDataReasonOf(rollup),
+      checkpointSummary: checkpointSummaryOf(bridge.getSourceCheckpointStatuses(id)),
+      scorecard: buildScorecard(rollup),
+    })
     return true
   }
 

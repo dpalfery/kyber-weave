@@ -307,6 +307,49 @@ describe('CanonStore refresh runs', () => {
       store.close()
     }
   })
+
+  it('round-trips the coverage window a refresh ran with', () => {
+    // T1 (issues #189/#198/#199 plan): the ingest window is what discards
+    // most history, so the run row must carry it — otherwise no surface can
+    // state what the last refresh actually covered.
+    const store = new CanonStore(':memory:')
+    try {
+      store.startRefreshRun({
+        id: 'windowed-refresh',
+        startedAt: new Date().toISOString(),
+        pid: process.pid,
+        trigger: 'cli',
+        historyWeeks: 6,
+      })
+
+      expect(store.latestRefreshRun('running')).toMatchObject({ id: 'windowed-refresh', historyWeeks: 6 })
+      expect(store.listRefreshRuns()[0]).toMatchObject({ id: 'windowed-refresh', historyWeeks: 6 })
+    } finally {
+      store.close()
+    }
+  })
+
+  it('reads a run recorded before window tracking as unknown, not zero', () => {
+    // Honest-unobservability: a run started without a window (every run
+    // before the history_weeks column existed) reads as null (unknown) —
+    // never 0, never the current default.
+    const store = new CanonStore(':memory:')
+    try {
+      store.startRefreshRun({
+        id: 'legacy-refresh',
+        startedAt: new Date().toISOString(),
+        pid: process.pid,
+        trigger: 'cli',
+      })
+
+      const running = store.latestRefreshRun('running')
+      expect(running?.id).toBe('legacy-refresh')
+      expect(running?.historyWeeks).toBeNull()
+      expect(store.listRefreshRuns()[0]?.historyWeeks).toBeNull()
+    } finally {
+      store.close()
+    }
+  })
 })
 
 describe('CanonStore quarantine, problems, and ingest log', () => {

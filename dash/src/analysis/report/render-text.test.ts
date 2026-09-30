@@ -124,4 +124,32 @@ describe('renderText display rules', () => {
     expect(shouldColorText({ isTTY: true, noColor: '1' })).toBe(false)
     expect(shouldColorText({ isTTY: false, noColor: undefined })).toBe(false)
   })
+
+  it('prints the tracked coverage window as last N weeks with its bounds (T3)', () => {
+    const report = loadFixture('full')
+    report.coverage!.refresh = {
+      ...report.coverage!.refresh,
+      historyWeeks: 2,
+      coveredFrom: '2026-09-05T11:00:00.000Z',
+      coveredThrough: '2026-09-19T11:00:00.000Z',
+    }
+    const out = renderText(report, { color: false })
+    expect(out).toContain(
+      'Coverage window: last 2 weeks (2026-09-05T11:00:00.000Z → 2026-09-19T11:00:00.000Z)',
+    )
+  })
+
+  it('renders an untracked window as unknown with its reason, never 2 or 0 (T3)', () => {
+    const report = loadFixture('full')
+    report.coverage!.refresh = {
+      ...report.coverage!.refresh,
+      historyWeeks: null,
+      coveredFrom: null,
+      coveredThrough: null,
+    }
+    const out = renderText(report, { color: false })
+    expect(out).toContain('Coverage window: unknown (recorded before window tracking)')
+    expect(out).not.toContain('last 2 weeks')
+    expect(out).not.toContain('last 0 weeks')
+  })
 })

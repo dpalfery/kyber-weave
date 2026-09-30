@@ -507,3 +507,78 @@ describe('schema migration v11 -> current (refresh run log)', () => {
     expect(tableNames(path)).toContain('refresh_run')
   })
 })
+
+describe('schema migration v14 -> v15 (refresh coverage window)', () => {
+  it('bumps past schema 14 through a dedicated step', () => {
+    expect(SCHEMA_VERSION).toBeGreaterThan(14)
+    expect(MIGRATIONS[14]).toBeTypeOf('function')
+  })
+
+  it('gives a v14 store a history_weeks column and reads old runs as unknown', () => {
+    // A v14 store is a current store with the new column dropped and the
+    // stamp wound back — the exact shape every installed copy is in before
+    // this upgrade. The legacy row below is inserted without the column, so
+    // the migration must leave its window NULL (unknown), never 0 or 2.
+    const dir = mkdtempSync(join(tmpdir(), 'kyber-migration-v14-'))
+    dirs.push(dir)
+    const path = join(dir, 'canon.db')
+    new CanonStore(path).close()
+
+    const setup = new DatabaseSync(path)
+    const before = setup.prepare('PRAGMA table_info(refresh_run)').all() as { name: string }[]
+    if (before.some((column) => column.name === 'history_weeks')) {
+      setup.exec('ALTER TABLE refresh_run DROP COLUMN history_weeks')
+    }
+    setup.prepare('UPDATE metadata SET value = ? WHERE key = ?').run('14', 'schema_version')
+    setup
+      .prepare(
+        `INSERT INTO refresh_run (id, started_at, completed_at, status, pid, trigger, summary)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        'legacy-run',
+        '2026-09-01T00:00:00.000Z',
+        '2026-09-01T00:01:00.000Z',
+        'success',
+        1234,
+        'cli',
+        'pre-window refresh',
+      )
+    setup.close()
+
+    const store = new CanonStore(path)
+    try {
+      expect(store.getMetadata('schema_version')).toBe(String(SCHEMA_VERSION))
+      const after = new DatabaseSync(path)
+      try {
+        const columns = after.prepare('PRAGMA table_info(refresh_run)').all() as { name: string }[]
+        expect(columns.map((column) => column.name)).toContain('history_weeks')
+      } finally {
+        after.close()
+      }
+      const legacy = store.listRefreshRuns().find((run) => run.id === 'legacy-run')
+      expect(legacy?.status).toBe('success')
+      expect(legacy?.historyWeeks).toBeNull()
+    } finally {
+      store.close()
+    }
+  })
+})
+
+describe('Cond2 14→15 safety probe (old binary on new schema)', () => {
+  it('refuses a store stamped one version newer with an upgrade message', () => {
+    // Cond2 for docs/plans/2026-09-30-issues-189-198-199.md: this build (v15,
+    // post-T1) opening a v16 store must refuse rather than misread. The guard
+    // is generic over future versions, so pin the adjacent version — the exact
+    // downgrade shape — rather than a far-future synthetic.
+    const dir = mkdtempSync(join(tmpdir(), 'kyber-migration-cond2-'))
+    dirs.push(dir)
+    const path = join(dir, 'canon.db')
+    new CanonStore(path).close()
+    const db = new DatabaseSync(path)
+    db.prepare('UPDATE metadata SET value = ? WHERE key = ?').run(String(SCHEMA_VERSION + 1), 'schema_version')
+    db.close()
+
+    expect(() => new CanonStore(path)).toThrow(/upgrade KyberDash/)
+  })
+})

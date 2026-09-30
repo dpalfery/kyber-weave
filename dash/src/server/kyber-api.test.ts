@@ -766,6 +766,204 @@ describe('Backend Contract Tests: /api/kyber/* Endpoints', () => {
     })
   })
 
+  describe('GET /api/kyber/coverage', () => {
+    it('returns refresh window, ingest activity, per-reason quarantine counts, and checkpoint statuses', async () => {
+      const res = await fetch(`${base}/api/kyber/coverage`)
+      expect(res.status).toBe(200)
+      assertStandardKyberHeaders(res)
+
+      const body = (await res.json()) as {
+        refresh: {
+          lastSuccessAt: string | null
+          lastFailure: { at: string; summary: string } | null
+          inProgress: { pid: number; since: string } | null
+          historyWeeks: number | null
+          coveredFrom: string | null
+          coveredThrough: string | null
+        }
+        ingest: {
+          status: string
+          reason?: string
+          sources: Array<{
+            source: string
+            display: string
+            kind: string
+            recordCount: number
+            ingestedCount: number
+            lastReceivedAt: string | null
+          }>
+          lastReceivedAt: string | null
+        }
+        quarantineByReason: Array<{ reason: string; count: number }>
+        checkpoints: unknown[]
+      }
+
+      // Refresh window: this fixture has no refresh_run table, so the
+      // window is unknown — null, never 0 and never the current default.
+      expect(body.refresh.lastSuccessAt).toBeNull()
+      expect(body.refresh.historyWeeks).toBeNull()
+      expect(body.refresh.coveredFrom).toBeNull()
+      expect(body.refresh.coveredThrough).toBeNull()
+
+      // Ingest activity: two record-only sources, no ingest_log table —
+      // known history, unknown recency (never zero-claimed, never running).
+      expect(body.ingest.status).toBe('known')
+      expect(body.ingest.status).not.toBe('running')
+      expect(body.ingest.lastReceivedAt).toBeNull()
+      const bySource = new Map(body.ingest.sources.map((entry) => [entry.source, entry]))
+      expect(bySource.get('synthetic')?.recordCount).toBe(1)
+      expect(bySource.get('pi-agent')?.recordCount).toBe(1)
+      expect(bySource.get('synthetic')?.lastReceivedAt).toBeNull()
+
+      // Per-reason quarantine counts, verbatim reasons.
+      expect(body.quarantineByReason).toEqual([
+        { reason: 'Malformed attribute', count: 1 },
+        { reason: 'Namespace unmapped', count: 1 },
+      ])
+
+      // No source_checkpoint table in this fixture — no statuses invented.
+      expect(body.checkpoints).toEqual([])
+    })
+
+    it('reports unknown receiver status when nothing was ever recorded, never zero or running', async () => {
+      const store = new CanonStore(':memory:')
+      const unknownBridge = new KyberBridge({ canonPath: ':memory:', store })
+      const unknownServer = await runWebDashboard({
+        port: 0,
+        open: false,
+        kyberBridge: unknownBridge,
+        writeStdout: () => {},
+      })
+
+      try {
+        const unknownBase = `http://127.0.0.1:${(unknownServer.address() as AddressInfo).port}`
+        const res = await fetch(`${unknownBase}/api/kyber/coverage`)
+        expect(res.status).toBe(200)
+        assertStandardKyberHeaders(res)
+
+        const body = (await res.json()) as {
+          ingest: { status: string; reason?: string; sources: unknown[]; lastReceivedAt: string | null }
+        }
+        expect(body.ingest.status).toBe('unknown')
+        expect(body.ingest.status).not.toBe('running')
+        expect(body.ingest.sources).toEqual([])
+        expect(body.ingest.lastReceivedAt).toBeNull()
+        expect(body.ingest.reason ?? '').toMatch(/no receiver activity recorded/)
+      } finally {
+        await new Promise<void>((resolve) => unknownServer.close(() => resolve()))
+        unknownBridge.close()
+        store.close()
+      }
+    })
+
+    it('rejects non-GET methods and unknown coverage paths per house style', async () => {
+      for (const method of ['POST', 'PUT', 'DELETE']) {
+        const res = await fetch(`${base}/api/kyber/coverage`, { method })
+        expect(res.status).toBe(405)
+        assertStandardKyberHeaders(res)
+        await expect(res.json()).resolves.toEqual({ error: 'Method Not Allowed' })
+      }
+
+      const res = await fetch(`${base}/api/kyber/coverage/`)
+      expect(res.status).toBe(404)
+      assertStandardKyberHeaders(res)
+      await expect(res.json()).resolves.toEqual({ error: 'Not found' })
+    })
+  })
+
+  describe('GET /api/kyber/harnesses carries coverage facts (T8)', () => {
+    it('rows include family, verbatim noDataReason, and per-harness checkpoint counts', async () => {
+      const store = new CanonStore(':memory:')
+      store.upsertHarnessRollup({
+        harness: 'claude-desktop',
+        sampleCount: 0,
+        contextPressureMedian: null,
+        contextPressureP95: null,
+        cacheHitRate: null,
+        toolYield: null,
+        delegationOverhead: null,
+        fieldCoverage: null,
+        measurability: {},
+        payload: {
+          sessionCount: 0,
+          runCount: 0,
+          executionCount: 0,
+          reason: 'No collectable runs or sessions recorded for harness "claude-desktop".',
+        },
+      })
+      store.upsertHarnessRollup({
+        harness: 'pi',
+        sampleCount: 2,
+        contextPressureMedian: 0.4,
+        contextPressureP95: 0.6,
+        cacheHitRate: null,
+        toolYield: null,
+        delegationOverhead: null,
+        fieldCoverage: 0.9,
+        measurability: {},
+        payload: { sessionCount: 2, runCount: 1, executionCount: 2 },
+      })
+      const checkpoint = (harnessId: string, sourceKey: string, lastStatus: 'ok' | 'partial' | 'failed') => ({
+        harnessId,
+        sourceKey,
+        providerId: harnessId,
+        parserId: `${harnessId}-parser`,
+        parserContractVersion: '1',
+        format: 'jsonl',
+        sourceRootLabel: `~/${harnessId}`,
+        revisionToken: `rev:${sourceKey}`,
+        coveredFromUtc: '2026-09-16T00:00:00.000Z',
+        coveredThroughUtc: '2026-09-30T00:00:00.000Z',
+        lastAttemptUtc: '2026-09-30T00:00:00.000Z',
+        lastSuccessUtc: '2026-09-30T00:00:01.000Z',
+        lastStatus,
+        lastErrorCode: null,
+        unitCount: 1,
+        recordCount: lastStatus === 'partial' ? 0 : 1,
+      })
+      // A partial unit with 0 records must stay visible as partial-with-0,
+      // never collapse into an invented aggregate or a bare zero.
+      store.commitSourceUnit({ records: [], provenance: [], checkpoint: checkpoint('claude-desktop', 's:1', 'partial') })
+      store.commitSourceUnit({ records: [], provenance: [], checkpoint: checkpoint('claude-desktop', 's:2', 'ok') })
+      store.commitSourceUnit({ records: [], provenance: [], checkpoint: checkpoint('pi', 's:1', 'ok') })
+      store.commitSourceUnit({ records: [], provenance: [], checkpoint: checkpoint('pi', 's:2', 'failed') })
+      const t8Bridge = new KyberBridge({ canonPath: ':memory:', store })
+      const t8Server = await runWebDashboard({ port: 0, open: false, kyberBridge: t8Bridge, writeStdout: () => {} })
+
+      try {
+        const t8Base = `http://127.0.0.1:${(t8Server.address() as AddressInfo).port}`
+        const res = await fetch(`${t8Base}/api/kyber/harnesses`)
+        expect(res.status).toBe(200)
+        assertStandardKyberHeaders(res)
+
+        const body = (await res.json()) as { harnesses: Array<Record<string, unknown>> }
+        const byId = new Map(body.harnesses.map((row) => [row.harness, row]))
+
+        // Family is display-only (D3): split identities stay distinct rows.
+        expect(byId.get('claude-desktop')?.family).toBe('claude-code')
+        expect(byId.get('pi')?.family).toBe('pi')
+
+        // Zero-data keeps its verbatim rollup reason; covered rows carry null.
+        expect(byId.get('claude-desktop')?.noDataReason).toBe(
+          'No collectable runs or sessions recorded for harness "claude-desktop".',
+        )
+        expect(byId.get('pi')?.noDataReason).toBeNull()
+
+        // Checkpoint summary counts units by status via the T4 seam.
+        expect(byId.get('claude-desktop')?.checkpointSummary).toEqual({ ok: 1, partial: 1, failed: 0, unavailable: 0 })
+        expect(byId.get('pi')?.checkpointSummary).toEqual({ ok: 1, partial: 0, failed: 1, unavailable: 0 })
+
+        // Grouping sums nothing: per-origin counts stay visible beside the family.
+        expect(byId.get('claude-desktop')?.sampleCount).toBe(0)
+        expect(byId.get('pi')?.sampleCount).toBe(2)
+      } finally {
+        await new Promise<void>((resolve) => t8Server.close(() => resolve()))
+        t8Bridge.close()
+        store.close()
+      }
+    })
+  })
+
   describe('Backward-compatible endpoints (/context, /schema, /timeline)', () => {
     it('GET /api/kyber/context returns context analysis JSON', async () => {
       const res = await fetch(`${base}/api/kyber/context?id=sess-copilot-001`)

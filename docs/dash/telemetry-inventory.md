@@ -14,7 +14,8 @@ It does not treat an absent source as a zero: unavailable dimensions are
 serialized as `not_measurable` with a source-specific reason.
 
 Local-history ingest is `dash refresh` ([ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md)):
-schema **13** (`source_checkpoint`, `record_provenance`, `refresh_run`), UTC `--history-weeks` default 2,
+schema **15** (`source_checkpoint`, `record_provenance`, `refresh_run` with
+`history_weeks`), UTC `--history-weeks` default 2,
 split client identities, Gemini never a stored harness id. `SURVEYED_HARNESSES` still names
 `gemini` as an E4 **survey family** for cache-counter vocabulary; that is not a coding-harness
 filter. A Gemini selector **label** may remain in the UI.
@@ -102,8 +103,45 @@ Absent signals are never rendered as zero spend or zero cache hit rate.
 | Gemini / AGY | `partial` (`cache_read` only) | `verified` | `not_measurable` | `verified` | `detect-but-cannot-locate` | OTel statusline telemetry exports cached input tokens (`cached_content_token_count` / `cache_read`). Explicit caching architecture has no cache-creation counter (`PROVIDER_UNMEASURABLE: cache_creation`). Standard traces omit prompt prefix bytes. |
 | OpenCode | `not_measurable` | `documented` | `not_measurable` | `documented` | `none` | Experimental OpenTelemetry is disabled by default; no session transcripts or telemetry are collected without user enablement. |
 
-## Dashboard verification boundary
+## Ingest coverage observability
 
+Coverage is stated from rows that exist; anything unrecorded renders as unknown with a
+reason, never as zero, per [honest unobservability](../rules/honest-unobservability.md).
+
+- **Refresh window.** Each refresh run persists its window in
+  `refresh_run.history_weeks` (the `--history-weeks` value of that run, default 2).
+  Runs recorded before window tracking read as `null` and render as "coverage window
+  unknown (recorded before window tracking)". The report and the Context Doctor banner
+  print "Coverage window: last N weeks (\<from> → \<through>)" from the last
+  successful run, and an empty scoped window hints
+  `kyberdash dash refresh --history-weeks <n>`.
+- **Ingest activity.** The live OTLP receiver writes `ingest_log` rows: one row per
+  distinct span source per decoded batch (source is `service.name`, `'otlp'` when
+  unnamed), sized to the arriving batch so quarantined traffic still counts as
+  received, plus one `otlp:logs` row per log batch so last-received reflects any
+  receiver request. Per-source activity joins `records GROUP BY source` (true for
+  history, including legacy `unattributed` and `codeburn/*` rows) with `ingest_log`
+  sums and `MAX(timestamp)` as `lastReceivedAt`. No rows in either table yields
+  `{ status: 'unknown' }` with "no receiver activity recorded"; receiver liveness is
+  never claimed from this page.
+- **Coverage route.** `GET /api/kyber/coverage` returns the refresh window, the
+  ingest activity above, per-reason quarantine counts, and `source_checkpoint`
+  statuses including `partial` ("N sources partial (problems recorded, coverage
+  incomplete)") with "0 records" shown only where `record_count` is a measured zero.
+- **Family display (display-only).** `harnessFamily` groups `claude-cli`,
+  `claude-desktop`, and `claude-code` under the `claude-code` family label for
+  display; stored ids, rollup keys, and API filters are unchanged, and per-origin
+  counts stay visible beside the family label so no aggregate is fabricated.
+  `/api/kyber/harnesses` rows carry `family`, the verbatim rollup `noDataReason`,
+  and a checkpoint summary. Zero-data harnesses keep their rollup reason and group
+  under an explicit "no records in coverage window" state.
+- **Source display names.** Stored `codeburn/<provider>` names keep their prefix;
+  surfaces render them through `sourceDisplayName`, which strips the prefix for
+  local-file sources, renders OTLP names verbatim, and labels legacy
+  `unattributed` rows as "unattributed (legacy)". The raw value rides along as
+  `rawSource` for auditability.
+
+## Dashboard verification boundary
 **[VERIFIED]** The Sessions rail uses the ASAD session dashboard and canonical session
 payload. The six views consume the payload directly: overview, per-turn token spend,
 context composition, tool/schema cost, timeline, and cost/token accounting. The Copilot Chat

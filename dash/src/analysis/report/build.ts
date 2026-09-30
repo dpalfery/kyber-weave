@@ -265,7 +265,9 @@ function buildCoverage(
 
   const hints: string[] = []
   if (scoped.length === 0) {
-    hints.push('No session in the window. Run `kyberdash dash refresh` to read local harness history.')
+    hints.push(
+      'No session in the window. Run `kyberdash dash refresh --history-weeks <n>` to widen the coverage window.',
+    )
   }
   // An hour is the point past which a reader should be told the figures are old rather
   // than left to compare timestamps themselves (R11.4).
@@ -296,12 +298,32 @@ function buildCoverage(
  * Refresh state from the run log (R10.5). The last success and the last failure are read
  * independently on purpose: a failure must not hide the success before it, because "it
  * last worked on Tuesday" is what tells a reader how stale the data is.
+ *
+ * The coverage window rides along from the T4 bridge seam (`historyWeeks` plus the
+ * derived `coveredFrom`/`coveredThrough` of the last success). A bridge that predates
+ * window tracking omits those keys, and a pre-migration run carries them as null:
+ * both normalise to null here — unknown stays unknown, never the default, never 0.
  */
 function readRefreshState(bridge: KyberBridge): ReportCoverage['refresh'] {
-  return safely(
-    () => bridge.getRefreshState(),
-    { lastSuccessAt: null, lastFailure: null, inProgress: null },
-  )
+  const fallback: ReportCoverage['refresh'] = {
+    lastSuccessAt: null,
+    lastFailure: null,
+    inProgress: null,
+    historyWeeks: null,
+    coveredFrom: null,
+    coveredThrough: null,
+  }
+  return safely(() => {
+    const state = bridge.getRefreshState()
+    return {
+      lastSuccessAt: state.lastSuccessAt,
+      lastFailure: state.lastFailure,
+      inProgress: state.inProgress,
+      historyWeeks: state.historyWeeks ?? null,
+      coveredFrom: state.coveredFrom ?? null,
+      coveredThrough: state.coveredThrough ?? null,
+    }
+  }, fallback)
 }
 
 function buildHarnesses(bridge: KyberBridge, scope: ReportScope): ReportHarness[] {

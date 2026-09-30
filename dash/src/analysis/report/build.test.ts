@@ -629,3 +629,61 @@ describe('sections and document shape', () => {
     )
   })
 })
+
+describe('refresh coverage window (plan 2026-09-30-issues-189-198-199 T3)', () => {
+  const windowedBridge = (refresh: Record<string, unknown>): KyberBridge => {
+    const bridge = bridgeOf({ sessions: [session()] })
+    bridge.getRefreshState = () => refresh as unknown as ReturnType<KyberBridge['getRefreshState']>
+    return bridge
+  }
+
+  it('carries historyWeeks and the derived window from the bridge', () => {
+    const bridge = windowedBridge({
+      lastSuccessAt: '2026-09-19T11:00:00.000Z',
+      lastFailure: null,
+      inProgress: null,
+      historyWeeks: 2,
+      coveredFrom: '2026-09-05T11:00:00.000Z',
+      coveredThrough: '2026-09-19T11:00:00.000Z',
+    })
+    const report = build(bridge)
+    const refresh = report.coverage!.refresh as unknown as Record<string, unknown>
+    expect(refresh['historyWeeks']).toBe(2)
+    expect(refresh['coveredFrom']).toBe('2026-09-05T11:00:00.000Z')
+    expect(refresh['coveredThrough']).toBe('2026-09-19T11:00:00.000Z')
+  })
+
+  it('names --history-weeks when the scoped window is empty', () => {
+    const bridge = bridgeOf({ sessions: [] })
+    bridge.getRefreshState = () =>
+      ({
+        lastSuccessAt: '2026-09-19T11:00:00.000Z',
+        lastFailure: null,
+        inProgress: null,
+        historyWeeks: 2,
+        coveredFrom: '2026-09-05T11:00:00.000Z',
+        coveredThrough: '2026-09-19T11:00:00.000Z',
+      }) as unknown as ReturnType<KyberBridge['getRefreshState']>
+    const report = build(bridge)
+    const hints = report.coverage!.hints.join(' ')
+    expect(hints).toContain('--history-weeks')
+    expect(hints).toContain('kyberdash dash refresh --history-weeks')
+  })
+
+  it('reads a pre-window-tracking run as null, never 2 or 0', () => {
+    // A pre-migration run (or a pre-T4 bridge) carries no window keys at all:
+    // the report must normalise the absence to null, never undefined, 2 or 0.
+    const bridge = windowedBridge({
+      lastSuccessAt: '2026-09-19T11:00:00.000Z',
+      lastFailure: null,
+      inProgress: null,
+    })
+    const report = build(bridge)
+    const refresh = report.coverage!.refresh as unknown as Record<string, unknown>
+    expect(refresh['historyWeeks']).toBeNull()
+    expect(refresh['coveredFrom']).toBeNull()
+    expect(refresh['coveredThrough']).toBeNull()
+    expect(refresh['historyWeeks']).not.toBe(2)
+    expect(refresh['historyWeeks']).not.toBe(0)
+  })
+})

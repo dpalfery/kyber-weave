@@ -24,6 +24,12 @@ import {
   type HarnessRollupDbRow,
   type ExecutionDbRow,
 } from '../canon/store.js'
+import { sourceDisplayName, type SourceKind } from '../canon/measurability.js'
+import {
+  toSourceCheckpoint,
+  type SourceCheckpoint,
+  type SourceCheckpointRow,
+} from '../canon/source-state.js'
 import {
   calculateCalibrationCurve,
   type CalibrationCurveResult,
@@ -114,7 +120,56 @@ export type RefreshState = {
   lastSuccessAt: string | null
   lastFailure: { at: string; summary: string } | null
   inProgress: { pid: number; since: string } | null
+  /**
+   * The ingest window, in weeks, of the last successful run (T1's
+   * `historyWeeks`, plan docs/plans/2026-09-30-issues-189-198-199 T4).
+   * Optional so readers that predate window tracking keep compiling;
+   * `null` means the run predates tracking or no success exists — window
+   * unknown, never 0 and never the current default.
+   */
+  historyWeeks?: number | null
+  /** Derived window end of the last success (its `startedAt`); null when unknown. */
+  coveredThrough?: string | null
+  /** Derived window start (`coveredThrough` minus `historyWeeks`); null when unknown. */
+  coveredFrom?: string | null
 }
+
+/**
+ * One stored source's ingest activity (T4 read seam).
+ *
+ * <remarks>
+ * `recordCount` comes from `records GROUP BY source` — true for history,
+ * including legacy `unattributed` and `codeburn/*` rows. `ingestedCount`
+ * and `lastReceivedAt` come from `ingest_log` sums / `MAX(timestamp)` (T6's
+ * shape). `display`/`kind` are T7's `sourceDisplayName` labeling only: no
+ * aggregation across origins ever happens here. A missing log side reads
+ * as 0 ingested / null received — a fact about the log, never a claim
+ * about the receiver process.
+ * </remarks>
+ */
+export type IngestActivitySource = {
+  /** The stored source name, verbatim (auditability). */
+  source: string
+  /** T7 display label for the stored name. */
+  display: string
+  /** T7 origin kind for the stored name. */
+  kind: SourceKind
+  /** Rows in `records` carrying this source. */
+  recordCount: number
+  /** Summed `ingest_log.count` for this source; 0 when the log names it nowhere. */
+  ingestedCount: number
+  /** Latest `ingest_log.timestamp` for this source; null when the log names it nowhere. */
+  lastReceivedAt: string | null
+}
+
+/**
+ * Receiver activity over the canonical store (honest-unobservability rule).
+ * `unknown` only when the log AND the table are both empty — with the
+ * reason, never 0 and never `running`.
+ */
+export type IngestActivity =
+  | { status: 'known'; sources: IngestActivitySource[]; lastReceivedAt: string | null }
+  | { status: 'unknown'; reason: string; sources: []; lastReceivedAt: null }
 
 export type QuarantineRow = {
   span_id: string
@@ -603,6 +658,74 @@ function extractMessagesFromHistory(text: string): { userMessages: string[]; ass
   }
 
   return { userMessages, assistantMessages }
+}
+
+/** One week in milliseconds — the unit of the refresh coverage window. */
+const REFRESH_WEEK_MS = 7 * 24 * 60 * 60 * 1000
+
+/**
+ * Derive the coverage window of a refresh run (T4).
+ *
+ * <remarks>
+ * The window a run covered is `[startedAt − historyWeeks, startedAt]`
+ * (`utcHistoryWindow` in `refresh/source-reader.ts` anchors on the command
+ * start, which is what `started_at` persists). Anything missing or
+ * unparseable degrades to null/null: unknown stays unknown, never 0.
+ * </remarks>
+ */
+function refreshWindowBounds(
+  startedAt: string | null | undefined,
+  historyWeeks: number | null | undefined,
+): { coveredFrom: string | null; coveredThrough: string | null } {
+  if (startedAt === null || startedAt === undefined) return { coveredFrom: null, coveredThrough: null }
+  if (historyWeeks === null || historyWeeks === undefined) return { coveredFrom: null, coveredThrough: null }
+  const throughMs = Date.parse(startedAt)
+  if (!Number.isFinite(throughMs) || !Number.isFinite(historyWeeks)) {
+    return { coveredFrom: null, coveredThrough: null }
+  }
+  return {
+    coveredFrom: new Date(throughMs - historyWeeks * REFRESH_WEEK_MS).toISOString(),
+    coveredThrough: startedAt,
+  }
+}
+
+/**
+ * Assemble per-source ingest activity from record counts and log aggregates (T4).
+ *
+ * <remarks>
+ * The union of both key sets is reported so a log-only source (e.g.
+ * `otlp:logs`) still shows its received count beside zero records, and a
+ * record-only source still shows its history beside zero ingested. Both
+ * zeros are facts about their respective tables, not claims about the
+ * receiver. Empty + empty is the only `unknown`.
+ * </remarks>
+ */
+function buildIngestActivity(
+  recordCounts: ReadonlyMap<string, number>,
+  logSums: ReadonlyMap<string, { total: number; lastAt: string | null }>,
+  lastReceivedAt: string | null,
+): IngestActivity {
+  if (recordCounts.size === 0 && logSums.size === 0) {
+    return {
+      status: 'unknown',
+      reason: 'no receiver activity recorded',
+      sources: [],
+      lastReceivedAt: null,
+    }
+  }
+  const keys = [...new Set([...recordCounts.keys(), ...logSums.keys()])].sort()
+  const sources: IngestActivitySource[] = keys.map((source) => {
+    const labeled = sourceDisplayName(source)
+    return {
+      source,
+      display: labeled.display,
+      kind: labeled.kind,
+      recordCount: recordCounts.get(source) ?? 0,
+      ingestedCount: logSums.get(source)?.total ?? 0,
+      lastReceivedAt: logSums.get(source)?.lastAt ?? null,
+    }
+  })
+  return { status: 'known', sources, lastReceivedAt }
 }
 
 export class KyberBridge {
@@ -1765,22 +1888,56 @@ export class KyberBridge {
    */
   getRefreshState(): RefreshState {
     const db = this.getDb()
-    const latest = (status: 'success' | 'failure' | 'running') => {
+    const latest = (status: 'success' | 'failure' | 'running'): {
+      startedAt: string
+      completedAt: string | null
+      pid: number
+      summary: string | null
+      historyWeeks?: number | null
+    } | undefined => {
       try {
         if (this.store) return this.store.latestRefreshRun(status)
         if (!this.hasTable(db, 'refresh_run')) return undefined
-        const row = db!
-          .prepare(
-            'SELECT started_at, completed_at, pid, summary FROM refresh_run WHERE status = ? ORDER BY started_at DESC LIMIT 1',
-          )
-          .get(status) as
+        // T1's `history_weeks` column: old databases predate migration 14→15
+        // and have no such column — they fall back to the column-less select
+        // and read as null (unknown), never 0.
+        let row:
           | {
               started_at: string
               completed_at: string | null
               pid: number
               summary: string | null
+              history_weeks?: unknown
             }
           | undefined
+        try {
+          row = db!
+            .prepare(
+              'SELECT started_at, completed_at, pid, summary, history_weeks FROM refresh_run WHERE status = ? ORDER BY started_at DESC LIMIT 1',
+            )
+            .get(status) as
+            | {
+                started_at: string
+                completed_at: string | null
+                pid: number
+                summary: string | null
+                history_weeks?: unknown
+              }
+            | undefined
+        } catch {
+          row = db!
+            .prepare(
+              'SELECT started_at, completed_at, pid, summary FROM refresh_run WHERE status = ? ORDER BY started_at DESC LIMIT 1',
+            )
+            .get(status) as
+            | {
+                started_at: string
+                completed_at: string | null
+                pid: number
+                summary: string | null
+              }
+            | undefined
+        }
         if (row === undefined) return undefined
         if (status === 'running' && !refreshProcessIsAlive(Number(row.pid))) return undefined
         return {
@@ -1788,6 +1945,10 @@ export class KyberBridge {
           completedAt: row.completed_at,
           pid: Number(row.pid),
           summary: row.summary,
+          historyWeeks:
+            row.history_weeks === null || row.history_weeks === undefined
+              ? null
+              : Number(row.history_weeks),
         }
       } catch {
         return undefined
@@ -1797,6 +1958,8 @@ export class KyberBridge {
     const success = latest('success')
     const failure = latest('failure')
     const running = latest('running')
+    const historyWeeks = success?.historyWeeks ?? null
+    const { coveredFrom, coveredThrough } = refreshWindowBounds(success?.startedAt, historyWeeks)
     return {
       lastSuccessAt: success?.completedAt ?? success?.startedAt ?? null,
       lastFailure:
@@ -1804,6 +1967,9 @@ export class KyberBridge {
           ? null
           : { at: failure.completedAt ?? failure.startedAt, summary: failure.summary ?? 'refresh failed' },
       inProgress: running === undefined ? null : { pid: running.pid, since: running.startedAt },
+      historyWeeks,
+      coveredFrom,
+      coveredThrough,
     }
   }
 
@@ -2305,6 +2471,104 @@ export class KyberBridge {
       rates: ratesInfo,
       harnesses: perHarness,
       sources,
+    }
+  }
+
+  /**
+   * Per-source ingest activity (T4, decision D2 additive seam).
+   *
+   * <remarks>
+   * Read-only over the single handle this bridge already owns
+   * (`getDb()` / the injected `store` — never a second handle, so the
+   * follow-the-file contract holds). Record counts come from
+   * `records GROUP BY source`; sums and recency from `ingest_log` (T6's
+   * shape). T7's display helper labels only. Empty log + empty table is
+   * the only `unknown`.
+   * </remarks>
+   */
+  getIngestActivity(): IngestActivity {
+    if (this.store) {
+      const recordCounts = new Map<string, number>()
+      for (const record of this.store.listAll()) {
+        recordCounts.set(record.source, (recordCounts.get(record.source) ?? 0) + 1)
+      }
+      const logSums = new Map<string, { total: number; lastAt: string | null }>()
+      let lastReceivedAt: string | null = null
+      for (const entry of this.store.getIngestLog()) {
+        const current = logSums.get(entry.source) ?? { total: 0, lastAt: null }
+        current.total += entry.count
+        if (current.lastAt === null || entry.timestamp > current.lastAt) current.lastAt = entry.timestamp
+        logSums.set(entry.source, current)
+        if (lastReceivedAt === null || entry.timestamp > lastReceivedAt) lastReceivedAt = entry.timestamp
+      }
+      return buildIngestActivity(recordCounts, logSums, lastReceivedAt)
+    }
+
+    const db = this.getDb()
+    const recordCounts = new Map<string, number>()
+    if (this.hasTable(db, 'records')) {
+      try {
+        const rows = db!
+          .prepare('SELECT source, COUNT(*) AS n FROM records GROUP BY source')
+          .all() as Array<{ source: unknown; n: unknown }>
+        for (const row of rows) {
+          if (typeof row.source !== 'string') continue
+          recordCounts.set(row.source, Number(row.n) || 0)
+        }
+      } catch {
+        // A records table that cannot be grouped reads as no history,
+        // not as a thrown coverage request.
+      }
+    }
+    const logSums = new Map<string, { total: number; lastAt: string | null }>()
+    let lastReceivedAt: string | null = null
+    if (this.hasTable(db, 'ingest_log')) {
+      try {
+        const rows = db!
+          .prepare(
+            'SELECT source, SUM(count) AS total, MAX(timestamp) AS last_at FROM ingest_log GROUP BY source',
+          )
+          .all() as Array<{ source: unknown; total: unknown; last_at: unknown }>
+        for (const row of rows) {
+          if (typeof row.source !== 'string') continue
+          const lastAt = typeof row.last_at === 'string' ? row.last_at : null
+          logSums.set(row.source, { total: Number(row.total) || 0, lastAt })
+          if (lastAt !== null && (lastReceivedAt === null || lastAt > lastReceivedAt)) {
+            lastReceivedAt = lastAt
+          }
+        }
+      } catch {
+        // An unreadable audit log reads as no receiver activity, not a throw.
+      }
+    }
+    return buildIngestActivity(recordCounts, logSums, lastReceivedAt)
+  }
+
+  /**
+   * Source-unit checkpoint statuses (T4, decision D2 additive seam).
+   *
+   * <remarks>
+   * Read-only over `listSourceCheckpoints` (injected store) or the same
+   * single `getDb()` handle (raw file) — never a second store handle.
+   * `partial` rows (including zero-record ones) are returned verbatim;
+   * display grouping is the caller's concern (T8), not this seam's.
+   * </remarks>
+   */
+  getSourceCheckpointStatuses(harnessId?: string): SourceCheckpoint[] {
+    if (this.store) {
+      return this.store.listSourceCheckpoints(harnessId)
+    }
+    const db = this.getDb()
+    if (!this.hasTable(db, 'source_checkpoint')) return []
+    try {
+      const rows = (
+        harnessId === undefined
+          ? db!.prepare('SELECT * FROM source_checkpoint ORDER BY harness_id, source_key').all()
+          : db!.prepare('SELECT * FROM source_checkpoint WHERE harness_id = ? ORDER BY source_key').all(harnessId)
+      ) as unknown as SourceCheckpointRow[]
+      return rows.map(toSourceCheckpoint)
+    } catch {
+      return []
     }
   }
 }
