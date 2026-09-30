@@ -63,6 +63,7 @@ public sealed class SquadCanonicalContentTests
         "azure-naming",
         "bug-crusher",
         "code-review",
+        "code-review-loop",
         "create-pull-request",
         "csharp-dev",
         "csp-security",
