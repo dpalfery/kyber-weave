@@ -242,6 +242,7 @@ export const TIMELINE_OP_COLORS: Record<string, string> = {
   chat: '#f59e0b', // amber
   execute_tool: '#10b981', // emerald
   tool: '#10b981',
+  'tool.invoke': '#10b981',
   execute_hook: '#ec4899', // pink
   hook: '#ec4899',
   embeddings: '#8b5cf6', // purple
@@ -266,6 +267,7 @@ function adaptTimelineNode(node: SessionTimelineNode, parentId: string | null = 
     durationMs: node.durationMs ?? 0,
     kind: node.kind ?? node.op ?? 'span',
     name: node.name ?? 'unnamed',
+    status: (node.status as string | undefined) ?? (node.attributes?.['gen_ai.tool.status'] as string | undefined),
     attributes: node.attributes ?? node.raw_attributes ?? {},
     isSubagent: Boolean(node.isSubagent || node.attributes?.['subagent.session_id']),
     isAuxiliary: Boolean(node.isAuxiliary || node.attributes?.['kyber.auxiliary']),
@@ -621,6 +623,12 @@ export function AgentSessionContent({
   }
 
   const u = session.summary || {}
+  const toolsOfferedCount = Array.isArray(u.tools_offered)
+    ? u.tools_offered.length
+    : (typeof u.tools_offered === 'number' ? u.tools_offered : undefined)
+  const toolsInvokedCount = Array.isArray(u.tools_invoked)
+    ? u.tools_invoked.length
+    : (typeof u.tools_invoked === 'number' ? u.tools_invoked : 0)
   const toolCallsMeasured = typeof u.tool_calls === 'number' && Number.isFinite(u.tool_calls)
   const toolCallsReason = `Tool invocation count was not reported by ${session.harness || 'this adapter'}.`
   const rows = session.reconciliation || []
@@ -1023,7 +1031,7 @@ export function AgentSessionContent({
             </div>
             <div className="mt-0.5 text-[11px] text-tertiary-foreground">
               {toolCallsMeasured
-                ? u.tools_invoked != null ? `${u.tools_invoked} distinct invoked` : 'invocations'
+                ? u.tools_invoked != null ? `${toolsInvokedCount} distinct invoked` : 'invocations'
                 : toolCallsReason}
             </div>
           </Card>
@@ -1034,11 +1042,11 @@ export function AgentSessionContent({
               Tools Offered
             </div>
             <div className="mt-1 text-xl font-semibold tabular-nums tracking-tight text-foreground">
-              {u.tools_offered != null ? fmtNum(u.tools_offered) : '—'}
+              {toolsOfferedCount != null ? fmtNum(toolsOfferedCount) : '—'}
             </div>
             <div className="mt-0.5 text-[11px] text-tertiary-foreground truncate">
-              {u.tools_offered != null
-                ? `${(u.tools_offered - (u.tools_invoked ?? 0))} never called`
+              {toolsOfferedCount != null
+                ? `${toolsOfferedCount - toolsInvokedCount} never called`
                 : `not exported by ${session.harness || 'adapter'}`}
             </div>
           </Card>

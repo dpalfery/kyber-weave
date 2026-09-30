@@ -184,7 +184,48 @@ function expandDefinitions(text: string): { name: string; text: string }[] {
 function invocationsOf(records: readonly CanonicalRecord[]): string[] {
   return records
     .filter((record) => record.op === 'tool.invoke')
-    .map((record) => attributeOf(record, ['gen_ai.tool.name']) ?? record.name)
+    .map((record) => attributeOf(record, ['gen_ai.tool.name', 'tool.name']) ?? record.name)
+}
+
+/** Offered tool names declared in tool-definition parts across the session. */
+function extractOfferedToolNames(parts: readonly { text: string }[]): string[] {
+  const names = new Set<string>()
+  for (const part of parts) {
+    if (!part.text || !part.text.trim()) continue
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(part.text)
+    } catch {
+      const trimmed = part.text.trim()
+      if (trimmed) names.add(trimmed)
+      continue
+    }
+
+    const addOne = (val: unknown) => {
+      if (typeof val === 'string' && val.trim()) {
+        names.add(val.trim())
+      } else if (val !== null && typeof val === 'object') {
+        const obj = val as { name?: unknown; function?: { name?: unknown } }
+        if (typeof obj.name === 'string' && obj.name.trim()) {
+          names.add(obj.name.trim())
+        } else if (typeof obj.function?.name === 'string' && obj.function.name.trim()) {
+          names.add(obj.function.name.trim())
+        }
+      }
+    }
+
+    if (Array.isArray(parsed)) {
+      for (const item of parsed) addOne(item)
+    } else if (parsed !== null && typeof parsed === 'object') {
+      const obj = parsed as Record<string, unknown>
+      if (Array.isArray(obj.tools)) {
+        for (const item of obj.tools) addOne(item)
+      } else {
+        addOne(parsed)
+      }
+    }
+  }
+  return Array.from(names)
 }
 
 /**
@@ -233,9 +274,11 @@ export type AsadContextBucket = {
 }
 
 export type AsadTool = {
+  name?: string
   schema_tokens: number
   invocations: number
   turns_resident: number
+  errors?: number
 }
 
 export type AsadServer = {
@@ -382,9 +425,27 @@ export function buildSessionRow(
 
   const definitions = toolDefinitionsOf(records, countTokens)
   const schema = rankSchemas(definitions, turnRecords.length, invocationsOf(records), undefined, measurability)
-  const invocations = invocationsOf(records)
+  const toolRecords = records.filter((r) => r.op === 'tool.invoke')
+
   const invocationCounts = new Map<string, number>()
-  for (const name of invocations) invocationCounts.set(name, (invocationCounts.get(name) ?? 0) + 1)
+  const errorCounts = new Map<string, number>()
+  for (const record of toolRecords) {
+    const name = attributeOf(record, ['gen_ai.tool.name', 'tool.name']) ?? record.name
+    if (!name) continue
+    invocationCounts.set(name, (invocationCounts.get(name) ?? 0) + 1)
+    const isError =
+      record.status === 'error' ||
+      attributeOf(record, ['gen_ai.tool.status', 'status']) === 'error' ||
+      (record.raw !== null &&
+        typeof record.raw === 'object' &&
+        ((record.raw as Record<string, unknown>)['gen_ai.tool.status'] === 'error' ||
+          (record.raw as Record<string, unknown>).is_error === true ||
+          (record.raw as Record<string, unknown>).isError === true))
+    if (isError) {
+      errorCounts.set(name, (errorCounts.get(name) ?? 0) + 1)
+    }
+  }
+
   const rankedTools = schema.measurable
     ? schema.ranked
     : definitions.map((definition) => ({
@@ -393,16 +454,42 @@ export function buildSessionRow(
         cost: definition.tokens * (definition.turnsResident ?? turnRecords.length),
       }))
   const definitionsByName = new Map(definitions.map((definition) => [definition.name, definition]))
+  const seenToolNames = new Set<string>()
   const tools: AsadTool[] = rankedTools.map((tool) => {
+    seenToolNames.add(tool.name)
     const definition = definitionsByName.get(tool.name)
     const schemaTokens = definition?.tokens ?? 0
     const turnsResident = definition?.turnsResident ?? turnRecords.length
+    const invocationsCount = invocationCounts.get(tool.name) ?? 0
+    const errorCount = errorCounts.get(tool.name) ?? 0
+    if (toolRecords.length > 0) {
+      return {
+        name: tool.name,
+        schema_tokens: schemaTokens,
+        invocations: invocationsCount,
+        turns_resident: turnsResident,
+        errors: errorCount,
+      }
+    }
     return {
       schema_tokens: schemaTokens,
-      invocations: invocationCounts.get(tool.name) ?? 0,
+      invocations: invocationsCount,
       turns_resident: turnsResident,
     }
   })
+
+  for (const [name, invocationsCount] of invocationCounts) {
+    if (!seenToolNames.has(name)) {
+      seenToolNames.add(name)
+      tools.push({
+        name,
+        schema_tokens: 0,
+        invocations: invocationsCount,
+        turns_resident: 0,
+        errors: errorCounts.get(name) ?? 0,
+      })
+    }
+  }
   const servers: AsadServer[] = schema.measurable
     ? [...schema.byServer.entries()].map(([server]) => {
         const serverTools = rankedTools.filter((tool) => tool.server === server)
@@ -497,6 +584,48 @@ export function buildSessionRow(
   const started = records[0]!.timestamp
   const ended = records[records.length - 1]!.timestamp
 
+  let toolCalls: number | undefined = undefined
+  let toolsInvoked: string[] | undefined = undefined
+
+  if (toolRecords.length > 0) {
+    toolCalls = toolRecords.length
+    toolsInvoked = Array.from(new Set(invocationsOf(records)))
+  } else {
+    const toolCallsAvailability = measurability?.tool_calls
+    if (toolCallsAvailability === 'measured' || toolCallsAvailability === 'derived') {
+      toolCalls = 0
+      toolsInvoked = []
+    }
+  }
+
+  const definitionParts: Array<{ text: string }> = []
+  for (const record of records) {
+    if (record.parts !== undefined && record.parts.length > 0) {
+      for (const p of record.parts) {
+        if (p.part === 'tool_definitions' || (p.part as string) === 'tool_definition') {
+          definitionParts.push(p)
+        }
+      }
+    } else if (record.content !== undefined) {
+      const content = record.content
+      if (typeof content['tool_definitions'] === 'string') {
+        definitionParts.push({ text: content['tool_definitions'] })
+      }
+      const rawContent = content as Record<string, unknown>
+      if (typeof rawContent['tool_definition'] === 'string') {
+        definitionParts.push({ text: rawContent['tool_definition'] as string })
+      }
+    }
+  }
+
+  let toolsOffered: string[] | undefined = undefined
+  if (definitionParts.length > 0) {
+    const offeredNames = extractOfferedToolNames(definitionParts)
+    if (offeredNames.length > 0) {
+      toolsOffered = offeredNames
+    }
+  }
+
   const payload: AsadSessionPayload = {
     id: sessionId,
     session_id: sessionId,
@@ -516,6 +645,9 @@ export function buildSessionRow(
       duration_ms: records.reduce((sum, record) => sum + record.durationMs, 0),
       models,
       cost: cost.ok ? cost.total : { basis: 'unknown' as const, status: 'no_rate' as const },
+      ...(toolCalls !== undefined ? { tool_calls: toolCalls } : {}),
+      ...(toolsInvoked !== undefined ? { tools_invoked: toolsInvoked } : {}),
+      ...(toolsOffered !== undefined ? { tools_offered: toolsOffered } : {}),
     },
     // The analysis output, verbatim. `toolDefinitionsByServer` is a Map, which
     // JSON.stringify would silently render as {} — convert it explicitly so a
@@ -595,6 +727,7 @@ export function buildSessionRow(
     branch: attributeOf(first, BRANCH_KEYS) ?? null,
     started: typeof started === 'string' ? started : started.toISOString(),
     ended: typeof ended === 'string' ? ended : ended.toISOString(),
+    summary: payload.summary,
     payload,
   }
 }

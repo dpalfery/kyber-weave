@@ -17,6 +17,7 @@ export type TimelineNode = {
   durationMs: number
   kind: string
   name: string
+  status?: string
   attributes: Record<string, unknown>
   isSubagent: boolean
   isAuxiliary: boolean
@@ -69,6 +70,18 @@ function NodeRow({
         )}
         {node.isAuxiliary && (
           <span className="shrink-0 rounded bg-violet-500/15 px-1.5 py-0.5 text-[10px] font-medium text-violet-700">auxiliary</span>
+        )}
+        {node.status && (
+          <span
+            data-testid="status-badge"
+            className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${
+              node.status.toLowerCase() === 'error'
+                ? 'bg-red-500/15 text-red-700 dark:text-red-400'
+                : 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400'
+            }`}
+          >
+            {node.status}
+          </span>
         )}
         <span className="shrink-0 tabular-nums text-xs text-tertiary-foreground">{node.durationMs}ms</span>
         <CostBadge cost={node.cost} />

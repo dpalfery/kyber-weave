@@ -11,6 +11,7 @@
 //    on-demand loading, and tool deferral over deletion. Never suggest deleting outright.
 // 5. Decision D16: skill utilisation findings are stamped at low confidence ('heuristic') and ranked last.
 
+import crypto from 'node:crypto'
 import { normalizeWhitespace, hashNormalized } from './signals.js'
 import { contextLimitOf, DEFAULT_CONTEXT_LIMIT } from '../canon/context-window.js'
 import { canonicalHarnessId, normalizeHarnessName, type SessionIdentities } from '../canon/measurability.js'
@@ -328,6 +329,56 @@ export function extractToolDefinitionsFromRecord(record: CanonicalRecord): { nam
   return tools
 }
 
+function attributeOf(record: CanonicalRecord, keys: readonly string[]): string | undefined {
+  const recAny = record as unknown as { attributes?: Record<string, unknown> }
+  const attrs = recAny.attributes
+  if (attrs && typeof attrs === 'object') {
+    for (const key of keys) {
+      const val = attrs[key]
+      if (typeof val === 'string' && val !== '') return val
+      if (typeof val === 'number' && Number.isFinite(val)) return String(val)
+    }
+  }
+  const raw = record.raw
+  if (raw && typeof raw === 'object') {
+    const rawObj = raw as Record<string, unknown>
+    for (const key of keys) {
+      const val = rawObj[key]
+      if (typeof val === 'string' && val !== '') return val
+      if (typeof val === 'number' && Number.isFinite(val)) return String(val)
+    }
+  }
+  return undefined
+}
+
+function numberAttributeOf(record: CanonicalRecord, keys: readonly string[]): number | undefined {
+  const recAny = record as unknown as { attributes?: Record<string, unknown> }
+  const attrs = recAny.attributes
+  if (attrs && typeof attrs === 'object') {
+    for (const key of keys) {
+      const val = attrs[key]
+      if (typeof val === 'number' && Number.isFinite(val)) return val
+      if (typeof val === 'string') {
+        const num = Number(val)
+        if (Number.isFinite(num)) return num
+      }
+    }
+  }
+  const raw = record.raw
+  if (raw && typeof raw === 'object') {
+    const rawObj = raw as Record<string, unknown>
+    for (const key of keys) {
+      const val = rawObj[key]
+      if (typeof val === 'number' && Number.isFinite(val)) return val
+      if (typeof val === 'string') {
+        const num = Number(val)
+        if (Number.isFinite(num)) return num
+      }
+    }
+  }
+  return undefined
+}
+
 // ---------------------------------------------------------------------------
 // Detector 1: dormant-tool-schema
 // ---------------------------------------------------------------------------
@@ -393,7 +444,10 @@ export function detectDormantToolSchema(input: DormantToolSchemaInput): Finding[
   // Invoked tool names
   const invokedNames = new Set<string>()
   for (const toolRec of toolRecords) {
-    invokedNames.add(toolRec.name.trim())
+    const resolvedName =
+      attributeOf(toolRec, ['gen_ai.tool.name', 'tool.name']) ??
+      (toolRec.name !== 'tool.invoke' ? toolRec.name : undefined)
+    invokedNames.add((resolvedName ?? toolRec.name).trim())
   }
   if (input.invocations) {
     for (const inv of input.invocations) invokedNames.add(inv.trim())
@@ -508,10 +562,13 @@ export function detectDuplicateToolCall(input: DuplicateToolCallInput): Finding[
     if (r.op === 'llm.invoke') {
       turnIdx++
     } else if (r.op === 'tool.invoke') {
+      const toolName =
+        attributeOf(r, ['gen_ai.tool.name', 'tool.name']) ??
+        (r.name !== 'tool.invoke' ? r.name : 'tool.invoke')
       const args = r.raw && typeof r.raw === 'object' ? (r.raw as Record<string, unknown>)['arguments'] : undefined
       const tokens = r.tokens.reportedInput + r.tokens.output || 250
       calls.push({
-        name: r.name.trim(),
+        name: toolName.trim(),
         args: serializeToolArgs(args),
         spanId: r.spanId,
         turnIndex: turnIdx,
@@ -538,7 +595,8 @@ export function detectDuplicateToolCall(input: DuplicateToolCallInput): Finding[
 
   for (let i = 0; i < calls.length; i++) {
     const call = calls[i]!
-    const key = `${call.name}::${call.args}`
+    const hashedArgs = crypto.createHash('sha256').update(call.args).digest('hex')
+    const key = `${call.name}::${hashedArgs}`
 
     if (seenMap.has(key)) {
       const firstCall = seenMap.get(key)!
@@ -671,12 +729,19 @@ export function detectOversizedToolResult(input: OversizedToolResultInput): Find
         }
       }
 
-      if (content.length > 0) {
+      const toolName =
+        attributeOf(r, ['gen_ai.tool.name', 'tool.name']) ??
+        (r.name !== 'tool.invoke' ? r.name : 'tool')
+      const resultBytes = numberAttributeOf(r, ['gen_ai.tool.result_bytes'])
+      const chars = Math.max(content.length, resultBytes ?? 0)
+      const estTokens = Math.max(tokens, resultBytes !== undefined ? Math.ceil(resultBytes / 4) : 0)
+
+      if (chars > 0 || content.length > 0) {
         items.push({
-          toolName: r.name,
+          toolName,
           text: content,
-          tokens: tokens || Math.ceil(content.length / 4),
-          chars: content.length,
+          tokens: estTokens || Math.ceil(chars / 4),
+          chars,
           spanId: r.spanId,
           turnIndex: currentTurnIndex,
           consumingSpanId: lastLlmSpanId || r.spanId,
@@ -704,7 +769,7 @@ export function detectOversizedToolResult(input: OversizedToolResultInput): Find
   }
 
   for (const item of items) {
-    const isOversized = item.tokens > tokenThreshold || item.chars > charThreshold
+    const isOversized = item.tokens > tokenThreshold || item.chars >= charThreshold
     if (!isOversized) continue
 
     const excessTokens = Math.max(100, item.tokens - tokenThreshold)
@@ -1270,7 +1335,15 @@ export function detectInactiveSkillReference(input: InactiveSkillReferenceInput)
 
   if (referenced.length === 0) return findings
 
-  const executedSet = new Set(input.executedSkills ?? toolRecords.map((t) => t.name.trim()))
+  const executedSet = new Set(
+    input.executedSkills ??
+      toolRecords.map((t) => {
+        const name =
+          attributeOf(t, ['gen_ai.tool.name', 'tool.name']) ??
+          (t.name !== 'tool.invoke' ? t.name : '')
+        return (name || t.name).trim()
+      }),
+  )
   const skillTokensMap = input.skillTokens ?? {}
 
   for (const skill of referenced) {
@@ -1358,64 +1431,98 @@ export type DetectFindingsInput = {
  */
 export function detectFindings(input: DetectFindingsInput): Finding[] {
   const findings: Finding[] = []
+  const base = {
+    runId: input.runId,
+    sessionId: input.sessionId,
+    records: input.records,
+    outcome: input.outcome,
+  }
 
   // 1. Dormant tool schema
-  findings.push(...detectDormantToolSchema(input.dormantToolSchema ?? {
-    runId: input.runId,
-    sessionId: input.sessionId,
-    records: input.records,
-    outcome: input.outcome,
-  }))
+  findings.push(
+    ...detectDormantToolSchema({
+      ...base,
+      ...input.dormantToolSchema,
+      records: input.dormantToolSchema?.records ?? input.records,
+      runId: input.dormantToolSchema?.runId ?? input.runId,
+      sessionId: input.dormantToolSchema?.sessionId ?? input.sessionId,
+      outcome: input.dormantToolSchema?.outcome ?? input.outcome,
+    }),
+  )
 
   // 2. Duplicate tool call
-  findings.push(...detectDuplicateToolCall(input.duplicateToolCall ?? {
-    runId: input.runId,
-    sessionId: input.sessionId,
-    records: input.records,
-    outcome: input.outcome,
-  }))
+  findings.push(
+    ...detectDuplicateToolCall({
+      ...base,
+      ...input.duplicateToolCall,
+      records: input.duplicateToolCall?.records ?? input.records,
+      runId: input.duplicateToolCall?.runId ?? input.runId,
+      sessionId: input.duplicateToolCall?.sessionId ?? input.sessionId,
+      outcome: input.duplicateToolCall?.outcome ?? input.outcome,
+    }),
+  )
 
   // 3. Oversized tool result
-  findings.push(...detectOversizedToolResult(input.oversizedToolResult ?? {
-    runId: input.runId,
-    sessionId: input.sessionId,
-    records: input.records,
-    outcome: input.outcome,
-  }))
+  findings.push(
+    ...detectOversizedToolResult({
+      ...base,
+      ...input.oversizedToolResult,
+      records: input.oversizedToolResult?.records ?? input.records,
+      runId: input.oversizedToolResult?.runId ?? input.runId,
+      sessionId: input.oversizedToolResult?.sessionId ?? input.sessionId,
+      outcome: input.oversizedToolResult?.outcome ?? input.outcome,
+    }),
+  )
 
   // 4. Prefix cache break
-  findings.push(...detectPrefixCacheBreak(input.prefixCacheBreak ?? {
-    runId: input.runId,
-    sessionId: input.sessionId,
-    records: input.records,
-    outcome: input.outcome,
-  }))
+  findings.push(
+    ...detectPrefixCacheBreak({
+      ...base,
+      ...input.prefixCacheBreak,
+      records: input.prefixCacheBreak?.records ?? input.records,
+      runId: input.prefixCacheBreak?.runId ?? input.runId,
+      sessionId: input.prefixCacheBreak?.sessionId ?? input.sessionId,
+      outcome: input.prefixCacheBreak?.outcome ?? input.outcome,
+    }),
+  )
 
   // 5. Compaction hazard
-  findings.push(...detectCompactionHazard(input.compactionHazard ?? {
-    runId: input.runId,
-    sessionId: input.sessionId,
-    records: input.records,
-    contextLimit: input.contextLimit,
-    outcome: input.outcome,
-    sessionIdentities: input.sessionIdentities,
-  }))
+  findings.push(
+    ...detectCompactionHazard({
+      ...base,
+      ...input.compactionHazard,
+      records: input.compactionHazard?.records ?? input.records,
+      runId: input.compactionHazard?.runId ?? input.runId,
+      sessionId: input.compactionHazard?.sessionId ?? input.sessionId,
+      outcome: input.compactionHazard?.outcome ?? input.outcome,
+      contextLimit: input.compactionHazard?.contextLimit ?? input.contextLimit,
+      sessionIdentities: input.compactionHazard?.sessionIdentities ?? input.sessionIdentities,
+    }),
+  )
 
   // 6. Unbounded delegation
-  findings.push(...detectUnboundedDelegation(input.unboundedDelegation ?? {
-    runId: input.runId,
-    sessionId: input.sessionId,
-    records: input.records,
-    outcome: input.outcome,
-  }))
+  findings.push(
+    ...detectUnboundedDelegation({
+      ...base,
+      ...input.unboundedDelegation,
+      records: input.unboundedDelegation?.records ?? input.records,
+      runId: input.unboundedDelegation?.runId ?? input.runId,
+      sessionId: input.unboundedDelegation?.sessionId ?? input.sessionId,
+      outcome: input.unboundedDelegation?.outcome ?? input.outcome,
+    }),
+  )
 
   // 7. Inactive skill reference
-  findings.push(...detectInactiveSkillReference(input.inactiveSkillReference ?? {
-    runId: input.runId,
-    sessionId: input.sessionId,
-    records: input.records,
-    outcome: input.outcome,
-  }))
+  findings.push(
+    ...detectInactiveSkillReference({
+      ...base,
+      ...input.inactiveSkillReference,
+      records: input.inactiveSkillReference?.records ?? input.records,
+      runId: input.inactiveSkillReference?.runId ?? input.runId,
+      sessionId: input.inactiveSkillReference?.sessionId ?? input.sessionId,
+      outcome: input.inactiveSkillReference?.outcome ?? input.outcome,
+    }),
+  )
 
   return rankFindings(findings)
 }

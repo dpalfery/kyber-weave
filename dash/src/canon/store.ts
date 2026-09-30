@@ -704,6 +704,10 @@ export function toSessionRow(row: SessionDbRow): SessionRow {
     branch: nullableText(row.branch),
     started: nullableText(row.started),
     ended: nullableText(row.ended),
+    summary:
+      payload !== null && typeof payload === "object" && "summary" in (payload as Record<string, unknown>)
+        ? ((payload as Record<string, unknown>).summary as Record<string, unknown>)
+        : undefined,
     payload,
   }
 }

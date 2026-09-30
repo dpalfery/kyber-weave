@@ -43,16 +43,34 @@
 // and the adapters follow the same split — `normalize` emits, `validate`
 // rejects. Re-validating here would be a second mechanism for one job.
 
+import { Buffer } from 'node:buffer'
 import { createHash } from 'node:crypto'
 
 import type { ParsedProviderCall } from '../providers/types.js'
 export type { ParsedProviderCall } from '../providers/types.js'
-import { contentFromParts, type CanonicalRecord, type CostBlock, type TokenUsage } from '../canon/types.js'
+import {
+  contentFromParts,
+  type CanonicalRecord,
+  type ContentPart,
+  type CostBlock,
+  type TokenUsage,
+} from '../canon/types.js'
 import { exclusiveConvention, inclusiveConvention } from '../canon/adapters/copilot.js'
 import { FILE_SOURCE_PREFIX, measurabilityFor } from '../canon/measurability.js'
-import type { ReaderTurn, SourceRecordEnvelope, SourceRecordProvenance } from './readers/types.js'
+import type {
+  ReaderToolCall,
+  ReaderToolResult,
+  ReaderTurn,
+  SourceRecordEnvelope,
+  SourceRecordProvenance,
+} from './readers/types.js'
 
-export type { SourceRecordEnvelope, SourceRecordProvenance } from './readers/types.js'
+export type {
+  ReaderToolCall,
+  ReaderToolResult,
+  SourceRecordEnvelope,
+  SourceRecordProvenance,
+} from './readers/types.js'
 
 // ---------------------------------------------------------------------------
 // Identity scheme (R3.2: extend upstream's key, don't add a mechanism)
@@ -102,9 +120,9 @@ export function nativeRecordIdentity(
     return { nativeRecordId: call.deduplicationKey.slice(prefix.length) }
   }
   const digest = createHash('sha256')
-    .update(`${nativeSessionIdFor(call, envelope)}\0${call.timestamp}\0llm.invoke\0${ordinal}`, 'utf8')
-    .digest('hex')
-    .slice(0, 16)
+      .update(`${nativeSessionIdFor(call, envelope)}\0${call.timestamp}\0llm.invoke\0${ordinal}`, 'utf8')
+      .digest('hex')
+      .slice(0, 16)
   return { nativeRecordId: digest, recordDigest: digest }
 }
 
@@ -398,6 +416,128 @@ export function synthesizeCall(
 }
 
 // ---------------------------------------------------------------------------
+// Tool invocation synthesis (Issue #180, Task 5)
+// ---------------------------------------------------------------------------
+
+/** Maximum bytes of tool result content stored in content parts before truncation (64KB). */
+export const MAX_TOOL_RESULT_BYTES = 65_536
+
+export type CanonicalToolRecord = CanonicalRecord & {
+  attributes?: Record<string, unknown>
+  provider?: string
+  model?: string
+}
+
+/**
+ * Synthesize one child `tool.invoke` canonical record from a reader tool call
+ * and its paired execution result.
+ */
+export function synthesizeToolCall(
+  parentRecord: CanonicalRecord,
+  toolCall: ReaderToolCall,
+  toolResult: ReaderToolResult | undefined,
+  index = 0,
+  call?: ParsedProviderCall,
+): CanonicalToolRecord {
+  const isError = toolResult?.isError === true
+  const status = isError ? 'error' : 'ok'
+  const attributes: Record<string, unknown> = {
+    'gen_ai.tool.name': toolCall.name,
+    'gen_ai.tool.call_id': toolCall.id,
+    'gen_ai.tool.status': status,
+    ...(toolResult?.content !== undefined
+      ? { 'gen_ai.tool.result_bytes': Buffer.byteLength(toolResult.content, 'utf8') }
+      : {}),
+  }
+
+  let parts: (ContentPart & { truncated?: boolean })[] = []
+  if (toolResult?.content !== undefined) {
+    const text = toolResult.content
+    if (text.length > MAX_TOOL_RESULT_BYTES) {
+      parts = [
+        {
+          part: 'tool_result_content',
+          text: text.slice(0, MAX_TOOL_RESULT_BYTES),
+          truncated: true,
+          order: 0,
+        },
+      ]
+    } else {
+      parts = [
+        {
+          part: 'tool_result_content',
+          text,
+          order: 0,
+        },
+      ]
+    }
+  }
+
+  const nameParts = parentRecord.name.split(':')
+  const provider = call?.provider ?? (nameParts.length > 1 ? nameParts[0] : parentRecord.harness)
+  const model = call?.model ?? (nameParts.length > 1 ? nameParts.slice(1).join(':') : undefined)
+
+  return {
+    spanId: `${parentRecord.spanId}-t${index}`,
+    traceId: parentRecord.traceId,
+    parentSpanId: parentRecord.spanId,
+    source: parentRecord.source,
+    harness: parentRecord.harness,
+    ...(parentRecord.sessionId !== undefined && parentRecord.sessionId !== null
+      ? { sessionId: parentRecord.sessionId }
+      : {}),
+    ...(provider ? { provider } : {}),
+    ...(model ? { model } : {}),
+    name: toolCall.name,
+    op: 'tool.invoke',
+    kind: 'internal',
+    timestamp: toolCall.timestamp ?? parentRecord.timestamp,
+    durationMs: toolCall.durationMs ?? 0,
+    status,
+    tokens: {
+      freshInput: 0,
+      cacheRead: 0,
+      cacheCreation: 0,
+      output: 0,
+      reportedInput: 0,
+      reportedOutput: 0,
+    },
+    content: {},
+    parts,
+    cost: { basis: 'unknown', status: 'no_rate' },
+    attributes,
+    raw: {
+      ...attributes,
+      arguments: toolCall.arguments,
+      result: toolResult?.content,
+    },
+  }
+}
+
+/**
+ * Synthesize child `tool.invoke` canonical records for all tool calls in a turn,
+ * pairing each with its corresponding tool result by tool call id.
+ */
+export function synthesizeToolCalls(
+  parentRecord: CanonicalRecord,
+  call: ParsedProviderCall,
+  readerTurn?: ReaderTurn,
+  sessionToolResults?: ReadonlyMap<string, ReaderToolResult>,
+): CanonicalToolRecord[] {
+  if (!readerTurn?.toolCalls || readerTurn.toolCalls.length === 0) {
+    return []
+  }
+
+  const toolResults = readerTurn.toolResults ?? []
+  return readerTurn.toolCalls.map((toolCall, i) => {
+    const toolResult =
+      sessionToolResults?.get(toolCall.id) ??
+      toolResults.find((r) => r.toolCallId === toolCall.id)
+    return synthesizeToolCall(parentRecord, toolCall, toolResult, i, call)
+  })
+}
+
+// ---------------------------------------------------------------------------
 // The synthesizer
 // ---------------------------------------------------------------------------
 
@@ -453,9 +593,25 @@ export class Synthesizer {
     parsedCalls: readonly ParsedProviderCall[],
     readerTurns?: readonly (ReaderTurn | undefined)[],
   ): CanonicalRecord[] {
+    const sessionToolResults = new Map<string, ReaderToolResult>()
+    if (readerTurns) {
+      for (const turn of readerTurns) {
+        if (turn?.toolResults) {
+          for (const res of turn.toolResults) {
+            if (res.toolCallId) {
+              sessionToolResults.set(res.toolCallId, res)
+            }
+          }
+        }
+      }
+    }
+
     return parsedCalls.flatMap((call, index) => {
       if (isExcludedHarness(call.provider)) return []
-      return [synthesizeCall(call, this.conventions, readerTurns?.[index], undefined, index)]
+      const readerTurn = readerTurns?.[index]
+      const parent = synthesizeCall(call, this.conventions, readerTurn, undefined, index)
+      const toolRecords = synthesizeToolCalls(parent, call, readerTurn, sessionToolResults)
+      return [parent, ...toolRecords]
     })
   }
 
@@ -465,15 +621,31 @@ export class Synthesizer {
    * persisted as harnesses. Token validation remains the quarantine seam.
    */
   synthesizeEnvelopes(envelopes: readonly SourceRecordEnvelope[]): CanonicalRecord[] {
+    const sessionToolResults = new Map<string, ReaderToolResult>()
+    for (const envelope of envelopes) {
+      if (envelope.readerTurn?.toolResults) {
+        for (const res of envelope.readerTurn.toolResults) {
+          if (res.toolCallId) {
+            sessionToolResults.set(res.toolCallId, res)
+          }
+        }
+      }
+    }
+
     return envelopes.flatMap((envelope, index) => {
       if (isExcludedHarness(envelope.harnessId) || isExcludedHarness(envelope.call.provider)) return []
-      return [synthesizeCall(envelope.call, this.conventions, envelope.readerTurn, envelope, index)]
+      const parent = synthesizeCall(envelope.call, this.conventions, envelope.readerTurn, envelope, index)
+      const toolRecords = synthesizeToolCalls(parent, envelope.call, envelope.readerTurn, sessionToolResults)
+      return [parent, ...toolRecords]
     })
   }
 
   /** The serial path's explicit name; identical to {@link synthesize}. */
-  synthesizeSerial(parsedCalls: readonly ParsedProviderCall[]): CanonicalRecord[] {
-    return this.synthesize(parsedCalls)
+  synthesizeSerial(
+    parsedCalls: readonly ParsedProviderCall[],
+    readerTurns?: readonly (ReaderTurn | undefined)[],
+  ): CanonicalRecord[] {
+    return this.synthesize(parsedCalls, readerTurns)
   }
 
   /**

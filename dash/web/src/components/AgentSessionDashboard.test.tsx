@@ -1181,3 +1181,129 @@ describe('timeline shape from the canonical store', () => {
     expect(html).toContain('spend-composition-section')
   })
 })
+
+
+describe('AgentSessionDashboard: Issue #180 Task 8 Dashboard UI Verification', () => {
+  it('renders tool-call count when summary.tool_calls = 5 in Overview card and not a dash', () => {
+    const sessionWith5ToolCalls: AgentSessionPayload = {
+      ...sampleSession,
+      summary: {
+        ...sampleSession.summary,
+        tool_calls: 5,
+        tools_invoked: 3,
+      },
+    }
+
+    const tree = AgentSessionDashboard({ session: sessionWith5ToolCalls })
+    const metric = findElementByTestId(tree, 'metric-tool-calls')
+    const html = renderHtml(metric)
+    expect(html).toContain('data-measured="true"')
+    expect(html).toContain('>5<')
+    expect(html).not.toContain('>—<')
+    expect(html).toContain('3 distinct invoked')
+  })
+
+  it('renders dash with honest unmeasured tooltip when summary.tool_calls is undefined for legacy session or unmeasured harness', () => {
+    const legacySession: AgentSessionPayload = {
+      ...sampleSession,
+      harness: 'claude-code',
+      summary: {
+        ...sampleSession.summary,
+        tool_calls: undefined,
+        tools_invoked: undefined,
+      },
+    }
+
+    const tree = AgentSessionDashboard({ session: legacySession })
+    const metric = findElementByTestId(tree, 'metric-tool-calls')
+    const html = renderHtml(metric)
+    expect(html).toContain('data-measured="false"')
+    expect(html).toContain('>—<')
+    expect(html).not.toContain('>0<')
+    expect(html).toContain('Tool invocation count was not reported by claude-code.')
+  })
+
+  it('renders tool invocations with name and status badge in timeline call tree when session contains tool.invoke records', () => {
+    const sessionWithToolInvokes: AgentSessionPayload = {
+      ...sampleSession,
+      timeline: [
+        {
+          spanId: 'root-span-1',
+          name: 'invoke_agent',
+          op: 'invoke_agent',
+          kind: 'agent',
+          durationMs: 5000,
+          offsetMs: 0,
+          children: [
+            {
+              spanId: 'tool-span-1',
+              parentId: 'root-span-1',
+              name: 'Bash',
+              op: 'tool.invoke',
+              kind: 'tool',
+              durationMs: 350,
+              offsetMs: 100,
+              status: 'ok',
+              attributes: {
+                'gen_ai.tool.name': 'Bash',
+                'gen_ai.tool.status': 'ok',
+                'gen_ai.tool.call_id': 'call_1',
+              },
+              children: [],
+            },
+            {
+              spanId: 'tool-span-2',
+              parentId: 'root-span-1',
+              name: 'Read',
+              op: 'tool.invoke',
+              kind: 'tool',
+              durationMs: 120,
+              offsetMs: 500,
+              status: 'error',
+              attributes: {
+                'gen_ai.tool.name': 'Read',
+                'gen_ai.tool.status': 'error',
+                'gen_ai.tool.call_id': 'call_2',
+              },
+              children: [],
+            },
+          ],
+        },
+      ],
+    }
+
+    const html = renderHtml(<AgentSessionDashboard session={sessionWithToolInvokes} />)
+    const treeView = html.slice(html.indexOf('data-testid="timeline-tree-view"'))
+
+    // Verify tool invocation names and durations render in call tree
+    expect(treeView).toContain('Bash')
+    expect(treeView).toContain('350ms')
+    expect(treeView).toContain('Read')
+    expect(treeView).toContain('120ms')
+
+    // Verify status badges render for tool invocations
+    expect(treeView).toMatch(/data-testid="status-badge"[^>]*>\s*ok\s*</i)
+    expect(treeView).toMatch(/data-testid="status-badge"[^>]*>\s*error\s*</i)
+  })
+  it("formats tools_offered and tools_invoked properly when provided as string arrays", () => {
+    const sessionWithArrayTools: AgentSessionPayload = {
+      ...sampleSession,
+      summary: {
+        ...sampleSession.summary,
+        tool_calls: 3,
+        tools_offered: ["toolA", "toolB"] as unknown as number,
+        tools_invoked: ["toolA"] as unknown as number,
+      },
+    }
+
+    const html = renderHtml(<AgentSessionDashboard session={sessionWithArrayTools} />)
+    const idx = html.indexOf("Tools Offered");
+    const offeredMetric = html.slice(idx, idx + 400);
+
+    // Card value should format as count 2, not "—"
+    expect(offeredMetric).toContain(">2<")
+    // Subtitle should format as "1 never called", not "NaN never called"
+    expect(offeredMetric).toContain("1 never called")
+    expect(offeredMetric).not.toContain("NaN")
+  })
+});

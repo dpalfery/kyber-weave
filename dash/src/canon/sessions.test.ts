@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import { tokens, turn } from './fixtures/records.js'
 import { getMeasurability } from './measurability.js'
@@ -8,7 +8,7 @@ import { CanonStore } from './store.js'
 import { activeTokenizer, cacheKey, approximateO200kBase } from './tokens.js'
 import { buildSessionRow, buildSessions, mergeMeasurability } from './sessions.js'
 import type { AsadSessionPayload } from './sessions.js'
-import type { CanonicalRecord } from './types.js'
+import type { CanonicalRecord, SessionRow } from './types.js'
 
 type SessionPayloadView = AsadSessionPayload & {
   context: AsadSessionPayload['context'] & {
@@ -27,10 +27,66 @@ type SessionPayloadView = AsadSessionPayload & {
   }
   schema?: { availability?: string; reason?: string }
   timeline?: { availability?: string; reason?: string } | unknown[]
+  summary: AsadSessionPayload['summary'] & {
+    tool_calls?: number
+    tools_invoked?: string[]
+    tools_offered?: string[]
+    [key: string]: unknown
+  }
+  tools: Array<AsadSessionPayload['tools'][number] & {
+    name?: string
+    errors?: number
+    invocations: number
+    [key: string]: unknown
+  }>
+}
+
+type SessionRowView = SessionRow & {
+  summary?: {
+    tool_calls?: number
+    tools_invoked?: string[]
+    tools_offered?: string[]
+    [key: string]: unknown
+  }
+  payload: SessionPayloadView
+}
+
+function sessionRow(row: SessionRow): SessionRowView {
+  return row as unknown as SessionRowView
 }
 
 function sessionPayload(row: { payload: unknown }): SessionPayloadView {
   return row.payload as SessionPayloadView
+}
+
+function toolInvoke(
+  spanId: string,
+  parentSpanId: string,
+  name: string,
+  over: Partial<CanonicalRecord> = {},
+): CanonicalRecord {
+  return {
+    spanId,
+    traceId: 'trace-1',
+    parentSpanId,
+    source: 'claude-code',
+    harness: 'claude-code',
+    sessionId: 'sess-1',
+    name,
+    op: 'tool.invoke',
+    kind: 'internal',
+    timestamp: '2026-09-03T10:00:01.000Z',
+    durationMs: 50,
+    status: 'ok',
+    tokens: tokens({ freshInput: 0, output: 0, reportedInput: 0, reportedOutput: 0 }),
+    content: {},
+    cost: { basis: 'unknown', status: 'no_rate' },
+    raw: {
+      'gen_ai.tool.name': name,
+      ...((over.raw as Record<string, unknown> | undefined) ?? {}),
+    },
+    ...over,
+  }
 }
 
 function unavailableReason(value: unknown, label: string): string {
@@ -321,6 +377,128 @@ describe('buildSessionRow', () => {
     expect(payload.context.first.buckets['tool_result_content']).toEqual(unavailableToolResult)
     expect(payload.context.last.buckets['tool_result_content']).toBe(40)
   })
+
+  it('populates tool metrics in session summary when tool invocations are present', () => {
+    const parent = turn('turn-1', [{ part: 'system_prompt', text: 'help' }])
+    const tool1 = toolInvoke('tool-1', 'turn-1', 'Bash', {
+      raw: { 'gen_ai.tool.name': 'Bash', arguments: '{"command":"echo test"}' },
+      status: 'ok',
+    })
+    const tool2 = toolInvoke('tool-2', 'turn-1', 'Read', {
+      raw: { 'gen_ai.tool.name': 'Read', arguments: '{"path":"file.txt"}' },
+      status: 'error',
+    })
+
+    const session = sessionRow(buildSessionRow('sess-tools', [parent, tool1, tool2], approximateO200kBase))
+
+    // 1. Tool metrics populated in summary:
+    // - session.summary.tool_calls is equal to the number of tool invocations (2)
+    expect(session.summary?.tool_calls).toBe(2)
+    // - session.summary.tools_invoked is an array of distinct or all invoked tool names (['Bash', 'Read'])
+    expect(session.summary?.tools_invoked).toEqual(['Bash', 'Read'])
+
+    // - session.payload.summary.tool_calls matches session.summary.tool_calls
+    expect(session.payload.summary.tool_calls).toBe(session.summary?.tool_calls)
+    expect(session.payload.summary.tool_calls).toBe(2)
+
+    // - session.payload.summary.tools_invoked matches session.summary.tools_invoked
+    expect(session.payload.summary.tools_invoked).toEqual(session.summary?.tools_invoked)
+    expect(session.payload.summary.tools_invoked).toEqual(['Bash', 'Read'])
+
+    // - session.payload.tools contains entries for invoked tools with invocation counts and error counts
+    expect(session.payload.tools).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'Bash', invocations: 1, errors: 0 }),
+        expect.objectContaining({ name: 'Read', invocations: 1, errors: 1 }),
+      ]),
+    )
+  })
+
+  it('preserves honest unobservability by keeping tools_offered undefined when unobserved', () => {
+    const parent = turn('turn-1', [{ part: 'system_prompt', text: 'help' }])
+    const tool1 = toolInvoke('tool-1', 'turn-1', 'Bash')
+
+    // Records do NOT contain any tool_definition or tool_definitions parts (unobserved)
+    const session = sessionRow(buildSessionRow('sess-unobserved', [parent, tool1], approximateO200kBase))
+
+    // Must be undefined (not an empty array or static harness defaults)
+    expect(session.summary?.tools_offered).toBeUndefined()
+    expect(session.payload.summary.tools_offered).toBeUndefined()
+    expect(session.summary?.tools_offered).not.toEqual([])
+    expect(session.payload.summary.tools_offered).not.toEqual([])
+  })
+
+  it('populates tools_offered when tool definition parts are observed in records', () => {
+    const parentWithDefs = turn('turn-defs', [
+      {
+        part: 'tool_definitions',
+        text: JSON.stringify([{ name: 'Bash' }, { name: 'Read' }, { name: 'Glob' }]),
+        tokens: 300,
+      },
+    ])
+    const tool1 = toolInvoke('tool-1', 'turn-defs', 'Bash')
+
+    const session = sessionRow(buildSessionRow('sess-observed', [parentWithDefs, tool1], approximateO200kBase))
+
+    expect(session.summary?.tools_offered).toEqual(expect.arrayContaining(['Bash', 'Read', 'Glob']))
+    expect(session.payload.summary.tools_offered).toEqual(session.summary?.tools_offered)
+  })
+  it("does not evaluate lazy record.content getter when record.parts is provided", () => {
+    const contentGetterSpy = vi.fn().mockReturnValue({})
+    const record = turn("turn-lazy-check", [
+      {
+        part: "tool_definitions",
+        text: JSON.stringify([{ name: "Bash" }]),
+        tokens: 100,
+      },
+    ])
+    Object.defineProperty(record, "content", {
+      get: contentGetterSpy,
+      configurable: true,
+      enumerable: true,
+    })
+
+    buildSessionRow("sess-lazy", [record], approximateO200kBase)
+
+    expect(contentGetterSpy).not.toHaveBeenCalled()
+  })
+
+
+  it('distinguishes unmeasured tool calls from zero tool calls when harness does not report tools', () => {
+    // When no tool records are present and harness did not report tools
+    const parentWithoutTools = turn('turn-no-tools', [{ part: 'system_prompt', text: 'plain conversation' }], {
+      source: 'claude-code',
+      harness: 'claude-code',
+      measurability: {
+        tool_calls: {
+          availability: 'not_measurable',
+          reason: 'Tool invocation count was not reported by claude-code.',
+        },
+      },
+    })
+
+    const unmeasuredSession = sessionRow(
+      buildSessionRow('sess-no-tools', [parentWithoutTools], approximateO200kBase),
+    )
+
+    // tool_calls must be undefined (unmeasured), NEVER coerced to 0
+    expect(unmeasuredSession.summary?.tool_calls).toBeUndefined()
+    expect(unmeasuredSession.payload.summary.tool_calls).toBeUndefined()
+    expect(unmeasuredSession.summary?.tools_invoked).toBeUndefined()
+    expect(unmeasuredSession.payload.summary.tools_invoked).toBeUndefined()
+
+    // Conversely, when tools ARE present and measured, tool_calls must be a valid count
+    const parentWithTool = turn('turn-with-tool', [{ part: 'system_prompt', text: 'help' }])
+    const tool = toolInvoke('tool-1', 'turn-with-tool', 'Bash')
+    const measuredSession = sessionRow(
+      buildSessionRow('sess-measured-tool', [parentWithTool, tool], approximateO200kBase),
+    )
+
+    expect(measuredSession.summary?.tool_calls).toBe(1)
+    expect(measuredSession.payload.summary.tool_calls).toBe(1)
+    expect(measuredSession.summary?.tools_invoked).toEqual(['Bash'])
+    expect(measuredSession.payload.summary.tools_invoked).toEqual(['Bash'])
+  })
 })
 
 describe('buildSessions', () => {
@@ -589,6 +767,7 @@ describe('canonical harness on derived sessions', () => {
   // corpus the claude-code scorecard computed context pressure, cache hit rate
   // and tool yield from 1 session while 58 more sat under `claude`, and still
   // reported 59 samples because that count comes from runs.
+  // Cursor lost 10 sessions the same way.
 
   function aliased(spanId: string, harness: string, sessionId: string): CanonicalRecord {
     return {
