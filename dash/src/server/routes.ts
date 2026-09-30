@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'http'
 import type { KyberBridge } from './bridge.js'
+import { sumSessionFigures } from './bridge.js'
 import { runContextReview, type ReviewRequest } from '../analysis/review.js'
 import { createReviewProvider } from '../analysis/review-providers/index.js'
 import { recordPrediction } from '../analysis/calibration.js'
@@ -553,11 +554,22 @@ export function handleKyberRequest(
       findingCounts.set(finding.runId, (findingCounts.get(finding.runId) ?? 0) + 1)
     }
     // Measured run figures ride along so the runs table never renders a dash
-    // beside measured data (issue #183). One derivation point:
-    // `runMeasuredFigures` sums the run's session summaries.
-    const runs = bridge.listRuns(harnessParam).map((run) => ({
+    // beside measured data (issue #183). One batched pass for the whole list
+    // (review follow-up: Kilo K2, Copilot C9): all executions, one summary
+    // query, per-run sums through the shared `sumSessionFigures` derivation.
+    const listedRuns = bridge.listRuns(harnessParam)
+    const executionsByRun = new Map<string, string[]>()
+    for (const execution of bridge.listExecutions()) {
+      if (typeof execution.sessionId !== 'string' || execution.sessionId.length === 0) continue
+      const group = executionsByRun.get(execution.runId) ?? []
+      group.push(execution.sessionId)
+      executionsByRun.set(execution.runId, group)
+    }
+    const listedSessionIds = [...new Set([...executionsByRun.values()].flat())]
+    const listedSummaries = bridge.sessionSummaryFigures(listedSessionIds)
+    const runs = listedRuns.map((run) => ({
       ...run,
-      ...bridge.runMeasuredFigures(run.runId),
+      ...sumSessionFigures(listedSummaries, executionsByRun.get(run.runId) ?? []),
       findingCount: findingCounts.get(run.runId) ?? 0,
     }))
     sendKyberJson(res, 200, { runs })
@@ -591,29 +603,32 @@ export function handleKyberRequest(
     const findings = bridge.listFindings({ runId: id })
     // Issue #183: the detail payload serves what its views need — measured
     // per-turn rows, enriched run figures, and a run-scoped scorecard — so
-    // the turn table and scorecard render figures instead of dashes.
-    const summaries = bridge.sessionSummaryFigures(
-      executions
-        .map((exec) => exec.sessionId)
-        .filter((sessionId): sessionId is string => typeof sessionId === 'string'),
+    // the turn table and scorecard render figures instead of dashes. Each
+    // session is read once and shared (review follow-up: Kilo K5/K7, Copilot
+    // C1): one payload map, one summary map, one shared sum derivation.
+    const payloads = bridge.runSessionPayloads(executions)
+    const summaries = bridge.sessionSummaryFigures([...payloads.keys()])
+    const figures = sumSessionFigures(
+      summaries,
+      executions.map((exec) => exec.sessionId),
     )
     const enrichedExecutions = executions.map((exec) => {
-      const figures = exec.sessionId !== null && exec.sessionId !== undefined
+      const sessionFigures = exec.sessionId !== null && exec.sessionId !== undefined
         ? summaries.get(exec.sessionId)
         : undefined
       return {
         ...exec,
-        ...(figures?.turnCount !== undefined ? { turnCount: figures.turnCount } : {}),
-        ...(figures?.costUsd !== undefined ? { costUsd: figures.costUsd } : {}),
+        ...(sessionFigures?.turnCount !== undefined ? { turnCount: sessionFigures.turnCount } : {}),
+        ...(sessionFigures?.costUsd !== undefined ? { costUsd: sessionFigures.costUsd } : {}),
       }
     })
     sendKyberJson(res, 200, {
-      run: { ...run, ...bridge.runMeasuredFigures(id) },
+      run: { ...run, ...figures },
       executionTree,
       executions: enrichedExecutions,
       findings,
-      turns: bridge.getRunTurns(id),
-      scorecard: bridge.getRunScorecard(id) ?? null,
+      turns: bridge.getRunTurns(id, { executions, payloads }),
+      scorecard: bridge.getRunScorecard(id, { executions, payloads, summaries }) ?? null,
     })
     return true
   }

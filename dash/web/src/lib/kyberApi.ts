@@ -559,6 +559,8 @@ export interface KyberRunSummary {
   totalInput?: number | null
   totalOutput?: number | null
   costUsd?: number | null
+  /** Present only when `costUsd` sums priced sessions beside unpriced ones. */
+  costStatus?: 'partial'
   outcome?: {
     status?: string
     exitCode?: number | null

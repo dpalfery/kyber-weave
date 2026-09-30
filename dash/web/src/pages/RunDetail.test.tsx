@@ -259,3 +259,54 @@ describe('RunDetail measured figures (issue #183)', () => {
     expect(html).not.toContain('does not export cache')
   })
 })
+
+// Review follow-up (Copilot C7, Kilo K3): a priced zero cost is a
+// measurement, not a missing figure — and a partial run total says so.
+describe('RunDetail cost honesty', () => {
+  beforeEach(() => {
+    clearHooks()
+  })
+
+  const pricedZeroRun: KyberRunDetail = {
+    runId: 'run-zero',
+    harness: 'copilot',
+    groupingBasis: 'explicit',
+    costUsd: 0,
+    executionTree: [],
+    executions: [
+      {
+        executionId: 'exec-1',
+        runId: 'run-zero',
+        harness: 'copilot',
+        isRoot: true,
+      },
+    ],
+    findings: [],
+    turns: [{ turnIndex: 0, model: 'gpt-4o', tokens: 100, costUsd: 0 }],
+  }
+
+  it('renders a priced zero turn cost as $0.00, not a dash', () => {
+    const qc = createTestQueryClient()
+    const html = renderHtml(
+      <QueryClientProvider client={qc}>
+        <RunDetail runId="run-zero" initialRun={pricedZeroRun} />
+      </QueryClientProvider>,
+    )
+
+    expect(html).toContain('$0.00')
+  })
+
+  it('marks a partial run total instead of presenting it as complete', () => {
+    const qc = createTestQueryClient()
+    const html = renderHtml(
+      <QueryClientProvider client={qc}>
+        <RunDetail
+          runId="run-zero"
+          initialRun={{ ...pricedZeroRun, costUsd: 0.015, costStatus: 'partial' }}
+        />
+      </QueryClientProvider>,
+    )
+
+    expect(html).toContain('partial')
+  })
+})

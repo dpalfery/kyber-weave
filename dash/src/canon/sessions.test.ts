@@ -148,12 +148,15 @@ describe('buildSessionRow', () => {
       'sess-cache',
       [
         turn('c1', [{ part: 'system_prompt', text: 'a'.repeat(400) }], {
+          harness: 'copilot',
           tokens: tokens({ freshInput: 99000, cacheRead: 1700000, cacheCreation: 1000, reportedInput: 1800000 }),
         }),
         turn('c2', [{ part: 'system_prompt', text: 'b'.repeat(400) }], {
+          harness: 'copilot',
           tokens: tokens({ freshInput: 9000, cacheRead: 86000, cacheCreation: 5000, reportedInput: 100000 }),
         }),
         turn('c3', [{ part: 'system_prompt', text: 'c'.repeat(400) }], {
+          harness: 'copilot',
           tokens: tokens({ freshInput: 0, cacheRead: 0, cacheCreation: 0, output: 50, reportedInput: 0 }),
         }),
       ],
@@ -186,7 +189,31 @@ describe('buildSessionRow', () => {
     const summary = sessionPayload(row).summary as Record<string, unknown>
     expect(summary.total_input).toEqual(unavailableCounter)
     expect('cache_hit_ratio' in summary).toBe(false)
+    // Review (Kilo K1 / Copilot C3): coverage with it — turns existing is not
+    // a measured counter.
+    expect('cache_creation_coverage' in summary).toBe(false)
     expect(JSON.stringify(summary)).not.toContain('"cache_hit_ratio":0')
+  })
+
+  // Review (Copilot C2/C3): Cursor declares no cache counters, so even with a
+  // measured input the cache figures are absent — never a 0% ratio or an
+  // "on 0 turns" count beside stored zeros.
+  it('omits cache figures for a harness that exports no cache counters', () => {
+    const row = buildSessionRow(
+      'sess-cursor-cache',
+      [
+        turn('cc1', [{ part: 'system_prompt', text: 'a'.repeat(400) }], {
+          source: 'cursor-hook',
+          harness: 'cursor',
+          tokens: tokens({ freshInput: 1200, cacheRead: 0, cacheCreation: 0, reportedInput: 1200 }),
+        }),
+      ],
+      approximateO200kBase,
+    )
+    const summary = sessionPayload(row).summary as Record<string, unknown>
+    expect(summary.total_input).toBe(1200)
+    expect('cache_hit_ratio' in summary).toBe(false)
+    expect('cache_creation_coverage' in summary).toBe(false)
   })
 
   // Issue #187: the engine's measured per-turn input never reached the wire —

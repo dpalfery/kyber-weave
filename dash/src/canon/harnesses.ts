@@ -201,6 +201,13 @@ export type AssembleRollupInput = {
   /** Measured input+output totals behind one session, for delegation overhead. */
   tokenTotals: (sessionId: string) => { input: number; output: number } | undefined
   scope: RollupScope
+  /**
+   * Whether the session-count ratio may stand in when no token totals were
+   * measured (review follow-up on issue #183: Kilo K4). True preserves the
+   * harness behavior; the run scope passes false — a count ratio is not an
+   * overhead ratio, so unmeasured delegation reads as unobservable.
+   */
+  allowCountFallback?: boolean
 }
 
 /**
@@ -395,12 +402,14 @@ export function assembleRollup(
       if (childTokens + rootTokens > 0) {
         delegationOverhead = Number((childTokens / (childTokens + rootTokens)).toFixed(4))
         measurability['delegation_overhead'] = 'measured'
-      } else if (executions.length > 0) {
+      } else if (input.allowCountFallback !== false && executions.length > 0) {
         delegationOverhead = Number((childCount / executions.length).toFixed(4))
         measurability['delegation_overhead'] = 'measured'
       } else {
         measurability['delegation_overhead'] = notMeasurable(
-          `No agent executions recorded ${forScope}.`,
+          executions.length > 0
+            ? `No measured token totals in ${inScope}; delegation overhead is unobservable.`
+            : `No agent executions recorded ${forScope}.`,
         )
       }
     }

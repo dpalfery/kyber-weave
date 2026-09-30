@@ -1011,10 +1011,12 @@ describe('GET /api/kyber/run/:id (issue #183)', () => {
       // The unpriced turn omits its cost — never zero.
       expect('costUsd' in (body.turns[2]!)).toBe(false)
 
-      // Enriched run figures.
+      // Enriched run figures. Session two is unpriced, so the cost is an
+      // explicit partial sum — never a complete-looking total (Kilo K3).
       expect(body.run.turnCount).toBe(3)
       expect(body.run.totalInput).toBe(3000)
       expect(body.run.costUsd).toBeCloseTo(0.015, 5)
+      expect(body.run.costStatus).toBe('partial')
 
       // Measured scorecard: the sessions exported cache counters, so the
       // cache dimension must not claim otherwise.
@@ -1023,6 +1025,183 @@ describe('GET /api/kyber/run/:id (issue #183)', () => {
     } finally {
       await new Promise<void>((resolve) => runServer.close(() => resolve()))
       runBridge.close()
+      store.close()
+    }
+  })
+})
+
+describe('GET /api/kyber/runs + run detail review follow-ups', () => {
+  // Kilo K2 / Copilot C9: the runs list carries the same measured figures as
+  // the detail payload, from one batched pass.
+  it('serves measured figures on runs list rows', async () => {
+    const store = new CanonStore(':memory:')
+    const usage: CanonicalRecord['tokens'] = {
+      freshInput: 800,
+      cacheRead: 200,
+      cacheCreation: 0,
+      output: 100,
+      reportedInput: 1000,
+      reportedOutput: 100,
+    }
+    const rec = (spanId: string, sessionId: string): CanonicalRecord => ({
+      spanId,
+      traceId: `trace-${sessionId}`,
+      parentSpanId: null,
+      sessionId,
+      source: 'synthetic',
+      harness: 'copilot',
+      name: 'canonical run turn',
+      op: 'llm.invoke',
+      kind: 'client',
+      timestamp: '2026-09-04T12:00:00.000Z',
+      durationMs: 100,
+      status: 'ok',
+      tokens: usage,
+      content: {},
+      parts: [{ part: 'system_prompt', text: 'sys', tokens: 600 }],
+      cost: { basis: 'published', status: 'priced', value: 0.01, currency: 'USD' },
+      raw: { model: 'gpt-4o', cwd: '/repo' },
+    })
+    store.upsertMany([rec('rl-t1', 'run-list-a'), rec('rl-t2', 'run-list-a')])
+    await buildSessions(store)
+    await buildRuns(store)
+
+    const listBridge = new KyberBridge({ canonPath: ':memory:', store })
+    const listServer = await runWebDashboard({ port: 0, open: false, kyberBridge: listBridge, writeStdout: () => {} })
+    try {
+      const listBase = `http://127.0.0.1:${(listServer.address() as AddressInfo).port}`
+      const res = await fetch(`${listBase}/api/kyber/runs?harness=copilot`)
+      expect(res.status).toBe(200)
+      const body = (await res.json()) as { runs: Array<Record<string, unknown>> }
+      expect(body.runs).toHaveLength(1)
+      expect(body.runs[0]!.turnCount).toBe(2)
+      expect(body.runs[0]!.totalInput).toBe(2000)
+      expect(body.runs[0]!.costUsd).toBeCloseTo(0.02, 5)
+      expect(body.runs[0]!.costStatus).toBeUndefined()
+    } finally {
+      await new Promise<void>((resolve) => listServer.close(() => resolve()))
+      listBridge.close()
+      store.close()
+    }
+  })
+
+  // Kilo K5: one run-detail request parses each session payload once, however
+  // many consumers (turns, scorecard) read it.
+  it('parses each session payload once per run-detail request', async () => {
+    const inner = new CanonStore(':memory:')
+    const usage: CanonicalRecord['tokens'] = {
+      freshInput: 800,
+      cacheRead: 200,
+      cacheCreation: 0,
+      output: 100,
+      reportedInput: 1000,
+      reportedOutput: 100,
+    }
+    const rec = (spanId: string, sessionId: string): CanonicalRecord => ({
+      spanId,
+      traceId: `trace-${sessionId}`,
+      parentSpanId: null,
+      sessionId,
+      source: 'synthetic',
+      harness: 'copilot',
+      name: 'canonical run turn',
+      op: 'llm.invoke',
+      kind: 'client',
+      timestamp: '2026-09-04T12:00:00.000Z',
+      durationMs: 100,
+      status: 'ok',
+      tokens: usage,
+      content: {},
+      parts: [{ part: 'system_prompt', text: 'sys', tokens: 600 }],
+      cost: { basis: 'published', status: 'priced', value: 0.01, currency: 'USD' },
+      raw: { model: 'gpt-4o', cwd: '/repo' },
+    })
+    inner.upsertMany([rec('sp-t1', 'single-parse-a'), rec('sp-t2', 'single-parse-b')])
+    await buildSessions(inner)
+    await buildRuns(inner)
+    const runId = inner.listRuns('copilot')[0]!.runId
+
+    let payloadReads = 0
+    class CountingStore extends CanonStore {
+      override getSessionPayload(sessionId: string): unknown | undefined {
+        payloadReads += 1
+        return super.getSessionPayload(sessionId)
+      }
+    }
+    // Rebuild the counter on a fresh store sharing no state with the fixture.
+    const store = new CountingStore(':memory:')
+    store.upsertMany([rec('sp-t1', 'single-parse-a'), rec('sp-t2', 'single-parse-b')])
+    await buildSessions(store)
+    await buildRuns(store)
+    payloadReads = 0
+
+    const countingBridge = new KyberBridge({ canonPath: ':memory:', store })
+    const countingServer = await runWebDashboard({ port: 0, open: false, kyberBridge: countingBridge, writeStdout: () => {} })
+    try {
+      const countingBase = `http://127.0.0.1:${(countingServer.address() as AddressInfo).port}`
+      const res = await fetch(`${countingBase}/api/kyber/run/${encodeURIComponent(runId)}`)
+      expect(res.status).toBe(200)
+      // Two sessions behind the run: parsed once each, not once per consumer.
+      expect(payloadReads).toBe(2)
+    } finally {
+      await new Promise<void>((resolve) => countingServer.close(() => resolve()))
+      countingBridge.close()
+      store.close()
+      inner.close()
+    }
+  })
+
+  // Kilo K4: a run whose sessions carry no measured token totals reports
+  // delegation overhead as unobservable — never a 0% measured figure — with a
+  // run-scoped reason (Copilot C8: no harness-telemetry claim).
+  it('reports unobservable delegation without token totals', async () => {
+    const store = new CanonStore(':memory:')
+    const rec = (spanId: string): CanonicalRecord => ({
+      spanId,
+      traceId: 'trace-unmeasured',
+      parentSpanId: null,
+      sessionId: 'unmeasured-session',
+      source: 'synthetic',
+      harness: 'copilot',
+      name: 'canonical run turn',
+      op: 'llm.invoke',
+      kind: 'client',
+      timestamp: '2026-09-04T12:00:00.000Z',
+      durationMs: 100,
+      status: 'ok',
+      tokens: {
+        freshInput: 0,
+        cacheRead: 0,
+        cacheCreation: 0,
+        output: 0,
+        reportedInput: 0,
+        reportedOutput: 0,
+      },
+      content: {},
+      parts: [{ part: 'system_prompt', text: 'sys', tokens: 10 }],
+      cost: { basis: 'unknown', status: 'no_rate' },
+      raw: { model: 'gpt-4o', cwd: '/repo' },
+    })
+    store.upsertMany([rec('u-t1')])
+    await buildSessions(store)
+    await buildRuns(store)
+    const runId = store.listRuns('copilot')[0]!.runId
+
+    const unmeasuredBridge = new KyberBridge({ canonPath: ':memory:', store })
+    const unmeasuredServer = await runWebDashboard({ port: 0, open: false, kyberBridge: unmeasuredBridge, writeStdout: () => {} })
+    try {
+      const unmeasuredBase = `http://127.0.0.1:${(unmeasuredServer.address() as AddressInfo).port}`
+      const res = await fetch(`${unmeasuredBase}/api/kyber/run/${encodeURIComponent(runId)}`)
+      expect(res.status).toBe(200)
+      const body = (await res.json()) as {
+        scorecard: Record<string, { value: number | null; reason?: string }>
+      }
+      expect(body.scorecard.delegationOverhead?.value).toBeNull()
+      expect(body.scorecard.delegationOverhead?.reason).toContain(runId)
+      expect(body.scorecard.delegationOverhead?.reason).not.toContain('does not export')
+    } finally {
+      await new Promise<void>((resolve) => unmeasuredServer.close(() => resolve()))
+      unmeasuredBridge.close()
       store.close()
     }
   })

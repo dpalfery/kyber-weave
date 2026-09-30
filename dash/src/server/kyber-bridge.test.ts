@@ -6,6 +6,7 @@ import { join } from 'node:path'
 
 import {
   KyberBridge,
+  sumSessionFigures,
   _clip,
 } from './bridge.js'
 import { CanonStore } from '../canon/store.js'
@@ -873,6 +874,74 @@ describe('KyberBridge: DB-backed report facts', () => {
       expect(bridge.getProblemCount()).toBe(0)
     } finally {
       bridge.close()
+    }
+  })
+})
+
+describe('KyberBridge run figures review follow-ups', () => {
+  // Copilot C4: a priced non-USD block is omitted, never served as dollars.
+  // The legacy `usd` shape predates currency and names dollars.
+  it('serves costUsd only for USD-priced figures', () => {
+    const store = new CanonStore(':memory:')
+    const session = (id: string, cost: unknown): void => {
+      store.upsertSession({
+        sessionId: id,
+        harness: 'copilot',
+        payload: {
+          id,
+          summary: { turn_count: 1, total_input: 100, total_output: 10, cost },
+        },
+      })
+    }
+    session('sess-usd', { basis: 'published', status: 'priced', value: 0.05, currency: 'USD' })
+    session('sess-eur', { basis: 'published', status: 'priced', value: 0.05, currency: 'EUR' })
+    session('sess-legacy', { usd: 0.12, basis: 'published_rates', status: 'ok' })
+    session('sess-norate', { basis: 'unknown', status: 'no_rate' })
+
+    const bridge = new KyberBridge({ canonPath: ':memory:', store })
+    try {
+      const figures = bridge.sessionSummaryFigures(['sess-usd', 'sess-eur', 'sess-legacy', 'sess-norate'])
+      expect(figures.get('sess-usd')?.costUsd).toBe(0.05)
+      expect(figures.get('sess-eur')?.costUsd).toBeUndefined()
+      expect(figures.get('sess-legacy')?.costUsd).toBe(0.12)
+      expect(figures.get('sess-norate')?.costUsd).toBeUndefined()
+    } finally {
+      bridge.close()
+      store.close()
+    }
+  })
+
+  // Kilo K3 / Copilot C5: a priced figure beside an unpriced session is a
+  // partial sum wearing a total's suit — mark it, or omit when nothing priced.
+  it('marks partial run costs and omits unpriced ones', () => {
+    const store = new CanonStore(':memory:')
+    const session = (id: string, cost: unknown): void => {
+      store.upsertSession({
+        sessionId: id,
+        harness: 'copilot',
+        payload: { id, summary: { turn_count: 1, cost } },
+      })
+    }
+    session('sess-p1', { basis: 'published', status: 'priced', value: 0.01, currency: 'USD' })
+    session('sess-p2', { basis: 'unknown', status: 'no_rate' })
+
+    const bridge = new KyberBridge({ canonPath: ':memory:', store })
+    try {
+      const summaries = bridge.sessionSummaryFigures(['sess-p1', 'sess-p2'])
+      expect(sumSessionFigures(summaries, ['sess-p1', 'sess-p2'])).toEqual({
+        turnCount: 2,
+        costUsd: 0.01,
+        costStatus: 'partial',
+      })
+      // Every session priced: complete, no marker.
+      expect(
+        sumSessionFigures(summaries, ['sess-p1']),
+      ).toEqual({ turnCount: 1, costUsd: 0.01 })
+      // Nothing priced: absent, never $0.
+      expect(sumSessionFigures(summaries, ['sess-p2'])).toEqual({ turnCount: 1 })
+    } finally {
+      bridge.close()
+      store.close()
     }
   })
 })

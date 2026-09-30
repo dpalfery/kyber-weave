@@ -237,8 +237,12 @@ export function RunDetail({
       dimensions,
       secondaryCost: {
         costUsd: run?.costUsd ?? null,
-        basis: 'run_summary',
-        status: run?.costUsd ? 'derived' : 'not_measurable',
+        // A priced zero is derived, not missing; a partial sum says so.
+        basis:
+          run?.costStatus === 'partial'
+            ? 'run_summary (partial: some sessions unpriced)'
+            : 'run_summary',
+        status: run?.costUsd != null ? 'derived' : 'not_measurable',
       },
     }
   }, [run])
@@ -488,7 +492,7 @@ export function RunDetail({
                                 : '—'}
                             </td>
                             <td className="py-2 px-2 text-right font-mono tabular-nums text-muted-foreground/80">
-                              {turn.costUsd ? usd(turn.costUsd) : '—'}
+                              {turn.costUsd != null ? usd(turn.costUsd) : '—'}
                             </td>
                             <td className="py-2 px-2 text-right">
                               <button

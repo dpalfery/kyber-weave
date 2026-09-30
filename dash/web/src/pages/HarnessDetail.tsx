@@ -159,7 +159,8 @@ export function HarnessDetail({
       secondaryCost: {
         costUsd: harness?.costUsd ?? null,
         basis: 'harness_rollup',
-        status: harness?.costUsd ? 'derived' : 'not_measurable',
+        // A priced zero is derived, not missing (review follow-up: Copilot C7).
+        status: harness?.costUsd != null ? 'derived' : 'not_measurable',
       },
     }
   }, [harness, rollupMissing, unbuiltReason])
@@ -390,9 +391,24 @@ export function HarnessDetail({
                       <td className="py-2.5 px-3 text-right font-mono tabular-nums text-amber-500 dark:text-amber-400">
                         {r.findingCount ?? 0}
                       </td>
-                      {/* Decision D9: Secondary derived cost */}
-                      <td className="py-2.5 px-3 text-right font-mono tabular-nums text-muted-foreground/80">
-                        {r.costUsd ? usd(r.costUsd) : '—'}
+                      {/* Decision D9: Secondary derived cost. A priced zero is a
+                          measurement (cost.ts renders a genuine $0.00), and a
+                          partial sum is marked — neither renders as missing
+                          (review follow-up: Copilot C7, Kilo K3). */}
+                      <td
+                        className="py-2.5 px-3 text-right font-mono tabular-nums text-muted-foreground/80"
+                        title={r.costStatus === 'partial' ? 'Partial total: some sessions in this run are unpriced' : undefined}
+                      >
+                        {r.costUsd != null ? (
+                          <>
+                            {usd(r.costUsd)}
+                            {r.costStatus === 'partial' && (
+                              <span className="ml-1 italic">(partial)</span>
+                            )}
+                          </>
+                        ) : (
+                          '—'
+                        )}
                       </td>
                     </tr>
                   )

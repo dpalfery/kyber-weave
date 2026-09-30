@@ -17,7 +17,7 @@ import { rankSchemas, type ToolDefinition } from '../analysis/schema.js'
 import { auxiliarySpend, buildTimeline, subagentSessions } from '../analysis/timeline.js'
 import { measuredInput, sumCosts } from './cost.js'
 import { contextLimitOf } from './context-window.js'
-import { groupByCanonicalHarness, normalizeHarnessName } from './measurability.js'
+import { groupByCanonicalHarness, harnessExportsCacheCounter, normalizeHarnessName } from './measurability.js'
 import { buildFindings } from './findings.js'
 import { buildHarnessRollup } from './harnesses.js'
 import { buildRuns } from './runs.js'
@@ -502,14 +502,22 @@ export function buildSessionRow(
   // here, the same `cache_read ÷ input` formula the tile footnotes and the
   // harness rollup uses. A figure that is not measured is omitted, never zero:
   // without a measured input the ratio has no denominator, and without turn
-  // rows the coverage has nothing to count.
+  // rows the coverage has nothing to count. Review follow-up (Kilo K1,
+  // Copilot C2/C3): turns existing is not a measured counter — when the input
+  // is undeclared, or the harness's vocabulary holds no such counter (Cursor
+  // exports totals but no cache counters), both keys stay absent so the tiles
+  // cannot print a 0% ratio or "on 0 turns" beside stored zeros.
   const summaryTotalInput = unavailableFor(measurability, 'token_usage') ?? totals.input
   const cacheHitRatio =
-    typeof summaryTotalInput === 'number' && summaryTotalInput > 0
+    typeof summaryTotalInput === 'number' &&
+    summaryTotalInput > 0 &&
+    harnessExportsCacheCounter(harness, 'read')
       ? totals.cacheRead / summaryTotalInput
       : undefined
   const cacheCreationCoverage =
-    turnRecords.length > 0
+    typeof summaryTotalInput === 'number' &&
+    turnRecords.length > 0 &&
+    harnessExportsCacheCounter(harness, 'creation')
       ? turnRecords.filter((record) => record.tokens.cacheCreation > 0).length
       : undefined
 

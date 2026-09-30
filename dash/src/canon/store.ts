@@ -2260,6 +2260,8 @@ export class CanonStore {
     totalOutput?: number
     costStatus?: string
     costValue?: number
+    costCurrency?: string
+    costUsdLegacy?: number
   }> {
     const uniqueIds = [...new Set(sessionIds)].filter((id) => id.length > 0)
     const out: Array<{
@@ -2269,6 +2271,8 @@ export class CanonStore {
       totalOutput?: number
       costStatus?: string
       costValue?: number
+      costCurrency?: string
+      costUsdLegacy?: number
     }> = []
     const chunkSize = 900
 
@@ -2282,7 +2286,9 @@ export class CanonStore {
                   json_extract(payload, '$.summary.total_input') AS total_input,
                   json_extract(payload, '$.summary.total_output') AS total_output,
                   json_extract(payload, '$.summary.cost.status') AS cost_status,
-                  json_extract(payload, '$.summary.cost.value') AS cost_value
+                  json_extract(payload, '$.summary.cost.value') AS cost_value,
+                  json_extract(payload, '$.summary.cost.currency') AS cost_currency,
+                  json_extract(payload, '$.summary.cost.usd') AS cost_usd
            FROM session WHERE session_id IN (${placeholders})`,
         )
         .all(...chunk) as Array<{
@@ -2292,6 +2298,8 @@ export class CanonStore {
         total_output: unknown
         cost_status: unknown
         cost_value: unknown
+        cost_currency: unknown
+        cost_usd: unknown
       }>
 
       for (const row of rows) {
@@ -2305,6 +2313,8 @@ export class CanonStore {
           ...(figure(row.total_output) !== undefined ? { totalOutput: figure(row.total_output)! } : {}),
           ...(typeof row.cost_status === 'string' ? { costStatus: row.cost_status } : {}),
           ...(figure(row.cost_value) !== undefined ? { costValue: figure(row.cost_value)! } : {}),
+          ...(typeof row.cost_currency === 'string' ? { costCurrency: row.cost_currency } : {}),
+          ...(figure(row.cost_usd) !== undefined ? { costUsdLegacy: figure(row.cost_usd)! } : {}),
         })
       }
     }
