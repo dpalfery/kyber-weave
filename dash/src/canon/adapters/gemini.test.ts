@@ -28,6 +28,11 @@ describe('geminiAdapter.detect', () => {
     ['full fingerprint', geminiCounts(), 1],
     ['gemini namespace vendor evidence', { 'gemini.session.id': 'g-77' }, 0.6],
     ['gen_ai.system vendor evidence', { 'gen_ai.system': 'gemini' }, 0.6],
+    [
+      'an explicit Antigravity agent identity outranks the Gemini vendor label',
+      { 'gen_ai.system': 'gemini', 'gen_ai.agent.name': 'antigravity' },
+      0,
+    ],
     ['shared GenAI usage alone', { 'gen_ai.usage.input_tokens': 1_200 }, 0.4],
     ['no fingerprint', { 'pi.session.id': 's-9f2' }, 0],
   ])('scores %s as %s', (_label, attributes, score) => {
