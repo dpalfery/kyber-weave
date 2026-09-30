@@ -83,14 +83,15 @@ or locate code:
 
 If there is no `.codegraph/` directory:
 - First occurrence: initialize the index with `codegraph init -y .` (standing approval for
-  repo-local fixes per #221; leave tracked files alone)
+  repo-local only: `codegraph init -y .`, builds, project-local dependencies; no system-wide
+  installs; leave tracked files alone)
 - If blocked: report the blocker under GAPS; the conductor relays it and stops that path
 - If the index fails after initialization: proceed with text search (Grep, Glob); state in
-  the result that CodeGraph was unavailable. Run `kyber-weave docs validate .` to confirm.
-
-See [#221 "Missing-dependency handling"](https://github.com/dpalfery/kyber-weave/issues/221)
-for the blocker->fix->retry loop and standing approval scope.
+  the result that CodeGraph was unavailable.
 <!-- CODEGRAPH_END -->
+
+See [the missing-dependency handling issue](https://github.com/dpalfery/kyber-weave/issues/221)
+for the blocker->fix->retry loop.
 
 **Documentation:** Before grepping or reading under `docs/`, use the Kyber-Weave MCP
 `docs_explore` tool. Before renaming, moving, or changing a code symbol's contract, use
