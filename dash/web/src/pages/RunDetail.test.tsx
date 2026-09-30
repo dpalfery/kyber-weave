@@ -172,3 +172,244 @@ describe('RunDetail turns table numbering', () => {
     expect(html).toContain('data-testid="drill-turn-2"')
   })
 })
+
+// Issue #183: the turn table must render served measured figures (not dashes
+// beside measured data), and the scorecard must render the served run-scoped
+// dimensions — with honest absence when the server sent none.
+describe('RunDetail measured figures (issue #183)', () => {
+  beforeEach(() => {
+    clearHooks()
+  })
+
+  const measuredRun: KyberRunDetail = {
+    runId: 'run-183',
+    harness: 'copilot',
+    groupingBasis: 'explicit',
+    turnCount: 2,
+    totalInput: 3000,
+    costUsd: 0.015,
+    executionTree: [],
+    executions: [
+      {
+        executionId: 'exec-1',
+        runId: 'run-183',
+        harness: 'copilot',
+        isRoot: true,
+      },
+    ],
+    findings: [],
+    turns: [
+      {
+        turnIndex: 0,
+        executionId: 'exec-1',
+        model: 'gpt-4o',
+        tokens: 1100,
+        inputTokens: 1000,
+        outputTokens: 100,
+        contextPressure: 0.05,
+        cacheHitRatio: 0.2,
+        costUsd: 0.01,
+      },
+      { turnIndex: 1, executionId: 'exec-1' },
+    ],
+    scorecard: {
+      cacheEfficiency: { value: 0.3333, display: '33%' },
+      contextHygiene: { value: 0.05, display: '5%' },
+    },
+  }
+
+  it('renders measured turn figures where the server sent them', () => {
+    const qc = createTestQueryClient()
+    const html = renderHtml(
+      <QueryClientProvider client={qc}>
+        <RunDetail runId="run-183" initialRun={measuredRun} />
+      </QueryClientProvider>,
+    )
+
+    expect(html).toContain('gpt-4o')
+    expect(html).toContain('5%')
+    expect(html).toContain('20%')
+    expect(html).toContain('$0.010')
+    // The unmeasured second row keeps its dashes — honesty both ways.
+    expect(html).toContain('Turn #2')
+  })
+
+  it('renders the served run-scoped scorecard as measured', () => {
+    const qc = createTestQueryClient()
+    const html = renderHtml(
+      <QueryClientProvider client={qc}>
+        <RunDetail runId="run-183" initialRun={measuredRun} />
+      </QueryClientProvider>,
+    )
+
+    expect(html).toContain('data-testid="dimension-value"')
+    expect(html).toContain('33%')
+  })
+
+  it('states honest absence without the harness-telemetry claim when unscored', () => {
+    const qc = createTestQueryClient()
+    const { scorecard: _omitted, ...unscored } = measuredRun
+    const html = renderHtml(
+      <QueryClientProvider client={qc}>
+        <RunDetail runId="run-183" initialRun={{ ...unscored, turns: undefined }} />
+      </QueryClientProvider>,
+    )
+
+    expect(html).toContain('projection has not scored it yet')
+    expect(html).not.toContain('does not export cache')
+  })
+})
+
+// Review follow-up (Copilot C7, Kilo K3): a priced zero cost is a
+// measurement, not a missing figure — and a partial run total says so.
+describe('RunDetail cost honesty', () => {
+  beforeEach(() => {
+    clearHooks()
+  })
+
+  const pricedZeroRun: KyberRunDetail = {
+    runId: 'run-zero',
+    harness: 'copilot',
+    groupingBasis: 'explicit',
+    costUsd: 0,
+    executionTree: [],
+    executions: [
+      {
+        executionId: 'exec-1',
+        runId: 'run-zero',
+        harness: 'copilot',
+        isRoot: true,
+      },
+    ],
+    findings: [],
+    turns: [{ turnIndex: 0, model: 'gpt-4o', tokens: 100, costUsd: 0 }],
+  }
+
+  it('renders a priced zero turn cost as $0.00, not a dash', () => {
+    const qc = createTestQueryClient()
+    const html = renderHtml(
+      <QueryClientProvider client={qc}>
+        <RunDetail runId="run-zero" initialRun={pricedZeroRun} />
+      </QueryClientProvider>,
+    )
+
+    expect(html).toContain('$0.00')
+  })
+
+  it('marks a partial run total instead of presenting it as complete', () => {
+    const qc = createTestQueryClient()
+    const html = renderHtml(
+      <QueryClientProvider client={qc}>
+        <RunDetail
+          runId="run-zero"
+          initialRun={{ ...pricedZeroRun, costUsd: 0.015, costStatus: 'partial' }}
+        />
+      </QueryClientProvider>,
+    )
+
+    expect(html).toContain('partial')
+  })
+
+  // Final polish (Kilo A): the cost marker is cost-precise — a turns-only
+  // gap marks no cost cell.
+  it('shows no cost marker when only turns are partial', () => {
+    const qc = createTestQueryClient()
+    const html = renderHtml(
+      <QueryClientProvider client={qc}>
+        <RunDetail
+          runId="run-zero"
+          initialRun={{
+            ...pricedZeroRun,
+            costUsd: 0.015,
+            partial: true,
+            partialFields: ['turnCount'],
+          }}
+        />
+      </QueryClientProvider>,
+    )
+
+    expect(html).not.toContain('data-testid="secondary-cost-partial"')
+  })
+
+  it('shows the cost marker when the cost itself is partial', () => {
+    const qc = createTestQueryClient()
+    const html = renderHtml(
+      <QueryClientProvider client={qc}>
+        <RunDetail
+          runId="run-zero"
+          initialRun={{
+            ...pricedZeroRun,
+            costUsd: 0.015,
+            partial: true,
+            partialFields: ['costUsd'],
+          }}
+        />
+      </QueryClientProvider>,
+    )
+
+    expect(html).toContain('data-testid="secondary-cost-partial"')
+  })
+})
+
+// Review re-review (Kilo 5): the partial marker must be visible text, not a
+// hover-only title.
+describe('RunDetail partial visibility', () => {
+  beforeEach(() => {
+    clearHooks()
+  })
+
+  it('shows a visible partial marker for a partial run total', () => {
+    const qc = createTestQueryClient()
+    const html = renderHtml(
+      <QueryClientProvider client={qc}>
+        <RunDetail
+          runId="run-zero"
+          initialRun={{
+            runId: 'run-zero',
+            harness: 'copilot',
+            groupingBasis: 'explicit',
+            costUsd: 0.015,
+            costStatus: 'partial',
+            executionTree: [],
+            executions: [],
+            findings: [],
+          }}
+        />
+      </QueryClientProvider>,
+    )
+
+    expect(html).toContain('data-testid="secondary-cost-partial"')
+  })
+})
+
+// Final polish (Kilo B): a partial turn cost carries its own marker.
+describe('RunDetail turn cost partial', () => {
+  beforeEach(() => {
+    clearHooks()
+  })
+
+  it('marks a partial turn cost beside the figure', () => {
+    const qc = createTestQueryClient()
+    const html = renderHtml(
+      <QueryClientProvider client={qc}>
+        <RunDetail
+          runId="run-zero"
+          initialRun={{
+            runId: 'run-zero',
+            harness: 'copilot',
+            groupingBasis: 'explicit',
+            executionTree: [],
+            executions: [],
+            findings: [],
+            turns: [{ turnIndex: 0, model: 'gpt-4o', tokens: 100, costUsd: 0.01, costStatus: 'partial' }],
+          }}
+        />
+      </QueryClientProvider>,
+    )
+
+    expect(html).toContain('data-testid="turn-cost-partial-0"')
+    // Open thread RunDetail.tsx:504 — the explanation must be reachable
+    // without a hovering mouse.
+    expect(html).toContain('tabindex="0"')
+  })
+})
