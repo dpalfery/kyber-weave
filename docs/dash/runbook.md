@@ -158,7 +158,22 @@ node dash/dist/cli.js kyber backfill
 
 # Re-evaluate harness attribution voting and token conventions
 node dash/dist/cli.js kyber renormalize
+
+# Re-evaluate attribution for one source's traces only (repeatable)
+node dash/dist/cli.js kyber renormalize --source agy
 ```
+
+`--source <name>` restricts renormalization to traces containing that source
+and restricts the excluded-harness remediation sweep the same way, so traces
+from other sources — and their derived sessions — are left untouched.
+Prefer it whenever the repair is scoped to one source (for example,
+re-attributing live Antigravity rows after an adapter change).
+
+> **Warning:** unscoped `kyber renormalize` quarantines every row the
+> fingerprint vote cannot claim, including file-sourced rows (`codeburn/*`),
+> which carry no OTLP attributes to vote on. Never run it unscoped on a
+> store whose file corpus matters without a backup; restore the backup to
+> roll back.
 
 ### 4. Content Retention Policy
 

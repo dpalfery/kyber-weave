@@ -1505,6 +1505,7 @@ const modelDisplayNames: Record<string, string> = {
   'Gemini 3.5 Flash (High)': 'Gemini 3.5 Flash',
   'Gemini 3.5 Flash (Medium)': 'Gemini 3.5 Flash',
   'Gemini 3.5 Flash (Low)': 'Gemini 3.5 Flash',
+  'Gemini 3.8 Flash (High)': 'Gemini 3.8 Flash',
   'gemini-3.1-flash-image': 'Gemini 3.1 Flash',
   'gemini-3.1-flash-lite': 'Gemini 3.1 Flash Lite',
   'claude-opus-4-6-thinking': 'Opus 4.6',
