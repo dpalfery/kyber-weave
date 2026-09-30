@@ -74,15 +74,29 @@ Do not start with grep, find, or arbitrary file browsing when a semantic index c
 question. MCP tool names may be namespace-qualified by the active harness.
 
 <!-- CODEGRAPH_START -->
-**Code:** When `.codegraph/` exists, use `codegraph_explore` before text search to understand
-or locate code:
+**Code:** When `.codegraph/` exists, use `codegraph_explore` before text search to
+understand or locate code:
 
-- The MCP tool returns relevant symbol definitions and call paths. Name a file or symbol when
-  current line-numbered source is required.
+- The MCP tool returns relevant symbol definitions and call paths. Name a file or symbol
+  when current line-numbered source is required.
 - The shell fallback is `codegraph explore "<symbol names or question>"`.
-
-If there is no `.codegraph/` directory, skip CodeGraph entirely — indexing is the user's decision.
 <!-- CODEGRAPH_END -->
+
+**Missing index.** If there is no `.codegraph/` directory, this repository authorizes
+`codegraph init -y .` from the repository root without further approval. This approval
+covers only repository-local initialization; installing CodeGraph or other system-wide
+tools remains the user's decision.
+
+- Before initialization, record `git status --short` and both staged and unstaged
+  tracked-file diffs. Initialization can rewrite the marked CodeGraph block above.
+  Afterwards, inspect `git status --short` and undo only tracked-file edits introduced
+  by initialization, preserving all pre-existing edits. The index itself is gitignored.
+- If initialization is blocked (no `codegraph` on `PATH`, no write access, a read-only
+  role) or leaves the index unusable, report the blocker under GAPS and fall back to
+  text search, stating in the result that CodeGraph was unavailable. The conductor
+  relays the blocker and stops that path.
+- If `docs drift` cannot run because no usable index is available, report it as skipped
+  rather than passed.
 
 **Documentation:** Before grepping or reading under `docs/`, use the Kyber-Weave MCP
 `docs_explore` tool. Before renaming, moving, or changing a code symbol's contract, use
