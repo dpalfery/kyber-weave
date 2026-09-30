@@ -91,9 +91,10 @@ If there is no `.codegraph/` directory:
 - If blocked (no `codegraph` on `PATH`, no write access, a read-only role): report the
   blocker under GAPS and proceed with text search (Grep, Glob), stating in the result
   that CodeGraph was unavailable; the conductor relays the blocker and stops that path.
-- If the index is unusable after initialization: fall back to text search (Grep, Glob),
-  stating in the result that CodeGraph was unavailable. Do not report `docs drift` as
-  passing when it was skipped for want of an index.
+- If the index is unusable after initialization: report the blocker under GAPS and fall
+  back to text search (Grep, Glob), stating in the result that CodeGraph was unavailable;
+  the conductor relays the blocker and stops that path. Note in the result that `docs
+  drift` was skipped for want of an index rather than passed.
 
 See issue #221, "Missing-dependency handling", for the blocker->fix->retry loop.
 
