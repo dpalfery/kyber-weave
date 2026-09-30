@@ -19,7 +19,7 @@ import { measuredInput, sumCosts } from './cost.js'
 import { isCopilotHarness, priceCopilotTurn } from './copilot-rates.js'
 import { isPublishedTableHarness, pricePublishedTurn } from './published-pricing.js'
 import { contextLimitOf } from './context-window.js'
-import { groupByCanonicalHarness, normalizeHarnessName } from './measurability.js'
+import { groupByCanonicalHarness, harnessExportsCacheCounter, normalizeHarnessName } from './measurability.js'
 import { buildFindings } from './findings.js'
 import { buildHarnessRollup } from './harnesses.js'
 import { buildRuns } from './runs.js'
@@ -530,6 +530,33 @@ export function buildSessionRow(
   const started = records[0]!.timestamp
   const ended = records[records.length - 1]!.timestamp
 
+  // Issue #185: the session tiles read `cache_hit_ratio` and
+  // `cache_creation_coverage`, which no writer ever emitted — one derivation
+  // here, the same `cache_read ÷ input` formula the tile footnotes and the
+  // harness rollup uses. A figure that is not measured is omitted, never zero:
+  // without a measured input the ratio has no denominator, and without turn
+  // rows the coverage has nothing to count. Review follow-up (Kilo K1,
+  // Copilot C2/C3): turns existing is not a measured counter — when the input
+  // is undeclared, or the harness's vocabulary holds no such counter (Cursor
+  // exports totals but no cache counters), both keys stay absent so the tiles
+  // cannot print a 0% ratio or "on 0 turns" beside stored zeros.
+  const summaryTotalInput = unavailableFor(measurability, 'token_usage') ?? totals.input
+  const cacheHitRatio =
+    typeof summaryTotalInput === 'number' &&
+    summaryTotalInput > 0 &&
+    harnessExportsCacheCounter(harness, 'read')
+      ? totals.cacheRead / summaryTotalInput
+      : undefined
+  // Review re-review (Kilo 2): the ratio beside this already requires input
+  // > 0 — a measured zero input emits neither key.
+  const cacheCreationCoverage =
+    typeof summaryTotalInput === 'number' &&
+    summaryTotalInput > 0 &&
+    turnRecords.length > 0 &&
+    harnessExportsCacheCounter(harness, 'creation')
+      ? turnRecords.filter((record) => record.tokens.cacheCreation > 0).length
+      : undefined
+
   const payload: AsadSessionPayload = {
     id: sessionId,
     session_id: sessionId,
@@ -542,10 +569,14 @@ export function buildSessionRow(
     summary: {
       turn_count: turnRecords.length,
       request_count: records.filter((r) => r.parentSpanId === null).length,
-      total_input: unavailableFor(measurability, 'token_usage') ?? totals.input,
+      total_input: summaryTotalInput,
       total_output: totals.output,
       total_cache_read: totals.cacheRead,
       total_cache_creation: totals.cacheCreation,
+      ...(cacheHitRatio !== undefined ? { cache_hit_ratio: cacheHitRatio } : {}),
+      ...(cacheCreationCoverage !== undefined
+        ? { cache_creation_coverage: cacheCreationCoverage }
+        : {}),
       duration_ms: records.reduce((sum, record) => sum + record.durationMs, 0),
       models,
       cost: cost.ok ? cost.total : { basis: 'unknown' as const, status: 'no_rate' as const },
@@ -663,6 +694,10 @@ function serializeContext(context: ReturnType<typeof analyzeContext>) {
     turns: context.turns.map((turn) => ({
       ...turn,
       toolDefinitionsByServer: Object.fromEntries(turn.toolDefinitionsByServer),
+      // Issue #187: the measured per-turn input, under the key the web
+      // composition view already reads (`reported_input`). Without it the view
+      // reconciles buckets against `bucketedTokens` and reports residual 0.0%.
+      reported_input: turn.inputTokens,
     })),
   }
 }

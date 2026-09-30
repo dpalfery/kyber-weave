@@ -12,6 +12,7 @@
 // looking authoritative.
 
 import type { HarnessRollupRow } from '../canon/types.js'
+import { isNotMeasurable } from '../canon/types.js'
 import { measured, unmeasurable, type DimensionKey, type Measured } from './report/types.js'
 
 /** The declared order dimensions are reported in, on every surface. */
@@ -73,6 +74,42 @@ function hasRollup(row: HarnessRollupRow): boolean {
   return row.sampleCount > 0
 }
 
+/**
+ * Which rollup measurability entry explains each dimension's absence.
+ * `skillUtilisation` and `continuity` have no rollup source — nothing derives
+ * them yet — so they always keep the static reason.
+ */
+const ROLLUP_REASON_KEYS: Partial<Record<DimensionKey, string>> = {
+  contextHygiene: 'context_pressure_median',
+  cacheEfficiency: 'cache_hit_rate',
+  toolYield: 'tool_yield',
+  delegationOverhead: 'delegation_overhead',
+}
+
+/**
+ * The rollup's own reason for an absent dimension, when it named one.
+ * Review follow-up (Copilot C8): the static reasons speak about harness
+ * telemetry in general, but a run-scoped rollup names what its own sessions
+ * lacked — and that specific reason must win, or a run with no measurable
+ * input inherits "harness does not export cache read/creation counters"
+ * for a harness that does.
+ */
+function rollupReason(row: HarnessRollupRow, key: DimensionKey, fallbackReason: string): string {
+  const reasonKey = ROLLUP_REASON_KEYS[key]
+  if (reasonKey !== undefined) {
+    const availability = row.measurability?.[reasonKey]
+    if (
+      availability !== undefined &&
+      isNotMeasurable(availability) &&
+      typeof availability.reason === 'string' &&
+      availability.reason.length > 0
+    ) {
+      return availability.reason
+    }
+  }
+  return fallbackReason
+}
+
 function dimension(
   key: DimensionKey,
   value: number | null | undefined,
@@ -104,19 +141,29 @@ export function buildScorecard(row: HarnessRollupRow): Scorecard {
 
   return {
     contextHygiene: dimension(
-      'contextHygiene', row.contextPressureMedian, asPercent, UNMEASURED_REASONS.contextHygiene,
+      'contextHygiene',
+      row.contextPressureMedian,
+      asPercent,
+      rollupReason(row, 'contextHygiene', UNMEASURED_REASONS.contextHygiene),
     ),
     cacheEfficiency: dimension(
-      'cacheEfficiency', row.cacheHitRate, asPercent, UNMEASURED_REASONS.cacheEfficiency,
+      'cacheEfficiency',
+      row.cacheHitRate,
+      asPercent,
+      rollupReason(row, 'cacheEfficiency', UNMEASURED_REASONS.cacheEfficiency),
     ),
     toolYield: dimension(
-      'toolYield', row.toolYield, asMultiple, UNMEASURED_REASONS.toolYield,
+      'toolYield', row.toolYield, asMultiple,
+      rollupReason(row, 'toolYield', UNMEASURED_REASONS.toolYield),
     ),
     // Nothing derives these two yet. They are reported as absent with the reason rather
     // than omitted, so a surface renders the gap instead of silently showing four of six.
     skillUtilisation: unmeasurable<number>(UNMEASURED_REASONS.skillUtilisation),
     delegationOverhead: dimension(
-      'delegationOverhead', row.delegationOverhead, asPercent, UNMEASURED_REASONS.delegationOverhead,
+      'delegationOverhead',
+      row.delegationOverhead,
+      asPercent,
+      rollupReason(row, 'delegationOverhead', UNMEASURED_REASONS.delegationOverhead),
     ),
     continuity: unmeasurable<number>(UNMEASURED_REASONS.continuity),
   }

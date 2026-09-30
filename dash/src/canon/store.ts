@@ -1587,9 +1587,13 @@ export class CanonStore {
       )
       .get(sessionId) as { input: unknown; output: unknown } | undefined
     if (row === undefined) return undefined
+    // Open thread harnesses.ts:416 — a total the session recorded as
+    // not_measurable is an object, not a number. Coercing it to 0 invents a
+    // measured zero for the delegation denominator; unknown stays unknown.
+    if (typeof row.input !== 'number' || typeof row.output !== 'number') return undefined
     return {
-      input: typeof row.input === 'number' ? row.input : 0,
-      output: typeof row.output === 'number' ? row.output : 0,
+      input: row.input,
+      output: row.output,
     }
   }
 
@@ -2241,6 +2245,116 @@ export class CanonStore {
       .prepare(`SELECT * FROM records WHERE (${placeholders})${sourceClause} ORDER BY span_id LIMIT ?`)
       .all(...args, limit) as RecordRow[]
     return rows.map(toRecord)
+  }
+
+  /**
+   * Cost blocks for selected spans without inflating parts or raw payloads.
+   * The run detail turn table (issue #183) needs each turn's priced figure;
+   * selecting full records would decompress every record's raw span.
+   */
+  spanCosts(spanIds: readonly string[]): Array<{ spanId: string; cost: CostBlock }> {
+    const uniqueIds = [...new Set(spanIds)].filter((id) => id.length > 0)
+    const out: Array<{ spanId: string; cost: CostBlock }> = []
+    const chunkSize = 900
+
+    for (let offset = 0; offset < uniqueIds.length; offset += chunkSize) {
+      const chunk = uniqueIds.slice(offset, offset + chunkSize)
+      const placeholders = chunk.map(() => '?').join(', ')
+      const rows = this.db
+        .prepare(`SELECT span_id, cost_json FROM records WHERE span_id IN (${placeholders})`)
+        .all(...chunk) as Array<{ span_id: unknown; cost_json: unknown }>
+
+      for (const row of rows) {
+        if (typeof row.span_id !== 'string') continue
+        let cost: unknown
+        try {
+          cost = JSON.parse(String(row.cost_json))
+        } catch {
+          continue
+        }
+        if (typeof cost !== 'object' || cost === null) continue
+        out.push({ spanId: row.span_id, cost: cost as CostBlock })
+      }
+    }
+
+    return out
+  }
+
+  /**
+   * Summary figures for selected sessions without parsing whole payloads.
+   * The runs list (issue #183) needs every run's turn count, token totals and
+   * priced cost; parsing each session payload would inflate megabytes per
+   * row, so only the summary fields are extracted.
+   */
+  sessionSummaryFigures(
+    sessionIds: readonly string[],
+  ): Array<{
+    sessionId: string
+    turnCount?: number
+    totalInput?: number
+    totalOutput?: number
+    costStatus?: string
+    costValue?: number
+    costCurrency?: string
+    costUsdLegacy?: number
+  }> {
+    const uniqueIds = [...new Set(sessionIds)].filter((id) => id.length > 0)
+    const out: Array<{
+      sessionId: string
+      turnCount?: number
+      totalInput?: number
+      totalOutput?: number
+      costStatus?: string
+      costValue?: number
+      costCurrency?: string
+      costUsdLegacy?: number
+    }> = []
+    const chunkSize = 900
+
+    for (let offset = 0; offset < uniqueIds.length; offset += chunkSize) {
+      const chunk = uniqueIds.slice(offset, offset + chunkSize)
+      const placeholders = chunk.map(() => '?').join(', ')
+      const rows = this.db
+        .prepare(
+          `SELECT session_id,
+                  json_extract(payload, '$.summary.turn_count') AS turn_count,
+                  json_extract(payload, '$.summary.total_input') AS total_input,
+                  json_extract(payload, '$.summary.total_output') AS total_output,
+                  json_extract(payload, '$.summary.cost.status') AS cost_status,
+                  json_extract(payload, '$.summary.cost.value') AS cost_value,
+                  json_extract(payload, '$.summary.cost.currency') AS cost_currency,
+                  json_extract(payload, '$.summary.cost.usd') AS cost_usd
+           FROM session WHERE session_id IN (${placeholders})`,
+        )
+        .all(...chunk) as Array<{
+        session_id: unknown
+        turn_count: unknown
+        total_input: unknown
+        total_output: unknown
+        cost_status: unknown
+        cost_value: unknown
+        cost_currency: unknown
+        cost_usd: unknown
+      }>
+
+      for (const row of rows) {
+        if (typeof row.session_id !== 'string') continue
+        const figure = (value: unknown): number | undefined =>
+          typeof value === 'number' && Number.isFinite(value) ? value : undefined
+        out.push({
+          sessionId: row.session_id,
+          ...(figure(row.turn_count) !== undefined ? { turnCount: figure(row.turn_count)! } : {}),
+          ...(figure(row.total_input) !== undefined ? { totalInput: figure(row.total_input)! } : {}),
+          ...(figure(row.total_output) !== undefined ? { totalOutput: figure(row.total_output)! } : {}),
+          ...(typeof row.cost_status === 'string' ? { costStatus: row.cost_status } : {}),
+          ...(figure(row.cost_value) !== undefined ? { costValue: figure(row.cost_value)! } : {}),
+          ...(typeof row.cost_currency === 'string' ? { costCurrency: row.cost_currency } : {}),
+          ...(figure(row.cost_usd) !== undefined ? { costUsdLegacy: figure(row.cost_usd)! } : {}),
+        })
+      }
+    }
+
+    return out
   }
 
   /**
