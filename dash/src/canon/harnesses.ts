@@ -84,7 +84,7 @@ export function computeP95(sorted: readonly number[]): number {
  * payload for the harness. The reductions are unchanged — this only decides
  * when a payload is live, not what is computed from it.
  */
-type SessionDigest = {
+export type SessionDigest = {
   count: number
   /** Peak context pressure per session, for the median and p95. */
   peakPressures: number[]
@@ -97,7 +97,12 @@ type SessionDigest = {
   subagentSessions: number
 }
 
-function digestSessions(store: CanonStore, harness: string): SessionDigest {
+/**
+ * Reduce session payloads to the scalars the rollup dimensions need, in one
+ * streaming pass (issue #183: the run scorecard reuses this over a run's own
+ * sessions instead of growing a second derivation).
+ */
+export function digestSessionPayloads(payloads: Iterable<AsadSessionPayload>): SessionDigest {
   const digest: SessionDigest = {
     count: 0,
     peakPressures: [],
@@ -109,10 +114,7 @@ function digestSessions(store: CanonStore, harness: string): SessionDigest {
     subagentSessions: 0,
   }
 
-  for (const row of store.iterateSessions(harness)) {
-    const payload = (row.payload !== null && typeof row.payload === 'object'
-      ? row.payload
-      : {}) as AsadSessionPayload
+  for (const payload of payloads) {
     digest.count += 1
 
     // Context pressure: the peak of a session's per-turn pressures.
@@ -169,19 +171,64 @@ function digestSessions(store: CanonStore, harness: string): SessionDigest {
 }
 
 /**
- * Build a single harness rollup row over sessions and executions in the store.
+ * Stream one harness's session payloads without materializing them: every use
+ * of a session is a sum, a count or one number per session, so holding 995 MB
+ * of payloads in an array is what took this phase's peak to 4.4 GB.
  */
-export function buildRollupForHarness(store: CanonStore, harness: string): HarnessRollupRow {
-  // Reduce each session to the scalars the dimensions below need, one payload
-  // at a time. Every use of a session here is a sum, a count or one number per
-  // session, so nothing is gained by holding 995 MB of payloads in an array —
-  // and doing so is what took this phase's peak to 4.4 GB.
-  const digest = digestSessions(store, harness)
-  const sessions = { length: digest.count }
+function* storedSessionPayloads(store: CanonStore, harness: string): Generator<AsadSessionPayload> {
+  for (const row of store.iterateSessions(harness)) {
+    yield (row.payload !== null && typeof row.payload === 'object'
+      ? row.payload
+      : {}) as AsadSessionPayload
+  }
+}
 
-  // Query all executions and runs for this harness
-  const executions = store.listExecutionsByHarness(harness)
-  const runs = store.listRuns(harness)
+function digestSessions(store: CanonStore, harness: string): SessionDigest {
+  return digestSessionPayloads(storedSessionPayloads(store, harness))
+}
+
+/** What a rollup's not-measurable reasons are scoped to (issue #183). */
+export type RollupScope = { kind: 'harness'; harness: string } | { kind: 'run'; runId: string }
+
+/** The execution fields the delegation dimension reads. */
+export type RollupExecutionView = { sessionId?: string | null; isChild: boolean }
+
+export type AssembleRollupInput = {
+  sessionCount: number
+  runCount: number
+  executionCount: number
+  executions: readonly RollupExecutionView[]
+  /** Measured input+output totals behind one session, for delegation overhead. */
+  tokenTotals: (sessionId: string) => { input: number; output: number } | undefined
+  scope: RollupScope
+}
+
+/**
+ * Assemble a rollup row from a digest and counts — the shared tail of the
+ * harness rollup and the run scorecard (issue #183). The dimensions derive
+ * here once; the only difference between scopes is what the not-measurable
+ * reasons name, so a run's own sessions can never inherit a harness-level
+ * claim about telemetry the run did export.
+ */
+export function assembleRollup(
+  harness: string,
+  digest: SessionDigest,
+  input: AssembleRollupInput,
+): HarnessRollupRow {
+  const sessions = { length: input.sessionCount }
+  const executions = { length: input.executionCount }
+  const runs = { length: input.runCount }
+  // Reason vocabulary is scope-aware: the harness wording below is unchanged
+  // from before the extraction, and the run wording names the run instead of
+  // ever claiming the harness lacks telemetry its sessions exported.
+  const inScope =
+    input.scope.kind === 'harness'
+      ? `sessions for harness "${input.scope.harness}"`
+      : `sessions in run "${input.scope.runId}"`
+  const forScope =
+    input.scope.kind === 'harness'
+      ? `for harness "${input.scope.harness}"`
+      : `for run "${input.scope.runId}"`
 
   const fieldCoverage = coverageFor(harness)
   const measurability: Record<string, MetricAvailability> = {}
@@ -202,7 +249,7 @@ export function buildRollupForHarness(store: CanonStore, harness: string): Harne
         measurability[dim] = baseAvail
       } else {
         measurability[dim] = notMeasurable(
-          `No collectable runs or sessions recorded for harness "${harness}".`,
+          `No collectable runs or sessions recorded ${forScope}.`,
         )
       }
     }
@@ -222,7 +269,7 @@ export function buildRollupForHarness(store: CanonStore, harness: string): Harne
         sessionCount: 0,
         runCount: 0,
         executionCount: 0,
-        reason: `No collectable runs or sessions recorded for harness "${harness}".`,
+        reason: `No collectable runs or sessions recorded ${forScope}.`,
       },
     }
   }
@@ -254,7 +301,7 @@ export function buildRollupForHarness(store: CanonStore, harness: string): Harne
       measurability['context_pressure_p95'] = classTag
     } else {
       const notMeas = notMeasurable(
-        `No measurable turns found in recorded sessions for harness "${harness}".`,
+        `No measurable turns found in recorded ${inScope}.`,
       )
       measurability['context_pressure'] = notMeas
       measurability['context_pressure_median'] = notMeas
@@ -278,7 +325,7 @@ export function buildRollupForHarness(store: CanonStore, harness: string): Harne
       measurability['cache_hit_rate'] = 'measured'
     } else {
       measurability['cache_hit_rate'] = notMeasurable(
-        `No input tokens recorded in sessions for harness "${harness}".`,
+        `No input tokens recorded in ${inScope}.`,
       )
     }
   }
@@ -299,7 +346,7 @@ export function buildRollupForHarness(store: CanonStore, harness: string): Harne
       measurability['tool_yield'] = 'measured'
     } else {
       measurability['tool_yield'] = notMeasurable(
-        `No tool definitions recorded in sessions for harness "${harness}".`,
+        `No tool definitions recorded in ${inScope}.`,
       )
     }
   }
@@ -319,7 +366,7 @@ export function buildRollupForHarness(store: CanonStore, harness: string): Harne
         measurability['delegation_overhead'] = 'measured'
       } else {
         measurability['delegation_overhead'] = notMeasurable(
-          `No agent executions recorded for harness "${harness}".`,
+          `No agent executions recorded ${forScope}.`,
         )
       }
     } else {
@@ -327,15 +374,13 @@ export function buildRollupForHarness(store: CanonStore, harness: string): Harne
       let rootTokens = 0
       let childCount = 0
 
-      for (const exec of executions) {
-        const isChild =
-          !exec.isRoot ||
-          (exec.parentExecutionId !== null && exec.parentExecutionId !== undefined)
+      for (const exec of input.executions) {
+        const isChild = exec.isChild
         let tokens = 0
         if (exec.sessionId) {
           // Two numbers read out of the stored JSON, rather than parsing a
           // payload that can run to hundreds of megabytes for each execution.
-          const totals = store.sessionTokenTotals(exec.sessionId)
+          const totals = input.tokenTotals(exec.sessionId)
           if (totals !== undefined) tokens = totals.input + totals.output
         }
 
@@ -355,7 +400,7 @@ export function buildRollupForHarness(store: CanonStore, harness: string): Harne
         measurability['delegation_overhead'] = 'measured'
       } else {
         measurability['delegation_overhead'] = notMeasurable(
-          `No agent executions recorded for harness "${harness}".`,
+          `No agent executions recorded ${forScope}.`,
         )
       }
     }
@@ -406,6 +451,30 @@ export function buildRollupForHarness(store: CanonStore, harness: string): Harne
       },
     },
   }
+}
+
+/**
+ * Build a single harness rollup row over sessions and executions in the store.
+ */
+export function buildRollupForHarness(store: CanonStore, harness: string): HarnessRollupRow {
+  // Query all executions and runs for this harness
+  const executions = store.listExecutionsByHarness(harness)
+  const runs = store.listRuns(harness)
+  const digest = digestSessions(store, harness)
+
+  return assembleRollup(harness, digest, {
+    sessionCount: digest.count,
+    runCount: runs.length,
+    executionCount: executions.length,
+    executions: executions.map((exec) => ({
+      sessionId: exec.sessionId,
+      isChild:
+        !exec.isRoot ||
+        (exec.parentExecutionId !== null && exec.parentExecutionId !== undefined),
+    })),
+    tokenTotals: (sessionId) => store.sessionTokenTotals(sessionId),
+    scope: { kind: 'harness', harness },
+  })
 }
 
 /**

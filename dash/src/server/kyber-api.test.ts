@@ -7,6 +7,8 @@ import { DatabaseSync } from 'node:sqlite'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { runWebDashboard } from '../cli/web.js'
+import { buildRuns } from '../canon/runs.js'
+import { buildSessions } from '../canon/sessions.js'
 import { CanonStore } from '../canon/store.js'
 import type { CanonicalRecord } from '../canon/types.js'
 import { KyberBridge } from './bridge.js'
@@ -909,5 +911,119 @@ describe('Backend Contract Tests: /api/kyber/* Endpoints', () => {
         expect(body).toEqual({ error: 'Not found' })
       }
     })
+  })
+})
+
+describe('GET /api/kyber/run/:id (issue #183)', () => {
+  // The run detail payload must serve the measured figures its views need:
+  // per-turn rows (not stub indices), enriched run figures, and a measured
+  // scorecard — never dashes beside measured data.
+  it('serves measured turn rows, summary figures, and scorecard', async () => {
+    const store = new CanonStore(':memory:')
+    const part = (tokens: number) => [
+      { part: 'system_prompt' as const, text: 'sys', tokens },
+      { part: 'conversation_history' as const, text: 'hi', tokens: 100 },
+    ]
+    const turnRecord = (
+      spanId: string,
+      sessionId: string,
+      timestamp: string,
+      tokens: CanonicalRecord['tokens'],
+      value: number | null,
+    ): CanonicalRecord => ({
+      spanId,
+      traceId: `trace-${sessionId}`,
+      parentSpanId: null,
+      sessionId,
+      source: 'synthetic',
+      harness: 'copilot',
+      name: 'canonical run turn',
+      op: 'llm.invoke',
+      kind: 'client',
+      timestamp,
+      durationMs: 100,
+      status: 'ok',
+      tokens,
+      content: {},
+      parts: part(600),
+      cost:
+        value === null
+          ? { basis: 'unknown', status: 'no_rate' as const }
+          : { basis: 'published', status: 'priced' as const, value, currency: 'USD' },
+      raw: { model: 'gpt-4o', cwd: '/repo' },
+    })
+    const usage = (fresh: number, read: number, out: number): CanonicalRecord['tokens'] => ({
+      freshInput: fresh,
+      cacheRead: read,
+      cacheCreation: 0,
+      output: out,
+      reportedInput: fresh + read,
+      reportedOutput: out,
+    })
+    store.upsertMany([
+      // Session one: two measured turns, both priced.
+      turnRecord('run-a-t1', 'run-sess-a', '2026-09-04T12:00:00.000Z', usage(800, 200, 100), 0.01),
+      turnRecord('run-a-t2', 'run-sess-a', '2026-09-04T12:01:00.000Z', usage(700, 300, 50), 0.005),
+      // Session two: one measured turn, unpriced — same cwd and window, so the
+      // same derived run, second execution, 0-based indices repeating by design.
+      turnRecord('run-b-t1', 'run-sess-b', '2026-09-04T12:02:00.000Z', usage(500, 500, 80), null),
+    ])
+    await buildSessions(store)
+    await buildRuns(store)
+
+    const runs = store.listRuns('copilot')
+    expect(runs).toHaveLength(1)
+    const runId = runs[0]!.runId
+
+    const runBridge = new KyberBridge({ canonPath: ':memory:', store })
+    const runServer = await runWebDashboard({ port: 0, open: false, kyberBridge: runBridge, writeStdout: () => {} })
+    try {
+      const runBase = `http://127.0.0.1:${(runServer.address() as AddressInfo).port}`
+      const res = await fetch(`${runBase}/api/kyber/run/${encodeURIComponent(runId)}`)
+      expect(res.status).toBe(200)
+      expect(res.headers.get('content-type')).toContain('application/json')
+      expect(res.headers.get('cache-control')).toBe('no-store')
+
+      const body = (await res.json()) as {
+        run: Record<string, unknown>
+        executions: Array<{ executionId: string; sessionId: string | null }>
+        turns: Array<Record<string, unknown>>
+        scorecard: Record<string, { value: number | null; reason?: string; display?: string }>
+      }
+      expect(body.executions).toHaveLength(2)
+
+      // Per-turn rows carry measured figures, not stub indices.
+      expect(body.turns).toHaveLength(3)
+      const first = body.turns[0]!
+      expect(first.model).toBe('gpt-4o')
+      expect(first.tokens).toBe(1100)
+      expect(first.inputTokens).toBe(1000)
+      expect(first.cacheHitRatio as number).toBeCloseTo(0.2, 5)
+      expect(typeof first.contextPressure).toBe('number')
+      expect(first.costUsd).toBe(0.01)
+      expect(typeof first.timestamp).toBe('string')
+      // 0-based per execution: session two restarts at turnIndex 0.
+      expect(body.turns.map((t) => [t.executionId, t.turnIndex])).toEqual([
+        [body.executions[0]!.executionId, 0],
+        [body.executions[0]!.executionId, 1],
+        [body.executions[1]!.executionId, 0],
+      ])
+      // The unpriced turn omits its cost — never zero.
+      expect('costUsd' in (body.turns[2]!)).toBe(false)
+
+      // Enriched run figures.
+      expect(body.run.turnCount).toBe(3)
+      expect(body.run.totalInput).toBe(3000)
+      expect(body.run.costUsd).toBeCloseTo(0.015, 5)
+
+      // Measured scorecard: the sessions exported cache counters, so the
+      // cache dimension must not claim otherwise.
+      expect(body.scorecard.cacheEfficiency?.value).toBeCloseTo(1000 / 3000, 4)
+      expect(body.scorecard.contextHygiene?.value).not.toBeNull()
+    } finally {
+      await new Promise<void>((resolve) => runServer.close(() => resolve()))
+      runBridge.close()
+      store.close()
+    }
   })
 })

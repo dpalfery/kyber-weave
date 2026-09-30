@@ -2213,6 +2213,106 @@ export class CanonStore {
   }
 
   /**
+   * Cost blocks for selected spans without inflating parts or raw payloads.
+   * The run detail turn table (issue #183) needs each turn's priced figure;
+   * selecting full records would decompress every record's raw span.
+   */
+  spanCosts(spanIds: readonly string[]): Array<{ spanId: string; cost: CostBlock }> {
+    const uniqueIds = [...new Set(spanIds)].filter((id) => id.length > 0)
+    const out: Array<{ spanId: string; cost: CostBlock }> = []
+    const chunkSize = 900
+
+    for (let offset = 0; offset < uniqueIds.length; offset += chunkSize) {
+      const chunk = uniqueIds.slice(offset, offset + chunkSize)
+      const placeholders = chunk.map(() => '?').join(', ')
+      const rows = this.db
+        .prepare(`SELECT span_id, cost_json FROM records WHERE span_id IN (${placeholders})`)
+        .all(...chunk) as Array<{ span_id: unknown; cost_json: unknown }>
+
+      for (const row of rows) {
+        if (typeof row.span_id !== 'string') continue
+        let cost: unknown
+        try {
+          cost = JSON.parse(String(row.cost_json))
+        } catch {
+          continue
+        }
+        if (typeof cost !== 'object' || cost === null) continue
+        out.push({ spanId: row.span_id, cost: cost as CostBlock })
+      }
+    }
+
+    return out
+  }
+
+  /**
+   * Summary figures for selected sessions without parsing whole payloads.
+   * The runs list (issue #183) needs every run's turn count, token totals and
+   * priced cost; parsing each session payload would inflate megabytes per
+   * row, so only the summary fields are extracted.
+   */
+  sessionSummaryFigures(
+    sessionIds: readonly string[],
+  ): Array<{
+    sessionId: string
+    turnCount?: number
+    totalInput?: number
+    totalOutput?: number
+    costStatus?: string
+    costValue?: number
+  }> {
+    const uniqueIds = [...new Set(sessionIds)].filter((id) => id.length > 0)
+    const out: Array<{
+      sessionId: string
+      turnCount?: number
+      totalInput?: number
+      totalOutput?: number
+      costStatus?: string
+      costValue?: number
+    }> = []
+    const chunkSize = 900
+
+    for (let offset = 0; offset < uniqueIds.length; offset += chunkSize) {
+      const chunk = uniqueIds.slice(offset, offset + chunkSize)
+      const placeholders = chunk.map(() => '?').join(', ')
+      const rows = this.db
+        .prepare(
+          `SELECT session_id,
+                  json_extract(payload, '$.summary.turn_count') AS turn_count,
+                  json_extract(payload, '$.summary.total_input') AS total_input,
+                  json_extract(payload, '$.summary.total_output') AS total_output,
+                  json_extract(payload, '$.summary.cost.status') AS cost_status,
+                  json_extract(payload, '$.summary.cost.value') AS cost_value
+           FROM session WHERE session_id IN (${placeholders})`,
+        )
+        .all(...chunk) as Array<{
+        session_id: unknown
+        turn_count: unknown
+        total_input: unknown
+        total_output: unknown
+        cost_status: unknown
+        cost_value: unknown
+      }>
+
+      for (const row of rows) {
+        if (typeof row.session_id !== 'string') continue
+        const figure = (value: unknown): number | undefined =>
+          typeof value === 'number' && Number.isFinite(value) ? value : undefined
+        out.push({
+          sessionId: row.session_id,
+          ...(figure(row.turn_count) !== undefined ? { turnCount: figure(row.turn_count)! } : {}),
+          ...(figure(row.total_input) !== undefined ? { totalInput: figure(row.total_input)! } : {}),
+          ...(figure(row.total_output) !== undefined ? { totalOutput: figure(row.total_output)! } : {}),
+          ...(typeof row.cost_status === 'string' ? { costStatus: row.cost_status } : {}),
+          ...(figure(row.cost_value) !== undefined ? { costValue: figure(row.cost_value)! } : {}),
+        })
+      }
+    }
+
+    return out
+  }
+
+  /**
    * Cost facts for selected sessions without inflating or reading raw payloads.
    * The report needs only the indexed session key and the small cost block;
    * selecting full records here would decompress each record's raw span.

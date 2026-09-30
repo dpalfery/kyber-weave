@@ -11,6 +11,7 @@ import {
   type ScorecardData,
   type ScorecardDimensionKey,
   type ScorecardDimensionValue,
+  type ServedHarnessScorecard,
   type KyberRunTurn,
 } from '../lib/kyberApi.js'
 import {
@@ -117,14 +118,42 @@ function ExecutionTreeItem({
   )
 }
 
-function unmeasuredDimension(key: ScorecardDimensionKey): ScorecardDimensionValue {
+/**
+ * The server said nothing about this run's scorecard — honest absence with a
+ * true reason (issue #183). The per-dimension default reasons claim the
+ * harness lacks telemetry, which is false for a run whose sessions exported
+ * the counters; they apply only when the engine itself measured the gap.
+ */
+const NO_RUN_SCORECARD_REASON =
+  'No served run scorecard for this run — the projection has not scored it yet; inspect the run\'s sessions for the measured figures.'
+
+/**
+ * Adapt one engine-served run dimension to the shape the Scorecard renders —
+ * the R11.14 pattern ScorecardMatrix's `dimensionForRow` already uses: the
+ * engine derives, the browser only presents.
+ */
+function adaptServedDimension(
+  key: ScorecardDimensionKey,
+  served: ServedHarnessScorecard | undefined,
+): ScorecardDimensionValue {
   const meta = DIMENSION_METADATA[key]
+  const dim = served?.[key]
+  if (dim && dim.value !== null && dim.value !== undefined) {
+    return {
+      key,
+      name: meta.name,
+      value: dim.value,
+      formatted: dim.display,
+      status: 'measured',
+      reason: meta.description,
+    }
+  }
   return {
     key,
     name: meta.name,
-    status: 'not_measurable',
-    reason: meta.defaultUnmeasuredReason,
     value: null,
+    status: 'not_measurable',
+    reason: dim?.reason ?? NO_RUN_SCORECARD_REASON,
   }
 }
 
@@ -190,19 +219,22 @@ export function RunDetail({
     }))
   }, [run, activeExecutionId, activeExecution?.sessionId, executionSession])
 
-  // Honest scorecard: live run.scorecard or not_measurable dashes — never fabricated values.
+  // Honest scorecard: the served run scorecard when present, not_measurable
+  // dashes otherwise — never fabricated values, and never the
+  // harness-telemetry claim (issue #183): an unscored run's sessions may
+  // export counters the projection has not aggregated yet.
   const scorecardData: ScorecardData = useMemo(() => {
-    if (run?.scorecard) return run.scorecard
-
+    const served = run?.scorecard
+    const dimensions: ScorecardData['dimensions'] = {
+      contextHygiene: adaptServedDimension('contextHygiene', served),
+      cacheEfficiency: adaptServedDimension('cacheEfficiency', served),
+      toolYield: adaptServedDimension('toolYield', served),
+      skillUtilisation: adaptServedDimension('skillUtilisation', served),
+      delegationOverhead: adaptServedDimension('delegationOverhead', served),
+      continuity: adaptServedDimension('continuity', served),
+    }
     return {
-      dimensions: {
-        contextHygiene: unmeasuredDimension('contextHygiene'),
-        cacheEfficiency: unmeasuredDimension('cacheEfficiency'),
-        toolYield: unmeasuredDimension('toolYield'),
-        skillUtilisation: unmeasuredDimension('skillUtilisation'),
-        delegationOverhead: unmeasuredDimension('delegationOverhead'),
-        continuity: unmeasuredDimension('continuity'),
-      },
+      dimensions,
       secondaryCost: {
         costUsd: run?.costUsd ?? null,
         basis: 'run_summary',

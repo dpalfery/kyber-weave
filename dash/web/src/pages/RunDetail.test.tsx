@@ -172,3 +172,90 @@ describe('RunDetail turns table numbering', () => {
     expect(html).toContain('data-testid="drill-turn-2"')
   })
 })
+
+// Issue #183: the turn table must render served measured figures (not dashes
+// beside measured data), and the scorecard must render the served run-scoped
+// dimensions — with honest absence when the server sent none.
+describe('RunDetail measured figures (issue #183)', () => {
+  beforeEach(() => {
+    clearHooks()
+  })
+
+  const measuredRun: KyberRunDetail = {
+    runId: 'run-183',
+    harness: 'copilot',
+    groupingBasis: 'explicit',
+    turnCount: 2,
+    totalInput: 3000,
+    costUsd: 0.015,
+    executionTree: [],
+    executions: [
+      {
+        executionId: 'exec-1',
+        runId: 'run-183',
+        harness: 'copilot',
+        isRoot: true,
+      },
+    ],
+    findings: [],
+    turns: [
+      {
+        turnIndex: 0,
+        executionId: 'exec-1',
+        model: 'gpt-4o',
+        tokens: 1100,
+        inputTokens: 1000,
+        outputTokens: 100,
+        contextPressure: 0.05,
+        cacheHitRatio: 0.2,
+        costUsd: 0.01,
+      },
+      { turnIndex: 1, executionId: 'exec-1' },
+    ],
+    scorecard: {
+      cacheEfficiency: { value: 0.3333, display: '33%' },
+      contextHygiene: { value: 0.05, display: '5%' },
+    },
+  }
+
+  it('renders measured turn figures where the server sent them', () => {
+    const qc = createTestQueryClient()
+    const html = renderHtml(
+      <QueryClientProvider client={qc}>
+        <RunDetail runId="run-183" initialRun={measuredRun} />
+      </QueryClientProvider>,
+    )
+
+    expect(html).toContain('gpt-4o')
+    expect(html).toContain('5%')
+    expect(html).toContain('20%')
+    expect(html).toContain('$0.010')
+    // The unmeasured second row keeps its dashes — honesty both ways.
+    expect(html).toContain('Turn #2')
+  })
+
+  it('renders the served run-scoped scorecard as measured', () => {
+    const qc = createTestQueryClient()
+    const html = renderHtml(
+      <QueryClientProvider client={qc}>
+        <RunDetail runId="run-183" initialRun={measuredRun} />
+      </QueryClientProvider>,
+    )
+
+    expect(html).toContain('data-testid="dimension-value"')
+    expect(html).toContain('33%')
+  })
+
+  it('states honest absence without the harness-telemetry claim when unscored', () => {
+    const qc = createTestQueryClient()
+    const { scorecard: _omitted, ...unscored } = measuredRun
+    const html = renderHtml(
+      <QueryClientProvider client={qc}>
+        <RunDetail runId="run-183" initialRun={{ ...unscored, turns: undefined }} />
+      </QueryClientProvider>,
+    )
+
+    expect(html).toContain('projection has not scored it yet')
+    expect(html).not.toContain('does not export cache')
+  })
+})

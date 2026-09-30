@@ -497,6 +497,22 @@ export function buildSessionRow(
   const started = records[0]!.timestamp
   const ended = records[records.length - 1]!.timestamp
 
+  // Issue #185: the session tiles read `cache_hit_ratio` and
+  // `cache_creation_coverage`, which no writer ever emitted — one derivation
+  // here, the same `cache_read ÷ input` formula the tile footnotes and the
+  // harness rollup uses. A figure that is not measured is omitted, never zero:
+  // without a measured input the ratio has no denominator, and without turn
+  // rows the coverage has nothing to count.
+  const summaryTotalInput = unavailableFor(measurability, 'token_usage') ?? totals.input
+  const cacheHitRatio =
+    typeof summaryTotalInput === 'number' && summaryTotalInput > 0
+      ? totals.cacheRead / summaryTotalInput
+      : undefined
+  const cacheCreationCoverage =
+    turnRecords.length > 0
+      ? turnRecords.filter((record) => record.tokens.cacheCreation > 0).length
+      : undefined
+
   const payload: AsadSessionPayload = {
     id: sessionId,
     session_id: sessionId,
@@ -509,10 +525,14 @@ export function buildSessionRow(
     summary: {
       turn_count: turnRecords.length,
       request_count: records.filter((r) => r.parentSpanId === null).length,
-      total_input: unavailableFor(measurability, 'token_usage') ?? totals.input,
+      total_input: summaryTotalInput,
       total_output: totals.output,
       total_cache_read: totals.cacheRead,
       total_cache_creation: totals.cacheCreation,
+      ...(cacheHitRatio !== undefined ? { cache_hit_ratio: cacheHitRatio } : {}),
+      ...(cacheCreationCoverage !== undefined
+        ? { cache_creation_coverage: cacheCreationCoverage }
+        : {}),
       duration_ms: records.reduce((sum, record) => sum + record.durationMs, 0),
       models,
       cost: cost.ok ? cost.total : { basis: 'unknown' as const, status: 'no_rate' as const },
@@ -630,6 +650,10 @@ function serializeContext(context: ReturnType<typeof analyzeContext>) {
     turns: context.turns.map((turn) => ({
       ...turn,
       toolDefinitionsByServer: Object.fromEntries(turn.toolDefinitionsByServer),
+      // Issue #187: the measured per-turn input, under the key the web
+      // composition view already reads (`reported_input`). Without it the view
+      // reconciles buckets against `bucketedTokens` and reports residual 0.0%.
+      reported_input: turn.inputTokens,
     })),
   }
 }

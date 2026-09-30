@@ -552,8 +552,12 @@ export function handleKyberRequest(
       if (finding.runId === undefined) continue
       findingCounts.set(finding.runId, (findingCounts.get(finding.runId) ?? 0) + 1)
     }
+    // Measured run figures ride along so the runs table never renders a dash
+    // beside measured data (issue #183). One derivation point:
+    // `runMeasuredFigures` sums the run's session summaries.
     const runs = bridge.listRuns(harnessParam).map((run) => ({
       ...run,
+      ...bridge.runMeasuredFigures(run.runId),
       findingCount: findingCounts.get(run.runId) ?? 0,
     }))
     sendKyberJson(res, 200, { runs })
@@ -585,7 +589,32 @@ export function handleKyberRequest(
     const executionTree = bridge.getExecutionTree(id)
     const executions = bridge.listExecutions(id)
     const findings = bridge.listFindings({ runId: id })
-    sendKyberJson(res, 200, { run, executionTree, executions, findings })
+    // Issue #183: the detail payload serves what its views need — measured
+    // per-turn rows, enriched run figures, and a run-scoped scorecard — so
+    // the turn table and scorecard render figures instead of dashes.
+    const summaries = bridge.sessionSummaryFigures(
+      executions
+        .map((exec) => exec.sessionId)
+        .filter((sessionId): sessionId is string => typeof sessionId === 'string'),
+    )
+    const enrichedExecutions = executions.map((exec) => {
+      const figures = exec.sessionId !== null && exec.sessionId !== undefined
+        ? summaries.get(exec.sessionId)
+        : undefined
+      return {
+        ...exec,
+        ...(figures?.turnCount !== undefined ? { turnCount: figures.turnCount } : {}),
+        ...(figures?.costUsd !== undefined ? { costUsd: figures.costUsd } : {}),
+      }
+    })
+    sendKyberJson(res, 200, {
+      run: { ...run, ...bridge.runMeasuredFigures(id) },
+      executionTree,
+      executions: enrichedExecutions,
+      findings,
+      turns: bridge.getRunTurns(id),
+      scorecard: bridge.getRunScorecard(id) ?? null,
+    })
     return true
   }
 

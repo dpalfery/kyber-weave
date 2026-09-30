@@ -42,11 +42,19 @@ import {
   type CanonicalContentKey,
   type CanonicalRecord,
   type ContentPart,
+  type CostBlock,
   type RunRow,
+  type RunTurnRow,
   type ExecutionRow,
   type ExecutionTreeNode,
   type HarnessRollupRow,
 } from '../canon/types.js'
+import {
+  assembleRollup,
+  digestSessionPayloads,
+} from '../canon/harnesses.js'
+import { buildScorecard, type Scorecard } from '../analysis/scorecard.js'
+import type { AsadSessionPayload } from '../canon/sessions.js'
 
 const _require = createRequire(import.meta.url)
 const { DatabaseSync } = _require('node:sqlite') as {
@@ -2202,6 +2210,320 @@ export class KyberBridge {
       roots.push(node)
     }
     return roots
+  }
+
+  /**
+   * Summary figures for sessions, without parsing whole payloads. Store mode
+   * reads the summary fields out of the stored JSON; direct-DB mode runs the
+   * same projection. Absent figures stay absent — never 0.
+   */
+  sessionSummaryFigures(
+    sessionIds: readonly string[],
+  ): Map<string, { turnCount?: number; totalInput?: number; totalOutput?: number; costUsd?: number }> {
+    const uniqueIds = [...new Set(sessionIds)].filter((id) => id.length > 0)
+    const out = new Map<
+      string,
+      { turnCount?: number; totalInput?: number; totalOutput?: number; costUsd?: number }
+    >()
+    if (uniqueIds.length === 0) return out
+
+    type SummaryRow = {
+      session_id: unknown
+      turn_count: unknown
+      total_input: unknown
+      total_output: unknown
+      cost_status: unknown
+      cost_value: unknown
+    }
+    const readRows = (): SummaryRow[] => {
+      if (this.store) {
+        return this.store.sessionSummaryFigures(uniqueIds).map((row) => ({
+          session_id: row.sessionId,
+          turn_count: row.turnCount,
+          total_input: row.totalInput,
+          total_output: row.totalOutput,
+          cost_status: row.costStatus,
+          cost_value: row.costValue,
+        }))
+      }
+      const db = this.getDb()
+      if (!this.hasTable(db, 'session')) return []
+      const rows: SummaryRow[] = []
+      const chunkSize = 900
+      for (let offset = 0; offset < uniqueIds.length; offset += chunkSize) {
+        const chunk = uniqueIds.slice(offset, offset + chunkSize)
+        const placeholders = chunk.map(() => '?').join(', ')
+        try {
+          rows.push(
+            ...(db!
+              .prepare(
+                `SELECT session_id,
+                        json_extract(payload, '$.summary.turn_count') AS turn_count,
+                        json_extract(payload, '$.summary.total_input') AS total_input,
+                        json_extract(payload, '$.summary.total_output') AS total_output,
+                        json_extract(payload, '$.summary.cost.status') AS cost_status,
+                        json_extract(payload, '$.summary.cost.value') AS cost_value
+                 FROM session WHERE session_id IN (${placeholders})`,
+              )
+              .all(...chunk) as SummaryRow[]),
+          )
+        } catch (err) {
+          console.warn('[KyberBridge] Failed querying session summaries from canon.db:', err)
+          return []
+        }
+      }
+      return rows
+    }
+
+    const figure = (value: unknown): number | undefined =>
+      typeof value === 'number' && Number.isFinite(value) ? value : undefined
+    for (const row of readRows()) {
+      if (typeof row.session_id !== 'string') continue
+      const cost =
+        row.cost_status === 'priced' ? figure(row.cost_value) : undefined
+      out.set(row.session_id, {
+        ...(figure(row.turn_count) !== undefined ? { turnCount: figure(row.turn_count)! } : {}),
+        ...(figure(row.total_input) !== undefined ? { totalInput: figure(row.total_input)! } : {}),
+        ...(figure(row.total_output) !== undefined ? { totalOutput: figure(row.total_output)! } : {}),
+        ...(cost !== undefined ? { costUsd: cost } : {}),
+      })
+    }
+    return out
+  }
+
+  /**
+   * Measured run figures summed over the run's session summaries (issue #183).
+   * Feeds both the runs list and the run detail `run` object; `RunRow`'s
+   * stored shape is unchanged, so figures are always live, never migrated.
+   */
+  runMeasuredFigures(runId: string): {
+    turnCount?: number
+    totalInput?: number
+    totalOutput?: number
+    costUsd?: number
+  } {
+    const sessionIds = this.listExecutions(runId)
+      .map((exec) => exec.sessionId)
+      .filter((id): id is string => typeof id === 'string' && id.length > 0)
+    const summaries = this.sessionSummaryFigures(sessionIds)
+    let turnCount = 0
+    let totalInput = 0
+    let totalOutput = 0
+    let costUsd = 0
+    let seenTurns = false
+    let seenInput = false
+    let seenOutput = false
+    let seenCost = false
+    for (const figures of summaries.values()) {
+      if (figures.turnCount !== undefined) {
+        turnCount += figures.turnCount
+        seenTurns = true
+      }
+      if (figures.totalInput !== undefined) {
+        totalInput += figures.totalInput
+        seenInput = true
+      }
+      if (figures.totalOutput !== undefined) {
+        totalOutput += figures.totalOutput
+        seenOutput = true
+      }
+      if (figures.costUsd !== undefined) {
+        costUsd += figures.costUsd
+        seenCost = true
+      }
+    }
+    return {
+      ...(seenTurns ? { turnCount } : {}),
+      ...(seenInput ? { totalInput } : {}),
+      ...(seenOutput ? { totalOutput } : {}),
+      ...(seenCost ? { costUsd } : {}),
+    }
+  }
+
+  /**
+   * Cost blocks for spans, keyed by span id. Store mode reads only the small
+   * cost column; direct-DB mode runs the same projection. Parts and raw
+   * payloads are never inflated for the turn table.
+   */
+  private readSpanCosts(spanIds: readonly string[]): Map<string, CostBlock> {
+    const uniqueIds = [...new Set(spanIds)].filter((id) => id.length > 0)
+    const out = new Map<string, CostBlock>()
+    if (uniqueIds.length === 0) return out
+    const ingest = (spanId: unknown, cost: unknown): void => {
+      if (typeof spanId !== 'string') return
+      if (typeof cost !== 'object' || cost === null) return
+      out.set(spanId, cost as CostBlock)
+    }
+    if (this.store) {
+      for (const row of this.store.spanCosts(uniqueIds)) ingest(row.spanId, row.cost)
+      return out
+    }
+    const db = this.getDb()
+    if (!this.hasTable(db, 'records')) return out
+    const chunkSize = 900
+    for (let offset = 0; offset < uniqueIds.length; offset += chunkSize) {
+      const chunk = uniqueIds.slice(offset, offset + chunkSize)
+      const placeholders = chunk.map(() => '?').join(', ')
+      try {
+        const rows = db!
+          .prepare(`SELECT span_id, cost_json FROM records WHERE span_id IN (${placeholders})`)
+          .all(...chunk) as Array<{ span_id: unknown; cost_json: unknown }>
+        for (const row of rows) {
+          let cost: unknown
+          try {
+            cost = JSON.parse(String(row.cost_json))
+          } catch {
+            continue
+          }
+          ingest(row.span_id, cost)
+        }
+      } catch (err) {
+        console.warn('[KyberBridge] Failed querying span costs from canon.db:', err)
+        return out
+      }
+    }
+    return out
+  }
+
+  /**
+   * Per-turn measured rows for a run, joined from the run's session payloads
+   * (issue #183). Context pressure joins positionally over measured turns —
+   * the engine's 1-based `TurnPressure.index` counts measured turns only, so
+   * an index-equality join would land on a neighbor wherever an unmeasured
+   * turn exists; a length mismatch omits every pressure rather than guessing.
+   * `turnIndex` keeps the #184 transport convention: 0-based per execution.
+   */
+  getRunTurns(runId: string): RunTurnRow[] {
+    const rows: RunTurnRow[] = []
+    const executions = this.listExecutions(runId)
+    const sessionIds = executions
+      .map((exec) => exec.sessionId)
+      .filter((id): id is string => typeof id === 'string' && id.length > 0)
+    const spanIds: string[] = []
+    const payloads = new Map<string, SessionPayload & { context?: unknown }>()
+    for (const sessionId of new Set(sessionIds)) {
+      const payload = this.getSessionPayload(sessionId)
+      if (payload === null) continue
+      payloads.set(sessionId, payload)
+      for (const turn of Array.isArray(payload.turns) ? payload.turns : []) {
+        const spanId = (turn as Record<string, unknown>)?.spanId
+        if (typeof spanId === 'string' && spanId.length > 0) spanIds.push(spanId)
+      }
+    }
+    const costs = this.readSpanCosts(spanIds)
+
+    const number = (value: unknown): number | undefined =>
+      typeof value === 'number' && Number.isFinite(value) ? value : undefined
+    for (const execution of executions) {
+      const payload = execution.sessionId !== null && execution.sessionId !== undefined
+        ? payloads.get(execution.sessionId)
+        : undefined
+      if (payload === undefined) continue
+      const turns = (Array.isArray(payload.turns) ? payload.turns : []) as Array<
+        Record<string, unknown>
+      >
+      // Measured turns in payload order; the engine's context turns are built
+      // from exactly this subset in this order, so position j here is
+      // `TurnPressure.index` j + 1 there.
+      const measuredPositions: number[] = []
+      turns.forEach((turn, position) => {
+        const input = number(turn.input)
+        if (input !== undefined && input > 0) measuredPositions.push(position)
+      })
+      const rawContext = payload.context as
+        | { measurable?: unknown; turns?: unknown }
+        | undefined
+      const contextTurns =
+        rawContext?.measurable === true && Array.isArray(rawContext.turns)
+          ? (rawContext.turns as Array<Record<string, unknown>>)
+          : []
+      const pressures =
+        contextTurns.length === measuredPositions.length
+          ? contextTurns.map((turn) => number(turn.pressure))
+          : []
+      turns.forEach((turn, position) => {
+        const row: RunTurnRow = {
+          turnIndex:
+            typeof turn.index === 'number' &&
+            Number.isInteger(turn.index) &&
+            turn.index >= 0
+              ? turn.index
+              : position,
+        }
+        if (typeof execution.executionId === 'string') row.executionId = execution.executionId
+        if (typeof execution.sessionId === 'string') row.sessionId = execution.sessionId
+        if (typeof turn.model === 'string' && turn.model.length > 0) row.model = turn.model
+        const input = number(turn.input)
+        const output = number(turn.output)
+        if (input !== undefined) row.inputTokens = input
+        if (output !== undefined) row.outputTokens = output
+        if (input !== undefined && output !== undefined) row.tokens = input + output
+        const cacheRead = number(turn.cache_read)
+        if (cacheRead !== undefined && input !== undefined && input > 0) {
+          row.cacheHitRatio = cacheRead / input
+        }
+        const measuredSlot = measuredPositions.indexOf(position)
+        if (measuredSlot !== -1 && pressures.length === measuredPositions.length) {
+          const pressure = pressures[measuredSlot]
+          if (pressure !== undefined) row.contextPressure = pressure
+        }
+        if (typeof turn.timestamp === 'string') row.timestamp = turn.timestamp
+        const spanId = turn.spanId
+        if (typeof spanId === 'string') {
+          const block = costs.get(spanId)
+          const value = block !== undefined ? number(block.value) : undefined
+          if (block?.status === 'priced' && value !== undefined) row.costUsd = value
+        }
+        rows.push(row)
+      })
+    }
+    return rows
+  }
+
+  /**
+   * Run-scoped scorecard reusing the harness rollup machinery over the run's
+   * own sessions (issue #183, Q2). Reasons are scoped to the run, so a run
+   * whose sessions exported cache counters can never inherit the
+   * harness-level claim that they did not. Absent sessions mean no scorecard.
+   */
+  getRunScorecard(runId: string): Scorecard | undefined {
+    const executions = this.listExecutions(runId)
+    const payloads: AsadSessionPayload[] = []
+    for (const execution of executions) {
+      if (!execution.sessionId) continue
+      const payload = this.getSessionPayload(execution.sessionId)
+      if (payload !== null) payloads.push(payload as unknown as AsadSessionPayload)
+    }
+    if (payloads.length === 0) return undefined
+    const run = this.getRun(runId)
+    const harness = run?.harness ?? 'unknown'
+    const digest = digestSessionPayloads(payloads)
+    const summaries = this.sessionSummaryFigures(
+      executions
+        .map((exec) => exec.sessionId)
+        .filter((id): id is string => typeof id === 'string' && id.length > 0),
+    )
+    const rollup = assembleRollup(harness, digest, {
+      sessionCount: payloads.length,
+      runCount: 1,
+      executionCount: executions.length,
+      executions: executions.map((exec) => ({
+        sessionId: exec.sessionId,
+        isChild:
+          !exec.isRoot ||
+          (exec.parentExecutionId !== null && exec.parentExecutionId !== undefined),
+      })),
+      tokenTotals: (sessionId) => {
+        const figures = summaries.get(sessionId)
+        if (figures === undefined) return undefined
+        return {
+          input: figures.totalInput ?? 0,
+          output: figures.totalOutput ?? 0,
+        }
+      },
+      scope: { kind: 'run', runId },
+    })
+    return buildScorecard(rollup)
   }
 
   /**

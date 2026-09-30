@@ -140,6 +140,77 @@ describe('buildSessionRow', () => {
     expect(context.turns?.[0]?.residual?.tokens).toBeGreaterThanOrEqual(0)
   })
 
+  // Issue #185: the summary never carried `cache_hit_ratio` or
+  // `cache_creation_coverage`, so the session tiles rendered '—' and "on 0 turns"
+  // beside measured totals. Both are emitted from measured figures only.
+  it('emits measured cache_hit_ratio and cache_creation_coverage in the summary', () => {
+    const row = buildSessionRow(
+      'sess-cache',
+      [
+        turn('c1', [{ part: 'system_prompt', text: 'a'.repeat(400) }], {
+          tokens: tokens({ freshInput: 99000, cacheRead: 1700000, cacheCreation: 1000, reportedInput: 1800000 }),
+        }),
+        turn('c2', [{ part: 'system_prompt', text: 'b'.repeat(400) }], {
+          tokens: tokens({ freshInput: 9000, cacheRead: 86000, cacheCreation: 5000, reportedInput: 100000 }),
+        }),
+        turn('c3', [{ part: 'system_prompt', text: 'c'.repeat(400) }], {
+          tokens: tokens({ freshInput: 0, cacheRead: 0, cacheCreation: 0, output: 50, reportedInput: 0 }),
+        }),
+      ],
+      approximateO200kBase,
+    )
+    const summary = sessionPayload(row).summary as Record<string, unknown>
+    expect(summary.total_input).toBe(1900000)
+    expect(summary.total_cache_read).toBe(1786000)
+    expect(summary.cache_hit_ratio as number).toBeCloseTo(0.94, 4)
+    expect(summary.cache_creation_coverage).toBe(2)
+  })
+
+  it('omits cache_hit_ratio when input is unmeasurable, never zero', () => {
+    const unavailableCounter = {
+      availability: 'not_measurable' as const,
+      reason: 'Cursor hook events do not include input-token counters.',
+    }
+    const row = buildSessionRow(
+      'sess-cache-unmeasurable',
+      [
+        turn('cu1', [], {
+          source: 'cursor-hook',
+          harness: 'cursor',
+          tokens: tokens({ freshInput: 0, reportedInput: 0 }),
+          measurability: { token_usage: unavailableCounter },
+        }),
+      ],
+      approximateO200kBase,
+    )
+    const summary = sessionPayload(row).summary as Record<string, unknown>
+    expect(summary.total_input).toEqual(unavailableCounter)
+    expect('cache_hit_ratio' in summary).toBe(false)
+    expect(JSON.stringify(summary)).not.toContain('"cache_hit_ratio":0')
+  })
+
+  // Issue #187: the engine's measured per-turn input never reached the wire —
+  // `TurnPressure` carries no input figure — so the composition view fell back to
+  // `bucketedTokens` and reported residual 0.0% for unattributed input.
+  it('carries the measured per-turn input on serialized context turns', () => {
+    const row = buildSessionRow(
+      'sess-reported',
+      [
+        turn('r1', [{ part: 'system_prompt', text: 'short', tokens: 124 }], {
+          tokens: tokens({ freshInput: 66600, cacheRead: 0, cacheCreation: 0, reportedInput: 66600 }),
+        }),
+      ],
+      approximateO200kBase,
+    )
+    const context = sessionPayload(row).context
+    const wire = JSON.parse(JSON.stringify(context)) as {
+      turns: Array<{ reported_input?: unknown; residual?: { tokens: number } }>
+    }
+    expect(wire.turns).toHaveLength(1)
+    expect(wire.turns[0]!.reported_input).toBe(66600)
+    expect(wire.turns[0]!.residual?.tokens).toBe(66600 - 124)
+  })
+
   it('ranks each tool in an aggregate catalogue, not the catalogue as one tool', () => {
     // Harnesses send the whole tool list as a single JSON array. Left
     // unsplit it ranks as one tool whose name is the entire blob.
