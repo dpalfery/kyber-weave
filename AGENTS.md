@@ -82,21 +82,21 @@ understand or locate code:
 - The shell fallback is `codegraph explore "<symbol names or question>"`.
 <!-- CODEGRAPH_END -->
 
-If there is no `.codegraph/` directory:
+**Missing index.** If there is no `.codegraph/` directory, this repository authorizes
+`codegraph init -y .` from the repository root without further approval. This approval
+covers only repository-local initialization; installing CodeGraph or other system-wide
+tools remains the user's decision.
 
-- Hook unavailable (local sessions; the `.claude/settings.json` SessionStart hook only
-  runs `codegraph init -y` when CLAUDE_CODE_REMOTE=true): initialize once per session
-  with `codegraph init -y .` (standing approval covers repo-local actions only: builds
-  and project-local dependencies; no system-wide installs; leave tracked files alone).
-- If blocked (no `codegraph` on `PATH`, no write access, a read-only role).
-- If the index is unusable after initialization.
-
-In either failure case: report the blocker under GAPS and fall back to text search
-(Grep, Glob), stating in the result that CodeGraph was unavailable; the conductor
-relays the blocker and stops that path. In the second case, also note that
-`docs drift` was skipped for want of an index rather than passed.
-
-See issue #221, "Missing-dependency handling", for the blocker->fix->retry loop.
+- Before initialization, record `git status --short` and both staged and unstaged
+  tracked-file diffs. Initialization can rewrite the marked CodeGraph block above.
+  Afterwards, inspect `git status --short` and undo only tracked-file edits introduced
+  by initialization, preserving all pre-existing edits. The index itself is gitignored.
+- If initialization is blocked (no `codegraph` on `PATH`, no write access, a read-only
+  role) or leaves the index unusable, report the blocker under GAPS and fall back to
+  text search, stating in the result that CodeGraph was unavailable. The conductor
+  relays the blocker and stops that path.
+- If `docs drift` cannot run because no usable index is available, report it as skipped
+  rather than passed.
 
 **Documentation:** Before grepping or reading under `docs/`, use the Kyber-Weave MCP
 `docs_explore` tool. Before renaming, moving, or changing a code symbol's contract, use
