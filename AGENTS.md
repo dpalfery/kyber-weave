@@ -82,12 +82,15 @@ or locate code:
 - The shell fallback is `codegraph explore "<symbol names or question>"`.
 
 If there is no `.codegraph/` directory:
-- First occurrence: invoke `setup-dev-environment` skill (standing approval for repo-local fixes per #221)
-  to initialize the index with `codegraph init .` (cleanup: verify git status and revert any tracked-file changes)
+- First occurrence: invoke `setup-dev-environment` skill (standing approval for repo-local
+  fixes per #221) to initialize the index with `codegraph init -y .` (leave tracked
+  files alone)
 - If blocked: report as BLOCKER in GAPS; conductor will dispatch a fixer agent
-- If the index fails after initialization, report as a documentation finding (file a docs validation issue)
+- If the index fails after initialization: proceed with text search (Grep, Glob); state in
+  the result that CodeGraph was unavailable. Run `kyber-weave docs validate .` to confirm.
 
-See #221 "Missing-dependency handling" for the blocker->fix->retry loop and standing approval scope.
+See [#221 "Missing-dependency handling"](https://github.com/dpalfery/kyber-weave/issues/221)
+for the blocker->fix->retry loop and standing approval scope.
 <!-- CODEGRAPH_END -->
 
 **Documentation:** Before grepping or reading under `docs/`, use the Kyber-Weave MCP
