@@ -31,6 +31,12 @@ host configuration created by `kyber-weave docs init`; the server never walks up
 Git repository and never serves an unbound default corpus. A missing binding is reported on
 stderr with an actionable `kyber-weave docs init` command.
 
+After resolution, an optional client assertion is checked: `--expect-root <path>`, or
+`KYBER_WEAVE_EXPECT_ROOT` when the flag is absent, must name the resolved root or the server
+refuses to serve — `KW-MCP-ROOT-002` on stderr, exit 1. The flag wins over the environment.
+This is the rail against a same-named server pinned to another checkout by a global or
+headless harness config; it does not replace correct project-local wiring.
+
 ## Tools return text for a model, not data for a program
 
 `DocsTools` formats results as prose an agent reads. Three properties matter when editing:
@@ -50,6 +56,10 @@ larger budget worthwhile.
 Adding a tool means adding an `[McpServerTool]` method with a `[Description]` written as
 routing metadata: a capability clause, then the conditions that should fire it. Only the
 broadest tool in the set carries an exclusion; the rest state their territory positively.
+Every tool response must also lead with the shared provenance header — the absolute root,
+short HEAD revision with dirty marker, and live document count — so a caller can tell which
+corpus answered. `CorpusProvenance` formats it, `docs_status` returns it alone, and the
+header is emitted whole while any budget is taken from the body.
 
 ## Staleness is handled for you
 
