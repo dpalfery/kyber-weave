@@ -162,11 +162,16 @@ export function renormalizeRecords(store: CanonStore, options: BackfillOptions =
   const report: RenormalizeReport = { traces: 0, reattributed: 0, unchanged: 0, unclaimed: 0 }
 
   for (const traceId of traceIds) {
-    const records = store.recordsForTrace(traceId)
-    if (options.sources !== undefined) {
-      const wanted = options.sources
-      if (!records.some((record) => wanted.includes(record.source))) continue
-    }
+    const traceRecords = store.recordsForTrace(traceId)
+    // Scope filtering applies to the rows re-ingested, not just the trace
+    // selected: attribution groups by (source, trace), so a trace can carry
+    // foreign-source rows that a scoped run must leave byte-identical.
+    const wanted = options.sources
+    const records =
+      wanted === undefined
+        ? traceRecords
+        : traceRecords.filter((record) => wanted.includes(record.source))
+    if (records.length === 0) continue
     report.traces += 1
     const recordsWithRaw = records.filter(
       (record): record is CanonicalRecord & { raw: Record<string, unknown> } =>
