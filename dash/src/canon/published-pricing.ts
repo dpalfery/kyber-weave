@@ -23,7 +23,7 @@ export function isPublishedTableHarness(harness: string | undefined): boolean {
 
 export function pricePublishedTurn(
   tokens: TokenUsage,
-  model: string,
+  model: string | undefined,
   harness: string | undefined,
   existing?: CostBlock,
 ): CostBlock {
@@ -31,6 +31,8 @@ export function pricePublishedTurn(
   if (existing?.basis === 'harness') return existing
   // R5.3: the table prices only the harnesses it names.
   if (!isPublishedTableHarness(harness)) return { basis: 'published', status: 'out_of_scope' }
+  // R5.4: a turn with no model cannot be matched to a rate.
+  if (model === undefined || model === '') return { basis: 'published', status: 'no_rate' }
   // R5.5: an explicitly unbilled model is not $0.00.
   if (isFlatRateModel(model)) return { basis: 'published', status: 'not_billed' }
   // R5.4: no rate, or a stub with nothing billable, is a missing rate.
@@ -41,6 +43,16 @@ export function pricePublishedTurn(
   ) {
     return { basis: 'published', status: 'no_rate' }
   }
-  const value = calculateCost(model, tokens.freshInput, tokens.output, tokens.cacheCreation, tokens.cacheRead, 0)
+  // Cache creation is billed at its own rate only when the source publishes one; otherwise it is
+  // plain input (same rule as providers/codex.ts), so no fabricated 1.25x surcharge appears.
+  const explicitWrite = costs.cacheWriteCostIsExplicit === true
+  const value = calculateCost(
+    model,
+    explicitWrite ? tokens.freshInput : tokens.freshInput + tokens.cacheCreation,
+    tokens.output,
+    explicitWrite ? tokens.cacheCreation : 0,
+    tokens.cacheRead,
+    0,
+  )
   return { basis: 'published', status: 'priced', value, currency: 'USD', byModel: { [model]: value } }
 }

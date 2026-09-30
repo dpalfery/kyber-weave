@@ -122,13 +122,16 @@ const GROK_4_6_HIGH_PROMPT_COSTS = buildCosts(4e-6, 12e-6, null, 1e-6, null)
 // copy-pasting the inline condition.
 // gpt-6-luna: OpenAI's standard tier charges 0.20 input / 0.02 cached / 0.75 output per 1M once
 // a request's input exceeds 272K tokens (https://developers.openai.com/api/docs/pricing,
-// retrieved 2026-09-30). Exactly 272K stays on the base tier. No cache-write rate is published.
-const GPT_6_LUNA_PROMPT_TOKEN_THRESHOLD = 272_000
+// retrieved 2026-09-30). Exactly 272K stays on the base tier. The tier is chosen by the request's
+// whole input (fresh + cache read + cache creation). No cache-write rate is published, so the
+// entries are not `cacheWriteCostIsExplicit` and callers bill cache creation as plain input.
+// Shared with the Copilot credits table so both tables switch tiers at the same size.
+export const GPT_6_LUNA_PROMPT_TOKEN_THRESHOLD = 272_000
 const GPT_6_LUNA_HIGH_PROMPT_COSTS = buildCosts(2e-7, 7.5e-7, null, 2e-8, null)
 
-function tieredCostsFor(model: string, baseCosts: ModelCosts, promptTokens: number): ModelCosts {
+function tieredCostsFor(model: string, baseCosts: ModelCosts, promptTokens: number, cacheCreationTokens = 0): ModelCosts {
   if (exactPriceOverrideFor(model)) return baseCosts
-  if (resolveCanonicalModelId(model) === 'gpt-6-luna' && promptTokens > GPT_6_LUNA_PROMPT_TOKEN_THRESHOLD) {
+  if (resolveCanonicalModelId(model) === 'gpt-6-luna' && promptTokens + cacheCreationTokens > GPT_6_LUNA_PROMPT_TOKEN_THRESHOLD) {
     return GPT_6_LUNA_HIGH_PROMPT_COSTS
   }
   if (resolveCanonicalModelId(model) === 'grok-4.6' && promptTokens >= GROK_4_6_PROMPT_TOKEN_THRESHOLD) {
@@ -1224,7 +1227,7 @@ export function calculateCost(
   const safeCacheCreation = Math.max(safe(cacheCreationTokens), safeOneHourCacheCreation)
   const safeFiveMinuteCacheCreation = Math.max(0, safeCacheCreation - safeOneHourCacheCreation)
   const promptTokens = safe(inputTokens) + safe(cacheReadTokens)
-  const tieredCosts = tieredCostsFor(model, costs, promptTokens)
+  const tieredCosts = tieredCostsFor(model, costs, promptTokens, safeCacheCreation)
   const multiplier = speed === 'fast' ? tieredCosts.fastMultiplier : 1
 
   // Clamp negative inputs to 0. A corrupt JSONL that emits a negative token

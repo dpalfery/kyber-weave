@@ -107,3 +107,54 @@ describe('loadCopilotCliCalls: reader-supplied cost_usd stays harness-reported (
     }
   })
 })
+
+describe('loadCopilotCliCalls: absent cost_usd is not a harness figure (issue #186, review 4149313627)', () => {
+  const withRow = (values: string, run: (call: ReturnType<typeof loadCopilotCliCalls>[number]) => void) => {
+    const root = mkdtempSync(join(tmpdir(), 'kyber-copilot-cli-nocost-'))
+    const filePath = join(root, 'data.db')
+    const db = new DatabaseSync(filePath)
+    try {
+      db.exec(`
+        CREATE TABLE sessions (id TEXT, session_id TEXT, model TEXT, created_at TEXT, cost_usd REAL,
+          input_tokens INTEGER, output_tokens INTEGER);
+        INSERT INTO sessions VALUES ${values};
+      `)
+      const [call] = loadCopilotCliCalls(filePath)
+      run(call!)
+    } finally {
+      db.close()
+      rmSync(root, { recursive: true, force: true })
+    }
+  }
+
+  it('a finite cost_usd still sets costHarnessReported true', () => {
+    withRow(
+      `('c1', 'cs1', 'claude-sonnet-5-5', '2026-09-04T12:00:00.000Z', 0.42, 1000, 200)`,
+      (call) => {
+        expect(call.costHarnessReported).toBe(true)
+        expect(call.costUSD).toBe(0.42)
+      },
+    )
+  })
+
+  it('a NULL cost_usd does not set costHarnessReported', () => {
+    withRow(
+      `('c2', 'cs2', 'claude-sonnet-5-5', '2026-09-04T12:00:00.000Z', NULL, 1000, 200)`,
+      (call) => {
+        expect(call.costHarnessReported).not.toBe(true)
+      },
+    )
+  })
+
+  it('a NULL cost_usd does not synthesize a harness-basis cost', async () => {
+    const { synthesizeCall } = await import('../synth.js')
+    let basis: string | undefined
+    withRow(
+      `('c3', 'cs3', 'claude-sonnet-5-5', '2026-09-04T12:00:00.000Z', NULL, 1000, 200)`,
+      (call) => {
+        basis = synthesizeCall(call).cost.basis
+      },
+    )
+    expect(basis).not.toBe('harness')
+  })
+})

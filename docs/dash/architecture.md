@@ -284,6 +284,34 @@ cost tile and the report path (`costContributionsForSessions`) share one answer.
 schema bump (`SCHEMA_VERSION` stays 14); existing stores and later `priceOverrides` /
 `modelAliases` changes take effect on the next projection.
 
+The write-back is the one exception to "every derived table is a cache over `records`". Each
+session's changed blocks go through `CanonStore.setCosts` in **one transaction** (`BEGIN`/`COMMIT`,
+rolled back whole on failure; an empty list is a no-op), so a failing session cannot leave a
+half-repriced one. `records.cost_json` is the derived, re-derivable cost cache: the report path
+reads it, the next projection reprices it, and a re-ingest overwrite self-heals on that next
+projection. Reprojecting a correct store writes nothing, and `harness` blocks are never touched.
+`isCopilotHarness` (`copilot-rates.ts`) is the single Copilot-family predicate used to route a turn
+to the credits table.
+
+**Published-path rules.**
+
+- An absent model is `{published, no_rate}` from `pricePublishedTurn`, not `unknown`: mixing
+  `unknown` with `published` turns makes `sumCosts` refuse the total (`COST_BASIS_MISMATCH`).
+- Cache writes: an absent cache-write rate is billed at the input rate. `gpt-6-luna` has no
+  published cache-write rate, so cache creation is billed as input on both the LiteLLM path and the
+  Copilot credits table (base $0.10, long-context $0.20 per 1M).
+  `claude-sonnet-5-5` keeps its explicit $2.50/M.
+- `gpt-6-luna` long-context tier: one shared `GPT_6_LUNA_PROMPT_TOKEN_THRESHOLD` (272,000,
+  `pricing/models.ts`). Both paths choose the tier by measured input (fresh + cacheRead +
+  cacheCreation); 272,000 stays on the base tier and 272,001 is long.
+- The Copilot reader sets `costHarnessReported` only when `cost_usd` is a finite number. Copilot
+  without the marker defaults to `published`, so a parser that forgets the flag is repriced from the
+  credits table instead of keeping a LiteLLM-derived figure at API list rates.
+- `claude-sonnet-5-5` and `gpt-6-luna` also live in `MANUAL_ENTRIES` of
+  `dash/scripts/bundle-litellm.mjs` (guarded by a test), so a regeneration reproduces them. The
+  bundler writes `dash/src/data/` while the runtime reads `dash/src/pricing/data/` (follow-up F2 in
+  the [rationale](../reference/kyberdash-rationale.md)).
+
 | Harness (normalized) | Priced from | Notes |
 |---|---|---|
 | `claude-code` (`claude-cli`, `claude-desktop`), `codex` (`codex-*`) | The bundled published table: the LiteLLM snapshot plus `pricing-provenance.json`, through `pricePublishedTurn` (`dash/src/canon/published-pricing.ts`) | Cache-aware. `claude-sonnet-5-5` and `gpt-6-luna` (with its >272K tier) were added 2026-09-30 with cited sources. `priceOverrides`, `modelAliases` and `flatRateModels` act on this path. |

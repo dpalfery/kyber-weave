@@ -1,7 +1,9 @@
 // GitHub Copilot credits table (issue #186, Defect B). Copilot bills per 1M tokens in AI credits
 // (1 credit = $0.01) with separate input / cached input / cache write / output classes and an
-// input-size tier. A class GitHub lists as "Not applicable" (GPT-6 Luna cache write) carries no rate here and falls back to the input rate. Rates below are the page's USD figures (credits / 100), retrieved 2026-09-30.
+// input-size tier. A class GitHub lists as "Not applicable" (GPT-6 Luna cache write) is billed at
+// the input rate, written explicitly on every entry and tier. Rates below are the page's USD figures (credits / 100), retrieved 2026-09-30.
 // Kept apart from the LiteLLM pricer so a Copilot turn is never priced at API list rates (R5.3).
+import { GPT_6_LUNA_PROMPT_TOKEN_THRESHOLD } from '../pricing/models.js'
 import { normalizeHarnessName } from './measurability.js'
 import { priceWithTable, type Rate, type RateTable } from './cost.js'
 import type { CostBlock, TokenUsage } from './types.js'
@@ -21,9 +23,10 @@ const COPILOT_RATES: ReadonlyArray<readonly [string, Rate]> = [
       inputRate: 0.1,
       outputRate: 0.5,
       cacheReadRate: 0.01,
+      cacheWriteRate: 0.1,
       tiers: [
-        { upTo: 272_000, inputRate: 0.1, outputRate: 0.5, cacheReadRate: 0.01 },
-        { upTo: Infinity, inputRate: 0.2, outputRate: 0.75, cacheReadRate: 0.02 },
+        { upTo: GPT_6_LUNA_PROMPT_TOKEN_THRESHOLD, inputRate: 0.1, outputRate: 0.5, cacheReadRate: 0.01, cacheWriteRate: 0.1 },
+        { upTo: Infinity, inputRate: 0.2, outputRate: 0.75, cacheReadRate: 0.02, cacheWriteRate: 0.2 },
       ],
     },
   ],
@@ -42,6 +45,11 @@ function copilotFamily(harness: string | undefined): string | undefined {
   if (harness === undefined) return undefined
   const id = normalizeHarnessName(harness)
   return id === 'copilot' || id.startsWith('copilot-') ? 'copilot' : id
+}
+
+/** True for every Copilot surface (`copilot`, `copilot-cli`, `copilot-vscode`, `github-copilot`, ...). */
+export function isCopilotHarness(harness: string | undefined): boolean {
+  return copilotFamily(harness) === 'copilot'
 }
 
 /**

@@ -10,14 +10,16 @@
 //                                           normalizes copilot-* / github-copilot to 'copilot'
 // A Rate tier is chosen by measured input (fresh + cacheRead + cacheCreation): the first tier whose
 // inclusive upTo covers it; a tier with upTo Infinity is the open-ended top tier.
-import { describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vitest'
 
 import {
   COPILOT_CREDITS_SOURCE,
   COPILOT_CREDITS_TABLE,
+  isCopilotHarness,
   priceCopilotTurn,
 } from './copilot-rates.js'
-import { priceWithTable } from './cost.js'
+import { GPT_6_LUNA_PROMPT_TOKEN_THRESHOLD, loadPricing } from '../pricing/models.js'
+import { priceWithTable, type Rate } from './cost.js'
 import { pricePublishedTurn } from './published-pricing.js'
 import type { CostBlock, TokenUsage } from './types.js'
 
@@ -177,5 +179,94 @@ describe('priceCopilotTurn: provenance of an existing block', () => {
       basis: 'published',
       status: 'no_rate',
     })
+  })
+})
+
+// PR #225 review follow-up (plan 2026-09-30-issue-186-review-fixes, T3 RED).
+describe('isCopilotHarness (comment 583)', () => {
+  it.each(['copilot', 'copilot-cli', 'copilot-vscode'])('is true for %s', (h) => {
+    expect(isCopilotHarness(h)).toBe(true)
+  })
+
+  it.each(['claude-code', 'codex'])('is false for %s', (h) => {
+    expect(isCopilotHarness(h)).toBe(false)
+  })
+
+  it('is false for undefined', () => {
+    expect(isCopilotHarness(undefined)).toBe(false)
+  })
+})
+
+describe('Copilot credits table: shape guards (comments 643, 604)', () => {
+  const entries = [...(COPILOT_CREDITS_TABLE.publishedRates ?? new Map()).entries()]
+
+  // `Rate` is a union with the unbilled arm `{ billed: false }`; assert the entry is billed so the
+  // class and tier fields type-check without weakening any assertion.
+  function billedRate(model: string): Extract<Rate, { inputRate: number }> {
+    const rate = COPILOT_CREDITS_TABLE.publishedRates!.get(model)!
+    expect(rate.billed).not.toBe(false)
+    return rate as Extract<Rate, { inputRate: number }>
+  }
+
+  it('has entries to check', () => {
+    expect(entries.length).toBeGreaterThan(0)
+  })
+
+  it.each(entries.map(([model]) => model))('%s sets cacheReadRate and cacheWriteRate on the entry and every tier', (model) => {
+    const rate = billedRate(model)
+    expect(rate.cacheReadRate).toBeDefined()
+    expect(rate.cacheWriteRate).toBeDefined()
+    for (const tier of rate.tiers ?? []) {
+      expect(tier.cacheReadRate).toBeDefined()
+      expect(tier.cacheWriteRate).toBeDefined()
+    }
+  })
+
+  it.each(entries.map(([model]) => model))('%s ends any tier list in an upTo: Infinity tier', (model) => {
+    const tiers = billedRate(model).tiers
+    if (!tiers || tiers.length === 0) return
+    expect(tiers[tiers.length - 1]!.upTo).toBe(Infinity)
+  })
+
+  it('gives gpt-6-luna explicit cache-write rates equal to its input rate (0.10 base, 0.20 long)', () => {
+    const tiers = billedRate('gpt-6-luna').tiers!
+    expect(tiers[0]!.cacheWriteRate).toBe(0.1)
+    expect(tiers[1]!.cacheWriteRate).toBe(0.2)
+  })
+
+  it('uses the shared GPT_6_LUNA_PROMPT_TOKEN_THRESHOLD as the first gpt-6-luna tier bound', () => {
+    const tiers = billedRate('gpt-6-luna').tiers!
+    expect(tiers[0]!.upTo).toBe(GPT_6_LUNA_PROMPT_TOKEN_THRESHOLD)
+  })
+})
+
+describe('gpt-6-luna: published (LiteLLM) and Copilot credits paths agree (comment 625)', () => {
+  beforeAll(async () => {
+    await loadPricing()
+  })
+
+  const cases: Array<[string, Partial<TokenUsage>]> = [
+    ['272,000 fresh', { freshInput: 272_000, output: 10_000 }],
+    ['272,001 fresh', { freshInput: 272_001, output: 10_000 }],
+    ['262,000 fresh + 10,000 cache creation = 272,000', { freshInput: 262_000, cacheCreation: 10_000, output: 10_000 }],
+    ['262,001 fresh + 10,000 cache creation = 272,001', { freshInput: 262_001, cacheCreation: 10_000, output: 10_000 }],
+    ['100,000 fresh + 172,001 cache creation = 272,001', { freshInput: 100_000, cacheCreation: 172_001, output: 10_000 }],
+    ['cache read + cache creation mix at 272,001', { freshInput: 50_000, cacheRead: 100_000, cacheCreation: 122_001, output: 10_000 }],
+  ]
+
+  it.each(cases)('gives the same figure on both paths: %s', (_label, p) => {
+    const t = tokens(p)
+    const published = pricePublishedTurn(t, 'gpt-6-luna', 'codex')
+    const copilot = priceCopilotTurn(t, 'gpt-6-luna', 'copilot')
+    expect(published.status).toBe('priced')
+    expect(copilot.status).toBe('priced')
+    expect(published.value).toBeCloseTo(copilot.value!, 10)
+  })
+
+  it('selects the long tier on both paths at 272,001 cache-creation-heavy measured input', () => {
+    const t = tokens({ freshInput: 100_000, cacheCreation: 172_001 })
+    const expected = 272_001 * 0.2e-6
+    expect(pricePublishedTurn(t, 'gpt-6-luna', 'codex').value).toBeCloseTo(expected, 10)
+    expect(priceCopilotTurn(t, 'gpt-6-luna', 'copilot').value).toBeCloseTo(expected, 10)
   })
 })

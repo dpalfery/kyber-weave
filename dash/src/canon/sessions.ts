@@ -16,7 +16,7 @@ import { analyzeContext, type ContextPart, type ContextTurn } from '../analysis/
 import { rankSchemas, type ToolDefinition } from '../analysis/schema.js'
 import { auxiliarySpend, buildTimeline, subagentSessions } from '../analysis/timeline.js'
 import { measuredInput, sumCosts } from './cost.js'
-import { priceCopilotTurn } from './copilot-rates.js'
+import { isCopilotHarness, priceCopilotTurn } from './copilot-rates.js'
 import { isPublishedTableHarness, pricePublishedTurn } from './published-pricing.js'
 import { contextLimitOf } from './context-window.js'
 import { groupByCanonicalHarness, normalizeHarnessName } from './measurability.js'
@@ -276,33 +276,35 @@ export type AsadSessionPayload = {
   [key: string]: unknown
 }
 
-function isCopilotFamily(harness: string): boolean {
-  const id = normalizeHarnessName(harness)
-  return id === 'copilot' || id.startsWith('copilot-')
-}
-
 /**
  * Projection-time repricing (issue #186, U9). Turn records of API-billed harnesses are priced from
  * the published table and Copilot-family turns from the credits table; a changed block is written
  * back so the session summary, payload and cost contributions agree. Harness-reported costs (R5.2)
  * and other harnesses are left alone, and an unchanged block causes no write.
+ *
+ * Design note: `records.cost_json` is the derived, re-derivable cost cache. The report path reads
+ * it, the next projection reprices it, and a re-ingest overwrite self-heals it. The changed blocks
+ * of one session are written back in a single transaction (`setCosts`), once per session.
  */
 function repriceTurns(store: CanonStore, records: CanonicalRecord[]): CanonicalRecord[] {
-  return records.map((record) => {
+  const changes: Array<{ spanId: string; cost: CostBlock }> = []
+  const repriced = records.map((record) => {
     if (record.op !== 'llm.invoke') return record
     const model = attributeOf(record, MODEL_KEYS)
     let next: CostBlock
     if (isPublishedTableHarness(record.harness)) {
-      next = pricePublishedTurn(record.tokens, model ?? '', record.harness, record.cost)
-    } else if (isCopilotFamily(record.harness)) {
+      next = pricePublishedTurn(record.tokens, model, record.harness, record.cost)
+    } else if (isCopilotHarness(record.harness)) {
       next = priceCopilotTurn(record.tokens, model, record.harness, record.cost)
     } else {
       return record
     }
     if (JSON.stringify(next) === JSON.stringify(record.cost)) return record
-    store.setCost(record.spanId, next)
+    changes.push({ spanId: record.spanId, cost: next })
     return { ...record, cost: next }
   })
+  if (changes.length > 0) store.setCosts(changes)
+  return repriced
 }
 
 /**

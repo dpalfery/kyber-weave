@@ -500,7 +500,9 @@ here.
 - **Fix (Claude Code, Codex)**: Price the model with `priceOverrides` (rates per model) or point
   it at a priced model with `modelAliases` in the KyberDash config. Both apply on the next
   projection, with no re-ingest. A Copilot model missing from the credits table cannot be priced
-  this way; overrides and aliases act on the published path only.
+  this way; overrides and aliases act on the published path only. A `priceOverrides` entry without
+  a cache-creation rate bills cache writes at its input rate (no 1.25x surcharge); set the
+  cache-creation rate to state a surcharge.
 - **Other statuses**: "partially priced" means some turns are unpriced (no figure is shown),
   "not billed" is a flat-rate model, and "out of scope" means the table does not name the harness.
 

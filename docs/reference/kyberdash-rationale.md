@@ -85,6 +85,25 @@ reader's `cost_usd` keeps the `harness` basis.
   `—` pattern.
 - A full LiteLLM re-snapshot (only `claude-sonnet-5-5` and `gpt-6-luna` were added) is a separate,
   source-cited change.
+- **F1.** The session-list cost cell (`w-20`) wraps word statuses such as "no published rate".
+  Needs a visual check, then a wider cell or a short label with the reason in `title`.
+- **F2.** `dash/scripts/bundle-litellm.mjs` writes `dash/src/data/`, but the runtime reads
+  `dash/src/pricing/data/`. Fixing the path makes every build a full re-snapshot, so it belongs
+  with the re-snapshot above.
+
+**PR #225 review items declined, with reasons.**
+
+- *Tier miss stays `no_rate`.* An input beyond every tier is priced at a rate the vendor does not
+  publish if it falls back to the base tier, an under-pricing risk (R5.4, R5.6). A table-shape test
+  requires every tiered Copilot entry to end in an `Infinity` tier.
+- *`partial` lists `cost_usd: null`.* This is the approved contract (U10): an incomplete total is
+  never shown as a figure. `cost.value` still carries it.
+- *The bridge default `{unknown, no_rate}` stays.* It is what the cost tile renders for an absent
+  block, so list and tile agree.
+- *An absent model stays `published`, not `unknown`.* `unknown` beside `published` turns makes
+  `sumCosts` refuse with `COST_BASIS_MISMATCH`.
+- *The Copilot relabel default is not inverted.* A parser that forgot `costHarnessReported` would
+  keep a LiteLLM figure at API list rates as `harness` and never be repriced (R5.3).
 
 ### R5.4, R5.5 — No published rate is not zero
 

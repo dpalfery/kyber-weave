@@ -1347,9 +1347,22 @@ export class CanonStore {
       )
   }
 
-  /** Rewrite one record's cost block (projection-time repricing, issue #186 U9). */
-  setCost(spanId: string, cost: CostBlock): void {
-    this.db.prepare('UPDATE records SET cost_json = ? WHERE span_id = ?').run(JSON.stringify(cost), spanId)
+  /**
+   * Rewrite the cost blocks of several records in ONE transaction (projection-time repricing,
+   * issue #186 U9). `cost_json` is the derived, re-derivable cost cache: a failure rolls every row
+   * back and rethrows, and an empty list is a no-op.
+   */
+  setCosts(changes: ReadonlyArray<{ spanId: string; cost: CostBlock }>): void {
+    if (changes.length === 0) return
+    this.db.exec('BEGIN')
+    try {
+      const update = this.db.prepare('UPDATE records SET cost_json = ? WHERE span_id = ?')
+      for (const change of changes) update.run(JSON.stringify(change.cost), change.spanId)
+      this.db.exec('COMMIT')
+    } catch (err) {
+      this.db.exec('ROLLBACK')
+      throw err
+    }
   }
 
   /** Distinct trace ids, the unit attribution votes over. */

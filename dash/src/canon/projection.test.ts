@@ -20,7 +20,7 @@
 //   * `drain()`/`close()` resolve only once the scheduler is quiescent — no
 //     pass in flight and no trailing pass still owed.
 
-import { afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import type { DatabaseSync } from 'node:sqlite'
 
 import { ingestBatch } from './ingest.js'
@@ -416,6 +416,55 @@ describe('projectCanonicalStore: projection-time repricing (issue #186, U9)', ()
       const writes = db.prepare('SELECT COUNT(*) AS n FROM write_log').get() as { n: number }
       expect(writes.n).toBe(0)
       expect(store.get('id-1')?.cost).toEqual(before)
+    } finally {
+      store.close()
+    }
+  })
+
+  it('writes a session\'s repriced blocks with one setCosts call and never calls setCost (PR #225 4149313577)', async () => {
+    const setCosts = vi.spyOn(CanonStore.prototype, 'setCosts')
+    // T2 may delete `setCost` outright; spy only while it still exists (removal also satisfies "never called").
+    const legacy = CanonStore.prototype as unknown as { setCost?: () => void }
+    const setCost = typeof legacy.setCost === 'function' ? vi.spyOn(legacy as { setCost: () => void }, 'setCost') : undefined
+    try {
+      const store = await projectOnce([
+        turn('b-1', 'b-s', 'claude-code', 'claude-opus-5', STALE, 0),
+        turn('b-2', 'b-s', 'claude-code', 'claude-opus-5', STALE, 1),
+        turn('b-3', 'b-s', 'claude-code', 'claude-opus-5', STALE, 2),
+      ])
+      try {
+        expect(setCosts).toHaveBeenCalledTimes(1)
+        const changes = setCosts.mock.calls[0][0]
+        expect(changes.map((c) => c.spanId).sort()).toEqual(['b-1', 'b-2', 'b-3'])
+        expect(changes.every((c) => c.cost.status === 'priced')).toBe(true)
+        if (setCost) expect(setCost).not.toHaveBeenCalled()
+        // A second projection finds nothing to change and writes nothing.
+        setCosts.mockClear()
+        const db = (store as unknown as { db: DatabaseSync }).db
+        db.exec('CREATE TABLE write_log2 (span_id TEXT)')
+        db.exec('CREATE TRIGGER log_records_update2 AFTER UPDATE ON records BEGIN INSERT INTO write_log2 VALUES (NEW.span_id); END')
+        await projectCanonicalStore(store)
+        expect((db.prepare('SELECT COUNT(*) AS n FROM write_log2').get() as { n: number }).n).toBe(0)
+        for (const call of setCosts.mock.calls) expect(call[0]).toHaveLength(0)
+      } finally {
+        store.close()
+      }
+    } finally {
+      setCosts.mockRestore()
+      setCost?.mockRestore()
+    }
+  })
+
+  it('stores a model-less turn as {published, no_rate} and totals the session as partial, not COST_BASIS_MISMATCH (PR #225 4149313591)', async () => {
+    const modelless: CanonicalRecord = { ...turn('nm-2', 'nm-s', 'claude-code', 'unused', STALE, 1), raw: {} }
+    const store = await projectOnce([turn('nm-1', 'nm-s', 'claude-code', 'claude-opus-5', STALE, 0), modelless])
+    try {
+      const priced = pricePublishedTurn(TOK, 'claude-opus-5', 'claude-code')
+      expect(store.get('nm-2')?.cost).toMatchObject({ basis: 'published', status: 'no_rate' })
+      const cost = sessionCost(store, 'nm-s')
+      expect(cost).toMatchObject({ basis: 'published', status: 'partial' })
+      expect(JSON.stringify(cost)).not.toContain('COST_BASIS_MISMATCH')
+      expect(cost.value).toBeCloseTo(priced.value!, 10)
     } finally {
       store.close()
     }

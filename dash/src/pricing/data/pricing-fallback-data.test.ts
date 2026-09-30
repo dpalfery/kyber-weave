@@ -73,3 +73,34 @@ describe('issue #186 U11 bundled rate additions', () => {
     expect(prov['gpt-6-luna'].retrieved).toBe('2026-09-30')
   })
 })
+
+// Reproducibility guard: the bundler regenerates litellm-snapshot.json from LiteLLM plus
+// MANUAL_ENTRIES, so a rate that lives only in the committed snapshot is dropped on the next
+// regeneration. The bundler is read as text; it is never executed (it fetches and writes files).
+describe('issue #186 bundler MANUAL_ENTRIES reproducibility', () => {
+  const source = readFileSync(new URL('../../../scripts/bundle-litellm.mjs', import.meta.url), 'utf8')
+  const block = /const MANUAL_ENTRIES = \{([\s\S]*?)\n\}/.exec(source)?.[1] ?? ''
+  const manual = new Map<string, number[]>()
+  for (const line of block.split('\n')) {
+    const m = /^\s*'([^']+)':\s*\[([^\]]*)\]/.exec(line)
+    if (m) manual.set(m[1], m[2].split(',').map((n) => Number(n.trim())))
+  }
+  const snap = snapshot as unknown as Record<string, (number | null)[]>
+
+  it('locates and parses the MANUAL_ENTRIES block (sanity: neighbour claude-mythos-5)', () => {
+    expect(manual.has('claude-mythos-5')).toBe(true)
+  })
+
+  for (const id of ['claude-sonnet-5-5', 'gpt-6-luna']) {
+    it(`declares ${id} in MANUAL_ENTRIES with the committed snapshot rates`, () => {
+      const declared = manual.get(id)
+      expect(declared).toBeDefined()
+      const committed = snap[id]
+      expect(committed).toBeDefined()
+      // input, output, cache-write, cache-read; a null cache-write is written as 0 in the tuple.
+      for (let i = 0; i < 4; i++) {
+        expect(declared![i]).toBeCloseTo(committed[i] ?? 0, 13)
+      }
+    })
+  }
+})

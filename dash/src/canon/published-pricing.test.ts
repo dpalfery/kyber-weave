@@ -12,6 +12,7 @@ import {
   setFlatRateRemoved,
   setModelAliases,
   setPriceOverrides,
+  GPT_6_LUNA_PROMPT_TOKEN_THRESHOLD,
 } from '../pricing/models.js'
 import { pricePublishedTurn } from './published-pricing.js'
 import type { CostBlock, TokenUsage } from './types.js'
@@ -154,5 +155,56 @@ describe('pricePublishedTurn: R5.2 harness-reported figures', () => {
   it('does not reprice a harness block for an out-of-scope harness either', () => {
     const harness: CostBlock = { basis: 'harness', status: 'priced', value: 0.4, currency: 'USD' }
     expect(pricePublishedTurn(MEASURED, 'claude-opus-5', 'copilot', harness)).toEqual(harness)
+  })
+})
+
+// PR #225 review follow-up (plan 2026-09-30-issue-186-review-fixes, T3 RED).
+describe('pricePublishedTurn: absent model (comment 591)', () => {
+  it('returns published/no_rate explicitly for an undefined model on an in-scope harness', () => {
+    const block = pricePublishedTurn(MEASURED, undefined, 'claude-code')
+    expect(block).toEqual({ basis: 'published', status: 'no_rate' })
+  })
+
+  it('is out_of_scope for an undefined model on copilot (scope is checked before the model)', () => {
+    expect(pricePublishedTurn(MEASURED, undefined, 'copilot')).toEqual({ basis: 'published', status: 'out_of_scope' })
+  })
+
+  it('passes a harness block through untouched even with no model', () => {
+    const harness: CostBlock = { basis: 'harness', status: 'priced', value: 0.9, currency: 'USD' }
+    expect(pricePublishedTurn(MEASURED, undefined, 'claude-code', harness)).toEqual(harness)
+  })
+})
+
+describe('pricePublishedTurn: cache-write policy (comment 621)', () => {
+  it('bills gpt-6-luna cache creation as input ($0.10 per 1M) on the base tier, not a fabricated 1.25x', () => {
+    const block = pricePublishedTurn(tokens({ cacheCreation: 100_000 }), 'gpt-6-luna', 'codex')
+    expect(block.status).toBe('priced')
+    expect(block.value).toBeCloseTo((100_000 * 0.1) / 1e6, 10)
+  })
+
+  it('bills gpt-6-luna cache creation as input on the >272K tier ($0.20 per 1M)', () => {
+    const block = pricePublishedTurn(tokens({ cacheCreation: 1_000_000 }), 'gpt-6-luna', 'codex')
+    expect(block.value).toBeCloseTo(0.2, 10) // 1M measured input is above 272K
+  })
+
+  it('leaves an explicit cache-write rate unchanged (claude-sonnet-5-5 still $2.50 per 1M)', () => {
+    const block = pricePublishedTurn(tokens({ cacheCreation: 1_000_000 }), 'claude-sonnet-5-5', 'claude-code')
+    expect(block.value).toBeCloseTo(2.5, 10)
+  })
+})
+
+describe('pricePublishedTurn: gpt-6-luna tier measure (comment 625)', () => {
+  it('exports the 272K threshold', () => {
+    expect(GPT_6_LUNA_PROMPT_TOKEN_THRESHOLD).toBe(272_000)
+  })
+
+  it('prices 265,000 fresh + 10,000 cache creation (275,000 measured) on the >272K tier', () => {
+    const block = pricePublishedTurn(tokens({ freshInput: 265_000, cacheCreation: 10_000 }), 'gpt-6-luna', 'codex')
+    expect(block.value).toBeCloseTo(275_000 * 0.2e-6, 10)
+  })
+
+  it('keeps 262,000 fresh + 10,000 cache creation (exactly 272,000 measured) on the base tier', () => {
+    const block = pricePublishedTurn(tokens({ freshInput: 262_000, cacheCreation: 10_000 }), 'gpt-6-luna', 'codex')
+    expect(block.value).toBeCloseTo(272_000 * 0.1e-6, 10)
   })
 })

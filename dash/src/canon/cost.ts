@@ -94,6 +94,8 @@ export type CostInput = {
  * Measured input size: the sum of the disjoint input classes (R4.1). Tier
  * selection reads this, not `reportedInput` and not an estimate — the point
  * of R5.6 is that the tier comes from what was actually measured inbound.
+ * Cache creation counts as input here; a table that publishes no cache-write rate
+ * bills it at the input rate, so the size and the price use one measure.
  */
 export function measuredInput(tokens: TokenUsage): number {
   return tokens.freshInput + tokens.cacheRead + tokens.cacheCreation
@@ -202,8 +204,8 @@ export function priceWithTable(
     return { basis: 'published', status: 'no_rate' }
   }
 
-  // Each disjoint class is charged at its own rate; an absent cache rate falls back to the
-  // input rate, which reproduces the single-rate arithmetic.
+  // Each disjoint class is charged at its own rate. Pricing policy: an absent cache rate is
+  // billed at the input rate (a source that publishes no cache surcharge charges none).
   const value =
     (tokens.freshInput * rate.inputRate +
       tokens.cacheRead * (rate.cacheReadRate ?? rate.inputRate) +
