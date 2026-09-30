@@ -276,7 +276,7 @@ describe('KyberBridge: in-memory minimal tables fixture (CI verified)', () => {
         total_cache_read: 200,
         total_cache_creation: 100,
         schema_tokens_per_turn: 50,
-        cost: { usd: 0.05, basis: 'published_rates' },
+        cost: { basis: 'published', status: 'priced', value: 0.05, currency: 'USD' },
         models: ['gpt-4o'],
       },
       problems: ['prob-1'],
@@ -290,7 +290,7 @@ describe('KyberBridge: in-memory minimal tables fixture (CI verified)', () => {
         request_count: 2,
         total_input: 400,
         total_output: 200,
-        cost: { usd: 0.02, basis: 'published_rates' },
+        cost: { basis: 'published', status: 'priced', value: 0.02, currency: 'USD' },
         models: ['gpt-4o'],
       },
     })
@@ -374,7 +374,7 @@ describe('KyberBridge: in-memory minimal tables fixture (CI verified)', () => {
         total_output: 300,
         total_cache_read: 0,
         total_cache_creation: 0,
-        cost: { usd: 0.03, basis: 'published_rates' },
+        cost: { basis: 'published', status: 'priced', value: 0.03, currency: 'USD' },
         models: ['gemini-1.5-pro'],
       },
     })
@@ -387,7 +387,7 @@ describe('KyberBridge: in-memory minimal tables fixture (CI verified)', () => {
         request_count: 2,
         total_input: 400,
         total_output: 200,
-        cost: { usd: 0.02, basis: 'published_rates' },
+        cost: { basis: 'published', status: 'priced', value: 0.02, currency: 'USD' },
         models: ['gpt-4o'],
       },
     })
@@ -479,6 +479,7 @@ describe('KyberBridge: in-memory minimal tables fixture (CI verified)', () => {
     expect(newest.total_input).toBe(1000)
     expect(newest.total_output).toBe(500)
     expect(newest.cost_usd).toBe(0.05)
+    expect(newest.cost).toEqual({ basis: 'published', status: 'priced', value: 0.05, currency: 'USD' })
     expect(newest.models).toEqual(['gpt-4o'])
     expect(newest.problems).toBe(1)
   })
@@ -1109,5 +1110,134 @@ describe('KyberBridge: T4 coverage read seam (plan docs/plans/2026-09-30-issues-
     } finally {
       store.close()
     }
+  })
+})
+
+describe('KyberBridge.listSessions cost mapping (issue #186)', () => {
+  let db: InstanceType<typeof DatabaseSync>
+  let bridge: KyberBridge
+
+  const insert = (id: string, started: string, cost: Record<string, unknown> | undefined) => {
+    const summary: Record<string, unknown> = { turn_count: 1, request_count: 1, models: ['m'] }
+    if (cost) summary.cost = cost
+    db.prepare('INSERT INTO session VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
+      id, 'claude-code', id, 0, null, 'agent', 'repo', 'main', started, started,
+      JSON.stringify({ id, harness: 'claude-code', summary }),
+    )
+  }
+
+  beforeAll(() => {
+    db = new DatabaseSync(':memory:')
+    db.exec(`
+      CREATE TABLE session (
+        session_id TEXT PRIMARY KEY, harness TEXT NOT NULL, label TEXT,
+        is_subagent INTEGER DEFAULT 0, parent_session TEXT, agent_name TEXT,
+        repo TEXT, branch TEXT, started TEXT, ended TEXT, payload TEXT
+      );
+      CREATE TABLE records (
+        span_id TEXT PRIMARY KEY, trace_id TEXT, parent_span_id TEXT, harness TEXT,
+        source TEXT, name TEXT, timestamp TEXT, op TEXT
+      );
+      CREATE TABLE quarantine (
+        span_id TEXT PRIMARY KEY, source TEXT, name TEXT, namespaces TEXT, reason TEXT, seen_at INTEGER
+      );
+      CREATE TABLE problem (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT, span_id TEXT,
+        severity TEXT, code TEXT, message TEXT, at INTEGER, harness TEXT
+      );
+    `)
+    insert('s-priced', '2026-09-30T05:00:00Z', { basis: 'published', status: 'priced', value: 0.05, currency: 'USD' })
+    insert('s-norate', '2026-09-30T04:00:00Z', { basis: 'published', status: 'no_rate' })
+    insert('s-partial', '2026-09-30T03:00:00Z', { basis: 'published', status: 'partial', value: 0.02, currency: 'USD' })
+    insert('s-nonusd', '2026-09-30T02:00:00Z', { basis: 'harness', status: 'priced', value: 7, currency: 'EUR' })
+    insert('s-none', '2026-09-30T01:00:00Z', undefined)
+    bridge = new KyberBridge({ canonDb: db })
+  })
+
+  afterAll(() => {
+    bridge.close()
+  })
+
+  const find = (id: string) => bridge.listSessions().find((s) => s.session_id === id)!
+
+  it('maps a priced CostBlock to a cost figure and exposes the block', () => {
+    const row = find('s-priced')
+    expect(row.cost_usd).toBe(0.05)
+    expect(row.cost).toEqual({ basis: 'published', status: 'priced', value: 0.05, currency: 'USD' })
+  })
+
+  it('lists a no_rate block with no figure and its status', () => {
+    const row = find('s-norate')
+    expect(row.cost_usd).toBeNull()
+    expect(row.cost.status).toBe('no_rate')
+    expect(row.cost.basis).toBe('published')
+  })
+
+  it('lists a partial block with no figure and partial status', () => {
+    const row = find('s-partial')
+    expect(row.cost_usd).toBeNull()
+    expect(row.cost.status).toBe('partial')
+  })
+
+  it('does not report a non-USD priced value as cost_usd', () => {
+    const row = find('s-nonusd')
+    expect(row.cost_usd).toBeNull()
+    expect(row.cost).toMatchObject({ basis: 'harness', status: 'priced', currency: 'EUR' })
+  })
+
+  it('defaults a row with no summary cost to unknown/no_rate', () => {
+    const row = find('s-none')
+    expect(row.cost_usd).toBeNull()
+    expect(row.cost).toEqual({ basis: 'unknown', status: 'no_rate' })
+  })
+})
+
+describe('KyberBridge: getMeta().rates names both rate tables (issue #186)', () => {
+  const bridge = new KyberBridge({
+    canonPath: '/path/does/not/exist/canon.db',
+    ratesPath: '/path/does/not/exist/rates.json',
+  })
+  afterAll(() => bridge.close())
+
+  type RateTable = {
+    id: string
+    source: string
+    retrieved: string
+    applies_to: string[]
+    credit_usd?: number
+  }
+  const tables = (): RateTable[] =>
+    (bridge.getMeta().rates as unknown as { tables: RateTable[] }).tables
+
+  it('keeps the legacy flat rates fields (additive extension)', () => {
+    const { rates } = bridge.getMeta()
+    expect(rates.credit_usd).toBe(0.01)
+    expect(rates.source).toBe(
+      'https://docs.github.com/copilot/reference/copilot-billing/models-and-pricing',
+    )
+  })
+
+  it('lists exactly the published and copilot_credits tables', () => {
+    expect(Array.isArray(tables())).toBe(true)
+    expect(tables().map((t) => t.id).sort()).toEqual(['copilot_credits', 'published'])
+  })
+
+  it('names the published-rate table (LiteLLM snapshot) for Claude Code and Codex', () => {
+    const t = tables().find((x) => x.id === 'published')
+    expect(t).toBeDefined()
+    expect(t!.source.toLowerCase()).toContain('litellm')
+    expect(t!.retrieved).toBe('2026-09-30')
+    expect([...t!.applies_to].sort()).toEqual(['claude-code', 'codex'])
+  })
+
+  it('names the Copilot credits table with source, retrieved date, credit value, and Copilot-only applicability', () => {
+    const t = tables().find((x) => x.id === 'copilot_credits')
+    expect(t).toBeDefined()
+    expect(t!.source).toBe(
+      'https://docs.github.com/copilot/reference/copilot-billing/models-and-pricing',
+    )
+    expect(t!.retrieved).toBe('2026-09-30')
+    expect(t!.credit_usd).toBe(0.01)
+    expect(t!.applies_to).toEqual(['copilot'])
   })
 })

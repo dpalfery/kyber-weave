@@ -7,6 +7,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 import * as ContextExplorerModule from './ContextExplorer.js'
 import type { KyberSessionSummary } from '../lib/kyberApi.js'
+import { formatCostFigure, normalizeCostBlock } from './SessionCostPanel.js'
 
 const { ContextExplorer, AgentSessionRow, getAgentHarnessFilter, PROVIDERS } = ContextExplorerModule
 
@@ -66,6 +67,7 @@ const sampleSession: KyberSessionSummary = {
   started: '2026-03-01T12:00:00.000Z',
   turn_count: 10,
   cost_usd: 0.185,
+  cost: { basis: 'published', status: 'priced', value: 0.185, currency: 'USD' },
 }
 
 /**
@@ -144,7 +146,10 @@ describe('ContextExplorer: canonical session-list contract', () => {
       session_id: sampleSession.session_id,
       harness: sampleSession.harness,
       label: sampleSession.label,
-      summary: { turn_count: 10, cost: { usd: 0.185, basis: 'published_rates', status: 'ok' } },
+      summary: {
+        turn_count: 10,
+        cost: { basis: 'published', status: 'priced', value: 0.185, currency: 'USD' },
+      },
       turns: [],
       tools: [],
       timeline: [],
@@ -191,6 +196,62 @@ describe('ContextExplorer: canonical session-list contract', () => {
     parentLink!.props.onClick!({ stopPropagation })
     expect(stopPropagation).toHaveBeenCalledOnce()
     expect(onSelectSession).toHaveBeenCalledWith('sess-parent-001')
+  })
+
+  describe('row cost cell (issue #186)', () => {
+    // The cell is addressed by test id; T4 adds `data-testid="agent-session-cost"`.
+    function renderCostCell(cost: KyberSessionSummary['cost'] | undefined): { text: string; title: string } {
+      const session: KyberSessionSummary = { ...sampleSession, cost_usd: null }
+      if (cost !== undefined) session.cost = cost
+      else delete session.cost
+      const html = renderHtml(
+        <QueryClientProvider client={createTestQueryClient()}>
+          <AgentSessionRow s={session} open={false} onToggle={() => {}} onSelectSession={() => {}} />
+        </QueryClientProvider>,
+      )
+      const match = /<span([^>]*data-testid="agent-session-cost"[^>]*)>([\s\S]*?)<\/span>/.exec(html)
+      expect(match, 'row must render an element with data-testid="agent-session-cost"').not.toBeNull()
+      const title = /title="([^"]*)"/.exec(match![1]!)?.[1] ?? ''
+      return { text: match![2]!, title }
+    }
+
+    it('renders the formatted figure (same formatter as the cost tile) for a priced block', () => {
+      const block = { basis: 'published', status: 'priced', value: 0.185, currency: 'USD' } as const
+      const { text } = renderCostCell(block)
+      expect(text).toBe(formatCostFigure(normalizeCostBlock(block)))
+      expect(text).toMatch(/^\$0\.1[89]\d*$/)
+      expect(text).not.toBe('—')
+    })
+
+    it.each([
+      ['no_rate', 'no published rate'],
+      ['not_billed', 'not billed'],
+      ['out_of_scope', 'out of scope'],
+    ] as const)('renders the %s reason in words, never a bare dash or $0.00', (status, words) => {
+      const { text } = renderCostCell({ basis: 'published', status })
+      expect(text).toBe(words)
+      expect(text).toBe(formatCostFigure(normalizeCostBlock({ basis: 'published', status })))
+      expect(text).not.toContain('—')
+      expect(text).not.toContain('$0.00')
+    })
+
+    it('renders "partially priced" with no figure for a partial block (U10)', () => {
+      const { text } = renderCostCell({ basis: 'published', status: 'partial', value: 1.23, currency: 'USD' })
+      expect(text).toBe('partially priced')
+      expect(text).not.toContain('$')
+      expect(text).not.toContain('—')
+    })
+
+    it('renders a dash only when the server sent no cost at all', () => {
+      expect(renderCostCell(undefined).text).toBe('—')
+    })
+
+    it('names the cost basis in the cell title', () => {
+      expect(renderCostCell({ basis: 'published', status: 'no_rate' }).title).toMatch(/published/i)
+      expect(
+        renderCostCell({ basis: 'harness', status: 'priced', value: 0.5, currency: 'USD' }).title,
+      ).toMatch(/harness/i)
+    })
   })
 
   it('does not retain a tree-detail or context-window-toggle path', () => {

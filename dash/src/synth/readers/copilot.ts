@@ -87,6 +87,9 @@ export function loadCopilotCliCalls(
         reasoningTokens: numberValue(row.reasoning_tokens),
         webSearchRequests: 0,
         costUSD: numberValue(row.cost_usd),
+        // Marker only when the row carries a real cost_usd; absent/NULL/non-finite is not a
+        // harness figure (issue #186) and falls through to the published-rate default.
+        costHarnessReported: typeof row.cost_usd === 'number' && Number.isFinite(row.cost_usd),
         tools: [],
         bashCommands: [],
         timestamp: timestampValue(row.created_at),
