@@ -4,7 +4,7 @@ title: Kyber-Squad — Multi-Harness Agent & Skill Deployment Control Plane
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-09-28
+last-reviewed: 2026-09-30
 ---
 
 # Kyber-Squad — Multi-Harness Agent & Skill Deployment Control Plane
@@ -25,7 +25,7 @@ and registered today: `copilot`, `cursor`, `claude`, `codex`, `antigravity`, `op
 Deploying multi-agent workflows across modern engineering environments breaks down in three key ways:
 
 ### 1. The Multi-Harness Fragmentation Tax
-Every coding harness uses its own configuration format, folder layout, and prompt syntax (`.cursorrules`, `.claude/agents`, `.github/copilot-instructions.md`, TOML, JSON). Manually duplicating 21 specialized agent roles and 23 skills across multiple tools guarantees silent configuration drift, outdated prompts, and inconsistent behaviors across developers.
+Every coding harness uses its own configuration format, folder layout, and prompt syntax (`.cursorrules`, `.claude/agents`, `.github/copilot-instructions.md`, TOML, JSON). Manually duplicating 21 specialized agent roles and 24 skills across multiple tools guarantees silent configuration drift, outdated prompts, and inconsistent behaviors across developers.
 
 ### 2. Differing Capability Boundaries & Tool Permissions
 Harnesses have wildly different capabilities: some support restricted subagent spawning or granular MCP permissions; others allow only flat prompt injection. Without a formalized capability lattice, agents fail unexpectedly or gain unintended permissions when deployed to less restrictive harnesses.
@@ -39,7 +39,7 @@ Modifying local developer environments or repository-level agent configurations 
 
 | Capability | How It Solves the Problem | Command |
 |---|---|---|
-| **Canonical AgentIR Compilation** | Compiles 21 canonical agents and 23 skills — each projecting its validated resource closure beside the rendered principal — for all twelve registered renderers while retaining a governed twelve-target catalog. | `kyber-weave squad install` |
+| **Canonical AgentIR Compilation** | Compiles 21 canonical agents and 24 skills — each projecting its validated resource closure beside the rendered principal — for all twelve registered renderers while retaining a governed twelve-target catalog. | `kyber-weave squad install` |
 | **Transactional Engine & Atomic Rollback** | Creates pre-execution rollback manifests and tracks deployed files in `.kyber-weave/squad.receipt.json` and `squad.lock.yml`—restores clean state on any failure. | `kyber-weave squad install` · `uninstall` |
 | **Capability Lattice & Degradation** | Intelligently maps subagent hierarchies, permissions, and tool access to each harness's exact feature set, emitting structured degradation warnings when a feature is unsupported. | `kyber-weave squad doctor` |
 | **Distributed Concurrency Leases** | Uses cross-process mutex leasing to ensure concurrent CI jobs or IDE instances cannot corrupt deployment state. | Integrated in all `squad` verbs |
@@ -49,15 +49,22 @@ Modifying local developer environments or repository-level agent configurations 
 
 ## Canonical, packaged, and rendered skill surfaces
 
-The canonical product contains 23 `SKILL.md` files. Every one except the five explicitly evolved
-skills matches the designated Hotshot golden copy byte for byte. It also retains 66 supplemental
-references, scripts, provider instructions, and metadata files, for 89 files under
-`products/kyber-squad/skills/`. Recursive APM and Agent Plugins packages carry all 89 files and
+The canonical product contains 24 `SKILL.md` files. `code-review-loop` is authored in Kyber-Squad;
+every imported skill except the five explicitly evolved skills matches the designated Hotshot
+golden copy byte for byte. It also retains 67 supplemental references, scripts, provider
+instructions, and metadata files, for 91 files under
+`products/kyber-squad/skills/`. Recursive APM and Agent Plugins packages carry all 91 files and
 preserve each retained local reference.
 
+The [code-review-loop skill](../../products/kyber-squad/skills/code-review-loop/SKILL.md)
+handles an authorized review cycle on the chosen platform: fix feedback, validate and
+push changes, link fix commits in replies, resolve addressed threads, and request
+another review. The existing
+`pr-review-fix-comments` skill supports step-by-step approvals.
+
 A fresh GitHub Copilot render projects each owner's linked resources beside its principal:
-21 `.github/agents/<name>.agent.md` files, 23 `.github/skills/<name>/SKILL.md` files, and the
-linked resources, 119 files total, with authored relative links resolving in the output. Every
+21 `.github/agents/<name>.agent.md` files, 24 `.github/skills/<name>/SKILL.md` files, and the
+linked resources, 121 files total, with authored relative links resolving in the output. Every
 skill resource reaches every render except `skills/setup-dev-environment/agents/openai.yaml`,
 which is packaged-only Codex skill-UI metadata. Every retained resource now has a reviewed
 disposition in the [skill-resource dispositions audit](skill-resource-dispositions.md):

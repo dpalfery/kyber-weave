@@ -58,6 +58,7 @@ public sealed class SquadPackAndReleaseTests : IDisposable
         "azure-naming",
         "bug-crusher",
         "code-review",
+        "code-review-loop",
         "create-pull-request",
         "csharp-dev",
         "csp-security",
@@ -150,8 +151,8 @@ public sealed class SquadPackAndReleaseTests : IDisposable
             Assert.Contains(entryNames, name => name == $"agents/{agent}.md");
         }
 
-        // Presence of all 23 canonical skills
-        Assert.Equal(23, CanonicalSkills.Length);
+        // Presence of all 24 canonical skills
+        Assert.Equal(24, CanonicalSkills.Length);
         foreach (string skill in CanonicalSkills)
         {
             Assert.Contains(entryNames, name => name == $"skills/{skill}/SKILL.md" || name.StartsWith($"skills/{skill}/", StringComparison.Ordinal));
@@ -284,7 +285,7 @@ public sealed class SquadPackAndReleaseTests : IDisposable
             }
         }
 
-        // Portable components only: contains all 23 canonical skills
+        // Portable components only: contains all 24 canonical skills
         foreach (string skill in CanonicalSkills)
         {
             Assert.Contains(entryNames, name => name == $"skills/{skill}/SKILL.md" || name.StartsWith($"skills/{skill}/", StringComparison.Ordinal));
@@ -611,7 +612,7 @@ public sealed class SquadPackAndReleaseTests : IDisposable
             // Solution marker
             fixture.Write("KyberWeave.sln", "Microsoft Visual Studio Solution File, Format Version 12.00");
 
-            // Copy product source from real repo if available, or write all 21 agents and 23 skills
+            // Copy product source from real repo if available, or write all 21 agents and 24 skills
             string realSquadSource = System.IO.Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
             if (Directory.Exists(realSquadSource))
             {

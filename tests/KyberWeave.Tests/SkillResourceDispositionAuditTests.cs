@@ -12,7 +12,7 @@ using Xunit;
 namespace KyberWeave.Tests;
 
 /// <summary>
-/// Pins the eight-part content-preservation audit contract for the 66 skill resources under
+/// Pins the eight-part content-preservation audit contract for the 67 skill resources under
 /// <c>products/kyber-squad/skills/</c>: every resource has exactly one disposition row, the
 /// disposition and delivery vocabularies are closed and self-consistent with the policy-line
 /// ledger, every ledger destination names a real template section containing its anchor, every
@@ -72,7 +72,7 @@ public sealed class SkillResourceDispositionAuditTests
 
     /// <summary>
     /// Prevents a resource from being silently dropped, duplicated, or invented in the audit: the
-    /// table's Resource column must equal, one-for-one, the 66 files on disk under
+    /// table's Resource column must equal, one-for-one, the 67 files on disk under
     /// <c>products/kyber-squad/skills/**</c> other than <c>SKILL.md</c>.
     /// </summary>
     [Fact]
@@ -109,7 +109,7 @@ public sealed class SkillResourceDispositionAuditTests
             missing.Length == 0 && extra.Length == 0,
             $"'Resource dispositions' does not match disk. Missing: [{string.Join(", ", missing)}]. " +
             $"Extra: [{string.Join(", ", extra)}].");
-        Assert.Equal(66, rows.Count);
+        Assert.Equal(67, rows.Count);
     }
 
     /// <summary>
