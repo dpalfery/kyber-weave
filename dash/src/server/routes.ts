@@ -15,7 +15,7 @@ import {
   type ReportSection,
 } from '../analysis/report/types.js'
 import { createRequire } from 'node:module'
-import { harnessFamily } from '../canon/measurability.js'
+import { harnessFamily, normalizeHarnessName } from '../canon/measurability.js'
 import type { SourceCheckpoint } from '../canon/source-state.js'
 
 /** The build this server is, carried on `/meta` so a client can check it (R6.7). */
@@ -243,12 +243,29 @@ function windowContextOf(bridge: KyberBridge): {
   return { coveredFrom, latestByHarness }
 }
 
+/**
+ * Checkpoints recorded under any front-end of one harness (issue #182).
+ * Null (unreadable table) stays null — never an empty list posing as none.
+ */
+function filterCheckpointsByHarness(
+  statuses: readonly SourceCheckpoint[] | null,
+  harnessId: string,
+): readonly SourceCheckpoint[] | null {
+  if (statuses === null) return null
+  const want = normalizeHarnessName(harnessId)
+  return statuses.filter((status) => normalizeHarnessName(status.harnessId) === want)
+}
+
 function groupCheckpointsByHarness(statuses: readonly SourceCheckpoint[]): Map<string, SourceCheckpoint[]> {
+  // Grouped by canonical harness (issue #182): checkpoints are recorded
+  // under raw front-end ids (`claude-desktop`, `cursor-agent`) while rollup
+  // rows carry the folded owner, so the raw key would drop them.
   const byHarness = new Map<string, SourceCheckpoint[]>()
   for (const status of statuses) {
-    const list = byHarness.get(status.harnessId) ?? []
+    const key = normalizeHarnessName(status.harnessId)
+    const list = byHarness.get(key) ?? []
     list.push(status)
-    byHarness.set(status.harnessId, list)
+    byHarness.set(key, list)
   }
   return byHarness
 }
@@ -550,15 +567,42 @@ export function handleKyberRequest(
     }
     const runId = (url.searchParams.get('runId') ?? url.searchParams.get('run_id') ?? '').trim() || undefined
     const sessionId = (url.searchParams.get('sessionId') ?? url.searchParams.get('session_id') ?? '').trim() || undefined
+    const detector = (url.searchParams.get('detector') ?? '').trim() || undefined
+    const harness = (url.searchParams.get('harness') ?? '').trim() || undefined
     const limitParam = url.searchParams.get('limit')
-    const limit = limitParam ? parseInt(limitParam, 10) : undefined
+    const offsetParam = url.searchParams.get('offset')
+    // Strict positive integers (council review): parseInt would silently
+    // truncate `10abc` to 10 and mask a bad URL with HTTP 200.
+    const parsePageNumber = (raw: string | null, name: string, min: number): number | undefined | string => {
+      if (raw === null || raw.trim() === '') return undefined
+      const parsed = Number(raw)
+      if (!Number.isInteger(parsed) || parsed < min) {
+        return `${name} must be an integer >= ${min} (got ${JSON.stringify(raw)})`
+      }
+      return parsed
+    }
+    const limit = parsePageNumber(limitParam, 'limit', 1)
+    if (typeof limit === 'string') {
+      sendKyberJson(res, 400, { error: limit })
+      return true
+    }
+    const offset = parsePageNumber(offsetParam, 'offset', 0)
+    if (typeof offset === 'string') {
+      sendKyberJson(res, 400, { error: offset })
+      return true
+    }
 
-    const findings = bridge.listFindings({
+    // Paged envelope (issue #191): `findings` keeps its shape; `total`,
+    // `detectorCounts` and `unknownWindowSessions` describe the narrowed set.
+    const page = bridge.listFindingsPage({
       runId,
       sessionId,
-      limit: limit && !isNaN(limit) ? limit : undefined,
+      detector,
+      harness,
+      ...(limit === undefined ? {} : { limit }),
+      ...(offset === undefined ? {} : { offset }),
     })
-    sendKyberJson(res, 200, { findings })
+    sendKyberJson(res, 200, page)
     return true
   }
 
@@ -676,7 +720,13 @@ export function handleKyberRequest(
       checkpointSummary:
         checkpointsByHarness === null
           ? null
-          : checkpointSummaryOf(checkpointsByHarness.get(row.harness) ?? []),
+          // The join is canonical on both sides. The map is keyed by
+          // `normalizeHarnessName` and a rollup row written before the fold
+          // (issue #182) still carries its raw front-end id until an operator
+          // rebuilds derived tables, so the lookup key is normalised too. A
+          // miss after that is a measured zero, not an unknown: the read
+          // succeeded and this harness recorded no units (D3).
+          : checkpointSummaryOf(checkpointsByHarness.get(normalizeHarnessName(row.harness)) ?? []),
       scorecard: buildScorecard(row),
     }))
     sendKyberJson(res, 200, { harnesses })
@@ -718,7 +768,7 @@ export function handleKyberRequest(
         detailCoveredFrom,
         noDataReasonOf(rollup),
       ),
-      checkpointSummary: checkpointSummaryOf(bridge.getSourceCheckpointStatuses(id)),
+      checkpointSummary: checkpointSummaryOf(filterCheckpointsByHarness(bridge.getSourceCheckpointStatuses(), id)),
       scorecard: buildScorecard(rollup),
     })
     return true

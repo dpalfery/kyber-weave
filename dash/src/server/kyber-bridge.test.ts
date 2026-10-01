@@ -1641,3 +1641,178 @@ describe('KyberBridge: getMeta().rates names both rate tables (issue #186)', () 
     expect(t!.applies_to).toEqual(['copilot'])
   })
 })
+
+describe('KyberBridge: unknown-window session owner semantics (thread-4)', () => {
+  // `sessionHarnessRaw` is private to bridge.ts (absent row -> undefined,
+  // failed read -> null), so the absent-vs-failed distinction is pinned
+  // through the observable `countUnknownWindowSessions` envelope below, on
+  // both the store and the raw-DB paths.
+  const payloadWithSource = (source: string) => ({ context: { contextLimitSource: source } })
+
+  const seedRawSession = (
+    db: import('node:sqlite').DatabaseSync,
+    sessionId: string,
+    harness: string,
+    source: string,
+  ): void => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS session (
+        session_id TEXT PRIMARY KEY,
+        harness TEXT NOT NULL,
+        payload TEXT NOT NULL
+      );
+    `)
+    db.prepare('INSERT OR REPLACE INTO session (session_id, harness, payload) VALUES (?, ?, ?)').run(
+      sessionId,
+      harness,
+      JSON.stringify(payloadWithSource(source)),
+    )
+  }
+
+  it('reports 0 for an absent session row under a harness scope (store path)', () => {
+    const store = new CanonStore(':memory:')
+    const bridge = new KyberBridge({ canonPath: ':memory:', store })
+    try {
+      expect(bridge.countUnknownWindowSessions({ harness: 'copilot', sessionId: 'sess-absent' })).toBe(0)
+    } finally {
+      bridge.close()
+      store.close()
+    }
+  })
+
+  it('reports 0 for an absent session row under a harness scope (raw-DB path)', () => {
+    const canonDb = new DatabaseSync(':memory:')
+    const bridge = new KyberBridge({ canonDb })
+    try {
+      canonDb.exec(
+        'CREATE TABLE session (session_id TEXT PRIMARY KEY, harness TEXT NOT NULL, payload TEXT NOT NULL)',
+      )
+      expect(bridge.countUnknownWindowSessions({ harness: 'copilot', sessionId: 'sess-absent' })).toBe(0)
+    } finally {
+      bridge.close()
+      try {
+        canonDb.close()
+      } catch {
+        // The bridge already closed the injected handle.
+      }
+    }
+  })
+
+  it('reports 0 on a normalized-harness mismatch even when the payload window is unknown (store path)', () => {
+    const store = new CanonStore(':memory:')
+    const bridge = new KyberBridge({ canonPath: ':memory:', store })
+    try {
+      store.upsertSession({
+        sessionId: 'sess-other-owner',
+        harness: 'copilot',
+        payload: payloadWithSource('default'),
+      })
+      expect(bridge.countUnknownWindowSessions({ harness: 'codex', sessionId: 'sess-other-owner' })).toBe(0)
+    } finally {
+      bridge.close()
+      store.close()
+    }
+  })
+
+  it('reports 0 on a normalized-harness mismatch even when the payload window is unknown (raw-DB path)', () => {
+    const canonDb = new DatabaseSync(':memory:')
+    const bridge = new KyberBridge({ canonDb })
+    try {
+      seedRawSession(canonDb, 'sess-other-owner', 'copilot', 'default')
+      expect(bridge.countUnknownWindowSessions({ harness: 'codex', sessionId: 'sess-other-owner' })).toBe(0)
+    } finally {
+      bridge.close()
+      try {
+        canonDb.close()
+      } catch {
+        // The bridge already closed the injected handle.
+      }
+    }
+  })
+
+  it('falls through to the payload read when the harness owns the session (store path)', () => {
+    const store = new CanonStore(':memory:')
+    const bridge = new KyberBridge({ canonPath: ':memory:', store })
+    try {
+      store.upsertSession({ sessionId: 'sess-unknown', harness: 'copilot', payload: payloadWithSource('default') })
+      store.upsertSession({ sessionId: 'sess-known', harness: 'copilot', payload: payloadWithSource('reported') })
+      expect(bridge.countUnknownWindowSessions({ harness: 'copilot', sessionId: 'sess-unknown' })).toBe(1)
+      expect(bridge.countUnknownWindowSessions({ harness: 'copilot', sessionId: 'sess-known' })).toBe(0)
+    } finally {
+      bridge.close()
+      store.close()
+    }
+  })
+
+  it('falls through to the payload read when the harness owns the session (raw-DB path)', () => {
+    const canonDb = new DatabaseSync(':memory:')
+    const bridge = new KyberBridge({ canonDb })
+    try {
+      seedRawSession(canonDb, 'sess-unknown', 'copilot', 'default')
+      seedRawSession(canonDb, 'sess-known', 'copilot', 'reported')
+      expect(bridge.countUnknownWindowSessions({ harness: 'copilot', sessionId: 'sess-unknown' })).toBe(1)
+      expect(bridge.countUnknownWindowSessions({ harness: 'copilot', sessionId: 'sess-known' })).toBe(0)
+    } finally {
+      bridge.close()
+      try {
+        canonDb.close()
+      } catch {
+        // The bridge already closed the injected handle.
+      }
+    }
+  })
+
+  it('falls back to the payload read when the store harness lookup throws', () => {
+    const bridgeFor = (source: string): KyberBridge => {
+      const throwingStore = {
+        sessionHarness: () => {
+          throw new Error('harness column unreadable')
+        },
+        getSessionPayload: () => payloadWithSource(source),
+      } as unknown as CanonStore
+      return new KyberBridge({ canonPath: ':memory:', store: throwingStore })
+    }
+    const unknownBridge = bridgeFor('default')
+    try {
+      expect(unknownBridge.countUnknownWindowSessions({ harness: 'copilot', sessionId: 'sess-1' })).toBe(1)
+    } finally {
+      unknownBridge.close()
+    }
+    const knownBridge = bridgeFor('reported')
+    try {
+      expect(knownBridge.countUnknownWindowSessions({ harness: 'copilot', sessionId: 'sess-1' })).toBe(0)
+    } finally {
+      knownBridge.close()
+    }
+  })
+
+  it('falls back to the payload read when the raw-DB harness lookup throws', () => {
+    const bridgeFor = (source: string): KyberBridge => {
+      const fakeDb = {
+        exec: () => {},
+        close: () => {},
+        prepare: (sql: string) => {
+          if (sql.includes('sqlite_master')) return { get: () => ({ '1': 1 }) }
+          if (sql.includes('SELECT harness')) throw new Error('harness column unreadable')
+          if (sql.includes('SELECT payload')) {
+            return { get: () => ({ payload: JSON.stringify(payloadWithSource(source)) }) }
+          }
+          throw new Error(`unexpected query: ${sql}`)
+        },
+      } as unknown as import('node:sqlite').DatabaseSync
+      return new KyberBridge({ canonDb: fakeDb })
+    }
+    const unknownBridge = bridgeFor('default')
+    try {
+      expect(unknownBridge.countUnknownWindowSessions({ harness: 'copilot', sessionId: 'sess-1' })).toBe(1)
+    } finally {
+      unknownBridge.close()
+    }
+    const knownBridge = bridgeFor('reported')
+    try {
+      expect(knownBridge.countUnknownWindowSessions({ harness: 'copilot', sessionId: 'sess-1' })).toBe(0)
+    } finally {
+      knownBridge.close()
+    }
+  })
+})

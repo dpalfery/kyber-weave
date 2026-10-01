@@ -82,13 +82,23 @@ export const SCHEMA_VERSION = 16
 
 /**
  * Version of the diagnostic signal and finding detector suite (Decision D17).
- * When detectors change, this version stamp is bumped to force automatic
- * recomputation of derived findings and signals over stored canonical records.
+ * An informational stamp identifying which detector semantics built a store's
+ * derived rows, so tooling and operators can tell a stale finding table from
+ * a fresh one. It does not itself trigger recomputation: every build
+ * (`buildSessions`, `buildRuns`, `buildFindings`, `buildHarnessRollup`) is
+ * authoritative and rewrites its derived rows, pruning what detectors no
+ * longer emit.
+ *
+ * Generations: 2 stopped fabricating duplicate-tool-call waste for
+ * underivable sizes (coverage-gap findings carry no estimate); 3 adds honest
+ * compaction windows, folded twin-harness identity, and rebuilt findings
+ * (issues #181/#182/#191). The stamp is written when the store is created;
+ * a store file that predates a generation keeps its old stamp until its
+ * derived tables are rebuilt. Bump it whenever detector semantics change
+ * and say so in the PR, so the stamp stays a truthful witness instead of a
+ * forgotten counter.
  */
-// Bumped to 2 when duplicate-tool-call stopped fabricating 250 waste tokens
-// for underivable sizes (coverage-gap findings carry no estimate): stores
-// stamped 1 recompute instead of serving stale fabricated numbers.
-export const DETECTOR_VERSION = 2
+export const DETECTOR_VERSION = 3
 
 /**
  * The whole schema, as code. `CREATE ... IF NOT EXISTS` throughout so
@@ -273,6 +283,7 @@ CREATE TABLE IF NOT EXISTS finding (
 CREATE INDEX IF NOT EXISTS finding_by_run ON finding (run_id);
 CREATE INDEX IF NOT EXISTS finding_by_session ON finding (session_id);
 CREATE INDEX IF NOT EXISTS finding_by_rank_score ON finding (rank_score DESC);
+CREATE INDEX IF NOT EXISTS finding_by_detector ON finding (detector_id);
 -- Prediction table for logging and scoring finding waste predictions (Task F4 / Decision D11).
 CREATE TABLE IF NOT EXISTS prediction (
   id TEXT PRIMARY KEY,
@@ -1012,6 +1023,14 @@ INSERT OR REPLACE INTO records (
   measurability_json, parts_json, raw
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
+
+/** Server-side finding filters (issue #191): detector and harness narrow the
+ * set. Paging lives in the bridge (`listFindingsPage`), which slices the
+ * narrowed set once `total` is known — one owner, not two (review). */
+export type FindingsListOptions = {
+  detector?: string
+  harness?: string
+}
 
 export class CanonStore {
   private readonly db: Database
@@ -2185,7 +2204,7 @@ export class CanonStore {
   }
 
   /** List findings, optionally filtered by runId or sessionId; ordered by rank_score DESC. */
-  listFindings(runId?: string, sessionId?: string): Finding[] {
+  listFindings(runId?: string, sessionId?: string, options?: FindingsListOptions): Finding[] {
     let query = 'SELECT * FROM finding'
     const params: string[] = []
     const conditions: string[] = []
@@ -2198,6 +2217,14 @@ export class CanonStore {
       conditions.push('session_id = ?')
       params.push(sessionId)
     }
+    // `detector_id` is a real column, so it filters in SQL. `harness` rides
+    // in the finding payload (canon/findings.ts stamps it) and filters after
+    // the round-trip below — no migration, and legacy rows without a harness
+    // simply match no harness filter rather than every one.
+    if (options?.detector !== undefined && options.detector !== '') {
+      conditions.push('detector_id = ?')
+      params.push(options.detector)
+    }
 
     if (conditions.length > 0) {
       query += ` WHERE ${conditions.join(' AND ')}`
@@ -2205,7 +2232,56 @@ export class CanonStore {
     query += ' ORDER BY rank_score DESC, id ASC'
 
     const rows = this.db.prepare(query).all(...params) as FindingDbRow[]
-    return rows.map(toFinding)
+    let findings = rows.map(toFinding)
+    if (options?.harness !== undefined && options.harness !== '') {
+      // One rule in both halves of the envelope (review): the request folds
+      // the way derived values are stamped (`cursor-agent` is `cursor`).
+      const want = normalizeHarnessName(options.harness)
+      findings = findings.filter((finding) => {
+        const have = (finding as { harness?: unknown }).harness
+        return typeof have === 'string' && normalizeHarnessName(have) === want
+      })
+    }
+    return findings
+  }
+
+  /** Sessions recorded per canonical harness (issue #191 review M2). Narrow
+   * columns only — no payload touch — so coverage checks stay cheap. */
+  countSessionsByHarness(): Record<string, number> {
+    const rows = this.db
+      .prepare('SELECT harness, COUNT(*) AS n FROM session GROUP BY harness')
+      .all() as { harness: string; n: number }[]
+    const counts: Record<string, number> = {}
+    for (const row of rows) counts[row.harness] = row.n
+    return counts
+  }
+
+  /** Canonical harness of one stored session, or undefined when absent. */
+  sessionHarness(sessionId: string): string | undefined {
+    const row = this.db
+      .prepare('SELECT harness FROM session WHERE session_id = ?')
+      .get(sessionId) as { harness: string } | undefined
+    return row?.harness
+  }
+
+  /**
+   * Sessions whose context window no source reported (issue #191, condition
+   * 3): the count that keeps a suppressed-default findings list from reading
+   * as "all clear". Reads the provenance the session builder persists
+   * (`payload.context.contextLimitSource`); legacy payloads without it are
+   * not counted either way.
+   */
+  countUnknownWindowSessions(harness?: string): number {
+    const conditions = [`json_extract(payload, '$.context.contextLimitSource') = 'default'`]
+    const params: string[] = []
+    if (harness !== undefined && harness !== '') {
+      conditions.push('harness = ?')
+      params.push(normalizeHarnessName(harness))
+    }
+    const row = this.db
+      .prepare(`SELECT COUNT(*) AS n FROM session WHERE ${conditions.join(' AND ')}`)
+      .get(...params) as { n: number } | undefined
+    return row?.n ?? 0
   }
 
   /** Delete one finding by id. */
