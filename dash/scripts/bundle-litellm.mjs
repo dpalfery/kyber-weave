@@ -1,6 +1,5 @@
 import { writeFileSync, mkdirSync } from 'fs'
-import { dirname, join } from 'path'
-import { fileURLToPath } from 'url'
+import { pricingDataDir, snapshotPath, fallbackPath } from './pricing-artifact-paths.mjs'
 
 // Pricing sources, in priority order:
 //   1. LiteLLM        - broad, maintained, tracks provider list prices.
@@ -21,10 +20,7 @@ const LITELLM_URL = 'https://raw.githubusercontent.com/BerriAI/litellm/main/mode
 const MODELS_DEV_URL = 'https://models.dev/api.json'
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/models'
 
-const __dirname = dirname(fileURLToPath(import.meta.url))
-const dataDir = join(__dirname, '..', 'src', 'pricing', 'data')
-const snapshotPath = join(dataDir, 'litellm-snapshot.json')
-const fallbackPath = join(dataDir, 'pricing-fallback.json')
+const dataDir = pricingDataDir
 
 // models.dev provider ids that are the actual model MAKERS (publish official
 // list prices), as opposed to gateways/resellers (openrouter, nano-gpt, vercel,
@@ -63,13 +59,18 @@ const MANUAL_ENTRIES = {
   // Regression restore (#229 review): LiteLLM now ships only prefixed keys
   // (e.g. openrouter/moonshotai/kimi-k2-thinking); Pass 2 strips one segment,
   // leaving moonshotai/kimi-k2-thinking, so bare kimi-k2-thinking and the
-  // kimi-auto/kimi-code aliases resolve null. Rates from prior bundled snapshot.
+  // kimi-auto/kimi-code aliases resolve null. Rescued prior value; see
+  // pricing-provenance.json.
   'kimi-k2-thinking':       [6e-7, 2.5e-6, null, 1.5e-7, null],
-  // Same refresh dropped the dated Opus 4 id; advisor/parser fixtures still cite it.
+  // Same refresh dropped the dated Opus 4 id and the bare claude-opus-4 row;
+  // restore both so the curated alias claude-4-opus → claude-opus-4 fires and
+  // advisor/parser fixtures that cite the dated id keep pricing. Official
+  // Anthropic Opus 4 list rates ($15/$75); see pricing-provenance.json.
+  'claude-opus-4':          [15e-6, 75e-6, 18.75e-6, 1.5e-6, null],
   'claude-opus-4-20250514': [15e-6, 75e-6, 18.75e-6, 1.5e-6, null],
   // xAI reports grok-latest in modelUsage; LiteLLM carries only ~x-ai/grok-latest
   // (Pass 2 does not peel to bare grok-latest), so chooseAuthoritativeModel
-  // falls back to summary grok-build. Mirror the OpenRouter/xAI latest rates.
+  // falls back to summary grok-build. See pricing-provenance.json.
   'grok-latest':            [2e-6, 6e-6, null, 5e-7, null],
 }
 
@@ -94,9 +95,23 @@ for (const [name, entry] of entries) {
   const val = toVal(entry)
   if (val) snapshot[name] = val
 }
-// Pass 2: prefixed entries - store full key + stripped (first-write-wins)
-for (const [name, entry] of entries) {
-  if (!name.includes('/')) continue
+// Pass 2: prefixed entries — full key always stored; stripped bare keys prefer
+// first-party makers (anthropic/openai/…) over gateways/resellers (snowflake/,
+// deepinfra/, openrouter/, …) so a reseller row cannot own a canonical bare id.
+const LITELLM_FIRST_PARTY_PREFIX = new Set([
+  'openai', 'anthropic', 'google', 'vertex_ai', 'mistral', 'deepseek',
+  'xai', 'minimax', 'moonshot', 'moonshotai', 'zhipuai', 'alibaba',
+  'cohere', 'perplexity', 'meta', 'meta_llama',
+])
+const prefixedEntries = entries
+  .filter(([name]) => name.includes('/'))
+  .map(([name, entry]) => {
+    const provider = name.slice(0, name.indexOf('/'))
+    const firstParty = LITELLM_FIRST_PARTY_PREFIX.has(provider) ? 0 : 1
+    return { name, entry, firstParty }
+  })
+  .sort((a, b) => a.firstParty - b.firstParty || a.name.localeCompare(b.name))
+for (const { name, entry } of prefixedEntries) {
   const val = toVal(entry)
   if (!val) continue
   if (!snapshot[name]) snapshot[name] = val
