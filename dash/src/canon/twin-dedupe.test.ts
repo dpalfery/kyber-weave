@@ -240,7 +240,8 @@ describe('dedupeTwinTurns surplus file content (review)', () => {
   }
   it('merges content keys from surplus file rows instead of dropping them (review)', () => {
     // The 2×-per-turn file shape (issue #232): one OTLP turn, two file rows
-    // carrying complementary halves. Totals stay OTLP-only, but no content\n    // key vanishes with the dropped duplicate.
+    // carrying complementary halves. Totals stay OTLP-only, but no content
+    // key vanishes with the dropped duplicate.
     const out = dedupeTwinTurns([
       llmInvoke('otel-1', {
         source: 'claude-code-desktop',
@@ -272,7 +273,7 @@ describe('dedupeTwinTurns surplus file content (review)', () => {
   })
 
   it('bounds clusters by span, not just adjacency (review)', () => {
-    // A file row chained more than the skew past every OTLP row is not\n    // provably the same turn: it is kept rather than merged into a\n    // cluster it only touches through other file rows.
+    // A file row chained more than the skew past the cluster start is not provably the same turn: kept rather than merged and dropped.
     const at = (spanId: string, source: string, harness: string, timestamp: string) =>
       llmInvoke(spanId, { source, harness, timestamp, tokens: { ...same }, content: {} })
     const out = dedupeTwinTurns([
@@ -282,5 +283,75 @@ describe('dedupeTwinTurns surplus file content (review)', () => {
     ])
 
     expect(out.map((r) => r.spanId)).toEqual(['otel-0', 'synth:far'])
+  })
+})
+
+describe('dedupeTwinTurns — matching must identify a turn (review round 2)', () => {
+  it('never merges identical counters reported by two different sessions', () => {
+    // Session b contributes a file row only — no OTel twin for it anywhere.
+    // Keying on counters alone would drop it as the file half of a pair with
+    // session a's OTel row, taking its content with it.
+    const out = dedupeTwinTurns([
+      llmInvoke('otel-a', { sessionId: 'session-a', content: {} }),
+      llmInvoke('synth:b', {
+        sessionId: 'session-b',
+        source: 'codeburn/claude-desktop',
+        content: { system_prompt: 'from-b' },
+        parts: [{ part: 'system_prompt', text: 'from-b' }],
+      }),
+    ])
+
+    expect(out).toHaveLength(2)
+    const kept = out.find((r) => r.spanId === 'synth:b')
+    expect(kept).toBeDefined()
+    expect(kept!.content.system_prompt).toBe('from-b')
+  })
+
+  it('bounds a cluster by total span so adjacent pairs cannot chain', () => {
+    // The file row is 50 s from the second OTel row but 100 s from the first.
+    // Bounding only each step chains them into one cluster and hands the file's
+    // content to the row 100 s away while dropping the file row itself.
+    const at = (seconds: number) => new Date(Date.parse('2026-09-23T22:43:53.540Z') + seconds * 1000).toISOString()
+    const out = dedupeTwinTurns([
+      llmInvoke('otel-0', { timestamp: at(0), content: {} }),
+      llmInvoke('otel-1', { timestamp: at(50), content: {} }),
+      llmInvoke('synth:late', {
+        timestamp: at(100),
+        source: 'codeburn/claude-desktop',
+        content: { system_prompt: 'late' },
+        parts: [{ part: 'system_prompt', text: 'late' }],
+      }),
+    ])
+
+    // No pair is provable, so nothing is dropped: all three rows survive with
+    // their own content.
+    expect(out).toHaveLength(3)
+    expect(out.find((r) => r.spanId === 'synth:late')!.content.system_prompt).toBe('late')
+    expect(out.find((r) => r.spanId === 'otel-0')!.content).toEqual({})
+  })
+
+  it('keeps the content of surplus file rows instead of discarding it', () => {
+    // Issue #232: file rows arrive 2x per turn, so donors outnumber the
+    // content-less OTel rows. Both file rows carry different text; neither may
+    // be dropped on the floor.
+    const out = dedupeTwinTurns([
+      llmInvoke('otel-only', { content: {} }),
+      llmInvoke('synth:one', {
+        source: 'codeburn/claude-desktop',
+        content: { system_prompt: 'first' },
+        parts: [{ part: 'system_prompt', text: 'first' }],
+      }),
+      llmInvoke('synth:two', {
+        source: 'codeburn/claude-desktop',
+        timestamp: '2026-09-23T22:43:55.540Z',
+        content: { conversation_history: 'second' },
+        parts: [{ part: 'conversation_history', text: 'second' }],
+      }),
+    ])
+
+    // Counters are still counted once — one keeper row survives.
+    expect(out).toHaveLength(1)
+    // But neither file row's content was thrown away with it.
+    expect(out[0]!.content).toMatchObject({ system_prompt: 'first', conversation_history: 'second' })
   })
 })

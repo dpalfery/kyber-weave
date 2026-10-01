@@ -687,31 +687,6 @@ export interface FindingsPage {
   unknownWindowSessions: number
 }
 
-/** One accumulated findings page, keyed by the offset it was fetched at. */
-export interface FindingsPageAcc {
-  offset: number
-  rows: KyberFinding[]
-}
-
-/**
- * Accumulate one fetched page (issue #191 review M1): every page including
- * the first lands in the accumulator, so loading more can never drop page 1.
- * A refetch of an already-held offset replaces nothing and appends nothing.
- */
-export function accumulateFindingsPage(
-  pages: readonly FindingsPageAcc[],
-  offset: number,
-  rows: readonly KyberFinding[],
-): FindingsPageAcc[] {
-  if (pages.some((page) => page.offset === offset)) return [...pages]
-  return [...pages, { offset, rows: [...rows] }]
-}
-
-/** Flatten accumulated pages in offset order. Pure, so the paging contract is unit-testable. */
-export function flattenFindingsPages(pages: readonly FindingsPageAcc[]): KyberFinding[] {
-  return [...pages].sort((a, b) => a.offset - b.offset).flatMap((page) => page.rows)
-}
-
 export async function fetchFindings(opts?: {
   runId?: string
   sessionId?: string

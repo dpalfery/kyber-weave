@@ -2200,6 +2200,16 @@ export class KyberBridge {
   }
 
   /**
+   * Whether the stored rollups cover every harness the store actually holds.
+   * Both sides are canonical names, so `cursor-agent`'s rollup covers a session
+   * row stamped `cursor-agent`.
+   */
+  private hasRollupForEveryStoredHarness(rollups: readonly HarnessRollupRow[]): boolean {
+    const built = new Set(rollups.map((rollup) => normalizeHarnessName(rollup.harness)))
+    return this.store!.listHarnesses().every((harness) => built.has(harness))
+  }
+
+  /**
    * Sessions whose context window no source reported, scoped the way the
    * findings are: the selected run's sessions, the selected session, or the
    * harness/workspace scope (issue #191, condition 3). An unscoped count on

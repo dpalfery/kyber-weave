@@ -5,10 +5,7 @@ import {
   fetchHarnesses,
   fetchRuns,
   fetchFindings,
-  accumulateFindingsPage,
-  flattenFindingsPages,
   type FindingsPage,
-  type FindingsPageAcc,
   type KyberHarnessSummary,
   type KyberFinding,
 } from '../lib/kyberApi.js'
@@ -82,6 +79,54 @@ function isObservedHarness(harness: string): boolean {
 /** Page size for the workspace findings browser (issue #191). */
 export const FINDINGS_PAGE_SIZE = 25
 
+/** One stored page of the browser, tagged with the filter scope it belongs to. */
+export type AccumulatedPage = { scope: string; offset: number; rows: KyberFinding[] }
+
+/**
+ * The next accumulated-page list after a page arrives.
+ *
+ * The first page is stored like any other. Skipping offset zero is what made
+ * "Load more" replace the list rather than extend it: page one never entered
+ * `appended`, so advancing the offset left nothing to extend and the rendered
+ * rows collapsed to the newly fetched page alone. Re-storing the same page is a
+ * no-op, which is what keeps a refetch from duplicating it.
+ */
+export function nextAccumulated(
+  pages: readonly AccumulatedPage[],
+  scope: string,
+  offset: number,
+  rows: readonly KyberFinding[],
+): AccumulatedPage[] {
+  if (pages.some((page) => page.scope === scope && page.offset === offset)) return [...pages]
+  return [...pages, { scope, offset, rows: [...rows] }]
+}
+
+/**
+ * The rows the browser renders: every page already stored for `scope`, in
+ * offset order.
+ *
+ * The first page is stored like any other. Treating it specially is what made
+ * "Load more" replace the list rather than extend it — page 1 was never
+ * accumulated, so the moment the offset left zero the rendered rows collapsed
+ * to the newly fetched page alone.
+ *
+ * Tagging each page with its scope stops a page fetched under a previous
+ * harness or detector from being re-appended after the filter changes.
+ * `current` covers the window before the effect has stored the first page,
+ * which is also the only thing that exists during static render.
+ */
+export function browserRows(
+  pages: readonly AccumulatedPage[],
+  scope: string,
+  offset: number,
+  current: readonly KyberFinding[] | undefined,
+): KyberFinding[] {
+  const stored = pages.filter((page) => page.scope === scope).sort((a, b) => a.offset - b.offset)
+  const accumulated = stored.flatMap((page) => page.rows)
+  const firstPageUnstored = offset === 0 && current !== undefined && !stored.some((page) => page.offset === 0)
+  return firstPageUnstored ? [...current, ...accumulated] : accumulated
+}
+
 /**
  * Renders the Context Doctor landing page with workspace findings and a
  * per-harness diagnostic scorecard.
@@ -97,16 +142,19 @@ export function ContextDoctor({
   const [baseline, setBaseline] = useState('none')
   const [detectorFilter, setDetectorFilter] = useState<string | undefined>(undefined)
   const [harnessFilter, setHarnessFilter] = useState<string | undefined>(undefined)
-  // Offset paging (issue #191): Load more advances `offset` and every
-  // fetched page — including the first — accumulates, so the visible set
-  // only ever grows (review M1).
+  // Offset paging (issue #191): Load more advances `offset` and appends the
+  // next page instead of refetching a growing prefix.
   const [offset, setOffset] = useState(0)
-  const [pages, setPages] = useState<FindingsPageAcc[]>([])
+  const [appended, setAppended] = useState<AccumulatedPage[]>([])
+
+  // Every page is stored under the scope it was fetched for, including the
+  // first, so advancing the offset extends the list instead of replacing it.
+  const browseScope = `${detectorFilter ?? ''}|${harnessFilter ?? ''}`
 
   const resetBrowse = (update: () => void) => {
     update()
     setOffset(0)
-    setPages([])
+    setAppended([])
   }
 
   // Query live harnesses
@@ -149,12 +197,12 @@ export function ContextDoctor({
     initialData: offset === 0 && !filtersActive ? initialFindings : undefined,
   })
 
-  // Accumulate every page as it arrives; the helper keeps a refetch from
-  // appending the same offset twice.
+  // Accumulate each page as it arrives, first page included. The guard keeps a
+  // refetch from storing the same page twice.
   useEffect(() => {
     if (!pageData) return
-    setPages((prev) => accumulateFindingsPage(prev, offset, pageData.findings))
-  }, [pageData, offset])
+    setAppended((prev) => nextAccumulated(prev, browseScope, offset, pageData.findings))
+  }, [pageData, offset, browseScope])
 
   const harnesses = useMemo((): ScorecardMatrixRow[] => {
     const fromRollups = (harnessesData ?? []).filter((h) => isObservedHarness(h.harness))
@@ -168,13 +216,11 @@ export function ContextDoctor({
   }, [harnessesData, runsData])
 
   const headline: KyberFinding[] = headlineData?.findings ?? []
-  // Accumulated pages win once any arrived; otherwise the first page renders
-  // straight from the query (effects do not run in static render, where only
-  // the first page exists).
-  const browserFindings: KyberFinding[] = useMemo(() => {
-    if (pages.length > 0) return flattenFindingsPages(pages)
-    return offset === 0 ? (pageData?.findings ?? []) : []
-  }, [pages, pageData, offset])
+  // Every page fetched so far for this filter scope, oldest first.
+  const browserFindings: KyberFinding[] = useMemo(
+    () => browserRows(appended, browseScope, offset, pageData?.findings),
+    [appended, browseScope, offset, pageData],
+  )
   const browserTotal = pageData?.total ?? 0
   const detectorCounts = pageData?.detectorCounts ?? {}
   const unknownWindowSessions = pageData?.unknownWindowSessions ?? 0
