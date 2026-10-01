@@ -4,7 +4,7 @@ title: Kyber-Weave Plan Inventory
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-09-29
+last-reviewed: 2026-09-30
 ---
 
 # Kyber-Weave Plan Inventory
@@ -17,12 +17,15 @@ A plan is open only while it is built. The pull request that finishes it archive
 
 ## Active Plans
 
+None.
+
 Pipeline T9 and spine S-docs harvested 2026-09-13 into [dash/architecture.md](../dash/architecture.md), [dash/runbook.md](../dash/runbook.md), [dash/telemetry-inventory.md](../dash/telemetry-inventory.md), [ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md), and [ADR 0018](../adr/0018-kyberdash-content-retention-purge.md). ADRs 0012–0015 remain the spine harvest (0014 notes that `kyber purge-content` was not shipped). Residual risks (T8 live-source coverage, findings client-side harness filter) live on the archived plans — they are not shipped claims.
 
 ## Archived Plans
 
 | Plan | Status | Date | Archive Date | Canonical Docs / Harvested ADRs | Goal |
 |---|---|---|---|---|---|
+| [2026-09-30-kyberdash-quarantine-problems-pagination.md](../archive/plans/2026-09-30-kyberdash-quarantine-problems-pagination.md) | Complete | 2026-09-30 | 2026-09-30 | [dash/architecture.md](../dash/architecture.md), [dash/runbook.md](../dash/runbook.md); no ADR | Fix issue #192: KyberDash quarantine and problems pagination, restore missing metadata columns, fix copilot_chat/gen_ai attribution. Complete: test-first mode, 3,703/3,703 tests pass. |
 | [2026-09-29-release-checksums-unsigned-windows.md](../archive/plans/2026-09-29-release-checksums-unsigned-windows.md) | Complete | 2026-09-29 | 2026-09-29 | [ADR 0027](../adr/0027-release-integrity-checksums-signing-deferred.md), [docs/distribution.md](../distribution.md), [docs/install.md](../install.md), [docs/dash/runbook.md](../dash/runbook.md) | Address [issue #132](https://github.com/dpalfery/kyber-weave/issues/132) by deferring Authenticode signing. Make the release's `SHA256SUMS.txt` cover an explicit list of 20 assets and stay self-consistent, with a fail-closed pre-publish check and a post-publish asset detection step. Document the SmartScreen steps and hash verification on Windows, macOS, and Linux, and the unsigned state accurately. Record the deferral as ADR 0027. Development mode: standard. Tasks T1–T8 council APPROVE (2026-09-29). Post-council technical debt (T9 bash 3.2 robustness, T10/T11 docs detective/preventive accuracy and README.md stale reference fix) verified through task audits and full gate suite re-run; no second council pass. |
 | [2026-09-29-glib-variant-str-iter-backport.md](../archive/plans/2026-09-29-glib-variant-str-iter-backport.md) | Archived; PR CI passed | 2026-09-29 | 2026-09-29 | [dash/runbook.md](../dash/runbook.md), [tauri-glib-upstream-removal.md](../todo/tauri-glib-upstream-removal.md); no ADR — the backport decision and provenance are in the plan and vendor README | Backport the upstream GLib `VariantStrIter` fix into the tray's Linux dependency graph, verify path resolution, and add Linux CI coverage. [PR #177 CI](https://github.com/dpalfery/kyber-weave/actions/runs/36635422504) passed; alert #68 stays open until merge. |
 | [2026-09-29-mcp-docs-corpus-provenance.md](../archive/plans/2026-09-29-mcp-docs-corpus-provenance.md) | Complete | 2026-09-29 | 2026-09-29 | [docgraph/mcp-runbook.md](../docgraph/mcp-runbook.md), root [AGENTS.md](../../AGENTS.md), [src/KyberWeave.Mcp/AGENTS.md](../../src/KyberWeave.Mcp/AGENTS.md); no ADR | Disclose MCP docs corpus provenance (root, HEAD+dirty, document count) on every docs_* response, add docs_status, optional --expect-root refuse-to-serve, and AGENTS.md agent check. Development mode: test-first. Complete: FullyQualifiedName~Mcp 80/80, docs validate zero findings, 2026-09-29. Fixes [issue #162](https://github.com/dpalfery/kyber-weave/issues/162). |

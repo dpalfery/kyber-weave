@@ -17,7 +17,6 @@ import {
   toRunRow,
   toHarnessRollupRow,
   toExecutionRow,
-  problemIdentity,
   type FindingDbRow,
   type PredictionDbRow,
   type RunDbRow,
@@ -123,6 +122,7 @@ export type QuarantineRow = {
   namespaces: string | null
   reason: string | null
   seen_at: number | string | null
+  timestamp?: string | null
 }
 
 export type ProblemRow = {
@@ -134,6 +134,7 @@ export type ProblemRow = {
   message: string
   at: number | string | null
   harness: string | null
+  timestamp?: string | null
 }
 
 export type ParsedSummary = {
@@ -316,6 +317,7 @@ interface QuarantineDbRow {
   namespaces?: string | null
   reason?: string | null
   seen_at?: number | string | null
+  timestamp?: string | null
 }
 
 interface ProblemDbRow {
@@ -326,6 +328,7 @@ interface ProblemDbRow {
   code: string
   message: string
   at?: number | string | null
+  timestamp?: string | null
   harness?: string | null
   location?: string | null
 }
@@ -1571,50 +1574,54 @@ export class KyberBridge {
     }
   }
 
-  getQuarantine(limit = 200): QuarantineRow[] {
+  getQuarantine(limit = 200, offset = 0): QuarantineRow[] {
     const db = this.getDb()
-    const results: QuarantineRow[] = []
-    const seenSpanIds = new Set<string>()
+    if (!this.hasTable(db, 'quarantine')) {
+      return []
+    }
 
-    // 1. Primary: canon.db
-    if (this.hasTable(db, 'quarantine')) {
-      try {
-        let rows: QuarantineDbRow[] = []
-        try {
-          rows = db!
-            .prepare(
-              'SELECT span_id, source, name, namespaces, reason, seen_at ' +
-                'FROM quarantine ORDER BY seen_at DESC'
-            )
-            .all() as unknown as QuarantineDbRow[]
-        } catch {
-          rows = db!
-            .prepare(
-              'SELECT span_id, namespaces, reason FROM quarantine ORDER BY span_id'
-            )
-            .all() as unknown as QuarantineDbRow[]
-        }
-        for (const r of rows) {
-          if (!r.span_id || seenSpanIds.has(r.span_id)) continue
-          seenSpanIds.add(r.span_id)
-          results.push({
-            span_id: r.span_id,
-            source: r.source ?? null,
-            name: r.name ?? null,
-            namespaces: r.namespaces ?? null,
-            reason: r.reason ?? null,
-            seen_at: r.seen_at ?? null,
-          })
-        }
-      } catch (err) {
-        console.warn('[KyberBridge] Failed querying quarantine from canon.db:', err)
+    const safeLimit = typeof limit === 'number' && Number.isFinite(limit) ? (limit <= 0 ? -1 : Math.floor(limit)) : 200
+    const safeOffset = typeof offset === 'number' && Number.isFinite(offset) && offset >= 0 ? Math.floor(offset) : 0
+
+    const cols = new Set(
+      (db!.prepare("PRAGMA table_info('quarantine')").all() as Array<{ name: string }>).map((c) => c.name),
+    )
+
+    const selectCols = ['span_id', 'namespaces', 'reason']
+    selectCols.push(cols.has('source') ? 'source' : 'NULL AS source')
+    selectCols.push(cols.has('name') ? 'name' : 'NULL AS name')
+    selectCols.push(cols.has('seen_at') ? 'seen_at' : 'NULL AS seen_at')
+    selectCols.push(cols.has('timestamp') ? 'timestamp' : 'NULL AS timestamp')
+
+    const orderCol = cols.has('timestamp') && cols.has('seen_at')
+      ? 'COALESCE(timestamp, seen_at)'
+      : cols.has('timestamp')
+        ? 'timestamp'
+        : cols.has('seen_at')
+          ? 'seen_at'
+          : 'span_id'
+
+    const sql = `SELECT ${selectCols.join(', ')} FROM quarantine ORDER BY ${orderCol} DESC, span_id DESC LIMIT ? OFFSET ?`
+
+    try {
+      const rows = db!.prepare(sql).all(safeLimit, safeOffset) as unknown as QuarantineDbRow[]
+      const results: QuarantineRow[] = []
+      for (const r of rows) {
+        results.push({
+          span_id: r.span_id,
+          source: r.source ?? null,
+          name: r.name ?? null,
+          namespaces: r.namespaces ?? null,
+          reason: r.reason ?? null,
+          seen_at: r.seen_at ?? r.timestamp ?? null,
+          timestamp: r.timestamp ?? (typeof r.seen_at === 'number' ? new Date(r.seen_at * 1000).toISOString() : (r.seen_at ? String(r.seen_at) : null)),
+        })
       }
+      return results
+    } catch (err) {
+      console.warn('[KyberBridge] Failed querying quarantine from canon.db:', err)
+      return []
     }
-
-    if (typeof limit === 'number' && limit > 0) {
-      return results.slice(0, Math.floor(limit))
-    }
-    return results
   }
 
   /** Count every quarantine row without applying the inspector's default page limit. */
@@ -1634,59 +1641,55 @@ export class KyberBridge {
    * Return recorded validation errors, token reconciliation mismatches, and anomalies.
    * Reads canonical diagnostics, deduplicated by the store's problem identity.
    */
-  getProblems(limit = 200): ProblemRow[] {
+  getProblems(limit = 200, offset = 0): ProblemRow[] {
     const db = this.getDb()
-    const results: ProblemRow[] = []
-    const seenKeys = new Set<string>()
-
-    // 1. Primary: canon.db ('problem' or 'problems' table)
-    const canonTable = this.hasTable(db, 'problem')
-      ? 'problem'
-      : this.hasTable(db, 'problems')
-        ? 'problems'
+    const canonTable = this.hasTable(db, 'problems')
+      ? 'problems'
+      : this.hasTable(db, 'problem')
+        ? 'problem'
         : null
 
-    if (canonTable) {
-      try {
-        let rows: ProblemDbRow[] = []
-        try {
-          rows = db!
-            .prepare(
-              `SELECT id, session_id, span_id, severity, code, message, at, harness FROM ${canonTable} ORDER BY id DESC`
-            )
-            .all() as unknown as ProblemDbRow[]
-        } catch {
-          rows = db!
-            .prepare(
-              `SELECT id, span_id, severity, code, message, location FROM ${canonTable} ORDER BY id DESC`
-            )
-            .all() as unknown as ProblemDbRow[]
-        }
+    if (!canonTable) {
+      return []
+    }
 
-        for (const r of rows) {
-          const key = problemIdentity(r.span_id ?? null, r.code, r.location ?? null, r.id)
-          if (seenKeys.has(key)) continue
-          seenKeys.add(key)
-          results.push({
-            id: r.id,
-            session_id: r.session_id ?? null,
-            span_id: r.span_id ?? null,
-            severity: r.severity,
-            code: r.code,
-            message: r.message,
-            at: r.at ?? null,
-            harness: r.harness ?? r.location ?? null,
-          })
-        }
-      } catch (err) {
-        console.warn('[KyberBridge] Failed querying problems from canon.db:', err)
+    const safeLimit = typeof limit === 'number' && Number.isFinite(limit) ? (limit <= 0 ? -1 : Math.floor(limit)) : 200
+    const safeOffset = typeof offset === 'number' && Number.isFinite(offset) && offset >= 0 ? Math.floor(offset) : 0
+
+    const cols = new Set(
+      (db!.prepare(`PRAGMA table_info(${canonTable})`).all() as Array<{ name: string }>).map((c) => c.name),
+    )
+
+    const selectCols = ['id', 'severity', 'code', 'message']
+    selectCols.push(cols.has('session_id') ? 'session_id' : 'NULL AS session_id')
+    selectCols.push(cols.has('span_id') ? 'span_id' : 'NULL AS span_id')
+    selectCols.push(cols.has('harness') ? 'harness' : 'NULL AS harness')
+    selectCols.push(cols.has('at') ? 'at' : 'NULL AS at')
+    selectCols.push(cols.has('timestamp') ? 'timestamp' : 'NULL AS timestamp')
+
+    const sql = `SELECT ${selectCols.join(', ')} FROM ${canonTable} ORDER BY id DESC LIMIT ? OFFSET ?`
+
+    try {
+      const rows = db!.prepare(sql).all(safeLimit, safeOffset) as unknown as ProblemDbRow[]
+      const results: ProblemRow[] = []
+      for (const r of rows) {
+        results.push({
+          id: r.id,
+          session_id: r.session_id ?? null,
+          span_id: r.span_id ?? null,
+          severity: r.severity,
+          code: r.code,
+          message: r.message,
+          at: r.at ?? r.timestamp ?? null,
+          timestamp: r.timestamp ?? (typeof r.at === 'number' ? new Date(r.at * 1000).toISOString() : (r.at ? String(r.at) : null)),
+          harness: r.harness ?? null,
+        })
       }
+      return results
+    } catch (err) {
+      console.warn('[KyberBridge] Failed querying problems from canon.db:', err)
+      return []
     }
-
-    if (typeof limit === 'number' && limit > 0) {
-      return results.slice(0, Math.floor(limit))
-    }
-    return results
   }
 
   /** Count every problem row without applying the inspector's default page limit. */
@@ -1695,10 +1698,10 @@ export class KyberBridge {
       return this.store.countProblems()
     }
     const db = this.getDb()
-    const table = this.hasTable(db, 'problem')
-      ? 'problem'
-      : this.hasTable(db, 'problems')
-        ? 'problems'
+    const table = this.hasTable(db, 'problems')
+      ? 'problems'
+      : this.hasTable(db, 'problem')
+        ? 'problem'
         : null
     if (table === null) return 0
     const row = db!.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as

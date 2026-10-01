@@ -54,6 +54,13 @@ export const geminiAdapter: HarnessAdapter = {
   namespaces: ['gen_ai', ...GEMINI_VENDOR_NAMESPACES],
 
   detect(span) {
+    if (
+      hasNamespace(span.attributes, ['copilot_chat', 'github.copilot', 'copilot']) ||
+      span.name.startsWith('copilot_chat') ||
+      span.name.startsWith('copilot')
+    ) {
+      return 0
+    }
     let score = 0
     if (
       hasNamespace(span.attributes, GEMINI_VENDOR_NAMESPACES) ||

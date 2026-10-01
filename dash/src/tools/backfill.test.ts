@@ -81,6 +81,9 @@ describe('renormalizeRecords — retained raw evidence', () => {
       spanId: NOISE_SPAN,
       namespaces: ['gen_ai'],
       reason: 'non-model span',
+      source: 'historical-export',
+      name: 'GlobalHttpApi.health',
+      timestamp: '2026-01-01T00:00:00.000Z',
     })
     // Noise is gone, and the retained span is now attributed from its Copilot
     // evidence. The copilot-misattributed session built before reclassify is
