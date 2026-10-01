@@ -1032,9 +1032,16 @@ describe('GET /api/kyber/run/:id (issue #183)', () => {
       // Measured scorecard: the sessions exported cache counters, so the
       // cache dimension must not claim otherwise.
       expect(body.scorecard.cacheEfficiency?.value).toBeCloseTo(1000 / 3000, 4)
+<<<<<<< HEAD
       // No turn reports a context window, so pressure is unmeasurable —
       // never a ratio against the guessed default (issue #181, honest
       // unobservability applies at run scope exactly as at harness scope).
+=======
+      // No session in this run reported a context window, so context hygiene is
+      // unmeasurable rather than zero (issues #181/#191). A null figure with the
+      // reason attached is the honest reading; a defaulted percentage would read
+      // as measured.
+>>>>>>> origin/fix/dash-181-182-191-findings-quality
       expect(body.scorecard.contextHygiene?.value).toBeNull()
       expect(body.scorecard.contextHygiene?.reason).toMatch(/context window/i)
     } finally {

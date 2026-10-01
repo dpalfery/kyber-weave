@@ -249,9 +249,16 @@ describe('Decision D13 — Run boundary derivation', () => {
 
     const runs = store.listRuns()
     expect(runs).toHaveLength(1)
+<<<<<<< HEAD
     // Issue #182 fold: the native `claude-desktop:` key prefix is preserved
     // verbatim while the harness segment is the folded owner `claude-code` —
     // still exactly one harness segment, never `derived:X:X:`.
+=======
+    // Unified harness identity (issue #182) canonicalizes the fixture's
+    // `claude-desktop` to `claude-code`, while the native session id keeps its own
+    // client name. The two segments are therefore different names, not the #183
+    // duplication of one name, and nothing is stripped.
+>>>>>>> origin/fix/dash-181-182-191-findings-quality
     expect(runs[0]!.runId).toBe(
       'derived:claude-code:claude-desktop:12f4dea4-33da-4f71-bbda-40e48f22e553',
     )
