@@ -1009,12 +1009,11 @@ export function getModelCosts(model: string): ModelCosts | null {
   if (override) return override
 
   // Prefer an explicit alias target only when that canonical key is present in
-  // the pricing cache. After the 2026-10-01 refresh the bare `claude-opus-4`
-  // primary row is retired, so the curated alias `claude-4-opus -> claude-opus-4`
-  // does not fire here: `pricingCache.has('claude-opus-4')` is false and lookup
-  // falls through to the bundled stripped reseller key `claude-4-opus` ($5).
-  // Restoring bare `claude-opus-4` via MANUAL_ENTRIES would re-enable this arm
-  // and break the #420 / models.test contract that pins null for that id.
+  // the pricing cache. That precedence is what lets curated Cursor slugs
+  // (`claude-4-opus` → `claude-opus-4`, `claude-4.5-opus` → `claude-opus-4-5`)
+  // beat a stripped gateway row that happens to share the input spelling.
+  // When the alias target is absent, lookup falls through so a bundled key
+  // under the input spelling can still win — do not drop the has() guard.
   if (canonical !== canonicalName && withPrefix === canonicalName && pricingCache.has(canonical)) {
     return pricingCache.get(canonical)!
   }
