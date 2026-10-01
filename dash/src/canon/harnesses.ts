@@ -352,20 +352,12 @@ export function assembleRollup(
       measurability['context_pressure_median'] = classTag
       measurability['context_pressure_p95'] = classTag
     } else {
-<<<<<<< HEAD
       // Sessions exist but none names a window its pressures were measured
-=======
-// Sessions exist but none names a window its pressures were measured
->>>>>>> origin/fix/dash-181-182-191-findings-quality
       // against: say so, so an empty gauge cannot read as "all clear".
       const notMeas =
         digest.unknownWindowSessions > 0
           ? notMeasurable(
-<<<<<<< HEAD
               `No source reported a context window for ${digest.unknownWindowSessions} recorded session(s) ${forScope}; pressure is unmeasurable, not zero.`,
-=======
-              `No source reported a context window for ${digest.unknownWindowSessions} recorded session(s) in ${inScope}; pressure is unmeasurable, not zero.`,
->>>>>>> origin/fix/dash-181-182-191-findings-quality
             )
           : notMeasurable(`No measurable turns found in recorded ${inScope}.`)
       measurability['context_pressure'] = notMeas
