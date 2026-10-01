@@ -1,17 +1,18 @@
 //! Popover placement against the taskbar, panel or menu-bar edge of the monitor that owns the
 //! click. Carried from the inherited Windows tray (spec requirement 6.11) because it already
-//! handles every taskbar edge and HiDPI scaling; the tray wires it in task 8.1.
+//! uses work-area bounds and HiDPI scaling; the tray wires it in task 8.1.
 
-/// Places the popover against the taskbar / panel edge of the monitor that owns the click.
+/// Positions the popover on the monitor selected by the click anchor or cursor.
 ///
 /// `anchor` carries the event's native global desktop coordinates for monitor lookup.
-/// Every supplied `Some((x, y))` is available, including negative and zero coordinates.
+/// Every `Some((x, y))` is used as-is, including negative and zero coordinates.
 /// Callers signal an unavailable event anchor with `None`; only then is the cursor read.
-/// If the selected point does not identify a monitor, placement uses the primary monitor.
+/// If the selected point does not identify a monitor, placement tries the primary monitor.
 ///
-/// The work area already excludes the taskbar on Windows and panels on Linux, so we never
-/// need to guess their heights: the popover sits a scaled margin inside the work area,
-/// horizontally centred on the selected point and clamped to the work-area bounds.
+/// Horizontal placement starts centred on the selected point, or a fallback anchor when
+/// neither event anchor nor cursor is available, then applies a best-effort clamp using
+/// work-area bounds. Placement maintains at least a scaled margin from the left and top
+/// work-area edges; a popover that does not fit may extend beyond the right or bottom edge.
 pub fn position_popover(window: &tauri::WebviewWindow, anchor: Option<(i32, i32)>) {
     const POPOVER_WIDTH_LOGICAL: f64 = 360.0;
     const POPOVER_HEIGHT_LOGICAL: f64 = 660.0;
@@ -47,10 +48,11 @@ pub fn position_popover(window: &tauri::WebviewWindow, anchor: Option<(i32, i32)
     let max_x = (area_x + area_w - pop_w - margin).max(min_x);
     let x = (anchor_x - pop_w / 2).clamp(min_x, max_x);
 
-    // Comparing the work area with the full screen's origin and bounds reveals the taskbar
-    // edge; work-area bounds keep the popover clear of that reserved space. If the taskbar
-    // is at the top (or the anchor is in the top half with no bottom taskbar) the popover
-    // drops down from the top edge; otherwise it rises from the bottom edge.
+    // Comparing the work area with the full screen's vertical bounds identifies reserved
+    // top/bottom edges; left/right reservations do not select the opening direction. Using
+    // work-area bounds aims to keep the popover clear of reserved space when it fits with
+    // margins. It opens downward for a reserved top edge (or an anchor in the top half with
+    // no reserved bottom edge); otherwise it opens upward.
     let trimmed_top = area_y > screen_pos.y;
     let trimmed_bottom = (area_y + area_h) < (screen_pos.y + screen.height as i32);
     let anchor_in_top_half = anchor_y < screen_pos.y + (screen.height as i32) / 2;
@@ -67,7 +69,7 @@ pub fn position_popover(window: &tauri::WebviewWindow, anchor: Option<(i32, i32)
 
 /// Selects the event anchor in native global desktop coordinates, with a lazy cursor fallback.
 ///
-/// `Some` establishes availability, so negative and zero coordinates are preserved.
+/// Every `Some((x, y))` is used as-is, including negative and zero coordinates.
 /// Callers report an unavailable event anchor as `None`, the only case that invokes
 /// `cursor_position`.
 fn select_position_point(
