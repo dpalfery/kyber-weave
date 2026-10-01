@@ -11,8 +11,10 @@
 # --draft applies only when a new pull request is created; an existing one keeps its state.
 set -euo pipefail
 
+USAGE="Usage: $0 --base <branch> --title <text> --body-file <file> [--head <branch>] [--repo <owner/name>] [--draft]"
+
 usage() {
-  echo "Usage: $0 --base <branch> --title <text> --body-file <file> [--head <branch>] [--repo <owner/name>] [--draft]" >&2
+  echo "${USAGE}" >&2
   exit 2
 }
 
@@ -31,7 +33,7 @@ while [ $# -gt 0 ]; do
     --body-file) [ $# -ge 2 ] || usage; BODY_FILE="$2"; shift 2 ;;
     --repo) [ $# -ge 2 ] || usage; REPO="$2"; shift 2 ;;
     --draft) DRAFT=true; shift ;;
-    -h|--help) usage ;;
+    -h|--help) echo "${USAGE}"; exit 0 ;;
     *) echo "Error: unknown argument '$1'." >&2; usage ;;
   esac
 done
@@ -56,8 +58,9 @@ fi
 
 if [ -z "${REPO}" ]; then
   REMOTE_URL="$(git remote get-url origin 2>/dev/null || true)"
-  if [[ "${REMOTE_URL}" =~ ^(git@github\.com:|https?://([^/@]+@)?github\.com/|ssh://git@github\.com/)([^/]+)/([^/]+)$ ]]; then
-    REPO="${BASH_REMATCH[3]}/${BASH_REMATCH[4]%.git}"
+  REMOTE_URL="${REMOTE_URL%/}"
+  if [[ "${REMOTE_URL}" =~ ^(git@github\.com:|https?://([^/@]+@)?github\.com[:/]|ssh://([^/@]+@)?github\.com(:[0-9]+)?/)([^/]+)/([^/]+)$ ]]; then
+    REPO="${BASH_REMATCH[5]}/${BASH_REMATCH[6]%.git}"
   else
     echo "Error: origin '${REMOTE_URL}' is not a github.com remote; pass --repo <owner/name>." >&2
     exit 1
@@ -77,8 +80,14 @@ else
   if [ "${DRAFT}" = true ]; then
     CREATE_ARGS+=(--draft)
   fi
-  gh pr create "${CREATE_ARGS[@]}"
-  NUMBER="$(find_open_pr)"
+  # gh prints the new pull request URL; take the number from it so a lagging list query cannot
+  # report failure for a pull request that exists (a rerun would then open a duplicate).
+  CREATE_OUTPUT="$(gh pr create "${CREATE_ARGS[@]}")"
+  echo "${CREATE_OUTPUT}"
+  NUMBER="$(printf '%s\n' "${CREATE_OUTPUT}" | tail -n 1 | sed -n 's#.*/pull/\([0-9][0-9]*\)$#\1#p')"
+  if [ -z "${NUMBER}" ]; then
+    NUMBER="$(find_open_pr)"
+  fi
   if [ -z "${NUMBER}" ]; then
     echo "Error: the pull request from '${HEAD_BRANCH}' into '${BASE_BRANCH}' was not found after creation." >&2
     exit 1

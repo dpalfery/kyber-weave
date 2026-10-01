@@ -41,12 +41,15 @@ If required data cannot be obtained from the named tool, state exactly what is m
 
 | Skill status | GitHub signal |
 |---|---|
-| `resolved` | thread `isResolved` true, or `outdated` and superseded by a later commit |
-| `responded` | latest reply author is us and thread not resolved but needs no action |
-| `unanswered` | no reply from us in the thread |
-| `needs review` | we replied, thread not resolved |
+| `resolved` | thread `isResolved` true. An `outdated` thread is not resolved: the diff lines moved, which does not show the concern was addressed, so it is classified by the rows below |
+| `unanswered` | thread not resolved and no reply from us |
+| `needs review` | thread not resolved and a comment from someone else landed after our last reply |
+| `responded` | thread not resolved and our reply is the most recent comment |
 | `automated/system` | comment author is a bot (`type: Bot`, or login ending in `[bot]`) such as `github-actions[bot]`, `dependabot[bot]`, `copilot-pull-request-reviewer[bot]` |
 | `unknown` | cannot be determined from metadata |
+
+Evaluate rows in the order `automated/system`, `resolved`, `unanswered`, `needs review`, `responded`, `unknown`;
+the first match wins, so no thread has two statuses.
 
 Bot-authored review comments that raise a real code concern (e.g. Copilot code review) are **not**
 `automated/system`. Classify as `automated/system` only when the comment is a status or

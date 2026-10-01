@@ -26,7 +26,9 @@ identified by its numeric ID.
 ## Tool map
 
 Prefer the Azure DevOps MCP server (`microsoft/azure-devops-mcp`) when it is connected and its
-write tool is available; otherwise use the `az` CLI column. Use local `git` only for local work
+write tool is available; otherwise use the `az` CLI column. This fallback is specific to this skill: the
+`pr-review-fix-comments` skill forbids `az repos` because mistakes in review-thread handling are costly,
+while opening a PR is easy to verify and correct. Use local `git` only for local work
 (branch, fetch, push). A harness may prefix MCP tool names with the name the host gave the
 server; match on the bare name below.
 

@@ -5,7 +5,8 @@ Terminology: PR = pull request, identified by PR number. Review comments live in
 ## Tool map
 
 Use Azure DevOps MCP tools (`microsoft/azure-devops-mcp`). Do not write ad hoc shell, Python,
-`az repos`, `curl`, or REST scripts for any step covered below. A harness may prefix these tool
+`az repos`, `curl`, or REST scripts for any step covered below. This ban is specific to this skill (unlike
+`create-pull-request`, which allows an `az` fallback) because a wrong thread read or write is costly to undo. A harness may prefix these tool
 names with the name the host gave the server; match on the bare name.
 
 | Step | Tool |

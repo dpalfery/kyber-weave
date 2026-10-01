@@ -105,7 +105,9 @@ Authoritative inventory for `[docs-root]/plans/`. Read before opening a plan. Op
 # [YYYY-MM-DD] [Plan title]
 
 **Status:** Draft
+
 **Date:** [YYYY-MM-DD]
+
 **Goal:** [one sentence]
 
 ## Investigation findings
@@ -123,6 +125,7 @@ Authoritative inventory for `[docs-root]/plans/`. Read before opening a plan. Op
 # ADR-[YYYY-MM-DD]: [Decision title]
 
 **Status:** Accepted
+
 **Date:** [YYYY-MM-DD]
 
 ## Decision

@@ -55,7 +55,8 @@ if ([string]::IsNullOrWhiteSpace($Repo)) {
     if ($LASTEXITCODE -ne 0) {
         throw "git remote get-url origin failed with exit code $LASTEXITCODE."
     }
-    if ($remoteUrl -match '^(?:git@github\.com:|https?://(?:[^/@]+@)?github\.com/|ssh://git@github\.com/)([^/]+)/([^/]+)$') {
+    $remoteUrl = "$remoteUrl".TrimEnd('/')
+    if ($remoteUrl -match '^(?:git@github\.com:|https?://(?:[^/@]+@)?github\.com[:/]|ssh://(?:[^/@]+@)?github\.com(?::[0-9]+)?/)([^/]+)/([^/]+)$') {
         $Repo = "$($Matches[1])/$($Matches[2] -replace '\.git$', '')"
     }
     else {
@@ -79,8 +80,16 @@ else {
         $createArguments += '--draft'
     }
 
-    Invoke-Gh $createArguments | Out-Null
-    $number = Find-OpenPullRequest
+    # gh prints the new pull request URL; take the number from it so a lagging list query cannot
+    # report failure for a pull request that exists (a rerun would then open a duplicate).
+    $createOutput = Invoke-Gh $createArguments
+    $number = $null
+    if ("$createOutput".Trim() -match '/pull/(\d+)\s*$') {
+        $number = $Matches[1]
+    }
+    if ([string]::IsNullOrWhiteSpace($number)) {
+        $number = Find-OpenPullRequest
+    }
     if ([string]::IsNullOrWhiteSpace($number)) {
         throw "The pull request from '$Head' into '$Base' was not found after creation."
     }
