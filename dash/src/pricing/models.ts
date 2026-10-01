@@ -1008,11 +1008,12 @@ export function getModelCosts(model: string): ModelCosts | null {
   const override = getPriceOverrideExact(model, withPrefix, canonicalName, canonical)
   if (override) return override
 
-  // An explicit alias for a bare (un-prefixed) model name is authoritative: it
-  // must win over a coincidental stripped reseller key of the same name. LiteLLM
-  // ships `snowflake/claude-4-opus` ($5), which the bundler strips to a bare
-  // `claude-4-opus` key; without this, that would shadow the curated alias
-  // `claude-4-opus -> claude-opus-4` ($15 official Anthropic price).
+  // Prefer an explicit alias target only when that canonical key is present in
+  // the pricing cache. That precedence is what lets curated Cursor slugs
+  // (`claude-4-opus` → `claude-opus-4`, `claude-4.5-opus` → `claude-opus-4-5`)
+  // beat a stripped gateway row that happens to share the input spelling.
+  // When the alias target is absent, lookup falls through so a bundled key
+  // under the input spelling can still win — do not drop the has() guard.
   if (canonical !== canonicalName && withPrefix === canonicalName && pricingCache.has(canonical)) {
     return pricingCache.get(canonical)!
   }

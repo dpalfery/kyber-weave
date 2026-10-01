@@ -6,7 +6,7 @@ component: KyberDash
 source-root: dash
 status: current
 owner: dpalfery
-last-reviewed: 2026-09-29
+last-reviewed: 2026-10-01
 decided-by:
   - adr/0020-kyberdash-one-time-fork
   - adr/0008-kyberdash-single-canonical-store
@@ -323,8 +323,14 @@ to the credits table.
   credits table instead of keeping a LiteLLM-derived figure at API list rates.
 - `claude-sonnet-5-5` and `gpt-6-luna` also live in `MANUAL_ENTRIES` of
   `dash/scripts/bundle-litellm.mjs` (guarded by a test), so a regeneration reproduces them. The
-  bundler writes `dash/src/data/` while the runtime reads `dash/src/pricing/data/` (follow-up F2 in
-  the [rationale](../reference/kyberdash-rationale.md)).
+  bundler writes both generated snapshots to `dash/src/pricing/data/`, which is what
+  `dash/src/pricing/models.ts` imports. `npm --prefix dash run build` runs that networked refresh
+  first; `build:cli`, Node SEA packaging, and `npm publish` (`prepublishOnly` → `build:cli`)
+  embed the committed files without re-snapshotting. Networked refresh is the explicit
+  `npm run bundle-litellm` only. See the [runbook](runbook.md#build-workflow). The gap-fill
+  file (`pricing-fallback.json`) shrank from
+  ~205 to 52 keys after the 2026-10-01 primary refresh absorbed most former fallback rows; it
+  remains a last-resort backstop, not a broad catalog.
 
 | Harness (normalized) | Priced from | Notes |
 |---|---|---|
