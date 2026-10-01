@@ -19,6 +19,7 @@ A plan is open only while it is built. The pull request that finishes it archive
 
 | Plan | Status | Date | Goal |
 |---|---|---|---|
+| [2026-10-01-pr-233-review-follow-up.md](2026-10-01-pr-233-review-follow-up.md) | Open | 2026-10-01 | Land the five kilo-code-bot findings on [PR #233](https://github.com/dpalfery/kyber-weave/pull/233) that were resolved with no fix commit: the half-applied harness normalisation on the `/api/kyber/harnesses` checkpoint join (F1), the mid-list error wedge and painted-row paging offset in the Context Doctor findings browser (F2, F3), stored pages not keyed on `total` (F4), and the `TWIN_TURN_MAX_SKEW_MS` docblock promising a step bound deleted in `a689157` (F5). F2–F4 are one task over one page state; F1's "widen `?? []` to `null`" is declined on R2 and pinned by a test; F5 is its own commit. Development mode: test-first. |
 
 Pipeline T9 and spine S-docs harvested 2026-09-13 into [dash/architecture.md](../dash/architecture.md), [dash/runbook.md](../dash/runbook.md), [dash/telemetry-inventory.md](../dash/telemetry-inventory.md), [ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md), and [ADR 0018](../adr/0018-kyberdash-content-retention-purge.md). ADRs 0012–0015 remain the spine harvest (0014 notes that `kyber purge-content` was not shipped). Residual risks (T8 live-source coverage, findings client-side harness filter) live on the archived plans — they are not shipped claims.
 
