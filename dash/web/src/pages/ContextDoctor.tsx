@@ -425,7 +425,7 @@ export function retainedEnvelope(
 export function servedOffset(pages: readonly AccumulatedPage[], scope: string): number {
   return pages
     .filter((page) => page.scope === scope)
-    .reduce((extent, page) => Math.max(extent, page.offset + page.rows.length), 0)
+    .reduce((extent, page) => (page.offset === extent ? page.offset + page.rows.length : extent), 0)
 }
 
 /**
