@@ -45,10 +45,12 @@ import type { CanonicalRecord } from './types.js'
  * tolerating that skew. Named, not inlined, so a wrong merge window is
  * traceable to one assumption instead of looking like a measurement.
  *
- * The gap bounds a cluster's total span as well as each step between
- * neighbours. Bounding only the step would be single-linkage chaining: rows
- * 50 s apart form an unbounded run that a session re-reporting identical
- * counters every 50 s would collapse into one turn.
+ * The gap bounds a cluster's total span, measured from its first row. Rows
+ * arrive time-ordered, so that span always covers the neighbour gap and a
+ * separate step bound could never fire on its own; bounding only the step
+ * would in any case be single-linkage chaining, since rows 50 s apart form
+ * an unbounded run that a session re-reporting identical counters every
+ * 50 s would collapse into one turn. See the check in `dedupeTwinTurns`.
  */
 export const TWIN_TURN_MAX_SKEW_MS = 60_000
 

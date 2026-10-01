@@ -1,3 +1,4 @@
+import { readFileSync } from 'fs'
 import { describe, expect, it } from 'vitest'
 
 import { dedupeTwinTurns } from './twin-dedupe.js'
@@ -553,5 +554,25 @@ describe('dedupeTwinTurns merged content (review)', () => {
     expect(out).toHaveLength(1)
     expect(out[0]!.content.system_prompt).toContain('first')
     expect(out[0]!.content.system_prompt).toContain('second')
+  })
+})
+
+// The clustering window is documented on the constant, not derived from the
+// loop: only the total span is bounded (the step check was removed with
+// a689157, since rows arrive time-ordered and the span always covers the
+// neighbour gap). The module is read as text so the docblock cannot promise a
+// bound the code no longer applies — a stale guarantee here is what a future
+// reader would size their reasoning off.
+describe('TWIN_TURN_MAX_SKEW_MS docblock states the bound that exists', () => {
+  // Docblock prefixes are stripped first: the claim spans ` * ` continuations, so
+  // a raw match on the source text misses it and the guard would pass on exactly
+  // the wording it exists to reject.
+  const source = readFileSync(new URL('./twin-dedupe.ts', import.meta.url), 'utf8')
+    .replace(/\n\s*\*/g, ' ')
+    .replace(/\s+/g, ' ')
+
+  it('bounds a cluster by total span and never claims a per-step bound', () => {
+    expect(source).toMatch(/total span/)
+    expect(source).not.toMatch(/step between neighbours/)
   })
 })
