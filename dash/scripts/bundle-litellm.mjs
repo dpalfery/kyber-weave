@@ -61,7 +61,11 @@ const MANUAL_ENTRIES = {
   // leaving moonshotai/kimi-k2-thinking, so bare kimi-k2-thinking and the
   // kimi-auto/kimi-code aliases resolve null. Rates from prior bundled snapshot.
   'kimi-k2-thinking':       [6e-7, 2.5e-6, null, 1.5e-7, null],
-  // Same refresh dropped the dated Opus 4 id; advisor/parser fixtures still cite it.
+  // Same refresh dropped the dated Opus 4 id and the bare claude-opus-4 row;
+  // restore both so the curated alias claude-4-opus → claude-opus-4 fires and
+  // advisor/parser fixtures that cite the dated id keep pricing. Official
+  // Anthropic Opus 4 list rates ($15/$75); see pricing-provenance.json.
+  'claude-opus-4':          [15e-6, 75e-6, 18.75e-6, 1.5e-6, null],
   'claude-opus-4-20250514': [15e-6, 75e-6, 18.75e-6, 1.5e-6, null],
   // xAI reports grok-latest in modelUsage; LiteLLM carries only ~x-ai/grok-latest
   // (Pass 2 does not peel to bare grok-latest), so chooseAuthoritativeModel

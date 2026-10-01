@@ -6,5 +6,9 @@
   "gpt-6-luna": {
     "source": "https://developers.openai.com/api/docs/pricing",
     "retrieved": "2026-09-30"
+  },
+  "claude-opus-4": {
+    "source": "LiteLLM/Anthropic official — https://platform.claude.com/docs/en/about-claude/pricing",
+    "retrieved": "2026-10-01"
   }
 }
