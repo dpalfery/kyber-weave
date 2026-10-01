@@ -1008,11 +1008,13 @@ export function getModelCosts(model: string): ModelCosts | null {
   const override = getPriceOverrideExact(model, withPrefix, canonicalName, canonical)
   if (override) return override
 
-  // An explicit alias for a bare (un-prefixed) model name is authoritative: it
-  // must win over a coincidental stripped reseller key of the same name. LiteLLM
-  // ships `snowflake/claude-4-opus` ($5), which the bundler strips to a bare
-  // `claude-4-opus` key; without this, that would shadow the curated alias
-  // `claude-4-opus -> claude-opus-4` ($15 official Anthropic price).
+  // Prefer an explicit alias target only when that canonical key is present in
+  // the pricing cache. After the 2026-10-01 refresh the bare `claude-opus-4`
+  // primary row is retired, so the curated alias `claude-4-opus -> claude-opus-4`
+  // does not fire here: `pricingCache.has('claude-opus-4')` is false and lookup
+  // falls through to the bundled stripped reseller key `claude-4-opus` ($5).
+  // Restoring bare `claude-opus-4` via MANUAL_ENTRIES would re-enable this arm
+  // and break the #420 / models.test contract that pins null for that id.
   if (canonical !== canonicalName && withPrefix === canonicalName && pricingCache.has(canonical)) {
     return pricingCache.get(canonical)!
   }

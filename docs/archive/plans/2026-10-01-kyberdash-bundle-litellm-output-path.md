@@ -14,9 +14,16 @@ development-mode: test-first
 **Status: Complete, archived 2026-10-01.** Approve-and-execute gate recorded 2026-10-01: David
 delegated plan approval to the orchestrator; the orchestrator approved this plan as written with
 no changes to decisions A1–A5. Development mode: `test-first`. Branch:
-`cursor/issue-229-bundle-litellm-path`. T1–T4 complete; code-review council APPROVE (2026-10-01).
-Durable content harvested into [dash/architecture.md](../../dash/architecture.md) (CostBlock
-published-path rules), [dash/runbook.md](../../dash/runbook.md) (build workflow), and
+`cursor/issue-229-bundle-litellm-path`. T1–T4 complete. End-of-run code-review council first pass
+**REQUEST_CHANGES** (2026-10-01): KW-REVIEW-005 (`ts-test` blocked by a pre-existing
+`migration.test.ts` DROP COLUMN failure unrelated to #229), plus a critical false-closeout that
+had claimed APPROVE / full Dash gates green, and a major finding on the `claude-4-opus` alias
+(disposition D5 below). Re-council after remediation (2026-10-01): council position
+**APPROVE-quality** (empty in-scope #229 findings); engine verdict **REQUEST_CHANGES** solely on
+KW-REVIEW-005 `ts-test` / pre-existing `migration.test.ts` DROP COLUMN (disclose, not fixed;
+reproduces on clean HEAD). Durable content harvested into
+[dash/architecture.md](../../dash/architecture.md) (CostBlock published-path rules),
+[dash/runbook.md](../../dash/runbook.md) (build workflow), and
 [reference/kyberdash-rationale.md](../../reference/kyberdash-rationale.md) (F2/full-refresh follow-ups
 closed). Archived here per `KW-DOC-LIFECYCLE-003` before `docs validate . --merge-ready`.
 
@@ -316,8 +323,18 @@ manual lookup shapes.
 | D2 | Primary removed 344 keys; fallback removed 161 keys (`/tmp/t3-key-diff.json`) | ACCEPT as authorized upstream attrition — not unexplained disappearance under Review |
 | D3 | 19 zero-rate stubs among changed primary keys (`/tmp/t3-anomalies.json`) | ACCEPT as upstream LiteLLM literals (cache-write/output/cache-read `0` fields), not “published free” product claims |
 | D4 | ≥10× input/output decreases vs HEAD (samples above) | ACCEPT as upstream LiteLLM/OpenRouter reprices |
+| D5 | Council major: alias `claude-4-opus` → missing bare `claude-opus-4` | ACCEPT as intentional post-refresh contract — see disposition below |
 
-**U11:** `claude-sonnet-5-5` = `[2e-6, 1e-5, 2.5e-6, 2e-7]`; `gpt-6-luna` = `[1e-7, 5e-7, null, 1e-8, null]` (cache-creation absent/`null` preserved). Untouched by this rework — neither U11 row nor generated JSON was edited for D1–D4.
+**D5 — `claude-4-opus` / bare `claude-opus-4` (council major, 2026-10-01 remediation).** Intentional
+post-refresh behavior, not a #229 regression and not a MANUAL restore. `models.test.ts` pins
+`getModelCosts('claude-opus-4')` to `null` and Cursor cases map `claude-4-opus` → bare
+`claude-4-opus` (the stripped $5 reseller key). `getModelCosts` prefers an alias target only when
+`pricingCache.has(canonical)`; with the bare `claude-opus-4` primary row retired, lookup falls
+through to that stripped key. Do **not** add bare `claude-opus-4` to `MANUAL_ENTRIES` (would
+break #420 / `models.test` expectations). Dated MANUAL `claude-opus-4-20250514` remains per D1.
+Alias-table / runtime lookup logic left unchanged (out of plan scope; focused tests green).
+
+**U11:** `claude-sonnet-5-5` = `[2e-6, 1e-5, 2.5e-6, 2e-7]`; `gpt-6-luna` = `[1e-7, 5e-7, null, 1e-8, null]` (cache-creation absent/`null` preserved). Untouched by this rework — neither U11 row nor generated JSON was edited for D1–D5.
 
 **`dash/src/data/`:** absent; no git status entry.
 
@@ -331,9 +348,13 @@ manual lookup shapes.
 
 Confirmed in POST primary snapshot: `kimi-k2-thinking` → `[6e-7, 2.5e-6, null, 1.5e-7, null]`; `claude-opus-4-20250514` → `[15e-6, 75e-6, 18.75e-6, 1.5e-6, null]`; `grok-latest` → `[2e-6, 6e-6, null, 5e-7, null]`.
 
-### Approved dispositions (D1–D4)
+### Approved dispositions (D1–D5)
 
-Orchestrator decisions 2026-10-01 (David-delegated gate). These four dispositions satisfy this plan’s **Review** human-confirmation requirement for unexplained disappearance, zero-rate stubs, and high-magnitude reprice; the task-reviewer must still perform a genuine review (no soft-pass).
+Orchestrator decisions 2026-10-01 (David-delegated gate) for D1–D4; D5 recorded on the same day
+during REQUEST_CHANGES remediation. D1–D4 satisfy this plan’s **Review** human-confirmation
+requirement for unexplained disappearance, zero-rate stubs, and high-magnitude reprice; D5
+disposes the council’s major alias finding without rewriting `MODEL_ALIASES` or lookup logic.
+Re-council after remediation recorded APPROVE-quality on findings (see Review below).
 
 | Id | Decision | Satisfies Review gate for |
 |---|---|---|
@@ -341,6 +362,7 @@ Orchestrator decisions 2026-10-01 (David-delegated gate). These four disposition
 | D2 | ACCEPT primary −344 / fallback −161 removals as authorized upstream attrition | Unexplained disappearance |
 | D3 | ACCEPT 19 zero-rate stubs as upstream literals (not “published free” product claims) | Zero-rate stub presented as free |
 | D4 | ACCEPT ≥10× decreases as upstream LiteLLM/OpenRouter reprices | High-magnitude reprice |
+| D5 | ACCEPT missing bare `claude-opus-4` / stripped `claude-4-opus` $5 identity as intentional post-refresh; no MANUAL restore of bare `claude-opus-4` | Council major on opus alias (not a #229 must-fix) |
 
 **RED/GREEN (test-first, cwd `dash/`):**
 
@@ -351,7 +373,21 @@ Orchestrator decisions 2026-10-01 (David-delegated gate). These four disposition
 | T3 GREEN | `npm --prefix dash run build` exit 0; digests/key counts as above; `dash/src/data/` absent; no rate-expectation edits required for this refresh |
 | T4 GREEN | Canonical docs updated; plan archived; documentation gates below |
 
-**Review:** code-review council **APPROVE** (2026-10-01). Human pricing-diff confirmation recorded as D1–D4 above. U11 rows preserved; `kimi-k2-thinking`, `claude-opus-4-20250514`, and `grok-latest` MANUAL regression restores confirmed in POST primary snapshot.
+**Review:** code-review council first pass **REQUEST_CHANGES** (2026-10-01). Findings: (1)
+critical false closeout that had claimed APPROVE / full Dash gates green; (2) major
+`claude-4-opus` → missing `claude-opus-4` (disposed as D5 — intentional post-refresh; comment
+and closeout corrected; no MANUAL / alias-table change); (3) KW-REVIEW-005 on `ts-test` from the
+known pre-existing `dash/src/canon/migration.test.ts` failure
+(`error in table refresh_run after drop column: incomplete input` on schema migration v14 → v15).
+That DROP COLUMN failure reproduces on clean HEAD, is unrelated to #229, and is **not** fixed
+here (same baseline disclosure pattern as the archived PR #233 review-follow-up plan). Human
+pricing-diff confirmation remains D1–D4; D5 added for the alias finding. U11 rows preserved;
+`kimi-k2-thinking`, `claude-opus-4-20250514`, and `grok-latest` MANUAL regression restores
+confirmed in POST primary snapshot. Re-council after remediation (2026-10-01): council position
+**APPROVE-quality** (empty in-scope #229 findings); engine verdict **REQUEST_CHANGES** solely on
+KW-REVIEW-005 `ts-test` / pre-existing `migration.test.ts` DROP COLUMN (disclose, not fixed;
+reproduces on clean HEAD). Do not claim engine APPROVE or “full Dash gates green” without that
+migration disclosure.
 
 **Documentation gates (T4 closeout):**
 
@@ -361,4 +397,8 @@ dotnet run --project src/KyberWeave.Cli --no-build -c Release -- docs drift .
 dotnet run --project src/KyberWeave.Cli --no-build -c Release -- docs validate . --merge-ready
 ```
 
-**Dash gates (T3):** `npm --prefix dash run typecheck`, `lint`, `test`, `check:reachable` — all passed on branch tip before T4.
+**Dash gates (honest evidence):** focused pricing suites 234/234
+(`pricing-fallback-data.test.ts`, `published-pricing.test.ts`, `models.test.ts`);
+`npm --prefix dash run typecheck`, `lint`, and `check:reachable` pass. Full `npm --prefix dash
+run test` (`ts-test`) is blocked only by the pre-existing `migration.test.ts` DROP COLUMN
+failure above — not by #229 work. .NET / documentation gates pass (validate / drift as above).
