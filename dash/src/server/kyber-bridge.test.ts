@@ -6,9 +6,14 @@ import { join } from 'node:path'
 
 import {
   KyberBridge,
+  dedupedRunSessions,
+  sumSessionFigures,
+  type SessionSummaryFigures,
   _clip,
 } from './bridge.js'
 import { CanonStore } from '../canon/store.js'
+import { buildSessions } from '../canon/sessions.js'
+import { buildRuns } from '../canon/runs.js'
 import type { CanonicalRecord } from '../canon/types.js'
 import { buildContextReport } from '../analysis/report/build.js'
 
@@ -276,7 +281,7 @@ describe('KyberBridge: in-memory minimal tables fixture (CI verified)', () => {
         total_cache_read: 200,
         total_cache_creation: 100,
         schema_tokens_per_turn: 50,
-        cost: { usd: 0.05, basis: 'published_rates' },
+        cost: { usd: 0.05, basis: 'published_rates', status: 'priced', value: 0.05, currency: 'USD' },
         models: ['gpt-4o'],
       },
       problems: ['prob-1'],
@@ -290,7 +295,7 @@ describe('KyberBridge: in-memory minimal tables fixture (CI verified)', () => {
         request_count: 2,
         total_input: 400,
         total_output: 200,
-        cost: { usd: 0.02, basis: 'published_rates' },
+        cost: { usd: 0.02, basis: 'published_rates', status: 'priced', value: 0.02, currency: 'USD' },
         models: ['gpt-4o'],
       },
     })
@@ -387,7 +392,7 @@ describe('KyberBridge: in-memory minimal tables fixture (CI verified)', () => {
         request_count: 2,
         total_input: 400,
         total_output: 200,
-        cost: { usd: 0.02, basis: 'published_rates' },
+        cost: { usd: 0.02, basis: 'published_rates', status: 'priced', value: 0.02, currency: 'USD' },
         models: ['gpt-4o'],
       },
     })
@@ -873,6 +878,941 @@ describe('KyberBridge: DB-backed report facts', () => {
       expect(bridge.getProblemCount()).toBe(0)
     } finally {
       bridge.close()
+    }
+  })
+})
+
+describe('KyberBridge: T4 coverage read seam (plan docs/plans/2026-09-30-issues-189-198-199, D2)', () => {
+  const WEEK_MS = 7 * 24 * 60 * 60 * 1000
+
+  function recordFor(overrides: Partial<CanonicalRecord>): CanonicalRecord {
+    return {
+      spanId: 'span-t4',
+      traceId: 'trace-t4',
+      parentSpanId: null,
+      source: 'synthetic',
+      harness: 'pi',
+      name: 't4 record',
+      op: 'llm.invoke',
+      kind: 'client',
+      timestamp: '2026-09-10T12:00:00.000Z',
+      durationMs: 10,
+      status: 'ok',
+      tokens: { freshInput: 10, cacheRead: 0, cacheCreation: 0, output: 2, reportedInput: 10, reportedOutput: 2 },
+      content: {},
+      cost: { basis: 'published', status: 'priced', value: 0.01, currency: 'USD' },
+      ...overrides,
+    }
+  }
+
+  it('exposes the refresh coverage window with derived bounds on the last success', () => {
+    const store = new CanonStore(':memory:')
+    try {
+      store.startRefreshRun({
+        id: 't4-windowed',
+        startedAt: '2026-09-12T00:00:00.000Z',
+        pid: process.pid,
+        trigger: 'cli',
+        historyWeeks: 6,
+      })
+      store.completeRefreshRun('t4-windowed', 'success', '2026-09-12T00:30:00.000Z', 't4 ok')
+      const bridge = new KyberBridge({ canonPath: ':memory:', store })
+      try {
+        const state = bridge.getRefreshState()
+        expect(state.lastSuccessAt).toBe('2026-09-12T00:30:00.000Z')
+        expect(state.historyWeeks).toBe(6)
+        expect(state.coveredThrough).toBe('2026-09-12T00:00:00.000Z')
+        expect(state.coveredFrom).toBe(
+          new Date(Date.parse('2026-09-12T00:00:00.000Z') - 6 * WEEK_MS).toISOString(),
+        )
+      } finally {
+        bridge.close()
+      }
+    } finally {
+      store.close()
+    }
+  })
+
+  it('reads pre-migration refresh rows as unknown window, never zero', () => {
+    const store = new CanonStore(':memory:')
+    try {
+      store.startRefreshRun({
+        id: 't4-legacy',
+        startedAt: '2026-09-12T00:00:00.000Z',
+        pid: process.pid,
+        trigger: 'cli',
+      })
+      store.completeRefreshRun('t4-legacy', 'success', '2026-09-12T00:30:00.000Z', 't4 legacy ok')
+      const bridge = new KyberBridge({ canonPath: ':memory:', store })
+      try {
+        const state = bridge.getRefreshState()
+        expect(state.historyWeeks).toBeNull()
+        expect(state.coveredFrom).toBeNull()
+        expect(state.coveredThrough).toBeNull()
+      } finally {
+        bridge.close()
+      }
+    } finally {
+      store.close()
+    }
+  })
+
+  it('reads databases without the history_weeks column as unknown rather than throwing', () => {
+    const canonDb = new DatabaseSync(':memory:')
+    try {
+      canonDb.exec(`
+        CREATE TABLE refresh_run (
+          id TEXT PRIMARY KEY,
+          started_at TEXT NOT NULL,
+          completed_at TEXT,
+          status TEXT NOT NULL,
+          pid INTEGER NOT NULL,
+          trigger TEXT NOT NULL,
+          summary TEXT
+        );
+      `)
+      canonDb
+        .prepare(
+          'INSERT INTO refresh_run (id, started_at, completed_at, status, pid, trigger, summary) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        )
+        .run('old-row', '2026-09-12T00:00:00.000Z', '2026-09-12T00:30:00.000Z', 'success', process.pid, 'cli', 'old')
+      const bridge = new KyberBridge({ canonDb })
+      try {
+        const state = bridge.getRefreshState()
+        expect(state.lastSuccessAt).toBe('2026-09-12T00:30:00.000Z')
+        expect(state.historyWeeks).toBeNull()
+        expect(state.coveredFrom).toBeNull()
+        expect(state.coveredThrough).toBeNull()
+      } finally {
+        bridge.close()
+      }
+    } finally {
+      try {
+        canonDb.close()
+      } catch {
+        // KyberBridge.close() already closed the injected handle.
+      }
+    }
+  })
+
+  it('derives per-source ingest activity without inventing receiver status', () => {
+    const store = new CanonStore(':memory:')
+    try {
+      store.upsertMany([
+        recordFor({ spanId: 't4-s1', source: 'codeburn/pi', harness: 'pi' }),
+        recordFor({ spanId: 't4-s2', source: 'codeburn/pi', harness: 'pi' }),
+        recordFor({ spanId: 't4-s3', source: 'agy', harness: 'antigravity' }),
+        recordFor({ spanId: 't4-s4', source: 'unattributed', harness: 'pi' }),
+      ])
+      store.logIngest('agy', 5)
+      store.logIngest('agy', 3)
+      const recordsBefore = store.count()
+      const logBefore = store.getIngestLog().length
+      const bridge = new KyberBridge({ canonPath: ':memory:', store })
+      try {
+        const activity = bridge.getIngestActivity()
+        expect(activity.status).toBe('known')
+        expect(activity.lastReceivedAt).not.toBeNull()
+        const bySource = new Map(activity.sources.map((entry) => [entry.source, entry]))
+        expect(bySource.get('codeburn/pi')?.recordCount).toBe(2)
+        expect(bySource.get('codeburn/pi')?.display).toBe('pi')
+        expect(bySource.get('codeburn/pi')?.kind).toBe('local-file')
+        expect(bySource.get('codeburn/pi')?.ingestedCount).toBe(0)
+        expect(bySource.get('codeburn/pi')?.lastReceivedAt).toBeNull()
+        expect(bySource.get('agy')?.recordCount).toBe(1)
+        expect(bySource.get('agy')?.ingestedCount).toBe(8)
+        expect(bySource.get('agy')?.lastReceivedAt).toBe(activity.lastReceivedAt)
+        expect(bySource.get('unattributed')?.recordCount).toBe(1)
+        expect(bySource.get('unattributed')?.kind).toBe('legacy-unattributed')
+        // Read-only: no rows added by the read.
+        expect(store.count()).toBe(recordsBefore)
+        expect(store.getIngestLog()).toHaveLength(logBefore)
+      } finally {
+        bridge.close()
+      }
+    } finally {
+      store.close()
+    }
+  })
+
+  it('reports unknown receiver status when nothing was ever recorded, never zero or running', () => {
+    const store = new CanonStore(':memory:')
+    try {
+      const bridge = new KyberBridge({ canonPath: ':memory:', store })
+      try {
+        const activity = bridge.getIngestActivity()
+        expect(activity.status).toBe('unknown')
+        expect(activity.sources).toEqual([])
+        expect(activity.lastReceivedAt).toBeNull()
+        if (activity.status === 'unknown') {
+          expect(activity.reason).toMatch(/no receiver activity recorded/)
+        }
+        expect(activity.status).not.toBe('running')
+      } finally {
+        bridge.close()
+      }
+    } finally {
+      store.close()
+    }
+  })
+
+  it('exposes source checkpoint statuses read-only, including partial with zero records', () => {
+    const store = new CanonStore(':memory:')
+    try {
+      const base = {
+        providerId: 'pi',
+        parserId: 'pi-jsonl',
+        parserContractVersion: '1',
+        format: 'jsonl',
+        sourceRootLabel: '~/.pi/agent/sessions',
+        revisionToken: 'rev-1',
+        coveredFromUtc: '2026-08-29T00:00:00.000Z',
+        coveredThroughUtc: '2026-09-12T00:00:00.000Z',
+        lastAttemptUtc: '2026-09-12T00:00:00.000Z',
+        lastSuccessUtc: '2026-09-12T00:00:01.000Z',
+        lastErrorCode: null,
+        unitCount: 1,
+      } as const
+      store.commitSourceUnit({
+        records: [],
+        provenance: [],
+        checkpoint: {
+          ...base,
+          harnessId: 'pi',
+          sourceKey: 'session:ok-unit',
+          lastStatus: 'ok',
+          recordCount: 3,
+        },
+      })
+      store.commitSourceUnit({
+        records: [],
+        provenance: [],
+        checkpoint: {
+          ...base,
+          harnessId: 'pi',
+          sourceKey: 'session:partial-unit',
+          lastStatus: 'partial',
+          lastErrorCode: 'PARSE_WARN',
+          recordCount: 0,
+        },
+      })
+      const before = store.listSourceCheckpoints().length
+      const bridge = new KyberBridge({ canonPath: ':memory:', store })
+      try {
+        const statuses = bridge.getSourceCheckpointStatuses()
+        expect(statuses).toHaveLength(2)
+        const partial = statuses?.find((entry) => entry.sourceKey === 'session:partial-unit')
+        expect(partial?.lastStatus).toBe('partial')
+        expect(partial?.recordCount).toBe(0)
+        expect(bridge.getSourceCheckpointStatuses('pi')).toHaveLength(2)
+        expect(bridge.getSourceCheckpointStatuses('cursor')).toEqual([])
+        // Read-only: the read added no checkpoints.
+        expect(store.listSourceCheckpoints()).toHaveLength(before)
+      } finally {
+        bridge.close()
+      }
+    } finally {
+      store.close()
+    }
+  })
+
+  it('reads a non-numeric file-backed history_weeks as unknown, never NaN', () => {
+    // Review PR #230 (kilo nux5R): Number('junk') is NaN, and NaN ?? null is
+    // still NaN — the file branch must use the shared normalizer so a bad
+    // value reads as unknown, matching the store mapper and the contract.
+    const canonDb = new DatabaseSync(':memory:')
+    try {
+      canonDb.exec(`
+        CREATE TABLE refresh_run (
+          id TEXT PRIMARY KEY,
+          started_at TEXT NOT NULL,
+          completed_at TEXT,
+          status TEXT NOT NULL,
+          pid INTEGER NOT NULL,
+          trigger TEXT NOT NULL,
+          summary TEXT,
+          history_weeks TEXT
+        );
+      `)
+      canonDb
+        .prepare(
+          'INSERT INTO refresh_run (id, started_at, completed_at, status, pid, trigger, summary, history_weeks) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        )
+        .run('bad-weeks', '2026-09-12T00:00:00.000Z', '2026-09-12T00:30:00.000Z', 'success', process.pid, 'cli', 'ok', 'junk')
+      const bridge = new KyberBridge({ canonDb })
+      try {
+        const state = bridge.getRefreshState()
+        expect(state.historyWeeks).toBeNull()
+        expect(state.coveredFrom).toBeNull()
+        expect(state.coveredThrough).toBeNull()
+      } finally {
+        bridge.close()
+      }
+    } finally {
+      try {
+        canonDb.close()
+      } catch {
+        // KyberBridge.close() already closed the injected handle.
+      }
+    }
+  })
+
+  it('degrades to unknown receiver status when the injected store read throws', () => {
+    // Review PR #230 (kilo nux5H): the file branch documents reads as no
+    // receiver activity, not a throw — the store branch must degrade
+    // identically instead of turning /coverage into a 500.
+    const store = new CanonStore(':memory:')
+    const bridge = new KyberBridge({ canonPath: ':memory:', store })
+    store.close()
+    try {
+      const activity = bridge.getIngestActivity()
+      expect(activity.status).toBe('unknown')
+    } finally {
+      bridge.close()
+    }
+  })
+
+  it('returns null checkpoint statuses when the checkpoint table is absent or unreadable', () => {
+    // Review PR #230 (kilo nux5Z): [] must mean "read fine, no units" — a
+    // failed or impossible read is null (unknown) so routes never fabricate
+    // {ok: 0, partial: 0, failed: 0, unavailable: 0} for unreadable coverage.
+    const canonDb = new DatabaseSync(':memory:')
+    try {
+      const bridge = new KyberBridge({ canonDb })
+      try {
+        expect(bridge.getSourceCheckpointStatuses()).toBeNull()
+      } finally {
+        bridge.close()
+      }
+    } finally {
+      try {
+        canonDb.close()
+      } catch {
+        // KyberBridge.close() already closed the injected handle.
+      }
+    }
+  })
+
+  it('tallies quarantine reasons with GROUP BY on both the store and file handles', () => {
+    // Review PR #230 (copilot numrV / kilo nux5e): the coverage endpoint must
+    // not materialize the quarantine table to count reasons.
+    const store = new CanonStore(':memory:')
+    try {
+      store.quarantine('span-q1', ['pi'], 'unclaimed')
+      store.quarantine('span-q2', ['pi'], 'unclaimed')
+      store.quarantine('span-q3', ['copilot'], 'non-model span: health check')
+      const bridge = new KyberBridge({ canonPath: ':memory:', store })
+      try {
+        expect(bridge.getQuarantineCountsByReason()).toEqual([
+          { reason: 'unclaimed', count: 2 },
+          { reason: 'non-model span: health check', count: 1 },
+        ])
+      } finally {
+        bridge.close()
+      }
+    } finally {
+      store.close()
+    }
+  })
+})
+
+describe('KyberBridge run figures review follow-ups', () => {
+  // Copilot C4: a priced non-USD block is omitted, never served as dollars.
+  // The legacy `usd` shape predates currency and names dollars.
+  it('serves costUsd only for USD-priced figures', () => {
+    const store = new CanonStore(':memory:')
+    const session = (id: string, cost: unknown): void => {
+      store.upsertSession({
+        sessionId: id,
+        harness: 'copilot',
+        payload: {
+          id,
+          summary: { turn_count: 1, total_input: 100, total_output: 10, cost },
+        },
+      })
+    }
+    session('sess-usd', { basis: 'published', status: 'priced', value: 0.05, currency: 'USD' })
+    session('sess-eur', { basis: 'published', status: 'priced', value: 0.05, currency: 'EUR' })
+    session('sess-legacy', { usd: 0.12, basis: 'published_rates', status: 'ok' })
+    session('sess-norate', { basis: 'unknown', status: 'no_rate' })
+    // Re-review Kilo 5: a `partial` block still carries a priced figure.
+    session('sess-partial', { basis: 'published', status: 'partial', value: 0.03, currency: 'USD' })
+
+    const bridge = new KyberBridge({ canonPath: ':memory:', store })
+    try {
+      const figures = bridge.sessionSummaryFigures([
+        'sess-usd',
+        'sess-eur',
+        'sess-legacy',
+        'sess-norate',
+        'sess-partial',
+      ])
+      expect(figures.get('sess-usd')?.costUsd).toBe(0.05)
+      expect(figures.get('sess-eur')?.costUsd).toBeUndefined()
+      expect(figures.get('sess-legacy')?.costUsd).toBe(0.12)
+      expect(figures.get('sess-norate')?.costUsd).toBeUndefined()
+      expect(figures.get('sess-partial')?.costUsd).toBe(0.03)
+    } finally {
+      bridge.close()
+      store.close()
+    }
+  })
+
+  // Kilo K3 / Copilot C5: a priced figure beside an unpriced session is a
+  // partial sum wearing a total's suit — mark it, or omit when nothing priced.
+  it('marks partial run costs and omits unpriced ones', () => {
+    const store = new CanonStore(':memory:')
+    const session = (id: string, cost: unknown): void => {
+      store.upsertSession({
+        sessionId: id,
+        harness: 'copilot',
+        payload: { id, summary: { turn_count: 1, cost } },
+      })
+    }
+    session('sess-p1', { basis: 'published', status: 'priced', value: 0.01, currency: 'USD' })
+    session('sess-p2', { basis: 'unknown', status: 'no_rate' })
+
+    const bridge = new KyberBridge({ canonPath: ':memory:', store })
+    try {
+      const summaries = bridge.sessionSummaryFigures(['sess-p1', 'sess-p2'])
+      expect(sumSessionFigures(summaries, ['sess-p1', 'sess-p2'])).toEqual({
+        turnCount: 2,
+        costUsd: 0.01,
+        costStatus: 'partial',
+        partial: true,
+        partialFields: ['costUsd'],
+      })
+      // Every session priced: complete, no marker.
+      expect(
+        sumSessionFigures(summaries, ['sess-p1']),
+      ).toEqual({ turnCount: 1, costUsd: 0.01 })
+      // Nothing priced: absent, never $0.
+      expect(sumSessionFigures(summaries, ['sess-p2'])).toEqual({ turnCount: 1 })
+    } finally {
+      bridge.close()
+      store.close()
+    }
+  })
+
+  // Re-review #2 (Kilo B): when every session's cost block is partial, the
+  // priced count equals the linked count, so neither marker fires and the
+  // total looks complete. A per-session partial flag marks it.
+  it('marks cost partial when every session is partial', () => {
+    const store = new CanonStore(':memory:')
+    const session = (id: string): void => {
+      store.upsertSession({
+        sessionId: id,
+        harness: 'copilot',
+        payload: {
+          id,
+          summary: {
+            turn_count: 1,
+            cost: { basis: 'published', status: 'partial', value: 0.02, currency: 'USD' },
+          },
+        },
+      })
+    }
+    session('sess-ap1')
+    session('sess-ap2')
+    const bridge = new KyberBridge({ canonPath: ':memory:', store })
+    try {
+      const summaries = bridge.sessionSummaryFigures(['sess-ap1', 'sess-ap2'])
+      expect(summaries.get('sess-ap1')?.costUsd).toBe(0.02)
+      // costStatus marks the partial cost; no general `partial` flag — both
+      // sessions are otherwise fully accounted for.
+      expect(sumSessionFigures(summaries, ['sess-ap1', 'sess-ap2'])).toEqual({
+        turnCount: 2,
+        costUsd: 0.04,
+        costStatus: 'partial',
+      })
+    } finally {
+      bridge.close()
+      store.close()
+    }
+  })
+
+  // Re-review #2 (Kilo 4): a field present in some summaries and missing in
+  // others names exactly which cells are subtotals.
+  it('names partially-covered fields', () => {
+    const summaries: SessionSummaryFigures = new Map([
+      ['s-a', { turnCount: 2, totalInput: 500, totalOutput: 50 }],
+      ['s-b', { turnCount: 3 }],
+    ])
+    expect(sumSessionFigures(summaries, ['s-a', 's-b'])).toEqual({
+      turnCount: 5,
+      totalInput: 500,
+      totalOutput: 50,
+      partial: true,
+      partialFields: ['totalInput', 'totalOutput'],
+    })
+  })
+
+  // Re-review Kilo 5: turn/input/output totals are subtotals when a linked
+  // session contributes no figures — marked, not complete-looking.
+  it('marks non-cost totals partial when a linked session is missing', () => {
+    const store = new CanonStore(':memory:')
+    store.upsertSession({
+      sessionId: 'sess-only',
+      harness: 'copilot',
+      payload: { id: 'sess-only', summary: { turn_count: 2, total_input: 500 } },
+    })
+    const bridge = new KyberBridge({ canonPath: ':memory:', store })
+    try {
+      const summaries = bridge.sessionSummaryFigures(['sess-only'])
+      // A linked session with no summary row at all: subtotal.
+      expect(sumSessionFigures(summaries, ['sess-only', 'sess-gone'])).toEqual({
+        turnCount: 2,
+        totalInput: 500,
+        partial: true,
+        partialFields: ['turnCount', 'totalInput'],
+      })
+      // Every linked session accounted for: complete, no marker.
+      expect(sumSessionFigures(summaries, ['sess-only'])).toEqual({
+        turnCount: 2,
+        totalInput: 500,
+      })
+    } finally {
+      bridge.close()
+      store.close()
+    }
+  })
+
+  // Re-review Kilo 7: in direct-DB mode json_extract yields null (not
+  // undefined) for a missing currency — a priced block without one must
+  // still read as USD, exactly as store mode treats it.
+  it('keeps a priced block without currency in direct-DB mode', () => {
+    const canonDb = new DatabaseSync(':memory:')
+    canonDb.exec(`
+      CREATE TABLE session (
+        session_id TEXT PRIMARY KEY, harness TEXT NOT NULL, label TEXT,
+        is_subagent INTEGER DEFAULT 0, parent_session TEXT, agent_name TEXT,
+        repo TEXT, branch TEXT, started TEXT, ended TEXT, payload TEXT
+      );
+    `)
+    canonDb
+      .prepare('INSERT INTO session VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(
+        'sess-nocur',
+        'copilot',
+        'no currency',
+        0,
+        null,
+        null,
+        null,
+        null,
+        '2026-09-04T00:00:00.000Z',
+        null,
+        JSON.stringify({
+          id: 'sess-nocur',
+          summary: {
+            turn_count: 1,
+            cost: { basis: 'published', status: 'priced', value: 0.07 },
+          },
+        }),
+      )
+    const bridge = new KyberBridge({ canonDb })
+    try {
+      expect(bridge.sessionSummaryFigures(['sess-nocur']).get('sess-nocur')?.costUsd).toBe(0.07)
+    } finally {
+      // Bridge owns the passed database handle.
+      bridge.close()
+    }
+  })
+})
+
+describe('KyberBridge run session streaming (re-review #2 Kilo 4/5)', () => {
+  // The generator is lazy: pulling one session parses exactly one payload.
+  // An eager shared Map would parse every session up front.
+  it('streams one payload at a time', async () => {
+    const store = new CanonStore(':memory:')
+    const rec = (spanId: string, sessionId: string): import('../canon/types.js').CanonicalRecord => ({
+      spanId,
+      traceId: `trace-${sessionId}`,
+      parentSpanId: null,
+      sessionId,
+      source: 'synthetic',
+      harness: 'copilot',
+      name: 'canonical run turn',
+      op: 'llm.invoke',
+      kind: 'client',
+      timestamp: '2026-09-04T12:00:00.000Z',
+      durationMs: 100,
+      status: 'ok',
+      tokens: {
+        freshInput: 800,
+        cacheRead: 200,
+        cacheCreation: 0,
+        output: 100,
+        reportedInput: 1000,
+        reportedOutput: 100,
+      },
+      content: {},
+      parts: [{ part: 'system_prompt', text: 'sys', tokens: 600 }],
+      cost: { basis: 'published', status: 'priced', value: 0.01, currency: 'USD' },
+      raw: { model: 'gpt-4o', cwd: '/repo' },
+    })
+    store.upsertMany([rec('st-t1', 'stream-a'), rec('st-t2', 'stream-b')])
+    await buildSessions(store)
+    await buildRuns(store)
+    const runId = store.listRuns('copilot')[0]!.runId
+
+    let payloadReads = 0
+    class CountingStore extends CanonStore {
+      override getSessionPayload(sessionId: string): unknown | undefined {
+        payloadReads += 1
+        return super.getSessionPayload(sessionId)
+      }
+    }
+    const counting = new CountingStore(':memory:')
+    counting.upsertMany([rec('st-t1', 'stream-a'), rec('st-t2', 'stream-b')])
+    await buildSessions(counting)
+    await buildRuns(counting)
+
+    const bridge = new KyberBridge({ canonPath: ':memory:', store: counting })
+    try {
+      const executions = counting.listExecutions(runId)
+      expect(executions).toHaveLength(2)
+      const stream = bridge.streamRunSessionPayloads(executions)
+      const first = stream.next()
+      expect(first.done).toBe(false)
+      // One pull, one parse — the second session is untouched.
+      expect(payloadReads).toBe(1)
+    } finally {
+      bridge.close()
+      store.close()
+      counting.close()
+    }
+  })
+
+  // Two executions sharing one session digest it once, not twice.
+  it('deduplicates shared sessions for the digest', () => {
+    const exec = (id: string): import('../canon/types.js').ExecutionRow => ({
+      executionId: id,
+      runId: 'run-dedup',
+      sessionId: 'sess-shared',
+      parentExecutionId: null,
+      harness: 'copilot',
+      agentName: null,
+      isRoot: true,
+      started: null,
+      ended: null,
+      parentLinkage: 'measured',
+    })
+    function* source(): Generator<{
+      execution: import('../canon/types.js').ExecutionRow
+      payload: Record<string, unknown> & { context?: unknown }
+    }> {
+      const payload = { id: 'sess-shared' }
+      yield { execution: exec('exec-1'), payload }
+      yield { execution: exec('exec-2'), payload }
+    }
+    const seen = [...dedupedRunSessions(source())]
+    expect(seen).toHaveLength(1)
+    expect(seen[0]!.execution.executionId).toBe('exec-1')
+  })
+})
+
+
+describe('KyberBridge.listSessions cost mapping (issue #186)', () => {
+  let db: InstanceType<typeof DatabaseSync>
+  let bridge: KyberBridge
+
+  const insert = (id: string, started: string, cost: Record<string, unknown> | undefined) => {
+    const summary: Record<string, unknown> = { turn_count: 1, request_count: 1, models: ['m'] }
+    if (cost) summary.cost = cost
+    db.prepare('INSERT INTO session VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
+      id, 'claude-code', id, 0, null, 'agent', 'repo', 'main', started, started,
+      JSON.stringify({ id, harness: 'claude-code', summary }),
+    )
+  }
+
+  beforeAll(() => {
+    db = new DatabaseSync(':memory:')
+    db.exec(`
+      CREATE TABLE session (
+        session_id TEXT PRIMARY KEY, harness TEXT NOT NULL, label TEXT,
+        is_subagent INTEGER DEFAULT 0, parent_session TEXT, agent_name TEXT,
+        repo TEXT, branch TEXT, started TEXT, ended TEXT, payload TEXT
+      );
+      CREATE TABLE records (
+        span_id TEXT PRIMARY KEY, trace_id TEXT, parent_span_id TEXT, harness TEXT,
+        source TEXT, name TEXT, timestamp TEXT, op TEXT
+      );
+      CREATE TABLE quarantine (
+        span_id TEXT PRIMARY KEY, source TEXT, name TEXT, namespaces TEXT, reason TEXT, seen_at INTEGER
+      );
+      CREATE TABLE problem (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT, span_id TEXT,
+        severity TEXT, code TEXT, message TEXT, at INTEGER, harness TEXT
+      );
+    `)
+    insert('s-priced', '2026-09-30T05:00:00Z', { basis: 'published', status: 'priced', value: 0.05, currency: 'USD' })
+    insert('s-norate', '2026-09-30T04:00:00Z', { basis: 'published', status: 'no_rate' })
+    insert('s-partial', '2026-09-30T03:00:00Z', { basis: 'published', status: 'partial', value: 0.02, currency: 'USD' })
+    insert('s-nonusd', '2026-09-30T02:00:00Z', { basis: 'harness', status: 'priced', value: 7, currency: 'EUR' })
+    insert('s-none', '2026-09-30T01:00:00Z', undefined)
+    bridge = new KyberBridge({ canonDb: db })
+  })
+
+  afterAll(() => {
+    bridge.close()
+  })
+
+  const find = (id: string) => bridge.listSessions().find((s) => s.session_id === id)!
+
+  it('maps a priced CostBlock to a cost figure and exposes the block', () => {
+    const row = find('s-priced')
+    expect(row.cost_usd).toBe(0.05)
+    expect(row.cost).toEqual({ basis: 'published', status: 'priced', value: 0.05, currency: 'USD' })
+  })
+
+  it('lists a no_rate block with no figure and its status', () => {
+    const row = find('s-norate')
+    expect(row.cost_usd).toBeNull()
+    expect(row.cost.status).toBe('no_rate')
+    expect(row.cost.basis).toBe('published')
+  })
+
+  it('lists a partial block with no figure and partial status', () => {
+    const row = find('s-partial')
+    expect(row.cost_usd).toBeNull()
+    expect(row.cost.status).toBe('partial')
+  })
+
+  it('does not report a non-USD priced value as cost_usd', () => {
+    const row = find('s-nonusd')
+    expect(row.cost_usd).toBeNull()
+    expect(row.cost).toMatchObject({ basis: 'harness', status: 'priced', currency: 'EUR' })
+  })
+
+  it('defaults a row with no summary cost to unknown/no_rate', () => {
+    const row = find('s-none')
+    expect(row.cost_usd).toBeNull()
+    expect(row.cost).toEqual({ basis: 'unknown', status: 'no_rate' })
+  })
+})
+
+describe('KyberBridge: getMeta().rates names both rate tables (issue #186)', () => {
+  const bridge = new KyberBridge({
+    canonPath: '/path/does/not/exist/canon.db',
+    ratesPath: '/path/does/not/exist/rates.json',
+  })
+  afterAll(() => bridge.close())
+
+  type RateTable = {
+    id: string
+    source: string
+    retrieved: string
+    applies_to: string[]
+    credit_usd?: number
+  }
+  const tables = (): RateTable[] =>
+    (bridge.getMeta().rates as unknown as { tables: RateTable[] }).tables
+
+  it('keeps the legacy flat rates fields (additive extension)', () => {
+    const { rates } = bridge.getMeta()
+    expect(rates.credit_usd).toBe(0.01)
+    expect(rates.source).toBe(
+      'https://docs.github.com/copilot/reference/copilot-billing/models-and-pricing',
+    )
+  })
+
+  it('lists exactly the published and copilot_credits tables', () => {
+    expect(Array.isArray(tables())).toBe(true)
+    expect(tables().map((t) => t.id).sort()).toEqual(['copilot_credits', 'published'])
+  })
+
+  it('names the published-rate table (LiteLLM snapshot) for Claude Code and Codex', () => {
+    const t = tables().find((x) => x.id === 'published')
+    expect(t).toBeDefined()
+    expect(t!.source.toLowerCase()).toContain('litellm')
+    expect(t!.retrieved).toBe('2026-09-30')
+    expect([...t!.applies_to].sort()).toEqual(['claude-code', 'codex'])
+  })
+
+  it('names the Copilot credits table with source, retrieved date, credit value, and Copilot-only applicability', () => {
+    const t = tables().find((x) => x.id === 'copilot_credits')
+    expect(t).toBeDefined()
+    expect(t!.source).toBe(
+      'https://docs.github.com/copilot/reference/copilot-billing/models-and-pricing',
+    )
+    expect(t!.retrieved).toBe('2026-09-30')
+    expect(t!.credit_usd).toBe(0.01)
+    expect(t!.applies_to).toEqual(['copilot'])
+  })
+})
+
+describe('KyberBridge: unknown-window session owner semantics (thread-4)', () => {
+  // `sessionHarnessRaw` is private to bridge.ts (absent row -> undefined,
+  // failed read -> null), so the absent-vs-failed distinction is pinned
+  // through the observable `countUnknownWindowSessions` envelope below, on
+  // both the store and the raw-DB paths.
+  const payloadWithSource = (source: string) => ({ context: { contextLimitSource: source } })
+
+  const seedRawSession = (
+    db: import('node:sqlite').DatabaseSync,
+    sessionId: string,
+    harness: string,
+    source: string,
+  ): void => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS session (
+        session_id TEXT PRIMARY KEY,
+        harness TEXT NOT NULL,
+        payload TEXT NOT NULL
+      );
+    `)
+    db.prepare('INSERT OR REPLACE INTO session (session_id, harness, payload) VALUES (?, ?, ?)').run(
+      sessionId,
+      harness,
+      JSON.stringify(payloadWithSource(source)),
+    )
+  }
+
+  it('reports 0 for an absent session row under a harness scope (store path)', () => {
+    const store = new CanonStore(':memory:')
+    const bridge = new KyberBridge({ canonPath: ':memory:', store })
+    try {
+      expect(bridge.countUnknownWindowSessions({ harness: 'copilot', sessionId: 'sess-absent' })).toBe(0)
+    } finally {
+      bridge.close()
+      store.close()
+    }
+  })
+
+  it('reports 0 for an absent session row under a harness scope (raw-DB path)', () => {
+    const canonDb = new DatabaseSync(':memory:')
+    const bridge = new KyberBridge({ canonDb })
+    try {
+      canonDb.exec(
+        'CREATE TABLE session (session_id TEXT PRIMARY KEY, harness TEXT NOT NULL, payload TEXT NOT NULL)',
+      )
+      expect(bridge.countUnknownWindowSessions({ harness: 'copilot', sessionId: 'sess-absent' })).toBe(0)
+    } finally {
+      bridge.close()
+      try {
+        canonDb.close()
+      } catch {
+        // The bridge already closed the injected handle.
+      }
+    }
+  })
+
+  it('reports 0 on a normalized-harness mismatch even when the payload window is unknown (store path)', () => {
+    const store = new CanonStore(':memory:')
+    const bridge = new KyberBridge({ canonPath: ':memory:', store })
+    try {
+      store.upsertSession({
+        sessionId: 'sess-other-owner',
+        harness: 'copilot',
+        payload: payloadWithSource('default'),
+      })
+      expect(bridge.countUnknownWindowSessions({ harness: 'codex', sessionId: 'sess-other-owner' })).toBe(0)
+    } finally {
+      bridge.close()
+      store.close()
+    }
+  })
+
+  it('reports 0 on a normalized-harness mismatch even when the payload window is unknown (raw-DB path)', () => {
+    const canonDb = new DatabaseSync(':memory:')
+    const bridge = new KyberBridge({ canonDb })
+    try {
+      seedRawSession(canonDb, 'sess-other-owner', 'copilot', 'default')
+      expect(bridge.countUnknownWindowSessions({ harness: 'codex', sessionId: 'sess-other-owner' })).toBe(0)
+    } finally {
+      bridge.close()
+      try {
+        canonDb.close()
+      } catch {
+        // The bridge already closed the injected handle.
+      }
+    }
+  })
+
+  it('falls through to the payload read when the harness owns the session (store path)', () => {
+    const store = new CanonStore(':memory:')
+    const bridge = new KyberBridge({ canonPath: ':memory:', store })
+    try {
+      store.upsertSession({ sessionId: 'sess-unknown', harness: 'copilot', payload: payloadWithSource('default') })
+      store.upsertSession({ sessionId: 'sess-known', harness: 'copilot', payload: payloadWithSource('reported') })
+      expect(bridge.countUnknownWindowSessions({ harness: 'copilot', sessionId: 'sess-unknown' })).toBe(1)
+      expect(bridge.countUnknownWindowSessions({ harness: 'copilot', sessionId: 'sess-known' })).toBe(0)
+    } finally {
+      bridge.close()
+      store.close()
+    }
+  })
+
+  it('falls through to the payload read when the harness owns the session (raw-DB path)', () => {
+    const canonDb = new DatabaseSync(':memory:')
+    const bridge = new KyberBridge({ canonDb })
+    try {
+      seedRawSession(canonDb, 'sess-unknown', 'copilot', 'default')
+      seedRawSession(canonDb, 'sess-known', 'copilot', 'reported')
+      expect(bridge.countUnknownWindowSessions({ harness: 'copilot', sessionId: 'sess-unknown' })).toBe(1)
+      expect(bridge.countUnknownWindowSessions({ harness: 'copilot', sessionId: 'sess-known' })).toBe(0)
+    } finally {
+      bridge.close()
+      try {
+        canonDb.close()
+      } catch {
+        // The bridge already closed the injected handle.
+      }
+    }
+  })
+
+  it('falls back to the payload read when the store harness lookup throws', () => {
+    const bridgeFor = (source: string): KyberBridge => {
+      const throwingStore = {
+        sessionHarness: () => {
+          throw new Error('harness column unreadable')
+        },
+        getSessionPayload: () => payloadWithSource(source),
+      } as unknown as CanonStore
+      return new KyberBridge({ canonPath: ':memory:', store: throwingStore })
+    }
+    const unknownBridge = bridgeFor('default')
+    try {
+      expect(unknownBridge.countUnknownWindowSessions({ harness: 'copilot', sessionId: 'sess-1' })).toBe(1)
+    } finally {
+      unknownBridge.close()
+    }
+    const knownBridge = bridgeFor('reported')
+    try {
+      expect(knownBridge.countUnknownWindowSessions({ harness: 'copilot', sessionId: 'sess-1' })).toBe(0)
+    } finally {
+      knownBridge.close()
+    }
+  })
+
+  it('falls back to the payload read when the raw-DB harness lookup throws', () => {
+    const bridgeFor = (source: string): KyberBridge => {
+      const fakeDb = {
+        exec: () => {},
+        close: () => {},
+        prepare: (sql: string) => {
+          if (sql.includes('sqlite_master')) return { get: () => ({ '1': 1 }) }
+          if (sql.includes('SELECT harness')) throw new Error('harness column unreadable')
+          if (sql.includes('SELECT payload')) {
+            return { get: () => ({ payload: JSON.stringify(payloadWithSource(source)) }) }
+          }
+          throw new Error(`unexpected query: ${sql}`)
+        },
+      } as unknown as import('node:sqlite').DatabaseSync
+      return new KyberBridge({ canonDb: fakeDb })
+    }
+    const unknownBridge = bridgeFor('default')
+    try {
+      expect(unknownBridge.countUnknownWindowSessions({ harness: 'copilot', sessionId: 'sess-1' })).toBe(1)
+    } finally {
+      unknownBridge.close()
+    }
+    const knownBridge = bridgeFor('reported')
+    try {
+      expect(knownBridge.countUnknownWindowSessions({ harness: 'copilot', sessionId: 'sess-1' })).toBe(0)
+    } finally {
+      knownBridge.close()
     }
   })
 })

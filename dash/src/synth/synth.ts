@@ -43,16 +43,40 @@
 // and the adapters follow the same split — `normalize` emits, `validate`
 // rejects. Re-validating here would be a second mechanism for one job.
 
+import { Buffer } from 'node:buffer'
 import { createHash } from 'node:crypto'
 
 import type { ParsedProviderCall } from '../providers/types.js'
 export type { ParsedProviderCall } from '../providers/types.js'
-import { contentFromParts, type CanonicalRecord, type CostBlock, type TokenUsage } from '../canon/types.js'
+import {
+  contentFromParts,
+  notMeasurable,
+  type CanonicalRecord,
+  type ContentPart,
+  type CostBlock,
+  type MetricAvailability,
+  type TokenUsage,
+} from '../canon/types.js'
 import { exclusiveConvention, inclusiveConvention } from '../canon/adapters/copilot.js'
+// The detector keys duplicates on serializeToolArgs; the producer reuses the
+// same canonical form so both identities agree by construction. Acyclic:
+// analysis/findings.ts never imports synth (it reads canonical records).
+import { serializeToolArgs } from '../analysis/findings.js'
 import { FILE_SOURCE_PREFIX, measurabilityFor } from '../canon/measurability.js'
-import type { ReaderTurn, SourceRecordEnvelope, SourceRecordProvenance } from './readers/types.js'
+import type {
+  ReaderToolCall,
+  ReaderToolResult,
+  ReaderTurn,
+  SourceRecordEnvelope,
+  SourceRecordProvenance,
+} from './readers/types.js'
 
-export type { SourceRecordEnvelope, SourceRecordProvenance } from './readers/types.js'
+export type {
+  ReaderToolCall,
+  ReaderToolResult,
+  SourceRecordEnvelope,
+  SourceRecordProvenance,
+} from './readers/types.js'
 
 // ---------------------------------------------------------------------------
 // Identity scheme (R3.2: extend upstream's key, don't add a mechanism)
@@ -102,9 +126,9 @@ export function nativeRecordIdentity(
     return { nativeRecordId: call.deduplicationKey.slice(prefix.length) }
   }
   const digest = createHash('sha256')
-    .update(`${nativeSessionIdFor(call, envelope)}\0${call.timestamp}\0llm.invoke\0${ordinal}`, 'utf8')
-    .digest('hex')
-    .slice(0, 16)
+      .update(`${nativeSessionIdFor(call, envelope)}\0${call.timestamp}\0llm.invoke\0${ordinal}`, 'utf8')
+      .digest('hex')
+      .slice(0, 16)
   return { nativeRecordId: digest, recordDigest: digest }
 }
 
@@ -306,13 +330,24 @@ export {
 export function costBlockFor(call: ParsedProviderCall): CostBlock {
   if (call.costUSD !== 0 && Number.isFinite(call.costUSD)) {
     return {
-      basis: call.costIsEstimated === true ? 'published' : 'harness',
+      // Every Copilot figure from a parser is LiteLLM-derived (API list rates) whatever its
+      // costIsEstimated flag, so it is never harness-reported (R5.2/R5.3): it is re-priced from
+      // the credits table. Only the genuine reader marks `costHarnessReported` and stays harness,
+      // and it sets the marker only when the row has a real cost_usd. Copilot without the marker
+      // defaults to published so a forgotten flag never leaves a LiteLLM-derived figure at API
+      // list rates presented as harness-reported (R5.3).
+      basis:
+        call.costIsEstimated === true || (call.provider === 'copilot' && call.costHarnessReported !== true)
+          ? 'published'
+          : 'harness',
       status: 'priced',
       value: call.costUSD,
       currency: 'USD',
       byModel: { [call.model]: call.costUSD },
     }
   }
+  // A published-rate provider's zero figure is a rate gap, not a missing basis.
+  if (call.costIsEstimated === true) return { basis: 'published', status: 'no_rate' }
   return { basis: 'unknown', status: 'no_rate' }
 }
 
@@ -398,6 +433,284 @@ export function synthesizeCall(
 }
 
 // ---------------------------------------------------------------------------
+// Tool invocation synthesis (Issue #180, Task 5)
+// ---------------------------------------------------------------------------
+
+/** Maximum bytes of tool result content stored in content parts before truncation (64KB). */
+export const MAX_TOOL_RESULT_BYTES = 65_536
+
+/** Maximum bytes of tool arguments stored in raw before truncation (64KB). */
+export const MAX_TOOL_ARGUMENTS_BYTES = 65_536
+
+/**
+ * Truncate a UTF-8 string to at most \`maxBytes\`, cutting strictly at a valid UTF-8 code point boundary.
+ */
+export function truncateUtf8(text: string, maxBytes: number): string {
+  const buf = Buffer.from(text, "utf8")
+  if (buf.byteLength <= maxBytes) return text
+
+  let end = maxBytes
+  while (end > 0 && (buf[end] & 0xc0) === 0x80) {
+    end--
+  }
+  return buf.subarray(0, end).toString("utf8")
+}
+
+export type CanonicalToolRecord = CanonicalRecord & {
+  attributes?: Record<string, unknown>
+  provider?: string
+  model?: string
+}
+
+/** A live reference to one string leaf inside a cloned arguments object. */
+type StringLeaf = {
+  get: () => string
+  set: (value: string) => void
+}
+
+/**
+ * Bound an object-shaped tool-arguments payload to `maxBytes` of serialized
+ * JSON without changing its shape: string leaves are shortened longest-first
+ * until the serialization fits, so small fields (paths, flags) survive intact
+ * and the stored value stays an object. Truncating the serialization itself
+ * would swap the type mid-flight (object to string, and not even valid JSON)
+ * and make duplicate detection compare 64KB prefixes instead of arguments.
+ *
+ * The last-resort empty object only triggers when no string leaf exists to
+ * shorten — a >64KB payload of pure numbers, which transcript input cannot
+ * produce — and is still flagged truncated with the full size and hash kept.
+ */
+export function truncateObjectArguments(
+  args: Record<string, unknown>,
+  maxBytes: number,
+): { bounded: Record<string, unknown>; truncated: boolean } {
+  let clone: Record<string, unknown>
+  try {
+    clone = JSON.parse(JSON.stringify(args)) as Record<string, unknown>
+  } catch {
+    return { bounded: {}, truncated: true }
+  }
+  const serializedSize = (): number => Buffer.byteLength(JSON.stringify(clone) ?? '{}', 'utf8')
+  if (serializedSize() <= maxBytes) return { bounded: clone, truncated: false }
+
+  const leaves: StringLeaf[] = []
+  const seen = new Set<unknown>()
+  const walk = (node: unknown, set: (value: string) => void): void => {
+    if (typeof node === 'string') {
+      let current = node
+      leaves.push({
+        get: () => current,
+        set: (value: string) => {
+          current = value
+          set(value)
+        },
+      })
+    } else if (node !== null && typeof node === 'object' && !seen.has(node)) {
+      seen.add(node)
+      if (Array.isArray(node)) {
+        node.forEach((item, i) => walk(item, (value) => {
+          node[i] = value
+        }))
+      } else {
+        for (const [key, value] of Object.entries(node)) {
+          walk(value, (next) => {
+            (node as Record<string, unknown>)[key] = next
+          })
+        }
+      }
+    }
+  }
+  walk(clone, () => {})
+
+  for (let pass = 0; pass <= leaves.length; pass++) {
+    const overage = serializedSize() - maxBytes
+    if (overage <= 0) return { bounded: clone, truncated: true }
+    let longest: StringLeaf | undefined
+    let longestBytes = 0
+    for (const leaf of leaves) {
+      const size = Buffer.byteLength(leaf.get(), 'utf8')
+      if (size > longestBytes) {
+        longestBytes = size
+        longest = leaf
+      }
+    }
+    if (longest === undefined || longestBytes === 0) break
+    longest.set(truncateUtf8(longest.get(), Math.max(0, longestBytes - overage)))
+  }
+  return serializedSize() <= maxBytes
+    ? { bounded: clone, truncated: true }
+    : { bounded: {}, truncated: true }
+}
+
+/**
+ * Synthesize one child `tool.invoke` canonical record from a reader tool call
+ * and its paired execution result.
+ */
+export function synthesizeToolCall(
+  parentRecord: CanonicalRecord,
+  toolCall: ReaderToolCall,
+  toolResult: ReaderToolResult | undefined,
+  index = 0,
+  call?: ParsedProviderCall,
+): CanonicalToolRecord {
+  const isError = toolResult?.isError === true
+  const status = toolResult === undefined ? 'unset' : (isError ? 'error' : 'ok')
+  const resultBytes = toolResult?.content !== undefined
+    ? Buffer.byteLength(toolResult.content, 'utf8')
+    : undefined
+
+  const serializedArgs = typeof toolCall.arguments === 'string'
+    ? toolCall.arguments
+    : JSON.stringify(toolCall.arguments ?? {})
+  const argsBytes = Buffer.byteLength(serializedArgs, 'utf8')
+
+  let boundedArguments: string | Record<string, unknown> = toolCall.arguments
+  let argsTruncated = false
+  if (typeof toolCall.arguments === 'string') {
+    if (argsBytes > MAX_TOOL_ARGUMENTS_BYTES) {
+      boundedArguments = truncateUtf8(toolCall.arguments, MAX_TOOL_ARGUMENTS_BYTES)
+      argsTruncated = true
+    }
+  } else if (toolCall.arguments !== null && typeof toolCall.arguments === 'object') {
+    if (argsBytes > MAX_TOOL_ARGUMENTS_BYTES) {
+      boundedArguments = truncateObjectArguments(toolCall.arguments, MAX_TOOL_ARGUMENTS_BYTES).bounded
+      argsTruncated = true
+    }
+  }
+
+  let durationMs = 0
+  let durationAvailability: MetricAvailability = notMeasurable('Tool duration was not reported in telemetry.')
+  if (toolCall.durationMs !== undefined && Number.isFinite(toolCall.durationMs)) {
+    durationMs = Math.max(0, toolCall.durationMs)
+    durationAvailability = 'measured'
+  } else if (toolCall.timestamp && toolResult?.timestamp) {
+    const callTime = new Date(toolCall.timestamp).getTime()
+    const resTime = new Date(toolResult.timestamp).getTime()
+    const diff = resTime - callTime
+    if (Number.isFinite(diff) && diff >= 0) {
+      durationMs = diff
+      durationAvailability = 'derived'
+    }
+  }
+
+  const attributes: Record<string, unknown> = {
+    'gen_ai.tool.name': toolCall.name,
+    'gen_ai.tool.call_id': toolCall.id,
+    'gen_ai.tool.status': status,
+    ...(resultBytes !== undefined
+      ? { 'gen_ai.tool.result_bytes': resultBytes }
+      : {}),
+    ...(toolCall.arguments !== undefined
+      ? { 'gen_ai.tool.arguments_bytes': argsBytes }
+      : {}),
+    // Identity of the FULL pre-truncation arguments in canonical form, so
+    // whitespace variants (`{"a":1}` vs `{ "a": 1 }`) share an identity.
+    // Emitted only when truncated: complete arguments are compared by the
+    // detector in normalised form already. It rides into `raw` with the
+    // rest of the attributes, which is what survives the store.
+    ...(argsTruncated
+      ? { 'gen_ai.tool.arguments_hash': createHash('sha256').update(serializeToolArgs(toolCall.arguments), 'utf8').digest('hex') }
+      : {}),
+    ...(argsTruncated ? { 'gen_ai.tool.arguments_truncated': true } : {}),
+    ...(durationAvailability === 'measured' || durationAvailability === 'derived'
+      ? { 'gen_ai.tool.duration_ms': durationMs }
+      : {}),
+  }
+
+  let parts: (ContentPart & { truncated?: boolean })[] = []
+  if (toolResult?.content !== undefined) {
+    const text = toolResult.content
+    const textBytes = resultBytes ?? Buffer.byteLength(text, 'utf8')
+    if (textBytes > MAX_TOOL_RESULT_BYTES) {
+      parts = [
+        {
+          part: 'tool_result_content',
+          text: truncateUtf8(text, MAX_TOOL_RESULT_BYTES),
+          truncated: true,
+          order: 0,
+        },
+      ]
+    } else {
+      parts = [
+        {
+          part: 'tool_result_content',
+          text,
+          order: 0,
+        },
+      ]
+    }
+  }
+
+  const nameParts = parentRecord.name.split(':')
+  const provider = call?.provider ?? (nameParts.length > 1 ? nameParts[0] : parentRecord.harness)
+  const model = call?.model ?? (nameParts.length > 1 ? nameParts.slice(1).join(':') : undefined)
+
+  const toolHash = createHash('sha256')
+    .update(`${toolCall.id || index}:${toolCall.name}:${serializedArgs}`)
+    .digest('hex')
+    .slice(0, 12)
+
+  return {
+    spanId: `${parentRecord.spanId}-t${toolHash}`,
+    traceId: parentRecord.traceId,
+    parentSpanId: parentRecord.spanId,
+    source: parentRecord.source,
+    harness: parentRecord.harness,
+    ...(parentRecord.sessionId !== undefined && parentRecord.sessionId !== null
+      ? { sessionId: parentRecord.sessionId }
+      : {}),
+    ...(provider ? { provider } : {}),
+    ...(model ? { model } : {}),
+    name: toolCall.name,
+    op: 'tool.invoke',
+    kind: 'internal',
+    timestamp: toolCall.timestamp ?? parentRecord.timestamp,
+    durationMs,
+    status,
+    tokens: {
+      freshInput: 0,
+      cacheRead: 0,
+      cacheCreation: 0,
+      output: 0,
+      reportedInput: 0,
+      reportedOutput: 0,
+    },
+    content: {},
+    parts,
+    cost: { basis: 'unknown', status: 'no_rate' },
+    measurability: {
+      ...parentRecord.measurability,
+      duration: durationAvailability,
+    },
+    attributes,
+    raw: {
+      ...attributes,
+      arguments: boundedArguments,
+      result: parts[0]?.text,
+    },
+  }
+}
+
+export function synthesizeToolCalls(
+  parentRecord: CanonicalRecord,
+  call: ParsedProviderCall,
+  readerTurn?: ReaderTurn,
+  sessionToolResults?: ReadonlyMap<string, ReaderToolResult>,
+): CanonicalToolRecord[] {
+  if (!readerTurn?.toolCalls || readerTurn.toolCalls.length === 0) {
+    return []
+  }
+
+  const toolResults = readerTurn.toolResults ?? []
+  return readerTurn.toolCalls.map((toolCall, i) => {
+    const toolResult =
+      sessionToolResults?.get(toolCall.id) ??
+      toolResults.find((r) => r.toolCallId === toolCall.id)
+    return synthesizeToolCall(parentRecord, toolCall, toolResult, i, call)
+  })
+}
+
+// ---------------------------------------------------------------------------
 // The synthesizer
 // ---------------------------------------------------------------------------
 
@@ -453,9 +766,25 @@ export class Synthesizer {
     parsedCalls: readonly ParsedProviderCall[],
     readerTurns?: readonly (ReaderTurn | undefined)[],
   ): CanonicalRecord[] {
+    const sessionToolResults = new Map<string, ReaderToolResult>()
+    if (readerTurns) {
+      for (const turn of readerTurns) {
+        if (turn?.toolResults) {
+          for (const res of turn.toolResults) {
+            if (res.toolCallId) {
+              sessionToolResults.set(res.toolCallId, res)
+            }
+          }
+        }
+      }
+    }
+
     return parsedCalls.flatMap((call, index) => {
       if (isExcludedHarness(call.provider)) return []
-      return [synthesizeCall(call, this.conventions, readerTurns?.[index], undefined, index)]
+      const readerTurn = readerTurns?.[index]
+      const parent = synthesizeCall(call, this.conventions, readerTurn, undefined, index)
+      const toolRecords = synthesizeToolCalls(parent, call, readerTurn, sessionToolResults)
+      return [parent, ...toolRecords]
     })
   }
 
@@ -465,15 +794,31 @@ export class Synthesizer {
    * persisted as harnesses. Token validation remains the quarantine seam.
    */
   synthesizeEnvelopes(envelopes: readonly SourceRecordEnvelope[]): CanonicalRecord[] {
+    const sessionToolResults = new Map<string, ReaderToolResult>()
+    for (const envelope of envelopes) {
+      if (envelope.readerTurn?.toolResults) {
+        for (const res of envelope.readerTurn.toolResults) {
+          if (res.toolCallId) {
+            sessionToolResults.set(res.toolCallId, res)
+          }
+        }
+      }
+    }
+
     return envelopes.flatMap((envelope, index) => {
       if (isExcludedHarness(envelope.harnessId) || isExcludedHarness(envelope.call.provider)) return []
-      return [synthesizeCall(envelope.call, this.conventions, envelope.readerTurn, envelope, index)]
+      const parent = synthesizeCall(envelope.call, this.conventions, envelope.readerTurn, envelope, index)
+      const toolRecords = synthesizeToolCalls(parent, envelope.call, envelope.readerTurn, sessionToolResults)
+      return [parent, ...toolRecords]
     })
   }
 
   /** The serial path's explicit name; identical to {@link synthesize}. */
-  synthesizeSerial(parsedCalls: readonly ParsedProviderCall[]): CanonicalRecord[] {
-    return this.synthesize(parsedCalls)
+  synthesizeSerial(
+    parsedCalls: readonly ParsedProviderCall[],
+    readerTurns?: readonly (ReaderTurn | undefined)[],
+  ): CanonicalRecord[] {
+    return this.synthesize(parsedCalls, readerTurns)
   }
 
   /**

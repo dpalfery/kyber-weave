@@ -25,6 +25,7 @@ import type { HarnessAdapter, RawSpan } from './adapters/base.js'
 import { claudeCodeAdapter } from './adapters/claude-code.js'
 import { copilotAdapter } from './adapters/copilot.js'
 import { geminiAdapter } from './adapters/gemini.js'
+import { antigravityAdapter } from './adapters/antigravity.js'
 import { piAdapter } from './adapters/pi.js'
 import { AdapterRegistry } from './adapters/registry.js'
 import {
@@ -40,6 +41,10 @@ import { ingestLogBatch } from './log-ingest.js'
 export const ADAPTERS: readonly HarnessAdapter[] = [
   piAdapter,
   copilotAdapter,
+  // Antigravity stays after Copilot (the abbreviated Antigravity shape
+  // pinned at ingest.test.ts:56-67 ties Copilot and resolves to it) and
+  // before Gemini (ties on the full agent-identity shape resolve here).
+  antigravityAdapter,
   geminiAdapter,
   claudeCodeAdapter,
 ]

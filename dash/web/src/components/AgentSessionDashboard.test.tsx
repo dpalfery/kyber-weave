@@ -11,6 +11,7 @@ import {
   formatDuration,
   formatCredits,
 } from './AgentSessionDashboard.js'
+import { findContextTurn, findTurnByTransport } from '../lib/kyberApi.js'
 import { SessionInspectorDrawer } from './SessionInspectorDrawer.js'
 import type { TimelineNode } from './analysis/TimelineView.js'
 import type { KyberSessionContext } from '../lib/kyberApi.js'
@@ -151,7 +152,8 @@ const sampleSession: AgentSessionPayload = {
   ],
   turns: [
     {
-      index: 1,
+      // 0-based payload `index`, matching the served contract (issue #184).
+      index: 0,
       spanId: 'turn-span-1',
       model: 'claude-3-5-sonnet',
       durationMs: 4200,
@@ -168,7 +170,7 @@ const sampleSession: AgentSessionPayload = {
       },
     },
     {
-      index: 2,
+      index: 1,
       spanId: 'turn-span-2',
       model: 'claude-3-5-sonnet',
       durationMs: 5100,
@@ -897,7 +899,8 @@ describe('AgentSessionDashboard: Interaction & Drawer Integration', () => {
       }
       findSpendCharts(turnTree)
       expect(spendCharts).not.toBeNull()
-      ;(spendCharts!.props as { onSelectTurn: (i: number, b?: string) => void }).onSelectTurn(1, 'tool_definitions')
+      // 0-based transport: the first turn is index 0 (issue #184).
+      ;(spendCharts!.props as { onSelectTurn: (i: number, b?: string) => void }).onSelectTurn(0, 'tool_definitions')
       expect((drawerFrom(renderWithState())!.props as { contentRequest?: unknown }).contentRequest).toEqual({
         sessionId: 'sess-abc-123',
         span: 'turn-span-1',
@@ -998,7 +1001,7 @@ describe('AgentSessionDashboard: Interaction & Drawer Integration', () => {
     }
   })
 
-  it('opens drawer for turn when onSelectTurn is invoked on SessionSpendCharts with 1-based index and populates bucket analysis data', () => {
+  it('opens drawer for turn when onSelectTurn is invoked on SessionSpendCharts with a 0-based index and populates bucket analysis data', () => {
     let capturedOpen = false
     let capturedTitle = ''
     let capturedContent: unknown = null
@@ -1035,20 +1038,20 @@ describe('AgentSessionDashboard: Interaction & Drawer Integration', () => {
 
       expect(spendChartsEl).not.toBeNull()
 
-      // 1-based turn lookup: Turn 1
-      ;(spendChartsEl!.props as { onSelectTurn: (i: number, b?: string) => void }).onSelectTurn(1)
+      // 0-based transport lookup: index 0 is the human-facing Turn 1 (issue #184).
+      ;(spendChartsEl!.props as { onSelectTurn: (i: number, b?: string) => void }).onSelectTurn(0)
       expect(capturedOpen).toBe(true)
       expect(capturedTitle).toBe('Turn 1')
       expect((capturedContent as { spanId?: string }).spanId).toBe('turn-span-1')
 
-      // 1-based turn lookup: Turn 2
-      ;(spendChartsEl!.props as { onSelectTurn: (i: number, b?: string) => void }).onSelectTurn(2)
+      // 0-based transport lookup: index 1 is Turn 2.
+      ;(spendChartsEl!.props as { onSelectTurn: (i: number, b?: string) => void }).onSelectTurn(1)
       expect(capturedOpen).toBe(true)
       expect(capturedTitle).toBe('Turn 2')
       expect((capturedContent as { spanId?: string }).spanId).toBe('turn-span-2')
 
-      // 1-based turn lookup with bucket: tool_definitions
-      ;(spendChartsEl!.props as { onSelectTurn: (i: number, b?: string) => void }).onSelectTurn(1, 'tool_definitions')
+      // 0-based turn lookup with bucket: tool_definitions
+      ;(spendChartsEl!.props as { onSelectTurn: (i: number, b?: string) => void }).onSelectTurn(0, 'tool_definitions')
       expect(capturedOpen).toBe(true)
       expect(capturedTitle).toBe('Turn 1 · tool_definitions')
       expect(capturedContent).toBeDefined()
@@ -1081,6 +1084,84 @@ describe('AgentSessionDashboard: Interaction & Drawer Integration', () => {
       expect(drawerHtml).toContain('2.8K')
       expect(drawerHtml).toContain('45.5K')
       expect(drawerHtml).toContain('6.2%')
+    } finally {
+      if (reactInternals?.H) {
+        reactInternals.H.useState = origState
+      }
+    }
+  })
+
+  it('shows the first-turn edge counts, not the last, for Turn 1 when context.turns is empty (issue #184 review)', () => {
+    const edgeSession: AgentSessionPayload = {
+      ...sampleSession,
+      turns: [
+        {
+          index: 0,
+          spanId: 'turn-span-1',
+          model: 'claude-3-5-sonnet',
+          buckets: { tool_definitions: 100 },
+        },
+      ],
+      context: {
+        measurable: true,
+        contextLimit: 200000,
+        turns: [],
+        residualTotal: 0,
+        derivedCounts: false,
+        freshJumpFactor: 2,
+        flaggedTurns: [],
+        sessionAccumulationRate: 0,
+        unmeasuredTurns: 0,
+        first: {
+          buckets: { tool_definitions: 111 },
+          reported_input: 111,
+        },
+        last: {
+          buckets: { tool_definitions: 999 },
+          reported_input: 999,
+        },
+      },
+    }
+
+    let capturedTitle = ''
+    let capturedContent: unknown = null
+
+    const reactInternals = internalsOf()
+    const origState = reactInternals?.H?.useState
+    if (reactInternals?.H) {
+      reactInternals.H.useState = (initial: unknown) => {
+        if (typeof initial === 'boolean') {
+          return [false, () => {}]
+        }
+        if (typeof initial === 'string') {
+          return [capturedTitle, (t: string) => { capturedTitle = t }]
+        }
+        return [capturedContent, (c: unknown) => { capturedContent = c }]
+      }
+    }
+
+    try {
+      const tree = AgentSessionContent({ session: edgeSession })
+      let spendChartsEl: React.ReactElement | null = null
+      const walk = (node: unknown): void => {
+        if (!React.isValidElement(node)) return
+        const props = node.props as Record<string, unknown> | undefined
+        if (props?.onSelectTurn && props?.session) {
+          spendChartsEl = node
+          return
+        }
+        if (props?.children) {
+          React.Children.forEach(props.children, walk)
+        }
+      }
+      walk(tree)
+      expect(spendChartsEl).not.toBeNull()
+
+      ;(spendChartsEl!.props as { onSelectTurn: (i: number, b?: string) => void }).onSelectTurn(0, 'tool_definitions')
+      expect(capturedTitle).toBe('Turn 1 · tool_definitions')
+      const bucketData = capturedContent as { tokens?: number; total?: number }
+      expect(bucketData.tokens).toBe(111)
+      expect(bucketData.total).toBe(111)
     } finally {
       if (reactInternals?.H) {
         reactInternals.H.useState = origState
@@ -1179,5 +1260,302 @@ describe('timeline shape from the canonical store', () => {
 
     expect(html).toContain('execution-timeline-section')
     expect(html).toContain('spend-composition-section')
+  })
+})
+
+
+describe('AgentSessionDashboard: Issue #180 Task 8 Dashboard UI Verification', () => {
+  it('renders tool-call count when summary.tool_calls = 5 in Overview card and not a dash', () => {
+    const sessionWith5ToolCalls: AgentSessionPayload = {
+      ...sampleSession,
+      summary: {
+        ...sampleSession.summary,
+        tool_calls: 5,
+        tools_invoked: 3,
+      },
+    }
+
+    const tree = AgentSessionDashboard({ session: sessionWith5ToolCalls })
+    const metric = findElementByTestId(tree, 'metric-tool-calls')
+    const html = renderHtml(metric)
+    expect(html).toContain('data-measured="true"')
+    expect(html).toContain('>5<')
+    expect(html).not.toContain('>—<')
+    expect(html).toContain('3 distinct invoked')
+  })
+
+  it('renders dash with honest unmeasured tooltip when summary.tool_calls is undefined for legacy session or unmeasured harness', () => {
+    const legacySession: AgentSessionPayload = {
+      ...sampleSession,
+      harness: 'claude-code',
+      summary: {
+        ...sampleSession.summary,
+        tool_calls: undefined,
+        tools_invoked: undefined,
+      },
+    }
+
+    const tree = AgentSessionDashboard({ session: legacySession })
+    const metric = findElementByTestId(tree, 'metric-tool-calls')
+    const html = renderHtml(metric)
+    expect(html).toContain('data-measured="false"')
+    expect(html).toContain('>—<')
+    expect(html).not.toContain('>0<')
+    expect(html).toContain('Tool invocation count was not reported by claude-code.')
+  })
+
+  it('renders tool invocations with name and status badge in timeline call tree when session contains tool.invoke records', () => {
+    const sessionWithToolInvokes: AgentSessionPayload = {
+      ...sampleSession,
+      timeline: [
+        {
+          spanId: 'root-span-1',
+          name: 'invoke_agent',
+          op: 'invoke_agent',
+          kind: 'agent',
+          durationMs: 5000,
+          offsetMs: 0,
+          children: [
+            {
+              spanId: 'tool-span-1',
+              parentId: 'root-span-1',
+              name: 'Bash',
+              op: 'tool.invoke',
+              kind: 'tool',
+              durationMs: 350,
+              offsetMs: 100,
+              status: 'ok',
+              attributes: {
+                'gen_ai.tool.name': 'Bash',
+                'gen_ai.tool.status': 'ok',
+                'gen_ai.tool.call_id': 'call_1',
+              },
+              children: [],
+            },
+            {
+              spanId: 'tool-span-2',
+              parentId: 'root-span-1',
+              name: 'Read',
+              op: 'tool.invoke',
+              kind: 'tool',
+              durationMs: 120,
+              offsetMs: 500,
+              status: 'error',
+              attributes: {
+                'gen_ai.tool.name': 'Read',
+                'gen_ai.tool.status': 'error',
+                'gen_ai.tool.call_id': 'call_2',
+              },
+              children: [],
+            },
+          ],
+        },
+      ],
+    }
+
+    const html = renderHtml(<AgentSessionDashboard session={sessionWithToolInvokes} />)
+    const treeView = html.slice(html.indexOf('data-testid="timeline-tree-view"'))
+
+    // Verify tool invocation names and durations render in call tree
+    expect(treeView).toContain('Bash')
+    expect(treeView).toContain('350ms')
+    expect(treeView).toContain('Read')
+    expect(treeView).toContain('120ms')
+
+    // Verify status badges render for tool invocations
+    expect(treeView).toMatch(/data-testid="status-badge"[^>]*>\s*ok\s*</i)
+    expect(treeView).toMatch(/data-testid="status-badge"[^>]*>\s*error\s*</i)
+  })
+  it("formats tools_offered and tools_invoked properly when provided as string arrays", () => {
+    const sessionWithArrayTools: AgentSessionPayload = {
+      ...sampleSession,
+      summary: {
+        ...sampleSession.summary,
+        tool_calls: 3,
+        tools_offered: ["toolA", "toolB"],
+        tools_invoked: ["toolA"],
+      },
+    }
+
+    const html = renderHtml(<AgentSessionDashboard session={sessionWithArrayTools} />)
+    const idx = html.indexOf("Tools Offered");
+    const offeredMetric = html.slice(idx, idx + 400);
+
+    // Card value should format as count 2, not "—"
+    expect(offeredMetric).toContain(">2<")
+    // Subtitle should format as "1 never called", not "NaN never called"
+    expect(offeredMetric).toContain("1 never called")
+    expect(offeredMetric).not.toContain("NaN")
+  })
+
+  it('does NOT render schema-waste-banner and reports unmeasured invocations when tools_invoked is undefined', () => {
+    const sessionWithUnmeasuredInvocations: AgentSessionPayload = {
+      ...sampleSession,
+      summary: {
+        ...sampleSession.summary,
+        tools_offered: ['toolA', 'toolB'],
+        tools_invoked: undefined,
+      },
+    }
+
+    const html = renderHtml(<AgentSessionDashboard session={sessionWithUnmeasuredInvocations} />)
+    expect(html).not.toContain('data-testid="schema-waste-banner"')
+    expect(html).not.toContain('tools were never called')
+    const offeredCard = html.slice(html.indexOf('Tools Offered'), html.indexOf('Tools Offered') + 300)
+    expect(offeredCard).toContain('invocations not reported')
+    expect(offeredCard).not.toContain('never called')
+  })
+
+  it('safely handles non-string node.status in timeline without throwing', () => {
+    const sessionWithMalformedStatus: AgentSessionPayload = {
+      ...sampleSession,
+      timeline: [
+        {
+          spanId: 'span-bad-status',
+          name: 'tool_call',
+          op: 'tool.invoke',
+          kind: 'tool',
+          durationMs: 100,
+          offsetMs: 0,
+          status: true as unknown as string,
+          attributes: {},
+          children: [],
+        },
+      ],
+    }
+
+    expect(() => {
+      renderHtml(<AgentSessionDashboard session={sessionWithMalformedStatus} />)
+    }).not.toThrow()
+  })
+
+  it("computes unusedOfferedCount via set difference and renders waste banner for string arrays (Threads 6 & 7)", () => {
+    const sessionWithArrayTools: AgentSessionPayload = {
+      ...sampleSession,
+      summary: {
+        ...sampleSession.summary,
+        tool_calls: 3,
+        tools_offered: ["toolA", "toolB"],
+        tools_invoked: ["toolA", "toolX"],
+        unused_schema_per_turn: 500,
+        schema_tokens_per_turn: 2000,
+      },
+    }
+
+    const html = renderHtml(<AgentSessionDashboard session={sessionWithArrayTools} />)
+    const idx = html.indexOf("Tools Offered")
+    const offeredMetric = html.slice(idx, idx + 400)
+
+    // Card subtitle should say "1 never called", NOT "0 never called"
+    expect(offeredMetric).toContain("1 never called")
+    expect(offeredMetric).not.toContain("0 never called")
+
+    // Waste banner MUST be rendered because 1 offered tool was never called!
+    expect(html).toContain('data-testid="schema-waste-banner"')
+    expect(html).toContain("1 of 2 tools were never called.")
+  })
+
+  it("styles timeline status badges according to failure/success/neutral classifications (Thread 8)", () => {
+    const sessionWithStatuses: AgentSessionPayload = {
+      ...sampleSession,
+      timeline: [
+        {
+          spanId: "root-span-1",
+          parentId: null,
+          name: "assistant",
+          op: "llm.turn",
+          kind: "turn",
+          durationMs: 1000,
+          children: [
+            { spanId: "c1", parentId: "root-span-1", name: "t1", op: "tool.invoke", kind: "tool", durationMs: 10, status: "error", children: [] },
+            { spanId: "c2", parentId: "root-span-1", name: "t2", op: "tool.invoke", kind: "tool", durationMs: 10, status: "failure", children: [] },
+            { spanId: "c3", parentId: "root-span-1", name: "t3", op: "tool.invoke", kind: "tool", durationMs: 10, status: "fatal", children: [] },
+            { spanId: "c4", parentId: "root-span-1", name: "t4", op: "tool.invoke", kind: "tool", durationMs: 10, status: "ok", children: [] },
+            { spanId: "c5", parentId: "root-span-1", name: "t5", op: "tool.invoke", kind: "tool", durationMs: 10, status: "success", children: [] },
+            { spanId: "c6", parentId: "root-span-1", name: "t6", op: "tool.invoke", kind: "tool", durationMs: 10, status: "unset", children: [] },
+            { spanId: "c7", parentId: "root-span-1", name: "t7", op: "tool.invoke", kind: "tool", durationMs: 10, status: "unknown", children: [] },
+          ],
+        },
+      ],
+    }
+
+    const html = renderHtml(<AgentSessionDashboard session={sessionWithStatuses} />)
+    const treeView = html.slice(html.indexOf('data-testid="timeline-tree-view"'))
+
+    // error, failure, fatal must have red classes
+    expect(treeView).toMatch(/data-testid="status-badge"[^>]*text-red-[^>]*>\s*error\s*</i)
+    expect(treeView).toMatch(/data-testid="status-badge"[^>]*text-red-[^>]*>\s*failure\s*</i)
+    expect(treeView).toMatch(/data-testid="status-badge"[^>]*text-red-[^>]*>\s*fatal\s*</i)
+
+    // ok, success must have green (emerald) classes
+    expect(treeView).toMatch(/data-testid="status-badge"[^>]*text-emerald-[^>]*>\s*ok\s*</i)
+    expect(treeView).toMatch(/data-testid="status-badge"[^>]*text-emerald-[^>]*>\s*success\s*</i)
+
+    // unset, unknown must have neutral muted classes (NOT emerald or red)
+    expect(treeView).toMatch(/data-testid="status-badge"[^>]*text-muted-foreground[^>]*>\s*unset\s*</i)
+    expect(treeView).toMatch(/data-testid="status-badge"[^>]*text-muted-foreground[^>]*>\s*unknown\s*</i)
+  })
+});
+
+// Issue #184: the drawer resolves strictly 0-based transport through the shared
+// helper — explicit identity first, array position only for rows that carry
+// neither `index` nor `turn`. Never a neighbor.
+describe('findTurnByTransport (shared drawer lookup)', () => {
+  it('matches a 0-based index row and the positional fallback', () => {
+    expect(findTurnByTransport([{ index: 4 }], 4)).toEqual({ index: 4 })
+    expect(findTurnByTransport([{}, {}], 1)).toEqual({})
+    expect(findTurnByTransport([{ index: 3 }], 4)).toBeUndefined()
+  })
+
+  it('matches a legacy 1-based turn row via turn - 1 only', () => {
+    expect(findTurnByTransport([{ turn: 5 }], 4)).toEqual({ turn: 5 })
+    expect(findTurnByTransport([{ turn: 5 }], 5)).toBeUndefined()
+  })
+
+  it('prefers explicit identity over an earlier positional match (issue #184 review)', () => {
+    const rows = [{ turn: 2, spanId: 'span-a' }, { turn: 1, spanId: 'span-b' }]
+    expect(findTurnByTransport(rows, 0)).toEqual({ turn: 1, spanId: 'span-b' })
+    expect(findTurnByTransport(rows, 1)).toEqual({ turn: 2, spanId: 'span-a' })
+  })
+
+  it('never serves a neighboring identified row positionally', () => {
+    expect(findTurnByTransport([{ index: 7 }, { index: 8 }], 0)).toBeUndefined()
+  })
+})
+
+describe('findContextTurn (shared 1-based context lookup)', () => {
+  it('matches engine 1-based index and legacy turn, then position', () => {
+    expect(findContextTurn([{ index: 2 }], 2)).toEqual({ index: 2 })
+    expect(findContextTurn([{ turn: 2 }], 2)).toEqual({ turn: 2 })
+    expect(findContextTurn([{}, {}], 2)).toEqual({})
+  })
+
+  it('prefers explicit identity over an earlier positional match (issue #184 review)', () => {
+    const rows = [{ turn: 2 }, { turn: 1 }]
+    expect(findContextTurn(rows, 1)).toEqual({ turn: 1 })
+    expect(findContextTurn(rows, 2)).toEqual({ turn: 2 })
+  })
+})
+
+// Issue #185: a legacy payload carrying cache creation but no coverage count
+// must not print "on 0 turns" — absence is not a measured zero.
+describe('AgentSessionDashboard cache tiles (issue #185)', () => {
+  it('renders honest absence instead of "on 0 turns" when coverage is unreported', () => {
+    const { summary, ...rest } = sampleSession
+    const legacy = {
+      ...rest,
+      summary: {
+        ...summary,
+        total_cache_creation: 10800000,
+        cache_creation_coverage: undefined,
+        cache_hit_ratio: undefined,
+      },
+    }
+    const html = renderHtml(<AgentSessionDashboard session={legacy} />)
+
+    expect(html).toContain('Cache Creation')
+    expect(html).not.toContain('on 0 turns')
+    // The ratio tile falls back to its honest dash without a served ratio.
+    expect(html).toContain('Cache Hit Ratio')
   })
 })

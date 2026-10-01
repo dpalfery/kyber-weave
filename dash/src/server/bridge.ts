@@ -7,10 +7,12 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { createRequire } from 'node:module'
 import { APPROXIMATE_TOKENIZER, tokenizerName } from '../canon/tokens.js'
+import { normalizeHarnessName } from '../canon/measurability.js'
 import { refreshProcessIsAlive } from '../canon/refresh-run.js'
 import {
   CanonStore,
   decompressRaw,
+  normalizeHistoryWeeks,
   toFinding,
   toPrediction,
   toRecord,
@@ -23,6 +25,12 @@ import {
   type HarnessRollupDbRow,
   type ExecutionDbRow,
 } from '../canon/store.js'
+import { sourceDisplayName, type SourceKind } from '../canon/measurability.js'
+import {
+  toSourceCheckpoint,
+  type SourceCheckpoint,
+  type SourceCheckpointRow,
+} from '../canon/source-state.js'
 import {
   calculateCalibrationCurve,
   type CalibrationCurveResult,
@@ -35,23 +43,53 @@ import {
   type RunComparisonOptions,
 } from '../analysis/compare.js'
 import type { Finding } from '../analysis/findings.js'
+import { DETECTOR_IDS } from '../analysis/findings.js'
+import { COPILOT_CREDITS_SOURCE } from '../canon/copilot-rates.js'
+
 import {
   CANONICAL_CONTENT_KEYS,
   type CanonicalContent,
   type CanonicalContentKey,
   type CanonicalRecord,
   type ContentPart,
+  type CostBlock,
   type RunRow,
+  type RunTurnRow,
   type ExecutionRow,
   type ExecutionTreeNode,
   type HarnessRollupRow,
 } from '../canon/types.js'
+import {
+  assembleRollup,
+  digestSessionPayloads,
+} from '../canon/harnesses.js'
+import { harnessExportsCacheCounter } from '../canon/measurability.js'
+import { buildScorecard, type Scorecard } from '../analysis/scorecard.js'
+import type { AsadSessionPayload } from '../canon/sessions.js'
 
 const _require = createRequire(import.meta.url)
 const { DatabaseSync } = _require('node:sqlite') as {
   DatabaseSync: typeof import('node:sqlite').DatabaseSync
 }
 type DatabaseSync = import('node:sqlite').DatabaseSync
+
+/** Paged findings envelope served at `GET /api/kyber/findings` (issue #191). */
+export type FindingsPage = {
+  findings: Finding[]
+  /** Size of the narrowed set ignoring paging. */
+  total: number
+  limit?: number
+  offset: number
+  /** Per-detector counts over the run/session/harness scope, ignoring paging and the detector filter. */
+  detectorCounts: Record<string, number>
+  /** Sessions with an unreported context window in the harness scope. */
+  unknownWindowSessions: number
+}
+
+/** A positive finite page number, floored; anything else is absent (paging lives in the bridge). */
+function validPageNumber(value: number | undefined): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.floor(value) : undefined
+}
 
 export type MetricAvailability = 'measured' | 'derived' | 'not_measurable'
 export type MetricKind = 'per_turn' | 'total'
@@ -95,7 +133,10 @@ export type SessionSummary = {
   request_count: number | null
   total_input: number | null
   total_output: number | null
+  /** USD figure; non-null only for a priced USD block. */
   cost_usd: number | null
+  /** The canonical cost block with its basis and status. */
+  cost: { basis: string; status: string; value?: number; currency?: string }
   models: string[]
   problems: number
 }
@@ -113,7 +154,56 @@ export type RefreshState = {
   lastSuccessAt: string | null
   lastFailure: { at: string; summary: string } | null
   inProgress: { pid: number; since: string } | null
+  /**
+   * The ingest window, in weeks, of the last successful run (T1's
+   * `historyWeeks`, plan docs/plans/2026-09-30-issues-189-198-199 T4).
+   * Optional so readers that predate window tracking keep compiling;
+   * `null` means the run predates tracking or no success exists — window
+   * unknown, never 0 and never the current default.
+   */
+  historyWeeks?: number | null
+  /** Derived window end of the last success (its `startedAt`); null when unknown. */
+  coveredThrough?: string | null
+  /** Derived window start (`coveredThrough` minus `historyWeeks`); null when unknown. */
+  coveredFrom?: string | null
 }
+
+/**
+ * One stored source's ingest activity (T4 read seam).
+ *
+ * <remarks>
+ * `recordCount` comes from `records GROUP BY source` — true for history,
+ * including legacy `unattributed` and `codeburn/*` rows. `ingestedCount`
+ * and `lastReceivedAt` come from `ingest_log` sums / `MAX(timestamp)` (T6's
+ * shape). `display`/`kind` are T7's `sourceDisplayName` labeling only: no
+ * aggregation across origins ever happens here. A missing log side reads
+ * as 0 ingested / null received — a fact about the log, never a claim
+ * about the receiver process.
+ * </remarks>
+ */
+export type IngestActivitySource = {
+  /** The stored source name, verbatim (auditability). */
+  source: string
+  /** T7 display label for the stored name. */
+  display: string
+  /** T7 origin kind for the stored name. */
+  kind: SourceKind
+  /** Rows in `records` carrying this source. */
+  recordCount: number
+  /** Summed `ingest_log.count` for this source; 0 when the log names it nowhere. */
+  ingestedCount: number
+  /** Latest `ingest_log.timestamp` for this source; null when the log names it nowhere. */
+  lastReceivedAt: string | null
+}
+
+/**
+ * Receiver activity over the canonical store (honest-unobservability rule).
+ * `unknown` only when the log AND the table are both empty — with the
+ * reason, never 0 and never `running`.
+ */
+export type IngestActivity =
+  | { status: 'known'; sources: IngestActivitySource[]; lastReceivedAt: string | null }
+  | { status: 'unknown'; reason: string; sources: []; lastReceivedAt: null }
 
 export type QuarantineRow = {
   span_id: string
@@ -145,11 +235,7 @@ export type ParsedSummary = {
   total_cache_read?: number | null
   total_cache_creation?: number | null
   schema_tokens_per_turn?: number | null
-  cost?: {
-    usd?: number | null
-    basis?: string | null
-    status?: string | null
-  } | null
+  cost?: CostBlock | null
   models?: string[] | null
 }
 
@@ -159,6 +245,170 @@ export type SessionPayload = Record<string, unknown> & {
   summary?: ParsedSummary
   turns?: unknown[]
   problems?: unknown[]
+}
+
+/** Measured session-summary figures behind one session, keyed by session id. */
+export type SessionSummaryFigures = Map<
+  string,
+  {
+    turnCount?: number
+    totalInput?: number
+    totalOutput?: number
+    costUsd?: number
+    /** The session's own cost block is partial — its figure is real but incomplete. */
+    costPartial?: true
+  }
+>
+
+/**
+ * Adapt streamed session payloads for the digest without retaining them:
+ * each payload is pulled, digested, and released before the next loads.
+ */
+function* asadPayloads(
+  source: Generator<{ payload: SessionPayload & { context?: unknown } }>,
+): Generator<AsadSessionPayload> {
+  for (const { payload } of source) {
+    yield payload as unknown as AsadSessionPayload
+  }
+}
+
+/**
+ * Collapse executions sharing one session to a single digest input
+ * (re-review #2: Kilo 5 — the old payload Map deduped by session id, and
+ * the stream must not count a shared session twice in digest.count or the
+ * peak-pressure list). Turns still stream per execution; only the digest
+ * dedupes. Executions without a session id have no key and always pass.
+ */
+export function* dedupedRunSessions(
+  source: Generator<{ execution: ExecutionRow; payload: SessionPayload & { context?: unknown } }>,
+): Generator<{ execution: ExecutionRow; payload: SessionPayload & { context?: unknown } }> {
+  const seen = new Set<string>()
+  for (const item of source) {
+    const sessionId = item.execution.sessionId
+    if (typeof sessionId === 'string' && sessionId.length > 0) {
+      if (seen.has(sessionId)) continue
+      seen.add(sessionId)
+    }
+    yield item
+  }
+}
+
+/** A run-figure field that names the cells it marks as subtotals. */
+export type PartialRunField = 'turnCount' | 'totalInput' | 'totalOutput' | 'costUsd'
+
+/**
+ * Measured run figures. `costStatus` marks a cost subtotal; `partial` marks
+ * any subtotal — a linked session with no summary, or a figure missing from
+ * some of the run's summaries — and `partialFields` names exactly which
+ * cells are subtotals so views mark the right ones (re-review #2: Kilo 4).
+ * All three are present only when partial.
+ */
+export type RunMeasuredFigures = {
+  turnCount?: number
+  totalInput?: number
+  totalOutput?: number
+  costUsd?: number
+  costStatus?: 'partial'
+  partial?: true
+  partialFields?: PartialRunField[]
+}
+
+/**
+ * A priced cost block's USD figure, or undefined when it is not one.
+ * Anything unpriced stays absent; a priced non-USD block stays absent too —
+ * serving euros under a dollar formatter is mislabelling (review follow-up:
+ * Copilot C4). The legacy `usd` shape predates currency and names dollars.
+ * A `partial` block still carries a priced figure for its priced portion
+ * (re-review: Kilo 5) — the run-level partial marker, not this function,
+ * says the total is incomplete. In direct-DB mode a missing currency reads
+ * as null rather than undefined (re-review: Kilo 7); both mean "unnamed".
+ */
+export function pricedUsd(
+  status: unknown,
+  value: unknown,
+  currency: unknown,
+  legacyUsd: unknown,
+): number | undefined {
+  if (status !== 'priced' && status !== 'ok' && status !== 'partial') return undefined
+  const figure = (candidate: unknown): number | undefined =>
+    typeof candidate === 'number' && Number.isFinite(candidate) ? candidate : undefined
+  const priced = figure(value) ?? figure(legacyUsd)
+  if (priced === undefined) return undefined
+  if (figure(value) !== undefined && currency != null && currency !== 'USD') return undefined
+  return priced
+}
+
+/**
+ * Sum session figures into run figures — the one derivation the runs list
+ * and the run detail share (review follow-up on issue #183: Kilo K7).
+ * Coverage is tracked, not assumed (Kilo K3, Copilot C5): a session without
+ * a priced figure makes the sum partial, and a run with no priced figure at
+ * all carries no cost — never $0. The same holds beyond cost (re-review:
+ * Kilo 5): a linked session with no summary row, or a figure present in
+ * some summaries but missing in others, marks the whole run `partial`.
+ */
+export function sumSessionFigures(
+  summaries: ReadonlyMap<
+    string,
+    { turnCount?: number; totalInput?: number; totalOutput?: number; costUsd?: number; costPartial?: true }
+  >,
+  sessionIds: readonly (string | null | undefined)[],
+): RunMeasuredFigures {
+  const uniqueIds = [...new Set(sessionIds)].filter(
+    (id): id is string => typeof id === 'string' && id.length > 0,
+  )
+  let turnCount = 0
+  let totalInput = 0
+  let totalOutput = 0
+  let costUsd = 0
+  let seenTurns = false
+  let seenInput = false
+  let seenOutput = false
+  let pricedSessions = 0
+  let partialSessions = 0
+  const fieldSeen = { turnCount: 0, totalInput: 0, totalOutput: 0, costUsd: 0 }
+  for (const sessionId of uniqueIds) {
+    const figures = summaries.get(sessionId)
+    if (figures === undefined) continue
+    if (figures.turnCount !== undefined) {
+      turnCount += figures.turnCount
+      seenTurns = true
+      fieldSeen.turnCount += 1
+    }
+    if (figures.totalInput !== undefined) {
+      totalInput += figures.totalInput
+      seenInput = true
+      fieldSeen.totalInput += 1
+    }
+    if (figures.totalOutput !== undefined) {
+      totalOutput += figures.totalOutput
+      seenOutput = true
+      fieldSeen.totalOutput += 1
+    }
+    if (figures.costUsd !== undefined) {
+      costUsd += figures.costUsd
+      pricedSessions += 1
+      fieldSeen.costUsd += 1
+    }
+    if (figures.costPartial === true) partialSessions += 1
+  }
+  const namedPartials = (Object.keys(fieldSeen) as Array<PartialRunField>).filter(
+    (field) => fieldSeen[field] > 0 && fieldSeen[field] < uniqueIds.length,
+  )
+  return {
+    ...(seenTurns ? { turnCount } : {}),
+    ...(seenInput ? { totalInput } : {}),
+    ...(seenOutput ? { totalOutput } : {}),
+    ...(pricedSessions > 0 ? { costUsd } : {}),
+    // A priced figure beside an unpriced session is a subtotal wearing a
+    // total's suit — mark it partial so the views can say so. Any partial
+    // session marks the sum too, even when every session priced something
+    // (re-review #2: Kilo B — otherwise an all-partial run looks complete).
+    ...(pricedSessions > 0 && (pricedSessions < uniqueIds.length || partialSessions > 0)
+      ? { costStatus: 'partial' as const }
+      : {}),
+    ...(namedPartials.length > 0 ? { partial: true as const, partialFields: namedPartials } : {}),
+  }
 }
 
 export type KyberMetaResult = {
@@ -173,6 +423,15 @@ export type KyberMetaResult = {
     source: string | null
     retrieved: string | null
     note: string | null
+    /** The two distinct rate tables in play; the flat fields above describe `copilot_credits` only. */
+    tables: Array<{
+      id: string
+      source: string
+      retrieved: string
+      applies_to: string[]
+      credit_usd?: number
+      note?: string
+    }>
   }
   harnesses: Record<string, unknown>
   sources: Array<{ origin: string; seen: number; new: number }>
@@ -384,8 +643,41 @@ type ContentSourceRecord = {
  */
 type TurnDescriptor = {
   index?: number
+  /**
+   * Legacy 1-based turn number some payload rows carry instead of `index`.
+   * Unknown at the boundary; `turnTransportIndexOf` checks before use.
+   */
+  turn?: unknown
   spanId?: string
   model?: string
+}
+
+/**
+ * One row's 0-based transport identity (issue #184): an explicit finite
+ * `index` wins; otherwise a finite legacy 1-based `turn` resolves as
+ * `turn - 1`. Anything else is no identity — the row is only reachable
+ * positionally.
+ */
+function turnTransportIndexOf(item: TurnDescriptor): number | undefined {
+  if (typeof item.index === 'number' && Number.isFinite(item.index)) return item.index
+  if (typeof item.turn === 'number' && Number.isFinite(item.turn)) return item.turn - 1
+  return undefined
+}
+
+/**
+ * Strict turn resolution: explicit identity first, array position only for
+ * rows carrying neither `index` nor `turn`. Anything else resolves to
+ * nothing — never a neighboring turn.
+ */
+function resolveTurn<T>(
+  pool: readonly T[],
+  turnIndex: number,
+  identityOf: (item: T) => number | undefined,
+): T | undefined {
+  return (
+    pool.find((item) => identityOf(item) === turnIndex) ??
+    pool.find((item, i) => i === turnIndex && identityOf(item) === undefined)
+  )
 }
 
 /**
@@ -573,6 +865,74 @@ function extractMessagesFromHistory(text: string): { userMessages: string[]; ass
   }
 
   return { userMessages, assistantMessages }
+}
+
+/** One week in milliseconds — the unit of the refresh coverage window. */
+const REFRESH_WEEK_MS = 7 * 24 * 60 * 60 * 1000
+
+/**
+ * Derive the coverage window of a refresh run (T4).
+ *
+ * <remarks>
+ * The window a run covered is `[startedAt − historyWeeks, startedAt]`
+ * (`utcHistoryWindow` in `refresh/source-reader.ts` anchors on the command
+ * start, which is what `started_at` persists). Anything missing or
+ * unparseable degrades to null/null: unknown stays unknown, never 0.
+ * </remarks>
+ */
+function refreshWindowBounds(
+  startedAt: string | null | undefined,
+  historyWeeks: number | null | undefined,
+): { coveredFrom: string | null; coveredThrough: string | null } {
+  if (startedAt === null || startedAt === undefined) return { coveredFrom: null, coveredThrough: null }
+  if (historyWeeks === null || historyWeeks === undefined) return { coveredFrom: null, coveredThrough: null }
+  const throughMs = Date.parse(startedAt)
+  if (!Number.isFinite(throughMs) || !Number.isFinite(historyWeeks)) {
+    return { coveredFrom: null, coveredThrough: null }
+  }
+  return {
+    coveredFrom: new Date(throughMs - historyWeeks * REFRESH_WEEK_MS).toISOString(),
+    coveredThrough: startedAt,
+  }
+}
+
+/**
+ * Assemble per-source ingest activity from record counts and log aggregates (T4).
+ *
+ * <remarks>
+ * The union of both key sets is reported so a log-only source (e.g.
+ * `otlp:logs`) still shows its received count beside zero records, and a
+ * record-only source still shows its history beside zero ingested. Both
+ * zeros are facts about their respective tables, not claims about the
+ * receiver. Empty + empty is the only `unknown`.
+ * </remarks>
+ */
+function buildIngestActivity(
+  recordCounts: ReadonlyMap<string, number>,
+  logSums: ReadonlyMap<string, { total: number; lastAt: string | null }>,
+  lastReceivedAt: string | null,
+): IngestActivity {
+  if (recordCounts.size === 0 && logSums.size === 0) {
+    return {
+      status: 'unknown',
+      reason: 'no receiver activity recorded',
+      sources: [],
+      lastReceivedAt: null,
+    }
+  }
+  const keys = [...new Set([...recordCounts.keys(), ...logSums.keys()])].sort()
+  const sources: IngestActivitySource[] = keys.map((source) => {
+    const labeled = sourceDisplayName(source)
+    return {
+      source,
+      display: labeled.display,
+      kind: labeled.kind,
+      recordCount: recordCounts.get(source) ?? 0,
+      ingestedCount: logSums.get(source)?.total ?? 0,
+      lastReceivedAt: logSums.get(source)?.lastAt ?? null,
+    }
+  })
+  return { status: 'known', sources, lastReceivedAt }
 }
 
 export class KyberBridge {
@@ -874,6 +1234,16 @@ export class KyberBridge {
           }
 
           summ = summ ?? {}
+          const block = summ.cost
+          const cost: SessionSummary['cost'] =
+            block && typeof block === 'object' && block.basis && block.status
+              ? {
+                  basis: block.basis,
+                  status: block.status,
+                  ...(typeof block.value === 'number' ? { value: block.value } : {}),
+                  ...(typeof block.currency === 'string' ? { currency: block.currency } : {}),
+                }
+              : { basis: 'unknown', status: 'no_rate' }
           list.push({
             session_id: row.session_id,
             harness: row.harness,
@@ -889,7 +1259,11 @@ export class KyberBridge {
             request_count: summ.request_count ?? null,
             total_input: summ.total_input ?? null,
             total_output: summ.total_output ?? null,
-            cost_usd: summ.cost?.usd ?? null,
+            cost_usd:
+              cost.status === 'priced' && cost.currency === 'USD' && typeof cost.value === 'number'
+                ? cost.value
+                : null,
+            cost,
             models: Array.isArray(summ.models) ? summ.models : [],
             problems: problemsCount,
           })
@@ -906,6 +1280,58 @@ export class KyberBridge {
       return list.slice(0, Math.floor(limit))
     }
     return list
+  }
+
+  /**
+   * Per-harness latest session time as epoch ms (coverage-window seam).
+   *
+   * <remarks>
+   * The harness window check needs one fact per harness — the latest
+   * timestamped session — not the session table. Both branches of this seam
+   * read only the narrow `(harness, started, ended)` columns (the store
+   * branch via `CanonStore.listSessionTimeColumns`, the raw-db branch via
+   * an explicit narrow SELECT) and fold them into a per-harness maximum in
+   * one pass, so payload blobs are never pulled across the bridge. The fold
+   * is deliberately uncapped — every session row participates — and runs in
+   * JS epoch ms rather than SQL MAX: recency is `ended ?? started` parsed
+   * to epoch ms (the report's `sessionAt` precedence in
+   * `analysis/report/build.ts`) because epoch comparison sorts `+02:00`-
+   * offset stamps correctly where a raw string compare does not. A harness
+   * with no parseable timestamp is absent from the map — unknown, never 0.
+   * </remarks>
+   */
+  getLatestSessionTimeByHarness(): Map<string, number> {
+    const latest = new Map<string, number>()
+    const track = (harness: unknown, started: unknown, ended: unknown): void => {
+      if (typeof harness !== 'string' || harness === '') return
+      const stamp = (typeof ended === 'string' ? ended : null) ?? (typeof started === 'string' ? started : null)
+      if (stamp === null) return
+      const at = Date.parse(stamp)
+      if (!Number.isFinite(at)) return
+      const prev = latest.get(harness)
+      if (prev === undefined || at > prev) latest.set(harness, at)
+    }
+    if (this.store) {
+      try {
+        for (const row of this.store.listSessionTimeColumns()) {
+          track(row.harness, row.started, row.ended)
+        }
+      } catch {
+        return new Map<string, number>()
+      }
+      return latest
+    }
+    const db = this.getDb()
+    if (!this.hasTable(db, 'session')) return latest
+    try {
+      const rows = db!
+        .prepare('SELECT harness, started, ended FROM session')
+        .all() as Array<{ harness: unknown; started: unknown; ended: unknown }>
+      for (const row of rows) track(row.harness, row.started, row.ended)
+    } catch {
+      return new Map<string, number>()
+    }
+    return latest
   }
 
   /**
@@ -1045,9 +1471,15 @@ export class KyberBridge {
 
   /**
    * Unclipped assembled turn content for the Context Inspector (Task G1 / Decision D14).
-   * Retrieves all blocks and parts for the given turn index (0-indexed or 1-indexed fallback),
-   * sub-divided into canonical context blocks (system_prompt, tool_definitions, instruction_context,
-   * conversation_history, tool_result_content) and parts (including user_messages, assistant_turns, etc.).
+   * Retrieves all blocks and parts for the given turn index, strictly 0-based:
+   * each row resolves by explicit identity (`index`, else legacy 1-based `turn`
+   * as `turn - 1`), and array position only matches rows carrying neither.
+   * Anything else resolves to nothing (the route 404s) rather than a
+   * neighboring turn (issue #184).
+   *
+   * Sub-divided into canonical context blocks (system_prompt, tool_definitions,
+   * instruction_context, conversation_history, tool_result_content) and parts
+   * (including user_messages, assistant_turns, etc.).
    */
   assembleTurnContent(
     sessionId: string,
@@ -1067,12 +1499,16 @@ export class KyberBridge {
       ? (payload.turns as TurnDescriptor[])
       : []
     if (turns.length > 0) {
-      const turnItem =
-        turns.find((t, i) => t.index === turnIndex || i === turnIndex) ??
-        (turnIndex >= 1 && turnIndex <= turns.length ? turns[turnIndex - 1] : undefined)
+      const turnItem = resolveTurn(turns, turnIndex, turnTransportIndexOf)
       if (turnItem) {
         if (typeof turnItem.spanId === 'string') targetSpanId = turnItem.spanId
         if (typeof turnItem.model === 'string') model = turnItem.model
+      } else if (turns.some((t) => turnTransportIndexOf(t) !== undefined)) {
+        // The payload names its turns and none matches: stop here. Falling
+        // through to the positional record lookup below could serve a
+        // neighboring span's content instead of the documented 404
+        // (issue #184 review). Identity-free payloads still fall through.
+        return null
       }
     }
 
@@ -1082,9 +1518,9 @@ export class KyberBridge {
         const records = this.store.recordsForSession(sessionId)
         const turnRecords = records.filter((r) => r.op === 'llm.invoke')
         const pool = turnRecords.length > 0 ? turnRecords : records
-        const target =
-          pool.find((r, i) => (r as CanonicalRecord & TurnDescriptor).index === turnIndex || i === turnIndex) ??
-          (turnIndex >= 1 && turnIndex <= pool.length ? pool[turnIndex - 1] : undefined)
+        const target = resolveTurn(pool, turnIndex, (r) =>
+          turnTransportIndexOf(r as CanonicalRecord & TurnDescriptor),
+        )
         if (target) {
           targetSpanId = target.spanId
           model = (target as CanonicalRecord & TurnDescriptor).model ?? target.name
@@ -1096,9 +1532,18 @@ export class KyberBridge {
             .all(sessionId) as Record<string, unknown>[]
           const turnRows = rows.filter((r) => r.op === 'llm.invoke')
           const pool = turnRows.length > 0 ? turnRows : rows
-          const target =
-            pool.find((r, i) => Number(r.index) === turnIndex || i === turnIndex) ??
-            (turnIndex >= 1 && turnIndex <= pool.length ? pool[turnIndex - 1] : undefined)
+          // DB rows predate the descriptor shape: `index` may arrive as a
+          // numeric string, and a null/empty index is no identity (unlike
+          // `Number(null)`, which coerces to 0 and would hijack turn 0).
+          const target = resolveTurn(pool, turnIndex, (r) => {
+            const rawIndex: unknown = r.index
+            const index =
+              rawIndex === null || rawIndex === undefined || rawIndex === '' ? undefined : Number(rawIndex)
+            return turnTransportIndexOf({
+              index: typeof index === 'number' && Number.isFinite(index) ? index : undefined,
+              turn: r.turn,
+            })
+          })
           if (target) {
             targetSpanId = String(target.span_id)
             model = String(target.name || '')
@@ -1716,22 +2161,56 @@ export class KyberBridge {
    */
   getRefreshState(): RefreshState {
     const db = this.getDb()
-    const latest = (status: 'success' | 'failure' | 'running') => {
+    const latest = (status: 'success' | 'failure' | 'running'): {
+      startedAt: string
+      completedAt: string | null
+      pid: number
+      summary: string | null
+      historyWeeks?: number | null
+    } | undefined => {
       try {
         if (this.store) return this.store.latestRefreshRun(status)
         if (!this.hasTable(db, 'refresh_run')) return undefined
-        const row = db!
-          .prepare(
-            'SELECT started_at, completed_at, pid, summary FROM refresh_run WHERE status = ? ORDER BY started_at DESC LIMIT 1',
-          )
-          .get(status) as
+        // T1's `history_weeks` column: old databases predate migration 14→15
+        // and have no such column — they fall back to the column-less select
+        // and read as null (unknown), never 0.
+        let row:
           | {
               started_at: string
               completed_at: string | null
               pid: number
               summary: string | null
+              history_weeks?: unknown
             }
           | undefined
+        try {
+          row = db!
+            .prepare(
+              'SELECT started_at, completed_at, pid, summary, history_weeks FROM refresh_run WHERE status = ? ORDER BY started_at DESC LIMIT 1',
+            )
+            .get(status) as
+            | {
+                started_at: string
+                completed_at: string | null
+                pid: number
+                summary: string | null
+                history_weeks?: unknown
+              }
+            | undefined
+        } catch {
+          row = db!
+            .prepare(
+              'SELECT started_at, completed_at, pid, summary FROM refresh_run WHERE status = ? ORDER BY started_at DESC LIMIT 1',
+            )
+            .get(status) as
+            | {
+                started_at: string
+                completed_at: string | null
+                pid: number
+                summary: string | null
+              }
+            | undefined
+        }
         if (row === undefined) return undefined
         if (status === 'running' && !refreshProcessIsAlive(Number(row.pid))) return undefined
         return {
@@ -1739,6 +2218,9 @@ export class KyberBridge {
           completedAt: row.completed_at,
           pid: Number(row.pid),
           summary: row.summary,
+          // A non-numeric column value reads as unknown (never NaN): the
+          // shared normalizer holds for both halves of the seam.
+          historyWeeks: normalizeHistoryWeeks('history_weeks' in row ? row.history_weeks : null),
         }
       } catch {
         return undefined
@@ -1748,6 +2230,8 @@ export class KyberBridge {
     const success = latest('success')
     const failure = latest('failure')
     const running = latest('running')
+    const historyWeeks = success?.historyWeeks ?? null
+    const { coveredFrom, coveredThrough } = refreshWindowBounds(success?.startedAt, historyWeeks)
     return {
       lastSuccessAt: success?.completedAt ?? success?.startedAt ?? null,
       lastFailure:
@@ -1755,6 +2239,9 @@ export class KyberBridge {
           ? null
           : { at: failure.completedAt ?? failure.startedAt, summary: failure.summary ?? 'refresh failed' },
       inProgress: running === undefined ? null : { pid: running.pid, since: running.startedAt },
+      historyWeeks,
+      coveredFrom,
+      coveredThrough,
     }
   }
 
@@ -1810,11 +2297,18 @@ export class KyberBridge {
   /**
    * List ranked findings optionally filtered by runId or sessionId.
    */
-  listFindings(options?: { runId?: string; sessionId?: string; limit?: number }): Finding[] {
+  listFindings(options?: { runId?: string; sessionId?: string; detector?: string; harness?: string; limit?: number; offset?: number }): Finding[] {
     if (this.store) {
-      const findings = this.store.listFindings(options?.runId, options?.sessionId)
-      if (typeof options?.limit === 'number' && options.limit > 0) {
-        return findings.slice(0, Math.floor(options.limit))
+      // Paging lives here, not in the store (review): slice the narrowed
+      // set so `limit` keeps the contract it always had on this method.
+      const findings = this.store.listFindings(options?.runId, options?.sessionId, {
+        ...(options?.detector !== undefined ? { detector: options.detector } : {}),
+        ...(options?.harness !== undefined ? { harness: options.harness } : {}),
+      })
+      const offset = validPageNumber(options?.offset) ?? 0
+      const limit = validPageNumber(options?.limit)
+      if (offset > 0 || limit !== undefined) {
+        return findings.slice(offset, limit === undefined ? undefined : offset + limit)
       }
       return findings
     }
@@ -1833,16 +2327,34 @@ export class KyberBridge {
           conds.push('session_id = ?')
           params.push(options.sessionId)
         }
+        if (options?.detector) {
+          conds.push('detector_id = ?')
+          params.push(options.detector)
+        }
         if (conds.length > 0) {
           sql += ' WHERE ' + conds.join(' AND ')
         }
         sql += ' ORDER BY rank_score DESC, id ASC'
-        if (typeof options?.limit === 'number' && options.limit > 0) {
-          sql += ' LIMIT ?'
-          params.push(Math.floor(options.limit))
-        }
         const rows = db!.prepare(sql).all(...(params as (string | number)[])) as unknown as FindingDbRow[]
-        return rows.map(toFinding)
+        // `harness` rides in the payload JSON and filters after the
+        // round-trip (same rule as `CanonStore.listFindings`); paging slices
+        // the narrowed set so `total` stays comparable across paths.
+        let findings = rows.map(toFinding)
+        if (options?.harness) {
+          // Same fold rule as `CanonStore.listFindings` (review): legacy
+          // front-end names answer under their folded owner.
+          const want = normalizeHarnessName(options.harness)
+          findings = findings.filter((finding) => {
+            const have = (finding as { harness?: unknown }).harness
+            return typeof have === 'string' && normalizeHarnessName(have) === want
+          })
+        }
+        const offset = typeof options?.offset === 'number' && options.offset > 0 ? Math.floor(options.offset) : 0
+        if (offset > 0 || (typeof options?.limit === 'number' && options.limit > 0)) {
+          const limit = typeof options?.limit === 'number' && options.limit > 0 ? Math.floor(options.limit) : undefined
+          findings = findings.slice(offset, limit === undefined ? undefined : offset + limit)
+        }
+        return findings
       } catch (err) {
         console.warn('[KyberBridge] Failed querying findings from canon.db:', err)
         return []
@@ -1850,6 +2362,224 @@ export class KyberBridge {
     }
 
     return []
+  }
+
+  /**
+   * Paged findings envelope for the workspace view (issue #191): the
+   * narrowed `findings` slice plus `total` and per-detector counts over the
+   * narrowed set ignoring paging, so the Context Doctor can show every
+   * finding and `unknownWindowSessions` keeps a suppressed-default list
+   * from reading as "all clear". Additive: `findings` rows are unchanged.
+   */
+  listFindingsPage(options?: {
+    runId?: string
+    sessionId?: string
+    detector?: string
+    harness?: string
+    limit?: number
+    offset?: number
+  }): FindingsPage {
+    // One findings-table read per request (review): the detector split
+    // happens in memory over the same rows, so `total` and `detectorCounts`
+    // can never disagree about what the table holds.
+    const base = this.listFindings({
+      ...(options?.runId !== undefined ? { runId: options.runId } : {}),
+      ...(options?.sessionId !== undefined ? { sessionId: options.sessionId } : {}),
+      ...(options?.harness !== undefined ? { harness: options.harness } : {}),
+    })
+    const narrowed =
+      options?.detector === undefined ? base : base.filter((finding) => finding.detectorId === options.detector)
+    // Per-detector counts stay scoped to run/session/harness but never to
+    // the detector being browsed (review): narrowing the list must not
+    // evaporate the chips that narrow it. `total` below stays narrowed.
+    const detectorCounts: Record<string, number> = {}
+    for (const id of DETECTOR_IDS) detectorCounts[id] = 0
+    for (const finding of base) {
+      detectorCounts[finding.detectorId] = (detectorCounts[finding.detectorId] ?? 0) + 1
+    }
+    const offset = typeof options?.offset === 'number' && Number.isFinite(options.offset) && options.offset > 0
+      ? Math.floor(options.offset)
+      : 0
+    const limit = typeof options?.limit === 'number' && Number.isFinite(options.limit) && options.limit > 0
+      ? Math.floor(options.limit)
+      : undefined
+    return {
+      findings: narrowed.slice(offset, limit === undefined ? undefined : offset + limit),
+      total: narrowed.length,
+      ...(limit === undefined ? {} : { limit }),
+      offset,
+      detectorCounts,
+      unknownWindowSessions: this.countUnknownWindowSessions({
+        ...(options?.harness !== undefined ? { harness: options.harness } : {}),
+        ...(options?.runId !== undefined ? { runId: options.runId } : {}),
+        ...(options?.sessionId !== undefined ? { sessionId: options.sessionId } : {}),
+      }),
+    }
+  }
+
+  /** Canonical harness of one stored session over the raw handle (review).
+   * Absent reads as undefined; a failed read reads as null — never a clean
+   * zero that would pose as "no suppressed sessions" (review). */
+  private sessionHarnessRaw(sessionId: string): string | null | undefined {
+    const db = this.getDb()
+    if (!this.hasTable(db, 'session')) return undefined
+    try {
+      const row = db!
+        .prepare('SELECT harness FROM session WHERE session_id = ?')
+        .get(sessionId) as unknown as { harness: string } | undefined
+      return row?.harness
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   * Sessions whose context window no source reported, scoped the way the
+   * findings are: the selected run's sessions, the selected session, or the
+   * harness/workspace scope (issue #191, condition 3). An unscoped count on
+   * a scoped query would warn about suppressions the listed findings never
+   * underwent.
+   */
+  countUnknownWindowSessions(scope?: { harness?: string; runId?: string; sessionId?: string }): number {
+    const harness = scope?.harness
+    const runId = scope?.runId
+    const sessionId = scope?.sessionId
+    if (sessionId !== undefined && sessionId !== '') {
+      // A harness that does not own the session scopes the count to zero,
+      // matching the narrowed findings (review S3a). Absent and failed look
+      // different: a missing row is 0, but an unreadable row must not answer
+      // at all — the payload read below still knows the window (review).
+      if (harness !== undefined && harness !== '') {
+        let owner: string | null | undefined
+        try {
+          owner = this.store ? this.store.sessionHarness(sessionId) : this.sessionHarnessRaw(sessionId)
+        } catch {
+          owner = null
+        }
+        if (owner === null) {
+          const payload = this.getSessionPayload<{ context?: { contextLimitSource?: string } }>(sessionId)
+          return payload?.context?.contextLimitSource === 'default' ? 1 : 0
+        }
+        if (owner === undefined || normalizeHarnessName(owner) !== normalizeHarnessName(harness)) return 0
+      }
+      const payload = this.getSessionPayload<{ context?: { contextLimitSource?: string } }>(sessionId)
+      return payload?.context?.contextLimitSource === 'default' ? 1 : 0
+    }
+    if (runId !== undefined && runId !== '') {
+      // Same fold rule as everywhere else (review): a run scoped to a legacy
+      // front-end name still matches its folded owner's executions.
+      const wantHarness = harness !== undefined && harness !== '' ? normalizeHarnessName(harness) : undefined
+      const ids = [
+        ...new Set(
+          this.listExecutions(runId)
+            .filter(
+              (execution) =>
+                wantHarness === undefined || normalizeHarnessName(execution.harness) === wantHarness,
+            )
+            .map((execution) => execution.sessionId ?? execution.executionId)
+            .filter((id) => id.length > 0),
+        ),
+      ]
+      return ids.filter(
+        (id) =>
+          this.getSessionPayload<{ context?: { contextLimitSource?: string } }>(id)?.context?.contextLimitSource ===
+          'default',
+      ).length
+    }
+    // Harness and workspace scopes read the persisted rollups (review): the
+    // count was derived at build time, so each findings request does not
+    // JSON-parse every session payload. A rollup sum is exact only when the
+    // rollups still cover every session (review M2): coverage is verified
+    // against narrow-column counts, and anything uncovered falls back to
+    // the direct session scan rather than wearing a partial sum as a total.
+    if (this.store) {
+      if (harness !== undefined && harness !== '') {
+        const canonical = normalizeHarnessName(harness)
+        const rollup = this.store.getHarnessRollup(canonical)
+        const covered = (rollup?.payload as { windowSessionsTotal?: unknown } | undefined)?.windowSessionsTotal
+        if (typeof covered === 'number' && covered === (this.store.countSessionsByHarness()[canonical] ?? -1)) {
+          const count = (rollup?.payload as { unknownWindowSessions?: unknown } | undefined)?.unknownWindowSessions
+          if (typeof count === 'number') return count
+        }
+      } else {
+        const rollups = this.store.listHarnessRollups()
+        const byHarness = this.store.countSessionsByHarness()
+        const covered = rollups.length > 0 && rollups.every((rollup) => {
+          const total = (rollup.payload as { windowSessionsTotal?: unknown } | undefined)?.windowSessionsTotal
+          return typeof total === 'number' && total === (byHarness[rollup.harness] ?? -1)
+        })
+        // covered also requires no sessions outside rollup harnesses.
+        if (covered && Object.keys(byHarness).every((h) => rollups.some((rollup) => rollup.harness === h))) {
+          return rollups.reduce((sum, rollup) => {
+            const count = (rollup.payload as { unknownWindowSessions?: unknown } | undefined)?.unknownWindowSessions
+            return sum + (typeof count === 'number' ? count : 0)
+          }, 0)
+        }
+      }
+      return this.store.countUnknownWindowSessions(harness)
+    }
+    const db = this.getDb()
+    // Built rollups first (review): one small table, no session-blob scan —
+    // but only when coverage verifies (review M2), else the session scan.
+    if (this.hasTable(db, 'harness_rollup') && this.hasTable(db, 'session')) {
+      try {
+        const payloadOf = (payload: unknown): { unknown?: number; total?: number } => {
+          if (typeof payload !== 'string') return {}
+          try {
+            const parsed = JSON.parse(payload) as { unknownWindowSessions?: unknown; windowSessionsTotal?: unknown }
+            return {
+              ...(typeof parsed.unknownWindowSessions === 'number' ? { unknown: parsed.unknownWindowSessions } : {}),
+              ...(typeof parsed.windowSessionsTotal === 'number' ? { total: parsed.windowSessionsTotal } : {}),
+            }
+          } catch {
+            return {}
+          }
+        }
+        const grouped = db!
+          .prepare('SELECT harness, COUNT(*) AS n FROM session GROUP BY harness')
+          .all() as unknown as { harness: string; n: number }[]
+        const actual: Record<string, number> = {}
+        for (const row of grouped) actual[row.harness] = row.n
+        if (harness !== undefined && harness !== '') {
+          const canonical = normalizeHarnessName(harness)
+          const row = db!
+            .prepare('SELECT payload FROM harness_rollup WHERE harness = ?')
+            .get(canonical) as unknown as { payload: unknown } | undefined
+          const { unknown, total } = payloadOf(row?.payload)
+          if (unknown !== undefined && total === (actual[canonical] ?? -1)) return unknown
+        } else {
+          const rows = db!.prepare('SELECT harness, payload FROM harness_rollup').all() as unknown as {
+            harness: string
+            payload: unknown
+          }[]
+          const covered =
+            rows.length > 0 &&
+            rows.every((row) => payloadOf(row.payload).total === (actual[row.harness] ?? -1)) &&
+            Object.keys(actual).every((h) => rows.some((row) => row.harness === h))
+          if (covered) {
+            return rows.reduce((sum, row) => sum + (payloadOf(row.payload).unknown ?? 0), 0)
+          }
+        }
+      } catch (err) {
+        console.warn('[KyberBridge] Failed reading unknown-window counts from rollups:', err)
+      }
+    }
+    if (!this.hasTable(db, 'session')) return 0
+    try {
+      const conds = [`json_extract(payload, '$.context.contextLimitSource') = 'default'`]
+      const params: (string | number)[] = []
+      if (harness !== undefined && harness !== '') {
+        conds.push('LOWER(harness) = LOWER(?)')
+        params.push(normalizeHarnessName(harness))
+      }
+      const row = db!
+        .prepare(`SELECT COUNT(*) AS n FROM session WHERE ${conds.join(' AND ')}`)
+        .get(...params) as unknown as { n: number } | undefined
+      return row?.n ?? 0
+    } catch (err) {
+      console.warn('[KyberBridge] Failed counting unknown-window sessions:', err)
+      return 0
+    }
   }
 
   /**
@@ -2156,6 +2886,347 @@ export class KyberBridge {
   }
 
   /**
+   * Summary figures for sessions, without parsing whole payloads. Store mode
+   * reads the summary fields out of the stored JSON; direct-DB mode runs the
+   * same projection. Absent figures stay absent — never 0. A priced cost is
+   * carried as USD only when its block names USD (or predates currency, as
+   * the legacy `usd` shape does); any other currency is omitted rather than
+   * mislabelled (review follow-up: Copilot C4).
+   */
+  sessionSummaryFigures(sessionIds: readonly string[]): SessionSummaryFigures {
+    const uniqueIds = [...new Set(sessionIds)].filter((id) => id.length > 0)
+    const out: SessionSummaryFigures = new Map()
+    if (uniqueIds.length === 0) return out
+
+    type SummaryRow = {
+      session_id: unknown
+      turn_count: unknown
+      total_input: unknown
+      total_output: unknown
+      cost_status: unknown
+      cost_value: unknown
+      cost_currency: unknown
+      cost_usd: unknown
+    }
+    const readRows = (): SummaryRow[] => {
+      if (this.store) {
+        return this.store.sessionSummaryFigures(uniqueIds).map((row) => ({
+          session_id: row.sessionId,
+          turn_count: row.turnCount,
+          total_input: row.totalInput,
+          total_output: row.totalOutput,
+          cost_status: row.costStatus,
+          cost_value: row.costValue,
+          cost_currency: row.costCurrency,
+          cost_usd: row.costUsdLegacy,
+        }))
+      }
+      const db = this.getDb()
+      if (!this.hasTable(db, 'session')) return []
+      const rows: SummaryRow[] = []
+      const chunkSize = 900
+      for (let offset = 0; offset < uniqueIds.length; offset += chunkSize) {
+        const chunk = uniqueIds.slice(offset, offset + chunkSize)
+        const placeholders = chunk.map(() => '?').join(', ')
+        try {
+          rows.push(
+            ...(db!
+              .prepare(
+                `SELECT session_id,
+                        json_extract(payload, '$.summary.turn_count') AS turn_count,
+                        json_extract(payload, '$.summary.total_input') AS total_input,
+                        json_extract(payload, '$.summary.total_output') AS total_output,
+                        json_extract(payload, '$.summary.cost.status') AS cost_status,
+                        json_extract(payload, '$.summary.cost.value') AS cost_value,
+                        json_extract(payload, '$.summary.cost.currency') AS cost_currency,
+                        json_extract(payload, '$.summary.cost.usd') AS cost_usd
+                 FROM session WHERE session_id IN (${placeholders})`,
+              )
+              .all(...chunk) as SummaryRow[]),
+          )
+        } catch (err) {
+          console.warn('[KyberBridge] Failed querying session summaries from canon.db:', err)
+          return []
+        }
+      }
+      return rows
+    }
+
+    const figure = (value: unknown): number | undefined =>
+      typeof value === 'number' && Number.isFinite(value) ? value : undefined
+    for (const row of readRows()) {
+      if (typeof row.session_id !== 'string') continue
+      const cost = pricedUsd(row.cost_status, row.cost_value, row.cost_currency, row.cost_usd)
+      out.set(row.session_id, {
+        ...(figure(row.turn_count) !== undefined ? { turnCount: figure(row.turn_count)! } : {}),
+        ...(figure(row.total_input) !== undefined ? { totalInput: figure(row.total_input)! } : {}),
+        ...(figure(row.total_output) !== undefined ? { totalOutput: figure(row.total_output)! } : {}),
+        ...(cost !== undefined ? { costUsd: cost } : {}),
+        // Re-review #2 (Kilo B): the status a bare figure cannot carry.
+        ...(row.cost_status === 'partial' && cost !== undefined ? { costPartial: true as const } : {}),
+      })
+    }
+    return out
+  }
+
+  /**
+   * Measured run figures summed over the run's session summaries (issue #183).
+   * Feeds the run detail `run` object; the runs list batches through
+   * `sumSessionFigures` directly. `RunRow`'s stored shape is unchanged, so
+   * figures are always live, never migrated.
+   */
+  runMeasuredFigures(runId: string): RunMeasuredFigures {
+    const sessionIds = this.listExecutions(runId)
+      .map((exec) => exec.sessionId)
+      .filter((id): id is string => typeof id === 'string' && id.length > 0)
+    return sumSessionFigures(this.sessionSummaryFigures(sessionIds), sessionIds)
+  }
+
+  /**
+   * Session payloads behind executions, streamed one distinct session at a
+   * time (review re-review on issue #183: Kilo 4, plus the open thread on
+   * shared sessions — payloads can be hundreds of MB, so no consumer may
+   * hold every session of the run at once, nor parse one session per
+   * execution sharing it). Executions are grouped by session first: each
+   * distinct payload parses once per pass, then yields one
+   * (execution, payload) pair per group member so turns still stream per
+   * execution. Each yielded payload is droppable as soon as the consumer
+   * advances: callers must process it inline and never retain it past the
+   * iteration.
+   */
+  *streamRunSessionPayloads(
+    executions: readonly ExecutionRow[],
+  ): Generator<{ execution: ExecutionRow; payload: SessionPayload & { context?: unknown } }> {
+    const bySession = new Map<string, ExecutionRow[]>()
+    for (const execution of executions) {
+      const sessionId = execution.sessionId
+      // An execution with no session carries no payload to stream; the
+      // executions list itself (kept by callers) still sees it.
+      if (typeof sessionId !== 'string' || sessionId.length === 0) continue
+      const group = bySession.get(sessionId) ?? []
+      group.push(execution)
+      bySession.set(sessionId, group)
+    }
+    for (const [sessionId, group] of bySession) {
+      const payload = this.getSessionPayload(sessionId)
+      if (payload === null) continue
+      for (const execution of group) {
+        yield { execution, payload }
+      }
+    }
+  }
+
+  /**
+   * Cost blocks for spans, keyed by span id. Store mode reads only the small
+   * cost column; direct-DB mode runs the same projection. Parts and raw
+   * payloads are never inflated for the turn table.
+   */
+  private readSpanCosts(spanIds: readonly string[]): Map<string, CostBlock> {
+    const uniqueIds = [...new Set(spanIds)].filter((id) => id.length > 0)
+    const out = new Map<string, CostBlock>()
+    if (uniqueIds.length === 0) return out
+    const ingest = (spanId: unknown, cost: unknown): void => {
+      if (typeof spanId !== 'string') return
+      if (typeof cost !== 'object' || cost === null) return
+      out.set(spanId, cost as CostBlock)
+    }
+    if (this.store) {
+      for (const row of this.store.spanCosts(uniqueIds)) ingest(row.spanId, row.cost)
+      return out
+    }
+    const db = this.getDb()
+    if (!this.hasTable(db, 'records')) return out
+    const chunkSize = 900
+    for (let offset = 0; offset < uniqueIds.length; offset += chunkSize) {
+      const chunk = uniqueIds.slice(offset, offset + chunkSize)
+      const placeholders = chunk.map(() => '?').join(', ')
+      try {
+        const rows = db!
+          .prepare(`SELECT span_id, cost_json FROM records WHERE span_id IN (${placeholders})`)
+          .all(...chunk) as Array<{ span_id: unknown; cost_json: unknown }>
+        for (const row of rows) {
+          let cost: unknown
+          try {
+            cost = JSON.parse(String(row.cost_json))
+          } catch {
+            continue
+          }
+          ingest(row.span_id, cost)
+        }
+      } catch (err) {
+        console.warn('[KyberBridge] Failed querying span costs from canon.db:', err)
+        return out
+      }
+    }
+    return out
+  }
+
+  /**
+   * Per-turn measured rows for a run, joined from the run's session payloads
+   * (issue #183). Context pressure joins positionally over measured turns —
+   * the engine's 1-based `TurnPressure.index` counts measured turns only, so
+   * an index-equality join would land on a neighbor wherever an unmeasured
+   * turn exists; a length mismatch omits every pressure rather than guessing.
+   * `turnIndex` keeps the #184 transport convention: 0-based per execution.
+   * Sessions stream one at a time (review re-review: Kilo 4): each payload —
+   * and its span-cost query — is dropped before the next session loads, so
+   * the peak stays one payload however large the run's sessions are.
+   */
+  getRunTurns(runId: string, executions?: readonly ExecutionRow[]): RunTurnRow[] {
+    const rows: RunTurnRow[] = []
+    const runExecutions = executions ?? this.listExecutions(runId)
+
+    const number = (value: unknown): number | undefined =>
+      typeof value === 'number' && Number.isFinite(value) ? value : undefined
+    for (const { execution, payload } of this.streamRunSessionPayloads(runExecutions)) {
+      const turns = (Array.isArray(payload.turns) ? payload.turns : []) as Array<
+        Record<string, unknown>
+      >
+      const spanIds: string[] = []
+      for (const turn of turns) {
+        const spanId = turn.spanId
+        if (typeof spanId === 'string' && spanId.length > 0) spanIds.push(spanId)
+      }
+      const costs = this.readSpanCosts(spanIds)
+      // Measured turns in payload order; the engine's context turns are built
+      // from exactly this subset in this order, so position j here is
+      // `TurnPressure.index` j + 1 there. The position→slot map keeps the
+      // join linear (review follow-up: Kilo K6, Copilot C6).
+      const measuredPositions: number[] = []
+      turns.forEach((turn, position) => {
+        const input = number(turn.input)
+        if (input !== undefined && input > 0) measuredPositions.push(position)
+      })
+      const measuredSlotByPosition = new Map(measuredPositions.map((p, slot) => [p, slot] as const))
+      const rawContext = payload.context as
+        | { measurable?: unknown; turns?: unknown }
+        | undefined
+      const contextTurns =
+        rawContext?.measurable === true && Array.isArray(rawContext.turns)
+          ? (rawContext.turns as Array<Record<string, unknown>>)
+          : []
+      const pressures =
+        contextTurns.length === measuredPositions.length
+          ? contextTurns.map((turn) => number(turn.pressure))
+          : []
+      turns.forEach((turn, position) => {
+        const row: RunTurnRow = {
+          turnIndex:
+            typeof turn.index === 'number' &&
+            Number.isInteger(turn.index) &&
+            turn.index >= 0
+              ? turn.index
+              : position,
+        }
+        if (typeof execution.executionId === 'string') row.executionId = execution.executionId
+        if (typeof execution.sessionId === 'string') row.sessionId = execution.sessionId
+        if (typeof turn.model === 'string' && turn.model.length > 0) row.model = turn.model
+        const input = number(turn.input)
+        const output = number(turn.output)
+        if (input !== undefined) row.inputTokens = input
+        if (output !== undefined) row.outputTokens = output
+        if (input !== undefined && output !== undefined) row.tokens = input + output
+        // Review follow-up (Copilot C2): a stored cache-read zero is absence,
+        // not a measured 0%, wherever the harness exports no read counter.
+        const cacheRead = number(turn.cache_read)
+        if (
+          cacheRead !== undefined &&
+          input !== undefined &&
+          input > 0 &&
+          harnessExportsCacheCounter(execution.harness, 'read')
+        ) {
+          row.cacheHitRatio = cacheRead / input
+        }
+        const measuredSlot = measuredSlotByPosition.get(position) ?? -1
+        if (measuredSlot !== -1 && pressures.length === measuredPositions.length) {
+          const pressure = pressures[measuredSlot]
+          if (pressure !== undefined) row.contextPressure = pressure
+        }
+        if (typeof turn.timestamp === 'string') row.timestamp = turn.timestamp
+        const spanId = turn.spanId
+        if (typeof spanId === 'string') {
+          const block = costs.get(spanId)
+          // Review follow-up (Copilot C4): a priced figure is USD only when
+          // its block says so — never serve euros under a dollar formatter.
+          const value =
+            block !== undefined
+              ? pricedUsd(block.status, block.value, block.currency, undefined)
+              : undefined
+          if (value !== undefined) row.costUsd = value
+          // Re-review #2 (Kilo B): a partial block's figure is real but
+          // incomplete — the row says so beside the figure.
+          if (block?.status === 'partial' && value !== undefined) row.costStatus = 'partial'
+        }
+        rows.push(row)
+      })
+    }
+    return rows
+  }
+
+  /**
+   * Run-scoped scorecard reusing the harness rollup machinery over the run's
+   * own sessions (issue #183, Q2). Reasons are scoped to the run, so a run
+   * whose sessions exported cache counters can never inherit the
+   * harness-level claim that they did not. Absent sessions mean no scorecard.
+   * Sessions stream through the digest one at a time (review re-review:
+   * Kilo 4) — `digestSessionPayloads` pulls each payload from the generator
+   * and releases it before the next loads, so the peak stays one payload.
+   * Executions and summaries may be preloaded; otherwise they are loaded here.
+   */
+  getRunScorecard(
+    runId: string,
+    preload: {
+      executions?: readonly ExecutionRow[]
+      summaries?: SessionSummaryFigures
+    } = {},
+  ): Scorecard | undefined {
+    const executions = preload.executions ?? this.listExecutions(runId)
+    const digest = digestSessionPayloads(
+      asadPayloads(dedupedRunSessions(this.streamRunSessionPayloads(executions))),
+    )
+    if (digest.count === 0) return undefined
+    const run = this.getRun(runId)
+    const harness = run?.harness ?? 'unknown'
+    const summaries =
+      preload.summaries ??
+      this.sessionSummaryFigures(
+        executions
+          .map((exec) => exec.sessionId)
+          .filter((id): id is string => typeof id === 'string' && id.length > 0),
+      )
+    const rollup = assembleRollup(harness, digest, {
+      sessionCount: digest.count,
+      runCount: 1,
+      executionCount: executions.length,
+      executions: executions.map((exec) => ({
+        sessionId: exec.sessionId,
+        isChild:
+          !exec.isRoot ||
+          (exec.parentExecutionId !== null && exec.parentExecutionId !== undefined),
+      })),
+      tokenTotals: (sessionId) => {
+        const figures = summaries.get(sessionId)
+        if (figures === undefined) return undefined
+        // Review re-review (Kilo 3): buildSessionRow always writes
+        // total_output as a number, so "both missing" never fires for built
+        // sessions. Without a measured input the session's token share is
+        // unknown — absence, not a measured zero input beside output.
+        if (figures.totalInput === undefined) return undefined
+        return {
+          input: figures.totalInput,
+          output: figures.totalOutput ?? 0,
+        }
+      },
+      // Review follow-up (Kilo K4): a session-count ratio is not an overhead
+      // ratio — with no measured token totals the run's delegation overhead
+      // is unobservable, not 0%.
+      allowCountFallback: false,
+      scope: { kind: 'run', runId },
+    })
+    return buildScorecard(rollup)
+  }
+
+  /**
    * Return metadata: rate definitions, tokenizer info, span/quarantine counts, and harness presence.
    */
   getMeta(): KyberMetaResult {
@@ -2182,12 +3253,30 @@ export class KyberBridge {
     }
 
     // Rates info
-    let ratesInfo: KyberMetaResult['rates'] = {
-      credit_usd: 0.01,
-      source: 'https://docs.github.com/copilot/reference/copilot-billing/models-and-pricing',
-      retrieved: '2026-08-06',
-      note: "Rates transcribed from GitHub's published models-and-pricing table (USD per 1M tokens x100 = credits per 1M).",
+    const copilotTable: KyberMetaResult['rates']['tables'][number] = {
+      id: 'copilot_credits',
+      source: COPILOT_CREDITS_SOURCE.url,
+      retrieved: COPILOT_CREDITS_SOURCE.retrieved,
+      credit_usd: COPILOT_CREDITS_SOURCE.credit_usd,
+      applies_to: ['copilot'],
+      note: "GitHub's published models-and-pricing table (USD per 1M tokens x100 = credits per 1M).",
     }
+    const publishedTable: KyberMetaResult['rates']['tables'][number] = {
+      id: 'published',
+      source: 'https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json',
+      retrieved: '2026-09-30',
+      applies_to: ['claude-code', 'codex'],
+      note: 'Bundled LiteLLM pricing snapshot (USD per token).',
+    }
+    let ratesInfo: KyberMetaResult['rates'] = {
+      credit_usd: copilotTable.credit_usd ?? 0.01,
+      source: copilotTable.source,
+      retrieved: copilotTable.retrieved,
+      note: 'Flat fields describe the Copilot credits table only; see tables for the published (LiteLLM) and copilot_credits tables.',
+      tables: [publishedTable, copilotTable],
+    }
+    // A ratesPath override replaces the flat Copilot-credits fields and the copilot_credits entry
+    // (they describe the same table); the published LiteLLM entry is never overridden.
     if (this.ratesPath !== undefined && existsSync(this.ratesPath)) {
       try {
         const raw = readFileSync(this.ratesPath, 'utf8')
@@ -2197,6 +3286,15 @@ export class KyberBridge {
           source: parsed.source ?? ratesInfo.source,
           retrieved: parsed.retrieved ?? ratesInfo.retrieved,
           note: parsed.note ?? ratesInfo.note,
+          tables: [
+            publishedTable,
+            {
+              ...copilotTable,
+              credit_usd: parsed.credit_usd ?? copilotTable.credit_usd,
+              source: parsed.source ?? copilotTable.source,
+              retrieved: parsed.retrieved ?? copilotTable.retrieved,
+            },
+          ],
         }
       } catch {}
     }
@@ -2256,6 +3354,151 @@ export class KyberBridge {
       rates: ratesInfo,
       harnesses: perHarness,
       sources,
+    }
+  }
+
+  /**
+   * Per-source ingest activity (T4, decision D2 additive seam).
+   *
+   * <remarks>
+   * Read-only over the single handle this bridge already owns
+   * (`getDb()` / the injected `store` — never a second handle, so the
+   * follow-the-file contract holds). Record counts come from
+   * `records GROUP BY source`; sums and recency from `ingest_log` (T6's
+   * shape). T7's display helper labels only. Empty log + empty table is
+   * the only `unknown`.
+   * </remarks>
+   */
+  getIngestActivity(): IngestActivity {
+    if (this.store) {
+      // The store half degrades exactly like the file half below: a broken
+      // or locked store reads as unknown receiver activity, never a throw —
+      // /coverage promises graceful degradation on both configurations.
+      // Counts come from GROUP BY aggregates, never from inflating the
+      // corpus through listAll() or paging the unbounded audit log.
+      try {
+        const recordCounts = this.store.countBySource()
+        const logSums = this.store.ingestLogSums()
+        let lastReceivedAt: string | null = null
+        for (const { lastAt } of logSums.values()) {
+          if (lastAt !== null && (lastReceivedAt === null || lastAt > lastReceivedAt)) {
+            lastReceivedAt = lastAt
+          }
+        }
+        return buildIngestActivity(recordCounts, logSums, lastReceivedAt)
+      } catch {
+        return { status: 'unknown', reason: 'no receiver activity recorded', sources: [], lastReceivedAt: null }
+      }
+    }
+
+    const db = this.getDb()
+    const recordCounts = new Map<string, number>()
+    if (this.hasTable(db, 'records')) {
+      try {
+        const rows = db!
+          .prepare('SELECT source, COUNT(*) AS n FROM records GROUP BY source')
+          .all() as Array<{ source: unknown; n: unknown }>
+        for (const row of rows) {
+          if (typeof row.source !== 'string') continue
+          recordCounts.set(row.source, Number(row.n) || 0)
+        }
+      } catch {
+        // A records table that cannot be grouped reads as no history,
+        // not as a thrown coverage request.
+      }
+    }
+    const logSums = new Map<string, { total: number; lastAt: string | null }>()
+    let lastReceivedAt: string | null = null
+    if (this.hasTable(db, 'ingest_log')) {
+      try {
+        const rows = db!
+          .prepare(
+            'SELECT source, SUM(count) AS total, MAX(timestamp) AS last_at FROM ingest_log GROUP BY source',
+          )
+          .all() as Array<{ source: unknown; total: unknown; last_at: unknown }>
+        for (const row of rows) {
+          if (typeof row.source !== 'string') continue
+          const lastAt = typeof row.last_at === 'string' ? row.last_at : null
+          logSums.set(row.source, { total: Number(row.total) || 0, lastAt })
+          if (lastAt !== null && (lastReceivedAt === null || lastAt > lastReceivedAt)) {
+            lastReceivedAt = lastAt
+          }
+        }
+      } catch {
+        // An unreadable audit log reads as no receiver activity, not a throw.
+      }
+    }
+    return buildIngestActivity(recordCounts, logSums, lastReceivedAt)
+  }
+
+  /**
+   * Source-unit checkpoint statuses (T4, decision D2 additive seam).
+   *
+   * <remarks>
+   * Read-only over `listSourceCheckpoints` (injected store) or the same
+   * single `getDb()` handle (raw file) — never a second store handle.
+   * `partial` rows (including zero-record ones) are returned verbatim;
+   * display grouping is the caller's concern (T8), not this seam's.
+   * `null` means the read failed or the table is absent (unknown) — an
+   * empty array means the read succeeded and no units exist. Callers must
+   * not render zeros for null: that is the fabricated zero the
+   * honest-unobservability rule forbids.
+   * </remarks>
+   */
+  getSourceCheckpointStatuses(harnessId?: string): SourceCheckpoint[] | null {
+    if (this.store) {
+      try {
+        return this.store.listSourceCheckpoints(harnessId)
+      } catch {
+        return null
+      }
+    }
+    const db = this.getDb()
+    if (!this.hasTable(db, 'source_checkpoint')) return null
+    try {
+      const rows = (
+        harnessId === undefined
+          ? db!.prepare('SELECT * FROM source_checkpoint ORDER BY harness_id, source_key').all()
+          : db!.prepare('SELECT * FROM source_checkpoint WHERE harness_id = ? ORDER BY source_key').all(harnessId)
+      ) as unknown as SourceCheckpointRow[]
+      return rows.map(toSourceCheckpoint)
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   * Quarantine counts by reason (T5 coverage seam).
+   *
+   * Aggregated in SQL (`GROUP BY reason`) on whichever handle this bridge
+   * owns — the coverage endpoint must not materialize the quarantine table
+   * to tally it. A null reason groups as `'unknown'`, never dropped. An
+   * unreadable table reads as no rows, matching `getQuarantineCount`'s
+   * zero-on-absent contract for this seam.
+   */
+  getQuarantineCountsByReason(): Array<{ reason: string; count: number }> {
+    if (this.store) {
+      try {
+        return this.store.quarantineCountsByReason()
+      } catch {
+        return []
+      }
+    }
+    const db = this.getDb()
+    if (!this.hasTable(db, 'quarantine')) return []
+    try {
+      const rows = db!
+        .prepare(
+          `SELECT COALESCE(reason, 'unknown') AS reason, COUNT(*) AS n
+           FROM quarantine GROUP BY reason ORDER BY n DESC, reason ASC`,
+        )
+        .all() as Array<{ reason: unknown; n: unknown }>
+      return rows.map((row) => ({
+        reason: typeof row.reason === 'string' && row.reason !== '' ? row.reason : 'unknown',
+        count: typeof row.n === 'number' ? row.n : Number(row.n) || 0,
+      }))
+    } catch {
+      return []
     }
   }
 }

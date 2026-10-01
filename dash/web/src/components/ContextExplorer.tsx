@@ -1,57 +1,40 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 
-import { type ContextProvider } from '../lib/api.js'
 import { fetchKyberSessions, type KyberSessionSummary } from '../lib/kyberApi.js'
 import { cn, usd } from '../lib/utils.js'
 import { Card } from './ui/card.js'
 import { Skeleton } from './ui/skeleton.js'
 import { AgentSessionDashboard } from './AgentSessionDashboard.js'
+import { formatCostFigure, normalizeCostBlock } from './SessionCostPanel.js'
 
-export type ExplorerProvider = ContextProvider
+// Canonical harness IDs are open — the store may report any ID — so this type
+// constrains nothing on purpose, and the All sentinel is the one fixed value.
+export type ExplorerProvider = string
 
-export const PROVIDERS: Array<{ key: ExplorerProvider; label: string }> = [
-  { key: 'agent-all', label: 'Agent Sessions (All)' },
-  { key: 'claude', label: 'Claude Code' },
-  { key: 'codex', label: 'Codex' },
-  { key: 'antigravity', label: 'Antigravity (AGY)' },
-  { key: 'copilot-cli', label: 'GitHub Copilot CLI' },
-  { key: 'copilot-vscode', label: 'Copilot (VS Code)' },
-  { key: 'copilot-agent', label: 'Copilot Agent' },
-  { key: 'pi', label: 'Pi' },
-  { key: 'opencode', label: 'OpenCode' },
-  { key: 'kilo-code', label: 'KiloCode' },
-  { key: 'cursor', label: 'Cursor' },
-]
+// The All callback sentinel is compatible with the established provider contract,
+// and doubles as the only inbound spelling of All: a parent that captures
+// `onHarnessChange` and feeds it back needs no translation. A harness ID that is
+// not in the inventory falls back to All, so an unknown inbound value degrades
+// to All rather than to a phantom empty tab.
+export const ALL_PROVIDER = 'agent-all' as const
 
-export function isAgentHarness(provider: string): boolean {
-  return (
-    provider === 'agent-all' ||
-    provider === 'copilot-agent' ||
-    provider === 'copilot-vscode' ||
-    provider === 'copilot' ||
-    provider === 'pi' ||
-    provider === 'antigravity' ||
-    provider === 'gemini'
-  )
-}
-
-export function getAgentHarnessFilter(provider: string): string | null {
-  switch (provider) {
-    case 'copilot-agent':
-    case 'copilot-vscode':
-    case 'copilot':
-      return 'copilot'
-    case 'pi':
-      return 'pi'
-    case 'antigravity':
-    case 'gemini':
-      return 'gemini'
-    case 'agent-all':
-      return null
-    default:
-      return provider
-  }
+// Labels never determine membership or merge canonical harness identities.
+const HARNESS_LABELS: Record<string, string> = {
+  'claude-code': 'Claude Code',
+  'claude-desktop': 'Claude Desktop',
+  'claude-cli': 'Claude CLI',
+  'codex-desktop': 'Codex Desktop',
+  'codex-cli': 'Codex CLI',
+  'antigravity-cli': 'Antigravity CLI',
+  'antigravity-ide': 'Antigravity IDE',
+  'copilot-cli': 'GitHub Copilot CLI',
+  'copilot-vscode': 'Copilot (VS Code)',
+  'copilot-agent': 'Copilot Agent',
+  'cursor-agent': 'Cursor Agent',
+  zcode: 'ZCode',
+  pi: 'Pi',
+  opencode: 'OpenCode',
 }
 
 export function ago(mtimeMs: number): string {
@@ -156,8 +139,12 @@ export function AgentSessionRow({
         </span>
 
         {/* Cost in USD */}
-        <span className="w-20 shrink-0 text-right text-xs tabular-nums text-foreground font-medium">
-          {costUsd != null ? usd(costUsd) : '—'}
+        <span
+          data-testid="agent-session-cost"
+          title={s.cost ? `Cost basis: ${s.cost.basis}` : undefined}
+          className="w-20 shrink-0 text-right text-xs tabular-nums text-foreground font-medium"
+        >
+          {s.cost ? formatCostFigure(normalizeCostBlock(s.cost)) : costUsd != null ? usd(costUsd) : '—'}
         </span>
 
         {/* Timestamp */}
@@ -183,35 +170,49 @@ export function ContextExplorer({
   onHarnessChange,
 }: {
   activeHarness?: string
-  onHarnessChange?: (h: ContextProvider) => void
+  onHarnessChange?: (h: ExplorerProvider) => void
 } = {}) {
-  const [localProvider, setLocalProvider] = useState<ContextProvider>('claude')
-  const provider = activeHarness && activeHarness !== 'all' ? (activeHarness as ContextProvider) : localProvider
-  const setProvider = (p: ContextProvider) => {
+  const [localProvider, setLocalProvider] = useState<ExplorerProvider>(ALL_PROVIDER)
+  const setProvider = (p: ExplorerProvider) => {
     setLocalProvider(p)
     onHarnessChange?.(p)
   }
   const [openId, setOpenId] = useState<string | null>(null)
 
-  const agentFilter = getAgentHarnessFilter(provider)
-
-  // All providers are represented by canonical ASAD sessions and expand through
-  // AgentSessionDashboard, regardless of their original transcript format.
+  // Tabs and rows share the unfiltered canonical inventory, so a selected subset
+  // cannot hide other harnesses or turn provider aliases into request filters.
   const {
     data: kyberData,
     isLoading: isKyberLoading,
     isError: isKyberError,
     error: kyberError,
   } = useQuery({
-    queryKey: ['kyber-sessions', agentFilter],
-    queryFn: () => fetchKyberSessions(agentFilter),
+    queryKey: ['kyber-sessions'],
+    queryFn: () => fetchKyberSessions(),
     staleTime: 30_000,
   })
+
+  // Sort so the tab strip is stable: the store returns started DESC, which would
+  // otherwise slide every tab right as a new session lands, moving the tab a user
+  // is mid-click on. Excluding the sentinel keeps the inventory provably disjoint
+  // from the All tab, so no session can mint a second tab sharing its key.
+  const harnesses = [...new Set(
+    kyberData
+      ?.map((s) => s.harness)
+      .filter((h): h is string => Boolean(h) && h !== ALL_PROVIDER),
+  )].sort()
+  const providers = [
+    { key: ALL_PROVIDER, label: 'Agent Sessions (All)' },
+    ...harnesses.map((key) => ({ key, label: Object.hasOwn(HARNESS_LABELS, key) ? HARNESS_LABELS[key] : key })),
+  ]
+  const selectedProvider = activeHarness ?? localProvider
+  const provider = harnesses.includes(selectedProvider) ? selectedProvider : ALL_PROVIDER
+  const sessions = provider === ALL_PROVIDER ? kyberData : kyberData?.filter((s) => s.harness === provider)
 
   return (
     <>
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        {PROVIDERS.map((p) => (
+        {providers.map((p) => (
           <button
             key={p.key}
             type="button"
@@ -252,12 +253,14 @@ export function ContextExplorer({
 
         {!isKyberLoading && !isKyberError && kyberData && (
           <>
-            {kyberData.length === 0 && (
+            {sessions?.length === 0 && (
               <p className="px-4 py-6 text-sm text-tertiary-foreground" data-testid="explorer-empty">
-                No sessions found for this harness.
+                {/* The empty state can only be All: `harnesses` is derived from these rows
+                    by a non-empty filter, so any selected subset already has a session. */}
+                No sessions found.
               </p>
             )}
-            {kyberData.map((s) => {
+            {sessions?.map((s) => {
               const sid = s.session_id || s.sessionId || ''
               return (
                 <AgentSessionRow

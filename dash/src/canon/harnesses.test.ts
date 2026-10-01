@@ -14,9 +14,10 @@ import {
 import {
   harnessDimensionAvailability,
 } from './measurability.js'
+import { buildSessionRow } from './sessions.js'
 import { CanonStore, SCHEMA_VERSION } from './store.js'
 import { isNotMeasurable } from './types.js'
-import type { SessionRow, ExecutionRow, RunRow } from './types.js'
+import type { SessionRow, ExecutionRow, RunRow, CanonicalRecord } from './types.js'
 
 const tempDirs: string[] = []
 
@@ -185,7 +186,9 @@ describe('buildHarnessRollup — Empty / uncollected harnesses', () => {
     expect(harnesses).toContain('copilot-vscode')
     expect(harnesses).toContain('claude-cli')
     expect(harnesses).toContain('cursor')
-    expect(harnesses).toContain('cursor-agent')
+    // Issue #182: folded front-ends seed no rollup of their own.
+    expect(harnesses).not.toContain('cursor-agent')
+    expect(harnesses).not.toContain('claude-desktop')
     expect(harnesses).toContain('codex-cli')
     expect(harnesses).not.toContain('gemini')
 
@@ -419,6 +422,144 @@ describe('buildHarnessRollup — Tool yield aggregation', () => {
     })
 
     const rollup = buildHarnessRollup(store, 'cursor')
+    expect(rollup.toolYield).toBeNull()
+    expect(isNotMeasurable(rollup.measurability['tool_yield'])).toBe(true)
+
+    store.close()
+  })
+
+  it('computes tool_yield fraction when session has observed tools_offered and tool invocations', () => {
+    const store = new CanonStore(':memory:')
+
+    store.upsertSession({
+      sessionId: 'sess-observed-tools',
+      harness: 'copilot',
+      payload: {
+        id: 'sess-observed-tools',
+        session_id: 'sess-observed-tools',
+        harness: 'copilot',
+        summary: {
+          total_input: 1000,
+          tool_calls: 1,
+          tools_invoked: ['Bash'],
+          tools_offered: ['Bash', 'Read', 'Write', 'Glob'],
+        },
+      },
+    })
+
+    const rollup = buildHarnessRollup(store, 'copilot')
+    // 1 invoked out of 4 offered = 0.25 (25%)
+    expect(rollup.toolYield).toBe(0.25)
+    expect(rollup.measurability['tool_yield']).toBe('measured')
+
+    store.close()
+  })
+
+  it('reports tool_yield as not_measurable (null) when session tools_offered is unobserved (undefined)', () => {
+    const store = new CanonStore(':memory:')
+
+    store.upsertSession({
+      sessionId: 'sess-unobserved-tools',
+      harness: 'copilot',
+      payload: {
+        id: 'sess-unobserved-tools',
+        session_id: 'sess-unobserved-tools',
+        harness: 'copilot',
+        tools: [
+          { name: 'Bash', schema_tokens: 0, invocations: 2, turns_resident: 0 },
+        ],
+        summary: {
+          total_input: 1000,
+          tool_calls: 2,
+          tools_invoked: ['Bash'],
+          // tools_offered is unobserved (undefined)
+        },
+      },
+    })
+
+    const rollup = buildHarnessRollup(store, 'copilot')
+    // When tools_offered is unobserved, tool_yield must be null (not_measurable), never fabricated or 1.0!
+    expect(rollup.toolYield).toBeNull()
+    expect(isNotMeasurable(rollup.measurability['tool_yield'])).toBe(true)
+
+    store.close()
+  })
+
+  it('reports tool_yield 0 measured when the session measured zero invocations (tools_invoked [])', () => {
+    // A present-but-empty tools_invoked is a measured zero, not an unobserved
+    // side: the denominator accrues and the yield is honestly 0. Driven
+    // through buildSessionRow so the shape is one the producer emits (a
+    // session whose records declare tool_calls measurability but carry no
+    // tool spans).
+    const store = new CanonStore(':memory:')
+
+    const parentMeasuredZero: CanonicalRecord = {
+      spanId: 'span-parent-zero',
+      traceId: 'trace-1',
+      parentSpanId: null,
+      source: 'copilot',
+      harness: 'copilot',
+      sessionId: 'sess-offered-zero-invocations',
+      name: 'copilot:chat',
+      op: 'llm.invoke',
+      kind: 'server',
+      timestamp: '2026-09-03T10:00:00.000Z',
+      durationMs: 100,
+      status: 'ok',
+      tokens: { freshInput: 100, cacheRead: 0, cacheCreation: 0, output: 50, reportedInput: 100, reportedOutput: 50 },
+      content: {},
+      parts: [
+        {
+          part: 'tool_definitions',
+          text: JSON.stringify([{ name: 'ToolA' }, { name: 'ToolB' }]),
+          order: 0,
+        },
+      ],
+      cost: { basis: 'published', status: 'priced', value: 0.002, currency: 'USD' },
+      measurability: { token_usage: 'measured', tool_calls: 'measured' },
+    }
+    const sessionRow = buildSessionRow('sess-offered-zero-invocations', [parentMeasuredZero], (s) => s.length)
+    store.upsertSession(sessionRow)
+
+    const rollup = buildHarnessRollup(store, 'copilot')
+    expect(rollup.toolYield).toBe(0)
+    expect(rollup.measurability['tool_yield']).toBe('measured')
+
+    store.close()
+  })
+
+  it('reports tool_yield as not_measurable (null) when session tools_offered is present but invocations were not observed (Thread 4)', () => {
+    const store = new CanonStore(':memory:')
+
+    const parentWithDefs: CanonicalRecord = {
+      spanId: 'span-parent',
+      traceId: 'trace-1',
+      parentSpanId: null,
+      source: 'copilot',
+      harness: 'copilot',
+      sessionId: 'sess-offered-no-invocations',
+      name: 'copilot:chat',
+      op: 'llm.invoke',
+      kind: 'server',
+      timestamp: '2026-09-03T10:00:00.000Z',
+      durationMs: 100,
+      status: 'ok',
+      tokens: { freshInput: 100, cacheRead: 0, cacheCreation: 0, output: 50, reportedInput: 100, reportedOutput: 50 },
+      content: {},
+      parts: [
+        {
+          part: 'tool_definitions',
+          text: JSON.stringify([{ name: 'ToolA' }, { name: 'ToolB' }]),
+          order: 0,
+        },
+      ],
+      cost: { basis: 'published', status: 'priced', value: 0.002, currency: 'USD' },
+      measurability: { token_usage: 'measured' },
+    }
+    const sessionRow = buildSessionRow('sess-offered-no-invocations', [parentWithDefs], (s) => s.length)
+    store.upsertSession(sessionRow)
+
+    const rollup = buildHarnessRollup(store, 'copilot')
     expect(rollup.toolYield).toBeNull()
     expect(isNotMeasurable(rollup.measurability['tool_yield'])).toBe(true)
 
@@ -829,6 +970,99 @@ describe('buildHarnessRollup — sessions are streamed, not materialized', () =>
 
     expect(rollup.cacheHitRate).toBeNull()
     expect(isNotMeasurable(rollup.measurability['cache_hit_rate'])).toBe(true)
+    store.close()
+  })
+
+  it("filters tools_invoked against tools_offered so tool yield does not exceed 100%", () => {
+    const store = new CanonStore(":memory:")
+    store.upsertSession({
+      sessionId: "s-tool-yield-filter",
+      harness: "copilot",
+      payload: {
+        id: "s-tool-yield-filter",
+        session_id: "s-tool-yield-filter",
+        harness: "copilot",
+        summary: {
+          total_input: 1000,
+          total_cache_read: 250,
+          tools_offered: ["toolA"],
+          tools_invoked: ["toolA", "Bash", "Read"],
+        },
+      },
+    })
+
+    const rollup = buildHarnessRollup(store, "copilot")
+
+    // Only "toolA" was offered, so only 1 offered tool was invoked.
+    // Tool yield must be 1.0 (100%), not 3.0 (300%).
+    expect(rollup.toolYield).toBe(1.0)
+
+    store.close()
+  })
+})
+
+describe('Issue #181 Q3 — rollup pressure ignores guessed windows', () => {
+  it('reports pressure unmeasurable when sessions name no context window', async () => {
+    // A 190,000-token turn is 95% of the 200,000 fallback — but the fallback
+    // is a guess. The harness rollup must not present it as measured
+    // pressure, or suppressing default-window findings reads as \"all clear\".
+    const store = new CanonStore(':memory:')
+    store.upsertSession({
+      sessionId: 'sess-unknown-window',
+      harness: 'copilot',
+      payload: {
+        id: 'sess-unknown-window',
+        session_id: 'sess-unknown-window',
+        harness: 'copilot',
+        context: {
+          measurable: true,
+          contextLimit: 200_000,
+          contextLimitSource: 'default',
+          turns: [{ pressure: 0.95 }],
+        },
+        summary: { total_input: 190_000 },
+      },
+    })
+
+    const rollup = buildHarnessRollup(store, 'copilot')
+
+    expect(rollup.contextPressureMedian).toBeNull()
+    expect(rollup.contextPressureP95).toBeNull()
+    expect(isNotMeasurable(rollup.measurability['context_pressure'])).toBe(true)
+    // The count persists on the rollup so the findings envelope can read it
+    // without scanning session payloads (review).
+    expect((rollup.payload as { unknownWindowSessions?: number }).unknownWindowSessions).toBe(1)
+    store.close()
+  })
+})
+
+describe('Issue #181 review — legacy sessions keep their measurable dimensions', () => {
+  it('still accumulates cache and tool totals when the window is missing (review)', async () => {
+    // A legacy payload with turns but no window cannot yield pressure — but
+    // its cache counters and tool rows are perfectly measurable and must
+    // still reach the digest.
+    const store = new CanonStore(':memory:')
+    store.upsertSession({
+      sessionId: 'sess-legacy',
+      harness: 'copilot',
+      payload: {
+        id: 'sess-legacy',
+        session_id: 'sess-legacy',
+        harness: 'copilot',
+        turns: [{ index: 0, input: 40_000 }],
+        summary: { total_input: 1000, total_cache_read: 200 },
+        tools: [
+          { name: 'read', invocations: 2 },
+          { name: 'unused-tool', invocations: 0 },
+        ],
+      },
+    })
+
+    const rollup = buildHarnessRollup(store, 'copilot')
+
+    expect(rollup.contextPressureMedian).toBeNull()
+    expect(rollup.cacheHitRate).toBe(0.2)
+    expect(rollup.toolYield).toBe(0.5)
     store.close()
   })
 })

@@ -42,7 +42,7 @@ const GEMINI_VENDOR_NAMESPACES = ['gemini']
 const GEMINI_SYSTEM_KEY = 'gen_ai.system'
 
 /** Where Gemini's thought tokens come from, beyond the shared reasoning key. */
-const THOUGHT_KEYS = ['gemini.usage.thoughts_tokens'] as const
+export const THOUGHT_KEYS = ['gemini.usage.thoughts_tokens'] as const
 
 /**
  * The Gemini adapter. Detection uses Gemini's vendor namespace or its exact
@@ -61,6 +61,13 @@ export const geminiAdapter: HarnessAdapter = {
     ) {
       return 0
     }
+    // An explicit Antigravity agent identity outranks the generic
+    // `gen_ai.system` vendor label its Gemini-vocabulary exporter emits
+    // (issue #195) — the same yield Copilot declares for an explicit
+    // Gemini system identity. Registration order alone cannot carry this:
+    // pass 1 averages per group, so any trace with an agent-name-less span
+    // is won outright by the unyielding adapter.
+    if (span.attributes['gen_ai.agent.name'] === 'antigravity') return 0
     let score = 0
     if (
       hasNamespace(span.attributes, GEMINI_VENDOR_NAMESPACES) ||

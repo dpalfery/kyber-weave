@@ -73,6 +73,7 @@ public sealed partial class HotshotGoldenContractTests
     private static readonly string[] EvolvedSkillIdentities =
     [
         "bug-crusher",
+        "code-review", // pre-push self-review gate added; exempts the whole skill directory, pinned by CodeReviewSkillRetainsSelfReviewTriggerAndGate
         "create-pull-request", // combined with create-pull-request-github; provider selection and neutral layer
         "pr-review-fix-comments", // provider files now rendered (plan 2026-09-28)
         "product-owner",
@@ -83,6 +84,12 @@ public sealed partial class HotshotGoldenContractTests
     [
         "create-pull-request-github" // consolidated into create-pull-request (plan 2026-09-28)
     ];
+
+    /// <summary>
+    /// Skills authored in Kyber-Squad have no Hotshot baseline; the canonical inventory
+    /// and resource-delivery contracts cover them without altering historical golden bytes.
+    /// </summary>
+    private static readonly string[] CanonicalOnlySkillIdentities = ["code-review-loop"];
 
     private static readonly string[] RetiredAgentIdentities =
     [
@@ -231,6 +238,23 @@ public sealed partial class HotshotGoldenContractTests
         Assert.Empty(mismatches);
     }
 
+    /// <summary>
+    /// <c>code-review</c> is listed in <c>EvolvedSkillIdentities</c>, which exempts its whole directory from the
+    /// golden byte comparison and the file-inventory check, so nothing else pins the pre-push self-review
+    /// trigger and gate. Deleting this test returns that section to no coverage.
+    /// </summary>
+    [Fact]
+    public void CodeReviewSkillRetainsSelfReviewTriggerAndGate()
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSkill? skill = source.Skills.FirstOrDefault(candidate => candidate.Name == "code-review");
+
+        Assert.NotNull(skill);
+        Assert.Contains("self-review gate before pushing", skill.Description, StringComparison.Ordinal);
+        Assert.Contains("## Pre-push self-review gate", skill.InstructionBody, StringComparison.Ordinal);
+        Assert.Contains("major-or-worse", skill.InstructionBody, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void CanonicalSourcePreservesGoldenContractOutsideReviewedEvolution()
     {
@@ -246,6 +270,7 @@ public sealed partial class HotshotGoldenContractTests
         string[] expectedSkills = manifest.Skills
             .Select(entry => SkillName(entry.Path))
             .Except(RetiredSkillIdentities, StringComparer.Ordinal)
+            .Concat(CanonicalOnlySkillIdentities)
             .Order(StringComparer.Ordinal)
             .ToArray();
         AddSequenceMismatch(mismatches, "canonical agents", expectedAgents, source.Agents.Select(agent => agent.Name));
@@ -304,6 +329,7 @@ public sealed partial class HotshotGoldenContractTests
         string[] actualSkillFiles = Directory.EnumerateFiles(skillRoot, "*", SearchOption.AllDirectories)
             .Select(path => Path.GetRelativePath(ProductRoot, path).Replace(Path.DirectorySeparatorChar, '/'))
             .Where(path => !EvolvedSkillIdentities.Contains(CanonicalSkillName(path), StringComparer.Ordinal) &&
+                          !CanonicalOnlySkillIdentities.Contains(CanonicalSkillName(path), StringComparer.Ordinal) &&
                           !RetiredSkillIdentities.Contains(CanonicalSkillName(path), StringComparer.Ordinal))
             .Order(StringComparer.Ordinal)
             .ToArray();

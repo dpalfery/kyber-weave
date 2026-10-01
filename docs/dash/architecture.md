@@ -161,6 +161,15 @@ Requirement 2 must hold without Docker, a container runtime, or a collector. The
 collectors already post OTLP JSON to port 4318, so they work unchanged. Non-model and
 unmatched telemetry is quarantined with an auditable reason instead of becoming a session.
 
+Receiver activity is auditable in `ingest_log`: the span sink writes one row per distinct
+span source in each decoded batch (`service.name`, `'otlp'` when unnamed), sized to the
+arriving batch so quarantined traffic still counts as received, and the log sink writes
+one `otlp:logs` row per log batch so last-received reflects any receiver request. Writes
+join the writer's existing store handle after the ingest call returns; there is no schema
+change and no second projection. An empty log reads as unknown downstream — "no receiver
+activity recorded" — never as stopped or running, because receiver liveness is not
+observable from the web server.
+
 ## Local harness-source refresh
 
 Session files also enter the store through `kyber-weave dash refresh` (`registerKyberCommands`
@@ -177,7 +186,12 @@ exits **2** before the store opens. Failed harness jobs or derivation failure ex
 Success, including absent (`unavailable`) sources, exits **0**.
 
 Each accepted unit is persisted with `CanonStore.commitSourceUnit`: canonical rows,
-`record_provenance`, and `source_checkpoint` in one transaction (schema **11**). After jobs
+`record_provenance`, and `source_checkpoint` in one transaction (schema **15**). Every
+refresh run additionally records its coverage window in `refresh_run.history_weeks` — the
+`--history-weeks` value of that run. Rows predating window tracking read as `null`, which
+every surface renders as unknown with the reason "recorded before window tracking", never
+coerced to a default or to zero
+([honest unobservability](../rules/honest-unobservability.md)). After jobs
 drain, `purgeExpiredContent` empties content older than 14 days without touching
 `records.raw` ([ADR 0018](../adr/0018-kyberdash-content-retention-purge.md)), then the store
 is projected through `projectCanonicalStore` — the same shared entry the live receiver uses
@@ -277,6 +291,68 @@ separates `no_rate` from `not_billed` from `out_of_scope` (R5.4, R5.5), and tier
 selects context tiers by measured input size (R5.6). The scoping failure this prevents — a
 table pricing a harness it does not name — is in the [rationale](../reference/kyberdash-rationale.md).
 
+**Repricing at projection time.** Ingest freezes a turn's cost as it arrived, often
+`{unknown, no_rate}`. `buildSessions` reprices every turn record whose block is not
+`basis:'harness'` and writes changed `cost_json` back in the same pass, so the session list, the
+cost tile and the report path (`costContributionsForSessions`) share one answer. There is no
+schema bump (`SCHEMA_VERSION` stays 14); existing stores and later `priceOverrides` /
+`modelAliases` changes take effect on the next projection.
+
+The write-back is the one exception to "every derived table is a cache over `records`". Each
+session's changed blocks go through `CanonStore.setCosts` in **one transaction** (`BEGIN`/`COMMIT`,
+rolled back whole on failure; an empty list is a no-op), so a failing session cannot leave a
+half-repriced one. `records.cost_json` is the derived, re-derivable cost cache: the report path
+reads it, the next projection reprices it, and a re-ingest overwrite self-heals on that next
+projection. Reprojecting a correct store writes nothing, and `harness` blocks are never touched.
+`isCopilotHarness` (`copilot-rates.ts`) is the single Copilot-family predicate used to route a turn
+to the credits table.
+
+**Published-path rules.**
+
+- An absent model is `{published, no_rate}` from `pricePublishedTurn`, not `unknown`: mixing
+  `unknown` with `published` turns makes `sumCosts` refuse the total (`COST_BASIS_MISMATCH`).
+- Cache writes: an absent cache-write rate is billed at the input rate. `gpt-6-luna` has no
+  published cache-write rate, so cache creation is billed as input on both the LiteLLM path and the
+  Copilot credits table (base $0.10, long-context $0.20 per 1M).
+  `claude-sonnet-5-5` keeps its explicit $2.50/M.
+- `gpt-6-luna` long-context tier: one shared `GPT_6_LUNA_PROMPT_TOKEN_THRESHOLD` (272,000,
+  `pricing/models.ts`). Both paths choose the tier by measured input (fresh + cacheRead +
+  cacheCreation); 272,000 stays on the base tier and 272,001 is long.
+- The Copilot reader sets `costHarnessReported` only when `cost_usd` is a finite number. Copilot
+  without the marker defaults to `published`, so a parser that forgets the flag is repriced from the
+  credits table instead of keeping a LiteLLM-derived figure at API list rates.
+- `claude-sonnet-5-5` and `gpt-6-luna` also live in `MANUAL_ENTRIES` of
+  `dash/scripts/bundle-litellm.mjs` (guarded by a test), so a regeneration reproduces them. The
+  bundler writes `dash/src/data/` while the runtime reads `dash/src/pricing/data/` (follow-up F2 in
+  the [rationale](../reference/kyberdash-rationale.md)).
+
+| Harness (normalized) | Priced from | Notes |
+|---|---|---|
+| `claude-code` (`claude-cli`, `claude-desktop`), `codex` (`codex-*`) | The bundled published table: the LiteLLM snapshot plus `pricing-provenance.json`, through `pricePublishedTurn` (`dash/src/canon/published-pricing.ts`) | Cache-aware. `claude-sonnet-5-5` and `gpt-6-luna` (with its >272K tier) were added 2026-09-30 with cited sources. `priceOverrides`, `modelAliases` and `flatRateModels` act on this path. |
+| `copilot` (`copilot-*`) | The Copilot credits table (`dash/src/canon/copilot-rates.ts`; 1 credit = $0.01; GitHub models-and-pricing) | Per-class rates (input, cached input, cache write, output) and input-size tiers. Where the table says cache write is "Not applicable" (`gpt-6-luna`), the input rate is used. A model the table omits is `{published, no_rate}`; overrides and aliases do not reach this path. |
+| Any harness outside the two above | Unchanged: the upstream parser's figure | Additive scope; a harness the LiteLLM table does not name is `out_of_scope` for it (R5.3). |
+
+A genuine harness-reported figure is never repriced (R5.2). For Copilot, only the genuine
+reader's `cost_usd` (marked `costHarnessReported` in `synth/readers/copilot.ts`) is `harness`;
+figures the Copilot parser derives through LiteLLM are `published` and are repriced from the
+credits table. `costBlockFor` returns `{published, no_rate}` for a zero or non-finite figure from
+a published-rate source (`costIsEstimated === true`), and `unknown` only where no pricing was
+attempted.
+
+**Session totals.** `buildSessionRow` sums only turn records; a non-turn span makes no cost
+claim. A session with some unpriced published turns totals `partial` with the priced share. A
+genuine mix of `harness` and `published` turns records `COST_BASIS_MISMATCH` in the payload's
+`problems` (where the cost tile reads it) instead of silently becoming `no_rate`.
+
+**Display.** `KyberBridge.listSessions` maps the canonical `CostBlock` (basis, status, value,
+currency) onto each row as `cost`; `cost_usd` is the block's value only when `status` is `priced`
+and the currency is USD. `AgentSessionRow` renders the cost tile's formatter text ("partially
+priced", "no published rate", "not billed", "out of scope", or the formatted figure); `—` appears
+only when the server sent no cost.
+
+**Rate metadata.** `getMeta().rates` keeps its flat Copilot-credits fields and adds `tables`
+(`published` and `copilot_credits`), each with `source`, `retrieved` and `applies_to`.
+
 ### `Measurability` and honest unobservability
 
 Each source declares per-metric availability independent of value (R10.1). A metric a source
@@ -291,7 +367,7 @@ measured independently from whether individual composition buckets are available
 
 `CanonStore` (`dash/src/canon/store.ts`) is SQLite through the runtime's built-in module —
 upstream already depends on it for two providers, so no new dependency is introduced. The
-schema is a version-controlled constant executed on construction, currently at version 13;
+schema is a version-controlled constant executed on construction, currently at version 14;
 metadata carries the schema version, and a store built by an older version is migrated in
 place on open rather than rebuilt. Idempotent upsert is keyed on the
 record identifier, which makes re-ingest idempotent (R2.5). The tables are `records`,
@@ -299,7 +375,7 @@ record identifier, which makes re-ingest idempotent (R2.5). The tables are `reco
 `quarantined_logs`, `enriched_logs`, `problems`, `ingest_log`, `metadata`,
 `harness_rollup`, `finding`, `prediction`, `source_checkpoint`, `record_provenance`, and `refresh_run`.
 Schema 11 added checkpointing and provenance ([ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md)),
-schema 12 added `refresh_run`, and schema 13 introduced `problem_key` with unique indexing.
+schema 12 added `refresh_run`, schema 13 introduced `problem_key` with unique indexing, and schema 14 rekeyed that identity by span, code, and location.
 `commitSourceUnit` writes records, provenance, and the unit checkpoint together. The raw
 column is compressed (R12.4); the measured cost of not doing
 so is in the [rationale](../reference/kyberdash-rationale.md).
@@ -421,6 +497,36 @@ indexes. Agent performance is evaluated across six orthogonal dimensions:
 A dimension lacking telemetry renders as a dash (`—`) with an explicit reason, never as zero
 and never as a passing grade.
 
+### Display families and source display names
+
+Split client surfaces stay distinct in stored data — and, except for the two
+evidenced twin front-ends below, in rollup keys and API filters.
+`harnessFamily` (`dash/src/canon/measurability.ts`) is a display-level grouping only:
+`claude-cli`, `claude-desktop`, and `claude-code` share the `claude-code` family label
+while each canonical id and its per-origin count stays visible beside it, so grouping
+never fabricates an aggregate. Twin front-ends fold one step earlier, at the
+derived layer (issue #182): `claude-desktop` onto `claude-code` and `cursor-agent`
+onto `cursor`, so those two surfaces share one canonical id, one rollup row, and one
+API filter namespace. Derived rows persist canonical ids: rolling back the fold
+after a rebuild requires rebuilding derived tables again under the reverted code.
+Reads normalise too, because
+[upgrading the binary does not rebuild derived tables](runbook.md#2-derived-projection-rebuilding-kyber-build):
+a rollup row written before the fold still carries its raw front-end id, so the
+per-harness checkpoint join on `/api/kyber/harnesses` is canonical on both sides
+and such a row still reports its own coverage counts until a rebuild rewrites it.
+That normalisation is what makes a miss after it a measured zero — the read
+succeeded and this harness recorded no units — rather than an unknown, which is
+reserved for an unreadable `source_checkpoint` table
+([honest unobservability](../rules/honest-unobservability.md)).
+Unmapped ids render verbatim.
+
+Stored source names keep their namespace (`codeburn/<provider>` for file-sourced rows,
+OTLP names verbatim, legacy `unattributed` rows retained). Surfaces render them through
+`sourceDisplayName`, which strips the `codeburn/` prefix, labels the kind
+(`local-file`, `otlp`, `legacy-unattributed` — the last displayed as
+"unattributed (legacy)"), and keeps the raw value alongside the display value for
+auditability. Raw `codeburn/` names never reach a user-facing surface.
+
 ## Analysis Layer
 
 The analysis layer contains pure, hermetic analysis modules that operate over canonical records:
@@ -476,8 +582,21 @@ $$\text{Rank Score} = \text{Estimated Recoverable Waste} \times \text{Outcome Ri
 An inferred finding can never outrank a deterministic finding of comparable size. Recoverable
 waste is an estimate tied to a specific recommended action.
 
+Two honest-measurement contracts govern what the engine will not claim. The compaction-hazard
+detector fires only against a reported context window: an unreported window suppresses the
+finding (pressure surfaces as unmeasurable instead), and a single-turn peak above the reported
+window is downgraded to inferred with an aggregate-attribution caveat rather than printed as a
+deterministic percentage. Twin front-end collectors (`claude-desktop` onto `claude-code`,
+`cursor-agent` onto `cursor`) fold onto one canonical harness id, and same-turn observations
+with byte-identical counters collapse per ADR 0009 source precedence (OTLP counters win; values are never
+summed across sources for the same turn) instead of double-counting one conversation.
+Same-turn observations whose counters differ are left alone (follow-up #231).
+
 Findings are materialized in `canon.db` at session/run build time with a `detector_version` schema
-stamp (Decision D17), forcing automatic recomputation whenever detectors are updated.
+stamp (Decision D17): an informational mark of which detector semantics built the rows, so
+tooling and operators can tell a stale finding table from a fresh one. Recomputation itself
+comes from the authoritative rebuild, which rewrites derived rows and prunes what detectors no
+longer emit.
 
 ### Run Comparison and Phase Alignment (Decision D11)
 
@@ -540,13 +659,27 @@ The React web dashboard provides progressive-disclosure views matching the 6-lev
 - **`ContextReviewPanel.tsx`**: Opt-in LLM review console with credential safety.
 - **`ScorecardMatrix.tsx`**: Cross-harness six-dimension matrix on Context Doctor.
 
+The workspace findings browser pages on what the **server** served, not on what is painted:
+the next offset is the extent of the contiguous run of the scope's stored pages that starts at
+offset 0, walked in offset order, so a page whose first row repeats its predecessor's last row
+does not re-request a row already fetched. A page stored beyond a gap is not counted until that
+gap is refetched, and a page that serves zero rows ends the run — neither advances the offset, so
+paging past them would skip rows the server never served. Each stored page keeps the envelope it
+was served under, and a `total` that moves
+invalidates the scope's pages and restarts the offset at 0 — a ranking that has been rebuilt
+underneath rows already on screen cannot be re-ranked into place. Consequently a failed page
+never rewrites a count: the heading, the detector chips and the suppression banner keep the last
+successful envelope, the failure renders as an inline retryable banner above the retained rows
+rather than the no-rows panel, and while the envelope is unavailable the suppression count is
+stated in words as unknown, never as `0` ([honest unobservability](../rules/honest-unobservability.md)).
+
 ### Backend REST API Contract (dash/src/server/routes.ts)
 
 The web dashboard server wires HTTP requests directly to `KyberBridge`:
 
 | Endpoint | Method | Response Schema | Description |
 |---|---|---|---|
-| `/api/kyber/harnesses` | `GET` | `{ harnesses: HarnessRollupRow[] }` | List harness rollups with 6-dimension availability. |
+| `/api/kyber/harnesses` | `GET` | `{ harnesses: HarnessRollupRow[] }` | List harness rollups with 6-dimension availability. Each row carries its display-level `family`, the verbatim rollup `noDataReason` for zero-data harnesses, and a `source_checkpoint` summary (`ok` / `partial` / `failed` / `unavailable` counts). |
 | `/api/kyber/harness/:id` | `GET` | `HarnessRollupRow` | Detail for a single harness including coverage metrics. |
 | `/api/kyber/runs` | `GET` | `{ runs: RunRow[] }` | List runs; supports `?harness=`. |
 | `/api/kyber/run/:id` | `GET` | `{ run, executionTree, executions, findings }` | Complete run detail with parent/child execution tree. |
@@ -554,7 +687,7 @@ The web dashboard server wires HTTP requests directly to `KyberBridge`:
 | `/api/kyber/session/:id` | `GET` | `SessionPayload` | Full session payload with turns, context, tools, and timeline. |
 | `/api/kyber/session/:id/content` | `GET` | `SessionContent` | Full canonical content for an inspected session part. |
 | `/api/kyber/session/:id/turn/:index/content` | `GET` | `TurnContentResult` | Full unclipped assembled context for a specific turn (D4). |
-| `/api/kyber/findings` | `GET` | `{ findings: Finding[] }` | Ranked findings; supports `?runId=`, `?sessionId=`. |
+| `/api/kyber/findings` | `GET` | `{ findings: Finding[], total, limit, offset, detectorCounts, unknownWindowSessions }` | Ranked findings; supports `?runId=`, `?sessionId=`, `?harness=`, `?detector=`, `?limit=`, `?offset=`. `total` describes the narrowed set; `detectorCounts` cover the run/session/harness scope ignoring paging and the detector filter so filter chips never evaporate; `unknownWindowSessions` counts sessions with an unreported context window in scope. |
 | `/api/kyber/finding/:id` | `GET` | `Finding` | Single finding detail with evidence rows and risk caveats. |
 | `/api/kyber/predictions` | `GET`, `POST` | `{ predictions: Prediction[] }` | Query or record prediction calibration entries. |
 | `/api/kyber/calibration` | `GET` | `CalibrationSummary` | Calibration curve and scoring summary. |
@@ -565,6 +698,7 @@ The web dashboard server wires HTTP requests directly to `KyberBridge`:
 | `/api/kyber/quarantine` | `GET` | `{ entries: QuarantineRow[] }` | Quarantined spans; supports `?limit=`. |
 | `/api/kyber/problems` | `GET` | `{ problems: ProblemRow[] }` | Recorded problems; supports `?limit=`. |
 | `/api/kyber/meta` | `GET` | `MetaResult` | Tokenizer configuration, rates, span counts, and sources. |
+| `/api/kyber/coverage` | `GET` | `{ refresh, ingest, quarantineByReason, checkpoints }` | Ingest coverage: persisted refresh window (`history_weeks`, null = unknown), per-source ingest activity (`records` counts joined with `ingest_log` sums and `lastReceivedAt`; `{ status: 'unknown' }` when nothing is recorded), per-reason quarantine counts, and `source_checkpoint` statuses including `partial`. |
 | `/api/kyber/report` | `GET` | `ContextReport` | The versioned context report for the query scope (`harness`, `session`, `run`, `days`); the same document `kyberdash report` prints. |
 
 All `/api/kyber/*` responses return standard headers (`content-type: application/json; charset=utf-8`, `cache-control: no-store`). Unrecognized `/api/kyber/*` routes return HTTP 404 JSON (guaranteed never to fall through to SPA HTML), and non-GET requests return HTTP 405 Method Not Allowed.

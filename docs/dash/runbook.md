@@ -6,7 +6,7 @@ status: current
 component: KyberDash
 source-root: dash
 owner: dpalfery
-last-reviewed: 2026-09-29
+last-reviewed: 2026-09-30
 code-refs:
   - registerKyberCommands
   - refreshHarnessSources
@@ -117,6 +117,10 @@ records. If detector algorithms change or migrations are applied, rebuild projec
 node dash/dist/cli.js kyber build --db ~/.kyberdash/canon.db
 ```
 
+Upgrading the binary does not itself rebuild derived tables: opening an existing store serves
+the rows its `detector_version` stamp describes until the next build, refresh, or live-collector
+projection runs. After deploying a release whose detectors changed, run the rebuild above once.
+
 This rebuilds:
 - Derived sessions from canonical records.
 - First-class `run` tasks and `execution` parent/child delegation trees ([ADR 0012](../adr/0012-progressive-disclosure-6-level-diagnostic-spine.md)).
@@ -150,6 +154,27 @@ per-harness table plus a derived summary; diagnostics for `failed`/`partial` row
 stderr without chat content or raw paths. Use a temporary `--db` when experimenting. There is
 no dashboard refresh button.
 
+Coverage window persistence: every refresh run records its window in
+`refresh_run.history_weeks` (schema 15). The value is the `--history-weeks` argument of
+that run (default 2). Rows written before window tracking read as `null`, which surfaces
+render as "coverage window unknown (recorded before window tracking)" — never as 2 and
+never as 0, per [honest unobservability](../rules/honest-unobservability.md). A scoped
+window with no session names the widening command
+(`kyberdash dash refresh --history-weeks <n>`), not just the bare refresh.
+
+Ingest activity audit: the live OTLP receiver writes one `ingest_log` row per distinct
+span source in each decoded batch (source is `service.name`, `'otlp'` when unnamed), sized
+to the arriving batch so quarantined traffic still counts as received, plus one
+`otlp:logs` row per log batch so last-received reflects any receiver request. When
+`ingest_log` holds no rows, the dashboard says "no receiver activity recorded" — receiver
+liveness is never inferred, because the receiver is a separate process this page cannot
+observe.
+
+Coverage route: `GET /api/kyber/coverage` returns the refresh window, per-source ingest
+activity (record counts from `records`, log sums and `lastReceivedAt` from `ingest_log`),
+per-reason quarantine counts, and `source_checkpoint` statuses including `partial`. An
+empty log and empty table yield `{ status: 'unknown' }` with a reason, never a zero.
+
 ### 3. Raw Content Backfill and Re-normalization
 
 ```bash
@@ -158,7 +183,22 @@ node dash/dist/cli.js kyber backfill
 
 # Re-evaluate harness attribution voting and token conventions
 node dash/dist/cli.js kyber renormalize
+
+# Re-evaluate attribution for one source's traces only (repeatable)
+node dash/dist/cli.js kyber renormalize --source agy
 ```
+
+`--source <name>` restricts renormalization to traces containing that source
+and restricts the excluded-harness remediation sweep the same way, so traces
+from other sources — and their derived sessions — are left untouched.
+Prefer it whenever the repair is scoped to one source (for example,
+re-attributing live Antigravity rows after an adapter change).
+
+> **Warning:** unscoped `kyber renormalize` quarantines every row the
+> fingerprint vote cannot claim, including file-sourced rows (`codeburn/*`),
+> which carry no OTLP attributes to vote on. Never run it unscoped on a
+> store whose file corpus matters without a backup; restore the backup to
+> roll back.
 
 ### 4. Content Retention Policy
 
@@ -319,6 +359,28 @@ controls appear on Usage only.
 - **Quarantine**: Quarantined spans holding unrecognized namespaces or malformed attributes.
 - **Problems**: Recorded token reconciliation mismatches, validation anomalies, and parser errors.
 
+#### Sessions harness tabs
+
+Open **Sessions** in the sidebar. **Agent Sessions (All)** is selected initially and shows
+sessions across all available harnesses. The other tabs come from the canonical session
+inventory: each distinct nonempty harness ID with sessions gets one tab, regardless of how
+many sessions share that ID. A harness without sessions has no tab.
+
+Select a harness tab to show only sessions with that exact harness ID. Client variants stay
+separate: Claude Code, Claude Desktop and Claude CLI; Codex Desktop and Codex CLI;
+Antigravity CLI and Antigravity IDE; and each Copilot client. Labels describe the tabs;
+future or unknown harness IDs use their stored ID as the label and remain selectable.
+**Agent Sessions (All)** restores sessions across harnesses.
+
+Tabs are ordered by harness ID and do not move when a new session lands. The All
+sentinel is reserved: a stored harness ID of `agent-all` never gets a tab of its own.
+
+If the selected harness is unavailable or disappears when the inventory refreshes, the
+selection falls back to All. An empty inventory keeps the All tab and displays
+**No sessions found.** Open a session row to inspect its dashboard, or use
+a child session's parent link to open its parent. Switching harness tabs collapses the
+expanded session.
+
 #### Querying REST Endpoints Directly
 
 You can inspect the backend JSON endpoints directly via curl or any HTTP client:
@@ -353,6 +415,9 @@ curl -s http://127.0.0.1:3000/api/kyber/compare | jq .
 # Quarantine entries and problems
 curl -s http://127.0.0.1:3000/api/kyber/quarantine | jq .
 curl -s http://127.0.0.1:3000/api/kyber/problems | jq .
+
+# Coverage route (refresh window, ingest activity, checkpoints)
+curl -s http://127.0.0.1:3000/api/kyber/coverage | jq .
 
 # Telemetry metadata and rate definitions
 curl -s http://127.0.0.1:3000/api/kyber/meta | jq .
@@ -457,8 +522,10 @@ here.
 - **Symptom**: Report footer displays `inProgress: pid X since <timestamp>` indefinitely.
 - **Remediation**: KyberDash automatically reconciles runs whose PID is dead or whose elapsed duration exceeds 15 minutes before starting each refresh. To inspect runs directly:
   ```bash
-  sqlite3 ~/.kyberdash/canon.db "SELECT id, status, pid, started_at, completed_at, summary FROM refresh_run ORDER BY started_at DESC LIMIT 5;"
+  sqlite3 ~/.kyberdash/canon.db "SELECT id, status, pid, started_at, completed_at, history_weeks, summary FROM refresh_run ORDER BY started_at DESC LIMIT 5;"
   ```
+  A `null` `history_weeks` means the window is unknown (recorded before window
+  tracking), not 2 and not 0.
 
 ### 5. Store Schema Migration and Problem Deduplication
 
@@ -476,6 +543,20 @@ here.
   checkpoint and close that too, then rename it over `canon.db` and remove any leftover
   `canon.db-wal` or `canon.db-shm` from the old file. A replacement that leaves those sidecars
   behind can make SQLite misread the new file; the server has no way to detect that case.
+
+### 7. A model shows "no published rate"
+
+- **Cause**: Claude Code and Codex turns are priced from the bundled published table, and Copilot
+  turns from the Copilot credits table. A model in neither table is honestly unpriced; rates are
+  never inferred from a sibling model.
+- **Fix (Claude Code, Codex)**: Price the model with `priceOverrides` (rates per model) or point
+  it at a priced model with `modelAliases` in the KyberDash config. Both apply on the next
+  projection, with no re-ingest. A Copilot model missing from the credits table cannot be priced
+  this way; overrides and aliases act on the published path only. A `priceOverrides` entry without
+  a cache-creation rate bills cache writes at its input rate (no 1.25x surcharge); set the
+  cache-creation rate to state a surcharge.
+- **Other statuses**: "partially priced" means some turns are unpriced (no figure is shown),
+  "not billed" is a flat-rate model, and "out of scope" means the table does not name the harness.
 
 ---
 

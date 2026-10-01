@@ -1,43 +1,59 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as React from 'react'
-import { readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 import * as ContextExplorerModule from './ContextExplorer.js'
+import { AgentSessionRow, ContextExplorer } from './ContextExplorer.js'
 import type { KyberSessionSummary } from '../lib/kyberApi.js'
+import { formatCostFigure, normalizeCostBlock } from './SessionCostPanel.js'
 
-const { ContextExplorer, AgentSessionRow, getAgentHarnessFilter, PROVIDERS } = ContextExplorerModule
+type InventoryQuery = {
+  queryKey: readonly unknown[]
+  queryFn: () => Promise<KyberSessionSummary[]>
+  staleTime?: number
+}
+let queryClient: QueryClient
+let inventoryQuery: InventoryQuery
+
+// SSR does not run React Query's fetching effect. Keep the real QueryClient and
+// query function, and advance that effect explicitly through the mocked HTTP boundary.
+vi.mock('@tanstack/react-query', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@tanstack/react-query')>()
+  return {
+    ...actual,
+    useQuery: (options: InventoryQuery) => {
+      if (options.queryKey[0] !== 'kyber-sessions') return actual.useQuery(options)
+      inventoryQuery = options
+      const state = queryClient.getQueryState(options.queryKey)
+      return {
+        data: state?.data,
+        isLoading: !state || state.status === 'pending',
+        isError: state?.status === 'error',
+        error: state?.error,
+      }
+    },
+  }
+})
 
 let hookStates: unknown[] = []
 let hookIndex = 0
-
-function clearHooks() {
-  hookStates = []
-  hookIndex = 0
-}
-
 const reactInternals = (
   React as unknown as {
     __CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE?: { H?: Record<string, unknown> }
   }
 ).__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE
 
-if (reactInternals) {
+function installHooks() {
+  if (!reactInternals) throw new Error('React hook dispatcher unavailable')
+  hookIndex = 0
   reactInternals.H = {
     useState: <T,>(value: T | (() => T)): [T, (next: T | ((previous: T) => T)) => void] => {
       const index = hookIndex++
-      if (index >= hookStates.length) {
-        hookStates.push(typeof value === 'function' ? (value as () => T)() : value)
-      }
-      return [
-        hookStates[index] as T,
-        (next) => {
-          hookStates[index] =
-            typeof next === 'function' ? (next as (previous: T) => T)(hookStates[index] as T) : next
-        },
-      ]
+      if (index >= hookStates.length) hookStates.push(typeof value === 'function' ? (value as () => T)() : value)
+      return [hookStates[index] as T, (next) => {
+        hookStates[index] = typeof next === 'function' ? (next as (previous: T) => T)(hookStates[index] as T) : next
+      }]
     },
     useMemo: <T,>(factory: () => T) => factory(),
     useCallback: <T,>(callback: T) => callback,
@@ -48,24 +64,37 @@ if (reactInternals) {
   }
 }
 
-function renderHtml(element: React.ReactElement): string {
-  hookIndex = 0
-  return renderToStaticMarkup(element)
+const canonicalHarnesses = [
+  'claude-code', 'claude-desktop', 'claude-cli', 'codex-desktop', 'codex-cli',
+  'antigravity-cli', 'antigravity-ide', 'zcode', 'cursor-agent',
+  'copilot-cli', 'copilot-vscode', 'copilot-agent', 'future-harness-v2',
+]
+function session(harness: string, suffix = ''): KyberSessionSummary {
+  return {
+    session_id: `sess-${harness}${suffix}`, harness, label: `Canonical ${harness}${suffix} session`,
+    started: '2026-03-01T12:00:00.000Z', turn_count: 3, cost_usd: 0.185,
+  }
 }
+const inventory = [...canonicalHarnesses.map((harness) => session(harness)), session('claude-code', '-second')]
+
+function mockSessions(sessions = inventory) {
+  const fetchMock = vi.fn(async (_url: string) => new Response(JSON.stringify({ sessions }), {
+    status: 200, headers: { 'Content-Type': 'application/json' },
+  }))
+  vi.stubGlobal('fetch', fetchMock)
+  return fetchMock
+}
+
+type ExplorerProps = Parameters<typeof ContextExplorer>[0]
 
 function createTestQueryClient() {
   return new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
 }
 
 const sampleSession: KyberSessionSummary = {
-  session_id: 'sess-canonical-001',
-  harness: 'claude',
-  label: 'Canonical Claude session',
-  is_subagent: false,
-  parent_session: null,
-  started: '2026-03-01T12:00:00.000Z',
+  ...session('claude-code'),
   turn_count: 10,
-  cost_usd: 0.185,
+  cost: { basis: 'published', status: 'priced', value: 0.185, currency: 'USD' },
 }
 
 /**
@@ -80,127 +109,313 @@ type TestNodeProps = {
   children?: React.ReactNode
   onClick?: (event?: unknown) => unknown
   title?: string
-  [key: string]: unknown
 }
-
 type TestNode = React.ReactElement<TestNodeProps>
 
-describe('ContextExplorer: canonical session-list contract', () => {
-  const source = readFileSync(fileURLToPath(new URL('./ContextExplorer.tsx', import.meta.url)), 'utf8')
+function renderExplorer(props: ExplorerProps = {}) {
+  installHooks()
+  return ContextExplorer(props)
+}
+async function loadExplorer(props: ExplorerProps = {}) {
+  renderExplorer(props)
+  await queryClient.ensureQueryData(inventoryQuery)
+  return renderExplorer(props)
+}
+function html(tree: React.ReactElement, client: QueryClient = queryClient) {
+  return renderToStaticMarkup(<QueryClientProvider client={client}>{tree}</QueryClientProvider>)
+}
+function nodes(tree: React.ReactNode, predicate: (node: TestNode) => boolean): TestNode[] {
+  const found: TestNode[] = []
+  const walk = (node: React.ReactNode): void => {
+    if (!React.isValidElement<TestNodeProps>(node)) return
+    if (predicate(node)) found.push(node)
+    React.Children.forEach(node.props.children, walk)
+  }
+  walk(tree)
+  return found
+}
+function clickTab(tree: React.ReactElement, harness: string) {
+  const tabs = nodes(tree, (node) => node.props['data-testid'] === `provider-tab-${harness}`)
+  expect(tabs, `Expected exactly one selectable tab for ${harness}`).toHaveLength(1)
+  tabs[0].props.onClick!()
+}
+function rowIds(tree: React.ReactElement) {
+  return [...html(tree).matchAll(/data-testid="agent-session-row-([^"]+)"/g)].map((match) => match[1]).sort()
+}
+function tabIds(tree: React.ReactElement) {
+  return [...tabIdSequence(tree)].sort()
+}
+/** Tab ids in rendered order, so ordering is assertable rather than incidental. */
+function tabIdSequence(tree: React.ReactElement) {
+  return nodes(tree, (node) => node.props['data-testid']?.startsWith('provider-tab-') ?? false)
+    .map((node) => node.props['data-testid']!.slice('provider-tab-'.length))
+}
+function openRow(tree: React.ReactElement, sessionId: string) {
+  const rows = nodes(tree, (node) => node.type === AgentSessionRow)
+  const row = rows.find((node) => (node.props as { s?: KyberSessionSummary }).s?.session_id === sessionId)
+  expect(row, `Expected visible canonical session ${sessionId}`).toBeDefined()
+  const onToggle = (row!.props as { onToggle: () => void }).onToggle
+  onToggle()
+}
 
-  beforeEach(clearHooks)
+beforeEach(() => {
+  hookStates = []
+  queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } })
+  mockSessions()
+})
+afterEach(() => {
+  queryClient.clear()
+  vi.unstubAllGlobals()
+})
 
-  it('routes every provider through fetchKyberSessions and AgentSessionRow', () => {
-    expect(source).toContain("import { fetchKyberSessions")
-    expect(source).toContain('queryFn: () => fetchKyberSessions(agentFilter)')
-    expect(source).toContain('<AgentSessionRow')
-    expect(PROVIDERS.map((provider) => provider.key)).toEqual([
-      'agent-all',
-      'claude',
-      'codex',
-      'antigravity',
-      'copilot-cli',
-      'copilot-vscode',
-      'copilot-agent',
-      'pi',
-      'opencode',
-      'kilo-code',
-      'cursor',
-    ])
-    expect(PROVIDERS.map((provider) => getAgentHarnessFilter(provider.key))).toEqual([
-      null,
-      'claude',
-      'codex',
-      'gemini',
-      'copilot-cli',
-      'copilot',
-      'copilot',
-      'pi',
-      'opencode',
-      'kilo-code',
-      'cursor',
-    ])
+describe('ContextExplorer canonical harness inventory', () => {
+  it('defaults to All and shows every canonical session', async () => {
+    expect(rowIds(await loadExplorer())).toEqual(inventory.map((s) => s.session_id).sort())
   })
-
-  it('renders the Claude provider as a canonical agent session row', () => {
-    const queryClient = createTestQueryClient()
-    queryClient.setQueryData(['kyber-sessions', 'claude'], [sampleSession])
-
-    const html = renderHtml(
-      <QueryClientProvider client={queryClient}>
-        <ContextExplorer activeHarness="claude" />
-      </QueryClientProvider>,
+  it('offers one tab per observed canonical ID and excludes absent static providers', async () => {
+    expect(tabIds(await loadExplorer())).toEqual(['agent-all', ...canonicalHarnesses].sort())
+  })
+  it.each(canonicalHarnesses)('selects only exact %s rows and reports that canonical ID', async (harness) => {
+    const onHarnessChange = vi.fn()
+    clickTab(await loadExplorer({ onHarnessChange }), harness)
+    expect(rowIds(await loadExplorer({ onHarnessChange }))).toEqual(
+      inventory.filter((s) => s.harness === harness).map((s) => s.session_id).sort(),
     )
-
-    expect(html).toContain('data-testid="agent-session-row-sess-canonical-001"')
-    expect(html).toContain('Canonical Claude session')
-    expect(html).toContain('claude')
+    expect(onHarnessChange).toHaveBeenCalledExactlyOnceWith(harness)
   })
-
+  it('restores every row and reports the agent-all sentinel when All is clicked', async () => {
+    const onHarnessChange = vi.fn()
+    clickTab(await loadExplorer({ onHarnessChange }), 'claude-code')
+    clickTab(await loadExplorer({ onHarnessChange }), 'agent-all')
+    expect(rowIds(await loadExplorer({ onHarnessChange }))).toEqual(inventory.map((s) => s.session_id).sort())
+    expect(onHarnessChange.mock.calls).toEqual([['claude-code'], ['agent-all']])
+  })
+  it('discovers through one unfiltered HTTP request and never requests provider aliases on tab switches', async () => {
+    const fetchMock = mockSessions()
+    let tree = await loadExplorer()
+    expect(fetchMock.mock.calls).toEqual([['/api/kyber/sessions']])
+    for (const harness of [...canonicalHarnesses, 'agent-all']) {
+      clickTab(tree, harness)
+      tree = await loadExplorer()
+    }
+    expect(fetchMock.mock.calls).toEqual([['/api/kyber/sessions']])
+  })
+  it('keeps future harness IDs selectable with their raw ID as the display fallback', async () => {
+    const tree = await loadExplorer()
+    const tab = nodes(tree, (node) => node.props['data-testid'] === 'provider-tab-future-harness-v2')
+    expect(tab).toHaveLength(1)
+    expect(renderToStaticMarkup(tab[0])).toContain('future-harness-v2')
+    clickTab(tree, 'future-harness-v2')
+    expect(rowIds(await loadExplorer())).toEqual(['sess-future-harness-v2'])
+  })
+  it('uses labels for display while keeping the canonical identity selectable', async () => {
+    const tree = await loadExplorer()
+    const tab = nodes(tree, (node) => node.props['data-testid'] === 'provider-tab-claude-code')
+    expect(tab).toHaveLength(1)
+    expect(renderToStaticMarkup(tab[0])).toContain('Claude Code')
+    clickTab(tree, 'claude-code')
+    expect(rowIds(await loadExplorer())).toEqual(['sess-claude-code', 'sess-claude-code-second'])
+  })
+  it.each(['claude-desktop', 'codex-desktop', 'antigravity-ide', 'future-harness-v2'])(
+    'honors available controlled canonical selection %s', async (harness) => {
+      const tree = await loadExplorer({ activeHarness: harness })
+      expect(rowIds(tree)).toEqual([`sess-${harness}`])
+      expect(tabIds(tree)).toEqual(['agent-all', ...canonicalHarnesses].sort())
+    },
+  )
+  it('explicit controlled all replaces an earlier local selection', async () => {
+    clickTab(await loadExplorer(), 'copilot-cli')
+    expect(rowIds(await loadExplorer())).toEqual(['sess-copilot-cli'])
+    expect(rowIds(await loadExplorer({ activeHarness: 'agent-all' }))).toEqual(inventory.map((s) => s.session_id).sort())
+  })
+  it('controlled agent-all selects the full canonical inventory', async () => {
+    expect(rowIds(await loadExplorer({ activeHarness: 'agent-all' }))).toEqual(inventory.map((s) => s.session_id).sort())
+  })
+  it('falls back to All when a controlled harness is unavailable', async () => {
+    expect(rowIds(await loadExplorer({ activeHarness: 'missing-harness' }))).toEqual(inventory.map((s) => s.session_id).sort())
+  })
+  it('falls back to All when a controlled harness disappears from refreshed inventory', async () => {
+    expect(rowIds(await loadExplorer({ activeHarness: 'copilot-cli' }))).toEqual(['sess-copilot-cli'])
+    const remaining = inventory.filter((s) => s.harness !== 'copilot-cli')
+    queryClient.setQueryData(inventoryQuery.queryKey, remaining)
+    const tree = renderExplorer({ activeHarness: 'copilot-cli' })
+    expect(rowIds(tree)).toEqual(remaining.map((s) => s.session_id).sort())
+    expect(tabIds(tree)).not.toContain('copilot-cli')
+  })
+  it('falls back to All when a local harness disappears from refreshed inventory', async () => {
+    clickTab(await loadExplorer(), 'copilot-cli')
+    expect(rowIds(await loadExplorer())).toEqual(['sess-copilot-cli'])
+    const remaining = inventory.filter((s) => s.harness !== 'copilot-cli')
+    queryClient.setQueryData(inventoryQuery.queryKey, remaining)
+    expect(rowIds(renderExplorer())).toEqual(remaining.map((s) => s.session_id).sort())
+  })
+  it('keeps All and the empty message when the canonical inventory is empty', async () => {
+    mockSessions([])
+    const tree = await loadExplorer()
+    expect(tabIds(tree)).toEqual(['agent-all'])
+    expect(html(tree)).toContain('data-testid="explorer-empty"')
+    expect(html(tree)).toContain('No sessions found.')
+  })
+  it('preserves the loading state until the canonical response arrives', () => {
+    expect(html(renderExplorer())).toContain('data-testid="explorer-loading"')
+  })
+  it('preserves the error state when the canonical HTTP request fails', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 503 })))
+    renderExplorer()
+    await expect(queryClient.fetchQuery(inventoryQuery)).rejects.toThrow('Request failed (503)')
+    expect(html(renderExplorer())).toContain('data-testid="explorer-error"')
+    expect(html(renderExplorer())).toContain('Request failed (503)')
+  })
+  it('orders the tab strip deterministically regardless of store ordering', async () => {
+    // The store hands back started DESC; a new session must not reshuffle the strip.
+    const byAge = [...canonicalHarnesses].sort((a, b) => a.localeCompare(b)).reverse()
+    mockSessions([...byAge.map((harness) => session(harness)), ...byAge.map((harness) => session(harness, '-old'))])
+    const tree = await loadExplorer()
+    // All is pinned first and only the harness IDs are sorted; a harness sorting
+    // ahead of "agent-all" must not move All out of position.
+    expect([...tabIdSequence(tree)]).toEqual(['agent-all', ...[...canonicalHarnesses].sort()])
+  })
+  it('never lets a stored agent-all harness mint a second All tab', async () => {
+    mockSessions([...inventory, { ...session('agent-all') }])
+    const tree = await loadExplorer()
+    const tabs = nodes(tree, (node) => node.props['data-testid'] === 'provider-tab-agent-all')
+    expect(tabs).toHaveLength(1)
+    expect(tabIds(tree)).toEqual(['agent-all', ...canonicalHarnesses].sort())
+  })
+  it('treats the legacy all spelling as a selection that resolves to All', async () => {
+    expect(rowIds(await loadExplorer({ activeHarness: 'all' }))).toEqual(inventory.map((s) => s.session_id).sort())
+    expect(tabIds(await loadExplorer({ activeHarness: 'all' }))).toEqual(['agent-all', ...canonicalHarnesses].sort())
+  })
+  it('opens the canonical Claude Code dashboard and clears expansion when switching tabs', async () => {
+    queryClient.setQueryData(['kyber-session', 'sess-claude-code'], {
+      id: 'sess-claude-code', session_id: 'sess-claude-code', harness: 'claude-code',
+      summary: { turn_count: 3, cost: { usd: 0.185, basis: 'published_rates', status: 'ok' } },
+      turns: [], tools: [], timeline: [],
+    })
+    openRow(await loadExplorer(), 'sess-claude-code')
+    expect(html(renderExplorer())).toContain('data-testid="agent-session-dashboard"')
+    clickTab(renderExplorer(), 'agent-all')
+    expect(html(await loadExplorer())).not.toContain('data-testid="agent-session-dashboard"')
+    clickTab(await loadExplorer(), 'claude-code')
+    openRow(await loadExplorer(), 'sess-claude-code')
+    expect(html(renderExplorer())).toContain('data-testid="agent-session-dashboard"')
+    clickTab(renderExplorer(), 'codex-desktop')
+    expect(html(await loadExplorer())).not.toContain('data-testid="agent-session-dashboard"')
+    clickTab(await loadExplorer(), 'claude-code')
+    expect(html(await loadExplorer())).not.toContain('data-testid="agent-session-dashboard"')
+  })
   it('expanding a canonical row mounts AgentSessionDashboard', () => {
-    const queryClient = createTestQueryClient()
-    queryClient.setQueryData(['kyber-session', sampleSession.session_id], {
+    const detailClient = createTestQueryClient()
+    detailClient.setQueryData(['kyber-session', sampleSession.session_id], {
       id: sampleSession.session_id,
       session_id: sampleSession.session_id,
       harness: sampleSession.harness,
       label: sampleSession.label,
-      summary: { turn_count: 10, cost: { usd: 0.185, basis: 'published_rates', status: 'ok' } },
+      summary: {
+        turn_count: 10,
+        cost: { basis: 'published', status: 'priced', value: 0.185, currency: 'USD' },
+      },
       turns: [],
       tools: [],
       timeline: [],
     })
 
-    const html = renderHtml(
-      <QueryClientProvider client={queryClient}>
-        <AgentSessionRow s={sampleSession} open onToggle={() => {}} onSelectSession={() => {}} />
-      </QueryClientProvider>,
+    const markup = html(
+      <AgentSessionRow s={sampleSession} open onToggle={() => {}} onSelectSession={() => {}} />,
+      detailClient,
     )
 
-    expect(html).toContain('data-testid="agent-session-dashboard"')
-    expect(html).toContain('data-testid="overview-strip-section"')
+    expect(markup).toContain('data-testid="agent-session-dashboard"')
+    expect(markup).toContain('data-testid="overview-strip-section"')
   })
+})
 
-  it('navigates to a parent canonical session from the row link', () => {
+describe('AgentSessionRow parent navigation', () => {
+  it('navigates to the canonical parent without toggling the child', () => {
     const onSelectSession = vi.fn()
+    const onToggle = vi.fn()
     const tree = AgentSessionRow({
-      s: { ...sampleSession, is_subagent: true, parent_session: 'sess-parent-001' },
-      open: false,
-      onToggle: () => {},
-      onSelectSession,
+      s: { ...session('claude-code'), is_subagent: true, parent_session: 'sess-parent-001' },
+      open: false, onToggle, onSelectSession,
     })
-
-    let found: TestNode | null = null
-    const walk = (node: unknown): void => {
-      if (!React.isValidElement(node) || found) return
-      const props = node.props as TestNodeProps | undefined
-      if (props?.['data-testid'] === 'parent-session-link') {
-        found = node as TestNode
-        return
-      }
-      React.Children.forEach(props?.children, walk)
-    }
-    walk(tree)
-
-    // Read through a fresh binding: the assignment above happens inside a callback, which
-    // control-flow analysis cannot follow, so `found` stays narrowed to `null` at its own
-    // declaration.
-    const parentLink: TestNode | null = found
-    expect(parentLink).not.toBeNull()
-    expect(parentLink!.props.title).toContain('Parent session: sess-parent-001')
+    const links = nodes(tree, (node) => node.props['data-testid'] === 'parent-session-link')
+    expect(links).toHaveLength(1)
+    expect(links[0].props.title).toBe('Parent session: sess-parent-001')
     const stopPropagation = vi.fn()
-    parentLink!.props.onClick!({ stopPropagation })
+    links[0].props.onClick!({ stopPropagation })
     expect(stopPropagation).toHaveBeenCalledOnce()
-    expect(onSelectSession).toHaveBeenCalledWith('sess-parent-001')
+    expect(onSelectSession).toHaveBeenCalledExactlyOnceWith('sess-parent-001')
+    expect(onToggle).not.toHaveBeenCalled()
+  })
+})
+
+describe('AgentSessionRow row cost cell (issue #186)', () => {
+  // The cell is addressed by test id; T4 adds `data-testid="agent-session-cost"`.
+  function renderCostCell(cost: KyberSessionSummary['cost'] | undefined): { text: string; title: string } {
+    const target: KyberSessionSummary = { ...sampleSession, cost_usd: null }
+    if (cost !== undefined) target.cost = cost
+    else delete target.cost
+    const markup = html(
+      <AgentSessionRow s={target} open={false} onToggle={() => {}} onSelectSession={() => {}} />,
+      createTestQueryClient(),
+    )
+    const match = /<span([^>]*data-testid="agent-session-cost"[^>]*)>([\s\S]*?)<\/span>/.exec(markup)
+    expect(match, 'row must render an element with data-testid="agent-session-cost"').not.toBeNull()
+    const title = /title="([^"]*)"/.exec(match![1]!)?.[1] ?? ''
+    return { text: match![2]!, title }
+  }
+
+  it('renders the formatted figure (same formatter as the cost tile) for a priced block', () => {
+    const block = { basis: 'published', status: 'priced', value: 0.185, currency: 'USD' } as const
+    const { text } = renderCostCell(block)
+    expect(text).toBe(formatCostFigure(normalizeCostBlock(block)))
+    expect(text).toMatch(/^\$0\.1[89]\d*$/)
+    expect(text).not.toBe('—')
   })
 
-  it('does not retain a tree-detail or context-window-toggle path', () => {
+  it.each([
+    ['no_rate', 'no published rate'],
+    ['not_billed', 'not billed'],
+    ['out_of_scope', 'out of scope'],
+  ] as const)('renders the %s reason in words, never a bare dash or $0.00', (status, words) => {
+    const { text } = renderCostCell({ basis: 'published', status })
+    expect(text).toBe(words)
+    expect(text).toBe(formatCostFigure(normalizeCostBlock({ basis: 'published', status })))
+    expect(text).not.toContain('—')
+    expect(text).not.toContain('$0.00')
+  })
+
+  it('renders "partially priced" with no figure for a partial block (U10)', () => {
+    const { text } = renderCostCell({ basis: 'published', status: 'partial', value: 1.23, currency: 'USD' })
+    expect(text).toBe('partially priced')
+    expect(text).not.toContain('$')
+    expect(text).not.toContain('—')
+  })
+
+  it('renders a dash only when the server sent no cost at all', () => {
+    expect(renderCostCell(undefined).text).toBe('—')
+  })
+
+  it('names the cost basis in the cell title', () => {
+    expect(renderCostCell({ basis: 'published', status: 'no_rate' }).title).toMatch(/published/i)
+    expect(
+      renderCostCell({ basis: 'harness', status: 'priced', value: 0.5, currency: 'USD' }).title,
+    ).toMatch(/harness/i)
+  })
+})
+
+describe('ContextExplorer removed surface', () => {
+  it('does not export a tree-detail or context-window-toggle component', () => {
     expect(ContextExplorerModule).not.toHaveProperty('TreeTable')
     expect(ContextExplorerModule).not.toHaveProperty('SessionDetails')
     expect(ContextExplorerModule).not.toHaveProperty('SessionDetailsBoundary')
-    expect(source).not.toContain('fetchContextTree')
-    expect(source).not.toContain('/api/context/tree')
-    expect(source).not.toContain("'context-tree'")
-    expect(source).not.toContain('Live window')
-    expect(source).not.toContain('Full history')
+  })
+  it('never requests the context-tree endpoint', async () => {
+    // Behavioural guard through the mocked HTTP boundary. Asserting that five literal
+    // strings are absent from the source file would pass on a renamed helper or a
+    // moved fetch while the feature it polices came straight back.
+    const fetchMock = mockSessions()
+    await loadExplorer()
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).not.toContain('/api/context/tree')
   })
 })

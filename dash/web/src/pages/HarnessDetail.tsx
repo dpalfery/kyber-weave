@@ -7,9 +7,9 @@ import {
   fetchHarness,
   fetchRuns,
   fetchFindings,
+  type FindingsPage,
   type KyberHarnessSummary,
   type KyberRunSummary,
-  type KyberFinding,
   type ScorecardData,
 } from '../lib/kyberApi.js'
 import {
@@ -24,7 +24,7 @@ export interface HarnessDetailProps {
   harnessId: string
   initialHarness?: KyberHarnessSummary
   initialRuns?: KyberRunSummary[]
-  initialFindings?: KyberFinding[]
+  initialFindings?: FindingsPage
   onSelectAll?: () => void
   onSelectRun?: (runId: string) => void
   onSelectFinding?: (findingId: string) => void
@@ -70,7 +70,9 @@ export function HarnessDetail({
 
   const harness = harnessData ?? initialHarness
   const runs = runsData ?? []
-  const findings = findingsData ?? []
+  // Server-side harness filter (issue #191): the envelope carries the
+  // harness's whole set, not a post-fetch slice.
+  const findings = findingsData?.findings ?? []
 
   // A missing rollup is not the same as missing telemetry, and conflating the two
   // is the failure ADR 0011 forbids: the six dimensions would read "telemetry
@@ -159,7 +161,8 @@ export function HarnessDetail({
       secondaryCost: {
         costUsd: harness?.costUsd ?? null,
         basis: 'harness_rollup',
-        status: harness?.costUsd ? 'derived' : 'not_measurable',
+        // A priced zero is derived, not missing (review follow-up: Copilot C7).
+        status: harness?.costUsd != null ? 'derived' : 'not_measurable',
       },
     }
   }, [harness, rollupMissing, unbuiltReason])
@@ -370,8 +373,17 @@ export function HarnessDetail({
                       <td className="py-2.5 px-3 text-right font-mono tabular-nums text-foreground">
                         {r.executionCount ?? 1}
                       </td>
-                      <td className="py-2.5 px-3 text-right font-mono tabular-nums text-foreground">
+                      {/* Re-review #2 (Kilo 4): the subtotal marker sits on
+                          the cell whose figure is partial — never blanket on
+                          cost when the gap is turns. */}
+                      <td
+                        className="py-2.5 px-3 text-right font-mono tabular-nums text-foreground"
+                        title={r.partialFields?.includes('turnCount') ? 'Partial total: some sessions in this run lack measured figures' : undefined}
+                      >
                         {r.turnCount ?? '—'}
+                        {r.turnCount != null && r.partialFields?.includes('turnCount') && (
+                          <span className="ml-1 italic text-muted-foreground/80">(partial)</span>
+                        )}
                       </td>
                       <td className="py-2.5 px-3">
                         <span
@@ -390,9 +402,24 @@ export function HarnessDetail({
                       <td className="py-2.5 px-3 text-right font-mono tabular-nums text-amber-500 dark:text-amber-400">
                         {r.findingCount ?? 0}
                       </td>
-                      {/* Decision D9: Secondary derived cost */}
-                      <td className="py-2.5 px-3 text-right font-mono tabular-nums text-muted-foreground/80">
-                        {r.costUsd ? usd(r.costUsd) : '—'}
+                      {/* Decision D9: Secondary derived cost. A priced zero is a
+                          measurement (cost.ts renders a genuine $0.00), and a
+                          partial sum is marked — neither renders as missing
+                          (review follow-up: Copilot C7, Kilo K3). */}
+                      <td
+                        className="py-2.5 px-3 text-right font-mono tabular-nums text-muted-foreground/80"
+                        title={r.costStatus === 'partial' || r.partialFields?.includes('costUsd') ? 'Partial total: some sessions in this run lack measured figures' : undefined}
+                      >
+                        {r.costUsd != null ? (
+                          <>
+                            {usd(r.costUsd)}
+                            {(r.costStatus === 'partial' || r.partialFields?.includes('costUsd')) && (
+                              <span className="ml-1 italic">(partial)</span>
+                            )}
+                          </>
+                        ) : (
+                          '—'
+                        )}
                       </td>
                     </tr>
                   )

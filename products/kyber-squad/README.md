@@ -1,7 +1,7 @@
 # Kyber-Squad Canonical Source Tree
 
 Kyber-Squad is the canonical source tree for unified agent and skill governance and deployment.
-It maintains a target-neutral, declarative catalog of **21 canonical agents** and **23 canonical skills**,
+It maintains a target-neutral, declarative catalog of **21 canonical agents** and **24 canonical skills**,
 governed by explicit schemas, model profiles, semantic capability profiles, and fallback lowering rules.
 
 `products/kyber-squad/` is the canonical and package authority from which target-native agent and
@@ -57,13 +57,14 @@ products/kyber-squad/
 │   ├── task-reviewer/                  # Progressive-disclosure references (Markdown)
 │   ├── tauri-dev.md
 │   └── test-dev.md
-├── skills/                             # 23 canonical skill directories; 89 recursive files
+├── skills/                             # 24 canonical skill directories; 91 recursive files
 │   ├── app-docs-standard/
 │   ├── architecture-decision-record/
 │   ├── azure-cli/
 │   ├── azure-naming/
 │   ├── bug-crusher/
 │   ├── code-review/
+│   ├── code-review-loop/
 │   ├── create-pull-request/
 │   ├── csharp-dev/
 │   ├── csp-security/
@@ -114,20 +115,26 @@ An agent body may link local Markdown resources beneath the agent's own director
 `conductor/references/*.md`); those links stay authored verbatim and resolve at the deployment
 target (see [Resource Closures](#6-resource-closures-and-progressive-disclosure)).
 
-### 2. Skills (23 Canonical Skills)
+### 2. Skills (24 Canonical Skills)
 
-The 23 canonical skill directories under `skills/` adhere to the Agent Skills open standard
-(`SKILL.md`, optional `scripts/`, `references/`, and asset files). Every raw `SKILL.md` except the
-five explicitly evolved skills (`bug-crusher`, `product-owner`, `second-brain`,
-`create-pull-request`, and `pr-review-fix-comments`) is byte-identical to the designated Hotshot
-golden copy; `create-pull-request-github` is retired into `create-pull-request`. The canonical
-tree also retains 66 supplemental resources, for 89 skill-tree files in total; recursive APM and
+The 24 canonical skill directories under `skills/` adhere to the Agent Skills open standard
+(`SKILL.md`, optional `scripts/`, `references/`, and asset files). `code-review-loop` is authored
+in Kyber-Squad. Every imported raw `SKILL.md` except the six explicitly evolved skills
+(`bug-crusher`, `code-review`, `product-owner`, `second-brain`,
+`create-pull-request`, and `pr-review-fix-comments`) is byte-identical to the designated
+Hotshot golden copy; `create-pull-request-github` is retired into `create-pull-request`. The canonical
+tree also retains 67 supplemental resources, for 91 skill-tree files in total; recursive APM and
 Agent Plugins packages preserve those resources and their local references.
+
+`code-review-loop` completes an authorized code review feedback cycle: validated fixes,
+pushed commit links in replies, resolved threads, and a requested re-review. Its linked
+`code-review-loop.md` workflow ships beside `SKILL.md`. `pr-review-fix-comments` remains the
+workflow for step-by-step approvals.
 
 Renderers project every file an owner's Markdown links reach beside its principal output, with
 authored relative links preserved, so the former dangling-reference defect is closed for every
-linked resource: a fresh Copilot render now emits the 44 principal files plus each owner's linked
-resources (119 files total). Every skill resource reaches every render except
+linked resource: a fresh Copilot render now emits the 45 principal files plus each owner's linked
+resources (121 files total). Every skill resource reaches every render except
 `skills/setup-dev-environment/agents/openai.yaml`, which is packaged-only Codex skill-UI metadata.
 The tracked root `.github/` self-deployment predates resource delivery and remains a stale
 snapshot until a human refreshes it after a release candidate; packages and fresh renders carry

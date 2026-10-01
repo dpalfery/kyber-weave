@@ -11,8 +11,9 @@
 //    on-demand loading, and tool deferral over deletion. Never suggest deleting outright.
 // 5. Decision D16: skill utilisation findings are stamped at low confidence ('heuristic') and ranked last.
 
+import crypto from 'node:crypto'
 import { normalizeWhitespace, hashNormalized } from './signals.js'
-import { contextLimitOf, DEFAULT_CONTEXT_LIMIT } from '../canon/context-window.js'
+import { contextLimitOf } from '../canon/context-window.js'
 import { canonicalHarnessId, normalizeHarnessName, type SessionIdentities } from '../canon/measurability.js'
 import type { CanonicalRecord } from '../canon/types.js'
 import type { OutcomeBlock } from '../canon/outcome.js'
@@ -32,6 +33,17 @@ export type DetectorId =
   | 'compaction-hazard'
   | 'unbounded-delegation'
   | 'inactive-skill-reference'
+
+/** Every detector id, for zero-filled per-detector counts (issue #191). */
+export const DETECTOR_IDS: readonly DetectorId[] = [
+  'dormant-tool-schema',
+  'duplicate-tool-call',
+  'oversized-tool-result',
+  'prefix-cache-break',
+  'compaction-hazard',
+  'unbounded-delegation',
+  'inactive-skill-reference',
+]
 
 /**
  * Confidence level for findings (Decision D5).
@@ -69,9 +81,12 @@ export type Finding = {
   mechanism: string
   evidenceLinks: FindingEvidenceLink[]
   confidence: FindingConfidence
-  estimatedWasteTokens: number
+  // Absent when the detector could not derive a size (coverage-gap):
+  // no number is invented to fill it. Downstream ranking and display
+  // treat a missing estimate as zero rank, never as zero waste.
+  estimatedWasteTokens?: number
   recommendation: string
-  errorBar: FindingErrorBar
+  errorBar?: FindingErrorBar
   outcomeRiskCaveat: string
   // Contextual linkages and ranking score
   runId?: string
@@ -189,8 +204,8 @@ export function computeRankScore(
  */
 export function rankFindings(findings: readonly Finding[]): Finding[] {
   return [...findings].sort((a, b) => {
-    const scoreA = a.rankScore ?? computeRankScore(a.estimatedWasteTokens, a.confidence)
-    const scoreB = b.rankScore ?? computeRankScore(b.estimatedWasteTokens, b.confidence)
+    const scoreA = a.rankScore ?? computeRankScore(a.estimatedWasteTokens ?? 0, a.confidence)
+    const scoreB = b.rankScore ?? computeRankScore(b.estimatedWasteTokens ?? 0, b.confidence)
 
     if (Math.abs(scoreB - scoreA) > 0.001) {
       return scoreB - scoreA
@@ -209,7 +224,7 @@ export function rankFindings(findings: readonly Finding[]): Finding[] {
     const confDiff = (confOrder[b.confidence] ?? 0) - (confOrder[a.confidence] ?? 0)
     if (confDiff !== 0) return confDiff
 
-    return b.estimatedWasteTokens - a.estimatedWasteTokens
+    return (b.estimatedWasteTokens ?? 0) - (a.estimatedWasteTokens ?? 0)
   })
 }
 
@@ -328,6 +343,61 @@ export function extractToolDefinitionsFromRecord(record: CanonicalRecord): { nam
   return tools
 }
 
+function attributeOf(record: CanonicalRecord, keys: readonly string[]): string | undefined {
+  if (record.op === 'tool.invoke' && record.name && record.name !== 'tool.invoke') {
+    if (keys.includes('gen_ai.tool.name') || keys.includes('tool.name')) {
+      return record.name
+    }
+  }
+  const recAny = record as unknown as { attributes?: Record<string, unknown> }
+  const attrs = recAny.attributes
+  if (attrs && typeof attrs === 'object') {
+    for (const key of keys) {
+      const val = attrs[key]
+      if (typeof val === 'string' && val !== '') return val
+      if (typeof val === 'number' && Number.isFinite(val)) return String(val)
+    }
+  }
+  const raw = record.raw
+  if (raw && typeof raw === 'object') {
+    const rawObj = raw as Record<string, unknown>
+    for (const key of keys) {
+      const val = rawObj[key]
+      if (typeof val === 'string' && val !== '') return val
+      if (typeof val === 'number' && Number.isFinite(val)) return String(val)
+    }
+  }
+  return undefined
+}
+
+function numberAttributeOf(record: CanonicalRecord, keys: readonly string[]): number | undefined {
+  const recAny = record as unknown as { attributes?: Record<string, unknown> }
+  const attrs = recAny.attributes
+  if (attrs && typeof attrs === 'object') {
+    for (const key of keys) {
+      const val = attrs[key]
+      if (typeof val === 'number' && Number.isFinite(val)) return val
+      if (typeof val === 'string') {
+        const num = Number(val)
+        if (Number.isFinite(num)) return num
+      }
+    }
+  }
+  const raw = record.raw
+  if (raw && typeof raw === 'object') {
+    const rawObj = raw as Record<string, unknown>
+    for (const key of keys) {
+      const val = rawObj[key]
+      if (typeof val === 'number' && Number.isFinite(val)) return val
+      if (typeof val === 'string') {
+        const num = Number(val)
+        if (Number.isFinite(num)) return num
+      }
+    }
+  }
+  return undefined
+}
+
 // ---------------------------------------------------------------------------
 // Detector 1: dormant-tool-schema
 // ---------------------------------------------------------------------------
@@ -393,7 +463,10 @@ export function detectDormantToolSchema(input: DormantToolSchemaInput): Finding[
   // Invoked tool names
   const invokedNames = new Set<string>()
   for (const toolRec of toolRecords) {
-    invokedNames.add(toolRec.name.trim())
+    const resolvedName =
+      attributeOf(toolRec, ['gen_ai.tool.name', 'tool.name']) ??
+      (toolRec.name !== 'tool.invoke' ? toolRec.name : undefined)
+    invokedNames.add((resolvedName ?? toolRec.name).trim())
   }
   if (input.invocations) {
     for (const inv of input.invocations) invokedNames.add(inv.trim())
@@ -476,7 +549,7 @@ export type DuplicateToolCallInput = {
   runId?: string
   sessionId?: string
   records?: readonly CanonicalRecord[]
-  calls?: readonly { name: string; arguments?: unknown; spanId?: string; turnIndex?: number; tokens?: number }[]
+  calls?: readonly { name: string; arguments?: unknown; argsHash?: string; spanId?: string; turnIndex?: number; tokens?: number; sessionId?: string }[]
   outcome?: OutcomeBlock
 }
 
@@ -495,9 +568,16 @@ export function detectDuplicateToolCall(input: DuplicateToolCallInput): Finding[
   type NormalizedCall = {
     name: string
     args: string
+    // Producer hash of the full pre-truncation arguments when the record
+    // carries one: the stored args may be truncated to 64KB, and hashing
+    // the truncated bytes would conflate calls that differ past the prefix.
+    argsHash?: string
     spanId: string
     turnIndex: number
-    tokens: number
+    // Undefined when no counter, byte count, part text, or raw payload
+    // could size the call: the finding stays unmeasured, never defaulted.
+    tokens?: number
+    sessionId?: string
   }
 
   const calls: NormalizedCall[] = []
@@ -508,14 +588,37 @@ export function detectDuplicateToolCall(input: DuplicateToolCallInput): Finding[
     if (r.op === 'llm.invoke') {
       turnIdx++
     } else if (r.op === 'tool.invoke') {
+      const toolName =
+        (r.name && r.name !== 'tool.invoke' ? r.name : undefined) ??
+        attributeOf(r, ['gen_ai.tool.name', 'tool.name']) ??
+        'tool.invoke'
       const args = r.raw && typeof r.raw === 'object' ? (r.raw as Record<string, unknown>)['arguments'] : undefined
-      const tokens = r.tokens.reportedInput + r.tokens.output || 250
+      const argsHash = attributeOf(r, ['gen_ai.tool.arguments_hash'])
+      let tokens: number | undefined = r.tokens.reportedInput + r.tokens.output || undefined
+      if (tokens === undefined) {
+        const resultBytes = numberAttributeOf(r, ['gen_ai.tool.result_bytes'])
+        if (resultBytes && resultBytes > 0) {
+          tokens = Math.ceil(resultBytes / 4)
+        } else if (r.parts && r.parts.length > 0) {
+          const textLen = r.parts.reduce((acc, p) => acc + (p.text?.length ?? 0), 0)
+          if (textLen > 0) {
+            tokens = Math.ceil(textLen / 4)
+          }
+        } else if (r.raw && typeof r.raw === 'object') {
+          const rawRes = (r.raw as Record<string, unknown>)['result'] ?? (r.raw as Record<string, unknown>)['output']
+          if (typeof rawRes === 'string' && rawRes.length > 0) {
+            tokens = Math.ceil(rawRes.length / 4)
+          }
+        }
+      }
       calls.push({
-        name: r.name.trim(),
+        name: toolName.trim(),
         args: serializeToolArgs(args),
+        ...(argsHash !== undefined ? { argsHash } : {}),
         spanId: r.spanId,
         turnIndex: turnIdx,
         tokens,
+        sessionId: r.sessionId ?? sessionId,
       })
     }
   }
@@ -527,9 +630,11 @@ export function detectDuplicateToolCall(input: DuplicateToolCallInput): Finding[
       calls.push({
         name: c.name.trim(),
         args: serializeToolArgs(c.arguments),
+        ...(c.argsHash !== undefined ? { argsHash: c.argsHash } : {}),
         spanId: c.spanId ?? `tool-call-span-${i}`,
         turnIndex: c.turnIndex ?? i,
-        tokens: c.tokens ?? 250,
+        tokens: c.tokens,
+        sessionId: c.sessionId ?? sessionId,
       })
     }
   }
@@ -538,11 +643,14 @@ export function detectDuplicateToolCall(input: DuplicateToolCallInput): Finding[
 
   for (let i = 0; i < calls.length; i++) {
     const call = calls[i]!
-    const key = `${call.name}::${call.args}`
+    const hashedArgs = call.argsHash ?? crypto.createHash('sha256').update(call.args).digest('hex')
+    const callSessionId = call.sessionId ?? sessionId ?? ''
+    const key = `${callSessionId}::${call.name}::${hashedArgs}`
 
     if (seenMap.has(key)) {
       const firstCall = seenMap.get(key)!
       const wasteTokens = call.tokens
+      const measured = wasteTokens !== undefined
 
       const evidenceLinks: FindingEvidenceLink[] = [
         {
@@ -564,28 +672,36 @@ export function detectDuplicateToolCall(input: DuplicateToolCallInput): Finding[
         'Client-side result caching assumes queried external resources are idempotent; volatile resources may yield stale data if cached.',
       )
 
-      const rankScore = computeRankScore(wasteTokens, 'deterministic', discount)
+      const rankScore = computeRankScore(wasteTokens ?? 0, 'deterministic', discount)
 
       findings.push({
         id: `finding-duplicate-call-${call.name}-${call.spanId}`,
         detectorId: 'duplicate-tool-call',
         title: `Duplicate Tool Call: Identical invocation of "${call.name}"`,
-        mechanism: `The tool "${call.name}" was executed multiple times with identical arguments in the same session without intermediate state changes, repeating ${wasteTokens} tokens of redundant call and result payloads.`,
+        mechanism: measured
+          ? `The tool "${call.name}" was executed multiple times with identical arguments in the same session, repeating ${wasteTokens} tokens of redundant call and result payloads.`
+          : `The tool "${call.name}" was executed multiple times with identical arguments in the same session, repeating a redundant call and result payload of unmeasured size.`,
         evidenceLinks,
         confidence: 'deterministic',
-        estimatedWasteTokens: wasteTokens,
+        ...(measured
+          ? {
+              estimatedWasteTokens: wasteTokens as number,
+              errorBar: {
+                lower: Math.floor((wasteTokens as number) * 0.8),
+                upper: Math.ceil((wasteTokens as number) * 1.25),
+              },
+            }
+          : {}),
         recommendation,
-        errorBar: {
-          lower: Math.floor(wasteTokens * 0.8),
-          upper: Math.ceil(wasteTokens * 1.25),
-        },
         outcomeRiskCaveat,
         runId,
-        sessionId,
+        sessionId: call.sessionId ?? sessionId,
         rankScore,
-        measurementClass: 'deterministic',
+        measurementClass: measured ? 'deterministic' : 'coverage-gap',
         confidenceBasis: 'Deterministically measured by hashing tool names and whitespace-normalized arguments across execution spans.',
-        whatWouldRaiseIt: 'Deterministic measurement; confidence is at ceiling.',
+        whatWouldRaiseIt: measured
+          ? 'Deterministic measurement; confidence is at ceiling.'
+          : 'Reported token counters or result byte counts on the duplicate tool spans would let the redundant payload be measured.',
       })
     } else {
       seenMap.set(key, call)
@@ -608,16 +724,25 @@ export type OversizedToolResultInput = {
     content: string | unknown
     tokens?: number
     characters?: number
+    bytes?: number
     spanId?: string
     turnIndex?: number
   }[]
   tokenThreshold?: number
   charThreshold?: number
+  byteThreshold?: number
   outcome?: OutcomeBlock
 }
 
 export const DEFAULT_FINDING_TOKEN_THRESHOLD = 2000
 export const DEFAULT_FINDING_CHAR_THRESHOLD = 8000
+export const DEFAULT_FINDING_BYTE_THRESHOLD = 8000
+// Precedence note: UTF-8 never encodes a string in fewer bytes than its
+// UTF-16 code units, so `bytes >= chars` always holds. At the equal defaults
+// above the byte arm therefore takes precedence and the character arm cannot
+// fire first — it reports only when `charThreshold` is configured tighter
+// than `byteThreshold`, which the arm order (tokens, bytes, characters)
+// guarantees.
 
 /**
  * Detector 3: oversized-tool-result
@@ -633,15 +758,18 @@ export function detectOversizedToolResult(input: OversizedToolResultInput): Find
 
   const tokenThreshold = input.tokenThreshold ?? DEFAULT_FINDING_TOKEN_THRESHOLD
   const charThreshold = input.charThreshold ?? DEFAULT_FINDING_CHAR_THRESHOLD
+  const byteThreshold = input.byteThreshold ?? DEFAULT_FINDING_BYTE_THRESHOLD
 
   type ResultItem = {
     toolName: string
     text: string
     tokens: number
     chars: number
+    bytes: number
     spanId: string
     turnIndex: number
     consumingSpanId?: string
+    sessionId?: string
   }
 
   const items: ResultItem[] = []
@@ -671,15 +799,44 @@ export function detectOversizedToolResult(input: OversizedToolResultInput): Find
         }
       }
 
-      if (content.length > 0) {
+      const toolName =
+        (r.name && r.name !== 'tool.invoke' ? r.name : undefined) ??
+        attributeOf(r, ['gen_ai.tool.name', 'tool.name']) ??
+        'tool'
+      // One fallback order, lazily: attributes first without touching raw;
+      // the raw fallback runs only when the byte count is still unknown and
+      // the content in hand cannot size the result (truncated or absent). A
+      // complete content never decompresses a lazy raw for a number it
+      // already implies, but a keyless attributes map must not stop the
+      // lookup the way the previous hand-rolled twin did.
+      const isTruncated = r.parts?.some(p => (p as { truncated?: boolean }).truncated) ?? false
+      const recAny = r as unknown as { attributes?: Record<string, unknown> }
+      const attrs = recAny.attributes
+      const attrVal = attrs && typeof attrs === 'object' ? attrs['gen_ai.tool.result_bytes'] : undefined
+      let resultBytes =
+        typeof attrVal === 'number' && Number.isFinite(attrVal)
+          ? attrVal
+          : typeof attrVal === 'string' && Number.isFinite(Number(attrVal))
+            ? Number(attrVal)
+            : undefined
+      if (resultBytes === undefined && (isTruncated || !content)) {
+        resultBytes = numberAttributeOf(r, ['gen_ai.tool.result_bytes'])
+      }
+      const chars = content.length
+      const bytes = resultBytes ?? Buffer.byteLength(content, 'utf8')
+      const estTokens = tokens > 0 ? tokens : (resultBytes !== undefined ? Math.ceil(resultBytes / 4) : Math.ceil(bytes / 4))
+
+      if (chars > 0 || bytes > 0 || content.length > 0) {
         items.push({
-          toolName: r.name,
+          toolName,
           text: content,
-          tokens: tokens || Math.ceil(content.length / 4),
-          chars: content.length,
+          tokens: estTokens || Math.ceil(chars / 4),
+          chars,
+          bytes,
           spanId: r.spanId,
           turnIndex: currentTurnIndex,
           consumingSpanId: lastLlmSpanId || r.spanId,
+          sessionId: r.sessionId ?? sessionId,
         })
       }
     }
@@ -690,31 +847,53 @@ export function detectOversizedToolResult(input: OversizedToolResultInput): Find
       const res = input.results[i]!
       const content = typeof res.content === 'string' ? res.content : JSON.stringify(res.content ?? '')
       const chars = res.characters ?? content.length
+      const bytes = res.bytes ?? Buffer.byteLength(content, 'utf8')
       const tokens = res.tokens ?? Math.ceil(chars / 4)
       items.push({
         toolName: res.toolName ?? 'tool',
         text: content,
         tokens,
         chars,
+        bytes,
         spanId: res.spanId ?? `result-span-${i}`,
         turnIndex: res.turnIndex ?? i,
         consumingSpanId: `llm-consuming-span-${i}`,
+        sessionId,
       })
     }
   }
 
   for (const item of items) {
-    const isOversized = item.tokens > tokenThreshold || item.chars > charThreshold
-    if (!isOversized) continue
+    const tokenExceeded = item.tokens > tokenThreshold
+    const charExceeded = item.chars > charThreshold
+    const byteExceeded = item.bytes > byteThreshold
+    if (!tokenExceeded && !charExceeded && !byteExceeded) continue
 
-    const excessTokens = Math.max(100, item.tokens - tokenThreshold)
+    let titleExceeded = ''
+    let thresholdDesc = ''
+    let excessTokens = 0
+
+    if (tokenExceeded) {
+      titleExceeded = `${item.tokens} tokens`
+      thresholdDesc = `${tokenThreshold} tokens`
+      excessTokens = Math.max(100, item.tokens - tokenThreshold)
+    } else if (byteExceeded) {
+      titleExceeded = `${item.bytes} bytes`
+      thresholdDesc = `${byteThreshold} bytes`
+      excessTokens = Math.max(100, Math.ceil((item.bytes - byteThreshold) / 4))
+    } else {
+      titleExceeded = `${item.chars} characters`
+      thresholdDesc = `${charThreshold} characters`
+      excessTokens = Math.max(100, Math.ceil((item.chars - charThreshold) / 4))
+    }
+
     const estimatedWasteTokens = excessTokens
 
     const evidenceLinks: FindingEvidenceLink[] = [
       {
         spanId: item.spanId,
         turnIndex: item.turnIndex,
-        description: `Tool "${item.toolName}" returned oversized output (${item.tokens} tokens, ${item.chars} characters), exceeding threshold (${tokenThreshold} tokens).`,
+        description: `Tool "${item.toolName}" returned oversized output (${item.tokens} tokens, ${item.chars} characters, ${item.bytes} bytes), exceeding threshold (${thresholdDesc}).`,
       },
       {
         spanId: item.consumingSpanId || item.spanId,
@@ -735,8 +914,8 @@ export function detectOversizedToolResult(input: OversizedToolResultInput): Find
     findings.push({
       id: `finding-oversized-result-${item.toolName}-${item.spanId}`,
       detectorId: 'oversized-tool-result',
-      title: `Oversized Tool Result: "${item.toolName}" returned ${item.tokens} tokens exceeding budget`,
-      mechanism: `Tool "${item.toolName}" injected ${item.tokens} tokens (${item.chars} characters) into context in a single output, exceeding the ${tokenThreshold} token limit and increasing per-turn re-read overhead by ${estimatedWasteTokens} tokens.`,
+      title: `Oversized Tool Result: "${item.toolName}" returned ${titleExceeded} exceeding budget`,
+      mechanism: `Tool "${item.toolName}" injected ${item.tokens} tokens (${item.chars} characters, ${item.bytes} bytes) into context in a single output, exceeding the ${thresholdDesc} limit and increasing per-turn re-read overhead by ${estimatedWasteTokens} tokens.`,
       evidenceLinks,
       confidence: 'deterministic',
       estimatedWasteTokens,
@@ -747,10 +926,10 @@ export function detectOversizedToolResult(input: OversizedToolResultInput): Find
       },
       outcomeRiskCaveat,
       runId,
-      sessionId,
+      sessionId: item.sessionId ?? sessionId,
       rankScore,
       measurementClass: 'deterministic',
-      confidenceBasis: 'Deterministically measured by comparing tool result byte and token lengths against configured thresholds.',
+      confidenceBasis: 'Deterministically measured by comparing tool result byte, character, and token lengths against configured thresholds.',
       whatWouldRaiseIt: 'Deterministic measurement; confidence is at ceiling.',
     })
   }
@@ -1037,6 +1216,11 @@ export function detectCompactionHazard(input: CompactionHazardInput): Finding[] 
       input.contextLimit !== undefined
         ? { contextLimit: input.contextLimit, contextLimitSource: 'reported' as const }
         : contextLimitOf(group.records)
+    // Issue #181 (honest unobservability): a ratio against the guessed
+    // default window is not a measurement. With no reported window there is
+    // no finding — the "window unreported" state is surfaced where
+    // pressure is shown, not as a deterministic percentage.
+    if (window.contextLimitSource === 'default') continue
     const limit = window.contextLimit
 
     let peakTurn: TurnContext = group.turns[0]!
@@ -1050,6 +1234,13 @@ export function detectCompactionHazard(input: CompactionHazardInput): Finding[] 
     if (peakTurn.tokens > thresholdTokens) {
       const ratio = peakTurn.tokens / limit
       const estimatedWasteTokens = peakTurn.tokens - thresholdTokens
+      // Issue #181: a peak above the reported window itself is physically
+      // impossible for one turn's context — the attribution aggregates
+      // child calls. The spend is real, but the single-turn reading is
+      // inferred, never deterministic.
+      const overWindow = peakTurn.tokens > limit
+      const confidence: FindingConfidence = overWindow ? 'heuristic' : 'deterministic'
+      const measurementClass = overWindow ? ('inferred' as const) : ('deterministic' as const)
 
       // Link prior turn and peak turn
       const priorTurn = group.turns.find((t) => t.turnIndex !== peakTurn.turnIndex) ?? group.turns[0]!
@@ -1074,25 +1265,34 @@ export function detectCompactionHazard(input: CompactionHazardInput): Finding[] 
         'Abrupt context compaction or summarization risks discarding early user constraints or domain definitions.',
       )
 
-      const rankScore = computeRankScore(estimatedWasteTokens, 'deterministic', discount)
+      const rankScore = computeRankScore(estimatedWasteTokens, confidence, discount)
 
       // The raw window stays in the parenthetical (it is what the ratio was
       // computed against); the trailing sentence names the window and where it
-      // came from, so a default denominator cannot pose as a measurement.
+      // came from. The default branch is gone with the default skip above:
+      // every emitted finding was measured against a reported window.
       const windowPhrase =
-        input.contextLimit !== undefined
-          ? 'declared by the caller'
-          : window.contextLimitSource === 'reported'
-            ? 'reported by session telemetry'
-            : `the ${DEFAULT_CONTEXT_LIMIT.toLocaleString('en-US')} default; no source reported a window`
+        input.contextLimit !== undefined ? 'declared by the caller' : 'reported by session telemetry'
+
+      // An over-window peak aggregates child calls into one turn's number
+      // (issue #181): say so in the mechanism rather than printing a
+      // physically impossible percentage as a deterministic claim.
+      const aggregateCaveat = overWindow
+        ? ` The peak exceeds the reported window itself, so the turn's token attribution likely aggregates child calls rather than one turn's context; the spend is measured, the single-turn reading is inferred.`
+        : ''
 
       findings.push({
         id: `finding-compaction-hazard-${group.sessionId}-${peakTurn.spanId}`,
         detectorId: 'compaction-hazard',
-        title: `Compaction Hazard: Context consumption reached ${Math.round(ratio * 100)}% of window without summarization plan`,
-        mechanism: `Peak context consumption reached ${peakTurn.tokens} tokens (${Math.round(ratio * 100)}% of ${limit} token window), exceeding the 85% safety boundary without active compaction or summarization. Window of record: ${limit.toLocaleString('en-US')} tokens (${windowPhrase}).`,
+        // An over-window peak's percentage is the attribution failure, not
+        // a measurement: the title says the window was exceeded (review)
+        // while the mechanism carries the figures with their caveat.
+        title: overWindow
+          ? `Compaction Hazard: Context consumption exceeds the reported window without summarization plan`
+          : `Compaction Hazard: Context consumption reached ${Math.round(ratio * 100)}% of window without summarization plan`,
+        mechanism: `Peak context consumption reached ${peakTurn.tokens} tokens (${Math.round(ratio * 100)}% of ${limit} token window), exceeding the 85% safety boundary without active compaction or summarization. Window of record: ${limit.toLocaleString('en-US')} tokens (${windowPhrase}).${aggregateCaveat}`,
         evidenceLinks,
-        confidence: 'deterministic',
+        confidence,
         estimatedWasteTokens,
         recommendation,
         errorBar: {
@@ -1103,9 +1303,13 @@ export function detectCompactionHazard(input: CompactionHazardInput): Finding[] 
         runId,
         sessionId: group.sessionId,
         rankScore,
-        measurementClass: 'deterministic',
-        confidenceBasis: 'Deterministically measured by comparing the session peak turn input tokens against the context window in effect for that session.',
-        whatWouldRaiseIt: 'Deterministic measurement; confidence is at ceiling.',
+        measurementClass,
+        confidenceBasis: overWindow
+          ? 'Peak turn input tokens exceed the reported context window, so single-turn attribution is inferred (likely aggregate of child calls) rather than measured.'
+          : 'Deterministically measured by comparing the session peak turn input tokens against the context window in effect for that session.',
+        whatWouldRaiseIt: overWindow
+          ? 'Harness emission of per-turn input counters that reconcile with the reported window.'
+          : 'Deterministic measurement; confidence is at ceiling.',
         payload: {
           contextLimit: limit,
           contextLimitSource: window.contextLimitSource,
@@ -1270,7 +1474,15 @@ export function detectInactiveSkillReference(input: InactiveSkillReferenceInput)
 
   if (referenced.length === 0) return findings
 
-  const executedSet = new Set(input.executedSkills ?? toolRecords.map((t) => t.name.trim()))
+  const executedSet = new Set(
+    input.executedSkills ??
+      toolRecords.map((t) => {
+        const name =
+          attributeOf(t, ['gen_ai.tool.name', 'tool.name']) ??
+          (t.name !== 'tool.invoke' ? t.name : '')
+        return (name || t.name).trim()
+      }),
+  )
   const skillTokensMap = input.skillTokens ?? {}
 
   for (const skill of referenced) {
@@ -1358,64 +1570,98 @@ export type DetectFindingsInput = {
  */
 export function detectFindings(input: DetectFindingsInput): Finding[] {
   const findings: Finding[] = []
+  const base = {
+    runId: input.runId,
+    sessionId: input.sessionId,
+    records: input.records,
+    outcome: input.outcome,
+  }
 
   // 1. Dormant tool schema
-  findings.push(...detectDormantToolSchema(input.dormantToolSchema ?? {
-    runId: input.runId,
-    sessionId: input.sessionId,
-    records: input.records,
-    outcome: input.outcome,
-  }))
+  findings.push(
+    ...detectDormantToolSchema({
+      ...base,
+      ...input.dormantToolSchema,
+      records: input.dormantToolSchema?.records ?? input.records,
+      runId: input.dormantToolSchema?.runId ?? input.runId,
+      sessionId: input.dormantToolSchema?.sessionId ?? input.sessionId,
+      outcome: input.dormantToolSchema?.outcome ?? input.outcome,
+    }),
+  )
 
   // 2. Duplicate tool call
-  findings.push(...detectDuplicateToolCall(input.duplicateToolCall ?? {
-    runId: input.runId,
-    sessionId: input.sessionId,
-    records: input.records,
-    outcome: input.outcome,
-  }))
+  findings.push(
+    ...detectDuplicateToolCall({
+      ...base,
+      ...input.duplicateToolCall,
+      records: input.duplicateToolCall?.records ?? input.records,
+      runId: input.duplicateToolCall?.runId ?? input.runId,
+      sessionId: input.duplicateToolCall?.sessionId ?? input.sessionId,
+      outcome: input.duplicateToolCall?.outcome ?? input.outcome,
+    }),
+  )
 
   // 3. Oversized tool result
-  findings.push(...detectOversizedToolResult(input.oversizedToolResult ?? {
-    runId: input.runId,
-    sessionId: input.sessionId,
-    records: input.records,
-    outcome: input.outcome,
-  }))
+  findings.push(
+    ...detectOversizedToolResult({
+      ...base,
+      ...input.oversizedToolResult,
+      records: input.oversizedToolResult?.records ?? input.records,
+      runId: input.oversizedToolResult?.runId ?? input.runId,
+      sessionId: input.oversizedToolResult?.sessionId ?? input.sessionId,
+      outcome: input.oversizedToolResult?.outcome ?? input.outcome,
+    }),
+  )
 
   // 4. Prefix cache break
-  findings.push(...detectPrefixCacheBreak(input.prefixCacheBreak ?? {
-    runId: input.runId,
-    sessionId: input.sessionId,
-    records: input.records,
-    outcome: input.outcome,
-  }))
+  findings.push(
+    ...detectPrefixCacheBreak({
+      ...base,
+      ...input.prefixCacheBreak,
+      records: input.prefixCacheBreak?.records ?? input.records,
+      runId: input.prefixCacheBreak?.runId ?? input.runId,
+      sessionId: input.prefixCacheBreak?.sessionId ?? input.sessionId,
+      outcome: input.prefixCacheBreak?.outcome ?? input.outcome,
+    }),
+  )
 
   // 5. Compaction hazard
-  findings.push(...detectCompactionHazard(input.compactionHazard ?? {
-    runId: input.runId,
-    sessionId: input.sessionId,
-    records: input.records,
-    contextLimit: input.contextLimit,
-    outcome: input.outcome,
-    sessionIdentities: input.sessionIdentities,
-  }))
+  findings.push(
+    ...detectCompactionHazard({
+      ...base,
+      ...input.compactionHazard,
+      records: input.compactionHazard?.records ?? input.records,
+      runId: input.compactionHazard?.runId ?? input.runId,
+      sessionId: input.compactionHazard?.sessionId ?? input.sessionId,
+      outcome: input.compactionHazard?.outcome ?? input.outcome,
+      contextLimit: input.compactionHazard?.contextLimit ?? input.contextLimit,
+      sessionIdentities: input.compactionHazard?.sessionIdentities ?? input.sessionIdentities,
+    }),
+  )
 
   // 6. Unbounded delegation
-  findings.push(...detectUnboundedDelegation(input.unboundedDelegation ?? {
-    runId: input.runId,
-    sessionId: input.sessionId,
-    records: input.records,
-    outcome: input.outcome,
-  }))
+  findings.push(
+    ...detectUnboundedDelegation({
+      ...base,
+      ...input.unboundedDelegation,
+      records: input.unboundedDelegation?.records ?? input.records,
+      runId: input.unboundedDelegation?.runId ?? input.runId,
+      sessionId: input.unboundedDelegation?.sessionId ?? input.sessionId,
+      outcome: input.unboundedDelegation?.outcome ?? input.outcome,
+    }),
+  )
 
   // 7. Inactive skill reference
-  findings.push(...detectInactiveSkillReference(input.inactiveSkillReference ?? {
-    runId: input.runId,
-    sessionId: input.sessionId,
-    records: input.records,
-    outcome: input.outcome,
-  }))
+  findings.push(
+    ...detectInactiveSkillReference({
+      ...base,
+      ...input.inactiveSkillReference,
+      records: input.inactiveSkillReference?.records ?? input.records,
+      runId: input.inactiveSkillReference?.runId ?? input.runId,
+      sessionId: input.inactiveSkillReference?.sessionId ?? input.sessionId,
+      outcome: input.inactiveSkillReference?.outcome ?? input.outcome,
+    }),
+  )
 
   return rankFindings(findings)
 }

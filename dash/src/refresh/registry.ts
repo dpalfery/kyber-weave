@@ -16,7 +16,8 @@ import type {
 export { getAllProviders }
 export type { SessionSource }
 
-const PARSER_CONTRACT_VERSION = '1'
+const DEFAULT_PARSER_CONTRACT_VERSION = '1'
+const CLAUDE_PARSER_CONTRACT_VERSION = '2'
 
 const GEMINI_EXCLUSION_REASON =
   'Gemini represents chat history and model usage, not a coding harness. It must not be a harness id or rollup filter.'
@@ -33,7 +34,11 @@ function excluded(reason: string): ProviderDisposition {
 }
 
 function descriptor(partial: Omit<HarnessSourceDescriptor, 'parserContractVersion'>): HarnessSourceDescriptor {
-  return { ...partial, parserContractVersion: PARSER_CONTRACT_VERSION }
+  const isClaude = partial.providerName === 'claude' || partial.harnessId.startsWith('claude')
+  return {
+    ...partial,
+    parserContractVersion: isClaude ? CLAUDE_PARSER_CONTRACT_VERSION : DEFAULT_PARSER_CONTRACT_VERSION,
+  }
 }
 
 export const PROVIDER_DISPOSITIONS: Record<string, ProviderDisposition> = {

@@ -489,7 +489,8 @@ describe('ContextCompositionChart', () => {
 
     if (sysSegment && typeof sysSegment.props.onClick === 'function') {
       sysSegment.props.onClick({ stopPropagation: vi.fn() })
-      expect(onSelect).toHaveBeenCalledWith(1, 'system_prompt')
+      // Row label is the 1-based `Turn #1`; transport is 0-based (issue #184).
+      expect(onSelect).toHaveBeenCalledWith(0, 'system_prompt')
     }
   })
 
@@ -560,7 +561,8 @@ describe('ContextCompositionChart', () => {
     const onSelect = vi.fn()
     const element = React.createElement(ContextCompositionChart, {
       context: sampleContext,
-      selectedTurnIndex: 2,
+      // 0-based transport index for the second turn (issue #184).
+      selectedTurnIndex: 1,
       onSelectTurn: onSelect,
     })
 
@@ -578,7 +580,7 @@ describe('ContextCompositionChart', () => {
 
     if (toolDefLegend && typeof toolDefLegend.props.onClick === 'function') {
       toolDefLegend.props.onClick({ stopPropagation: vi.fn() } as { stopPropagation: () => void })
-      expect(onSelect).toHaveBeenCalledWith(2, 'tool_definitions')
+      expect(onSelect).toHaveBeenCalledWith(1, 'tool_definitions')
     }
   })
 
@@ -603,7 +605,7 @@ describe('ContextCompositionChart', () => {
       sysSegment.props.onKeyDown({ key: 'Enter', preventDefault, stopPropagation })
       expect(preventDefault).toHaveBeenCalled()
       expect(stopPropagation).toHaveBeenCalled()
-      expect(onSelect).toHaveBeenCalledWith(1, 'system_prompt')
+      expect(onSelect).toHaveBeenCalledWith(0, 'system_prompt')
     }
   })
 
@@ -733,6 +735,69 @@ describe('ContextCompositionChart', () => {
 
     expect(hasTestId(element, 'context-caveat-no-servers')).toBe(true)
   })
+
+  it('emits a 0-based transport index when a 1-based row label is clicked (issue #184)', () => {
+    const onSelect = vi.fn()
+    const element = React.createElement(ContextCompositionChart, {
+      context: sampleContext,
+      onSelectTurn: onSelect,
+    })
+
+    const rowLabel = findAllElements(
+      element,
+      (el) => el.props['role'] === 'button' && renderText(el) === 'Turn #2',
+    )[0]
+    expect(rowLabel).toBeDefined()
+    expect(renderText(element)).toContain('Turn #2')
+
+    if (rowLabel && typeof rowLabel.props.onClick === 'function') {
+      rowLabel.props.onClick()
+      expect(onSelect).toHaveBeenCalledWith(1)
+    }
+  })
+
+  it('defaults a legend click to the first row as a 0-based index (issue #184)', () => {
+    const onSelect = vi.fn()
+    const element = React.createElement(ContextCompositionChart, {
+      context: sampleContext,
+      onSelectTurn: onSelect,
+    })
+
+    const legendItems = findAllElements(
+      element,
+      (el) =>
+        el.props['role'] === 'button' &&
+        typeof el.props.children === 'object' &&
+        el.props.tabIndex === 0,
+    )
+    const toolDefLegend = legendItems.find((item) => renderText(item).includes('Tool definitions'))
+    expect(toolDefLegend).toBeDefined()
+
+    if (toolDefLegend && typeof toolDefLegend.props.onClick === 'function') {
+      toolDefLegend.props.onClick({ stopPropagation: vi.fn() } as { stopPropagation: () => void })
+      expect(onSelect).toHaveBeenCalledWith(0, 'tool_definitions')
+    }
+  })
+
+  it('highlights the row matching a 0-based selectedTurnIndex (issue #184)', () => {
+    const element = React.createElement(ContextCompositionChart, {
+      context: sampleContext,
+      selectedTurnIndex: 1,
+      onSelectTurn: vi.fn(),
+    })
+
+    const selected = findAllElements(
+      element,
+      (el) => el.props['data-testid'] === 'context-turn-2',
+    )[0]
+    const unselected = findAllElements(
+      element,
+      (el) => el.props['data-testid'] === 'context-turn-1',
+    )[0]
+    expect(selected).toBeDefined()
+    expect(String(selected!.props.className)).toContain('ring-1')
+    expect(String(unselected!.props.className)).not.toContain('ring-1')
+  })
 })
 
 describe('SessionSpendCharts (composite)', () => {
@@ -850,5 +915,70 @@ describe('extractNormalizedContextTurns — server attribution', () => {
     })
 
     expect(rows[0]?.servers).toEqual({ context7: 2000 })
+  })
+})
+
+// Issue #187: a turn whose measured input dwarfs its buckets must show the
+// gap as residual — never "Residual: 0.0%" — and a composition with no
+// measured input basis must say so instead of printing a zero.
+describe('SessionSpendCharts residual honesty (issue #187)', () => {
+  it('attributes the engine residual instead of reporting 0.0%', () => {
+    const data: ContextCompositionData = {
+      measurable: true,
+      contextLimit: 200000,
+      turns: [
+        {
+          index: 1,
+          buckets: { system_prompt: 124 },
+          reported_input: 66600,
+          residual: { tokens: 66476, attribution: 'tokenizer_drift' },
+        },
+      ],
+    }
+    const rows = extractNormalizedContextTurns(data)
+    expect(rows).toHaveLength(1)
+    expect(rows[0]!.buckets.residual).toBe(66476)
+    expect(rows[0]!.hasMeasuredInput).toBe(true)
+
+    const text = normalizedRenderText(React.createElement(ContextCompositionChart, { context: data }))
+    expect(text).toContain('Residual: 99.8')
+    expect(text).not.toContain('Residual: 0.0')
+  })
+
+  it('renders not measurable instead of 0.0% with no measured input basis', () => {
+    const data: ContextCompositionData = {
+      measurable: true,
+      contextLimit: 200000,
+      turns: [{ index: 1, buckets: { system_prompt: 124 } }],
+    }
+    const rows = extractNormalizedContextTurns(data)
+    expect(rows).toHaveLength(1)
+    expect(rows[0]!.hasMeasuredInput).toBe(false)
+
+    const text = normalizedRenderText(React.createElement(ContextCompositionChart, { context: data }))
+    expect(text).toContain('not measurable')
+    expect(text).not.toContain('0.0%')
+  })
+
+  it('keeps a fully-bucketed turn at a measured 0.0%', () => {
+    const data: ContextCompositionData = {
+      measurable: true,
+      contextLimit: 200000,
+      turns: [
+        {
+          index: 1,
+          buckets: { system_prompt: 124 },
+          reported_input: 124,
+          residual: { tokens: 0, attribution: 'tokenizer_drift' },
+        },
+      ],
+    }
+    const rows = extractNormalizedContextTurns(data)
+    expect(rows[0]!.buckets.residual).toBe(0)
+    expect(rows[0]!.hasMeasuredInput).toBe(true)
+
+    const text = normalizedRenderText(React.createElement(ContextCompositionChart, { context: data }))
+    expect(text).toContain('Residual: 0.0')
+    expect(text).not.toContain('not measurable')
   })
 })

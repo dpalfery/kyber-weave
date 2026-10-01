@@ -31,11 +31,17 @@
 import { existsSync, readFileSync } from 'fs'
 import { basename, extname } from 'path'
 
-import type { ParsedProviderCall } from '../../providers/types.js'
-
+import { claudeUsageOf } from '../../providers/claude.js'
 import { detectUserCorrection } from '../../canon/outcome.js'
 import type { ContentPart } from '../../canon/types.js'
-import type { ContentReader, ReaderTurn } from './types.js'
+import type { ContentReader, ReaderToolCall, ReaderToolResult, ReaderTurn } from './types.js'
+
+export {
+  claudeCount,
+  claudeText,
+  claudeUsageOf,
+  loadClaudeCalls,
+} from '../../providers/claude.js'
 
 /**
  * The assistant records in a Claude Code transcript each carry the `usage`
@@ -63,105 +69,6 @@ export function splitClaudeTurns(lines: readonly string[]): string[][] {
   return groups
 }
 
-/** The `message.usage` block of one transcript line, when it is an assistant turn. */
-function claudeUsageOf(rawLine: string): Record<string, unknown> | undefined {
-  let record: Record<string, unknown>
-  try {
-    const parsed: unknown = JSON.parse(rawLine)
-    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined
-    record = parsed as Record<string, unknown>
-  } catch {
-    return undefined
-  }
-  if (record['type'] !== 'assistant') return undefined
-  const message = record['message']
-  if (message === null || typeof message !== 'object' || Array.isArray(message)) return undefined
-  const usage = (message as Record<string, unknown>)['usage']
-  if (usage === null || usage === undefined || typeof usage !== 'object' || Array.isArray(usage)) {
-    return undefined
-  }
-  return usage as Record<string, unknown>
-}
-
-/** A finite non-negative counter, or 0 — never a fabricated estimate. */
-function claudeCount(value: unknown): number {
-  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0
-}
-
-function claudeText(value: unknown): string | undefined {
-  return typeof value === 'string' && value.trim() !== '' ? value.trim() : undefined
-}
-
-/**
- * Read one Claude Code transcript as provider calls — one per assistant turn.
- *
- * Claude Code's provider entry exposes discovery but no streaming session
- * parser (`createSessionParser` yields nothing), so synthesis had no calls to
- * build records from and every Claude transcript ingested as zero records.
- * This is the same seam Copilot CLI uses for its SQLite store: the transcript
- * is the collectable source, so the counters are read straight off it.
- *
- * Anthropic's `input_tokens` excludes both cache classes, which is the
- * `exclusive` convention already registered for this provider. Counters are
- * copied verbatim; nothing is inferred when a field is absent.
- */
-export function loadClaudeCalls(filePath: string): ParsedProviderCall[] {
-  let lines: string[]
-  try {
-    lines = readFileSync(filePath, 'utf-8').split(/\r?\n/)
-  } catch {
-    return []
-  }
-
-  const calls: ParsedProviderCall[] = []
-  const fileStem = basename(filePath, extname(filePath))
-  let index = 0
-
-  for (const rawLine of lines) {
-    const usage = claudeUsageOf(rawLine)
-    if (usage === undefined) continue
-
-    const record = JSON.parse(rawLine) as Record<string, unknown>
-    const message = record['message'] as Record<string, unknown>
-    const sessionId = claudeText(record['sessionId']) ?? fileStem
-    // `uuid` is the transcript's own per-record identity; the index keeps the
-    // key unique for a transcript that omits it.
-    const messageId = claudeText(record['uuid']) ?? claudeText(message['id']) ?? `turn-${index}`
-    index += 1
-
-    const serverToolUse = usage['server_tool_use']
-    const webSearchRequests =
-      serverToolUse !== null && typeof serverToolUse === 'object' && !Array.isArray(serverToolUse)
-        ? claudeCount((serverToolUse as Record<string, unknown>)['web_search_requests'])
-        : 0
-
-    calls.push({
-      provider: 'claude',
-      model: claudeText(message['model']) ?? 'unknown',
-      inputTokens: claudeCount(usage['input_tokens']),
-      outputTokens: claudeCount(usage['output_tokens']),
-      cacheCreationInputTokens: claudeCount(usage['cache_creation_input_tokens']),
-      cacheReadInputTokens: claudeCount(usage['cache_read_input_tokens']),
-      cachedInputTokens: claudeCount(usage['cache_read_input_tokens']),
-      reasoningTokens: 0,
-      webSearchRequests,
-      // Cost is derived downstream from the counters and the rate table; the
-      // transcript states no price, and stating 0 here would be a fabrication.
-      costUSD: 0,
-      costIsEstimated: true,
-      tools: [],
-      bashCommands: [],
-      timestamp: claudeText(record['timestamp']) ?? new Date(0).toISOString(),
-      speed: claudeText(usage['speed']) === 'fast' ? 'fast' : 'standard',
-      deduplicationKey: `claude:${sessionId}:${messageId}`,
-      sessionId,
-      userMessage: '',
-    })
-  }
-
-  return calls
-}
-
 /** Result of reading a full session transcript, including its identifier. */
 export type ClaudeSessionReadResult = {
   /** The session id from the transcript records or filename stem. */
@@ -176,6 +83,12 @@ export type ClaudeSessionReadResult = {
   isCorrection?: boolean
   /** The rule that identified the user correction. */
   correctionRule?: string
+  /** Tool calls invoked in this turn/session. */
+  toolCalls?: ReaderToolCall[]
+  /** Tool execution results received in this turn/session. */
+  toolResults?: ReaderToolResult[]
+  /** Tool schemas explicitly offered to the model, if observed in telemetry. */
+  toolsOffered?: string[]
 }
 
 /**
@@ -208,6 +121,8 @@ export function readClaudeSession(source: string | readonly string[]): ClaudeSes
   let hasCorrection = false
   let detectedCorrectionRule: string | undefined
   const parts: ContentPart[] = []
+  const toolCalls: ReaderToolCall[] = []
+  const toolResults: ReaderToolResult[] = []
   let order = 0
   const nextOrder = () => order++
 
@@ -343,6 +258,21 @@ export function readClaudeSession(source: string | readonly string[]): ClaudeSes
           text = JSON.stringify(blockObj)
         }
 
+        const toolCallId = typeof blockObj['tool_use_id'] === 'string'
+          ? blockObj['tool_use_id']
+          : (typeof blockObj['id'] === 'string' ? blockObj['id'] : '')
+
+        if (toolCallId !== '') {
+          const isError = blockObj['is_error'] === true ||
+            (typeof blockObj['exit_code'] === 'number' && blockObj['exit_code'] !== 0) ||
+            (typeof blockObj['exitCode'] === 'number' && blockObj['exitCode'] !== 0)
+          toolResults.push({
+            toolCallId,
+            content: text,
+            isError,
+          })
+        }
+
         if (text === '') continue
         parts.push({
           part: 'tool_result_content',
@@ -350,9 +280,24 @@ export function readClaudeSession(source: string | readonly string[]): ClaudeSes
           ...(server !== undefined ? { server } : {}),
           order: nextOrder(),
         })
+      } else if (type === 'tool_use') {
+        const id = typeof blockObj['id'] === 'string' ? blockObj['id'] : ''
+        const name = typeof blockObj['name'] === 'string' ? blockObj['name'] : ''
+        const rawInput = blockObj['input']
+        const input: Record<string, unknown> | string =
+          typeof rawInput === 'string'
+            ? rawInput
+            : (rawInput !== null && typeof rawInput === 'object' && !Array.isArray(rawInput))
+              ? (rawInput as Record<string, unknown>)
+              : {}
+        if (id !== '' || name !== '') {
+          toolCalls.push({
+            id,
+            name,
+            arguments: input,
+          })
+        }
       }
-      // 'tool_use' blocks represent tool invocations rather than tool definitions (schemas),
-      // and system prompts are never written to disk by Claude Code. Neither is emitted.
     }
   }
 
@@ -362,6 +307,8 @@ export function readClaudeSession(source: string | readonly string[]): ClaudeSes
     ...(observedTerminationReason !== undefined ? { terminationReason: observedTerminationReason } : {}),
     ...(observedExitCode !== undefined ? { exitCode: observedExitCode } : {}),
     ...(hasCorrection ? { isCorrection: true, correctionRule: detectedCorrectionRule } : {}),
+    ...(toolCalls.length > 0 ? { toolCalls } : {}),
+    ...(toolResults.length > 0 ? { toolResults } : {}),
   }
 }
 
@@ -407,13 +354,23 @@ export class ClaudeContentReader implements ContentReader {
 
     for (const group of splitClaudeTurns(lines)) {
       const session = readClaudeSession(group)
-      if (session.parts.length === 0 && session.sessionId === undefined) continue
+      if (
+        session.parts.length === 0 &&
+        session.sessionId === undefined &&
+        (!session.toolCalls || session.toolCalls.length === 0) &&
+        (!session.toolResults || session.toolResults.length === 0)
+      ) {
+        continue
+      }
       yield {
         parts: session.parts,
         ...(session.sessionId !== undefined ? { sessionId: session.sessionId } : {}),
         ...(session.terminationReason !== undefined ? { terminationReason: session.terminationReason } : {}),
         ...(session.exitCode !== undefined ? { exitCode: session.exitCode } : {}),
         ...(session.isCorrection !== undefined ? { isCorrection: session.isCorrection, correctionRule: session.correctionRule } : {}),
+        ...(session.toolCalls !== undefined ? { toolCalls: session.toolCalls } : {}),
+        ...(session.toolResults !== undefined ? { toolResults: session.toolResults } : {}),
+        ...(session.toolsOffered !== undefined ? { toolsOffered: session.toolsOffered } : {}),
       }
     }
   }

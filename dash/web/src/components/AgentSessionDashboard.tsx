@@ -8,6 +8,7 @@ import { SessionSpendCharts, CONTEXT_BUCKET_LABELS } from './SessionSpendCharts.
 import { SchemaCostRanking, type SchemaCostAnalysis, type SchemaCostToolRow } from './SchemaCostRanking.js'
 import { TimelineView, type TimelineNode, type CostBlock } from './analysis/TimelineView.js'
 import { SessionCostPanel } from './SessionCostPanel.js'
+import { findContextTurn, findTurnByTransport } from '../lib/kyberApi.js'
 import type {
   KyberContextBucket,
   KyberContextTurn,
@@ -62,8 +63,8 @@ export interface SessionSummaryPayload {
   duration_ms?: number | null
   models?: string[]
   tool_calls?: number | null
-  tools_invoked?: number | null
-  tools_offered?: number | null
+  tools_invoked?: string[] | number | null
+  tools_offered?: string[] | number | null
   error_count?: number | null
   median_ttft_ms?: number | null
   aux_chat_calls?: number | null
@@ -242,6 +243,7 @@ export const TIMELINE_OP_COLORS: Record<string, string> = {
   chat: '#f59e0b', // amber
   execute_tool: '#10b981', // emerald
   tool: '#10b981',
+  'tool.invoke': '#10b981',
   execute_hook: '#ec4899', // pink
   hook: '#ec4899',
   embeddings: '#8b5cf6', // purple
@@ -266,6 +268,12 @@ function adaptTimelineNode(node: SessionTimelineNode, parentId: string | null = 
     durationMs: node.durationMs ?? 0,
     kind: node.kind ?? node.op ?? 'span',
     name: node.name ?? 'unnamed',
+    status:
+      typeof node.status === 'string'
+        ? node.status
+        : typeof node.attributes?.['gen_ai.tool.status'] === 'string'
+          ? (node.attributes['gen_ai.tool.status'] as string)
+          : undefined,
     attributes: node.attributes ?? node.raw_attributes ?? {},
     isSubagent: Boolean(node.isSubagent || node.attributes?.['subagent.session_id']),
     isAuxiliary: Boolean(node.isAuxiliary || node.attributes?.['kyber.auxiliary']),
@@ -473,29 +481,26 @@ export function AgentSessionContent({
     (turnIndex: number, bucketName?: string) => {
       setSelectedSpanId(undefined)
       const turns = session?.turns || []
-      const turn = turns.find(
-        (t, i) =>
-          t.index === turnIndex ||
-          t.turn === turnIndex ||
-          i === turnIndex ||
-          i + 1 === turnIndex
-      )
+      // Shared strict lookup (issue #184 review): explicit identity first,
+      // position only for rows carrying neither.
+      const turn = findTurnByTransport(turns, turnIndex)
       if (!turn) return
 
-      const turnNum = turn.index ?? turn.turn ?? turnIndex
       if (bucketName) {
         const ctx = session?.context
         const contextTurns: KyberContextTurn[] = ctx?.measurable ? ctx.turns : []
+        // Context rows carry the engine's 1-based numbering (`TurnPressure.index`,
+        // legacy `turn`); the transport `turnIndex` is 0-based, so compare in
+        // 1-based space with the shared strict lookup.
+        const oneBased = turnIndex + 1
+        // Edge fallbacks compare in 1-based space (issue #184 review): the
+        // first turn reads `ctx.first`, the final turn `ctx.last`. Any other
+        // turn without a context row falls back to its own buckets below —
+        // never to the opposite edge of the session.
         const ctxTurn: KyberContextTurn | KyberContextBucket | undefined =
-          contextTurns.find(
-            (ct, i) =>
-              ct.turn === turnNum ||
-              ct.index === turnNum ||
-              i === turnNum ||
-              i + 1 === turnNum
-          ) ||
-          (turnNum === 1 ? ctx?.first : undefined) ||
-          ctx?.last
+          findContextTurn(contextTurns, oneBased) ||
+          (oneBased === 1 ? ctx?.first : undefined) ||
+          (oneBased === turns.length ? ctx?.last : undefined)
 
         const rawBuckets = ctxTurn?.buckets ?? turn.buckets ?? {}
         const tokens = Number(rawBuckets[bucketName] ?? turn[bucketName] ?? 0)
@@ -519,7 +524,8 @@ export function AgentSessionContent({
             ? turn.content[bucketName]
             : (turn[bucketName] ?? (typeof turn.content === 'string' ? turn.content : turn))
 
-        setDrawerTitle(`Turn ${turnNum} · ${bucketName}`)
+        // Issue #184: transport `turnIndex` is 0-based; humans see 1-based.
+        setDrawerTitle(`Turn ${turnIndex + 1} · ${bucketName}`)
         setDrawerSubtitle(
           `Bucket analysis · ${turn.model ? `Model: ${turn.model} · ` : ''}${fmtTokens(total || turn.cumulative_input || turn.input)} total tokens`
         )
@@ -536,7 +542,8 @@ export function AgentSessionContent({
           context: ctx as KyberSessionContext,
         })
       } else {
-        setDrawerTitle(`Turn ${turnNum}`)
+        // Issue #184: transport `turnIndex` is 0-based; humans see 1-based.
+        setDrawerTitle(`Turn ${turnIndex + 1}`)
         setDrawerSubtitle(
           `${turn.model ? `Model: ${turn.model} · ` : ''}${formatDuration(turn.durationMs)}`
         )
@@ -621,6 +628,20 @@ export function AgentSessionContent({
   }
 
   const u = session.summary || {}
+  const offeredList = Array.isArray(u.tools_offered) ? u.tools_offered : undefined
+  const invokedList = Array.isArray(u.tools_invoked) ? u.tools_invoked : undefined
+  const toolsOfferedCount = offeredList !== undefined
+    ? offeredList.length
+    : (typeof u.tools_offered === 'number' ? u.tools_offered : undefined)
+  const toolsInvokedCount = invokedList !== undefined
+    ? invokedList.length
+    : (typeof u.tools_invoked === 'number' ? u.tools_invoked : undefined)
+  const invokedSet = invokedList !== undefined ? new Set(invokedList) : null
+  const unusedOfferedCount = toolsOfferedCount != null && toolsInvokedCount != null
+    ? (offeredList !== undefined && invokedSet !== null
+        ? offeredList.filter((name) => !invokedSet.has(name)).length
+        : Math.max(0, toolsOfferedCount - toolsInvokedCount))
+    : undefined
   const toolCallsMeasured = typeof u.tool_calls === 'number' && Number.isFinite(u.tool_calls)
   const toolCallsReason = `Tool invocation count was not reported by ${session.harness || 'this adapter'}.`
   const rows = session.reconciliation || []
@@ -889,7 +910,11 @@ export function AgentSessionContent({
             </div>
             <div className="mt-0.5 text-[11px] text-tertiary-foreground truncate">
               {u.total_cache_creation != null
-                ? `on ${u.cache_creation_coverage ?? 0} turns`
+                ? (u.cache_creation_coverage != null
+                    // Issue #185: a legacy payload without the count must not
+                    // print "on 0 turns" — absence is not a measured zero.
+                    ? `on ${u.cache_creation_coverage} turns`
+                    : 'turn coverage unreported')
                 : 'not emitted'}
             </div>
           </Card>
@@ -1023,7 +1048,7 @@ export function AgentSessionContent({
             </div>
             <div className="mt-0.5 text-[11px] text-tertiary-foreground">
               {toolCallsMeasured
-                ? u.tools_invoked != null ? `${u.tools_invoked} distinct invoked` : 'invocations'
+                ? u.tools_invoked != null ? `${toolsInvokedCount} distinct invoked` : 'invocations'
                 : toolCallsReason}
             </div>
           </Card>
@@ -1034,11 +1059,13 @@ export function AgentSessionContent({
               Tools Offered
             </div>
             <div className="mt-1 text-xl font-semibold tabular-nums tracking-tight text-foreground">
-              {u.tools_offered != null ? fmtNum(u.tools_offered) : '—'}
+              {toolsOfferedCount != null ? fmtNum(toolsOfferedCount) : '—'}
             </div>
             <div className="mt-0.5 text-[11px] text-tertiary-foreground truncate">
-              {u.tools_offered != null
-                ? `${(u.tools_offered - (u.tools_invoked ?? 0))} never called`
+              {toolsOfferedCount != null
+                ? (toolsInvokedCount != null && unusedOfferedCount != null
+                    ? `${unusedOfferedCount} never called`
+                    : 'invocations not reported')
                 : `not exported by ${session.harness || 'adapter'}`}
             </div>
           </Card>
@@ -1082,13 +1109,13 @@ export function AgentSessionContent({
         </div>
 
         {/* Waste Callout Banner */}
-        {u.tools_offered != null && (u.tools_offered - (u.tools_invoked ?? 0)) > 0 && (
+        {toolsOfferedCount != null && toolsInvokedCount != null && unusedOfferedCount != null && unusedOfferedCount > 0 && (
           <div
             className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-foreground/90 space-y-1"
             data-testid="schema-waste-banner"
           >
             <div className="font-semibold text-amber-700 dark:text-amber-300">
-              {u.tools_offered - (u.tools_invoked ?? 0)} of {u.tools_offered} tools were never called.
+              {unusedOfferedCount} of {toolsOfferedCount} tools were never called.
             </div>
             <p className="text-muted-foreground leading-relaxed">
               That represents{' '}
@@ -1120,8 +1147,8 @@ export function AgentSessionContent({
         {/* Tools Ranking */}
         <SchemaCostRanking
           schema={(session as { schema?: SchemaCostAnalysis }).schema}
-          // The payload's tools rows carry no name today; the ranking table's
-          // row type still expects one and labels empty cells where absent.
+          // The payload's tools rows carry names and total_schema_cost when available;
+          // the ranking table renders them or falls back where absent.
           tools={toolRows as unknown as SchemaCostToolRow[]}
           onSelectTool={openDrawerForTool}
         />

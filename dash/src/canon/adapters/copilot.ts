@@ -646,7 +646,13 @@ export const copilotAdapter: HarnessAdapter = {
     // An explicit Gemini system identity outranks a generic Copilot exporter
     // label that may be attached by the collector or wrapper process, unless
     // the span carries explicit copilot_chat or copilot evidence.
-    if (span.attributes['gen_ai.system'] === 'gemini' && !isCopilotEvidence) return 0
+    // When both gemini system and antigravity agent identity are present,
+    // Antigravity outranks Copilot.
+    if (span.attributes['gen_ai.system'] === 'gemini') {
+      if (span.attributes['gen_ai.agent.name'] === 'antigravity' || !isCopilotEvidence) {
+        return 0
+      }
+    }
     let score = 0
     if (hasNamespace(span.attributes, COPILOT_VENDOR_NAMESPACES) || isCopilotEvidence) {
       score += VENDOR_EVIDENCE

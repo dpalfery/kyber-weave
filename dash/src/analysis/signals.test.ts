@@ -696,8 +696,30 @@ describe('CanonStore detector_version stamp & Decision D17 compliance', () => {
     expect(store.getMetadata('schema_version')).toBe(String(SCHEMA_VERSION))
     expect(store.getMetadata('detector_version')).toBe(String(DETECTOR_VERSION))
     expect(store.getDetectorVersion()).toBe(DETECTOR_VERSION)
+    // Issues #181/#182/#191 changed detector semantics (honest compaction
+    // windows, folded harness identity, rebuilt findings). The stamp is
+    // informational — rebuilds are authoritative — so the suite pins the
+    // round-trip, not a literal: the bump itself is recorded in the PR.
     expect(store.hasCurrentDetectorVersion()).toBe(true)
     expect(store.isDetectorOutdated()).toBe(false)
+    store.close()
+  })
+
+  it('stamps DETECTOR_VERSION 3 so stale generations report outdated', () => {
+    // Generation 2 removed the duplicate-tool-call 250-token fallback;
+    // Generation 3 (issues #181/#182/#191) added honest compaction windows
+    // and folded twin-harness identity. The literal below pins the current
+    // generation so an accidental bump or revert fails loudly; the
+    // behavioral contract is the lines after it: a store stamped below
+    // current reports outdated. (The stamp itself is informational —
+    // rebuilds are authoritative — see the DETECTOR_VERSION comment.)
+    expect(DETECTOR_VERSION).toBe(3)
+    const path = tempStorePath()
+    const store = new CanonStore(path)
+    store.setDetectorVersion(1)
+    expect(store.getDetectorVersion()).toBe(1)
+    expect(store.hasCurrentDetectorVersion()).toBe(false)
+    expect(store.isDetectorOutdated()).toBe(true)
     store.close()
   })
 

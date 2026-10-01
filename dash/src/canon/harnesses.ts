@@ -10,6 +10,7 @@
 import {
   harnessDimensionAvailability,
   isExcludedHarnessIdentity,
+  normalizeHarnessName,
 } from './measurability.js'
 import { HARNESS_DESCRIPTORS } from '../refresh/registry.js'
 import { CanonStore } from './store.js'
@@ -84,12 +85,14 @@ export function computeP95(sorted: readonly number[]): number {
  * payload for the harness. The reductions are unchanged — this only decides
  * when a payload is live, not what is computed from it.
  */
-type SessionDigest = {
+export type SessionDigest = {
   count: number
   /** Peak context pressure per session, for the median and p95. */
   peakPressures: number[]
   /** Whether any session's pressure came from derived rather than measured counts. */
   anyDerived: boolean
+  /** Sessions whose context window no source reported (issue #181). */
+  unknownWindowSessions: number
   totalCacheRead: number
   totalInput: number
   totalDefinedTools: number
@@ -97,11 +100,17 @@ type SessionDigest = {
   subagentSessions: number
 }
 
-function digestSessions(store: CanonStore, harness: string): SessionDigest {
+/**
+ * Reduce session payloads to the scalars the rollup dimensions need, in one
+ * streaming pass (issue #183: the run scorecard reuses this over a run's own
+ * sessions instead of growing a second derivation).
+ */
+export function digestSessionPayloads(payloads: Iterable<AsadSessionPayload>): SessionDigest {
   const digest: SessionDigest = {
     count: 0,
     peakPressures: [],
     anyDerived: false,
+    unknownWindowSessions: 0,
     totalCacheRead: 0,
     totalInput: 0,
     totalDefinedTools: 0,
@@ -109,31 +118,42 @@ function digestSessions(store: CanonStore, harness: string): SessionDigest {
     subagentSessions: 0,
   }
 
-  for (const row of store.iterateSessions(harness)) {
-    const payload = (row.payload !== null && typeof row.payload === 'object'
-      ? row.payload
-      : {}) as AsadSessionPayload
+  for (const payload of payloads) {
     digest.count += 1
 
     // Context pressure: the peak of a session's per-turn pressures.
+    // Pressures measured against the guessed 200,000 default window are
+    // skipped (issue #181, honest unobservability): a ratio against an
+    // unreported denominator presented as harness pressure is the same
+    // fabrication the compaction detector stopped emitting.
     const context = payload.context
-    if (context && context.measurable === true && Array.isArray(context.turns) && context.turns.length > 0) {
+    const windowUnknown = (context as { contextLimitSource?: string } | undefined)?.contextLimitSource === 'default'
+    if (windowUnknown) digest.unknownWindowSessions += 1
+    if (context && context.measurable === true && !windowUnknown && Array.isArray(context.turns) && context.turns.length > 0) {
       const pressures = context.turns
         .map((t: unknown) => (t as { pressure?: number })?.pressure)
         .filter((pressure: unknown): pressure is number => typeof pressure === 'number' && Number.isFinite(pressure))
       if (pressures.length > 0) digest.peakPressures.push(Math.max(...pressures))
       if (context.derivedCounts) digest.anyDerived = true
-    } else if (Array.isArray(payload.turns) && payload.turns.length > 0) {
-      const limit = Number(payload.context?.contextLimit ?? 200_000)
-      const pressures = payload.turns
-        .map((t: unknown) => {
-          const input = (t as { input?: number })?.input
-          return typeof input === 'number' ? input / limit : undefined
-        })
-        .filter((pressure: unknown): pressure is number => typeof pressure === 'number' && Number.isFinite(pressure))
-      if (pressures.length > 0) {
-        digest.peakPressures.push(Math.max(...pressures))
-        digest.anyDerived = true
+    } else if (!windowUnknown && Array.isArray(payload.turns) && payload.turns.length > 0) {
+      // Legacy fallback path: pressures can only be derived when the payload
+      // names a real window (default-sourced payloads still carry the
+      // 200,000 fallback as `contextLimit`, so the provenance check above
+      // is what keeps them out). A missing window is unknown, not 200,000 —
+      // and the skip ends here: cache, tool and delegation totals below stay
+      // measurable whatever the window did.
+      const limit = Number(payload.context?.contextLimit ?? NaN)
+      if (Number.isFinite(limit) && limit > 0) {
+        const pressures = payload.turns
+          .map((t: unknown) => {
+            const input = (t as { input?: number })?.input
+            return typeof input === 'number' ? input / limit : undefined
+          })
+          .filter((pressure: unknown): pressure is number => typeof pressure === 'number' && Number.isFinite(pressure))
+        if (pressures.length > 0) {
+          digest.peakPressures.push(Math.max(...pressures))
+          digest.anyDerived = true
+        }
       }
     }
 
@@ -147,11 +167,38 @@ function digestSessions(store: CanonStore, harness: string): SessionDigest {
 
     // Tool yield: per-tool rows where the session has them, per-server counts
     // where it only has the server bands.
-    if (Array.isArray(payload.tools) && payload.tools.length > 0) {
-      digest.totalDefinedTools += payload.tools.length
-      digest.totalInvokedTools += payload.tools.filter(
-        (t: { invocations?: number }) => (t.invocations ?? 0) > 0,
-      ).length
+    // If tools_offered is explicitly present in session summary, count observed offered
+    // and invoked tools. If tools_offered was unobserved, do not fabricate 100% yield
+    // from invocation-only tools (schema_tokens === 0).
+    if (summary && Array.isArray(summary.tools_offered)) {
+      // Measurability, not values: a present tools_invoked — even an empty
+      // one — means the producer observed invocations (a measured zero),
+      // while an absent one means the invocation side was never exported
+      // and the session must not enter the denominator at all.
+      const invocationsObserved = Array.isArray(summary.tools_invoked)
+      if (invocationsObserved) {
+        digest.totalDefinedTools += summary.tools_offered.length
+        const offeredSet = new Set(summary.tools_offered)
+        if (Array.isArray(summary.tools_invoked)) {
+          const invokedOffered = summary.tools_invoked.filter((t) => offeredSet.has(t))
+          digest.totalInvokedTools += invokedOffered.length
+        } else if (Array.isArray(payload.tools)) {
+          digest.totalInvokedTools += payload.tools.filter(
+            (t: { name?: string; invocations?: number }) =>
+              (t.invocations ?? 0) > 0 && (t.name !== undefined ? offeredSet.has(t.name) : true),
+          ).length
+        }
+      }
+    } else if (Array.isArray(payload.tools) && payload.tools.length > 0) {
+      const defined = payload.tools.filter(
+        (t: { schema_tokens?: number }) => t.schema_tokens !== 0,
+      )
+      if (defined.length > 0) {
+        digest.totalDefinedTools += defined.length
+        digest.totalInvokedTools += defined.filter(
+          (t: { invocations?: number }) => (t.invocations ?? 0) > 0,
+        ).length
+      }
     } else if (Array.isArray(payload.servers) && payload.servers.length > 0) {
       for (const server of payload.servers) {
         digest.totalDefinedTools += server.tools ?? 0
@@ -169,19 +216,71 @@ function digestSessions(store: CanonStore, harness: string): SessionDigest {
 }
 
 /**
- * Build a single harness rollup row over sessions and executions in the store.
+ * Stream one harness's session payloads without materializing them: every use
+ * of a session is a sum, a count or one number per session, so holding 995 MB
+ * of payloads in an array is what took this phase's peak to 4.4 GB.
  */
-export function buildRollupForHarness(store: CanonStore, harness: string): HarnessRollupRow {
-  // Reduce each session to the scalars the dimensions below need, one payload
-  // at a time. Every use of a session here is a sum, a count or one number per
-  // session, so nothing is gained by holding 995 MB of payloads in an array —
-  // and doing so is what took this phase's peak to 4.4 GB.
-  const digest = digestSessions(store, harness)
-  const sessions = { length: digest.count }
+function* storedSessionPayloads(store: CanonStore, harness: string): Generator<AsadSessionPayload> {
+  for (const row of store.iterateSessions(harness)) {
+    yield (row.payload !== null && typeof row.payload === 'object'
+      ? row.payload
+      : {}) as AsadSessionPayload
+  }
+}
 
-  // Query all executions and runs for this harness
-  const executions = store.listExecutionsByHarness(harness)
-  const runs = store.listRuns(harness)
+function digestSessions(store: CanonStore, harness: string): SessionDigest {
+  return digestSessionPayloads(storedSessionPayloads(store, harness))
+}
+
+/** What a rollup's not-measurable reasons are scoped to (issue #183). */
+export type RollupScope = { kind: 'harness'; harness: string } | { kind: 'run'; runId: string }
+
+/** The execution fields the delegation dimension reads. */
+export type RollupExecutionView = { sessionId?: string | null; isChild: boolean }
+
+export type AssembleRollupInput = {
+  sessionCount: number
+  runCount: number
+  executionCount: number
+  executions: readonly RollupExecutionView[]
+  /** Measured input+output totals behind one session, for delegation overhead. */
+  tokenTotals: (sessionId: string) => { input: number; output: number } | undefined
+  scope: RollupScope
+  /**
+   * Whether the session-count ratio may stand in when no token totals were
+   * measured (review follow-up on issue #183: Kilo K4). True preserves the
+   * harness behavior; the run scope passes false — a count ratio is not an
+   * overhead ratio, so unmeasured delegation reads as unobservable.
+   */
+  allowCountFallback?: boolean
+}
+
+/**
+ * Assemble a rollup row from a digest and counts — the shared tail of the
+ * harness rollup and the run scorecard (issue #183). The dimensions derive
+ * here once; the only difference between scopes is what the not-measurable
+ * reasons name, so a run's own sessions can never inherit a harness-level
+ * claim about telemetry the run did export.
+ */
+export function assembleRollup(
+  harness: string,
+  digest: SessionDigest,
+  input: AssembleRollupInput,
+): HarnessRollupRow {
+  const sessions = { length: input.sessionCount }
+  const executions = { length: input.executionCount }
+  const runs = { length: input.runCount }
+  // Reason vocabulary is scope-aware: the harness wording below is unchanged
+  // from before the extraction, and the run wording names the run instead of
+  // ever claiming the harness lacks telemetry its sessions exported.
+  const inScope =
+    input.scope.kind === 'harness'
+      ? `sessions for harness "${input.scope.harness}"`
+      : `sessions in run "${input.scope.runId}"`
+  const forScope =
+    input.scope.kind === 'harness'
+      ? `for harness "${input.scope.harness}"`
+      : `for run "${input.scope.runId}"`
 
   const fieldCoverage = coverageFor(harness)
   const measurability: Record<string, MetricAvailability> = {}
@@ -202,7 +301,7 @@ export function buildRollupForHarness(store: CanonStore, harness: string): Harne
         measurability[dim] = baseAvail
       } else {
         measurability[dim] = notMeasurable(
-          `No collectable runs or sessions recorded for harness "${harness}".`,
+          `No collectable runs or sessions recorded ${forScope}.`,
         )
       }
     }
@@ -222,7 +321,7 @@ export function buildRollupForHarness(store: CanonStore, harness: string): Harne
         sessionCount: 0,
         runCount: 0,
         executionCount: 0,
-        reason: `No collectable runs or sessions recorded for harness "${harness}".`,
+        reason: `No collectable runs or sessions recorded ${forScope}.`,
       },
     }
   }
@@ -253,9 +352,14 @@ export function buildRollupForHarness(store: CanonStore, harness: string): Harne
       measurability['context_pressure_median'] = classTag
       measurability['context_pressure_p95'] = classTag
     } else {
-      const notMeas = notMeasurable(
-        `No measurable turns found in recorded sessions for harness "${harness}".`,
-      )
+      // Sessions exist but none names a window its pressures were measured
+      // against: say so, so an empty gauge cannot read as "all clear".
+      const notMeas =
+        digest.unknownWindowSessions > 0
+          ? notMeasurable(
+              `No source reported a context window for ${digest.unknownWindowSessions} recorded session(s) ${forScope}; pressure is unmeasurable, not zero.`,
+            )
+          : notMeasurable(`No measurable turns found in recorded ${inScope}.`)
       measurability['context_pressure'] = notMeas
       measurability['context_pressure_median'] = notMeas
       measurability['context_pressure_p95'] = notMeas
@@ -278,7 +382,7 @@ export function buildRollupForHarness(store: CanonStore, harness: string): Harne
       measurability['cache_hit_rate'] = 'measured'
     } else {
       measurability['cache_hit_rate'] = notMeasurable(
-        `No input tokens recorded in sessions for harness "${harness}".`,
+        `No input tokens recorded in ${inScope}.`,
       )
     }
   }
@@ -299,7 +403,7 @@ export function buildRollupForHarness(store: CanonStore, harness: string): Harne
       measurability['tool_yield'] = 'measured'
     } else {
       measurability['tool_yield'] = notMeasurable(
-        `No tool definitions recorded in sessions for harness "${harness}".`,
+        `No tool definitions recorded in ${inScope}.`,
       )
     }
   }
@@ -319,7 +423,7 @@ export function buildRollupForHarness(store: CanonStore, harness: string): Harne
         measurability['delegation_overhead'] = 'measured'
       } else {
         measurability['delegation_overhead'] = notMeasurable(
-          `No agent executions recorded for harness "${harness}".`,
+          `No agent executions recorded ${forScope}.`,
         )
       }
     } else {
@@ -327,16 +431,27 @@ export function buildRollupForHarness(store: CanonStore, harness: string): Harne
       let rootTokens = 0
       let childCount = 0
 
-      for (const exec of executions) {
-        const isChild =
-          !exec.isRoot ||
-          (exec.parentExecutionId !== null && exec.parentExecutionId !== undefined)
+      // Re-review #2 (Kilo A): an execution whose totals are unknown
+      // contributes absence, not zero tokens. In run scope any unknown
+      // linked execution makes the overhead unobservable — counting it as
+      // zero labels a measured 0% on the remaining sessions' tokens alone.
+      let unknownTokens = 0
+      for (const exec of input.executions) {
+        const isChild = exec.isChild
         let tokens = 0
         if (exec.sessionId) {
           // Two numbers read out of the stored JSON, rather than parsing a
           // payload that can run to hundreds of megabytes for each execution.
-          const totals = store.sessionTokenTotals(exec.sessionId)
-          if (totals !== undefined) tokens = totals.input + totals.output
+          const totals = input.tokenTotals(exec.sessionId)
+          if (totals !== undefined) {
+            tokens = totals.input + totals.output
+          } else {
+            unknownTokens += 1
+          }
+        } else {
+          // Polish (Kilo C): an execution with no session has no totals to
+          // know — unknown, not a silent zero beside measured sessions.
+          unknownTokens += 1
         }
 
         if (isChild) {
@@ -347,15 +462,25 @@ export function buildRollupForHarness(store: CanonStore, harness: string): Harne
         }
       }
 
-      if (childTokens + rootTokens > 0) {
+      // Open thread harnesses.ts:416 — the unknown guard applies to every
+      // caller, not just the run scope. An execution with unknown totals
+      // never contributes its zero: with any unknown linked execution the
+      // overhead is unobservable, in harness scope as in run scope.
+      if (unknownTokens > 0) {
+        measurability['delegation_overhead'] = notMeasurable(
+          `Token totals are unmeasured for ${unknownTokens} execution${unknownTokens === 1 ? '' : 's'} in ${inScope}; delegation overhead is unobservable.`,
+        )
+      } else if (childTokens + rootTokens > 0) {
         delegationOverhead = Number((childTokens / (childTokens + rootTokens)).toFixed(4))
         measurability['delegation_overhead'] = 'measured'
-      } else if (executions.length > 0) {
+      } else if (input.allowCountFallback !== false && executions.length > 0) {
         delegationOverhead = Number((childCount / executions.length).toFixed(4))
         measurability['delegation_overhead'] = 'measured'
       } else {
         measurability['delegation_overhead'] = notMeasurable(
-          `No agent executions recorded for harness "${harness}".`,
+          executions.length > 0
+            ? `No measured token totals in ${inScope}; delegation overhead is unobservable.`
+            : `No agent executions recorded ${forScope}.`,
         )
       }
     }
@@ -378,6 +503,13 @@ export function buildRollupForHarness(store: CanonStore, harness: string): Harne
       sessionCount: sessions.length,
       runCount: runs.length,
       executionCount: executions.length,
+      // Persisted for the findings envelope (issue #191, review): reading
+      // the count off the rollup avoids JSON-parsing every session payload
+      // on each `/api/kyber/findings` request. `windowSessionsTotal` is the
+      // exact session count behind the digest, so readers can verify the
+      // rollup still covers every session before trusting the sum (M2).
+      unknownWindowSessions: digest.unknownWindowSessions,
+      windowSessionsTotal: sessions.length,
       dimensions: {
         contextPressureMedian: {
           value: contextPressureMedian,
@@ -409,6 +541,30 @@ export function buildRollupForHarness(store: CanonStore, harness: string): Harne
 }
 
 /**
+ * Build a single harness rollup row over sessions and executions in the store.
+ */
+export function buildRollupForHarness(store: CanonStore, harness: string): HarnessRollupRow {
+  // Query all executions and runs for this harness
+  const executions = store.listExecutionsByHarness(harness)
+  const runs = store.listRuns(harness)
+  const digest = digestSessions(store, harness)
+
+  return assembleRollup(harness, digest, {
+    sessionCount: digest.count,
+    runCount: runs.length,
+    executionCount: executions.length,
+    executions: executions.map((exec) => ({
+      sessionId: exec.sessionId,
+      isChild:
+        !exec.isRoot ||
+        (exec.parentExecutionId !== null && exec.parentExecutionId !== undefined),
+    })),
+    tokenTotals: (sessionId) => store.sessionTokenTotals(sessionId),
+    scope: { kind: 'harness', harness },
+  })
+}
+
+/**
  * Compute aggregate harness rollups and store them in the canonical store (Task E2).
  *
  * Overload 1: Build and persist rollup for a single specified harness.
@@ -427,7 +583,12 @@ export function buildHarnessRollup(
     return row
   }
 
-  const registered = HARNESS_DESCRIPTORS.map((descriptor) => descriptor.harnessId)
+  const registered = Array.from(
+    // Folded front-ends seed no rollup of their own (issue #182): a row that
+    // can never gain a session is dead UI beside the harness it merged into.
+    // Refresh jobs still collect under the raw names; the derived layer folds.
+    new Set(HARNESS_DESCRIPTORS.map((descriptor) => normalizeHarnessName(descriptor.harnessId))),
+  )
   const observed = store.listHarnesses().filter((harness) => !isExcludedHarnessIdentity(harness))
   const allHarnesses = Array.from(new Set([...registered, ...observed])).sort()
 

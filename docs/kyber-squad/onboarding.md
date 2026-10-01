@@ -5,7 +5,7 @@ doc-type: onboarding
 component: KyberSquad
 source-root: src/KyberWeave.Core/Squad
 owner: dpalfery
-last-reviewed: 2026-09-28
+last-reviewed: 2026-09-30
 status: current
 decided-by:
   - adr/0019-pi-native-subagents-and-primary-lowering
@@ -19,7 +19,7 @@ code-refs:
 
 `kyber-weave squad` is the unified lifecycle and deployment control plane for agent ecosystems.
 It manages the installation, update, inspection, and uninstallation of **21 canonical agents** and
-**23 canonical skills**, with transactional recovery and state governance. Twelve harness targets
+**24 canonical skills**, with transactional recovery and state governance. Twelve harness targets
 are declared; all twelve are currently implemented and registered.
 
 ---
@@ -484,6 +484,19 @@ Locally modified files are preserved during uninstallation unless explicitly cle
 
 ---
 
+## PR review workflows
+
+Use the [code-review-loop skill](../../products/kyber-squad/skills/code-review-loop/SKILL.md)
+when authorizing a review feedback cycle on your chosen platform: fixes, validation,
+pushed commits, linked replies, thread resolution, and another review. Specify the PR
+and reviewer, and say whether you want
+one re-review or continued rounds until clean. The skill preserves that authorization scope.
+Its linked `code-review-loop.md` procedure is included in packages and harness deployments.
+
+Use `pr-review-fix-comments` when you prefer step-by-step approval for each fix.
+
+---
+
 ## Packaging (`squad pack`)
 
 `kyber-weave squad pack` is a maintainer-only command for building release archives. It requires execution from the root of the Kyber-Weave repository containing `KyberWeave.sln` and `products/kyber-squad/squad.yml`:
@@ -501,12 +514,12 @@ kyber-weave squad pack --format all --out ./artifacts
 
 Running `squad pack` outside the repository root fails immediately with a diagnostic directing the operator to rerun the command from the Kyber-Weave repository root (or run `squad install` if deploying agents and skills to a project).
 
-Both archive formats recurse through each skill directory. They contain all 23 canonical
-`SKILL.md` files plus the 66 retained supplemental resources, and retained local skill references
+Both archive formats recurse through each skill directory. They contain all 24 canonical
+`SKILL.md` files plus the 67 retained supplemental resources, and retained local skill references
 must resolve in the extracted package. The APM archive additionally contains the 21 canonical
 agents with their 10 owned reference files; the Agent Plugins archive never contains agents or
 agent-owned resources. A fresh deployment renders every file an owner's Markdown links reach
-beside its principal — 119 files on Copilot today — with authored relative links resolving inside
+beside its principal — 121 files on Copilot today — with authored relative links resolving inside
 the target output; every skill resource reaches this render except
 `skills/setup-dev-environment/agents/openai.yaml`, which stays packaged-only Codex skill-UI
 metadata. The tracked root `.github/` self-deployment predates resource delivery and is refreshed

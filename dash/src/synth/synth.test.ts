@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 // Tests for the span synthesizer (task 9.1; R1.1, R1.4, R1.5). The three
 // acceptance criteria are the three load-bearing describe blocks below:
 //
@@ -26,7 +27,8 @@ import { describe, expect, it, vi } from 'vitest'
 import { allProviderNames } from '../providers/index.js'
 import type { ParsedProviderCall } from '../providers/types.js'
 import { tokenValidator } from '../canon/adapters/quarantine.js'
-import { validateTokens } from '../canon/types.js'
+import { validateTokens, type CanonicalRecord, type ContentPart } from '../canon/types.js'
+import type { ReaderToolCall, ReaderToolResult, ReaderTurn, SourceRecordEnvelope } from './readers/types.js'
 import {
   DEFAULT_CONVENTION,
   PROVIDER_CONVENTIONS,
@@ -370,6 +372,13 @@ describe('cost blocks (R5.1, R5.2, R5.4)', () => {
     expect(block.status).toBe('priced')
   })
 
+  it('renders a zero figure from a published-rate provider as published no_rate (issue #186)', () => {
+    expect(costBlockFor(call({ costUSD: 0, costIsEstimated: true }))).toEqual({
+      basis: 'published',
+      status: 'no_rate',
+    })
+  })
+
   it('renders a zero figure as no published rate, never a priced $0.00 (R5.4)', () => {
     expect(costBlockFor(call({ costUSD: 0 }))).toEqual({ basis: 'unknown', status: 'no_rate' })
     // A non-finite figure upstream failed to compute is absent, not priced.
@@ -447,10 +456,10 @@ describe('canonical record shape', () => {
 // ---------------------------------------------------------------------------
 
 function envelope(
-  spec: Partial<import('./readers/types.js').SourceRecordEnvelope> & {
+  spec: Partial<SourceRecordEnvelope> & {
     call?: ParsedProviderCall
   } = {},
-): import('./readers/types.js').SourceRecordEnvelope {
+): SourceRecordEnvelope {
   const parsed = spec.call ?? call({ provider: 'antigravity', deduplicationKey: 'antigravity:s-1:m-1' })
   return {
     harnessId: spec.harnessId ?? 'antigravity-cli',
@@ -553,3 +562,541 @@ describe('T4 — identity-aware synthesis', () => {
   })
 })
 
+// ---------------------------------------------------------------------------
+// Task 5 — Child tool.invoke span generation & result truncation (Issue #180)
+// ---------------------------------------------------------------------------
+
+type ToolInvokeRecord = CanonicalRecord & {
+  attributes?: Record<string, unknown>
+}
+
+type TruncatedContentPart = ContentPart & {
+  truncated?: boolean
+}
+
+describe('Task 5 — child tool.invoke span generation and result truncation', () => {
+  it('emits parent llm.invoke record and one child tool.invoke record per tool invocation', () => {
+    const synthesizer = new Synthesizer()
+    const parsedCall = call({
+      provider: 'claude',
+      sessionId: 's-t5-1',
+      deduplicationKey: 'claude:s-t5-1:t-1',
+    })
+    const toolCalls: ReaderToolCall[] = [
+      { id: 'tu_bash', name: 'Bash', arguments: { command: 'git status' } },
+      { id: 'tu_read', name: 'Read', arguments: { path: 'src/synth/synth.ts' } },
+    ]
+    const toolResults: ReaderToolResult[] = [
+      { toolCallId: 'tu_bash', content: 'clean working tree' },
+      { toolCallId: 'tu_read', content: 'export class Synthesizer {}' },
+    ]
+    const readerTurn: ReaderTurn = {
+      parts: [],
+      toolCalls,
+      toolResults,
+    }
+
+    const records = synthesizer.synthesize([parsedCall], [readerTurn])
+
+    // Should return 3 CanonicalRecords: 1 parent llm.invoke + 2 child tool.invoke
+    expect(records).toHaveLength(3)
+
+    const parent = records.find((r) => r.op === 'llm.invoke')
+    expect(parent).toBeDefined()
+    expect(parent?.parentSpanId).toBeNull()
+
+    const toolRecords = records.filter((r) => r.op === 'tool.invoke') as ToolInvokeRecord[]
+    expect(toolRecords).toHaveLength(2)
+
+    // First child: Bash
+    const bashRecord = toolRecords.find((r) => r.name === 'Bash')
+    expect(bashRecord).toBeDefined()
+    expect(bashRecord?.parentSpanId).toBe(parent!.spanId)
+    const bashHash = createHash('sha256').update(`tu_bash:Bash:${JSON.stringify({ command: 'git status' })}`).digest('hex').slice(0, 12)
+    expect(bashRecord?.spanId).toBe(`${parent!.spanId}-t${bashHash}`)
+    expect(bashRecord?.attributes?.['gen_ai.tool.name']).toBe('Bash')
+    expect(bashRecord?.attributes?.['gen_ai.tool.call_id']).toBe('tu_bash')
+    expect(bashRecord?.attributes?.['gen_ai.tool.status']).toBe('ok')
+    expect((bashRecord?.raw as Record<string, unknown>)?.['arguments']).toEqual({ command: 'git status' })
+    expect((bashRecord?.raw as Record<string, unknown>)?.['result']).toBe('clean working tree')
+
+    // Second child: Read
+    const readRecord = toolRecords.find((r) => r.name === 'Read')
+    expect(readRecord).toBeDefined()
+    expect(readRecord?.parentSpanId).toBe(parent!.spanId)
+    const readHash = createHash('sha256').update(`tu_read:Read:${JSON.stringify({ path: 'src/synth/synth.ts' })}`).digest('hex').slice(0, 12)
+    expect(readRecord?.spanId).toBe(`${parent!.spanId}-t${readHash}`)
+    expect(readRecord?.attributes?.['gen_ai.tool.name']).toBe('Read')
+    expect(readRecord?.attributes?.['gen_ai.tool.call_id']).toBe('tu_read')
+    expect(readRecord?.attributes?.['gen_ai.tool.status']).toBe('ok')
+    expect((readRecord?.raw as Record<string, unknown>)?.['arguments']).toEqual({ path: 'src/synth/synth.ts' })
+    expect((readRecord?.raw as Record<string, unknown>)?.['result']).toBe('export class Synthesizer {}')
+  })
+
+  it('emits child tool.invoke records through synthesizeEnvelopes', () => {
+    const synthesizer = new Synthesizer()
+    const parsedCall = call({
+      provider: 'claude',
+      sessionId: 's-env-tool',
+      deduplicationKey: 'claude:s-env-tool:t-1',
+    })
+    const env = envelope({
+      call: parsedCall,
+      readerTurn: {
+        parts: [],
+        toolCalls: [
+          { id: 'tu_ls', name: 'Bash', arguments: { command: 'ls' } },
+        ],
+        toolResults: [
+          { toolCallId: 'tu_ls', content: 'file1\nfile2' },
+        ],
+      },
+    })
+
+    const records = synthesizer.synthesizeEnvelopes([env])
+    expect(records).toHaveLength(2)
+
+    const child = records.find((r) => r.op === 'tool.invoke') as ToolInvokeRecord | undefined
+    expect(child).toBeDefined()
+    expect(child?.name).toBe('Bash')
+    expect(child?.attributes?.['gen_ai.tool.name']).toBe('Bash')
+    expect(child?.attributes?.['gen_ai.tool.call_id']).toBe('tu_ls')
+    expect(child?.attributes?.['gen_ai.tool.status']).toBe('ok')
+    expect((child?.raw as Record<string, unknown>)?.['arguments']).toEqual({ command: 'ls' })
+    expect((child?.raw as Record<string, unknown>)?.['result']).toBe('file1\nfile2')
+  })
+
+  it('truncates large tool results (>64KB) in parts and preserves original byte count in attributes', () => {
+    const synthesizer = new Synthesizer()
+    const parsedCall = call({
+      provider: 'claude',
+      sessionId: 's-t5-trunc',
+      deduplicationKey: 'claude:s-t5-trunc:t-1',
+    })
+    const largeContent = 'Z'.repeat(100_000)
+    const readerTurn: ReaderTurn = {
+      parts: [],
+      toolCalls: [
+        { id: 'tu_big', name: 'Bash', arguments: { command: 'cat massive.txt' } },
+      ],
+      toolResults: [
+        { toolCallId: 'tu_big', content: largeContent },
+      ],
+    }
+
+    const records = synthesizer.synthesize([parsedCall], [readerTurn])
+    const toolRecord = records.find((r) => r.op === 'tool.invoke') as ToolInvokeRecord | undefined
+
+    expect(toolRecord).toBeDefined()
+    expect(toolRecord?.attributes?.['gen_ai.tool.result_bytes']).toBe(100_000)
+
+    const part = toolRecord?.parts?.find((p) => p.part === 'tool_result_content') as TruncatedContentPart | undefined
+    expect(part).toBeDefined()
+    expect(part?.text).toHaveLength(65_536)
+    expect(part?.text).toBe('Z'.repeat(65_536))
+    expect(part?.truncated).toBe(true)
+  })
+
+  it('records gen_ai.tool.status strictly from isError without inferring error from result text', () => {
+    const synthesizer = new Synthesizer()
+    const parsedCall = call({
+      provider: 'claude',
+      sessionId: 's-t5-status',
+      deduplicationKey: 'claude:s-t5-status:t-1',
+    })
+    const readerTurn: ReaderTurn = {
+      parts: [],
+      toolCalls: [
+        { id: 'tu_err', name: 'Bash', arguments: { command: 'false' } },
+        { id: 'tu_text_has_error', name: 'Bash', arguments: { command: 'echo "SyntaxError: fake error"' } },
+        { id: 'tu_default', name: 'Read', arguments: { path: 'README.md' } },
+      ],
+      toolResults: [
+        { toolCallId: 'tu_err', content: 'Command failed with exit code 1', isError: true },
+        { toolCallId: 'tu_text_has_error', content: 'SyntaxError: fake error', isError: false },
+        { toolCallId: 'tu_default', content: '# Documentation' },
+      ],
+    }
+
+    const records = synthesizer.synthesize([parsedCall], [readerTurn])
+    const toolRecords = records.filter((r) => r.op === 'tool.invoke') as ToolInvokeRecord[]
+
+    expect(toolRecords).toHaveLength(3)
+
+    const errSpan = toolRecords.find((r) => r.attributes?.['gen_ai.tool.call_id'] === 'tu_err')
+    expect(errSpan?.attributes?.['gen_ai.tool.status']).toBe('error')
+
+    const falseErrSpan = toolRecords.find((r) => r.attributes?.['gen_ai.tool.call_id'] === 'tu_text_has_error')
+    expect(falseErrSpan?.attributes?.['gen_ai.tool.status']).toBe('ok')
+
+    const defaultSpan = toolRecords.find((r) => r.attributes?.['gen_ai.tool.call_id'] === 'tu_default')
+    expect(defaultSpan?.attributes?.['gen_ai.tool.status']).toBe('ok')
+  })
+
+  it('does not invent or inject tool_definitions parts when toolsOffered is undefined', () => {
+    const synthesizer = new Synthesizer()
+    const parsedCall = call({
+      provider: 'claude',
+      sessionId: 's-t5-unobs',
+      deduplicationKey: 'claude:s-t5-unobs:t-1',
+    })
+    const readerTurn: ReaderTurn = {
+      parts: [],
+      toolCalls: [
+        { id: 'tu_1', name: 'Bash', arguments: { command: 'pwd' } },
+      ],
+      toolResults: [
+        { toolCallId: 'tu_1', content: '/workspace' },
+      ],
+      toolsOffered: undefined,
+    }
+
+    const records = synthesizer.synthesize([parsedCall], [readerTurn])
+    const parent = records.find((r) => r.op === 'llm.invoke')
+    expect(parent).toBeDefined()
+    expect(parent?.parts?.some((p) => p.part === 'tool_definitions')).toBe(false)
+    expect(parent?.content.tool_definitions).toBeUndefined()
+  })
+  it("pairs tool results across split-turn boundaries in a multi-turn session", () => {
+    const synthesizer = new Synthesizer()
+    const call1 = call({
+      provider: "claude",
+      sessionId: "s-split-1",
+      deduplicationKey: "claude:s-split-1:turn-1",
+    })
+    const call2 = call({
+      provider: "claude",
+      sessionId: "s-split-1",
+      deduplicationKey: "claude:s-split-1:turn-2",
+    })
+
+    // Turn 1 has the tool invocation
+    const turn1: ReaderTurn = {
+      parts: [],
+      toolCalls: [
+        { id: "tu_split_1", name: "Bash", arguments: { command: "npm test" } },
+      ],
+      toolResults: [],
+    }
+
+    // Turn 2 has the tool result corresponding to Turn 1's tool invocation
+    const turn2: ReaderTurn = {
+      parts: [],
+      toolCalls: [],
+      toolResults: [
+        { toolCallId: "tu_split_1", content: "FAIL: 1 test failed", isError: true },
+      ],
+    }
+
+    const records = synthesizer.synthesize([call1, call2], [turn1, turn2])
+    const toolRecord = records.find((r) => r.op === "tool.invoke") as ToolInvokeRecord | undefined
+
+    expect(toolRecord).toBeDefined()
+    expect(toolRecord?.name).toBe("Bash")
+    // Result content, byte count, and error status must be populated from Turn 2's result
+    expect((toolRecord?.raw as Record<string, unknown>)?.["result"]).toBe("FAIL: 1 test failed")
+    expect(toolRecord?.attributes?.["gen_ai.tool.result_bytes"]).toBe("FAIL: 1 test failed".length)
+    expect(toolRecord?.attributes?.["gen_ai.tool.status"]).toBe("error")
+    const resultPart = toolRecord?.parts?.find((p) => p.part === "tool_result_content")
+    expect(resultPart?.text).toBe("FAIL: 1 test failed")
+  })
+
+  it("merges tool attributes into record.raw so they persist across store round-trip", () => {
+    const synthesizer = new Synthesizer()
+    const parsedCall = call({
+      provider: "claude",
+      sessionId: "s-attr-persist",
+      deduplicationKey: "claude:s-attr-persist:t-1",
+    })
+    const readerTurn: ReaderTurn = {
+      parts: [],
+      toolCalls: [
+        { id: "tu_persist", name: "Bash", arguments: { command: "echo hi" } },
+      ],
+      toolResults: [
+        { toolCallId: "tu_persist", content: "hi\n", isError: false },
+      ],
+    }
+
+    const records = synthesizer.synthesize([parsedCall], [readerTurn])
+    const toolRecord = records.find((r) => r.op === "tool.invoke")
+
+    expect(toolRecord).toBeDefined()
+    const raw = toolRecord?.raw as Record<string, unknown>
+    expect(raw).toBeDefined()
+    expect(raw["gen_ai.tool.name"]).toBe("Bash")
+    expect(raw["gen_ai.tool.call_id"]).toBe("tu_persist")
+    expect(raw["gen_ai.tool.status"]).toBe("ok")
+    expect(raw["gen_ai.tool.result_bytes"]).toBe(3)
+  })
+  it("truncates multi-byte UTF-8 tool results at code-point boundary when byte length > 64KB (Thread 1)", () => {
+    const synthesizer = new Synthesizer()
+    const parsedCall = call({
+      provider: "claude",
+      sessionId: "s-t5-emoji",
+      deduplicationKey: "claude:s-t5-emoji:t-1",
+    })
+    // 20,000 emoji: 40,000 UTF-16 code units, but 80,000 UTF-8 bytes (> 64KB)
+    const emojiContent = "🚀".repeat(20_000)
+    const readerTurn: ReaderTurn = {
+      parts: [],
+      toolCalls: [
+        { id: "tu_emoji", name: "Bash", arguments: { command: "cat emoji.txt" } },
+      ],
+      toolResults: [
+        { toolCallId: "tu_emoji", content: emojiContent },
+      ],
+    }
+
+    const records = synthesizer.synthesize([parsedCall], [readerTurn])
+    const toolRecord = records.find((r) => r.op === "tool.invoke") as ToolInvokeRecord | undefined
+
+    expect(toolRecord).toBeDefined()
+    expect(toolRecord?.attributes?.["gen_ai.tool.result_bytes"]).toBe(80_000)
+
+    const part = toolRecord?.parts?.find((p) => p.part === "tool_result_content") as TruncatedContentPart | undefined
+    expect(part).toBeDefined()
+    expect(part?.truncated).toBe(true)
+    const partBytes = Buffer.byteLength(part!.text, "utf8")
+    expect(partBytes).toBeLessThanOrEqual(65_536)
+    expect(partBytes).toBe(65_536)
+    expect(part?.text).toBe("🚀".repeat(16_384))
+  })
+
+  it("bounds raw.result to bounded part text to avoid persisting multi-megabyte payloads (Thread 2)", () => {
+    const synthesizer = new Synthesizer()
+    const parsedCall = call({
+      provider: "claude",
+      sessionId: "s-t5-raw-bound",
+      deduplicationKey: "claude:s-t5-raw-bound:t-1",
+    })
+    const largeContent = "X".repeat(200_000)
+    const readerTurn: ReaderTurn = {
+      parts: [],
+      toolCalls: [
+        { id: "tu_huge", name: "Bash", arguments: { command: "cat huge.txt" } },
+      ],
+      toolResults: [
+        { toolCallId: "tu_huge", content: largeContent },
+      ],
+    }
+
+    const records = synthesizer.synthesize([parsedCall], [readerTurn])
+    const toolRecord = records.find((r) => r.op === "tool.invoke") as ToolInvokeRecord | undefined
+
+    expect(toolRecord).toBeDefined()
+    expect(toolRecord?.attributes?.["gen_ai.tool.result_bytes"]).toBe(200_000)
+    const raw = toolRecord?.raw as Record<string, unknown>
+    expect(raw["result"]).toBe("X".repeat(65_536))
+    expect((raw["result"] as string).length).toBe(65_536)
+  })
+
+  it("marks tool call with no matched result as unset status (Thread 5)", () => {
+    const synthesizer = new Synthesizer()
+    const parsedCall = call({
+      provider: "claude",
+      sessionId: "s-t5-unmatched",
+      deduplicationKey: "claude:s-t5-unmatched:t-1",
+    })
+    const readerTurn: ReaderTurn = {
+      parts: [],
+      toolCalls: [
+        { id: "tu_unmatched", name: "Bash", arguments: { command: "sleep 100" } },
+      ],
+      toolResults: [],
+    }
+
+    const records = synthesizer.synthesize([parsedCall], [readerTurn])
+    const toolRecord = records.find((r) => r.op === "tool.invoke") as ToolInvokeRecord | undefined
+
+    expect(toolRecord).toBeDefined()
+    expect(toolRecord?.status).toBe("unset")
+    expect(toolRecord?.attributes?.["gen_ai.tool.status"]).toBe("unset")
+    expect((toolRecord?.raw as Record<string, unknown>)?.[ "gen_ai.tool.status"]).toBe("unset")
+  })
+  it("derives stable child span id from tool identity so regrouped turns retain identical span ids (Thread 8)", () => {
+    const synthesizer = new Synthesizer()
+    const parsedCall = call({
+      provider: "claude",
+      sessionId: "s-t8-stable",
+      deduplicationKey: "claude:s-t8-stable:t-1",
+    })
+    const toolA = { id: "tu_a", name: "Bash", arguments: { command: "ls" } }
+    const toolB = { id: "tu_b", name: "Read", arguments: { path: "a.txt" } }
+
+    const turn1: ReaderTurn = {
+      parts: [],
+      toolCalls: [toolA, toolB],
+      toolResults: [],
+    }
+    const turn2: ReaderTurn = {
+      parts: [],
+      toolCalls: [toolB, toolA],
+      toolResults: [],
+    }
+
+    const records1 = synthesizer.synthesize([parsedCall], [turn1])
+    const records2 = synthesizer.synthesize([parsedCall], [turn2])
+
+    const a1 = records1.find((r) => r.name === "Bash")
+    const a2 = records2.find((r) => r.name === "Bash")
+    const b1 = records1.find((r) => r.name === "Read")
+    const b2 = records2.find((r) => r.name === "Read")
+
+    expect(a1?.spanId).toBe(a2?.spanId)
+    expect(b1?.spanId).toBe(b2?.spanId)
+    expect(a1?.spanId).not.toBe(b1?.spanId)
+  })
+
+  it("bounds raw.arguments to MAX_TOOL_ARGUMENTS_BYTES (64KB) and records gen_ai.tool.arguments_bytes (Thread 9)", () => {
+    const synthesizer = new Synthesizer()
+    const parsedCall = call({
+      provider: "claude",
+      sessionId: "s-t9-args-bound",
+      deduplicationKey: "claude:s-t9-args-bound:t-1",
+    })
+    const largeArgs = "Y".repeat(150_000)
+    const readerTurn: ReaderTurn = {
+      parts: [],
+      toolCalls: [
+        { id: "tu_huge_args", name: "Write", arguments: largeArgs },
+      ],
+      toolResults: [],
+    }
+
+    const records = synthesizer.synthesize([parsedCall], [readerTurn])
+    const toolRecord = records.find((r) => r.op === "tool.invoke") as ToolInvokeRecord | undefined
+
+    expect(toolRecord).toBeDefined()
+    expect(toolRecord?.attributes?.["gen_ai.tool.arguments_bytes"]).toBe(150_000)
+    const raw = toolRecord?.raw as Record<string, unknown>
+    const boundArgs = raw["arguments"] as string
+    expect(Buffer.byteLength(boundArgs, "utf8")).toBeLessThanOrEqual(65_536)
+  })
+
+  it("preserves object shape and flags arguments_truncated when object arguments exceed 64KB (Thread 3)", () => {
+    const synthesizer = new Synthesizer()
+    const parsedCall = call({
+      provider: "claude",
+      sessionId: "s-t3-args-shape",
+      deduplicationKey: "claude:s-t3-args-shape:t-1",
+    })
+    const largeContent = "Z".repeat(100_000)
+    const readerTurn: ReaderTurn = {
+      parts: [],
+      toolCalls: [
+        { id: "tu_obj_args", name: "Write", arguments: { path: "src/file.ts", content: largeContent } },
+      ],
+      toolResults: [],
+    }
+
+    const records = synthesizer.synthesize([parsedCall], [readerTurn])
+    const toolRecord = records.find((r) => r.op === "tool.invoke") as ToolInvokeRecord | undefined
+
+    expect(toolRecord).toBeDefined()
+    expect(toolRecord?.attributes?.["gen_ai.tool.arguments_bytes"]).toBeGreaterThan(100_000)
+    expect(toolRecord?.attributes?.["gen_ai.tool.arguments_truncated"]).toBe(true)
+    expect(typeof toolRecord?.attributes?.["gen_ai.tool.arguments_hash"]).toBe("string")
+    const raw = toolRecord?.raw as Record<string, unknown>
+    expect(typeof raw["arguments"]).toBe("object")
+    const boundArgs = raw["arguments"] as Record<string, unknown>
+    expect(boundArgs.path).toBe("src/file.ts")
+    expect(typeof boundArgs.content).toBe("string")
+    expect(Buffer.byteLength(boundArgs.content as string, "utf8")).toBeLessThanOrEqual(65_536)
+  })
+
+  it("hashes the canonical arguments form so whitespace variants share an identity", () => {
+    // The same call serialized with different spacing must hash alike;
+    // the producer hash previously covered the verbatim string.
+    const big = "Z".repeat(70_000)
+    const compact = `{"path":"src/file.ts","content":"${big}"}`
+    const spaced = `{ "path" : "src/file.ts" , "content" : "${big}" }`
+    const hashFor = (args: string): unknown => {
+      const synthesizer = new Synthesizer()
+      const parsedCall = call({
+        provider: "claude",
+        sessionId: "s-hash-canon",
+        deduplicationKey: "claude:s-hash-canon:t-1",
+      })
+      const records = synthesizer.synthesize([parsedCall], [{
+        parts: [],
+        toolCalls: [{ id: "tu_hash", name: "Write", arguments: args }],
+        toolResults: [],
+      }])
+      const toolRecord = records.find((r) => r.op === "tool.invoke") as ToolInvokeRecord | undefined
+      expect(toolRecord?.attributes?.["gen_ai.tool.arguments_truncated"]).toBe(true)
+      return toolRecord?.attributes?.["gen_ai.tool.arguments_hash"]
+    }
+
+    expect(typeof hashFor(compact)).toBe("string")
+    expect(hashFor(compact)).toBe(hashFor(spaced))
+  })
+
+  it("omits arguments_hash when arguments fit untruncated", () => {
+    // The detector already compares complete arguments in normalised form;
+    // the producer hash exists only to identify truncated arguments.
+    const synthesizer = new Synthesizer()
+    const parsedCall = call({
+      provider: "claude",
+      sessionId: "s-hash-omitted",
+      deduplicationKey: "claude:s-hash-omitted:t-1",
+    })
+    const records = synthesizer.synthesize([parsedCall], [{
+      parts: [],
+      toolCalls: [{ id: "tu_small", name: "Read", arguments: { path: "src/file.ts" } }],
+      toolResults: [],
+    }])
+    const toolRecord = records.find((r) => r.op === "tool.invoke") as ToolInvokeRecord | undefined
+
+    expect(toolRecord).toBeDefined()
+    expect(toolRecord?.attributes?.["gen_ai.tool.arguments_truncated"]).toBeUndefined()
+    expect(toolRecord?.attributes?.["gen_ai.tool.arguments_hash"]).toBeUndefined()
+  })
+
+  it("derives duration from paired toolCall and toolResult timestamps or marks unmeasured (Thread 10)", () => {
+    const synthesizer = new Synthesizer()
+    const parsedCall = call({
+      provider: "claude",
+      sessionId: "s-t10-duration",
+      deduplicationKey: "claude:s-t10-duration:t-1",
+    })
+    const readerTurn: ReaderTurn = {
+      parts: [],
+      toolCalls: [
+        {
+          id: "tu_timed",
+          name: "Bash",
+          arguments: { command: "sleep 2" },
+          timestamp: "2026-09-01T12:00:00.000Z",
+        },
+        {
+          id: "tu_untimed",
+          name: "Read",
+          arguments: { path: "file.txt" },
+        },
+      ],
+      toolResults: [
+        {
+          toolCallId: "tu_timed",
+          content: "ok",
+          timestamp: "2026-09-01T12:00:02.500Z",
+        },
+        {
+          toolCallId: "tu_untimed",
+          content: "file content",
+        },
+      ],
+    }
+
+    const records = synthesizer.synthesize([parsedCall], [readerTurn])
+    const timedSpan = records.find((r) => r.name === "Bash")
+    const untimedSpan = records.find((r) => r.name === "Read")
+
+    expect(timedSpan?.durationMs).toBe(2500)
+    expect(timedSpan?.measurability?.duration).toBe("derived")
+
+    expect(untimedSpan?.durationMs).toBe(0)
+    expect(typeof untimedSpan?.measurability?.duration).toBe("object")
+    expect((untimedSpan?.measurability?.duration as { availability: string })?.availability).toBe("not_measurable")
+  })
+});

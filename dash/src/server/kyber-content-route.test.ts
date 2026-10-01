@@ -92,6 +92,108 @@ describe('Backend Contract Tests: GET /api/kyber/session/:id/content', () => {
       label: 'Content drill-down',
       payload: { id: 'sess-content-001', harness: 'copilot' },
     })
+    // Session whose payload carries explicit turn descriptors: one current
+    // 0-based `index` row and one legacy 1-based `turn` row (issue #184).
+    store.upsertMany([
+      turn('span-m0', [{ part: 'system_prompt', text: 'mixed zero', tokens: 2 }], {
+        sessionId: 'sess-mixed-001',
+        timestamp: '2026-09-03T11:00:00.000Z',
+      }),
+      turn('span-m1', [{ part: 'system_prompt', text: 'mixed one', tokens: 2 }], {
+        sessionId: 'sess-mixed-001',
+        timestamp: '2026-09-03T11:01:00.000Z',
+      }),
+    ])
+    store.upsertSession({
+      sessionId: 'sess-mixed-001',
+      harness: 'copilot',
+      label: 'Mixed turn descriptors',
+      payload: {
+        id: 'sess-mixed-001',
+        harness: 'copilot',
+        turns: [
+          { index: 0, spanId: 'span-m0', model: 'm' },
+          { turn: 2, spanId: 'span-m1', model: 'm' },
+        ],
+      },
+    })
+    // Payload rows whose legacy identity disagrees with array position
+    // (issue #184 review): explicit identity must win over position.
+    store.upsertMany([
+      turn('span-pa', [{ part: 'system_prompt', text: 'precedence A', tokens: 1 }], {
+        sessionId: 'sess-precedence-001',
+        timestamp: '2026-09-03T12:00:00.000Z',
+      }),
+      turn('span-pb', [{ part: 'system_prompt', text: 'precedence B', tokens: 1 }], {
+        sessionId: 'sess-precedence-001',
+        timestamp: '2026-09-03T12:01:00.000Z',
+      }),
+    ])
+    store.upsertSession({
+      sessionId: 'sess-precedence-001',
+      harness: 'copilot',
+      label: 'Precedence descriptors',
+      payload: {
+        id: 'sess-precedence-001',
+        harness: 'copilot',
+        turns: [
+          { turn: 2, spanId: 'span-pa', model: 'm' },
+          { turn: 1, spanId: 'span-pb', model: 'm' },
+        ],
+      },
+    })
+    // Identity-bearing payload shorter than the record pool (issue #184
+    // review): an unmatched identity must 404, not fall through to a
+    // positional record match.
+    store.upsertMany([
+      turn('span-x0', [{ part: 'system_prompt', text: 'cross X0', tokens: 1 }], {
+        sessionId: 'sess-cross-001',
+        timestamp: '2026-09-03T13:00:00.000Z',
+      }),
+      turn('span-x1', [{ part: 'system_prompt', text: 'cross X1', tokens: 1 }], {
+        sessionId: 'sess-cross-001',
+        timestamp: '2026-09-03T13:01:00.000Z',
+      }),
+      turn('span-x2', [{ part: 'system_prompt', text: 'cross X2', tokens: 1 }], {
+        sessionId: 'sess-cross-001',
+        timestamp: '2026-09-03T13:02:00.000Z',
+      }),
+    ])
+    store.upsertSession({
+      sessionId: 'sess-cross-001',
+      harness: 'copilot',
+      label: 'Cross-source descriptors',
+      payload: {
+        id: 'sess-cross-001',
+        harness: 'copilot',
+        turns: [
+          { index: 0, spanId: 'span-x0', model: 'm' },
+          { index: 1, spanId: 'span-x1', model: 'm' },
+        ],
+      },
+    })
+    // Payload rows without any identity (issue #184 review): the canonical
+    // positional lookup stays available as the only option.
+    store.upsertMany([
+      turn('span-q0', [{ part: 'system_prompt', text: 'noident Q0', tokens: 1 }], {
+        sessionId: 'sess-noidentity-001',
+        timestamp: '2026-09-03T14:00:00.000Z',
+      }),
+      turn('span-q1', [{ part: 'system_prompt', text: 'noident Q1', tokens: 1 }], {
+        sessionId: 'sess-noidentity-001',
+        timestamp: '2026-09-03T14:01:00.000Z',
+      }),
+    ])
+    store.upsertSession({
+      sessionId: 'sess-noidentity-001',
+      harness: 'copilot',
+      label: 'Identity-free descriptors',
+      payload: {
+        id: 'sess-noidentity-001',
+        harness: 'copilot',
+        turns: [{ spanId: 'span-q0', model: 'm' }],
+      },
+    })
 
     canonDb = new DatabaseSync(':memory:')
 
@@ -258,6 +360,82 @@ describe('Backend Contract Tests: GET /api/kyber/session/:id/content', () => {
       const res = await fetch(`${base}/api/kyber/session/sess-content-001/turn/999/content`)
       expect(res.status).toBe(404)
       assertStandardKyberHeaders(res)
+    })
+
+    describe('strict 0-based turn resolution (issue #184)', () => {
+      it('returns 404 for a turn index equal to the turn count instead of the last turn', async () => {
+        // sess-content-001 holds 3 turns (indices 0-2). The 1-based
+        // `turns[turnIndex - 1]` fallback serves the last turn with 200 here.
+        const res = await fetch(`${base}/api/kyber/session/sess-content-001/turn/3/content`)
+        expect(res.status).toBe(404)
+        assertStandardKyberHeaders(res)
+      })
+
+      it('resolves a 0-based index to exactly that span', async () => {
+        const res = await fetch(`${base}/api/kyber/session/sess-content-001/turn/2/content`)
+        expect(res.status).toBe(200)
+        const body = (await res.json()) as TurnContentResult
+        expect(body.turnIndex).toBe(2)
+        expect(body.spanId).toBe('span-huge')
+      })
+
+      it('resolves a legacy 1-based `turn` descriptor via `turn - 1`', async () => {
+        const res = await fetch(`${base}/api/kyber/session/sess-mixed-001/turn/1/content`)
+        expect(res.status).toBe(200)
+        const body = (await res.json()) as TurnContentResult
+        expect(body.spanId).toBe('span-m1')
+        expect(body.assembledText).toContain('mixed one')
+      })
+
+      it('returns 404 past the end of a session with legacy descriptors', async () => {
+        // Two payload turns: valid 0-based indices are 0 and 1.
+        const res = await fetch(`${base}/api/kyber/session/sess-mixed-001/turn/2/content`)
+        expect(res.status).toBe(404)
+        assertStandardKyberHeaders(res)
+      })
+
+      it('prefers explicit legacy identity over array position (issue #184 review)', async () => {
+        // Payload order is [{turn: 2}, {turn: 1}]: transport 0 is the second
+        // row (span-pb), transport 1 the first (span-pa). A positional match
+        // would serve span-pa for both.
+        const first = await fetch(`${base}/api/kyber/session/sess-precedence-001/turn/0/content`)
+        expect(first.status).toBe(200)
+        const firstBody = (await first.json()) as TurnContentResult
+        expect(firstBody.spanId).toBe('span-pb')
+        expect(firstBody.assembledText).toContain('precedence B')
+
+        const second = await fetch(`${base}/api/kyber/session/sess-precedence-001/turn/1/content`)
+        expect(second.status).toBe(200)
+        const secondBody = (await second.json()) as TurnContentResult
+        expect(secondBody.spanId).toBe('span-pa')
+        expect(secondBody.assembledText).toContain('precedence A')
+      })
+
+      it('returns 404 when an identity-bearing payload misses, without falling through to records (issue #184 review)', async () => {
+        // Two identified payload turns but three records: transport 2 matches
+        // no identity, and must not resolve positionally to span-x2.
+        const res = await fetch(`${base}/api/kyber/session/sess-cross-001/turn/2/content`)
+        expect(res.status).toBe(404)
+        assertStandardKyberHeaders(res)
+      })
+
+      it('resolves identified payload turns while the cross-source guard stands', async () => {
+        const res = await fetch(`${base}/api/kyber/session/sess-cross-001/turn/1/content`)
+        expect(res.status).toBe(200)
+        const body = (await res.json()) as TurnContentResult
+        expect(body.spanId).toBe('span-x1')
+        expect(body.assembledText).toContain('cross X1')
+      })
+
+      it('preserves the canonical positional lookup for identity-free payload rows (issue #184 review)', async () => {
+        // One identity-free payload row, two records: transport 1 has no
+        // payload answer, so the positional record lookup still serves span-q1.
+        const res = await fetch(`${base}/api/kyber/session/sess-noidentity-001/turn/1/content`)
+        expect(res.status).toBe(200)
+        const body = (await res.json()) as TurnContentResult
+        expect(body.spanId).toBe('span-q1')
+        expect(body.assembledText).toContain('noident Q1')
+      })
     })
 
     it('flags budget truncation when turn content exceeds budget param', async () => {
