@@ -882,6 +882,340 @@ describe('KyberBridge: DB-backed report facts', () => {
   })
 })
 
+describe('KyberBridge: T4 coverage read seam (plan docs/plans/2026-09-30-issues-189-198-199, D2)', () => {
+  const WEEK_MS = 7 * 24 * 60 * 60 * 1000
+
+  function recordFor(overrides: Partial<CanonicalRecord>): CanonicalRecord {
+    return {
+      spanId: 'span-t4',
+      traceId: 'trace-t4',
+      parentSpanId: null,
+      source: 'synthetic',
+      harness: 'pi',
+      name: 't4 record',
+      op: 'llm.invoke',
+      kind: 'client',
+      timestamp: '2026-09-10T12:00:00.000Z',
+      durationMs: 10,
+      status: 'ok',
+      tokens: { freshInput: 10, cacheRead: 0, cacheCreation: 0, output: 2, reportedInput: 10, reportedOutput: 2 },
+      content: {},
+      cost: { basis: 'published', status: 'priced', value: 0.01, currency: 'USD' },
+      ...overrides,
+    }
+  }
+
+  it('exposes the refresh coverage window with derived bounds on the last success', () => {
+    const store = new CanonStore(':memory:')
+    try {
+      store.startRefreshRun({
+        id: 't4-windowed',
+        startedAt: '2026-09-12T00:00:00.000Z',
+        pid: process.pid,
+        trigger: 'cli',
+        historyWeeks: 6,
+      })
+      store.completeRefreshRun('t4-windowed', 'success', '2026-09-12T00:30:00.000Z', 't4 ok')
+      const bridge = new KyberBridge({ canonPath: ':memory:', store })
+      try {
+        const state = bridge.getRefreshState()
+        expect(state.lastSuccessAt).toBe('2026-09-12T00:30:00.000Z')
+        expect(state.historyWeeks).toBe(6)
+        expect(state.coveredThrough).toBe('2026-09-12T00:00:00.000Z')
+        expect(state.coveredFrom).toBe(
+          new Date(Date.parse('2026-09-12T00:00:00.000Z') - 6 * WEEK_MS).toISOString(),
+        )
+      } finally {
+        bridge.close()
+      }
+    } finally {
+      store.close()
+    }
+  })
+
+  it('reads pre-migration refresh rows as unknown window, never zero', () => {
+    const store = new CanonStore(':memory:')
+    try {
+      store.startRefreshRun({
+        id: 't4-legacy',
+        startedAt: '2026-09-12T00:00:00.000Z',
+        pid: process.pid,
+        trigger: 'cli',
+      })
+      store.completeRefreshRun('t4-legacy', 'success', '2026-09-12T00:30:00.000Z', 't4 legacy ok')
+      const bridge = new KyberBridge({ canonPath: ':memory:', store })
+      try {
+        const state = bridge.getRefreshState()
+        expect(state.historyWeeks).toBeNull()
+        expect(state.coveredFrom).toBeNull()
+        expect(state.coveredThrough).toBeNull()
+      } finally {
+        bridge.close()
+      }
+    } finally {
+      store.close()
+    }
+  })
+
+  it('reads databases without the history_weeks column as unknown rather than throwing', () => {
+    const canonDb = new DatabaseSync(':memory:')
+    try {
+      canonDb.exec(`
+        CREATE TABLE refresh_run (
+          id TEXT PRIMARY KEY,
+          started_at TEXT NOT NULL,
+          completed_at TEXT,
+          status TEXT NOT NULL,
+          pid INTEGER NOT NULL,
+          trigger TEXT NOT NULL,
+          summary TEXT
+        );
+      `)
+      canonDb
+        .prepare(
+          'INSERT INTO refresh_run (id, started_at, completed_at, status, pid, trigger, summary) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        )
+        .run('old-row', '2026-09-12T00:00:00.000Z', '2026-09-12T00:30:00.000Z', 'success', process.pid, 'cli', 'old')
+      const bridge = new KyberBridge({ canonDb })
+      try {
+        const state = bridge.getRefreshState()
+        expect(state.lastSuccessAt).toBe('2026-09-12T00:30:00.000Z')
+        expect(state.historyWeeks).toBeNull()
+        expect(state.coveredFrom).toBeNull()
+        expect(state.coveredThrough).toBeNull()
+      } finally {
+        bridge.close()
+      }
+    } finally {
+      try {
+        canonDb.close()
+      } catch {
+        // KyberBridge.close() already closed the injected handle.
+      }
+    }
+  })
+
+  it('derives per-source ingest activity without inventing receiver status', () => {
+    const store = new CanonStore(':memory:')
+    try {
+      store.upsertMany([
+        recordFor({ spanId: 't4-s1', source: 'codeburn/pi', harness: 'pi' }),
+        recordFor({ spanId: 't4-s2', source: 'codeburn/pi', harness: 'pi' }),
+        recordFor({ spanId: 't4-s3', source: 'agy', harness: 'antigravity' }),
+        recordFor({ spanId: 't4-s4', source: 'unattributed', harness: 'pi' }),
+      ])
+      store.logIngest('agy', 5)
+      store.logIngest('agy', 3)
+      const recordsBefore = store.count()
+      const logBefore = store.getIngestLog().length
+      const bridge = new KyberBridge({ canonPath: ':memory:', store })
+      try {
+        const activity = bridge.getIngestActivity()
+        expect(activity.status).toBe('known')
+        expect(activity.lastReceivedAt).not.toBeNull()
+        const bySource = new Map(activity.sources.map((entry) => [entry.source, entry]))
+        expect(bySource.get('codeburn/pi')?.recordCount).toBe(2)
+        expect(bySource.get('codeburn/pi')?.display).toBe('pi')
+        expect(bySource.get('codeburn/pi')?.kind).toBe('local-file')
+        expect(bySource.get('codeburn/pi')?.ingestedCount).toBe(0)
+        expect(bySource.get('codeburn/pi')?.lastReceivedAt).toBeNull()
+        expect(bySource.get('agy')?.recordCount).toBe(1)
+        expect(bySource.get('agy')?.ingestedCount).toBe(8)
+        expect(bySource.get('agy')?.lastReceivedAt).toBe(activity.lastReceivedAt)
+        expect(bySource.get('unattributed')?.recordCount).toBe(1)
+        expect(bySource.get('unattributed')?.kind).toBe('legacy-unattributed')
+        // Read-only: no rows added by the read.
+        expect(store.count()).toBe(recordsBefore)
+        expect(store.getIngestLog()).toHaveLength(logBefore)
+      } finally {
+        bridge.close()
+      }
+    } finally {
+      store.close()
+    }
+  })
+
+  it('reports unknown receiver status when nothing was ever recorded, never zero or running', () => {
+    const store = new CanonStore(':memory:')
+    try {
+      const bridge = new KyberBridge({ canonPath: ':memory:', store })
+      try {
+        const activity = bridge.getIngestActivity()
+        expect(activity.status).toBe('unknown')
+        expect(activity.sources).toEqual([])
+        expect(activity.lastReceivedAt).toBeNull()
+        if (activity.status === 'unknown') {
+          expect(activity.reason).toMatch(/no receiver activity recorded/)
+        }
+        expect(activity.status).not.toBe('running')
+      } finally {
+        bridge.close()
+      }
+    } finally {
+      store.close()
+    }
+  })
+
+  it('exposes source checkpoint statuses read-only, including partial with zero records', () => {
+    const store = new CanonStore(':memory:')
+    try {
+      const base = {
+        providerId: 'pi',
+        parserId: 'pi-jsonl',
+        parserContractVersion: '1',
+        format: 'jsonl',
+        sourceRootLabel: '~/.pi/agent/sessions',
+        revisionToken: 'rev-1',
+        coveredFromUtc: '2026-08-29T00:00:00.000Z',
+        coveredThroughUtc: '2026-09-12T00:00:00.000Z',
+        lastAttemptUtc: '2026-09-12T00:00:00.000Z',
+        lastSuccessUtc: '2026-09-12T00:00:01.000Z',
+        lastErrorCode: null,
+        unitCount: 1,
+      } as const
+      store.commitSourceUnit({
+        records: [],
+        provenance: [],
+        checkpoint: {
+          ...base,
+          harnessId: 'pi',
+          sourceKey: 'session:ok-unit',
+          lastStatus: 'ok',
+          recordCount: 3,
+        },
+      })
+      store.commitSourceUnit({
+        records: [],
+        provenance: [],
+        checkpoint: {
+          ...base,
+          harnessId: 'pi',
+          sourceKey: 'session:partial-unit',
+          lastStatus: 'partial',
+          lastErrorCode: 'PARSE_WARN',
+          recordCount: 0,
+        },
+      })
+      const before = store.listSourceCheckpoints().length
+      const bridge = new KyberBridge({ canonPath: ':memory:', store })
+      try {
+        const statuses = bridge.getSourceCheckpointStatuses()
+        expect(statuses).toHaveLength(2)
+        const partial = statuses?.find((entry) => entry.sourceKey === 'session:partial-unit')
+        expect(partial?.lastStatus).toBe('partial')
+        expect(partial?.recordCount).toBe(0)
+        expect(bridge.getSourceCheckpointStatuses('pi')).toHaveLength(2)
+        expect(bridge.getSourceCheckpointStatuses('cursor')).toEqual([])
+        // Read-only: the read added no checkpoints.
+        expect(store.listSourceCheckpoints()).toHaveLength(before)
+      } finally {
+        bridge.close()
+      }
+    } finally {
+      store.close()
+    }
+  })
+
+  it('reads a non-numeric file-backed history_weeks as unknown, never NaN', () => {
+    // Review PR #230 (kilo nux5R): Number('junk') is NaN, and NaN ?? null is
+    // still NaN — the file branch must use the shared normalizer so a bad
+    // value reads as unknown, matching the store mapper and the contract.
+    const canonDb = new DatabaseSync(':memory:')
+    try {
+      canonDb.exec(`
+        CREATE TABLE refresh_run (
+          id TEXT PRIMARY KEY,
+          started_at TEXT NOT NULL,
+          completed_at TEXT,
+          status TEXT NOT NULL,
+          pid INTEGER NOT NULL,
+          trigger TEXT NOT NULL,
+          summary TEXT,
+          history_weeks TEXT
+        );
+      `)
+      canonDb
+        .prepare(
+          'INSERT INTO refresh_run (id, started_at, completed_at, status, pid, trigger, summary, history_weeks) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        )
+        .run('bad-weeks', '2026-09-12T00:00:00.000Z', '2026-09-12T00:30:00.000Z', 'success', process.pid, 'cli', 'ok', 'junk')
+      const bridge = new KyberBridge({ canonDb })
+      try {
+        const state = bridge.getRefreshState()
+        expect(state.historyWeeks).toBeNull()
+        expect(state.coveredFrom).toBeNull()
+        expect(state.coveredThrough).toBeNull()
+      } finally {
+        bridge.close()
+      }
+    } finally {
+      try {
+        canonDb.close()
+      } catch {
+        // KyberBridge.close() already closed the injected handle.
+      }
+    }
+  })
+
+  it('degrades to unknown receiver status when the injected store read throws', () => {
+    // Review PR #230 (kilo nux5H): the file branch documents reads as no
+    // receiver activity, not a throw — the store branch must degrade
+    // identically instead of turning /coverage into a 500.
+    const store = new CanonStore(':memory:')
+    const bridge = new KyberBridge({ canonPath: ':memory:', store })
+    store.close()
+    try {
+      const activity = bridge.getIngestActivity()
+      expect(activity.status).toBe('unknown')
+    } finally {
+      bridge.close()
+    }
+  })
+
+  it('returns null checkpoint statuses when the checkpoint table is absent or unreadable', () => {
+    // Review PR #230 (kilo nux5Z): [] must mean "read fine, no units" — a
+    // failed or impossible read is null (unknown) so routes never fabricate
+    // {ok: 0, partial: 0, failed: 0, unavailable: 0} for unreadable coverage.
+    const canonDb = new DatabaseSync(':memory:')
+    try {
+      const bridge = new KyberBridge({ canonDb })
+      try {
+        expect(bridge.getSourceCheckpointStatuses()).toBeNull()
+      } finally {
+        bridge.close()
+      }
+    } finally {
+      try {
+        canonDb.close()
+      } catch {
+        // KyberBridge.close() already closed the injected handle.
+      }
+    }
+  })
+
+  it('tallies quarantine reasons with GROUP BY on both the store and file handles', () => {
+    // Review PR #230 (copilot numrV / kilo nux5e): the coverage endpoint must
+    // not materialize the quarantine table to count reasons.
+    const store = new CanonStore(':memory:')
+    try {
+      store.quarantine('span-q1', ['pi'], 'unclaimed')
+      store.quarantine('span-q2', ['pi'], 'unclaimed')
+      store.quarantine('span-q3', ['copilot'], 'non-model span: health check')
+      const bridge = new KyberBridge({ canonPath: ':memory:', store })
+      try {
+        expect(bridge.getQuarantineCountsByReason()).toEqual([
+          { reason: 'unclaimed', count: 2 },
+          { reason: 'non-model span: health check', count: 1 },
+        ])
+      } finally {
+        bridge.close()
+      }
+    } finally {
+      store.close()
+    }
+  })
+})
+
 describe('KyberBridge run figures review follow-ups', () => {
   // Copilot C4: a priced non-USD block is omitted, never served as dollars.
   // The legacy `usd` shape predates currency and names dollars.
@@ -1177,6 +1511,7 @@ describe('KyberBridge run session streaming (re-review #2 Kilo 4/5)', () => {
     expect(seen[0]!.execution.executionId).toBe('exec-1')
   })
 })
+
 
 describe('KyberBridge.listSessions cost mapping (issue #186)', () => {
   let db: InstanceType<typeof DatabaseSync>

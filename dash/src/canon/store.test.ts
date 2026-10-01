@@ -400,6 +400,72 @@ describe('CanonStore refresh runs', () => {
       store.close()
     }
   })
+
+  it('round-trips the coverage window a refresh ran with', () => {
+    // T1 (issues #189/#198/#199 plan): the ingest window is what discards
+    // most history, so the run row must carry it — otherwise no surface can
+    // state what the last refresh actually covered.
+    const store = new CanonStore(':memory:')
+    try {
+      store.startRefreshRun({
+        id: 'windowed-refresh',
+        startedAt: new Date().toISOString(),
+        pid: process.pid,
+        trigger: 'cli',
+        historyWeeks: 6,
+      })
+
+      expect(store.latestRefreshRun('running')).toMatchObject({ id: 'windowed-refresh', historyWeeks: 6 })
+      expect(store.listRefreshRuns()[0]).toMatchObject({ id: 'windowed-refresh', historyWeeks: 6 })
+    } finally {
+      store.close()
+    }
+  })
+
+  it('reads a run recorded before window tracking as unknown, not zero', () => {
+    // Honest-unobservability: a run started without a window (every run
+    // before the history_weeks column existed) reads as null (unknown) —
+    // never 0, never the current default.
+    const store = new CanonStore(':memory:')
+    try {
+      store.startRefreshRun({
+        id: 'legacy-refresh',
+        startedAt: new Date().toISOString(),
+        pid: process.pid,
+        trigger: 'cli',
+      })
+
+      const running = store.latestRefreshRun('running')
+      expect(running?.id).toBe('legacy-refresh')
+      expect(running?.historyWeeks).toBeNull()
+      expect(store.listRefreshRuns()[0]?.historyWeeks).toBeNull()
+    } finally {
+      store.close()
+    }
+  })
+
+  it.each([0, -2, 1.5, Number.NaN, Number.POSITIVE_INFINITY])(
+    'stores a non-positive-safe-integer window (%p) as unknown, never verbatim',
+    (historyWeeks) => {
+      // Review PR #230 (kilo nux5h/nux5v): the persistence seam is what every
+      // surface reads, so `absent is not zero` must hold in the database —
+      // otherwise a hand-edited row renders `last 0 weeks`.
+      const store = new CanonStore(':memory:')
+      try {
+        store.startRefreshRun({
+          id: `bad-window-${String(historyWeeks)}`,
+          startedAt: new Date().toISOString(),
+          pid: process.pid,
+          trigger: 'cli',
+          historyWeeks,
+        })
+
+        expect(store.latestRefreshRun('running')?.historyWeeks).toBeNull()
+      } finally {
+        store.close()
+      }
+    },
+  )
 })
 
 describe('CanonStore quarantine, problems, and ingest log', () => {
@@ -632,6 +698,58 @@ describe('CanonStore quarantine, problems, and ingest log', () => {
       expect(entry.timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T/)
     }
   })
+
+  it('normalizes a blank ingest source to the unnamed-receiver key', () => {
+    // Review PR #230 (kilo nux45): service.name arrives over the network, so
+    // the persistence seam normalizes it — blank becomes the shared unnamed
+    // key rather than a distinct empty-string cardinality entry.
+    const store = new CanonStore(':memory:')
+    try {
+      store.logIngest('   ', 5)
+
+      expect(store.getIngestLog()).toHaveLength(1)
+      expect(store.getIngestLog()[0]?.source).toBe('otlp')
+    } finally {
+      store.close()
+    }
+  })
+
+  it('tallies quarantine reasons in SQL without materializing rows', () => {
+    // Review PR #230 (copilot numrV / kilo nux5e): the coverage endpoint must
+    // not read every quarantine row to count reasons — the store aggregates
+    // with GROUP BY and folds a null reason into 'unknown', never dropping it.
+    const store = new CanonStore(':memory:')
+    try {
+      store.quarantine('span-1', ['pi'], 'unclaimed')
+      store.quarantine('span-2', ['pi'], 'unclaimed')
+      store.quarantine('span-3', ['copilot'], 'non-model span: health check')
+
+      expect(store.quarantineCountsByReason()).toEqual([
+        { reason: 'unclaimed', count: 2 },
+        { reason: 'non-model span: health check', count: 1 },
+      ])
+    } finally {
+      store.close()
+    }
+  })
+
+  it('sums ingest activity per source in SQL with recency', () => {
+    // Review PR #230 (kilo nux5E): the coverage path must not inflate every
+    // ingest_log row — sums and recency come from one GROUP BY query.
+    const store = new CanonStore(':memory:')
+    try {
+      store.logIngest('pi', 3)
+      store.logIngest('pi', 4)
+      store.logIngest('copilot', 1)
+
+      const sums = store.ingestLogSums()
+      expect(sums.get('pi')?.total).toBe(7)
+      expect(sums.get('pi')?.lastAt).toMatch(/^\d{4}-\d{2}-\d{2}T/)
+      expect(sums.get('copilot')?.total).toBe(1)
+    } finally {
+      store.close()
+    }
+  })
 })
 
 describe('session key index', () => {
@@ -822,6 +940,30 @@ describe('sessionTokenTotals', () => {
   it('is undefined for a session that was never built', () => {
     const store = new CanonStore(':memory:')
     expect(store.sessionTokenTotals('missing')).toBeUndefined()
+    store.close()
+  })
+})
+
+describe('listSessionTimeColumns', () => {
+  it('reads only (harness, started, ended) without the payload', () => {
+    const store = new CanonStore(':memory:')
+    store.upsertSession({
+      sessionId: 's1',
+      harness: 'cursor',
+      label: null,
+      isSubagent: false,
+      parentSession: null,
+      agentName: null,
+      repo: null,
+      branch: null,
+      started: '2026-09-20T12:00:00.000Z',
+      ended: '2026-09-20T13:00:00.000Z',
+      payload: { summary: 'large-payload-that-must-not-cross' },
+    })
+
+    const cols = store.listSessionTimeColumns()
+    expect(cols).toEqual([{ harness: 'cursor', started: '2026-09-20T12:00:00.000Z', ended: '2026-09-20T13:00:00.000Z' }])
+    expect(JSON.stringify(cols)).not.toContain('large-payload')
     store.close()
   })
 })

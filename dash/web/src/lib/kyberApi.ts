@@ -550,6 +550,26 @@ export interface KyberHarnessSummary {
   findingCount?: number
   scorecard?: ServedHarnessScorecard
   payload?: Record<string, unknown>
+  /**
+   * Display-only family label (decision D3, issues #189/#199): split client
+   * surfaces stay distinct rows — grouping sums nothing across origins.
+   */
+  family?: string | null
+  /** Verbatim zero-data reason off the rollup payload, or null when covered. */
+  noDataReason?: string | null
+  /**
+   * Per-harness source-checkpoint unit counts by status, served for API
+   * consumers (null when the checkpoint read is impossible — unknown, never
+   * zeros). The dashboard's checkpoint surface is the ingest panel's global
+   * `KyberCoverage.checkpoints` list, not this per-row rollup — no web
+   * surface renders this field, so the matrix row type does not carry it.
+   */
+  checkpointSummary?: {
+    ok: number
+    partial: number
+    failed: number
+    unavailable: number
+  } | null
 }
 
 export interface KyberRunSummary {
@@ -888,5 +908,84 @@ export async function requestContextReview(
 
 export async function fetchReviewStatus(): Promise<{ provider: string; isConfigured: boolean }> {
   return fetchJson<{ provider: string; isConfigured: boolean }>('/api/kyber/review/status')
+}
+
+// ===========================================================================
+// Ingest coverage (plan docs/plans/2026-09-30-issues-189-198-199 T9,
+// issues #189/#198/#199): one read-only payload carrying the refresh window,
+// receiver activity, quarantine reasons, and checkpoint statuses. Every count
+// comes from a row that exists; anything unrecorded reads as unknown.
+// ===========================================================================
+
+/** One stored source's ingest activity: T7 display label plus the raw id for audit. */
+export interface KyberCoverageSource {
+  /** The stored source name, verbatim (auditability). */
+  source: string
+  /** Display label for the stored name (never a `codeburn/` id). */
+  display: string
+  /** Origin kind for the stored name. */
+  kind: string
+  /** Rows in `records` carrying this source. */
+  recordCount: number
+  /** Summed `ingest_log.count` for this source; 0 when the log names it nowhere. */
+  ingestedCount: number
+  /** Latest `ingest_log.timestamp` for this source; null when the log names it nowhere. */
+  lastReceivedAt: string | null
+}
+
+/**
+ * Receiver activity over the canonical store. `unknown` only when the log AND
+ * the table are both empty — with the reason, never 0 and never `running`.
+ */
+export type KyberCoverageIngest =
+  | { status: 'known'; sources: KyberCoverageSource[]; lastReceivedAt: string | null }
+  | { status: 'unknown'; reason: string; sources: []; lastReceivedAt: null }
+
+/** Refresh health plus the persisted ingest window; null window means unknown. */
+export interface KyberCoverageRefresh {
+  lastSuccessAt: string | null
+  lastFailure: { at: string; summary: string } | null
+  inProgress: { pid: number; since: string } | null
+  historyWeeks?: number | null
+  coveredThrough?: string | null
+  coveredFrom?: string | null
+}
+
+/** Quarantine rows grouped by their verbatim reason. */
+export interface KyberCoverageQuarantine {
+  reason: string
+  count: number
+}
+
+/** Source-unit checkpoint status as the store holds it (`partial` reads verbatim). */
+export interface KyberCoverageCheckpoint {
+  harnessId: string
+  sourceKey: string
+  providerId: string
+  parserId: string
+  parserContractVersion: string
+  format: string
+  sourceRootLabel: string
+  revisionToken: string
+  coveredFromUtc: string
+  coveredThroughUtc: string
+  lastAttemptUtc: string
+  lastSuccessUtc: string | null
+  lastStatus: string
+  lastErrorCode: string | null
+  unitCount: number
+  recordCount: number
+}
+
+export interface KyberCoverage {
+  refresh: KyberCoverageRefresh
+  ingest: KyberCoverageIngest
+  quarantineByReason: KyberCoverageQuarantine[]
+  /** Null when the checkpoint read is unobservable; [] means zero units. */
+  checkpoints: KyberCoverageCheckpoint[] | null
+}
+
+export async function fetchCoverage(): Promise<KyberCoverage> {
+  return fetchJson<KyberCoverage>('/api/kyber/coverage')
 }
 

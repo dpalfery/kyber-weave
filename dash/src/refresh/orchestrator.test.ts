@@ -489,6 +489,30 @@ describe('refreshHarnessSources', () => {
       store.close()
     }
   })
+
+  it('records the coverage window on the refresh run row', async () => {
+    const store = temporaryStore()
+    try {
+      const baseDependencies = {
+        getAllProviders: async () => [],
+        descriptors: [] as ReturnType<typeof descriptors>,
+        jobConcurrency: 1,
+        commandStartedAt: new Date('2026-09-12T00:00:00.000Z'),
+        parseAllSessions: async () => undefined,
+      }
+      await refreshHarnessSources(store, baseDependencies, { historyWeeks: 6 })
+      expect(store.listRefreshRuns()[0]).toMatchObject({ historyWeeks: 6 })
+
+      await refreshHarnessSources(
+        store,
+        { ...baseDependencies, commandStartedAt: new Date('2026-09-13T00:00:00.000Z') },
+        {},
+      )
+      expect(store.listRefreshRuns()[0]).toMatchObject({ historyWeeks: 2 })
+    } finally {
+      store.close()
+    }
+  })
 })
 
 describe('refreshHarnessSources — write volume', () => {

@@ -15,6 +15,8 @@ import {
   type ReportSection,
 } from '../analysis/report/types.js'
 import { createRequire } from 'node:module'
+import { harnessFamily } from '../canon/measurability.js'
+import type { SourceCheckpoint } from '../canon/source-state.js'
 
 /** The build this server is, carried on `/meta` so a client can check it (R6.7). */
 const KYBERDASH_VERSION = String(
@@ -121,6 +123,134 @@ function parseTurnContentPath(pathname: string): { sessionId: string; turnIndex:
     sessionId: decodeURIComponent(sessionIdRaw).trim(),
     turnIndex,
   }
+}
+
+/**
+ * Verbatim zero-data reason off a rollup payload, or null when the row holds
+ * data (T8, issues #189/#199). Zero-data rows keep their rollup reason
+ * word-for-word: no surface may render `0 sessions` where the truth is none
+ * in the coverage window.
+ */
+function noDataReasonOf(row: { payload?: unknown }): string | null {
+  if (row.payload !== null && typeof row.payload === 'object' && 'reason' in row.payload) {
+    const reason = (row.payload as { reason?: unknown }).reason
+    if (typeof reason === 'string' && reason.trim() !== '') return reason
+  }
+  return null
+}
+
+/**
+ * Per-harness checkpoint-unit counts by status (T8, read via the T4 seam).
+ *
+ * <remarks>
+ * `unchanged` units hold reusable coverage so they count as `ok`;
+ * `invalidated` units need reprocessing so they count as `failed`; any other
+ * status reads as `unavailable` rather than being dropped. These are unit
+ * counts — record counts are never summed and nothing is merged across
+ * harnesses, so family grouping (D3) sums nothing.
+ * A null seam read (failed or impossible — table absent, store locked) maps
+ * to null (unknown), never to zeros: `{ok: 0, ...}` for unreadable coverage
+ * is the fabricated zero the honest-unobservability rule forbids.
+ * </remarks>
+ */
+function checkpointSummaryOf(statuses: readonly SourceCheckpoint[] | null): {
+  ok: number
+  partial: number
+  failed: number
+  unavailable: number
+} | null {
+  if (statuses === null) return null
+  const summary = { ok: 0, partial: 0, failed: 0, unavailable: 0 }
+  for (const status of statuses) {
+    switch (status.lastStatus) {
+      case 'ok':
+      case 'unchanged':
+        summary.ok += 1
+        break
+      case 'partial':
+        summary.partial += 1
+        break
+      case 'failed':
+      case 'invalidated':
+        summary.failed += 1
+        break
+      default:
+        summary.unavailable += 1
+        break
+    }
+  }
+  return summary
+}
+
+/**
+ * Per-harness in-window state (issue #189, T8).
+ *
+ * The rollup reason is all-time: a harness with only pre-window history
+ * carries no reason and would read as covered. When the refresh window is
+ * known, the harness's own latest session timestamp decides — a latest
+ * timestamp at or after `coveredFrom` keeps the verbatim state; a latest
+ * timestamp older than the window overrides it with a windowed reason.
+ * Anything else (unknown window, unreadable sessions, no timestamped
+ * sessions at all) keeps the verbatim reason: absence of evidence is not
+ * evidence of absence. Recency is `ended ?? started` parsed to epoch ms,
+ * matching the report's `sessionAt` (`analysis/report/build.ts`): the end
+ * is what "in the window" means, and epoch comparison sorts offset stamps
+ * (`+02:00`) chronologically where a raw string compare does not.
+ */
+function inWindowNoDataReason(
+  harness: string,
+  latestByHarness: ReadonlyMap<string, number>,
+  coveredFrom: string | null,
+  verbatim: string | null,
+): string | null {
+  if (verbatim !== null || coveredFrom === null) return verbatim
+  const floor = Date.parse(coveredFrom)
+  if (!Number.isFinite(floor)) return verbatim
+  const latest = latestByHarness.get(harness)
+  if (latest === undefined) return verbatim
+  if (latest >= floor) return null
+  return `No sessions in coverage window (since ${coveredFrom})`
+}
+
+/**
+ * The persisted window bound plus the per-harness latest session times that
+ * decide per-harness in-window state, or nulls when either is unknowable.
+ * Reads are fenced so a locked store degrades to verbatim reasons rather
+ * than a 500. The session times come from the bridge's narrow-column
+ * `getLatestSessionTimeByHarness` seam (every session row's
+ * `(harness, started, ended)` folded to a per-harness maximum in JS epoch
+ * ms, payload-free and uncapped — no LIMIT, no SQL MAX): this context must
+ * never materialize the session table via an uncapped `listSessions()`.
+ */
+function windowContextOf(bridge: KyberBridge): {
+  coveredFrom: string | null
+  latestByHarness: ReadonlyMap<string, number>
+} {
+  let coveredFrom: string | null = null
+  try {
+    coveredFrom = bridge.getRefreshState().coveredFrom ?? null
+  } catch {
+    coveredFrom = null
+  }
+  let latestByHarness: ReadonlyMap<string, number> = new Map<string, number>()
+  if (coveredFrom !== null) {
+    try {
+      latestByHarness = bridge.getLatestSessionTimeByHarness()
+    } catch {
+      latestByHarness = new Map<string, number>()
+    }
+  }
+  return { coveredFrom, latestByHarness }
+}
+
+function groupCheckpointsByHarness(statuses: readonly SourceCheckpoint[]): Map<string, SourceCheckpoint[]> {
+  const byHarness = new Map<string, SourceCheckpoint[]>()
+  for (const status of statuses) {
+    const list = byHarness.get(status.harnessId) ?? []
+    list.push(status)
+    byHarness.set(status.harnessId, list)
+  }
+  return byHarness
 }
 
 function sendKyberJson(res: ServerResponse, status: number, body: unknown): void {
@@ -359,6 +489,30 @@ export function handleKyberRequest(
     return true
   }
 
+  // Ingest coverage (plan docs/plans/2026-09-30-issues-189-198-199 T5,
+  // issues #189/#198/#199). Refresh window, receiver activity, quarantine
+  // reasons, and checkpoint statuses in one read-only payload — every count
+  // comes from a row that exists, and anything unrecorded reads as unknown.
+  if (url.pathname === '/api/kyber/coverage') {
+    if (req.method !== 'GET') {
+      sendKyberJson(res, 405, { error: 'Method Not Allowed' })
+      return true
+    }
+    const refresh = bridge.getRefreshState()
+    const ingest = bridge.getIngestActivity()
+    // Per-reason counts come from the bridge's GROUP BY aggregate over the
+    // handle it already owns (no second store): the coverage request must
+    // not materialize the quarantine table to tally it. A null reason
+    // groups as 'unknown' inside the seam, never dropped.
+    const quarantineByReason = bridge.getQuarantineCountsByReason()
+    // An unreadable checkpoint read is unknown (null), never []: null means
+    // the checkpoint status is not observable from this page, [] means the
+    // read succeeded and zero units exist (genuine zero).
+    const checkpoints = bridge.getSourceCheckpointStatuses()
+    sendKyberJson(res, 200, { refresh, ingest, quarantineByReason, checkpoints })
+    return true
+  }
+
   // The one report every surface reads (Decision D2, R7.1, R7.5).
   if (url.pathname === '/api/kyber/report') {
     if (req.method !== 'GET') {
@@ -513,8 +667,25 @@ export function handleKyberRequest(
     }
     // `scorecard` is served rather than left for each client to derive: the report and
     // this endpoint must agree on dimensions (R11.14), which one derivation guarantees.
+    // `family` is the T7 display-only label (D3 — rows stay per-origin, nothing is
+    // summed); `noDataReason` keeps the rollup's verbatim zero-data reason unless
+    // the window proves the harness has only pre-window history (#189); and
+    // `checkpointSummary` counts source-checkpoint units by status via the T4 seam
+    // (null when that read is impossible — unknown, never zeros).
+    const { coveredFrom, latestByHarness } = windowContextOf(bridge)
+    // A failed checkpoint read is unknown for every row (null); a
+    // successful read with no units for this harness is genuinely zero.
+    const allCheckpoints = bridge.getSourceCheckpointStatuses()
+    const checkpointsByHarness =
+      allCheckpoints === null ? null : groupCheckpointsByHarness(allCheckpoints)
     const harnesses = bridge.listHarnessRollups().map((row) => ({
       ...row,
+      family: harnessFamily(row.harness),
+      noDataReason: inWindowNoDataReason(row.harness, latestByHarness, coveredFrom, noDataReasonOf(row)),
+      checkpointSummary:
+        checkpointsByHarness === null
+          ? null
+          : checkpointSummaryOf(checkpointsByHarness.get(row.harness) ?? []),
       scorecard: buildScorecard(row),
     }))
     sendKyberJson(res, 200, { harnesses })
@@ -543,7 +714,22 @@ export function handleKyberRequest(
       sendKyberJson(res, 404, { error: 'Harness not found' })
       return true
     }
-    sendKyberJson(res, 200, { ...rollup, scorecard: buildScorecard(rollup) })
+    // Same coverage facts as the list endpoint, so the two agree (R11.14).
+    // The window override applies here too: a pre-window-only harness reads
+    // as no-data on the detail route exactly as on the list route.
+    const { coveredFrom: detailCoveredFrom, latestByHarness: detailLatest } = windowContextOf(bridge)
+    sendKyberJson(res, 200, {
+      ...rollup,
+      family: harnessFamily(rollup.harness),
+      noDataReason: inWindowNoDataReason(
+        rollup.harness,
+        detailLatest,
+        detailCoveredFrom,
+        noDataReasonOf(rollup),
+      ),
+      checkpointSummary: checkpointSummaryOf(bridge.getSourceCheckpointStatuses(id)),
+      scorecard: buildScorecard(rollup),
+    })
     return true
   }
 

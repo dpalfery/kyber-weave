@@ -240,6 +240,7 @@ function toReportMeasurability(
  */
 function buildCoverage(
   bridge: KyberBridge,
+  scope: ReportScope,
   scoped: readonly SessionSummary[],
   windowed: readonly SessionSummary[],
   storePath: string,
@@ -264,8 +265,25 @@ function buildCoverage(
     }))
 
   const hints: string[] = []
-  if (scoped.length === 0) {
-    hints.push('No session in the window. Run `kyberdash dash refresh` to read local harness history.')
+  // An empty narrowed set has two different causes with two different
+  // remedies: a filter that matches nothing (name the filter and the day
+  // window) versus a day window that holds nothing at all (name the ingest
+  // window). Suggesting `--history-weeks` for a filter emptiness prescribes
+  // rows nobody asked for; suggesting `--days` for an empty ingest window
+  // misses the refresh that would fill it.
+  const hasFilter =
+    scope.harness !== undefined || scope.sessionId !== undefined || scope.runId !== undefined
+  if (scoped.length === 0 && hasFilter && windowed.length > 0) {
+    const naming = [scope.harness, scope.sessionId, scope.runId].filter(
+      (part): part is string => part !== undefined,
+    )
+    hints.push(
+      `No session matches the filter (${naming.join(', ')}). Loosen the filter or widen the report window with --days ${scope.days}.`,
+    )
+  } else if (scoped.length === 0) {
+    hints.push(
+      'No session in the window. Run `kyberdash dash refresh --history-weeks <n>` to widen the coverage window.',
+    )
   }
   // An hour is the point past which a reader should be told the figures are old rather
   // than left to compare timestamps themselves (R11.4).
@@ -296,12 +314,32 @@ function buildCoverage(
  * Refresh state from the run log (R10.5). The last success and the last failure are read
  * independently on purpose: a failure must not hide the success before it, because "it
  * last worked on Tuesday" is what tells a reader how stale the data is.
+ *
+ * The coverage window rides along from the T4 bridge seam (`historyWeeks` plus the
+ * derived `coveredFrom`/`coveredThrough` of the last success). A bridge that predates
+ * window tracking omits those keys, and a pre-migration run carries them as null:
+ * both normalise to null here — unknown stays unknown, never the default, never 0.
  */
 function readRefreshState(bridge: KyberBridge): ReportCoverage['refresh'] {
-  return safely(
-    () => bridge.getRefreshState(),
-    { lastSuccessAt: null, lastFailure: null, inProgress: null },
-  )
+  const fallback: ReportCoverage['refresh'] = {
+    lastSuccessAt: null,
+    lastFailure: null,
+    inProgress: null,
+    historyWeeks: null,
+    coveredFrom: null,
+    coveredThrough: null,
+  }
+  return safely(() => {
+    const state = bridge.getRefreshState()
+    return {
+      lastSuccessAt: state.lastSuccessAt,
+      lastFailure: state.lastFailure,
+      inProgress: state.inProgress,
+      historyWeeks: state.historyWeeks ?? null,
+      coveredFrom: state.coveredFrom ?? null,
+      coveredThrough: state.coveredThrough ?? null,
+    }
+  }, fallback)
 }
 
 function buildHarnesses(bridge: KyberBridge, scope: ReportScope): ReportHarness[] {
@@ -548,6 +586,7 @@ export function buildContextReport(
     // session and run filters the inventory must ignore (R8.8).
     report.coverage = buildCoverage(
       bridge,
+      scope,
       scoped,
       sessionsInScope(allSessions, { days: scope.days }, now),
       options.storePath ?? 'canon.db',

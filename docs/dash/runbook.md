@@ -150,6 +150,27 @@ per-harness table plus a derived summary; diagnostics for `failed`/`partial` row
 stderr without chat content or raw paths. Use a temporary `--db` when experimenting. There is
 no dashboard refresh button.
 
+Coverage window persistence: every refresh run records its window in
+`refresh_run.history_weeks` (schema 15). The value is the `--history-weeks` argument of
+that run (default 2). Rows written before window tracking read as `null`, which surfaces
+render as "coverage window unknown (recorded before window tracking)" — never as 2 and
+never as 0, per [honest unobservability](../rules/honest-unobservability.md). A scoped
+window with no session names the widening command
+(`kyberdash dash refresh --history-weeks <n>`), not just the bare refresh.
+
+Ingest activity audit: the live OTLP receiver writes one `ingest_log` row per distinct
+span source in each decoded batch (source is `service.name`, `'otlp'` when unnamed), sized
+to the arriving batch so quarantined traffic still counts as received, plus one
+`otlp:logs` row per log batch so last-received reflects any receiver request. When
+`ingest_log` holds no rows, the dashboard says "no receiver activity recorded" — receiver
+liveness is never inferred, because the receiver is a separate process this page cannot
+observe.
+
+Coverage route: `GET /api/kyber/coverage` returns the refresh window, per-source ingest
+activity (record counts from `records`, log sums and `lastReceivedAt` from `ingest_log`),
+per-reason quarantine counts, and `source_checkpoint` statuses including `partial`. An
+empty log and empty table yield `{ status: 'unknown' }` with a reason, never a zero.
+
 ### 3. Raw Content Backfill and Re-normalization
 
 ```bash
@@ -391,6 +412,9 @@ curl -s http://127.0.0.1:3000/api/kyber/compare | jq .
 curl -s http://127.0.0.1:3000/api/kyber/quarantine | jq .
 curl -s http://127.0.0.1:3000/api/kyber/problems | jq .
 
+# Coverage route (refresh window, ingest activity, checkpoints)
+curl -s http://127.0.0.1:3000/api/kyber/coverage | jq .
+
 # Telemetry metadata and rate definitions
 curl -s http://127.0.0.1:3000/api/kyber/meta | jq .
 ```
@@ -494,8 +518,10 @@ here.
 - **Symptom**: Report footer displays `inProgress: pid X since <timestamp>` indefinitely.
 - **Remediation**: KyberDash automatically reconciles runs whose PID is dead or whose elapsed duration exceeds 15 minutes before starting each refresh. To inspect runs directly:
   ```bash
-  sqlite3 ~/.kyberdash/canon.db "SELECT id, status, pid, started_at, completed_at, summary FROM refresh_run ORDER BY started_at DESC LIMIT 5;"
+  sqlite3 ~/.kyberdash/canon.db "SELECT id, status, pid, started_at, completed_at, history_weeks, summary FROM refresh_run ORDER BY started_at DESC LIMIT 5;"
   ```
+  A `null` `history_weeks` means the window is unknown (recorded before window
+  tracking), not 2 and not 0.
 
 ### 5. Store Schema Migration and Problem Deduplication
 

@@ -78,7 +78,7 @@ import {
  * corpus is the expensive thing here and re-collecting it is not always
  * possible.
  */
-export const SCHEMA_VERSION = 15
+export const SCHEMA_VERSION = 16
 
 /**
  * Version of the diagnostic signal and finding detector suite (Decision D17).
@@ -239,6 +239,11 @@ CREATE TABLE IF NOT EXISTS ingest_log (
   count INTEGER NOT NULL,
   timestamp TEXT NOT NULL
 );
+-- The coverage and meta seams read this table only through GROUP BY source
+-- (sums plus MAX(timestamp)); the index keeps those scans off a full sort as
+-- the audit log grows without a retention policy.
+CREATE INDEX IF NOT EXISTS ingest_log_by_source ON ingest_log (source);
+CREATE INDEX IF NOT EXISTS ingest_log_by_timestamp ON ingest_log (timestamp);
 CREATE TABLE IF NOT EXISTS metadata (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
@@ -296,12 +301,6 @@ CREATE INDEX IF NOT EXISTS prediction_by_run ON prediction (run_id);
 CREATE INDEX IF NOT EXISTS prediction_by_created_at ON prediction (created_at);
 ` + SOURCE_STATE_SQL + REFRESH_RUN_SQL
 
-/**
- * In-place upgrades, keyed by the version they upgrade FROM. Each runs inside
- * one transaction and leaves the store at `key + 1`. `SCHEMA_SQL` cannot do
- * this work: every statement in it is `IF NOT EXISTS`, so an existing table
- * never gains a column.
- */
 /** Map a `refresh_run` row out of SQLite's column names. */
 function toRefreshRunRow(row: Record<string, unknown>): RefreshRunRow {
   return {
@@ -312,9 +311,46 @@ function toRefreshRunRow(row: Record<string, unknown>): RefreshRunRow {
     pid: Number(row['pid']),
     trigger: String(row['trigger']) as RefreshTrigger,
     summary: row['summary'] === null ? null : String(row['summary']),
+    // Rows written before migration 15→16 carry NULL (or no column at all
+    // on a store that has not migrated): the window is unknown, never 0.
+    historyWeeks: normalizeHistoryWeeks(row['history_weeks']),
   }
 }
 
+/**
+ * Coerce a persisted coverage window to the contract every surface reads
+ * (`historyWeeks?: number | null` — null means unknown, never 0).
+ *
+ * The persistence seam is what every surface reads, so `absent is not zero`
+ * holds here, not just at the CLI parser: only a positive safe integer
+ * survives; 0, negatives, fractions, NaN, Infinity, and non-numeric junk all
+ * read as unknown. Shared by the store mapper and the file-backed bridge
+ * mapper so both halves of the seam agree.
+ */
+export function normalizeHistoryWeeks(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0) return null
+  return value
+}
+
+/**
+ * Normalize an ingest audit-log key at the persistence seam. `service.name`
+ * arrives over the network, so blank values fold into the shared unnamed
+ * key and over-long values are capped — one more bound on a table with no
+ * retention policy. Never a liveness claim: callers still decide what an
+ * empty log means.
+ */
+export function normalizeIngestSource(source: string): string {
+  const trimmed = source.trim()
+  if (trimmed === '') return 'otlp'
+  return trimmed.length > 256 ? trimmed.slice(0, 256) : trimmed
+}
+
+/**
+ * In-place upgrades, keyed by the version they upgrade FROM. Each runs inside
+ * one transaction and leaves the store at `key + 1`. `SCHEMA_SQL` cannot do
+ * this work: every statement in it is `IF NOT EXISTS`, so an existing table
+ * never gains a column.
+ */
 export const MIGRATIONS: Record<number, (db: Database) => void> = {
   // v1 -> v2: structured content parts. v1 stored content as a flat string
   // per bucket, which has nowhere to put the ground-truth MCP server a tool
@@ -524,6 +560,25 @@ export const MIGRATIONS: Record<number, (db: Database) => void> = {
     CREATE INDEX IF NOT EXISTS finding_by_run ON finding (run_id);
     CREATE INDEX IF NOT EXISTS finding_by_session ON finding (session_id);
     CREATE INDEX IF NOT EXISTS finding_by_rank_score ON finding (rank_score DESC);`)
+  },
+  // v15 -> v16: persist the ingest coverage window per refresh run
+  // (issues #189/#198/#199 plan, T1). The window is what discards most
+  // history, and no surface can state it while `refresh_run` carries no
+  // column for it. Existing rows gain a NULL column — window unknown, which
+  // readers state as such rather than as 0 or the current default.
+  // Renumbered from 14 after main landed the nullable-finding-waste 14→15
+  // step on the same base; main's step stays 14 so a v14 store migrates
+  // through both in order.
+  15: (db) => {
+    // Like migration 12's problems guard: a v15-stamped store with no
+    // refresh_run table (partial install, hand-built fixture) skips the
+    // ALTER rather than throwing a raw driver error.
+    const table = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='refresh_run'").get()
+    if (!table) return
+    const columns = db.prepare('PRAGMA table_info(refresh_run)').all() as { name: string }[]
+    if (!columns.some((column) => column.name === 'history_weeks')) {
+      db.exec('ALTER TABLE refresh_run ADD COLUMN history_weeks INTEGER')
+    }
   },
 }
 
@@ -1195,13 +1250,22 @@ export class CanonStore {
     startedAt: string
     pid: number
     trigger: RefreshTrigger
+    /**
+     * The ingest window, in weeks, this run will cover. Optional so callers
+     * that predate window tracking (and the orchestrator until T2) keep
+     * compiling; an omitted window persists as NULL = unknown.
+     */
+    historyWeeks?: number | null
   }): string {
     this.db
       .prepare(
-        `INSERT INTO refresh_run (id, started_at, completed_at, status, pid, trigger, summary)
-         VALUES (?, ?, NULL, 'running', ?, ?, NULL)`,
+        `INSERT INTO refresh_run (id, started_at, completed_at, status, pid, trigger, summary, history_weeks)
+         VALUES (?, ?, NULL, 'running', ?, ?, NULL, ?)`,
       )
-      .run(input.id, input.startedAt, input.pid, input.trigger)
+      // The persistence seam validates: only a positive safe integer is a
+      // window — 0, negatives, fractions, and non-finite values persist as
+      // NULL (unknown), so no surface can render `last 0 weeks`.
+      .run(input.id, input.startedAt, input.pid, input.trigger, normalizeHistoryWeeks(input.historyWeeks))
     return input.id
   }
 
@@ -1801,6 +1865,22 @@ export class CanonStore {
         : this.db.prepare('SELECT * FROM session WHERE harness = ? ORDER BY started DESC').all(harnessId)
     ) as SessionDbRow[]
     return rows.map(toSessionRow)
+  }
+
+  /**
+   * Narrow session-time columns for the coverage-window seam. Only
+   * `(harness, started, ended)` cross the bridge — payload blobs are never
+   * selected and never parsed — so the per-harness latest-time fold stays
+   * cheap no matter how large session payloads grow. Uncapped by design:
+   * every row participates and the maximum folds in JS epoch ms (a SQL MAX
+   * over ISO strings mis-sorts `+02:00`-offset stamps).
+   */
+  listSessionTimeColumns(): Array<{ harness: unknown; started: unknown; ended: unknown }> {
+    return this.db.prepare('SELECT harness, started, ended FROM session').all() as Array<{
+      harness: unknown
+      started: unknown
+      ended: unknown
+    }>
   }
 
   /**
@@ -2618,6 +2698,40 @@ export class CanonStore {
     return (this.db.prepare('SELECT COUNT(*) AS n FROM quarantine').get() as { n: number }).n
   }
 
+  /**
+   * Quarantined-span counts by reason, aggregated in SQL (GROUP BY) so the
+   * coverage seam never materializes the table to tally it. A null reason
+   * groups as `'unknown'` — folded, never dropped.
+   */
+  quarantineCountsByReason(): Array<{ reason: string; count: number }> {
+    const rows = this.db
+      .prepare(
+        `SELECT COALESCE(reason, 'unknown') AS reason, COUNT(*) AS n
+         FROM quarantine GROUP BY reason ORDER BY n DESC, reason ASC`,
+      )
+      .all() as Array<{ reason: unknown; n: unknown }>
+    return rows.map((row) => ({
+      reason: typeof row.reason === 'string' && row.reason !== '' ? row.reason : 'unknown',
+      count: typeof row.n === 'number' ? row.n : Number(row.n) || 0,
+    }))
+  }
+
+  /**
+   * Per-source record counts, aggregated in SQL (GROUP BY) so activity seams
+   * never inflate the corpus through `listAll()` to tally it.
+   */
+  countBySource(): Map<string, number> {
+    const rows = this.db
+      .prepare('SELECT source, COUNT(*) AS n FROM records GROUP BY source')
+      .all() as Array<{ source: unknown; n: unknown }>
+    const counts = new Map<string, number>()
+    for (const row of rows) {
+      if (typeof row.source !== 'string') continue
+      counts.set(row.source, typeof row.n === 'number' ? row.n : Number(row.n) || 0)
+    }
+    return counts
+  }
+
   /** Record a surfaced failure the system declines to guess about. */
   recordProblem(problem: SpanProblem): void {
     const problemKey = problemIdentity(problem.spanId, problem.code, problem.location ?? null)
@@ -2670,7 +2784,29 @@ export class CanonStore {
   logIngest(source: string, count: number): void {
     this.db
       .prepare('INSERT INTO ingest_log (source, count, timestamp) VALUES (?, ?, ?)')
-      .run(source, count, new Date().toISOString())
+      .run(normalizeIngestSource(source), count, new Date().toISOString())
+  }
+
+  /**
+   * Per-source ingest sums with recency, aggregated in SQL (GROUP BY) so the
+   * coverage and meta seams never page the unbounded audit log to tally it.
+   */
+  ingestLogSums(): Map<string, { total: number; lastAt: string | null }> {
+    const rows = this.db
+      .prepare(
+        `SELECT source, SUM(count) AS total, MAX(timestamp) AS last_at
+         FROM ingest_log GROUP BY source`,
+      )
+      .all() as Array<{ source: unknown; total: unknown; last_at: unknown }>
+    const sums = new Map<string, { total: number; lastAt: string | null }>()
+    for (const row of rows) {
+      if (typeof row.source !== 'string') continue
+      sums.set(row.source, {
+        total: typeof row.total === 'number' ? row.total : Number(row.total) || 0,
+        lastAt: typeof row.last_at === 'string' ? row.last_at : null,
+      })
+    }
+    return sums
   }
 
   /** The ingest audit log, oldest first. */
