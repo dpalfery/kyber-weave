@@ -467,6 +467,21 @@ export function currentBrowserPage(
 }
 
 /**
+ * Whether the browser query may keep the previous page on screen while the
+ * next one loads. Offset-only moves stay within the same filter scope, so
+ * the stored rows are still valid; a detector or harness change re-scopes
+ * the list and the old filter's rows must not pose as the new filter's.
+ * Both filter slots are compared — checking only one would keep stale rows
+ * when the other filter changes.
+ */
+export function shouldKeepPreviousData(
+  prevKey: readonly unknown[] | undefined,
+  nextKey: readonly unknown[],
+): boolean {
+  return prevKey?.[1] === nextKey[1] && prevKey?.[2] === nextKey[2]
+}
+
+/**
  * Renders the Context Doctor landing page with workspace findings and a
  * per-harness diagnostic scorecard.
  */
@@ -558,8 +573,13 @@ export function ContextDoctor({
     // resetBrowse the old filter's page must not pose as the new filter's.
     placeholderData: (previousData, previousQuery) => {
       const prevKey = previousQuery?.queryKey as readonly unknown[] | undefined
-      const sameFilters = prevKey?.[1] === (detectorFilter ?? '') && prevKey?.[2] === (harnessFilter ?? '')
-      return sameFilters ? previousData : undefined
+      const nextKey: readonly unknown[] = [
+        'kyber-findings-browser',
+        detectorFilter ?? '',
+        harnessFilter ?? '',
+        offset,
+      ]
+      return shouldKeepPreviousData(prevKey, nextKey) ? previousData : undefined
     },
   })
 

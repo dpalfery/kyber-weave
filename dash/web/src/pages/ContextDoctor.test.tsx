@@ -1,9 +1,14 @@
+// @vitest-environment happy-dom
+// The rendered suites below mount the real component with @testing-library/react,
+// so this file runs under happy-dom (the static-markup suites above are unaffected:
+// renderToStaticMarkup needs no DOM). dash/vitest.config.ts is left untouched.
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
+import { render, screen, fireEvent, cleanup, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type * as React from 'react'
 
-import { ContextDoctor, browserRows, nextAccumulated, FindingsBrowserView, nextBrowserOffset, currentBrowserPage } from './ContextDoctor.js'
+import { ContextDoctor, browserRows, nextAccumulated, FindingsBrowserView, nextBrowserOffset, currentBrowserPage, shouldKeepPreviousData } from './ContextDoctor.js'
 import { fetchCoverage, type FindingsPage, type KyberFinding, type KyberHarnessSummary, type KyberCoverage } from '../lib/kyberApi.js'
 
 function createTestQueryClient() {
@@ -549,6 +554,39 @@ describe('browser paging races (review M3)', () => {
   })
 })
 
+describe('shouldKeepPreviousData — placeholder scope for the findings browser', () => {
+  const key = (detector: string, harness: string, offset: number): readonly unknown[] => [
+    'kyber-findings-browser',
+    detector,
+    harness,
+    offset,
+  ]
+
+  it('keeps previous rows when only the offset changed', () => {
+    expect(shouldKeepPreviousData(key('', '', 0), key('', '', 25))).toBe(true)
+  })
+
+  it('drops previous rows when the detector filter changed', () => {
+    // Harness slot identical — the detector slot alone must drop the data.
+    expect(shouldKeepPreviousData(key('', 'cursor', 0), key('duplicate-tool-call', 'cursor', 0))).toBe(false)
+  })
+
+  it('drops previous rows when the harness filter changed', () => {
+    // Detector slot identical — the harness slot alone must drop the data.
+    expect(shouldKeepPreviousData(key('', '', 0), key('', 'cursor', 0))).toBe(false)
+  })
+
+  it('drops previous rows when both filters changed', () => {
+    expect(
+      shouldKeepPreviousData(key('', '', 0), key('duplicate-tool-call', 'cursor', 0)),
+    ).toBe(false)
+  })
+
+  it('drops previous rows when there is no previous query key', () => {
+    expect(shouldKeepPreviousData(undefined, key('', '', 0))).toBe(false)
+  })
+})
+
 describe('FindingsBrowserView complete set (review optional)', () => {
   it('has no load-more button when every finding is shown', () => {
     const rows = Array.from({ length: 115 }, (_, i) =>
@@ -619,5 +657,212 @@ describe('browserRows staleness and overlap (review)', () => {
     const second = nextAccumulated(first, '|', 0, rows('b', 25))
     const flat = browserRows(second, '|', 0, undefined)
     expect(flat.map((r) => r.id)).toEqual(rows('b', 25).map((r) => r.id))
+  })
+})
+
+/**
+ * Rendered filter-change regression (must-fix-1 review): mounting the real
+ * `ContextDoctor` with a real QueryClient and stubbed fetch, then changing a
+ * filter must drop the old filter's rows at once — no placeholder pose, no
+ * stale re-append, no skeleton over stored rows. Unit suites above pin the
+ * helpers; these pin the wired path (query key + placeholderData +
+ * currentBrowserPage + the resetBrowse effect).
+ */
+describe('ContextDoctor filter change — rendered (must-fix-1)', () => {
+  const harnessRows: KyberHarnessSummary[] = [
+    { ...harnessRow, harness: 'cursor', name: 'Cursor' },
+    { ...harnessRow, harness: 'claude-code', name: 'Claude Code' },
+  ]
+
+  const emptyCoverage: KyberCoverage = {
+    refresh: {
+      lastSuccessAt: null,
+      lastFailure: null,
+      inProgress: null,
+      historyWeeks: null,
+      coveredFrom: null,
+      coveredThrough: null,
+    },
+    ingest: { status: 'unknown', reason: 'test stub', sources: [], lastReceivedAt: null },
+    quarantineByReason: [],
+    checkpoints: [],
+  }
+
+  function browserPage(
+    ids: string[],
+    detectorCounts: Record<string, number>,
+    harness = 'cursor',
+  ): FindingsPage {
+    return {
+      findings: ids.map((id, i) => finding(id, `det-${i}`, harness)),
+      total: ids.length,
+      offset: 0,
+      detectorCounts,
+      unknownWindowSessions: 0,
+    }
+  }
+
+  afterEach(() => {
+    cleanup()
+    vi.unstubAllGlobals()
+  })
+
+  /**
+   * Stubs every endpoint ContextDoctor queries. Requests carrying the *new*
+   * filter wait on a gate the test releases, so the mid-flight assertions
+   * observe the loading state deterministically — no real timers, no real
+   * network. Unfiltered findings requests always serve `initial`: the offset-0
+   * browser page and the headline card share one URL (`fetchFindings` drops
+   * a zero offset as falsy), so both read the same rows — the browser-scoped
+   * assertions below are unaffected, and the mount refetch is a same-ids
+   * no-op in `nextAccumulated`.
+   */
+  function stubFetch(opts: {
+    initial: FindingsPage
+    filtered: FindingsPage
+    isFilteredRequest: (url: URL) => boolean
+    release: () => Promise<void>
+  }): void {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string) => {
+        const url = new URL(input, 'http://localhost')
+        const json = (payload: unknown) =>
+          ({ ok: true, json: async () => payload }) as unknown as Response
+        if (url.pathname === '/api/kyber/harnesses') return json({ harnesses: harnessRows })
+        if (url.pathname === '/api/kyber/runs') return json({ runs: [] })
+        if (url.pathname === '/api/kyber/coverage') return json(emptyCoverage)
+        if (url.pathname === '/api/kyber/findings') {
+          if (opts.isFilteredRequest(url)) {
+            await opts.release()
+            return json(opts.filtered)
+          }
+          return json(opts.initial)
+        }
+        throw new Error(`unstubbed fetch: ${input}`)
+      }),
+    )
+  }
+
+  function renderDoctor(initial: FindingsPage): void {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
+    const out = render(
+      <QueryClientProvider client={client}>
+        <ContextDoctor initialHarnesses={harnessRows} initialFindings={initial} />
+      </QueryClientProvider>,
+    )
+    // eslint-disable-next-line no-console
+    console.log(
+      `RENDER container=${out.container.innerHTML.length} sameDoc=${out.container.ownerDocument === document} attached=${document.body.contains(out.container)} base=${out.baseElement === document.body}`,
+    )
+  }
+
+  function browserSection(): HTMLElement {
+    return screen.getByTestId('all-workspace-findings')
+  }
+
+  /**
+   * Queries scoped to the browser section. The headline card above reads the
+   * same initial rows (shared initial page), so global card testids are
+   * ambiguous — every row assertion lives inside the browser section.
+   */
+  function browser() {
+    return within(browserSection())
+  }
+
+  it('changing the harness filter drops the old rows at once and never re-appends them', async () => {
+    const initial = browserPage(['a-1', 'a-2', 'a-3'], {})
+    const filtered = browserPage(['b-1', 'b-2'], {})
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    stubFetch({
+      initial,
+      filtered,
+      isFilteredRequest: (url) => url.searchParams.get('harness') === 'claude-code',
+      release: () => gate,
+    })
+    renderDoctor(initial)
+    // eslint-disable-next-line no-console
+    console.log(`PROBE body=${document.body.innerHTML.length} act=${(globalThis as unknown as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT} doc=${typeof document}`)
+
+    // (a) Page 1 for filter A renders (synchronously, from initialFindings).
+    expect(browser().getByTestId('finding-card-a-1')).not.toBeNull()
+    expect(browser().getByTestId('finding-card-a-3')).not.toBeNull()
+    expect(browser().getByText('All Workspace Findings (3)')).not.toBeNull()
+
+    // (b) Change the harness filter; the new page stays gated.
+    fireEvent.change(screen.getByTestId('findings-harness-filter'), {
+      target: { value: 'claude-code' },
+    })
+    expect((screen.getByTestId('findings-harness-filter') as HTMLSelectElement).value).toBe(
+      'claude-code',
+    )
+
+    // (c) Mid-flight: old ids are ABSENT (not hidden), and the section shows
+    // a skeleton over zero rows — no placeholder leak, no stale rows.
+    expect(browser().queryByTestId('finding-card-a-1')).toBeNull()
+    expect(browser().queryByTestId('finding-card-a-2')).toBeNull()
+    expect(browser().queryByTestId('finding-card-a-3')).toBeNull()
+    expect(browser().queryByTestId('finding-list-empty')).toBeNull()
+    expect(browserSection().querySelector('.skeleton-shimmer')).not.toBeNull()
+
+    // New page resolves: exactly its rows render, once each.
+    release()
+    await browser().findByTestId('finding-card-b-1')
+    expect(browser().getByText('All Workspace Findings (2)')).not.toBeNull()
+    expect(browser().getAllByTestId('finding-card-b-1')).toHaveLength(1)
+    expect(browser().getAllByTestId('finding-card-b-2')).toHaveLength(1)
+    // `appended` was reset: no stale page-A row re-appears and the list is
+    // complete, so Load more stays hidden.
+    expect(browser().queryByTestId('finding-card-a-1')).toBeNull()
+    expect(browser().queryByTestId('finding-card-a-2')).toBeNull()
+    expect(browser().queryByTestId('finding-card-a-3')).toBeNull()
+    expect(browser().queryAllByTestId(/finding-card-/)).toHaveLength(2)
+    expect(browser().queryByTestId('findings-load-more')).toBeNull()
+    expect(browserSection().querySelector('.skeleton-shimmer')).toBeNull()
+  })
+
+  it('changing the detector filter drops the old rows at once and never re-appends them', async () => {
+    const initial = browserPage(['a-1', 'a-2', 'a-3'], { 'dup-det': 7 })
+    const filtered = browserPage(['c-1', 'c-2'], { 'dup-det': 2 })
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    stubFetch({
+      initial,
+      filtered,
+      isFilteredRequest: (url) => url.searchParams.get('detector') === 'dup-det',
+      release: () => gate,
+    })
+    renderDoctor(initial)
+
+    // (a) Page 1 for filter A renders, with the detector chip.
+    expect(browser().getByTestId('finding-card-a-1')).not.toBeNull()
+    expect(browser().getByText('All Workspace Findings (3)')).not.toBeNull()
+    fireEvent.click(screen.getByTestId('findings-detector-chip-dup-det'))
+
+    // (c) Mid-flight: old ids are ABSENT (not hidden); skeleton, not rows.
+    expect(browser().queryByTestId('finding-card-a-1')).toBeNull()
+    expect(browser().queryByTestId('finding-card-a-2')).toBeNull()
+    expect(browser().queryByTestId('finding-card-a-3')).toBeNull()
+    expect(browserSection().querySelector('.skeleton-shimmer')).not.toBeNull()
+
+    // New page resolves: exactly its rows render, once each.
+    release()
+    await browser().findByTestId('finding-card-c-1')
+    expect(browser().getByText('All Workspace Findings (2)')).not.toBeNull()
+    expect(browser().getAllByTestId('finding-card-c-1')).toHaveLength(1)
+    expect(browser().getAllByTestId('finding-card-c-2')).toHaveLength(1)
+    // `appended` was reset: no stale page-A row re-appears and the list is
+    // complete, so Load more stays hidden.
+    expect(browser().queryByTestId('finding-card-a-1')).toBeNull()
+    expect(browser().queryByTestId('finding-card-a-2')).toBeNull()
+    expect(browser().queryByTestId('finding-card-a-3')).toBeNull()
+    expect(browser().queryAllByTestId(/finding-card-/)).toHaveLength(2)
+    expect(browser().queryByTestId('findings-load-more')).toBeNull()
+    expect(browserSection().querySelector('.skeleton-shimmer')).toBeNull()
   })
 })
