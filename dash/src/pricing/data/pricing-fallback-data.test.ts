@@ -121,7 +121,7 @@ describe('issue #186 bundler MANUAL_ENTRIES reproducibility', () => {
   })
 
   // Drive the guard off every parsed MANUAL_ENTRIES key so a hand-added rate
-  // (kimi-k2-thinking, claude-opus-4-20250514, grok-latest, …) cannot skip the
+  // (kimi-k2-thinking, claude-opus-4, claude-opus-4-20250514, …) cannot skip the
   // reproducibility check. Compare the full tuple, including optional `fast`.
   for (const id of manual.keys()) {
     it(`declares ${id} in MANUAL_ENTRIES with the committed snapshot rates`, () => {

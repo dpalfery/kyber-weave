@@ -67,10 +67,6 @@ const MANUAL_ENTRIES = {
   // Anthropic Opus 4 list rates ($15/$75); see pricing-provenance.json.
   'claude-opus-4':          [15e-6, 75e-6, 18.75e-6, 1.5e-6, null],
   'claude-opus-4-20250514': [15e-6, 75e-6, 18.75e-6, 1.5e-6, null],
-  // xAI reports grok-latest in modelUsage; LiteLLM carries only ~x-ai/grok-latest
-  // (Pass 2 does not peel to bare grok-latest), so chooseAuthoritativeModel
-  // falls back to summary grok-build. Mirror the OpenRouter/xAI latest rates.
-  'grok-latest':            [2e-6, 6e-6, null, 5e-7, null],
 }
 
 const snapshot = {}
