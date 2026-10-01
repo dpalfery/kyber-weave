@@ -53,7 +53,7 @@ const MANUAL_ENTRIES = {
   // claude-sonnet-5-5 and gpt-6-luna (#186): not yet in the LiteLLM/models.dev
   // source the bundled snapshot was built from; rates and provenance are in
   // src/pricing/data/pricing-provenance.json. gpt-6-luna publishes no cache-write
-  // rate (null in the snapshot); buildCosts() bills cache creation at input rate.
+  // rate (null in the snapshot); buildCosts() bills cache creation at 1.25x input.
   'claude-sonnet-5-5':      [2e-6, 1e-5, 2.5e-6, 2e-7],
   'gpt-6-luna':             [1e-7, 5e-7, null, 1e-8, null],
   // Regression restore (#229 review): LiteLLM now ships only prefixed keys
