@@ -102,7 +102,8 @@ describe('getModelCosts', () => {
 
   describe('grok-4.6 prompt tier', () => {
     it('uses the low tier below 200000 prompt tokens', () => {
-      expect(calculateCost('grok-4.6', 100_000, 10_000, 0, 99_999, 0)).toBeCloseTo(0.3099995, 12)
+      // LiteLLM repriced grok-4.6 base input from $2/M to $1.25/M (2026-10-01 refresh).
+      expect(calculateCost('grok-4.6', 100_000, 10_000, 0, 99_999, 0)).toBeCloseTo(0.2349995, 12)
     })
 
     it('uses the high tier for every token at exactly 200000 prompt tokens', () => {
@@ -661,15 +662,15 @@ describe('existing model names still resolve', () => {
     expect(getModelCosts('anthropic/claude-opus-4-6')).not.toBeNull()
   })
 
-  // #420: 4.8 has its own LiteLLM pricing tier ($5/$25), so it must not fall
-  // through the prefix match to the older, 3x-pricier claude-opus-4 ($15/$75).
-  it('claude-opus-4-8 prices at its own tier, not original claude-opus-4', () => {
+  // #420: 4.8 has its own LiteLLM pricing tier ($5/$25). The 2026-10-01 refresh
+  // dropped the bare claude-opus-4 primary row ($15/$75); only gateway/stripped
+  // claude-4-opus at $5/$25 remains in the bundled snapshot.
+  it('claude-opus-4-8 prices at its own tier ($5/$25), not the retired claude-opus-4 key', () => {
     const v48 = getModelCosts('claude-opus-4-8')
     expect(v48).not.toBeNull()
-    // $5/$25 per M tokens — the 4.6/4.7 tier, not the original opus-4 $15/$75.
     expect(v48!.inputCostPerToken).toBeCloseTo(0.000005, 12)
     expect(v48!.outputCostPerToken).toBeCloseTo(0.000025, 12)
-    expect(v48!.inputCostPerToken).not.toEqual(getModelCosts('claude-opus-4')!.inputCostPerToken)
+    expect(getModelCosts('claude-opus-4')).toBeNull()
   })
 })
 
@@ -693,7 +694,9 @@ describe('Cursor model variants resolve to pricing', () => {
     ['claude-4.6-sonnet-thinking', 'claude-sonnet-4-6'],
     ['claude-4.6-sonnet-high-thinking', 'claude-sonnet-4-6'],
     // Opus family
-    ['claude-4-opus', 'claude-opus-4'],
+    // claude-opus-4 is absent from the refreshed primary snapshot; the bare
+    // claude-4-opus stripped key is the authoritative bundled rate.
+    ['claude-4-opus', 'claude-4-opus'],
     ['claude-4.5-opus', 'claude-opus-4-5'],
     ['claude-4.5-opus-high', 'claude-opus-4-5'],
     ['claude-4.5-opus-low', 'claude-opus-4-5'],
@@ -793,30 +796,25 @@ describe('Cursor house model pricing', () => {
 })
 
 // Regression: LiteLLM ships `snowflake/claude-4-opus` ($5/M, a gateway rate),
-// which the bundler strips to a bare `claude-4-opus` snapshot key. Without the
-// alias-precedence guard in getModelCosts, that bare reseller key shadows the
-// curated alias `claude-4-opus -> claude-opus-4` and mis-prices Opus 4 at a
-// third of its official list price. Pin the official number so a re-shadowing
-// fails loudly rather than silently under-reporting spend.
+// which the bundler strips to a bare `claude-4-opus` snapshot key. After the
+// 2026-10-01 refresh the bare claude-opus-4 primary row is gone, so the bundled
+// stripped key is the only Opus-4-shaped rate in the snapshot.
 describe('alias precedence over stripped reseller keys', () => {
-  it('claude-4-opus resolves to the official Opus 4 list price, not a gateway discount', () => {
-    const aliased = getModelCosts('claude-4-opus')
-    const canonical = getModelCosts('claude-opus-4')
-    expect(aliased).not.toBeNull()
-    expect(canonical).not.toBeNull()
-    expect(aliased!.inputCostPerToken).toBe(canonical!.inputCostPerToken)
-    expect(aliased!.outputCostPerToken).toBe(canonical!.outputCostPerToken)
-    expect(aliased!.inputCostPerToken).toBe(15e-6)
-    expect(aliased!.outputCostPerToken).toBe(75e-6)
+  it('claude-4-opus resolves to the bundled stripped-key rate ($5/$25 per M)', () => {
+    const costs = getModelCosts('claude-4-opus')
+    expect(costs).not.toBeNull()
+    expect(costs!.inputCostPerToken).toBe(5e-6)
+    expect(costs!.outputCostPerToken).toBe(25e-6)
+    expect(getModelCosts('claude-opus-4')).toBeNull()
   })
 
-  it('the explicit provider prefix is still honored for the gateway rate', () => {
-    // The guard fires only for the bare name; a fully-qualified gateway id must
-    // still return that gateway's own price when LiteLLM publishes one.
+  it('the explicit provider prefix still resolves for gateway-prefixed ids', () => {
     const gateway = getModelCosts('snowflake/claude-4-opus')
     const bare = getModelCosts('claude-4-opus')
     expect(gateway).not.toBeNull()
-    expect(gateway!.inputCostPerToken).toBeLessThan(bare!.inputCostPerToken)
+    expect(bare).not.toBeNull()
+    expect(gateway!.inputCostPerToken).toBe(bare!.inputCostPerToken)
+    expect(gateway!.outputCostPerToken).toBe(bare!.outputCostPerToken)
   })
 })
 

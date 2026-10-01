@@ -4,7 +4,7 @@ title: Kyber-Weave Plan Inventory
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-09-30
+last-reviewed: 2026-10-01
 ---
 
 # Kyber-Weave Plan Inventory
@@ -17,8 +17,7 @@ A plan is open only while it is built. The pull request that finishes it archive
 
 ## Active Plans
 
-| Plan | Status | Date | Goal |
-|---|---|---|---|
+No active plans.
 
 Pipeline T9 and spine S-docs harvested 2026-09-13 into [dash/architecture.md](../dash/architecture.md), [dash/runbook.md](../dash/runbook.md), [dash/telemetry-inventory.md](../dash/telemetry-inventory.md), [ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md), and [ADR 0018](../adr/0018-kyberdash-content-retention-purge.md). ADRs 0012–0015 remain the spine harvest (0014 notes that `kyber purge-content` was not shipped). Residual risks (T8 live-source coverage, findings client-side harness filter) live on the archived plans — they are not shipped claims.
 
@@ -26,6 +25,7 @@ Pipeline T9 and spine S-docs harvested 2026-09-13 into [dash/architecture.md](..
 
 | Plan | Status | Date | Archive Date | Canonical Docs / Harvested ADRs | Goal |
 |---|---|---|---|---|---|
+| [2026-10-01-kyberdash-bundle-litellm-output-path.md](../archive/plans/2026-10-01-kyberdash-bundle-litellm-output-path.md) | Complete | 2026-10-01 | 2026-10-01 | [dash/architecture.md](../dash/architecture.md) (CostBlock published-path rules), [dash/runbook.md](../dash/runbook.md) (build workflow), [reference/kyberdash-rationale.md](../reference/kyberdash-rationale.md); no ADR — decisions A1–A5 and D1–D4 recorded in the plan | Fix [issue #229](https://github.com/dpalfery/kyber-weave/issues/229): point `bundle-litellm.mjs` at `dash/src/pricing/data/`, preserve U11 manual-rate semantics, and commit an audited full LiteLLM/models.dev/OpenRouter re-snapshot (primary 4671→5978 keys, fallback 205→52). Development mode: test-first. Complete: T1–T4, council APPROVE, focused 234/234 pricing tests, full Dash gates green. Archived per KW-DOC-LIFECYCLE-003. |
 | [2026-10-01-pr-233-review-follow-up.md](../archive/plans/2026-10-01-pr-233-review-follow-up.md) | Complete | 2026-10-01 | 2026-10-01 | [dash/architecture.md](../dash/architecture.md) (canonical read side of the harness checkpoint join; Web Dashboard paging contract); no ADR — decisions D1–D5 are recorded in the plan itself | Land the five kilo-code-bot findings on [PR #233](https://github.com/dpalfery/kyber-weave/pull/233) that had been resolved with no fix commit: the half-applied harness normalisation on the `/api/kyber/harnesses` checkpoint join (F1, `aa28158`), the mid-list error wedge and painted-row paging offset in the Context Doctor findings browser (F2, F3, `258cf9f`), stored pages not keyed on `total` (F4, `258cf9f`), and the `TWIN_TURN_MAX_SKEW_MS` docblock promising a step bound deleted in `a689157` (F5, `212b35b`). F2–F4 are one task over one page state; F1's "widen `?? []` to `null`" is declined on R2 and pinned by a test; F5 is its own commit. Development mode: test-first. Complete: `94b91a0` also unbroke the branch's `render` name collision, which had been failing the TypeScript gate. Archived in its own PR per KW-DOC-LIFECYCLE-003, which `ci.yml` runs as the merge gate. |
 | [2026-09-30-issues-181-182-191.md](../archive/plans/2026-09-30-issues-181-182-191.md) | Complete | 2026-09-30 | 2026-09-30 | [dash/architecture.md](../dash/architecture.md) (findings API contract, honest-measurement rules); no ADR — decisions D181-A–D191-B recorded in the plan | Fix [issue #181](https://github.com/dpalfery/kyber-weave/issues/181) (suppress default-window compaction findings, downgrade over-window peaks, ~85% gauge caption), [issue #182](https://github.com/dpalfery/kyber-weave/issues/182) (fold twin front-ends + ADR 0009 same-turn dedupe), [issue #191](https://github.com/dpalfery/kyber-weave/issues/191) (paged findings envelope, workspace browser, unknown-window count). Development mode: test-first. |
 | [2026-09-30-issues-189-198-199.md](../archive/plans/2026-09-30-issues-189-198-199.md) | Complete | 2026-09-30 | 2026-09-30 | [dash/architecture.md](../dash/architecture.md), [dash/runbook.md](../dash/runbook.md), [dash/telemetry-inventory.md](../dash/telemetry-inventory.md); no ADR — D1–D4 are recorded in the plan itself | Make KyberDash ingest coverage visible and honest across [#189](https://github.com/dpalfery/kyber-weave/issues/189), [#198](https://github.com/dpalfery/kyber-weave/issues/198), [#199](https://github.com/dpalfery/kyber-weave/issues/199) in one PR: persist and surface the `dash refresh` coverage window, record and expose OTLP collector activity (`ingest_log`, per-source counts, last-received-or-unknown), and surface checkpoint `partial` state, display-level Claude family grouping, and non-`codeburn/` source display names — no new parsers, no default-window change. Development mode: test-first. Complete: archived for merge-ready per KW-DOC-LIFECYCLE-003. |

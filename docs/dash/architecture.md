@@ -6,7 +6,7 @@ component: KyberDash
 source-root: dash
 status: current
 owner: dpalfery
-last-reviewed: 2026-09-29
+last-reviewed: 2026-10-01
 decided-by:
   - adr/0020-kyberdash-one-time-fork
   - adr/0008-kyberdash-single-canonical-store
@@ -323,8 +323,10 @@ to the credits table.
   credits table instead of keeping a LiteLLM-derived figure at API list rates.
 - `claude-sonnet-5-5` and `gpt-6-luna` also live in `MANUAL_ENTRIES` of
   `dash/scripts/bundle-litellm.mjs` (guarded by a test), so a regeneration reproduces them. The
-  bundler writes `dash/src/data/` while the runtime reads `dash/src/pricing/data/` (follow-up F2 in
-  the [rationale](../reference/kyberdash-rationale.md)).
+  bundler writes both generated snapshots to `dash/src/pricing/data/`, which is what
+  `dash/src/pricing/models.ts` imports. `npm --prefix dash run build` runs that networked refresh
+  first; `build:cli` and release packaging embed the committed files without re-snapshotting (see
+  the [runbook](runbook.md#build-workflow)).
 
 | Harness (normalized) | Priced from | Notes |
 |---|---|---|

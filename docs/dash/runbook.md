@@ -6,7 +6,7 @@ status: current
 component: KyberDash
 source-root: dash
 owner: dpalfery
-last-reviewed: 2026-09-30
+last-reviewed: 2026-10-01
 code-refs:
   - registerKyberCommands
   - refreshHarnessSources
@@ -86,6 +86,21 @@ flowchart TD
 - **No upstream remote**: `dash/` no longer tracks CodeBurn. A clone made while it did
   may still carry the `codeburn` git remote; nothing uses it, so remove it with
   `git remote remove codeburn`.
+
+### Build workflow
+
+KyberDash splits **compiled output** from **pricing data refresh**:
+
+| Script | Pricing re-snapshot | Produces |
+|---|---|---|
+| `npm --prefix dash run build` | Yes — runs `scripts/bundle-litellm.mjs` over the network (LiteLLM, models.dev, OpenRouter) into `dash/src/pricing/data/`, then `tsup` and `build:web` | CLI, web bundle, refreshed committed pricing JSON |
+| `npm --prefix dash run build:cli` | No — `tsup` only | `dash/dist/cli.js` from committed sources |
+| `npm --prefix dash run build:dash` | No | Web dashboard static assets |
+
+Release packaging (`tsup`, Node SEA binaries, npm publish) embeds the committed files under
+`dash/src/pricing/data/` and does not call the bundler independently. Refresh pricing deliberately
+with `npm --prefix dash run build` (or `npm --prefix dash run bundle-litellm`) before packaging
+when upstream list prices have moved.
 
 ---
 

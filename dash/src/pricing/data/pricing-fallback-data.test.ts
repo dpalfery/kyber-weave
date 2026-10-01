@@ -80,26 +80,46 @@ describe('issue #186 U11 bundled rate additions', () => {
 describe('issue #186 bundler MANUAL_ENTRIES reproducibility', () => {
   const source = readFileSync(new URL('../../../scripts/bundle-litellm.mjs', import.meta.url), 'utf8')
   const block = /const MANUAL_ENTRIES = \{([\s\S]*?)\n\}/.exec(source)?.[1] ?? ''
-  const manual = new Map<string, number[]>()
+
+  function parseTupleLiteral(raw: string): (number | null)[] {
+    return raw.split(',').map((token) => {
+      const trimmed = token.trim()
+      if (trimmed === 'null') return null
+      return Number(trimmed)
+    })
+  }
+
+  const manual = new Map<string, (number | null)[]>()
   for (const line of block.split('\n')) {
     const m = /^\s*'([^']+)':\s*\[([^\]]*)\]/.exec(line)
-    if (m) manual.set(m[1], m[2].split(',').map((n) => Number(n.trim())))
+    if (m) manual.set(m[1], parseTupleLiteral(m[2]))
   }
   const snap = snapshot as unknown as Record<string, (number | null)[]>
+
+  it('targets dash/src/pricing/data for generated pricing artifacts (not dash/src/data)', () => {
+    const dataDirLine = source.match(/const dataDir = join\([^)]+\)/)?.[0] ?? ''
+    expect(dataDirLine).toMatch(/'src',\s*'pricing',\s*'data'/)
+    expect(dataDirLine).not.toMatch(/'src',\s*'data'\s*\)/)
+  })
 
   it('locates and parses the MANUAL_ENTRIES block (sanity: neighbour claude-mythos-5)', () => {
     expect(manual.has('claude-mythos-5')).toBe(true)
   })
 
   for (const id of ['claude-sonnet-5-5', 'gpt-6-luna']) {
-    it(`declares ${id} in MANUAL_ENTRIES with the committed snapshot rates`, () => {
+    it(`declares ${id} in MANUAL_ENTRIES with the committed snapshot rates (first four tuple fields)`, () => {
       const declared = manual.get(id)
       expect(declared).toBeDefined()
       const committed = snap[id]
       expect(committed).toBeDefined()
-      // input, output, cache-write, cache-read; a null cache-write is written as 0 in the tuple.
       for (let i = 0; i < 4; i++) {
-        expect(declared![i]).toBeCloseTo(committed[i] ?? 0, 13)
+        const expected = committed![i]
+        const actual = declared![i]
+        if (expected === null) {
+          expect(actual, `${id}[${i}] must stay null (absent cache-write), not 0`).toBeNull()
+        } else {
+          expect(actual).toBeCloseTo(expected, 13)
+        }
       }
     })
   }

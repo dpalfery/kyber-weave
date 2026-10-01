@@ -4,7 +4,7 @@ title: KyberDash measurable rationale
 doc-type: reference
 status: current
 owner: dpalfery
-last-reviewed: 2026-08-29
+last-reviewed: 2026-10-01
 ---
 
 # KyberDash measurable rationale
@@ -83,13 +83,8 @@ reader's `cost_usd` keeps the `harness` basis.
 - The legacy `cost_usd` fallback in the session row is untested.
 - The Run and Harness cost cells (`RunDetail.tsx:459`, `HarnessDetail.tsx:395`) still use the bare
   `—` pattern.
-- A full LiteLLM re-snapshot (only `claude-sonnet-5-5` and `gpt-6-luna` were added) is a separate,
-  source-cited change.
 - **F1.** The session-list cost cell (`w-20`) wraps word statuses such as "no published rate".
   Needs a visual check, then a wider cell or a short label with the reason in `title`.
-- **F2.** `dash/scripts/bundle-litellm.mjs` writes `dash/src/data/`, but the runtime reads
-  `dash/src/pricing/data/`. Fixing the path makes every build a full re-snapshot, so it belongs
-  with the re-snapshot above.
 
 **PR #225 review items declined, with reasons.**
 

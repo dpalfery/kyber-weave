@@ -22,7 +22,7 @@ const MODELS_DEV_URL = 'https://models.dev/api.json'
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/models'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
-const dataDir = join(__dirname, '..', 'src', 'data')
+const dataDir = join(__dirname, '..', 'src', 'pricing', 'data')
 const snapshotPath = join(dataDir, 'litellm-snapshot.json')
 const fallbackPath = join(dataDir, 'pricing-fallback.json')
 
@@ -57,9 +57,20 @@ const MANUAL_ENTRIES = {
   // claude-sonnet-5-5 and gpt-6-luna (#186): not yet in the LiteLLM/models.dev
   // source the bundled snapshot was built from; rates and provenance are in
   // src/pricing/data/pricing-provenance.json. gpt-6-luna publishes no cache-write
-  // rate (null in the snapshot), which the parser treats as 0.
+  // rate (null in the snapshot); buildCosts() bills cache creation at input rate.
   'claude-sonnet-5-5':      [2e-6, 1e-5, 2.5e-6, 2e-7],
-  'gpt-6-luna':             [1e-7, 5e-7, 0, 1e-8],
+  'gpt-6-luna':             [1e-7, 5e-7, null, 1e-8, null],
+  // Regression restore (#229 review): LiteLLM now ships only prefixed keys
+  // (e.g. openrouter/moonshotai/kimi-k2-thinking); Pass 2 strips one segment,
+  // leaving moonshotai/kimi-k2-thinking, so bare kimi-k2-thinking and the
+  // kimi-auto/kimi-code aliases resolve null. Rates from prior bundled snapshot.
+  'kimi-k2-thinking':       [6e-7, 2.5e-6, null, 1.5e-7, null],
+  // Same refresh dropped the dated Opus 4 id; advisor/parser fixtures still cite it.
+  'claude-opus-4-20250514': [15e-6, 75e-6, 18.75e-6, 1.5e-6, null],
+  // xAI reports grok-latest in modelUsage; LiteLLM carries only ~x-ai/grok-latest
+  // (Pass 2 does not peel to bare grok-latest), so chooseAuthoritativeModel
+  // falls back to summary grok-build. Mirror the OpenRouter/xAI latest rates.
+  'grok-latest':            [2e-6, 6e-6, null, 5e-7, null],
 }
 
 const snapshot = {}

@@ -29,7 +29,7 @@ import { currentTzKey, ensureCacheHydrated, toDateString, type DailyEntry } from
 import { createCodexProvider } from './codex.js'
 import type { ParsedProviderCall } from './types.js'
 
-// Snapshot ground truth (src/data/litellm-snapshot.json), USD per token:
+// Snapshot ground truth (src/pricing/data/litellm-snapshot.json), USD per token:
 //   gpt-5.6-terra  input 2e-6   output 12e-6  cacheWrite 2.5e-6 (EXPLICIT)  cacheRead 2e-7
 //   gpt-5.5        input 5e-6   output 30e-6  cacheWrite null (fabricated)  cacheRead 5e-7
 const TERRA = { input: 2e-6, output: 12e-6, cacheWrite: 2.5e-6, cacheRead: 2e-7 }
