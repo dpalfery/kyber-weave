@@ -117,6 +117,10 @@ records. If detector algorithms change or migrations are applied, rebuild projec
 node dash/dist/cli.js kyber build --db ~/.kyberdash/canon.db
 ```
 
+Upgrading the binary does not itself rebuild derived tables: opening an existing store serves
+the rows its `detector_version` stamp describes until the next build, refresh, or live-collector
+projection runs. After deploying a release whose detectors changed, run the rebuild above once.
+
 This rebuilds:
 - Derived sessions from canonical records.
 - First-class `run` tasks and `execution` parent/child delegation trees ([ADR 0012](../adr/0012-progressive-disclosure-6-level-diagnostic-spine.md)).

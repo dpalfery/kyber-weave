@@ -113,7 +113,7 @@ export function ContextPressureStrip({
 
       <div className="mt-1 flex items-center justify-between text-[10px] text-tertiary-foreground">
         <span>0%</span>
-        <span>Compaction threshold (~75%)</span>
+        <span>Compaction threshold (~85%)</span>
         <span>100% {maxContextTokens ? `(${fmtTokens(maxContextTokens)})` : ''}</span>
       </div>
     </div>
