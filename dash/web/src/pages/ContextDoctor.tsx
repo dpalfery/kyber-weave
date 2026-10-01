@@ -411,8 +411,12 @@ export function retainedEnvelope(
 }
 
 /**
- * How far the **server** has served this scope: the highest `offset +
- * rows.length` over its stored pages, or 0 when none.
+ * How far the **server** has served this scope: the extent of the contiguous
+ * run of stored pages starting at offset 0, or 0 when there is none.
+ *
+ * A page stored beyond a gap is not counted until the gap is refetched, and a
+ * page that serves zero rows ends the run — neither advances the offset, so
+ * paging on from them would skip rows the server never served.
  *
  * <remarks>
  * Not `browserRows(...).length`. A rebuild can shift a page window by one, so
@@ -420,11 +424,21 @@ export function retainedEnvelope(
  * the overlap by id, and paging from the painted count then re-requests a row
  * the server already served. The stored pages carry the served extent
  * directly, and it survives the dedupe.
+ *
+ * Sorted by offset first, like `browserRows` and `retainedEnvelope`: the
+ * stored list is in arrival order, not offset order, and the F4 restart makes
+ * that visible — it stores the page the rebuild was caught at and then re-fetches
+ * from 0, so the list reads `[p25, p0]`. Walking arrival order skips `p25`,
+ * never returns for it, and reports the extent of `p0` alone; the next offset
+ * handed to `onLoadMore` is then the one already loaded and the browser
+ * re-fetches the same page forever. `.filter()` copies, so the sort cannot
+ * mutate the caller's list.
  * </remarks>
  */
 export function servedOffset(pages: readonly AccumulatedPage[], scope: string): number {
   return pages
     .filter((page) => page.scope === scope)
+    .sort((a, b) => a.offset - b.offset)
     .reduce((extent, page) => (page.offset === extent ? page.offset + page.rows.length : extent), 0)
 }
 

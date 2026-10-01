@@ -359,8 +359,17 @@ describe("servedOffset — the extent the server served, not the rows painted (F
   const scope = "|"
   const rows = (prefix: string, n: number) =>
     Array.from({ length: n }, (_, i) => finding(`${prefix}-${i + 1}`, "duplicate-tool-call", "cursor"))
+  /** A stored page, envelope included — what the accumulate effect writes. */
+  const page = (scope: string, offset: number, prefix: string, n: number): AccumulatedPage => ({
+    scope,
+    offset,
+    total: 115,
+    detectorCounts: {},
+    unknownWindowSessions: 0,
+    rows: rows(prefix, n),
+  })
 
-  it("is the highest offset plus its rows, so an overlap is not skipped", () => {
+  it("is the contiguous run from offset zero, not the highest offset plus its rows", () => {
     // Page two repeats page one's last row (a rebuild shifted the window).
     // `browserRows` dedupes it, so the painted count is 5 while the server
     // extent is 6 — paging from the painted count re-requests a served row.
@@ -374,6 +383,42 @@ describe("servedOffset — the extent the server served, not the rows painted (F
     expect(browserRows(stored, scope, 3, undefined)).toHaveLength(5)
     expect(servedOffset(stored, scope)).toBe(6)
     expect(nextBrowserOffset(servedOffset(stored, scope), 115)).toBe(6)
+  })
+
+  it("counts nothing when the scope's only stored page is at a non-zero offset", () => {
+    // The F4 restart drops the scope and stores the page the rebuild was caught
+    // at (offset 25), then resets the offset to 0. Reporting 25 as the served
+    // extent hands `onLoadMore` the offset it is already sitting on, so every
+    // click refetches the page already in the list (F3).
+    const stranded = nextAccumulated([], scope, findingsPage(rows("late", 25), 25, 115))
+    expect(servedOffset(stranded, scope)).toBe(0)
+  })
+
+  it("walks the stored list in offset order, not arrival order", () => {
+    // The F4 restart stores the rebuilt page at 25 first; page 0 re-arrives
+    // second, leaving the list as [p25, p0]. Trusting arrival order skips p25,
+    // never returns for it, and reports 25 — with p25's own rows unfetched and
+    // everything past 50 unreachable.
+    const stored = nextAccumulated(
+      nextAccumulated([], scope, findingsPage(rows("late", 25), 25, 115)),
+      scope,
+      findingsPage(rows("head", 25), 0, 115),
+    )
+    expect(stored.map((p) => p.offset)).toEqual([25, 0])
+    expect(servedOffset(stored, scope)).toBe(50)
+    expect(nextBrowserOffset(servedOffset(stored, scope), 115)).toBe(50)
+  })
+
+  it("stops at a hole rather than counting the pages stored beyond it", () => {
+    const stored = [page(scope, 0, "p0", 25), page(scope, 50, "p2", 25)]
+    expect(servedOffset(stored, scope)).toBe(25)
+  })
+
+  it("ends the run at a page that serves zero rows", () => {
+    // A page that serves nothing advances no extent, so the run ends there and
+    // the page stored beyond it is not counted.
+    const stored = [page(scope, 0, "p0", 25), page(scope, 25, "empty", 0), page(scope, 50, "p2", 25)]
+    expect(servedOffset(stored, scope)).toBe(25)
   })
 
   it("is zero when the scope has nothing stored", () => {
@@ -723,8 +768,8 @@ describe('formatCoverageAgo (ingest panel)', () => {
 
 describe('browser paging races (review M3)', () => {
   it('derives the next offset from the extent the server served', () => {
-    // `served` is `servedOffset` over the stored pages: the highest
-    // `offset + rows.length` the server has answered for. It cannot move
+    // `served` is `servedOffset` over the stored pages: the extent of the
+    // contiguous run from offset 0 the server has answered for. It cannot move
     // while a fetch is in flight — two quick clicks on Load more resolve to
     // the same offset instead of skipping a page — and unlike the painted row
     // count it survives a deduped overlap (F3). These are

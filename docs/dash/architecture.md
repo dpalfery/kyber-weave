@@ -660,9 +660,12 @@ The React web dashboard provides progressive-disclosure views matching the 6-lev
 - **`ScorecardMatrix.tsx`**: Cross-harness six-dimension matrix on Context Doctor.
 
 The workspace findings browser pages on what the **server** served, not on what is painted:
-the next offset is the highest `offset + rows.length` across the scope's stored pages, so a
-page whose first row repeats its predecessor's last row does not re-request a row already
-fetched. Each stored page keeps the envelope it was served under, and a `total` that moves
+the next offset is the extent of the contiguous run of the scope's stored pages that starts at
+offset 0, walked in offset order, so a page whose first row repeats its predecessor's last row
+does not re-request a row already fetched. A page stored beyond a gap is not counted until that
+gap is refetched, and a page that serves zero rows ends the run — neither advances the offset, so
+paging past them would skip rows the server never served. Each stored page keeps the envelope it
+was served under, and a `total` that moves
 invalidates the scope's pages and restarts the offset at 0 — a ranking that has been rebuilt
 underneath rows already on screen cannot be re-ranked into place. Consequently a failed page
 never rewrites a count: the heading, the detector chips and the suppression banner keep the last
