@@ -2,7 +2,7 @@
 id: plans/2026-10-01-pr-233-review-follow-up
 title: "KyberDash: PR #233 review follow-up (F1–F5)"
 doc-type: plan
-status: current
+status: complete
 component: KyberDash
 owner: dpalfery
 last-reviewed: 2026-10-01
@@ -11,21 +11,27 @@ development-mode: test-first
 
 # KyberDash: PR #233 review follow-up (F1–F5)
 
-**Status: open, approved for execution 2026-10-01.** Development mode: `test-first`.
+**Status: complete, delivered 2026-10-01.** Development mode: `test-first`.
 
-**Delivery status 2026-10-01: T1–T7 complete, including T7's documentation step.**
-`docs/dash/architecture.md` now states the read-side normalisation of the harness checkpoint
-join ("Display families and source display names") and the findings browser's paging contract
-("Web Dashboard"). The two remaining lifecycle steps belong to PR close and are deliberately not
-done here: archiving this plan to `docs/archive/plans/` and moving its inventory row in
-[`<plan-index>`](README.md). Until then `docs validate . --merge-ready` reports
-`KW-DOC-LIFECYCLE-003` for this plan, which is expected mid-PR.
+**Delivery 2026-10-01: T1–T7 complete, archived in the PR that finished it.**
+`docs/dash/architecture.md` states the read-side normalisation of the harness checkpoint join
+("Display families and source display names") and the findings browser's paging contract
+("Web Dashboard"). The plan is archived here rather than at merge because
+`KW-DOC-LIFECYCLE-003` is the merge gate: `ci.yml` runs `docs validate . --merge-ready` on every
+PR, so a plan left in `docs/plans/` while its PR is open fails the build it was written for. An
+open plan with nothing left to execute is not work in progress, and an exception for that case
+belongs in the rule rather than in a note explaining why the gate is red this time.
 
-This plan plans the work for the five findings on
+**Fixing commits** — F1 `aa28158`, F2/F3/F4 `258cf9f`, F5 `212b35b`; the branch compile break
+that preceded them `94b91a0`, and the two review-guard corrections `81f8597`.
+
+This plan planned the work for the five findings on
 [PR #233](https://github.com/dpalfery/kyber-weave/pull/233) (branch
 `fix/dash-181-182-191-findings-quality`) that were resolved in the review threads with **no fix
 commit**, plus the fifth thread that was only partially fixed. The 25 kilo-code-bot threads are
-otherwise resolved; the findings below are the residue, not a re-litigation of the review.
+otherwise resolved; the findings below were the residue, not a re-litigation of the review. All
+five are now fixed by the commits named above; the sections below record what was decided and
+why, and the `T1 (RED)` / `T2 (GREEN)` headings are the delivery record, not outstanding work.
 
 The branch documents two premises this plan depends on and does not reopen:
 
@@ -408,8 +414,7 @@ T2, T4 and T6 are the GREEN halves of T1, T3 and T5. They add no contract of the
    * 50 s would collapse into one turn. See the check in `dedupeTwinTurns`.
   ```
   Acceptance: T5 GREEN and the whole `twin-dedupe.test.ts` green. Depends on: T5.
-- **T7 (docs; skill: app-docs-standard; no-test) — DONE except the two PR-close steps below,
-  which are the orchestrator's.**
+- **T7 (docs; skill: app-docs-standard; no-test) — DONE.**
   - **DONE** — `docs/dash/architecture.md`, "Display families and source display names": the
     per-harness checkpoint join is canonical on both sides, so a rollup row written before the
     fold still reports its own coverage counts until a rebuild rewrites it. The edit also states
@@ -425,11 +430,10 @@ T2, T4 and T6 are the GREEN halves of T1, T3 and T5. They add no contract of the
   - **DONE (no change)** — `docs/dash/architecture.md` for F5. No governed document describes the
     twin-dedupe clustering bound; the decision lives in the code, and this plan records that in
     its inventory row.
-  - **PENDING, PR close (orchestrator)** — `docs/plans/README.md`: the Active Plans row moves to
-    Archived Plans, with "None — the twin-dedupe bound is code-local; the D1–D5 decisions are
-    recorded in the plan".
-  - **PENDING, PR close (orchestrator)** — archive this plan to `docs/archive/plans/` and move the
-    row, which is what clears `KW-DOC-LIFECYCLE-003` for the `--merge-ready` run.
+  - **DONE** — `docs/plans/README.md`: the Active Plans row moved to Archived Plans, and this
+    artifact moved to `docs/archive/plans/`, clearing `KW-DOC-LIFECYCLE-003`. Not deferred to
+    merge: `ci.yml` runs `docs validate . --merge-ready` on every PR, so leaving the plan open
+    would fail the build it was written for.
   - Depends on: T2, T4, T6.
 
 ## Dependency graph and MAX_CONCURRENCY
