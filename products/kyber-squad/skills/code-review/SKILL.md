@@ -194,7 +194,7 @@ Procedure above and the host's declared gates.
    head and base branch are reachable from your local `HEAD` before pushing.
 2. **Council over the whole change.** Run full Procedure steps 1–5 over the whole
    accumulated diff against its base, not just the last files touched. Fix every
-   medium-or-worse finding before pushing.
+   major-or-worse finding before pushing.
 3. **Defect-class checklist.** Walk each class explicitly before pushing:
    a. Invented/hidden values: `?? 0`, `|| N`, `?? []`, clamps, default window/price/size/duration, unmeasured shown as zero or "measured", partial data looking complete (honest-unobservability: absent stays absent with reason).
    b. Scope/cost: filters/dedupe too wide or single-caller-only; N+1/per-run loops; unbounded reads/copies; caps without paging; large payloads kept alive.
