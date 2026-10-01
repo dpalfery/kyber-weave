@@ -23,7 +23,12 @@ import type { ScorecardMatrixRow, ScorecardCoverageWindow } from '../components/
 
 export interface ContextDoctorProps {
   initialHarnesses?: KyberHarnessSummary[]
-  initialFindings?: FindingsPage
+  /**
+   * Initial findings page, or a bare row list (the coverage suites pass
+   * `[]`: it normalizes to an empty envelope). Prefer the envelope — a bare
+   * list cannot carry totals, counts, or the unknown-window figure.
+   */
+  initialFindings?: FindingsPage | KyberFinding[]
   /**
    * Coverage facts for the banner (T10) and ingest panel (T9). Accepts the
    * full `GET /api/kyber/coverage` payload or the refresh slice alone —
@@ -424,6 +429,17 @@ export function ContextDoctor({
   const [offset, setOffset] = useState(0)
   const [appended, setAppended] = useState<AccumulatedPage[]>([])
 
+  // A bare row list normalizes to an empty-total envelope (see props).
+  const initialPage: FindingsPage | undefined = Array.isArray(initialFindings)
+    ? {
+        findings: initialFindings,
+        total: initialFindings.length,
+        offset: 0,
+        detectorCounts: {},
+        unknownWindowSessions: 0,
+      }
+    : initialFindings
+
   // Every page is stored under the scope it was fetched for, including the
   // first, so advancing the offset extends the list instead of replacing it.
   const browseScope = `${detectorFilter ?? ''}|${harnessFilter ?? ''}`
@@ -455,7 +471,7 @@ export function ContextDoctor({
   const { data: headlineData, isLoading: loadingFindings } = useQuery({
     queryKey: ['kyber-findings-workspace'],
     queryFn: () => fetchFindings({ limit: FINDINGS_PAGE_SIZE }),
-    initialData: initialFindings,
+    initialData: initialPage,
   })
 
   // Full workspace browser (issue #191): server-side detector/harness
@@ -475,7 +491,7 @@ export function ContextDoctor({
         limit: FINDINGS_PAGE_SIZE,
         offset,
       }),
-    initialData: offset === 0 && !filtersActive ? initialFindings : undefined,
+    initialData: offset === 0 && !filtersActive ? initialPage : undefined,
     // Keep the current list on screen while the next page loads (review
     // M1): without this every offset change flashes a skeleton and the
     // heading reads "(0)" mid-flight.

@@ -1,9 +1,28 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import type * as React from 'react'
 
 import { ContextDoctor, browserRows, nextAccumulated, FindingsBrowserView } from './ContextDoctor.js'
-import type { FindingsPage, KyberFinding, KyberHarnessSummary } from '../lib/kyberApi.js'
+import { fetchCoverage, type FindingsPage, type KyberFinding, type KyberHarnessSummary, type KyberCoverage } from '../lib/kyberApi.js'
+
+function createTestQueryClient() {
+  return new QueryClient({
+    defaultOptions: {
+      queries: {
+        retry: false,
+        gcTime: 0,
+      },
+    },
+  })
+}
+
+function renderWithQuery(ui: React.ReactElement) {
+  const queryClient = createTestQueryClient()
+  return renderToStaticMarkup(
+    <QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>,
+  )
+}
 
 function finding(id: string, detectorId: string, harness: string): KyberFinding {
   return {
@@ -234,31 +253,8 @@ describe('FindingsBrowserView clear filters (review S1)', () => {
       <FindingsBrowserView findings={[]} total={0} detectorCounts={counts} loading={false} harnesses={[]} />,
     )
     expect(html).not.toContain('findings-clear-filters')
-import { describe, it, expect, vi, afterEach } from 'vitest'
-import { renderToStaticMarkup } from 'react-dom/server'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-
-import { ContextDoctor } from './ContextDoctor.js'
-import { fetchCoverage, type KyberCoverage } from '../lib/kyberApi.js'
-
-function createTestQueryClient() {
-  return new QueryClient({
-    defaultOptions: {
-      queries: {
-        retry: false,
-        gcTime: 0,
-      },
-    },
   })
-}
-
-function renderWithQuery(ui: React.ReactElement) {
-  const queryClient = createTestQueryClient()
-  return renderToStaticMarkup(
-    <QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>,
-  )
-}
-
+})
 /**
  * T10 web matrix honesty (issues #189/#199): the coverage banner wiring.
  * The ingest activity panel is T9's hunk in this same file — merge-keep-both.
