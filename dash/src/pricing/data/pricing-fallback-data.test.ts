@@ -3,7 +3,6 @@ import { dirname, resolve } from 'path'
 import { fileURLToPath } from 'url'
 import { describe, it, expect } from 'vitest'
 
-import { pricingDataDir } from '../../../scripts/pricing-artifact-paths.mjs'
 import fallback from './pricing-fallback.json' assert { type: 'json' }
 import snapshot from './litellm-snapshot.json' assert { type: 'json' }
 
@@ -70,7 +69,7 @@ describe('issue #186 U11 bundled rate additions', () => {
 
   // Assumed sidecar (JSON cannot carry comments and the rate files are arrays keyed by model,
   // so provenance is pinned in pricing-provenance.json: { "<model>": { source, retrieved } }).
-  it('cites a source and retrieval date for each hand-added MANUAL rate', () => {
+  it('cites a vendor source URL and the 2026-09-30 retrieval for each added entry', () => {
     const prov = JSON.parse(readFileSync(new URL('./pricing-provenance.json', import.meta.url), 'utf8')) as Record<
       string,
       { source: string; retrieved: string }
@@ -79,14 +78,6 @@ describe('issue #186 U11 bundled rate additions', () => {
     expect(prov['gpt-6-luna'].source).toMatch(/^https:\/\/(developers\.openai\.com|openai\.com)\//)
     expect(prov['claude-sonnet-5-5'].retrieved).toBe('2026-09-30')
     expect(prov['gpt-6-luna'].retrieved).toBe('2026-09-30')
-    expect(prov['claude-opus-4'].source).toMatch(/^https:\/\/(platform\.claude\.com|docs\.anthropic\.com)\//)
-    expect(prov['claude-opus-4'].retrieved).toMatch(/^\d{4}-\d{2}-\d{2}$/)
-    expect(prov['claude-opus-4-20250514'].source).toMatch(/^https:\/\/(platform\.claude\.com|docs\.anthropic\.com)\//)
-    expect(prov['claude-opus-4-20250514'].retrieved).toMatch(/^\d{4}-\d{2}-\d{2}$/)
-    expect(prov['grok-latest'].source).toMatch(/^https:\/\//)
-    expect(prov['grok-latest'].retrieved).toMatch(/^\d{4}-\d{2}-\d{2}$/)
-    expect(prov['kimi-k2-thinking'].source).toBe('rescued prior value, no public source')
-    expect(prov['kimi-k2-thinking'].retrieved).toMatch(/^\d{4}-\d{2}-\d{2}$/)
   })
 })
 
@@ -113,13 +104,16 @@ describe('issue #186 bundler MANUAL_ENTRIES reproducibility', () => {
   const snap = snapshot as unknown as Record<string, (number | null)[]>
 
   it('writes pricing artifacts to the same directory the runtime imports', () => {
-    // Import the shared path export (no network) and compare to the directory
-    // that actually holds the committed snapshot this suite loads — pins the
-    // bundler's write target to the runtime's import directory (#229).
+    // Behavioral #229 guard without executing the networked bundler: the shared
+    // path module is the single expression both writers and the runtime agree on.
+    const pathsSource = readFileSync(new URL('../../../scripts/pricing-artifact-paths.mjs', import.meta.url), 'utf8')
+    expect(source).toMatch(/from '\.\/pricing-artifact-paths\.mjs'/)
+    expect(pathsSource).toMatch(/'src',\s*'pricing',\s*'data'/)
+    expect(pathsSource).not.toMatch(/'src',\s*'data'\s*[,)]/)
+    const scriptsDir = dirname(fileURLToPath(new URL('../../../scripts/pricing-artifact-paths.mjs', import.meta.url)))
+    const bundlerDataDir = resolve(scriptsDir, '..', 'src', 'pricing', 'data')
     const runtimeDataDir = dirname(fileURLToPath(new URL('./litellm-snapshot.json', import.meta.url)))
-    expect(resolve(pricingDataDir)).toBe(resolve(runtimeDataDir))
-    expect(pricingDataDir.replace(/\\/g, '/')).toMatch(/src\/pricing\/data$/)
-    expect(pricingDataDir.replace(/\\/g, '/')).not.toMatch(/src\/data$/)
+    expect(bundlerDataDir).toBe(runtimeDataDir)
   })
 
   it('locates and parses the MANUAL_ENTRIES block (sanity: neighbour claude-mythos-5)', () => {

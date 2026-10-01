@@ -6,21 +6,5 @@
   "gpt-6-luna": {
     "source": "https://developers.openai.com/api/docs/pricing",
     "retrieved": "2026-09-30"
-  },
-  "kimi-k2-thinking": {
-    "source": "rescued prior value, no public source",
-    "retrieved": "2026-10-01"
-  },
-  "claude-opus-4": {
-    "source": "https://platform.claude.com/docs/en/about-claude/pricing",
-    "retrieved": "2026-10-01"
-  },
-  "claude-opus-4-20250514": {
-    "source": "https://platform.claude.com/docs/en/about-claude/pricing",
-    "retrieved": "2026-10-01"
-  },
-  "grok-latest": {
-    "source": "https://openrouter.ai/x-ai/grok-3-latest",
-    "retrieved": "2026-10-01"
   }
 }

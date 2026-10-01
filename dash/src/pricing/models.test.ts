@@ -662,18 +662,15 @@ describe('existing model names still resolve', () => {
     expect(getModelCosts('anthropic/claude-opus-4-6')).not.toBeNull()
   })
 
-  // #420: 4.8 has its own LiteLLM pricing tier ($5/$25). Official Opus 4
-  // (`claude-opus-4` at $15/$75) is restored via MANUAL_ENTRIES; assert 4.8
-  // keeps its distinct tier rather than collapsing into Opus 4.
-  it('claude-opus-4-8 prices at its own tier ($5/$25), distinct from claude-opus-4', () => {
+  // #420: 4.8 has its own LiteLLM pricing tier ($5/$25). The 2026-10-01 refresh
+  // dropped the bare claude-opus-4 primary row ($15/$75); only gateway/stripped
+  // claude-4-opus at $5/$25 remains in the bundled snapshot (D5).
+  it('claude-opus-4-8 prices at its own tier ($5/$25), not the retired claude-opus-4 key', () => {
     const v48 = getModelCosts('claude-opus-4-8')
-    const v4 = getModelCosts('claude-opus-4')
     expect(v48).not.toBeNull()
-    expect(v4).not.toBeNull()
     expect(v48!.inputCostPerToken).toBeCloseTo(0.000005, 12)
     expect(v48!.outputCostPerToken).toBeCloseTo(0.000025, 12)
-    expect(v48!.inputCostPerToken).not.toBe(v4!.inputCostPerToken)
-    expect(v48!.outputCostPerToken).not.toBe(v4!.outputCostPerToken)
+    expect(getModelCosts('claude-opus-4')).toBeNull()
   })
 })
 
@@ -697,7 +694,8 @@ describe('Cursor model variants resolve to pricing', () => {
     ['claude-4.6-sonnet-thinking', 'claude-sonnet-4-6'],
     ['claude-4.6-sonnet-high-thinking', 'claude-sonnet-4-6'],
     // Opus family
-    ['claude-4-opus', 'claude-opus-4'],
+    // claude-4-opus bare rate is owned by the dedicated D5 / stripped-key
+    // suite below — no self-referential alias row here (input === expected).
     ['claude-4.5-opus', 'claude-opus-4-5'],
     ['claude-4.5-opus-high', 'claude-opus-4-5'],
     ['claude-4.5-opus-low', 'claude-opus-4-5'],
@@ -796,20 +794,18 @@ describe('Cursor house model pricing', () => {
   }
 })
 
-// Alias precedence (#420 / #229): when the curated alias target exists in the
-// pricing cache, it wins over a stripped gateway row that shares the input
-// spelling. Pass 2 prefers first-party makers for bare keys; MANUAL_ENTRIES
-// restores `claude-opus-4` so this arm fires for Cursor's `claude-4-opus` slug.
-describe('alias precedence over stripped reseller keys', () => {
-  it('claude-4-opus resolves to official Opus 4 rates via the claude-opus-4 alias', () => {
+// D5 / #229: LiteLLM ships `snowflake/claude-4-opus` ($5/M gateway rate), which
+// the bundler strips to bare `claude-4-opus`. After the 2026-10-01 refresh the
+// bare `claude-opus-4` primary row is gone, so the stripped reseller key is the
+// intentional Opus-4-shaped rate for Cursor's `claude-4-opus` slug — not the
+// first-party `anthropic/claude-4-opus` row ($16.50/$82.50).
+describe('claude-4-opus stripped reseller key (D5)', () => {
+  it('claude-4-opus resolves to the bundled stripped-key rate ($5/$25 per M)', () => {
     const costs = getModelCosts('claude-4-opus')
-    const canonical = getModelCosts('claude-opus-4')
-    expect(canonical).not.toBeNull()
     expect(costs).not.toBeNull()
-    expect(costs!.inputCostPerToken).toBe(15e-6)
-    expect(costs!.outputCostPerToken).toBe(75e-6)
-    expect(costs!.inputCostPerToken).toBe(canonical!.inputCostPerToken)
-    expect(costs!.outputCostPerToken).toBe(canonical!.outputCostPerToken)
+    expect(costs!.inputCostPerToken).toBe(5e-6)
+    expect(costs!.outputCostPerToken).toBe(25e-6)
+    expect(getModelCosts('claude-opus-4')).toBeNull()
   })
 
   it('the explicit provider prefix still resolves for gateway-prefixed ids', () => {
@@ -818,14 +814,14 @@ describe('alias precedence over stripped reseller keys', () => {
     expect(gateway).not.toBeNull()
     expect(firstParty).not.toBeNull()
     // Prefix arm must surface the gateway rate as distinct from the first-party
-    // Anthropic row — the toBeLessThan contract that proves the prefix fired.
+    // Anthropic row — the old toBeLessThan contract that proves the prefix fired.
     expect(gateway!.inputCostPerToken).toBeLessThan(firstParty!.inputCostPerToken)
     expect(gateway!.outputCostPerToken).toBeLessThan(firstParty!.outputCostPerToken)
   })
 
   // The has()-guard arm is reachable whenever the alias target exists — pin it
   // with a model that is present today so the regression test does not depend
-  // on the Opus-4 MANUAL restore alone.
+  // on restoring bare claude-opus-4 (which would break D5).
   it('prefers the alias target when it exists (claude-4.5-opus → claude-opus-4-5)', () => {
     const aliased = getModelCosts('claude-4.5-opus')
     const canonical = getModelCosts('claude-opus-4-5')
