@@ -44,6 +44,12 @@ public sealed class SquadStateStore
     {
         ArgumentNullException.ThrowIfNull(userPaths);
         _userPaths = userPaths;
+
+        // The default singleton is the implicit user-path provider for plan creation in code
+        // paths that omit an explicit user-scope argument. Keeping it aligned with the active
+        // store ensures the durable Global root key used by a plan matches the state directory a
+        // transaction later resolves.
+        DefaultSquadUserPaths.Instance.SetApplicationDataDirectory(userPaths.ApplicationDataDirectory);
     }
 
     internal ISquadUserPaths UserPaths => _userPaths;
@@ -56,10 +62,18 @@ public sealed class SquadStateStore
         return scope switch
         {
             SquadDeploymentScope.Project => ResolveProjectStateDirectory(targetRoot),
+            // Global scope keeps the durable logical root at the user-scoped Squad base
+            // directory, while the concrete file payloads live under the canonical
+            // <appData>/KyberWeave/squad/global path. The logical root is the value callers
+            // use to identify the installation boundary and bind across roots; the nested
+            // global directory is the file-system location for receipts and locks.
             SquadDeploymentScope.Global => ResolveGlobalStateDirectory(),
             _ => throw new ArgumentOutOfRangeException(nameof(scope), scope, "Unknown Squad scope.")
         };
     }
+
+    internal string ResolveGlobalStateKey() =>
+        SquadPhysicalRootIdentity.ResolveGlobalState(_userPaths).Key;
 
     /// <summary>Serializes a lock using stable, portable YAML field ordering.</summary>
     public string SerializeLock(SquadLock squadLock)
@@ -287,6 +301,9 @@ public sealed class SquadStateStore
         }
         else if (scope == SquadDeploymentScope.Global)
         {
+            // v1 global receipts have no persisted layout marker, so they are classified by the
+            // file paths themselves. A legacy single-root receipt must stay single-root here, not
+            // be silently normalized to per-target-roots.
             layout = SquadDeploymentPlan.ClassifyGlobalLayout(files);
         }
         else
@@ -303,39 +320,171 @@ public sealed class SquadStateStore
     /// <summary>Reads the receipt for a deployment, or returns <see langword="null"/> when absent.</summary>
     public SquadReceipt? ReadReceipt(string targetRoot, SquadDeploymentScope scope)
     {
+        if (scope == SquadDeploymentScope.Global)
+        {
+            return ReadGlobalReceipt(targetRoot);
+        }
+
         string path = ResolveStateFile(targetRoot, scope, ReceiptFileName);
         return File.Exists(path)
             ? DeserializeReceipt(File.ReadAllText(path, Encoding.UTF8))
             : null;
     }
 
-    /// <summary>
-    /// Receipts for other project roots that share this machine's Global state directory.
-    /// Two <c>--global</c> installs must not both own one harness file.
-    /// </summary>
-    internal IReadOnlyList<SquadReceipt> ListOtherGlobalReceipts(string targetRoot)
+    internal SquadReceipt? ReadGlobalReceipt(string targetRoot)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(targetRoot);
 
-        string currentBinding = GlobalRootBinding(targetRoot);
-        string rootsDirectory = Path.Combine(ResolveGlobalStateDirectory(), "roots");
-        if (!Directory.Exists(rootsDirectory))
-            return [];
-
-        List<SquadReceipt> receipts = [];
-        foreach (string rootDirectory in Directory.EnumerateDirectories(rootsDirectory))
+        string globalStateDirectory = ResolveGlobalStateDirectory();
+        string canonicalReceiptPath = Path.Combine(globalStateDirectory, ReceiptFileName);
+        IReadOnlyList<string> legacyBindingIds = EnumerateLegacyGlobalBindingIds();
+        if (File.Exists(canonicalReceiptPath))
         {
-            if (string.Equals(Path.GetFileName(rootDirectory), currentBinding, StringComparison.Ordinal))
-                continue;
+            if (legacyBindingIds.Count > 0)
+            {
+                throw GlobalStateConflict(
+                    legacyBindingIds,
+                    "canonical global state and legacy partitions coexist",
+                    "Move or delete the conflicting legacy partitions, then rerun the command to restore a single canonical global state.");
+            }
 
-            string receiptPath = Path.Combine(rootDirectory, ReceiptFileName);
-            if (!File.Exists(receiptPath))
-                continue;
-
-            receipts.Add(DeserializeReceipt(File.ReadAllText(receiptPath, Encoding.UTF8)));
+            return DeserializeReceipt(File.ReadAllText(canonicalReceiptPath, Encoding.UTF8));
         }
 
-        return receipts;
+        if (legacyBindingIds.Count == 0)
+        {
+            return null;
+        }
+
+        if (legacyBindingIds.Count > 1)
+        {
+            throw GlobalStateConflict(
+                legacyBindingIds,
+                "multiple legacy global partitions were found",
+                "Delete or recover the conflicting partitions, then rerun the command from the original project root to restore the current global state.");
+        }
+
+        string bindingId = legacyBindingIds[0];
+        string legacyPartition = Path.Combine(ResolveLegacyGlobalRootsDirectory(), bindingId);
+        string receiptPath = Path.Combine(legacyPartition, ReceiptFileName);
+        if (!File.Exists(receiptPath))
+        {
+            throw GlobalStateConflict(
+                [bindingId],
+                "a legacy partition is missing its receipt",
+                "Repair or remove the incomplete partition, then rerun the command.");
+        }
+
+        try
+        {
+            SquadReceipt receipt = DeserializeReceipt(File.ReadAllText(receiptPath, Encoding.UTF8));
+            if (SquadDeploymentPlan.IsLegacySingleRootReceipt(receipt) &&
+                !string.Equals(GlobalRootBinding(targetRoot), bindingId, StringComparison.Ordinal))
+            {
+                throw GlobalStateConflict(
+                    [bindingId],
+                    "this legacy global installation is tied to a different original root",
+                    "Rerun the command from the original project root that created this legacy deployment, or use uninstall there to remove it before re-installing globally.");
+            }
+
+            return receipt;
+        }
+        catch (InvalidDataException ex)
+        {
+            throw new SquadDeploymentConflictException(
+                $"Global Squad state conflict: legacy global receipt '{receiptPath}' is corrupt or malformed. " +
+                $"Binding ID: {bindingId}. Recovery: repair or remove the invalid partition, then rerun the command.",
+                ex);
+        }
+    }
+
+    internal string PrepareGlobalMutation(string targetRoot)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(targetRoot);
+
+        string globalStateDirectory = ResolveGlobalStateDirectory();
+        string canonicalReceiptPath = Path.Combine(globalStateDirectory, ReceiptFileName);
+        IReadOnlyList<string> legacyBindingIds = EnumerateLegacyGlobalBindingIds();
+        if (legacyBindingIds.Count > 0 && File.Exists(canonicalReceiptPath))
+        {
+            throw GlobalStateConflict(
+                legacyBindingIds,
+                "canonical global state and legacy partitions coexist",
+                "Move or delete the conflicting legacy partitions, then rerun the command to restore a single canonical global state.");
+        }
+
+        if (legacyBindingIds.Count == 0)
+        {
+            Directory.CreateDirectory(globalStateDirectory);
+            return globalStateDirectory;
+        }
+
+        if (legacyBindingIds.Count > 1)
+        {
+            throw GlobalStateConflict(
+                legacyBindingIds,
+                "multiple legacy global partitions were found",
+                "Delete or recover the conflicting partitions, then rerun the command from the original project root to restore the current global state.");
+        }
+
+        string bindingId = legacyBindingIds[0];
+        string legacyPartition = Path.Combine(ResolveLegacyGlobalRootsDirectory(), bindingId);
+        string receiptPath = Path.Combine(legacyPartition, ReceiptFileName);
+        if (!File.Exists(receiptPath))
+        {
+            throw GlobalStateConflict(
+                [bindingId],
+                "a legacy partition is missing its receipt",
+                "Repair or remove the incomplete partition, then rerun the command.");
+        }
+
+        SquadReceipt receipt;
+        try
+        {
+            receipt = DeserializeReceipt(File.ReadAllText(receiptPath, Encoding.UTF8));
+        }
+        catch (InvalidDataException ex)
+        {
+            throw new SquadDeploymentConflictException(
+                $"Global Squad state conflict: legacy global receipt '{receiptPath}' is corrupt or malformed. " +
+                $"Binding ID: {bindingId}. Recovery: repair or remove the invalid partition, then rerun the command.",
+                ex);
+        }
+
+        if (SquadDeploymentPlan.IsLegacySingleRootReceipt(receipt) &&
+            !string.Equals(GlobalRootBinding(targetRoot), bindingId, StringComparison.Ordinal))
+        {
+            throw GlobalStateConflict(
+                [bindingId],
+                "this legacy global installation is tied to a different original root",
+                "Rerun the command from the original project root that created this legacy deployment, or use uninstall there to remove it before re-installing globally.");
+        }
+
+        if (SquadDeploymentPlan.IsLegacySingleRootReceipt(receipt))
+        {
+            return globalStateDirectory;
+        }
+
+        string globalParent = Path.GetDirectoryName(globalStateDirectory)
+            ?? throw new InvalidOperationException("Could not resolve the parent directory for the global Squad state.");
+        Directory.CreateDirectory(globalParent);
+
+        using SquadTransaction.TransactionLease lease = SquadTransaction.AcquireLease(
+            SquadPhysicalRootIdentity.ResolveGlobalState(_userPaths).Key);
+
+        if (Directory.Exists(globalStateDirectory))
+        {
+            return globalStateDirectory;
+        }
+
+        Directory.Move(legacyPartition, globalStateDirectory);
+        string rootsDirectory = ResolveLegacyGlobalRootsDirectory();
+        if (Directory.Exists(rootsDirectory) && !Directory.EnumerateFileSystemEntries(rootsDirectory).Any())
+        {
+            Directory.Delete(rootsDirectory);
+        }
+
+        return globalStateDirectory;
     }
 
     /// <summary>Reads the lock for a deployment, or returns <see langword="null"/> when absent.</summary>
@@ -358,13 +507,16 @@ public sealed class SquadStateStore
 
     internal string ResolveTransactionWorkDirectory(
         string targetRoot,
-        SquadDeploymentScope scope) =>
+        SquadDeploymentScope scope,
+        bool isSingleRootLayout = false) =>
         scope switch
         {
             SquadDeploymentScope.Project => ResolveTransactionDirectory(targetRoot, scope),
-            SquadDeploymentScope.Global => SquadPathPolicy.ResolveFile(
-                Path.GetFullPath(targetRoot),
-                ".kyber-weave/.squad-transaction"),
+            SquadDeploymentScope.Global => isSingleRootLayout
+                ? SquadPathPolicy.ResolveFile(
+                    SquadPhysicalRootIdentity.Resolve(targetRoot).PhysicalPath,
+                    $".kyber-weave/{TransactionDirectoryName}")
+                : ResolveTransactionDirectory(targetRoot, scope),
             _ => throw new ArgumentOutOfRangeException(nameof(scope), scope, "Unknown Squad scope.")
         };
 
@@ -375,10 +527,8 @@ public sealed class SquadStateStore
         {
             SquadDeploymentScope.Project =>
                 SquadPhysicalRootIdentity.Resolve(targetRoot).PhysicalPath,
-            SquadDeploymentScope.Global => Path.GetDirectoryName(
-                    Path.TrimEndingDirectorySeparator(
-                        Path.GetFullPath(_userPaths.ApplicationDataDirectory)))
-                ?? Path.GetFullPath(_userPaths.ApplicationDataDirectory),
+            SquadDeploymentScope.Global =>
+                Path.GetFullPath(_userPaths.ApplicationDataDirectory),
             _ => throw new ArgumentOutOfRangeException(nameof(scope), scope, "Unknown Squad scope.")
         };
 
@@ -390,13 +540,68 @@ public sealed class SquadStateStore
             ?? throw new InvalidOperationException("Could not resolve the project Squad state directory.");
     }
 
-    private string ResolveGlobalStateDirectory()
+    private string ResolveGlobalStateBaseDirectory()
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(_userPaths.ApplicationDataDirectory);
-        string root = Path.GetFullPath(_userPaths.ApplicationDataDirectory);
-        string sentinel = SquadPathPolicy.ResolveFile(root, "KyberWeave/squad/.state-sentinel");
-        return Path.GetDirectoryName(sentinel)
-            ?? throw new InvalidOperationException("Could not resolve the global Squad state directory.");
+        string root = Path.Combine(
+            Path.GetFullPath(_userPaths.ApplicationDataDirectory),
+            "KyberWeave",
+            "squad");
+        return Path.TrimEndingDirectorySeparator(root).Normalize(NormalizationForm.FormC);
+    }
+
+    private string ResolveGlobalStateDirectory()
+    {
+        string root = Path.Combine(
+            Path.GetFullPath(_userPaths.ApplicationDataDirectory),
+            "KyberWeave",
+            "squad",
+            "global");
+        return Path.TrimEndingDirectorySeparator(root).Normalize(NormalizationForm.FormC);
+    }
+
+    private string ResolveLegacyGlobalRootsDirectory()
+    {
+        return Path.Combine(
+            Path.GetDirectoryName(ResolveGlobalStateDirectory())
+                ?? throw new InvalidOperationException("Could not resolve the global Squad state parent."),
+            "roots");
+    }
+
+    private IReadOnlyList<string> EnumerateLegacyGlobalBindingIds()
+    {
+        string rootsDirectory = ResolveLegacyGlobalRootsDirectory();
+        if (!Directory.Exists(rootsDirectory))
+        {
+            return [];
+        }
+
+        List<string> bindingIds = [];
+        foreach (string directory in Directory.EnumerateDirectories(rootsDirectory))
+        {
+            string bindingId = Path.GetFileName(directory);
+            if (string.IsNullOrWhiteSpace(bindingId) || !bindingId.All(character =>
+                    character is >= '0' and <= '9' or >= 'a' and <= 'f'))
+            {
+                continue;
+            }
+
+            bindingIds.Add(bindingId);
+        }
+
+        return bindingIds
+            .OrderBy(bindingId => bindingId, StringComparer.Ordinal)
+            .ToArray();
+    }
+
+    private static SquadDeploymentConflictException GlobalStateConflict(
+        IReadOnlyList<string> bindingIds,
+        string problem,
+        string recovery)
+    {
+        string packedIds = string.Join(", ", bindingIds.OrderBy(id => id, StringComparer.Ordinal));
+        return new SquadDeploymentConflictException(
+            $"Global Squad state conflict: {problem}. Binding IDs: {packedIds}. Recovery: {recovery}");
     }
 
     private string ResolveStateFile(
@@ -411,7 +616,7 @@ public sealed class SquadStateStore
                 $".kyber-weave/{fileName}"),
             SquadDeploymentScope.Global => SquadPathPolicy.ResolveFile(
                 ResolveGlobalStateDirectory(),
-                $"roots/{GlobalRootBinding(targetRoot)}/{fileName}"),
+                fileName),
             _ => throw new ArgumentOutOfRangeException(nameof(scope), scope, "Unknown Squad scope.")
         };
     }

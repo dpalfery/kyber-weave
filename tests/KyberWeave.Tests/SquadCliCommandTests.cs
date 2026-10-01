@@ -344,6 +344,105 @@ public sealed class SquadCliCommandTests : IDisposable
         Assert.Contains("architect.md", globalExecution.Output, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Status_GlobalFlag_ConflictingLegacyPartitions_ExitsNonZeroListsBindingIdsAndLeavesDiskUntouched()
+    {
+        string appDataDirectory = Path.Combine(_temp.Path, "conflicting-legacy-global-user-data");
+        string repoRoot = Path.Combine(_temp.Path, "conflicting-legacy-global-root");
+        Directory.CreateDirectory(repoRoot);
+
+        string rootsDirectory = Path.Combine(appDataDirectory, "KyberWeave", "squad", "roots");
+        Directory.CreateDirectory(rootsDirectory);
+
+        string firstBinding = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        string secondBinding = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        string firstPath = Path.Combine(rootsDirectory, firstBinding);
+        string secondPath = Path.Combine(rootsDirectory, secondBinding);
+        Directory.CreateDirectory(firstPath);
+        Directory.CreateDirectory(secondPath);
+
+        FakeUserPaths userPaths = new FakeUserPaths(appDataDirectory);
+        SquadStateStore stateStore = new SquadStateStore(userPaths);
+
+        SquadReceipt firstReceipt = new(
+            "kyber-squad.receipt/v2",
+            SquadDeploymentScope.Global,
+            ".",
+            DateTimeOffset.UtcNow,
+            [],
+            [new SquadOwnedFile("agents/first.md", "1111111111111111111111111111111111111111111111111111111111111111", "codex", false)]);
+        File.WriteAllText(
+            Path.Combine(firstPath, "squad.receipt.json"),
+            stateStore.SerializeReceipt(firstReceipt),
+            Encoding.UTF8);
+        File.WriteAllText(
+            Path.Combine(firstPath, "squad.lock.yml"),
+            stateStore.SerializeLock(new SquadLock(
+                Schema: "kyber-squad.lock/v1",
+                SquadVersion: "1.2.3",
+                CliVersion: "1.2.3",
+                McpVersion: "1.2.3",
+                Bundle: "full",
+                Targets: ["codex"],
+                Exclusions: [],
+                Translation: "best-effort",
+                BundleDigest: "a".PadRight(64, '0'),
+                AssetDigest: "b".PadRight(64, '0'),
+                Apm: new SquadApmIdentity("0.28.0", "c".PadRight(40, '0'), "d".PadRight(64, '0')))),
+            Encoding.UTF8);
+
+        SquadReceipt secondReceipt = new(
+            "kyber-squad.receipt/v2",
+            SquadDeploymentScope.Global,
+            ".",
+            DateTimeOffset.UtcNow,
+            [],
+            [new SquadOwnedFile("agents/second.md", "2222222222222222222222222222222222222222222222222222222222222222", "codex", false)]);
+        File.WriteAllText(
+            Path.Combine(secondPath, "squad.receipt.json"),
+            stateStore.SerializeReceipt(secondReceipt),
+            Encoding.UTF8);
+        File.WriteAllText(
+            Path.Combine(secondPath, "squad.lock.yml"),
+            stateStore.SerializeLock(new SquadLock(
+                Schema: "kyber-squad.lock/v1",
+                SquadVersion: "1.2.3",
+                CliVersion: "1.2.3",
+                McpVersion: "1.2.3",
+                Bundle: "full",
+                Targets: ["codex"],
+                Exclusions: [],
+                Translation: "best-effort",
+                BundleDigest: "e".PadRight(64, '0'),
+                AssetDigest: "f".PadRight(64, '0'),
+                Apm: new SquadApmIdentity("0.28.0", "c".PadRight(40, '0'), "d".PadRight(64, '0')))),
+            Encoding.UTF8);
+
+        string[] beforeFiles = Directory.GetFiles(rootsDirectory, "*", SearchOption.AllDirectories)
+            .OrderBy(path => path, StringComparer.Ordinal)
+            .ToArray();
+
+        SquadStatusCommand command = new SquadStatusCommand(userPaths, stateStore);
+
+        CommandExecution execution = Capture(() => command.Execute(
+            null!,
+            new SquadStatusSettings
+            {
+                Path = repoRoot,
+                Global = true
+            }));
+
+        string[] afterFiles = Directory.GetFiles(rootsDirectory, "*", SearchOption.AllDirectories)
+            .OrderBy(path => path, StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.Equal(1, execution.ExitCode);
+        Assert.Contains(firstBinding, execution.Output, StringComparison.Ordinal);
+        Assert.Contains(secondBinding, execution.Output, StringComparison.Ordinal);
+        Assert.Contains("recovery", execution.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(beforeFiles, afterFiles);
+    }
+
     #endregion
 
     #region SquadDoctorCommand Execution Tests (K6d)

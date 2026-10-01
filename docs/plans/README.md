@@ -4,7 +4,7 @@ title: Kyber-Weave Plan Inventory
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-09-30
+last-reviewed: 2026-10-01
 ---
 
 # Kyber-Weave Plan Inventory
@@ -19,6 +19,7 @@ A plan is open only while it is built. The pull request that finishes it archive
 
 | Plan | Status | Date | Goal |
 |---|---|---|---|
+| [2026-09-30-squad-global-user-state.md](2026-09-30-squad-global-user-state.md) | Ready | 2026-09-30 | Replace caller-root-partitioned Global Squad ownership, state, lease, and recovery with one user-level state root; migrate one safe legacy partition and fail closed on ambiguous state. Development mode: test-first. Q1/Q2 approved 2026-10-01. |
 
 Pipeline T9 and spine S-docs harvested 2026-09-13 into [dash/architecture.md](../dash/architecture.md), [dash/runbook.md](../dash/runbook.md), [dash/telemetry-inventory.md](../dash/telemetry-inventory.md), [ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md), and [ADR 0018](../adr/0018-kyberdash-content-retention-purge.md). ADRs 0012–0015 remain the spine harvest (0014 notes that `kyber purge-content` was not shipped). Residual risks (T8 live-source coverage, findings client-side harness filter) live on the archived plans — they are not shipped claims.
 

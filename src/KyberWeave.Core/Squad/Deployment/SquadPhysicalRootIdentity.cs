@@ -27,4 +27,21 @@ internal sealed record SquadPhysicalRootIdentity(string PhysicalPath, string Key
             Encoding.UTF8.GetBytes(physicalPath)));
         return new SquadPhysicalRootIdentity(physicalPath, key);
     }
+
+    public static SquadPhysicalRootIdentity ResolveGlobalState(ISquadUserPaths? userPaths = null)
+    {
+        ISquadUserPaths resolvedPaths = userPaths ?? DefaultSquadUserPaths.Instance;
+        ArgumentException.ThrowIfNullOrWhiteSpace(resolvedPaths.ApplicationDataDirectory);
+
+        string globalStateRoot = Path.Combine(
+            Path.GetFullPath(resolvedPaths.ApplicationDataDirectory),
+            "KyberWeave",
+            "squad",
+            "global");
+        string normalizedPath = Path.TrimEndingDirectorySeparator(globalStateRoot)
+            .Normalize(NormalizationForm.FormC);
+        string key = Convert.ToHexStringLower(SHA256.HashData(
+            Encoding.UTF8.GetBytes(normalizedPath)));
+        return new SquadPhysicalRootIdentity(normalizedPath, key);
+    }
 }

@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
+using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -271,7 +272,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             SquadDeploymentScope.Global);
 
         Assert.Equal(
-            Path.Combine(applicationData, "KyberWeave", "squad"),
+            Path.Combine(applicationData, "KyberWeave", "squad", "global"),
             stateDirectory);
         Assert.Equal(InstalledAt, plan.Receipt.InstalledAtUtc);
         Assert.Equal(".", plan.Receipt.TargetRoot);
@@ -281,25 +282,35 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     }
 
     [Fact]
-    public void GlobalStateTwoTargetRootsSharingOneStateDirectoryRemainPrivatelyBoundToTheirOwnReceipts()
+    public void GlobalStateUsesOneCanonicalUserDirectoryAndSharedLeaseAcrossCallerRoots()
     {
         using TempDirectory fixture = new TempDirectory();
         string applicationData = Path.Combine(fixture.Path, "application-data");
-        string firstRoot = Path.Combine(fixture.Path, "customer-alpha");
-        string secondRoot = Path.Combine(fixture.Path, "customer-beta");
+        string firstRoot = Path.Combine(fixture.Path, "repo-a");
+        string secondRoot = Path.Combine(fixture.Path, "repo-b");
         Directory.CreateDirectory(firstRoot);
         Directory.CreateDirectory(secondRoot);
+
         SquadStateStore store = Store(applicationData);
-        // Bare paths, not dot-prefixed: a fresh CreateInstall always renders through the modern
-        // per-target layout (NormalizeRenderedFiles never treats a new render as legacy), so a
-        // dot-prefixed path here would only manufacture a self-contradicting receipt of this
-        // test's own making against the read-side layout cross-check (#91), not exercise
-        // anything CreateInstall itself does.
+        string expectedDirectory = Path.Combine(applicationData, "KyberWeave", "squad", "global");
+
+        Assert.Equal(expectedDirectory, store.ResolveStateDirectory(firstRoot, SquadDeploymentScope.Global));
+        Assert.Equal(expectedDirectory, store.ResolveStateDirectory(secondRoot, SquadDeploymentScope.Global));
+        Assert.Equal(Path.Combine(expectedDirectory, "squad.lock.yml"), store.ResolveLockPath(firstRoot, SquadDeploymentScope.Global));
+        Assert.Equal(Path.Combine(expectedDirectory, "squad.lock.yml"), store.ResolveLockPath(secondRoot, SquadDeploymentScope.Global));
+        Assert.Equal(Path.Combine(expectedDirectory, "squad.receipt.json"), store.ResolveReceiptPath(firstRoot, SquadDeploymentScope.Global));
+        Assert.Equal(Path.Combine(expectedDirectory, "squad.receipt.json"), store.ResolveReceiptPath(secondRoot, SquadDeploymentScope.Global));
+        Assert.Equal(Path.Combine(expectedDirectory, ".squad-transaction"), store.ResolveTransactionDirectory(firstRoot, SquadDeploymentScope.Global));
+        Assert.Equal(Path.Combine(expectedDirectory, ".squad-transaction"), store.ResolveTransactionDirectory(secondRoot, SquadDeploymentScope.Global));
+        Assert.DoesNotContain("roots", store.ResolveLockPath(firstRoot, SquadDeploymentScope.Global), StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("roots", store.ResolveReceiptPath(firstRoot, SquadDeploymentScope.Global), StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("roots", store.ResolveTransactionDirectory(firstRoot, SquadDeploymentScope.Global), StringComparison.OrdinalIgnoreCase);
+
         SquadDeploymentPlan firstPlan = SquadDeploymentPlan.CreateInstall(
             firstRoot,
             SquadDeploymentScope.Global,
             Lock(),
-            [Rendered("agents/first.toml", "first")],
+            [Rendered("agents/conductor.toml", "first body")],
             [],
             adopt: false,
             new FixedTimeProvider(InstalledAt));
@@ -307,41 +318,170 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             secondRoot,
             SquadDeploymentScope.Global,
             Lock(),
-            [Rendered("agents/second.toml", "second")],
+            [Rendered("agents/conductor.toml", "second body")],
             [],
             adopt: false,
             new FixedTimeProvider(InstalledAt.AddMinutes(1)));
 
-        new SquadTransaction(store).Execute(firstPlan);
-        new SquadTransaction(store).Execute(secondPlan);
+        Assert.NotEqual(firstPlan.PhysicalRootKey, secondPlan.PhysicalRootKey);
+        Assert.Equal(
+            SquadPhysicalRootIdentity.ResolveGlobalState(store.UserPaths).Key,
+            store.ResolveGlobalStateKey());
 
-        SquadReceipt firstReceipt = Assert.IsType<SquadReceipt>(store.ReadReceipt(
+        SquadDeploymentPlan projectPlanFirst = SquadDeploymentPlan.CreateInstall(
             firstRoot,
-            SquadDeploymentScope.Global));
-        SquadReceipt secondReceipt = Assert.IsType<SquadReceipt>(store.ReadReceipt(
+            SquadDeploymentScope.Project,
+            Lock(),
+            [Rendered("agents/conductor.toml", "project body")],
+            [],
+            adopt: false,
+            new FixedTimeProvider(InstalledAt));
+        SquadDeploymentPlan projectPlanSecond = SquadDeploymentPlan.CreateInstall(
             secondRoot,
-            SquadDeploymentScope.Global));
-        Assert.Equal("agents/first.toml", Assert.Single(firstReceipt.Files).RelativePath);
-        Assert.Equal("agents/second.toml", Assert.Single(secondReceipt.Files).RelativePath);
-        Assert.NotEqual(firstReceipt.InstalledAtUtc, secondReceipt.InstalledAtUtc);
+            SquadDeploymentScope.Project,
+            Lock(),
+            [Rendered("agents/conductor.toml", "project body")],
+            [],
+            adopt: false,
+            new FixedTimeProvider(InstalledAt.AddMinutes(1)));
 
-        string stateDirectory = store.ResolveStateDirectory(firstRoot, SquadDeploymentScope.Global);
-        string[] statePaths = Directory.EnumerateFileSystemEntries(
-                stateDirectory,
-                "*",
-                SearchOption.AllDirectories)
-            .Select(path => Path.GetRelativePath(stateDirectory, path).Replace(
-                Path.DirectorySeparatorChar,
-                '/'))
-            .ToArray();
-        Assert.NotEmpty(statePaths);
-        Assert.All(statePaths, relativePath =>
+        Assert.NotEqual(projectPlanFirst.PhysicalRootKey, projectPlanSecond.PhysicalRootKey);
+    }
+
+    [Fact]
+    public void ModernLegacyGlobalPartitionReadsAcrossRootsAndStatusStaysReadOnly()
+    {
+        using TempDirectory fixture = new TempDirectory();
+        string applicationData = Path.Combine(fixture.Path, "application-data");
+        string firstRoot = Path.Combine(fixture.Path, "repo-a");
+        string secondRoot = Path.Combine(fixture.Path, "repo-b");
+        Directory.CreateDirectory(firstRoot);
+        Directory.CreateDirectory(secondRoot);
+
+        SquadStateStore store = Store(applicationData);
+        string legacyHash = SquadPhysicalRootIdentity.Resolve(firstRoot).Key;
+        string legacyPartition = Path.Combine(applicationData, "KyberWeave", "squad", "roots", legacyHash);
+        Directory.CreateDirectory(legacyPartition);
+
+        SquadReceipt receipt = new SquadReceipt(
+            SquadStateStore.ReceiptSchemaV2,
+            SquadDeploymentScope.Global,
+            ".",
+            InstalledAt,
+            [],
+            [new SquadOwnedFile("agents/conductor.toml", Digest("conductor"), "codex", false)])
         {
-            Assert.DoesNotContain("customer-alpha", relativePath, StringComparison.OrdinalIgnoreCase);
-            Assert.DoesNotContain("customer-beta", relativePath, StringComparison.OrdinalIgnoreCase);
-        });
-        Assert.DoesNotContain(firstRoot, Store(applicationData).SerializeReceipt(firstReceipt), StringComparison.Ordinal);
-        Assert.DoesNotContain(secondRoot, Store(applicationData).SerializeReceipt(secondReceipt), StringComparison.Ordinal);
+            Layout = SquadReceiptLayout.PerTargetRoots
+        };
+
+        File.WriteAllText(
+            Path.Combine(legacyPartition, "squad.receipt.json"),
+            store.SerializeReceipt(receipt),
+            new UTF8Encoding(false));
+        File.WriteAllText(
+            Path.Combine(legacyPartition, "squad.lock.yml"),
+            store.SerializeLock(Lock()),
+            new UTF8Encoding(false));
+
+        SquadReceipt firstReceipt = Assert.IsType<SquadReceipt>(store.ReadReceipt(firstRoot, SquadDeploymentScope.Global));
+        SquadReceipt secondReceipt = Assert.IsType<SquadReceipt>(store.ReadReceipt(secondRoot, SquadDeploymentScope.Global));
+        Assert.Equal(receipt, firstReceipt);
+        Assert.Equal(firstReceipt, secondReceipt);
+
+        SquadStatusCommand command = new(stateStore: store);
+        CapturedConsoleExecution<int> status = ProcessConsoleCapture.Run(() => command.Execute(
+            null!,
+            new SquadStatusSettings
+            {
+                Path = secondRoot,
+                Global = true
+            }));
+
+        Assert.Equal(0, status.Result);
+        Assert.Contains("ok", status.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.True(Directory.Exists(legacyPartition), "Legacy partition must remain in place during read-only status.");
+        Assert.True(File.Exists(Path.Combine(legacyPartition, "squad.receipt.json")));
+    }
+
+    [Fact]
+    public void GlobalLegacyStateMatrixFailsClosedWithoutChangingDisk()
+    {
+        using TempDirectory fixture = new TempDirectory();
+        string applicationData = Path.Combine(fixture.Path, "application-data");
+        string callerRoot = Path.Combine(fixture.Path, "repo-a");
+        string legacyRoot = Path.Combine(fixture.Path, "repo-legacy");
+        Directory.CreateDirectory(callerRoot);
+        Directory.CreateDirectory(legacyRoot);
+
+        SquadStateStore store = Store(applicationData);
+        string legacyHash = SquadPhysicalRootIdentity.Resolve(legacyRoot).Key;
+        string legacyPartition = Path.Combine(applicationData, "KyberWeave", "squad", "roots", legacyHash);
+        Directory.CreateDirectory(legacyPartition);
+
+        SquadReceipt singleRootReceipt = new SquadReceipt(
+            "kyber-squad.receipt/v1",
+            SquadDeploymentScope.Global,
+            ".",
+            InstalledAt,
+            [],
+            [new SquadOwnedFile(".codex/agents/conductor.toml", Digest("single-root"), "codex", false)]);
+        File.WriteAllText(Path.Combine(legacyPartition, "squad.receipt.json"), store.SerializeReceipt(singleRootReceipt), new UTF8Encoding(false));
+        File.WriteAllText(Path.Combine(legacyPartition, "squad.lock.yml"), store.SerializeLock(Lock()), new UTF8Encoding(false));
+
+        SquadStatusCommand command = new(stateStore: store);
+        CapturedConsoleExecution<int> result = ProcessConsoleCapture.Run(() => command.Execute(
+            null!,
+            new SquadStatusSettings
+            {
+                Path = callerRoot,
+                Global = true
+            }));
+
+        Assert.Equal(1, result.Result);
+        Assert.Contains("legacy", result.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("conflict", result.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.True(File.Exists(Path.Combine(legacyPartition, "squad.receipt.json")));
+        Assert.True(File.Exists(Path.Combine(legacyPartition, "squad.lock.yml")));
+    }
+
+    [Fact]
+    public void GlobalRecoveryUsesCanonicalJournalFromAnotherWorkingDirectory()
+    {
+        using TempDirectory fixture = new TempDirectory();
+        string applicationData = Path.Combine(fixture.Path, "application-data");
+        string firstRoot = Path.Combine(fixture.Path, "repo-a");
+        string secondRoot = Path.Combine(fixture.Path, "repo-b");
+        Directory.CreateDirectory(firstRoot);
+        Directory.CreateDirectory(secondRoot);
+
+        SquadStateStore store = Store(applicationData);
+        string globalDirectory = Path.Combine(applicationData, "KyberWeave", "squad", "global");
+        CheckpointFailingObserver observer = new CheckpointFailingObserver(
+            fixture.Path,
+            SquadTransactionCheckpointKind.Prepared);
+        Assert.Throws<InjectedSquadTransactionFailure>(() =>
+            new SquadTransaction(store, observer).Execute(CreateGlobalInstallPlan(secondRoot)));
+        RestoreTree(
+            fixture.Path,
+            Assert.IsType<SortedDictionary<string, TreeEntry>>(
+                observer.InterruptedTreeSnapshot));
+        string journalFile = Path.Combine(
+            store.ResolveTransactionDirectory(secondRoot, SquadDeploymentScope.Global),
+            "intent.json");
+        Assert.True(File.Exists(journalFile));
+        Assert.Equal(
+            journalFile,
+            Path.Combine(
+                store.ResolveTransactionDirectory(firstRoot, SquadDeploymentScope.Global),
+                "intent.json"));
+
+        new SquadTransaction(store).Recover(secondRoot, SquadDeploymentScope.Global);
+
+        Assert.False(
+            File.Exists(journalFile),
+            "Recovery must consume the canonical global journal even when another caller root shares it.");
+        Assert.Equal(globalDirectory, store.ResolveStateDirectory(firstRoot, SquadDeploymentScope.Global));
+        Assert.Equal(globalDirectory, store.ResolveStateDirectory(secondRoot, SquadDeploymentScope.Global));
     }
 
     /// <summary>
@@ -548,7 +688,10 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
                 ".codex/agents/conductor.toml",
                 Digest("installed body"),
                 "codex",
-                false)]);
+                false)])
+        {
+            Layout = SquadReceiptLayout.SingleRoot
+        };
         SquadDeploymentPlan plan = SquadDeploymentPlan.CreateUpdate(
             targetRoot,
             SquadDeploymentScope.Global,
@@ -559,9 +702,14 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             replaceManaged: false,
             new FixedTimeProvider(InstalledAt.AddDays(1)));
         SquadStateStore store = Store(applicationData);
-        GlobalTransactionLocationObserver observer = new GlobalTransactionLocationObserver(
+        string journalDirectory = store.ResolveTransactionDirectory(targetRoot, SquadDeploymentScope.Global);
+        string workDirectory = store.ResolveTransactionWorkDirectory(
             targetRoot,
-            store.ResolveStateDirectory(targetRoot, SquadDeploymentScope.Global));
+            SquadDeploymentScope.Global,
+            plan.IsSingleRootLayout);
+        GlobalTransactionLocationObserver observer = new GlobalTransactionLocationObserver(
+            workDirectory,
+            journalDirectory);
 
         new SquadTransaction(store, observer).Execute(plan);
 
@@ -1928,6 +2076,27 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         Assert.Equal(
             store.ResolveTransactionDirectory(targetRoot, SquadDeploymentScope.Global),
             store.ResolveTransactionDirectory(aliasRoot, SquadDeploymentScope.Global));
+    }
+
+    [Fact]
+    public void RelativeAuthorityPath_UsesCanonicalPhysicalRootWhenTargetAndPathAliasTheSameDirectory()
+    {
+        using TempDirectory fixture = new TempDirectory();
+        string realRoot = Path.Combine(fixture.Path, "real-root");
+        string aliasedRoot = Path.Combine(fixture.Path, "aliased-root");
+        Directory.CreateDirectory(realRoot);
+        string authorityRoot = Path.Combine(realRoot, "agents");
+        Directory.CreateDirectory(authorityRoot);
+        Directory.CreateSymbolicLink(aliasedRoot, realRoot);
+        string path = Path.Combine(aliasedRoot, "agents", "architect.md");
+
+        MethodInfo method = typeof(SquadTransaction).GetMethod(
+            "RelativeAuthorityPath",
+            BindingFlags.NonPublic | BindingFlags.Static)!;
+
+        string actual = (string)method.Invoke(null, [authorityRoot, path])!;
+
+        Assert.Equal("architect.md", actual);
     }
 
     [Fact]
@@ -6135,8 +6304,8 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     }
 
     private sealed class GlobalTransactionLocationObserver(
-        string targetRoot,
-        string stateDirectory) : ISquadTransactionObserver
+        string workDirectory,
+        string journalDirectory) : ISquadTransactionObserver
     {
         public bool SawDurableIntentInState { get; private set; }
 
@@ -6148,21 +6317,21 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
 
         public void AfterStep(SquadTransactionStep step)
         {
-            SawDurableIntentInState |= Directory.Exists(stateDirectory) &&
+            SawDurableIntentInState |= Directory.Exists(journalDirectory) &&
                 Directory.EnumerateFiles(
-                    stateDirectory,
+                    journalDirectory,
                     "intent.json",
                     SearchOption.AllDirectories).Any();
             if (step.Kind == SquadTransactionStepKind.FileStaged)
             {
-                SawStagingOnTargetFilesystem |= HasDirectoryNamed(targetRoot, "staging");
-                SawStagingOrBackupInState |= HasDirectoryNamed(stateDirectory, "staging");
+                SawStagingOnTargetFilesystem |= HasDirectoryNamed(workDirectory, "staging");
+                SawStagingOrBackupInState |= HasDirectoryNamed(journalDirectory, "staging");
             }
 
             if (step.Kind == SquadTransactionStepKind.FileBackedUp)
             {
-                SawBackupOnTargetFilesystem |= HasDirectoryNamed(targetRoot, "backups");
-                SawStagingOrBackupInState |= HasDirectoryNamed(stateDirectory, "backups");
+                SawBackupOnTargetFilesystem |= HasDirectoryNamed(workDirectory, "backups");
+                SawStagingOrBackupInState |= HasDirectoryNamed(journalDirectory, "backups");
             }
         }
     }

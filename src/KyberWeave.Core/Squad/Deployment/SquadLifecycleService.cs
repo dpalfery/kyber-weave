@@ -102,6 +102,11 @@ public sealed class SquadLifecycleService
         SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(request.TargetRoot);
         string targetRoot = identity.PhysicalPath;
 
+        if (request.Scope == SquadDeploymentScope.Global)
+        {
+            _stateStore.PrepareGlobalMutation(targetRoot);
+        }
+
         SquadReceipt? existingReceipt = _stateStore.ReadReceipt(targetRoot, request.Scope);
         if (existingReceipt is not null)
         {
@@ -176,7 +181,6 @@ public sealed class SquadLifecycleService
                 .ToArray();
 
             SquadDeploymentPlan plan;
-            IReadOnlyList<SquadReceipt>? siblingReceipts = SiblingGlobalReceipts(targetRoot, request.Scope);
             if (existingReceipt is null)
             {
                 plan = SquadDeploymentPlan.CreateInstall(
@@ -188,7 +192,7 @@ public sealed class SquadLifecycleService
                     adopt: request.Adopt,
                     timeProvider: _timeProvider,
                     globalRoots: _globalRoots,
-                    siblingGlobalReceipts: siblingReceipts);
+                    userPaths: _stateStore.UserPaths);
             }
             else
             {
@@ -202,7 +206,7 @@ public sealed class SquadLifecycleService
                     replaceManaged: false,
                     timeProvider: _timeProvider,
                     globalRoots: _globalRoots,
-                    siblingGlobalReceipts: siblingReceipts);
+                    userPaths: _stateStore.UserPaths);
             }
 
             if (request.DryRun)
@@ -245,6 +249,11 @@ public sealed class SquadLifecycleService
 
         SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(request.TargetRoot);
         string targetRoot = identity.PhysicalPath;
+
+        if (request.Scope == SquadDeploymentScope.Global)
+        {
+            _stateStore.PrepareGlobalMutation(targetRoot);
+        }
 
         SquadReceipt previousReceipt = _stateStore.ReadReceipt(targetRoot, request.Scope)
             ?? throw new SquadDeploymentConflictException(
@@ -334,7 +343,7 @@ public sealed class SquadLifecycleService
                 replaceManaged: request.ReplaceManaged,
                 timeProvider: _timeProvider,
                 globalRoots: _globalRoots,
-                siblingGlobalReceipts: SiblingGlobalReceipts(targetRoot, request.Scope));
+                userPaths: _stateStore.UserPaths);
 
             if (request.DryRun)
             {
@@ -382,6 +391,11 @@ public sealed class SquadLifecycleService
         SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(request.TargetRoot);
         string targetRoot = identity.PhysicalPath;
 
+        if (request.Scope == SquadDeploymentScope.Global)
+        {
+            _stateStore.PrepareGlobalMutation(targetRoot);
+        }
+
         SquadReceipt? receipt = _stateStore.ReadReceipt(targetRoot, request.Scope);
         if (receipt is null)
         {
@@ -396,7 +410,7 @@ public sealed class SquadLifecycleService
             scope: request.Scope,
             receipt: receipt,
             globalRoots: _globalRoots,
-            siblingGlobalReceipts: SiblingGlobalReceipts(targetRoot, request.Scope));
+            userPaths: _stateStore.UserPaths);
 
         if (request.DryRun)
         {
@@ -420,13 +434,6 @@ public sealed class SquadLifecycleService
             Degradations: plan.Receipt.Degradations,
             DryRun: false));
     }
-
-    private IReadOnlyList<SquadReceipt>? SiblingGlobalReceipts(
-        string targetRoot,
-        SquadDeploymentScope scope) =>
-        scope == SquadDeploymentScope.Global
-            ? _stateStore.ListOtherGlobalReceipts(targetRoot)
-            : null;
 
     /// <summary>
     /// Rejects any requested target with no registered renderer before the release is

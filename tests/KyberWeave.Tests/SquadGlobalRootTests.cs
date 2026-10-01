@@ -192,6 +192,81 @@ public sealed class SquadGlobalRootTests : IDisposable
     }
 
     [Fact]
+    public void GlobalStatePathUsesTheCanonicalUserScopedDirectoryAcrossCallerRoots()
+    {
+        string applicationData = Path.Combine(_temp.Path, "app-data");
+        string firstRoot = Path.Combine(_temp.Path, "repo-a");
+        string secondRoot = Path.Combine(_temp.Path, "repo-b");
+        Directory.CreateDirectory(firstRoot);
+        Directory.CreateDirectory(secondRoot);
+
+        SquadStateStore store = new(new FakeSquadUserPaths(applicationData));
+        string expectedDirectory = Path.Combine(applicationData, "KyberWeave", "squad", "global");
+
+        Assert.Equal(expectedDirectory, store.ResolveStateDirectory(firstRoot, SquadDeploymentScope.Global));
+        Assert.Equal(expectedDirectory, store.ResolveStateDirectory(secondRoot, SquadDeploymentScope.Global));
+        Assert.Equal(Path.Combine(expectedDirectory, "squad.lock.yml"), store.ResolveLockPath(firstRoot, SquadDeploymentScope.Global));
+        Assert.Equal(Path.Combine(expectedDirectory, "squad.lock.yml"), store.ResolveLockPath(secondRoot, SquadDeploymentScope.Global));
+        Assert.Equal(Path.Combine(expectedDirectory, "squad.receipt.json"), store.ResolveReceiptPath(firstRoot, SquadDeploymentScope.Global));
+        Assert.Equal(Path.Combine(expectedDirectory, "squad.receipt.json"), store.ResolveReceiptPath(secondRoot, SquadDeploymentScope.Global));
+        Assert.Equal(Path.Combine(expectedDirectory, ".squad-transaction"), store.ResolveTransactionDirectory(firstRoot, SquadDeploymentScope.Global));
+        Assert.Equal(Path.Combine(expectedDirectory, ".squad-transaction"), store.ResolveTransactionDirectory(secondRoot, SquadDeploymentScope.Global));
+    }
+
+    [Fact]
+    public async Task InstallAsync_GlobalScope_SameTargetInstallAcrossDifferentRootsSharesOneReceiptAndManagedFiles()
+    {
+        string tempHome = Path.Combine(_temp.Path, "cross-root-home");
+        Directory.CreateDirectory(tempHome);
+        string applicationData = Path.Combine(_temp.Path, "cross-root-user-data");
+        string repoA = Path.Combine(_temp.Path, "repo-a");
+        string repoB = Path.Combine(_temp.Path, "repo-b");
+        Directory.CreateDirectory(repoA);
+        Directory.CreateDirectory(repoB);
+
+        FakeSquadUserPaths userPaths = new(applicationData);
+        SquadStateStore stateStore = new(userPaths);
+        SquadGlobalRoots globalRoots = new(_ => null, tempHome);
+        using CorpusSquadReleaseSource releaseSource = new();
+
+        SquadLifecycleService service = new(
+            releaseSource,
+            SquadCommandComposition.ResolveRenderer(),
+            stateStore,
+            globalRoots: globalRoots);
+
+        SquadLifecycleResult firstInstall = await service.InstallAsync(new SquadInstallRequest(
+            TargetRoot: repoA,
+            Scope: SquadDeploymentScope.Global,
+            Targets: [SquadTarget.Codex],
+            Version: "1.2.3"));
+
+        Assert.True(firstInstall.Success, string.Join("; ", firstInstall.Errors ?? Array.Empty<string>()));
+
+        SquadLifecycleResult secondInstall = await service.InstallAsync(new SquadInstallRequest(
+            TargetRoot: repoB,
+            Scope: SquadDeploymentScope.Global,
+            Targets: [SquadTarget.Codex],
+            Version: "1.2.3"));
+
+        Assert.True(secondInstall.Success, string.Join("; ", secondInstall.Errors ?? Array.Empty<string>()));
+
+        SquadReceipt? receiptA = stateStore.ReadReceipt(repoA, SquadDeploymentScope.Global);
+        SquadReceipt? receiptB = stateStore.ReadReceipt(repoB, SquadDeploymentScope.Global);
+
+        Assert.NotNull(receiptA);
+        Assert.NotNull(receiptB);
+        Assert.Equal(receiptA, receiptB);
+        Assert.Equal(
+            stateStore.ResolveStateDirectory(repoA, SquadDeploymentScope.Global),
+            stateStore.ResolveStateDirectory(repoB, SquadDeploymentScope.Global));
+        Assert.Equal(
+            receiptA!.Files.Select(file => file.RelativePath).OrderBy(path => path),
+            receiptB!.Files.Select(file => file.RelativePath).OrderBy(path => path));
+        Assert.True(receiptA.Files.Count > 0);
+    }
+
+    [Fact]
     public void Constructor_RelativeHomeDirectory_ThrowsArgumentException()
     {
         ArgumentException exception = Assert.Throws<ArgumentException>(

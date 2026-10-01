@@ -73,6 +73,9 @@ public sealed class SquadDeploymentPlan
     private readonly ISquadGlobalRootResolver? _globalRoots;
     private readonly bool _isSingleRootLayout;
 
+    /// <summary>Whether the plan represents a legacy single-root Global deployment layout.</summary>
+    internal bool IsSingleRootLayout => _isSingleRootLayout;
+
     /// <summary>
     /// Resolves the absolute physical path where <c>file.RelativePath</c> will be written,
     /// based on the deployment scope: for <see cref="SquadDeploymentScope.Project"/> that is
@@ -162,18 +165,23 @@ public sealed class SquadDeploymentPlan
         SquadReceipt receipt,
         string targetRoot,
         ISquadGlobalRootResolver? globalRoots,
-        SquadOwnedFile file)
+        SquadOwnedFile file,
+        ISquadUserPaths? userPaths = null)
     {
         ArgumentNullException.ThrowIfNull(receipt);
         ArgumentNullException.ThrowIfNull(file);
 
+        bool isLegacySingleRoot = IsLegacySingleRootReceipt(receipt);
+        string physicalRoot = receipt.Scope == SquadDeploymentScope.Global && !isLegacySingleRoot
+            ? SquadPhysicalRootIdentity.ResolveGlobalState(userPaths).PhysicalPath
+            : SquadPhysicalRootIdentity.Resolve(targetRoot).PhysicalPath;
         return ResolvePhysicalPath(
             receipt.Scope,
-            SquadPhysicalRootIdentity.Resolve(targetRoot).PhysicalPath,
+            physicalRoot,
             globalRoots,
             file.Target,
             file.RelativePath,
-            IsLegacySingleRootReceipt(receipt));
+            isLegacySingleRoot);
     }
 
     /// <summary>
@@ -278,7 +286,8 @@ public sealed class SquadDeploymentPlan
         bool adopt,
         TimeProvider timeProvider,
         ISquadGlobalRootResolver? globalRoots = null,
-        IReadOnlyList<SquadReceipt>? siblingGlobalReceipts = null)
+        IReadOnlyList<SquadReceipt>? siblingGlobalReceipts = null,
+        ISquadUserPaths? userPaths = null)
     {
         ValidateCommon(targetRoot, squadLock, renderedFiles, degradations, timeProvider);
         SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(targetRoot);
@@ -360,7 +369,8 @@ public sealed class SquadDeploymentPlan
         bool replaceManaged,
         TimeProvider timeProvider,
         ISquadGlobalRootResolver? globalRoots = null,
-        IReadOnlyList<SquadReceipt>? siblingGlobalReceipts = null)
+        IReadOnlyList<SquadReceipt>? siblingGlobalReceipts = null,
+        ISquadUserPaths? userPaths = null)
     {
         ValidateCommon(targetRoot, squadLock, renderedFiles, degradations, timeProvider);
         ArgumentNullException.ThrowIfNull(previousReceipt);
@@ -536,7 +546,8 @@ public sealed class SquadDeploymentPlan
         SquadDeploymentScope scope,
         SquadReceipt receipt,
         ISquadGlobalRootResolver? globalRoots = null,
-        IReadOnlyList<SquadReceipt>? siblingGlobalReceipts = null)
+        IReadOnlyList<SquadReceipt>? siblingGlobalReceipts = null,
+        ISquadUserPaths? userPaths = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(targetRoot);
         ArgumentNullException.ThrowIfNull(receipt);
@@ -630,12 +641,15 @@ public sealed class SquadDeploymentPlan
         string targetRoot,
         SquadDeploymentScope scope,
         IReadOnlyList<SquadDeploymentFile> renderedFiles,
-        ISquadGlobalRootResolver? globalRoots)
+        ISquadGlobalRootResolver? globalRoots,
+        ISquadUserPaths? userPaths = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(targetRoot);
         ArgumentNullException.ThrowIfNull(renderedFiles);
 
-        string root = SquadPhysicalRootIdentity.Resolve(targetRoot).PhysicalPath;
+        string root = scope == SquadDeploymentScope.Global
+            ? SquadPhysicalRootIdentity.ResolveGlobalState(userPaths).PhysicalPath
+            : SquadPhysicalRootIdentity.Resolve(targetRoot).PhysicalPath;
         IReadOnlyList<NormalizedDeploymentFile> normalizedFiles = NormalizeRenderedFiles(
             root,
             scope,

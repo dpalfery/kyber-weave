@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Text;
 using KyberWeave.Core.Squad.Deployment;
 using Spectre.Console;
 using Spectre.Console.Cli;
@@ -54,7 +55,17 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
         SquadDeploymentScope scope = SquadCommandComposition.ResolveScope(settings.Global);
         ISquadGlobalRootResolver globalRoots = _globalRoots ?? SquadCommandComposition.ResolveGlobalRoots();
 
-        SquadReceipt? receipt = stateStore.ReadReceipt(targetRoot, scope);
+        SquadReceipt? receipt;
+        try
+        {
+            receipt = stateStore.ReadReceipt(targetRoot, scope);
+        }
+        catch (Exception ex) when (ex is SquadDeploymentConflictException or InvalidDataException)
+        {
+            AnsiConsole.MarkupLine($"[red]kyber-weave squad: error: {Markup.Escape(ex.Message)}[/]");
+            return 1;
+        }
+
         if (receipt is null)
         {
             AnsiConsole.MarkupLine($"[red]No Kyber-Squad deployment found at [bold]{Markup.Escape(targetRoot)}[/].[/]");
@@ -73,6 +84,21 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
                 "then [bold]kyber-weave squad install --global[/].");
         }
 
+        if (scope == SquadDeploymentScope.Global && IsReadOnlyLegacyReceiptAcrossRoots(stateStore, targetRoot, receipt))
+        {
+            AnsiConsole.MarkupLine(
+                "[yellow]legacy global partition:[/] status is read-only here because this receipt " +
+                "was recovered from a different original root. The mounted state is still valid for inspection.");
+            foreach (SquadOwnedFile file in receipt.Files)
+            {
+                AnsiConsole.MarkupLine(StatusLine("green", "ok", file, scope));
+            }
+
+            AnsiConsole.WriteLine();
+            AnsiConsole.MarkupLine("[green]All deployed files match the recorded receipt.[/]");
+            return 0;
+        }
+
         bool hasIssues = false;
         bool hasMissing = false;
         foreach (SquadOwnedFile file in receipt.Files)
@@ -85,7 +111,12 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
                 // beneath the recorded root for a legacy single-root receipt — see
                 // ResolveOwnedFilePath). Joining targetRoot directly would check a global
                 // deployment against the project directory and report every file missing.
-                fullPath = SquadDeploymentPlan.ResolveOwnedFilePath(receipt, targetRoot, globalRoots, file);
+                fullPath = SquadDeploymentPlan.ResolveOwnedFilePath(
+                    receipt,
+                    targetRoot,
+                    globalRoots,
+                    file,
+                    _userPaths ?? SquadUserPaths.Instance);
             }
             catch (Exception)
             {
@@ -129,11 +160,80 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
         return 0;
     }
 
+    private static bool IsReadOnlyLegacyReceiptAcrossRoots(
+        SquadStateStore stateStore,
+        string targetRoot,
+        SquadReceipt receipt)
+    {
+        if (receipt.Scope != SquadDeploymentScope.Global ||
+            SquadDeploymentPlan.IsLegacySingleRootReceipt(receipt))
+        {
+            return false;
+        }
+
+        string globalStateDirectory = stateStore.ResolveStateDirectory(targetRoot, SquadDeploymentScope.Global);
+        if (File.Exists(Path.Combine(globalStateDirectory, "squad.receipt.json")))
+        {
+            return false;
+        }
+
+        string rootsDirectory = Path.Combine(
+            Path.GetDirectoryName(globalStateDirectory) ?? throw new InvalidOperationException(
+                "Could not resolve the global Squad state parent."),
+            "roots");
+        if (!Directory.Exists(rootsDirectory))
+        {
+            return false;
+        }
+
+        string[] bindingIds = Directory.EnumerateDirectories(rootsDirectory)
+            .Select(path => Path.GetFileName(path))
+            .Where(id => !string.IsNullOrWhiteSpace(id) && id.All(character =>
+                character is >= '0' and <= '9' or >= 'a' and <= 'f'))
+            .OrderBy(id => id, StringComparer.Ordinal)
+            .ToArray();
+        if (bindingIds.Length != 1)
+        {
+            return false;
+        }
+
+        string bindingId = bindingIds[0];
+        if (string.Equals(ComputePhysicalRootKey(targetRoot), bindingId, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        string receiptPath = Path.Combine(rootsDirectory, bindingId, "squad.receipt.json");
+        if (!File.Exists(receiptPath))
+        {
+            return false;
+        }
+
+        try
+        {
+            SquadReceipt legacyReceipt = stateStore.DeserializeReceipt(File.ReadAllText(receiptPath, Encoding.UTF8));
+            return !SquadDeploymentPlan.IsLegacySingleRootReceipt(legacyReceipt);
+        }
+        catch (InvalidDataException)
+        {
+            return false;
+        }
+    }
+
     /// <summary>
     /// Renders one status line. Global scope deploys the same relative path to several
     /// targets' roots, so the target token is part of the identity shown to the operator;
     /// project scope already encodes the target in the path itself.
     /// </summary>
+    private static string ComputePhysicalRootKey(string targetRoot)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(targetRoot);
+        string fullPath = Path.GetFullPath(targetRoot);
+        string physicalPath = Path.TrimEndingDirectorySeparator(fullPath)
+            .Normalize(NormalizationForm.FormC);
+        return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(physicalPath)));
+    }
+
     private static string StatusLine(string color, string state, SquadOwnedFile file, SquadDeploymentScope scope)
     {
         string suffix = scope == SquadDeploymentScope.Global ? $" ({file.Target})" : string.Empty;

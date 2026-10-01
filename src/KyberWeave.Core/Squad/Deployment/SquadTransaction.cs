@@ -96,26 +96,33 @@ public sealed class SquadTransaction
                 "Squad target root changed physical identity after preflight. Recreate the plan before writing.");
         }
 
-        using TransactionLease lease = AcquireLease(plan.PhysicalRootKey);
-        string root = plan.PhysicalRootPath;
+        string stateRoot = plan.Scope == SquadDeploymentScope.Global
+            ? _stateStore.ResolveStateDirectory(plan.TargetRoot, plan.Scope)
+            : plan.PhysicalRootPath;
+        string workRoot = plan.Scope == SquadDeploymentScope.Global && !plan.IsSingleRootLayout
+            ? stateRoot
+            : plan.PhysicalRootPath;
+        using TransactionLease lease = AcquireLease(ResolveLeaseKeys(plan.Scope, plan.PhysicalRootKey));
         string journalDirectory = _stateStore.ResolveTransactionDirectory(
-            root,
+            stateRoot,
             plan.Scope);
         string workDirectory = _stateStore.ResolveTransactionWorkDirectory(
-            root,
-            plan.Scope);
+            plan.TargetRoot,
+            plan.Scope,
+            plan.IsSingleRootLayout);
         bool sameTransactionDirectory = SquadFileSystemPathSemantics.AreSame(
             journalDirectory,
             workDirectory);
         string intentPath = Path.Combine(journalDirectory, IntentFileName);
         bool workExisted = Directory.Exists(workDirectory);
-        string stateAuthorityRoot = _stateStore.ResolveStateAuthorityRoot(root, plan.Scope);
+        string stateAuthorityRoot = _stateStore.ResolveStateAuthorityRoot(stateRoot, plan.Scope);
         IReadOnlyList<string> journalDirectoriesCreated = CaptureMissingDirectories(
             journalDirectory,
             stateAuthorityRoot);
         IReadOnlyList<string> workDirectoriesCreated = sameTransactionDirectory
             ? Array.Empty<string>()
-            : CaptureMissingDirectories(workDirectory, root);
+            : CaptureMissingDirectories(workDirectory, workRoot);
+        IReadOnlyList<string> transactionDirectoriesCreated = workDirectoriesCreated;
 
         Directory.CreateDirectory(journalDirectory);
         bool ownsNewTransaction = false;
@@ -132,15 +139,13 @@ public sealed class SquadTransaction
             ValidatePreconditions(plan);
             Directory.CreateDirectory(workDirectory);
 
-            string lockPath = _stateStore.ResolveLockPath(root, plan.Scope);
-            string receiptPath = _stateStore.ResolveReceiptPath(root, plan.Scope);
+            string lockPath = _stateStore.ResolveLockPath(stateRoot, plan.Scope);
+            string receiptPath = _stateStore.ResolveReceiptPath(stateRoot, plan.Scope);
             IntentDocument intent = CaptureIntent(
                 plan,
                 lockPath,
                 receiptPath,
-                sameTransactionDirectory
-                    ? journalDirectoriesCreated
-                    : workDirectoriesCreated,
+                transactionDirectoriesCreated,
                 journalDirectoriesCreated,
                 stateAuthorityRoot);
             int sequence = 0;
@@ -313,14 +318,18 @@ public sealed class SquadTransaction
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(targetRoot);
 
-        SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(targetRoot);
-        using TransactionLease lease = AcquireLease(identity.Key);
-        string root = identity.PhysicalPath;
+        SquadPhysicalRootIdentity targetIdentity = SquadPhysicalRootIdentity.Resolve(targetRoot);
+        using TransactionLease lease = AcquireLease(ResolveLeaseKeys(scope, targetIdentity.Key));
+        string root = scope == SquadDeploymentScope.Global
+            ? _stateStore.ResolveStateDirectory(targetRoot, scope)
+            : targetIdentity.PhysicalPath;
         string journalDirectory = _stateStore.ResolveTransactionDirectory(root, scope);
         if (!Directory.Exists(journalDirectory))
             return;
 
-        string workDirectory = _stateStore.ResolveTransactionWorkDirectory(root, scope);
+        string workDirectory = _stateStore.ResolveTransactionWorkDirectory(targetRoot, scope);
+        string targetAuthorityRoot = targetIdentity.PhysicalPath;
+        string stateAuthorityRoot = _stateStore.ResolveStateAuthorityRoot(root, scope);
         bool recoveryCompleted = false;
         IReadOnlyList<CreatedDirectoryAuthority> createdDirectoriesToRemove =
             Array.Empty<CreatedDirectoryAuthority>();
@@ -337,9 +346,9 @@ public sealed class SquadTransaction
                 intentPath,
                 journalDirectory,
                 workDirectory,
-                identity.Key,
-                root,
-                _stateStore.ResolveStateAuthorityRoot(root, scope));
+                targetIdentity.Key,
+                targetAuthorityRoot,
+                stateAuthorityRoot);
             string lockPath = _stateStore.ResolveLockPath(root, scope);
             string receiptPath = _stateStore.ResolveReceiptPath(root, scope);
             ResolveActiveClaims(
@@ -368,8 +377,8 @@ public sealed class SquadTransaction
                 DeleteEmptyDirectory(journalDirectory);
                 RemoveCreatedDirectories(
                     createdDirectoriesToRemove,
-                    root,
-                    _stateStore.ResolveStateAuthorityRoot(root, scope));
+                    targetAuthorityRoot,
+                    stateAuthorityRoot);
             }
         }
     }
@@ -2011,13 +2020,20 @@ public sealed class SquadTransaction
         string boundary = Path.TrimEndingDirectorySeparator(Path.GetFullPath(boundaryPath));
         string current = Path.TrimEndingDirectorySeparator(Path.GetFullPath(directoryPath));
         List<string> missing = new List<string>();
-        while (!SquadFileSystemPathSemantics.AreSame(current, boundary) &&
-               SquadFileSystemPathSemantics.IsWithin(boundary, current))
+        while (current is not null)
         {
+            bool isBoundary = SquadFileSystemPathSemantics.AreSame(boundary, current);
+            bool isWithinBoundary = !isBoundary && SquadFileSystemPathSemantics.IsWithin(boundary, current);
+            if (!isBoundary && !isWithinBoundary)
+                break;
+
             if (GetEntryKind(current) != OriginalEntryKind.Missing)
                 break;
 
             missing.Add(current);
+            if (isBoundary)
+                break;
+
             current = Path.GetDirectoryName(current)
                 ?? throw new InvalidOperationException(
                     $"Could not inspect the parent of transaction directory '{directoryPath}'.");
@@ -2032,39 +2048,56 @@ public sealed class SquadTransaction
         string targetRoot,
         string stateAuthorityRoot)
     {
-        CreatedDirectoryAuthority[] authorities = transactionDirectories.Select(path =>
-                new CreatedDirectoryAuthority(
-                    CreatedDirectoryArea.Target,
-                    RelativeAuthorityPath(targetRoot, path)))
-            .Concat(journalDirectories.Select(path =>
-                new CreatedDirectoryAuthority(
-                    CreatedDirectoryArea.State,
-                    RelativeAuthorityPath(stateAuthorityRoot, path))))
+        List<CreatedDirectoryAuthority> authorities = new();
+        foreach (string path in transactionDirectories)
+        {
+            authorities.Add(new CreatedDirectoryAuthority(
+                CreatedDirectoryArea.Target,
+                RelativeAuthorityPath(targetRoot, path)));
+        }
+
+        foreach (string path in journalDirectories)
+        {
+            authorities.Add(new CreatedDirectoryAuthority(
+                CreatedDirectoryArea.State,
+                RelativeAuthorityPath(stateAuthorityRoot, path)));
+        }
+
+        return authorities
             .Distinct()
-            .OrderByDescending(authority => authority.Path.Count(character => character == '/'))
+            .OrderByDescending(authority => authority.Path.Length == 0
+                ? -1
+                : authority.Path.Count(character => character == '/'))
             .ThenBy(authority => authority.Area)
             .ThenBy(authority => authority.Path, StringComparer.Ordinal)
             .ToArray();
-        return authorities;
     }
 
     private static string RelativeAuthorityPath(string authorityRoot, string path)
     {
-        if (!SquadFileSystemPathSemantics.IsWithin(authorityRoot, path))
+        string canonicalRoot = SquadFileSystemPathSemantics.Canonicalize(authorityRoot);
+        string canonicalPath = SquadFileSystemPathSemantics.Canonicalize(path);
+
+        if (SquadFileSystemPathSemantics.AreSame(canonicalRoot, canonicalPath))
+            return string.Empty;
+
+        if (!SquadFileSystemPathSemantics.IsWithin(canonicalRoot, canonicalPath))
         {
             throw new InvalidOperationException(
                 "Squad created-directory authority escaped its bound root.");
         }
 
         return SquadPathPolicy.NormalizeRelativePath(
-            Path.GetRelativePath(authorityRoot, path)
+            Path.GetRelativePath(canonicalRoot, canonicalPath)
                 .Replace(Path.DirectorySeparatorChar, '/'));
     }
 
     private static void RemoveCreatedDirectories(IEnumerable<string> directories)
     {
         foreach (string directory in directories)
+        {
             DeleteEmptyDirectory(directory);
+        }
     }
 
     private static void RemoveCreatedDirectories(
@@ -2077,6 +2110,12 @@ public sealed class SquadTransaction
             string root = authority.Area == CreatedDirectoryArea.Target
                 ? targetRoot
                 : stateAuthorityRoot;
+            if (authority.Path.Length == 0)
+            {
+                DeleteEmptyDirectory(root);
+                continue;
+            }
+
             DeleteEmptyDirectory(SquadPathPolicy.ResolveFile(root, authority.Path));
         }
     }
@@ -2137,53 +2176,131 @@ public sealed class SquadTransaction
         Directory.Delete(path);
     }
 
+    /// <remarks>
+    /// Global work always leases both the canonical global state key and the target's
+    /// resolved physical-root key so a project or a second global caller on the same
+    /// physical tree cannot make conflicting progress at the same time.
+    /// </remarks>
+    private IReadOnlyList<string> ResolveLeaseKeys(SquadDeploymentScope scope, string targetRootKey)
+    {
+        if (scope != SquadDeploymentScope.Global)
+            return new[] { targetRootKey };
+
+        string globalState = _stateStore.ResolveGlobalStateKey();
+        return new[]
+        {
+            globalState,
+            targetRootKey
+        }
+        .Distinct(StringComparer.Ordinal)
+        .OrderBy(key => key, StringComparer.Ordinal)
+        .ToArray();
+    }
+
     [SuppressMessage(
         "Reliability",
         "CA2000:Dispose objects before losing scope",
         Justification = "A successful TransactionLease takes ownership of the mutex; the catch path disposes it.")]
-    private static TransactionLease AcquireLease(string rootKey)
-    {
-        if (!ActiveLeases.TryAdd(rootKey, 0))
-        {
-            throw new InvalidOperationException(
-                "A Squad transaction is active for this deployment root. Wait for it to finish before retrying.");
-        }
+    internal static TransactionLease AcquireLease(string rootKey) =>
+        AcquireLease([rootKey]);
 
-        Mutex? mutex = null;
-        bool mutexAcquired = false;
+    [SuppressMessage(
+        "Reliability",
+        "CA2000:Dispose objects before losing scope",
+        Justification = "A successful TransactionLease takes ownership of the mutex; the catch path disposes it.")]
+    internal static TransactionLease AcquireLease(IEnumerable<string> rootKeys)
+    {
+        ArgumentNullException.ThrowIfNull(rootKeys);
+        List<string> identities = [];
+        List<Mutex> mutexes = [];
+        List<string> orderedKeys = rootKeys
+            .Where(key => !string.IsNullOrWhiteSpace(key))
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(key => key, StringComparer.Ordinal)
+            .ToList();
+
         try
         {
-            mutex = new Mutex(initiallyOwned: false, $"kyber-weave-squad-{rootKey}");
-            try
+            foreach (string rootKey in orderedKeys)
             {
-                mutexAcquired = mutex.WaitOne(0);
-            }
-            catch (AbandonedMutexException)
-            {
-                mutexAcquired = true;
+                if (!ActiveLeases.TryAdd(rootKey, 0))
+                {
+                    foreach (string activeKey in identities)
+                        ActiveLeases.TryRemove(activeKey, out _);
+
+                    throw new InvalidOperationException(
+                        "A Squad transaction is active for this deployment root. Wait for it to finish before retrying.");
+                }
+
+                identities.Add(rootKey);
+                Mutex mutex = new(initiallyOwned: false, $"kyber-weave-squad-{rootKey}");
+                bool mutexAcquired = false;
+                try
+                {
+                    mutexAcquired = mutex.WaitOne(0);
+                }
+                catch (AbandonedMutexException)
+                {
+                    mutexAcquired = true;
+                }
+
+                if (!mutexAcquired)
+                {
+                    foreach (string activeKey in identities)
+                        ActiveLeases.TryRemove(activeKey, out _);
+                    foreach (Mutex activeMutex in mutexes)
+                    {
+                        try
+                        {
+                            activeMutex.ReleaseMutex();
+                        }
+                        catch (ApplicationException)
+                        {
+                        }
+                        catch (InvalidOperationException)
+                        {
+                        }
+                        finally
+                        {
+                            activeMutex.Dispose();
+                        }
+                    }
+
+                    throw new InvalidOperationException(
+                        "A Squad transaction is active for this deployment root. Wait for it to finish before retrying.");
+                }
+
+                mutexes.Add(mutex);
             }
 
-            if (!mutexAcquired)
-            {
-                throw new InvalidOperationException(
-                    "A Squad transaction is active for this deployment root. Wait for it to finish before retrying.");
-            }
+            if (identities.Count == 0)
+                throw new InvalidOperationException("A Squad transaction requires at least one lease key.");
 
-            return new TransactionLease(rootKey, mutex);
+            return new TransactionLease(identities, mutexes);
         }
         catch (Exception exception)
         {
-            if (mutex is not null)
+            foreach (Mutex mutex in mutexes)
             {
-                if (mutexAcquired)
+                try
                 {
                     mutex.ReleaseMutex();
                 }
-
-                mutex.Dispose();
+                catch (ApplicationException)
+                {
+                }
+                catch (InvalidOperationException)
+                {
+                }
+                finally
+                {
+                    mutex.Dispose();
+                }
             }
 
-            ActiveLeases.TryRemove(rootKey, out _);
+            foreach (string rootKey in identities)
+                ActiveLeases.TryRemove(rootKey, out _);
+
             if (exception is IOException or UnauthorizedAccessException)
             {
                 throw new InvalidOperationException(
@@ -2972,11 +3089,21 @@ public sealed class SquadTransaction
         int previousDepth = int.MaxValue;
         foreach (CreatedDirectoryAuthority authority in authorities)
         {
-            string normalized = SquadPathPolicy.NormalizeRelativePath(authority.Path);
-            int depth = normalized.Count(character => character == '/');
-            if (!string.Equals(normalized, authority.Path, StringComparison.Ordinal) ||
-                !identities.Add($"{authority.Area}:{normalized}") ||
-                depth > previousDepth)
+            string normalized = authority.Path.Length == 0
+                ? string.Empty
+                : SquadPathPolicy.NormalizeRelativePath(authority.Path);
+            int depth = normalized.Length == 0 ? -1 : normalized.Count(character => character == '/');
+            if (authority.Path.Length != 0 &&
+                (!string.Equals(normalized, authority.Path, StringComparison.Ordinal) ||
+                 !identities.Add($"{authority.Area}:{normalized}") ||
+                 depth > previousDepth))
+            {
+                throw new InvalidDataException(
+                    "Squad created-directory authority is duplicate, unordered, or non-portable.");
+            }
+
+            if (authority.Path.Length == 0 &&
+                !identities.Add($"{authority.Area}:"))
             {
                 throw new InvalidDataException(
                     "Squad created-directory authority is duplicate, unordered, or non-portable.");
@@ -2989,7 +3116,9 @@ public sealed class SquadTransaction
             string transactionRoot = authority.Area == CreatedDirectoryArea.Target
                 ? workDirectory
                 : journalDirectory;
-            string directory = SquadPathPolicy.ResolveFile(authorityRoot, normalized);
+            string directory = authority.Path.Length == 0
+                ? authorityRoot
+                : SquadPathPolicy.ResolveFile(authorityRoot, normalized);
             if (!SquadFileSystemPathSemantics.AreSame(directory, transactionRoot) &&
                 !SquadFileSystemPathSemantics.IsWithin(directory, transactionRoot))
             {
@@ -3291,10 +3420,23 @@ public sealed class SquadTransaction
         State
     }
 
-    private sealed class TransactionLease(string identity, Mutex mutex) : IDisposable
+    internal sealed class TransactionLease : IDisposable
     {
+        private readonly IReadOnlyList<string> _identities;
+        private readonly IReadOnlyList<Mutex> _mutexes;
         private bool _disposed;
         private FileStream? _journal;
+
+        public TransactionLease(string identity, Mutex mutex)
+            : this([identity], [mutex])
+        {
+        }
+
+        public TransactionLease(IReadOnlyList<string> identities, IReadOnlyList<Mutex> mutexes)
+        {
+            _identities = identities;
+            _mutexes = mutexes;
+        }
 
         public void HoldJournal(string journalPath)
         {
@@ -3317,9 +3459,15 @@ public sealed class SquadTransaction
                 return;
 
             ReleaseJournal();
-            mutex.ReleaseMutex();
-            mutex.Dispose();
-            ActiveLeases.TryRemove(identity, out _);
+            foreach (Mutex mutex in _mutexes)
+            {
+                mutex.ReleaseMutex();
+                mutex.Dispose();
+            }
+
+            foreach (string identity in _identities)
+                ActiveLeases.TryRemove(identity, out _);
+
             _disposed = true;
         }
     }

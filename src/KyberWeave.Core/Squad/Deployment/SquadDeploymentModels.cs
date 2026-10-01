@@ -41,7 +41,45 @@ public sealed record SquadLock(
     string Translation,
     string BundleDigest,
     string AssetDigest,
-    SquadApmIdentity Apm);
+    SquadApmIdentity Apm) : IEquatable<SquadLock>
+{
+    public bool Equals(SquadLock? other)
+    {
+        if (ReferenceEquals(this, other)) return true;
+        if (other is null) return false;
+
+        return Schema == other.Schema &&
+               SquadVersion == other.SquadVersion &&
+               CliVersion == other.CliVersion &&
+               McpVersion == other.McpVersion &&
+               Bundle == other.Bundle &&
+               Targets.SequenceEqual(other.Targets, StringComparer.Ordinal) &&
+               Exclusions.SequenceEqual(other.Exclusions, StringComparer.Ordinal) &&
+               Translation == other.Translation &&
+               BundleDigest == other.BundleDigest &&
+               AssetDigest == other.AssetDigest &&
+               Apm.Equals(other.Apm);
+    }
+
+    public override int GetHashCode()
+    {
+        HashCode hash = new();
+        hash.Add(Schema, StringComparer.Ordinal);
+        hash.Add(SquadVersion, StringComparer.Ordinal);
+        hash.Add(CliVersion, StringComparer.Ordinal);
+        hash.Add(McpVersion, StringComparer.Ordinal);
+        hash.Add(Bundle, StringComparer.Ordinal);
+        foreach (string target in Targets)
+            hash.Add(target, StringComparer.Ordinal);
+        foreach (string exclusion in Exclusions)
+            hash.Add(exclusion, StringComparer.Ordinal);
+        hash.Add(Translation, StringComparer.Ordinal);
+        hash.Add(BundleDigest, StringComparer.Ordinal);
+        hash.Add(AssetDigest, StringComparer.Ordinal);
+        hash.Add(Apm);
+        return hash.ToHashCode();
+    }
+}
 
 /// <summary>A documented loss of native harness behavior in a rendered deployment.</summary>
 public sealed record SquadDegradation(
@@ -73,7 +111,7 @@ public sealed record SquadReceipt(
     string TargetRoot,
     DateTimeOffset InstalledAtUtc,
     IReadOnlyList<SquadDegradation> Degradations,
-    IReadOnlyList<SquadOwnedFile> Files)
+    IReadOnlyList<SquadOwnedFile> Files) : IEquatable<SquadReceipt>
 {
     /// <summary>
     /// How this receipt's owned files map onto physical roots. Meaningful only for
@@ -84,6 +122,35 @@ public sealed record SquadReceipt(
     /// overwritten by classification in <see cref="SquadStateStore.DeserializeReceipt"/>.
     /// </summary>
     public SquadReceiptLayout Layout { get; init; } = SquadReceiptLayout.PerTargetRoots;
+
+    public bool Equals(SquadReceipt? other)
+    {
+        if (ReferenceEquals(this, other)) return true;
+        if (other is null) return false;
+
+        return Schema == other.Schema &&
+               Scope == other.Scope &&
+               TargetRoot == other.TargetRoot &&
+               InstalledAtUtc == other.InstalledAtUtc &&
+               Degradations.SequenceEqual(other.Degradations) &&
+               Files.SequenceEqual(other.Files) &&
+               Layout == other.Layout;
+    }
+
+    public override int GetHashCode()
+    {
+        HashCode hash = new();
+        hash.Add(Schema, StringComparer.Ordinal);
+        hash.Add(Scope);
+        hash.Add(TargetRoot, StringComparer.Ordinal);
+        hash.Add(InstalledAtUtc);
+        foreach (SquadDegradation degradation in Degradations)
+            hash.Add(degradation);
+        foreach (SquadOwnedFile file in Files)
+            hash.Add(file);
+        hash.Add(Layout);
+        return hash.ToHashCode();
+    }
 }
 
 /// <summary>A harness-native file produced by the upstream renderer.</summary>
@@ -108,6 +175,28 @@ public sealed record SquadDeploymentFile
 public interface ISquadUserPaths
 {
     string ApplicationDataDirectory { get; }
+}
+
+internal sealed class DefaultSquadUserPaths : ISquadUserPaths
+{
+    public static DefaultSquadUserPaths Instance { get; } = new();
+
+    private DefaultSquadUserPaths()
+    {
+    }
+
+    private string? _applicationDataDirectoryOverride;
+
+    public void SetApplicationDataDirectory(string applicationDataDirectory)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(applicationDataDirectory);
+        _applicationDataDirectoryOverride = Path.GetFullPath(applicationDataDirectory);
+    }
+
+    public string ApplicationDataDirectory =>
+        string.IsNullOrWhiteSpace(_applicationDataDirectoryOverride)
+            ? Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData)
+            : _applicationDataDirectoryOverride;
 }
 
 /// <summary>Raised when a deployment would overwrite a path outside its receipt authority.</summary>
