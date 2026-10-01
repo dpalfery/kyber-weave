@@ -239,6 +239,19 @@ public sealed partial class HotshotGoldenContractTests
     }
 
     [Fact]
+    public void CodeReviewSkillRetainsSelfReviewTriggerAndGate()
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSkill? skill = source.Skills.FirstOrDefault(candidate => candidate.Name == "code-review");
+
+        Assert.NotNull(skill);
+        Assert.Contains("self-review gate before pushing", skill.Description, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("## Pre-push self-review gate", skill.InstructionBody, StringComparison.Ordinal);
+        Assert.Contains("major-or-worse", skill.InstructionBody, StringComparison.Ordinal);
+        Assert.Contains("before pushing", skill.InstructionBody, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void CanonicalSourcePreservesGoldenContractOutsideReviewedEvolution()
     {
         HotshotGoldenManifest manifest = ReadManifest();
