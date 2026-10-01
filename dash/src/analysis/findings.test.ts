@@ -2136,3 +2136,34 @@ describe('unknown-window coverage guard (issue #191, review round 2)', () => {
     store.close()
   })
 })
+
+describe('Findings route paging validation (council review)', () => {
+  it('rejects malformed limit/offset instead of silently truncating', () => {
+    const path = tempStorePath()
+    const store = new CanonStore(path)
+    const bridge = new KyberBridge({ canonPath: path, store })
+    const invoke = (href: string): { status: number; body: string } => {
+      let status = 0
+      let body = ''
+      const req = { method: 'GET' } as unknown as import('node:http').IncomingMessage
+      const res = {
+        writeHead: (code: number) => {
+          status = code
+        },
+        end: (data: string) => {
+          body = data
+        },
+      } as unknown as import('node:http').ServerResponse
+      handleKyberRequest(req, res, new URL(href), bridge)
+      return { status, body }
+    }
+
+    expect(invoke('http://localhost:3000/api/kyber/findings?limit=10abc').status).toBe(400)
+    expect(invoke('http://localhost:3000/api/kyber/findings?offset=-5').status).toBe(400)
+    expect(invoke('http://localhost:3000/api/kyber/findings?limit=10&offset=0').status).toBe(200)
+    expect(invoke('http://localhost:3000/api/kyber/findings').status).toBe(200)
+
+    bridge.close()
+    store.close()
+  })
+})

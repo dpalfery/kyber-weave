@@ -70,6 +70,19 @@ function timestampMs(record: CanonicalRecord): number {
   return Date.parse(typeof record.timestamp === 'string' ? record.timestamp : record.timestamp.toISOString())
 }
 
+/** Parsed timestamps memoized across a run (council review): sorts, span
+ * checks and nearest-pairing otherwise re-parse the same stamps per
+ * comparison. Records are garbage-collected with their entries. */
+const parsedTimestamps = new WeakMap<CanonicalRecord, number>()
+
+function cachedTimestampMs(record: CanonicalRecord): number {
+  const known = parsedTimestamps.get(record)
+  if (known !== undefined) return known
+  const ms = timestampMs(record)
+  parsedTimestamps.set(record, ms)
+  return ms
+}
+
 function hasParts(record: CanonicalRecord): boolean {
   return (record.parts !== undefined && record.parts.length > 0) || Object.keys(record.content).length > 0
 }
@@ -114,21 +127,19 @@ export function dedupeTwinTurns(records: readonly CanonicalRecord[]): CanonicalR
   const dropped = new Set<CanonicalRecord>()
   const transplant = new Map<CanonicalRecord, CanonicalRecord>()
   for (const turns of byCounter.values()) {
-    const ordered = [...turns].sort((a, b) => timestampMs(a) - timestampMs(b))
+    const ordered = [...turns].sort((a, b) => cachedTimestampMs(a) - cachedTimestampMs(b))
     let cluster: CanonicalRecord[] = []
     const closeCluster = () => {
       collapseCluster(cluster, dropped, transplant)
       cluster = []
     }
     for (const record of ordered) {
-      // Close on either bound: the gap to the neighbour, and the span from the
-      // cluster's first row. The second is what stops adjacent pairs from
-      // chaining into an arbitrarily long run.
-      const previous = cluster[cluster.length - 1]
+      // Close when the span from the cluster's first row exceeds the window.
+      // Rows arrive time-ordered, so the span always covers the neighbour
+      // gap — a separate step bound could never fire on its own (review).
       const first = cluster[0]
-      const exceedsStep = previous !== undefined && Math.abs(timestampMs(record) - timestampMs(previous)) > TWIN_TURN_MAX_SKEW_MS
-      const exceedsSpan = first !== undefined && timestampMs(record) - timestampMs(first) > TWIN_TURN_MAX_SKEW_MS
-      if (exceedsStep || exceedsSpan) closeCluster()
+      const exceedsSpan = first !== undefined && cachedTimestampMs(record) - cachedTimestampMs(first) > TWIN_TURN_MAX_SKEW_MS
+      if (exceedsSpan) closeCluster()
       cluster.push(record)
     }
     closeCluster()
@@ -193,24 +204,24 @@ function collapseCluster(
   // bare while a content-carrying neighbour absorbs its donor.
   const donors = files
     .filter((file) => hasParts(file))
-    .sort((a, b) => timestampMs(a) - timestampMs(b))
+    .sort((a, b) => cachedTimestampMs(a) - cachedTimestampMs(b))
   const free = new Set(donors)
   const nearestFree = (moment: number): CanonicalRecord | undefined => {
     let best: CanonicalRecord | undefined
     for (const donor of donors) {
       if (!free.has(donor)) continue
-      if (best === undefined || Math.abs(timestampMs(donor) - moment) < Math.abs(timestampMs(best) - moment)) {
+      if (best === undefined || Math.abs(cachedTimestampMs(donor) - moment) < Math.abs(cachedTimestampMs(best) - moment)) {
         best = donor
       }
     }
     return best
   }
   const keepers = [
-    ...otels.filter((otel) => !hasParts(otel)).sort((a, b) => timestampMs(a) - timestampMs(b)),
-    ...otels.filter((otel) => hasParts(otel)).sort((a, b) => timestampMs(a) - timestampMs(b)),
+    ...otels.filter((otel) => !hasParts(otel)).sort((a, b) => cachedTimestampMs(a) - cachedTimestampMs(b)),
+    ...otels.filter((otel) => hasParts(otel)).sort((a, b) => cachedTimestampMs(a) - cachedTimestampMs(b)),
   ]
   for (const keeper of keepers) {
-    const donor = nearestFree(timestampMs(keeper))
+    const donor = nearestFree(cachedTimestampMs(keeper))
     if (donor === undefined) break
     free.delete(donor)
     transplant.set(keeper, donor)
@@ -218,10 +229,10 @@ function collapseCluster(
   // Surplus donors (the 2x-per-turn shape) still drop — their counters are
   // the same turn — but merge into the keeper nearest to them in time rather
   // than vanishing with the duplicate.
-  for (const donor of [...free].sort((a, b) => timestampMs(a) - timestampMs(b))) {
+  for (const donor of [...free].sort((a, b) => cachedTimestampMs(a) - cachedTimestampMs(b))) {
     let nearest = otels[0]!
     for (const keeper of otels) {
-      if (Math.abs(timestampMs(keeper) - timestampMs(donor)) < Math.abs(timestampMs(nearest) - timestampMs(donor))) {
+      if (Math.abs(cachedTimestampMs(keeper) - cachedTimestampMs(donor)) < Math.abs(cachedTimestampMs(nearest) - cachedTimestampMs(donor))) {
         nearest = keeper
       }
     }

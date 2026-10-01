@@ -92,8 +92,10 @@ export const SCHEMA_VERSION = 16
  * Generations: 2 stopped fabricating duplicate-tool-call waste for
  * underivable sizes (coverage-gap findings carry no estimate); 3 adds honest
  * compaction windows, folded twin-harness identity, and rebuilt findings
- * (issues #181/#182/#191). Bump it whenever detector semantics change and
- * say so in the PR, so the stamp stays a truthful witness instead of a
+ * (issues #181/#182/#191). The stamp is written when the store is created;
+ * a store file that predates a generation keeps its old stamp until its
+ * derived tables are rebuilt. Bump it whenever detector semantics change
+ * and say so in the PR, so the stamp stays a truthful witness instead of a
  * forgotten counter.
  */
 export const DETECTOR_VERSION = 3
@@ -281,6 +283,7 @@ CREATE TABLE IF NOT EXISTS finding (
 CREATE INDEX IF NOT EXISTS finding_by_run ON finding (run_id);
 CREATE INDEX IF NOT EXISTS finding_by_session ON finding (session_id);
 CREATE INDEX IF NOT EXISTS finding_by_rank_score ON finding (rank_score DESC);
+CREATE INDEX IF NOT EXISTS finding_by_detector ON finding (detector_id);
 -- Prediction table for logging and scoring finding waste predictions (Task F4 / Decision D11).
 CREATE TABLE IF NOT EXISTS prediction (
   id TEXT PRIMARY KEY,

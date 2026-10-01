@@ -499,11 +499,17 @@ and never as a passing grade.
 
 ### Display families and source display names
 
-Split client surfaces stay distinct in stored data, rollup keys, and API filters.
+Split client surfaces stay distinct in stored data — and, except for the two
+evidenced twin front-ends below, in rollup keys and API filters.
 `harnessFamily` (`dash/src/canon/measurability.ts`) is a display-level grouping only:
 `claude-cli`, `claude-desktop`, and `claude-code` share the `claude-code` family label
 while each canonical id and its per-origin count stays visible beside it, so grouping
-never fabricates an aggregate. Unmapped ids render verbatim.
+never fabricates an aggregate. Twin front-ends fold one step earlier, at the
+derived layer (issue #182): `claude-desktop` onto `claude-code` and `cursor-agent`
+onto `cursor`, so those two surfaces share one canonical id, one rollup row, and one
+API filter namespace. Derived rows persist canonical ids: rolling back the fold
+after a rebuild requires rebuilding derived tables again under the reverted code.
+Unmapped ids render verbatim.
 
 Stored source names keep their namespace (`codeburn/<provider>` for file-sourced rows,
 OTLP names verbatim, legacy `unattributed` rows retained). Surfaces render them through

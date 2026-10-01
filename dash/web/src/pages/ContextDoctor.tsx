@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react'
-import { useQuery, keepPreviousData } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import { Skeleton } from '../components/ui/skeleton.js'
 import {
   fetchCoverage,
@@ -107,9 +107,12 @@ export interface FindingsBrowserViewProps {
   /** True while a page is in flight. The skeleton shows only when there is
    * nothing stored yet (review M1): pages already on screen stay up. */
   loading: boolean
+  /** Bounded fetch failure. Raw server text never renders (council review). */
+  error?: string | null
   onDetectorChange?: (detector: string | undefined) => void
   onHarnessChange?: (harness: string | undefined) => void
   onLoadMore?: () => void
+  onRetry?: () => void
   onSelectFinding?: (findingId: string) => void
   onSelectTurn?: (turnIndex: number, executionId?: string) => void
   onSelectExecution?: (executionId: string) => void
@@ -129,9 +132,11 @@ export function FindingsBrowserView({
   harnessFilter,
   harnesses,
   loading,
+  error = null,
   onDetectorChange = () => {},
   onHarnessChange = () => {},
   onLoadMore = () => {},
+  onRetry = () => {},
   onSelectFinding,
   onSelectTurn,
   onSelectExecution,
@@ -206,8 +211,15 @@ export function FindingsBrowserView({
         })}
       </div>
 
-      {loading && findings.length === 0 ? (
+      {loading && findings.length === 0 && error === null ? (
         <Skeleton className="h-44 w-full" />
+      ) : error !== null && findings.length === 0 ? (
+        <div data-testid="findings-error" role="alert">
+          <p>Findings failed to load.</p>
+          <button type="button" data-testid="findings-retry" onClick={onRetry}>
+            Retry
+          </button>
+        </div>
       ) : (
         <>
           <FindingList
@@ -219,7 +231,13 @@ export function FindingsBrowserView({
             onSelectExecution={onSelectExecution}
           />
           {findings.length < total && (
-            <button type="button" data-testid="findings-load-more" onClick={onLoadMore}>
+            <button
+              type="button"
+              data-testid="findings-load-more"
+              disabled={loading}
+              title={loading ? 'Loading the next page…' : 'Load the next page of findings'}
+              onClick={onLoadMore}
+            >
               Load more ({findings.length} of {total})
             </button>
           )}
@@ -409,6 +427,28 @@ export function isFullCoverage(
 }
 
 /**
+ * The next page offset from the rows on screen (review M3): the loaded
+ * count, which cannot move while a fetch is in flight — so two quick
+ * clicks on Load more request the same offset twice instead of skipping a
+ * page. Undefined when everything is loaded and the button hides.
+ */
+export function nextBrowserOffset(loaded: number, total: number): number | undefined {
+  return loaded < total ? loaded : undefined
+}
+
+/**
+ * The current page eligible for display (review M1): placeholder rows from
+ * a previous key are never the current page of a new filter — they belong
+ * to no scope until the server answers.
+ */
+export function currentBrowserPage(
+  findings: readonly KyberFinding[] | undefined,
+  isPlaceholderData: boolean,
+): readonly KyberFinding[] | undefined {
+  return isPlaceholderData ? undefined : findings
+}
+
+/**
  * Renders the Context Doctor landing page with workspace findings and a
  * per-harness diagnostic scorecard.
  */
@@ -482,6 +522,8 @@ export function ContextDoctor({
     data: pageData,
     isLoading: loadingBrowser,
     isPlaceholderData,
+    error: browserError,
+    refetch: refetchBrowser,
   } = useQuery({
     queryKey: ['kyber-findings-browser', detectorFilter ?? '', harnessFilter ?? '', offset],
     queryFn: () =>
@@ -494,8 +536,13 @@ export function ContextDoctor({
     initialData: offset === 0 && !filtersActive ? initialPage : undefined,
     // Keep the current list on screen while the next page loads (review
     // M1): without this every offset change flashes a skeleton and the
-    // heading reads "(0)" mid-flight.
-    placeholderData: keepPreviousData,
+    // heading reads "(0)" mid-flight. Scoped to unchanged filters: after
+    // resetBrowse the old filter's page must not pose as the new filter's.
+    placeholderData: (previousData, previousQuery) => {
+      const prevKey = previousQuery?.queryKey as readonly unknown[] | undefined
+      const sameFilters = prevKey?.[1] === (detectorFilter ?? '') && prevKey?.[2] === (harnessFilter ?? '')
+      return sameFilters ? previousData : undefined
+    },
   })
 
   // Accumulate each page as it arrives, first page included, keyed by the
@@ -547,9 +594,13 @@ export function ContextDoctor({
 
   const headline: KyberFinding[] = headlineData?.findings ?? []
   // Every page fetched so far for this filter scope, oldest first.
+  // The eligible current page: never placeholder rows from a previous key
+  // (review M1). During a filter change this is undefined until the server
+  // answers, so the old filter's rows cannot pose as the new filter's.
+  const current = currentBrowserPage(pageData?.findings, isPlaceholderData)
   const browserFindings: KyberFinding[] = useMemo(
-    () => browserRows(appended, browseScope, offset, pageData?.findings),
-    [appended, browseScope, offset, pageData],
+    () => browserRows(appended, browseScope, offset, current),
+    [appended, browseScope, offset, current],
   )
   const browserTotal = pageData?.total ?? 0
   const detectorCounts = pageData?.detectorCounts ?? {}
@@ -603,9 +654,18 @@ export function ContextDoctor({
         harnessFilter={harnessFilter}
         harnesses={harnesses}
         loading={loadingBrowser}
+        error={browserError ? 'findings-load-failed' : null}
+        onRetry={() => {
+          void refetchBrowser()
+        }}
         onDetectorChange={(detector) => resetBrowse(() => setDetectorFilter(detector))}
         onHarnessChange={(harness) => resetBrowse(() => setHarnessFilter(harness))}
-        onLoadMore={() => setOffset((n) => n + FINDINGS_PAGE_SIZE)}
+        onLoadMore={() => {
+          // Offset follows the rows on screen (review M3): repeat clicks
+          // while loading resolve to the same offset instead of skipping.
+          const next = nextBrowserOffset(browserFindings.length, browserTotal)
+          if (next !== undefined) setOffset(next)
+        }}
         onSelectFinding={onSelectFinding}
         onSelectTurn={(turnIdx, execId) => onSelectTurn?.(turnIdx, execId)}
         onSelectExecution={(execId) => onSelectRun?.(execId)}

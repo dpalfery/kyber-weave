@@ -47,23 +47,6 @@ import type { Finding } from '../analysis/findings.js'
 import { DETECTOR_IDS } from '../analysis/findings.js'
 import { COPILOT_CREDITS_SOURCE } from '../canon/copilot-rates.js'
 
-/** Paged findings envelope served at `GET /api/kyber/findings` (issue #191). */
-export type FindingsPage = {
-  findings: Finding[]
-  /** Size of the narrowed set ignoring paging. */
-  total: number
-  limit?: number
-  offset: number
-  /** Per-detector counts over the run/session/harness scope, ignoring paging and the detector filter. */
-  detectorCounts: Record<string, number>
-  /** Sessions with an unreported context window in the harness scope. */
-  unknownWindowSessions: number
-}
-
-/** A positive finite page number, floored; anything else is absent (paging lives in the bridge). */
-function validPageNumber(value: number | undefined): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.floor(value) : undefined
-}
 import {
   CANONICAL_CONTENT_KEYS,
   type CanonicalContent,
@@ -90,6 +73,24 @@ const { DatabaseSync } = _require('node:sqlite') as {
   DatabaseSync: typeof import('node:sqlite').DatabaseSync
 }
 type DatabaseSync = import('node:sqlite').DatabaseSync
+
+/** Paged findings envelope served at `GET /api/kyber/findings` (issue #191). */
+export type FindingsPage = {
+  findings: Finding[]
+  /** Size of the narrowed set ignoring paging. */
+  total: number
+  limit?: number
+  offset: number
+  /** Per-detector counts over the run/session/harness scope, ignoring paging and the detector filter. */
+  detectorCounts: Record<string, number>
+  /** Sessions with an unreported context window in the harness scope. */
+  unknownWindowSessions: number
+}
+
+/** A positive finite page number, floored; anything else is absent (paging lives in the bridge). */
+function validPageNumber(value: number | undefined): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.floor(value) : undefined
+}
 
 export type MetricAvailability = 'measured' | 'derived' | 'not_measurable'
 export type MetricKind = 'per_turn' | 'total'

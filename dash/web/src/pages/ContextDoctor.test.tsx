@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type * as React from 'react'
 
-import { ContextDoctor, browserRows, nextAccumulated, FindingsBrowserView } from './ContextDoctor.js'
+import { ContextDoctor, browserRows, nextAccumulated, FindingsBrowserView, nextBrowserOffset, currentBrowserPage } from './ContextDoctor.js'
 import { fetchCoverage, type FindingsPage, type KyberFinding, type KyberHarnessSummary, type KyberCoverage } from '../lib/kyberApi.js'
 
 function createTestQueryClient() {
@@ -509,5 +509,91 @@ describe('formatCoverageAgo (ingest panel)', () => {
     )
     expect(formatCoverageAgo('2026-09-30T20:00:00.000Z', Date.parse('2026-09-30T20:00:30.000Z'))).toBe('just now')
     expect(formatCoverageAgo('not-a-timestamp')).toBe('unknown age')
+  })
+})
+
+describe('browser paging races (review M3)', () => {
+  it('derives the next offset from loaded rows, not from repeated clicks', () => {
+    // Two quick clicks while a fetch is in flight must not advance past the
+    // rows on screen: the offset is the loaded count, which cannot move
+    // until new rows arrive.
+    expect(nextBrowserOffset(25, 115)).toBe(25)
+    expect(nextBrowserOffset(25, 115)).toBe(25)
+    expect(nextBrowserOffset(115, 115)).toBeUndefined()
+    expect(nextBrowserOffset(0, 0)).toBeUndefined()
+  })
+
+  it('never treats placeholder rows as the current page', () => {
+    const rows = [{ id: 'x' } as unknown as import('../lib/kyberApi.js').KyberFinding]
+    expect(currentBrowserPage(rows, false)).toBe(rows)
+    expect(currentBrowserPage(rows, true)).toBeUndefined()
+    expect(currentBrowserPage(undefined, false)).toBeUndefined()
+  })
+
+  it('disables Load more while a fetch is in flight', () => {
+    const fifty = Array.from({ length: 50 }, (_, i) =>
+      finding(`h-${i + 1}`, 'duplicate-tool-call', 'cursor'),
+    )
+    const html = renderToStaticMarkup(
+      <FindingsBrowserView
+        findings={fifty}
+        total={115}
+        detectorCounts={{ 'duplicate-tool-call': 49 }}
+        loading={true}
+        harnesses={[]}
+      />,
+    )
+    expect(html).toContain('findings-load-more')
+    expect(html).toContain('50 of 115')
+    expect(html).toMatch(/<button[^>]*disabled[^>]*data-testid="findings-load-more"|<button[^>]*data-testid="findings-load-more"[^>]*disabled/)
+  })
+})
+
+describe('FindingsBrowserView complete set (review optional)', () => {
+  it('has no load-more button when every finding is shown', () => {
+    const rows = Array.from({ length: 115 }, (_, i) =>
+      finding(`w-${i + 1}`, 'duplicate-tool-call', 'cursor'),
+    )
+    const html = renderToStaticMarkup(
+      <FindingsBrowserView
+        findings={rows}
+        total={115}
+        detectorCounts={{ 'duplicate-tool-call': 115 }}
+        loading={false}
+        harnesses={[]}
+      />,
+    )
+    expect(html).not.toContain('findings-load-more')
+    expect(html).toContain('All Workspace Findings (115)')
+  })
+})
+
+describe('FindingsBrowserView query errors (council review)', () => {
+  it('surfaces a bounded error with retry instead of stale rows', () => {
+    const onRetry = () => {}
+    const html = renderToStaticMarkup(
+      <FindingsBrowserView
+        findings={[]}
+        total={0}
+        detectorCounts={{}}
+        loading={false}
+        harnesses={[]}
+        error="boom: ECONNREFUSED 127.0.0.1:4747 :: connection string secret=abc"
+        onRetry={onRetry}
+      />,
+    )
+    expect(html).toContain('findings-error')
+    expect(html).toContain('Findings failed to load')
+    expect(html).not.toContain('ECONNREFUSED')
+    expect(html).not.toContain('secret=abc')
+  })
+
+  it('shows rows, not the error panel, when both are present', () => {
+    const rows = [finding('e-1', 'duplicate-tool-call', 'cursor')]
+    const html = renderToStaticMarkup(
+      <FindingsBrowserView findings={rows} total={1} detectorCounts={{}} loading={false} harnesses={[]} error="x" />,
+    )
+    expect(html).not.toContain('findings-error')
+    expect(html).toContain('finding-card-e-1')
   })
 })

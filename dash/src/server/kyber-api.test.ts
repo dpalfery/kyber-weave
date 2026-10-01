@@ -928,8 +928,11 @@ describe('Backend Contract Tests: /api/kyber/* Endpoints', () => {
   describe('GET /api/kyber/harnesses carries coverage facts (T8)', () => {
     it('rows include family, verbatim noDataReason, and per-harness checkpoint counts', async () => {
       const store = new CanonStore(':memory:')
+      // Issue #182 fold: no claude-desktop rollup row exists anymore, but
+      // checkpoints are still recorded under the raw front-end id — they
+      // surface on the folded owner's row, never dropped.
       store.upsertHarnessRollup({
-        harness: 'claude-desktop',
+        harness: 'claude-code',
         sampleCount: 0,
         contextPressureMedian: null,
         contextPressureP95: null,
@@ -942,8 +945,22 @@ describe('Backend Contract Tests: /api/kyber/* Endpoints', () => {
           sessionCount: 0,
           runCount: 0,
           executionCount: 0,
-          reason: 'No collectable runs or sessions recorded for harness "claude-desktop".',
+          reason: 'No collectable runs or sessions recorded for harness "claude-code".',
         },
+      })
+      // Genuinely split surfaces stay distinct rows (D3): claude-cli keeps
+      // its own row beside the folded owner.
+      store.upsertHarnessRollup({
+        harness: 'claude-cli',
+        sampleCount: 0,
+        contextPressureMedian: null,
+        contextPressureP95: null,
+        cacheHitRate: null,
+        toolYield: null,
+        delegationOverhead: null,
+        fieldCoverage: 0.9,
+        measurability: {},
+        payload: { sessionCount: 0, runCount: 0, executionCount: 0 },
       })
       store.upsertHarnessRollup({
         harness: 'pi',
@@ -993,23 +1010,36 @@ describe('Backend Contract Tests: /api/kyber/* Endpoints', () => {
         const body = (await res.json()) as { harnesses: Array<Record<string, unknown>> }
         const byId = new Map(body.harnesses.map((row) => [row.harness, row]))
 
-        // Family is display-only (D3): split identities stay distinct rows.
-        expect(byId.get('claude-desktop')?.family).toBe('claude-code')
+        // Family is display-only (D3): split identities stay distinct rows,
+        // while folded front-ends have no row of their own.
+        expect(byId.get('claude-code')?.family).toBe('claude-code')
+        expect(byId.get('claude-cli')?.family).toBe('claude-code')
         expect(byId.get('pi')?.family).toBe('pi')
+        expect(byId.has('claude-desktop')).toBe(false)
+        expect(byId.has('cursor-agent')).toBe(false)
 
         // Zero-data keeps its verbatim rollup reason; covered rows carry null.
-        expect(byId.get('claude-desktop')?.noDataReason).toBe(
-          'No collectable runs or sessions recorded for harness "claude-desktop".',
+        expect(byId.get('claude-code')?.noDataReason).toBe(
+          'No collectable runs or sessions recorded for harness "claude-code".',
         )
         expect(byId.get('pi')?.noDataReason).toBeNull()
 
-        // Checkpoint summary counts units by status via the T4 seam.
-        expect(byId.get('claude-desktop')?.checkpointSummary).toEqual({ ok: 1, partial: 1, failed: 0, unavailable: 0 })
+        // Checkpoint summary counts units by status via the T4 seam — the
+        // claude-desktop-recorded units appear on the folded claude-code row.
+        expect(byId.get('claude-code')?.checkpointSummary).toEqual({ ok: 1, partial: 1, failed: 0, unavailable: 0 })
         expect(byId.get('pi')?.checkpointSummary).toEqual({ ok: 1, partial: 0, failed: 1, unavailable: 0 })
 
         // Grouping sums nothing: per-origin counts stay visible beside the family.
-        expect(byId.get('claude-desktop')?.sampleCount).toBe(0)
+        expect(byId.get('claude-code')?.sampleCount).toBe(0)
+        expect(byId.get('claude-cli')?.sampleCount).toBe(0)
         expect(byId.get('pi')?.sampleCount).toBe(2)
+
+        // Detail route scopes the same way: desktop-recorded checkpoints on
+        // the claude-code row (issue #182).
+        const detail = await fetch(`${t8Base}/api/kyber/harness/claude-code`)
+        expect(detail.status).toBe(200)
+        const detailBody = (await detail.json()) as { checkpointSummary: unknown }
+        expect(detailBody.checkpointSummary).toEqual({ ok: 1, partial: 1, failed: 0, unavailable: 0 })
       } finally {
         await new Promise<void>((resolve) => t8Server.close(() => resolve()))
         t8Bridge.close()

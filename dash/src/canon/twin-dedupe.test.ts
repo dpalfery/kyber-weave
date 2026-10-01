@@ -397,6 +397,8 @@ describe('dedupeTwinTurns nearest pairing (review M2)', () => {
     ])
 
     expect(out.map((r) => r.spanId)).toEqual(['otel-a', 'otel-b'])
+    // otelA keeps its own content: the twin's row only fills what is absent.
+    expect(out[0]!.content).toEqual({ system_prompt: 'a' })
     expect(out[1]!.content).toEqual({ system_prompt: 'b' })
     expect(out[1]!.parts).toEqual([{ part: 'system_prompt', text: 'b' }])
   })
