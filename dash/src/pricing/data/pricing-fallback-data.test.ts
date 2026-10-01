@@ -129,16 +129,11 @@ describe('issue #186 bundler MANUAL_ENTRIES reproducibility', () => {
       expect(declared).toBeDefined()
       const committed = snap[id]
       expect(committed).toBeDefined()
-      const len = Math.max(declared!.length, committed!.length)
-      for (let i = 0; i < len; i++) {
-        const expected = committed![i] ?? null
-        const actual = declared![i] ?? null
-        if (expected === null) {
-          expect(actual, `${id}[${i}] must stay null (absent field), not 0`).toBeNull()
-        } else {
-          expect(actual).toBeCloseTo(expected, 13)
-        }
-      }
+      expect(
+        declared!.length,
+        `${id} tuple length must match committed — null fields must stay null (absent field), not 0 or dropped`,
+      ).toBe(committed!.length)
+      expect(declared).toEqual(committed)
     })
   }
 })
