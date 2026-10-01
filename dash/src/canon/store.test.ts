@@ -1268,3 +1268,15 @@ describe('CanonStore.setCosts (batched cost write-back)', () => {
     store.close()
   })
 })
+
+describe('CanonStore finding indexes (council review)', () => {
+  it('indexes detector_id for the workspace browser filter', () => {
+    const store = new CanonStore(':memory:')
+    const db = (store as unknown as { db: DatabaseSync }).db
+    const rows = db
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'finding_by_detector'")
+      .all() as { name: string }[]
+    expect(rows.map((row) => row.name)).toEqual(['finding_by_detector'])
+    store.close()
+  })
+})

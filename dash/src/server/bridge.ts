@@ -7,6 +7,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { createRequire } from 'node:module'
 import { APPROXIMATE_TOKENIZER, tokenizerName } from '../canon/tokens.js'
+import { normalizeHarnessName } from '../canon/measurability.js'
 import { refreshProcessIsAlive } from '../canon/refresh-run.js'
 import {
   CanonStore,
@@ -43,7 +44,9 @@ import {
   type RunComparisonOptions,
 } from '../analysis/compare.js'
 import type { Finding } from '../analysis/findings.js'
+import { DETECTOR_IDS } from '../analysis/findings.js'
 import { COPILOT_CREDITS_SOURCE } from '../canon/copilot-rates.js'
+
 import {
   CANONICAL_CONTENT_KEYS,
   type CanonicalContent,
@@ -70,6 +73,24 @@ const { DatabaseSync } = _require('node:sqlite') as {
   DatabaseSync: typeof import('node:sqlite').DatabaseSync
 }
 type DatabaseSync = import('node:sqlite').DatabaseSync
+
+/** Paged findings envelope served at `GET /api/kyber/findings` (issue #191). */
+export type FindingsPage = {
+  findings: Finding[]
+  /** Size of the narrowed set ignoring paging. */
+  total: number
+  limit?: number
+  offset: number
+  /** Per-detector counts over the run/session/harness scope, ignoring paging and the detector filter. */
+  detectorCounts: Record<string, number>
+  /** Sessions with an unreported context window in the harness scope. */
+  unknownWindowSessions: number
+}
+
+/** A positive finite page number, floored; anything else is absent (paging lives in the bridge). */
+function validPageNumber(value: number | undefined): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.floor(value) : undefined
+}
 
 export type MetricAvailability = 'measured' | 'derived' | 'not_measurable'
 export type MetricKind = 'per_turn' | 'total'
@@ -2273,11 +2294,18 @@ export class KyberBridge {
   /**
    * List ranked findings optionally filtered by runId or sessionId.
    */
-  listFindings(options?: { runId?: string; sessionId?: string; limit?: number }): Finding[] {
+  listFindings(options?: { runId?: string; sessionId?: string; detector?: string; harness?: string; limit?: number; offset?: number }): Finding[] {
     if (this.store) {
-      const findings = this.store.listFindings(options?.runId, options?.sessionId)
-      if (typeof options?.limit === 'number' && options.limit > 0) {
-        return findings.slice(0, Math.floor(options.limit))
+      // Paging lives here, not in the store (review): slice the narrowed
+      // set so `limit` keeps the contract it always had on this method.
+      const findings = this.store.listFindings(options?.runId, options?.sessionId, {
+        ...(options?.detector !== undefined ? { detector: options.detector } : {}),
+        ...(options?.harness !== undefined ? { harness: options.harness } : {}),
+      })
+      const offset = validPageNumber(options?.offset) ?? 0
+      const limit = validPageNumber(options?.limit)
+      if (offset > 0 || limit !== undefined) {
+        return findings.slice(offset, limit === undefined ? undefined : offset + limit)
       }
       return findings
     }
@@ -2296,16 +2324,34 @@ export class KyberBridge {
           conds.push('session_id = ?')
           params.push(options.sessionId)
         }
+        if (options?.detector) {
+          conds.push('detector_id = ?')
+          params.push(options.detector)
+        }
         if (conds.length > 0) {
           sql += ' WHERE ' + conds.join(' AND ')
         }
         sql += ' ORDER BY rank_score DESC, id ASC'
-        if (typeof options?.limit === 'number' && options.limit > 0) {
-          sql += ' LIMIT ?'
-          params.push(Math.floor(options.limit))
-        }
         const rows = db!.prepare(sql).all(...(params as (string | number)[])) as unknown as FindingDbRow[]
-        return rows.map(toFinding)
+        // `harness` rides in the payload JSON and filters after the
+        // round-trip (same rule as `CanonStore.listFindings`); paging slices
+        // the narrowed set so `total` stays comparable across paths.
+        let findings = rows.map(toFinding)
+        if (options?.harness) {
+          // Same fold rule as `CanonStore.listFindings` (review): legacy
+          // front-end names answer under their folded owner.
+          const want = normalizeHarnessName(options.harness)
+          findings = findings.filter((finding) => {
+            const have = (finding as { harness?: unknown }).harness
+            return typeof have === 'string' && normalizeHarnessName(have) === want
+          })
+        }
+        const offset = typeof options?.offset === 'number' && options.offset > 0 ? Math.floor(options.offset) : 0
+        if (offset > 0 || (typeof options?.limit === 'number' && options.limit > 0)) {
+          const limit = typeof options?.limit === 'number' && options.limit > 0 ? Math.floor(options.limit) : undefined
+          findings = findings.slice(offset, limit === undefined ? undefined : offset + limit)
+        }
+        return findings
       } catch (err) {
         console.warn('[KyberBridge] Failed querying findings from canon.db:', err)
         return []
@@ -2313,6 +2359,224 @@ export class KyberBridge {
     }
 
     return []
+  }
+
+  /**
+   * Paged findings envelope for the workspace view (issue #191): the
+   * narrowed `findings` slice plus `total` and per-detector counts over the
+   * narrowed set ignoring paging, so the Context Doctor can show every
+   * finding and `unknownWindowSessions` keeps a suppressed-default list
+   * from reading as "all clear". Additive: `findings` rows are unchanged.
+   */
+  listFindingsPage(options?: {
+    runId?: string
+    sessionId?: string
+    detector?: string
+    harness?: string
+    limit?: number
+    offset?: number
+  }): FindingsPage {
+    // One findings-table read per request (review): the detector split
+    // happens in memory over the same rows, so `total` and `detectorCounts`
+    // can never disagree about what the table holds.
+    const base = this.listFindings({
+      ...(options?.runId !== undefined ? { runId: options.runId } : {}),
+      ...(options?.sessionId !== undefined ? { sessionId: options.sessionId } : {}),
+      ...(options?.harness !== undefined ? { harness: options.harness } : {}),
+    })
+    const narrowed =
+      options?.detector === undefined ? base : base.filter((finding) => finding.detectorId === options.detector)
+    // Per-detector counts stay scoped to run/session/harness but never to
+    // the detector being browsed (review): narrowing the list must not
+    // evaporate the chips that narrow it. `total` below stays narrowed.
+    const detectorCounts: Record<string, number> = {}
+    for (const id of DETECTOR_IDS) detectorCounts[id] = 0
+    for (const finding of base) {
+      detectorCounts[finding.detectorId] = (detectorCounts[finding.detectorId] ?? 0) + 1
+    }
+    const offset = typeof options?.offset === 'number' && Number.isFinite(options.offset) && options.offset > 0
+      ? Math.floor(options.offset)
+      : 0
+    const limit = typeof options?.limit === 'number' && Number.isFinite(options.limit) && options.limit > 0
+      ? Math.floor(options.limit)
+      : undefined
+    return {
+      findings: narrowed.slice(offset, limit === undefined ? undefined : offset + limit),
+      total: narrowed.length,
+      ...(limit === undefined ? {} : { limit }),
+      offset,
+      detectorCounts,
+      unknownWindowSessions: this.countUnknownWindowSessions({
+        ...(options?.harness !== undefined ? { harness: options.harness } : {}),
+        ...(options?.runId !== undefined ? { runId: options.runId } : {}),
+        ...(options?.sessionId !== undefined ? { sessionId: options.sessionId } : {}),
+      }),
+    }
+  }
+
+  /** Canonical harness of one stored session over the raw handle (review).
+   * Absent reads as undefined; a failed read reads as null — never a clean
+   * zero that would pose as "no suppressed sessions" (review). */
+  private sessionHarnessRaw(sessionId: string): string | null | undefined {
+    const db = this.getDb()
+    if (!this.hasTable(db, 'session')) return undefined
+    try {
+      const row = db!
+        .prepare('SELECT harness FROM session WHERE session_id = ?')
+        .get(sessionId) as unknown as { harness: string } | undefined
+      return row?.harness
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   * Sessions whose context window no source reported, scoped the way the
+   * findings are: the selected run's sessions, the selected session, or the
+   * harness/workspace scope (issue #191, condition 3). An unscoped count on
+   * a scoped query would warn about suppressions the listed findings never
+   * underwent.
+   */
+  countUnknownWindowSessions(scope?: { harness?: string; runId?: string; sessionId?: string }): number {
+    const harness = scope?.harness
+    const runId = scope?.runId
+    const sessionId = scope?.sessionId
+    if (sessionId !== undefined && sessionId !== '') {
+      // A harness that does not own the session scopes the count to zero,
+      // matching the narrowed findings (review S3a). Absent and failed look
+      // different: a missing row is 0, but an unreadable row must not answer
+      // at all — the payload read below still knows the window (review).
+      if (harness !== undefined && harness !== '') {
+        let owner: string | null | undefined
+        try {
+          owner = this.store ? this.store.sessionHarness(sessionId) : this.sessionHarnessRaw(sessionId)
+        } catch {
+          owner = null
+        }
+        if (owner === null) {
+          const payload = this.getSessionPayload<{ context?: { contextLimitSource?: string } }>(sessionId)
+          return payload?.context?.contextLimitSource === 'default' ? 1 : 0
+        }
+        if (owner === undefined || normalizeHarnessName(owner) !== normalizeHarnessName(harness)) return 0
+      }
+      const payload = this.getSessionPayload<{ context?: { contextLimitSource?: string } }>(sessionId)
+      return payload?.context?.contextLimitSource === 'default' ? 1 : 0
+    }
+    if (runId !== undefined && runId !== '') {
+      // Same fold rule as everywhere else (review): a run scoped to a legacy
+      // front-end name still matches its folded owner's executions.
+      const wantHarness = harness !== undefined && harness !== '' ? normalizeHarnessName(harness) : undefined
+      const ids = [
+        ...new Set(
+          this.listExecutions(runId)
+            .filter(
+              (execution) =>
+                wantHarness === undefined || normalizeHarnessName(execution.harness) === wantHarness,
+            )
+            .map((execution) => execution.sessionId ?? execution.executionId)
+            .filter((id) => id.length > 0),
+        ),
+      ]
+      return ids.filter(
+        (id) =>
+          this.getSessionPayload<{ context?: { contextLimitSource?: string } }>(id)?.context?.contextLimitSource ===
+          'default',
+      ).length
+    }
+    // Harness and workspace scopes read the persisted rollups (review): the
+    // count was derived at build time, so each findings request does not
+    // JSON-parse every session payload. A rollup sum is exact only when the
+    // rollups still cover every session (review M2): coverage is verified
+    // against narrow-column counts, and anything uncovered falls back to
+    // the direct session scan rather than wearing a partial sum as a total.
+    if (this.store) {
+      if (harness !== undefined && harness !== '') {
+        const canonical = normalizeHarnessName(harness)
+        const rollup = this.store.getHarnessRollup(canonical)
+        const covered = (rollup?.payload as { windowSessionsTotal?: unknown } | undefined)?.windowSessionsTotal
+        if (typeof covered === 'number' && covered === (this.store.countSessionsByHarness()[canonical] ?? -1)) {
+          const count = (rollup?.payload as { unknownWindowSessions?: unknown } | undefined)?.unknownWindowSessions
+          if (typeof count === 'number') return count
+        }
+      } else {
+        const rollups = this.store.listHarnessRollups()
+        const byHarness = this.store.countSessionsByHarness()
+        const covered = rollups.length > 0 && rollups.every((rollup) => {
+          const total = (rollup.payload as { windowSessionsTotal?: unknown } | undefined)?.windowSessionsTotal
+          return typeof total === 'number' && total === (byHarness[rollup.harness] ?? -1)
+        })
+        // covered also requires no sessions outside rollup harnesses.
+        if (covered && Object.keys(byHarness).every((h) => rollups.some((rollup) => rollup.harness === h))) {
+          return rollups.reduce((sum, rollup) => {
+            const count = (rollup.payload as { unknownWindowSessions?: unknown } | undefined)?.unknownWindowSessions
+            return sum + (typeof count === 'number' ? count : 0)
+          }, 0)
+        }
+      }
+      return this.store.countUnknownWindowSessions(harness)
+    }
+    const db = this.getDb()
+    // Built rollups first (review): one small table, no session-blob scan —
+    // but only when coverage verifies (review M2), else the session scan.
+    if (this.hasTable(db, 'harness_rollup') && this.hasTable(db, 'session')) {
+      try {
+        const payloadOf = (payload: unknown): { unknown?: number; total?: number } => {
+          if (typeof payload !== 'string') return {}
+          try {
+            const parsed = JSON.parse(payload) as { unknownWindowSessions?: unknown; windowSessionsTotal?: unknown }
+            return {
+              ...(typeof parsed.unknownWindowSessions === 'number' ? { unknown: parsed.unknownWindowSessions } : {}),
+              ...(typeof parsed.windowSessionsTotal === 'number' ? { total: parsed.windowSessionsTotal } : {}),
+            }
+          } catch {
+            return {}
+          }
+        }
+        const grouped = db!
+          .prepare('SELECT harness, COUNT(*) AS n FROM session GROUP BY harness')
+          .all() as unknown as { harness: string; n: number }[]
+        const actual: Record<string, number> = {}
+        for (const row of grouped) actual[row.harness] = row.n
+        if (harness !== undefined && harness !== '') {
+          const canonical = normalizeHarnessName(harness)
+          const row = db!
+            .prepare('SELECT payload FROM harness_rollup WHERE harness = ?')
+            .get(canonical) as unknown as { payload: unknown } | undefined
+          const { unknown, total } = payloadOf(row?.payload)
+          if (unknown !== undefined && total === (actual[canonical] ?? -1)) return unknown
+        } else {
+          const rows = db!.prepare('SELECT harness, payload FROM harness_rollup').all() as unknown as {
+            harness: string
+            payload: unknown
+          }[]
+          const covered =
+            rows.length > 0 &&
+            rows.every((row) => payloadOf(row.payload).total === (actual[row.harness] ?? -1)) &&
+            Object.keys(actual).every((h) => rows.some((row) => row.harness === h))
+          if (covered) {
+            return rows.reduce((sum, row) => sum + (payloadOf(row.payload).unknown ?? 0), 0)
+          }
+        }
+      } catch (err) {
+        console.warn('[KyberBridge] Failed reading unknown-window counts from rollups:', err)
+      }
+    }
+    if (!this.hasTable(db, 'session')) return 0
+    try {
+      const conds = [`json_extract(payload, '$.context.contextLimitSource') = 'default'`]
+      const params: (string | number)[] = []
+      if (harness !== undefined && harness !== '') {
+        conds.push('LOWER(harness) = LOWER(?)')
+        params.push(normalizeHarnessName(harness))
+      }
+      const row = db!
+        .prepare(`SELECT COUNT(*) AS n FROM session WHERE ${conds.join(' AND ')}`)
+        .get(...params) as unknown as { n: number } | undefined
+      return row?.n ?? 0
+    } catch (err) {
+      console.warn('[KyberBridge] Failed counting unknown-window sessions:', err)
+      return 0
+    }
   }
 
   /**

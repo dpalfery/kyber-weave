@@ -90,7 +90,7 @@ If a target harness cannot guarantee the containment or authorization boundaries
 ## Golden-render and knowledge-retention requirement
 
 `code-review-loop` is authored in Kyber-Squad and has no Hotshot baseline. Every imported
-canonical raw `SKILL.md` except the five explicitly evolved skills (`bug-crusher`,
+canonical raw `SKILL.md` except the six explicitly evolved skills (`bug-crusher`, `code-review`,
 `product-owner`, `second-brain`, `create-pull-request`, and `pr-review-fix-comments`) matches the
 Hotshot golden bytes, as does every non-evolved agent body. The golden `create-pull-request-github`
 skill is retired into `create-pull-request`, and the three retired `-v3` agent identities survive

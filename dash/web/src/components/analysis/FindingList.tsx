@@ -338,9 +338,11 @@ export function FindingList({
       <div className="flex flex-wrap items-baseline justify-between gap-density-cluster border-b border-border/60 pb-chrome-sm">
         <div>
           <div className="flex items-center gap-density-cluster">
-            <h3 className="text-density-xs font-semibold uppercase tracking-density text-heading">
-              {title}
-            </h3>
+            {title !== '' && (
+              <h3 className="text-density-xs font-semibold uppercase tracking-density text-heading">
+                {title}
+              </h3>
+            )}
             <span className="rounded-chrome bg-interactive-secondary px-chrome-sm py-chrome-xs text-density-2xs font-mono text-tertiary-foreground">
               {sortedFindings.length} finding{sortedFindings.length === 1 ? '' : 's'}
             </span>
