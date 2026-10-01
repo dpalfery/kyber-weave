@@ -14,7 +14,7 @@
   ],
   "scripts": {
     "bundle-litellm": "node scripts/bundle-litellm.mjs",
-    "build": "node scripts/bundle-litellm.mjs && tsup && node -e \"const fs=require('fs'); fs.copyFileSync('src/launcher.ts','dist/cli.js'); fs.chmodSync('dist/cli.js',0o755)\" && npm run build:web",
+    "build": "npm run build:cli && npm run build:web",
     "build:cli": "tsup && node -e \"const fs=require('fs'); fs.copyFileSync('src/launcher.ts','dist/cli.js'); fs.chmodSync('dist/cli.js',0o755)\"",
     "build:web": "cd web && npm install --no-audit --no-fund --silent && npm run build",
     "dev": "NODE_OPTIONS=--no-deprecation tsx src/launcher.ts",
@@ -26,7 +26,7 @@
     "typecheck": "tsc --noEmit && tsc --noEmit -p web/tsconfig.json && tsc --noEmit -p tsconfig.tests.json",
     "lint": "eslint .",
     "verify:upgrade": "node scripts/upgrade-path/run.mjs",
-    "prepublishOnly": "npm run build",
+    "prepublishOnly": "npm run build:cli",
     "report:fixtures": "tsx src/tools/report-fixtures.ts"
   },
   "keywords": [

@@ -93,14 +93,15 @@ KyberDash splits **compiled output** from **pricing data refresh**:
 
 | Script | Pricing re-snapshot | Produces |
 |---|---|---|
-| `npm --prefix dash run build` | Yes — runs `scripts/bundle-litellm.mjs` over the network (LiteLLM, models.dev, OpenRouter) into `dash/src/pricing/data/`, then `tsup` and `build:web` | CLI, web bundle, refreshed committed pricing JSON |
+| `npm --prefix dash run build` | No — hermetic; compiles from committed sources | CLI + web dashboard static assets |
 | `npm --prefix dash run build:cli` | No — `tsup` only | `dash/dist/cli.js` from committed sources |
-| `npm --prefix dash run build:dash` | No | Web dashboard static assets |
+| `npm --prefix dash run build:web` | No | Web dashboard static assets |
+| `npm --prefix dash run bundle-litellm` | Yes — networked refresh into `dash/src/pricing/data/` | Updated committed pricing JSON (commit the diff) |
 
-Release packaging (`tsup`, Node SEA binaries, npm publish) embeds the committed files under
-`dash/src/pricing/data/` and does not call the bundler independently. Refresh pricing deliberately
-with `npm --prefix dash run build` (or `npm --prefix dash run bundle-litellm`) before packaging
-when upstream list prices have moved.
+Node SEA packaging (`tsup` via `release-local.sh`) and `npm publish` (`prepublishOnly` →
+`build:cli`) embed the committed files under `dash/src/pricing/data/` and do not call the
+bundler. Refresh pricing deliberately with `npm --prefix dash run bundle-litellm` and commit
+the diff when upstream list prices have moved.
 
 ---
 
@@ -330,7 +331,7 @@ To run the complete production bundle served directly by the KyberDash CLI engin
 
 1. Build the web dashboard bundle:
    ```bash
-   npm --prefix dash run build:dash
+   npm --prefix dash run build:web
    ```
 2. Build the CLI binary:
    ```bash
