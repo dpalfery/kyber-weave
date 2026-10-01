@@ -194,7 +194,7 @@ Procedure above and the host's declared gates.
    head and base branch are reachable from your local `HEAD` before pushing.
 2. **Council over the whole change.** Run full Procedure steps 1–5 over the whole
    accumulated diff against its base, not just the last files touched. Fix every
-   major-or-worse finding before pushing, then re-run steps 2 and 5 over the updated
+   major-or-worse finding before pushing, then re-run steps 1–5 over the updated
    diff and use that second verdict. A verdict computed before a fix is void. If the
    re-run still returns `REQUEST_CHANGES` or `NEEDS_HUMAN`, do not push; fix again or
    report the blocker.
