@@ -361,8 +361,15 @@ public sealed class SquadRendererRegistry : ISquadRenderer
     /// Claude adds an entry-point skill at <c>.claude/skills/&lt;name&gt;/SKILL.md</c> alongside
     /// the kept subagent <c>.claude/agents/&lt;name&gt;.md</c>, so a primary agent is the one
     /// target with two principals (subagent enforced, skill the unenforced main-thread entry).
-    /// ZCode and the other native targets render every agent uniformly without a hard-coded
-    /// special case.
+    /// Cursor joins Pi, ZCode, and Devin as a native target whose output path depends on
+    /// <see cref="SquadAgent.Invocation"/> (Claude instead keeps both principals for a primary
+    /// agent): a primary-invocation agent lowers to <c>.cursor/skills/&lt;name&gt;/SKILL.md</c>
+    /// when its fallback profile's <c>no-primary-agent</c> value is <c>skill</c> (the Pi-renderer
+    /// skill-only precedent — no agent file is emitted), and claims nothing under
+    /// <c>omit</c>. The remaining native targets render every agent uniformly without a
+    /// hard-coded special case here. The <c>Cursor</c> switch arm above is intentionally
+    /// unchanged: resource-principal collision validation keys on source paths, so the
+    /// lowered skill identity needs no arm change.
     /// </remarks>
     private static string? AgentOutputPath(
         SquadTarget target,
