@@ -4,11 +4,13 @@
 // renderToStaticMarkup needs no DOM). dash/vitest.config.ts is left untouched.
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
+// Aliased, because the module-scope `render` below is the static-markup helper
+// and a plain `render` import would be shadowed by it at every call site.
 import { render as renderDom, screen, fireEvent, cleanup, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type * as React from 'react'
 
-import { ContextDoctor, browserRows, nextAccumulated, FindingsBrowserView, nextBrowserOffset, currentBrowserPage, shouldKeepPreviousData } from './ContextDoctor.js'
+import { ContextDoctor, browserRows, nextAccumulated, retainedEnvelope, servedOffset, FindingsBrowserView, nextBrowserOffset, currentBrowserPage, shouldKeepPreviousData, type AccumulatedPage } from './ContextDoctor.js'
 import { fetchCoverage, type FindingsPage, type KyberFinding, type KyberHarnessSummary, type KyberCoverage } from '../lib/kyberApi.js'
 
 function createTestQueryClient() {
@@ -81,6 +83,121 @@ function render(): string {
   )
 }
 
+/**
+ * A findings page for the pure paging helpers. The envelope travels with the
+ * rows, because the rows are only meaningful under it — the same shape the
+ * browser query hands `nextAccumulated`.
+ */
+function findingsPage(
+  rows: readonly KyberFinding[],
+  offset: number,
+  total: number,
+  unknownWindowSessions = 0,
+): FindingsPage {
+  return {
+    findings: [...rows],
+    offset,
+    total,
+    detectorCounts: {},
+    unknownWindowSessions,
+  }
+}
+
+/** A findings page for the rendered suites; the envelope is overridable. */
+function browserPage(
+  ids: string[],
+  detectorCounts: Record<string, number>,
+  harness = 'cursor',
+  envelope: { total?: number; unknownWindowSessions?: number } = {},
+): FindingsPage {
+  return {
+    findings: ids.map((id, i) => finding(id, `det-${i}`, harness)),
+    total: envelope.total ?? ids.length,
+    offset: 0,
+    detectorCounts,
+    unknownWindowSessions: envelope.unknownWindowSessions ?? 0,
+  }
+}
+
+const renderedHarnesses: KyberHarnessSummary[] = [
+  { ...harnessRow, harness: 'cursor', name: 'Cursor' },
+  { ...harnessRow, harness: 'claude-code', name: 'Claude Code' },
+]
+
+const emptyCoverage: KyberCoverage = {
+  refresh: {
+    lastSuccessAt: null,
+    lastFailure: null,
+    inProgress: null,
+    historyWeeks: null,
+    coveredFrom: null,
+    coveredThrough: null,
+  },
+  ingest: { status: 'unknown', reason: 'test stub', sources: [], lastReceivedAt: null },
+  quarantineByReason: [],
+  checkpoints: [],
+}
+
+function renderDoctor(initial: FindingsPage): void {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
+  renderDom(
+    <QueryClientProvider client={client}>
+      <ContextDoctor initialHarnesses={renderedHarnesses} initialFindings={initial} />
+    </QueryClientProvider>,
+  )
+}
+
+function browserSection(): HTMLElement {
+  return screen.getByTestId('all-workspace-findings')
+}
+
+/**
+ * Queries scoped to the browser section. The headline card above reads the
+ * same initial rows (shared initial page), so global card testids are
+ * ambiguous — every row assertion lives inside the browser section.
+ */
+function browser() {
+  return within(browserSection())
+}
+
+/**
+ * Stubs every endpoint ContextDoctor queries, serving the findings pages the
+ * browser's offset walk asks for and recording the offsets requested. Offset 0
+ * arrives with no `offset` param (`fetchFindings` drops a zero offset as
+ * falsy), so the mount refetch and the headline card both read `first`.
+ * Requests carrying an offset wait on `release`, so a mid-flight assertion is
+ * deterministic — no real timers, no real network — and `failAt` turns one of
+ * them into a bounded fetch failure (F2).
+ */
+function stubPagedFetch(opts: {
+  first: FindingsPage
+  byOffset?: Readonly<Record<string, FindingsPage>>
+  failAt?: readonly string[]
+  release?: () => Promise<void>
+}): string[] {
+  const requested: string[] = []
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (input: string) => {
+      const url = new URL(input, 'http://localhost')
+      const json = (payload: unknown) => ({ ok: true, json: async () => payload }) as unknown as Response
+      if (url.pathname === '/api/kyber/harnesses') return json({ harnesses: renderedHarnesses })
+      if (url.pathname === '/api/kyber/runs') return json({ runs: [] })
+      if (url.pathname === '/api/kyber/coverage') return json(emptyCoverage)
+      if (url.pathname === '/api/kyber/findings') {
+        const offset = url.searchParams.get('offset')
+        if (offset === null) return json(opts.first)
+        requested.push(offset)
+        if (opts.release) await opts.release()
+        if (opts.failAt?.includes(offset)) throw new Error(`offset ${offset} failed`)
+        return json(opts.byOffset?.[offset] ?? opts.first)
+      }
+      throw new Error(`unstubbed fetch: ${input}`)
+    }),
+  )
+  return requested
+}
+
 describe('ContextDoctor findings browser (issue #191)', () => {
   it('shows the workspace total with per-detector counts', () => {
     const html = render()
@@ -114,6 +231,15 @@ describe('browserRows — paging accumulates instead of replacing (issue #191)',
   const other = 'duplicate-tool-call|'
   const rows = (prefix: string, n: number) =>
     Array.from({ length: n }, (_, i) => finding(`${prefix}-${i + 1}`, 'duplicate-tool-call', 'cursor'))
+  /** A stored page, envelope included — what the accumulate effect writes. */
+  const page = (scope: string, offset: number, prefix: string, n: number): AccumulatedPage => ({
+    scope,
+    offset,
+    total: 115,
+    detectorCounts: {},
+    unknownWindowSessions: 0,
+    rows: rows(prefix, n),
+  })
 
   it('renders page one before the effect has stored it (static render)', () => {
     // Only the first page exists at this point; nothing has been accumulated.
@@ -123,10 +249,7 @@ describe('browserRows — paging accumulates instead of replacing (issue #191)',
   })
 
   it('extends the list with page two rather than replacing page one', () => {
-    const stored = [
-      { scope, offset: 0, rows: rows('p0', 25) },
-      { scope, offset: 25, rows: rows('p1', 25) },
-    ]
+    const stored = [page(scope, 0, 'p0', 25), page(scope, 25, 'p1', 25)]
     const ids = browserRows(stored, scope, 25, undefined).map((r) => r.id)
     expect(ids).toHaveLength(50)
     expect(ids).toContain('p0-1')
@@ -134,11 +257,7 @@ describe('browserRows — paging accumulates instead of replacing (issue #191)',
   })
 
   it('orders pages by offset regardless of arrival order', () => {
-    const stored = [
-      { scope, offset: 50, rows: rows('p2', 25) },
-      { scope, offset: 0, rows: rows('p0', 25) },
-      { scope, offset: 25, rows: rows('p1', 25) },
-    ]
+    const stored = [page(scope, 50, 'p2', 25), page(scope, 0, 'p0', 25), page(scope, 25, 'p1', 25)]
     const ids = browserRows(stored, scope, 50, undefined).map((r) => r.id)
     expect(ids[0]).toBe('p0-1')
     expect(ids[25]).toBe('p1-1')
@@ -146,10 +265,7 @@ describe('browserRows — paging accumulates instead of replacing (issue #191)',
   })
 
   it('never re-appends a page fetched under a previous filter scope', () => {
-    const stored = [
-      { scope: other, offset: 0, rows: rows('narrowed', 25) },
-      { scope, offset: 0, rows: rows('p0', 25) },
-    ]
+    const stored = [page(other, 0, 'narrowed', 25), page(scope, 0, 'p0', 25)]
     const ids = browserRows(stored, scope, 0, undefined).map((r) => r.id)
     expect(ids).toHaveLength(25)
     expect(ids.some((id) => id.startsWith('narrowed'))).toBe(false)
@@ -159,26 +275,114 @@ describe('browserRows — paging accumulates instead of replacing (issue #191)',
 describe("nextAccumulated — the first page must be stored (issue #191)", () => {
   const scope = "|"
   const rows = (prefix: string) => [finding(prefix, "duplicate-tool-call", "cursor")]
+  const page = (prefix: string, offset: number, total = 2) =>
+    findingsPage(rows(prefix), offset, total)
 
   it("stores page zero instead of skipping it", () => {
     // Skipping offset 0 is what made Load more replace the list: page one was
     // never in the accumulated list, so there was nothing to extend.
-    expect(nextAccumulated([], scope, 0, rows("p0"))).toHaveLength(1)
+    expect(nextAccumulated([], scope, page("p0", 0))).toHaveLength(1)
   })
 
   it("is a no-op when the same page arrives again", () => {
-    const once = nextAccumulated([], scope, 0, rows("p0"))
-    expect(nextAccumulated(once, scope, 0, rows("p0"))).toHaveLength(1)
+    const once = nextAccumulated([], scope, page("p0", 0))
+    expect(nextAccumulated(once, scope, page("p0", 0))).toHaveLength(1)
   })
 
   it("stores the same offset under a different scope", () => {
-    const once = nextAccumulated([], scope, 0, rows("p0"))
-    expect(nextAccumulated(once, "duplicate-tool-call|", 0, rows("p1"))).toHaveLength(2)
+    const once = nextAccumulated([], scope, page("p0", 0))
+    expect(nextAccumulated(once, "duplicate-tool-call|", page("p1", 0))).toHaveLength(2)
   })
 
   it("accumulates page two alongside page one", () => {
-    const both = nextAccumulated(nextAccumulated([], scope, 0, rows("p0")), scope, 25, rows("p1"))
+    const both = nextAccumulated(nextAccumulated([], scope, page("p0", 0)), scope, page("p1", 25))
     expect(both.map((p) => p.offset)).toEqual([0, 25])
+  })
+
+  it("returns the same reference when nothing changed", () => {
+    // The accumulate effect depends on the stored list, so a no-op that
+    // returns a copy re-renders forever (plan risk: same-reference no-op).
+    const once = nextAccumulated([], scope, page("p0", 0))
+    expect(nextAccumulated(once, scope, page("p0", 0))).toBe(once)
+  })
+})
+
+describe("nextAccumulated — a moved total invalidates the scope (F4)", () => {
+  const scope = "|"
+  const rows = (prefix: string, n: number) =>
+    Array.from({ length: n }, (_, i) => finding(`${prefix}-${i + 1}`, "duplicate-tool-call", "cursor"))
+
+  it("stores only the new page when the server's total moves", () => {
+    // A rebuild deleted or re-ranked rows inside the window page one covers.
+    // Its rows were ranked under a ranking that no longer exists, so they are
+    // dropped rather than left on screen for the life of the mount (F4).
+    const stored = nextAccumulated([], scope, findingsPage(rows("stale", 25), 0, 115))
+    const rebuilt = nextAccumulated(stored, scope, findingsPage(rows("fresh", 25), 25, 90))
+    const ids = browserRows(rebuilt, scope, 25, undefined).map((r) => r.id)
+    expect(ids).toEqual(rows("fresh", 25).map((r) => r.id))
+    expect(ids.some((id) => id.startsWith("stale"))).toBe(false)
+  })
+
+  it("keeps the scope when the total is unchanged", () => {
+    const stored = nextAccumulated([], scope, findingsPage(rows("a", 25), 0, 115))
+    const grown = nextAccumulated(stored, scope, findingsPage(rows("b", 25), 25, 115))
+    expect(browserRows(grown, scope, 25, undefined)).toHaveLength(50)
+  })
+})
+
+describe("retainedEnvelope — the last envelope the rows were served under (F2)", () => {
+  const scope = "|"
+
+  it("is undefined when the scope has nothing stored", () => {
+    expect(retainedEnvelope([], scope)).toBeUndefined()
+  })
+
+  it("carries the total and the unknown-window count, never a zero", () => {
+    // A mid-list failure clears `data`, and the heading, chips and suppression
+    // banner must read the last envelope the retained rows were served under
+    // — a fabricated 0 reads as "all clear" (F2).
+    const stored = nextAccumulated([], scope, findingsPage([], 0, 115, 3))
+    expect(retainedEnvelope(stored, scope)).toEqual({
+      total: 115,
+      detectorCounts: {},
+      unknownWindowSessions: 3,
+    })
+  })
+
+  it("returns the newest stored page for the scope only", () => {
+    const stored = nextAccumulated([], scope, findingsPage([], 0, 115, 3))
+    expect(retainedEnvelope(stored, "duplicate-tool-call|")).toBeUndefined()
+  })
+})
+
+describe("servedOffset — the extent the server served, not the rows painted (F3)", () => {
+  const scope = "|"
+  const rows = (prefix: string, n: number) =>
+    Array.from({ length: n }, (_, i) => finding(`${prefix}-${i + 1}`, "duplicate-tool-call", "cursor"))
+
+  it("is the highest offset plus its rows, so an overlap is not skipped", () => {
+    // Page two repeats page one's last row (a rebuild shifted the window).
+    // `browserRows` dedupes it, so the painted count is 5 while the server
+    // extent is 6 — paging from the painted count re-requests a served row.
+    const p0 = rows("s", 3)
+    const shifted = [p0[2]!, ...rows("n", 2)]
+    const stored = nextAccumulated(
+      nextAccumulated([], scope, findingsPage(p0, 0, 115)),
+      scope,
+      findingsPage(shifted, 3, 115),
+    )
+    expect(browserRows(stored, scope, 3, undefined)).toHaveLength(5)
+    expect(servedOffset(stored, scope)).toBe(6)
+    expect(nextBrowserOffset(servedOffset(stored, scope), 115)).toBe(6)
+  })
+
+  it("is zero when the scope has nothing stored", () => {
+    expect(servedOffset([], scope)).toBe(0)
+  })
+
+  it("counts only the requested scope", () => {
+    const stored = nextAccumulated([], "duplicate-tool-call|", findingsPage(rows("n", 3), 0, 115))
+    expect(servedOffset(stored, scope)).toBe(0)
   })
 })
 
@@ -518,10 +722,14 @@ describe('formatCoverageAgo (ingest panel)', () => {
 })
 
 describe('browser paging races (review M3)', () => {
-  it('derives the next offset from loaded rows, not from repeated clicks', () => {
-    // Two quick clicks while a fetch is in flight must not advance past the
-    // rows on screen: the offset is the loaded count, which cannot move
-    // until new rows arrive.
+  it('derives the next offset from the extent the server served', () => {
+    // `served` is `servedOffset` over the stored pages: the highest
+    // `offset + rows.length` the server has answered for. It cannot move
+    // while a fetch is in flight — two quick clicks on Load more resolve to
+    // the same offset instead of skipping a page — and unlike the painted row
+    // count it survives a deduped overlap (F3). These are
+    // `nextBrowserOffset`'s own contract; only the argument's provenance
+    // changed.
     expect(nextBrowserOffset(25, 115)).toBe(25)
     expect(nextBrowserOffset(25, 115)).toBe(25)
     expect(nextBrowserOffset(115, 115)).toBeUndefined()
@@ -626,13 +834,18 @@ describe('FindingsBrowserView query errors (council review)', () => {
     expect(html).not.toContain('secret=abc')
   })
 
-  it('shows rows, not the error panel, when both are present', () => {
+  it('keeps the rows and offers retry inline when a page fails mid-list', () => {
+    // F2, contract change: rows on screen plus a failure is a retryable wedge,
+    // not a reason to hide what the user already read. The full-panel
+    // `findings-error` is the no-rows state only — it is what made the
+    // mid-list failure indistinguishable from "you have seen everything".
     const rows = [finding('e-1', 'duplicate-tool-call', 'cursor')]
     const html = renderToStaticMarkup(
       <FindingsBrowserView findings={rows} total={1} detectorCounts={{}} loading={false} harnesses={[]} error="x" />,
     )
-    expect(html).not.toContain('findings-error')
     expect(html).toContain('finding-card-e-1')
+    expect(html).toContain('findings-inline-error')
+    expect(html).toContain('findings-retry')
   })
 })
 
@@ -645,7 +858,11 @@ describe('browserRows staleness and overlap (review)', () => {
     // by one and page 2's first row repeats page 1's last row.
     const p0 = rows('s', 25)
     const shifted = [p0[24]!, ...rows('n', 24)]
-    const stored = nextAccumulated(nextAccumulated([], '|', 0, p0), '|', 25, shifted)
+    const stored = nextAccumulated(
+      nextAccumulated([], '|', findingsPage(p0, 0, 115)),
+      '|',
+      findingsPage(shifted, 25, 115),
+    )
     const flat = browserRows(stored, '|', 25, undefined)
     const ids = flat.map((r) => r.id)
     expect(flat).toHaveLength(49)
@@ -653,8 +870,8 @@ describe('browserRows staleness and overlap (review)', () => {
   })
 
   it('replaces a stored page whose rows changed instead of keeping stale rows', () => {
-    const first = nextAccumulated([], '|', 0, rows('a', 25))
-    const second = nextAccumulated(first, '|', 0, rows('b', 25))
+    const first = nextAccumulated([], '|', findingsPage(rows('a', 25), 0, 115))
+    const second = nextAccumulated(first, '|', findingsPage(rows('b', 25), 0, 115))
     const flat = browserRows(second, '|', 0, undefined)
     expect(flat.map((r) => r.id)).toEqual(rows('b', 25).map((r) => r.id))
   })
@@ -669,39 +886,6 @@ describe('browserRows staleness and overlap (review)', () => {
  * currentBrowserPage + the resetBrowse effect).
  */
 describe('ContextDoctor filter change — rendered (must-fix-1)', () => {
-  const harnessRows: KyberHarnessSummary[] = [
-    { ...harnessRow, harness: 'cursor', name: 'Cursor' },
-    { ...harnessRow, harness: 'claude-code', name: 'Claude Code' },
-  ]
-
-  const emptyCoverage: KyberCoverage = {
-    refresh: {
-      lastSuccessAt: null,
-      lastFailure: null,
-      inProgress: null,
-      historyWeeks: null,
-      coveredFrom: null,
-      coveredThrough: null,
-    },
-    ingest: { status: 'unknown', reason: 'test stub', sources: [], lastReceivedAt: null },
-    quarantineByReason: [],
-    checkpoints: [],
-  }
-
-  function browserPage(
-    ids: string[],
-    detectorCounts: Record<string, number>,
-    harness = 'cursor',
-  ): FindingsPage {
-    return {
-      findings: ids.map((id, i) => finding(id, `det-${i}`, harness)),
-      total: ids.length,
-      offset: 0,
-      detectorCounts,
-      unknownWindowSessions: 0,
-    }
-  }
-
   afterEach(() => {
     cleanup()
     vi.unstubAllGlobals()
@@ -729,7 +913,7 @@ describe('ContextDoctor filter change — rendered (must-fix-1)', () => {
         const url = new URL(input, 'http://localhost')
         const json = (payload: unknown) =>
           ({ ok: true, json: async () => payload }) as unknown as Response
-        if (url.pathname === '/api/kyber/harnesses') return json({ harnesses: harnessRows })
+        if (url.pathname === '/api/kyber/harnesses') return json({ harnesses: renderedHarnesses })
         if (url.pathname === '/api/kyber/runs') return json({ runs: [] })
         if (url.pathname === '/api/kyber/coverage') return json(emptyCoverage)
         if (url.pathname === '/api/kyber/findings') {
@@ -742,28 +926,6 @@ describe('ContextDoctor filter change — rendered (must-fix-1)', () => {
         throw new Error(`unstubbed fetch: ${input}`)
       }),
     )
-  }
-
-  function renderDoctor(initial: FindingsPage): void {
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
-    renderDom(
-      <QueryClientProvider client={client}>
-        <ContextDoctor initialHarnesses={harnessRows} initialFindings={initial} />
-      </QueryClientProvider>,
-    )
-  }
-
-  function browserSection(): HTMLElement {
-    return screen.getByTestId('all-workspace-findings')
-  }
-
-  /**
-   * Queries scoped to the browser section. The headline card above reads the
-   * same initial rows (shared initial page), so global card testids are
-   * ambiguous — every row assertion lives inside the browser section.
-   */
-  function browser() {
-    return within(browserSection())
   }
 
   it('changing the harness filter drops the old rows at once and never re-appends them', async () => {
@@ -858,5 +1020,95 @@ describe('ContextDoctor filter change — rendered (must-fix-1)', () => {
     expect(browser().queryAllByTestId(/finding-card-/)).toHaveLength(2)
     expect(browser().queryByTestId('findings-load-more')).toBeNull()
     expect(browserSection().querySelector('.skeleton-shimmer')).toBeNull()
+  })
+})
+
+/**
+ * Rendered paging regressions (F2/F3): mounting the real `ContextDoctor` with
+ * a real QueryClient and a stubbed findings endpoint, then walking Load more.
+ * These pin the wired path — the query's error state, `placeholderData`, the
+ * retained envelope and the served-extent offset — where the pure suites above
+ * pin the helpers alone.
+ */
+describe('ContextDoctor paging — rendered (F2/F3)', () => {
+  afterEach(() => {
+    cleanup()
+    vi.unstubAllGlobals()
+  })
+
+  it('keeps the retained total, rows, banner and retry when a later page fails', async () => {
+    // F2: on a page-2 failure the query clears `data`, and reading the
+    // heading, the suppression banner and the Load-more gate off that failed
+    // envelope rewrote 115 to 0 and 3 to 0 — "all clear", no retry, and no
+    // way to tell from "you have seen everything".
+    const first = browserPage(['a-1', 'a-2', 'a-3'], {}, 'cursor', {
+      total: 115,
+      unknownWindowSessions: 3,
+    })
+    stubPagedFetch({ first, failAt: ['3'] })
+    renderDoctor(first)
+
+    // Page one is on screen with the real total, the suppression banner and
+    // Load more.
+    expect(browser().getByText('All Workspace Findings (115)')).not.toBeNull()
+    expect(browser().getByTestId('finding-card-a-3')).not.toBeNull()
+    expect(browser().getByTestId('unknown-window-banner').textContent).toContain(
+      '3 sessions with unknown context window',
+    )
+    expect(browser().queryByTestId('findings-load-more')).not.toBeNull()
+
+    // The offset request fails.
+    fireEvent.click(browser().getByTestId('findings-load-more'))
+    await browser().findByTestId('findings-retry')
+
+    // The rows the user already read stay, under the last successful
+    // envelope: the count is not rewritten to 0, and the suppression banner
+    // keeps its measured 3 rather than reading as "unmeasurable: none".
+    expect(browser().getAllByTestId(/finding-card-/)).toHaveLength(3)
+    expect(browser().getByText('All Workspace Findings (115)')).not.toBeNull()
+    expect(browser().getByTestId('unknown-window-banner').textContent).toContain(
+      '3 sessions with unknown context window',
+    )
+    // The failure is escapable and the tail is still reachable.
+    expect(browser().getByTestId('findings-inline-error')).not.toBeNull()
+    expect(browser().queryByTestId('findings-load-more')).not.toBeNull()
+  })
+
+  it('requests the offset the server served, not the rows painted', async () => {
+    // F3: a rebuild shifted the window, so page 2's first row repeats page
+    // 1's last. The id dedupe paints 5 rows over a served extent of 6, and an
+    // offset derived from the painted count re-requests offset 5.
+    const first = findingsPage(
+      ['a-1', 'a-2', 'a-3'].map((id, i) => finding(id, `det-${i}`, 'cursor')),
+      0,
+      115,
+    )
+    const requested = stubPagedFetch({
+      first,
+      byOffset: {
+        // offset 3: the overlap is a-3, already on screen from page one.
+        '3': findingsPage(
+          ['a-3', 'a-4', 'a-5'].map((id, i) => finding(id, `det-${i}`, 'cursor')),
+          3,
+          115,
+        ),
+        '6': findingsPage(
+          ['a-6', 'a-7'].map((id, i) => finding(id, `det-${i}`, 'cursor')),
+          6,
+          115,
+        ),
+      },
+    })
+    renderDoctor(first)
+
+    fireEvent.click(browser().getByTestId('findings-load-more'))
+    // Five distinct rows render: a-3 is not painted twice.
+    await browser().findByTestId('finding-card-a-5')
+    expect(browser().queryAllByTestId(/finding-card-/)).toHaveLength(5)
+
+    fireEvent.click(browser().getByTestId('findings-load-more'))
+    await browser().findByTestId('finding-card-a-7')
+    // Offsets 3 then 6 — never 5, an offset the server already served.
+    expect(requested).toEqual(['3', '6'])
   })
 })

@@ -127,7 +127,7 @@ export function FindingsBrowserView({
   findings,
   total,
   detectorCounts,
-  unknownWindowSessions = 0,
+  unknownWindowSessions,
   detectorFilter,
   harnessFilter,
   harnesses,
@@ -147,6 +147,12 @@ export function FindingsBrowserView({
         .filter(([, count]) => count > 0)
         .sort(([, a], [, b]) => b - a),
     [detectorCounts],
+  )
+  // One retry control, rendered in whichever error surface applies.
+  const retry = (
+    <button type="button" data-testid="findings-retry" onClick={onRetry}>
+      Retry
+    </button>
   )
 
   return (
@@ -172,11 +178,21 @@ export function FindingsBrowserView({
         </label>
       </div>
 
-      {unknownWindowSessions > 0 && (
+      {/* Suppression is stated only when it is measured. While the envelope
+      is unavailable — a mid-list failure cleared it — the count is unknown,
+      and a banner reading `0` would claim every suppressed session is
+      measurable, which is the opposite of what the failure means (F2). */}
+      {unknownWindowSessions !== undefined && unknownWindowSessions > 0 && (
         <p data-testid="unknown-window-banner" className="text-density-xs text-muted-foreground mt-density-hair">
           {unknownWindowSessions} session{unknownWindowSessions === 1 ? '' : 's'} with unknown context
           window — pressure unmeasurable, not zero. Findings are suppressed for these sessions until a
           source reports a window.
+        </p>
+      )}
+      {unknownWindowSessions === undefined && error !== null && (
+        <p data-testid="unknown-window-banner" className="text-density-xs text-muted-foreground mt-density-hair">
+          Sessions with unknown context window — pressure unmeasurable, not zero. How many are
+          suppressed is unknown: the findings request failed, so this is not a measured zero.
         </p>
       )}
 
@@ -216,12 +232,21 @@ export function FindingsBrowserView({
       ) : error !== null && findings.length === 0 ? (
         <div data-testid="findings-error" role="alert">
           <p>Findings failed to load.</p>
-          <button type="button" data-testid="findings-retry" onClick={onRetry}>
-            Retry
-          </button>
+          {retry}
         </div>
       ) : (
         <>
+          {/* A failure with rows on screen is a retryable wedge, not a reason
+              to hide what the user already read: the banner rides above the
+              retained rows, and the panel above stays the no-rows state only
+              (F2). Without it a page-2 failure is indistinguishable from
+              "you have seen everything". */}
+          {error !== null && (
+            <div data-testid="findings-inline-error" role="status">
+              <p>More findings failed to load. The rows below are the ones already loaded.</p>
+              {retry}
+            </div>
+          )}
           <FindingList
             findings={[...findings]}
             title=""
@@ -247,8 +272,29 @@ export function FindingsBrowserView({
   )
 }
 
-/** One stored page of the browser, tagged with the filter scope it belongs to. */
-export type AccumulatedPage = { scope: string; offset: number; rows: KyberFinding[] }
+/**
+ * One stored page of the browser, tagged with the filter scope it belongs to
+ * and the envelope it was served under.
+ *
+ * <remarks>
+ * The envelope travels with the rows because the rows are only meaningful
+ * under it: a mid-list failure clears `data`, and a rebuild moves `total`
+ * under rows that are already on screen. A page that kept only its rows would
+ * leave the heading, the suppression count and the next offset to be
+ * re-derived from whatever the failed query returned — which is how a
+ * page-2 failure rendered "All Workspace Findings (0)" above 25 retained
+ * rows, and dropped the banner that says some of those sessions are
+ * unmeasurable.
+ * </remarks>
+ */
+export type AccumulatedPage = {
+  scope: string
+  offset: number
+  total: number
+  detectorCounts: Readonly<Record<string, number>>
+  unknownWindowSessions: number
+  rows: KyberFinding[]
+}
 
 /**
  * The next accumulated-page list after a page arrives.
@@ -258,22 +304,46 @@ export type AccumulatedPage = { scope: string; offset: number; rows: KyberFindin
  * `appended`, so advancing the offset left nothing to extend and the rendered
  * rows collapsed to the newly fetched page alone. Re-storing the same page is a
  * no-op, which is what keeps a refetch from duplicating it.
+ *
+ * The no-op returns `pages` itself, not a copy: the accumulate effect depends
+ * on the stored list, so a fresh array per render would loop forever.
+ *
+ * <remarks>
+ * A `total` that differs from the scope's stored one means the server's answer
+ * no longer describes the rows underneath it — a rebuild deleted or re-ranked
+ * findings inside a window already on screen. Those pages are dropped rather
+ * than left on screen for the life of the mount (F4). The caller restarts the
+ * offset at zero; storing only the new page here is what makes that restart
+ * render the new page alone.
+ * </remarks>
  */
 export function nextAccumulated(
   pages: readonly AccumulatedPage[],
   scope: string,
-  offset: number,
-  rows: readonly KyberFinding[],
+  page: Pick<FindingsPage, 'offset' | 'findings' | 'total' | 'detectorCounts' | 'unknownWindowSessions'>,
 ): AccumulatedPage[] {
+  const { offset, findings, total, detectorCounts, unknownWindowSessions } = page
   const sameIds = (a: readonly KyberFinding[], b: readonly KyberFinding[]): boolean =>
     a.length === b.length && a.every((row, i) => row.id === b[i]!.id)
-  const ix = pages.findIndex((page) => page.scope === scope && page.offset === offset)
+  const storedForScope = pages.filter((entry) => entry.scope === scope)
+  const sameTotal = storedForScope.every((entry) => entry.total === total)
+  const entry: AccumulatedPage = {
+    scope,
+    offset,
+    total,
+    detectorCounts,
+    unknownWindowSessions,
+    rows: [...findings],
+  }
+  // The moved total supersedes the scope: nothing stored under the old one can
+  // be re-ranked into place.
+  if (!sameTotal) return [entry]
+  const ix = pages.findIndex((other) => other.scope === scope && other.offset === offset)
   // A rebuild can shift or replace a stored page's rows (review): an
   // identical re-serve is a no-op, but changed rows replace the stale page
   // instead of haunting the list for the life of the mount.
-  if (ix !== -1 && sameIds(pages[ix]!.rows, rows)) return [...pages]
+  if (ix !== -1 && sameIds(pages[ix]!.rows, findings)) return pages as AccumulatedPage[]
   const next = [...pages]
-  const entry = { scope, offset, rows: [...rows] }
   if (ix === -1) next.push(entry)
   else next[ix] = entry
   return next
@@ -311,6 +381,51 @@ export function browserRows(
   })
   const firstPageUnstored = offset === 0 && current !== undefined && !stored.some((page) => page.offset === 0)
   return firstPageUnstored ? [...current, ...accumulated] : accumulated
+}
+
+/**
+ * The envelope the scope's retained rows were served under, or `undefined`
+ * when nothing is stored for it.
+ *
+ * <remarks>
+ * This answers "what did the server last say about this list?" for the fields
+ * the row count cannot answer: the total, the per-detector counts, and the
+ * unknown-window figure. A mid-list failure clears the query's `data`, and
+ * reading those fields off the failed envelope rewrote a 115 total to 0 and
+ * dropped the banner saying three sessions are unmeasurable — "all clear"
+ * invented from a fetch error.
+ * </remarks>
+ */
+export function retainedEnvelope(
+  pages: readonly AccumulatedPage[],
+  scope: string,
+): { total: number; detectorCounts: Readonly<Record<string, number>>; unknownWindowSessions: number } | undefined {
+  const stored = pages.filter((page) => page.scope === scope).sort((a, b) => a.offset - b.offset)
+  const newest = stored[stored.length - 1]
+  if (newest === undefined) return undefined
+  return {
+    total: newest.total,
+    detectorCounts: newest.detectorCounts,
+    unknownWindowSessions: newest.unknownWindowSessions,
+  }
+}
+
+/**
+ * How far the **server** has served this scope: the highest `offset +
+ * rows.length` over its stored pages, or 0 when none.
+ *
+ * <remarks>
+ * Not `browserRows(...).length`. A rebuild can shift a page window by one, so
+ * the same finding opens page two after closing page one; `browserRows` dedupes
+ * the overlap by id, and paging from the painted count then re-requests a row
+ * the server already served. The stored pages carry the served extent
+ * directly, and it survives the dedupe.
+ * </remarks>
+ */
+export function servedOffset(pages: readonly AccumulatedPage[], scope: string): number {
+  return pages
+    .filter((page) => page.scope === scope)
+    .reduce((extent, page) => Math.max(extent, page.offset + page.rows.length), 0)
 }
 
 /**
@@ -445,13 +560,20 @@ export function isFullCoverage(
 }
 
 /**
- * The next page offset from the rows on screen (review M3): the loaded
- * count, which cannot move while a fetch is in flight — so two quick
- * clicks on Load more request the same offset twice instead of skipping a
- * page. Undefined when everything is loaded and the button hides.
+ * The next page offset from the extent the server has served this scope
+ * (`servedOffset`), or `undefined` when everything is loaded and the button
+ * hides.
+ *
+ * <remarks>
+ * Two quick clicks on Load more resolving to the same offset is the
+ * click-disable plus React batching, not a property of the count: a fetch in
+ * flight does not freeze it, and the argument is deliberately the served
+ * extent rather than the painted row count so a deduped overlap does not make
+ * the browser re-request a row it already has.
+ * </remarks>
  */
-export function nextBrowserOffset(loaded: number, total: number): number | undefined {
-  return loaded < total ? loaded : undefined
+export function nextBrowserOffset(served: number, total: number): number | undefined {
+  return served < total ? served : undefined
 }
 
 /**
@@ -589,8 +711,18 @@ export function ContextDoctor({
   // it twice.
   useEffect(() => {
     if (!pageData || isPlaceholderData) return
-    setAppended((prev) => nextAccumulated(prev, browseScope, pageData.offset, pageData.findings))
-  }, [pageData, isPlaceholderData, browseScope])
+    const stored = retainedEnvelope(appended, browseScope)
+    if (stored !== undefined && stored.total !== pageData.total) {
+      // The server's answer no longer describes these rows (F4): drop the
+      // scope and restart at the top rather than paging from a base that
+      // describes a ranking that has moved. Paging on instead would keep a
+      // deleted row on screen for the life of the mount.
+      setAppended(nextAccumulated([], browseScope, pageData))
+      setOffset(0)
+      return
+    }
+    setAppended((prev) => nextAccumulated(prev, browseScope, pageData))
+  }, [pageData, isPlaceholderData, browseScope, appended])
   // Coverage payload for the T9 ingest panel: window, receiver activity,
   // quarantine reasons, checkpoint statuses. Optional initial data keeps the
   // panel deterministic under test; otherwise the live endpoint supplies it.
@@ -640,9 +772,16 @@ export function ContextDoctor({
     () => browserRows(appended, browseScope, offset, current),
     [appended, browseScope, offset, current],
   )
-  const browserTotal = pageData?.total ?? 0
-  const detectorCounts = pageData?.detectorCounts ?? {}
-  const unknownWindowSessions = pageData?.unknownWindowSessions ?? 0
+  // The envelope the rows on screen were served under: the live one when the
+  // query has it, otherwise the last one the stored pages arrived under. A
+  // mid-list failure clears `data`, and reading these off the failed envelope
+  // reported "All Workspace Findings (0)" above 25 rows (F2).
+  const retained = retainedEnvelope(appended, browseScope)
+  const browserTotal = pageData?.total ?? retained?.total ?? 0
+  const detectorCounts = pageData?.detectorCounts ?? retained?.detectorCounts ?? {}
+  // Never a fabricated 0: while the envelope is unavailable the banner says
+  // the count is unknown rather than that nothing is suppressed.
+  const unknownWindowSessions = pageData?.unknownWindowSessions ?? retained?.unknownWindowSessions
   const loadingMatrix = loadingHarnesses || (!harnessesData?.length && loadingRuns)
 
   return (
@@ -699,9 +838,10 @@ export function ContextDoctor({
         onDetectorChange={(detector) => resetBrowse(() => setDetectorFilter(detector))}
         onHarnessChange={(harness) => resetBrowse(() => setHarnessFilter(harness))}
         onLoadMore={() => {
-          // Offset follows the rows on screen (review M3): repeat clicks
-          // while loading resolve to the same offset instead of skipping.
-          const next = nextBrowserOffset(browserFindings.length, browserTotal)
+          // The offset follows the extent the server served, not the rows
+          // painted: `browserRows` dedupes an overlap by id, and paging from
+          // the painted count re-requests a served row (F3).
+          const next = nextBrowserOffset(servedOffset(appended, browseScope), browserTotal)
           if (next !== undefined) setOffset(next)
         }}
         onSelectFinding={onSelectFinding}
