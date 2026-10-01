@@ -1,6 +1,6 @@
 ---
 name: code-review
-description: Use when reviewing written code — a diff, a branch, a pull request, or work an agent claims is finished. Also use as the self-review gate before pushing your own finished change. Fans out a parallel council of specialist review lenses over the change, runs the host's declared deterministic gates, and computes an auditable Approve / Request-changes / Needs-human verdict. Do NOT use for writing or fixing code, for authoring tests, or for a standalone vulnerability scan — invoke the security-review skill for that.
+description: Use when reviewing written code — a diff, a branch, a pull request, or work an agent claims is finished. Also use as the self-review gate before pushing your own finished change. Fans out a parallel council of specialist review lenses over the change, runs the host's declared deterministic gates, and computes an auditable Approve / Request-changes / Needs-human verdict. Do NOT use for standalone authoring or fixing work unrelated to a review (the pre-push gate fixes only the findings it raised), for authoring tests, or for a standalone vulnerability scan — invoke the security-review skill for that.
 license: MIT
 ---
 
@@ -194,7 +194,10 @@ Procedure above and the host's declared gates.
    head and base branch are reachable from your local `HEAD` before pushing.
 2. **Council over the whole change.** Run full Procedure steps 1–5 over the whole
    accumulated diff against its base, not just the last files touched. Fix every
-   major-or-worse finding before pushing.
+   major-or-worse finding before pushing, then re-run steps 2 and 5 over the updated
+   diff and use that second verdict. A verdict computed before a fix is void. If the
+   re-run still returns `REQUEST_CHANGES` or `NEEDS_HUMAN`, do not push; fix again or
+   report the blocker.
 3. **Defect-class checklist.** Walk each class explicitly before pushing:
    a. Invented/hidden values: `?? 0`, `|| N`, `?? []`, clamps, default window/price/size/duration, unmeasured shown as zero or "measured", partial data looking complete (honest-unobservability: absent stays absent with reason).
    b. Scope/cost: filters/dedupe too wide or single-caller-only; N+1/per-run loops; unbounded reads/copies; caps without paging; large payloads kept alive.
