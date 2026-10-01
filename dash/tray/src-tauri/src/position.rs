@@ -12,10 +12,7 @@ pub fn position_popover(window: &tauri::WebviewWindow, anchor: Option<(i32, i32)
     const POPOVER_HEIGHT_LOGICAL: f64 = 660.0;
     const MARGIN_LOGICAL: f64 = 8.0;
 
-    let point = anchor
-        .filter(|(x, y)| *x > 0 || *y > 0)
-        .map(|(x, y)| (x as f64, y as f64))
-        .or_else(|| window.cursor_position().ok().map(|p| (p.x, p.y)));
+    let point = select_position_point(anchor, || window.cursor_position().ok().map(|p| (p.x, p.y)));
 
     let monitor = point
         .and_then(|(x, y)| window.monitor_from_point(x, y).ok().flatten())
@@ -60,4 +57,109 @@ pub fn position_popover(window: &tauri::WebviewWindow, anchor: Option<(i32, i32)
     };
 
     let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
+}
+
+fn select_position_point(
+    anchor: Option<(i32, i32)>,
+    cursor_position: impl FnOnce() -> Option<(f64, f64)>,
+) -> Option<(f64, f64)> {
+    anchor
+        .map(|(x, y)| (x as f64, y as f64))
+        .or_else(cursor_position)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::select_position_point;
+    use std::cell::Cell;
+
+    // Issue #178: virtual desktop coordinates can be negative when a display is left of
+    // or above the primary display. The click must still select its own display.
+    #[test]
+    fn a_negative_tray_anchor_wins_over_a_cursor_on_another_display() {
+        let point = select_position_point(Some((-1743, -1080)), || Some((800.0, 600.0)));
+
+        assert_eq!(point, Some((-1743.0, -1080.0)));
+    }
+
+    #[test]
+    fn an_anchor_at_the_virtual_desktop_origin_remains_valid() {
+        let point = select_position_point(Some((0, 0)), || Some((800.0, 600.0)));
+
+        assert_eq!(point, Some((0.0, 0.0)));
+    }
+
+    #[test]
+    fn an_anchor_above_the_origin_on_the_vertical_axis_remains_valid() {
+        let point = select_position_point(Some((0, -100)), || Some((800.0, 600.0)));
+
+        assert_eq!(point, Some((0.0, -100.0)));
+    }
+
+    #[test]
+    fn an_anchor_left_of_the_origin_on_the_horizontal_axis_remains_valid() {
+        let point = select_position_point(Some((-100, 0)), || Some((800.0, 600.0)));
+
+        assert_eq!(point, Some((-100.0, 0.0)));
+    }
+
+    #[test]
+    fn a_positive_anchor_wins_over_the_cursor() {
+        let point = select_position_point(Some((120, 240)), || Some((-1743.0, -1080.0)));
+
+        assert_eq!(point, Some((120.0, 240.0)));
+    }
+
+    #[test]
+    fn mixed_sign_anchors_remain_valid() {
+        for anchor in [(-100, 240), (120, -240)] {
+            let point = select_position_point(Some(anchor), || Some((800.0, 600.0)));
+
+            assert_eq!(
+                point,
+                Some((anchor.0 as f64, anchor.1 as f64)),
+                "anchor {anchor:?} must retain both coordinates"
+            );
+        }
+    }
+
+    #[test]
+    fn a_supplied_anchor_never_queries_the_cursor() {
+        for anchor in [
+            (-1743, -1080),
+            (0, 0),
+            (0, -100),
+            (-100, 0),
+            (120, 240),
+            (-100, 240),
+            (120, -240),
+        ] {
+            let cursor_queries = Cell::new(0);
+
+            select_position_point(Some(anchor), || {
+                cursor_queries.set(cursor_queries.get() + 1);
+                Some((800.0, 600.0))
+            });
+
+            assert_eq!(
+                cursor_queries.get(),
+                0,
+                "anchor {anchor:?} must avoid the cursor fallback"
+            );
+        }
+    }
+
+    #[test]
+    fn a_missing_anchor_uses_the_cursor_position() {
+        let point = select_position_point(None, || Some((-1743.25, -1080.75)));
+
+        assert_eq!(point, Some((-1743.25, -1080.75)));
+    }
+
+    #[test]
+    fn unavailable_anchor_and_cursor_leave_the_primary_monitor_fallback_available() {
+        let point = select_position_point(None, || None);
+
+        assert_eq!(point, None);
+    }
 }
