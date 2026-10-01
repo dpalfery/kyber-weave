@@ -147,7 +147,7 @@ layout for each runtime is APM's problem rather than a second copy of that mappi
 
 While ContextHygiene validates individual skill specifications, scores routing readiness,
 and scans instruction surfaces, **[Kyber-Squad](../kyber-squad/architecture.md)** acts as the
-unified multi-harness deployment control plane. Kyber-Squad maintains 23 canonical skills
+unified multi-harness deployment control plane. Kyber-Squad maintains 24 canonical skills
 (alongside 21 canonical agent roles and lowering rules) under `products/kyber-squad/` and
 manages their transactional deployment, drift tracking, and lifecycle. Its catalog declares twelve
 harness targets. All twelve renderers are implemented and registered (`copilot`, `cursor`, `claude`,
@@ -156,7 +156,7 @@ harness targets. All twelve renderers are implemented and registered (`copilot`,
 Every raw `SKILL.md` except the six explicitly evolved skills (`bug-crusher`, `code-review`, `product-owner`,
 `second-brain`, `create-pull-request`, and `pr-review-fix-comments`) matches the Hotshot golden
 bytes; the golden `create-pull-request-github` skill is retired into `create-pull-request`.
-Canonical storage and recursive Squad packages preserve 66 supplemental resources, for 89
+Canonical storage and recursive Squad packages preserve 67 supplemental resources, for 91
 skill-tree files. Renderers project every file a Markdown link reaches beside the rendered
 principal, so those references resolve when deployed; every skill resource reaches its render
 except `skills/setup-dev-environment/agents/openai.yaml`, which stays packaged-only Codex
