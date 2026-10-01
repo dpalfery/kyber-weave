@@ -509,6 +509,15 @@ derived layer (issue #182): `claude-desktop` onto `claude-code` and `cursor-agen
 onto `cursor`, so those two surfaces share one canonical id, one rollup row, and one
 API filter namespace. Derived rows persist canonical ids: rolling back the fold
 after a rebuild requires rebuilding derived tables again under the reverted code.
+Reads normalise too, because
+[upgrading the binary does not rebuild derived tables](runbook.md#2-derived-projection-rebuilding-kyber-build):
+a rollup row written before the fold still carries its raw front-end id, so the
+per-harness checkpoint join on `/api/kyber/harnesses` is canonical on both sides
+and such a row still reports its own coverage counts until a rebuild rewrites it.
+That normalisation is what makes a miss after it a measured zero — the read
+succeeded and this harness recorded no units — rather than an unknown, which is
+reserved for an unreadable `source_checkpoint` table
+([honest unobservability](../rules/honest-unobservability.md)).
 Unmapped ids render verbatim.
 
 Stored source names keep their namespace (`codeburn/<provider>` for file-sourced rows,
@@ -649,6 +658,17 @@ The React web dashboard provides progressive-disclosure views matching the 6-lev
 - **`ContextInspector.tsx`**: Full unclipped context viewer with part tabs and copy-out protocol.
 - **`ContextReviewPanel.tsx`**: Opt-in LLM review console with credential safety.
 - **`ScorecardMatrix.tsx`**: Cross-harness six-dimension matrix on Context Doctor.
+
+The workspace findings browser pages on what the **server** served, not on what is painted:
+the next offset is the highest `offset + rows.length` across the scope's stored pages, so a
+page whose first row repeats its predecessor's last row does not re-request a row already
+fetched. Each stored page keeps the envelope it was served under, and a `total` that moves
+invalidates the scope's pages and restarts the offset at 0 — a ranking that has been rebuilt
+underneath rows already on screen cannot be re-ranked into place. Consequently a failed page
+never rewrites a count: the heading, the detector chips and the suppression banner keep the last
+successful envelope, the failure renders as an inline retryable banner above the retained rows
+rather than the no-rows panel, and while the envelope is unavailable the suppression count is
+stated in words as unknown, never as `0` ([honest unobservability](../rules/honest-unobservability.md)).
 
 ### Backend REST API Contract (dash/src/server/routes.ts)
 

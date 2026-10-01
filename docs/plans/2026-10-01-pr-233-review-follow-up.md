@@ -13,6 +13,14 @@ development-mode: test-first
 
 **Status: open, approved for execution 2026-10-01.** Development mode: `test-first`.
 
+**Delivery status 2026-10-01: T1–T7 complete, including T7's documentation step.**
+`docs/dash/architecture.md` now states the read-side normalisation of the harness checkpoint
+join ("Display families and source display names") and the findings browser's paging contract
+("Web Dashboard"). The two remaining lifecycle steps belong to PR close and are deliberately not
+done here: archiving this plan to `docs/archive/plans/` and moving its inventory row in
+[`<plan-index>`](README.md). Until then `docs validate . --merge-ready` reports
+`KW-DOC-LIFECYCLE-003` for this plan, which is expected mid-PR.
+
 This plan plans the work for the five findings on
 [PR #233](https://github.com/dpalfery/kyber-weave/pull/233) (branch
 `fix/dash-181-182-191-findings-quality`) that were resolved in the review threads with **no fix
@@ -296,11 +304,11 @@ T2, T4 and T6 are the GREEN halves of T1, T3 and T5. They add no contract of the
 
 ## Tasks
 
-- **T1 (RED; skill: test-dev).** Write the T1 contract cases in `src/server/kyber-api.test.ts`.
+- **T1 — DONE (RED; skill: test-dev).** Write the T1 contract cases in `src/server/kyber-api.test.ts`.
   Reuse the local `checkpoint(harnessId, sourceKey, lastStatus)` helper already in that `describe`
   (`:977-994`) and the store-construction pattern at `:1001-1046`; do not add a raw-SQL fixture.
   Files: `src/server/kyber-api.test.ts` only. Depends on: nothing.
-- **T2 (GREEN).** TypeScript specialist (no listed skill covers Node/TypeScript server code; the
+- **T2 — DONE (GREEN).** TypeScript specialist (no listed skill covers Node/TypeScript server code; the
   conductor maps it, as the archived #186 review-fixes plan did). `dash/src/server/routes.ts`, the
   one expression:
 
@@ -327,7 +335,7 @@ T2, T4 and T6 are the GREEN halves of T1, T3 and T5. They add no contract of the
   `normalizeHarnessName` is already imported in this file (used at `:255` and `:265`); no import
   change. Acceptance: T1 GREEN, and `npx vitest run src/server/kyber-api.test.ts
   src/server/kyber-bridge.test.ts` green. Depends on: T1.
-- **T3 (RED; skill: test-dev).** Write the T3 contract cases in
+- **T3 — DONE (RED; skill: test-dev).** Write the T3 contract cases in
   `web/src/pages/ContextDoctor.test.tsx`. Mechanical prerequisites, all in the same commit:
   - Rewrite the three `nextAccumulated` call sites at `:648`, `:656` and `:657-658` to the new
     `nextAccumulated(pages, scope, page)` signature, passing a full `FindingsPage` (`offset`,
@@ -343,7 +351,7 @@ T2, T4 and T6 are the GREEN halves of T1, T3 and T5. They add no contract of the
     `render`/`within(screen.getByTestId('all-workspace-findings'))` as the existing rendered suite
     at `:671` does, including its `afterEach(cleanup)` and `vi.unstubAllGlobals`.
   Depends on: nothing.
-- **T4 (GREEN).** TypeScript specialist. `dash/web/src/pages/ContextDoctor.tsx`, six edits, in
+- **T4 — DONE (GREEN).** TypeScript specialist. `dash/web/src/pages/ContextDoctor.tsx`, six edits, in
   this order so the file stays type-consistent:
   1. `AccumulatedPage` (`:250-251`) and `nextAccumulated` (`:262-280`) → the D1 shape. `nextAccumulated`
      takes `page: Pick<FindingsPage, 'offset' | 'findings' | 'total' | 'detectorCounts' | 'unknownWindowSessions'>`,
@@ -378,10 +386,10 @@ T2, T4 and T6 are the GREEN halves of T1, T3 and T5. They add no contract of the
      is unknown **and** `error !== null`, in words, never as `0`.
   Acceptance: T3 GREEN; `npm --prefix dash run typecheck` exits 0; `npm --prefix dash run lint`
   exits 0. Depends on: T3.
-- **T5 (RED; skill: test-dev).** Add the source guard to `src/canon/twin-dedupe.test.ts`, reading
+- **T5 — DONE (RED; skill: test-dev).** Add the source guard to `src/canon/twin-dedupe.test.ts`, reading
   the module with `readFileSync(new URL('./twin-dedupe.ts', import.meta.url), 'utf8')` — the
   pattern `src/pricing/data/pricing-fallback-data.test.ts` already uses. Depends on: nothing.
-- **T6 (GREEN).** TypeScript specialist, comment only. `dash/src/canon/twin-dedupe.ts:47-52`:
+- **T6 — DONE (GREEN).** TypeScript specialist, comment only. `dash/src/canon/twin-dedupe.ts:47-52`:
 
   old:
   ```
@@ -400,21 +408,28 @@ T2, T4 and T6 are the GREEN halves of T1, T3 and T5. They add no contract of the
    * 50 s would collapse into one turn. See the check in `dedupeTwinTurns`.
   ```
   Acceptance: T5 GREEN and the whole `twin-dedupe.test.ts` green. Depends on: T5.
-- **T7 (docs; skill: app-docs-standard; no-test).**
-  - `docs/dash/architecture.md`, "Display families and source display names" (:500-512): one
-    sentence that the per-harness checkpoint join is canonical on both sides, so a rollup row
-    written before the fold still reports its own coverage counts until a rebuild rewrites it.
-  - `docs/dash/architecture.md`, "Web Dashboard": one sentence on the browser's paging contract —
-    the next offset is the extent the server served, a rebuilt ranking invalidates the stored
-    window, and a failed page keeps the last successful envelope so no count is ever rewritten to
-    zero (honest unobservability in the UI).
-  - `docs/dash/architecture.md`: no change for F5. No governed document describes the twin-dedupe
-    clustering bound; the decision lives in the code, and this plan records that in its inventory
-    row.
-  - `docs/plans/README.md`: the Active Plans row moves to Archived Plans at PR close, with
-    "None — the twin-dedupe bound is code-local; the D1–D5 decisions are recorded in the plan".
-  - At PR close, archive this plan to `docs/archive/plans/` and move the row, which is what clears
-    `KW-DOC-LIFECYCLE-003` for the `--merge-ready` run.
+- **T7 (docs; skill: app-docs-standard; no-test) — DONE except the two PR-close steps below,
+  which are the orchestrator's.**
+  - **DONE** — `docs/dash/architecture.md`, "Display families and source display names": the
+    per-harness checkpoint join is canonical on both sides, so a rollup row written before the
+    fold still reports its own coverage counts until a rebuild rewrites it. The edit also states
+    the reason a miss after normalisation is a measured zero (R2) rather than an unknown, which
+    is reserved for an unreadable `source_checkpoint` table, and links the runbook's
+    derived-projection section for the "upgrade does not rebuild" premise.
+  - **DONE** — `docs/dash/architecture.md`, "Web Dashboard": the browser's paging contract — the
+    next offset is the extent the server served (not the rows painted), a `total` that moves
+    invalidates the stored window and restarts the offset, and a failed page keeps the last
+    successful envelope so the heading, chips and suppression banner are never rewritten to zero,
+    with the suppression count stated in words as unknown while the envelope is unavailable
+    (honest unobservability in the UI).
+  - **DONE (no change)** — `docs/dash/architecture.md` for F5. No governed document describes the
+    twin-dedupe clustering bound; the decision lives in the code, and this plan records that in
+    its inventory row.
+  - **PENDING, PR close (orchestrator)** — `docs/plans/README.md`: the Active Plans row moves to
+    Archived Plans, with "None — the twin-dedupe bound is code-local; the D1–D5 decisions are
+    recorded in the plan".
+  - **PENDING, PR close (orchestrator)** — archive this plan to `docs/archive/plans/` and move the
+    row, which is what clears `KW-DOC-LIFECYCLE-003` for the `--merge-ready` run.
   - Depends on: T2, T4, T6.
 
 ## Dependency graph and MAX_CONCURRENCY
