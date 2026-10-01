@@ -190,8 +190,8 @@ Procedure above and the host's declared gates.
 
 1. **Sync.** Refresh the remote head and the base branch before pushing. If another
    actor advanced either, reconcile their changes into your branch and revalidate the
-   affected work. Merge, never rebase, never force-push. Confirm each commit you cite
-   is reachable from the remote head before pushing.
+   affected work. Merge, never rebase, never force-push. Confirm the refreshed remote
+   head and base branch are reachable from your local `HEAD` before pushing.
 2. **Council over the whole change.** Run full Procedure steps 1–5 over the whole
    accumulated diff against its base, not just the last files touched. Fix every
    medium-or-worse finding before pushing.
