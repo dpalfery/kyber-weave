@@ -499,11 +499,26 @@ and never as a passing grade.
 
 ### Display families and source display names
 
-Split client surfaces stay distinct in stored data, rollup keys, and API filters.
+Split client surfaces stay distinct in stored data — and, except for the two
+evidenced twin front-ends below, in rollup keys and API filters.
 `harnessFamily` (`dash/src/canon/measurability.ts`) is a display-level grouping only:
 `claude-cli`, `claude-desktop`, and `claude-code` share the `claude-code` family label
 while each canonical id and its per-origin count stays visible beside it, so grouping
-never fabricates an aggregate. Unmapped ids render verbatim.
+never fabricates an aggregate. Twin front-ends fold one step earlier, at the
+derived layer (issue #182): `claude-desktop` onto `claude-code` and `cursor-agent`
+onto `cursor`, so those two surfaces share one canonical id, one rollup row, and one
+API filter namespace. Derived rows persist canonical ids: rolling back the fold
+after a rebuild requires rebuilding derived tables again under the reverted code.
+Reads normalise too, because
+[upgrading the binary does not rebuild derived tables](runbook.md#2-derived-projection-rebuilding-kyber-build):
+a rollup row written before the fold still carries its raw front-end id, so the
+per-harness checkpoint join on `/api/kyber/harnesses` is canonical on both sides
+and such a row still reports its own coverage counts until a rebuild rewrites it.
+That normalisation is what makes a miss after it a measured zero — the read
+succeeded and this harness recorded no units — rather than an unknown, which is
+reserved for an unreadable `source_checkpoint` table
+([honest unobservability](../rules/honest-unobservability.md)).
+Unmapped ids render verbatim.
 
 Stored source names keep their namespace (`codeburn/<provider>` for file-sourced rows,
 OTLP names verbatim, legacy `unattributed` rows retained). Surfaces render them through
@@ -567,8 +582,21 @@ $$\text{Rank Score} = \text{Estimated Recoverable Waste} \times \text{Outcome Ri
 An inferred finding can never outrank a deterministic finding of comparable size. Recoverable
 waste is an estimate tied to a specific recommended action.
 
+Two honest-measurement contracts govern what the engine will not claim. The compaction-hazard
+detector fires only against a reported context window: an unreported window suppresses the
+finding (pressure surfaces as unmeasurable instead), and a single-turn peak above the reported
+window is downgraded to inferred with an aggregate-attribution caveat rather than printed as a
+deterministic percentage. Twin front-end collectors (`claude-desktop` onto `claude-code`,
+`cursor-agent` onto `cursor`) fold onto one canonical harness id, and same-turn observations
+with byte-identical counters collapse per ADR 0009 source precedence (OTLP counters win; values are never
+summed across sources for the same turn) instead of double-counting one conversation.
+Same-turn observations whose counters differ are left alone (follow-up #231).
+
 Findings are materialized in `canon.db` at session/run build time with a `detector_version` schema
-stamp (Decision D17), forcing automatic recomputation whenever detectors are updated.
+stamp (Decision D17): an informational mark of which detector semantics built the rows, so
+tooling and operators can tell a stale finding table from a fresh one. Recomputation itself
+comes from the authoritative rebuild, which rewrites derived rows and prunes what detectors no
+longer emit.
 
 ### Run Comparison and Phase Alignment (Decision D11)
 
@@ -631,6 +659,20 @@ The React web dashboard provides progressive-disclosure views matching the 6-lev
 - **`ContextReviewPanel.tsx`**: Opt-in LLM review console with credential safety.
 - **`ScorecardMatrix.tsx`**: Cross-harness six-dimension matrix on Context Doctor.
 
+The workspace findings browser pages on what the **server** served, not on what is painted:
+the next offset is the extent of the contiguous run of the scope's stored pages that starts at
+offset 0, walked in offset order, so a page whose first row repeats its predecessor's last row
+does not re-request a row already fetched. A page stored beyond a gap is not counted until that
+gap is refetched, and a page that serves zero rows ends the run — neither advances the offset, so
+paging past them would skip rows the server never served. Each stored page keeps the envelope it
+was served under, and a `total` that moves
+invalidates the scope's pages and restarts the offset at 0 — a ranking that has been rebuilt
+underneath rows already on screen cannot be re-ranked into place. Consequently a failed page
+never rewrites a count: the heading, the detector chips and the suppression banner keep the last
+successful envelope, the failure renders as an inline retryable banner above the retained rows
+rather than the no-rows panel, and while the envelope is unavailable the suppression count is
+stated in words as unknown, never as `0` ([honest unobservability](../rules/honest-unobservability.md)).
+
 ### Backend REST API Contract (dash/src/server/routes.ts)
 
 The web dashboard server wires HTTP requests directly to `KyberBridge`:
@@ -645,7 +687,7 @@ The web dashboard server wires HTTP requests directly to `KyberBridge`:
 | `/api/kyber/session/:id` | `GET` | `SessionPayload` | Full session payload with turns, context, tools, and timeline. |
 | `/api/kyber/session/:id/content` | `GET` | `SessionContent` | Full canonical content for an inspected session part. |
 | `/api/kyber/session/:id/turn/:index/content` | `GET` | `TurnContentResult` | Full unclipped assembled context for a specific turn (D4). |
-| `/api/kyber/findings` | `GET` | `{ findings: Finding[] }` | Ranked findings; supports `?runId=`, `?sessionId=`. |
+| `/api/kyber/findings` | `GET` | `{ findings: Finding[], total, limit, offset, detectorCounts, unknownWindowSessions }` | Ranked findings; supports `?runId=`, `?sessionId=`, `?harness=`, `?detector=`, `?limit=`, `?offset=`. `total` describes the narrowed set; `detectorCounts` cover the run/session/harness scope ignoring paging and the detector filter so filter chips never evaporate; `unknownWindowSessions` counts sessions with an unreported context window in scope. |
 | `/api/kyber/finding/:id` | `GET` | `Finding` | Single finding detail with evidence rows and risk caveats. |
 | `/api/kyber/predictions` | `GET`, `POST` | `{ predictions: Prediction[] }` | Query or record prediction calibration entries. |
 | `/api/kyber/calibration` | `GET` | `CalibrationSummary` | Calibration curve and scoring summary. |

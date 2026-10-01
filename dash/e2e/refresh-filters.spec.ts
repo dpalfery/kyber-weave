@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { POPULATED_HARNESSES, USER_CANON } from './refresh-filters-world.js'
+import { DERIVED_HARNESSES, USER_CANON } from './refresh-filters-world.js'
 
 /**
  * Isolated browser acceptance for refresh filters. Starts its own dashboard
@@ -89,7 +89,11 @@ test('T8 Context Doctor filters split identities from the temp refreshed DB', as
   }
   writeFileSync(join(scratch, 'harnesses.json'), JSON.stringify(payload, null, 2))
 
-  for (const harness of POPULATED_HARNESSES) {
+  // Derived harness ids (issue #182): refresh jobs still collect under
+  // front-end names, but rollups and runs carry the folded owner. The fold
+  // must unite rows, not lose the twin: the cursor-agent job's fixture
+  // session (`cursor-agent-1`) ingests under the folded owner.
+  for (const harness of DERIVED_HARNESSES) {
     const row = payload.harnesses.find((entry) => entry.harness === harness)
     expect(row, `${harness} missing from rollups`).toBeTruthy()
     expect(row!.sampleCount).toBeGreaterThan(0)
@@ -126,6 +130,17 @@ test('T8 Context Doctor filters split identities from the temp refreshed DB', as
     await page.getByTestId('breadcrumb-context-doctor').click()
     await expect(page.getByTestId('page-context-doctor')).toBeVisible()
   }
+
+  // Issue #182: folded front-ends appear nowhere as derived ids, and the
+  // twin job's records are not lost in the fold.
+  const foldedOut = (payload.harnesses as Array<{ harness: string }>).map((entry) => entry.harness)
+  expect(foldedOut).not.toContain('cursor-agent')
+  expect(foldedOut).not.toContain('claude-desktop')
+  const cursorSessions = await page.request.get(`${app}/api/kyber/sessions?harness=cursor`)
+  const cursorBody = (await cursorSessions.json()) as {
+    sessions: Array<{ session_id?: string; sessionId?: string }>
+  }
+  expect(cursorBody.sessions.map((s) => s.session_id ?? s.sessionId)).toContain('cursor-agent-1')
 
   await page.screenshot({ path: join(scratch, 'context-doctor.png'), fullPage: true })
 

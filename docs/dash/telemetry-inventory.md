@@ -135,8 +135,11 @@ reason, never as zero, per [honest unobservability](../rules/honest-unobservabil
   incomplete)") with "0 records" shown only where `record_count` is a measured zero.
 - **Family display (display-only).** `harnessFamily` groups `claude-cli`,
   `claude-desktop`, and `claude-code` under the `claude-code` family label for
-  display; stored ids, rollup keys, and API filters are unchanged, and per-origin
-  counts stay visible beside the family label so no aggregate is fabricated.
+  display; stored ids stay verbatim, per-origin source counts stay visible
+  beside the family label so no aggregate is fabricated, and every surface
+  except the two folded twins keeps its own rollup key and API filter
+  namespace (`claude-desktop` folds onto `claude-code` and `cursor-agent`
+  onto `cursor` at the derived layer, issue #182).
   `/api/kyber/harnesses` rows carry `family`, the verbatim rollup `noDataReason`,
   and a checkpoint summary. Zero-data harnesses keep their rollup reason and group
   under an explicit "no records in coverage window" state.

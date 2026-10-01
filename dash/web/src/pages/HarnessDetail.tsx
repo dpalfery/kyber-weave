@@ -7,9 +7,9 @@ import {
   fetchHarness,
   fetchRuns,
   fetchFindings,
+  type FindingsPage,
   type KyberHarnessSummary,
   type KyberRunSummary,
-  type KyberFinding,
   type ScorecardData,
 } from '../lib/kyberApi.js'
 import {
@@ -24,7 +24,7 @@ export interface HarnessDetailProps {
   harnessId: string
   initialHarness?: KyberHarnessSummary
   initialRuns?: KyberRunSummary[]
-  initialFindings?: KyberFinding[]
+  initialFindings?: FindingsPage
   onSelectAll?: () => void
   onSelectRun?: (runId: string) => void
   onSelectFinding?: (findingId: string) => void
@@ -70,7 +70,9 @@ export function HarnessDetail({
 
   const harness = harnessData ?? initialHarness
   const runs = runsData ?? []
-  const findings = findingsData ?? []
+  // Server-side harness filter (issue #191): the envelope carries the
+  // harness's whole set, not a post-fetch slice.
+  const findings = findingsData?.findings ?? []
 
   // A missing rollup is not the same as missing telemetry, and conflating the two
   // is the failure ADR 0011 forbids: the six dimensions would read "telemetry

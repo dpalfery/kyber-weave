@@ -465,7 +465,7 @@ and validates.
   behaviour.
 - **Skill golden bytes and retained resources**: `code-review-loop` is authored in Kyber-Squad
   and has no Hotshot baseline. Every imported canonical raw `SKILL.md` except the
-  five explicitly evolved skills (`bug-crusher`, `product-owner`, `second-brain`,
+  six explicitly evolved skills (`bug-crusher`, `code-review`, `product-owner`, `second-brain`,
   `create-pull-request`, and `pr-review-fix-comments`) still matches Hotshot golden bytes;
   `create-pull-request-github` is retired into `create-pull-request`. Canonical source and both
   recursive package formats retain all 67 skill resources (91 files under
