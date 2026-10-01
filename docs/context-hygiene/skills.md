@@ -153,7 +153,7 @@ manages their transactional deployment, drift tracking, and lifecycle. Its catal
 harness targets. All twelve renderers are implemented and registered (`copilot`, `cursor`, `claude`,
 `codex`, `antigravity`, `opencode`, `kilo`, `pi`, `factory`, `warp`, `zcode`, and `devin`).
 
-Every raw `SKILL.md` except the five explicitly evolved skills (`bug-crusher`, `product-owner`,
+Every raw `SKILL.md` except the six explicitly evolved skills (`bug-crusher`, `code-review`, `product-owner`,
 `second-brain`, `create-pull-request`, and `pr-review-fix-comments`) matches the Hotshot golden
 bytes; the golden `create-pull-request-github` skill is retired into `create-pull-request`.
 Canonical storage and recursive Squad packages preserve 66 supplemental resources, for 89

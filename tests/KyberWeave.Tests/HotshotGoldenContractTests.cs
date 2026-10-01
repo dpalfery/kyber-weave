@@ -73,6 +73,7 @@ public sealed partial class HotshotGoldenContractTests
     private static readonly string[] EvolvedSkillIdentities =
     [
         "bug-crusher",
+        "code-review", // pre-push self-review gate added to the canonical body
         "create-pull-request", // combined with create-pull-request-github; provider selection and neutral layer
         "pr-review-fix-comments", // provider files now rendered (plan 2026-09-28)
         "product-owner",

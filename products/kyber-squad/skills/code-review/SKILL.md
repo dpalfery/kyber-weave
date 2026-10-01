@@ -1,6 +1,6 @@
 ---
 name: code-review
-description: Use when reviewing written code — a diff, a branch, a pull request, or work an agent claims is finished. Fans out a parallel council of specialist review lenses over the change, runs the host's declared deterministic gates, and computes an auditable Approve / Request-changes / Needs-human verdict. Do NOT use for writing or fixing code, for authoring tests, or for a standalone vulnerability scan — invoke the security-review skill for that.
+description: Use when reviewing written code — a diff, a branch, a pull request, or work an agent claims is finished. Also use as the self-review gate before pushing your own finished change. Fans out a parallel council of specialist review lenses over the change, runs the host's declared deterministic gates, and computes an auditable Approve / Request-changes / Needs-human verdict. Do NOT use for writing or fixing code, for authoring tests, or for a standalone vulnerability scan — invoke the security-review skill for that.
 license: MIT
 ---
 
@@ -181,6 +181,29 @@ padding the number, which is exactly what the `test-adequacy` lens is there to c
 
 Report the verdict the engine returned. You may not override it. If you believe it is wrong,
 say so alongside it with the finding that should have changed it.
+
+## Pre-push self-review gate
+
+Run this gate on your own finished change before pushing. It works the same in any
+harness — Claude, Pi, OpenCode, Antigravity, or others — because it uses only the
+Procedure above and the host's declared gates.
+
+1. **Sync.** Refresh the remote head and the base branch before pushing. If another
+   actor advanced either, reconcile their changes into your branch and revalidate the
+   affected work. Merge, never rebase, never force-push. Confirm each commit you cite
+   is reachable from the remote head before pushing.
+2. **Council over the whole change.** Run full Procedure steps 1–5 over the whole
+   accumulated diff against its base, not just the last files touched. Fix every
+   medium-or-worse finding before pushing.
+3. **Defect-class checklist.** Walk each class explicitly before pushing:
+   a. Invented/hidden values: `?? 0`, `|| N`, `?? []`, clamps, default window/price/size/duration, unmeasured shown as zero or "measured", partial data looking complete (honest-unobservability: absent stays absent with reason).
+   b. Scope/cost: filters/dedupe too wide or single-caller-only; N+1/per-run loops; unbounded reads/copies; caps without paging; large payloads kept alive.
+   c. Parity: guard added in one place not every caller/branch (store vs direct-DB, harness vs run scope, API vs UI, producer vs consumer).
+   d. Stale text: comments/docs/test names/version-migration numbers/PR description mismatch code (grep old value).
+   e. Tests only pure helpers never real render/serve path; assertions locking bug; new test passing even if fix reverted.
+   f. Lint and type gates actually run.
+4. **Evidence.** Paste the real gate output into the push report. A claim with no
+   gate result is "unverified", never "passing".
 
 ## Report format
 
