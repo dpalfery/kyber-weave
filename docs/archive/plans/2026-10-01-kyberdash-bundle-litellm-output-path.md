@@ -307,21 +307,26 @@ Current on-disk digests (confirmed via `node` at T4 closeout) match POST below. 
 rebundle rewrote the same committed bytes as the initial refresh except for the three restored
 manual lookup shapes.
 
-**Key diff vs HEAD** (full machine-readable dump: `/tmp/t3-key-diff.json` — present on the T3 host as of this closeout):
+**Key diff vs HEAD** (full machine-readable dump:
+[2026-10-01-kyberdash-bundle-litellm-t3-evidence.json](2026-10-01-kyberdash-bundle-litellm-t3-evidence.json)
+— key-diff counts, anomaly list, and upstream artifact digests from the T3 closeout):
 
 | File | added | removed | changed |
 |---|---:|---:|---:|
 | litellm-snapshot | 1651 | 344 | 403 |
 | pricing-fallback | 8 | 161 | 1 |
 
-**Anomaly scan on changed tuples:** negatives `0`; non-finite `0`. Zero-rate stubs among changed primary keys: 19 (15 cache-write `0`, 3 output `0` on reranker-style models, 1 cache-read `0`). High-magnitude samples (≥10× input/output vs HEAD, all decreases): `bigscience/mt0-xxl-13b`, `watsonx/bigscience/mt0-xxl-13b`, `gryphe/mythomax-l2-13b` (+ openrouter twin), `mancer/weaver` (+ openrouter twin), `mistral-small-2503@001`, `vertex_ai/mistral-small-2503`, `vertex_ai/mistral-small-2503@001`. Sidecar: `/tmp/t3-anomalies.json` (present; `litellm.zeroStubs` length 19).
+**Anomaly scan on changed tuples:** negatives `0`; non-finite `0`. Zero-rate stubs among changed primary keys: 19 (15 cache-write `0`, 3 output `0` on reranker-style models, 1 cache-read `0`). High-magnitude samples (≥10× input/output vs HEAD, all decreases): `bigscience/mt0-xxl-13b`, `watsonx/bigscience/mt0-xxl-13b`, `gryphe/mythomax-l2-13b` (+ openrouter twin), `mancer/weaver` (+ openrouter twin), `mistral-small-2503@001`, `vertex_ai/mistral-small-2503`, `vertex_ai/mistral-small-2503@001`. Sidecar:
+[2026-10-01-kyberdash-bundle-litellm-t3-evidence.json](2026-10-01-kyberdash-bundle-litellm-t3-evidence.json)
+(`anomalies.litellm.zeroStubs` length 19). Upstream digests are recorded in that file’s
+`artifactDigestsSha256` and in the digest table above.
 
 **Anomaly dispositions (D2–D4).** Provenance: orchestrator decision 2026-10-01 (David-delegated gate).
 
 | Id | Finding | Disposition |
 |---|---|---|
-| D2 | Primary removed 344 keys; fallback removed 161 keys (`/tmp/t3-key-diff.json`) | ACCEPT as authorized upstream attrition — not unexplained disappearance under Review |
-| D3 | 19 zero-rate stubs among changed primary keys (`/tmp/t3-anomalies.json`) | ACCEPT as upstream LiteLLM literals (cache-write/output/cache-read `0` fields), not “published free” product claims |
+| D2 | Primary removed 344 keys; fallback removed 161 keys ([t3-evidence.json](2026-10-01-kyberdash-bundle-litellm-t3-evidence.json)) | ACCEPT as authorized upstream attrition — not unexplained disappearance under Review |
+| D3 | 19 zero-rate stubs among changed primary keys ([t3-evidence.json](2026-10-01-kyberdash-bundle-litellm-t3-evidence.json)) | ACCEPT as upstream LiteLLM literals (cache-write/output/cache-read `0` fields), not “published free” product claims |
 | D4 | ≥10× input/output decreases vs HEAD (samples above) | ACCEPT as upstream LiteLLM/OpenRouter reprices |
 | D5 | Council major: alias `claude-4-opus` → missing bare `claude-opus-4` | ACCEPT as intentional post-refresh contract — see disposition below |
 
