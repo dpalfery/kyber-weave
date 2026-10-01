@@ -1,4 +1,6 @@
 import { readFileSync } from 'fs'
+import { dirname, resolve } from 'path'
+import { fileURLToPath } from 'url'
 import { describe, it, expect } from 'vitest'
 
 import fallback from './pricing-fallback.json' assert { type: 'json' }
@@ -10,8 +12,13 @@ import snapshot from './litellm-snapshot.json' assert { type: 'json' }
 describe('pricing-fallback.json data hygiene', () => {
   const entries = Object.entries(fallback as Record<string, (number | null)[]>)
 
-  it('is non-empty', () => {
-    expect(entries.length).toBeGreaterThan(50)
+  // Post 2026-10-01 refresh the primary snapshot (4671 → 5978 keys) absorbed most
+  // former gap-fill rows via bareKey seeding of `seen`, collapsing fallback
+  // coverage 205 → 52. Pin the committed cardinality so a broken rebundle that
+  // empties or silently shrinks the safety net fails CI; bump deliberately when
+  // the snapshot changes.
+  it('pins the post-refresh gap-fill cardinality (205 → 52 collapse)', () => {
+    expect(entries.length).toBe(52)
   })
 
   it('has no negative rates (OpenRouter -1 "variable price" sentinels)', () => {
@@ -80,27 +87,53 @@ describe('issue #186 U11 bundled rate additions', () => {
 describe('issue #186 bundler MANUAL_ENTRIES reproducibility', () => {
   const source = readFileSync(new URL('../../../scripts/bundle-litellm.mjs', import.meta.url), 'utf8')
   const block = /const MANUAL_ENTRIES = \{([\s\S]*?)\n\}/.exec(source)?.[1] ?? ''
-  const manual = new Map<string, number[]>()
+
+  function parseTupleLiteral(raw: string): (number | null)[] {
+    return raw.split(',').map((token) => {
+      const trimmed = token.trim()
+      if (trimmed === 'null') return null
+      return Number(trimmed)
+    })
+  }
+
+  const manual = new Map<string, (number | null)[]>()
   for (const line of block.split('\n')) {
     const m = /^\s*'([^']+)':\s*\[([^\]]*)\]/.exec(line)
-    if (m) manual.set(m[1], m[2].split(',').map((n) => Number(n.trim())))
+    if (m) manual.set(m[1], parseTupleLiteral(m[2]))
   }
   const snap = snapshot as unknown as Record<string, (number | null)[]>
+
+  it('writes pricing artifacts to the same directory the runtime imports', () => {
+    // Behavioral #229 guard without executing the networked bundler: the shared
+    // path module is the single expression both writers and the runtime agree on.
+    const pathsSource = readFileSync(new URL('../../../scripts/pricing-artifact-paths.mjs', import.meta.url), 'utf8')
+    expect(source).toMatch(/from '\.\/pricing-artifact-paths\.mjs'/)
+    expect(pathsSource).toMatch(/'src',\s*'pricing',\s*'data'/)
+    expect(pathsSource).not.toMatch(/'src',\s*'data'\s*[,)]/)
+    const scriptsDir = dirname(fileURLToPath(new URL('../../../scripts/pricing-artifact-paths.mjs', import.meta.url)))
+    const bundlerDataDir = resolve(scriptsDir, '..', 'src', 'pricing', 'data')
+    const runtimeDataDir = dirname(fileURLToPath(new URL('./litellm-snapshot.json', import.meta.url)))
+    expect(bundlerDataDir).toBe(runtimeDataDir)
+  })
 
   it('locates and parses the MANUAL_ENTRIES block (sanity: neighbour claude-mythos-5)', () => {
     expect(manual.has('claude-mythos-5')).toBe(true)
   })
 
-  for (const id of ['claude-sonnet-5-5', 'gpt-6-luna']) {
+  // Drive the guard off every parsed MANUAL_ENTRIES key so a hand-added rate
+  // (kimi-k2-thinking, claude-opus-4, claude-opus-4-20250514, …) cannot skip the
+  // reproducibility check. Compare the full tuple, including optional `fast`.
+  for (const id of manual.keys()) {
     it(`declares ${id} in MANUAL_ENTRIES with the committed snapshot rates`, () => {
       const declared = manual.get(id)
       expect(declared).toBeDefined()
       const committed = snap[id]
       expect(committed).toBeDefined()
-      // input, output, cache-write, cache-read; a null cache-write is written as 0 in the tuple.
-      for (let i = 0; i < 4; i++) {
-        expect(declared![i]).toBeCloseTo(committed[i] ?? 0, 13)
-      }
+      expect(
+        declared!.length,
+        `${id} tuple length must match committed — null fields must stay null (absent field), not 0 or dropped`,
+      ).toBe(committed!.length)
+      expect(declared).toEqual(committed)
     })
   }
 })

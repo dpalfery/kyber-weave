@@ -26,7 +26,7 @@
     "typecheck": "tsc --noEmit && tsc --noEmit -p web/tsconfig.json && tsc --noEmit -p tsconfig.tests.json",
     "lint": "eslint .",
     "verify:upgrade": "node scripts/upgrade-path/run.mjs",
-    "prepublishOnly": "npm run build",
+    "prepublishOnly": "npm run build:cli",
     "report:fixtures": "tsx src/tools/report-fixtures.ts"
   },
   "keywords": [

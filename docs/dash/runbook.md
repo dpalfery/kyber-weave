@@ -6,7 +6,7 @@ status: current
 component: KyberDash
 source-root: dash
 owner: dpalfery
-last-reviewed: 2026-09-30
+last-reviewed: 2026-10-01
 code-refs:
   - registerKyberCommands
   - refreshHarnessSources
@@ -86,6 +86,23 @@ flowchart TD
 - **No upstream remote**: `dash/` no longer tracks CodeBurn. A clone made while it did
   may still carry the `codeburn` git remote; nothing uses it, so remove it with
   `git remote remove codeburn`.
+
+### Build workflow
+
+KyberDash splits **compiled output** from **pricing data refresh**:
+
+| Script | Pricing re-snapshot | Produces |
+|---|---|---|
+| `npm --prefix dash run build` | Yes — runs `scripts/bundle-litellm.mjs` over the network (LiteLLM, models.dev, OpenRouter) into `dash/src/pricing/data/`, then `tsup` and `build:web` | CLI, web bundle, refreshed committed pricing JSON |
+| `npm --prefix dash run build:cli` | No — `tsup` only | `dash/dist/cli.js` from committed sources |
+| `npm --prefix dash run build:web` | No | Web dashboard static assets |
+| `npm --prefix dash run bundle-litellm` | Yes — networked refresh only | Updated committed pricing JSON (commit the diff) |
+
+Node SEA packaging (`tsup` via `release-local.sh`) and `npm publish` both embed the
+committed files under `dash/src/pricing/data/` without re-snapshotting:
+`prepublishOnly` runs `build:cli` only. Networked pricing refresh is the explicit
+`npm --prefix dash run bundle-litellm` step (or full `npm --prefix dash run build`);
+commit the resulting JSON diff before a release when upstream list prices have moved.
 
 ---
 
@@ -315,7 +332,7 @@ To run the complete production bundle served directly by the KyberDash CLI engin
 
 1. Build the web dashboard bundle:
    ```bash
-   npm --prefix dash run build:dash
+   npm --prefix dash run build:web
    ```
 2. Build the CLI binary:
    ```bash
