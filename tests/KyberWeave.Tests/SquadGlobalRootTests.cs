@@ -515,18 +515,41 @@ public sealed class SquadGlobalRootTests : IDisposable
         Assert.NotEmpty(result.Receipt.Files);
         Assert.Equal(ExpectedRenderedFileCount(target), result.Receipt.Files.Count);
 
-        // Claude is the one target where a primary agent adds an entry-point skill.
-        if (target == SquadTarget.Claude)
+        // Claude keeps the subagent and adds an entry-point skill beside it; Cursor
+        // follows the Pi-renderer skill-only precedent (no agents/<name>.md principal),
+        // so its total is count-neutral and only the receipt paths differ.
+        if (target is SquadTarget.Claude or SquadTarget.Cursor)
         {
             string productRoot = Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
             SquadSource source = SquadSourceLoader.Load(productRoot);
-            string primaryAgentName = Assert.Single(source.Agents, a => a.Invocation == SquadInvocation.Primary).Name;
+            SquadAgent primaryAgent = Assert.Single(source.Agents, a => a.Invocation == SquadInvocation.Primary);
+            Assert.Equal("conductor", primaryAgent.Name);
+
+            // The conductor carries plan-path, spec-path, intake-path, and
+            // execution-and-review references; the entry-point skill projects all four.
+            Assert.Equal(4, primaryAgent.Resources.Count);
             Assert.Single(
                 result.Receipt.Files,
-                f => f.RelativePath == $"skills/{primaryAgentName}/SKILL.md");
-            Assert.Single(
-                result.Receipt.Files,
-                f => f.RelativePath == $"agents/{primaryAgentName}.md");
+                f => f.RelativePath == $"skills/{primaryAgent.Name}/SKILL.md");
+            foreach (SquadResource resource in primaryAgent.Resources)
+            {
+                Assert.Single(
+                    result.Receipt.Files,
+                    f => f.RelativePath == $"skills/{primaryAgent.Name}/{resource.RelativePath}");
+            }
+
+            if (target == SquadTarget.Claude)
+            {
+                Assert.Single(
+                    result.Receipt.Files,
+                    f => f.RelativePath == $"agents/{primaryAgent.Name}.md");
+            }
+            else
+            {
+                Assert.DoesNotContain(
+                    result.Receipt.Files,
+                    f => f.RelativePath == $"agents/{primaryAgent.Name}.md");
+            }
         }
 
         bool sawAgentFile = false;
@@ -919,18 +942,40 @@ public sealed class SquadGlobalRootTests : IDisposable
         Assert.Equal(expectedFileCount, result.Receipt.Files.Count);
         Assert.All(result.Receipt.Files, file => Assert.Equal(expectedToken, file.Target));
 
-        // Claude is the one target where a primary agent adds an entry-point skill.
-        if (target == SquadTarget.Claude)
+        // Claude keeps the subagent and adds an entry-point skill beside it; Cursor
+        // follows the Pi-renderer skill-only precedent (no agents/<name>.md principal).
+        if (target is SquadTarget.Claude or SquadTarget.Cursor)
         {
             string productRoot = Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
             SquadSource source = SquadSourceLoader.Load(productRoot);
-            string primaryAgentName = Assert.Single(source.Agents, a => a.Invocation == SquadInvocation.Primary).Name;
+            SquadAgent primaryAgent = Assert.Single(source.Agents, a => a.Invocation == SquadInvocation.Primary);
+            Assert.Equal("conductor", primaryAgent.Name);
+
+            // The conductor carries plan-path, spec-path, intake-path, and
+            // execution-and-review references; the entry-point skill projects all four.
+            Assert.Equal(4, primaryAgent.Resources.Count);
             Assert.Single(
                 result.Receipt.Files,
-                f => f.RelativePath == $"skills/{primaryAgentName}/SKILL.md");
-            Assert.Single(
-                result.Receipt.Files,
-                f => f.RelativePath == $"agents/{primaryAgentName}.md");
+                f => f.RelativePath == $"skills/{primaryAgent.Name}/SKILL.md");
+            foreach (SquadResource resource in primaryAgent.Resources)
+            {
+                Assert.Single(
+                    result.Receipt.Files,
+                    f => f.RelativePath == $"skills/{primaryAgent.Name}/{resource.RelativePath}");
+            }
+
+            if (target == SquadTarget.Claude)
+            {
+                Assert.Single(
+                    result.Receipt.Files,
+                    f => f.RelativePath == $"agents/{primaryAgent.Name}.md");
+            }
+            else
+            {
+                Assert.DoesNotContain(
+                    result.Receipt.Files,
+                    f => f.RelativePath == $"agents/{primaryAgent.Name}.md");
+            }
         }
 
         Assert.True(
@@ -997,8 +1042,10 @@ public sealed class SquadGlobalRootTests : IDisposable
     /// <summary>
     /// R17: <c>Agents.Count + Σ agent resources + Skills.Count − shared-identity skills +
     /// Σ non-suppressed skill resources</c>, read from the loaded corpus rather than a
-    /// hardcoded literal. Claude is the one target where a primary agent adds a principal
-    /// (an entry-point skill beside its subagent).
+    /// hardcoded literal. Claude adds a principal (an entry-point skill beside its
+    /// subagent); Cursor is count-neutral under the skill-only Pi precedent (the agent
+    /// principal plus its refs out, <c>SKILL.md</c> plus its refs in), so only the
+    /// receipt paths differ there.
     /// </summary>
     private static int ExpectedRenderedFileCount(SquadTarget target)
     {
@@ -1014,9 +1061,16 @@ public sealed class SquadGlobalRootTests : IDisposable
             + source.Skills.Where(skill => !sharedIdentities.Contains(skill.Name))
                 .Sum(skill => skill.Resources.Count);
 
-        // Claude is the one target where a primary agent adds an entry-point skill beside its subagent.
-        if (target == SquadTarget.Claude)
+        // Claude keeps the subagent and adds an entry-point skill beside it; Cursor
+        // replaces the agent principal with the entry-point skill (Pi precedent), so
+        // its total is unchanged and only the receipt paths differ (asserted above).
+        if (target is SquadTarget.Claude or SquadTarget.Cursor)
         {
+            if (target == SquadTarget.Cursor)
+            {
+                return baseCount;
+            }
+
             int claudeAddition = 0;
             foreach (SquadAgent agent in source.Agents.Where(a => a.Invocation == SquadInvocation.Primary))
             {
