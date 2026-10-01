@@ -48,7 +48,7 @@ export function buildFindings(store: CanonStore): BuildFindingsReport {
       // unbounded-delegation) would read one conversation as two. Scoped per
       // execution, never across them: two sessions' identical turns are two
       // genuine turns, and the detector regroups by session below.
-      records.push(...dedupeTwinTurns(shareRecords))
+      records.push(...dedupeTwinTurns(shareRecords, share?.key ?? sessionId))
     }
     if (records.length === 0) continue
 

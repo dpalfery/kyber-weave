@@ -427,7 +427,7 @@ export async function buildRuns(
       // Same twin-collector collapse as `buildSessions` (issue #182, ADR
       // 0009 D4): the candidate's records must be the merged share's turns,
       // not both collectors' copies stacked.
-      const records = dedupeTwinTurns(shareRecords)
+      const records = dedupeTwinTurns(shareRecords, sessionKey.key)
       if (records.length === 0 || !hasTurnEvidence(records)) {
         continue
       }

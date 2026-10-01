@@ -1,4 +1,5 @@
 import { isFileSource } from './measurability.js'
+import { contentFromParts } from './types.js'
 import type { CanonicalRecord } from './types.js'
 
 // Same-turn dedupe for twin front-end collectors (issues #181/#182, ADR 0009 D4).
@@ -53,10 +54,14 @@ export const TWIN_TURN_MAX_SKEW_MS = 60_000
 
 type CounterKey = string
 
-function counterKey(record: CanonicalRecord): CounterKey {
+function counterKey(record: CanonicalRecord, shareKey?: string): CounterKey {
   const { tokens } = record
+  // A share routinely mixes rows with session_id set and rows where only
+  // the trace carried the key (review): an omitted attribute must resolve
+  // to the share's key, never to a bucket of its own — otherwise one
+  // collector's half of a twin lands in '' and the turn counts twice.
   return [
-    record.sessionId ?? '',
+    record.sessionId ?? shareKey ?? '',
     tokens.freshInput,
     tokens.cacheRead,
     tokens.cacheCreation,
@@ -110,7 +115,7 @@ function isUnreportedCounters(tokens: CanonicalRecord['tokens']): boolean {
  * after shares merge, never at ingest — raw records keep both collectors'
  * rows as provenance.
  */
-export function dedupeTwinTurns(records: readonly CanonicalRecord[]): CanonicalRecord[] {
+export function dedupeTwinTurns(records: readonly CanonicalRecord[], shareKey?: string): CanonicalRecord[] {
   const byCounter = new Map<CounterKey, CanonicalRecord[]>()
   for (const record of records) {
     if (record.op !== 'llm.invoke') continue
@@ -118,7 +123,7 @@ export function dedupeTwinTurns(records: readonly CanonicalRecord[]): CanonicalR
     // share, which identifies nothing. Excluding them here means they are never
     // clustered at all, rather than relying on a later guard to un-merge them.
     if (isUnreportedCounters(record.tokens)) continue
-    const key = counterKey(record)
+    const key = counterKey(record, shareKey)
     const list = byCounter.get(key) ?? []
     list.push(record)
     byCounter.set(key, list)
@@ -245,9 +250,13 @@ function collapseCluster(
 function mergeDonors(first: CanonicalRecord, second: CanonicalRecord): CanonicalRecord {
   const firstParts = first.parts ?? []
   const secondParts = second.parts ?? []
+  const parts = [...firstParts, ...secondParts]
+  // Content is the collapsed form of exactly the parts (review): derive it
+  // from the fused parts rather than first-wins spreading, which drops the
+  // second donor's text whenever both share a bucket key.
   return {
     ...first,
-    parts: [...firstParts, ...secondParts],
-    content: { ...second.content, ...first.content },
+    parts,
+    content: contentFromParts(parts),
   }
 }

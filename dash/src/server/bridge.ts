@@ -2414,8 +2414,10 @@ export class KyberBridge {
     }
   }
 
-  /** Canonical harness of one stored session over the raw handle (review S3a). */
-  private sessionHarnessRaw(sessionId: string): string | undefined {
+  /** Canonical harness of one stored session over the raw handle (review).
+   * Absent reads as undefined; a failed read reads as null — never a clean
+   * zero that would pose as "no suppressed sessions" (review). */
+  private sessionHarnessRaw(sessionId: string): string | null | undefined {
     const db = this.getDb()
     if (!this.hasTable(db, 'session')) return undefined
     try {
@@ -2424,7 +2426,7 @@ export class KyberBridge {
         .get(sessionId) as unknown as { harness: string } | undefined
       return row?.harness
     } catch {
-      return undefined
+      return null
     }
   }
 
@@ -2441,11 +2443,20 @@ export class KyberBridge {
     const sessionId = scope?.sessionId
     if (sessionId !== undefined && sessionId !== '') {
       // A harness that does not own the session scopes the count to zero,
-      // matching the narrowed findings (review S3a).
+      // matching the narrowed findings (review S3a). Absent and failed look
+      // different: a missing row is 0, but an unreadable row must not answer
+      // at all — the payload read below still knows the window (review).
       if (harness !== undefined && harness !== '') {
-        const owner = this.store
-          ? this.store.sessionHarness(sessionId)
-          : this.sessionHarnessRaw(sessionId)
+        let owner: string | null | undefined
+        try {
+          owner = this.store ? this.store.sessionHarness(sessionId) : this.sessionHarnessRaw(sessionId)
+        } catch {
+          owner = null
+        }
+        if (owner === null) {
+          const payload = this.getSessionPayload<{ context?: { contextLimitSource?: string } }>(sessionId)
+          return payload?.context?.contextLimitSource === 'default' ? 1 : 0
+        }
         if (owner === undefined || normalizeHarnessName(owner) !== normalizeHarnessName(harness)) return 0
       }
       const payload = this.getSessionPayload<{ context?: { contextLimitSource?: string } }>(sessionId)

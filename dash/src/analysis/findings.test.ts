@@ -2054,6 +2054,8 @@ describe('Server Bridge & API Route: /api/kyber/findings', () => {
     // matching the (also empty) narrowed findings (review S3a).
     expect(bridge.listFindingsPage({ sessionId: 's-unknown', harness: 'claude-code' }).unknownWindowSessions).toBe(0)
     expect(bridge.listFindingsPage({ sessionId: 's-unknown', harness: 'cursor' }).unknownWindowSessions).toBe(1)
+    // A session id the store never held scopes to zero (absent, review).
+    expect(bridge.listFindingsPage({ sessionId: 'no-such-session', harness: 'cursor' }).unknownWindowSessions).toBe(0)
     expect(bridge.listFindingsPage({ runId: 'run-1' }).unknownWindowSessions).toBe(1)
     expect(bridge.listFindingsPage({}).unknownWindowSessions).toBe(1)
     // The run scope folds legacy front-end names the same way (review).

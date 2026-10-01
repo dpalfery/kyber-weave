@@ -372,7 +372,7 @@ export async function buildSessions(store: CanonStore): Promise<BuildSessionsRep
       // Twin front-end collectors describe the same turns twice (issue #182,
       // ADR 0009 D4): collapse same-turn observations before the row sums
       // them, or the merged session double-counts one conversation.
-      const merged = dedupeTwinTurns(records)
+      const merged = dedupeTwinTurns(records, key.key)
       if (merged.length === 0 || !hasEvidence(merged)) {
         report.skipped += 1
         continue

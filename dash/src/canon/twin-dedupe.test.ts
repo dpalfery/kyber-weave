@@ -467,3 +467,91 @@ describe('dedupeTwinTurns window boundary (review)', () => {
     expect(out.map((r) => r.spanId).sort()).toEqual(['otel-new', 'otel-old'])
   })
 })
+
+describe('dedupeTwinTurns share-key fallback (review)', () => {
+  it('collapses twins when one side omits the session attribute (review)', () => {
+    // A share routinely mixes rows with session_id set and rows where only
+    // the trace carried the key. Keying on the record attribute alone would
+    // bucket the OTel row under '' and its file twin under the id — the
+    // exact double count #182 exists to kill, invisible in every total.
+    const same = {
+      freshInput: 2,
+      cacheRead: 39096,
+      cacheCreation: 24977,
+      output: 563,
+      reportedInput: 64075,
+      reportedOutput: 563,
+    }
+    const out = dedupeTwinTurns(
+      [
+        llmInvoke('otel-1', {
+          source: 'claude-code-desktop',
+          harness: 'claude-code',
+          sessionId: undefined,
+          timestamp: '2026-09-23T22:43:53.540Z',
+          tokens: { ...same },
+          content: {},
+        }),
+        llmInvoke('synth:aaa', {
+          source: 'codeburn/claude-desktop',
+          harness: 'claude-desktop',
+          sessionId: 'twin-key',
+          timestamp: '2026-09-23T22:43:58.783Z',
+          tokens: { ...same },
+          content: {},
+        }),
+      ],
+      'twin-key',
+    )
+
+    expect(out.map((r) => r.spanId)).toEqual(['otel-1'])
+  })
+})
+
+describe('dedupeTwinTurns merged content (review)', () => {
+  it('derives fused content from fused parts, not first-wins (review)', () => {
+    // Two surplus file rows sharing one bucket key with different text: the
+    // fused donor's content must carry both, matching its fused parts —
+    // content is documented as the collapsed form of exactly the parts.
+    const same = {
+      freshInput: 2,
+      cacheRead: 39096,
+      cacheCreation: 24977,
+      output: 563,
+      reportedInput: 64075,
+      reportedOutput: 563,
+    }
+    const out = dedupeTwinTurns(
+      [
+        llmInvoke('otel-1', {
+          source: 'claude-code-desktop',
+          harness: 'claude-code',
+          timestamp: '2026-09-23T22:43:53.540Z',
+          tokens: { ...same },
+          content: {},
+        }),
+        llmInvoke('synth:one', {
+          source: 'codeburn/claude-desktop',
+          harness: 'claude-desktop',
+          timestamp: '2026-09-23T22:43:58.000Z',
+          tokens: { ...same },
+          content: { system_prompt: 'first' },
+          parts: [{ part: 'system_prompt', text: 'first' }],
+        }),
+        llmInvoke('synth:two', {
+          source: 'codeburn/claude-desktop',
+          harness: 'claude-desktop',
+          timestamp: '2026-09-23T22:43:59.000Z',
+          tokens: { ...same },
+          content: { system_prompt: 'second' },
+          parts: [{ part: 'system_prompt', text: 'second' }],
+        }),
+      ],
+      'twin-key',
+    )
+
+    expect(out).toHaveLength(1)
+    expect(out[0]!.content.system_prompt).toContain('first')
+    expect(out[0]!.content.system_prompt).toContain('second')
+  })
+})

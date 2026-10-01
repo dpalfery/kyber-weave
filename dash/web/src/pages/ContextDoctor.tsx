@@ -265,8 +265,18 @@ export function nextAccumulated(
   offset: number,
   rows: readonly KyberFinding[],
 ): AccumulatedPage[] {
-  if (pages.some((page) => page.scope === scope && page.offset === offset)) return [...pages]
-  return [...pages, { scope, offset, rows: [...rows] }]
+  const sameIds = (a: readonly KyberFinding[], b: readonly KyberFinding[]): boolean =>
+    a.length === b.length && a.every((row, i) => row.id === b[i]!.id)
+  const ix = pages.findIndex((page) => page.scope === scope && page.offset === offset)
+  // A rebuild can shift or replace a stored page's rows (review): an
+  // identical re-serve is a no-op, but changed rows replace the stale page
+  // instead of haunting the list for the life of the mount.
+  if (ix !== -1 && sameIds(pages[ix]!.rows, rows)) return [...pages]
+  const next = [...pages]
+  const entry = { scope, offset, rows: [...rows] }
+  if (ix === -1) next.push(entry)
+  else next[ix] = entry
+  return next
 }
 
 /**
@@ -290,7 +300,15 @@ export function browserRows(
   current: readonly KyberFinding[] | undefined,
 ): KyberFinding[] {
   const stored = pages.filter((page) => page.scope === scope).sort((a, b) => a.offset - b.offset)
-  const accumulated = stored.flatMap((page) => page.rows)
+  // A rebuild or refresh can shift the server window by one: the same
+  // finding may open page 2 after closing page 1. Dedupe by id (first
+  // occurrence wins) so the list never renders a row twice (review).
+  const seen = new Set<string>()
+  const accumulated = stored.flatMap((page) => page.rows).filter((row) => {
+    if (seen.has(row.id)) return false
+    seen.add(row.id)
+    return true
+  })
   const firstPageUnstored = offset === 0 && current !== undefined && !stored.some((page) => page.offset === 0)
   return firstPageUnstored ? [...current, ...accumulated] : accumulated
 }

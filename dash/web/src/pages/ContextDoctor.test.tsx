@@ -597,3 +597,27 @@ describe('FindingsBrowserView query errors (council review)', () => {
     expect(html).toContain('finding-card-e-1')
   })
 })
+
+describe('browserRows staleness and overlap (review)', () => {
+  const rows = (prefix: string, n: number, from = 1): import('../lib/kyberApi.js').KyberFinding[] =>
+    Array.from({ length: n }, (_, i) => finding(`${prefix}-${from + i}`, 'duplicate-tool-call', 'cursor'))
+
+  it('dedupes a shifted page by id instead of double-rendering', () => {
+    // A rebuild inserts one higher-ranked finding: the whole window shifts
+    // by one and page 2's first row repeats page 1's last row.
+    const p0 = rows('s', 25)
+    const shifted = [p0[24]!, ...rows('n', 24)]
+    const stored = nextAccumulated(nextAccumulated([], '|', 0, p0), '|', 25, shifted)
+    const flat = browserRows(stored, '|', 25, undefined)
+    const ids = flat.map((r) => r.id)
+    expect(flat).toHaveLength(49)
+    expect(new Set(ids).size).toBe(49)
+  })
+
+  it('replaces a stored page whose rows changed instead of keeping stale rows', () => {
+    const first = nextAccumulated([], '|', 0, rows('a', 25))
+    const second = nextAccumulated(first, '|', 0, rows('b', 25))
+    const flat = browserRows(second, '|', 0, undefined)
+    expect(flat.map((r) => r.id)).toEqual(rows('b', 25).map((r) => r.id))
+  })
+})
