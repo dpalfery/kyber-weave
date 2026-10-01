@@ -10,6 +10,7 @@ import { Chalk } from 'chalk'
 
 import { DIMENSION_KEYS, DIMENSION_NAMES } from '../scorecard.js'
 import { BUCKET_KEYS } from './build.js'
+import { formatCoverageWindowBody } from './coverage-window.js'
 import {
   formatMeasured,
   isUnmeasurable,
@@ -95,6 +96,9 @@ export function renderText(report: ContextReport, options?: { color?: boolean })
     if (coverage.refresh.inProgress !== null) {
       push(`  In progress: pid ${coverage.refresh.inProgress.pid} since ${coverage.refresh.inProgress.since}`)
     }
+    // The window formatter returns a body; the label pads into the section's
+    // shared 12-character column like every other row here.
+    push(`  Coverage:   ${formatCoverageWindowBody(coverage.refresh)}`)
     if (coverage.harnesses.length === 0) {
       push('  Harnesses:  none in the window')
     } else {

@@ -161,6 +161,15 @@ Requirement 2 must hold without Docker, a container runtime, or a collector. The
 collectors already post OTLP JSON to port 4318, so they work unchanged. Non-model and
 unmatched telemetry is quarantined with an auditable reason instead of becoming a session.
 
+Receiver activity is auditable in `ingest_log`: the span sink writes one row per distinct
+span source in each decoded batch (`service.name`, `'otlp'` when unnamed), sized to the
+arriving batch so quarantined traffic still counts as received, and the log sink writes
+one `otlp:logs` row per log batch so last-received reflects any receiver request. Writes
+join the writer's existing store handle after the ingest call returns; there is no schema
+change and no second projection. An empty log reads as unknown downstream — "no receiver
+activity recorded" — never as stopped or running, because receiver liveness is not
+observable from the web server.
+
 ## Local harness-source refresh
 
 Session files also enter the store through `kyber-weave dash refresh` (`registerKyberCommands`
@@ -177,7 +186,12 @@ exits **2** before the store opens. Failed harness jobs or derivation failure ex
 Success, including absent (`unavailable`) sources, exits **0**.
 
 Each accepted unit is persisted with `CanonStore.commitSourceUnit`: canonical rows,
-`record_provenance`, and `source_checkpoint` in one transaction (schema **11**). After jobs
+`record_provenance`, and `source_checkpoint` in one transaction (schema **15**). Every
+refresh run additionally records its coverage window in `refresh_run.history_weeks` — the
+`--history-weeks` value of that run. Rows predating window tracking read as `null`, which
+every surface renders as unknown with the reason "recorded before window tracking", never
+coerced to a default or to zero
+([honest unobservability](../rules/honest-unobservability.md)). After jobs
 drain, `purgeExpiredContent` empties content older than 14 days without touching
 `records.raw` ([ADR 0018](../adr/0018-kyberdash-content-retention-purge.md)), then the store
 is projected through `projectCanonicalStore` — the same shared entry the live receiver uses
@@ -483,6 +497,21 @@ indexes. Agent performance is evaluated across six orthogonal dimensions:
 A dimension lacking telemetry renders as a dash (`—`) with an explicit reason, never as zero
 and never as a passing grade.
 
+### Display families and source display names
+
+Split client surfaces stay distinct in stored data, rollup keys, and API filters.
+`harnessFamily` (`dash/src/canon/measurability.ts`) is a display-level grouping only:
+`claude-cli`, `claude-desktop`, and `claude-code` share the `claude-code` family label
+while each canonical id and its per-origin count stays visible beside it, so grouping
+never fabricates an aggregate. Unmapped ids render verbatim.
+
+Stored source names keep their namespace (`codeburn/<provider>` for file-sourced rows,
+OTLP names verbatim, legacy `unattributed` rows retained). Surfaces render them through
+`sourceDisplayName`, which strips the `codeburn/` prefix, labels the kind
+(`local-file`, `otlp`, `legacy-unattributed` — the last displayed as
+"unattributed (legacy)"), and keeps the raw value alongside the display value for
+auditability. Raw `codeburn/` names never reach a user-facing surface.
+
 ## Analysis Layer
 
 The analysis layer contains pure, hermetic analysis modules that operate over canonical records:
@@ -608,7 +637,7 @@ The web dashboard server wires HTTP requests directly to `KyberBridge`:
 
 | Endpoint | Method | Response Schema | Description |
 |---|---|---|---|
-| `/api/kyber/harnesses` | `GET` | `{ harnesses: HarnessRollupRow[] }` | List harness rollups with 6-dimension availability. |
+| `/api/kyber/harnesses` | `GET` | `{ harnesses: HarnessRollupRow[] }` | List harness rollups with 6-dimension availability. Each row carries its display-level `family`, the verbatim rollup `noDataReason` for zero-data harnesses, and a `source_checkpoint` summary (`ok` / `partial` / `failed` / `unavailable` counts). |
 | `/api/kyber/harness/:id` | `GET` | `HarnessRollupRow` | Detail for a single harness including coverage metrics. |
 | `/api/kyber/runs` | `GET` | `{ runs: RunRow[] }` | List runs; supports `?harness=`. |
 | `/api/kyber/run/:id` | `GET` | `{ run, executionTree, executions, findings }` | Complete run detail with parent/child execution tree. |
@@ -627,6 +656,7 @@ The web dashboard server wires HTTP requests directly to `KyberBridge`:
 | `/api/kyber/quarantine` | `GET` | `{ entries: QuarantineRow[] }` | Quarantined spans; supports `?limit=`. |
 | `/api/kyber/problems` | `GET` | `{ problems: ProblemRow[] }` | Recorded problems; supports `?limit=`. |
 | `/api/kyber/meta` | `GET` | `MetaResult` | Tokenizer configuration, rates, span counts, and sources. |
+| `/api/kyber/coverage` | `GET` | `{ refresh, ingest, quarantineByReason, checkpoints }` | Ingest coverage: persisted refresh window (`history_weeks`, null = unknown), per-source ingest activity (`records` counts joined with `ingest_log` sums and `lastReceivedAt`; `{ status: 'unknown' }` when nothing is recorded), per-reason quarantine counts, and `source_checkpoint` statuses including `partial`. |
 | `/api/kyber/report` | `GET` | `ContextReport` | The versioned context report for the query scope (`harness`, `session`, `run`, `days`); the same document `kyberdash report` prints. |
 
 All `/api/kyber/*` responses return standard headers (`content-type: application/json; charset=utf-8`, `cache-control: no-store`). Unrecognized `/api/kyber/*` routes return HTTP 404 JSON (guaranteed never to fall through to SPA HTML), and non-GET requests return HTTP 405 Method Not Allowed.

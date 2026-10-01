@@ -24,11 +24,13 @@ import {
   cacheAvailability,
   contextCompositionAvailability,
   getMeasurability,
+  harnessFamily,
   isFileSource,
   measurabilityFor,
   normalizeHarnessName,
   prefixAvailability,
   schemaRankingAvailability,
+  sourceDisplayName,
 } from './measurability.js'
 
 // ---------------------------------------------------------------------------
@@ -470,6 +472,47 @@ describe('cacheAvailability and prefixAvailability (Task E4)', () => {
     expect(prefix.prefixBytes).toBe(false)
     expect(prefix.fallback).toBe('none')
     expect(prefix.reason).toContain('unknown-agent')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// T7 — Display-level family + source display names (issue #199, decision D3)
+// ---------------------------------------------------------------------------
+
+describe('harnessFamily — display-level family only (D3)', () => {
+  it('groups the Claude split identities under claude-code', () => {
+    expect(harnessFamily('claude-cli')).toBe('claude-code')
+    expect(harnessFamily('claude-desktop')).toBe('claude-code')
+    expect(harnessFamily('claude-code')).toBe('claude-code')
+  })
+
+  it('keeps unmapped ids verbatim (no persisted merge, no rollup-key change)', () => {
+    expect(harnessFamily('pi')).toBe('pi')
+    expect(harnessFamily('opencode')).toBe('opencode')
+  })
+})
+
+describe('sourceDisplayName — honest rendering of stored source names', () => {
+  it('strips the file-source prefix but keeps the raw value', () => {
+    const named = sourceDisplayName(`${FILE_SOURCE_PREFIX}claude-desktop`)
+    expect(named.display).toBe('claude-desktop')
+    expect(named.display).not.toContain('codeburn')
+    expect(named.raw).toBe(`${FILE_SOURCE_PREFIX}claude-desktop`)
+    expect(named.kind).toBe('local-file')
+  })
+
+  it('labels OTLP sources without rewriting them', () => {
+    const named = sourceDisplayName('agy')
+    expect(named.display).toBe('agy')
+    expect(named.raw).toBe('agy')
+    expect(named.kind).toBe('otlp')
+  })
+
+  it('labels the legacy unattributed source instead of rendering it as a harness', () => {
+    const named = sourceDisplayName('unattributed')
+    expect(named.raw).toBe('unattributed')
+    expect(named.kind).toBe('legacy-unattributed')
+    expect(named.display).toMatch(/unattributed/i)
   })
 })
 

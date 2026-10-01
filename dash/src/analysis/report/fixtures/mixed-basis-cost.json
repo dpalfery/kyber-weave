@@ -10,7 +10,10 @@
     "refresh": {
       "lastSuccessAt": "2026-09-19T11:00:00.000Z",
       "lastFailure": null,
-      "inProgress": null
+      "inProgress": null,
+      "historyWeeks": null,
+      "coveredFrom": null,
+      "coveredThrough": null
     },
     "harnesses": [
       {

@@ -79,6 +79,7 @@ export async function refreshHarnessSources(
     startedAt: importedAtUtc,
     pid: process.pid,
     trigger: options.trigger ?? 'cli',
+    historyWeeks,
   })
   let runClosed = false
   try {

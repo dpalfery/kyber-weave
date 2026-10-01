@@ -279,3 +279,92 @@ describe('startOtlpCollectorService canonical projection', () => {
     }
   })
 })
+
+// T6 Collector writes ingest_log (plan 2026-09-30-issues-189-198-199, D4):
+// a span batch writes one logIngest row per distinct service.name
+// (unnamed ⇒ 'otlp'); a log batch writes one otlp:logs row sized to batch.
+// Activity comes from rows only; empty ⇒ unknown (no receiver-liveness claim).
+describe('startOtlpCollectorService ingest_log', () => {
+  it('writes one ingest_log row per distinct service.name in a span batch', async () => {
+    const service = await startOtlpCollectorService({ port: 0, dbPath: ':memory:' })
+    try {
+      expect(service.canon.getIngestLog()).toEqual([])
+
+      await service.writer.enqueue([
+        claimableSpan({
+          spanId: 'ingest-log-span-a1',
+          resource: { 'service.name': 'svc-a' },
+        }),
+        claimableSpan({
+          spanId: 'ingest-log-span-a2',
+          resource: { 'service.name': 'svc-a' },
+        }),
+        claimableSpan({
+          spanId: 'ingest-log-span-b1',
+          resource: { 'service.name': 'svc-b' },
+        }),
+      ])
+      await service.writer.flush()
+
+      const log = service.canon.getIngestLog()
+      expect(log).toHaveLength(2)
+      expect(log).toContainEqual(expect.objectContaining({ source: 'svc-a', count: 2 }))
+      expect(log).toContainEqual(expect.objectContaining({ source: 'svc-b', count: 1 }))
+    } finally {
+      await service.close()
+    }
+  })
+
+  it("maps unnamed spans to 'otlp' and log batches to a single 'otlp:logs' row", async () => {
+    const service = await startOtlpCollectorService({ port: 0, dbPath: ':memory:' })
+    try {
+      await service.writer.enqueue([
+        claimableSpan({ spanId: 'ingest-log-unnamed-1', resource: {} }),
+      ])
+      await service.writer.flush()
+
+      expect(service.canon.getIngestLog()).toContainEqual(
+        expect.objectContaining({ source: 'otlp', count: 1 }),
+      )
+
+      const baseLog = identifiedLog()
+      service.writer.writeLogs([
+        { ...baseLog, logId: 'ingest-log-batch-1' },
+        { ...baseLog, logId: 'ingest-log-batch-2' },
+        { ...baseLog, logId: 'ingest-log-batch-3' },
+      ])
+      await service.writer.flush()
+
+      expect(service.canon.getIngestLog()).toContainEqual(
+        expect.objectContaining({ source: 'otlp:logs', count: 3 }),
+      )
+    } finally {
+      await service.close()
+    }
+  })
+
+  it('keeps an accepted batch when the audit write throws (audit never fails ingest)', async () => {
+    // Review PR #230 (kilo nux45): the audit write ran unguarded inside the
+    // sink, so a locked audit table failed the whole batch — and the writer
+    // requeued it, appending another audit row on retry. An audit row must
+    // never fail the ingest it audits.
+    const service = await startOtlpCollectorService({ port: 0, dbPath: ':memory:' })
+    try {
+      const auditWrite = service.canon.logIngest
+      service.canon.logIngest = () => {
+        throw new Error('audit table locked')
+      }
+      try {
+        await service.writer.enqueue([
+          claimableSpan({ spanId: 'audit-fail-1', resource: { 'service.name': 'svc-a' } }),
+        ])
+        await service.writer.flush()
+      } finally {
+        service.canon.logIngest = auditWrite
+      }
+      expect(service.canon.count()).toBeGreaterThan(0)
+    } finally {
+      await service.close()
+    }
+  })
+})

@@ -108,4 +108,63 @@ describe('renderMarkdown display rules', () => {
       expect(renderMarkdown(loadFixture(name)), name).not.toMatch(ANSI)
     }
   })
+
+  it('prints the tracked coverage window as last N weeks with its bounds (T3)', () => {
+    const report = loadFixture('full')
+    report.coverage!.refresh = {
+      ...report.coverage!.refresh,
+      historyWeeks: 2,
+      coveredFrom: '2026-09-05T11:00:00.000Z',
+      coveredThrough: '2026-09-19T11:00:00.000Z',
+    }
+    const out = renderMarkdown(report)
+    expect(out).toContain(
+      '**Coverage window:** last 2 weeks (2026-09-05T11:00:00.000Z → 2026-09-19T11:00:00.000Z)',
+    )
+  })
+
+  it('renders an untracked window as unknown with its reason, never 2 or 0 (T3)', () => {
+    const report = loadFixture('full')
+    report.coverage!.refresh = {
+      ...report.coverage!.refresh,
+      historyWeeks: null,
+      coveredFrom: null,
+      coveredThrough: null,
+    }
+    const out = renderMarkdown(report)
+    expect(out).toContain('**Coverage window:** unknown (recorded before window tracking)')
+    expect(out).not.toContain('last 2 weeks')
+    expect(out).not.toContain('last 0 weeks')
+  })
+
+  it('distinguishes a fresh store (no successful refresh) from a legacy tracked run (T3)', () => {
+    // Review PR #230 (copilot numqo): lastSuccessAt null means no refresh
+    // was ever recorded — that must not read as a legacy pre-window run.
+    const report = loadFixture('full')
+    report.coverage!.refresh = {
+      ...report.coverage!.refresh,
+      lastSuccessAt: null,
+      historyWeeks: null,
+      coveredFrom: null,
+      coveredThrough: null,
+    }
+    const out = renderMarkdown(report)
+    expect(out).toContain('**Coverage window:** unknown (no successful refresh recorded)')
+    expect(out).not.toContain('recorded before window tracking')
+  })
+
+  it.each([0, -1, 1.5, Number.NaN])('never renders a non-positive-integer window %p as last N weeks', (historyWeeks) => {
+    // Review PR #230 (kilo nux5v, markdown twin): the same single-minded
+    // !== null guard lives here — both renderers share one formatter now.
+    const report = loadFixture('full')
+    report.coverage!.refresh = {
+      ...report.coverage!.refresh,
+      historyWeeks,
+      coveredFrom: '2026-09-19T11:00:00.000Z',
+      coveredThrough: '2026-09-19T11:00:00.000Z',
+    }
+    const out = renderMarkdown(report)
+    expect(out).not.toContain(`last ${String(historyWeeks)} week`)
+    expect(out).toContain('**Coverage window:** unknown')
+  })
 })

@@ -109,6 +109,19 @@ export type ReportCoverage = {
     lastSuccessAt: string | null
     lastFailure: { at: string; summary: string } | null
     inProgress: { pid: number; since: string } | null
+    /**
+     * The ingest window, in weeks, of the last successful refresh run
+     * (plan docs/plans/2026-09-30-issues-189-198-199 T3, persisted by T1,
+     * read through the T4 bridge seam).
+     *
+     * `null` means the run predates window tracking or no success exists —
+     * window unknown, never the current default and never 0.
+     */
+    historyWeeks: number | null
+    /** Derived window start (`coveredThrough` minus `historyWeeks`); null when unknown. */
+    coveredFrom: string | null
+    /** Derived window end of the last success (its `startedAt`); null when unknown. */
+    coveredThrough: string | null
   }
   harnesses: Array<{
     harness: string
