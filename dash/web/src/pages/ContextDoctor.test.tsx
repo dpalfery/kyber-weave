@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
-import { ContextDoctor, browserRows, nextAccumulated } from './ContextDoctor.js'
+import { ContextDoctor, browserRows, nextAccumulated, FindingsBrowserView } from './ContextDoctor.js'
 import type { FindingsPage, KyberFinding, KyberHarnessSummary } from '../lib/kyberApi.js'
 
 function finding(id: string, detectorId: string, harness: string): KyberFinding {
@@ -155,5 +155,84 @@ describe("nextAccumulated — the first page must be stored (issue #191)", () =>
   it("accumulates page two alongside page one", () => {
     const both = nextAccumulated(nextAccumulated([], scope, 0, rows("p0")), scope, 25, rows("p1"))
     expect(both.map((p) => p.offset)).toEqual([0, 25])
+  })
+})
+
+describe('FindingsBrowserView second page (review M1)', () => {
+  const detectors = ['duplicate-tool-call', 'compaction-hazard', 'dormant-tool-schema']
+  const fifty = Array.from({ length: 50 }, (_, i) =>
+    finding(`g-${i + 1}`, detectors[i % detectors.length]!, i % 2 === 0 ? 'cursor' : 'claude-code'),
+  )
+  const counts = { 'duplicate-tool-call': 49, 'compaction-hazard': 40, 'dormant-tool-schema': 26 }
+
+  function renderBrowser(): string {
+    return renderToStaticMarkup(
+      <FindingsBrowserView
+        findings={fifty}
+        total={115}
+        detectorCounts={counts}
+        unknownWindowSessions={3}
+        loading={false}
+        harnesses={[{ harness: 'cursor', name: 'Cursor' }]}
+        onSelectFinding={() => {}}
+      />,
+    )
+  }
+
+  it('renders two accumulated pages with no skeleton and no duplicate rows', () => {
+    const html = renderBrowser()
+    expect(html).not.toContain('skeleton-shimmer')
+    for (let i = 1; i <= 50; i++) {
+      const occurrences = html.split(`data-testid="finding-card-g-${i}"`).length - 1
+      expect(occurrences).toBe(1)
+    }
+  })
+
+  it('keeps heading count, chips and banner across pages', () => {
+    const html = renderBrowser()
+    expect(html).toContain('All Workspace Findings (115)')
+    expect(html).toContain('duplicate-tool-call')
+    expect(html).toContain('×49')
+    expect(html).toContain('3 sessions with unknown context window')
+    expect(html).toContain('findings-load-more')
+    expect(html).toContain('50 of 115')
+  })
+
+  it('shows the skeleton only when nothing is stored yet', () => {
+    const loading = renderToStaticMarkup(
+      <FindingsBrowserView findings={[]} total={115} detectorCounts={counts} loading={true} harnesses={[]} />,
+    )
+    expect(loading).toContain('skeleton-shimmer')
+    const loaded = renderToStaticMarkup(
+      <FindingsBrowserView findings={fifty} total={115} detectorCounts={counts} loading={true} harnesses={[]} />,
+    )
+    expect(loaded).not.toContain('skeleton-shimmer')
+  })
+})
+
+describe('FindingsBrowserView clear filters (review S1)', () => {
+  const counts = { 'duplicate-tool-call': 49, 'compaction-hazard': 0, 'dormant-tool-schema': 0 }
+
+  it('offers clearing while a detector filter is active', () => {
+    // A zero-count chip row hides every chip including the active one; the
+    // explicit clear control is the way back.
+    const html = renderToStaticMarkup(
+      <FindingsBrowserView
+        findings={[]}
+        total={0}
+        detectorCounts={counts}
+        detectorFilter="duplicate-tool-call"
+        loading={false}
+        harnesses={[]}
+      />,
+    )
+    expect(html).toContain('findings-clear-filters')
+  })
+
+  it('hides the clear control when no filter is active', () => {
+    const html = renderToStaticMarkup(
+      <FindingsBrowserView findings={[]} total={0} detectorCounts={counts} loading={false} harnesses={[]} />,
+    )
+    expect(html).not.toContain('findings-clear-filters')
   })
 })

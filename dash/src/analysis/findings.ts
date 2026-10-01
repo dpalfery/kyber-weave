@@ -1284,7 +1284,12 @@ export function detectCompactionHazard(input: CompactionHazardInput): Finding[] 
       findings.push({
         id: `finding-compaction-hazard-${group.sessionId}-${peakTurn.spanId}`,
         detectorId: 'compaction-hazard',
-        title: `Compaction Hazard: Context consumption reached ${Math.round(ratio * 100)}% of window without summarization plan`,
+        // An over-window peak's percentage is the attribution failure, not
+        // a measurement: the title says the window was exceeded (review)
+        // while the mechanism carries the figures with their caveat.
+        title: overWindow
+          ? `Compaction Hazard: Context consumption exceeds the reported window without summarization plan`
+          : `Compaction Hazard: Context consumption reached ${Math.round(ratio * 100)}% of window without summarization plan`,
         mechanism: `Peak context consumption reached ${peakTurn.tokens} tokens (${Math.round(ratio * 100)}% of ${limit} token window), exceeding the 85% safety boundary without active compaction or summarization. Window of record: ${limit.toLocaleString('en-US')} tokens (${windowPhrase}).${aggregateCaveat}`,
         evidenceLinks,
         confidence,

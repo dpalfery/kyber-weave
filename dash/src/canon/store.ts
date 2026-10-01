@@ -2173,6 +2173,14 @@ export class CanonStore {
     return counts
   }
 
+  /** Canonical harness of one stored session, or undefined when absent. */
+  sessionHarness(sessionId: string): string | undefined {
+    const row = this.db
+      .prepare('SELECT harness FROM session WHERE session_id = ?')
+      .get(sessionId) as { harness: string } | undefined
+    return row?.harness
+  }
+
   /**
    * Sessions whose context window no source reported (issue #191, condition
    * 3): the count that keeps a suppressed-default findings list from reading

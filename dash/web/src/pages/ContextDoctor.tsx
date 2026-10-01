@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, keepPreviousData } from '@tanstack/react-query'
 import { Skeleton } from '../components/ui/skeleton.js'
 import {
   fetchHarnesses,
@@ -78,6 +78,139 @@ function isObservedHarness(harness: string): boolean {
 
 /** Page size for the workspace findings browser (issue #191). */
 export const FINDINGS_PAGE_SIZE = 25
+
+export interface FindingsBrowserViewProps {
+  findings: readonly KyberFinding[]
+  total: number
+  detectorCounts: Readonly<Record<string, number>>
+  unknownWindowSessions?: number
+  detectorFilter?: string
+  harnessFilter?: string
+  harnesses: readonly ScorecardMatrixRow[]
+  /** True while a page is in flight. The skeleton shows only when there is
+   * nothing stored yet (review M1): pages already on screen stay up. */
+  loading: boolean
+  onDetectorChange?: (detector: string | undefined) => void
+  onHarnessChange?: (harness: string | undefined) => void
+  onLoadMore?: () => void
+  onSelectFinding?: (findingId: string) => void
+  onSelectTurn?: (turnIndex: number, executionId?: string) => void
+  onSelectExecution?: (executionId: string) => void
+}
+
+/**
+ * The workspace findings browser as pure presentation (issue #191, review
+ * M1): every prop is renderable without effects, so the paged states —
+ * including a fully accumulated second page — are directly testable.
+ */
+export function FindingsBrowserView({
+  findings,
+  total,
+  detectorCounts,
+  unknownWindowSessions = 0,
+  detectorFilter,
+  harnessFilter,
+  harnesses,
+  loading,
+  onDetectorChange = () => {},
+  onHarnessChange = () => {},
+  onLoadMore = () => {},
+  onSelectFinding,
+  onSelectTurn,
+  onSelectExecution,
+}: FindingsBrowserViewProps) {
+  const detectorChips = useMemo(
+    () =>
+      Object.entries(detectorCounts)
+        .filter(([, count]) => count > 0)
+        .sort(([, a], [, b]) => b - a),
+    [detectorCounts],
+  )
+
+  return (
+    <section aria-label="All workspace findings" data-testid="all-workspace-findings">
+      <div className="flex flex-wrap items-baseline justify-between gap-density-cluster">
+        <h3 className="font-display text-density-base font-semibold text-foreground">
+          All Workspace Findings ({total})
+        </h3>
+        <label className="text-density-xs text-muted-foreground">
+          Harness:{' '}
+          <select
+            data-testid="findings-harness-filter"
+            value={harnessFilter ?? ''}
+            onChange={(event) => onHarnessChange(event.target.value === '' ? undefined : event.target.value)}
+          >
+            <option value="">All harnesses</option>
+            {harnesses.map((row) => (
+              <option key={row.harness} value={row.harness}>
+                {row.name ?? harnessDisplayName(row.harness)}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      {unknownWindowSessions > 0 && (
+        <p data-testid="unknown-window-banner" className="text-density-xs text-muted-foreground mt-density-hair">
+          {unknownWindowSessions} session{unknownWindowSessions === 1 ? '' : 's'} with unknown context
+          window — pressure unmeasurable, not zero. Findings are suppressed for these sessions until a
+          source reports a window.
+        </p>
+      )}
+
+      <div className="flex flex-wrap gap-density-cluster mt-density-hair" data-testid="findings-detector-chips">
+        {(detectorFilter !== undefined || harnessFilter !== undefined) && (
+          <button
+            type="button"
+            data-testid="findings-clear-filters"
+            title="Clear detector and harness filters"
+            onClick={() => {
+              onDetectorChange(undefined)
+              onHarnessChange(undefined)
+            }}
+          >
+            Clear ×
+          </button>
+        )}
+        {detectorChips.map(([detector, count]) => {
+          const active = detectorFilter === detector
+          return (
+            <button
+              key={detector}
+              type="button"
+              data-testid={`findings-detector-chip-${detector}`}
+              aria-pressed={active}
+              title={active ? `Clear ${detector} filter` : `Show only ${detector} findings`}
+              onClick={() => onDetectorChange(active ? undefined : detector)}
+            >
+              {detector} ×{count}
+            </button>
+          )
+        })}
+      </div>
+
+      {loading && findings.length === 0 ? (
+        <Skeleton className="h-44 w-full" />
+      ) : (
+        <>
+          <FindingList
+            findings={[...findings]}
+            title=""
+            description="Server-ranked across the workspace; filters narrow the set before paging."
+            onSelectFinding={onSelectFinding}
+            onSelectTurn={onSelectTurn}
+            onSelectExecution={onSelectExecution}
+          />
+          {findings.length < total && (
+            <button type="button" data-testid="findings-load-more" onClick={onLoadMore}>
+              Load more ({findings.length} of {total})
+            </button>
+          )}
+        </>
+      )}
+    </section>
+  )
+}
 
 /** One stored page of the browser, tagged with the filter scope it belongs to. */
 export type AccumulatedPage = { scope: string; offset: number; rows: KyberFinding[] }
@@ -185,7 +318,11 @@ export function ContextDoctor({
   // filters with per-detector counts over the narrowed set, paged by
   // offset. Counts ignore paging, so chips stay comparable across pages.
   const filtersActive = detectorFilter !== undefined || harnessFilter !== undefined
-  const { data: pageData, isLoading: loadingBrowser } = useQuery({
+  const {
+    data: pageData,
+    isLoading: loadingBrowser,
+    isPlaceholderData,
+  } = useQuery({
     queryKey: ['kyber-findings-browser', detectorFilter ?? '', harnessFilter ?? '', offset],
     queryFn: () =>
       fetchFindings({
@@ -195,14 +332,20 @@ export function ContextDoctor({
         offset,
       }),
     initialData: offset === 0 && !filtersActive ? initialFindings : undefined,
+    // Keep the current list on screen while the next page loads (review
+    // M1): without this every offset change flashes a skeleton and the
+    // heading reads "(0)" mid-flight.
+    placeholderData: keepPreviousData,
   })
 
-  // Accumulate each page as it arrives, first page included. The guard keeps a
-  // refetch from storing the same page twice.
+  // Accumulate each page as it arrives, first page included, keyed by the
+  // offset the server actually served (review M1): storing placeholder data
+  // under the requested offset would file page 0 away as page 25 and show
+  // it twice.
   useEffect(() => {
-    if (!pageData) return
-    setAppended((prev) => nextAccumulated(prev, browseScope, offset, pageData.findings))
-  }, [pageData, offset, browseScope])
+    if (!pageData || isPlaceholderData) return
+    setAppended((prev) => nextAccumulated(prev, browseScope, pageData.offset, pageData.findings))
+  }, [pageData, isPlaceholderData, browseScope])
 
   const harnesses = useMemo((): ScorecardMatrixRow[] => {
     const fromRollups = (harnessesData ?? []).filter((h) => isObservedHarness(h.harness))
@@ -225,14 +368,6 @@ export function ContextDoctor({
   const detectorCounts = pageData?.detectorCounts ?? {}
   const unknownWindowSessions = pageData?.unknownWindowSessions ?? 0
   const loadingMatrix = loadingHarnesses || (!harnessesData?.length && loadingRuns)
-
-  const detectorChips = useMemo(
-    () =>
-      Object.entries(detectorCounts)
-        .filter(([, count]) => count > 0)
-        .sort(([, a], [, b]) => b - a),
-    [detectorCounts],
-  )
 
   return (
     <div className="flex flex-col gap-density-stack" data-testid="page-context-doctor">
@@ -270,84 +405,22 @@ export function ContextDoctor({
       {/* Full workspace findings browser (issue #191): every finding is one */}
       {/* filter or page away, with per-detector counts — the 49 */}
       {/* duplicate-tool-call findings are no longer invisible. */}
-      <section aria-label="All workspace findings" data-testid="all-workspace-findings">
-        <div className="flex flex-wrap items-baseline justify-between gap-density-cluster">
-          <h3 className="font-display text-density-base font-semibold text-foreground">
-            All Workspace Findings ({browserTotal})
-          </h3>
-          <label className="text-density-xs text-muted-foreground">
-            Harness:{' '}
-            <select
-              data-testid="findings-harness-filter"
-              value={harnessFilter ?? ''}
-              onChange={(event) =>
-                resetBrowse(() =>
-                  setHarnessFilter(event.target.value === '' ? undefined : event.target.value),
-                )
-              }
-            >
-              <option value="">All harnesses</option>
-              {harnesses.map((row) => (
-                <option key={row.harness} value={row.harness}>
-                  {row.name ?? harnessDisplayName(row.harness)}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-
-        {unknownWindowSessions > 0 && (
-          <p data-testid="unknown-window-banner" className="text-density-xs text-muted-foreground mt-density-hair">
-            {unknownWindowSessions} session{unknownWindowSessions === 1 ? '' : 's'} with unknown context
-            window — pressure unmeasurable, not zero. Findings are suppressed for these sessions until a
-            source reports a window.
-          </p>
-        )}
-
-        <div className="flex flex-wrap gap-density-cluster mt-density-hair" data-testid="findings-detector-chips">
-          {detectorChips.map(([detector, count]) => {
-            const active = detectorFilter === detector
-            return (
-              <button
-                key={detector}
-                type="button"
-                data-testid={`findings-detector-chip-${detector}`}
-                aria-pressed={active}
-                title={active ? `Clear ${detector} filter` : `Show only ${detector} findings`}
-                onClick={() =>
-                  resetBrowse(() => setDetectorFilter(active ? undefined : detector))
-                }
-              >
-                {detector} ×{count}
-              </button>
-            )
-          })}
-        </div>
-
-        {loadingBrowser ? (
-          <Skeleton className="h-44 w-full" />
-        ) : (
-          <>
-            <FindingList
-              findings={browserFindings}
-              title=""
-              description="Server-ranked across the workspace; filters narrow the set before paging."
-              onSelectFinding={onSelectFinding}
-              onSelectTurn={(turnIdx, execId) => onSelectTurn?.(turnIdx, execId)}
-              onSelectExecution={(execId) => onSelectRun?.(execId)}
-            />
-            {browserFindings.length < browserTotal && (
-              <button
-                type="button"
-                data-testid="findings-load-more"
-                onClick={() => setOffset((n) => n + FINDINGS_PAGE_SIZE)}
-              >
-                Load more ({browserFindings.length} of {browserTotal})
-              </button>
-            )}
-          </>
-        )}
-      </section>
+      <FindingsBrowserView
+        findings={browserFindings}
+        total={browserTotal}
+        detectorCounts={detectorCounts}
+        unknownWindowSessions={unknownWindowSessions}
+        detectorFilter={detectorFilter}
+        harnessFilter={harnessFilter}
+        harnesses={harnesses}
+        loading={loadingBrowser}
+        onDetectorChange={(detector) => resetBrowse(() => setDetectorFilter(detector))}
+        onHarnessChange={(harness) => resetBrowse(() => setHarnessFilter(harness))}
+        onLoadMore={() => setOffset((n) => n + FINDINGS_PAGE_SIZE)}
+        onSelectFinding={onSelectFinding}
+        onSelectTurn={(turnIdx, execId) => onSelectTurn?.(turnIdx, execId)}
+        onSelectExecution={(execId) => onSelectRun?.(execId)}
+      />
 
       <ScorecardMatrix
         rows={harnesses}

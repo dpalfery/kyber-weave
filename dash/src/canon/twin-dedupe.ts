@@ -139,11 +139,22 @@ export function dedupeTwinTurns(records: readonly CanonicalRecord[]): CanonicalR
     const donor = transplant.get(record)
     if (donor === undefined) return [record]
     // ADR 0009 D4: the OTel row's counters stand; the file row's content
-    // fills only what the OTel row did not carry.
+    // fills only what the OTel row did not carry — keeper parts first, then
+    // donor parts not already present, so a paired non-needy keeper never
+    // loses its own content to its twin's (review M2).
+    const seen = new Set((record.parts ?? []).map((part) => `${part.part}\u0000${part.text}`))
+    const extraParts = (donor.parts ?? []).filter((part) => {
+      const key = `${part.part}\u0000${part.text}`
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
     return [
       {
         ...record,
-        ...(donor.parts !== undefined && donor.parts.length > 0 ? { parts: donor.parts } : {}),
+        ...((donor.parts !== undefined && donor.parts.length > 0) || extraParts.length > 0
+          ? { parts: [...(record.parts ?? []), ...extraParts] }
+          : {}),
         content: { ...donor.content, ...record.content },
       },
     ]
@@ -151,10 +162,10 @@ export function dedupeTwinTurns(records: readonly CanonicalRecord[]): CanonicalR
 }
 
 /**
- * Collapse one proximity cluster: when it holds both source kinds, every
- * file row is the same turn observed twice and drops; content transplants
- * onto the nearest content-less OTel rows so no turn's file content is
- * silently discarded with a sibling's duplicate.
+ * Collapse one proximity cluster: when it holds both source kinds, each
+ * file row is treated as the same turn observed twice and drops; content
+ * transplants onto keepers paired nearest-in-time (review M2) so no turn's
+ * file content is silently discarded with a sibling's duplicate.
  *
  * Issue #232 reports file rows arriving 2x per turn, so donors can outnumber
  * the rows that receive them. Those surplus rows are not provably duplicates of
@@ -173,21 +184,45 @@ function collapseCluster(
   const files = cluster.filter((record) => isFileSource(record.source))
   if (otels.length === 0 || files.length === 0) return
   for (const file of files) dropped.add(file)
-  const needy = otels.filter((otel) => !hasParts(otel))
-  const donors = files.filter((file) => hasParts(file))
-  const paired = Math.min(needy.length, donors.length)
-  for (let i = 0; i < paired; i++) {
-    transplant.set(needy[i]!, donors[i]!)
+  // Pairing is OTel-centric in time order, needy keepers first (review M2).
+  // Donor-centric pairing ("each file takes its nearest free OTel") misfires
+  // on the #232 shape: fA2's true mate otelA is already taken, so it would
+  // pair otelB and hand the other turn's parts across. Letting each keeper in
+  // turn take its nearest free donor keeps fA1/fA2 on otelA and fB1/fB2 on
+  // otelB. Needy keepers choose first so a content-less turn is never left
+  // bare while a content-carrying neighbour absorbs its donor.
+  const donors = files
+    .filter((file) => hasParts(file))
+    .sort((a, b) => timestampMs(a) - timestampMs(b))
+  const free = new Set(donors)
+  const nearestFree = (moment: number): CanonicalRecord | undefined => {
+    let best: CanonicalRecord | undefined
+    for (const donor of donors) {
+      if (!free.has(donor)) continue
+      if (best === undefined || Math.abs(timestampMs(donor) - moment) < Math.abs(timestampMs(best) - moment)) {
+        best = donor
+      }
+    }
+    return best
   }
-  // Surplus donors have no row of their own to land on. Attach each to the
-  // nearest already-paired keeper rather than discarding its content.
-  for (let i = paired; i < donors.length; i++) {
-    const donor = donors[i]!
-    if (needy.length === 0) break
-    let nearest = needy[0]!
-    for (const candidate of needy) {
-      if (Math.abs(timestampMs(candidate) - timestampMs(donor)) < Math.abs(timestampMs(nearest) - timestampMs(donor))) {
-        nearest = candidate
+  const keepers = [
+    ...otels.filter((otel) => !hasParts(otel)).sort((a, b) => timestampMs(a) - timestampMs(b)),
+    ...otels.filter((otel) => hasParts(otel)).sort((a, b) => timestampMs(a) - timestampMs(b)),
+  ]
+  for (const keeper of keepers) {
+    const donor = nearestFree(timestampMs(keeper))
+    if (donor === undefined) break
+    free.delete(donor)
+    transplant.set(keeper, donor)
+  }
+  // Surplus donors (the 2x-per-turn shape) still drop — their counters are
+  // the same turn — but merge into the keeper nearest to them in time rather
+  // than vanishing with the duplicate.
+  for (const donor of [...free].sort((a, b) => timestampMs(a) - timestampMs(b))) {
+    let nearest = otels[0]!
+    for (const keeper of otels) {
+      if (Math.abs(timestampMs(keeper) - timestampMs(donor)) < Math.abs(timestampMs(nearest) - timestampMs(donor))) {
+        nearest = keeper
       }
     }
     const existing = transplant.get(nearest)

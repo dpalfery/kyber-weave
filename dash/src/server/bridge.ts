@@ -2157,26 +2157,22 @@ export class KyberBridge {
     limit?: number
     offset?: number
   }): FindingsPage {
-    const narrowed = this.listFindings({
+    // One findings-table read per request (review): the detector split
+    // happens in memory over the same rows, so `total` and `detectorCounts`
+    // can never disagree about what the table holds.
+    const base = this.listFindings({
       ...(options?.runId !== undefined ? { runId: options.runId } : {}),
       ...(options?.sessionId !== undefined ? { sessionId: options.sessionId } : {}),
-      ...(options?.detector !== undefined ? { detector: options.detector } : {}),
       ...(options?.harness !== undefined ? { harness: options.harness } : {}),
     })
+    const narrowed =
+      options?.detector === undefined ? base : base.filter((finding) => finding.detectorId === options.detector)
     // Per-detector counts stay scoped to run/session/harness but never to
     // the detector being browsed (review): narrowing the list must not
     // evaporate the chips that narrow it. `total` below stays narrowed.
-    const countBase =
-      options?.detector === undefined
-        ? narrowed
-        : this.listFindings({
-            ...(options?.runId !== undefined ? { runId: options.runId } : {}),
-            ...(options?.sessionId !== undefined ? { sessionId: options.sessionId } : {}),
-            ...(options?.harness !== undefined ? { harness: options.harness } : {}),
-          })
     const detectorCounts: Record<string, number> = {}
     for (const id of DETECTOR_IDS) detectorCounts[id] = 0
-    for (const finding of countBase) {
+    for (const finding of base) {
       detectorCounts[finding.detectorId] = (detectorCounts[finding.detectorId] ?? 0) + 1
     }
     const offset = typeof options?.offset === 'number' && Number.isFinite(options.offset) && options.offset > 0
@@ -2199,14 +2195,18 @@ export class KyberBridge {
     }
   }
 
-  /**
-   * Whether the stored rollups cover every harness the store actually holds.
-   * Both sides are canonical names, so `cursor-agent`'s rollup covers a session
-   * row stamped `cursor-agent`.
-   */
-  private hasRollupForEveryStoredHarness(rollups: readonly HarnessRollupRow[]): boolean {
-    const built = new Set(rollups.map((rollup) => normalizeHarnessName(rollup.harness)))
-    return this.store!.listHarnesses().every((harness) => built.has(harness))
+  /** Canonical harness of one stored session over the raw handle (review S3a). */
+  private sessionHarnessRaw(sessionId: string): string | undefined {
+    const db = this.getDb()
+    if (!this.hasTable(db, 'session')) return undefined
+    try {
+      const row = db!
+        .prepare('SELECT harness FROM session WHERE session_id = ?')
+        .get(sessionId) as unknown as { harness: string } | undefined
+      return row?.harness
+    } catch {
+      return undefined
+    }
   }
 
   /**
@@ -2221,6 +2221,14 @@ export class KyberBridge {
     const runId = scope?.runId
     const sessionId = scope?.sessionId
     if (sessionId !== undefined && sessionId !== '') {
+      // A harness that does not own the session scopes the count to zero,
+      // matching the narrowed findings (review S3a).
+      if (harness !== undefined && harness !== '') {
+        const owner = this.store
+          ? this.store.sessionHarness(sessionId)
+          : this.sessionHarnessRaw(sessionId)
+        if (owner === undefined || normalizeHarnessName(owner) !== normalizeHarnessName(harness)) return 0
+      }
       const payload = this.getSessionPayload<{ context?: { contextLimitSource?: string } }>(sessionId)
       return payload?.context?.contextLimitSource === 'default' ? 1 : 0
     }

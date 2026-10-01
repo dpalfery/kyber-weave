@@ -355,3 +355,113 @@ describe('dedupeTwinTurns — matching must identify a turn (review round 2)', (
     expect(out[0]!.content).toMatchObject({ system_prompt: 'first', conversation_history: 'second' })
   })
 })
+
+describe('dedupeTwinTurns nearest pairing (review M2)', () => {
+  const turn = (
+    spanId: string,
+    source: string,
+    timestamp: string,
+    content: CanonicalRecord['content'],
+    parts?: CanonicalRecord['parts'],
+  ) =>
+    llmInvoke(spanId, {
+      source,
+      harness: source.startsWith('codeburn/') ? 'claude-desktop' : 'claude-code',
+      timestamp,
+      tokens: {
+        freshInput: 2,
+        cacheRead: 39096,
+        cacheCreation: 24977,
+        output: 563,
+        reportedInput: 64075,
+        reportedOutput: 563,
+      },
+      content,
+      ...(parts === undefined ? {} : { parts }),
+    })
+
+  it('pairs the interleaved case by time, not by index (review M2)', () => {
+    // otelB must receive fileB — and only fileB — even though fileA comes
+    // first in the donor order. Index pairing gave otelB fileA plus fileB.
+    const out = dedupeTwinTurns([
+      turn('otel-a', 'claude-code-desktop', '2026-09-23T22:43:00.000Z', { system_prompt: 'a' }, [
+        { part: 'system_prompt', text: 'a' },
+      ]),
+      turn('file-a', 'codeburn/claude-desktop', '2026-09-23T22:43:02.000Z', { system_prompt: 'a' }, [
+        { part: 'system_prompt', text: 'a' },
+      ]),
+      turn('otel-b', 'claude-code-desktop', '2026-09-23T22:43:30.000Z', {}),
+      turn('file-b', 'codeburn/claude-desktop', '2026-09-23T22:43:32.000Z', { system_prompt: 'b' }, [
+        { part: 'system_prompt', text: 'b' },
+      ]),
+    ])
+
+    expect(out.map((r) => r.spanId)).toEqual(['otel-a', 'otel-b'])
+    expect(out[1]!.content).toEqual({ system_prompt: 'b' })
+    expect(out[1]!.parts).toEqual([{ part: 'system_prompt', text: 'b' }])
+  })
+
+  it('keeps the #232 shape on its own turn (review M2)', () => {
+    // Two file rows per OTLP turn: otelB must not receive the other turn's
+    // parts even though donors outnumber keepers two to one.
+    const out = dedupeTwinTurns([
+      turn('otel-a', 'claude-code-desktop', '2026-09-23T22:43:00.000Z', {}),
+      turn('f-a1', 'codeburn/claude-desktop', '2026-09-23T22:43:02.000Z', { system_prompt: 'a1' }, [
+        { part: 'system_prompt', text: 'a1' },
+      ]),
+      turn('f-a2', 'codeburn/claude-desktop', '2026-09-23T22:43:04.000Z', { tool_result_content: 'a2' }, [
+        { part: 'tool_result_content', text: 'a2' },
+      ]),
+      turn('otel-b', 'claude-code-desktop', '2026-09-23T22:43:10.000Z', {}),
+      turn('f-b1', 'codeburn/claude-desktop', '2026-09-23T22:43:12.000Z', { system_prompt: 'b1' }, [
+        { part: 'system_prompt', text: 'b1' },
+      ]),
+      turn('f-b2', 'codeburn/claude-desktop', '2026-09-23T22:43:14.000Z', { tool_result_content: 'b2' }, [
+        { part: 'tool_result_content', text: 'b2' },
+      ]),
+    ])
+
+    expect(out.map((r) => r.spanId)).toEqual(['otel-a', 'otel-b'])
+    const b = out[1]!
+    const texts = [...(b.parts ?? [])].map((p) => p.text)
+    expect(texts).toContain('b1')
+    expect(texts).toContain('b2')
+    expect(texts).not.toContain('a1')
+    expect(texts).not.toContain('a2')
+  })
+})
+
+describe('dedupeTwinTurns window boundary (review)', () => {
+  it('pins the 60 s straddle: a twin pair past the cluster span is kept twice (review)', () => {
+    // An earlier same-counter row anchors the cluster; a genuine twin pair
+    // arriving more than the skew past that anchor starts its own cluster.
+    // The pair still collapses within its own cluster — but a lone row past
+    // the span has no provable mate and is kept, even if that double-counts
+    // a coincidence. This test pins the boundary, not the wish.
+    const same = {
+      freshInput: 2,
+      cacheRead: 39096,
+      cacheCreation: 24977,
+      output: 563,
+      reportedInput: 64075,
+      reportedOutput: 563,
+    }
+    const at = (spanId: string, source: string, timestamp: string) =>
+      llmInvoke(spanId, {
+        source,
+        harness: source.startsWith('codeburn/') ? 'claude-desktop' : 'claude-code',
+        timestamp,
+        tokens: { ...same },
+        content: {},
+      })
+    const out = dedupeTwinTurns([
+      at('otel-old', 'claude-code-desktop', '2026-09-23T22:43:00.000Z'),
+      at('otel-new', 'claude-code-desktop', '2026-09-23T22:44:05.000Z'),
+      at('synth-new', 'codeburn/claude-desktop', '2026-09-23T22:44:08.000Z'),
+    ])
+
+    // otel-new + synth-new collapse (3 s apart, own cluster); otel-old stands
+    // alone: nothing provable to merge it with.
+    expect(out.map((r) => r.spanId).sort()).toEqual(['otel-new', 'otel-old'])
+  })
+})

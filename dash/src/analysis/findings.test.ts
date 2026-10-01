@@ -894,6 +894,10 @@ describe('Detector 5: compaction-hazard', () => {
     expect(f.confidence).toBe('heuristic')
     expect(f.measurementClass).toBe('inferred')
     expect(f.mechanism).toMatch(/aggregat/i)
+    // The title must not print the impossible percentage as a claim: 639%
+    // of a window is the attribution failure, not a measurement (review).
+    expect(f.title).not.toMatch(/639%/)
+    expect(f.title).toMatch(/exceeds/i)
     expect(f.payload?.contextLimitSource).toBe('reported')
   })
 
@@ -2046,6 +2050,10 @@ describe('Server Bridge & API Route: /api/kyber/findings', () => {
 
     expect(bridge.listFindingsPage({ sessionId: 's-known' }).unknownWindowSessions).toBe(0)
     expect(bridge.listFindingsPage({ sessionId: 's-unknown' }).unknownWindowSessions).toBe(1)
+    // A harness that does not own the session scopes the count to zero,
+    // matching the (also empty) narrowed findings (review S3a).
+    expect(bridge.listFindingsPage({ sessionId: 's-unknown', harness: 'claude-code' }).unknownWindowSessions).toBe(0)
+    expect(bridge.listFindingsPage({ sessionId: 's-unknown', harness: 'cursor' }).unknownWindowSessions).toBe(1)
     expect(bridge.listFindingsPage({ runId: 'run-1' }).unknownWindowSessions).toBe(1)
     expect(bridge.listFindingsPage({}).unknownWindowSessions).toBe(1)
     // The run scope folds legacy front-end names the same way (review).
