@@ -78,7 +78,7 @@ import {
  * corpus is the expensive thing here and re-collecting it is not always
  * possible.
  */
-export const SCHEMA_VERSION = 14
+export const SCHEMA_VERSION = 15
 
 /**
  * Version of the diagnostic signal and finding detector suite (Decision D17).
@@ -87,10 +87,16 @@ export const SCHEMA_VERSION = 14
  * a fresh one. It does not itself trigger recomputation: every build
  * (`buildSessions`, `buildRuns`, `buildFindings`, `buildHarnessRollup`) is
  * authoritative and rewrites its derived rows, pruning what detectors no
- * longer emit. Bump it whenever detector semantics change and say so in the
- * PR, so the stamp stays a truthful witness instead of a forgotten counter.
+ * longer emit.
+ *
+ * Generations: 2 stopped fabricating duplicate-tool-call waste for
+ * underivable sizes (coverage-gap findings carry no estimate); 3 adds honest
+ * compaction windows, folded twin-harness identity, and rebuilt findings
+ * (issues #181/#182/#191). Bump it whenever detector semantics change and
+ * say so in the PR, so the stamp stays a truthful witness instead of a
+ * forgotten counter.
  */
-export const DETECTOR_VERSION = 2
+export const DETECTOR_VERSION = 3
 
 /**
  * The whole schema, as code. `CREATE ... IF NOT EXISTS` throughout so
@@ -255,7 +261,9 @@ CREATE TABLE IF NOT EXISTS finding (
   title TEXT NOT NULL,
   mechanism TEXT NOT NULL,
   confidence TEXT NOT NULL,
-  estimated_waste_tokens INTEGER NOT NULL DEFAULT 0,
+  -- Nullable since v15: an unmeasured (coverage-gap) finding persists NULL,
+  -- which reads back as an absent estimate rather than zero waste.
+  estimated_waste_tokens INTEGER,
   recommendation TEXT NOT NULL,
   error_bar_json TEXT NOT NULL,
   evidence_links_json TEXT NOT NULL,
@@ -483,6 +491,40 @@ export const MIGRATIONS: Record<number, (db: Database) => void> = {
   // v13 -> v14: existing stores used a span/code key, so rekey their surviving
   // rows before a new diagnostic at a different location can be recorded.
   13: (db) => rekeyProblems(db),
+  // v14 -> v15: unmeasured (coverage-gap) findings persist NULL waste instead
+  // of a fabricated number. SQLite cannot drop NOT NULL in place, so rebuild
+  // the table; every row (including its 0-valued measured estimates) copies
+  // across unchanged, and fresh stores take the nullable shape from SCHEMA_SQL.
+  14: (db) => {
+    db.exec(`CREATE TABLE finding_new (
+      id TEXT PRIMARY KEY,
+      detector_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      mechanism TEXT NOT NULL,
+      confidence TEXT NOT NULL,
+      estimated_waste_tokens INTEGER,
+      recommendation TEXT NOT NULL,
+      error_bar_json TEXT NOT NULL,
+      evidence_links_json TEXT NOT NULL,
+      outcome_risk_caveat TEXT NOT NULL,
+      run_id TEXT,
+      session_id TEXT,
+      rank_score REAL NOT NULL DEFAULT 0.0,
+      payload TEXT
+    );
+    INSERT INTO finding_new
+      (id, detector_id, title, mechanism, confidence, estimated_waste_tokens,
+       recommendation, error_bar_json, evidence_links_json, outcome_risk_caveat,
+       run_id, session_id, rank_score, payload)
+      SELECT id, detector_id, title, mechanism, confidence, estimated_waste_tokens,
+       recommendation, error_bar_json, evidence_links_json, outcome_risk_caveat,
+       run_id, session_id, rank_score, payload FROM finding;
+    DROP TABLE finding;
+    ALTER TABLE finding_new RENAME TO finding;
+    CREATE INDEX IF NOT EXISTS finding_by_run ON finding (run_id);
+    CREATE INDEX IF NOT EXISTS finding_by_session ON finding (session_id);
+    CREATE INDEX IF NOT EXISTS finding_by_rank_score ON finding (rank_score DESC);`)
+  },
 }
 
 /** Stable per-span/code/location key; rows without a span keep their independent legacy identity. */
@@ -709,6 +751,10 @@ export function toSessionRow(row: SessionDbRow): SessionRow {
     branch: nullableText(row.branch),
     started: nullableText(row.started),
     ended: nullableText(row.ended),
+    summary:
+      payload !== null && typeof payload === "object" && "summary" in (payload as Record<string, unknown>)
+        ? ((payload as Record<string, unknown>).summary as Record<string, unknown>)
+        : undefined,
     payload,
   }
 }
@@ -829,7 +875,7 @@ export type FindingDbRow = {
 }
 
 export function toFinding(row: FindingDbRow): Finding {
-  const errorBar = JSON.parse(text(row.error_bar_json)) as { lower: number; upper: number }
+  const parsedErrorBar = JSON.parse(text(row.error_bar_json)) as { lower: number; upper: number } | null
   const evidenceLinks = JSON.parse(text(row.evidence_links_json)) as FindingEvidenceLink[]
   const finding: Finding = {
     id: text(row.id),
@@ -838,9 +884,13 @@ export function toFinding(row: FindingDbRow): Finding {
     mechanism: text(row.mechanism),
     evidenceLinks,
     confidence: text(row.confidence) as FindingConfidence,
-    estimatedWasteTokens: Number(row.estimated_waste_tokens ?? 0),
+    // A NULL waste column is an unmeasured (coverage-gap) finding: it
+    // round-trips as absent, never as zero waste.
+    ...(row.estimated_waste_tokens === null || row.estimated_waste_tokens === undefined
+      ? {}
+      : { estimatedWasteTokens: Number(row.estimated_waste_tokens) }),
     recommendation: text(row.recommendation),
-    errorBar,
+    ...(parsedErrorBar === null || parsedErrorBar === undefined ? {} : { errorBar: parsedErrorBar }),
     outcomeRiskCaveat: text(row.outcome_risk_caveat),
     runId: nullableText(row.run_id) ?? undefined,
     sessionId: nullableText(row.session_id) ?? undefined,
@@ -2037,9 +2087,9 @@ export class CanonStore {
         finding.title,
         finding.mechanism,
         finding.confidence,
-        finding.estimatedWasteTokens,
+        finding.estimatedWasteTokens ?? null,
         finding.recommendation,
-        JSON.stringify(finding.errorBar),
+        JSON.stringify(finding.errorBar ?? null),
         JSON.stringify(finding.evidenceLinks),
         finding.outcomeRiskCaveat,
         finding.runId ?? null,

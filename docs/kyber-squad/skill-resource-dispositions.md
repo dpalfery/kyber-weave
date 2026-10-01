@@ -5,14 +5,14 @@ doc-type: reference
 status: current
 component: KyberSquad
 owner: dpalfery
-last-reviewed: 2026-09-28
+last-reviewed: 2026-09-30
 ---
 
 # Skill-resource dispositions and policy-line ledger
 
-This reference is the content-preservation audit for the 66 supplemental files that sit
-beside the 23 canonical `SKILL.md` files under `products/kyber-squad/skills/`. It exists so
-that, for every one of those 66 resources, a reader can answer three questions: what kind of
+This reference is the content-preservation audit for the 67 supplemental files that sit
+beside the 24 canonical `SKILL.md` files under `products/kyber-squad/skills/`. It exists so
+that, for every one of those 67 resources, a reader can answer three questions: what kind of
 content it is, what happens to it, and — where it states a rule a host could reverse — where
 that rule now lives. It is a governed `reference` document (D5) and it outlives the plan that
 created it,
@@ -55,6 +55,7 @@ it stands, not this ledger's quotations of what it used to say.
 
 | Resource | Content class | Disposition | Delivery | Destination | Verification |
 |---|---|---|---|---|---|
+| `skills/code-review-loop/code-review-loop.md` | procedure | retain-in-place | rendered | — | Kyber-authored review-remediation procedure across platforms; linked from its `SKILL.md` and delivered beside the principal in every harness. |
 | `skills/code-review/references/azure.md` | review-pointer | pointer-already-#126 | rendered | the declared `<azure-coding-standard>` | Pointer-only since #126 (finding 7); resolves the `<azure-coding-standard>` registry token where the host declares one. |
 | `skills/code-review/references/csharp.md` | review-pointer | pointer-already-#126 | rendered | the declared `<csharp-coding-standard>` | Pointer-only since #126; resolves `<csharp-coding-standard>` where declared. |
 | `skills/code-review/references/github-actions.md` | review-pointer | pointer-already-#126 | rendered | the declared `<github-actions-coding-standard>` | Pointer-only since #126; resolves `<github-actions-coding-standard>` where declared. |
@@ -122,10 +123,10 @@ it stands, not this ledger's quotations of what it used to say.
 | `skills/test-dev/references/test-maintainability.md` | technique | retain-in-place | rendered | — | Test-maintainability technique; not a host-reversible policy (D2). |
 | `skills/test-dev/references/unit-test-patterns.md` | policy-bearing | policy-migrated-to-template | rendered | test standard | 8 duplicate Policy-line ledger rows below point to `<test-coding-standard>`. |
 
-Sixty-six rows: 11 `policy-migrated-to-template`, 7 `pointer-already-#126`, 48
+Sixty-seven rows: 11 `policy-migrated-to-template`, 7 `pointer-already-#126`, 49
 `retain-in-place`, 0 `superseded-intentionally` (every file with a `superseded` ledger row
 below also carries a `migrated` or `duplicate` row, so the derivation table resolves it to
-`policy-migrated-to-template`). Delivery: 65 `rendered`, 1 `packaged-only`.
+`policy-migrated-to-template`). Delivery: 66 `rendered`, 1 `packaged-only`.
 
 ## Policy-line ledger
 

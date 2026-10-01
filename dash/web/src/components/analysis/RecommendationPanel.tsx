@@ -10,7 +10,9 @@ export interface RelocationAction {
 
 export interface RecommendationPanelProps {
   recommendation: string
-  estimatedWasteTokens: number
+  // Absent for unmeasured (coverage-gap) findings: the bar normalises
+  // around zero and the label renders '—' via fmtTokens, never zero waste.
+  estimatedWasteTokens?: number
   errorBar?: {
     lower: number
     upper: number
@@ -78,13 +80,14 @@ export function RecommendationPanel({
 }: RecommendationPanelProps) {
   const strategy = deriveRelocationStrategy(recommendation, relocationAction)
   const hasErrorBar = errorBar !== undefined && errorBar !== null
-  const lowerBound = hasErrorBar ? errorBar.lower : estimatedWasteTokens
-  const upperBound = hasErrorBar ? errorBar.upper : estimatedWasteTokens
+  const wasteOrZero = estimatedWasteTokens ?? 0
+  const lowerBound = hasErrorBar ? errorBar.lower : wasteOrZero
+  const upperBound = hasErrorBar ? errorBar.upper : wasteOrZero
 
   // Normalized position calculation for visual error-bar range
-  const maxRange = Math.max(upperBound * 1.15, estimatedWasteTokens * 1.25, 1)
+  const maxRange = Math.max(upperBound * 1.15, wasteOrZero * 1.25, 1)
   const lowerPct = Math.min(100, Math.max(0, (lowerBound / maxRange) * 100))
-  const estimatePct = Math.min(100, Math.max(0, (estimatedWasteTokens / maxRange) * 100))
+  const estimatePct = Math.min(100, Math.max(0, (wasteOrZero / maxRange) * 100))
   const upperPct = Math.min(100, Math.max(0, (upperBound / maxRange) * 100))
   const barWidthPct = Math.max(2, upperPct - lowerPct)
 

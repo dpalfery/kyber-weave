@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 
 import { CanonStore, SCHEMA_VERSION, compressRaw } from './store.js'
+import type { Finding } from '../analysis/findings.js'
 import type { RecordProvenance, SourceCheckpoint } from './source-state.js'
 import { TOKEN_SUM_MISMATCH, notMeasurable, type CanonicalRecord, type CostBlock, type TokenUsage } from './types.js'
 
@@ -184,6 +185,98 @@ describe('CanonStore round trip', () => {
     store.upsert(record({ raw }))
 
     expect(store.get('span-1')?.raw).toEqual(raw)
+  })
+})
+
+describe('CanonStore finding waste persistence (coverage-gap)', () => {
+  function measuredFinding(): Finding {
+    return {
+      id: 'finding-measured',
+      detectorId: 'duplicate-tool-call',
+      title: 'Duplicate',
+      mechanism: 'Repeated call',
+      evidenceLinks: [],
+      confidence: 'deterministic',
+      estimatedWasteTokens: 250,
+      recommendation: 'Cache it',
+      errorBar: { lower: 200, upper: 312 },
+      outcomeRiskCaveat: 'none',
+      rankScore: 200,
+      measurementClass: 'deterministic',
+    }
+  }
+
+  function unmeasuredFinding(): Finding {
+    return {
+      id: 'finding-unmeasured',
+      detectorId: 'duplicate-tool-call',
+      title: 'Duplicate',
+      mechanism: 'Repeated call of unmeasured size',
+      evidenceLinks: [],
+      confidence: 'deterministic',
+      recommendation: 'Cache it',
+      outcomeRiskCaveat: 'none',
+      rankScore: 0,
+      measurementClass: 'coverage-gap',
+    }
+  }
+
+  it('round-trips a measured finding unchanged', () => {
+    const store = new CanonStore(':memory:')
+    store.upsertFinding(measuredFinding())
+
+    const read = store.getFinding('finding-measured')
+    expect(read?.estimatedWasteTokens).toBe(250)
+    expect(read?.errorBar).toEqual({ lower: 200, upper: 312 })
+    store.close()
+  })
+
+  it('round-trips an unmeasured finding with absent waste and error bar, never zero', () => {
+    const store = new CanonStore(':memory:')
+    store.upsertFinding(unmeasuredFinding())
+
+    const read = store.getFinding('finding-unmeasured')
+    expect(read).toBeDefined()
+    expect(read?.estimatedWasteTokens).toBeUndefined()
+    expect(read?.errorBar).toBeUndefined()
+    expect(read?.measurementClass).toBe('coverage-gap')
+    expect(read?.rankScore).toBe(0)
+    store.close()
+  })
+
+  it('migrates a v14 store to nullable waste without losing measured rows', () => {
+    const path = tempStorePath()
+    const legacy = new DatabaseSync(path)
+    legacy.exec(`CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE finding (
+  id TEXT PRIMARY KEY,
+  detector_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  mechanism TEXT NOT NULL,
+  confidence TEXT NOT NULL,
+  estimated_waste_tokens INTEGER NOT NULL DEFAULT 0,
+  recommendation TEXT NOT NULL,
+  error_bar_json TEXT NOT NULL,
+  evidence_links_json TEXT NOT NULL,
+  outcome_risk_caveat TEXT NOT NULL,
+  run_id TEXT,
+  session_id TEXT,
+  rank_score REAL NOT NULL DEFAULT 0.0,
+  payload TEXT
+);
+INSERT INTO finding (id, detector_id, title, mechanism, confidence, estimated_waste_tokens, recommendation, error_bar_json, evidence_links_json, outcome_risk_caveat, rank_score)
+  VALUES ('legacy-measured', 'duplicate-tool-call', 'Duplicate', 'Repeated call', 'deterministic', 250, 'Cache it', '{"lower":200,"upper":312}', '[]', 'none', 200);
+INSERT INTO metadata (key, value) VALUES ('schema_version', '14'), ('detector_version', '1');`)
+    legacy.close()
+
+    const migrated = new CanonStore(path)
+    expect(migrated.getMetadata('schema_version')).toBe(String(SCHEMA_VERSION))
+    // The measured row survives the rebuild with its estimate intact.
+    expect(migrated.getFinding('legacy-measured')?.estimatedWasteTokens).toBe(250)
+    // And the rebuilt table now accepts an unmeasured finding.
+    migrated.upsertFinding(unmeasuredFinding())
+    expect(migrated.getFinding('finding-unmeasured')?.estimatedWasteTokens).toBeUndefined()
+    migrated.close()
   })
 })
 

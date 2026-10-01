@@ -705,6 +705,21 @@ describe('CanonStore detector_version stamp & Decision D17 compliance', () => {
     store.close()
   })
 
+  it('stamps DETECTOR_VERSION 3 so stale pre-honest-window findings recompute', () => {
+    // Generation 2 removed the duplicate-tool-call 250-token fallback;
+    // Generation 3 (issues #181/#182/#191) added honest compaction windows
+    // and folded twin-harness identity. A store stamped below current must
+    // report outdated so those stale rows recompute instead of being served.
+    expect(DETECTOR_VERSION).toBe(3)
+    const path = tempStorePath()
+    const store = new CanonStore(path)
+    store.setDetectorVersion(1)
+    expect(store.getDetectorVersion()).toBe(1)
+    expect(store.hasCurrentDetectorVersion()).toBe(false)
+    expect(store.isDetectorOutdated()).toBe(true)
+    store.close()
+  })
+
   it('detects outdated detector_version and flags that recomputation is required', () => {
     const path = tempStorePath()
     const store = new CanonStore(path)
