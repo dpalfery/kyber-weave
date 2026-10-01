@@ -186,7 +186,9 @@ describe('buildHarnessRollup — Empty / uncollected harnesses', () => {
     expect(harnesses).toContain('copilot-vscode')
     expect(harnesses).toContain('claude-cli')
     expect(harnesses).toContain('cursor')
-    expect(harnesses).toContain('cursor-agent')
+    // Issue #182: folded front-ends seed no rollup of their own.
+    expect(harnesses).not.toContain('cursor-agent')
+    expect(harnesses).not.toContain('claude-desktop')
     expect(harnesses).toContain('codex-cli')
     expect(harnesses).not.toContain('gemini')
 
@@ -970,6 +972,7 @@ describe('buildHarnessRollup — sessions are streamed, not materialized', () =>
     expect(isNotMeasurable(rollup.measurability['cache_hit_rate'])).toBe(true)
     store.close()
   })
+
   it("filters tools_invoked against tools_offered so tool yield does not exceed 100%", () => {
     const store = new CanonStore(":memory:")
     store.upsertSession({
@@ -996,4 +999,70 @@ describe('buildHarnessRollup — sessions are streamed, not materialized', () =>
 
     store.close()
   })
-});
+})
+
+describe('Issue #181 Q3 — rollup pressure ignores guessed windows', () => {
+  it('reports pressure unmeasurable when sessions name no context window', async () => {
+    // A 190,000-token turn is 95% of the 200,000 fallback — but the fallback
+    // is a guess. The harness rollup must not present it as measured
+    // pressure, or suppressing default-window findings reads as \"all clear\".
+    const store = new CanonStore(':memory:')
+    store.upsertSession({
+      sessionId: 'sess-unknown-window',
+      harness: 'copilot',
+      payload: {
+        id: 'sess-unknown-window',
+        session_id: 'sess-unknown-window',
+        harness: 'copilot',
+        context: {
+          measurable: true,
+          contextLimit: 200_000,
+          contextLimitSource: 'default',
+          turns: [{ pressure: 0.95 }],
+        },
+        summary: { total_input: 190_000 },
+      },
+    })
+
+    const rollup = buildHarnessRollup(store, 'copilot')
+
+    expect(rollup.contextPressureMedian).toBeNull()
+    expect(rollup.contextPressureP95).toBeNull()
+    expect(isNotMeasurable(rollup.measurability['context_pressure'])).toBe(true)
+    // The count persists on the rollup so the findings envelope can read it
+    // without scanning session payloads (review).
+    expect((rollup.payload as { unknownWindowSessions?: number }).unknownWindowSessions).toBe(1)
+    store.close()
+  })
+})
+
+describe('Issue #181 review — legacy sessions keep their measurable dimensions', () => {
+  it('still accumulates cache and tool totals when the window is missing (review)', async () => {
+    // A legacy payload with turns but no window cannot yield pressure — but
+    // its cache counters and tool rows are perfectly measurable and must
+    // still reach the digest.
+    const store = new CanonStore(':memory:')
+    store.upsertSession({
+      sessionId: 'sess-legacy',
+      harness: 'copilot',
+      payload: {
+        id: 'sess-legacy',
+        session_id: 'sess-legacy',
+        harness: 'copilot',
+        turns: [{ index: 0, input: 40_000 }],
+        summary: { total_input: 1000, total_cache_read: 200 },
+        tools: [
+          { name: 'read', invocations: 2 },
+          { name: 'unused-tool', invocations: 0 },
+        ],
+      },
+    })
+
+    const rollup = buildHarnessRollup(store, 'copilot')
+
+    expect(rollup.contextPressureMedian).toBeNull()
+    expect(rollup.cacheHitRate).toBe(0.2)
+    expect(rollup.toolYield).toBe(0.5)
+    store.close()
+  })
+})
