@@ -1,6 +1,9 @@
 import { readFileSync } from 'fs'
+import { dirname, resolve } from 'path'
+import { fileURLToPath } from 'url'
 import { describe, it, expect } from 'vitest'
 
+import { pricingDataDir } from '../../../scripts/pricing-artifact-paths.mjs'
 import fallback from './pricing-fallback.json' assert { type: 'json' }
 import snapshot from './litellm-snapshot.json' assert { type: 'json' }
 
@@ -10,8 +13,13 @@ import snapshot from './litellm-snapshot.json' assert { type: 'json' }
 describe('pricing-fallback.json data hygiene', () => {
   const entries = Object.entries(fallback as Record<string, (number | null)[]>)
 
-  it('is non-empty', () => {
-    expect(entries.length).toBeGreaterThan(50)
+  // Post 2026-10-01 refresh the primary snapshot (4671 → 5978 keys) absorbed most
+  // former gap-fill rows via bareKey seeding of `seen`, collapsing fallback
+  // coverage 205 → 52. Pin the committed cardinality so a broken rebundle that
+  // empties or silently shrinks the safety net fails CI; bump deliberately when
+  // the snapshot changes.
+  it('pins the post-refresh gap-fill cardinality (205 → 52 collapse)', () => {
+    expect(entries.length).toBe(52)
   })
 
   it('has no negative rates (OpenRouter -1 "variable price" sentinels)', () => {
@@ -62,7 +70,7 @@ describe('issue #186 U11 bundled rate additions', () => {
 
   // Assumed sidecar (JSON cannot carry comments and the rate files are arrays keyed by model,
   // so provenance is pinned in pricing-provenance.json: { "<model>": { source, retrieved } }).
-  it('cites a vendor source URL and the 2026-09-30 retrieval for each added entry', () => {
+  it('cites a source and retrieval date for each hand-added MANUAL rate', () => {
     const prov = JSON.parse(readFileSync(new URL('./pricing-provenance.json', import.meta.url), 'utf8')) as Record<
       string,
       { source: string; retrieved: string }
@@ -71,6 +79,14 @@ describe('issue #186 U11 bundled rate additions', () => {
     expect(prov['gpt-6-luna'].source).toMatch(/^https:\/\/(developers\.openai\.com|openai\.com)\//)
     expect(prov['claude-sonnet-5-5'].retrieved).toBe('2026-09-30')
     expect(prov['gpt-6-luna'].retrieved).toBe('2026-09-30')
+    expect(prov['claude-opus-4'].source).toMatch(/^https:\/\/(platform\.claude\.com|docs\.anthropic\.com)\//)
+    expect(prov['claude-opus-4'].retrieved).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+    expect(prov['claude-opus-4-20250514'].source).toMatch(/^https:\/\/(platform\.claude\.com|docs\.anthropic\.com)\//)
+    expect(prov['claude-opus-4-20250514'].retrieved).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+    expect(prov['grok-latest'].source).toMatch(/^https:\/\//)
+    expect(prov['grok-latest'].retrieved).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+    expect(prov['kimi-k2-thinking'].source).toBe('rescued prior value, no public source')
+    expect(prov['kimi-k2-thinking'].retrieved).toMatch(/^\d{4}-\d{2}-\d{2}$/)
   })
 })
 
@@ -96,27 +112,35 @@ describe('issue #186 bundler MANUAL_ENTRIES reproducibility', () => {
   }
   const snap = snapshot as unknown as Record<string, (number | null)[]>
 
-  it('targets dash/src/pricing/data for generated pricing artifacts (not dash/src/data)', () => {
-    const dataDirLine = source.match(/const dataDir = join\([^)]+\)/)?.[0] ?? ''
-    expect(dataDirLine).toMatch(/'src',\s*'pricing',\s*'data'/)
-    expect(dataDirLine).not.toMatch(/'src',\s*'data'\s*\)/)
+  it('writes pricing artifacts to the same directory the runtime imports', () => {
+    // Import the shared path export (no network) and compare to the directory
+    // that actually holds the committed snapshot this suite loads — pins the
+    // bundler's write target to the runtime's import directory (#229).
+    const runtimeDataDir = dirname(fileURLToPath(new URL('./litellm-snapshot.json', import.meta.url)))
+    expect(resolve(pricingDataDir)).toBe(resolve(runtimeDataDir))
+    expect(pricingDataDir.replace(/\\/g, '/')).toMatch(/src\/pricing\/data$/)
+    expect(pricingDataDir.replace(/\\/g, '/')).not.toMatch(/src\/data$/)
   })
 
   it('locates and parses the MANUAL_ENTRIES block (sanity: neighbour claude-mythos-5)', () => {
     expect(manual.has('claude-mythos-5')).toBe(true)
   })
 
-  for (const id of ['claude-sonnet-5-5', 'gpt-6-luna']) {
-    it(`declares ${id} in MANUAL_ENTRIES with the committed snapshot rates (first four tuple fields)`, () => {
+  // Drive the guard off every parsed MANUAL_ENTRIES key so a hand-added rate
+  // (kimi-k2-thinking, claude-opus-4-20250514, grok-latest, …) cannot skip the
+  // reproducibility check. Compare the full tuple, including optional `fast`.
+  for (const id of manual.keys()) {
+    it(`declares ${id} in MANUAL_ENTRIES with the committed snapshot rates`, () => {
       const declared = manual.get(id)
       expect(declared).toBeDefined()
       const committed = snap[id]
       expect(committed).toBeDefined()
-      for (let i = 0; i < 4; i++) {
-        const expected = committed![i]
-        const actual = declared![i]
+      const len = Math.max(declared!.length, committed!.length)
+      for (let i = 0; i < len; i++) {
+        const expected = committed![i] ?? null
+        const actual = declared![i] ?? null
         if (expected === null) {
-          expect(actual, `${id}[${i}] must stay null (absent cache-write), not 0`).toBeNull()
+          expect(actual, `${id}[${i}] must stay null (absent field), not 0`).toBeNull()
         } else {
           expect(actual).toBeCloseTo(expected, 13)
         }
