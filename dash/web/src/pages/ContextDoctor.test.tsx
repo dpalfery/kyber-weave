@@ -4,7 +4,7 @@
 // renderToStaticMarkup needs no DOM). dash/vitest.config.ts is left untouched.
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { render, screen, fireEvent, cleanup, within } from '@testing-library/react'
+import { render as renderDom, screen, fireEvent, cleanup, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type * as React from 'react'
 
@@ -746,14 +746,10 @@ describe('ContextDoctor filter change — rendered (must-fix-1)', () => {
 
   function renderDoctor(initial: FindingsPage): void {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
-    const out = render(
+    renderDom(
       <QueryClientProvider client={client}>
         <ContextDoctor initialHarnesses={harnessRows} initialFindings={initial} />
       </QueryClientProvider>,
-    )
-    // eslint-disable-next-line no-console
-    console.log(
-      `RENDER container=${out.container.innerHTML.length} sameDoc=${out.container.ownerDocument === document} attached=${document.body.contains(out.container)} base=${out.baseElement === document.body}`,
     )
   }
 
@@ -784,8 +780,6 @@ describe('ContextDoctor filter change — rendered (must-fix-1)', () => {
       release: () => gate,
     })
     renderDoctor(initial)
-    // eslint-disable-next-line no-console
-    console.log(`PROBE body=${document.body.innerHTML.length} act=${(globalThis as unknown as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT} doc=${typeof document}`)
 
     // (a) Page 1 for filter A renders (synchronously, from initialFindings).
     expect(browser().getByTestId('finding-card-a-1')).not.toBeNull()
