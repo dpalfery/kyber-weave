@@ -548,8 +548,10 @@ with byte-identical counters collapse per ADR 0009 source precedence (OTLP count
 summed across sources for the same turn) instead of double-counting one conversation.
 Same-turn observations whose counters differ are left alone (follow-up #231).
 
-Findings are materialized in `canon.db` at session/run build time with a `detector_version` schema
-stamp (Decision D17), forcing automatic recomputation whenever detectors are updated.
+Findings are materialized in `canon.db` at session/run build time with an informational
+`detector_version` stamp (Decision D17) identifying which detector semantics produced them; every rebuild
+is authoritative, rewrites its derived rows, and prunes rows no longer emitted. The stamp is a witness for
+tooling and operators, not a trigger: it does not itself force recomputation.
 
 ### Run Comparison and Phase Alignment (Decision D11)
 

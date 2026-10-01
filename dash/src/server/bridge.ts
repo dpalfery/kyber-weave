@@ -2200,6 +2200,16 @@ export class KyberBridge {
   }
 
   /**
+   * Whether the stored rollups cover every harness the store actually holds.
+   * Both sides are canonical names, so `cursor-agent`'s rollup covers a session
+   * row stamped `cursor-agent`.
+   */
+  private hasRollupForEveryStoredHarness(rollups: readonly HarnessRollupRow[]): boolean {
+    const built = new Set(rollups.map((rollup) => normalizeHarnessName(rollup.harness)))
+    return this.store!.listHarnesses().every((harness) => built.has(harness))
+  }
+
+  /**
    * Sessions whose context window no source reported, scoped the way the
    * findings are: the selected run's sessions, the selected session, or the
    * harness/workspace scope (issue #191, condition 3). An unscoped count on
@@ -2220,7 +2230,7 @@ export class KyberBridge {
           this.listExecutions(runId)
             .filter(
               (execution) =>
-                harness === undefined || harness === '' || execution.harness.toLowerCase() === harness.toLowerCase(),
+                harness === undefined || harness === '' || normalizeHarnessName(execution.harness) === normalizeHarnessName(harness),
             )
             .map((execution) => execution.sessionId ?? execution.executionId)
             .filter((id) => id.length > 0),
@@ -2243,7 +2253,14 @@ export class KyberBridge {
         if (typeof count === 'number') return count
       } else {
         const rollups = this.store.listHarnessRollups()
-        if (rollups.length > 0) {
+        // The sum is only the workspace total when every harness the session
+        // table actually holds has a rollup row. `buildHarnessRollup` accepts a
+        // single harness, so a store can hold cursor sessions alongside claude
+        // sessions with one rollup between them; summing that would report
+        // cursor's count as the whole workspace. Anything short of full
+        // coverage falls back to the scan, which is the honest answer.
+        const covered = rollups.length > 0 && this.hasRollupForEveryStoredHarness(rollups)
+        if (covered) {
           return rollups.reduce((sum, rollup) => {
             const count = (rollup.payload as { unknownWindowSessions?: unknown } | undefined)?.unknownWindowSessions
             return sum + (typeof count === 'number' ? count : 0)

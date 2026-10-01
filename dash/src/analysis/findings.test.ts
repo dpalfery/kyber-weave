@@ -2029,3 +2029,75 @@ describe('Server Bridge & API Route: /api/kyber/findings', () => {
     store.close()
   })
 })
+
+describe('unknown-window coverage guard (issue #191, review round 2)', () => {
+  const session = (store: CanonStore, id: string, harness: string, source: string) =>
+    store.upsertSession({
+      sessionId: id,
+      harness,
+      payload: { context: { measurable: true, contextLimit: 200_000, contextLimitSource: source, turns: [] } },
+    })
+
+  it('does not report one harness rollup as the whole-workspace total', () => {
+    // `buildHarnessRollup` takes a single harness, so a store can hold cursor
+    // and claude sessions with only a cursor rollup between them. Summing the
+    // rollups would answer "2" — cursor's count — for the entire workspace.
+    const path = tempStorePath()
+    const store = new CanonStore(path)
+    session(store, 's-cursor-1', 'cursor', 'default')
+    session(store, 's-cursor-2', 'cursor', 'default')
+    session(store, 's-claude-1', 'claude-code', 'default')
+    buildHarnessRollup(store, 'cursor')
+    const bridge = new KyberBridge({ canonPath: path, store })
+
+    // The workspace total is 3, not cursor's 2.
+    expect(bridge.listFindingsPage({}).unknownWindowSessions).toBe(3)
+
+    bridge.close()
+    store.close()
+  })
+
+  it('still reads the rollups when they do cover every stored harness', () => {
+    const path = tempStorePath()
+    const store = new CanonStore(path)
+    session(store, 's-cursor-1', 'cursor', 'default')
+    session(store, 's-claude-1', 'claude-code', 'default')
+    buildHarnessRollup(store)
+    const bridge = new KyberBridge({ canonPath: path, store })
+
+    expect(bridge.listFindingsPage({}).unknownWindowSessions).toBe(2)
+
+    bridge.close()
+    store.close()
+  })
+
+  it('counts a legacy run-scoped harness name under its folded owner', () => {
+    const path = tempStorePath()
+    const store = new CanonStore(path)
+    session(store, 's-cursor-1', 'cursor-agent', 'default')
+    store.upsertRun({
+      runId: 'run-legacy',
+      harness: 'cursor-agent',
+      groupingBasis: 'derived',
+      groupingRule: 'session_fallback',
+      executionCount: 1,
+    })
+    store.upsertExecution({
+      executionId: 'exec-legacy',
+      runId: 'run-legacy',
+      sessionId: 's-cursor-1',
+      harness: 'cursor-agent',
+      isRoot: true,
+      parentLinkage: 'measured',
+    })
+    const bridge = new KyberBridge({ canonPath: path, store })
+
+    // `cursor-agent` is `cursor` at the derived layer: the run scope must not
+    // silently answer 0 for the legacy name.
+    expect(bridge.listFindingsPage({ runId: 'run-legacy', harness: 'cursor-agent' }).unknownWindowSessions).toBe(1)
+    expect(bridge.listFindingsPage({ runId: 'run-legacy', harness: 'cursor' }).unknownWindowSessions).toBe(1)
+
+    bridge.close()
+    store.close()
+  })
+})

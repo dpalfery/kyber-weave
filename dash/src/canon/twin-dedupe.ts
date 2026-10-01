@@ -20,11 +20,22 @@ import type { CanonicalRecord } from './types.js'
 // rows, two file rows) could be genuine retries and are always kept — dropping telemetry the rule cannot prove
 // duplicated would trade a known over-count for a silent under-count.
 //
+// Matching needs to identify a turn, not merely a counter vector. `counterKey`
+// therefore carries the session key, because both collectors report the twin
+// of one turn under the same session (live evidence: "one session key"), and
+// without it two unrelated sessions whose counters happen to agree — and whose
+// records share a build share because they share a canonical harness — would
+// be merged into one turn. Content is deliberately *not* part of the key: the
+// whole point of the pairing is that the OTel row has no content and the file
+// row does, so a content fingerprint would separate exactly the rows the rule
+// exists to join.
+//
 // Matching is exact-counter only: same-turn observations whose counters
 // differ (e.g. the cursor twin's overlapping output figures, issue #231) are
-// left alone, as are turns that reported no usage at all (their shared
-// all-zero key identifies nothing). The canonical architecture states this
-// boundary where the contract is described.
+// left alone, as are turns that reported no usage at all — every such turn
+// stamps the same all-zero key, which identifies nothing, so those rows are
+// never bucketed for matching in the first place. The canonical architecture
+// states this boundary where the contract is described.
 
 /**
  * Maximum timestamp gap for two rows to be the same turn observed twice.
@@ -32,13 +43,20 @@ import type { CanonicalRecord } from './types.js'
  * 60 s bounds the risk of merging genuinely repeated identical turns while
  * tolerating that skew. Named, not inlined, so a wrong merge window is
  * traceable to one assumption instead of looking like a measurement.
+ *
+ * The gap bounds a cluster's total span as well as each step between
+ * neighbours. Bounding only the step would be single-linkage chaining: rows
+ * 50 s apart form an unbounded run that a session re-reporting identical
+ * counters every 50 s would collapse into one turn.
  */
 export const TWIN_TURN_MAX_SKEW_MS = 60_000
 
 type CounterKey = string
 
-function counterKey(tokens: CanonicalRecord['tokens']): CounterKey {
+function counterKey(record: CanonicalRecord): CounterKey {
+  const { tokens } = record
   return [
+    record.sessionId ?? '',
     tokens.freshInput,
     tokens.cacheRead,
     tokens.cacheCreation,
@@ -83,9 +101,14 @@ export function dedupeTwinTurns(records: readonly CanonicalRecord[]): CanonicalR
   const byCounter = new Map<CounterKey, CanonicalRecord[]>()
   for (const record of records) {
     if (record.op !== 'llm.invoke') continue
-    const list = byCounter.get(counterKey(record.tokens)) ?? []
+    // An all-zero row shares one key with every other all-zero row in the
+    // share, which identifies nothing. Excluding them here means they are never
+    // clustered at all, rather than relying on a later guard to un-merge them.
+    if (isUnreportedCounters(record.tokens)) continue
+    const key = counterKey(record)
+    const list = byCounter.get(key) ?? []
     list.push(record)
-    byCounter.set(counterKey(record.tokens), list)
+    byCounter.set(key, list)
   }
 
   const dropped = new Set<CanonicalRecord>()
@@ -98,10 +121,14 @@ export function dedupeTwinTurns(records: readonly CanonicalRecord[]): CanonicalR
       cluster = []
     }
     for (const record of ordered) {
+      // Close on either bound: the gap to the neighbour, and the span from the
+      // cluster's first row. The second is what stops adjacent pairs from
+      // chaining into an arbitrarily long run.
       const previous = cluster[cluster.length - 1]
-      if (previous !== undefined && Math.abs(timestampMs(record) - timestampMs(previous)) > TWIN_TURN_MAX_SKEW_MS) {
-        closeCluster()
-      }
+      const first = cluster[0]
+      const exceedsStep = previous !== undefined && Math.abs(timestampMs(record) - timestampMs(previous)) > TWIN_TURN_MAX_SKEW_MS
+      const exceedsSpan = first !== undefined && timestampMs(record) - timestampMs(first) > TWIN_TURN_MAX_SKEW_MS
+      if (exceedsStep || exceedsSpan) closeCluster()
       cluster.push(record)
     }
     closeCluster()
@@ -126,8 +153,15 @@ export function dedupeTwinTurns(records: readonly CanonicalRecord[]): CanonicalR
 /**
  * Collapse one proximity cluster: when it holds both source kinds, every
  * file row is the same turn observed twice and drops; content transplants
- * one-to-one onto the nearest content-less OTel rows so no turn's file
- * content is silently discarded with a sibling's duplicate.
+ * onto the nearest content-less OTel rows so no turn's file content is
+ * silently discarded with a sibling's duplicate.
+ *
+ * Issue #232 reports file rows arriving 2x per turn, so donors can outnumber
+ * the rows that receive them. Those surplus rows are not provably duplicates of
+ * anything — they carry content — so their content is merged into the keeper
+ * nearest in time rather than dropped with the row. Dropping the row itself is
+ * still correct and is what keeps the counters counted once: precedence gives
+ * counters to the OTel row, so a retained file row would count them twice.
  */
 function collapseCluster(
   cluster: readonly CanonicalRecord[],
@@ -135,16 +169,39 @@ function collapseCluster(
   transplant: Map<CanonicalRecord, CanonicalRecord>,
 ): void {
   if (cluster.length === 0) return
-  // Zero-counter rows share one key by construction (`0:0:0:0:0:0`) across
-  // unrelated turns: with nothing to match on, the whole cluster is kept.
-  if (cluster.every((record) => isUnreportedCounters(record.tokens))) return
   const otels = cluster.filter((record) => !isFileSource(record.source))
   const files = cluster.filter((record) => isFileSource(record.source))
   if (otels.length === 0 || files.length === 0) return
   for (const file of files) dropped.add(file)
   const needy = otels.filter((otel) => !hasParts(otel))
   const donors = files.filter((file) => hasParts(file))
-  for (let i = 0; i < Math.min(needy.length, donors.length); i++) {
+  const paired = Math.min(needy.length, donors.length)
+  for (let i = 0; i < paired; i++) {
     transplant.set(needy[i]!, donors[i]!)
+  }
+  // Surplus donors have no row of their own to land on. Attach each to the
+  // nearest already-paired keeper rather than discarding its content.
+  for (let i = paired; i < donors.length; i++) {
+    const donor = donors[i]!
+    if (needy.length === 0) break
+    let nearest = needy[0]!
+    for (const candidate of needy) {
+      if (Math.abs(timestampMs(candidate) - timestampMs(donor)) < Math.abs(timestampMs(nearest) - timestampMs(donor))) {
+        nearest = candidate
+      }
+    }
+    const existing = transplant.get(nearest)
+    transplant.set(nearest, existing === undefined ? donor : mergeDonors(existing, donor))
+  }
+}
+
+/** Two file rows of one turn, fused into the single donor the keeper receives. */
+function mergeDonors(first: CanonicalRecord, second: CanonicalRecord): CanonicalRecord {
+  const firstParts = first.parts ?? []
+  const secondParts = second.parts ?? []
+  return {
+    ...first,
+    parts: [...firstParts, ...secondParts],
+    content: { ...second.content, ...first.content },
   }
 }

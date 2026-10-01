@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
-import { ContextDoctor } from './ContextDoctor.js'
+import { ContextDoctor, browserRows, nextAccumulated } from './ContextDoctor.js'
 import type { FindingsPage, KyberFinding, KyberHarnessSummary } from '../lib/kyberApi.js'
 
 function finding(id: string, detectorId: string, harness: string): KyberFinding {
@@ -82,5 +82,78 @@ describe('ContextDoctor findings browser (issue #191)', () => {
   it('keeps the ranked top-5 headline card', () => {
     const html = render()
     expect(html).toContain('Highest-Leverage Workspace Findings')
+  })
+})
+
+describe('browserRows — paging accumulates instead of replacing (issue #191)', () => {
+  const scope = '|'
+  const other = 'duplicate-tool-call|'
+  const rows = (prefix: string, n: number) =>
+    Array.from({ length: n }, (_, i) => finding(`${prefix}-${i + 1}`, 'duplicate-tool-call', 'cursor'))
+
+  it('renders page one before the effect has stored it (static render)', () => {
+    // Only the first page exists at this point; nothing has been accumulated.
+    expect(browserRows([], scope, 0, rows('p0', 25)).map((r) => r.id)).toEqual(
+      rows('p0', 25).map((r) => r.id),
+    )
+  })
+
+  it('extends the list with page two rather than replacing page one', () => {
+    const stored = [
+      { scope, offset: 0, rows: rows('p0', 25) },
+      { scope, offset: 25, rows: rows('p1', 25) },
+    ]
+    const ids = browserRows(stored, scope, 25, undefined).map((r) => r.id)
+    expect(ids).toHaveLength(50)
+    expect(ids).toContain('p0-1')
+    expect(ids).toContain('p1-25')
+  })
+
+  it('orders pages by offset regardless of arrival order', () => {
+    const stored = [
+      { scope, offset: 50, rows: rows('p2', 25) },
+      { scope, offset: 0, rows: rows('p0', 25) },
+      { scope, offset: 25, rows: rows('p1', 25) },
+    ]
+    const ids = browserRows(stored, scope, 50, undefined).map((r) => r.id)
+    expect(ids[0]).toBe('p0-1')
+    expect(ids[25]).toBe('p1-1')
+    expect(ids[50]).toBe('p2-1')
+  })
+
+  it('never re-appends a page fetched under a previous filter scope', () => {
+    const stored = [
+      { scope: other, offset: 0, rows: rows('narrowed', 25) },
+      { scope, offset: 0, rows: rows('p0', 25) },
+    ]
+    const ids = browserRows(stored, scope, 0, undefined).map((r) => r.id)
+    expect(ids).toHaveLength(25)
+    expect(ids.some((id) => id.startsWith('narrowed'))).toBe(false)
+  })
+})
+
+describe("nextAccumulated — the first page must be stored (issue #191)", () => {
+  const scope = "|"
+  const rows = (prefix: string) => [finding(prefix, "duplicate-tool-call", "cursor")]
+
+  it("stores page zero instead of skipping it", () => {
+    // Skipping offset 0 is what made Load more replace the list: page one was
+    // never in the accumulated list, so there was nothing to extend.
+    expect(nextAccumulated([], scope, 0, rows("p0"))).toHaveLength(1)
+  })
+
+  it("is a no-op when the same page arrives again", () => {
+    const once = nextAccumulated([], scope, 0, rows("p0"))
+    expect(nextAccumulated(once, scope, 0, rows("p0"))).toHaveLength(1)
+  })
+
+  it("stores the same offset under a different scope", () => {
+    const once = nextAccumulated([], scope, 0, rows("p0"))
+    expect(nextAccumulated(once, "duplicate-tool-call|", 0, rows("p1"))).toHaveLength(2)
+  })
+
+  it("accumulates page two alongside page one", () => {
+    const both = nextAccumulated(nextAccumulated([], scope, 0, rows("p0")), scope, 25, rows("p1"))
+    expect(both.map((p) => p.offset)).toEqual([0, 25])
   })
 })
