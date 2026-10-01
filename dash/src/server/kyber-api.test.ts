@@ -926,6 +926,25 @@ describe('Backend Contract Tests: /api/kyber/* Endpoints', () => {
   })
 
   describe('GET /api/kyber/harnesses carries coverage facts (T8)', () => {
+    const checkpoint = (harnessId: string, sourceKey: string, lastStatus: 'ok' | 'partial' | 'failed') => ({
+      harnessId,
+      sourceKey,
+      providerId: harnessId,
+      parserId: `${harnessId}-parser`,
+      parserContractVersion: '1',
+      format: 'jsonl',
+      sourceRootLabel: `~/${harnessId}`,
+      revisionToken: `rev:${sourceKey}`,
+      coveredFromUtc: '2026-09-16T00:00:00.000Z',
+      coveredThroughUtc: '2026-09-30T00:00:00.000Z',
+      lastAttemptUtc: '2026-09-30T00:00:00.000Z',
+      lastSuccessUtc: '2026-09-30T00:00:01.000Z',
+      lastStatus,
+      lastErrorCode: null,
+      unitCount: 1,
+      recordCount: lastStatus === 'partial' ? 0 : 1,
+    })
+
     it('rows include family, verbatim noDataReason, and per-harness checkpoint counts', async () => {
       const store = new CanonStore(':memory:')
       // Issue #182 fold: no claude-desktop rollup row exists anymore, but
@@ -973,24 +992,6 @@ describe('Backend Contract Tests: /api/kyber/* Endpoints', () => {
         fieldCoverage: 0.9,
         measurability: {},
         payload: { sessionCount: 2, runCount: 1, executionCount: 2 },
-      })
-      const checkpoint = (harnessId: string, sourceKey: string, lastStatus: 'ok' | 'partial' | 'failed') => ({
-        harnessId,
-        sourceKey,
-        providerId: harnessId,
-        parserId: `${harnessId}-parser`,
-        parserContractVersion: '1',
-        format: 'jsonl',
-        sourceRootLabel: `~/${harnessId}`,
-        revisionToken: `rev:${sourceKey}`,
-        coveredFromUtc: '2026-09-16T00:00:00.000Z',
-        coveredThroughUtc: '2026-09-30T00:00:00.000Z',
-        lastAttemptUtc: '2026-09-30T00:00:00.000Z',
-        lastSuccessUtc: '2026-09-30T00:00:01.000Z',
-        lastStatus,
-        lastErrorCode: null,
-        unitCount: 1,
-        recordCount: lastStatus === 'partial' ? 0 : 1,
       })
       // A partial unit with 0 records must stay visible as partial-with-0,
       // never collapse into an invented aggregate or a bare zero.
@@ -1043,6 +1044,91 @@ describe('Backend Contract Tests: /api/kyber/* Endpoints', () => {
       } finally {
         await new Promise<void>((resolve) => t8Server.close(() => resolve()))
         t8Bridge.close()
+        store.close()
+      }
+    })
+
+    it('joins checkpoints onto a legacy rollup row by canonical harness (unrebuilt store)', async () => {
+      // An upgraded store is not a rebuilt one: `harness_rollup` rows written
+      // before the display fold (issue #182) keep their raw front-end id until
+      // an operator runs `kyber build`, while checkpoints are recorded under
+      // that same raw id. The join must be canonical on both sides or the row
+      // reports a measured zero over coverage it actually has.
+      const store = new CanonStore(':memory:')
+      store.upsertHarnessRollup({
+        harness: 'cursor-agent',
+        sampleCount: 1,
+        contextPressureMedian: null,
+        contextPressureP95: null,
+        cacheHitRate: null,
+        toolYield: null,
+        delegationOverhead: null,
+        fieldCoverage: null,
+        measurability: {},
+        payload: { sessionCount: 1, runCount: 1, executionCount: 1 },
+      })
+      store.commitSourceUnit({ records: [], provenance: [], checkpoint: checkpoint('cursor-agent', 's:1', 'ok') })
+      store.commitSourceUnit({ records: [], provenance: [], checkpoint: checkpoint('cursor-agent', 's:2', 'partial') })
+      const legacyBridge = new KyberBridge({ canonPath: ':memory:', store })
+      const legacyServer = await runWebDashboard({ port: 0, open: false, kyberBridge: legacyBridge, writeStdout: () => {} })
+
+      try {
+        const legacyBase = `http://127.0.0.1:${(legacyServer.address() as AddressInfo).port}`
+        const res = await fetch(`${legacyBase}/api/kyber/harnesses`)
+        expect(res.status).toBe(200)
+        assertStandardKyberHeaders(res)
+
+        const body = (await res.json()) as { harnesses: Array<Record<string, unknown>> }
+        const byId = new Map(body.harnesses.map((row) => [row.harness, row]))
+        expect(byId.get('cursor-agent')?.checkpointSummary).toEqual({ ok: 1, partial: 1, failed: 0, unavailable: 0 })
+
+        // The detail route already normalises both sides, so the two routes
+        // must agree on the same row (R11.14).
+        const detail = await fetch(`${legacyBase}/api/kyber/harness/cursor-agent`)
+        expect(detail.status).toBe(200)
+        const detailBody = (await detail.json()) as { checkpointSummary: unknown }
+        expect(detailBody.checkpointSummary).toEqual({ ok: 1, partial: 1, failed: 0, unavailable: 0 })
+      } finally {
+        await new Promise<void>((resolve) => legacyServer.close(() => resolve()))
+        legacyBridge.close()
+        store.close()
+      }
+    })
+
+    it('keeps a harness with no checkpoint units a measured zero, not null', async () => {
+      // The measured-zero half of the same seam (plan D3): a readable
+      // `source_checkpoint` table that holds no units for this harness is an
+      // observed zero. `null` is reserved for an unreadable table, so the two
+      // stay distinguishable — widening the miss to `null` would fabricate a
+      // permanent unknown over a fact we measured.
+      const store = new CanonStore(':memory:')
+      store.upsertHarnessRollup({
+        harness: 'no-units',
+        sampleCount: 1,
+        contextPressureMedian: null,
+        contextPressureP95: null,
+        cacheHitRate: null,
+        toolYield: null,
+        delegationOverhead: null,
+        fieldCoverage: null,
+        measurability: {},
+        payload: { sessionCount: 1, runCount: 1, executionCount: 1 },
+      })
+      const zeroBridge = new KyberBridge({ canonPath: ':memory:', store })
+      const zeroServer = await runWebDashboard({ port: 0, open: false, kyberBridge: zeroBridge, writeStdout: () => {} })
+
+      try {
+        const zeroBase = `http://127.0.0.1:${(zeroServer.address() as AddressInfo).port}`
+        const res = await fetch(`${zeroBase}/api/kyber/harnesses`)
+        expect(res.status).toBe(200)
+
+        const body = (await res.json()) as { harnesses: Array<Record<string, unknown>> }
+        const byId = new Map(body.harnesses.map((row) => [row.harness, row]))
+        expect(byId.get('no-units')?.checkpointSummary).toEqual({ ok: 0, partial: 0, failed: 0, unavailable: 0 })
+        expect(byId.get('no-units')?.checkpointSummary).not.toBeNull()
+      } finally {
+        await new Promise<void>((resolve) => zeroServer.close(() => resolve()))
+        zeroBridge.close()
         store.close()
       }
     })

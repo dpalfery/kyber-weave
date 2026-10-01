@@ -720,7 +720,13 @@ export function handleKyberRequest(
       checkpointSummary:
         checkpointsByHarness === null
           ? null
-          : checkpointSummaryOf(checkpointsByHarness.get(row.harness) ?? []),
+          // The join is canonical on both sides. The map is keyed by
+          // `normalizeHarnessName` and a rollup row written before the fold
+          // (issue #182) still carries its raw front-end id until an operator
+          // rebuilds derived tables, so the lookup key is normalised too. A
+          // miss after that is a measured zero, not an unknown: the read
+          // succeeded and this harness recorded no units (D3).
+          : checkpointSummaryOf(checkpointsByHarness.get(normalizeHarnessName(row.harness)) ?? []),
       scorecard: buildScorecard(row),
     }))
     sendKyberJson(res, 200, { harnesses })
