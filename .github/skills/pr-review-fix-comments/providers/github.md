@@ -45,7 +45,7 @@ If required data cannot be obtained from the named tool, state exactly what is m
 | `resolved` | thread `isResolved` true. An `outdated` thread is not resolved: the diff lines moved, which does not show the concern was addressed, so it is classified by the rows below |
 | `unanswered` | thread not resolved and no reply from us |
 | `needs review` | thread not resolved and a comment from someone else landed after our last reply that is not a bare acknowledgement (`LGTM`, `thanks`, `looks good`, `approved`); a bare acknowledgement is terminal and classifies as `responded` |
-| `responded` | thread not resolved and our reply is the most recent comment |
+| `responded` | thread not resolved, we have replied, and either our reply is the most recent comment or every later comment from someone else is a bare acknowledgement |
 | `unknown` | cannot be determined from metadata |
 
 Evaluate rows in the order `automated/system`, `resolved`, `unanswered`, `needs review`, `responded`, `unknown`;
