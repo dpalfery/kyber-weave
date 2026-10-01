@@ -564,15 +564,27 @@ describe('dedupeTwinTurns merged content (review)', () => {
 // bound the code no longer applies — a stale guarantee here is what a future
 // reader would size their reasoning off.
 describe('TWIN_TURN_MAX_SKEW_MS docblock states the bound that exists', () => {
-  // Docblock prefixes are stripped first: the claim spans ` * ` continuations, so
-  // a raw match on the source text misses it and the guard would pass on exactly
-  // the wording it exists to reject.
-  const source = readFileSync(new URL('./twin-dedupe.ts', import.meta.url), 'utf8')
+  // Sliced to the constant's own docblock, not the whole module: a `total span`
+  // elsewhere in the file would otherwise satisfy the positive half on wording
+  // this docblock never carried. The slice starts at the nearest `/**` before
+  // the declaration, so the preceding declaration's docblock stays out.
+  const moduleText = readFileSync(new URL('./twin-dedupe.ts', import.meta.url), 'utf8')
+  const marker = moduleText.indexOf('export const TWIN_TURN_MAX_SKEW_MS')
+  const docblockStart = moduleText.lastIndexOf('/**', marker)
+  // Docblock prefixes are stripped after slicing: the claim spans ` * `
+  // continuations, so a raw match misses it and the guard would pass on exactly
+  // the wording it exists to reject. That stripping is an extension of the
+  // source-as-text guard in pricing/data/pricing-fallback-data.test.ts, which
+  // reads a file as text but not through a docblock prefix.
+  const docblock = moduleText
+    .slice(docblockStart, moduleText.lastIndexOf('*/', marker))
     .replace(/\n\s*\*/g, ' ')
     .replace(/\s+/g, ' ')
 
   it('bounds a cluster by total span and never claims a per-step bound', () => {
-    expect(source).toMatch(/total span/)
-    expect(source).not.toMatch(/step between neighbours/)
+    expect(docblock).toMatch(/total span/)
+    // Broadened from the one retired phrasing: any per-step claim is the defect,
+    // whatever words it is phrased in.
+    expect(docblock).not.toMatch(/each step between/)
   })
 })

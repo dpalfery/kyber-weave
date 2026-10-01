@@ -1124,8 +1124,12 @@ describe('Backend Contract Tests: /api/kyber/* Endpoints', () => {
 
         const body = (await res.json()) as { harnesses: Array<Record<string, unknown>> }
         const byId = new Map(body.harnesses.map((row) => [row.harness, row]))
-        expect(byId.get('no-units')?.checkpointSummary).toEqual({ ok: 0, partial: 0, failed: 0, unavailable: 0 })
-        expect(byId.get('no-units')?.checkpointSummary).not.toBeNull()
+        // Not-null first, then the value: the claim is that an empty table is a
+        // zero and not the `null` an unreadable one produces, so the exclusion
+        // has to be stated before the shape that would otherwise imply it.
+        const summary = byId.get('no-units')?.checkpointSummary
+        expect(summary).not.toBeNull()
+        expect(summary).toEqual({ ok: 0, partial: 0, failed: 0, unavailable: 0 })
       } finally {
         await new Promise<void>((resolve) => zeroServer.close(() => resolve()))
         zeroBridge.close()
