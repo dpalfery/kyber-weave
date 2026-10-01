@@ -325,9 +325,10 @@ to the credits table.
   `dash/scripts/bundle-litellm.mjs` (guarded by a test), so a regeneration reproduces them. The
   bundler writes both generated snapshots to `dash/src/pricing/data/`, which is what
   `dash/src/pricing/models.ts` imports. `npm --prefix dash run build` runs that networked refresh
-  first; `build:cli` and Node SEA packaging embed the committed files without re-snapshotting.
-  `npm publish` is not hermetic: `prepublishOnly` runs full `build` (bundler included). See the
-  [runbook](runbook.md#build-workflow). The gap-fill file (`pricing-fallback.json`) shrank from
+  first; `build:cli`, Node SEA packaging, and `npm publish` (`prepublishOnly` → `build:cli`)
+  embed the committed files without re-snapshotting. Networked refresh is the explicit
+  `npm run bundle-litellm` only. See the [runbook](runbook.md#build-workflow). The gap-fill
+  file (`pricing-fallback.json`) shrank from
   ~205 to 52 keys after the 2026-10-01 primary refresh absorbed most former fallback rows; it
   remains a last-resort backstop, not a broad catalog.
 

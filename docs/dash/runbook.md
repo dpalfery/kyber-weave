@@ -98,12 +98,11 @@ KyberDash splits **compiled output** from **pricing data refresh**:
 | `npm --prefix dash run build:web` | No | Web dashboard static assets |
 | `npm --prefix dash run bundle-litellm` | Yes — networked refresh only | Updated committed pricing JSON (commit the diff) |
 
-Node SEA packaging (`tsup` via `release-local.sh`) embeds the committed files under
-`dash/src/pricing/data/` and does not call the bundler. `npm publish` is different:
-`prepublishOnly` runs full `npm run build`, which re-snapshots from the network before
-packing. Refresh pricing deliberately with `npm --prefix dash run build` (or
-`npm --prefix dash run bundle-litellm`) and commit the diff before a SEA release when
-upstream list prices have moved.
+Node SEA packaging (`tsup` via `release-local.sh`) and `npm publish` both embed the
+committed files under `dash/src/pricing/data/` without re-snapshotting:
+`prepublishOnly` runs `build:cli` only. Networked pricing refresh is the explicit
+`npm --prefix dash run bundle-litellm` step (or full `npm --prefix dash run build`);
+commit the resulting JSON diff before a release when upstream list prices have moved.
 
 ---
 
