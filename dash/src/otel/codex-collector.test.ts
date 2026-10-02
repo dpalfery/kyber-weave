@@ -11,16 +11,13 @@ import type { OtlpSpan } from './receiver.js'
  *
  * Per D2 decision: verify both file-source and collector paths.
  *
- * Every test here CHARACTERISES current behaviour and passes today: no Codex
- * adapter is registered in ADAPTERS (dash/src/canon/ingest.ts, the `ADAPTERS`
- * array), so a Codex model span claims no adapter and is quarantined with reason
- * 'unclaimed'. These are not RED tests.
+ * T4 (D3 = A) registered `codexAdapter`. A span with the Codex fingerprint
+ * (`codex.*` namespace plus GenAI usage) is accepted as harness `codex`; a span
+ * carrying only the shared GenAI usage keys still claims no adapter and is
+ * quarantined as 'unclaimed' (R6.1), whatever its service.name says (R6.2).
  *
- * No intentional-RED contract test is added: nothing in docs/dash or the
- * adapter specs states that Codex CLI emits OTLP or that a Codex OTLP model span
- * must be accepted (the telemetry inventory documents Codex via rollout files
- * only). Whether Codex spans SHOULD be accepted is therefore an owner decision
- * (plan D2 / T4), not a contract this file can assert.
+ * Fixture attributes are SOURCE-VERIFIED names from the plan; the span name and
+ * the token convention are UNVERIFIED pending an owner capture.
  */
 
 function createCodexOtlpSpan(overrides?: Partial<OtlpSpan>): OtlpSpan {
@@ -37,7 +34,7 @@ function createCodexOtlpSpan(overrides?: Partial<OtlpSpan>): OtlpSpan {
     timestamp: new Date(now).toISOString(),
     durationMs: 100,
     status: { code: 'ok' },
-    resource: { 'service.name': 'codex-cli' },
+    resource: { 'service.name': 'codex_cli_rs' },
     scope: {},
     attributes: {
       'gen_ai.model.name': 'gpt-5.3-codex',
@@ -49,7 +46,32 @@ function createCodexOtlpSpan(overrides?: Partial<OtlpSpan>): OtlpSpan {
 }
 
 describe('codex collector — OTLP ingest (T1 diagnostic)', () => {
-  it('characterisation: codex-cli model span is quarantined as unclaimed (no Codex adapter registered)', () => {
+  it('a span with the Codex fingerprint is accepted as harness codex, keyed by conversation.id', () => {
+    const store = new CanonStore(':memory:')
+    const span = createCodexOtlpSpan({
+      spanId: 'span-codex-full',
+      resource: { 'service.name': 'codex-app-server' },
+      attributes: {
+        model: 'gpt-5.3-codex',
+        'conversation.id': 'conv-42',
+        'gen_ai.usage.input_tokens': 1000,
+        'gen_ai.usage.output_tokens': 200,
+        'gen_ai.usage.cache_read.input_tokens': 400,
+        'codex.usage.total_tokens': 1200,
+      },
+    })
+
+    const outcome = ingestBatch([span], store)
+
+    expect(outcome.accepted).toBe(1)
+    expect(outcome.quarantined).toBe(0)
+    const record = store.get('span-codex-full')
+    expect(record?.harness).toBe('codex')
+    expect(record?.sessionId).toBe('conv-42')
+    store.close()
+  })
+
+  it('shared-usage-only span from codex_cli_rs is quarantined as unclaimed (service.name is not evidence)', () => {
     // Current behaviour: Codex has no adapter in the ingest.ts ADAPTERS registry,
     // so the span is quarantined with reason 'unclaimed'.
     const store = new CanonStore(':memory:')
@@ -67,12 +89,12 @@ describe('codex collector — OTLP ingest (T1 diagnostic)', () => {
     store.close()
   })
 
-  it('service.name codex also produces unclaimed quarantine', () => {
+  it('service.name codex_exec with shared-usage-only attributes is also unclaimed', () => {
     // Variant: some configs may emit service.name='codex' instead of 'codex-cli'
     const store = new CanonStore(':memory:')
     const span = createCodexOtlpSpan({
       spanId: 'span-codex-variant',
-      resource: { 'service.name': 'codex' },
+      resource: { 'service.name': 'codex_exec' },
     })
 
     const outcome = ingestBatch([span], store)
