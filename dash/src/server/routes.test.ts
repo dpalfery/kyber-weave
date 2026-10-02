@@ -161,11 +161,23 @@ describe('routes pagination', () => {
       expect(items.some((i) => i.span_id === 'quar-1')).toBe(false)
     })
 
-    it('parses direct offset and limit query parameters if provided', () => {
+    it('parses direct offset and limit query parameters if provided and computes page', () => {
       const bridge = createMockBridge()
       const { body } = call('/api/kyber/quarantine?offset=2&limit=1', bridge)
 
       expect(bridge.getQuarantine).toHaveBeenCalledWith(1, 2)
+      expect(body.page).toBe(3)
+      const items = (body.data ?? body.entries) as QuarantineRow[]
+      expect(items).toHaveLength(1)
+      expect(items[0].span_id).toBe('quar-3')
+    })
+
+    it('computes page from offset even when conflicting page parameter is provided', () => {
+      const bridge = createMockBridge()
+      const { body } = call('/api/kyber/quarantine?offset=2&limit=1&page=1', bridge)
+
+      expect(bridge.getQuarantine).toHaveBeenCalledWith(1, 2)
+      expect(body.page).toBe(3)
       const items = (body.data ?? body.entries) as QuarantineRow[]
       expect(items).toHaveLength(1)
       expect(items[0].span_id).toBe('quar-3')
@@ -215,11 +227,23 @@ describe('routes pagination', () => {
       expect(items.some((i) => i.span_id === 'prob-1')).toBe(false)
     })
 
-    it('parses direct offset and limit query parameters if provided', () => {
+    it('parses direct offset and limit query parameters if provided and computes page', () => {
       const bridge = createMockBridge()
       const { body } = call('/api/kyber/problems?offset=2&limit=1', bridge)
 
       expect(bridge.getProblems).toHaveBeenCalledWith(1, 2)
+      expect(body.page).toBe(3)
+      const items = (body.data ?? body.problems) as ProblemRow[]
+      expect(items).toHaveLength(1)
+      expect(items[0].span_id).toBe('prob-3')
+    })
+
+    it('computes page from offset even when conflicting page parameter is provided', () => {
+      const bridge = createMockBridge()
+      const { body } = call('/api/kyber/problems?offset=2&limit=1&page=1', bridge)
+
+      expect(bridge.getProblems).toHaveBeenCalledWith(1, 2)
+      expect(body.page).toBe(3)
       const items = (body.data ?? body.problems) as ProblemRow[]
       expect(items).toHaveLength(1)
       expect(items[0].span_id).toBe('prob-3')

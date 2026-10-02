@@ -3063,7 +3063,16 @@ export class CanonStore {
     return this.getDetectorVersion() === DETECTOR_VERSION
   }
 
+  /**
+   * Underlying SQLite database handle for bridge/server consumers that query
+   * the canonical store directly without reopening the file.
+   */
+  getDatabase(): Database {
+    return this.db
+  }
+
   close(): void {
     this.db.close()
   }
 }
+

@@ -1295,48 +1295,71 @@ describe('store migrations v17: quarantine and problems schema upgrade', () => {
     const qCols = verifyDb.prepare('PRAGMA table_info(quarantine)').all() as Array<{ name: string }>
     expect(qCols.some((col) => col.name === 'source')).toBe(true)
     expect(qCols.some((col) => col.name === 'name')).toBe(true)
-    expect(qCols.some((col) => col.name === 'timestamp' || col.name === 'seen_at')).toBe(true)
+    expect(qCols.some((col) => col.name === 'timestamp')).toBe(true)
 
     const probCols = verifyDb.prepare('PRAGMA table_info(problems)').all() as Array<{ name: string }>
     expect(probCols.some((col) => col.name === 'session_id')).toBe(true)
     expect(probCols.some((col) => col.name === 'harness')).toBe(true)
-    expect(probCols.some((col) => col.name === 'timestamp' || col.name === 'at')).toBe(true)
+    expect(probCols.some((col) => col.name === 'timestamp')).toBe(true)
     verifyDb.close()
   })
 
-  it('accepts and records source, name, and timestamp metadata via store.quarantine()', () => {
+  it('accepts and records source, name, and timestamp metadata via positional arguments in store.quarantine()', () => {
     const path = tempStorePath()
     const store = new CanonStore(path)
 
-    const spanId = 'span-quarantine-meta'
+    const spanId = 'span-quarantine-meta-pos'
     const namespaces = ['copilot', 'gen_ai']
     const reason = 'unclaimed'
     const source = 'copilot:chat-1'
     const name = 'chat_turn'
     const timestamp = '2026-09-30T12:00:00.000Z'
 
-    // quarantine() accepts metadata either positionally or as an options object
-    try {
-      store.quarantine(spanId, namespaces, reason, source, name, timestamp)
-    } catch {
-      store.quarantine(spanId, namespaces, reason, { source, name, timestamp })
-    }
+    store.quarantine(spanId, namespaces, reason, source, name, timestamp)
 
     const verifyDb = new DatabaseSync(path)
     const row = verifyDb.prepare('SELECT * FROM quarantine WHERE span_id = ?').get(spanId) as Record<string, unknown>
     expect(row).toBeDefined()
     expect(row.source).toBe(source)
     expect(row.name).toBe(name)
-    const recordedTimestamp = row.timestamp ?? row.seen_at
-    expect(recordedTimestamp).toBe(timestamp)
+    expect(row.timestamp).toBe(timestamp)
     verifyDb.close()
 
     const entry = store.getQuarantine(spanId)
     expect(entry).toBeDefined()
     expect(entry?.source).toBe(source)
     expect(entry?.name).toBe(name)
-    const entryTimestamp = entry?.timestamp
-    expect(entryTimestamp).toBe(timestamp)
+    expect(entry?.timestamp).toBe(timestamp)
+
+    store.close()
+  })
+
+  it('accepts and records source, name, and timestamp metadata via options object in store.quarantine()', () => {
+    const path = tempStorePath()
+    const store = new CanonStore(path)
+
+    const spanId = 'span-quarantine-meta-opt'
+    const namespaces = ['copilot', 'gen_ai']
+    const reason = 'unclaimed'
+    const source = 'copilot:chat-2'
+    const name = 'chat_turn_options'
+    const timestamp = '2026-09-30T12:05:00.000Z'
+
+    store.quarantine(spanId, namespaces, reason, { source, name, timestamp })
+
+    const verifyDb = new DatabaseSync(path)
+    const row = verifyDb.prepare('SELECT * FROM quarantine WHERE span_id = ?').get(spanId) as Record<string, unknown>
+    expect(row).toBeDefined()
+    expect(row.source).toBe(source)
+    expect(row.name).toBe(name)
+    expect(row.timestamp).toBe(timestamp)
+    verifyDb.close()
+
+    const entry = store.getQuarantine(spanId)
+    expect(entry).toBeDefined()
+    expect(entry?.source).toBe(source)
+    expect(entry?.name).toBe(name)
+    expect(entry?.timestamp).toBe(timestamp)
 
     store.close()
   })
@@ -1417,21 +1440,22 @@ describe('store migrations v17: quarantine and problems schema upgrade', () => {
     const qCols = verifyDb.prepare('PRAGMA table_info(quarantine)').all() as Array<{ name: string }>
     expect(qCols.some((col) => col.name === 'source')).toBe(true)
     expect(qCols.some((col) => col.name === 'name')).toBe(true)
-    expect(qCols.some((col) => col.name === 'timestamp' || col.name === 'seen_at')).toBe(true)
+    expect(qCols.some((col) => col.name === 'timestamp')).toBe(true)
 
     const probCols = verifyDb.prepare('PRAGMA table_info(problems)').all() as Array<{ name: string }>
     expect(probCols.some((col) => col.name === 'session_id')).toBe(true)
     expect(probCols.some((col) => col.name === 'harness')).toBe(true)
-    expect(probCols.some((col) => col.name === 'timestamp' || col.name === 'at')).toBe(true)
+    expect(probCols.some((col) => col.name === 'timestamp')).toBe(true)
 
     // 5. Verify newly migrated database can insert new quarantine and problem metadata
     verifyDb.prepare(
-      "INSERT INTO quarantine (span_id, namespaces, reason, source, name, " + (qCols.some((c) => c.name === "timestamp") ? "timestamp" : "seen_at") + ") VALUES (?, ?, ?, ?, ?, ?)"
+      'INSERT INTO quarantine (span_id, namespaces, reason, source, name, timestamp) VALUES (?, ?, ?, ?, ?, ?)'
     ).run('span-v15-q', '["copilot"]', 'new reason', 'source-1', 'name-1', '2026-09-30T12:00:00.000Z')
 
     const newQRow = verifyDb.prepare('SELECT * FROM quarantine WHERE span_id = ?').get('span-v15-q') as Record<string, unknown>
     expect(newQRow.source).toBe('source-1')
     expect(newQRow.name).toBe('name-1')
+    expect(newQRow.timestamp).toBe('2026-09-30T12:00:00.000Z')
 
     verifyDb.close()
     migrated.close()

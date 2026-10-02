@@ -978,13 +978,18 @@ export class KyberBridge {
     this.reopenCheckIntervalMs = options?.reopenCheckIntervalMs ?? DEFAULT_REOPEN_CHECK_INTERVAL_MS
     this.now = options?.now ?? Date.now
 
-    this.ownsHandle = options?.canonDb === undefined && this.canonPath !== ':memory:'
+    this.ownsHandle =
+      options?.canonDb === undefined &&
+      this.canonPath !== ':memory:' &&
+      !(this.store && typeof this.store.getDatabase === 'function')
 
     if (options?.canonDb) {
       this.canonDb = options.canonDb
       try {
         this.canonDb.exec('PRAGMA busy_timeout = 5000')
       } catch {}
+    } else if (this.store && typeof this.store.getDatabase === 'function') {
+      this.canonDb = this.store.getDatabase()
     } else if (this.canonPath === ':memory:') {
       this.canonDb = this.openMemoryDb()
     } else {
@@ -992,6 +997,7 @@ export class KyberBridge {
       this.lastProbeAt = this.now()
       this.reconcile()
     }
+
   }
 
   private openMemoryDb(): DatabaseSync | undefined {
@@ -1175,7 +1181,11 @@ export class KyberBridge {
    */
   close(): void {
     this.closed = true
-    this.closeHandle()
+    if (this.store && typeof this.store.getDatabase === 'function' && this.canonDb === this.store.getDatabase()) {
+      this.canonDb = undefined
+    } else {
+      this.closeHandle()
+    }
   }
 
   /**
@@ -2028,27 +2038,27 @@ export class KyberBridge {
     const safeLimit = typeof limit === 'number' && Number.isFinite(limit) ? (limit <= 0 ? -1 : Math.floor(limit)) : 200
     const safeOffset = typeof offset === 'number' && Number.isFinite(offset) && offset >= 0 ? Math.floor(offset) : 0
 
-    const cols = new Set(
-      (db!.prepare("PRAGMA table_info('quarantine')").all() as Array<{ name: string }>).map((c) => c.name),
-    )
-
-    const selectCols = ['span_id', 'namespaces', 'reason']
-    selectCols.push(cols.has('source') ? 'source' : 'NULL AS source')
-    selectCols.push(cols.has('name') ? 'name' : 'NULL AS name')
-    selectCols.push(cols.has('seen_at') ? 'seen_at' : 'NULL AS seen_at')
-    selectCols.push(cols.has('timestamp') ? 'timestamp' : 'NULL AS timestamp')
-
-    const orderCol = cols.has('timestamp') && cols.has('seen_at')
-      ? 'COALESCE(timestamp, seen_at)'
-      : cols.has('timestamp')
-        ? 'timestamp'
-        : cols.has('seen_at')
-          ? 'seen_at'
-          : 'span_id'
-
-    const sql = `SELECT ${selectCols.join(', ')} FROM quarantine ORDER BY ${orderCol} DESC, span_id DESC LIMIT ? OFFSET ?`
-
     try {
+      const cols = new Set(
+        (db!.prepare("PRAGMA table_info('quarantine')").all() as Array<{ name: string }>).map((c) => c.name),
+      )
+
+      const selectCols = ['span_id', 'namespaces', 'reason']
+      selectCols.push(cols.has('source') ? 'source' : 'NULL AS source')
+      selectCols.push(cols.has('name') ? 'name' : 'NULL AS name')
+      selectCols.push(cols.has('seen_at') ? 'seen_at' : 'NULL AS seen_at')
+      selectCols.push(cols.has('timestamp') ? 'timestamp' : 'NULL AS timestamp')
+
+      const orderCol = cols.has('timestamp') && cols.has('seen_at')
+        ? 'COALESCE(timestamp, seen_at)'
+        : cols.has('timestamp')
+          ? 'timestamp'
+          : cols.has('seen_at')
+            ? 'seen_at'
+            : 'span_id'
+
+      const sql = `SELECT ${selectCols.join(', ')} FROM quarantine ORDER BY ${orderCol} DESC, span_id DESC LIMIT ? OFFSET ?`
+
       const rows = db!.prepare(sql).all(safeLimit, safeOffset) as unknown as QuarantineDbRow[]
       const results: QuarantineRow[] = []
       for (const r of rows) {
@@ -2101,20 +2111,20 @@ export class KyberBridge {
     const safeLimit = typeof limit === 'number' && Number.isFinite(limit) ? (limit <= 0 ? -1 : Math.floor(limit)) : 200
     const safeOffset = typeof offset === 'number' && Number.isFinite(offset) && offset >= 0 ? Math.floor(offset) : 0
 
-    const cols = new Set(
-      (db!.prepare(`PRAGMA table_info(${canonTable})`).all() as Array<{ name: string }>).map((c) => c.name),
-    )
-
-    const selectCols = ['id', 'severity', 'code', 'message']
-    selectCols.push(cols.has('session_id') ? 'session_id' : 'NULL AS session_id')
-    selectCols.push(cols.has('span_id') ? 'span_id' : 'NULL AS span_id')
-    selectCols.push(cols.has('harness') ? 'harness' : 'NULL AS harness')
-    selectCols.push(cols.has('at') ? 'at' : 'NULL AS at')
-    selectCols.push(cols.has('timestamp') ? 'timestamp' : 'NULL AS timestamp')
-
-    const sql = `SELECT ${selectCols.join(', ')} FROM ${canonTable} ORDER BY id DESC LIMIT ? OFFSET ?`
-
     try {
+      const cols = new Set(
+        (db!.prepare(`PRAGMA table_info(${canonTable})`).all() as Array<{ name: string }>).map((c) => c.name),
+      )
+
+      const selectCols = ['id', 'severity', 'code', 'message']
+      selectCols.push(cols.has('session_id') ? 'session_id' : 'NULL AS session_id')
+      selectCols.push(cols.has('span_id') ? 'span_id' : 'NULL AS span_id')
+      selectCols.push(cols.has('harness') ? 'harness' : 'NULL AS harness')
+      selectCols.push(cols.has('at') ? 'at' : 'NULL AS at')
+      selectCols.push(cols.has('timestamp') ? 'timestamp' : 'NULL AS timestamp')
+
+      const sql = `SELECT ${selectCols.join(', ')} FROM ${canonTable} ORDER BY id DESC LIMIT ? OFFSET ?`
+
       const rows = db!.prepare(sql).all(safeLimit, safeOffset) as unknown as ProblemDbRow[]
       const results: ProblemRow[] = []
       for (const r of rows) {

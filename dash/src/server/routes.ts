@@ -147,9 +147,7 @@ function parsePaginationParams(url: URL, defaultLimit = 200): PaginationParams {
 
   if (parsedOffset !== undefined && !isNaN(parsedOffset)) {
     offset = Math.max(0, parsedOffset)
-    page = parsedPage !== undefined && !isNaN(parsedPage) && parsedPage > 0
-      ? parsedPage
-      : Math.floor(offset / limit) + 1
+    page = Math.floor(offset / limit) + 1
   } else if (parsedPage !== undefined && !isNaN(parsedPage)) {
     page = Math.max(1, parsedPage)
     offset = Math.max(0, (page - 1) * limit)

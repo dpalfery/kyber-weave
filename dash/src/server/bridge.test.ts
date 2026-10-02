@@ -11,7 +11,10 @@ type QuarantineRowWithTimestamp = QuarantineRow & { timestamp?: string | null }
 
 interface PagedBridge {
   getQuarantine(limit?: number, offset?: number): QuarantineRowWithTimestamp[]
+  getQuarantineCount(): number
   getProblems(limit?: number, offset?: number): ProblemRow[]
+  getProblemCount(): number
+  close(): void
 }
 
 describe('bridge quarantine problems: pagination and metadata contract (Task T3)', () => {
@@ -160,5 +163,22 @@ describe('bridge quarantine problems: pagination and metadata contract (Task T3)
       expect(prob?.harness).not.toBe(location)
       expect(prob?.harness).not.toBe(prob?.span_id)
     })
+
+    it('ensures bridge constructed with store shares database handle for rows and counts', () => {
+      const storeBridge = new KyberBridge({ store }) as unknown as PagedBridge
+
+      try {
+        const quarCount = storeBridge.getQuarantineCount()
+        const quarRows = storeBridge.getQuarantine(100, 0)
+        expect(quarCount).toBe(quarRows.length)
+
+        const probCount = storeBridge.getProblemCount()
+        const probRows = storeBridge.getProblems(100, 0)
+        expect(probCount).toBe(probRows.length)
+      } finally {
+        storeBridge.close()
+      }
+    })
   })
 })
+
