@@ -1034,6 +1034,8 @@ describe('Backend Contract Tests: /api/kyber/* Endpoints', () => {
         expect(byId.get('claude-code')?.sampleCount).toBe(0)
         expect(byId.get('claude-cli')?.sampleCount).toBe(0)
         expect(byId.get('pi')?.sampleCount).toBe(2)
+        expect(byId.get('pi')?.sessionCount).toBe(2)
+        expect(byId.get('pi')?.runCount).toBe(1)
 
         // Detail route scopes the same way: desktop-recorded checkpoints on
         // the claude-code row (issue #182).
@@ -1044,6 +1046,63 @@ describe('Backend Contract Tests: /api/kyber/* Endpoints', () => {
       } finally {
         await new Promise<void>((resolve) => t8Server.close(() => resolve()))
         t8Bridge.close()
+        store.close()
+      }
+    })
+
+    it('overlays live session counts so harnesses agree with /sessions (issue #194)', async () => {
+      const store = new CanonStore(':memory:')
+      store.upsertHarnessRollup({
+        harness: 'claude-desktop',
+        sampleCount: 66,
+        contextPressureMedian: 1.08,
+        contextPressureP95: 1.09,
+        cacheHitRate: null,
+        toolYield: null,
+        delegationOverhead: null,
+        fieldCoverage: null,
+        measurability: {},
+        payload: { sessionCount: 66, runCount: 66, executionCount: 66 },
+      })
+      const session = (id: string) =>
+        store.upsertSession({
+          sessionId: id,
+          harness: 'claude-desktop',
+          label: id,
+          isSubagent: false,
+          parentSession: null,
+          agentName: null,
+          repo: null,
+          branch: null,
+          started: '2026-09-30T00:00:00.000Z',
+          ended: '2026-09-30T00:01:00.000Z',
+          payload: {},
+        })
+      session('live-1')
+      session('live-2')
+      const bridge = new KyberBridge({ canonPath: ':memory:', store })
+      const srv = await runWebDashboard({ port: 0, open: false, kyberBridge: bridge, writeStdout: () => {} })
+      try {
+        const baseUrl = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`
+        const harnesses = (await (await fetch(`${baseUrl}/api/kyber/harnesses`)).json()) as {
+          harnesses: Array<{ harness: string; sampleCount: number; sessionCount: number; runCount: number }>
+        }
+        const row = harnesses.harnesses.find((h) => h.harness === 'claude-desktop')
+        expect(row?.sessionCount).toBe(2)
+        expect(row?.sampleCount).toBe(2)
+        const sessions = (await (await fetch(`${baseUrl}/api/kyber/sessions?harness=claude-desktop`)).json()) as {
+          sessions: unknown[]
+        }
+        expect(sessions.sessions).toHaveLength(2)
+        const detail = (await (await fetch(`${baseUrl}/api/kyber/harness/claude-desktop`)).json()) as {
+          sessionCount: number
+          sampleCount: number
+        }
+        expect(detail.sessionCount).toBe(2)
+        expect(detail.sampleCount).toBe(2)
+      } finally {
+        await new Promise<void>((resolve) => srv.close(() => resolve()))
+        bridge.close()
         store.close()
       }
     })

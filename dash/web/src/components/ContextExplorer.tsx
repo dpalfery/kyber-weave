@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 
 import { fetchKyberSessions, type KyberSessionSummary } from '../lib/kyberApi.js'
+import { formatSessionId, formatSessionTitle } from '../lib/labels.js'
 import { cn, usd } from '../lib/utils.js'
 import { Card } from './ui/card.js'
 import { Skeleton } from './ui/skeleton.js'
@@ -90,10 +91,19 @@ export function AgentSessionRow({
           <path d="M6 3l5 5-5 5" />
         </svg>
 
-        <span className="shrink-0 font-mono text-xs text-primary">{sessionId.slice(0, 8)}</span>
+        <span className="shrink-0 font-mono text-xs text-primary" title={sessionId}>
+          {formatSessionId(sessionId)}
+        </span>
 
         <span className="min-w-0 flex-1 truncate text-[13px] text-foreground flex items-center gap-2">
-          <span>{s.label || <span className="text-tertiary-foreground">untitled session</span>}</span>
+          <span>
+            {formatSessionTitle({
+              label: s.label,
+              sessionId,
+              agentName: s.agent_name ?? s.agentName,
+              harness: s.harness,
+            }) || <span className="text-tertiary-foreground">untitled session</span>}
+          </span>
           {isSubagent && (
             <span className="rounded bg-interactive-secondary px-1.5 py-0.5 text-[10px] text-tertiary-foreground font-mono">
               subagent
@@ -112,7 +122,7 @@ export function AgentSessionRow({
             className="shrink-0 text-xs text-primary hover:underline font-mono"
             title={`Parent session: ${parentSession}`}
           >
-            parent: {parentSession.slice(0, 8)}
+            parent: {formatSessionId(parentSession)}
           </button>
         )}
 
