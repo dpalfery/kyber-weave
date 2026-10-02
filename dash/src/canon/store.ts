@@ -78,7 +78,7 @@ import {
  * corpus is the expensive thing here and re-collecting it is not always
  * possible.
  */
-export const SCHEMA_VERSION = 16
+export const SCHEMA_VERSION = 17
 
 /**
  * Version of the diagnostic signal and finding detector suite (Decision D17).
@@ -211,7 +211,10 @@ CREATE TABLE IF NOT EXISTS token_cache (
 CREATE TABLE IF NOT EXISTS quarantine (
   span_id TEXT PRIMARY KEY,
   namespaces TEXT NOT NULL,
-  reason TEXT NOT NULL
+  reason TEXT NOT NULL,
+  source TEXT,
+  name TEXT,
+  timestamp TEXT
 );
 CREATE TABLE IF NOT EXISTS pending_logs (
   log_id TEXT PRIMARY KEY,
@@ -232,7 +235,10 @@ CREATE TABLE IF NOT EXISTS problems (
   severity TEXT NOT NULL,
   code TEXT NOT NULL,
   message TEXT NOT NULL,
-  location TEXT
+  location TEXT,
+  session_id TEXT,
+  harness TEXT,
+  timestamp TEXT
 );
 CREATE UNIQUE INDEX IF NOT EXISTS problems_by_identity ON problems (problem_key);
 CREATE TABLE IF NOT EXISTS ingest_log (
@@ -535,6 +541,9 @@ export const MIGRATIONS: Record<number, (db: Database) => void> = {
   // the table; every row (including its 0-valued measured estimates) copies
   // across unchanged, and fresh stores take the nullable shape from SCHEMA_SQL.
   14: (db) => {
+    const table = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='finding'").get()
+    if (!table) return
+
     db.exec(`CREATE TABLE finding_new (
       id TEXT PRIMARY KEY,
       detector_id TEXT NOT NULL,
@@ -583,6 +592,38 @@ export const MIGRATIONS: Record<number, (db: Database) => void> = {
       db.exec('ALTER TABLE refresh_run ADD COLUMN history_weeks INTEGER')
     }
   },
+  // v16 -> v17: quarantine and problems metadata columns.
+  // quarantine gains source, name, timestamp.
+  // problems gains session_id, harness, timestamp.
+  16: (db) => {
+    const hasQuarantine = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='quarantine'").get()
+    if (hasQuarantine) {
+      const qCols = (db.prepare('PRAGMA table_info(quarantine)').all() as { name: string }[]).map((c) => c.name)
+      if (!qCols.includes('source')) {
+        db.exec('ALTER TABLE quarantine ADD COLUMN source TEXT')
+      }
+      if (!qCols.includes('name')) {
+        db.exec('ALTER TABLE quarantine ADD COLUMN name TEXT')
+      }
+      if (!qCols.includes('timestamp')) {
+        db.exec('ALTER TABLE quarantine ADD COLUMN timestamp TEXT')
+      }
+    }
+
+    const hasProblems = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='problems'").get()
+    if (hasProblems) {
+      const pCols = (db.prepare('PRAGMA table_info(problems)').all() as { name: string }[]).map((c) => c.name)
+      if (!pCols.includes('session_id')) {
+        db.exec('ALTER TABLE problems ADD COLUMN session_id TEXT')
+      }
+      if (!pCols.includes('harness')) {
+        db.exec('ALTER TABLE problems ADD COLUMN harness TEXT')
+      }
+      if (!pCols.includes('timestamp')) {
+        db.exec('ALTER TABLE problems ADD COLUMN timestamp TEXT')
+      }
+    }
+  },
 }
 
 /** Stable per-span/code/location key; rows without a span keep their independent legacy identity. */
@@ -626,7 +667,12 @@ export type {
 }
 
 /** A problem pinned to the record it belongs to (the `problems` table row). */
-export type SpanProblem = Problem & { spanId: string }
+export type SpanProblem = Problem & {
+  spanId: string
+  sessionId?: string | null
+  harness?: string | null
+  timestamp?: string | null
+}
 
 /** One entry of the ingest audit log. */
 export type IngestLogEntry = {
@@ -640,6 +686,9 @@ export type QuarantineEntry = {
   spanId: string
   namespaces: string[]
   reason: string
+  source?: string
+  name?: string
+  timestamp?: string
 }
 
 export type QuarantinedLog = {
@@ -1527,16 +1576,53 @@ export class CanonStore {
    * Reclassification uses this for rows retained by an older ingest pass:
    * the audit entry and the removal cannot disagree after a partial write.
    */
-  quarantineAndDelete(spanId: string, namespaces: readonly string[], reason: string): void {
-    this.db.exec('BEGIN')
+  quarantineAndDelete(
+    spanId: string,
+    namespaces: readonly string[],
+    reason: string,
+    metadata?: { source?: string; name?: string; timestamp?: string },
+  ): void
+  quarantineAndDelete(
+    spanId: string,
+    namespaces: readonly string[],
+    reason: string,
+    source?: string,
+    name?: string,
+    timestamp?: string,
+  ): void
+  quarantineAndDelete(
+    spanId: string,
+    namespaces: readonly string[],
+    reason: string,
+    sourceOrOptions?: string | { source?: string; name?: string; timestamp?: string },
+    name?: string,
+    timestamp?: string,
+  ): void {
+    let sourceVal: string | null = null
+    let nameVal: string | null = null
+    let timestampVal: string | null = null
+
+    if (typeof sourceOrOptions === "object" && sourceOrOptions !== null) {
+      sourceVal = sourceOrOptions.source ?? null
+      nameVal = sourceOrOptions.name ?? null
+      timestampVal = sourceOrOptions.timestamp ?? null
+    } else if (typeof sourceOrOptions === "string") {
+      sourceVal = sourceOrOptions
+      nameVal = name ?? null
+      timestampVal = timestamp ?? null
+    }
+
+    this.db.exec("BEGIN")
     try {
       this.db
-        .prepare('INSERT OR REPLACE INTO quarantine (span_id, namespaces, reason) VALUES (?, ?, ?)')
-        .run(spanId, JSON.stringify(namespaces), reason)
-      this.db.prepare('DELETE FROM records WHERE span_id = ?').run(spanId)
-      this.db.exec('COMMIT')
+        .prepare(
+          "INSERT OR REPLACE INTO quarantine (span_id, namespaces, reason, source, name, timestamp) VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .run(spanId, JSON.stringify(namespaces), reason, sourceVal, nameVal, timestampVal)
+      this.db.prepare("DELETE FROM records WHERE span_id = ?").run(spanId)
+      this.db.exec("COMMIT")
     } catch (err) {
-      this.db.exec('ROLLBACK')
+      this.db.exec("ROLLBACK")
       throw err
     }
   }
@@ -2665,35 +2751,114 @@ export class CanonStore {
   }
 
   /** Hold a span out of the corpus; re-quarantining the same span replaces the entry. */
-  quarantine(spanId: string, namespaces: readonly string[], reason: string): void {
+  quarantine(
+    spanId: string,
+    namespaces: readonly string[],
+    reason: string,
+    metadata?: { source?: string; name?: string; timestamp?: string },
+  ): void
+  quarantine(
+    spanId: string,
+    namespaces: readonly string[],
+    reason: string,
+    source?: string,
+    name?: string,
+    timestamp?: string,
+  ): void
+  quarantine(
+    spanId: string,
+    namespaces: readonly string[],
+    reason: string,
+    sourceOrOptions?: string | { source?: string; name?: string; timestamp?: string },
+    name?: string,
+    timestamp?: string,
+  ): void {
+    let sourceVal: string | null = null
+    let nameVal: string | null = null
+    let timestampVal: string | null = null
+
+    if (typeof sourceOrOptions === 'object' && sourceOrOptions !== null) {
+      sourceVal = sourceOrOptions.source ?? null
+      nameVal = sourceOrOptions.name ?? null
+      timestampVal = sourceOrOptions.timestamp ?? null
+    } else if (typeof sourceOrOptions === 'string') {
+      sourceVal = sourceOrOptions
+      nameVal = name ?? null
+      timestampVal = timestamp ?? null
+    }
+
     this.db
-      .prepare('INSERT OR REPLACE INTO quarantine (span_id, namespaces, reason) VALUES (?, ?, ?)')
-      .run(spanId, JSON.stringify(namespaces), reason)
+      .prepare(
+        'INSERT OR REPLACE INTO quarantine (span_id, namespaces, reason, source, name, timestamp) VALUES (?, ?, ?, ?, ?, ?)',
+      )
+      .run(spanId, JSON.stringify(namespaces), reason, sourceVal, nameVal, timestampVal)
   }
 
   /** The quarantine entry for a span, with its parsed namespaces; absent id gives undefined. */
   getQuarantine(spanId: string): QuarantineEntry | undefined {
     const row = this.db
-      .prepare('SELECT span_id, namespaces, reason FROM quarantine WHERE span_id = ?')
-      .get(spanId) as { span_id: unknown; namespaces: unknown; reason: unknown } | undefined
+      .prepare(
+        'SELECT span_id, namespaces, reason, source, name, timestamp FROM quarantine WHERE span_id = ?',
+      )
+      .get(spanId) as
+      | {
+          span_id: unknown
+          namespaces: unknown
+          reason: unknown
+          source: unknown
+          name: unknown
+          timestamp: unknown
+        }
+      | undefined
     if (row === undefined) return undefined
-    return {
+    const entry: QuarantineEntry = {
       spanId: text(row.span_id),
       namespaces: JSON.parse(text(row.namespaces)) as string[],
       reason: text(row.reason),
     }
+    if (row.source !== null && row.source !== undefined) {
+      entry.source = text(row.source)
+    }
+    if (row.name !== null && row.name !== undefined) {
+      entry.name = text(row.name)
+    }
+    if (row.timestamp !== null && row.timestamp !== undefined) {
+      entry.timestamp = text(row.timestamp)
+    }
+    return entry
   }
 
   /** Every quarantined span ordered by span id — the R6.3 view's row list. */
   listQuarantine(): QuarantineEntry[] {
     const rows = this.db
-      .prepare('SELECT span_id, namespaces, reason FROM quarantine ORDER BY span_id')
-      .all() as { span_id: unknown; namespaces: unknown; reason: unknown }[]
-    return rows.map((row) => ({
-      spanId: text(row.span_id),
-      namespaces: JSON.parse(text(row.namespaces)) as string[],
-      reason: text(row.reason),
-    }))
+      .prepare(
+        'SELECT span_id, namespaces, reason, source, name, timestamp FROM quarantine ORDER BY span_id',
+      )
+      .all() as {
+      span_id: unknown
+      namespaces: unknown
+      reason: unknown
+      source: unknown
+      name: unknown
+      timestamp: unknown
+    }[]
+    return rows.map((row) => {
+      const entry: QuarantineEntry = {
+        spanId: text(row.span_id),
+        namespaces: JSON.parse(text(row.namespaces)) as string[],
+        reason: text(row.reason),
+      }
+      if (row.source !== null && row.source !== undefined) {
+        entry.source = text(row.source)
+      }
+      if (row.name !== null && row.name !== undefined) {
+        entry.name = text(row.name)
+      }
+      if (row.timestamp !== null && row.timestamp !== undefined) {
+        entry.timestamp = text(row.timestamp)
+      }
+      return entry
+    })
   }
 
   /** Total quarantined span count, without materializing the row list. */
@@ -2740,14 +2905,17 @@ export class CanonStore {
     const problemKey = problemIdentity(problem.spanId, problem.code, problem.location ?? null)
     this.db
       .prepare(
-        `INSERT INTO problems (span_id, problem_key, severity, code, message, location)
-         VALUES (?, ?, ?, ?, ?, ?)
+        `INSERT INTO problems (span_id, problem_key, severity, code, message, location, session_id, harness, timestamp)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(problem_key) DO UPDATE SET
            span_id = excluded.span_id,
            severity = excluded.severity,
            code = excluded.code,
            message = excluded.message,
-           location = excluded.location`,
+           location = excluded.location,
+           session_id = excluded.session_id,
+           harness = excluded.harness,
+           timestamp = excluded.timestamp`,
       )
       .run(
         problem.spanId,
@@ -2756,6 +2924,9 @@ export class CanonStore {
         problem.code,
         problem.message,
         problem.location ?? null,
+        problem.sessionId ?? null,
+        problem.harness ?? null,
+        problem.timestamp ?? null,
       )
   }
 
@@ -2763,19 +2934,47 @@ export class CanonStore {
   getProblems(spanId?: string): SpanProblem[] {
     const rows = (
       spanId === undefined
-        ? this.db.prepare('SELECT span_id, severity, code, message, location FROM problems').all()
-        : this
-            .db
-            .prepare('SELECT span_id, severity, code, message, location FROM problems WHERE span_id = ?')
+        ? this.db
+            .prepare(
+              'SELECT span_id, severity, code, message, location, session_id, harness, timestamp FROM problems',
+            )
+            .all()
+        : this.db
+            .prepare(
+              'SELECT span_id, severity, code, message, location, session_id, harness, timestamp FROM problems WHERE span_id = ?',
+            )
             .all(spanId)
-    ) as { span_id: unknown; severity: unknown; code: unknown; message: unknown; location: unknown }[]
-    return rows.map((row) => ({
-      spanId: text(row.span_id),
-      severity: text(row.severity) as Problem['severity'],
-      code: text(row.code),
-      message: text(row.message),
-      location: row.location === null ? undefined : text(row.location),
-    }))
+    ) as {
+      span_id: unknown
+      severity: unknown
+      code: unknown
+      message: unknown
+      location: unknown
+      session_id: unknown
+      harness: unknown
+      timestamp: unknown
+    }[]
+    return rows.map((row) => {
+      const p: SpanProblem = {
+        spanId: text(row.span_id),
+        severity: text(row.severity) as Problem['severity'],
+        code: text(row.code),
+        message: text(row.message),
+      }
+      if (row.location !== null && row.location !== undefined) {
+        p.location = text(row.location)
+      }
+      if (row.session_id !== null && row.session_id !== undefined) {
+        p.sessionId = text(row.session_id)
+      }
+      if (row.harness !== null && row.harness !== undefined) {
+        p.harness = text(row.harness)
+      }
+      if (row.timestamp !== null && row.timestamp !== undefined) {
+        p.timestamp = text(row.timestamp)
+      }
+      return p
+    })
   }
 
   /** Total recorded problem count, without loading problem details. */
@@ -2864,7 +3063,16 @@ export class CanonStore {
     return this.getDetectorVersion() === DETECTOR_VERSION
   }
 
+  /**
+   * Underlying SQLite database handle for bridge/server consumers that query
+   * the canonical store directly without reopening the file.
+   */
+  getDatabase(): Database {
+    return this.db
+  }
+
   close(): void {
     this.db.close()
   }
 }
+

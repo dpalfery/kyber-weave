@@ -6,7 +6,7 @@ component: KyberDash
 source-root: dash
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-01
+last-reviewed: 2026-10-02
 decided-by:
   - adr/0020-kyberdash-one-time-fork
   - adr/0008-kyberdash-single-canonical-store
@@ -605,7 +605,12 @@ deterministic percentage. Twin front-end collectors (`claude-desktop` onto `clau
 `cursor-agent` onto `cursor`) fold onto one canonical harness id, and same-turn observations
 with byte-identical counters collapse per ADR 0009 source precedence (OTLP counters win; values are never
 summed across sources for the same turn) instead of double-counting one conversation.
-Same-turn observations whose counters differ are left alone (follow-up #231).
+After that fold and exact-counter collapse, overlapping twin observations whose counters
+differ but stand in a complementary or subset relation within `TWIN_TURN_MAX_SKEW_MS`
+join inside `dedupeTwinTurns` (issue #231): the merge takes the per-dimension max and
+prefers the fuller row as keeper, and joined counters are never summed. File+file twin
+pairs under the folded `cursor` share are admitted, not only OTel+file. Raw ingest rows
+remain provenance; the join applies when derived tables rebuild.
 
 Findings are materialized in `canon.db` at session/run build time with a `detector_version` schema
 stamp (Decision D17): an informational mark of which detector semantics built the rows, so

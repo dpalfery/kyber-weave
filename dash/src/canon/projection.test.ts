@@ -530,8 +530,8 @@ describe('projectCanonicalStore: projection-time repricing (issue #186, U9)', ()
   // via two parallel steps on the v14 base: the nullable finding waste
   // 14→15 step (PR #226, coverage-gap findings persist NULL) and the
   // ingest-coverage history_weeks 15→16 step — not via pricing.
-  it('keeps SCHEMA_VERSION at 16 (U9: no schema bump beyond the nullable finding waste and coverage window)', () => {
-    expect(SCHEMA_VERSION).toBe(16)
+  it('keeps SCHEMA_VERSION at 17 (U9: no schema bump beyond the nullable finding waste, coverage window, and quarantine/problems metadata)', () => {
+    expect(SCHEMA_VERSION).toBe(17)
   })
 
   it('reprices a stale {unknown,no_rate} claude-code turn, rewrites cost_json, and the session cost agrees', async () => {

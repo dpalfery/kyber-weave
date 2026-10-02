@@ -2,7 +2,7 @@
 id: plans/2026-10-02-otlp-projection-debounce
 title: "KyberDash: debounce the live canonical projection so the OTLP collector stops rebuilding on every batch"
 doc-type: plan
-status: current
+status: complete
 component: KyberDash
 owner: dpalfery
 last-reviewed: 2026-10-02

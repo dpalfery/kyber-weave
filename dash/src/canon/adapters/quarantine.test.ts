@@ -259,6 +259,8 @@ describe('recordValidationProblems — R4.4', () => {
         code,
         message: expect.any(String),
         location: 'bad',
+        harness: 'pi',
+        timestamp: '2026-08-29T12:00:00.000Z',
       },
     ])
     expect(store.getProblems('good')).toEqual([])
@@ -289,6 +291,8 @@ describe('recordValidationProblems — R4.4', () => {
         code: 'ADAPTER_ASSERTION',
         message: 'stub adapter rejected the record',
         location: 'flagged',
+        harness: 'pi',
+        timestamp: '2026-08-29T12:00:00.000Z',
       },
     ])
   })
