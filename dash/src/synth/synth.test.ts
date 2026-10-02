@@ -33,6 +33,8 @@ import {
   DEFAULT_CONVENTION,
   PROVIDER_CONVENTIONS,
   Synthesizer,
+  collapseCallAndTurns,
+  collapseEnvelopeTurns,
   conventionFor,
   costBlockFor,
   measurabilityFor,
@@ -820,6 +822,62 @@ describe('Task 5 — child tool.invoke span generation and result truncation', (
     const records = synthesizer.synthesizeEnvelopes([env1, env2])
     const parentRecords = records.filter((r) => r.op === 'llm.invoke')
     expect(parentRecords).toHaveLength(2)
+  })
+
+  it('preserves the larger web-search count when collapsing turns in mergeParsedCalls', () => {
+    const call1 = call({
+      provider: 'claude',
+      sessionId: 's-websearch',
+      timestamp: '2026-09-23T22:43:53.000Z',
+      inputTokens: 2,
+      outputTokens: 563,
+      cacheReadInputTokens: 39096,
+      cacheCreationInputTokens: 24977,
+      cachedInputTokens: 39096,
+      webSearchRequests: 1,
+      deduplicationKey: 'claude:s-websearch:req',
+    })
+    const call2 = call({
+      provider: 'claude',
+      sessionId: 's-websearch',
+      timestamp: '2026-09-23T22:43:58.000Z',
+      inputTokens: 2,
+      outputTokens: 563,
+      cacheReadInputTokens: 39096,
+      cacheCreationInputTokens: 24977,
+      cachedInputTokens: 39096,
+      webSearchRequests: 3,
+      deduplicationKey: 'claude:s-websearch:res',
+    })
+    const env1 = envelope({
+      harnessId: 'claude-desktop',
+      call: call1,
+    })
+    const env2 = envelope({
+      harnessId: 'claude-desktop',
+      call: call2,
+    })
+
+    const collapsedEnvelopes = collapseEnvelopeTurns([env1, env2])
+    expect(collapsedEnvelopes).toHaveLength(1)
+    expect(collapsedEnvelopes[0]!.call.webSearchRequests).toBe(3)
+
+    // Also verify when keeper has higher count than donor
+    const call1High = { ...call1, webSearchRequests: 5 }
+    const call2Low = { ...call2, webSearchRequests: 2 }
+    const env1High = envelope({ harnessId: 'claude-desktop', call: call1High })
+    const env2Low = envelope({ harnessId: 'claude-desktop', call: call2Low })
+    const collapsedHighFirst = collapseEnvelopeTurns([env1High, env2Low])
+    expect(collapsedHighFirst).toHaveLength(1)
+    expect(collapsedHighFirst[0]!.call.webSearchRequests).toBe(5)
+
+    // Also verify collapseCallAndTurns
+    const collapsedCalls = collapseCallAndTurns([
+      { call: { ...call1, provider: 'claude-desktop' } },
+      { call: { ...call2, provider: 'claude-desktop' } },
+    ])
+    expect(collapsedCalls).toHaveLength(1)
+    expect(collapsedCalls[0]!.call.webSearchRequests).toBe(3)
   })
 
   it('truncates large tool results (>64KB) in parts and preserves original byte count in attributes', () => {

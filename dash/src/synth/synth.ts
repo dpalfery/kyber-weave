@@ -822,6 +822,7 @@ function mergeParsedCalls(keeper: ParsedProviderCall, donor: ParsedProviderCall)
     tools,
     bashCommands,
     ...(toolSequence.length > 0 ? { toolSequence } : {}),
+    webSearchRequests: Math.max(keeper.webSearchRequests ?? 0, donor.webSearchRequests ?? 0),
     activeDurationMs: Math.max(keeper.activeDurationMs ?? 0, donor.activeDurationMs ?? 0),
   }
 }
