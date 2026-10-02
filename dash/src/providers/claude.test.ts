@@ -174,6 +174,56 @@ describe('claude provider - tool extraction in loadClaudeCalls', () => {
     expect(calls[1]!.turnId).toBe('msg-second')
   })
 
+  it('retains a native message ID learned during merge and prevents merging a subsequent call with a different ID', () => {
+    const transcriptPath = join(tmpDir, 'merge-learns-native-id.jsonl')
+    const usage = {
+      input_tokens: 150,
+      output_tokens: 45,
+      cache_read_input_tokens: 300,
+      cache_creation_input_tokens: 200,
+    }
+    const lines = [
+      JSON.stringify({
+        type: 'assistant',
+        sessionId: 'session-learn-id',
+        uuid: 'turn-1',
+        timestamp: '2026-09-01T12:00:00.000Z',
+        message: {
+          model: 'claude-sonnet-4-5',
+          usage,
+        },
+      }),
+      JSON.stringify({
+        type: 'assistant',
+        sessionId: 'session-learn-id',
+        uuid: 'turn-2',
+        timestamp: '2026-09-01T12:00:05.000Z',
+        message: {
+          id: 'msg-1',
+          model: 'claude-sonnet-4-5',
+          usage,
+        },
+      }),
+      JSON.stringify({
+        type: 'assistant',
+        sessionId: 'session-learn-id',
+        uuid: 'turn-3',
+        timestamp: '2026-09-01T12:00:10.000Z',
+        message: {
+          id: 'msg-2',
+          model: 'claude-sonnet-4-5',
+          usage,
+        },
+      }),
+    ]
+    writeFileSync(transcriptPath, lines.join('\n') + '\n', 'utf8')
+
+    const calls = loadClaudeCalls(transcriptPath)
+    expect(calls).toHaveLength(2)
+    expect(calls[0]!.turnId).toBe('msg-1')
+    expect(calls[1]!.turnId).toBe('msg-2')
+  })
+
   it('recurses into subagent directories when parsing sessions (Thread 11)', async () => {
     const subagentsDir = join(tmpDir, 'subagents')
     mkdirSync(subagentsDir)

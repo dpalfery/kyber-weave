@@ -401,6 +401,10 @@ export function loadClaudeCalls(filePath: string): ParsedProviderCall[] {
       prevCall !== undefined &&
       isContiguousPair(prevCall, newCall, nativeMessageIds[nativeMessageIds.length - 1], nativeMessageId)
     ) {
+      if (nativeMessageIds[nativeMessageIds.length - 1] === undefined && nativeMessageId !== undefined) {
+        nativeMessageIds[nativeMessageIds.length - 1] = nativeMessageId
+        prevCall.turnId = nativeMessageId
+      }
       prevCall.tools = Array.from(new Set([...prevCall.tools, ...newCall.tools]))
       prevCall.bashCommands = Array.from(new Set([...prevCall.bashCommands, ...newCall.bashCommands]))
       if (newCall.toolSequence && newCall.toolSequence.length > 0) {
