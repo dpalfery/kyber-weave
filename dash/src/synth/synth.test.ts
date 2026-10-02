@@ -666,6 +666,66 @@ describe('Task 5 — child tool.invoke span generation and result truncation', (
     expect((child?.raw as Record<string, unknown>)?.['result']).toBe('file1\nfile2')
   })
 
+  it('synthesizeEnvelopes collapses request/response pair calls with identical counters into one canonical record', () => {
+    const synthesizer = new Synthesizer()
+    const call1 = call({
+      provider: 'claude',
+      sessionId: 's-pair',
+      timestamp: '2026-09-23T22:43:53.000Z',
+      inputTokens: 2,
+      outputTokens: 563,
+      cacheReadInputTokens: 39096,
+      cacheCreationInputTokens: 24977,
+      cachedInputTokens: 39096,
+      deduplicationKey: 'claude:s-pair:req',
+    })
+    const call2 = call({
+      provider: 'claude',
+      sessionId: 's-pair',
+      timestamp: '2026-09-23T22:43:58.000Z',
+      inputTokens: 2,
+      outputTokens: 563,
+      cacheReadInputTokens: 39096,
+      cacheCreationInputTokens: 24977,
+      cachedInputTokens: 39096,
+      deduplicationKey: 'claude:s-pair:res',
+    })
+    const env1 = envelope({
+      harnessId: 'claude-desktop',
+      call: call1,
+      readerTurn: {
+        parts: [{ part: 'system_prompt', text: 'req prompt' }],
+        toolCalls: [
+          { id: 'tu_bash', name: 'Bash', arguments: { command: 'ls' } },
+        ],
+        toolResults: [
+          { toolCallId: 'tu_bash', content: 'file1\nfile2' },
+        ],
+      },
+    })
+    const env2 = envelope({
+      harnessId: 'claude-desktop',
+      call: call2,
+      readerTurn: {
+        parts: [{ part: 'conversation_history', text: 'res reply' }],
+      },
+    })
+
+    const records = synthesizer.synthesizeEnvelopes([env1, env2])
+    const parentRecords = records.filter((r) => r.op === 'llm.invoke')
+    const toolRecords = records.filter((r) => r.op === 'tool.invoke') as ToolInvokeRecord[]
+
+    expect(parentRecords).toHaveLength(1)
+    const parent = parentRecords[0]!
+    expect(parent.spanId).toBe(spanIdFor(call1, env1, 0))
+    expect(parent.tokens.reportedInput).toBe(64075)
+    expect(parent.content.system_prompt).toBe('req prompt')
+    expect(parent.content.conversation_history).toBe('res reply')
+
+    expect(toolRecords).toHaveLength(1)
+    expect(toolRecords[0]!.parentSpanId).toBe(parent.spanId)
+  })
+
   it('truncates large tool results (>64KB) in parts and preserves original byte count in attributes', () => {
     const synthesizer = new Synthesizer()
     const parsedCall = call({

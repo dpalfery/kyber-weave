@@ -557,6 +557,33 @@ describe('dedupeTwinTurns merged content (review)', () => {
   })
 })
 
+describe('dedupeTwinTurns file-only sessions (#232)', () => {
+  it('collapses duplicate file rows in a file-only session (no OTLP rows)', () => {
+    const turnTokens = counters({ reportedInput: 64075, output: 563 })
+    const out = dedupeTwinTurns([
+      file('synth:claude-desktop:file-only:req', {
+        sessionId: 'file-only-session',
+        timestamp: '2026-09-23T22:43:53.000Z',
+        tokens: turnTokens,
+        content: { system_prompt: 'req' },
+        parts: [{ part: 'system_prompt', text: 'req' }],
+      }),
+      file('synth:claude-desktop:file-only:res', {
+        sessionId: 'file-only-session',
+        timestamp: '2026-09-23T22:43:58.000Z',
+        tokens: turnTokens,
+        content: { conversation_history: 'res' },
+        parts: [{ part: 'conversation_history', text: 'res' }],
+      }),
+    ])
+
+    expect(out).toHaveLength(1)
+    expect(out[0]!.tokens.reportedInput).toBe(64075)
+    expect(out[0]!.content.system_prompt).toBe('req')
+    expect(out[0]!.content.conversation_history).toBe('res')
+  })
+})
+
 // The clustering window is documented on the constant, not derived from the
 // loop: only the total span is bounded (the step check was removed with
 // a689157, since rows arrive time-ordered and the span always covers the

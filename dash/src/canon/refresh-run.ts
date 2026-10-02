@@ -59,6 +59,8 @@ export function refreshProcessIsAlive(pid: number): boolean {
 
 export const REFRESH_RUN_SQL = `
 -- Refresh run log (spec: kyberdash-context-surfaces, R10.3-R10.5).
+-- The coverage window the run ingested (migration 15→16). NULL on rows
+-- written before window tracking: window unknown, never 0.
 CREATE TABLE IF NOT EXISTS refresh_run (
   id TEXT PRIMARY KEY,
   started_at TEXT NOT NULL,
@@ -67,8 +69,6 @@ CREATE TABLE IF NOT EXISTS refresh_run (
   pid INTEGER NOT NULL,
   trigger TEXT NOT NULL,
   summary TEXT,
-  -- The coverage window the run ingested (migration 15→16). NULL on rows
-  -- written before window tracking: window unknown, never 0.
   history_weeks INTEGER
 );
 -- The three questions the footer asks are all "most recent X", so both indexes are

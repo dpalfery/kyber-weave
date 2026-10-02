@@ -17,7 +17,9 @@ A plan is open only while it is built. The pull request that finishes it archive
 
 ## Active Plans
 
-No active plans.
+| Plan | Status | Date | Canonical Docs / Harvested ADRs | Goal |
+|---|---|---|---|---|
+| [2026-10-02-file-synth-turn-dedupe.md](2026-10-02-file-synth-turn-dedupe.md) | Ready | 2026-10-02 | None — issue #232 fix; ADR 0009 D4 compliance | Fix [issue #232](https://github.com/dpalfery/kyber-weave/issues/232): synthesize one canonical record per turn at the reader/synth layer for file-synthesized turns arriving twice per turn (request/response pair). |
 
 Pipeline T9 and spine S-docs harvested 2026-09-13 into [dash/architecture.md](../dash/architecture.md), [dash/runbook.md](../dash/runbook.md), [dash/telemetry-inventory.md](../dash/telemetry-inventory.md), [ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md), and [ADR 0018](../adr/0018-kyberdash-content-retention-purge.md). ADRs 0012–0015 remain the spine harvest (0014 notes that `kyber purge-content` was not shipped). Residual risks (T8 live-source coverage, findings client-side harness filter) live on the archived plans — they are not shipped claims.
 

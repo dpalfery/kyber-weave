@@ -167,13 +167,18 @@ export function dedupeTwinTurns(records: readonly CanonicalRecord[], shareKey?: 
       seen.add(key)
       return true
     })
+    const newParts = [...(record.parts ?? []), ...extraParts]
     return [
       {
         ...record,
         ...((donor.parts !== undefined && donor.parts.length > 0) || extraParts.length > 0
-          ? { parts: [...(record.parts ?? []), ...extraParts] }
+          ? { parts: newParts }
           : {}),
-        content: { ...donor.content, ...record.content },
+        content: {
+          ...donor.content,
+          ...record.content,
+          ...(newParts.length > 0 ? contentFromParts(newParts) : {}),
+        },
       },
     ]
   })
@@ -184,6 +189,10 @@ export function dedupeTwinTurns(records: readonly CanonicalRecord[], shareKey?: 
  * file row is treated as the same turn observed twice and drops; content
  * transplants onto keepers paired nearest-in-time (review M2) so no turn's
  * file content is silently discarded with a sibling's duplicate.
+ *
+ * In a file-only session (no OTLP rows), duplicate file rows for the same
+ * turn with identical counters are also collapsed onto the earliest file row
+ * so file-only sessions never double-count turns or tokens (#232).
  *
  * Issue #232 reports file rows arriving 2x per turn, so donors can outnumber
  * the rows that receive them. Those surplus rows are not provably duplicates of
@@ -200,7 +209,24 @@ function collapseCluster(
   if (cluster.length === 0) return
   const otels = cluster.filter((record) => !isFileSource(record.source))
   const files = cluster.filter((record) => isFileSource(record.source))
-  if (otels.length === 0 || files.length === 0) return
+  if (otels.length === 0) {
+    if (files.length <= 1) return
+    const sortedFiles = [...files].sort((a, b) => cachedTimestampMs(a) - cachedTimestampMs(b))
+    const keeper = sortedFiles[0]!
+    let donor: CanonicalRecord | undefined
+    for (let i = 1; i < sortedFiles.length; i++) {
+      const file = sortedFiles[i]!
+      dropped.add(file)
+      if (hasParts(file)) {
+        donor = donor === undefined ? file : mergeDonors(donor, file)
+      }
+    }
+    if (donor !== undefined) {
+      transplant.set(keeper, donor)
+    }
+    return
+  }
+  if (files.length === 0) return
   for (const file of files) dropped.add(file)
   // Pairing is OTel-centric in time order, needy keepers first (review M2).
   // Donor-centric pairing ("each file takes its nearest free OTel") misfires
@@ -259,6 +285,10 @@ function mergeDonors(first: CanonicalRecord, second: CanonicalRecord): Canonical
   return {
     ...first,
     parts,
-    content: contentFromParts(parts),
+    content: {
+      ...first.content,
+      ...second.content,
+      ...(parts.length > 0 ? contentFromParts(parts) : {}),
+    },
   }
 }

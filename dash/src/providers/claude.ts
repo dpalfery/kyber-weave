@@ -371,7 +371,7 @@ export function loadClaudeCalls(filePath: string): ParsedProviderCall[] {
       toolSequence.push(turnToolCalls)
     }
 
-    calls.push({
+    const newCall: ParsedProviderCall = {
       provider: 'claude',
       model: claudeText(message['model']) ?? 'unknown',
       inputTokens: claudeCount(usage['input_tokens']),
@@ -391,10 +391,48 @@ export function loadClaudeCalls(filePath: string): ParsedProviderCall[] {
       deduplicationKey: `claude:${sessionId}:${messageId}`,
       sessionId,
       userMessage: '',
-    })
+    }
+
+    const prevCall = calls[calls.length - 1]
+    if (prevCall !== undefined && isContiguousPair(prevCall, newCall)) {
+      prevCall.tools = Array.from(new Set([...prevCall.tools, ...newCall.tools]))
+      prevCall.bashCommands = Array.from(new Set([...prevCall.bashCommands, ...newCall.bashCommands]))
+      if (newCall.toolSequence && newCall.toolSequence.length > 0) {
+        prevCall.toolSequence = [...(prevCall.toolSequence ?? []), ...newCall.toolSequence]
+      }
+      prevCall.webSearchRequests = Math.max(prevCall.webSearchRequests, newCall.webSearchRequests)
+    } else {
+      calls.push(newCall)
+    }
   }
 
   return calls
+}
+
+function isContiguousPair(prev: ParsedProviderCall, next: ParsedProviderCall): boolean {
+  if (prev.sessionId !== next.sessionId) return false
+  if (prev.model !== next.model) return false
+  if (
+    prev.inputTokens !== next.inputTokens ||
+    prev.outputTokens !== next.outputTokens ||
+    prev.cacheReadInputTokens !== next.cacheReadInputTokens ||
+    prev.cacheCreationInputTokens !== next.cacheCreationInputTokens
+  ) {
+    return false
+  }
+  const isZero =
+    prev.inputTokens === 0 &&
+    prev.outputTokens === 0 &&
+    prev.cacheReadInputTokens === 0 &&
+    prev.cacheCreationInputTokens === 0
+  if (isZero) return false
+
+  const prevTime = new Date(prev.timestamp).getTime()
+  const nextTime = new Date(next.timestamp).getTime()
+  if (Number.isFinite(prevTime) && Number.isFinite(nextTime)) {
+    if (Math.abs(nextTime - prevTime) > 60_000) return false
+  }
+  return true
 }
 
 export const claude: Provider = {

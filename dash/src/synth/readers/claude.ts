@@ -31,7 +31,7 @@
 import { existsSync, readFileSync } from 'fs'
 import { basename, extname } from 'path'
 
-import { claudeUsageOf } from '../../providers/claude.js'
+import { claudeCount, claudeText, claudeUsageOf } from '../../providers/claude.js'
 import { detectUserCorrection } from '../../canon/outcome.js'
 import type { ContentPart } from '../../canon/types.js'
 import type { ContentReader, ReaderToolCall, ReaderToolResult, ReaderTurn } from './types.js'
@@ -43,6 +43,71 @@ export {
   loadClaudeCalls,
 } from '../../providers/claude.js'
 
+function parseLineUsageInfo(rawLine: string): {
+  sessionId?: string
+  model?: string
+  inputTokens: number
+  outputTokens: number
+  cacheReadTokens: number
+  cacheCreationTokens: number
+  timestamp?: string
+} | undefined {
+  const usage = claudeUsageOf(rawLine)
+  if (usage === undefined) return undefined
+  let record: Record<string, unknown>
+  try {
+    record = JSON.parse(rawLine) as Record<string, unknown>
+  } catch {
+    return undefined
+  }
+  const message = record['message'] as Record<string, unknown> | undefined
+  return {
+    sessionId: claudeText(record['sessionId']),
+    model: message ? claudeText(message['model']) : undefined,
+    inputTokens: claudeCount(usage['input_tokens']),
+    outputTokens: claudeCount(usage['output_tokens']),
+    cacheReadTokens: claudeCount(usage['cache_read_input_tokens']),
+    cacheCreationTokens: claudeCount(usage['cache_creation_input_tokens']),
+    timestamp: claudeText(record['timestamp']),
+  }
+}
+
+function isMatchingTurnUsage(
+  prev: ReturnType<typeof parseLineUsageInfo>,
+  next: ReturnType<typeof parseLineUsageInfo>,
+): boolean {
+  if (!prev || !next) return false
+  if (prev.sessionId !== undefined && next.sessionId !== undefined && prev.sessionId !== next.sessionId) {
+    return false
+  }
+  if (prev.model !== undefined && next.model !== undefined && prev.model !== next.model) {
+    return false
+  }
+  if (
+    prev.inputTokens !== next.inputTokens ||
+    prev.outputTokens !== next.outputTokens ||
+    prev.cacheReadTokens !== next.cacheReadTokens ||
+    prev.cacheCreationTokens !== next.cacheCreationTokens
+  ) {
+    return false
+  }
+  const isZero =
+    prev.inputTokens === 0 &&
+    prev.outputTokens === 0 &&
+    prev.cacheReadTokens === 0 &&
+    prev.cacheCreationTokens === 0
+  if (isZero) return false
+
+  if (prev.timestamp && next.timestamp) {
+    const prevTime = new Date(prev.timestamp).getTime()
+    const nextTime = new Date(next.timestamp).getTime()
+    if (Number.isFinite(prevTime) && Number.isFinite(nextTime)) {
+      if (Math.abs(nextTime - prevTime) > 60_000) return false
+    }
+  }
+  return true
+}
+
 /**
  * The assistant records in a Claude Code transcript each carry the `usage`
  * block for the request that produced them, so an assistant record with usage
@@ -50,23 +115,49 @@ export {
  * every line since the previous turn belongs to the turn it precedes, which is
  * how a user prompt and its tool results stay attached to the request they fed.
  *
+ * Contiguous assistant records sharing identical usage counters within the turn
+ * window are grouped into a single turn to fuse paired request/response halves (#232).
+ *
  * Lines after the last assistant record are emitted as a trailing group so a
  * transcript that never reported usage still reads as a single turn.
  */
 export function splitClaudeTurns(lines: readonly string[]): string[][] {
-  const groups: string[][] = []
+  const rawGroups: string[][] = []
   let current: string[] = []
 
   for (const rawLine of lines) {
     if (rawLine.trim() === '') continue
     current.push(rawLine)
     if (claudeUsageOf(rawLine) === undefined) continue
-    groups.push(current)
+    rawGroups.push(current)
     current = []
   }
 
-  if (current.length > 0) groups.push(current)
-  return groups
+  if (current.length > 0) rawGroups.push(current)
+  if (rawGroups.length <= 1) return rawGroups
+
+  const mergedGroups: string[][] = []
+  for (let i = 0; i < rawGroups.length; i++) {
+    const group = rawGroups[i]!
+    const lastLine = group[group.length - 1]!
+    const usageInfo = parseLineUsageInfo(lastLine)
+
+    if (mergedGroups.length > 0) {
+      const prevMerged = mergedGroups[mergedGroups.length - 1]!
+      let prevUsageInfo: ReturnType<typeof parseLineUsageInfo>
+      for (let j = prevMerged.length - 1; j >= 0; j--) {
+        prevUsageInfo = parseLineUsageInfo(prevMerged[j]!)
+        if (prevUsageInfo !== undefined) break
+      }
+      if (prevUsageInfo !== undefined && isMatchingTurnUsage(prevUsageInfo, usageInfo)) {
+        prevMerged.push(...group)
+        continue
+      }
+    }
+    mergedGroups.push([...group])
+  }
+
+  return mergedGroups
 }
 
 /** Result of reading a full session transcript, including its identifier. */
