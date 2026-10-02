@@ -2,8 +2,14 @@ import { describe, expect, it } from 'vitest'
 
 import { AdapterRegistry } from './registry.js'
 import { rawSpan } from './testing.js'
-import { TOKEN_NEGATIVE_FRESH, TOKEN_SUM_MISMATCH } from '../types.js'
-import { canonicalSessionId, copilotAdapter, reconcileRequest } from './copilot.js'
+import { TOKEN_SUM_MISMATCH } from '../types.js'
+import {
+  canonicalSessionId,
+  convertInclusiveCounts,
+  copilotAdapter,
+  inclusiveConvention,
+  reconcileRequest,
+} from './copilot.js'
 import { geminiAdapter } from './gemini.js'
 import { piAdapter } from './pi.js'
 
@@ -175,32 +181,43 @@ describe('copilotAdapter.normalize — the inclusive convention (R4.2)', () => {
   })
 })
 
-describe('copilotAdapter — the inverted convention must fail loudly (R4.2)', () => {
-  // The measured failure: applying Copilot's inclusive conversion to pi's
-  // exclusive counters subtracts cache the input never contained. On the
-  // measured corpus this went negative on 293 of 307 spans; every row here
-  // is cache-heavy the way real turns are, so every row must reject.
+describe('copilotAdapter — exclusive-shaped counters convert exclusively (issue #193)', () => {
+  // Inclusive subtraction of exclusive counters is impossible: cache cannot
+  // be a subset of a smaller input. The adapter takes fresh as claimed and
+  // reassembles the reported total. Clamping fresh to 0 would drop the
+  // claimed input; leaving it negative would reject a coherent decomposition.
   it.each([
-    ['pi-shaped counters', piCounts(), 500 - 40_000 - 400],
+    ['pi-shaped counters', piCounts(), { fresh: 500, read: 40_000, creation: 400 }],
     [
       'cache read alone exceeding the claim',
       { 'gen_ai.usage.input_tokens': 1000, 'gen_ai.usage.cache_read.input_tokens': 50_000 },
-      1000 - 50_000,
+      { fresh: 1_000, read: 50_000, creation: 0 },
     ],
-  ])('rejects %s with TOKEN_NEGATIVE_FRESH', (_label, attributes, freshInput) => {
+  ])('recovers %s without clamping or rejecting', (_label, attributes, expected) => {
     const record = copilotAdapter.normalize(rawSpan({ spanId: 's1', traceId: 't1', attributes }))
 
-    // No clamping: the negative survives so validation can see it. A
-    // Math.max(0, …) here is how the inversion would be silenced.
-    expect(record.tokens.freshInput).toBe(freshInput)
-    expect(record.tokens.freshInput).toBeLessThan(0)
+    expect(record.tokens.freshInput).toBe(expected.fresh)
+    expect(record.tokens.cacheRead).toBe(expected.read)
+    expect(record.tokens.cacheCreation).toBe(expected.creation)
+    expect(record.tokens.reportedInput).toBe(expected.fresh + expected.read + expected.creation)
+    expect(record.tokens.freshInput).toBeGreaterThanOrEqual(0)
+    expect(copilotAdapter.validate(record)).toBeUndefined()
+  })
 
-    const problem = copilotAdapter.validate(record)
-    expect(problem).toMatchObject({
-      severity: 'error',
-      code: TOKEN_NEGATIVE_FRESH,
-      location: 's1',
+  it('keeps inclusiveConvention unclamped so a probe still sees the inversion', () => {
+    const raw = inclusiveConvention({
+      input: 500,
+      cacheRead: 40_000,
+      cacheCreation: 400,
+      output: 210,
     })
+    expect(raw.freshInput).toBe(500 - 40_000 - 400)
+    expect(convertInclusiveCounts({
+      input: 500,
+      cacheRead: 40_000,
+      cacheCreation: 400,
+      output: 210,
+    }).freshInput).toBe(500)
   })
 
   it('surfaces a corrupted sum as TOKEN_SUM_MISMATCH', () => {

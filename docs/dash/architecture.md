@@ -6,7 +6,7 @@ component: KyberDash
 source-root: dash
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-01
+last-reviewed: 2026-10-02
 decided-by:
   - adr/0020-kyberdash-one-time-fork
   - adr/0008-kyberdash-single-canonical-store
@@ -278,9 +278,14 @@ The invariant is `freshInput + cacheRead + cacheCreation === reportedInput`, che
 is what makes the invariant checkable at all; a model that stored "input" as one number could
 not detect the pi/Copilot convention inversion of R4.2 — the same `gen_ai.usage.input_tokens`
 attribute key with opposite meanings across harnesses. Adapters convert each harness's
-convention on the way in; a decomposition that yields negative fresh input, or that does not
-reconcile to the reported total, rejects the record and writes a problem rather than storing
-it (R4.4).
+convention on the way in. When inclusive subtraction is impossible — cache exceeds the
+input that supposedly contains it — the counters are exclusive-shaped and convert that
+way rather than being stored as negative fresh or clamped to zero. File-side exclusive
+reasoning (Antigravity-cli thinking counted separately from response) is folded into
+`output` so the subset invariant holds; Copilot rows that carry reasoning with output
+absent stay unfolded so that absence stays visible. A decomposition that is still
+negative, or that does not reconcile to the reported total, rejects the record and
+writes a problem rather than storing it (R4.4).
 
 ### `CostBlock` and cost basis
 

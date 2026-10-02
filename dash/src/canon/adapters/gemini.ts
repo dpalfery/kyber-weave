@@ -23,7 +23,7 @@ import { resolveRootByParentage, traceGroup } from './base.js'
 import {
   baseRecord,
   hasNamespace,
-  inclusiveConvention,
+  convertInclusiveCounts,
   readCounter,
   readUsageCounters,
   reconcileRequest,
@@ -91,16 +91,16 @@ export const geminiAdapter: HarnessAdapter = {
   /**
    * Convert Gemini's cached-inclusive counters into the disjoint classes
    * (R4.2): fresh = input − cacheRead (no creation term — there is no
-   * counter for it), unclamped, so an inverted reading of the convention
-   * surfaces as negative fresh input in validation rather than a silent
-   * undercount.
+   * counter for it). When cache exceeds input the counters cannot be
+   * inclusive and convert exclusively rather than going negative or
+   * clamping to zero (issue #193).
    */
   normalize(raw) {
     const record = baseRecord(this, raw)
     const counters = readUsageCounters(raw.attributes)
     const thoughts =
       counters.reasoning !== 0 ? counters.reasoning : readCounter(raw.attributes, THOUGHT_KEYS)
-    record.tokens = inclusiveConvention({
+    record.tokens = convertInclusiveCounts({
       input: counters.input,
       cacheRead: counters.cacheRead,
       cacheCreation: 0,

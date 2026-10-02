@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest'
 import { rawSpan } from './testing.js'
 import { antigravityAdapter } from './antigravity.js'
 import antigravitySpan from './__fixtures__/antigravity-span.json' with { type: 'json' }
-import { TOKEN_NEGATIVE_FRESH } from '../types.js'
 
 // Antigravity speaks Gemini's telemetry vocabulary (`gen_ai.system:
 // 'gemini' on the wire) but is a distinct surveyed harness with its own
@@ -64,7 +63,7 @@ describe('antigravityAdapter.normalize — the Gemini-vocabulary convention (R4.
     expect(record.tokens.cacheCreation).toBe(0)
   })
 
-  it('rejects inverted counters with TOKEN_NEGATIVE_FRESH', () => {
+  it('recovers exclusive-shaped counters instead of negative fresh (issue #193)', () => {
     const record = antigravityAdapter.normalize(
       rawSpan({
         spanId: 's1',
@@ -76,11 +75,12 @@ describe('antigravityAdapter.normalize — the Gemini-vocabulary convention (R4.
       }),
     )
 
-    expect(record.tokens.freshInput).toBe(200 - 1_000)
-    expect(antigravityAdapter.validate(record)).toMatchObject({
-      severity: 'error',
-      code: TOKEN_NEGATIVE_FRESH,
-      location: 's1',
+    expect(record.tokens).toMatchObject({
+      freshInput: 200,
+      cacheRead: 1_000,
+      cacheCreation: 0,
+      reportedInput: 1_200,
     })
+    expect(antigravityAdapter.validate(record)).toBeUndefined()
   })
 })

@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { rawSpan } from './testing.js'
 import { reconcileRequest } from './copilot.js'
 import { geminiAdapter } from './gemini.js'
-import { TOKEN_NEGATIVE_FRESH, TOKEN_REASONING_EXCEEDS_OUTPUT } from '../types.js'
+import { TOKEN_REASONING_EXCEEDS_OUTPUT } from '../types.js'
 
 // Gemini's convention is carried by documented assumptions pinned to the
 // session parser's recorded reading of its counters (dash/src/providers/
@@ -95,12 +95,11 @@ describe('geminiAdapter.normalize — the documented convention (R4.2)', () => {
   })
 })
 
-describe('geminiAdapter — the inverted convention must fail loudly (R4.2)', () => {
-  it('rejects exclusive-shaped counters with TOKEN_NEGATIVE_FRESH', () => {
-    // If Gemini's input were read the pi way — cache excluded — the
-    // inclusive subtraction removes cache twice. Cache-heavy turns go
-    // negative exactly like the pi/Copilot inversion, and validation is the
-    // alarm; no clamping may stand in its way.
+describe('geminiAdapter — exclusive-shaped counters convert exclusively (issue #193)', () => {
+  it('recovers exclusive-shaped counters instead of negative fresh', () => {
+    // Cache cannot be a subset of a smaller input. Convert exclusively:
+    // fresh as claimed, reported total reassembled. Clamping to 0 would
+    // drop the 200 claimed tokens.
     const record = geminiAdapter.normalize(
       rawSpan({
         spanId: 's1',
@@ -109,12 +108,13 @@ describe('geminiAdapter — the inverted convention must fail loudly (R4.2)', ()
       }),
     )
 
-    expect(record.tokens.freshInput).toBe(200 - 1_000)
-    expect(geminiAdapter.validate(record)).toMatchObject({
-      severity: 'error',
-      code: TOKEN_NEGATIVE_FRESH,
-      location: 's1',
+    expect(record.tokens).toMatchObject({
+      freshInput: 200,
+      cacheRead: 1_000,
+      cacheCreation: 0,
+      reportedInput: 1_200,
     })
+    expect(geminiAdapter.validate(record)).toBeUndefined()
   })
 
   it('rejects thoughts reported outside output (assumption 3)', () => {

@@ -11,14 +11,13 @@
 // trace (cache-exclusive turn, a child tool span, a second turn), a
 // Copilot cache-inclusive turn, a GenAI-only span alone in its trace
 // (fingerprint below threshold, nothing to inherit from → quarantine, R6.1),
-// and a Copilot turn whose inverted decomposition cannot hold (fresh input
-// −400 → rejected with a persisted problem, R4.4).
+// and a Copilot turn whose exclusive-shaped counters (input 100, cache 500)
+// convert exclusively rather than going negative (issue #193).
 
 import { describe, expect, it } from 'vitest'
 
 import { SCHEMA_VERSION, CanonStore } from '../canon/store.js'
 import type { CanonicalRecord } from '../canon/types.js'
-import { TOKEN_NEGATIVE_FRESH } from '../canon/types.js'
 import { decodeOtlpJson, type OtlpSpan } from '../otel/receiver.js'
 import { compareDigests, computeDigest } from './parity.js'
 import { reingestFromExports } from './reingest.js'
@@ -183,8 +182,8 @@ const BATCH_1 = exportRequest([
 // Batch 2 — a later export: a GenAI-only span alone in its trace (partial
 // fingerprint scores 0.4, below the 0.6 threshold, and this batch holds no
 // same-source group to inherit from → quarantine), and a Copilot turn whose
-// decomposition cannot hold (input 100 against cache read 500 → fresh input
-// −400 → rejected with a persisted problem).
+// exclusive-shaped counters (input 100, cache 500) convert exclusively
+// rather than being stored as negative fresh (issue #193).
 const BATCH_2 = exportRequest([
   {
     source: 'orphan-exporter',
@@ -214,7 +213,7 @@ const BATCH_2 = exportRequest([
 const EXPORTS: OtlpSpan[][] = [decodeOtlpJson(BATCH_1), decodeOtlpJson(BATCH_2)]
 
 /** Span ids of the corpus the fixture exports store, in corpus order. */
-const STORED_SPAN_IDS = [S_PI_TURN_1, S_PI_TOOL, S_COPILOT_TURN, S_PI_TURN_2]
+const STORED_SPAN_IDS = [S_PI_TURN_1, S_PI_TOOL, S_COPILOT_TURN, S_PI_TURN_2, S_INVALID]
 
 /** The corpus a store rebuilt from the fixture holds, read back in corpus order. */
 function corpusOf(store: CanonStore): CanonicalRecord[] {
@@ -226,13 +225,14 @@ function corpusOf(store: CanonStore): CanonicalRecord[] {
   return corpus
 }
 
-// Hand-computed over the stored corpus: 1_000+1_500 fresh (pi turns) and
-// 4_000−1_000 (Copilot's inclusive conversion), 2_000+1_000 cache read,
-// 500 cache creation, 800+600+300 output, 0 for the tool span.
+// Hand-computed over the stored corpus: 1_000+1_500+100 fresh (pi turns plus
+// the exclusive-shaped Copilot row), 4_000−1_000 (Copilot's inclusive
+// conversion) + 500 cache read on the exclusive-shaped row, 500 cache
+// creation, 800+600+300 output, 0 for the tool span.
 const EXPECTED_TOKEN_STATS = {
-  totalTokens: 10_700,
-  freshInput: 5_500,
-  cacheRead: 3_000,
+  totalTokens: 11_300,
+  freshInput: 5_600,
+  cacheRead: 3_500,
   cacheCreation: 500,
   output: 1_700,
 }
@@ -247,7 +247,7 @@ describe('reingestFromExports — rebuilding the corpus from existing exports (R
     const original = new CanonStore(':memory:')
     await reingestFromExports(EXPORTS, original)
     const originalCorpus = corpusOf(original)
-    expect(originalCorpus).toHaveLength(4)
+    expect(originalCorpus).toHaveLength(5)
     const originalDigest = computeDigest(originalCorpus)
 
     // The reconstruction: same exports, a fresh store, nothing carried
@@ -264,9 +264,9 @@ describe('reingestFromExports — rebuilding the corpus from existing exports (R
 
     // The equality is not vacuous: the digest is the corpus the fixtures
     // encode, every token class where the conventions put it.
-    expect(rebuiltDigest.recordCount).toBe(4)
+    expect(rebuiltDigest.recordCount).toBe(5)
     expect(rebuiltDigest.tokenStats).toEqual(EXPECTED_TOKEN_STATS)
-    expect(rebuiltDigest.timeline.spans).toBe(4)
+    expect(rebuiltDigest.timeline.spans).toBe(5)
 
     // The fresh store holds exactly the original corpus — same records,
     // same count, none lost and none invented by the rebuild.
@@ -332,18 +332,21 @@ describe('reingestFromExports — rebuilding the corpus from existing exports (R
       { spanId: S_ORPHAN, namespaces: ['gen_ai'], reason: 'unclaimed' },
     ])
 
-    // The inverted Copilot decomposition was rejected, its problem persisted
-    // for the problems view — not logged and lost, not stored (R4.4).
-    expect(store.get(S_INVALID)).toBeUndefined()
-    const problems = store.getProblems()
-    expect(problems).toHaveLength(1)
-    expect(problems[0].spanId).toBe(S_INVALID)
-    expect(problems[0].severity).toBe('error')
-    expect(problems[0].code).toBe(TOKEN_NEGATIVE_FRESH)
+    // Exclusive-shaped Copilot counters (input 100, cache 500) convert
+    // exclusively rather than being rejected as negative fresh (issue #193).
+    expect(store.get(S_INVALID)?.tokens).toEqual({
+      freshInput: 100,
+      cacheRead: 500,
+      cacheCreation: 0,
+      output: 0,
+      reportedInput: 600,
+      reportedOutput: 0,
+    })
+    expect(store.getProblems()).toEqual([])
 
     // One audit entry for the run, with the records it stored.
     expect(store.getIngestLog()).toEqual([
-      { source: 'span-exports', count: 4, timestamp: expect.any(String) },
+      { source: 'span-exports', count: 5, timestamp: expect.any(String) },
     ])
 
     store.close()
@@ -359,10 +362,10 @@ describe('reingestFromExports — rebuilding the corpus from existing exports (R
     // span_id is the primary key: the corpus is unchanged, and so is its
     // digest. Quarantine replaces its entry; under v13 idempotency, re-ingesting
     // the same problematic record results in 1 diagnostic row rather than 2.
-    expect(store.count()).toBe(4)
+    expect(store.count()).toBe(5)
     expect(computeDigest(corpusOf(store))).toEqual(first)
     expect(store.listQuarantine()).toHaveLength(1)
-    expect(store.getProblems()).toHaveLength(1)
+    expect(store.getProblems()).toHaveLength(0)
 
     store.close()
   })
