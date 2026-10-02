@@ -132,6 +132,46 @@ describe('claude provider - tool extraction in loadClaudeCalls', () => {
     expect(call.cacheCreationInputTokens).toBe(200)
   })
 
+  it('keeps calls separate when adjacent assistant lines have differing native message IDs', () => {
+    const transcriptPath = join(tmpDir, 'different-msg-ids.jsonl')
+    const usage = {
+      input_tokens: 150,
+      output_tokens: 45,
+      cache_read_input_tokens: 300,
+      cache_creation_input_tokens: 200,
+    }
+    const lines = [
+      JSON.stringify({
+        type: 'assistant',
+        sessionId: 'session-diff-ids',
+        uuid: 'turn-1',
+        timestamp: '2026-09-01T12:00:00.000Z',
+        message: {
+          id: 'msg-first',
+          model: 'claude-sonnet-4-5',
+          usage,
+        },
+      }),
+      JSON.stringify({
+        type: 'assistant',
+        sessionId: 'session-diff-ids',
+        uuid: 'turn-2',
+        timestamp: '2026-09-01T12:00:05.000Z',
+        message: {
+          id: 'msg-second',
+          model: 'claude-sonnet-4-5',
+          usage,
+        },
+      }),
+    ]
+    writeFileSync(transcriptPath, lines.join('\n') + '\n', 'utf8')
+
+    const calls = loadClaudeCalls(transcriptPath)
+    expect(calls).toHaveLength(2)
+    expect(calls[0]!.deduplicationKey).toBe('claude:session-diff-ids:turn-1')
+    expect(calls[1]!.deduplicationKey).toBe('claude:session-diff-ids:turn-2')
+  })
+
   it('recurses into subagent directories when parsing sessions (Thread 11)', async () => {
     const subagentsDir = join(tmpDir, 'subagents')
     mkdirSync(subagentsDir)

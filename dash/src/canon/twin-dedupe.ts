@@ -211,6 +211,13 @@ function collapseCluster(
   const files = cluster.filter((record) => isFileSource(record.source))
   if (otels.length === 0) {
     if (files.length <= 1) return
+    // Only collapse duplicate file rows for Claude Desktop where request/response
+    // pairs produce twin file records for one turn (#232). For other file sources,
+    // identical counters within 60 s could be genuine retries and must be preserved
+    // per ADR 0009 D4.
+    if (!files.every((file) => file.source === 'codeburn/claude-desktop' || file.harness === 'claude-desktop')) {
+      return
+    }
     const sortedFiles = [...files].sort((a, b) => cachedTimestampMs(a) - cachedTimestampMs(b))
     const keeper = sortedFiles[0]!
     let donor: CanonicalRecord | undefined

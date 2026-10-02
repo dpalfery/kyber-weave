@@ -726,6 +726,38 @@ describe('Task 5 — child tool.invoke span generation and result truncation', (
     expect(toolRecords[0]!.parentSpanId).toBe(parent.spanId)
   })
 
+  it('does not collapse equal-counter turns for non-Claude desktop harnesses like codex-desktop', () => {
+    const synthesizer = new Synthesizer()
+    const call1 = call({
+      provider: 'codex',
+      sessionId: 's-codex',
+      timestamp: '2026-09-23T22:43:53.000Z',
+      inputTokens: 100,
+      outputTokens: 50,
+      deduplicationKey: 'codex:s-codex:1',
+    })
+    const call2 = call({
+      provider: 'codex',
+      sessionId: 's-codex',
+      timestamp: '2026-09-23T22:43:58.000Z',
+      inputTokens: 100,
+      outputTokens: 50,
+      deduplicationKey: 'codex:s-codex:2',
+    })
+    const env1 = envelope({
+      harnessId: 'codex-desktop',
+      call: call1,
+    })
+    const env2 = envelope({
+      harnessId: 'codex-desktop',
+      call: call2,
+    })
+
+    const records = synthesizer.synthesizeEnvelopes([env1, env2])
+    const parentRecords = records.filter((r) => r.op === 'llm.invoke')
+    expect(parentRecords).toHaveLength(2)
+  })
+
   it('truncates large tool results (>64KB) in parts and preserves original byte count in attributes', () => {
     const synthesizer = new Synthesizer()
     const parsedCall = call({

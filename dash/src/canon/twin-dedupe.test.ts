@@ -582,6 +582,31 @@ describe('dedupeTwinTurns file-only sessions (#232)', () => {
     expect(out[0]!.content.system_prompt).toBe('req')
     expect(out[0]!.content.conversation_history).toBe('res')
   })
+
+  it('preserves duplicate-counter rows for non-Claude-Desktop file sources (ADR 0009 D4)', () => {
+    const turnTokens = counters({ reportedInput: 64075, output: 563 })
+    const out = dedupeTwinTurns([
+      llmInvoke('synth:codex:file-only:turn1', {
+        source: 'codeburn/codex',
+        harness: 'codex',
+        sessionId: 'codex-session',
+        timestamp: '2026-09-23T22:43:53.000Z',
+        tokens: turnTokens,
+        content: { conversation_history: 'turn 1' },
+      }),
+      llmInvoke('synth:codex:file-only:turn2', {
+        source: 'codeburn/codex',
+        harness: 'codex',
+        sessionId: 'codex-session',
+        timestamp: '2026-09-23T22:43:58.000Z',
+        tokens: turnTokens,
+        content: { conversation_history: 'turn 2' },
+      }),
+    ])
+
+    // Preserved as genuine retries per ADR 0009 D4
+    expect(out).toHaveLength(2)
+  })
 })
 
 // The clustering window is documented on the constant, not derived from the

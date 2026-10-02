@@ -756,8 +756,7 @@ function isCandidateCollapse(call: ParsedProviderCall, harnessId?: string): bool
   return (
     harness === 'claude-desktop' ||
     harness === 'kyberdash/claude-desktop' ||
-    call.provider === 'claude-desktop' ||
-    harness.includes('desktop')
+    call.provider === 'claude-desktop'
   )
 }
 

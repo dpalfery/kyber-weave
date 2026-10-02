@@ -305,6 +305,7 @@ export function loadClaudeCalls(filePath: string): ParsedProviderCall[] {
   }
 
   const calls: ParsedProviderCall[] = []
+  const nativeMessageIds: Array<string | undefined> = []
   const fileStem = basename(filePath, extname(filePath))
   let index = 0
 
@@ -321,9 +322,10 @@ export function loadClaudeCalls(filePath: string): ParsedProviderCall[] {
     const message = record['message'] as Record<string, unknown> | undefined
     if (!message) continue
     const sessionId = claudeText(record['sessionId']) ?? fileStem
+    const nativeMessageId = claudeText(message['id'])
     // `uuid` is the transcript's own per-record identity; the index keeps the
     // key unique for a transcript that omits it.
-    const messageId = claudeText(record['uuid']) ?? claudeText(message['id']) ?? `turn-${index}`
+    const messageId = claudeText(record['uuid']) ?? nativeMessageId ?? `turn-${index}`
     index += 1
 
     const serverToolUse = usage['server_tool_use']
@@ -394,7 +396,10 @@ export function loadClaudeCalls(filePath: string): ParsedProviderCall[] {
     }
 
     const prevCall = calls[calls.length - 1]
-    if (prevCall !== undefined && isContiguousPair(prevCall, newCall)) {
+    if (
+      prevCall !== undefined &&
+      isContiguousPair(prevCall, newCall, nativeMessageIds[nativeMessageIds.length - 1], nativeMessageId)
+    ) {
       prevCall.tools = Array.from(new Set([...prevCall.tools, ...newCall.tools]))
       prevCall.bashCommands = Array.from(new Set([...prevCall.bashCommands, ...newCall.bashCommands]))
       if (newCall.toolSequence && newCall.toolSequence.length > 0) {
@@ -403,13 +408,26 @@ export function loadClaudeCalls(filePath: string): ParsedProviderCall[] {
       prevCall.webSearchRequests = Math.max(prevCall.webSearchRequests, newCall.webSearchRequests)
     } else {
       calls.push(newCall)
+      nativeMessageIds.push(nativeMessageId)
     }
   }
 
   return calls
 }
 
-function isContiguousPair(prev: ParsedProviderCall, next: ParsedProviderCall): boolean {
+function isContiguousPair(
+  prev: ParsedProviderCall,
+  next: ParsedProviderCall,
+  prevNativeMessageId: string | undefined,
+  nextNativeMessageId: string | undefined,
+): boolean {
+  if (
+    prevNativeMessageId !== undefined &&
+    nextNativeMessageId !== undefined &&
+    prevNativeMessageId !== nextNativeMessageId
+  ) {
+    return false
+  }
   if (prev.sessionId !== next.sessionId) return false
   if (prev.model !== next.model) return false
   if (

@@ -44,6 +44,7 @@ export {
 } from '../../providers/claude.js'
 
 function parseLineUsageInfo(rawLine: string): {
+  messageId?: string
   sessionId?: string
   model?: string
   inputTokens: number
@@ -62,6 +63,7 @@ function parseLineUsageInfo(rawLine: string): {
   }
   const message = record['message'] as Record<string, unknown> | undefined
   return {
+    messageId: message ? claudeText(message['id']) : undefined,
     sessionId: claudeText(record['sessionId']),
     model: message ? claudeText(message['model']) : undefined,
     inputTokens: claudeCount(usage['input_tokens']),
@@ -77,6 +79,9 @@ function isMatchingTurnUsage(
   next: ReturnType<typeof parseLineUsageInfo>,
 ): boolean {
   if (!prev || !next) return false
+  if (prev.messageId !== undefined && next.messageId !== undefined && prev.messageId !== next.messageId) {
+    return false
+  }
   if (prev.sessionId !== undefined && next.sessionId !== undefined && prev.sessionId !== next.sessionId) {
     return false
   }
