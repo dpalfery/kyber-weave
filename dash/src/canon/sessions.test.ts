@@ -1136,7 +1136,7 @@ describe('canonical harness on derived sessions', () => {
     // (17007/0, 0/45) plus cursor-agent (125/45) within skew. After T2's
     // complementary join, buildSessions must sum the overlapped 45 once
     // (~45, not ~90) — rebuild-only; raw dual rows stay in the store.
-    const sessionKey = '0f659701-8568-44e8-86d2-0cf768294ae9'
+    const sessionKey = 'test-session-key-0001'
     const store = new CanonStore(':memory:')
     store.upsertMany([
       turn('synth:cursor:req', [], {
