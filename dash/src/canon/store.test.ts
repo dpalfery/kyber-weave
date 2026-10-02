@@ -1280,3 +1280,184 @@ describe('CanonStore finding indexes (council review)', () => {
     store.close()
   })
 })
+
+
+describe('store migrations v17: quarantine and problems schema upgrade', () => {
+  it('bumps SCHEMA_VERSION to 17 and initializes fresh database with new quarantine and problems columns', () => {
+    expect(SCHEMA_VERSION).toBe(17)
+
+    const path = tempStorePath()
+    const store = new CanonStore(path)
+    expect(store.getMetadata('schema_version')).toBe('17')
+    store.close()
+
+    const verifyDb = new DatabaseSync(path)
+    const qCols = verifyDb.prepare('PRAGMA table_info(quarantine)').all() as Array<{ name: string }>
+    expect(qCols.some((col) => col.name === 'source')).toBe(true)
+    expect(qCols.some((col) => col.name === 'name')).toBe(true)
+    expect(qCols.some((col) => col.name === 'timestamp')).toBe(true)
+
+    const probCols = verifyDb.prepare('PRAGMA table_info(problems)').all() as Array<{ name: string }>
+    expect(probCols.some((col) => col.name === 'session_id')).toBe(true)
+    expect(probCols.some((col) => col.name === 'harness')).toBe(true)
+    expect(probCols.some((col) => col.name === 'timestamp')).toBe(true)
+    verifyDb.close()
+  })
+
+  it('accepts and records source, name, and timestamp metadata via positional arguments in store.quarantine()', () => {
+    const path = tempStorePath()
+    const store = new CanonStore(path)
+
+    const spanId = 'span-quarantine-meta-pos'
+    const namespaces = ['copilot', 'gen_ai']
+    const reason = 'unclaimed'
+    const source = 'copilot:chat-1'
+    const name = 'chat_turn'
+    const timestamp = '2026-09-30T12:00:00.000Z'
+
+    store.quarantine(spanId, namespaces, reason, source, name, timestamp)
+
+    const verifyDb = new DatabaseSync(path)
+    const row = verifyDb.prepare('SELECT * FROM quarantine WHERE span_id = ?').get(spanId) as Record<string, unknown>
+    expect(row).toBeDefined()
+    expect(row.source).toBe(source)
+    expect(row.name).toBe(name)
+    expect(row.timestamp).toBe(timestamp)
+    verifyDb.close()
+
+    const entry = store.getQuarantine(spanId)
+    expect(entry).toBeDefined()
+    expect(entry?.source).toBe(source)
+    expect(entry?.name).toBe(name)
+    expect(entry?.timestamp).toBe(timestamp)
+
+    store.close()
+  })
+
+  it('accepts and records source, name, and timestamp metadata via options object in store.quarantine()', () => {
+    const path = tempStorePath()
+    const store = new CanonStore(path)
+
+    const spanId = 'span-quarantine-meta-opt'
+    const namespaces = ['copilot', 'gen_ai']
+    const reason = 'unclaimed'
+    const source = 'copilot:chat-2'
+    const name = 'chat_turn_options'
+    const timestamp = '2026-09-30T12:05:00.000Z'
+
+    store.quarantine(spanId, namespaces, reason, { source, name, timestamp })
+
+    const verifyDb = new DatabaseSync(path)
+    const row = verifyDb.prepare('SELECT * FROM quarantine WHERE span_id = ?').get(spanId) as Record<string, unknown>
+    expect(row).toBeDefined()
+    expect(row.source).toBe(source)
+    expect(row.name).toBe(name)
+    expect(row.timestamp).toBe(timestamp)
+    verifyDb.close()
+
+    const entry = store.getQuarantine(spanId)
+    expect(entry).toBeDefined()
+    expect(entry?.source).toBe(source)
+    expect(entry?.name).toBe(name)
+    expect(entry?.timestamp).toBe(timestamp)
+
+    store.close()
+  })
+
+  it('migrates existing databases on schema version 14 to schema version 15 preserving rows', () => {
+    const path = tempStorePath()
+
+    // 1. Seed a schema version 14 database with existing rows in quarantine and problems
+    const v14Db = new DatabaseSync(path)
+    v14Db.exec(`
+      CREATE TABLE metadata (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+      INSERT INTO metadata (key, value) VALUES ('schema_version', '14');
+
+      CREATE TABLE quarantine (
+        span_id TEXT PRIMARY KEY,
+        namespaces TEXT NOT NULL,
+        reason TEXT NOT NULL
+      );
+      INSERT INTO quarantine (span_id, namespaces, reason)
+      VALUES ('span-v14-q', '["pi"]', 'legacy unclaimed');
+
+      CREATE TABLE problems (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        span_id TEXT,
+        problem_key TEXT NOT NULL DEFAULT '',
+        severity TEXT NOT NULL,
+        code TEXT NOT NULL,
+        message TEXT NOT NULL,
+        location TEXT
+      );
+      CREATE UNIQUE INDEX problems_by_identity ON problems (problem_key);
+      INSERT INTO problems (span_id, problem_key, severity, code, message, location)
+      VALUES ('span-v14-p', 'key-v14', 'warning', 'LEGACY_PARSE_ERROR', 'legacy problem message', 'turn-1');
+
+      CREATE TABLE records (
+        span_id TEXT PRIMARY KEY,
+        trace_id TEXT,
+        parent_span_id TEXT,
+        source TEXT NOT NULL,
+        harness TEXT NOT NULL,
+        session_id TEXT,
+        name TEXT NOT NULL,
+        op TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        timestamp TEXT NOT NULL,
+        duration_ms INTEGER NOT NULL,
+        status TEXT NOT NULL,
+        tokens_json TEXT NOT NULL,
+        content_json TEXT NOT NULL,
+        cost_json TEXT NOT NULL,
+        measurability_json TEXT,
+        parts_json BLOB,
+        raw BLOB
+      );
+    `)
+    v14Db.close()
+
+    // 2. Open with CanonStore: should run migrations up to 17
+    const migrated = new CanonStore(path)
+    expect(migrated.getMetadata('schema_version')).toBe('17')
+
+    // 3. Verify existing rows are preserved
+    const qRow = migrated.getQuarantine('span-v14-q')
+    expect(qRow).toBeDefined()
+    expect(qRow?.namespaces).toEqual(['pi'])
+    expect(qRow?.reason).toBe('legacy unclaimed')
+
+    const pRows = migrated.getProblems('span-v14-p')
+    expect(pRows).toHaveLength(1)
+    expect(pRows[0]?.code).toBe('LEGACY_PARSE_ERROR')
+    expect(pRows[0]?.message).toBe('legacy problem message')
+
+    // 4. Verify new columns exist in both tables after migration
+    const verifyDb = new DatabaseSync(path)
+    const qCols = verifyDb.prepare('PRAGMA table_info(quarantine)').all() as Array<{ name: string }>
+    expect(qCols.some((col) => col.name === 'source')).toBe(true)
+    expect(qCols.some((col) => col.name === 'name')).toBe(true)
+    expect(qCols.some((col) => col.name === 'timestamp')).toBe(true)
+
+    const probCols = verifyDb.prepare('PRAGMA table_info(problems)').all() as Array<{ name: string }>
+    expect(probCols.some((col) => col.name === 'session_id')).toBe(true)
+    expect(probCols.some((col) => col.name === 'harness')).toBe(true)
+    expect(probCols.some((col) => col.name === 'timestamp')).toBe(true)
+
+    // 5. Verify newly migrated database can insert new quarantine and problem metadata
+    verifyDb.prepare(
+      'INSERT INTO quarantine (span_id, namespaces, reason, source, name, timestamp) VALUES (?, ?, ?, ?, ?, ?)'
+    ).run('span-v15-q', '["copilot"]', 'new reason', 'source-1', 'name-1', '2026-09-30T12:00:00.000Z')
+
+    const newQRow = verifyDb.prepare('SELECT * FROM quarantine WHERE span_id = ?').get('span-v15-q') as Record<string, unknown>
+    expect(newQRow.source).toBe('source-1')
+    expect(newQRow.name).toBe('name-1')
+    expect(newQRow.timestamp).toBe('2026-09-30T12:00:00.000Z')
+
+    verifyDb.close()
+    migrated.close()
+  })
+})

@@ -105,6 +105,9 @@ export function recordValidationProblems(
       ...problem,
       spanId: record.spanId,
       location: problem.location ?? record.spanId,
+      sessionId: record.sessionId ?? null,
+      harness: record.harness,
+      timestamp: record.timestamp instanceof Date ? record.timestamp.toISOString() : (record.timestamp ?? null),
     })
   }
   return accepted
