@@ -48,8 +48,9 @@ describe('cursor provider', () => {
 
   describe('time floor', () => {
     it('uses dateRange.start when within the six-month cap', () => {
-      const start = new Date(2026, 3, 1)
-      expect(getCursorTimeFloor({ start, end: new Date(2026, 5, 2) })).toBe(start.toISOString())
+      const end = new Date()
+      const start = new Date(end.getFullYear(), end.getMonth() - 3, end.getDate())
+      expect(getCursorTimeFloor({ start, end })).toBe(start.toISOString())
     })
   })
 
