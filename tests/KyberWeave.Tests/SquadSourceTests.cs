@@ -153,6 +153,36 @@ public sealed class SquadSourceTests
     }
 
     /// <summary>
+    /// Pins the Antigravity column of each model profile (issue #209). Architect-class
+    /// <c>deep-planning</c> is <c>claude-opus-4-6</c>; every other profile is Gemini Flash.
+    /// Without this pin, <c>deep-planning</c> and <c>reviewer</c> can silently return to
+    /// <c>pro</c> (Gemini 3.1 Pro) and still pass renderer tests that only echo <c>models.yml</c>.
+    /// </summary>
+    [Theory]
+    [InlineData("deep-planning", "claude-opus-4-6")]
+    [InlineData("fast", "flash")]
+    [InlineData("general", "flash")]
+    [InlineData("orchestration", "flash")]
+    [InlineData("reviewer", "flash")]
+    public void ModelsYmlAntigravityColumnPinsDeepPlanningOnClaudeOpusAndOtherProfilesOnFlash(
+        string profileName,
+        string expectedAntigravityModel)
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+
+        Assert.True(
+            source.ModelProfiles.Profiles.ContainsKey(profileName),
+            $"models.yml does not declare the '{profileName}' profile.");
+        SquadModelProfile profile = source.ModelProfiles.Profiles[profileName];
+        Assert.True(
+            profile.HarnessModels.TryGetValue("antigravity", out string? actualValue),
+            $"Profile '{profileName}' is missing its antigravity column in models.yml.");
+        Assert.True(
+            actualValue == expectedAntigravityModel,
+            $"Profile '{profileName}' antigravity is '{actualValue}' but should be '{expectedAntigravityModel}'.");
+    }
+
+    /// <summary>
     /// Guard against vacuous tests: reviewer must have members when it exists (plan section 7, T16 criterion 3).
     /// </summary>
     [Fact]

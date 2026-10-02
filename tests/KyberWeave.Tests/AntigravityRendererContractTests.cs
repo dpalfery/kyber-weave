@@ -1045,8 +1045,15 @@ public sealed class AntigravityRendererContractTests : IDisposable
         }
     }
 
+    /// <summary>
+    /// Pins rendered Antigravity models by value (issue #209). Architect is on
+    /// <c>deep-planning</c>, which renders <c>claude-opus-4-6</c>; every other
+    /// profile renders Gemini Flash. The previous inherit/flash/pro enum allowed
+    /// <c>pro</c> on deep-planning and reviewer, which installed Gemini 3.1 Pro
+    /// instead of the intended mapping.
+    /// </summary>
     [Fact]
-    public async Task RenderAsync_Antigravity_Native_ModelEnumInheritFlashProOnly()
+    public async Task RenderAsync_Antigravity_DeepPlanningRunsOnClaudeOpusAndOtherProfilesOnFlash()
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
         SquadRendererRegistry registry = new([new AntigravityRenderer()]);
@@ -1059,7 +1066,9 @@ public sealed class AntigravityRendererContractTests : IDisposable
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
-        // D8: Only inherit, flash, pro spellings; never flash-lite or FLASH_LITE
+        SquadAgent architect = Assert.Single(source.Agents, agent => agent.Name == "architect");
+        Assert.Equal("deep-planning", architect.ModelProfile);
+
         foreach (SquadAgent agent in source.Agents)
         {
             SquadDeploymentFile agentFile = Assert.Single(
@@ -1068,8 +1077,13 @@ public sealed class AntigravityRendererContractTests : IDisposable
 
             YamlMappingNode frontmatter = ReadFrontmatter(agentFile);
             string model = RequireScalar(frontmatter, "model");
+            string expectedModel = string.Equals(agent.ModelProfile, "deep-planning", StringComparison.Ordinal)
+                ? "claude-opus-4-6"
+                : "flash";
 
-            Assert.Matches("^(inherit|flash|pro)$", model);
+            Assert.True(
+                string.Equals(expectedModel, model, StringComparison.Ordinal),
+                $"Agent '{agent.Name}' (profile '{agent.ModelProfile}') model must be '{expectedModel}', got '{model}'.");
             Assert.False(
                 model.Contains("flash", StringComparison.OrdinalIgnoreCase) && model.Contains('-', StringComparison.Ordinal),
                 $"Agent '{agent.Name}' model must not use flash-lite or flash_lite spelling, got '{model}'");

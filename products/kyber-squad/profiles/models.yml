@@ -2,7 +2,7 @@ schema: kyber-squad.model-profiles/v1
 profiles:
   deep-planning:
     default: inherit
-    antigravity: pro
+    antigravity: claude-opus-4-6
     claude: opus
     codex: gpt-5.6-sol
     copilot: GPT-5.6 Sol (copilot)
@@ -47,7 +47,7 @@ profiles:
     zcode: glm-5.3-flash
   reviewer:
     default: inherit
-    antigravity: pro
+    antigravity: flash
     claude: sonnet
     codex: gpt-5.6-terra
     copilot: Kimi K2.7 Code (copilot)
