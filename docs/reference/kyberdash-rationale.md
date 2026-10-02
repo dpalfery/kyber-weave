@@ -4,7 +4,7 @@ title: KyberDash measurable rationale
 doc-type: reference
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-01
+last-reviewed: 2026-10-02
 ---
 
 # KyberDash measurable rationale
@@ -83,8 +83,6 @@ reader's `cost_usd` keeps the `harness` basis.
 - The legacy `cost_usd` fallback in the session row is untested.
 - The Run and Harness cost cells (`RunDetail.tsx:459`, `HarnessDetail.tsx:395`) still use the bare
   `—` pattern.
-- **F1.** The session-list cost cell (`w-20`) wraps word statuses such as "no published rate".
-  Needs a visual check, then a wider cell or a short label with the reason in `title`.
 
 **PR #225 review items declined, with reasons.**
 
