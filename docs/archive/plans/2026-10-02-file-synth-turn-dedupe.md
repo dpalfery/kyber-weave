@@ -2,7 +2,7 @@
 id: plans/2026-10-02-file-synth-turn-dedupe
 title: "KyberDash: synthesize one canonical record per turn for file-synthesized turns (#232)"
 doc-type: plan
-status: draft
+status: complete
 component: KyberDash
 owner: dpalfery
 last-reviewed: 2026-10-02
@@ -11,7 +11,7 @@ development-mode: test-first
 
 # KyberDash: synthesize one canonical record per turn for file-synthesized turns (#232)
 
-**Status: Ready.** Approved by orchestrator on 2026-10-01 (Approve-and-execute gate). Assigned to conductor / architect on branch `agy/issue-232-synth-dup-turns`.
+**Status: Complete, archived 2026-10-02.** Approved by orchestrator on 2026-10-01 (Approve-and-execute gate). Assigned to conductor / architect on branch `agy/issue-232-synth-dup-turns`. T1–T5 complete. Archived per KW-DOC-LIFECYCLE-003.
 This plan addresses GitHub issue [#232](https://github.com/dpalfery/kyber-weave/issues/232): file-synthesized turns arrive twice per turn (request/response pair).
 
 **Development mode:** `test-first`. Every implementation task defines failing automated tests before touching production logic.
