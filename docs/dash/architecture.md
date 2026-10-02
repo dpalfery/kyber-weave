@@ -215,13 +215,22 @@ prevent, and the manual `kyberdash build` command runs the same derivation.
 The live collector does not call the projection inline. Accepted span batches and successful
 log enrichment mark a serialized `CanonicalProjectionScheduler` dirty instead:
 
+- The scheduler **debounces**: a pass starts only after the ingest stream has been quiet for
+  `DEFAULT_PROJECTION_IDLE_MS` (10s), at the staleness cap `DEFAULT_PROJECTION_MAX_WAIT_MS`
+  (10min) if dirt never quiesces, and never sooner than `DEFAULT_PROJECTION_MIN_INTERVAL_MS`
+  (10min) after the previous pass started. Sustained traffic therefore costs at most one full
+  pass per 10 minutes; `request()` never starts one immediately.
 - At most one pass runs at a time; a burst of dirty marks costs one pass plus **one trailing
-  pass**, never one projection per batch.
+  (scheduled, not immediate) pass**, never one projection per batch.
 - A failed pass rolls nothing back — records the writer already committed stay committed —
-  reports the error, and leaves the work dirty; the next request retries it. A slow or failing
-  projection can therefore never block, reject, or drop accepted ingestion.
+  reports the error, and leaves the work dirty; the next request or `drain()` retries it. A
+  slow or failing projection can therefore never block, reject, or drop accepted ingestion.
 - Shutdown orders receiver stop, writer stop, projection drain, then store close: `drain()`
-  and `close()` resolve only once no pass is in flight and no trailing pass is owed.
+  and `close()` bypass the debounce/floor schedule, run any owed work immediately, and
+  resolve only once no pass is in flight and no trailing pass is owed. Dashboard freshness
+  is bounded by the same knobs: derived sessions trail the last accepted batch by roughly
+  the idle window after the stream quiets, and by at most the 10-minute caps under
+  saturation.
 
 `KyberBridge.listSessions()` (`dash/src/server/bridge.ts`) reads only the canonical derived
 `session` cache. Raw `records` are never synthesized into sessions for reporting: until the

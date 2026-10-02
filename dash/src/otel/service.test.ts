@@ -182,6 +182,24 @@ describe('startOtlpCollectorService canonical projection', () => {
     }
   })
 
+  it('derives nothing before the debounce window and derives after drain', async () => {
+    const service = await startOtlpCollectorService({ port: 0, dbPath: ':memory:' })
+    try {
+      await service.writer.enqueue([claimableSpan()])
+      await service.writer.flush()
+
+      // The writer committed the record, but the projection is scheduled —
+      // with the production 10s idle window, no pass has run yet.
+      expect(service.canon.get(SPAN_ID)).toBeDefined()
+      expect(service.canon.getSessionPayload(TRACE_ID)).toBeUndefined()
+
+      await projectionScheduler(service).drain()
+      expect(service.canon.getSessionPayload(TRACE_ID)).toMatchObject({ harness: 'claude-code' })
+    } finally {
+      await service.close()
+    }
+  })
+
   it('reprojects an enriched session so the persisted payload measurably changes', async () => {
     const service = await startOtlpCollectorService({ port: 0, dbPath: ':memory:' })
     try {

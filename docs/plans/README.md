@@ -4,7 +4,7 @@ title: Kyber-Weave Plan Inventory
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-01
+last-reviewed: 2026-10-02
 ---
 
 # Kyber-Weave Plan Inventory
@@ -17,7 +17,9 @@ A plan is open only while it is built. The pull request that finishes it archive
 
 ## Active Plans
 
-No active plans.
+| Plan | Status | Date | Goal |
+|---|---|---|---|
+| [2026-10-02-otlp-projection-debounce.md](2026-10-02-otlp-projection-debounce.md) | Current | 2026-10-02 | Fix [issue #250](https://github.com/dpalfery/kyber-weave/issues/250): bound the live OTLP collector's canonical projection with a debounced, coalescing `CanonicalProjectionScheduler` (10s trailing idle window, 10min staleness cap, 10min minimum pass interval; `drain()`/`close()` flush immediately), so sustained ingest stops triggering back-to-back full-store rebuilds at ~80% CPU; acceptance adds a live owner gate on the real store, incremental projection deferred as a follow-up issue. Development mode: test-first. Decision-complete (Q1–Q3 answered 2026-10-02, D4–D6); approved with T4 isolated-store amendment, 2026-10-02. |
 
 Pipeline T9 and spine S-docs harvested 2026-09-13 into [dash/architecture.md](../dash/architecture.md), [dash/runbook.md](../dash/runbook.md), [dash/telemetry-inventory.md](../dash/telemetry-inventory.md), [ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md), and [ADR 0018](../adr/0018-kyberdash-content-retention-purge.md). ADRs 0012–0015 remain the spine harvest (0014 notes that `kyber purge-content` was not shipped). Residual risks (T8 live-source coverage, findings client-side harness filter) live on the archived plans — they are not shipped claims.
 

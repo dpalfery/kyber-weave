@@ -38,24 +38,41 @@ export type CanonicalProjectionSchedulerOptions = {
   project?: (store: CanonStore) => Promise<BuildSessionsReport>
   /** Where a failed pass's error lands. See `report` below for the default. */
   onError?: (error: unknown) => void
+  /** A pass may start once the ingest stream has been quiet this long. */
+  idleMs?: number
+  /** Owed work older than this starts a pass even without an idle gap. */
+  maxWaitMs?: number
+  /** No pass may start sooner than this after the previous pass started. */
+  minIntervalMs?: number
 }
 
+export const DEFAULT_PROJECTION_IDLE_MS = 10_000
+export const DEFAULT_PROJECTION_MAX_WAIT_MS = 600_000
+export const DEFAULT_PROJECTION_MIN_INTERVAL_MS = 600_000
+
 /**
- * Serialized, coalescing runner for the live collector's projections.
+ * Serialized, coalescing, DEBOUNCED runner for the live collector's
+ * projections.
  *
- *   * `request()` marks the work dirty and runs a pass immediately — no
- *     timer, no debounce. One request from ingest is one dirty mark, not
- *     one projection: at most one pass ever runs at a time.
+ *   * `request()` marks the work dirty and SCHEDULES the next pass; it does
+ *     not start one immediately. One request from ingest is one dirty mark,
+ *     not one projection: at most one pass ever runs at a time.
+ *   * The next pass starts at
+ *     `max(min(lastRequestAt + idleMs, oldestUnprojectedAt + maxWaitMs),
+ *         lastPassStartAt + minIntervalMs)`: an idle window collapses a
+ *     burst into one pass, the staleness cap rescues a trickle that never
+ *     goes quiet, and the start floor bounds pass frequency under a
+ *     saturated stream to one full pass per `minIntervalMs`.
  *   * Dirtiness arriving while a pass is in flight coalesces into exactly
- *     ONE trailing pass, however many requests arrived. A burst of batches
- *     costs two passes, not N.
+ *     ONE scheduled trailing pass, however many requests arrived. A burst
+ *     of batches costs two passes, not N.
  *   * A failed pass settles its requests, reports through `onError`, and
  *     leaves the work dirty. It rolls nothing back — records already
  *     committed by the writer stay committed — and it does not retry by
  *     itself: the NEXT request runs the retained work again.
- *   * `drain()` and `close()` resolve only once quiescent — no pass in
- *     flight and no trailing pass still owed — which is what lets the
- *     collector close the SQLite store after them.
+ *   * `drain()` and `close()` bypass the schedule and resolve only once
+ *     quiescent — no pass in flight and no trailing pass still owed —
+ *     which is what lets the collector close the SQLite store after them.
  *
  * A pass is awaited nowhere in the ingest path: the writer's sink calls
  * `request()` fire-and-forget precisely so a slow or failing projection
@@ -65,17 +82,33 @@ export class CanonicalProjectionScheduler {
   private readonly store: CanonStore
   private readonly project: (store: CanonStore) => Promise<BuildSessionsReport>
   private readonly report: (error: unknown) => void
+  private readonly idleMs: number
+  private readonly maxWaitMs: number
+  private readonly minIntervalMs: number
 
   /** Un-projected work exists: a pass is owed on the next opportunity. */
   private dirty = false
   /** Set once `close()` begins; no new pass starts after it. */
   private closed = false
-  /** The run currently driving passes to quiescence, if any. */
-  private currentRun: Promise<void> | null = null
+  /** The run currently driving passes, if any. */
+  private currentRun: Promise<'quiescent' | 'trailing' | 'failed'> | null = null
+  /** The pending scheduled pass start, if any. */
+  private timer: ReturnType<typeof setTimeout> | null = null
+  /** When the most recent dirty mark arrived. */
+  private lastRequestAt: number | null = null
+  /** When the oldest un-projected dirty mark arrived. */
+  private oldestUnprojectedAt: number | null = null
+  /** When the previous pass started; the floor is measured from it. */
+  private lastPassStartAt: number | null = null
+  /** Promises to settle the next time the scheduler stops owing work. */
+  private waiters: Array<() => void> = []
 
   constructor(options: CanonicalProjectionSchedulerOptions) {
     this.store = options.store
     this.project = options.project ?? projectCanonicalStore
+    this.idleMs = options.idleMs ?? DEFAULT_PROJECTION_IDLE_MS
+    this.maxWaitMs = options.maxWaitMs ?? DEFAULT_PROJECTION_MAX_WAIT_MS
+    this.minIntervalMs = options.minIntervalMs ?? DEFAULT_PROJECTION_MIN_INTERVAL_MS
     const onError = options.onError
     this.report = (error: unknown) => {
       if (onError !== undefined) {
@@ -92,26 +125,42 @@ export class CanonicalProjectionScheduler {
   }
 
   /**
-   * Mark the work dirty and project it now. Resolves — never rejects — when
-   * the scheduler next reaches quiescence, including any trailing pass the
-   * requests that arrived mid-pass coalesced into.
+   * Mark the work dirty and schedule its projection. Resolves — never
+   * rejects — when the scheduler next reaches quiescence, including any
+   * trailing pass the requests that arrived mid-pass coalesced into.
    */
   request(): Promise<void> {
     if (this.closed) return Promise.resolve()
+    const now = Date.now()
     this.dirty = true
-    if (this.currentRun === null) this.currentRun = this.runUntilQuiescent()
-    return this.currentRun
+    this.lastRequestAt = now
+    if (this.oldestUnprojectedAt === null) this.oldestUnprojectedAt = now
+    this.schedule()
+    return new Promise<void>((resolve) => {
+      this.waiters.push(resolve)
+    })
   }
 
   /**
-   * Wait the scheduler out: any pass in flight finishes, and dirty work with
-   * no pass running starts one. Resolves only at quiescence.
+   * Wait the scheduler out: the pending timer is bypassed, any pass in
+   * flight finishes, and owed work with no pass running runs now. A failed
+   * pass settles its requests and retains the work — drain does not turn
+   * into a retry loop. Resolves only when quiescent or after a failure.
    */
-  drain(): Promise<void> {
-    if (this.currentRun !== null) return this.currentRun
-    if (this.closed || !this.dirty) return Promise.resolve()
-    this.currentRun = this.runUntilQuiescent()
-    return this.currentRun
+  async drain(): Promise<void> {
+    for (;;) {
+      this.cancelTimer()
+      if (this.currentRun !== null) {
+        await this.currentRun
+        continue
+      }
+      if (this.closed || !this.dirty) return
+      this.currentRun = this.runUntilQuiescent()
+      const outcome = await this.currentRun
+      if (outcome === 'failed') return
+      // 'trailing' means owed work is still scheduled out: run it now
+      // rather than waiting for the debounce/floor it was assigned.
+    }
   }
 
   /**
@@ -121,32 +170,103 @@ export class CanonicalProjectionScheduler {
    */
   async close(): Promise<void> {
     this.closed = true
-    if (this.currentRun === null && this.dirty) {
+    for (;;) {
+      this.cancelTimer()
+      if (this.currentRun !== null) {
+        await this.currentRun
+        continue
+      }
+      if (!this.dirty) return
       this.currentRun = this.runUntilQuiescent()
+      const outcome = await this.currentRun
+      if (outcome === 'failed') {
+        // Sealed with owed work retained: better than an unbounded failure
+        // loop inside close, and records stay committed.
+        return
+      }
     }
-    if (this.currentRun !== null) await this.currentRun
   }
 
   /**
-   * Drive passes until quiescent. The dirty flag is consumed up front so
-   * dirtiness that arrives while a pass runs is a NEW trailing pass, not a
-   * re-run of the one in flight; a failure re-marks it so the work stays
-   * owed, then stops — the loop is not a retry loop.
+   * Compute the next pass start from the schedule rule and (re)arm the
+   * timer. The pending timer is `unref()`d so it can never hold the
+   * process open.
    */
-  private async runUntilQuiescent(): Promise<void> {
+  private schedule(): void {
+    this.cancelTimer()
+    if (this.closed || !this.dirty || this.currentRun !== null) return
+    const lastRequest = this.lastRequestAt
+    const oldest = this.oldestUnprojectedAt
+    if (lastRequest === null || oldest === null) return
+    let at = Math.min(lastRequest + this.idleMs, oldest + this.maxWaitMs)
+    if (this.lastPassStartAt !== null) {
+      at = Math.max(at, this.lastPassStartAt + this.minIntervalMs)
+    }
+    const delay = Math.max(0, at - Date.now())
+    this.timer = setTimeout(() => {
+      this.timer = null
+      if (this.closed || !this.dirty || this.currentRun !== null) return
+      this.currentRun = this.runUntilQuiescent()
+    }, delay)
+    this.timer.unref?.()
+  }
+
+  private cancelTimer(): void {
+    if (this.timer !== null) {
+      clearTimeout(this.timer)
+      this.timer = null
+    }
+  }
+
+  /**
+   * Run the owed pass(es) for THIS cycle. The dirty flag is consumed up
+   * front so dirtiness that arrives while a pass runs is a NEW trailing
+   * pass, not a re-run of the one in flight; a failure re-marks it so the
+   * work stays owed, then stops — the loop is not a retry loop. When a
+   * pass succeeds with dirtiness still owed (mid-pass requests), the
+   * trailing pass is SCHEDULED per the rule and this run ends: the timer
+   * drives the next cycle, which is what bounds pass frequency under a
+   * sustained stream. Waiters settle only when no work is owed or a pass
+   * failed (a failed pass leaves work owed, but its requests must still
+   * settle — the retry belongs to the NEXT explicit request/drain).
+   */
+  private async runUntilQuiescent(): Promise<'quiescent' | 'trailing' | 'failed'> {
     try {
-      while (this.dirty) {
-        this.dirty = false
-        try {
-          await this.project(this.store)
-        } catch (error) {
-          this.dirty = true
-          this.report(error)
-          break
-        }
+      if (!this.dirty) {
+        this.settleWaiters()
+        return 'quiescent'
       }
+      this.dirty = false
+      const passStart = Date.now()
+      this.lastPassStartAt = passStart
+      this.lastRequestAt = null
+      this.oldestUnprojectedAt = null
+      try {
+        await this.project(this.store)
+      } catch (error) {
+        this.dirty = true
+        this.report(error)
+        this.settleWaiters()
+        return 'failed'
+      }
+      if (this.dirty) {
+        // Mid-pass requests coalesced into one trailing pass, scheduled
+        // from their timestamps — never a same-instant rebuild. Clear the
+        // run slot first so schedule() arms the timer.
+        this.currentRun = null
+        this.schedule()
+        return 'trailing'
+      }
+      this.settleWaiters()
+      return 'quiescent'
     } finally {
       this.currentRun = null
     }
+  }
+
+  private settleWaiters(): void {
+    const settled = this.waiters
+    this.waiters = []
+    for (const resolve of settled) resolve()
   }
 }
