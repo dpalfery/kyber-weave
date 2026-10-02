@@ -17,7 +17,9 @@ A plan is open only while it is built. The pull request that finishes it archive
 
 ## Active Plans
 
-No active plans.
+| Plan | Status | Date | Goal |
+|---|---|---|---|
+| [2026-10-01-issue-196.md](2026-10-01-issue-196.md) | Draft (T1 complete, D3 pending) | 2026-10-01 | Fix KyberDash Codex session ingestion and display. T1 found: root cause = `sliceCallsToWindow` silent drop without persisted reason; D1 refuted (originator preserved); Codex OTLP verified exported (source-verified service names: codex_cli_rs/codex_exec/codex-app-server). T2 skipped; T3 fixes silent drop; T4a/T4b build adapter with source-verified fixture + three owner-capture blockers (span name, trace_id/span_id, token convention); T5–T6 updated. D3: build T4 now (A, recommended) with source-verified names and owner-capture gates, or wait for owner payload capture (B)? Development mode: test-first. |
 
 Pipeline T9 and spine S-docs harvested 2026-09-13 into [dash/architecture.md](../dash/architecture.md), [dash/runbook.md](../dash/runbook.md), [dash/telemetry-inventory.md](../dash/telemetry-inventory.md), [ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md), and [ADR 0018](../adr/0018-kyberdash-content-retention-purge.md). ADRs 0012–0015 remain the spine harvest (0014 notes that `kyber purge-content` was not shipped). Residual risks (T8 live-source coverage, findings client-side harness filter) live on the archived plans — they are not shipped claims.
 
