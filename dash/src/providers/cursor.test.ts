@@ -48,8 +48,13 @@ describe('cursor provider', () => {
 
   describe('time floor', () => {
     it('uses dateRange.start when within the six-month cap', () => {
-      const start = new Date(2026, 3, 1)
-      expect(getCursorTimeFloor({ start, end: new Date(2026, 5, 2) })).toBe(start.toISOString())
+      // Anchor to "now" rather than a calendar date. A fixed April 2026 start
+      // fell outside the rolling six-month cap on 2026-10-02 and failed CI
+      // without any product change.
+      const now = new Date()
+      const start = new Date(now.getFullYear(), now.getMonth() - 2, now.getDate())
+      const end = new Date(now.getFullYear(), now.getMonth() - 1, now.getDate())
+      expect(getCursorTimeFloor({ start, end })).toBe(start.toISOString())
     })
   })
 
