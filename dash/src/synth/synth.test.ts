@@ -33,6 +33,8 @@ import {
   DEFAULT_CONVENTION,
   PROVIDER_CONVENTIONS,
   Synthesizer,
+  collapseCallAndTurns,
+  collapseEnvelopeTurns,
   conventionFor,
   costBlockFor,
   measurabilityFor,
@@ -664,6 +666,218 @@ describe('Task 5 — child tool.invoke span generation and result truncation', (
     expect(child?.attributes?.['gen_ai.tool.status']).toBe('ok')
     expect((child?.raw as Record<string, unknown>)?.['arguments']).toEqual({ command: 'ls' })
     expect((child?.raw as Record<string, unknown>)?.['result']).toBe('file1\nfile2')
+  })
+
+  it('synthesizeEnvelopes collapses request/response pair calls with identical counters into one canonical record', () => {
+    const synthesizer = new Synthesizer()
+    const call1 = call({
+      provider: 'claude',
+      sessionId: 's-pair',
+      timestamp: '2026-09-23T22:43:53.000Z',
+      inputTokens: 2,
+      outputTokens: 563,
+      cacheReadInputTokens: 39096,
+      cacheCreationInputTokens: 24977,
+      cachedInputTokens: 39096,
+      deduplicationKey: 'claude:s-pair:req',
+    })
+    const call2 = call({
+      provider: 'claude',
+      sessionId: 's-pair',
+      timestamp: '2026-09-23T22:43:58.000Z',
+      inputTokens: 2,
+      outputTokens: 563,
+      cacheReadInputTokens: 39096,
+      cacheCreationInputTokens: 24977,
+      cachedInputTokens: 39096,
+      deduplicationKey: 'claude:s-pair:res',
+    })
+    const env1 = envelope({
+      harnessId: 'claude-desktop',
+      call: call1,
+      readerTurn: {
+        parts: [{ part: 'system_prompt', text: 'req prompt' }],
+        toolCalls: [
+          { id: 'tu_bash', name: 'Bash', arguments: { command: 'ls' } },
+        ],
+        toolResults: [
+          { toolCallId: 'tu_bash', content: 'file1\nfile2' },
+        ],
+      },
+    })
+    const env2 = envelope({
+      harnessId: 'claude-desktop',
+      call: call2,
+      readerTurn: {
+        parts: [{ part: 'conversation_history', text: 'res reply' }],
+      },
+    })
+
+    const records = synthesizer.synthesizeEnvelopes([env1, env2])
+    const parentRecords = records.filter((r) => r.op === 'llm.invoke')
+    const toolRecords = records.filter((r) => r.op === 'tool.invoke') as ToolInvokeRecord[]
+
+    expect(parentRecords).toHaveLength(1)
+    const parent = parentRecords[0]!
+    expect(parent.spanId).toBe(spanIdFor(call1, env1, 0))
+    expect(parent.tokens.reportedInput).toBe(64075)
+    expect(parent.content.system_prompt).toBe('req prompt')
+    expect(parent.content.conversation_history).toBe('res reply')
+
+    expect(toolRecords).toHaveLength(1)
+    expect(toolRecords[0]!.parentSpanId).toBe(parent.spanId)
+  })
+
+  it('does not collapse Claude calls with same counters within skew when nativeMessageIds differ', () => {
+    const synthesizer = new Synthesizer()
+    const call1 = call({
+      provider: 'claude',
+      sessionId: 's-diff-native',
+      timestamp: '2026-09-23T22:43:53.000Z',
+      inputTokens: 2,
+      outputTokens: 563,
+      cacheReadInputTokens: 39096,
+      cacheCreationInputTokens: 24977,
+      cachedInputTokens: 39096,
+      turnId: 'msg-1',
+      deduplicationKey: 'claude:s-diff-native:msg-1',
+    })
+    const call2 = call({
+      provider: 'claude',
+      sessionId: 's-diff-native',
+      timestamp: '2026-09-23T22:43:58.000Z',
+      inputTokens: 2,
+      outputTokens: 563,
+      cacheReadInputTokens: 39096,
+      cacheCreationInputTokens: 24977,
+      cachedInputTokens: 39096,
+      turnId: 'msg-2',
+      deduplicationKey: 'claude:s-diff-native:msg-2',
+    })
+    const env1 = envelope({
+      harnessId: 'claude-desktop',
+      nativeRecordId: call1.turnId,
+      call: call1,
+    })
+    const env2 = envelope({
+      harnessId: 'claude-desktop',
+      nativeRecordId: call2.turnId,
+      call: call2,
+    })
+
+    // Both survive in envelope synthesis (collapseEnvelopeTurns)
+    const envRecords = synthesizer.synthesizeEnvelopes([env1, env2])
+    expect(envRecords.filter((r) => r.op === 'llm.invoke')).toHaveLength(2)
+
+    // Both survive in direct call synthesis (collapseCallAndTurns)
+    const call1Desktop = { ...call1, provider: 'claude-desktop' }
+    const call2Desktop = { ...call2, provider: 'claude-desktop' }
+    const callRecords = synthesizer.synthesize([call1Desktop, call2Desktop])
+    expect(callRecords.filter((r) => r.op === 'llm.invoke')).toHaveLength(2)
+
+    // Calls with one present and one missing ID stay separate
+    const callNoId = call({
+      provider: 'claude-desktop',
+      sessionId: 's-diff-native',
+      timestamp: '2026-09-23T22:43:55.000Z',
+      inputTokens: 2,
+      outputTokens: 563,
+      cacheReadInputTokens: 39096,
+      cacheCreationInputTokens: 24977,
+      cachedInputTokens: 39096,
+      turnId: undefined,
+      deduplicationKey: 'claude-desktop:s-diff-native:no-id',
+    })
+    const mixedRecords = synthesizer.synthesize([call1Desktop, callNoId])
+    expect(mixedRecords.filter((r) => r.op === 'llm.invoke')).toHaveLength(2)
+  })
+
+  it('does not collapse equal-counter turns for non-Claude desktop harnesses like codex-desktop', () => {
+    const synthesizer = new Synthesizer()
+    const call1 = call({
+      provider: 'codex',
+      sessionId: 's-codex',
+      timestamp: '2026-09-23T22:43:53.000Z',
+      inputTokens: 100,
+      outputTokens: 50,
+      deduplicationKey: 'codex:s-codex:1',
+    })
+    const call2 = call({
+      provider: 'codex',
+      sessionId: 's-codex',
+      timestamp: '2026-09-23T22:43:58.000Z',
+      inputTokens: 100,
+      outputTokens: 50,
+      deduplicationKey: 'codex:s-codex:2',
+    })
+    const env1 = envelope({
+      harnessId: 'codex-desktop',
+      call: call1,
+    })
+    const env2 = envelope({
+      harnessId: 'codex-desktop',
+      call: call2,
+    })
+
+    const records = synthesizer.synthesizeEnvelopes([env1, env2])
+    const parentRecords = records.filter((r) => r.op === 'llm.invoke')
+    expect(parentRecords).toHaveLength(2)
+  })
+
+  it('preserves the larger web-search count when collapsing turns in mergeParsedCalls', () => {
+    const call1 = call({
+      provider: 'claude',
+      sessionId: 's-websearch',
+      timestamp: '2026-09-23T22:43:53.000Z',
+      inputTokens: 2,
+      outputTokens: 563,
+      cacheReadInputTokens: 39096,
+      cacheCreationInputTokens: 24977,
+      cachedInputTokens: 39096,
+      webSearchRequests: 1,
+      deduplicationKey: 'claude:s-websearch:req',
+    })
+    const call2 = call({
+      provider: 'claude',
+      sessionId: 's-websearch',
+      timestamp: '2026-09-23T22:43:58.000Z',
+      inputTokens: 2,
+      outputTokens: 563,
+      cacheReadInputTokens: 39096,
+      cacheCreationInputTokens: 24977,
+      cachedInputTokens: 39096,
+      webSearchRequests: 3,
+      deduplicationKey: 'claude:s-websearch:res',
+    })
+    const env1 = envelope({
+      harnessId: 'claude-desktop',
+      call: call1,
+    })
+    const env2 = envelope({
+      harnessId: 'claude-desktop',
+      call: call2,
+    })
+
+    const collapsedEnvelopes = collapseEnvelopeTurns([env1, env2])
+    expect(collapsedEnvelopes).toHaveLength(1)
+    expect(collapsedEnvelopes[0]!.call.webSearchRequests).toBe(3)
+
+    // Also verify when keeper has higher count than donor
+    const call1High = { ...call1, webSearchRequests: 5 }
+    const call2Low = { ...call2, webSearchRequests: 2 }
+    const env1High = envelope({ harnessId: 'claude-desktop', call: call1High })
+    const env2Low = envelope({ harnessId: 'claude-desktop', call: call2Low })
+    const collapsedHighFirst = collapseEnvelopeTurns([env1High, env2Low])
+    expect(collapsedHighFirst).toHaveLength(1)
+    expect(collapsedHighFirst[0]!.call.webSearchRequests).toBe(5)
+
+    // Also verify collapseCallAndTurns
+    const collapsedCalls = collapseCallAndTurns([
+      { call: { ...call1, provider: 'claude-desktop' } },
+      { call: { ...call2, provider: 'claude-desktop' } },
+    ])
+    expect(collapsedCalls).toHaveLength(1)
+    expect(collapsedCalls[0]!.call.webSearchRequests).toBe(3)
   })
 
   it('truncates large tool results (>64KB) in parts and preserves original byte count in attributes', () => {
