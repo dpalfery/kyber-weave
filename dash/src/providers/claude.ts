@@ -375,6 +375,7 @@ export function loadClaudeCalls(filePath: string): ParsedProviderCall[] {
 
     const newCall: ParsedProviderCall = {
       provider: 'claude',
+      ...(nativeMessageId !== undefined ? { turnId: nativeMessageId } : {}),
       model: claudeText(message['model']) ?? 'unknown',
       inputTokens: claudeCount(usage['input_tokens']),
       outputTokens: claudeCount(usage['output_tokens']),

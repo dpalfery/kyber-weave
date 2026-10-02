@@ -726,6 +726,70 @@ describe('Task 5 — child tool.invoke span generation and result truncation', (
     expect(toolRecords[0]!.parentSpanId).toBe(parent.spanId)
   })
 
+  it('does not collapse Claude calls with same counters within skew when nativeMessageIds differ', () => {
+    const synthesizer = new Synthesizer()
+    const call1 = call({
+      provider: 'claude',
+      sessionId: 's-diff-native',
+      timestamp: '2026-09-23T22:43:53.000Z',
+      inputTokens: 2,
+      outputTokens: 563,
+      cacheReadInputTokens: 39096,
+      cacheCreationInputTokens: 24977,
+      cachedInputTokens: 39096,
+      turnId: 'msg-1',
+      deduplicationKey: 'claude:s-diff-native:msg-1',
+    })
+    const call2 = call({
+      provider: 'claude',
+      sessionId: 's-diff-native',
+      timestamp: '2026-09-23T22:43:58.000Z',
+      inputTokens: 2,
+      outputTokens: 563,
+      cacheReadInputTokens: 39096,
+      cacheCreationInputTokens: 24977,
+      cachedInputTokens: 39096,
+      turnId: 'msg-2',
+      deduplicationKey: 'claude:s-diff-native:msg-2',
+    })
+    const env1 = envelope({
+      harnessId: 'claude-desktop',
+      nativeRecordId: call1.turnId,
+      call: call1,
+    })
+    const env2 = envelope({
+      harnessId: 'claude-desktop',
+      nativeRecordId: call2.turnId,
+      call: call2,
+    })
+
+    // Both survive in envelope synthesis (collapseEnvelopeTurns)
+    const envRecords = synthesizer.synthesizeEnvelopes([env1, env2])
+    expect(envRecords.filter((r) => r.op === 'llm.invoke')).toHaveLength(2)
+
+    // Both survive in direct call synthesis (collapseCallAndTurns)
+    const call1Desktop = { ...call1, provider: 'claude-desktop' }
+    const call2Desktop = { ...call2, provider: 'claude-desktop' }
+    const callRecords = synthesizer.synthesize([call1Desktop, call2Desktop])
+    expect(callRecords.filter((r) => r.op === 'llm.invoke')).toHaveLength(2)
+
+    // Calls with one present and one missing ID stay separate
+    const callNoId = call({
+      provider: 'claude-desktop',
+      sessionId: 's-diff-native',
+      timestamp: '2026-09-23T22:43:55.000Z',
+      inputTokens: 2,
+      outputTokens: 563,
+      cacheReadInputTokens: 39096,
+      cacheCreationInputTokens: 24977,
+      cachedInputTokens: 39096,
+      turnId: undefined,
+      deduplicationKey: 'claude-desktop:s-diff-native:no-id',
+    })
+    const mixedRecords = synthesizer.synthesize([call1Desktop, callNoId])
+    expect(mixedRecords.filter((r) => r.op === 'llm.invoke')).toHaveLength(2)
+  })
+
   it('does not collapse equal-counter turns for non-Claude desktop harnesses like codex-desktop', () => {
     const synthesizer = new Synthesizer()
     const call1 = call({

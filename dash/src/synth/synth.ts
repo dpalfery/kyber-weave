@@ -836,13 +836,17 @@ function mergeEnvelopes(keeper: SourceRecordEnvelope, donor: SourceRecordEnvelop
   }
 }
 
+function collapseKey(counterKey: string, nativeId: string | undefined): string {
+  return nativeId === undefined ? counterKey : `${counterKey}\0${nativeId}`
+}
+
 export function collapseEnvelopeTurns(envelopes: readonly SourceRecordEnvelope[]): SourceRecordEnvelope[] {
   if (envelopes.length <= 1) return [...envelopes]
 
   const byKey = new Map<string, SourceRecordEnvelope[]>()
   for (const env of envelopes) {
     if (!isCandidateCollapse(env.call, env.harnessId)) continue
-    const key = callCounterKey(env.call)
+    const key = collapseKey(callCounterKey(env.call), env.nativeRecordId)
     const list = byKey.get(key) ?? []
     list.push(env)
     byKey.set(key, list)
@@ -900,7 +904,7 @@ export function collapseCallAndTurns(items: readonly CallAndTurn[]): CallAndTurn
   const byKey = new Map<string, CallAndTurn[]>()
   for (const item of items) {
     if (!isCandidateCollapse(item.call)) continue
-    const key = callCounterKey(item.call)
+    const key = collapseKey(callCounterKey(item.call), item.call.turnId)
     const list = byKey.get(key) ?? []
     list.push(item)
     byKey.set(key, list)

@@ -170,6 +170,8 @@ describe('claude provider - tool extraction in loadClaudeCalls', () => {
     expect(calls).toHaveLength(2)
     expect(calls[0]!.deduplicationKey).toBe('claude:session-diff-ids:turn-1')
     expect(calls[1]!.deduplicationKey).toBe('claude:session-diff-ids:turn-2')
+    expect(calls[0]!.turnId).toBe('msg-first')
+    expect(calls[1]!.turnId).toBe('msg-second')
   })
 
   it('recurses into subagent directories when parsing sessions (Thread 11)', async () => {
