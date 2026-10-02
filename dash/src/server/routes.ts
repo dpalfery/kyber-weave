@@ -146,17 +146,8 @@ function liveHarnessCounts(bridge: KyberBridge): {
   sessions: Map<string, number>
   runs: Map<string, number>
 } {
-  const sessions = new Map<string, number>()
-  for (const session of bridge.listSessions()) {
-    if (!session.harness) continue
-    sessions.set(session.harness, (sessions.get(session.harness) ?? 0) + 1)
-  }
-  const runs = new Map<string, number>()
-  for (const run of bridge.listRuns()) {
-    if (!run.harness) continue
-    runs.set(run.harness, (runs.get(run.harness) ?? 0) + 1)
-  }
-  return { sessions, runs }
+  // Narrow-column counts — never uncapped listSessions() (coverage-window seam).
+  return { sessions: bridge.countSessionsByHarness(), runs: bridge.countRunsByHarness() }
 }
 
 function withLiveCounts<T extends { harness: string; sampleCount: number; payload?: unknown }>(

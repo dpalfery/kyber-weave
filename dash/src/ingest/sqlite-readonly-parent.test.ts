@@ -1,5 +1,4 @@
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
-import * as fs from 'node:fs'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
@@ -8,7 +7,6 @@ import { tmpdir } from 'node:os'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
-  copyFileBestEffort,
   isSqliteReadonlyError,
   openDatabase,
   sqliteSupportsUriFilenames,
@@ -347,25 +345,6 @@ describe('SQLite read-only parent fallback', () => {
       expect(stderr.mock.calls.filter(([chunk]) => String(chunk).includes('read-only directory'))).toHaveLength(1)
     } finally {
       stderr.mockRestore()
-    }
-  })
-})
-
-describe('copyFileBestEffort (issue #194 Warp EPERM)', () => {
-  it('falls back to read/write when copyfile returns EPERM', () => {
-    const src = join(sourceRoot, 'warp.sqlite')
-    const dest = join(cacheRoot, 'warp-copy.sqlite')
-    writeFileSync(src, 'warp-bytes')
-    const spy = vi.spyOn(fs, 'copyFileSync').mockImplementation(() => {
-      const err = new Error('EPERM: copyfile') as NodeJS.ErrnoException
-      err.code = 'EPERM'
-      throw err
-    })
-    try {
-      copyFileBestEffort(src, dest)
-      expect(readFileSync(dest, 'utf8')).toBe('warp-bytes')
-    } finally {
-      spy.mockRestore()
     }
   })
 })

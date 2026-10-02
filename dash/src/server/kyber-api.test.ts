@@ -1051,36 +1051,39 @@ describe('Backend Contract Tests: /api/kyber/* Endpoints', () => {
     })
 
     it('overlays live session counts so harnesses agree with /sessions (issue #194)', async () => {
-      const store = new CanonStore(':memory:')
-      store.upsertHarnessRollup({
-        harness: 'claude-desktop',
-        sampleCount: 66,
-        contextPressureMedian: 1.08,
-        contextPressureP95: 1.09,
-        cacheHitRate: null,
-        toolYield: null,
-        delegationOverhead: null,
-        fieldCoverage: null,
-        measurability: {},
-        payload: { sessionCount: 66, runCount: 66, executionCount: 66 },
-      })
+      // Shared raw db: `/sessions` reads via listSessions() and the overlay
+      // counts via the narrow harness-column seam. A store-plus-`:memory:`
+      // pair would be two databases — that is not the production path.
+      const db = new DatabaseSync(':memory:')
+      db.exec(`
+        CREATE TABLE harness_rollup (
+          harness TEXT PRIMARY KEY, sample_count INTEGER NOT NULL DEFAULT 0,
+          context_pressure_median REAL, context_pressure_p95 REAL,
+          cache_hit_rate REAL, tool_yield REAL, delegation_overhead REAL,
+          field_coverage REAL, measurability_json TEXT NOT NULL, payload TEXT
+        );
+        CREATE TABLE session (
+          session_id TEXT PRIMARY KEY, harness TEXT NOT NULL, label TEXT,
+          is_subagent INTEGER NOT NULL DEFAULT 0, parent_session TEXT,
+          agent_name TEXT, repo TEXT, branch TEXT,
+          started TEXT, ended TEXT, payload TEXT NOT NULL
+        );
+      `)
+      db.prepare(
+        'INSERT INTO harness_rollup (harness, sample_count, measurability_json, payload) VALUES (?, ?, ?, ?)',
+      ).run(
+        'claude-desktop',
+        66,
+        '{}',
+        JSON.stringify({ sessionCount: 66, runCount: 66, executionCount: 66 }),
+      )
       const session = (id: string) =>
-        store.upsertSession({
-          sessionId: id,
-          harness: 'claude-desktop',
-          label: id,
-          isSubagent: false,
-          parentSession: null,
-          agentName: null,
-          repo: null,
-          branch: null,
-          started: '2026-09-30T00:00:00.000Z',
-          ended: '2026-09-30T00:01:00.000Z',
-          payload: {},
-        })
+        db
+          .prepare('INSERT INTO session (session_id, harness, started, ended, payload) VALUES (?, ?, ?, ?, ?)')
+          .run(id, 'claude-desktop', '2026-09-30T00:00:00.000Z', '2026-09-30T00:01:00.000Z', '{}')
       session('live-1')
       session('live-2')
-      const bridge = new KyberBridge({ canonPath: ':memory:', store })
+      const bridge = new KyberBridge({ canonDb: db })
       const srv = await runWebDashboard({ port: 0, open: false, kyberBridge: bridge, writeStdout: () => {} })
       try {
         const baseUrl = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`
@@ -1103,7 +1106,6 @@ describe('Backend Contract Tests: /api/kyber/* Endpoints', () => {
       } finally {
         await new Promise<void>((resolve) => srv.close(() => resolve()))
         bridge.close()
-        store.close()
       }
     })
 

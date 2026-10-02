@@ -217,13 +217,10 @@ export function registerReportCommand(program: Command): void {
     .option('--limit <n>', 'Maximum findings (default: 5)', parsePositiveInteger('--limit'), DEFAULT_FINDING_LIMIT)
     .option('--db <path>', 'Path to canon.db')
   report.exitOverride((error) => {
-    // Help and version already wrote their text. Re-throw so Commander
-    // finishes the built-in path — swallowing them here printed a stack
-    // (`kyberdash report --help`, issue #194) when the default-command
-    // help path surfaced as an unhandled CommanderError.
-    if (error.code === 'commander.helpDisplayed' || error.code === 'commander.version') {
-      throw error
-    }
+    // Help/version already wrote their text. Exit here — do not rethrow.
+    // Rethrowing `commander.helpDisplayed` from the default command becomes
+    // an unhandled CommanderError (`(outputHelp)` plus a stack) which is
+    // what `kyberdash report --help` printed (issue #194).
     if (error.code === 'commander.invalidArgument') {
       process.stderr.write(`${error.message}\n`)
       process.exit(2)

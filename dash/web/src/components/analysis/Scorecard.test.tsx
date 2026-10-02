@@ -226,6 +226,7 @@ describe('Scorecard Component (Decision D3 & D9 Compliance)', () => {
       <Scorecard
         data={{
           dimensions: {
+            ...mockScorecardData.dimensions,
             contextHygiene: {
               key: 'contextHygiene',
               name: 'Context Hygiene',
