@@ -33,11 +33,16 @@ import type { CanonicalRecord, TokenUsage } from './types.js'
 //
 // Exact-counter matching covers the Claude OTel+file path (ADR 0009 D4). Issue
 // #231 extends the same share with a complementary/overlap join for observations
-// whose counters differ: within `TWIN_TURN_MAX_SKEW_MS`, file+file rows under a
-// folded twin share that stand in a complementary or subset relation join into
-// one turn. Joined counters take the per-dimension max (prefer the fuller row as
-// keeper identity); they are never summed. Identical same-kind OTLP retries stay
-// kept — the overlap join only bridges *different* counter vectors.
+// whose counters differ: within `TWIN_TURN_MAX_SKEW_MS`, file+file rows under an
+// *evidenced* Cursor twin share (session group holding both `cursor` and
+// `cursor-agent` collectors) that stand in a complementary or subset relation
+// join into one turn. The pass stays inert for every other harness group —
+// `isFileSource` alone is not twin evidence (A3 refined, not overturned).
+// Joined counters take the per-dimension max (prefer the fuller row as keeper
+// identity); they are never summed. Partials assign to at most one complete
+// Cursor Agent observation so union-find cannot transitively bridge conflicting
+// completes. Identical same-kind OTLP retries stay kept — the overlap join only
+// bridges *different* counter vectors.
 
 /**
  * Maximum timestamp gap for two rows to be the same turn observed twice.
@@ -197,9 +202,11 @@ function preferFullerKeeper(a: CanonicalRecord, b: CanonicalRecord): CanonicalRe
  * counters cluster by timestamp proximity (span within `TWIN_TURN_MAX_SKEW_MS`);
  * a cluster holding both source kinds is one turn observed twice, so its file
  * rows drop and its content transplants pairwise onto the content-less OTel
- * rows nearest in time. A second pass (#231) joins file+file rows whose
- * counters differ but stand in a complementary/subset relation under the same
- * skew window, merging by per-dimension max onto the fuller keeper. Applied by
+ * rows nearest in time. A second pass (#231) joins file+file rows under an
+ * evidenced Cursor twin share whose counters differ but stand in a
+ * complementary/subset relation under the same skew window, merging by
+ * per-dimension max onto the fuller keeper (partials assign to at most one
+ * complete Cursor Agent turn). Applied by
  * the derived-layer builders (`buildSessions`, `buildRuns`, `buildFindings`)
  * after shares merge, never at ingest — raw records keep both collectors'
  * rows as provenance.
@@ -275,12 +282,55 @@ export function dedupeTwinTurns(records: readonly CanonicalRecord[], shareKey?: 
   })
 }
 
+/** Cursor IDE file collector — not `cursor-agent` (harness or `codeburn/` source). */
+function isCursorCollector(record: CanonicalRecord): boolean {
+  if (record.harness === 'cursor-agent') return false
+  if (record.harness === 'cursor') return true
+  // Exact source stamp; reject `…/cursor-agent` which also starts with codeburn/cursor.
+  return record.source === 'codeburn/cursor'
+}
+
+/** Cursor Agent file collector. */
+function isCursorAgentCollector(record: CanonicalRecord): boolean {
+  return record.harness === 'cursor-agent' || record.source.includes('cursor-agent')
+}
+
 /**
- * Issue #231: within one session and skew window, join file-sourced rows whose
- * counters differ but are complementary or subset-related. Connected components
- * collapse to the fuller keeper with per-dimension max counters; content from
- * dropped siblings transplants like the exact-counter donor path. Identical
- * vectors are excluded so same-kind retries stay intact.
+ * A3 overlap join only runs when the session group evidences both Cursor twin
+ * collectors. `buildSessions` calls `dedupeTwinTurns` for every harness share;
+ * without this gate, ordinary file-backed rows elsewhere would collapse on
+ * complementary counters alone.
+ */
+function hasEvidencedCursorTwinShare(records: readonly CanonicalRecord[]): boolean {
+  let cursor = false
+  let agent = false
+  for (const record of records) {
+    if (isCursorAgentCollector(record)) agent = true
+    else if (isCursorCollector(record)) cursor = true
+    if (cursor && agent) return true
+  }
+  return false
+}
+
+/**
+ * Complete Cursor Agent observation: both input and output counters present.
+ * Partials (request/response halves, incomplete agent rows) assign to at most
+ * one such complete so they cannot transitively bridge conflicting turns.
+ */
+function isCompleteCursorAgentObservation(record: CanonicalRecord): boolean {
+  if (!isCursorAgentCollector(record)) return false
+  const hasInput = record.tokens.freshInput > 0 || record.tokens.reportedInput > 0
+  const hasOutput = record.tokens.output > 0 || record.tokens.reportedOutput > 0
+  return hasInput && hasOutput
+}
+
+/**
+ * Issue #231: within one evidenced Cursor twin session and skew window, join
+ * file-sourced rows whose counters differ but are complementary or subset-
+ * related. Each partial assigns to at most one complete Cursor Agent turn;
+ * components collapse to the fuller keeper with per-dimension max counters.
+ * Content from dropped siblings transplants like the exact-counter donor path.
+ * Identical vectors are excluded so same-kind retries stay intact.
  */
 function collapseOverlapFileJoins(
   records: readonly CanonicalRecord[],
@@ -302,6 +352,8 @@ function collapseOverlapFileJoins(
   }
 
   for (const turns of bySession.values()) {
+    // Inert unless both Cursor collectors appear in this session group.
+    if (!hasEvidencedCursorTwinShare(turns)) continue
     const ordered = [...turns].sort((a, b) => cachedTimestampMs(a) - cachedTimestampMs(b))
     let cluster: CanonicalRecord[] = []
     const closeCluster = () => {
@@ -318,6 +370,12 @@ function collapseOverlapFileJoins(
   }
 }
 
+/**
+ * Bounded turn matching: each complete Cursor Agent observation is a turn
+ * anchor; each partial joins at most one anchor it can complement/subset with
+ * (nearest in time). Partials never union two completes — the join relation is
+ * not transitive, and union-find would treat it as if it were.
+ */
 function collapseOverlapCluster(
   cluster: readonly CanonicalRecord[],
   dropped: Set<CanonicalRecord>,
@@ -326,44 +384,36 @@ function collapseOverlapCluster(
 ): void {
   if (cluster.length < 2) return
 
-  // Union-find over complementary/subset edges (transitive via a bridging half).
-  const parent = new Map<CanonicalRecord, CanonicalRecord>()
-  const find = (record: CanonicalRecord): CanonicalRecord => {
-    let root = record
-    while (parent.get(root) !== undefined && parent.get(root) !== root) root = parent.get(root)!
-    let walk = record
-    while (walk !== root) {
-      const next = parent.get(walk) ?? walk
-      parent.set(walk, root)
-      walk = next
+  const completes = cluster.filter(isCompleteCursorAgentObservation)
+  if (completes.length === 0) return
+
+  const groups = new Map<CanonicalRecord, CanonicalRecord[]>()
+  for (const complete of completes) groups.set(complete, [complete])
+
+  const partials = cluster
+    .filter((record) => !isCompleteCursorAgentObservation(record))
+    .sort((a, b) => cachedTimestampMs(a) - cachedTimestampMs(b))
+
+  for (const partial of partials) {
+    let best: CanonicalRecord | undefined
+    let bestDist = Number.POSITIVE_INFINITY
+    for (const complete of completes) {
+      if (!canJoinDistinctCounters(partial.tokens, complete.tokens)) continue
+      const dist = Math.abs(cachedTimestampMs(partial) - cachedTimestampMs(complete))
+      if (best === undefined || dist < bestDist) {
+        best = complete
+        bestDist = dist
+        continue
+      }
+      if (dist > bestDist) continue
+      // Time tie: prefer the earlier complete for stable assignment.
+      if (cachedTimestampMs(complete) < cachedTimestampMs(best)) best = complete
     }
-    return root
-  }
-  const union = (a: CanonicalRecord, b: CanonicalRecord): void => {
-    const ra = find(a)
-    const rb = find(b)
-    if (ra === rb) return
-    parent.set(ra, rb)
-  }
-  for (const record of cluster) parent.set(record, record)
-
-  for (let i = 0; i < cluster.length; i++) {
-    for (let j = i + 1; j < cluster.length; j++) {
-      const left = cluster[i]!
-      const right = cluster[j]!
-      if (canJoinDistinctCounters(left.tokens, right.tokens)) union(left, right)
-    }
+    if (best === undefined) continue
+    groups.get(best)!.push(partial)
   }
 
-  const components = new Map<CanonicalRecord, CanonicalRecord[]>()
-  for (const record of cluster) {
-    const root = find(record)
-    const list = components.get(root) ?? []
-    list.push(record)
-    components.set(root, list)
-  }
-
-  for (const members of components.values()) {
+  for (const members of groups.values()) {
     if (members.length < 2) continue
     let keeper = members[0]!
     for (const candidate of members.slice(1)) {
@@ -378,8 +428,12 @@ function collapseOverlapCluster(
       const existing = transplant.get(keeper)
       transplant.set(keeper, existing === undefined ? member : mergeDonors(existing, member))
     }
-    // Only stamp an override when the max vector differs from the keeper's own.
-    if (tokenDims(mergedTokens).some((value, i) => value !== (tokenDims(keeper.tokens)[i] ?? 0))) {
+    // Only stamp an override when the max vector differs from the keeper's own
+    // (TOKEN_DIMS or reasoning — maxTokens merges reasoning too).
+    if (
+      tokenDims(mergedTokens).some((value, i) => value !== (tokenDims(keeper.tokens)[i] ?? 0)) ||
+      (mergedTokens.reasoning ?? 0) !== (keeper.tokens.reasoning ?? 0)
+    ) {
       tokenOverride.set(keeper, mergedTokens)
     }
   }

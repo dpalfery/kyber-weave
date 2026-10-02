@@ -157,6 +157,174 @@ describe('dedupeTwinTurns (ADR 0009 D4 source precedence)', () => {
     expect(totalReportedOutput).toBe(45)
   })
 
+  it('does not overlap-join a single Cursor collector without twin evidence (review)', () => {
+    // Complementary halves from cursor alone look joinable, but the overlap
+    // pass requires evidenced cursor + cursor-agent in the session group.
+    const out = dedupeTwinTurns([
+      file('synth:cursor:req', {
+        source: 'codeburn/cursor',
+        harness: 'cursor',
+        timestamp: '2026-09-30T19:52:28.000Z',
+        tokens: counters({
+          freshInput: 100,
+          cacheRead: 0,
+          cacheCreation: 0,
+          output: 10,
+          reportedInput: 100,
+          reportedOutput: 10,
+        }),
+      }),
+      file('synth:cursor:res', {
+        source: 'codeburn/cursor',
+        harness: 'cursor',
+        timestamp: '2026-09-30T19:52:30.000Z',
+        tokens: counters({
+          freshInput: 200,
+          cacheRead: 0,
+          cacheCreation: 0,
+          output: 20,
+          reportedInput: 200,
+          reportedOutput: 20,
+        }),
+      }),
+    ])
+
+    expect(out).toHaveLength(2)
+    expect(out.reduce((sum, r) => sum + r.tokens.output, 0)).toBe(30)
+    expect(out.reduce((sum, r) => sum + r.tokens.reportedInput, 0)).toBe(300)
+  })
+
+  it('does not overlap-join an unrelated file-backed harness (review)', () => {
+    // buildSessions runs dedupeTwinTurns on every harness group; Claude
+    // file-only complementary rows must stay separate (exact-counter OTel+file
+    // path is unaffected — this is the #231 pass staying inert).
+    const out = dedupeTwinTurns([
+      file('synth:claude:a', {
+        source: 'codeburn/claude-desktop',
+        harness: 'claude-desktop',
+        timestamp: '2026-09-30T19:52:28.000Z',
+        tokens: counters({
+          freshInput: 100,
+          cacheRead: 0,
+          cacheCreation: 0,
+          output: 10,
+          reportedInput: 100,
+          reportedOutput: 10,
+        }),
+      }),
+      file('synth:claude:b', {
+        source: 'codeburn/claude-desktop',
+        harness: 'claude-desktop',
+        timestamp: '2026-09-30T19:52:30.000Z',
+        tokens: counters({
+          freshInput: 200,
+          cacheRead: 0,
+          cacheCreation: 0,
+          output: 20,
+          reportedInput: 200,
+          reportedOutput: 20,
+        }),
+      }),
+    ])
+
+    expect(out).toHaveLength(2)
+    expect(out.reduce((sum, r) => sum + r.tokens.output, 0)).toBe(30)
+  })
+
+  it('does not let one partial bridge two complete Cursor Agent turns (review)', () => {
+    // Two complete agent observations (100/60, 200/45) plus a response half
+    // (0/45) that is a subset of both. Union-find would merge all three into
+    // 200/60 and under-count output (105 → 60). Bounded matching assigns the
+    // partial to one complete only.
+    const out = dedupeTwinTurns([
+      file('synth:cursor-agent:a', {
+        source: 'codeburn/cursor-agent',
+        harness: 'cursor-agent',
+        timestamp: '2026-09-30T19:52:28.000Z',
+        tokens: counters({
+          freshInput: 100,
+          cacheRead: 0,
+          cacheCreation: 0,
+          output: 60,
+          reportedInput: 100,
+          reportedOutput: 60,
+        }),
+      }),
+      file('synth:cursor-agent:b', {
+        source: 'codeburn/cursor-agent',
+        harness: 'cursor-agent',
+        timestamp: '2026-09-30T19:52:32.000Z',
+        tokens: counters({
+          freshInput: 200,
+          cacheRead: 0,
+          cacheCreation: 0,
+          output: 45,
+          reportedInput: 200,
+          reportedOutput: 45,
+        }),
+      }),
+      file('synth:cursor:res', {
+        source: 'codeburn/cursor',
+        harness: 'cursor',
+        timestamp: '2026-09-30T19:52:30.000Z',
+        tokens: counters({
+          freshInput: 0,
+          cacheRead: 0,
+          cacheCreation: 0,
+          output: 45,
+          reportedInput: 0,
+          reportedOutput: 45,
+        }),
+      }),
+    ])
+
+    expect(out).toHaveLength(2)
+    const totalOutput = out.reduce((sum, r) => sum + r.tokens.output, 0)
+    expect(totalOutput).toBe(105)
+    // Partials do not invent a 200/60 max across conflicting completes.
+    expect(out.some((r) => r.tokens.freshInput === 200 && r.tokens.output === 60)).toBe(false)
+  })
+
+  it('retains merged reasoning when TOKEN_DIMS already match the keeper (review)', () => {
+    // Keeper covers the six TOKEN_DIMS; a subset donor still contributes a
+    // higher reasoning count that maxTokens merges — retention must compare it.
+    const out = dedupeTwinTurns([
+      file('synth:cursor-agent:0', {
+        source: 'codeburn/cursor-agent',
+        harness: 'cursor-agent',
+        timestamp: '2026-09-30T19:52:33.000Z',
+        tokens: counters({
+          freshInput: 100,
+          cacheRead: 0,
+          cacheCreation: 0,
+          output: 50,
+          reportedInput: 100,
+          reportedOutput: 50,
+          reasoning: 5,
+        }),
+      }),
+      file('synth:cursor:res', {
+        source: 'codeburn/cursor',
+        harness: 'cursor',
+        timestamp: '2026-09-30T19:52:30.000Z',
+        tokens: counters({
+          freshInput: 0,
+          cacheRead: 0,
+          cacheCreation: 0,
+          output: 50,
+          reportedInput: 0,
+          reportedOutput: 50,
+          reasoning: 20,
+        }),
+      }),
+    ])
+
+    expect(out).toHaveLength(1)
+    expect(out[0]!.tokens.reasoning).toBe(20)
+    expect(out[0]!.tokens.freshInput).toBe(100)
+    expect(out[0]!.tokens.output).toBe(50)
+  })
+
   it('never drops same-kind rows: two identical OTLP turns are kept', () => {
     // Conservative by construction: only a file row paired with a non-file
     // row is provably the same turn observed twice (ADR 0009 D4). Two
