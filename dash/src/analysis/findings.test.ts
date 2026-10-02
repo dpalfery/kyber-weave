@@ -258,6 +258,34 @@ describe('Detector 1: dormant-tool-schema', () => {
     expect(flaggedTools.some((t) => t.includes('"Write"'))).toBe(true)
     expect(flaggedTools.some((t) => t.includes('"Glob"'))).toBe(true)
   })
+
+  it('does NOT fabricate 150 tokens when schema size cannot be derived, marking estimatedWasteTokens undefined and measurementClass coverage-gap', () => {
+    const findings = detectDormantToolSchema({
+      sessionId: 'session-1',
+      turnsCount: 4,
+      toolDefinitions: [{ name: 'unused_linter' }],
+    })
+
+    expect(findings.length).toBe(1)
+    expect(findings[0]!.estimatedWasteTokens).toBeUndefined()
+    expect(findings[0]!.errorBar).toBeUndefined()
+    expect(findings[0]!.measurementClass).toBe('coverage-gap')
+    expect(findings[0]!.rankScore).toBe(0)
+    expect(findings[0]!.estimatedWasteTokens).not.toBe(600)
+  })
+
+  it('multiplies a measured schema size across resident turns', () => {
+    const findings = detectDormantToolSchema({
+      sessionId: 'session-1',
+      turnsCount: 4,
+      toolDefinitions: [{ name: 'unused_linter', tokens: 200 }],
+    })
+
+    expect(findings.length).toBe(1)
+    expect(findings[0]!.estimatedWasteTokens).toBe(800)
+    expect(findings[0]!.measurementClass).toBe('deterministic')
+    expect(findings[0]!.errorBar).toEqual({ lower: 640, upper: 960 })
+  })
 })
 
 describe('Detector 2: duplicate-tool-call', () => {
@@ -828,6 +856,37 @@ describe('Detector 4: prefix-cache-break', () => {
     })
 
     expect(findings.length).toBe(0)
+  })
+
+  it('does NOT fabricate 500 tokens when fresh input cannot be derived, marking estimatedWasteTokens undefined and measurementClass coverage-gap', () => {
+    const findings = detectPrefixCacheBreak({
+      sessionId: 'session-1',
+      turns: [
+        { spanId: 'llm-turn-1', turnIndex: 0, prefixText: 'System prompt v1. timestamp A. Act as expert.' },
+        { spanId: 'llm-turn-2', turnIndex: 1, prefixText: 'System prompt v1. timestamp B. Act as expert.' },
+      ],
+    })
+
+    expect(findings.length).toBe(1)
+    expect(findings[0]!.estimatedWasteTokens).toBeUndefined()
+    expect(findings[0]!.errorBar).toBeUndefined()
+    expect(findings[0]!.measurementClass).toBe('coverage-gap')
+    expect(findings[0]!.rankScore).toBe(0)
+  })
+
+  it('uses the measured fresh-input size without a 150-token floor', () => {
+    const findings = detectPrefixCacheBreak({
+      sessionId: 'session-1',
+      turns: [
+        { spanId: 'llm-turn-1', turnIndex: 0, prefixText: 'System prompt v1. timestamp A. Act as expert.', freshInput: 80 },
+        { spanId: 'llm-turn-2', turnIndex: 1, prefixText: 'System prompt v1. timestamp B. Act as expert.', freshInput: 80 },
+      ],
+    })
+
+    expect(findings.length).toBe(1)
+    expect(findings[0]!.estimatedWasteTokens).toBe(80)
+    expect(findings[0]!.measurementClass).toBe('deterministic')
+    expect(findings[0]!.errorBar).toEqual({ lower: 64, upper: 100 })
   })
 })
 
@@ -1457,6 +1516,46 @@ describe('Detector 7: inactive-skill-reference & Decision D16 Compliance', () =>
     })
 
     expect(findings.length).toBe(0)
+  })
+
+  it('does NOT fabricate 120 tokens when skill-block size cannot be derived, marking estimatedWasteTokens undefined and measurementClass coverage-gap', () => {
+    const findings = detectInactiveSkillReference({
+      sessionId: 'session-1',
+      referencedSkills: ['docker_deploy'],
+      executedSkills: [],
+    })
+
+    expect(findings.length).toBe(1)
+    expect(findings[0]!.estimatedWasteTokens).toBeUndefined()
+    expect(findings[0]!.errorBar).toBeUndefined()
+    expect(findings[0]!.measurementClass).toBe('coverage-gap')
+    expect(findings[0]!.rankScore).toBe(0)
+    expect(findings[0]!.confidence).toBe('heuristic')
+  })
+
+  it('multiplies a measured skill-block size across resident turns', () => {
+    const turn1 = makeMockRecord({
+      spanId: 'turn-skill-1',
+      op: 'llm.invoke',
+      content: { system_prompt: '<skill name="docker_deploy">Deploy containers to swarm</skill>' },
+    })
+    const turn2 = makeMockRecord({
+      spanId: 'turn-skill-2',
+      op: 'llm.invoke',
+      content: { system_prompt: '<skill name="docker_deploy">Deploy containers to swarm</skill>' },
+    })
+
+    const findings = detectInactiveSkillReference({
+      records: [turn1, turn2],
+      executedSkills: [],
+      skillTokens: { docker_deploy: 80 },
+    })
+
+    expect(findings.length).toBe(1)
+    // turnsCount = max(record count, 3) stays the measured-path formula
+    expect(findings[0]!.estimatedWasteTokens).toBe(240)
+    expect(findings[0]!.measurementClass).toBe('inferred')
+    expect(findings[0]!.errorBar).toEqual({ lower: 120, upper: 360 })
   })
 })
 

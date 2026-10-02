@@ -407,7 +407,7 @@ export type DormantToolSchemaInput = {
   sessionId?: string
   records?: readonly CanonicalRecord[]
   outcome?: OutcomeBlock
-  toolDefinitions?: readonly { name: string; tokens: number; server?: string }[]
+  toolDefinitions?: readonly { name: string; tokens?: number; server?: string }[]
   turnsCount?: number
   invocations?: readonly string[]
   references?: readonly string[]
@@ -428,8 +428,9 @@ export function detectDormantToolSchema(input: DormantToolSchemaInput): Finding[
   const turnRecords = records.filter((r) => r.op === 'llm.invoke')
   const toolRecords = records.filter((r) => r.op === 'tool.invoke')
 
-  // Map of tool name -> turns in which it was resident
-  const toolResidency = new Map<string, { turns: { spanId: string; turnIndex: number }[]; tokens: number }>()
+  // Map of tool name -> turns in which it was resident. `tokens` stays
+  // undefined until a measured schema size is seen; never defaulted.
+  const toolResidency = new Map<string, { turns: { spanId: string; turnIndex: number }[]; tokens?: number }>()
 
   // 1. Extract from records
   if (turnRecords.length > 0) {
@@ -437,9 +438,11 @@ export function detectDormantToolSchema(input: DormantToolSchemaInput): Finding[
       const turn = turnRecords[turnIdx]!
       const defs = extractToolDefinitionsFromRecord(turn)
       for (const def of defs) {
-        const existing = toolResidency.get(def.name) ?? { turns: [], tokens: def.tokens }
+        const existing = toolResidency.get(def.name) ?? { turns: [] }
         existing.turns.push({ spanId: turn.spanId, turnIndex: turnIdx })
-        existing.tokens = Math.max(existing.tokens, def.tokens)
+        if (def.tokens > 0) {
+          existing.tokens = Math.max(existing.tokens ?? 0, def.tokens)
+        }
         toolResidency.set(def.name, existing)
       }
     }
@@ -455,7 +458,10 @@ export function detectDormantToolSchema(input: DormantToolSchemaInput): Finding[
           const spanId = turnRecords[i]?.spanId ?? `turn-span-${i}`
           turnsList.push({ spanId, turnIndex: i })
         }
-        toolResidency.set(def.name, { turns: turnsList, tokens: def.tokens })
+        toolResidency.set(def.name, {
+          turns: turnsList,
+          ...(def.tokens !== undefined && def.tokens > 0 ? { tokens: def.tokens } : {}),
+        })
       }
     }
   }
@@ -486,9 +492,10 @@ export function detectDormantToolSchema(input: DormantToolSchemaInput): Finding[
     if (hasRef) continue
 
     const turnsResident = residency.turns.length
-    const schemaTokens = residency.tokens || 150
+    const schemaTokens = residency.tokens
+    const measured = schemaTokens !== undefined
     // Waste is the schema tokens carried across all turns without yielding actions
-    const estimatedWasteTokens = schemaTokens * turnsResident
+    const estimatedWasteTokens = measured ? schemaTokens * turnsResident : undefined
 
     const firstTurn = residency.turns[0]!
     const lastTurn = residency.turns[residency.turns.length - 1]!
@@ -497,7 +504,9 @@ export function detectDormantToolSchema(input: DormantToolSchemaInput): Finding[
       {
         spanId: firstTurn.spanId,
         turnIndex: firstTurn.turnIndex,
-        description: `Tool schema for "${toolName}" first registered in context (${schemaTokens} tokens).`,
+        description: measured
+          ? `Tool schema for "${toolName}" first registered in context (${schemaTokens} tokens).`
+          : `Tool schema for "${toolName}" first registered in context (size unmeasured).`,
       },
       {
         spanId: lastTurn.spanId,
@@ -513,28 +522,36 @@ export function detectDormantToolSchema(input: DormantToolSchemaInput): Finding[
       'Relocating tool schemas to on-demand loading requires the agent to be aware of tool availability; ensure tool discovery prompts are provided.',
     )
 
-    const rankScore = computeRankScore(estimatedWasteTokens, 'deterministic', discount)
+    const rankScore = computeRankScore(estimatedWasteTokens ?? 0, 'deterministic', discount)
 
     findings.push({
       id: `finding-dormant-tool-${toolName}-${sessionId ?? 'session'}`,
       detectorId: 'dormant-tool-schema',
       title: `Dormant Tool Schema: "${toolName}" resident across ${turnsResident} turns without invocation`,
-      mechanism: `Tool schema definition for "${toolName}" was injected into the prompt context on each turn (${schemaTokens} tokens/turn), accumulating ${estimatedWasteTokens} tokens across ${turnsResident} turns with zero invocations and no model references.`,
+      mechanism: measured
+        ? `Tool schema definition for "${toolName}" was injected into the prompt context on each turn (${schemaTokens} tokens/turn), accumulating ${estimatedWasteTokens} tokens across ${turnsResident} turns with zero invocations and no model references.`
+        : `Tool schema definition for "${toolName}" was injected into the prompt context on each turn at an unmeasured size, remaining resident across ${turnsResident} turns with zero invocations and no model references.`,
       evidenceLinks,
       confidence: 'deterministic',
-      estimatedWasteTokens,
+      ...(measured
+        ? {
+            estimatedWasteTokens: estimatedWasteTokens as number,
+            errorBar: {
+              lower: Math.floor((estimatedWasteTokens as number) * 0.8),
+              upper: Math.ceil((estimatedWasteTokens as number) * 1.2),
+            },
+          }
+        : {}),
       recommendation,
-      errorBar: {
-        lower: Math.floor(estimatedWasteTokens * 0.8),
-        upper: Math.ceil(estimatedWasteTokens * 1.2),
-      },
       outcomeRiskCaveat,
       runId,
       sessionId,
       rankScore,
-      measurementClass: 'deterministic',
+      measurementClass: measured ? 'deterministic' : 'coverage-gap',
       confidenceBasis: 'Deterministically measured from schema presence in turn context and 0 recorded invocation spans.',
-      whatWouldRaiseIt: 'Telemetry is already deterministic; confidence is at ceiling.',
+      whatWouldRaiseIt: measured
+        ? 'Telemetry is already deterministic; confidence is at ceiling.'
+        : 'Reported schema token sizes on the resident tool definitions would let the unused schema cost be measured.',
     })
   }
 
@@ -972,7 +989,9 @@ export function detectPrefixCacheBreak(input: PrefixCacheBreakInput): Finding[] 
     turnIndex: number
     prefix: string
     hash: string
-    freshInput: number
+    // Undefined when no fresh-input counter was reported: the finding
+    // stays unmeasured, never defaulted to 500 or floored at 150.
+    freshInput?: number
     cacheRead: number
   }
 
@@ -1001,7 +1020,7 @@ export function detectPrefixCacheBreak(input: PrefixCacheBreakInput): Finding[] 
         turnIndex: t.turnIndex ?? i,
         prefix,
         hash: prefix ? hashNormalized(prefix) : '',
-        freshInput: t.freshInput ?? 500,
+        freshInput: t.freshInput,
         cacheRead: t.cacheRead ?? 0,
       })
     }
@@ -1018,7 +1037,8 @@ export function detectPrefixCacheBreak(input: PrefixCacheBreakInput): Finding[] 
 
     if (tA.hash && tB.hash && tA.hash !== tB.hash) {
       // Estimated waste is the fresh input tokens that had to be computed because of cache invalidation
-      const wasteTokens = Math.max(150, tB.freshInput || 500)
+      const wasteTokens = tB.freshInput !== undefined && tB.freshInput > 0 ? tB.freshInput : undefined
+      const measured = wasteTokens !== undefined
 
       const evidenceLinks: FindingEvidenceLink[] = [
         {
@@ -1040,28 +1060,36 @@ export function detectPrefixCacheBreak(input: PrefixCacheBreakInput): Finding[] 
         'Relocating dynamic instructions to the prompt tail can subtly shift model attention weights for early turn system prompts.',
       )
 
-      const rankScore = computeRankScore(wasteTokens, 'deterministic', discount)
+      const rankScore = computeRankScore(wasteTokens ?? 0, 'deterministic', discount)
 
       findings.push({
         id: `finding-prefix-break-${sessionId ?? 'session'}-${tB.spanId}`,
         detectorId: 'prefix-cache-break',
         title: `Prefix Cache Break: Dynamic tokens injected early in prompt breaking KV-cache`,
-        mechanism: `Prefix tokens differed between turn ${tA.turnIndex} and turn ${tB.turnIndex}, breaking KV-cache prefix stability and forcing the model to re-evaluate ${wasteTokens} fresh input tokens that could have been cached.`,
+        mechanism: measured
+          ? `Prefix tokens differed between turn ${tA.turnIndex} and turn ${tB.turnIndex}, breaking KV-cache prefix stability and forcing the model to re-evaluate ${wasteTokens} fresh input tokens that could have been cached.`
+          : `Prefix tokens differed between turn ${tA.turnIndex} and turn ${tB.turnIndex}, breaking KV-cache prefix stability and forcing the model to re-evaluate a fresh input payload of unmeasured size that could have been cached.`,
         evidenceLinks,
         confidence: 'deterministic',
-        estimatedWasteTokens: wasteTokens,
+        ...(measured
+          ? {
+              estimatedWasteTokens: wasteTokens,
+              errorBar: {
+                lower: Math.floor(wasteTokens * 0.8),
+                upper: Math.ceil(wasteTokens * 1.25),
+              },
+            }
+          : {}),
         recommendation,
-        errorBar: {
-          lower: Math.floor(wasteTokens * 0.8),
-          upper: Math.ceil(wasteTokens * 1.25),
-        },
         outcomeRiskCaveat,
         runId,
         sessionId,
         rankScore,
-        measurementClass: 'deterministic',
+        measurementClass: measured ? 'deterministic' : 'coverage-gap',
         confidenceBasis: 'Deterministically verified by whitespace-normalized SHA-256 hash divergence between consecutive turn prefixes.',
-        whatWouldRaiseIt: 'Deterministic measurement; confidence is at ceiling.',
+        whatWouldRaiseIt: measured
+          ? 'Deterministic measurement; confidence is at ceiling.'
+          : 'Reported fresh-input token counters on the breaking turn would let the invalidated prefix cost be measured.',
       })
       // One finding per session break sequence is sufficient to avoid flooding
       break
@@ -1488,9 +1516,10 @@ export function detectInactiveSkillReference(input: InactiveSkillReferenceInput)
   for (const skill of referenced) {
     if (executedSet.has(skill)) continue
 
-    const tokensPerTurn = skillTokensMap[skill] ?? 120
+    const tokensPerTurn = skillTokensMap[skill]
+    const measured = tokensPerTurn !== undefined && tokensPerTurn > 0
     const turnsCount = Math.max(turnRecords.length, 3)
-    const estimatedWasteTokens = tokensPerTurn * turnsCount
+    const estimatedWasteTokens = measured ? tokensPerTurn * turnsCount : undefined
 
     const firstSpanId = turnRecords[0]?.spanId ?? 'turn-skill-inject-0'
     const lastSpanId = turnRecords[turnRecords.length - 1]?.spanId ?? `turn-skill-uncalled-${turnsCount - 1}`
@@ -1499,7 +1528,9 @@ export function detectInactiveSkillReference(input: InactiveSkillReferenceInput)
       {
         spanId: firstSpanId,
         turnIndex: 0,
-        description: `Skill instructions for "${skill}" loaded into prompt context (${tokensPerTurn} tokens/turn).`,
+        description: measured
+          ? `Skill instructions for "${skill}" loaded into prompt context (${tokensPerTurn} tokens/turn).`
+          : `Skill instructions for "${skill}" loaded into prompt context (size unmeasured).`,
       },
       {
         spanId: lastSpanId,
@@ -1515,28 +1546,36 @@ export function detectInactiveSkillReference(input: InactiveSkillReferenceInput)
       'Per Decision D16, skill activation telemetry is not exported directly; skill instructions may supply latent guidance even when uncalled.',
     )
 
-    const rankScore = computeRankScore(estimatedWasteTokens, 'heuristic', discount)
+    const rankScore = computeRankScore(estimatedWasteTokens ?? 0, 'heuristic', discount)
 
     findings.push({
       id: `finding-inactive-skill-${skill}-${sessionId ?? 'session'}`,
       detectorId: 'inactive-skill-reference',
       title: `Inactive Skill Reference: Skill "${skill}" loaded in context with 0 executions`,
-      mechanism: `Skill instruction block for "${skill}" remained resident in prompt context across ${turnsCount} turns (${tokensPerTurn} tokens/turn), accumulating ${estimatedWasteTokens} tokens without explicit execution or activation.`,
+      mechanism: measured
+        ? `Skill instruction block for "${skill}" remained resident in prompt context across ${turnsCount} turns (${tokensPerTurn} tokens/turn), accumulating ${estimatedWasteTokens} tokens without explicit execution or activation.`
+        : `Skill instruction block for "${skill}" remained resident in prompt context across ${turnsCount} turns at an unmeasured size without explicit execution or activation.`,
       evidenceLinks,
       confidence: 'heuristic',
-      estimatedWasteTokens,
+      ...(measured
+        ? {
+            estimatedWasteTokens: estimatedWasteTokens as number,
+            errorBar: {
+              lower: Math.floor((estimatedWasteTokens as number) * 0.5),
+              upper: Math.ceil((estimatedWasteTokens as number) * 1.5),
+            },
+          }
+        : {}),
       recommendation,
-      errorBar: {
-        lower: Math.floor(estimatedWasteTokens * 0.5),
-        upper: Math.ceil(estimatedWasteTokens * 1.5),
-      },
       outcomeRiskCaveat,
       runId,
       sessionId,
       rankScore,
-      measurementClass: 'inferred',
+      measurementClass: measured ? 'inferred' : 'coverage-gap',
       confidenceBasis: 'Decision D16: Stamped at low confidence (heuristic) because agent harnesses do not export explicit skill activation telemetry.',
-      whatWouldRaiseIt: 'Harness export of discrete skill activation spans or tool routing telemetry.',
+      whatWouldRaiseIt: measured
+        ? 'Harness export of discrete skill activation spans or tool routing telemetry.'
+        : 'Reported skill-block token sizes would let the unused instruction cost be measured. Harness export of discrete skill activation spans would also raise confidence.',
     })
   }
 
