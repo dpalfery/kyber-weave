@@ -64,7 +64,16 @@ export type NativeUnit = {
   revision: NativeRevision | null
   envelopes: SourceRecordEnvelope[]
   problems: SourceProblem[]
+  /** Why a changed unit yielded no envelopes and no problems; absent when it yielded records or problems. */
+  emptyReason?: NativeEmptyReason
 }
+
+/**
+ * Persisted on a zero-record checkpoint so an empty unit is explained, not silent.
+ * `window_filtered`: the parser yielded calls but all predate the coverage window.
+ * `no_recordable_events`: the parser yielded no calls (no usage/model events).
+ */
+export type NativeEmptyReason = 'window_filtered' | 'no_recordable_events'
 
 export type NativeClassifierEvidence = {
   originator?: string | null
@@ -231,7 +240,13 @@ async function readNativeUnit(
   const { inWindow, problems } = sliceCallsToWindow(calls, dependencies.dateRange)
   const revisionToken = revision?.token ?? 'unknown'
   const envelopes = inWindow.map(parsed => toEnvelope(harnessId, sourceKey, source, parsed, revisionToken))
-  return { harnessId, sourceKey, source, status, revision, envelopes, problems }
+  const emptyReason = emptyReasonFor(calls.length, envelopes.length, problems.length)
+  return { harnessId, sourceKey, source, status, revision, envelopes, problems, ...(emptyReason ? { emptyReason } : {}) }
+}
+
+function emptyReasonFor(parsed: number, enveloped: number, problems: number): NativeEmptyReason | undefined {
+  if (enveloped > 0 || problems > 0) return undefined
+  return parsed === 0 ? 'no_recordable_events' : 'window_filtered'
 }
 
 function changeStatus(

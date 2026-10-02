@@ -197,31 +197,26 @@ describe('codex ingest: checkpoint rows for three rollout shapes (T1 diagnostic)
     expect(row).toMatchObject({ units: 3, created: 1, problems: 0, status: 'ok' })
   })
 
-  it('(b) pre-window rollout: checkpoint is status ok, record_count 0, no error code, no problem, no quarantine (silent ok)', async () => {
+  it('(b) pre-window rollout: checkpoint is status ok, record_count 0, reason window_filtered, no problem, no quarantine', async () => {
     await refresh()
 
     const checkpoint = checkpointOf(fixtures.preWindow)
-    expect(checkpoint).toMatchObject({ lastStatus: 'ok', recordCount: 0, lastErrorCode: null, unitCount: 1 })
+    expect(checkpoint).toMatchObject({ lastStatus: 'ok', recordCount: 0, lastErrorCode: 'window_filtered', unitCount: 1 })
     expect(checkpoint?.coveredFromUtc).toBe(WINDOW.start.toISOString())
     expect(store.getProblems().filter(problem => problem.spanId.includes(checkpoint!.sourceKey))).toEqual([])
     expect(store.listQuarantine()).toEqual([])
   })
 
-  it('(c) in-window session without token_count/model: checkpoint is status ok, record_count 0, no error code, no problem (silent ok)', async () => {
+  it('(c) in-window session without token_count/model: checkpoint is status ok, record_count 0, reason no_recordable_events, no problem', async () => {
     await refresh()
 
     const checkpoint = checkpointOf(fixtures.noUsage)
-    expect(checkpoint).toMatchObject({ lastStatus: 'ok', recordCount: 0, lastErrorCode: null, unitCount: 1 })
+    expect(checkpoint).toMatchObject({ lastStatus: 'ok', recordCount: 0, lastErrorCode: 'no_recordable_events', unitCount: 1 })
     expect(store.getProblems().filter(problem => problem.spanId.includes(checkpoint!.sourceKey))).toEqual([])
     expect(store.listQuarantine()).toEqual([])
   })
 
-  // INTENTIONAL RED for the follow-up task (issue #196, honest-unobservability).
-  // The three passing characterisation tests above prove that today a zero-record
-  // unit is persisted as lastStatus 'ok' with lastErrorCode null and no problem
-  // row, so the reason a unit is empty (pre-window vs. no usage events) is
-  // unobservable. This test FAILS until the orchestrator persists a reason for
-  // zero-record checkpoints. Do not weaken it; the fix task makes it pass.
+  // Honest-unobservability contract (issue #196): a zero-record unit says why.
   it('contract: zero-record checkpoint carries a reason (honest-unobservability)', async () => {
     await refresh()
 
