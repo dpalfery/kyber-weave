@@ -226,8 +226,10 @@ log enrichment mark a serialized `CanonicalProjectionScheduler` dirty instead:
   reports the error, and leaves the work dirty; the next request or `drain()` retries it. A
   slow or failing projection can therefore never block, reject, or drop accepted ingestion.
 - Shutdown orders receiver stop, writer stop, projection drain, then store close: `drain()`
-  and `close()` bypass the debounce/floor schedule, run any owed work immediately, and
-  resolve only once no pass is in flight and no trailing pass is owed. Those knobs limit
+  and `close()` bypass the debounce/floor schedule, attempt any owed work immediately,
+  and resolve once no pass is in flight and no trailing pass is owed — a failed pass
+  can still leave work dirty, to be retried by the next request or `drain()`. Those
+  knobs limit
   when a projection pass may START, not how fresh derived sessions are: a batch that
   arrives just after a pass started can wait nearly the full minimum interval (the 10s
   idle window plus a floor up to 10min) for the next pass, and slow or failed passes can
