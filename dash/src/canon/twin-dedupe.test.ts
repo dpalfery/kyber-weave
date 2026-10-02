@@ -285,6 +285,63 @@ describe('dedupeTwinTurns (ADR 0009 D4 source precedence)', () => {
     expect(out.some((r) => r.tokens.freshInput === 200 && r.tokens.output === 60)).toBe(false)
   })
 
+  it('does not let conflicting complete Cursor IDE turns collapse into one Agent turn (review)', () => {
+    // CodeRabbit round-3: two complete IDE turns (100/60, 200/45) both subset
+    // one complete Agent (200/60). Treating IDE completes as partials let both
+    // join the anchor and emit a single 200/60 (output 60), dropping the other
+    // turn's 45. Complete IDE observations are full turns — each Agent anchor
+    // takes at most one best IDE match; the conflicting complete stays separate.
+    // Timestamps: IDE 100/60 nearest the Agent so it joins; IDE 200/45 remains.
+    const out = dedupeTwinTurns([
+      file('synth:cursor:ide-a', {
+        source: 'codeburn/cursor',
+        harness: 'cursor',
+        timestamp: '2026-09-30T19:52:28.000Z',
+        tokens: counters({
+          freshInput: 100,
+          cacheRead: 0,
+          cacheCreation: 0,
+          output: 60,
+          reportedInput: 100,
+          reportedOutput: 60,
+        }),
+      }),
+      file('synth:cursor:ide-b', {
+        source: 'codeburn/cursor',
+        harness: 'cursor',
+        timestamp: '2026-09-30T19:52:32.000Z',
+        tokens: counters({
+          freshInput: 200,
+          cacheRead: 0,
+          cacheCreation: 0,
+          output: 45,
+          reportedInput: 200,
+          reportedOutput: 45,
+        }),
+      }),
+      file('synth:cursor-agent:0', {
+        source: 'codeburn/cursor-agent',
+        harness: 'cursor-agent',
+        timestamp: '2026-09-30T19:52:29.000Z',
+        tokens: counters({
+          freshInput: 200,
+          cacheRead: 0,
+          cacheCreation: 0,
+          output: 60,
+          reportedInput: 200,
+          reportedOutput: 60,
+        }),
+      }),
+    ])
+
+    expect(out).toHaveLength(2)
+    const totalOutput = out.reduce((sum, r) => sum + r.tokens.output, 0)
+    expect(totalOutput).toBe(105)
+    // Joined keeper is the Agent maxed with IDE A; IDE B survives intact.
+    expect(out.some((r) => r.tokens.freshInput === 200 && r.tokens.output === 60)).toBe(true)
+    expect(out.some((r) => r.tokens.freshInput === 200 && r.tokens.output === 45)).toBe(true)
+  })
+
   it('retains merged reasoning when TOKEN_DIMS already match the keeper (review)', () => {
     // Keeper covers the six TOKEN_DIMS; a subset donor still contributes a
     // higher reasoning count that maxTokens merges — retention must compare it.

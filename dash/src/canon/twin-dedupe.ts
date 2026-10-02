@@ -39,10 +39,13 @@ import type { CanonicalRecord, TokenUsage } from './types.js'
 // join into one turn. The pass stays inert for every other harness group —
 // `isFileSource` alone is not twin evidence (A3 refined, not overturned).
 // Joined counters take the per-dimension max (prefer the fuller row as keeper
-// identity); they are never summed. Partials assign to at most one complete
-// Cursor Agent observation so union-find cannot transitively bridge conflicting
-// completes. Identical same-kind OTLP retries stay kept — the overlap join only
-// bridges *different* counter vectors.
+// identity); they are never summed. Partials (request/response halves) assign
+// to at most one complete Cursor Agent observation so union-find cannot
+// transitively bridge conflicting completes. A complete Cursor IDE turn is
+// itself a full observation — not a half — so each Agent anchor accepts at
+// most one best matching complete IDE; conflicting complete IDE turns stay
+// separate rather than silently collapsing. Identical same-kind OTLP retries
+// stay kept — the overlap join only bridges *different* counter vectors.
 
 /**
  * Maximum timestamp gap for two rows to be the same turn observed twice.
@@ -206,10 +209,10 @@ function preferFullerKeeper(a: CanonicalRecord, b: CanonicalRecord): CanonicalRe
  * evidenced Cursor twin share whose counters differ but stand in a
  * complementary/subset relation under the same skew window, merging by
  * per-dimension max onto the fuller keeper (partials assign to at most one
- * complete Cursor Agent turn). Applied by
- * the derived-layer builders (`buildSessions`, `buildRuns`, `buildFindings`)
- * after shares merge, never at ingest — raw records keep both collectors'
- * rows as provenance.
+ * complete Cursor Agent turn; each such turn accepts at most one complete
+ * Cursor IDE match). Applied by the derived-layer builders (`buildSessions`,
+ * `buildRuns`, `buildFindings`) after shares merge, never at ingest — raw
+ * records keep both collectors' rows as provenance.
  */
 export function dedupeTwinTurns(records: readonly CanonicalRecord[], shareKey?: string): CanonicalRecord[] {
   const byCounter = new Map<CounterKey, CanonicalRecord[]>()
@@ -312,25 +315,39 @@ function hasEvidencedCursorTwinShare(records: readonly CanonicalRecord[]): boole
   return false
 }
 
-/**
- * Complete Cursor Agent observation: both input and output counters present.
- * Partials (request/response halves, incomplete agent rows) assign to at most
- * one such complete so they cannot transitively bridge conflicting turns.
- */
-function isCompleteCursorAgentObservation(record: CanonicalRecord): boolean {
-  if (!isCursorAgentCollector(record)) return false
+/** Both input and output counters present — a full turn observation, not a half. */
+function hasCompleteCounters(record: CanonicalRecord): boolean {
   const hasInput = record.tokens.freshInput > 0 || record.tokens.reportedInput > 0
   const hasOutput = record.tokens.output > 0 || record.tokens.reportedOutput > 0
   return hasInput && hasOutput
 }
 
 /**
+ * Complete Cursor Agent observation: both input and output counters present.
+ * Partials (request/response halves, incomplete agent rows) assign to at most
+ * one such complete so they cannot transitively bridge conflicting turns.
+ */
+function isCompleteCursorAgentObservation(record: CanonicalRecord): boolean {
+  return isCursorAgentCollector(record) && hasCompleteCounters(record)
+}
+
+/**
+ * Complete Cursor IDE observation: a full turn from the IDE collector, not a
+ * request/response half. Conflicting completes must not all subset-join one
+ * Agent anchor (review): each anchor takes at most one best IDE match.
+ */
+function isCompleteCursorIdeObservation(record: CanonicalRecord): boolean {
+  return isCursorCollector(record) && hasCompleteCounters(record)
+}
+
+/**
  * Issue #231: within one evidenced Cursor twin session and skew window, join
  * file-sourced rows whose counters differ but are complementary or subset-
  * related. Each partial assigns to at most one complete Cursor Agent turn;
- * components collapse to the fuller keeper with per-dimension max counters.
- * Content from dropped siblings transplants like the exact-counter donor path.
- * Identical vectors are excluded so same-kind retries stay intact.
+ * each Agent turn accepts at most one complete Cursor IDE match. Components
+ * collapse to the fuller keeper with per-dimension max counters. Content from
+ * dropped siblings transplants like the exact-counter donor path. Identical
+ * vectors are excluded so same-kind retries stay intact.
  */
 function collapseOverlapFileJoins(
   records: readonly CanonicalRecord[],
@@ -372,9 +389,12 @@ function collapseOverlapFileJoins(
 
 /**
  * Bounded turn matching: each complete Cursor Agent observation is a turn
- * anchor; each partial joins at most one anchor it can complement/subset with
- * (nearest in time). Partials never union two completes — the join relation is
- * not transitive, and union-find would treat it as if it were.
+ * anchor. Request/response halves join at most one anchor they can
+ * complement/subset with (nearest in time). Complete Cursor IDE observations
+ * are full turns, not halves: each anchor accepts at most its nearest
+ * joinable IDE match; any other conflicting complete IDE stays its own turn.
+ * Partials never union two Agent completes — the join relation is not
+ * transitive, and union-find would treat it as if it were.
  */
 function collapseOverlapCluster(
   cluster: readonly CanonicalRecord[],
@@ -390,8 +410,9 @@ function collapseOverlapCluster(
   const groups = new Map<CanonicalRecord, CanonicalRecord[]>()
   for (const complete of completes) groups.set(complete, [complete])
 
+  // Halves and incomplete rows only — a complete IDE turn is not a partial.
   const partials = cluster
-    .filter((record) => !isCompleteCursorAgentObservation(record))
+    .filter((record) => !isCompleteCursorAgentObservation(record) && !isCompleteCursorIdeObservation(record))
     .sort((a, b) => cachedTimestampMs(a) - cachedTimestampMs(b))
 
   for (const partial of partials) {
@@ -411,6 +432,29 @@ function collapseOverlapCluster(
     }
     if (best === undefined) continue
     groups.get(best)!.push(partial)
+  }
+
+  // At most one complete IDE per Agent anchor (nearest joinable). Remaining
+  // complete IDE turns stay separate — never silently dropped into the max.
+  const availableIdes = new Set(cluster.filter(isCompleteCursorIdeObservation))
+  const anchorsByTime = [...completes].sort((a, b) => cachedTimestampMs(a) - cachedTimestampMs(b))
+  for (const complete of anchorsByTime) {
+    let best: CanonicalRecord | undefined
+    let bestDist = Number.POSITIVE_INFINITY
+    for (const ide of availableIdes) {
+      if (!canJoinDistinctCounters(ide.tokens, complete.tokens)) continue
+      const dist = Math.abs(cachedTimestampMs(ide) - cachedTimestampMs(complete))
+      if (best === undefined || dist < bestDist) {
+        best = ide
+        bestDist = dist
+        continue
+      }
+      if (dist > bestDist) continue
+      if (cachedTimestampMs(ide) < cachedTimestampMs(best)) best = ide
+    }
+    if (best === undefined) continue
+    availableIdes.delete(best)
+    groups.get(complete)!.push(best)
   }
 
   for (const members of groups.values()) {
