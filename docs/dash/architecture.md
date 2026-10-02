@@ -227,10 +227,13 @@ log enrichment mark a serialized `CanonicalProjectionScheduler` dirty instead:
   slow or failing projection can therefore never block, reject, or drop accepted ingestion.
 - Shutdown orders receiver stop, writer stop, projection drain, then store close: `drain()`
   and `close()` bypass the debounce/floor schedule, run any owed work immediately, and
-  resolve only once no pass is in flight and no trailing pass is owed. Dashboard freshness
-  is bounded by the same knobs: derived sessions trail the last accepted batch by roughly
-  the idle window after the stream quiets, and by at most the 10-minute caps under
-  saturation.
+  resolve only once no pass is in flight and no trailing pass is owed. Those knobs limit
+  when a projection pass may START, not how fresh derived sessions are: a batch that
+  arrives just after a pass started can wait nearly the full minimum interval (the 10s
+  idle window plus a floor up to 10min) for the next pass, and slow or failed passes can
+  delay visible results further. Under saturation, at most one new pass starts per
+  10 minutes, so derived sessions trail the last accepted batch by roughly the idle
+  window after the stream quiets, and worst-case by the 10-minute caps.
 
 `KyberBridge.listSessions()` (`dash/src/server/bridge.ts`) reads only the canonical derived
 `session` cache. Raw `records` are never synthesized into sessions for reporting: until the
