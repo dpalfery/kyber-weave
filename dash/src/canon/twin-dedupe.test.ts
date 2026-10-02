@@ -102,25 +102,59 @@ describe('dedupeTwinTurns (ADR 0009 D4 source precedence)', () => {
     expect(out[0]!.parts).toEqual([{ part: 'system_prompt', text: 'hello' }])
   })
 
-  it('leaves disjoint turns from twin collectors untouched (cursor-style)', () => {
-    // Live evidence: cursor file rows (17007/0, 0/45) and the cursor-agent row
-    // (125/45) share a key but describe different observations — distinct
-    // counters, so the fold sums the union without inflation.
+  it('counts #231 cursor twin overlap output once (file halves + agent)', () => {
+    // Live evidence (issue #231, key 0f659701-…): cursor file halves
+    // (17007/0, 0/45) plus cursor-agent (125/45) within skew. Exact-counter
+    // matching never clusters them, so the share used to sum the overlapping
+    // 45 twice (90). A3 join: time skew + complementary/subset counters under
+    // the folded cursor share → per-dimension max / prefer-fuller-row; never
+    // sum joined counters. Summed output/reportedOutput must be 45, not 90.
     const out = dedupeTwinTurns([
-      file('synth:cursor:1', {
+      file('synth:cursor:req', {
         source: 'codeburn/cursor',
         harness: 'cursor',
-        tokens: counters({ freshInput: 17007, cacheRead: 0, cacheCreation: 0, output: 0, reportedInput: 17007, reportedOutput: 0 }),
+        timestamp: '2026-09-30T19:52:28.000Z',
+        tokens: counters({
+          freshInput: 17007,
+          cacheRead: 0,
+          cacheCreation: 0,
+          output: 0,
+          reportedInput: 17007,
+          reportedOutput: 0,
+        }),
+      }),
+      file('synth:cursor:res', {
+        source: 'codeburn/cursor',
+        harness: 'cursor',
+        timestamp: '2026-09-30T19:52:30.000Z',
+        tokens: counters({
+          freshInput: 0,
+          cacheRead: 0,
+          cacheCreation: 0,
+          output: 45,
+          reportedInput: 0,
+          reportedOutput: 45,
+        }),
       }),
       file('synth:cursor-agent:0', {
         source: 'codeburn/cursor-agent',
         harness: 'cursor-agent',
         timestamp: '2026-09-30T19:52:33.181Z',
-        tokens: counters({ freshInput: 125, cacheRead: 0, cacheCreation: 0, output: 45, reportedInput: 125, reportedOutput: 45 }),
+        tokens: counters({
+          freshInput: 125,
+          cacheRead: 0,
+          cacheCreation: 0,
+          output: 45,
+          reportedInput: 125,
+          reportedOutput: 45,
+        }),
       }),
     ])
 
-    expect(out).toHaveLength(2)
+    const totalOutput = out.reduce((sum, r) => sum + r.tokens.output, 0)
+    const totalReportedOutput = out.reduce((sum, r) => sum + r.tokens.reportedOutput, 0)
+    expect(totalOutput).toBe(45)
+    expect(totalReportedOutput).toBe(45)
   })
 
   it('never drops same-kind rows: two identical OTLP turns are kept', () => {

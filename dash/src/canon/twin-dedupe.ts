@@ -1,8 +1,8 @@
 import { isFileSource } from './measurability.js'
 import { contentFromParts } from './types.js'
-import type { CanonicalRecord } from './types.js'
+import type { CanonicalRecord, TokenUsage } from './types.js'
 
-// Same-turn dedupe for twin front-end collectors (issues #181/#182, ADR 0009 D4).
+// Same-turn dedupe for twin front-end collectors (issues #181/#182/#231, ADR 0009 D4).
 //
 // One harness reached through two collectors — Claude Code's OTLP export plus
 // its transcript files, Cursor plus Cursor Agent — describes the same model
@@ -31,12 +31,13 @@ import type { CanonicalRecord } from './types.js'
 // row does, so a content fingerprint would separate exactly the rows the rule
 // exists to join.
 //
-// Matching is exact-counter only: same-turn observations whose counters
-// differ (e.g. the cursor twin's overlapping output figures, issue #231) are
-// left alone, as are turns that reported no usage at all — every such turn
-// stamps the same all-zero key, which identifies nothing, so those rows are
-// never bucketed for matching in the first place. The canonical architecture
-// states this boundary where the contract is described.
+// Exact-counter matching covers the Claude OTel+file path (ADR 0009 D4). Issue
+// #231 extends the same share with a complementary/overlap join for observations
+// whose counters differ: within `TWIN_TURN_MAX_SKEW_MS`, file+file rows under a
+// folded twin share that stand in a complementary or subset relation join into
+// one turn. Joined counters take the per-dimension max (prefer the fuller row as
+// keeper identity); they are never summed. Identical same-kind OTLP retries stay
+// kept — the overlap join only bridges *different* counter vectors.
 
 /**
  * Maximum timestamp gap for two rows to be the same turn observed twice.
@@ -56,6 +57,15 @@ export const TWIN_TURN_MAX_SKEW_MS = 60_000
 
 type CounterKey = string
 
+const TOKEN_DIMS = [
+  'freshInput',
+  'cacheRead',
+  'cacheCreation',
+  'output',
+  'reportedInput',
+  'reportedOutput',
+] as const satisfies readonly (keyof TokenUsage)[]
+
 function counterKey(record: CanonicalRecord, shareKey?: string): CounterKey {
   const { tokens } = record
   // A share routinely mixes rows with session_id set and rows where only
@@ -71,6 +81,10 @@ function counterKey(record: CanonicalRecord, shareKey?: string): CounterKey {
     tokens.reportedInput,
     tokens.reportedOutput,
   ].join(':')
+}
+
+function sessionKeyOf(record: CanonicalRecord, shareKey?: string): string {
+  return record.sessionId ?? shareKey ?? ''
 }
 
 function timestampMs(record: CanonicalRecord): number {
@@ -106,14 +120,87 @@ function isUnreportedCounters(tokens: CanonicalRecord['tokens']): boolean {
   )
 }
 
+function tokenDims(tokens: TokenUsage): readonly number[] {
+  return TOKEN_DIMS.map((dim) => tokens[dim] ?? 0)
+}
+
+/** Componentwise ≤ — every field of `a` is covered by `b`. */
+function isSubsetDims(a: readonly number[], b: readonly number[]): boolean {
+  return a.every((value, i) => value <= (b[i] ?? 0))
+}
+
+/**
+ * No conflicting non-zeros: each dimension is zero on at least one side, or
+ * both sides agree. Request/response halves (`17007/0` + `0/45`) match this;
+ * disagreeing inputs (`17007` vs `125`) do not.
+ */
+function isComplementaryDims(a: readonly number[], b: readonly number[]): boolean {
+  return a.every((value, i) => {
+    const other = b[i] ?? 0
+    return value === 0 || other === 0 || value === other
+  })
+}
+
+/**
+ * Issue #231 join predicate for distinct counter vectors: complementary or
+ * subset. Identical vectors stay on the exact-counter path so same-kind
+ * retries are never collapsed here.
+ */
+function canJoinDistinctCounters(a: TokenUsage, b: TokenUsage): boolean {
+  const da = tokenDims(a)
+  const db = tokenDims(b)
+  if (da.every((value, i) => value === (db[i] ?? 0))) return false
+  return isComplementaryDims(da, db) || isSubsetDims(da, db) || isSubsetDims(db, da)
+}
+
+/** Per-dimension max — joined counters are never summed (A3 / ADR 0009 D4). */
+function maxTokens(a: TokenUsage, b: TokenUsage): TokenUsage {
+  const merged: TokenUsage = {
+    freshInput: Math.max(a.freshInput, b.freshInput),
+    cacheRead: Math.max(a.cacheRead, b.cacheRead),
+    cacheCreation: Math.max(a.cacheCreation, b.cacheCreation),
+    output: Math.max(a.output, b.output),
+    reportedInput: Math.max(a.reportedInput, b.reportedInput),
+    reportedOutput: Math.max(a.reportedOutput, b.reportedOutput),
+  }
+  const reasoning = Math.max(a.reasoning ?? 0, b.reasoning ?? 0)
+  if (a.reasoning !== undefined || b.reasoning !== undefined) {
+    merged.reasoning = reasoning
+  }
+  return merged
+}
+
+/** Fuller vector = more non-zero dimensions, then larger magnitude. */
+function counterFullness(tokens: TokenUsage): { nonZero: number; magnitude: number } {
+  const dims = tokenDims(tokens)
+  let nonZero = 0
+  let magnitude = 0
+  for (const value of dims) {
+    if (value > 0) nonZero++
+    magnitude += value
+  }
+  return { nonZero, magnitude }
+}
+
+function preferFullerKeeper(a: CanonicalRecord, b: CanonicalRecord): CanonicalRecord {
+  const fa = counterFullness(a.tokens)
+  const fb = counterFullness(b.tokens)
+  if (fa.nonZero !== fb.nonZero) return fa.nonZero > fb.nonZero ? a : b
+  if (fa.magnitude !== fb.magnitude) return fa.magnitude > fb.magnitude ? a : b
+  // Stable: earlier stamp wins when fullness ties.
+  return cachedTimestampMs(a) <= cachedTimestampMs(b) ? a : b
+}
+
 /**
  * Collapse same-turn twin observations within one canonical-harness share.
  * Pure: input order is preserved, no record is mutated. Rows sharing exact
- * counters cluster by timestamp proximity (consecutive gaps within
- * `TWIN_TURN_MAX_SKEW_MS`); a cluster holding both source kinds is one turn
- * observed twice, so its file rows drop and its content transplants pairwise
- * onto the content-less OTel rows nearest in time. Applied by the
- * derived-layer builders (`buildSessions`, `buildRuns`, `buildFindings`)
+ * counters cluster by timestamp proximity (span within `TWIN_TURN_MAX_SKEW_MS`);
+ * a cluster holding both source kinds is one turn observed twice, so its file
+ * rows drop and its content transplants pairwise onto the content-less OTel
+ * rows nearest in time. A second pass (#231) joins file+file rows whose
+ * counters differ but stand in a complementary/subset relation under the same
+ * skew window, merging by per-dimension max onto the fuller keeper. Applied by
+ * the derived-layer builders (`buildSessions`, `buildRuns`, `buildFindings`)
  * after shares merge, never at ingest — raw records keep both collectors'
  * rows as provenance.
  */
@@ -152,14 +239,22 @@ export function dedupeTwinTurns(records: readonly CanonicalRecord[], shareKey?: 
     closeCluster()
   }
 
+  // #231: complementary / overlap join for distinct counter vectors (file+file).
+  const tokenOverride = new Map<CanonicalRecord, TokenUsage>()
+  collapseOverlapFileJoins(records, shareKey, dropped, transplant, tokenOverride)
+
   return records.flatMap((record) => {
     if (dropped.has(record)) return []
     const donor = transplant.get(record)
-    if (donor === undefined) return [record]
+    const tokens = tokenOverride.get(record) ?? record.tokens
+    if (donor === undefined) {
+      return tokens === record.tokens ? [record] : [{ ...record, tokens }]
+    }
     // ADR 0009 D4: the OTel row's counters stand; the file row's content
     // fills only what the OTel row did not carry — keeper parts first, then
     // donor parts not already present, so a paired non-needy keeper never
-    // loses its own content to its twin's (review M2).
+    // loses its own content to its twin's (review M2). For #231 file+file
+    // joins the keeper already carries maxed counters via `tokenOverride`.
     const seen = new Set((record.parts ?? []).map((part) => `${part.part}\u0000${part.text}`))
     const extraParts = (donor.parts ?? []).filter((part) => {
       const key = `${part.part}\u0000${part.text}`
@@ -170,6 +265,7 @@ export function dedupeTwinTurns(records: readonly CanonicalRecord[], shareKey?: 
     return [
       {
         ...record,
+        tokens,
         ...((donor.parts !== undefined && donor.parts.length > 0) || extraParts.length > 0
           ? { parts: [...(record.parts ?? []), ...extraParts] }
           : {}),
@@ -177,6 +273,116 @@ export function dedupeTwinTurns(records: readonly CanonicalRecord[], shareKey?: 
       },
     ]
   })
+}
+
+/**
+ * Issue #231: within one session and skew window, join file-sourced rows whose
+ * counters differ but are complementary or subset-related. Connected components
+ * collapse to the fuller keeper with per-dimension max counters; content from
+ * dropped siblings transplants like the exact-counter donor path. Identical
+ * vectors are excluded so same-kind retries stay intact.
+ */
+function collapseOverlapFileJoins(
+  records: readonly CanonicalRecord[],
+  shareKey: string | undefined,
+  dropped: Set<CanonicalRecord>,
+  transplant: Map<CanonicalRecord, CanonicalRecord>,
+  tokenOverride: Map<CanonicalRecord, TokenUsage>,
+): void {
+  const bySession = new Map<string, CanonicalRecord[]>()
+  for (const record of records) {
+    if (dropped.has(record)) continue
+    if (record.op !== 'llm.invoke') continue
+    if (!isFileSource(record.source)) continue
+    if (isUnreportedCounters(record.tokens)) continue
+    const key = sessionKeyOf(record, shareKey)
+    const list = bySession.get(key) ?? []
+    list.push(record)
+    bySession.set(key, list)
+  }
+
+  for (const turns of bySession.values()) {
+    const ordered = [...turns].sort((a, b) => cachedTimestampMs(a) - cachedTimestampMs(b))
+    let cluster: CanonicalRecord[] = []
+    const closeCluster = () => {
+      collapseOverlapCluster(cluster, dropped, transplant, tokenOverride)
+      cluster = []
+    }
+    for (const record of ordered) {
+      const first = cluster[0]
+      const exceedsSpan = first !== undefined && cachedTimestampMs(record) - cachedTimestampMs(first) > TWIN_TURN_MAX_SKEW_MS
+      if (exceedsSpan) closeCluster()
+      cluster.push(record)
+    }
+    closeCluster()
+  }
+}
+
+function collapseOverlapCluster(
+  cluster: readonly CanonicalRecord[],
+  dropped: Set<CanonicalRecord>,
+  transplant: Map<CanonicalRecord, CanonicalRecord>,
+  tokenOverride: Map<CanonicalRecord, TokenUsage>,
+): void {
+  if (cluster.length < 2) return
+
+  // Union-find over complementary/subset edges (transitive via a bridging half).
+  const parent = new Map<CanonicalRecord, CanonicalRecord>()
+  const find = (record: CanonicalRecord): CanonicalRecord => {
+    let root = record
+    while (parent.get(root) !== undefined && parent.get(root) !== root) root = parent.get(root)!
+    let walk = record
+    while (walk !== root) {
+      const next = parent.get(walk) ?? walk
+      parent.set(walk, root)
+      walk = next
+    }
+    return root
+  }
+  const union = (a: CanonicalRecord, b: CanonicalRecord): void => {
+    const ra = find(a)
+    const rb = find(b)
+    if (ra === rb) return
+    parent.set(ra, rb)
+  }
+  for (const record of cluster) parent.set(record, record)
+
+  for (let i = 0; i < cluster.length; i++) {
+    for (let j = i + 1; j < cluster.length; j++) {
+      const left = cluster[i]!
+      const right = cluster[j]!
+      if (canJoinDistinctCounters(left.tokens, right.tokens)) union(left, right)
+    }
+  }
+
+  const components = new Map<CanonicalRecord, CanonicalRecord[]>()
+  for (const record of cluster) {
+    const root = find(record)
+    const list = components.get(root) ?? []
+    list.push(record)
+    components.set(root, list)
+  }
+
+  for (const members of components.values()) {
+    if (members.length < 2) continue
+    let keeper = members[0]!
+    for (const candidate of members.slice(1)) {
+      keeper = preferFullerKeeper(keeper, candidate)
+    }
+    let mergedTokens = keeper.tokens
+    for (const member of members) {
+      if (member === keeper) continue
+      mergedTokens = maxTokens(mergedTokens, member.tokens)
+      dropped.add(member)
+      if (!hasParts(member)) continue
+      const existing = transplant.get(keeper)
+      transplant.set(keeper, existing === undefined ? member : mergeDonors(existing, member))
+    }
+    // Only stamp an override when the max vector differs from the keeper's own.
+    if (tokenDims(mergedTokens).some((value, i) => value !== (tokenDims(keeper.tokens)[i] ?? 0))) {
+      tokenOverride.set(keeper, mergedTokens)
+    }
+  }
 }
 
 /**
