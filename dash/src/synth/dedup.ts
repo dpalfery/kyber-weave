@@ -249,6 +249,12 @@ function recordDisagreement(
   const kept = otlp
   const problem: SpanProblem = {
     spanId: kept.firstSpanId,
+    sessionId: key,
+    harness: otlpRecords[0]?.harness ?? fileRecords[0]?.harness ?? null,
+    timestamp: (() => {
+      const raw = otlpRecords[0]?.timestamp ?? fileRecords[0]?.timestamp
+      return raw instanceof Date ? raw.toISOString() : (raw ?? new Date().toISOString())
+    })(),
     severity: 'warning',
     code: DEDUP_DISAGREEMENT,
     message:

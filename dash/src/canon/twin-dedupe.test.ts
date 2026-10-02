@@ -102,25 +102,284 @@ describe('dedupeTwinTurns (ADR 0009 D4 source precedence)', () => {
     expect(out[0]!.parts).toEqual([{ part: 'system_prompt', text: 'hello' }])
   })
 
-  it('leaves disjoint turns from twin collectors untouched (cursor-style)', () => {
-    // Live evidence: cursor file rows (17007/0, 0/45) and the cursor-agent row
-    // (125/45) share a key but describe different observations — distinct
-    // counters, so the fold sums the union without inflation.
+  it('counts #231 cursor twin overlap output once (file halves + agent)', () => {
+    // Live evidence (issue #231, key 0f659701-…): cursor file halves
+    // (17007/0, 0/45) plus cursor-agent (125/45) within skew. Exact-counter
+    // matching never clusters them, so the share used to sum the overlapping
+    // 45 twice (90). A3 join: time skew + complementary/subset counters under
+    // the folded cursor share → per-dimension max / prefer-fuller-row; never
+    // sum joined counters. Summed output/reportedOutput must be 45, not 90.
     const out = dedupeTwinTurns([
-      file('synth:cursor:1', {
+      file('synth:cursor:req', {
         source: 'codeburn/cursor',
         harness: 'cursor',
-        tokens: counters({ freshInput: 17007, cacheRead: 0, cacheCreation: 0, output: 0, reportedInput: 17007, reportedOutput: 0 }),
+        timestamp: '2026-09-30T19:52:28.000Z',
+        tokens: counters({
+          freshInput: 17007,
+          cacheRead: 0,
+          cacheCreation: 0,
+          output: 0,
+          reportedInput: 17007,
+          reportedOutput: 0,
+        }),
+      }),
+      file('synth:cursor:res', {
+        source: 'codeburn/cursor',
+        harness: 'cursor',
+        timestamp: '2026-09-30T19:52:30.000Z',
+        tokens: counters({
+          freshInput: 0,
+          cacheRead: 0,
+          cacheCreation: 0,
+          output: 45,
+          reportedInput: 0,
+          reportedOutput: 45,
+        }),
       }),
       file('synth:cursor-agent:0', {
         source: 'codeburn/cursor-agent',
         harness: 'cursor-agent',
         timestamp: '2026-09-30T19:52:33.181Z',
-        tokens: counters({ freshInput: 125, cacheRead: 0, cacheCreation: 0, output: 45, reportedInput: 125, reportedOutput: 45 }),
+        tokens: counters({
+          freshInput: 125,
+          cacheRead: 0,
+          cacheCreation: 0,
+          output: 45,
+          reportedInput: 125,
+          reportedOutput: 45,
+        }),
+      }),
+    ])
+
+    const totalOutput = out.reduce((sum, r) => sum + r.tokens.output, 0)
+    const totalReportedOutput = out.reduce((sum, r) => sum + r.tokens.reportedOutput, 0)
+    expect(totalOutput).toBe(45)
+    expect(totalReportedOutput).toBe(45)
+  })
+
+  it('does not overlap-join a single Cursor collector without twin evidence (review)', () => {
+    // Complementary halves from cursor alone look joinable, but the overlap
+    // pass requires evidenced cursor + cursor-agent in the session group.
+    const out = dedupeTwinTurns([
+      file('synth:cursor:req', {
+        source: 'codeburn/cursor',
+        harness: 'cursor',
+        timestamp: '2026-09-30T19:52:28.000Z',
+        tokens: counters({
+          freshInput: 100,
+          cacheRead: 0,
+          cacheCreation: 0,
+          output: 10,
+          reportedInput: 100,
+          reportedOutput: 10,
+        }),
+      }),
+      file('synth:cursor:res', {
+        source: 'codeburn/cursor',
+        harness: 'cursor',
+        timestamp: '2026-09-30T19:52:30.000Z',
+        tokens: counters({
+          freshInput: 200,
+          cacheRead: 0,
+          cacheCreation: 0,
+          output: 20,
+          reportedInput: 200,
+          reportedOutput: 20,
+        }),
       }),
     ])
 
     expect(out).toHaveLength(2)
+    expect(out.reduce((sum, r) => sum + r.tokens.output, 0)).toBe(30)
+    expect(out.reduce((sum, r) => sum + r.tokens.reportedInput, 0)).toBe(300)
+  })
+
+  it('does not overlap-join an unrelated file-backed harness (review)', () => {
+    // buildSessions runs dedupeTwinTurns on every harness group; Claude
+    // file-only complementary rows must stay separate (exact-counter OTel+file
+    // path is unaffected — this is the #231 pass staying inert).
+    const out = dedupeTwinTurns([
+      file('synth:claude:a', {
+        source: 'codeburn/claude-desktop',
+        harness: 'claude-desktop',
+        timestamp: '2026-09-30T19:52:28.000Z',
+        tokens: counters({
+          freshInput: 100,
+          cacheRead: 0,
+          cacheCreation: 0,
+          output: 10,
+          reportedInput: 100,
+          reportedOutput: 10,
+        }),
+      }),
+      file('synth:claude:b', {
+        source: 'codeburn/claude-desktop',
+        harness: 'claude-desktop',
+        timestamp: '2026-09-30T19:52:30.000Z',
+        tokens: counters({
+          freshInput: 200,
+          cacheRead: 0,
+          cacheCreation: 0,
+          output: 20,
+          reportedInput: 200,
+          reportedOutput: 20,
+        }),
+      }),
+    ])
+
+    expect(out).toHaveLength(2)
+    expect(out.reduce((sum, r) => sum + r.tokens.output, 0)).toBe(30)
+  })
+
+  it('does not let one partial bridge two complete Cursor Agent turns (review)', () => {
+    // Two complete agent observations (100/60, 200/45) plus a response half
+    // (0/45) that is a subset of both. Union-find would merge all three into
+    // 200/60 and under-count output (105 → 60). Bounded matching assigns the
+    // partial to one complete only.
+    const out = dedupeTwinTurns([
+      file('synth:cursor-agent:a', {
+        source: 'codeburn/cursor-agent',
+        harness: 'cursor-agent',
+        timestamp: '2026-09-30T19:52:28.000Z',
+        tokens: counters({
+          freshInput: 100,
+          cacheRead: 0,
+          cacheCreation: 0,
+          output: 60,
+          reportedInput: 100,
+          reportedOutput: 60,
+        }),
+      }),
+      file('synth:cursor-agent:b', {
+        source: 'codeburn/cursor-agent',
+        harness: 'cursor-agent',
+        timestamp: '2026-09-30T19:52:32.000Z',
+        tokens: counters({
+          freshInput: 200,
+          cacheRead: 0,
+          cacheCreation: 0,
+          output: 45,
+          reportedInput: 200,
+          reportedOutput: 45,
+        }),
+      }),
+      file('synth:cursor:res', {
+        source: 'codeburn/cursor',
+        harness: 'cursor',
+        timestamp: '2026-09-30T19:52:30.000Z',
+        tokens: counters({
+          freshInput: 0,
+          cacheRead: 0,
+          cacheCreation: 0,
+          output: 45,
+          reportedInput: 0,
+          reportedOutput: 45,
+        }),
+      }),
+    ])
+
+    expect(out).toHaveLength(2)
+    const totalOutput = out.reduce((sum, r) => sum + r.tokens.output, 0)
+    expect(totalOutput).toBe(105)
+    // Partials do not invent a 200/60 max across conflicting completes.
+    expect(out.some((r) => r.tokens.freshInput === 200 && r.tokens.output === 60)).toBe(false)
+  })
+
+  it('does not let conflicting complete Cursor IDE turns collapse into one Agent turn (review)', () => {
+    // CodeRabbit round-3: two complete IDE turns (100/60, 200/45) both subset
+    // one complete Agent (200/60). Treating IDE completes as partials let both
+    // join the anchor and emit a single 200/60 (output 60), dropping the other
+    // turn's 45. Complete IDE observations are full turns — each Agent anchor
+    // takes at most one best IDE match; the conflicting complete stays separate.
+    // Timestamps: IDE 100/60 nearest the Agent so it joins; IDE 200/45 remains.
+    const out = dedupeTwinTurns([
+      file('synth:cursor:ide-a', {
+        source: 'codeburn/cursor',
+        harness: 'cursor',
+        timestamp: '2026-09-30T19:52:28.000Z',
+        tokens: counters({
+          freshInput: 100,
+          cacheRead: 0,
+          cacheCreation: 0,
+          output: 60,
+          reportedInput: 100,
+          reportedOutput: 60,
+        }),
+      }),
+      file('synth:cursor:ide-b', {
+        source: 'codeburn/cursor',
+        harness: 'cursor',
+        timestamp: '2026-09-30T19:52:32.000Z',
+        tokens: counters({
+          freshInput: 200,
+          cacheRead: 0,
+          cacheCreation: 0,
+          output: 45,
+          reportedInput: 200,
+          reportedOutput: 45,
+        }),
+      }),
+      file('synth:cursor-agent:0', {
+        source: 'codeburn/cursor-agent',
+        harness: 'cursor-agent',
+        timestamp: '2026-09-30T19:52:29.000Z',
+        tokens: counters({
+          freshInput: 200,
+          cacheRead: 0,
+          cacheCreation: 0,
+          output: 60,
+          reportedInput: 200,
+          reportedOutput: 60,
+        }),
+      }),
+    ])
+
+    expect(out).toHaveLength(2)
+    const totalOutput = out.reduce((sum, r) => sum + r.tokens.output, 0)
+    expect(totalOutput).toBe(105)
+    // Joined keeper is the Agent maxed with IDE A; IDE B survives intact.
+    expect(out.some((r) => r.tokens.freshInput === 200 && r.tokens.output === 60)).toBe(true)
+    expect(out.some((r) => r.tokens.freshInput === 200 && r.tokens.output === 45)).toBe(true)
+  })
+
+  it('retains merged reasoning when TOKEN_DIMS already match the keeper (review)', () => {
+    // Keeper covers the six TOKEN_DIMS; a subset donor still contributes a
+    // higher reasoning count that maxTokens merges — retention must compare it.
+    const out = dedupeTwinTurns([
+      file('synth:cursor-agent:0', {
+        source: 'codeburn/cursor-agent',
+        harness: 'cursor-agent',
+        timestamp: '2026-09-30T19:52:33.000Z',
+        tokens: counters({
+          freshInput: 100,
+          cacheRead: 0,
+          cacheCreation: 0,
+          output: 50,
+          reportedInput: 100,
+          reportedOutput: 50,
+          reasoning: 5,
+        }),
+      }),
+      file('synth:cursor:res', {
+        source: 'codeburn/cursor',
+        harness: 'cursor',
+        timestamp: '2026-09-30T19:52:30.000Z',
+        tokens: counters({
+          freshInput: 0,
+          cacheRead: 0,
+          cacheCreation: 0,
+          output: 50,
+          reportedInput: 0,
+          reportedOutput: 50,
+          reasoning: 20,
+        }),
+      }),
+    ])
+
+    expect(out).toHaveLength(1)
+    expect(out[0]!.tokens.reasoning).toBe(20)
+    expect(out[0]!.tokens.freshInput).toBe(100)
+    expect(out[0]!.tokens.output).toBe(50)
   })
 
   it('never drops same-kind rows: two identical OTLP turns are kept', () => {

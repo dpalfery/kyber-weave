@@ -54,6 +54,13 @@ export const geminiAdapter: HarnessAdapter = {
   namespaces: ['gen_ai', ...GEMINI_VENDOR_NAMESPACES],
 
   detect(span) {
+    if (
+      hasNamespace(span.attributes, ['copilot_chat', 'github.copilot', 'copilot']) ||
+      span.name.startsWith('copilot_chat') ||
+      span.name.startsWith('copilot')
+    ) {
+      return 0
+    }
     // An explicit Antigravity agent identity outranks the generic
     // `gen_ai.system` vendor label its Gemini-vocabulary exporter emits
     // (issue #195) — the same yield Copilot declares for an explicit
