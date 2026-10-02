@@ -305,6 +305,7 @@ export function loadClaudeCalls(filePath: string): ParsedProviderCall[] {
   }
 
   const calls: ParsedProviderCall[] = []
+  const nativeMessageIds: Array<string | undefined> = []
   const fileStem = basename(filePath, extname(filePath))
   let index = 0
 
@@ -321,9 +322,10 @@ export function loadClaudeCalls(filePath: string): ParsedProviderCall[] {
     const message = record['message'] as Record<string, unknown> | undefined
     if (!message) continue
     const sessionId = claudeText(record['sessionId']) ?? fileStem
+    const nativeMessageId = claudeText(message['id'])
     // `uuid` is the transcript's own per-record identity; the index keeps the
     // key unique for a transcript that omits it.
-    const messageId = claudeText(record['uuid']) ?? claudeText(message['id']) ?? `turn-${index}`
+    const messageId = claudeText(record['uuid']) ?? nativeMessageId ?? `turn-${index}`
     index += 1
 
     const serverToolUse = usage['server_tool_use']
@@ -371,8 +373,9 @@ export function loadClaudeCalls(filePath: string): ParsedProviderCall[] {
       toolSequence.push(turnToolCalls)
     }
 
-    calls.push({
+    const newCall: ParsedProviderCall = {
       provider: 'claude',
+      ...(nativeMessageId !== undefined ? { turnId: nativeMessageId } : {}),
       model: claudeText(message['model']) ?? 'unknown',
       inputTokens: claudeCount(usage['input_tokens']),
       outputTokens: claudeCount(usage['output_tokens']),
@@ -391,10 +394,68 @@ export function loadClaudeCalls(filePath: string): ParsedProviderCall[] {
       deduplicationKey: `claude:${sessionId}:${messageId}`,
       sessionId,
       userMessage: '',
-    })
+    }
+
+    const prevCall = calls[calls.length - 1]
+    if (
+      prevCall !== undefined &&
+      isContiguousPair(prevCall, newCall, nativeMessageIds[nativeMessageIds.length - 1], nativeMessageId)
+    ) {
+      if (nativeMessageIds[nativeMessageIds.length - 1] === undefined && nativeMessageId !== undefined) {
+        nativeMessageIds[nativeMessageIds.length - 1] = nativeMessageId
+        prevCall.turnId = nativeMessageId
+      }
+      prevCall.tools = Array.from(new Set([...prevCall.tools, ...newCall.tools]))
+      prevCall.bashCommands = Array.from(new Set([...prevCall.bashCommands, ...newCall.bashCommands]))
+      if (newCall.toolSequence && newCall.toolSequence.length > 0) {
+        prevCall.toolSequence = [...(prevCall.toolSequence ?? []), ...newCall.toolSequence]
+      }
+      prevCall.webSearchRequests = Math.max(prevCall.webSearchRequests, newCall.webSearchRequests)
+    } else {
+      calls.push(newCall)
+      nativeMessageIds.push(nativeMessageId)
+    }
   }
 
   return calls
+}
+
+function isContiguousPair(
+  prev: ParsedProviderCall,
+  next: ParsedProviderCall,
+  prevNativeMessageId: string | undefined,
+  nextNativeMessageId: string | undefined,
+): boolean {
+  if (
+    prevNativeMessageId !== undefined &&
+    nextNativeMessageId !== undefined &&
+    prevNativeMessageId !== nextNativeMessageId
+  ) {
+    return false
+  }
+  if (prev.sessionId !== next.sessionId) return false
+  if (prev.model !== next.model) return false
+  if (
+    prev.inputTokens !== next.inputTokens ||
+    prev.outputTokens !== next.outputTokens ||
+    prev.cacheReadInputTokens !== next.cacheReadInputTokens ||
+    prev.cacheCreationInputTokens !== next.cacheCreationInputTokens
+  ) {
+    return false
+  }
+  const isZero =
+    prev.inputTokens === 0 &&
+    prev.outputTokens === 0 &&
+    prev.cacheReadInputTokens === 0 &&
+    prev.cacheCreationInputTokens === 0
+  if (isZero) return false
+
+  const prevTime = new Date(prev.timestamp).getTime()
+  const nextTime = new Date(next.timestamp).getTime()
+  if (Number.isFinite(prevTime) && Number.isFinite(nextTime)) {
+    if (Math.abs(nextTime - prevTime) > 60_000) return false
+  }
+  return true
 }
 
 export const claude: Provider = {

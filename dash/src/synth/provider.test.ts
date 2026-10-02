@@ -320,6 +320,63 @@ describe('D5 reader integration', () => {
     })
     expect(result.records[0]?.parts).toHaveLength(2)
   })
+
+  it('pairs request/response paired calls with turns without generating duplicate records (#232)', async () => {
+    const call1 = call({
+      provider: 'claude',
+      sessionId: 's-duo',
+      timestamp: '2026-09-23T22:43:53.000Z',
+      inputTokens: 2,
+      outputTokens: 563,
+      cacheReadInputTokens: 39096,
+      cacheCreationInputTokens: 24977,
+      cachedInputTokens: 39096,
+      deduplicationKey: 'claude:s-duo:req',
+    })
+    const call2 = call({
+      provider: 'claude',
+      sessionId: 's-duo',
+      timestamp: '2026-09-23T22:43:58.000Z',
+      inputTokens: 2,
+      outputTokens: 563,
+      cacheReadInputTokens: 39096,
+      cacheCreationInputTokens: 24977,
+      cachedInputTokens: 39096,
+      deduplicationKey: 'claude:s-duo:res',
+    })
+
+    const root = mkdtempSync(join(tmpdir(), 'kyber-pair-transcript-'))
+    tempRoots.push(root)
+    const filePath = join(root, 'session.jsonl')
+    writeFileSync(filePath, [
+      JSON.stringify({
+        sessionId: 's-duo',
+        message: {
+          role: 'user',
+          content: [{ type: 'text', text: 'question' }],
+        },
+      }),
+      JSON.stringify({
+        sessionId: 's-duo',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'answer' }],
+        },
+      }),
+    ].join('\n') + '\n')
+
+    const result = await ingestProviders(['claude-desktop'], () => ({
+      calls: [call1, call2],
+      filePath,
+      harnessId: 'claude-desktop',
+      sourceKey: 'claude-desktop:s-duo',
+    }))
+
+    expect(result.problems).toEqual([])
+    const invokes = result.records.filter((r) => r.op === 'llm.invoke')
+    expect(invokes).toHaveLength(1)
+    expect(invokes[0]?.tokens.reportedInput).toBe(64075)
+  })
 })
 
 describe('D6 Copilot CLI SQLite integration', () => {
