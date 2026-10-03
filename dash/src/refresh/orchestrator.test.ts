@@ -832,13 +832,36 @@ describe('refreshHarnessSources — shared projection entry point', () => {
       })
 
       expect(report.rows[0]?.status).toBe('ok')
+      // Second parse is intentional (#216): ProviderLoad.filePath is what
+      // attaches reader turns; a bare remapped array strips parts.
       expect(ingestPasses).toBe(2)
-      // On-disk source: fallback keeps ProviderLoad (filePath), not a bare array.
+      // On-disk source: both passes share one ProviderLoad shape — only
+      // calls.provider is remapped on the zero-record retry. Drift on any
+      // other field (filePath/harnessId/sourceKey/dateRange) is the bug the
+      // #276 hoist fixes.
+      expect(Array.isArray(loaderShapes[0])).toBe(false)
       expect(Array.isArray(loaderShapes[1])).toBe(false)
-      expect(loaderShapes[1]).toMatchObject({
+      const firstLoad = loaderShapes[0] as {
+        filePath?: string
+        harnessId?: string
+        sourceKey?: string
+        dateRange?: unknown
+        calls: ParsedProviderCall[]
+      }
+      const retryLoad = loaderShapes[1] as typeof firstLoad
+      expect(retryLoad).toMatchObject({
+        filePath: firstLoad.filePath,
+        harnessId: firstLoad.harnessId,
+        sourceKey: firstLoad.sourceKey,
+        dateRange: firstLoad.dateRange,
+      })
+      expect(retryLoad).toMatchObject({
         filePath,
         harnessId: 'claude-desktop',
+        sourceKey: 'claude-desktop:desk-fallback-216',
       })
+      expect(firstLoad.calls[0]?.provider).toBe('claude')
+      expect(retryLoad.calls[0]?.provider).toBe('claude-desktop')
 
       const records = store.listAll().filter((r) => r.op === 'llm.invoke')
       expect(records).toHaveLength(1)

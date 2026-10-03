@@ -355,12 +355,18 @@ async function ingestUnit(
   unit: NativeUnit,
   dateRange: SourceReaderDependencies['dateRange'],
 ) {
-  const loaded = await ingest([descriptor.harnessId], () => ({
-    calls: unit.envelopes.map((envelope) => envelope.call),
-    filePath: unit.source.path,
+  // Shared ProviderLoad fields — one literal shape for the first pass and the
+  // zero-record retry so they cannot drift when a field is added (#276).
+  const loadFields = {
     dateRange,
     harnessId: descriptor.harnessId,
     sourceKey: unit.sourceKey,
+  }
+
+  const loaded = await ingest([descriptor.harnessId], () => ({
+    ...loadFields,
+    calls: unit.envelopes.map((envelope) => envelope.call),
+    filePath: unit.source.path,
   }))
   if (loaded.records.length > 0 || unit.envelopes.length === 0) return loaded
 
@@ -368,19 +374,16 @@ async function ingestUnit(
     ...envelope.call,
     provider: descriptor.harnessId,
   }))
-  // When the source file is on disk, keep ProviderLoad so the content reader
-  // still runs. A bare call array is only for unreadable/missing paths — that
-  // path recovers counters but strips parts (#216).
-  if (existsSync(unit.source.path)) {
-    return await ingest([descriptor.harnessId], () => ({
-      calls: remappedCalls,
-      filePath: unit.source.path,
-      dateRange,
-      harnessId: descriptor.harnessId,
-      sourceKey: unit.sourceKey,
-    }))
-  }
-  return await ingest([descriptor.harnessId], () => remappedCalls)
+  // Second full-file parse is required: ingestProviders attaches reader turns
+  // only from ProviderLoad.filePath. Remapping provider onto a bare call array
+  // recovers counters but strips parts (#216). Vary only whether the path is
+  // still on disk — missing paths stay on the bare-array recovery path.
+  const filePath = existsSync(unit.source.path) ? unit.source.path : undefined
+  return await ingest([descriptor.harnessId], () =>
+    filePath !== undefined
+      ? { ...loadFields, calls: remappedCalls, filePath }
+      : remappedCalls,
+  )
 }
 
 function failedRow(harnessId: string, error: Error, fallback = 'harness job failed'): HarnessJobRow {
