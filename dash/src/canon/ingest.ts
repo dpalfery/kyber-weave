@@ -23,6 +23,7 @@
 
 import type { HarnessAdapter, RawSpan } from './adapters/base.js'
 import { claudeCodeAdapter } from './adapters/claude-code.js'
+import { codexAdapter } from './adapters/codex.js'
 import { copilotAdapter } from './adapters/copilot.js'
 import { geminiAdapter } from './adapters/gemini.js'
 import { antigravityAdapter } from './adapters/antigravity.js'
@@ -47,6 +48,7 @@ export const ADAPTERS: readonly HarnessAdapter[] = [
   antigravityAdapter,
   geminiAdapter,
   claudeCodeAdapter,
+  codexAdapter,
 ]
 
 /** Resource attribute the OTLP convention names the emitting process with. */
