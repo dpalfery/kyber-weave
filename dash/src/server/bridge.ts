@@ -1991,13 +1991,14 @@ export class KyberBridge {
    * Thin load for `compareRuns` — does not re-derive run boundaries (D16).
    * Resolves split/late shares the way findings do (`shareOf` →
    * `recordsForShare` / bare session) and twin-dedupes per execution.
+   * Caller supplies `identities` so a comparison can share one table scan
+   * across both runs rather than rebuilding it per side.
    */
-  private recordsForRun(runId: string): CanonicalRecord[] {
+  private recordsForRun(runId: string, identities: SessionIdentities): CanonicalRecord[] {
     const executions = this.listExecutions(runId)
     if (executions.length === 0) {
       return this.recordsForSessionKey(runId)
     }
-    const identities = this.sessionIdentities()
     const records: CanonicalRecord[] = []
     for (const execution of executions) {
       const sessionId = execution.sessionId ?? execution.executionId
@@ -2024,6 +2025,9 @@ export class KyberBridge {
     const runB = this.getRun(runBId)
     if (runA === undefined || runB === undefined) return null
 
+    // One identity table for both sides — recordsForRun used to rebuild it
+    // per run (two full DISTINCT scans on the direct-DB path).
+    const identities = this.sessionIdentities()
     const summary = compareStoredRuns(
       {
         runId: runA.runId,
@@ -2031,7 +2035,7 @@ export class KyberBridge {
         ...(runA.label ? { label: runA.label } : {}),
         ...(runA.workingDirectory !== undefined ? { workingDirectory: runA.workingDirectory } : {}),
         ...(runA.outcome !== undefined ? { outcome: runA.outcome } : {}),
-        turns: this.recordsForRun(runA.runId),
+        turns: this.recordsForRun(runA.runId, identities),
       },
       {
         runId: runB.runId,
@@ -2039,7 +2043,7 @@ export class KyberBridge {
         ...(runB.label ? { label: runB.label } : {}),
         ...(runB.workingDirectory !== undefined ? { workingDirectory: runB.workingDirectory } : {}),
         ...(runB.outcome !== undefined ? { outcome: runB.outcome } : {}),
-        turns: this.recordsForRun(runB.runId),
+        turns: this.recordsForRun(runB.runId, identities),
       },
       options,
     )

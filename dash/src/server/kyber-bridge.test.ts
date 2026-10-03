@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createRequire } from 'node:module'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -1909,6 +1909,44 @@ describe('KyberBridge.compareRuns split-share identity (issue #190 / D1)', () =>
       expect(split!.runB.turnCount).toBeGreaterThan(0)
       expect(split!.pairs.length).toBeGreaterThan(0)
     } finally {
+      bridge.close()
+      store.close()
+    }
+  })
+
+  it('resolves session identities once per compareRuns call', async () => {
+    // compareRuns loads turns for both runs; each must not rebuild the
+    // full-table SessionIdentities set (kilo finding on recordsForRun).
+    const store = new CanonStore(':memory:')
+    store.upsertMany([
+      turnRecord('split-cur', 'cursor', 'k-split', '2026-09-03T10:00:00.000Z'),
+      turnRecord('split-vs', 'copilot-chat', 'k-split', '2026-09-03T10:01:00.000Z'),
+    ])
+    await buildSessions(store)
+    await buildRuns(store)
+
+    const cursorSplitRun = store.listRuns('cursor').find((run) =>
+      store.listExecutions(run.runId).some((execution) => execution.sessionId === 'cursor:k-split'),
+    )
+    const vscodeSplitRun = store.listRuns('copilot-vscode').find((run) =>
+      store
+        .listExecutions(run.runId)
+        .some((execution) => execution.sessionId === 'copilot-vscode:k-split'),
+    )
+    expect(cursorSplitRun).toBeDefined()
+    expect(vscodeSplitRun).toBeDefined()
+
+    const bridge = new KyberBridge({ canonPath: ':memory:', store })
+    const identitiesSpy = vi.spyOn(store, 'sessionIdentities')
+    try {
+      identitiesSpy.mockClear()
+      const split = bridge.compareRuns(cursorSplitRun!.runId, vscodeSplitRun!.runId)
+      expect(split).not.toBeNull()
+      expect(split!.runA.turnCount).toBeGreaterThan(0)
+      expect(split!.runB.turnCount).toBeGreaterThan(0)
+      expect(identitiesSpy).toHaveBeenCalledTimes(1)
+    } finally {
+      identitiesSpy.mockRestore()
       bridge.close()
       store.close()
     }
