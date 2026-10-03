@@ -309,32 +309,52 @@ export function serializeToolArgs(args: unknown): string {
   }
 }
 
-export function extractToolDefinitionsFromRecord(record: CanonicalRecord): { name: string; tokens: number }[] {
-  const tools: { name: string; tokens: number }[] = []
+/**
+ * Names (and optional harness-reported sizes) of tool definitions carried on
+ * a turn. `tokens` is set only when the part itself carries a measured
+ * harness count (`ContentPart.tokens`, R4.6): text-length /4 estimates are
+ * never invented here, so dormant-tool-schema can keep the deterministic
+ * waste path for measured sizes and coverage-gap when size is unobserved
+ * (honest-unobservability; ADR 0013 D5).
+ *
+ * A measured part count covers the whole catalogue blob. It is attributed
+ * to a tool only when the part describes a single definition — splitting
+ * one harness count across many names would invent per-tool sizes.
+ */
+export function extractToolDefinitionsFromRecord(
+  record: CanonicalRecord,
+): { name: string; tokens?: number }[] {
+  const tools: { name: string; tokens?: number }[] = []
   if (record.parts) {
     for (const part of record.parts) {
       if (part.part === 'tool_definitions' && part.text) {
+        const measured =
+          typeof part.tokens === 'number' && Number.isFinite(part.tokens) && part.tokens > 0
+            ? part.tokens
+            : undefined
         try {
           const parsed = JSON.parse(part.text)
           if (Array.isArray(parsed)) {
-            for (const item of parsed) {
-              if (item?.name) {
-                tools.push({
-                  name: String(item.name),
-                  tokens: Math.max(1, Math.ceil(JSON.stringify(item).length / 4)),
-                })
-              }
+            const named = parsed.filter((item) => item?.name)
+            for (const item of named) {
+              tools.push({
+                name: String(item.name),
+                ...(measured !== undefined && named.length === 1 ? { tokens: measured } : {}),
+              })
             }
           } else if (parsed?.name) {
             tools.push({
               name: String(parsed.name),
-              tokens: Math.max(1, Math.ceil(part.text.length / 4)),
+              ...(measured !== undefined ? { tokens: measured } : {}),
             })
           }
         } catch {
           const name = part.text.trim()
           if (name) {
-            tools.push({ name, tokens: Math.max(1, Math.ceil(name.length / 4)) })
+            tools.push({
+              name,
+              ...(measured !== undefined ? { tokens: measured } : {}),
+            })
           }
         }
       }
@@ -440,7 +460,7 @@ export function detectDormantToolSchema(input: DormantToolSchemaInput): Finding[
       for (const def of defs) {
         const existing = toolResidency.get(def.name) ?? { turns: [] }
         existing.turns.push({ spanId: turn.spanId, turnIndex: turnIdx })
-        if (def.tokens > 0) {
+        if (def.tokens !== undefined && def.tokens > 0) {
           existing.tokens = Math.max(existing.tokens ?? 0, def.tokens)
         }
         toolResidency.set(def.name, existing)

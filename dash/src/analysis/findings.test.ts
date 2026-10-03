@@ -154,8 +154,52 @@ describe('Detector 1: dormant-tool-schema', () => {
     expect(f.evidenceLinks.length).toBeGreaterThanOrEqual(2)
     expect(f.evidenceLinks[0]?.spanId).toBe('turn-1')
     expect(f.evidenceLinks[1]?.spanId).toBe('turn-3')
-    expect(f.estimatedWasteTokens).toBeGreaterThan(0)
-    expect(f.errorBar!.lower).toBeLessThanOrEqual(f.errorBar!.upper)
+    // Text-only tool_definitions parts carry no harness-reported size: the
+    // finding stays a coverage gap rather than inventing length/4 tokens.
+    expect(f.estimatedWasteTokens).toBeUndefined()
+    expect(f.errorBar).toBeUndefined()
+    expect(f.measurementClass).toBe('coverage-gap')
+  })
+
+  it('does NOT treat text-derived schema sizes from records as measured deterministic waste', () => {
+    const defText = JSON.stringify([{ name: 'unused_linter', description: 'runs linter' }])
+    const turns = [1, 2, 3].map((n) =>
+      makeMockRecord({
+        spanId: `turn-${n}`,
+        op: 'llm.invoke',
+        parts: [{ part: 'tool_definitions', text: defText }],
+      }),
+    )
+
+    const findings = detectDormantToolSchema({ records: turns })
+
+    expect(findings.length).toBe(1)
+    expect(findings[0]!.estimatedWasteTokens).toBeUndefined()
+    expect(findings[0]!.errorBar).toBeUndefined()
+    expect(findings[0]!.measurementClass).toBe('coverage-gap')
+    expect(findings[0]!.rankScore).toBe(0)
+    expect(findings[0]!.measurementClass).not.toBe('deterministic')
+    // length/4 of the serialized definition must not leak into the estimate
+    const invented = Math.max(1, Math.ceil(JSON.stringify({ name: 'unused_linter', description: 'runs linter' }).length / 4)) * 3
+    expect(findings[0]!.estimatedWasteTokens).not.toBe(invented)
+  })
+
+  it('multiplies a harness-reported part.tokens schema size across resident turns from records', () => {
+    const defText = JSON.stringify([{ name: 'unused_linter', description: 'runs linter' }])
+    const turns = [1, 2, 3].map((n) =>
+      makeMockRecord({
+        spanId: `turn-${n}`,
+        op: 'llm.invoke',
+        parts: [{ part: 'tool_definitions', text: defText, tokens: 200 }],
+      }),
+    )
+
+    const findings = detectDormantToolSchema({ records: turns })
+
+    expect(findings.length).toBe(1)
+    expect(findings[0]!.estimatedWasteTokens).toBe(600)
+    expect(findings[0]!.measurementClass).toBe('deterministic')
+    expect(findings[0]!.errorBar).toEqual({ lower: 480, upper: 720 })
   })
 
   it('does NOT flag tool schema if tool is invoked in any turn', () => {
