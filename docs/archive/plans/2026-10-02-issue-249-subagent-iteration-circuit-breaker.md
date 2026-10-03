@@ -14,7 +14,8 @@ development-mode: test-first
 **Status: Complete, archived 2026-10-02.**  
 **Date:** 2026-10-02  
 **Development mode:** `test-first`  
-**Goal:** Address GitHub issue [#249](https://github.com/dpalfery/kyber-weave/issues/249): establish an iteration circuit-breaker and Judgment/Execution Verification (JEV) checkpoints for the conductor and developer subagents (`csharp-dev`, `test-dev`, `github-devops`), preventing runaway test-fix loops, bounded retries per failure cluster, oscillation detection, and deterministic escalation.
+**Goal:** Address GitHub issue [#249](https://github.com/dpalfery/kyber-weave/issues/249): establish an iteration circuit-breaker and Judgment/Execution Verification (JEV) checkpoints for the conductor and developer subagents (`csharp-dev`, `test-dev`, `github-devops`), preventing runaway test-fix loops, bounded retries per failure cluster, oscillation detection, and deterministic escalation.  
+**Harvest:** No ADR is needed; decisions Q1–Q5 are recorded in this plan. Contracts live in canonical agent specifications (`products/kyber-squad/agents/conductor.md`, `csharp-dev.md`, `test-dev.md`, `github-devops.md`) and agent reference documentation (`products/kyber-squad/agents/conductor/references/execution-and-review.md`).
 
 ---
 
@@ -109,18 +110,18 @@ Root causes identified in issue [#249](https://github.com/dpalfery/kyber-weave/i
 
 ## 4. Test-First Implementation Tasks
 
-- [ ] **T1 (RED): Author contract tests for circuit breaker and JEV contracts**
+- [x] **T1 (RED): Author contract tests for circuit breaker and JEV contracts**
   - Add test methods in `tests/KyberWeave.Tests/` asserting that conductor and developer agents (`csharp-dev`, `test-dev`, `github-devops`) specify the iteration circuit-breaker, iteration cap, oscillation detection, JEV checkpoints, and `STATUS: ESCALATION` digest format.
   - Verify tests fail (RED) against current un-updated agent contracts.
-- [ ] **T2 (GREEN - Conductor): Implement circuit-breaker rules in conductor**
+- [x] **T2 (GREEN - Conductor): Implement circuit-breaker rules in conductor**
   - Update `products/kyber-squad/agents/conductor.md` and `products/kyber-squad/agents/conductor/references/execution-and-review.md` with cluster rework caps, oscillation detection, and circuit-breaker findings escalation.
-- [ ] **T3 (GREEN - Developer Subagents): Implement JEV checkpoints in developer subagents**
+- [x] **T3 (GREEN - Developer Subagents): Implement JEV checkpoints in developer subagents**
   - Update `products/kyber-squad/agents/csharp-dev.md`, `products/kyber-squad/agents/test-dev.md`, and `products/kyber-squad/agents/github-devops.md` with JEV checkpoints, 3-iteration cap, oscillation tripwires, and escalation digests.
-- [ ] **T4 (GREEN - Golden and Migration Alignment): Update golden contract and migration records**
+- [x] **T4 (GREEN - Golden and Migration Alignment): Update golden contract and migration records**
   - Update `tests/KyberWeave.Tests/HotshotGoldenContractTests.cs` (`EvolvedAgentIdentities`).
   - Update `products/kyber-squad/migration/{csharp-dev,test-dev,github-devops}.md` `final-body-sha256`.
   - Verify all unit and golden tests pass (GREEN).
-- [ ] **T5 (Verification & Quality Gates): Run solution build, tests, and documentation gates**
+- [x] **T5 (Verification & Quality Gates): Run solution build, tests, and documentation gates**
   - `/Users/hal/.dotnet/dotnet build KyberWeave.sln -c Release`
   - `/Users/hal/.dotnet/dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build`
   - `dotnet run --project src/KyberWeave.Cli --no-build -c Release -- docs validate .`
@@ -133,3 +134,12 @@ Root causes identified in issue [#249](https://github.com/dpalfery/kyber-weave/i
 - Upon green verification of all tasks, move this plan to `docs/archive/plans/2026-10-02-issue-249-subagent-iteration-circuit-breaker.md`.
 - Update `docs/plans/README.md` to reflect `Complete` status and archival date under Archived Plans.
 - Verify `docs validate . --merge-ready` exits 0 with zero findings.
+
+### Closeout & Harvest
+
+- **Tasks:** T1–T5 verified and complete.
+- **Harvest:** No ADR is required. Decisions Q1–Q5 are durably recorded in this plan. The operational rules and invariants are harvested into:
+  - `products/kyber-squad/agents/conductor.md` (shared lifecycle invariant for iteration circuit-breaker)
+  - `products/kyber-squad/agents/conductor/references/execution-and-review.md` (cluster rework retry cap of 2, oscillation detection, `STATUS: ESCALATION` intake into findings, architect mediation)
+  - `products/kyber-squad/agents/csharp-dev.md`, `products/kyber-squad/agents/test-dev.md`, `products/kyber-squad/agents/github-devops.md` (JEV checkpoints 1–4, 3-iteration inner loop cap, oscillation tripwires, contradictory invariant escalation, and `STATUS: ESCALATION` completion digest)
+  - `tests/KyberWeave.Tests/SquadCanonicalContentTests.cs` and `tests/KyberWeave.Tests/HotshotGoldenContractTests.cs` (automated regression contract tests and golden manifest tracking)
