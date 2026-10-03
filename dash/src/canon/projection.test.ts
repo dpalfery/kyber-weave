@@ -9,18 +9,21 @@
 // to a projection failure, and never a store closed while a projection is
 // still draining.
 //
-// Pinned scheduler semantics (T21 implements, these tests enforce):
-//   * `request()` marks work dirty and runs it immediately — no timer to
-//     advance, no debounce to expire.
+// Pinned scheduler semantics (T2 implements, these tests enforce):
+//   * `request()` marks work dirty and SCHEDULES the next pass — it does not
+//     start one immediately. A pass starts after the idle window with no new
+//     request, at the maxWait cap if dirtiness never quiets, and never sooner
+//     than minInterval after the previous pass started.
 //   * One pass runs at a time. Dirtiness arriving mid-pass is coalesced into
 //     exactly one trailing pass, however many requests arrived.
 //   * A failed pass settles its requests, reports through `onError`, and
 //     leaves the work dirty: the committed record is untouched and the NEXT
 //     request retries — there is no automatic retry loop.
-//   * `drain()`/`close()` resolve only once the scheduler is quiescent — no
-//     pass in flight and no trailing pass still owed.
+//   * `drain()`/`close()` bypass the schedule and resolve only once the
+//     scheduler is quiescent — no pass in flight and no trailing pass
+//     still owed.
 
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DatabaseSync } from 'node:sqlite'
 
 import { ingestBatch } from './ingest.js'
@@ -138,47 +141,240 @@ describe('projectCanonicalStore', () => {
 })
 
 describe('CanonicalProjectionScheduler', () => {
-  it('projects accepted work immediately through the shared projection, with no timer to advance', async () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('starts no pass while the idle window is unexpired, then runs exactly one pass when it expires', async () => {
     const store = new CanonStore(':memory:')
-    // No `project` override: the scheduler's default projector must BE the
-    // shared entry point, or the derived session below cannot exist.
-    const scheduler = new CanonicalProjectionScheduler({ store })
+    const gated = gatedProjector()
+    const scheduler = new CanonicalProjectionScheduler({
+      store,
+      project: gated.project,
+      idleMs: 1_000,
+      maxWaitMs: 60_000,
+      minIntervalMs: 0,
+    })
     try {
-      ingestBatch([claimableSpan()], store)
+      const pending = scheduler.request()
 
-      // No fake timers are running and none are advanced: this await settling
-      // on its own is the proof the request ran immediately rather than on a
-      // debounce or interval.
-      await scheduler.request()
+      // The debounced contract: the request is accepted but no pass has
+      // started, however long the ingest stream was quiet before it.
+      expect(gated.passes).toBe(0)
+      await Promise.resolve()
+      expect(gated.passes).toBe(0)
 
-      expect(store.getSessionPayload(TRACE_ID)).toMatchObject({ harness: 'claude-code' })
+      await vi.advanceTimersByTimeAsync(999)
+      expect(gated.passes).toBe(0)
+
+      await vi.advanceTimersByTimeAsync(1)
+      await gated.started(1)
+      expect(gated.passes).toBe(1)
+
+      gated.open(1)
+      await pending
+      expect(gated.passes).toBe(1)
     } finally {
       await scheduler.close()
       store.close()
     }
   })
 
-  it('never overlaps projections and coalesces in-flight dirtiness into exactly one trailing pass', async () => {
+  it('coalesces N requests inside one idle window into exactly one pass', async () => {
     const store = new CanonStore(':memory:')
     const gated = gatedProjector()
-    const scheduler = new CanonicalProjectionScheduler({ store, project: gated.project })
+    const scheduler = new CanonicalProjectionScheduler({
+      store,
+      project: gated.project,
+      idleMs: 1_000,
+      maxWaitMs: 60_000,
+      minIntervalMs: 0,
+    })
     try {
-      const first = scheduler.request()
-      await gated.started(1) // pass 1 is in flight and gated open
-      const second = scheduler.request()
-      const third = scheduler.request()
+      const a = scheduler.request()
+      const b = scheduler.request()
+      const c = scheduler.request()
 
-      // Single-flight: pass 1 is still in flight and two more requests have
-      // arrived, yet no second projection has started.
+      await vi.advanceTimersByTimeAsync(1_000)
+      await gated.started(1)
       expect(gated.passes).toBe(1)
 
       gated.open(1)
-      gated.open(2) // the one trailing pass may run straight through
+      await Promise.all([a, b, c])
+      expect(gated.passes).toBe(1)
+    } finally {
+      await scheduler.close()
+      store.close()
+    }
+  })
+
+  it('coalesces dirtiness arriving mid-pass into exactly one scheduled trailing pass, never overlapping', async () => {
+    const store = new CanonStore(':memory:')
+    const gated = gatedProjector()
+    const scheduler = new CanonicalProjectionScheduler({
+      store,
+      project: gated.project,
+      idleMs: 1_000,
+      maxWaitMs: 60_000,
+      minIntervalMs: 0,
+    })
+    try {
+      const first = scheduler.request()
+      await vi.advanceTimersByTimeAsync(1_000)
+      await gated.started(1) // pass 1 is in flight and gated open
+
+      const second = scheduler.request()
+      const third = scheduler.request()
+
+      // Single-flight: pass 1 still in flight, no second pass has started.
+      expect(gated.passes).toBe(1)
+
+      gated.open(1)
+      // The trailing pass is owed but scheduled, not immediate.
+      await vi.advanceTimersByTimeAsync(1_000)
+      await gated.started(2)
+      expect(gated.passes).toBe(2)
+
+      gated.open(2)
       await Promise.all([first, second, third])
 
       // However many requests arrived mid-flight, they cost exactly one
       // trailing pass — not one per request, and not zero.
       expect(gated.passes).toBe(2)
+    } finally {
+      await scheduler.close()
+      store.close()
+    }
+  })
+
+  it('respects the minInterval floor from the previous pass start under a saturated stream', async () => {
+    const store = new CanonStore(':memory:')
+    const gated = gatedProjector()
+    const scheduler = new CanonicalProjectionScheduler({
+      store,
+      project: gated.project,
+      idleMs: 1_000,
+      maxWaitMs: 10_000_000,
+      minIntervalMs: 10_000,
+    })
+    try {
+      const first = scheduler.request()
+      await vi.advanceTimersByTimeAsync(1_000)
+      await gated.started(1) // pass 1 starts at t=1000
+      gated.open(1)
+      await first
+
+      // New dirty work arrives at t=1000: its idle deadline is t=2000, but
+      // the floor pins the next pass start at t=11000 (lastPassStart + floor).
+      const second = scheduler.request()
+      await vi.advanceTimersByTimeAsync(1_000)
+      expect(gated.passes).toBe(1) // t=2000: idle met, floor not met
+      await vi.advanceTimersByTimeAsync(8_000)
+      expect(gated.passes).toBe(1) // t=10000: still floored
+      await vi.advanceTimersByTimeAsync(1_000)
+      await gated.started(2) // t=11000: floor met
+      expect(gated.passes).toBe(2)
+
+      gated.open(2)
+      await second
+      expect(gated.passes).toBe(2)
+    } finally {
+      await scheduler.close()
+      store.close()
+    }
+  })
+
+  it('fires the maxWait cap when a trickle never lets the idle window expire', async () => {
+    const store = new CanonStore(':memory:')
+    const gated = gatedProjector()
+    const scheduler = new CanonicalProjectionScheduler({
+      store,
+      project: gated.project,
+      idleMs: 1_000,
+      maxWaitMs: 5_000,
+      minIntervalMs: 0,
+    })
+    try {
+      const pending = [scheduler.request()]
+      // A trickle spaced tighter than the idle window, forever.
+      for (let t = 800; t <= 4800; t += 800) {
+        await vi.advanceTimersByTimeAsync(800)
+        pending.push(scheduler.request())
+      }
+      // At t=4800 the idle deadline moved to t=5800, but the cap pins the
+      // pass at t=5000 (oldest unprojected work + maxWaitMs).
+      expect(gated.passes).toBe(0)
+      await vi.advanceTimersByTimeAsync(200) // t=5000
+      await gated.started(1)
+      expect(gated.passes).toBe(1)
+
+      gated.open(1)
+      await Promise.all(pending)
+      expect(gated.passes).toBe(1)
+    } finally {
+      await scheduler.close()
+      store.close()
+    }
+  })
+
+  it('drain() flushes immediately with no timer advance and resolves at quiescence', async () => {
+    const store = new CanonStore(':memory:')
+    const gated = gatedProjector()
+    const scheduler = new CanonicalProjectionScheduler({
+      store,
+      project: gated.project,
+      idleMs: 60_000,
+      maxWaitMs: 60_000,
+      minIntervalMs: 0,
+    })
+    try {
+      const pending = scheduler.request()
+      expect(gated.passes).toBe(0)
+
+      const drained = scheduler.drain()
+      // drain bypasses the schedule: the pass starts right away, no timer
+      // advanced.
+      await gated.started(1)
+      expect(gated.passes).toBe(1)
+
+      gated.open(1)
+      await drained
+      await pending
+      expect(gated.passes).toBe(1)
+    } finally {
+      await scheduler.close()
+      store.close()
+    }
+  })
+
+  it('close() cancels the pending timer and runs retained dirty work, then no pass ever starts again', async () => {
+    const store = new CanonStore(':memory:')
+    const gated = gatedProjector()
+    const scheduler = new CanonicalProjectionScheduler({
+      store,
+      project: gated.project,
+      idleMs: 60_000,
+      maxWaitMs: 60_000,
+      minIntervalMs: 0,
+    })
+    try {
+      const pending = scheduler.request()
+      expect(gated.passes).toBe(0)
+
+      const closing = scheduler.close()
+      await gated.started(1) // retained dirty work runs now
+      gated.open(1)
+      await closing
+      await pending
+      expect(gated.passes).toBe(1)
+
+      // No pending timer can start a pass after close resolved.
+      await vi.advanceTimersByTimeAsync(120_000)
+      expect(gated.passes).toBe(1)
     } finally {
       await scheduler.close()
       store.close()
@@ -192,6 +388,9 @@ describe('CanonicalProjectionScheduler', () => {
     let passes = 0
     const scheduler = new CanonicalProjectionScheduler({
       store,
+      idleMs: 1_000,
+      maxWaitMs: 60_000,
+      minIntervalMs: 0,
       async project(projectionStore) {
         passes += 1
         if (failNextPass) throw new Error('projection pass failed (fixture)')
@@ -204,10 +403,9 @@ describe('CanonicalProjectionScheduler', () => {
     try {
       ingestBatch([claimableSpan()], store)
 
-      // The failed pass settles its request and is reported rather than
-      // thrown: the writer's ingest callback must not be crashed by a
-      // derivation error.
-      await scheduler.request()
+      const settled = scheduler.request()
+      await vi.advanceTimersByTimeAsync(1_000)
+      await settled
       expect(passes).toBe(1)
       expect(reported).toEqual([expect.objectContaining({ message: 'projection pass failed (fixture)' })])
 
@@ -216,10 +414,16 @@ describe('CanonicalProjectionScheduler', () => {
       expect(store.get(SPAN_ID)).toBeDefined()
       expect(store.getSessionPayload(TRACE_ID)).toBeUndefined()
 
+      // No auto-retry loop: retained work is owed, but no pass runs on its
+      // own, however long passes.
+      await vi.advanceTimersByTimeAsync(120_000)
+      expect(passes).toBe(1)
+
       failNextPass = false
       // No new record arrived — the retried pass is the retained dirty work
-      // itself, and it derives the session the failed pass could not.
-      await scheduler.request()
+      // itself, and it derives the session the failed pass could not. drain()
+      // bypasses the schedule.
+      await scheduler.drain()
       expect(passes).toBe(2)
       expect(store.getSessionPayload(TRACE_ID)).toMatchObject({ harness: 'claude-code' })
     } finally {
@@ -231,9 +435,16 @@ describe('CanonicalProjectionScheduler', () => {
   it('drains an in-flight projection and its trailing pass before close resolves', async () => {
     const store = new CanonStore(':memory:')
     const gated = gatedProjector()
-    const scheduler = new CanonicalProjectionScheduler({ store, project: gated.project })
+    const scheduler = new CanonicalProjectionScheduler({
+      store,
+      project: gated.project,
+      idleMs: 1_000,
+      maxWaitMs: 60_000,
+      minIntervalMs: 0,
+    })
 
     const first = scheduler.request()
+    await vi.advanceTimersByTimeAsync(1_000)
     await gated.started(1) // pass 1 is in flight and gated open
     const later = scheduler.request() // dirtiness arriving while pass 1 is in flight
 
@@ -319,8 +530,8 @@ describe('projectCanonicalStore: projection-time repricing (issue #186, U9)', ()
   // via two parallel steps on the v14 base: the nullable finding waste
   // 14→15 step (PR #226, coverage-gap findings persist NULL) and the
   // ingest-coverage history_weeks 15→16 step — not via pricing.
-  it('keeps SCHEMA_VERSION at 16 (U9: no schema bump beyond the nullable finding waste and coverage window)', () => {
-    expect(SCHEMA_VERSION).toBe(16)
+  it('keeps SCHEMA_VERSION at 17 (U9: no schema bump beyond the nullable finding waste, coverage window, and quarantine/problems metadata)', () => {
+    expect(SCHEMA_VERSION).toBe(17)
   })
 
   it('reprices a stale {unknown,no_rate} claude-code turn, rewrites cost_json, and the session cost agrees', async () => {

@@ -245,9 +245,11 @@ async function runHarnessJob(context: JobContext): Promise<HarnessJobRow> {
     const failure = asError(error)
     store.recordProblem({
       spanId: `harness:${descriptor.harnessId}:job`,
+      harness: descriptor.harnessId,
       severity: 'error',
       code: PROVIDER_PARSE_ERROR,
       message: `harness '${descriptor.harnessId}' could not be parsed: ${failure.message}`,
+      timestamp: context.importedAtUtc,
     })
     return failedRow(descriptor.harnessId, failure, 'source unreadable')
   }
@@ -271,9 +273,11 @@ async function runHarnessJob(context: JobContext): Promise<HarnessJobRow> {
     for (const problem of unit.problems) {
       store.recordProblem({
         spanId: `harness:${descriptor.harnessId}:${unit.sourceKey}:${problem.code}`,
+        harness: descriptor.harnessId,
         severity: 'error',
         code: problem.code,
         message: `harness '${descriptor.harnessId}' ${problem.message}`,
+        timestamp: context.importedAtUtc,
       })
     }
 
@@ -282,6 +286,8 @@ async function runHarnessJob(context: JobContext): Promise<HarnessJobRow> {
       store.recordProblem({
         ...problem,
         spanId: `harness:${descriptor.harnessId}:${unit.sourceKey}`,
+        harness: descriptor.harnessId,
+        timestamp: context.importedAtUtc,
       })
     }
     row.problems += ingestResult.problems.length

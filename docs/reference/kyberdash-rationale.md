@@ -4,7 +4,7 @@ title: KyberDash measurable rationale
 doc-type: reference
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-01
+last-reviewed: 2026-10-02
 ---
 
 # KyberDash measurable rationale
@@ -30,9 +30,11 @@ OpenTelemetry specification distinguishes its meanings:
 
 Applying Copilot's convention to pi produced **negative fresh input on 293 of 307 measured
 spans** (the input figure counted as inclusive while the cache classes were added separately,
-so the decomposition no longer summed). Applying pi's convention to Copilot **double-counts
-input by up to 2×** (inclusive input already contains the cache classes; counting them again
-adds them a second time).
+so the decomposition no longer summed). Those counters cannot be inclusive — cache is not a
+subset of a smaller total — and now convert exclusively rather than being stored as
+negative fresh or clamped to zero (issue #193). Applying pi's convention to Copilot
+**double-counts input by up to 2×** (inclusive input already contains the cache classes;
+counting them again adds them a second time).
 
 The consequence is architectural: adapters must convert each harness's convention **on the way
 in**, and `TokenUsage` must store `freshInput + cacheRead + cacheCreation` disjointly so the
@@ -83,8 +85,6 @@ reader's `cost_usd` keeps the `harness` basis.
 - The legacy `cost_usd` fallback in the session row is untested.
 - The Run and Harness cost cells (`RunDetail.tsx:459`, `HarnessDetail.tsx:395`) still use the bare
   `—` pattern.
-- **F1.** The session-list cost cell (`w-20`) wraps word statuses such as "no published rate".
-  Needs a visual check, then a wider cell or a short label with the reason in `title`.
 
 **PR #225 review items declined, with reasons.**
 
