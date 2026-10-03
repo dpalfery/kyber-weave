@@ -3,7 +3,7 @@ schema: kyber-squad.agent/v1
 name: architect
 description: "Headless technical planner and intake assessor: recommends plan versus spec, investigates bounded changes, and persists mode-aware implementation plans. Plans only and never prompts the user directly."
 invocation: subagent
-model-profile: deep-planning
+model-profile: architect
 capability-profile: architect
 copilot-capability-profile: architect-copilot
 devin-capability-profile: architect-devin

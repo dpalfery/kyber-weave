@@ -261,7 +261,8 @@ frontier model:
 
 | Model profile | Devin model | Agents |
 |---|---|---|
-| `deep-planning` | `claude-opus-5-5-high` | architect, bug-crusher-investigator, sql-database-architect |
+| `architect` | `claude-opus-5-5-high` | architect |
+| `deep-planning` | `claude-opus-5-5-high` | bug-crusher-investigator, sql-database-architect |
 | `general` | `swe-2-high` | dal-dev, github-devops, product-owner, pulumi-dev, tauri-dev |
 | `fast` | `deepseek-v4-1-flash-high` | azure-reader, csharp-dev, docs-dev, maui-dev, python-dev, react-dev, research-agent, test-dev |
 | `reviewer` | `grok-4-7-high` | code-reviewer, review-lens, review-triage, task-reviewer |

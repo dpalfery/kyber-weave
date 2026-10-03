@@ -85,6 +85,7 @@ public sealed class DevinRendererContractTests : IDisposable
     /// </summary>
     private static readonly Dictionary<string, string> ExpectedDevinModels = new(StringComparer.Ordinal)
     {
+        ["architect"] = "claude-opus-5-5-high",
         ["deep-planning"] = "claude-opus-5-5-high",
         ["fast"] = "deepseek-v4-1-flash-high",
         ["general"] = "swe-2-high",
@@ -493,6 +494,7 @@ public sealed class DevinRendererContractTests : IDisposable
     /// on the session's model — renders none.
     /// </summary>
     [Theory]
+    [InlineData("architect", "claude-opus-5-5-high")]
     [InlineData("deep-planning", "claude-opus-5-5-high")]
     [InlineData("fast", "deepseek-v4-1-flash-high")]
     [InlineData("general", "swe-2-high")]
