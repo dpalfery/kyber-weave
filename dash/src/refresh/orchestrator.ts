@@ -229,16 +229,9 @@ async function runHarnessJob(context: JobContext): Promise<HarnessJobRow> {
   }
 
   const checkpoints = store.listSourceCheckpoints(descriptor.harnessId)
-  const checkpointBySourceKey = new Map(
-    checkpoints.map((checkpoint) => [checkpoint.sourceKey, checkpoint]),
+  const anyVersionInvalidated = checkpoints.some(
+    (checkpoint) => checkpoint.parserContractVersion !== descriptor.parserContractVersion,
   )
-  let anyVersionInvalidated = false
-  for (const checkpoint of checkpoints) {
-    if (checkpoint.parserContractVersion !== descriptor.parserContractVersion) {
-      anyVersionInvalidated = true
-      break
-    }
-  }
 
   const coverageBySourceKey = new Map<string, { dateRange: DateRange; coveredFromUtc: string }>()
   if (anyVersionInvalidated) {
@@ -308,7 +301,10 @@ async function runHarnessJob(context: JobContext): Promise<HarnessJobRow> {
     // checkpoint floor is preserved; the slice is clamped to the 14-day
     // content-retention floor so this run does not ingest parts that
     // purgeExpiredContent will empty on the way out.
-    const previous = checkpointBySourceKey.get(unit.sourceKey)
+    // Live store read, not the pre-iterate snapshot: enqueue commits inside
+    // this loop, so a duplicate sourceKey must see the just-written row or
+    // recordCount walks backwards.
+    const previous = store.getSourceCheckpoint(descriptor.harnessId, unit.sourceKey)
     const repaired = coverageBySourceKey.get(unit.sourceKey) ?? {
       dateRange: context.dateRange,
       coveredFromUtc: context.coveredFromUtc,
