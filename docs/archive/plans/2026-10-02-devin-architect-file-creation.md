@@ -1,8 +1,8 @@
 ---
-id: plans/2026-10-02-devin-architect-file-creation
+id: archive/plans/2026-10-02-devin-architect-file-creation
 title: "Devin harness: architect profile file-creation and artifact persistence (#161)"
 doc-type: plan
-status: draft
+status: complete
 component: KyberSquad
 owner: dpalfery
 last-reviewed: 2026-10-02
@@ -11,7 +11,7 @@ development-mode: test-first
 
 # Devin harness: architect profile file-creation and artifact persistence (#161)
 
-**Status: Draft.** Intake investigation and decision ledger prepared for orchestrator/user approval.
+**Status: Complete.** Delivered per test-first development mode. Archived per `KW-DOC-LIFECYCLE-003`.
 Addresses GitHub issue [#161](https://github.com/dpalfery/kyber-weave/issues/161): Devin renderer's architect subagent profile cannot create new files, blocking plan persistence.
 
 **Development mode:** `test-first`.
@@ -105,11 +105,11 @@ Automated tests in `tests/KyberWeave.Tests/`:
 
 ## 5. Implementation Tasks
 
-- [ ] **T1: Failing Tests for Devin Architect Capabilities** (`tests/KyberWeave.Tests/DevinRendererContractTests.cs`)
-- [ ] **T2: Capability Profile & Rendering Updates** (`products/kyber-squad/profiles/capabilities.yml`, `src/KyberWeave.Core/Squad/Rendering/DevinRenderer.cs`)
-- [ ] **T3: Authoring Reference Guidance for Devin** (`products/kyber-squad/agents/architect/references/plan-authoring.md`, `products/kyber-squad/agents/conductor/references/plan-path.md`)
-- [ ] **T4: Documentation Checks and Regression Suite** (`docs validate .`, `docs drift .`, `dotnet test`)
-- [ ] **T5: PR Creation and Handoff** (Draft PR against trunk titled `[issue #161] [hal.hermes.agy] Devin architect can create new files`)
+- [x] **T1: Failing Tests for Devin Architect Capabilities** (`tests/KyberWeave.Tests/DevinRendererContractTests.cs`)
+- [x] **T2: Capability Profile & Rendering Updates** (`products/kyber-squad/profiles/capabilities.yml`, `src/KyberWeave.Core/Squad/Rendering/DevinRenderer.cs`)
+- [x] **T3: Authoring Reference Guidance for Devin** (`products/kyber-squad/agents/architect/references/plan-authoring.md`, `products/kyber-squad/agents/conductor/references/plan-path.md`)
+- [x] **T4: Documentation Checks and Regression Suite** (`docs validate .`, `docs drift .`, `dotnet test`)
+- [x] **T5: PR Creation and Handoff** (Draft PR against trunk titled `[issue #161] [hal.hermes.agy] Devin architect can create new files`)
 
 ---
 

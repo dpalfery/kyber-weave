@@ -6,6 +6,7 @@ invocation: subagent
 model-profile: deep-planning
 capability-profile: architect
 copilot-capability-profile: architect-copilot
+devin-capability-profile: architect-devin
 copilot-tools: [vscode, execute, read, agent, edit/createDirectory, edit/createFile, edit/editFiles, edit/rename, search, web, codegraph/*, kyber-weave/*, context7/*, vscodeGeneral/rename, todo]
 delegates-to: [azure-reader, research-agent]
 fallback: role-skill
