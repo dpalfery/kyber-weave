@@ -37,6 +37,14 @@ const ALLOWED = [
     why: 'OTLP attribute key or instrumentation scope name',
   },
   { pattern: /^codeburn\/$/, why: 'canon FILE_SOURCE_PREFIX, written into stored rows' },
+  {
+    pattern: /^codeburn\/cursor$/,
+    why: 'canon source stamp for the Cursor IDE file collector; must match on-disk source keys',
+  },
+  {
+    pattern: /^codeburn\/claude-desktop$/,
+    why: 'canon source stamp for the Claude Desktop file collector; must match on-disk source keys',
+  },
   { pattern: /^codeburn$/, why: 'vendor namespace matched against what emitters send' },
   {
     pattern: /^codeburn-theme$/,

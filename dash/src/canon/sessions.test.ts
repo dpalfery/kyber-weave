@@ -1130,6 +1130,72 @@ describe('canonical harness on derived sessions', () => {
     }
     store.close()
   })
+
+  it('counts #231 cursor twin overlap output once on session totals', async () => {
+    // Live evidence (issue #231, key 0f659701-…): cursor file halves
+    // (17007/0, 0/45) plus cursor-agent (125/45) within skew. After T2's
+    // complementary join, buildSessions must sum the overlapped 45 once
+    // (~45, not ~90) — rebuild-only; raw dual rows stay in the store.
+    const sessionKey = 'test-session-key-0001'
+    const store = new CanonStore(':memory:')
+    store.upsertMany([
+      turn('synth:cursor:req', [], {
+        source: 'codeburn/cursor',
+        harness: 'cursor',
+        sessionId: sessionKey,
+        timestamp: '2026-09-30T19:52:28.000Z',
+        tokens: tokens({
+          freshInput: 17007,
+          cacheRead: 0,
+          cacheCreation: 0,
+          output: 0,
+          reportedInput: 17007,
+          reportedOutput: 0,
+        }),
+      }),
+      turn('synth:cursor:res', [], {
+        source: 'codeburn/cursor',
+        harness: 'cursor',
+        sessionId: sessionKey,
+        timestamp: '2026-09-30T19:52:30.000Z',
+        tokens: tokens({
+          freshInput: 0,
+          cacheRead: 0,
+          cacheCreation: 0,
+          output: 45,
+          reportedInput: 0,
+          reportedOutput: 45,
+        }),
+      }),
+      turn('synth:cursor-agent:0', [], {
+        source: 'codeburn/cursor-agent',
+        harness: 'cursor-agent',
+        sessionId: sessionKey,
+        timestamp: '2026-09-30T19:52:33.181Z',
+        tokens: tokens({
+          freshInput: 125,
+          cacheRead: 0,
+          cacheCreation: 0,
+          output: 45,
+          reportedInput: 125,
+          reportedOutput: 45,
+        }),
+      }),
+    ])
+
+    const report = await buildSessions(store)
+    expect(report.built).toBe(1)
+
+    const sessions = store.listSessions('cursor')
+    expect(sessions).toHaveLength(1)
+    const payload = sessionPayload({ payload: store.getSessionPayload(sessions[0]!.sessionId) })
+    expect(payload.summary.total_output).toBe(45)
+    expect(store.sessionTokenTotals(sessions[0]!.sessionId)?.output).toBe(45)
+    // Without the join the three raw rows would sum to 90; prove the store
+    // still holds all three provenance rows while the derived total is once.
+    expect(store.recordsForSession(sessionKey)).toHaveLength(3)
+    store.close()
+  })
 })
 
 describe('timeline attributes are not re-stored in the payload', () => {

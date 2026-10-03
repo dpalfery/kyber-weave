@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -47,10 +47,38 @@ describe('cursor provider', () => {
   })
 
   describe('time floor', () => {
+    beforeEach(() => {
+      vi.useFakeTimers()
+      vi.setSystemTime(new Date('2026-10-02T12:00:00.000Z'))
+    })
+
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
     it('uses dateRange.start when within the six-month cap', () => {
-      const end = new Date()
-      const start = new Date(end.getFullYear(), end.getMonth() - 3, end.getDate())
-      expect(getCursorTimeFloor({ start, end })).toBe(start.toISOString())
+      const now = new Date()
+      const capFloor = new Date(
+        now.getFullYear(),
+        now.getMonth() - 6,
+        now.getDate(),
+      )
+      const start = new Date(capFloor.getTime() + 24 * 60 * 60 * 1000)
+      expect(getCursorTimeFloor({ start, end: new Date(2026, 5, 2) })).toBe(start.toISOString())
+
+      const older = new Date(capFloor.getTime() - 24 * 60 * 60 * 1000)
+      expect(getCursorTimeFloor({ start: older, end: new Date(2026, 5, 2) })).toBe(capFloor.toISOString())
+    })
+
+    it('uses the cap floor when dateRange.start is older than the six-month cap', () => {
+      const now = new Date()
+      const capFloor = new Date(
+        now.getFullYear(),
+        now.getMonth() - 6,
+        now.getDate(),
+      )
+      const older = new Date(capFloor.getTime() - 24 * 60 * 60 * 1000)
+      expect(getCursorTimeFloor({ start: older, end: new Date(2026, 5, 2) })).toBe(capFloor.toISOString())
     })
   })
 

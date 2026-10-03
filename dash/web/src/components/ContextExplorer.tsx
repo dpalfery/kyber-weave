@@ -148,11 +148,11 @@ export function AgentSessionRow({
           {turnCount != null ? `${turnCount} turns` : '—'}
         </span>
 
-        {/* Cost in USD */}
+        {/* Cost: word statuses from formatCostFigure need ~97px at text-xs; w-20 (80px) wraps. */}
         <span
           data-testid="agent-session-cost"
           title={s.cost ? `Cost basis: ${s.cost.basis}` : undefined}
-          className="w-20 shrink-0 text-right text-xs tabular-nums text-foreground font-medium"
+          className="w-28 shrink-0 whitespace-nowrap text-right text-xs tabular-nums text-foreground font-medium"
         >
           {s.cost ? formatCostFigure(normalizeCostBlock(s.cost)) : costUsd != null ? usd(costUsd) : '—'}
         </span>

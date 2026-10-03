@@ -351,7 +351,11 @@ describe('AgentSessionRow parent navigation', () => {
 
 describe('AgentSessionRow row cost cell (issue #186)', () => {
   // The cell is addressed by test id; T4 adds `data-testid="agent-session-cost"`.
-  function renderCostCell(cost: KyberSessionSummary['cost'] | undefined): { text: string; title: string } {
+  function renderCostCell(cost: KyberSessionSummary['cost'] | undefined): {
+    text: string
+    title: string
+    className: string
+  } {
     const target: KyberSessionSummary = { ...sampleSession, cost_usd: null }
     if (cost !== undefined) target.cost = cost
     else delete target.cost
@@ -362,7 +366,8 @@ describe('AgentSessionRow row cost cell (issue #186)', () => {
     const match = /<span([^>]*data-testid="agent-session-cost"[^>]*)>([\s\S]*?)<\/span>/.exec(markup)
     expect(match, 'row must render an element with data-testid="agent-session-cost"').not.toBeNull()
     const title = /title="([^"]*)"/.exec(match![1]!)?.[1] ?? ''
-    return { text: match![2]!, title }
+    const className = /class="([^"]*)"/.exec(match![1]!)?.[1] ?? ''
+    return { text: match![2]!, title, className }
   }
 
   it('renders the formatted figure (same formatter as the cost tile) for a priced block', () => {
@@ -401,6 +406,15 @@ describe('AgentSessionRow row cost cell (issue #186)', () => {
     expect(
       renderCostCell({ basis: 'harness', status: 'priced', value: 0.5, currency: 'USD' }).title,
     ).toMatch(/harness/i)
+  })
+
+  it('keeps word statuses on one line without shrinking below the measured phrase width (issue #228)', () => {
+    // "no published rate" measures ~97px at text-xs; w-20 (80px) wraps. The cell
+    // stays on formatCostFigure (U10) and uses w-28 (112px) plus nowrap.
+    const { text, className } = renderCostCell({ basis: 'published', status: 'no_rate' })
+    expect(text).toBe(formatCostFigure(normalizeCostBlock({ basis: 'published', status: 'no_rate' })))
+    expect(className.split(/\s+/)).toEqual(expect.arrayContaining(['w-28', 'whitespace-nowrap', 'shrink-0']))
+    expect(className.split(/\s+/)).not.toContain('w-20')
   })
 })
 

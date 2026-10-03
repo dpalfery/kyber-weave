@@ -4,9 +4,11 @@
 // plus cache read plus cache creation, as its own parser records
 // (dash/src/providers/copilot.ts: "input_tokens is cache-INCLUSIVE (input +
 // cache_read + cache_write)"). Converting on the way in therefore SUBTRACTS
-// the cache classes to recover fresh input; clamping the subtraction to zero
-// would hide exactly the inversion R4.2 exists to catch, so the adapter
-// preserves a negative result and lets `validate` reject the record loudly.
+// the cache classes to recover fresh input. When that subtraction is
+// negative the counters cannot be inclusive — they convert exclusively
+// rather than being stored as negative fresh or clamped to zero
+// (issue #193). Clamping would drop the claimed input; the exclusive
+// reading keeps every class and satisfies the identity.
 //
 // This module also hosts the small shared core the three task-5.3 adapters
 // are built from — counter reading, the two convention conversions, and the
@@ -497,6 +499,44 @@ export function exclusiveConvention(counts: {
 }
 
 /**
+ * Convert counters the inclusive adapters claimed, falling back to exclusive
+ * when subtraction is impossible.
+ *
+ * Inclusive is a subset reading: cache cannot exceed the total that supposedly
+ * contains it. When it does, the counters are exclusive-shaped (issue #193's
+ * `TOKEN_NEGATIVE_FRESH` corpus) and the exclusive conversion is the only
+ * coherent decomposition. That is not a clamp — `Math.max(0, fresh)` would
+ * drop the claimed input and hide the inversion; taking fresh as claimed and
+ * reassembling the reported total keeps every class and satisfies the
+ * identity.
+ *
+ * Exclusive fallback requires a present, parsed input claim. `readCounter`
+ * folds absent or unreadable values to 0; treating that zero as exclusive
+ * fresh would accept an incomplete record (cache read alone becoming a valid
+ * reported total) that inclusive conversion correctly rejected as negative
+ * fresh. Callers that already hold a numeric claim omit `inputPresent`
+ * (defaults to present); OTLP adapters pass the parse outcome explicitly.
+ *
+ * The primitive `inclusiveConvention` stays unclamped so a caller that wants
+ * the raw subtraction (tests, inverted-convention probes) still sees it.
+ */
+export function convertInclusiveCounts(counts: {
+  input: number
+  cacheRead: number
+  cacheCreation: number
+  output: number
+  reasoning?: number
+  /** False when the input counter was absent or unreadable. */
+  inputPresent?: boolean
+}): TokenUsage {
+  const inclusive = inclusiveConvention(counts)
+  if (inclusive.freshInput < 0 && counts.inputPresent !== false) {
+    return exclusiveConvention(counts)
+  }
+  return inclusive
+}
+
+/**
  * Record validation shared by the adapters (R4.3, R4.4): `validateTokens` is
  * the whole check — non-negative disjoint classes, reasoning within output,
  * and the reported-input identity — and its problem, when any, is what the
@@ -508,8 +548,14 @@ export function validateRecordTokens(record: CanonicalRecord) {
 
 /** Read the raw counters every GenAI-emitting harness shares. */
 export function readUsageCounters(attributes: Record<string, unknown>) {
+  // Input presence is tracked separately: convertInclusiveCounts may only
+  // fall back to exclusive when the harness actually claimed an input
+  // figure. Folding an unreadable value to 0 via readCounter alone would
+  // make cache-only incomplete spans look exclusive-valid.
+  const input = readOptionalCounter(attributes, INPUT_TOKEN_KEYS)
   return {
-    input: readCounter(attributes, INPUT_TOKEN_KEYS),
+    input: input ?? 0,
+    inputPresent: input !== undefined,
     output: readCounter(attributes, OUTPUT_TOKEN_KEYS),
     cacheRead: readCounter(attributes, CACHE_READ_KEYS),
     cacheCreation: readCounter(attributes, CACHE_CREATION_KEYS),
@@ -639,11 +685,24 @@ export const copilotAdapter: HarnessAdapter = {
   namespaces: ['gen_ai', ...COPILOT_VENDOR_NAMESPACES],
 
   detect(span) {
+    const isCopilotEvidence =
+      hasNamespace(span.attributes, ['copilot_chat', 'github.copilot', 'copilot']) ||
+      span.name.startsWith('copilot_chat') ||
+      span.name.startsWith('copilot')
     // An explicit Gemini system identity outranks a generic Copilot exporter
-    // label that may be attached by the collector or wrapper process.
-    if (span.attributes['gen_ai.system'] === 'gemini') return 0
+    // label that may be attached by the collector or wrapper process, unless
+    // the span carries explicit copilot_chat or copilot evidence.
+    // When both gemini system and antigravity agent identity are present,
+    // Antigravity outranks Copilot.
+    if (span.attributes['gen_ai.system'] === 'gemini') {
+      if (span.attributes['gen_ai.agent.name'] === 'antigravity' || !isCopilotEvidence) {
+        return 0
+      }
+    }
     let score = 0
-    if (hasNamespace(span.attributes, COPILOT_VENDOR_NAMESPACES)) score += VENDOR_EVIDENCE
+    if (hasNamespace(span.attributes, COPILOT_VENDOR_NAMESPACES) || isCopilotEvidence) {
+      score += VENDOR_EVIDENCE
+    }
     if (INPUT_TOKEN_KEYS.some((key) => key in span.attributes)) score += USAGE_EVIDENCE
     return Math.min(1, score)
   },
@@ -661,9 +720,12 @@ export const copilotAdapter: HarnessAdapter = {
 
   /**
    * Convert Copilot's cache-inclusive counters into the disjoint classes
-   * (R4.2): fresh = input − cacheRead − cacheCreation, unclamped, so the
-   * inverted convention surfaces as a validation problem rather than a
-   * silently mispriced record.
+   * (R4.2): fresh = input − cacheRead − cacheCreation. When that subtraction
+   * is negative and the input counter was present and parsed, the counters
+   * are exclusive-shaped and convert that way rather than being stored as
+   * negative fresh or clamped to zero (issue #193). An unreadable input
+   * keeps the inclusive (negative) result so validation still rejects the
+   * incomplete record.
    */
   normalize(raw) {
     const record = baseRecord(this, raw)
@@ -683,11 +745,12 @@ export const copilotAdapter: HarnessAdapter = {
       }
     }
     const counters = readUsageCounters(raw.attributes)
-    record.tokens = inclusiveConvention({
+    record.tokens = convertInclusiveCounts({
       input: counters.input,
       cacheRead: counters.cacheRead,
       cacheCreation: counters.cacheCreation,
       output: counters.output,
+      inputPresent: counters.inputPresent,
       ...(counters.reasoning !== 0 ? { reasoning: counters.reasoning } : {}),
     })
     return record
