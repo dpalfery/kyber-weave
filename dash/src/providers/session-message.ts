@@ -22,6 +22,11 @@ export type MessageData = {
     cache_creation_input_tokens?: number
     cache_read_input_tokens?: number
   }
+  // Divergent stores carry flat token keys instead of a `tokens`/`usage`
+  // object; without these the turn silently parses as zero tokens (issue #227).
+  tokens_input?: number
+  tokens_output?: number
+  tokens_reasoning?: number
 }
 
 export type PartData = {
@@ -85,9 +90,9 @@ export function buildAssistantCall(opts: {
   const { data, parts } = opts
 
   const tokens = {
-    input: data.tokens?.input ?? data.usage?.input_tokens ?? 0,
-    output: data.tokens?.output ?? data.usage?.output_tokens ?? 0,
-    reasoning: data.tokens?.reasoning ?? 0,
+    input: data.tokens?.input ?? data.usage?.input_tokens ?? data.tokens_input ?? 0,
+    output: data.tokens?.output ?? data.usage?.output_tokens ?? data.tokens_output ?? 0,
+    reasoning: data.tokens?.reasoning ?? data.tokens_reasoning ?? 0,
     cacheRead: data.tokens?.cache?.read ?? data.usage?.cache_read_input_tokens ?? 0,
     cacheWrite: data.tokens?.cache?.write ?? data.usage?.cache_creation_input_tokens ?? 0,
   }
