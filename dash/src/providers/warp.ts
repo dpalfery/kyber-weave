@@ -6,7 +6,7 @@ import { calculateCost, getShortModelName } from '../pricing/models.js'
 import { blobToText, getSqliteLoadError, isSqliteAvailable, openDatabase, type SqliteDatabase } from '../ingest/sqlite.js'
 import { estimateTokensFromChars } from '../pricing/token-estimate.js'
 import type { ProbeRoot, ParsedProviderCall, Provider, SessionParser, SessionSource } from './types.js'
-import { safeNumber } from '../ingest/parser.js'
+import { safeNumber } from '../ingest/numbers.js'
 
 const WARP_GROUP_CONTAINER = '2BBY89MBSN.dev.warp'
 const WARP_STABLE_BUNDLE_ID = 'dev.warp.Warp-Stable'

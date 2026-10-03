@@ -16,7 +16,7 @@ import {
 } from '../ingest/session-cache.js'
 import { renderTable } from './text-table.js'
 import { collectLauncherNotes, type LauncherNote } from '../ingest/launcher-homes.js'
-import { isPositiveNumber } from '../ingest/parser.js'
+import { isPositiveNumber } from '../ingest/numbers.js'
 import { readConfig } from '../config.js'
 import { BRAND } from '../brand-overlay.js'
 
@@ -366,8 +366,9 @@ async function collectOneProvider(
     }
     // discoverFromDb exposes TCC denials that existsSync alone cannot see;
     // fold them into the probe rows so emptyVerdict names permission denied.
-    // Dynamic import: report.ts pulls doctor into every CLI entry, and a static
-    // warp import would otherwise warm the sqlite provider graph on refresh.
+    // Dynamic like providers/index.ts:loadWarp — warp statically imports
+    // sqlite + pricing; report.ts pulls doctor into every CLI entry, so a
+    // static doctor→warp edge would load node:sqlite on every command.
     if (provider.name === 'warp') {
       const { drainWarpDbAccessDenials } = await import('../providers/warp.js')
       base.probePaths = applyAccessDenials(base.probePaths, drainWarpDbAccessDenials())
