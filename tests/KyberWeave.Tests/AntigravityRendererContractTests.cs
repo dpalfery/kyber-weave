@@ -1047,14 +1047,14 @@ public sealed class AntigravityRendererContractTests : IDisposable
 
     /// <summary>
     /// Pins rendered Antigravity models by agent identity (issue #209): only
-    /// <c>architect</c> renders <c>claude-opus-4-6-thinking</c>; every other
+    /// <c>architect</c> renders <c>claude-opus-4-6</c>; every other
     /// agent — including <c>sql-database-architect</c> and
     /// <c>bug-crusher-investigator</c> on shared <c>deep-planning</c> — renders
     /// Gemini Flash. Asserting by profile would incorrectly allow Opus for those
     /// peers.
     /// </summary>
     [Fact]
-    public async Task RenderAsync_Antigravity_OnlyArchitectRunsOnClaudeOpusThinkingAndEveryOtherAgentOnFlash()
+    public async Task RenderAsync_Antigravity_OnlyArchitectRunsOnClaudeOpusAndEveryOtherAgentOnFlash()
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
         SquadRendererRegistry registry = new([new AntigravityRenderer()]);
@@ -1079,7 +1079,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
             YamlMappingNode frontmatter = ReadFrontmatter(agentFile);
             string model = RequireScalar(frontmatter, "model");
             string expectedModel = string.Equals(agent.Name, "architect", StringComparison.Ordinal)
-                ? "claude-opus-4-6-thinking"
+                ? "claude-opus-4-6"
                 : "flash";
 
             Assert.True(

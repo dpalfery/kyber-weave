@@ -2,10 +2,10 @@ schema: kyber-squad.model-profiles/v1
 profiles:
   # Dedicated to the architect agent so Antigravity Opus cannot leak to other
   # deep-planning peers (sql-database-architect, bug-crusher-investigator).
-  # Issue #209: architect → claude-opus-4-6-thinking; everyone else → flash.
+  # Issue #209: architect → claude-opus-4-6; everyone else → flash.
   architect:
     default: inherit
-    antigravity: claude-opus-4-6-thinking
+    antigravity: claude-opus-4-6
     claude: opus
     codex: gpt-5.6-sol
     copilot: GPT-5.6 Sol (copilot)

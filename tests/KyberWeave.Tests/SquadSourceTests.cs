@@ -162,19 +162,19 @@ public sealed class SquadSourceTests
 
     /// <summary>
     /// Pins the Antigravity column of each model profile (issue #209). Only the dedicated
-    /// <c>architect</c> profile is <c>claude-opus-4-6-thinking</c>; every other profile —
+    /// <c>architect</c> profile is <c>claude-opus-4-6</c>; every other profile —
     /// including shared <c>deep-planning</c> used by non-architect agents — is Gemini Flash.
     /// Without this pin, <c>deep-planning</c> and <c>reviewer</c> can silently return to
     /// <c>pro</c> (Gemini 3.1 Pro) and still pass renderer tests that only echo <c>models.yml</c>.
     /// </summary>
     [Theory]
-    [InlineData("architect", "claude-opus-4-6-thinking")]
+    [InlineData("architect", "claude-opus-4-6")]
     [InlineData("deep-planning", "flash")]
     [InlineData("fast", "flash")]
     [InlineData("general", "flash")]
     [InlineData("orchestration", "flash")]
     [InlineData("reviewer", "flash")]
-    public void ModelsYmlAntigravityColumnPinsArchitectOnClaudeOpusThinkingAndOtherProfilesOnFlash(
+    public void ModelsYmlAntigravityColumnPinsArchitectOnClaudeOpusAndOtherProfilesOnFlash(
         string profileName,
         string expectedAntigravityModel)
     {
