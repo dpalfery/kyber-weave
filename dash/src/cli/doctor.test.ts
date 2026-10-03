@@ -83,6 +83,20 @@ function only(report: Awaited<ReturnType<typeof collectDoctorReport>>, name: str
   return r
 }
 
+const deniedProbeFs = {
+  existsSync: () => false,
+  statSync: () => {
+    const err = new Error('EACCES: permission denied') as NodeJS.ErrnoException
+    err.code = 'EACCES'
+    throw err
+  },
+}
+
+function restoreProcessPlatform(original: PropertyDescriptor | undefined): void {
+  if (original) Object.defineProperty(process, 'platform', original)
+  else delete (process as { platform?: NodeJS.Platform }).platform
+}
+
 let tmpDir: string
 beforeEach(async () => { tmpDir = await mkdtemp(join(tmpdir(), 'doctor-test-')) })
 afterEach(async () => { await rm(tmpDir, { recursive: true, force: true }) })
@@ -774,5 +788,75 @@ describe('collectDoctorReport - permission-denied probe root (#197)', () => {
     expect(r.status).toBe('error')
     expect(r.verdict).toMatch(/^ERROR \(/)
     expect(r.verdict).toMatch(/ELOOP|symbolic links/i)
+  })
+
+  it('permission-denied verdict is platform-aware and keeps an override', async () => {
+    const prev = process.env['WARP_DB_PATH']
+    const inner = join(tmpDir, 'locked', 'warp.sqlite')
+    process.env['WARP_DB_PATH'] = inner
+    const provider = fakeProvider({
+      name: 'warp',
+      probeRoots: async () => [{ path: inner, label: 'db' }],
+    })
+    try {
+      const report = await collectDoctorReport('all', {
+        providers: [provider],
+        cache: emptyCache(),
+        probeFs: deniedProbeFs,
+      })
+      const r = only(report, 'warp')
+      expect(r.verdict).toContain('permission denied')
+      expect(r.verdict).toContain('override WARP_DB_PATH set')
+      if (process.platform === 'darwin') {
+        expect(r.verdict).toMatch(/Full Disk Access/i)
+      } else {
+        expect(r.verdict).toMatch(/check owner\/permissions/)
+        expect(r.verdict).not.toMatch(/Full Disk Access/i)
+      }
+    } finally {
+      if (prev === undefined) delete process.env['WARP_DB_PATH']
+      else process.env['WARP_DB_PATH'] = prev
+    }
+  })
+
+  it('darwin permission-denied verdict names Full Disk Access; others do not', async () => {
+    const inner = join(tmpDir, 'locked', 'warp.sqlite')
+    const provider = fakeProvider({
+      name: 'warp',
+      probeRoots: async () => [{ path: inner, label: 'db' }],
+    })
+    const original = Object.getOwnPropertyDescriptor(process, 'platform')
+    Object.defineProperty(process, 'platform', { configurable: true, value: 'darwin' })
+    try {
+      const report = await collectDoctorReport('all', {
+        providers: [provider],
+        cache: emptyCache(),
+        probeFs: deniedProbeFs,
+      })
+      expect(only(report, 'warp').verdict).toMatch(/on macOS grant Full Disk Access/)
+    } finally {
+      restoreProcessPlatform(original)
+    }
+  })
+
+  it('names the count when more than one probe root is permission-denied', async () => {
+    const first = join(tmpDir, 'a', 'warp.sqlite')
+    const second = join(tmpDir, 'b', 'warp.sqlite')
+    const provider = fakeProvider({
+      name: 'warp',
+      probeRoots: async () => [
+        { path: first, label: 'db' },
+        { path: second, label: 'db' },
+      ],
+    })
+    const report = await collectDoctorReport('all', {
+      providers: [provider],
+      cache: emptyCache(),
+      probeFs: deniedProbeFs,
+    })
+    const r = only(report, 'warp')
+    expect(r.verdict).toContain(first)
+    expect(r.verdict).toMatch(/and 1 more/)
+    expect(r.verdict).toContain('permission denied')
   })
 })

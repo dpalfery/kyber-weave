@@ -16,7 +16,7 @@ import {
 } from '../ingest/session-cache.js'
 import { renderTable } from './text-table.js'
 import { collectLauncherNotes, type LauncherNote } from '../ingest/launcher-homes.js'
-import { isPositiveNumber } from '../ingest/parser.js'
+import { isPositiveNumber } from '../ingest/numbers.js'
 import { readConfig } from '../config.js'
 import { BRAND } from '../brand-overlay.js'
 
@@ -301,7 +301,14 @@ function emptyVerdict(
   // installed" (issue #197 — Warp's Group Containers sqlite copy fails EPERM).
   const denied = known.filter(p => p.accessError === 'permission-denied')
   if (denied.length > 0) {
-    return `NOTHING FOUND (${denied[0]!.path} is not readable — permission denied; macOS requires granting the app Full Disk Access for this container)`
+    const named = denied.length === 1
+      ? `${denied[0]!.path} is not readable — permission denied`
+      : `${denied[0]!.path} (and ${denied.length - 1} more) is not readable — permission denied`
+    const remedy = process.platform === 'darwin'
+      ? 'on macOS grant Full Disk Access'
+      : 'check owner/permissions'
+    const override = hasOverride ? `; override ${overrideNames} set` : ''
+    return `NOTHING FOUND (${named}; ${remedy}${override})`
   }
 
   // No known probe roots to check: honest, override-aware fallback.
@@ -366,8 +373,9 @@ async function collectOneProvider(
     }
     // discoverFromDb exposes TCC denials that existsSync alone cannot see;
     // fold them into the probe rows so emptyVerdict names permission denied.
-    // Dynamic import: report.ts pulls doctor into every CLI entry, and a static
-    // warp import would otherwise warm the sqlite provider graph on refresh.
+    // Dynamic like providers/index.ts:loadWarp — warp statically imports
+    // sqlite + pricing; report.ts pulls doctor into every CLI entry, so a
+    // static doctor→warp edge would load node:sqlite on every command.
     if (provider.name === 'warp') {
       const { drainWarpDbAccessDenials } = await import('../providers/warp.js')
       base.probePaths = applyAccessDenials(base.probePaths, drainWarpDbAccessDenials())

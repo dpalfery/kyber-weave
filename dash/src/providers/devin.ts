@@ -13,7 +13,7 @@ import type {
   ParsedProviderCall,
 } from "./types.js";
 import { readSessionFile } from "../ingest/fs-utils.js";
-import { isPositiveNumber, safeNumber } from "../ingest/parser.js";
+import { isPositiveNumber, safeNumber } from "../ingest/numbers.js";
 
 type AgentTrajectory<StepType extends Step = Step, AgentExtra = unknown> = {
   schema_version: string;

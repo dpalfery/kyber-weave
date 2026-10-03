@@ -1,4 +1,4 @@
-import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
+import { accessSync, chmodSync, constants, copyFileSync, existsSync, mkdirSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
@@ -300,7 +300,18 @@ describe('SQLite read-only parent fallback', () => {
 
     const stderr = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
     try {
-      expect(() => readValue(dbPath)).toThrow()
+      let thrown: unknown
+      try {
+        readValue(dbPath)
+      } catch (err) {
+        thrown = err
+      }
+      expect(thrown).toBeDefined()
+      const code = typeof thrown === 'object' && thrown !== null && 'code' in thrown
+        ? (thrown as { code?: unknown }).code
+        : undefined
+      // Cache-dir EACCES must stay a sidecar/open error, not a source TCC denial.
+      expect(code === 'EACCES' || code === 'EPERM').toBe(false)
       const notices = stderr.mock.calls.filter(([chunk]) => String(chunk).includes('cache copy could not be written'))
       expect(notices).toHaveLength(1)
       expect(String(notices[0]?.[0])).toContain(dbPath)
@@ -310,41 +321,35 @@ describe('SQLite read-only parent fallback', () => {
     }
   })
 
-  it('does not rethrow cache-dir EACCES as a source permission denial', ({ skip }) => {
-    // Unwritable KYBERDASH_CACHE_DIR must stay a cache-health failure, not look
-    // like a TCC denial on the readable source (#197 / FDA false positive).
-    // openDatabase itself may succeed; the cache fallback runs on first query.
+  it('rethrows a source-read denial even when the cache dir is also unwritable', ({ skip }) => {
+    // chmod bit clearing is ineffective on Windows (warp.test.ts skips the same way).
     if (process.platform === 'win32') skip()
     const dbPath = join(sourceRoot, 'state.vscdb')
     writeUncheckpointedWalDatabase(dbPath)
-    if (!makeSourceParentReadOnly(skip)) return
-    chmodSync(cacheRoot, 0o000)
-
-    const stderr = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
+    if (!makeReadOnly(cacheRoot, skip)) return
+    chmodSync(dbPath, 0o000)
     try {
-      // Capture the query-time fallback error before close(); readValue's finally
-      // can replace EACCES with "database is not open" after the closed handle.
+      accessSync(dbPath, constants.R_OK)
+      chmodSync(dbPath, 0o644)
+      skip(`SKIP: chmod 000 did not make ${dbPath} unreadable for this process`)
+      return
+    } catch {
+      // Source is unreadable — the branch isSourceUnreadable must prefer this errno.
+    }
+    try {
       let thrown: unknown
       try {
-        const db = openDatabase(dbPath)
-        try {
-          db.query('SELECT c FROM values_table')
-        } catch (err) {
-          thrown = err
-        }
-        try { db.close() } catch { /* query-time fallback may have closed it */ }
+        readValue(dbPath)
       } catch (err) {
         thrown = err
       }
       expect(thrown).toBeDefined()
-      const code = (thrown as NodeJS.ErrnoException | undefined)?.code
-      // Cache mkdir/copy EACCES must not be rethrown — that misattributes the
-      // failure to the source path for Warp doctor / Full Disk Access.
-      expect(code === 'EACCES' || code === 'EPERM').toBe(false)
-      const notices = stderr.mock.calls.filter(([chunk]) => String(chunk).includes('cache copy could not be written'))
-      expect(notices).toHaveLength(1)
+      const code = typeof thrown === 'object' && thrown !== null && 'code' in thrown
+        ? (thrown as { code?: unknown }).code
+        : undefined
+      expect(code === 'EACCES' || code === 'EPERM').toBe(true)
     } finally {
-      stderr.mockRestore()
+      chmodSync(dbPath, 0o644)
       chmodSync(cacheRoot, 0o755)
     }
   })
