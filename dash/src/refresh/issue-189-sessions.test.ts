@@ -120,18 +120,18 @@ describe('issue #189 T1 (kilo-code)', () => {
   })
 })
 
-// T1b — RED: a divergent kilo.db shape must surface a record or a named reason.
+// T1b — a divergent kilo.db shape must land records, not a silent zero.
 //
-// Hypothesis grounded in the code: `buildAssistantCall`
-// (dash/src/providers/session-message.ts) only recognises token keys under
-// `tokens` / `usage`, returns null when the turn has no cost and no
-// substantive part, and `tryQuerySessionTokens` needs `cost`/`tokens_*`
-// columns on `session`. A shared-runtime DB whose assistant `message.data`
-// carries flat `tokens_input`-style keys with part types outside the
-// substantive list yields exactly 0 records, silently. The live 104 MB
-// kilo.db behaved this way (70 units, 69 with 0 records, none named why).
+// The fixture mirrors the live 104 MB kilo.db: assistant `message.data`
+// carries flat `tokens_input`/`tokens_output` keys with only a `markdown`
+// part outside the substantive list. `buildAssistantCall`
+// (dash/src/providers/session-message.ts) reads the flat keys, so the
+// fixture holds valid token data and MUST produce records. A checkpoint
+// lastErrorCode must not excuse a zero here: a generic 'partial' status
+// covered exactly the silent-zero regression this test exists to catch
+// (PR #264 review).
 describe('issue #189 T1b (kilo-code divergent shape)', () => {
-  it('either persists kilo records or records a named no-data reason', async () => {
+  it('persists kilo records from flat tokens_input/tokens_output keys', async () => {
     const kiloDir = join(root, 'xdg', 'kilo')
     mkdirSync(kiloDir, { recursive: true })
     const dbPath = join(kiloDir, 'kilo.db')
@@ -190,16 +190,10 @@ describe('issue #189 T1b (kilo-code divergent shape)', () => {
       const kiloRecords = store
         .listAll()
         .filter((record) => String(record.source).includes('kilo') || String(record.harness).includes('kilo'))
-      const kiloCheckpoints = store
-        .listSourceCheckpoints()
-        .filter((checkpoint) => checkpoint.harnessId.includes('kilo'))
-      const anyNamedReason = kiloCheckpoints.some(
-        (checkpoint) => checkpoint.recordCount > 0 || (checkpoint.lastErrorCode !== null && checkpoint.lastErrorCode !== ''),
-      )
       expect(
-        kiloRecords.length > 0 || anyNamedReason,
-        `silent zero: ${kiloCheckpoints.length} kilo unit(s), 0 records, no reason recorded`,
-      ).toBe(true)
+        kiloRecords.length,
+        'kilo flat-token fixture must land records; 0 records is the #227 silent-zero regression',
+      ).toBeGreaterThan(0)
     } finally {
       store.close()
     }
@@ -274,11 +268,15 @@ describe('issue #189 T3b (codex-tui originator)', () => {
   })
 })
 
-// T3b' — RED variant 2: originator 'codex-tui' plus token_count usage under
-// unrecognised keys. If nothing lands and no reason is recorded, that is the
-// same silent-zero class as T1b, attributed to Codex.
+// T3b' — variant 2: originator 'codex-tui' plus token_count usage under
+// camelCase keys. normalizeTokenInfo (dash/src/providers/codex.ts) maps the
+// camelCase spellings onto the canonical snake_case ones, so the fixture
+// holds valid token data and MUST produce records. As with T1b, a checkpoint
+// lastErrorCode must not excuse a zero here: a generic 'partial' status
+// covered exactly the silent-zero regression this test exists to catch
+// (PR #264 review).
 describe('issue #189 T3b (codex divergent token shape)', () => {
-  it('either persists codex records or records a named no-data reason', async () => {
+  it('persists codex records from camelCase token usage keys', async () => {
     const codexHome = join(root, '.codex')
     const dayDir = join(codexHome, 'sessions', '2026', '09', '10')
     mkdirSync(dayDir, { recursive: true })
@@ -328,16 +326,10 @@ describe('issue #189 T3b (codex divergent token shape)', () => {
       const codexRecords = store
         .listAll()
         .filter((record) => String(record.harness).startsWith('codex'))
-      const codexCheckpoints = store
-        .listSourceCheckpoints()
-        .filter((checkpoint) => checkpoint.harnessId.startsWith('codex'))
-      const anyNamedReason = codexCheckpoints.some(
-        (checkpoint) => checkpoint.recordCount > 0 || (checkpoint.lastErrorCode !== null && checkpoint.lastErrorCode !== ''),
-      )
       expect(
-        codexRecords.length > 0 || anyNamedReason,
-        `silent zero: ${codexCheckpoints.length} codex unit(s), 0 records, no reason recorded`,
-      ).toBe(true)
+        codexRecords.length,
+        'codex camelCase-usage fixture must land records; 0 records is the #196 silent-zero regression',
+      ).toBeGreaterThan(0)
     } finally {
       store.close()
     }
