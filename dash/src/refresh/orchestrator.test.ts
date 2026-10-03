@@ -893,4 +893,88 @@ describe('refreshHarnessSources — shared projection entry point', () => {
       store.close()
     }
   })
+
+  it('retries a missing on-disk path as a remapped bare call array (#276)', async () => {
+    const store = new CanonStore(':memory:')
+    const root = mkdtempSync(join(tmpdir(), 'kyber-desktop-missing-216-'))
+    temporaryRoots.push(root)
+    const filePath = join(root, 'does-not-exist.jsonl')
+
+    const parsedCall: ParsedProviderCall = {
+      provider: 'claude',
+      model: 'claude-sonnet-4-5',
+      inputTokens: 150,
+      outputTokens: 45,
+      cacheCreationInputTokens: 0,
+      cacheReadInputTokens: 0,
+      cachedInputTokens: 0,
+      reasoningTokens: 0,
+      webSearchRequests: 0,
+      costUSD: 0,
+      tools: [],
+      bashCommands: [],
+      timestamp: '2026-09-10T12:00:00.000Z',
+      speed: 'standard',
+      deduplicationKey: 'claude:desk-missing-216:desk-missing-asst',
+      userMessage: '',
+      sessionId: 'desk-missing-216',
+      turnId: 'msg-desk-missing',
+    }
+
+    const loaderShapes: unknown[] = []
+    let ingestPasses = 0
+
+    try {
+      const report = await refreshHarnessSources(store, {
+        getAllProviders: async () => [],
+        descriptors: descriptors('claude-desktop'),
+        jobConcurrency: 1,
+        commandStartedAt: new Date('2026-09-12T00:00:00.000Z'),
+        parseAllSessions: async () => undefined,
+        iterateNativeUnits: async (): Promise<NativeUnit[]> => {
+          const session: SessionSource = {
+            path: filePath,
+            project: 'fixture-project',
+            provider: 'claude',
+          }
+          return [{
+            harnessId: 'claude-desktop',
+            sourceKey: 'claude-desktop:desk-missing-216',
+            source: session,
+            status: 'new',
+            revision: {
+              fingerprint: { dev: 1, ino: 1, mtimeMs: 1, sizeBytes: 1 },
+              token: '1:1:1:1',
+            },
+            envelopes: [{
+              harnessId: 'claude-desktop',
+              sourceKey: 'claude-desktop:desk-missing-216',
+              source: session,
+              nativeSessionId: parsedCall.sessionId,
+              timestamp: parsedCall.timestamp,
+              call: parsedCall,
+              revisionToken: '1:1:1:1',
+            }],
+            problems: [],
+          }]
+        },
+        ingestProviders: async (providers, loader) => {
+          ingestPasses += 1
+          const loaded = loader(providers[0]!)
+          loaderShapes.push(loaded)
+          if (ingestPasses === 1) return { records: [], problems: [] }
+          return productionIngestProviders(providers, () => loaded)
+        },
+      })
+
+      expect(report.rows[0]?.status).toBe('ok')
+      expect(ingestPasses).toBe(2)
+      expect(Array.isArray(loaderShapes[0])).toBe(false)
+      expect(Array.isArray(loaderShapes[1])).toBe(true)
+      const retryLoad = loaderShapes[1] as ParsedProviderCall[]
+      expect(retryLoad[0]?.provider).toBe('claude-desktop')
+    } finally {
+      store.close()
+    }
+  })
 })

@@ -351,7 +351,7 @@ async function runHarnessJob(context: JobContext): Promise<HarnessJobRow> {
       parserContractVersion: descriptor.parserContractVersion,
     }
     const outgoing = recordsForUncoveredCommit(merged, store, previous, requested, coverageRequest)
-    const created = outgoing.filter((record) => store.get(record.spanId) === undefined).length
+    const created = outgoing.filter((record) => !store.has(record.spanId)).length
     const updated = outgoing.length - created
     const checkpoint = checkpointFor(descriptor, unit, {
       coveredFromUtc: activeCoveredFromUtc,
@@ -598,7 +598,7 @@ function recordsForUncoveredCommit(
     previous !== undefined &&
     previous.parserContractVersion !== request.parserContractVersion
   return merged.filter((record) => {
-    if (store.get(record.spanId) !== undefined) {
+    if (store.has(record.spanId)) {
       return versionInvalidated
     }
     if (!reusable || previous === undefined) return true

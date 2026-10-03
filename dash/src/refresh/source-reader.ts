@@ -240,7 +240,7 @@ export function sliceCallsToWindow(
  * already decided a per-source slice (parser-contract repair); otherwise the
  * job `dateRange`.
  */
-export async function readNativeUnit(
+async function readNativeUnit(
   harnessId: HarnessId,
   provider: Provider,
   source: SessionSource,
