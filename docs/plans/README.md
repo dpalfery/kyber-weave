@@ -19,6 +19,7 @@ A plan is open only while it is built. The pull request that finishes it archive
 
 | Plan | Status | Date | Goal |
 |---|---|---|---|
+| [2026-10-02-issue-189-sessions-dashboard.md](2026-10-02-issue-189-sessions-dashboard.md) | Draft | 2026-10-02 | Fix [issue #189](https://github.com/dpalfery/kyber-weave/issues/189): the remaining per-harness parser gaps that keep sessions out of the dashboard — KiloCode yields zero records ([#227](https://github.com/dpalfery/kyber-weave/issues/227)) and Codex ingests 647 folder sessions but shows 5 with no `codex-cli` or collector data ([#196](https://github.com/dpalfery/kyber-weave/issues/196)). Development mode: test-first. |
 
 Pipeline T9 and spine S-docs harvested 2026-09-13 into [dash/architecture.md](../dash/architecture.md), [dash/runbook.md](../dash/runbook.md), [dash/telemetry-inventory.md](../dash/telemetry-inventory.md), [ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md), and [ADR 0018](../adr/0018-kyberdash-content-retention-purge.md). ADRs 0012–0015 remain the spine harvest (0014 notes that `kyber purge-content` was not shipped). Residual risks (T8 live-source coverage, findings client-side harness filter) live on the archived plans — they are not shipped claims.
 
