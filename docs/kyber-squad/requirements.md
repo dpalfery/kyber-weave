@@ -4,7 +4,7 @@ title: Kyber-Squad requirements and degradation contract
 doc-type: requirements
 component: KyberSquad
 owner: dpalfery
-last-reviewed: 2026-09-30
+last-reviewed: 2026-10-03
 status: current
 decided-by:
   - adr/0019-pi-native-subagents-and-primary-lowering
@@ -29,6 +29,24 @@ This document defines the formal requirement specifications (**KS-001** through 
 | **KS-006** | **Dual Distribution Packaging**: Provide `squad pack` to build an APM distribution zip containing all agents with their owned resources, all skills with their resources, and MCP configurations, plus an adjunct Agent Plugins v1 artifact exposing the complete recursive portable skill tree and MCP surfaces only — never agents or agent-owned resources. Every rendered role embeds its canonical instruction digest. |
 | **KS-007** | **Release Pipeline Publishing**: Publish versioned `kyber-squad-X.Y.Z.zip` and `kyber-squad-plugin-X.Y.Z.zip` artifacts in GitHub Releases, validated against the pinned APM release. |
 | **KS-008** | **Documentation & Plan Closeout**: Maintain canonical architecture, onboarding, requirements, configuration, and distribution documentation, keeping the governed corpus at zero validation findings. |
+
+---
+
+## Conductor execution circuit-breaker
+
+This is product behavior of the deployed `conductor`, `csharp-dev`, `test-dev`, and
+`github-devops` agents, not a new `KS-*` id. `KS-001` through `KS-008` stay as numbered.
+Mechanics live in [architecture §9](architecture.md#9-conductor-execution-circuit-breaker).
+
+| Decision | Requirement |
+|---|---|
+| **Q1 — Two-level caps** | A worker may make at most 3 incremental test-fix-verify attempts against the same failing fixture or cluster in one invocation. The conductor may dispatch at most 2 rework workers for that cluster in the run. Cluster identity is the first-observed test ID recorded on the execution artifact. The dispatch tally increments only on rework dispatch. |
+| **Q2 — Oscillation** | A first one-way regression (A causes B to fail) consumes one worker iteration. `THRASH_OSCILLATION_DETECTED` trips only on A→B→A or a repeating failure signature. |
+| **Q3 — Invariant contradiction** | Workers must not satisfy contradictory invariants. A fixture that asserts obsolete details conflicting with the approved design trips `INVARIANT_CONTRADICTION`. |
+| **Q4 — JEV checkpoints** | Before and after each fix, workers check blast radius, oscillation, invariant consistency, and the 3-iteration cap. The closed trigger set is `ITERATION_CAP_EXCEEDED`, `THRASH_OSCILLATION_DETECTED`, `INVARIANT_CONTRADICTION`, `BLAST_RADIUS_EXCEEDED`. |
+| **Q5 — Escalation** | A trip emits `STATUS: ESCALATION`. The conductor records `ESCALATION: circuit-breaker`, halts rework for that task, and leaves non-dependent work running. The run cannot complete while that finding is unresolved. `architect` mediates at queue drain. |
+
+No ADR: the decisions constrain instruction bodies, not the render or transaction engine.
 
 ---
 
@@ -114,6 +132,6 @@ synchronization. They remain untouched until a human refreshes them after a fres
 
 ## Related
 
-- [Kyber-Squad architecture](architecture.md) — technical design and transaction engine
+- [Kyber-Squad architecture](architecture.md) — technical design, transaction engine, and conductor execution circuit-breaker
 - [Kyber-Squad onboarding guide](onboarding.md) — command usage and lifecycle workflows
 - [The documentation ontology](../documentation-ontology.md) — documentation standards
