@@ -200,7 +200,7 @@ window (`sliceCallsToWindow`), `no_recordable_events` when it produced none (for
 no `token_count` or model events). A unit with records, or with problems, carries no such
 reason. The Codex OTLP adapter (`canon/adapters/codex.ts`) is the sixth fingerprint voter; see the Codex OTLP note in [telemetry-inventory](telemetry-inventory.md). Warp's Group Containers
 sqlite is opened through `openDatabase`. A copyfile(2) `EPERM`/`EACCES` on the cache copy
-falls back to read/write (`copyFileBestEffort`, #257), so records are produced whenever the
+falls back to read/write (`copyFileBestEffort`, issue #194 / PR #257), so records are produced whenever the
 bytes are readable. A true source-unreadable denial (typically macOS TCC on Group Containers)
 is not retried as another user and does not fabricate rows: discovery returns `[]`, the probe
 path stays `exists: true` with `accessError: permission-denied`, and doctor's `emptyVerdict`
