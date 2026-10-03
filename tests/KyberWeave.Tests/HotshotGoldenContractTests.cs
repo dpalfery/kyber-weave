@@ -544,6 +544,22 @@ public sealed partial class HotshotGoldenContractTests
             }
         }
 
+        // Guard: an EvolvedAgentIdentities entry that still matches golden silently
+        // disables every field comparison. Fail so a stale name is removed rather than rotting.
+        foreach (string evolvedName in EvolvedAgentIdentities)
+        {
+            GoldenAgentEntry goldenEntry = manifest.Agents.FirstOrDefault(entry => AgentName(entry.Path) == evolvedName);
+            if (string.IsNullOrEmpty(goldenEntry.Path) || !sourceAgents.TryGetValue(evolvedName, out SquadAgent? sourceAgent))
+            {
+                continue;
+            }
+
+            if (string.Equals(goldenEntry.BodySha256, sourceAgent.BodyDigest, StringComparison.Ordinal))
+            {
+                mismatches.Add($"evolved agent '{evolvedName}' matches golden; remove it from the list");
+            }
+        }
+
         foreach (GoldenSkillEntry expected in manifest.Skills)
         {
             string skillName = SkillName(expected.Path);

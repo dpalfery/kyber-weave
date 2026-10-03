@@ -290,6 +290,13 @@ public sealed class SquadCanonicalContentTests
         Assert.Contains("loop detection", contract, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("failure cluster", contract, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("oscillation", contract, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Maximum of 2 rework dispatches", contract, StringComparison.Ordinal);
+        Assert.Contains("ITERATION_CAP_EXCEEDED", contract, StringComparison.Ordinal);
+        Assert.Contains("THRASH_OSCILLATION_DETECTED", contract, StringComparison.Ordinal);
+        Assert.Contains("INVARIANT_CONTRADICTION", contract, StringComparison.Ordinal);
+        Assert.Contains("BLAST_RADIUS_EXCEEDED", contract, StringComparison.Ordinal);
+        Assert.Contains("ESCALATION: circuit-breaker", contract, StringComparison.Ordinal);
+        Assert.Contains("RECOMMENDED_ACTION", contract, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -301,13 +308,19 @@ public sealed class SquadCanonicalContentTests
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
         SquadAgent agent = Assert.Single(source.Agents, a => a.Name == agentName);
 
+        Assert.Contains("Maximum of 3 incremental", agent.InstructionBody, StringComparison.Ordinal);
         Assert.Contains("JEV", agent.InstructionBody, StringComparison.Ordinal);
         Assert.Contains("circuit breaker", agent.InstructionBody, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("STATUS: ESCALATION", agent.InstructionBody, StringComparison.Ordinal);
         Assert.Contains("CIRCUIT_BREAKER_TRIGGER", agent.InstructionBody, StringComparison.Ordinal);
+        Assert.Contains("ITERATION_CAP_EXCEEDED", agent.InstructionBody, StringComparison.Ordinal);
+        Assert.Contains("THRASH_OSCILLATION_DETECTED", agent.InstructionBody, StringComparison.Ordinal);
+        Assert.Contains("INVARIANT_CONTRADICTION", agent.InstructionBody, StringComparison.Ordinal);
+        Assert.Contains("BLAST_RADIUS_EXCEEDED", agent.InstructionBody, StringComparison.Ordinal);
         Assert.Contains("FAILURE_CLUSTER", agent.InstructionBody, StringComparison.Ordinal);
         Assert.Contains("CONTRADICTORY_INVARIANTS", agent.InstructionBody, StringComparison.Ordinal);
         Assert.Contains("BLAST_RADIUS", agent.InstructionBody, StringComparison.Ordinal);
+        Assert.Contains("RECOMMENDED_ACTION", agent.InstructionBody, StringComparison.Ordinal);
     }
 
     [Fact]
