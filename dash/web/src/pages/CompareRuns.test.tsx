@@ -155,7 +155,23 @@ describe('CompareRuns option labels (D4)', () => {
     expect(option.textContent).toContain('—')
   })
 
-  it('shows — for turns when turnCount is unmeasured, not a fabricated 0t', () => {
+  it('shows — for turns when turnCount is undefined (unmeasured)', () => {
+    const label = formatCompareRunOptionLabel(
+      run({
+        runId: 'run-unknown-turns',
+        harness: 'cursor',
+        turnCount: undefined,
+        totalInput: undefined,
+        totalOutput: undefined,
+      }),
+    )
+    // Same sentinel as the tokens branch — not a fabricated `0t`.
+    expect(label).toMatch(/ · — · — · /)
+    expect(label).not.toMatch(/\b0t\b/)
+    expect(formatComparePickerTurns(undefined, 0)).toBe('—')
+    expect(formatComparePickerTurns(0, 0)).toBe('0')
+    expect(formatComparePickerTurns(undefined, 4)).toBe('4')
+
     const unknown = run({
       runId: 'run-unknown-turns',
       harness: 'cursor',
@@ -163,12 +179,6 @@ describe('CompareRuns option labels (D4)', () => {
       totalInput: 100,
       totalOutput: 20,
     })
-    expect(formatCompareRunOptionLabel(unknown)).toContain('—')
-    expect(formatCompareRunOptionLabel(unknown)).not.toContain('0t')
-    expect(formatComparePickerTurns(undefined, 0)).toBe('—')
-    expect(formatComparePickerTurns(0, 0)).toBe('0')
-    expect(formatComparePickerTurns(undefined, 4)).toBe('4')
-
     renderCompare(<CompareRuns runs={[unknown]} initialRunAId="run-unknown-turns" />)
     const option = within(screen.getByTestId('compare-run-a')).getByRole('option', {
       name: /run-unknown-turns|—/,
