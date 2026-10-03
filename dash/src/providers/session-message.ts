@@ -102,11 +102,11 @@ export function buildAssistantCall(opts: {
   const { data, parts } = opts
 
   const tokens = {
-    input: finiteOrUndefined(data.tokens?.input ?? data.usage?.input_tokens ?? data.tokens_input) ?? 0,
-    output: finiteOrUndefined(data.tokens?.output ?? data.usage?.output_tokens ?? data.tokens_output) ?? 0,
-    reasoning: finiteOrUndefined(data.tokens?.reasoning ?? data.tokens_reasoning) ?? 0,
-    cacheRead: finiteOrUndefined(data.tokens?.cache?.read ?? data.usage?.cache_read_input_tokens ?? data.tokens_cache_read) ?? 0,
-    cacheWrite: finiteOrUndefined(data.tokens?.cache?.write ?? data.usage?.cache_creation_input_tokens ?? data.tokens_cache_write) ?? 0,
+    input: finiteOrUndefined(data.tokens?.input) ?? finiteOrUndefined(data.usage?.input_tokens) ?? finiteOrUndefined(data.tokens_input) ?? 0,
+    output: finiteOrUndefined(data.tokens?.output) ?? finiteOrUndefined(data.usage?.output_tokens) ?? finiteOrUndefined(data.tokens_output) ?? 0,
+    reasoning: finiteOrUndefined(data.tokens?.reasoning) ?? finiteOrUndefined(data.tokens_reasoning) ?? 0,
+    cacheRead: finiteOrUndefined(data.tokens?.cache?.read) ?? finiteOrUndefined(data.usage?.cache_read_input_tokens) ?? finiteOrUndefined(data.tokens_cache_read) ?? 0,
+    cacheWrite: finiteOrUndefined(data.tokens?.cache?.write) ?? finiteOrUndefined(data.usage?.cache_creation_input_tokens) ?? finiteOrUndefined(data.tokens_cache_write) ?? 0,
   }
 
   const toolParts = parts.filter((p) => (p.type === 'tool' || p.type === 'tool-call' || p.type === 'tool_call') && normalizeToolName(p.tool))

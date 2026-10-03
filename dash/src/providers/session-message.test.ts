@@ -104,6 +104,21 @@ describe('buildAssistantCall flat token fallbacks', () => {
     expect(usageOnly!.cacheCreationInputTokens).toBe(40)
   })
 
+  it('falls through to a numeric flat fallback when nested tokens are a string', () => {
+    const call = buildAssistantCall({
+      ...base,
+      data: {
+        role: 'assistant',
+        modelID: 'claude-opus-4-6',
+        tokens: { input: '100' as unknown as number, output: 50 },
+        tokens_input: 42,
+      },
+    })
+    expect(call).not.toBeNull()
+    expect(call!.inputTokens).toBe(42)
+    expect(call!.outputTokens).toBe(50)
+  })
+
   it('treats nested string token fields as absent', () => {
     const nested = buildAssistantCall({
       ...base,
