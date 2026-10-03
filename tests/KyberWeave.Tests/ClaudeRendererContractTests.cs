@@ -576,6 +576,34 @@ public sealed class ClaudeRendererContractTests : IDisposable
     }
 
     /// <summary>
+    /// Pins the Claude model of the specification author by value. On <c>haiku</c>,
+    /// <c>product-owner</c> restated approved decisions inaccurately, pre-decided an open
+    /// question, contradicted its own phase mapping, and misreported its own output across
+    /// three revision rounds of one design phase. Authoring requirements and design is
+    /// planning work, so it runs on the same tier as <c>architect</c>.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_Claude_ProductOwnerRunsOnOpus()
+    {
+        SquadRendererRegistry registry = new([new ClaudeRenderer()]);
+        SquadRenderRequest request = new(
+            SourceDirectory: ProductRoot,
+            Targets: [SquadTarget.Claude],
+            Scope: SquadDeploymentScope.Project);
+
+        SquadRenderResult result = await registry.RenderAsync(request);
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+        SquadDeploymentFile file = Assert.Single(
+            result.Files,
+            f => f.RelativePath == ".claude/agents/product-owner.md");
+        (YamlMappingNode frontmatter, _) = SplitFrontmatter(
+            Encoding.UTF8.GetString(file.Content.Span),
+            "product-owner");
+        Assert.Equal("opus", RequireScalar(frontmatter, "model", "product-owner"));
+    }
+
+    /// <summary>
     /// Row (b): Project scope renders the primary agent as both a subagent and an entry-point
     /// skill, each with its resource closure, under the same degradation records.
     /// </summary>

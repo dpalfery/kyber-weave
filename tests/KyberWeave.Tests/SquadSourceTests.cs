@@ -105,7 +105,7 @@ public sealed class SquadSourceTests
     [InlineData("fast", "opencode", "opencode/muse-spark-1.3-contributor-free")]
     [InlineData("fast", "pi", "opencode/muse-spark-1.3-contributor-free[thinking=low]")]
     [InlineData("fast", "devin", "deepseek-v4-1-flash-high")]
-    [InlineData("general", "claude", "haiku")]
+    [InlineData("general", "claude", "sonnet")]
     [InlineData("general", "codex", "gpt-5.6-terra")]
     [InlineData("general", "copilot", "Grok 4.6 (copilot)")]
     [InlineData("general", "cursor", "grok-4.6[]")]
