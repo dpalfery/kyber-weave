@@ -23,7 +23,13 @@ code-refs:
 2026-10-02 by the orchestrator under the no-human-tonight protocol: all
 questions were grounded in repo docs or carried as open questions with
 conservative defaults; none required a human answer. Development mode:
-`test-first` (default). Branch: `hal.hermes.opencode/issue-197-warp-devin-no-data` (created from `origin/main`). T1–T5 complete. Archived per KW-DOC-LIFECYCLE-003.
+`test-first` (default). Branch: `hal.hermes.opencode/issue-197-warp-devin-no-data` (created from
+`origin/main`). T1–T5 complete. Review round 2: the branch merged main so
+`copyFileBestEffort` (#257) is in scope — a copyfile(2) EPERM/EACCES now falls
+back to read/write, so Warp produces records whenever the bytes are readable,
+and the surfaced permission-denied state covers only true TCC denials. Both
+halves are required by the issue title: produce data where possible, surface
+the reason where not. Archived per KW-DOC-LIFECYCLE-003.
 
 This plan addresses [issue #197](https://github.com/dpalfery/kyber-weave/issues/197):
 Warp reports 4 checkpoints, last success 2026-09-24, 0 records because the sqlite

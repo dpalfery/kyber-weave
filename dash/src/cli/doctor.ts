@@ -16,6 +16,7 @@ import {
 } from '../ingest/session-cache.js'
 import { renderTable } from './text-table.js'
 import { collectLauncherNotes, type LauncherNote } from '../ingest/launcher-homes.js'
+import { isPositiveNumber } from '../ingest/parser.js'
 import { readConfig } from '../config.js'
 import { BRAND } from '../brand-overlay.js'
 
@@ -421,7 +422,10 @@ async function collectOneProvider(
       // name the gap in the verdict instead.
       if (provider.name === 'devin') {
         const rate = (await readConfig()).devin?.acuUsdRate
-        if (!(typeof rate === 'number' && rate > 0)) {
+        // isPositiveNumber (not a bare `> 0`): a config literal such as 1e400
+        // parses to positive Infinity, which the Devin parser rejects — the
+        // rate is effectively missing and must keep the unpriced warning.
+        if (!isPositiveNumber(rate)) {
           base.verdict += '; costs unpriced — set devin.acuUsdRate in ~/.kyberdash/config.json'
         }
       }

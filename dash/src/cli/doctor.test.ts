@@ -520,6 +520,28 @@ describe('collectDoctorReport - devin rate transparency (#197)', () => {
       else process.env['HOME'] = prevHome
     }
   })
+
+  it('a non-finite ACU rate (1e400 parses to Infinity) still names the rate gap', async () => {
+    const prevHome = process.env['HOME']
+    process.env['HOME'] = tmpDir
+    try {
+      await mkdir(join(tmpDir, '.kyberdash'), { recursive: true })
+      // Raw literal on purpose: JSON.stringify would coerce Infinity to null,
+      // but JSON.parse maps 1e400 to positive Infinity.
+      await writeFile(join(tmpDir, '.kyberdash', 'config.json'), '{"devin":{"acuUsdRate":1e400}}')
+      await mkdir(join(tmpDir, 'transcripts'), { recursive: true })
+      await writeFile(join(tmpDir, 'transcripts', 's1.json'), JSON.stringify({ steps: [] }))
+      const provider = createDevinProvider(tmpDir)
+      const report = await collectDoctorReport('all', { providers: [provider], cache: emptyCache() })
+      const r = only(report, 'devin')
+
+      expect(r.candidatesFound).toBeGreaterThanOrEqual(1)
+      expect(r.verdict).toContain('devin.acuUsdRate')
+    } finally {
+      if (prevHome === undefined) delete process.env['HOME']
+      else process.env['HOME'] = prevHome
+    }
+  })
 })
 
 describe('collectDoctorReport - permission-denied probe root (#197)', () => {
