@@ -148,11 +148,12 @@ function toCandidate(row: KyberRunSummary): RunCandidate {
 
 /**
  * Picker option text (D4): `{localDate} · {harness} · {turnCount}t · {tokens} · {shortId}`
- * with an optional `label` prefix. Tokens are measured input+output or "—".
+ * with an optional `label` prefix. Unmeasured turns and tokens are "—", not a
+ * fabricated zero — the same honesty `isComparePickerVisible` uses for D2.
  */
 export function formatCompareRunOptionLabel(run: RunCandidate): string {
   const localDate = fmtRunTimestamp(run.started).date
-  const turns = `${run.turnCount ?? 0}t`
+  const turns = run.turnCount === undefined ? '—' : `${run.turnCount}t`
   const input = run.totalInput
   const output = run.totalOutput
   const hasTokens =
@@ -166,6 +167,17 @@ export function formatCompareRunOptionLabel(run: RunCandidate): string {
   return run.label ? `${run.label} · ${body}` : body
 }
 
+/**
+ * Picker-card Turns figure. Measured counts win; a loaded turn list is a last
+ * resort. `toCandidate` always sets `turns: []`, so treating length as a
+ * fallback would reprint the #190 "Turns: 0" lie for unmeasured runs.
+ */
+export function formatComparePickerTurns(measured: number | undefined, loadedTurns: number): string {
+  if (measured !== undefined) return String(measured)
+  if (loadedTurns > 0) return String(loadedTurns)
+  return '—'
+}
+
 /** D2: hide zero-turn runs always; hide subagents unless the toggle is on. */
 export function isComparePickerVisible(run: RunCandidate, showSubagents: boolean): boolean {
   if (run.turnCount === 0) return false
@@ -173,14 +185,121 @@ export function isComparePickerVisible(run: RunCandidate, showSubagents: boolean
   return true
 }
 
-function optionTitleForCollision(
-  run: RunCandidate,
-  label: string,
-  collidingLabels: ReadonlySet<string>,
-): string | undefined {
-  if (!collidingLabels.has(label)) return undefined
+function workingDirectoryBasename(cwd: string | null | undefined): string | undefined {
+  const trimmed = cwd?.trim()
+  if (!trimmed) return undefined
+  const parts = trimmed.replace(/\\/g, '/').split('/').filter(Boolean)
+  return parts.at(-1)
+}
+
+/**
+ * Visible `<option>` text. Colliding D4 labels get a cwd basename (or a stable
+ * ordinal) appended so Chrome/Firefox users can tell the rows apart — `<option
+ * title>` is not reliably surfaced.
+ */
+export function compareOptionLabels(runs: readonly RunCandidate[]): Map<string, string> {
+  const base = new Map<string, string>()
+  for (const run of runs) {
+    base.set(run.runId, formatCompareRunOptionLabel(run))
+  }
+  const groups = new Map<string, RunCandidate[]>()
+  for (const run of runs) {
+    const label = base.get(run.runId) ?? formatCompareRunOptionLabel(run)
+    const group = groups.get(label) ?? []
+    group.push(run)
+    groups.set(label, group)
+  }
+  const visible = new Map<string, string>()
+  for (const run of runs) {
+    const label = base.get(run.runId) ?? formatCompareRunOptionLabel(run)
+    const group = groups.get(label) ?? [run]
+    if (group.length === 1) {
+      visible.set(run.runId, label)
+      continue
+    }
+    const basename = workingDirectoryBasename(run.workingDirectory)
+    const used = group.map((sibling) => workingDirectoryBasename(sibling.workingDirectory))
+    const basenameUnique = basename !== undefined && used.filter((name) => name === basename).length === 1
+    if (basenameUnique) {
+      visible.set(run.runId, `${label} · ${basename}`)
+      continue
+    }
+    visible.set(run.runId, `${label} · ${group.findIndex((sibling) => sibling.runId === run.runId) + 1}`)
+  }
+  return visible
+}
+
+function selectedRunTitle(run: RunCandidate | undefined): string | undefined {
+  if (!run) return undefined
   const cwd = run.workingDirectory?.trim()
-  return cwd ? `${run.runId}\n${cwd}` : run.runId
+  // HTML title attributes collapse newlines; keep the pair on one readable line.
+  return cwd ? `${run.runId} · ${cwd}` : run.runId
+}
+
+function RunPickerCard({
+  id,
+  heading,
+  selectedId,
+  onChange,
+  run,
+  outcome,
+  turnCount,
+  pickerRuns,
+  optionLabels,
+}: {
+  id: string
+  heading: string
+  selectedId: string
+  onChange: (id: string) => void
+  run: RunCandidate | undefined
+  outcome: OutcomeSummary | undefined
+  turnCount: string
+  pickerRuns: readonly RunCandidate[]
+  optionLabels: ReadonlyMap<string, string>
+}) {
+  return (
+    <Card className="flex flex-col gap-2 p-4">
+      <label htmlFor={id} className="text-[11px] font-semibold uppercase tracking-wider text-heading">
+        {heading}
+      </label>
+      <select
+        id={id}
+        data-testid={id}
+        value={selectedId}
+        title={selectedRunTitle(run)}
+        onChange={(e) => onChange(e.target.value)}
+        className="rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+      >
+        <option value="">Select a run</option>
+        {pickerRuns.map((candidate) => {
+          const label = optionLabels.get(candidate.runId) ?? formatCompareRunOptionLabel(candidate)
+          return (
+            <option key={candidate.runId} value={candidate.runId}>
+              {label}
+            </option>
+          )
+        })}
+      </select>
+      {run && (
+        <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-tertiary-foreground">
+          <span>Harness: <strong className="text-foreground">{run.harness}</strong></span>
+          <span>Turns: <strong className="text-foreground">{turnCount}</strong></span>
+          <span>
+            Outcome:{' '}
+            <strong
+              className={
+                outcome?.status === 'success'
+                  ? 'text-emerald-600 dark:text-emerald-400'
+                  : 'text-rose-600 dark:text-rose-400'
+              }
+            >
+              {outcome?.status ?? 'unobserved'}
+            </strong>
+          </span>
+        </div>
+      )}
+    </Card>
+  )
 }
 
 function toTurn(raw: Record<string, unknown> | null): RunTurnSummary | null {
@@ -363,25 +482,7 @@ export function CompareRuns({
     )
   }, [runs, showSubagents, selectedAId, selectedBId])
 
-  const optionLabels = useMemo(() => {
-    const labels = new Map<string, string>()
-    for (const r of pickerRuns) {
-      labels.set(r.runId, formatCompareRunOptionLabel(r))
-    }
-    return labels
-  }, [pickerRuns])
-
-  const collidingLabels = useMemo(() => {
-    const counts = new Map<string, number>()
-    for (const label of optionLabels.values()) {
-      counts.set(label, (counts.get(label) ?? 0) + 1)
-    }
-    const colliding = new Set<string>()
-    for (const [label, count] of counts) {
-      if (count > 1) colliding.add(label)
-    }
-    return colliding
-  }, [optionLabels])
+  const optionLabels = useMemo(() => compareOptionLabels(pickerRuns), [pickerRuns])
 
   const canFetchComparison = live && selectedAId !== '' && selectedBId !== '' && selectedAId !== selectedBId
 
@@ -600,89 +701,28 @@ export function CompareRuns({
             </label>
           </div>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <Card className="flex flex-col gap-2 p-4">
-              <label htmlFor="compare-run-a" className="text-[11px] font-semibold uppercase tracking-wider text-heading">
-                Run A (Baseline)
-              </label>
-              <select
-                id="compare-run-a"
-                data-testid="compare-run-a"
-                value={selectedAId}
-                onChange={(e) => handleSelectA(e.target.value)}
-                className="rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-              >
-                <option value="">Select a run</option>
-                {pickerRuns.map((r) => {
-                  const label = optionLabels.get(r.runId) ?? formatCompareRunOptionLabel(r)
-                  const title = optionTitleForCollision(r, label, collidingLabels)
-                  return (
-                    <option key={r.runId} value={r.runId} title={title}>
-                      {label}
-                    </option>
-                  )
-                })}
-              </select>
-              {runA && (
-                <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-tertiary-foreground">
-                  <span>Harness: <strong className="text-foreground">{runA.harness}</strong></span>
-                  <span>Turns: <strong className="text-foreground">{comparison?.runA.turnCount ?? runA.turnCount ?? runA.turns.length}</strong></span>
-                  <span>
-                    Outcome:{' '}
-                    <strong
-                      className={
-                        outcomeA?.status === 'success'
-                          ? 'text-emerald-600 dark:text-emerald-400'
-                          : 'text-rose-600 dark:text-rose-400'
-                      }
-                    >
-                      {outcomeA?.status ?? 'unobserved'}
-                    </strong>
-                  </span>
-                </div>
-              )}
-            </Card>
-
-            <Card className="flex flex-col gap-2 p-4">
-              <label htmlFor="compare-run-b" className="text-[11px] font-semibold uppercase tracking-wider text-heading">
-                Run B (Candidate)
-              </label>
-              <select
-                id="compare-run-b"
-                data-testid="compare-run-b"
-                value={selectedBId}
-                onChange={(e) => handleSelectB(e.target.value)}
-                className="rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-              >
-                <option value="">Select a run</option>
-                {pickerRuns.map((r) => {
-                  const label = optionLabels.get(r.runId) ?? formatCompareRunOptionLabel(r)
-                  const title = optionTitleForCollision(r, label, collidingLabels)
-                  return (
-                    <option key={r.runId} value={r.runId} title={title}>
-                      {label}
-                    </option>
-                  )
-                })}
-              </select>
-              {runB && (
-                <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-tertiary-foreground">
-                  <span>Harness: <strong className="text-foreground">{runB.harness}</strong></span>
-                  <span>Turns: <strong className="text-foreground">{comparison?.runB.turnCount ?? runB.turnCount ?? runB.turns.length}</strong></span>
-                  <span>
-                    Outcome:{' '}
-                    <strong
-                      className={
-                        outcomeB?.status === 'success'
-                          ? 'text-emerald-600 dark:text-emerald-400'
-                          : 'text-rose-600 dark:text-rose-400'
-                      }
-                    >
-                      {outcomeB?.status ?? 'unobserved'}
-                    </strong>
-                  </span>
-                </div>
-              )}
-            </Card>
+            <RunPickerCard
+              id="compare-run-a"
+              heading="Run A (Baseline)"
+              selectedId={selectedAId}
+              onChange={handleSelectA}
+              run={runA}
+              outcome={outcomeA}
+              turnCount={formatComparePickerTurns(comparison?.runA.turnCount ?? runA?.turnCount, runA?.turns.length ?? 0)}
+              pickerRuns={pickerRuns}
+              optionLabels={optionLabels}
+            />
+            <RunPickerCard
+              id="compare-run-b"
+              heading="Run B (Candidate)"
+              selectedId={selectedBId}
+              onChange={handleSelectB}
+              run={runB}
+              outcome={outcomeB}
+              turnCount={formatComparePickerTurns(comparison?.runB.turnCount ?? runB?.turnCount, runB?.turns.length ?? 0)}
+              pickerRuns={pickerRuns}
+              optionLabels={optionLabels}
+            />
           </div>
         </div>
       ) : null}
