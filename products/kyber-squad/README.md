@@ -103,6 +103,7 @@ invocation: subagent             # primary | subagent
 model-profile: deep-planning
 capability-profile: architect
 copilot-capability-profile: architect-copilot
+devin-capability-profile: architect-devin
 copilot-tools: [vscode, execute, read, agent, edit, search, web, todo]
 delegates-to: [azure-reader, research-agent]
 fallback: role-skill
