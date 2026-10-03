@@ -5,17 +5,17 @@ doc-type: plan
 status: complete
 component: KyberSquad
 owner: dpalfery
-last-reviewed: 2026-10-02
+last-reviewed: 2026-10-03
 development-mode: test-first
 ---
 
 # Kyber-Squad: Subagent Iteration Circuit-Breaker and JEV Checkpoints (#249)
 
-**Status: Complete, archived 2026-10-02.**  
+**Status: Complete, archived 2026-10-02; harvest completed 2026-10-03.**  
 **Date:** 2026-10-02  
 **Development mode:** `test-first`  
 **Goal:** Address GitHub issue [#249](https://github.com/dpalfery/kyber-weave/issues/249): establish an iteration circuit-breaker and Judgment/Execution Verification (JEV) checkpoints for the conductor and developer subagents (`csharp-dev`, `test-dev`, `github-devops`), preventing runaway test-fix loops, bounded retries per failure cluster, oscillation detection, and deterministic escalation.  
-**Harvest:** No ADR is needed; decisions Q1–Q5 are recorded in this plan. Contracts live in canonical agent specifications (`products/kyber-squad/agents/conductor.md`, `csharp-dev.md`, `test-dev.md`, `github-devops.md`) and agent reference documentation (`products/kyber-squad/agents/conductor/references/execution-and-review.md`).
+**Harvest:** No ADR. Q1–Q5 are closed. Durable product claims live in [kyber-squad/architecture.md](../../kyber-squad/architecture.md#9-conductor-execution-circuit-breaker) §9, [kyber-squad/requirements.md](../../kyber-squad/requirements.md#conductor-execution-circuit-breaker) (unnumbered; not KS-009), and [kyber-squad/onboarding.md](../../kyber-squad/onboarding.md#delivery-circuit-breaker). Operational contracts remain in the agent specs. Kyber-Squad has no runbook.
 
 ---
 
@@ -56,6 +56,7 @@ Root causes identified in issue [#249](https://github.com/dpalfery/kyber-weave/i
 - **Resolution (Deterministic):**
   - An oscillation is triggered when an attempt to fix Failure Cluster A causes previously passing Failure Cluster B to fail, or when fixes alternate between two sets of failures (A → B → A).
   - Both worker subagents (during inner loops) and the conductor (during queue re-evaluation) must track failure signatures. If an oscillation is observed, the circuit breaker trips immediately without exhausting remaining attempts.
+- **Shipped refinement (harvested 2026-10-03):** The original OR wording would trip on the first one-way regression. The deployed worker contract consumes one of the 3 incremental iterations on the first one-way A→B, and trips `THRASH_OSCILLATION_DETECTED` only on a subsequent A→B→A or a repeating failure signature. The conductor still trips when rework alternates A→B→A. The original OR wording is historical; the shipped rule is canonical in [architecture §9](../../kyber-squad/architecture.md#9-conductor-execution-circuit-breaker).
 
 ### Decision Q3: Scope Creep & Invariant Contradictions
 - **Question:** How should subagents handle deeply coupled test fixtures asserting legacy details that conflict with the approved task design?
@@ -138,8 +139,10 @@ Root causes identified in issue [#249](https://github.com/dpalfery/kyber-weave/i
 ### Closeout & Harvest
 
 - **Tasks:** T1–T5 verified and complete.
-- **Harvest:** No ADR is required. Decisions Q1–Q5 are durably recorded in this plan. The operational rules and invariants are harvested into:
-  - `products/kyber-squad/agents/conductor.md` (shared lifecycle invariant for iteration circuit-breaker)
-  - `products/kyber-squad/agents/conductor/references/execution-and-review.md` (cluster rework retry cap of 2, oscillation detection, `STATUS: ESCALATION` intake into findings, architect mediation)
-  - `products/kyber-squad/agents/csharp-dev.md`, `products/kyber-squad/agents/test-dev.md`, `products/kyber-squad/agents/github-devops.md` (three JEV checkpoints plus the iteration cap, 3-iteration inner loop cap, oscillation tripwires, contradictory invariant escalation, and `STATUS: ESCALATION` completion digest)
-  - `tests/KyberWeave.Tests/SquadCanonicalContentTests.cs` and `tests/KyberWeave.Tests/HotshotGoldenContractTests.cs` (automated regression contract tests and golden manifest tracking)
+- **Open questions:** none. Q1–Q5 are resolved; Q2's shipped A→B→A refinement is recorded above.
+- **Harvest (2026-10-03):** Durable decisions now live in governed docs. No ADR — the plan and the ADR skill's three tests (the caps constrain instruction bodies, not the C# engine; they remain cheap to revise). Kyber-Squad has no runbook.
+  - [kyber-squad/architecture.md](../../kyber-squad/architecture.md#9-conductor-execution-circuit-breaker) §9 — Q1 two-level caps, first-observed cluster identity, increment-on-dispatch tally, Q2 A→B→A, Q3 invariant, Q4 three JEV + cap, Q5 `ESCALATION: circuit-breaker` / architect, closed trigger set
+  - [kyber-squad/requirements.md](../../kyber-squad/requirements.md#conductor-execution-circuit-breaker) — unnumbered harvest table (not KS-009); `KS-001`–`KS-008` unchanged
+  - [kyber-squad/onboarding.md](../../kyber-squad/onboarding.md#delivery-circuit-breaker) — operator pointer to architecture §9
+  - Operational contracts remain in `products/kyber-squad/agents/conductor.md`, `conductor/references/execution-and-review.md`, `csharp-dev.md`, `test-dev.md`, `github-devops.md`
+  - Regression pins remain in `tests/KyberWeave.Tests/SquadCanonicalContentTests.cs` and `HotshotGoldenContractTests.cs`
