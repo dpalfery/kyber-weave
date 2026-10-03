@@ -6,7 +6,7 @@ status: current
 component: KyberDash
 source-root: dash
 owner: dpalfery
-last-reviewed: 2026-10-01
+last-reviewed: 2026-10-02
 code-refs:
   - registerKyberCommands
   - refreshHarnessSources
@@ -379,6 +379,21 @@ controls appear on Usage only.
   - *Execution Timeline / Call Tree*: Hierarchical span call tree with duration, status badges, and auxiliary flags.
   - *Inspector Drawer (`SessionInspectorDrawer`)*: Slide-out drawer with XML tag folding (`<instructions>`, `<environment_info>`, `<context>`) and formatted tool call/result trees.
 - **Compare** (rail): Phase-aligned run comparison (`page-compare`), not a fifth header tab.
+  Open it from the sidebar or navigate directly to `/compare?a=:runId&b=:runId` to pre-select
+  two runs; without explicit `a`/`b` query ids, **Run A** and **Run B** both start at
+  **Select a run** and kyberdash issues no comparison request until two distinct run ids are
+  chosen. Each selector has its own harness filter (**All harnesses** plus every harness id
+  observed in the inventory); filters are independent so cross-harness A/B comparisons remain
+  possible and narrowing one side does not affect the other. Harness filters use measured
+  canonical ids only — kyberdash does not infer ZCode (or any harness) subagent vs parent role
+  from id, label, or run size. The run inventory stays newest-first (`started DESC` from
+  `/api/kyber/runs`); within each filtered list, options read
+  `YYYY-MM-DD · <harness> · <n> turns · <label or id>` (`date unknown` / `turns unknown` when
+  the server omits those fields). Same-run selection does not fetch. When turns, token delta, or
+  recommendation history are unavailable, the UI shows `—` and the API reason — never fabricated
+  `0` turns, a zero token delta, or `0 / 5` completed pairs; promotion stays disabled
+  (`canPromote: false`) until history is explicitly measured. See
+  [Run Comparison and Phase Alignment](architecture.md#run-comparison-and-phase-alignment-decision-d11).
 - **Usage**: Device spend overview, multi-provider cost rollups, top projects, daily spend, Share.
 - **Quarantine**: Quarantined spans holding unrecognized namespaces or malformed attributes.
 - **Problems**: Recorded token reconciliation mismatches, validation anomalies, and parser errors.
@@ -435,6 +450,9 @@ curl -s http://127.0.0.1:3000/api/kyber/review/status | jq .
 
 # Cross-harness comparison matrix
 curl -s http://127.0.0.1:3000/api/kyber/compare | jq .
+
+# Phase-aligned run comparison (requires two run ids; no caller-supplied history count)
+curl -s "http://127.0.0.1:3000/api/kyber/compare/runs?runA=run-a&runB=run-b" | jq .
 
 # Quarantine entries and problems
 curl -s http://127.0.0.1:3000/api/kyber/quarantine | jq .

@@ -719,10 +719,14 @@ export type ComparisonVerdictStatus =
   | 'outcome_regression'
   | 'neutral'
 
+export type ComparisonHistoryAvailability = 'measured' | 'unavailable'
+
 export type ComparisonVerdict = {
   status: ComparisonVerdictStatus
   pairCount: number
-  completedPairCount: number
+  /** Present only when a trusted caller supplied store-backed or internal history. */
+  completedPairCount?: number
+  historyAvailability: ComparisonHistoryAvailability
   meetsSufficiencyThreshold: boolean
   outcomeRegression: boolean
   canPromote: boolean
@@ -760,41 +764,56 @@ export type RunComparisonOptions = {
   completedPairCount?: number
 }
 
+export type ComparisonTotalsMeasured = {
+  availability: 'measured'
+  tokensA: number
+  tokensB: number
+  tokenDelta: number
+  turnCountA: number
+  turnCountB: number
+  turnDelta: number
+  costA?: number
+  costB?: number
+  costDelta?: number
+  costComparable: boolean
+  costRefusalReason?: string
+}
+
+export type ComparisonTotalsUnavailable = {
+  availability: 'unavailable'
+  reason: string
+  turnCountA: number
+  turnCountB: number
+  turnDelta: number
+  costComparable: boolean
+  costRefusalReason?: string
+}
+
+export type ComparisonTotals = ComparisonTotalsMeasured | ComparisonTotalsUnavailable
+
+export type ComparisonRunSide = {
+  runId: string
+  harness: string
+  label?: string
+  outcome?: OutcomeBlock
+  /** Omitted when the run resolved no comparable model turns — never fabricated zero. */
+  totalTokens?: number
+  totalCost?: number
+  /** Omitted when comparable turns are unavailable — never fabricated zero. */
+  turnCount?: number
+  availability?: 'measured' | 'unavailable'
+  reason?: string
+  /** Per-run metrics unavailability reason consumed by CompareRuns (issue #190). */
+  metricsReason?: string
+}
+
 export type ComparisonSummary = {
-  runA: {
-    runId: string
-    harness: string
-    label?: string
-    outcome?: OutcomeBlock
-    totalTokens: number
-    totalCost?: number
-    turnCount: number
-  }
-  runB: {
-    runId: string
-    harness: string
-    label?: string
-    outcome?: OutcomeBlock
-    totalTokens: number
-    totalCost?: number
-    turnCount: number
-  }
+  runA: ComparisonRunSide
+  runB: ComparisonRunSide
   taskFamily?: string
   pairs: PhaseAlignedTurnPair[]
   phaseSummaries: Record<TaskPhase, PhaseSummary>
-  totals: {
-    tokensA: number
-    tokensB: number
-    tokenDelta: number
-    turnCountA: number
-    turnCountB: number
-    turnDelta: number
-    costA?: number
-    costB?: number
-    costDelta?: number
-    costComparable: boolean
-    costRefusalReason?: string
-  }
+  totals: ComparisonTotals
   verdict: ComparisonVerdict
 }
 
@@ -1023,9 +1042,92 @@ function getTurnTokens(turn: RunTurn | null): number {
   return inp + (turn.tokens.output ?? 0)
 }
 
+/** Turn token total only when telemetry is measurable and present — no fabricated zeros. */
+function getComparableTurnTokens(turn: RunTurn | null): number | undefined {
+  if (!turn) return undefined
+  if (tokenCoverageUnavailable(turn) !== undefined) return undefined
+  if (!turn.tokens) return undefined
+  if (typeof turn.tokens.all === 'number') return turn.tokens.all
+  const reportedInput = turn.tokens.reportedInput
+  const output = turn.tokens.output
+  if (typeof reportedInput === 'number' && typeof output === 'number') {
+    return reportedInput + output
+  }
+  const fresh = turn.tokens.freshInput
+  const cache = turn.tokens.cacheRead
+  const cacheCreation = turn.tokens.cacheCreation
+  if (typeof fresh === 'number' && typeof cache === 'number' && typeof output === 'number') {
+    return fresh + cache + (cacheCreation ?? 0) + output
+  }
+  return undefined
+}
+
 function getTurnCost(turn: RunTurn | null): number | undefined {
   if (!turn || !turn.cost || typeof turn.cost.value !== 'number') return undefined
   return turn.cost.value
+}
+
+/** Measurability keys that gate whether turn token totals may be summed (issue #190). */
+const TOKEN_COVERAGE_KEYS = ['token_usage', 'total_input', 'total_output', 'total_tokens'] as const
+
+function tokenCoverageUnavailable(turn: RunTurn): string | undefined {
+  for (const key of TOKEN_COVERAGE_KEYS) {
+    const availability = turn.measurability?.[key]
+    if (availability !== undefined && isNotMeasurable(availability)) {
+      return availability.reason
+    }
+  }
+  return undefined
+}
+
+function findRunTokenCoverageGap(
+  run: RunComparisonInput,
+): string | undefined {
+  for (let i = 0; i < run.turns.length; i++) {
+    const turn = toRunTurn(run.turns[i]!, i, run.turns.length)
+    const reason = tokenCoverageUnavailable(turn)
+    if (reason !== undefined) return reason
+  }
+  return undefined
+}
+
+function noComparableTurnsReason(runId: string): string {
+  return `Run ${runId} resolved no comparable model turns for phase alignment.`
+}
+
+type ComparisonRunSideSummary = ComparisonSummary['runA']
+
+function buildComparisonRunSide(
+  input: RunComparisonInput,
+  turnCount: number,
+  totalTokens: number,
+  totalCost: number | undefined,
+  tokenGapReason?: string,
+): ComparisonRunSideSummary {
+  if (turnCount === 0) {
+    const metricsReason = noComparableTurnsReason(input.runId)
+    return {
+      runId: input.runId,
+      harness: input.harness,
+      label: input.label,
+      outcome: input.outcome,
+      availability: 'unavailable',
+      reason: metricsReason,
+      metricsReason,
+      ...(totalCost !== undefined ? { totalCost } : {}),
+    }
+  }
+
+  return {
+    runId: input.runId,
+    harness: input.harness,
+    label: input.label,
+    outcome: input.outcome,
+    availability: 'measured',
+    ...(tokenGapReason === undefined ? { totalTokens } : {}),
+    totalCost,
+    turnCount,
+  }
 }
 
 /**
@@ -1040,32 +1142,60 @@ function compareTurnSignals(
 
   // 1. Total tokens
   if (turnA !== null && turnB !== null) {
-    const valA = getTurnTokens(turnA)
-    const valB = getTurnTokens(turnB)
-    signals.push({
-      name: 'total_tokens',
-      label: 'Total tokens',
-      unit: 'tokens',
-      runAValue: valA,
-      runBValue: valB,
-      delta: valB - valA,
-      status: 'compared',
-    })
+    const gapA = tokenCoverageUnavailable(turnA)
+    const gapB = tokenCoverageUnavailable(turnB)
+    if (gapA !== undefined || gapB !== undefined) {
+      const reasonParts = [
+        gapA !== undefined ? `token usage is not measurable in Run A (${gapA})` : '',
+        gapB !== undefined ? `token usage is not measurable in Run B (${gapB})` : '',
+      ].filter(Boolean)
+      signals.push({
+        name: 'total_tokens',
+        label: 'Total tokens',
+        unit: 'tokens',
+        status: 'not_comparable',
+        reason: reasonParts.join('; '),
+      })
+    } else {
+      const valA = getComparableTurnTokens(turnA)
+      const valB = getComparableTurnTokens(turnB)
+      if (valA !== undefined && valB !== undefined) {
+        signals.push({
+          name: 'total_tokens',
+          label: 'Total tokens',
+          unit: 'tokens',
+          runAValue: valA,
+          runBValue: valB,
+          delta: valB - valA,
+          status: 'compared',
+        })
+      } else {
+        signals.push({
+          name: 'total_tokens',
+          label: 'Total tokens',
+          unit: 'tokens',
+          status: 'not_comparable',
+          reason: 'Token telemetry unavailable in one or both paired turns',
+        })
+      }
+    }
   } else if (turnA !== null) {
+    const valA = getComparableTurnTokens(turnA)
     signals.push({
       name: 'total_tokens',
       label: 'Total tokens',
       unit: 'tokens',
-      runAValue: getTurnTokens(turnA),
+      ...(valA !== undefined ? { runAValue: valA } : {}),
       status: 'missing_in_b',
       reason: 'Turn missing in Run B for this phase slot',
     })
   } else if (turnB !== null) {
+    const valB = getComparableTurnTokens(turnB)
     signals.push({
       name: 'total_tokens',
       label: 'Total tokens',
       unit: 'tokens',
-      runBValue: getTurnTokens(turnB),
+      ...(valB !== undefined ? { runBValue: valB } : {}),
       status: 'missing_in_a',
       reason: 'Turn missing in Run A for this phase slot',
     })
@@ -1379,8 +1509,8 @@ export function compareRuns(
 
   const turnCountA = runA.turns.length
   const turnCountB = runB.turns.length
-  const tokenDelta = totalTokensB - totalTokensA
   const turnDelta = turnCountB - turnCountA
+  const comparableTurns = turnCountA > 0 && turnCountB > 0
 
   // Check cost comparability
   let costComparable = true
@@ -1394,12 +1524,68 @@ export function compareRuns(
     }
   }
 
+  const tokenGapA = findRunTokenCoverageGap(runA)
+  const tokenGapB = findRunTokenCoverageGap(runB)
+
+  const totalsUnavailableReason = ((): string | undefined => {
+    if (!comparableTurns) {
+      if (turnCountA === 0 && turnCountB === 0) {
+        return 'Neither selected run resolved comparable model turns for phase alignment.'
+      }
+      if (turnCountA === 0) {
+        return noComparableTurnsReason(runA.runId)
+      }
+      return noComparableTurnsReason(runB.runId)
+    }
+    if (tokenGapA !== undefined && tokenGapB !== undefined) {
+      return `Token telemetry is not measurable for both runs (${tokenGapA}; ${tokenGapB})`
+    }
+    if (tokenGapA !== undefined) {
+      return `Token telemetry is not measurable for Run ${runA.runId}: ${tokenGapA}`
+    }
+    if (tokenGapB !== undefined) {
+      return `Token telemetry is not measurable for Run ${runB.runId}: ${tokenGapB}`
+    }
+    return undefined
+  })()
+
+  const totals: ComparisonTotals =
+    totalsUnavailableReason === undefined
+      ? {
+          availability: 'measured',
+          tokensA: totalTokensA,
+          tokensB: totalTokensB,
+          tokenDelta: totalTokensB - totalTokensA,
+          turnCountA,
+          turnCountB,
+          turnDelta,
+          costA: totalCostA,
+          costB: totalCostB,
+          costDelta:
+            totalCostA !== undefined && totalCostB !== undefined
+              ? totalCostB - totalCostA
+              : undefined,
+          costComparable,
+          costRefusalReason,
+        }
+      : {
+          availability: 'unavailable',
+          reason: totalsUnavailableReason,
+          turnCountA,
+          turnCountB,
+          turnDelta,
+          costComparable,
+          costRefusalReason,
+        }
+
   // Outcome comparison & verdict (Acceptance Criterion 3)
   const outcomeRegression = detectOutcomeRegression(runA.outcome, runB.outcome)
+  const historyAvailability: ComparisonHistoryAvailability =
+    options?.completedPairCount !== undefined ? 'measured' : 'unavailable'
   const completedPairCount =
-    options?.completedPairCount ??
-    (runA.outcome?.status === 'success' && runB.outcome?.status === 'success' ? 1 : 0)
-  const meetsSufficiencyThreshold = completedPairCount >= 5
+    options?.completedPairCount !== undefined ? options.completedPairCount : undefined
+  const meetsSufficiencyThreshold =
+    completedPairCount !== undefined ? completedPairCount >= 5 : false
 
   let status: ComparisonVerdictStatus = 'insufficient_history'
   let canPromote = false
@@ -1413,6 +1599,13 @@ export function compareRuns(
       'Promotion refused: outcome regression detected between paired runs. Modifications cannot be recommended when correctness or test outcomes regress.'
     recommendation =
       'Do not adopt changes from Run B: task outcome regressed compared to baseline Run A.'
+  } else if (historyAvailability === 'unavailable') {
+    status = 'insufficient_history'
+    canPromote = false
+    refusalReason =
+      'Recommendation history is not measured for this comparison; promotion requires an explicitly recorded completed-pair count of at least 5.'
+    recommendation =
+      'Pairing is manual-only until recommendation history is measured. At least 5 completed pairs without outcome regression are required before promoting automated recommendations.'
   } else if (!meetsSufficiencyThreshold) {
     status = 'insufficient_history'
     canPromote = false
@@ -1431,7 +1624,8 @@ export function compareRuns(
   const verdict: ComparisonVerdict = {
     status,
     pairCount: pairs.length,
-    completedPairCount,
+    ...(completedPairCount !== undefined ? { completedPairCount } : {}),
+    historyAvailability,
     meetsSufficiencyThreshold,
     outcomeRegression,
     canPromote,
@@ -1448,43 +1642,12 @@ export function compareRuns(
         : runA.taskFamily?.id ?? runB.taskFamily?.id ?? options?.taskFamily
 
   return {
-    runA: {
-      runId: runA.runId,
-      harness: runA.harness,
-      label: runA.label,
-      outcome: runA.outcome,
-      totalTokens: totalTokensA,
-      totalCost: totalCostA,
-      turnCount: turnCountA,
-    },
-    runB: {
-      runId: runB.runId,
-      harness: runB.harness,
-      label: runB.label,
-      outcome: runB.outcome,
-      totalTokens: totalTokensB,
-      totalCost: totalCostB,
-      turnCount: turnCountB,
-    },
+    runA: buildComparisonRunSide(runA, turnCountA, totalTokensA, totalCostA, tokenGapA),
+    runB: buildComparisonRunSide(runB, turnCountB, totalTokensB, totalCostB, tokenGapB),
     taskFamily,
     pairs,
     phaseSummaries,
-    totals: {
-      tokensA: totalTokensA,
-      tokensB: totalTokensB,
-      tokenDelta,
-      turnCountA,
-      turnCountB,
-      turnDelta,
-      costA: totalCostA,
-      costB: totalCostB,
-      costDelta:
-        totalCostA !== undefined && totalCostB !== undefined
-          ? totalCostB - totalCostA
-          : undefined,
-      costComparable,
-      costRefusalReason,
-    },
+    totals,
     verdict,
   }
 }
