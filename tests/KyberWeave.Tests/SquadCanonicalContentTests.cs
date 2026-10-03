@@ -29,11 +29,11 @@ public sealed class SquadCanonicalContentTests
         RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
     private static readonly Regex CircuitBreakerTriggerSingleton = new(
-        @"CIRCUIT_BREAKER_TRIGGER:\s*`?(?<token>[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+)`?(?!\s*[|<])",
+        @"CIRCUIT_BREAKER_TRIGGER:\s*`?(?<token>[A-Z][A-Z0-9_]*)`?(?!\s*[|<])",
         RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
     private static readonly Regex CircuitBreakerTriggerToken = new(
-        @"[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+",
+        @"[A-Z][A-Z0-9_]*",
         RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
     private static readonly string[] RetiredAgentIdentities =
