@@ -42,8 +42,11 @@ public sealed partial class HotshotGoldenContractTests
         "architect",
         "code-reviewer",      // in-process council when the harness gives subagents no agent tool (ADR 0025)
         "conductor",
+        "csharp-dev",         // iteration circuit-breaker / conflicting-invariants halt (issue #249)
+        "github-devops",      // iteration circuit-breaker / conflicting-invariants halt (issue #249)
         "product-owner",
-        "task-reviewer"
+        "task-reviewer",
+        "test-dev"            // iteration circuit-breaker / conflicting-invariants halt (issue #249)
     ];
 
     /// <summary>
@@ -75,9 +78,12 @@ public sealed partial class HotshotGoldenContractTests
         "bug-crusher",
         "code-review", // pre-push self-review gate added; exempts the whole skill directory, pinned by CodeReviewSkillRetainsSelfReviewTriggerAndGate
         "create-pull-request", // combined with create-pull-request-github; provider selection and neutral layer
+        "csharp-dev",         // anti-thrash / conflicting-invariants halt (issue #249)
+        "github-devops",      // anti-thrash / conflicting-invariants halt (issue #249)
         "pr-review-fix-comments", // provider files now rendered (plan 2026-09-28)
         "product-owner",
-        "second-brain"        // hardcoded 6-Docs replaced with <docs-root> (todo squad-hardcoded-docs-root)
+        "second-brain",       // hardcoded 6-Docs replaced with <docs-root> (todo squad-hardcoded-docs-root)
+        "test-dev"            // anti-thrash / conflicting-invariants halt (issue #249)
     ];
 
     private static readonly string[] RetiredSkillIdentities =

@@ -46,6 +46,8 @@ You follow the path declared as **<github-actions-coding-standard>** for runners
 - **No credentials in YAML.** All sensitive values come from `secrets` or `vars` contexts. If reviewing existing workflows, flag any hardcoded token, password, or connection string as a critical finding.
 - **Untrusted input never reaches a shell.** Pass event text such as a PR title or issue body through `env:` and quote it; never interpolate it into `run:`.
 - **Least privilege for tokens.** Declare `permissions:` explicitly and grant only what a job needs.
+- **Anti-thrash / conflicting invariants:** When a failing pipeline assertion, workflow test, or fixture asserts legacy internals or requirements that contradict the approved design, halt immediately. Do not contort workflows or build configuration to satisfy contradictory invariants. Emit `STATUS: CONFLICTING_INVARIANTS` naming the fixture and the conflicting invariants for architectural reconciliation.
+- **Blast radius:** Stay strictly within the task's declared CI/Docker scope. Reject unapproved expansion into application or test source; escalate rather than thrashing across layers.
 
 ## Workflow
 
@@ -68,7 +70,7 @@ You follow the path declared as **<github-actions-coding-standard>** for runners
 When done, return:
 
 ```text
-STATUS: READY_FOR_REVIEW
+STATUS: READY_FOR_REVIEW | CONFLICTING_INVARIANTS
 ARTIFACTS: <list of workflow/Dockerfile paths changed or created>
 SUMMARY: <2–4 sentences: pipeline shape, environments covered, gates in place>
 SECRETS_REQUIRED: <list of secret names the user must add to GitHub environments, or "none">

@@ -70,13 +70,15 @@ You do **not** own:
 - Never author application, persistence, schema, or CI files.
 - Never claim done with open diagnostics in your change set. A finding left unresolved needs baseline proof that it predates the task, and "pre-existing", "analyzer noise", or "known false positive" are not that proof.
 - Never use a validation command that filters compiler or linter output, or ends with `|| true`, unless the command separately preserves and checks the underlying exit code. A masked command cannot serve as a quality gate.
+- **Anti-thrash / conflicting invariants:** When an existing fixture asserts legacy internals, transient internal state, or requirements that contradict the approved design, halt immediately. Do not weaken or rewrite assertions to paper over contradictory invariants, and do not ask implementation agents to contort production code to satisfy them. Emit `STATUS: CONFLICTING_INVARIANTS` naming the fixture and the conflicting invariants for architectural reconciliation.
+- **Blast radius:** Stay strictly within the task's declared test-file scope. Reject unapproved expansion into application, persistence, or CI files; escalate rather than thrashing across layers.
 
 ## Completion digest
 
 When done, return:
 
 ```text
-STATUS: READY_FOR_REVIEW
+STATUS: READY_FOR_REVIEW | CONFLICTING_INVARIANTS
 ARTIFACTS: <list of test file paths>
 SUMMARY: <2–4 sentences: what layers are covered, test count, any notable gaps>
 DIAGNOSTICS: clean on <paths> | fix pass: <format, format analyzers, cleanupcode — all applied, or skipped (not C# / .NET)> | artifacts: <isolated artifacts path> | baseline: <scratchpad path> | remaining: <none, or list with baseline proof>

@@ -18,3 +18,8 @@ Identify your sub-task and read ONLY the relevant reference document before proc
 | MSBuild Anti-patterns | Cross-platform build failures; hardcoded paths; `<Exec>` shell commands; `<Reference>` with `HintPath`; unquoted conditions | [MSBuild Anti-patterns](./references/msbuild-anti-patterns.md) |
 
 **Rule:** Read ONLY the reference(s) relevant to your current task. Do not pre-load all references.
+
+## Anti-thrash guardrails
+
+- Halt on **conflicting invariants**: when a pipeline assertion or fixture asserts legacy internals or contradicts the approved design, do not contort workflows to satisfy both. Escalate with `STATUS: CONFLICTING_INVARIANTS`.
+- Respect **blast radius**: stay inside the declared CI/Docker scope; do not expand into application or test sources to chase a green suite.

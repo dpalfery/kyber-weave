@@ -24,3 +24,8 @@ Identify your sub-task and read ONLY the relevant reference before proceeding.
 | Incremental Build | Fix targets that always rebuild; `Inputs`/`Outputs` attributes; `FileWrites` registration; volatile output paths | Refer to the path defined by the **Incremental Build** property in the root `AGENTS.md`. |
 
 **Rule:** Read only the reference(s) relevant to your current task. Do not pre-load all references.
+
+## Anti-thrash guardrails
+
+- Halt on **conflicting invariants**: when a failing test fixture asserts legacy internals or contradicts the approved design, do not contort production code to satisfy both. Escalate with `STATUS: CONFLICTING_INVARIANTS`.
+- Respect **blast radius**: stay inside the declared task file scope; do not expand into unapproved files or layers to chase a green suite.

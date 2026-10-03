@@ -22,3 +22,8 @@ Identify your sub-task and read ONLY the relevant reference before proceeding.
 | Test Maintainability | Magic values, duplicate setup, assertion overload, brittle naming — detect and refactor | [Test Maintainability](./references/test-maintainability.md) |
 
 **Rule:** Read only the reference(s) relevant to your current task. Do not pre-load all references.
+
+## Anti-thrash guardrails
+
+- Halt on **conflicting invariants**: when an existing fixture asserts legacy internals or contradicts the approved design, do not weaken assertions or demand production contortions. Escalate with `STATUS: CONFLICTING_INVARIANTS`.
+- Respect **blast radius**: stay inside the declared test-file scope; do not expand into application or CI sources to chase a green suite.

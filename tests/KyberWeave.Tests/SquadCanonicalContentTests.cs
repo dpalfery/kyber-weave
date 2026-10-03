@@ -309,6 +309,26 @@ public sealed class SquadCanonicalContentTests
 
         Assert.Contains("failure cluster", skill, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("oscillation", skill, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("blast radius", skill, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void LoadWorkerAgentsHaltOnConflictingInvariantsRatherThanThrashing()
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        string[] workers = ["csharp-dev", "test-dev", "github-devops"];
+
+        foreach (string name in workers)
+        {
+            SquadAgent agent = Assert.Single(source.Agents, candidate => candidate.Name == name);
+            Assert.Contains("conflicting invariants", agent.InstructionBody, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("CONFLICTING_INVARIANTS", agent.InstructionBody, StringComparison.Ordinal);
+            Assert.Contains("blast radius", agent.InstructionBody, StringComparison.OrdinalIgnoreCase);
+
+            string skill = ReadSkillContract(name);
+            Assert.Contains("conflicting invariants", skill, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("blast radius", skill, StringComparison.OrdinalIgnoreCase);
+        }
     }
 
     [Fact]
