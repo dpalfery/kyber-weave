@@ -67,8 +67,6 @@ import { classifyTurn, BASH_TOOLS, EDIT_TOOLS } from '../metrics/classifier.js'
 import { extractBashCommands } from './bash-utils.js'
 import { isTrustedAbsoluteWorkingDirectory } from './path-privacy.js'
 
-export { isPositiveNumber, safeNumber } from './numbers.js'
-
 function unsanitizePath(dirName: string): string {
   return dirName.replace(/-/g, '/')
 }
