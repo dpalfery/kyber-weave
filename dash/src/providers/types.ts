@@ -30,6 +30,12 @@ export type SessionSource = {
 
 export type SessionParser = {
   parse(): AsyncGenerator<ParsedProviderCall>
+  /**
+   * When the parser applied a coverage window itself (Cursor): how many
+   * recordable calls it discarded solely for predating that window. Read after
+   * `parse()` completes. Absent when the parser does not pre-filter.
+   */
+  preWindowRecordableCount?: number
 }
 
 export type ParsedProviderCall = {
