@@ -57,6 +57,10 @@ unattributed residual measured **2.8–4.4% on one model against 35–41% on ano
 difference is the tokenizer, not missing content, and the figure must not read as a true
 count. Regression coverage: `dash/kyber/canon/tokens.test.ts`.
 
+### R4.7 — Flat token validation and finite checks (Issue #227)
+
+When parsers fall back to flat token counters (e.g. KiloCode SQLite stores emitting `tokens_input`, `tokens_output`, etc.), unvalidated values can inject `NaN`, `Infinity`, or string types into token accounting. Flat tokens are wrapped in `finiteOrUndefined` checks so non-finite numbers or string values are rejected as absent (yielding 0) rather than corrupting cost calculations, while preserving nested `tokens` and `usage` object precedence.
+
 ## Cost attribution (Requirement 5)
 
 ### R5.3 — Rate-table scoping failure
