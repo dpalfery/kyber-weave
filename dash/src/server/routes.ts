@@ -886,11 +886,19 @@ export function handleKyberRequest(
     }
     const listedSessionIds = [...new Set([...executionsByRun.values()].flat())]
     const listedSummaries = bridge.sessionSummaryFigures(listedSessionIds)
-    const runs = listedRuns.map((run) => ({
-      ...run,
-      ...sumSessionFigures(listedSummaries, executionsByRun.get(run.runId) ?? []),
-      findingCount: findingCounts.get(run.runId) ?? 0,
-    }))
+    // Subagent flags for Compare picker filtering (issue #190 D2). Keyed to
+    // sessions already linked to listed runs — not listSessions(), not compare.
+    const subagentBySession = bridge.sessionSubagentFlags(listedSessionIds)
+    const runs = listedRuns.map((run) => {
+      const sessionIds = executionsByRun.get(run.runId) ?? []
+      const isSubagent = sessionIds.some((id) => subagentBySession.get(id) === true)
+      return {
+        ...run,
+        ...sumSessionFigures(listedSummaries, sessionIds),
+        findingCount: findingCounts.get(run.runId) ?? 0,
+        ...(isSubagent ? { isSubagent: true } : {}),
+      }
+    })
     sendKyberJson(res, 200, { runs })
     return true
   }

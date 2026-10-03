@@ -1816,3 +1816,249 @@ describe('KyberBridge: unknown-window session owner semantics (thread-4)', () =>
     }
   })
 })
+
+describe('KyberBridge.compareRuns split-share identity (issue #190 / D1)', () => {
+  // Executions store claimed ids (`cursor:<rawKey>`) when a session key is
+  // split across harnesses. Compare must resolve via shareOf → recordsForShare
+  // the way findings/runs already do; recordsForSession(claimedId) is empty
+  // because records stay under the raw key.
+  function turnRecord(
+    spanId: string,
+    harness: string,
+    sessionId: string,
+    timestamp: string,
+  ): CanonicalRecord {
+    return {
+      spanId,
+      traceId: `trace-${sessionId}`,
+      parentSpanId: null,
+      sessionId,
+      source: 'synthetic',
+      harness,
+      name: 'canonical compare turn',
+      op: 'llm.invoke',
+      kind: 'client',
+      timestamp,
+      durationMs: 100,
+      status: 'ok',
+      tokens: {
+        freshInput: 800,
+        cacheRead: 200,
+        cacheCreation: 0,
+        output: 100,
+        reportedInput: 1000,
+        reportedOutput: 100,
+      },
+      content: { system_prompt: 'hello' },
+      parts: [{ part: 'system_prompt', text: 'sys', tokens: 600 }],
+      cost: { basis: 'published', status: 'priced', value: 0.01, currency: 'USD' },
+      raw: { model: 'gpt-4o', cwd: '/repo' },
+    }
+  }
+
+  it('compares split-share runs that have records under the raw key (and bare-key runs still compare)', async () => {
+    const store = new CanonStore(':memory:')
+    store.upsertMany([
+      turnRecord('split-cur', 'cursor', 'k-split', '2026-09-03T10:00:00.000Z'),
+      turnRecord('split-vs', 'copilot-chat', 'k-split', '2026-09-03T10:01:00.000Z'),
+      turnRecord('bare-a', 'cursor', 'solo-a', '2026-09-03T11:00:00.000Z'),
+      turnRecord('bare-b', 'copilot', 'solo-b', '2026-09-03T11:01:00.000Z'),
+    ])
+    await buildSessions(store)
+    await buildRuns(store)
+
+    const cursorSplitRun = store.listRuns('cursor').find((run) =>
+      store.listExecutions(run.runId).some((execution) => execution.sessionId === 'cursor:k-split'),
+    )
+    const vscodeSplitRun = store.listRuns('copilot-vscode').find((run) =>
+      store
+        .listExecutions(run.runId)
+        .some((execution) => execution.sessionId === 'copilot-vscode:k-split'),
+    )
+    const bareCursorRun = store.listRuns('cursor').find((run) =>
+      store.listExecutions(run.runId).some((execution) => execution.sessionId === 'solo-a'),
+    )
+    const bareCopilotRun = store.listRuns('copilot').find((run) =>
+      store.listExecutions(run.runId).some((execution) => execution.sessionId === 'solo-b'),
+    )
+
+    expect(cursorSplitRun).toBeDefined()
+    expect(vscodeSplitRun).toBeDefined()
+    expect(bareCursorRun).toBeDefined()
+    expect(bareCopilotRun).toBeDefined()
+    // Precondition: claimed ids, empty under recordsForSession, populated via share.
+    const identities = store.sessionIdentities()
+    for (const sessionId of ['cursor:k-split', 'copilot-vscode:k-split'] as const) {
+      const share = identities.shareOf(sessionId)
+      expect(share).toEqual({ key: 'k-split', harness: sessionId.split(':')[0] })
+      expect(store.recordsForSession(sessionId)).toHaveLength(0)
+      expect(store.recordsForShare(share!.key, share!.harness).length).toBeGreaterThan(0)
+    }
+
+    const bridge = new KyberBridge({ canonPath: ':memory:', store })
+    try {
+      const bare = bridge.compareRuns(bareCursorRun!.runId, bareCopilotRun!.runId)
+      expect(bare).not.toBeNull()
+      expect(bare!.runA.turnCount).toBeGreaterThan(0)
+      expect(bare!.runB.turnCount).toBeGreaterThan(0)
+      expect(bare!.pairs.length).toBeGreaterThan(0)
+
+      const split = bridge.compareRuns(cursorSplitRun!.runId, vscodeSplitRun!.runId)
+      expect(split).not.toBeNull()
+      expect(split!.runA.turnCount).toBeGreaterThan(0)
+      expect(split!.runB.turnCount).toBeGreaterThan(0)
+      expect(split!.pairs.length).toBeGreaterThan(0)
+    } finally {
+      bridge.close()
+      store.close()
+    }
+  })
+
+  it('resolves split-share the same way on the direct-DB path (no injected store)', async () => {
+    const store = new CanonStore(':memory:')
+    store.upsertMany([
+      turnRecord('split-cur', 'cursor', 'k-split', '2026-09-03T10:00:00.000Z'),
+      turnRecord('split-vs', 'copilot-chat', 'k-split', '2026-09-03T10:01:00.000Z'),
+    ])
+    await buildSessions(store)
+    await buildRuns(store)
+
+    const cursorSplitRun = store.listRuns('cursor').find((run) =>
+      store.listExecutions(run.runId).some((execution) => execution.sessionId === 'cursor:k-split'),
+    )
+    const vscodeSplitRun = store.listRuns('copilot-vscode').find((run) =>
+      store
+        .listExecutions(run.runId)
+        .some((execution) => execution.sessionId === 'copilot-vscode:k-split'),
+    )
+    expect(cursorSplitRun).toBeDefined()
+    expect(vscodeSplitRun).toBeDefined()
+
+    // Direct-DB: same sqlite handle, no CanonStore — must rebuild SessionIdentities.
+    const bridge = new KyberBridge({ canonDb: store.getDatabase() })
+    try {
+      const split = bridge.compareRuns(cursorSplitRun!.runId, vscodeSplitRun!.runId)
+      expect(split).not.toBeNull()
+      expect(split!.runA.turnCount).toBeGreaterThan(0)
+      expect(split!.runB.turnCount).toBeGreaterThan(0)
+      expect(split!.pairs.length).toBeGreaterThan(0)
+      expect(bridge.compareRuns('missing-a', cursorSplitRun!.runId)).toBeNull()
+    } finally {
+      bridge.close()
+      try {
+        store.close()
+      } catch {
+        // Bridge closed the injected shared handle.
+      }
+    }
+  })
+
+  it('rebuilds SessionIdentities once when compareRuns loads two executed sides', async () => {
+    const store = new CanonStore(':memory:')
+    store.upsertMany([
+      turnRecord('split-cur', 'cursor', 'k-split', '2026-09-03T10:00:00.000Z'),
+      turnRecord('split-vs', 'copilot-chat', 'k-split', '2026-09-03T10:01:00.000Z'),
+    ])
+    await buildSessions(store)
+    await buildRuns(store)
+
+    const cursorSplitRun = store.listRuns('cursor').find((run) =>
+      store.listExecutions(run.runId).some((execution) => execution.sessionId === 'cursor:k-split'),
+    )
+    const vscodeSplitRun = store.listRuns('copilot-vscode').find((run) =>
+      store
+        .listExecutions(run.runId)
+        .some((execution) => execution.sessionId === 'copilot-vscode:k-split'),
+    )
+    expect(cursorSplitRun).toBeDefined()
+    expect(vscodeSplitRun).toBeDefined()
+
+    const db = store.getDatabase()
+    const originalPrepare = db.prepare.bind(db)
+    let identityScans = 0
+    db.prepare = ((sql: string) => {
+      if (sql.includes('SELECT DISTINCT COALESCE(session_id, trace_id)')) identityScans += 1
+      return originalPrepare(sql)
+    }) as typeof db.prepare
+
+    const bridge = new KyberBridge({ canonDb: db })
+    try {
+      const split = bridge.compareRuns(cursorSplitRun!.runId, vscodeSplitRun!.runId)
+      expect(split).not.toBeNull()
+      expect(split!.runA.turnCount).toBeGreaterThan(0)
+      expect(split!.runB.turnCount).toBeGreaterThan(0)
+      expect(identityScans).toBe(1)
+    } finally {
+      bridge.close()
+      try {
+        store.close()
+      } catch {
+        // Bridge closed the injected shared handle.
+      }
+    }
+  })
+
+  it('twin-dedupes compare turnCount per execution like findings (not raw undeduped rows)', async () => {
+    // Live twin shape (issue #182 / ADR 0009 D4): one session key under
+    // claude-code (OTLP) and claude-desktop (file) with byte-identical
+    // counters within the skew window. Two such pairs five minutes apart
+    // are two genuine turns — four raw rows, two after dedupeTwinTurns.
+    // Dropping the per-execution dedupe in recordsForRun would make
+    // turnCount 4 and this assertion fail.
+    const twinKey = 'twin-cmp'
+    const sameTokens = {
+      freshInput: 2,
+      cacheRead: 39096,
+      cacheCreation: 24977,
+      output: 563,
+      reportedInput: 64075,
+      reportedOutput: 563,
+    }
+    const otel = (spanId: string, timestamp: string): CanonicalRecord => ({
+      ...turnRecord(spanId, 'claude-code', twinKey, timestamp),
+      source: 'claude-code-desktop',
+      tokens: { ...sameTokens },
+    })
+    const file = (spanId: string, timestamp: string): CanonicalRecord => ({
+      ...turnRecord(spanId, 'claude-desktop', twinKey, timestamp),
+      source: 'codeburn/claude-desktop',
+      tokens: { ...sameTokens },
+    })
+
+    const store = new CanonStore(':memory:')
+    store.upsertMany([
+      otel('otel-1', '2026-09-23T22:43:53.540Z'),
+      file('synth:aaa', '2026-09-23T22:43:58.783Z'),
+      otel('otel-2', '2026-09-23T22:48:53.540Z'),
+      file('synth:bbb', '2026-09-23T22:48:58.783Z'),
+      turnRecord('bare-b', 'copilot', 'solo-b', '2026-09-23T23:00:00.000Z'),
+    ])
+    await buildSessions(store)
+    await buildRuns(store)
+
+    // Precondition: raw provenance keeps all four twin rows under the folded share.
+    expect(store.recordsForShare(twinKey, 'claude-code')).toHaveLength(4)
+
+    const twinRun = store.listRuns('claude-code').find((run) =>
+      store.listExecutions(run.runId).some((execution) => execution.sessionId === twinKey),
+    )
+    const bareRun = store.listRuns('copilot').find((run) =>
+      store.listExecutions(run.runId).some((execution) => execution.sessionId === 'solo-b'),
+    )
+    expect(twinRun).toBeDefined()
+    expect(bareRun).toBeDefined()
+
+    const bridge = new KyberBridge({ canonPath: ':memory:', store })
+    try {
+      const cmp = bridge.compareRuns(twinRun!.runId, bareRun!.runId)
+      expect(cmp).not.toBeNull()
+      // Deduped cardinality: 2 twin pairs → 2 turns (not 4 raw rows).
+      expect(cmp!.runA.turnCount).toBe(2)
+      expect(cmp!.runB.turnCount).toBe(1)
+      expect(cmp!.pairs.length).toBeGreaterThan(0)
+    } finally {
+      bridge.close()
+      store.close()
+    }
+  })
+})

@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { DatabaseSync } from 'node:sqlite'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 
 import { runWebDashboard } from '../cli/web.js'
 import { buildRuns } from '../canon/runs.js'
@@ -1589,6 +1589,88 @@ describe('GET /api/kyber/runs + run detail review follow-ups', () => {
       expect(body.runs[0]!.costStatus).toBeUndefined()
     } finally {
       await new Promise<void>((resolve) => listServer.close(() => resolve()))
+      listBridge.close()
+      store.close()
+    }
+  })
+
+  // Issue #190 D2: Compare filters subagent runs from `/api/kyber/runs`.
+  // Enrichment must key on linked session ids — never uncapped listSessions().
+  it('exposes isSubagent via keyed session lookup, not listSessions()', async () => {
+    const store = new CanonStore(':memory:')
+    const usage: CanonicalRecord['tokens'] = {
+      freshInput: 800,
+      cacheRead: 200,
+      cacheCreation: 0,
+      output: 100,
+      reportedInput: 1000,
+      reportedOutput: 100,
+    }
+    const rec = (
+      spanId: string,
+      sessionId: string,
+      subagent: boolean,
+      timestamp: string,
+    ): CanonicalRecord => ({
+      spanId,
+      traceId: `trace-${sessionId}`,
+      parentSpanId: null,
+      sessionId,
+      source: 'synthetic',
+      harness: 'copilot',
+      name: 'canonical run turn',
+      op: 'llm.invoke',
+      kind: 'client',
+      timestamp,
+      durationMs: 100,
+      status: 'ok',
+      tokens: usage,
+      content: {},
+      parts: [{ part: 'system_prompt', text: 'sys', tokens: 600 }],
+      cost: { basis: 'harness', status: 'priced', value: 0.01, currency: 'USD' },
+      // Distinct cwd keeps time-gap clustering from folding both into one run.
+      raw: {
+        model: 'gpt-4o',
+        cwd: `/repo-${sessionId}`,
+        ...(subagent ? { parent_session: 'parent-main' } : {}),
+      },
+    })
+    store.upsertMany([
+      rec('sub-t1', 'run-list-sub', true, '2026-09-04T12:00:00.000Z'),
+      rec('main-t1', 'run-list-main', false, '2026-09-05T12:00:00.000Z'),
+    ])
+    await buildSessions(store)
+    await buildRuns(store)
+
+    const listBridge = new KyberBridge({ canonPath: ':memory:', store })
+    const listSpy = vi.spyOn(listBridge, 'listSessions')
+    const flagSpy = vi.spyOn(listBridge, 'sessionSubagentFlags')
+    const listServer = await runWebDashboard({ port: 0, open: false, kyberBridge: listBridge, writeStdout: () => {} })
+    try {
+      const listBase = `http://127.0.0.1:${(listServer.address() as AddressInfo).port}`
+      const res = await fetch(`${listBase}/api/kyber/runs?harness=copilot`)
+      expect(res.status).toBe(200)
+      const body = (await res.json()) as {
+        runs: Array<{ runId: string; isSubagent?: boolean }>
+      }
+      expect(body.runs).toHaveLength(2)
+      const bySession = new Map(
+        body.runs.map((run) => {
+          const exec = store.listExecutions(run.runId)[0]
+          return [exec?.sessionId ?? run.runId, run] as const
+        }),
+      )
+      expect(bySession.get('run-list-sub')?.isSubagent).toBe(true)
+      expect(bySession.get('run-list-main')?.isSubagent).toBeUndefined()
+      expect(listSpy).not.toHaveBeenCalled()
+      expect(flagSpy).toHaveBeenCalledTimes(1)
+      expect(flagSpy.mock.calls[0]![0]).toEqual(
+        expect.arrayContaining(['run-list-sub', 'run-list-main']),
+      )
+    } finally {
+      await new Promise<void>((resolve) => listServer.close(() => resolve()))
+      listSpy.mockRestore()
+      flagSpy.mockRestore()
       listBridge.close()
       store.close()
     }

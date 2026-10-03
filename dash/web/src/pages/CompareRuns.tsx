@@ -17,6 +17,7 @@ import {
   type KyberRunComparison,
   type KyberRunSummary,
 } from '../lib/kyberApi.js'
+import { fmtRunTimestamp, shortRunId } from '../lib/utils.js'
 
 export type OutcomeSummary = {
   status: 'success' | 'failure' | 'abandoned' | 'inconclusive' | 'not_measurable'
@@ -38,6 +39,12 @@ export type RunCandidate = {
   ended?: string
   outcome?: OutcomeSummary
   turns: RunTurnSummary[]
+  /** Measured turn count from `/api/kyber/runs` (picker size + D2 filter). */
+  turnCount?: number
+  totalInput?: number | null
+  totalOutput?: number | null
+  /** True when any linked session is a subagent (D2 picker filter). */
+  isSubagent?: boolean
 }
 
 export type ProposedPairCandidate = {
@@ -132,7 +139,167 @@ function toCandidate(row: KyberRunSummary): RunCandidate {
     ended: row.ended ?? undefined,
     outcome: toOutcome(row.outcome),
     turns: [],
+    turnCount: row.turnCount,
+    totalInput: row.totalInput,
+    totalOutput: row.totalOutput,
+    isSubagent: row.isSubagent === true,
   }
+}
+
+/**
+ * Picker option text (D4): `{localDate} · {harness} · {turnCount}t · {tokens} · {shortId}`
+ * with an optional `label` prefix. Unmeasured turns and tokens are "—", not a
+ * fabricated zero — the same honesty `isComparePickerVisible` uses for D2.
+ */
+export function formatCompareRunOptionLabel(run: RunCandidate): string {
+  const localDate = fmtRunTimestamp(run.started).date
+  const turns = run.turnCount === undefined ? '—' : `${run.turnCount}t`
+  const input = run.totalInput
+  const output = run.totalOutput
+  const hasTokens =
+    (typeof input === 'number' && Number.isFinite(input)) ||
+    (typeof output === 'number' && Number.isFinite(output))
+  const tokens = hasTokens
+    ? ((typeof input === 'number' ? input : 0) + (typeof output === 'number' ? output : 0)).toLocaleString()
+    : '—'
+  const shortId = shortRunId(run.runId, run.harness)
+  const body = `${localDate} · ${run.harness} · ${turns} · ${tokens} · ${shortId}`
+  return run.label ? `${run.label} · ${body}` : body
+}
+
+/**
+ * Picker-card Turns figure. Measured counts win; a loaded turn list is a last
+ * resort. `toCandidate` always sets `turns: []`, so treating length as a
+ * fallback would reprint the #190 "Turns: 0" lie for unmeasured runs.
+ */
+export function formatComparePickerTurns(measured: number | undefined, loadedTurns: number): string {
+  if (measured !== undefined) return String(measured)
+  if (loadedTurns > 0) return String(loadedTurns)
+  return '—'
+}
+
+/** D2: hide zero-turn runs always; hide subagents unless the toggle is on. */
+export function isComparePickerVisible(run: RunCandidate, showSubagents: boolean): boolean {
+  if (run.turnCount === 0) return false
+  if (!showSubagents && run.isSubagent === true) return false
+  return true
+}
+
+function workingDirectoryBasename(cwd: string | null | undefined): string | undefined {
+  const trimmed = cwd?.trim()
+  if (!trimmed) return undefined
+  const parts = trimmed.replace(/\\/g, '/').split('/').filter(Boolean)
+  return parts.at(-1)
+}
+
+/**
+ * Visible `<option>` text. Colliding D4 labels get a cwd basename (or a stable
+ * ordinal) appended so Chrome/Firefox users can tell the rows apart — `<option
+ * title>` is not reliably surfaced.
+ */
+export function compareOptionLabels(runs: readonly RunCandidate[]): Map<string, string> {
+  const base = new Map<string, string>()
+  for (const run of runs) {
+    base.set(run.runId, formatCompareRunOptionLabel(run))
+  }
+  const groups = new Map<string, RunCandidate[]>()
+  for (const run of runs) {
+    const label = base.get(run.runId) ?? formatCompareRunOptionLabel(run)
+    const group = groups.get(label) ?? []
+    group.push(run)
+    groups.set(label, group)
+  }
+  const visible = new Map<string, string>()
+  for (const run of runs) {
+    const label = base.get(run.runId) ?? formatCompareRunOptionLabel(run)
+    const group = groups.get(label) ?? [run]
+    if (group.length === 1) {
+      visible.set(run.runId, label)
+      continue
+    }
+    const basename = workingDirectoryBasename(run.workingDirectory)
+    const used = group.map((sibling) => workingDirectoryBasename(sibling.workingDirectory))
+    const basenameUnique = basename !== undefined && used.filter((name) => name === basename).length === 1
+    if (basenameUnique) {
+      visible.set(run.runId, `${label} · ${basename}`)
+      continue
+    }
+    visible.set(run.runId, `${label} · ${group.findIndex((sibling) => sibling.runId === run.runId) + 1}`)
+  }
+  return visible
+}
+
+function selectedRunTitle(run: RunCandidate | undefined): string | undefined {
+  if (!run) return undefined
+  const cwd = run.workingDirectory?.trim()
+  // HTML title attributes collapse newlines; keep the pair on one readable line.
+  return cwd ? `${run.runId} · ${cwd}` : run.runId
+}
+
+function RunPickerCard({
+  id,
+  heading,
+  selectedId,
+  onChange,
+  run,
+  outcome,
+  turnCount,
+  pickerRuns,
+  optionLabels,
+}: {
+  id: string
+  heading: string
+  selectedId: string
+  onChange: (id: string) => void
+  run: RunCandidate | undefined
+  outcome: OutcomeSummary | undefined
+  turnCount: string
+  pickerRuns: readonly RunCandidate[]
+  optionLabels: ReadonlyMap<string, string>
+}) {
+  return (
+    <Card className="flex flex-col gap-2 p-4">
+      <label htmlFor={id} className="text-[11px] font-semibold uppercase tracking-wider text-heading">
+        {heading}
+      </label>
+      <select
+        id={id}
+        data-testid={id}
+        value={selectedId}
+        title={selectedRunTitle(run)}
+        onChange={(e) => onChange(e.target.value)}
+        className="rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+      >
+        <option value="">Select a run</option>
+        {pickerRuns.map((candidate) => {
+          const label = optionLabels.get(candidate.runId) ?? formatCompareRunOptionLabel(candidate)
+          return (
+            <option key={candidate.runId} value={candidate.runId}>
+              {label}
+            </option>
+          )
+        })}
+      </select>
+      {run && (
+        <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-tertiary-foreground">
+          <span>Harness: <strong className="text-foreground">{run.harness}</strong></span>
+          <span>Turns: <strong className="text-foreground">{turnCount}</strong></span>
+          <span>
+            Outcome:{' '}
+            <strong
+              className={
+                outcome?.status === 'success'
+                  ? 'text-emerald-600 dark:text-emerald-400'
+                  : 'text-rose-600 dark:text-rose-400'
+              }
+            >
+              {outcome?.status ?? 'unobserved'}
+            </strong>
+          </span>
+        </div>
+      )}
+    </Card>
+  )
 }
 
 function toTurn(raw: Record<string, unknown> | null): RunTurnSummary | null {
@@ -283,6 +450,7 @@ export function CompareRuns({
   const [localA, setLocalA] = useState<string | undefined>(undefined)
   const [localB, setLocalB] = useState<string | undefined>(undefined)
   const [showProposedDrawer, setShowProposedDrawer] = useState(true)
+  const [showSubagents, setShowSubagents] = useState(false)
 
   const {
     data: fetchedRuns,
@@ -300,13 +468,21 @@ export function CompareRuns({
     [injectedRuns, fetchedRuns],
   )
 
-  const selectedAId = propA ?? localA ?? initialRunAId ?? runs[0]?.runId ?? ''
-  const selectedBId =
-    propB ??
-    localB ??
-    initialRunBId ??
-    runs.find((r) => r.runId !== selectedAId)?.runId ??
-    ''
+  // D3: no silent list default. Deep-link / initial* / controlled props count as explicit.
+  const selectedAId = propA ?? localA ?? initialRunAId ?? ''
+  const selectedBId = propB ?? localB ?? initialRunBId ?? ''
+
+  // D2 filters apply, but an explicitly selected id must stay in the <select>
+  // options so deep-links / controlled props do not render a blank value while
+  // compare still fetches. Do not auto-toggle Show subagents — preserve filter intent.
+  const pickerRuns = useMemo(() => {
+    const pinned = new Set([selectedAId, selectedBId].filter((id) => id !== ''))
+    return runs.filter(
+      (r) => isComparePickerVisible(r, showSubagents) || pinned.has(r.runId),
+    )
+  }, [runs, showSubagents, selectedAId, selectedBId])
+
+  const optionLabels = useMemo(() => compareOptionLabels(pickerRuns), [pickerRuns])
 
   const canFetchComparison = live && selectedAId !== '' && selectedBId !== '' && selectedAId !== selectedBId
 
@@ -512,81 +688,42 @@ export function CompareRuns({
       )}
 
       {runs.length > 0 ? (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <Card className="flex flex-col gap-2 p-4">
-            <label htmlFor="compare-run-a" className="text-[11px] font-semibold uppercase tracking-wider text-heading">
-              Run A (Baseline)
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center justify-end">
+            <label className="flex items-center gap-2 text-xs text-foreground">
+              <input
+                type="checkbox"
+                checked={showSubagents}
+                onChange={(e) => setShowSubagents(e.target.checked)}
+                data-testid="compare-show-subagents"
+              />
+              Show subagents
             </label>
-            <select
+          </div>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <RunPickerCard
               id="compare-run-a"
-              data-testid="compare-run-a"
-              value={selectedAId}
-              onChange={(e) => handleSelectA(e.target.value)}
-              className="rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-            >
-              {runs.map((r) => (
-                <option key={r.runId} value={r.runId}>
-                  {r.label ?? r.runId} ({r.harness})
-                </option>
-              ))}
-            </select>
-            {runA && (
-              <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-tertiary-foreground">
-                <span>Harness: <strong className="text-foreground">{runA.harness}</strong></span>
-                <span>Turns: <strong className="text-foreground">{comparison?.runA.turnCount ?? runA.turns.length}</strong></span>
-                <span>
-                  Outcome:{' '}
-                  <strong
-                    className={
-                      outcomeA?.status === 'success'
-                        ? 'text-emerald-600 dark:text-emerald-400'
-                        : 'text-rose-600 dark:text-rose-400'
-                    }
-                  >
-                    {outcomeA?.status ?? 'unobserved'}
-                  </strong>
-                </span>
-              </div>
-            )}
-          </Card>
-
-          <Card className="flex flex-col gap-2 p-4">
-            <label htmlFor="compare-run-b" className="text-[11px] font-semibold uppercase tracking-wider text-heading">
-              Run B (Candidate)
-            </label>
-            <select
+              heading="Run A (Baseline)"
+              selectedId={selectedAId}
+              onChange={handleSelectA}
+              run={runA}
+              outcome={outcomeA}
+              turnCount={formatComparePickerTurns(comparison?.runA.turnCount ?? runA?.turnCount, runA?.turns.length ?? 0)}
+              pickerRuns={pickerRuns}
+              optionLabels={optionLabels}
+            />
+            <RunPickerCard
               id="compare-run-b"
-              data-testid="compare-run-b"
-              value={selectedBId}
-              onChange={(e) => handleSelectB(e.target.value)}
-              className="rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-            >
-              <option value="">Select a run</option>
-              {runs.map((r) => (
-                <option key={r.runId} value={r.runId}>
-                  {r.label ?? r.runId} ({r.harness})
-                </option>
-              ))}
-            </select>
-            {runB && (
-              <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-tertiary-foreground">
-                <span>Harness: <strong className="text-foreground">{runB.harness}</strong></span>
-                <span>Turns: <strong className="text-foreground">{comparison?.runB.turnCount ?? runB.turns.length}</strong></span>
-                <span>
-                  Outcome:{' '}
-                  <strong
-                    className={
-                      outcomeB?.status === 'success'
-                        ? 'text-emerald-600 dark:text-emerald-400'
-                        : 'text-rose-600 dark:text-rose-400'
-                    }
-                  >
-                    {outcomeB?.status ?? 'unobserved'}
-                  </strong>
-                </span>
-              </div>
-            )}
-          </Card>
+              heading="Run B (Candidate)"
+              selectedId={selectedBId}
+              onChange={handleSelectB}
+              run={runB}
+              outcome={outcomeB}
+              turnCount={formatComparePickerTurns(comparison?.runB.turnCount ?? runB?.turnCount, runB?.turns.length ?? 0)}
+              pickerRuns={pickerRuns}
+              optionLabels={optionLabels}
+            />
+          </div>
         </div>
       ) : null}
 
