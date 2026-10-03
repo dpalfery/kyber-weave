@@ -198,7 +198,17 @@ yields no records persists its reason on the checkpoint's `last_error_code` (sta
 `ok`): `window_filtered` when the parser produced calls that all predate the coverage
 window (`sliceCallsToWindow`), `no_recordable_events` when it produced none (for Codex,
 no `token_count` or model events). A unit with records, or with problems, carries no such
-reason. The Codex OTLP adapter (`canon/adapters/codex.ts`) is the sixth fingerprint voter; see the Codex OTLP note in [telemetry-inventory](telemetry-inventory.md). After jobs
+reason. The Codex OTLP adapter (`canon/adapters/codex.ts`) is the sixth fingerprint voter; see the Codex OTLP note in [telemetry-inventory](telemetry-inventory.md). Warp's Group Containers
+sqlite is opened through `openDatabase`. A copyfile(2) `EPERM`/`EACCES` on the cache copy
+falls back to read/write (`copyFileBestEffort`, issue #194 / PR #257), so records are produced whenever the
+bytes are readable. A true source-unreadable denial (typically macOS TCC on Group Containers)
+is not retried as another user and does not fabricate rows: discovery returns `[]`, the probe
+path stays `exists: true` with `accessError: permission-denied`, and doctor's `emptyVerdict`
+names the path as not readable — permission denied — with a platform-specific remedy (Full
+Disk Access on macOS, owner/permissions otherwise). A kyberdash cache-directory
+mkdir/copy/rename `EACCES` is not a Warp TCC denial and is not rethrown as one. A
+zero-record checkpoint remains a truthful count of *parsed* records
+([honest unobservability](../rules/honest-unobservability.md)). After jobs
 drain, `purgeExpiredContent` empties content older than 14 days without touching
 `records.raw` ([ADR 0018](../adr/0018-kyberdash-content-retention-purge.md)), then the store
 is projected through `projectCanonicalStore` — the same shared entry the live receiver uses
@@ -371,6 +381,14 @@ credits table. `costBlockFor` returns `{published, no_rate}` for a zero or non-f
 a published-rate source (`costIsEstimated === true`), and `unknown` only where no pricing was
 attempted.
 
+**Devin rate (issue #197).** `devin.acuUsdRate` in `~/.kyberdash/config.json` prices Devin ACU
+usage; it does not gate discovery or parsing. A missing, non-positive, or non-finite rate
+(including a JSON literal such as `1e400` that parses as `Infinity`) still emits sessions and
+token fields. `costUSD` is then `0` with `costIsEstimated: true` — unknown, never a measured
+zero — and doctor appends `costs unpriced — set devin.acuUsdRate in ~/.kyberdash/config.json`
+rather than reporting `sessions.db` as holding no sessions. Set a finite positive rate to
+price; do not invent one.
+
 **Session totals.** `buildSessionRow` sums only turn records; a non-turn span makes no cost
 claim. A session with some unpriced published turns totals `partial` with the priced share. A
 genuine mix of `harness` and `published` turns records `COST_BASIS_MISMATCH` in the payload's
@@ -390,7 +408,9 @@ only when the server sent no cost.
 Each source declares per-metric availability independent of value (R10.1). A metric a source
 cannot report renders as "not measurable" (`null` with a machine- and human-readable `reason`),
 never as zero — rendering an unreported metric as `0` would make the harness that reports least look
-most efficient. Content readers (such as `copilotVscodeReader` and `cursorReader`) map native evidence
+most efficient. The same rule applies at discovery: a missing Devin price rate is unpriced
+cost, not "no sessions"; an unreadable Warp database is permission denied, not "tool not
+installed" and not an empty history. Content readers (such as `copilotVscodeReader` and `cursorReader`) map native evidence
 into input-side `ReaderTurn` snapshots without attributing current response text to input context or
 inventing unobserved prefix history. Where total tokens and context window are known, pressure is
 measured independently from whether individual composition buckets are available.
