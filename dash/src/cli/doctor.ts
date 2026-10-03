@@ -301,7 +301,14 @@ function emptyVerdict(
   // installed" (issue #197 — Warp's Group Containers sqlite copy fails EPERM).
   const denied = known.filter(p => p.accessError === 'permission-denied')
   if (denied.length > 0) {
-    return `NOTHING FOUND (${denied[0]!.path} is not readable — permission denied; macOS requires granting the app Full Disk Access for this container)`
+    const named = denied.length === 1
+      ? `${denied[0]!.path} is not readable — permission denied`
+      : `${denied[0]!.path} (and ${denied.length - 1} more) is not readable — permission denied`
+    const remedy = process.platform === 'darwin'
+      ? 'on macOS grant Full Disk Access'
+      : 'check owner/permissions'
+    const override = hasOverride ? `; override ${overrideNames} set` : ''
+    return `NOTHING FOUND (${named}; ${remedy}${override})`
   }
 
   // No known probe roots to check: honest, override-aware fallback.
