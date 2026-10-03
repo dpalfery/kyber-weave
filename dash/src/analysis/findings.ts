@@ -318,8 +318,9 @@ export function serializeToolArgs(args: unknown): string {
  * (honest-unobservability; ADR 0013 D5).
  *
  * A measured part count covers the whole catalogue blob. It is attributed
- * to a tool only when the part describes a single definition — splitting
- * one harness count across many names would invent per-tool sizes.
+ * to a tool only when the parsed array is exactly one entry and that entry
+ * is named — an unnamed sibling still shares the blob, so pinning the count
+ * on the named tool alone would invent a per-tool size.
  */
 export function extractToolDefinitionsFromRecord(
   record: CanonicalRecord,
@@ -339,7 +340,9 @@ export function extractToolDefinitionsFromRecord(
             for (const item of named) {
               tools.push({
                 name: String(item.name),
-                ...(measured !== undefined && named.length === 1 ? { tokens: measured } : {}),
+                ...(measured !== undefined && parsed.length === 1 && named.length === 1
+                  ? { tokens: measured }
+                  : {}),
               })
             }
           } else if (parsed?.name) {

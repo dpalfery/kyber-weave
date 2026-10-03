@@ -6,7 +6,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import crypto from 'node:crypto'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { computeRankScore, detectCompactionHazard, detectDormantToolSchema, detectDuplicateToolCall, detectFindings, detectInactiveSkillReference, detectOversizedToolResult, detectPrefixCacheBreak, detectUnboundedDelegation, lintRecommendationD8, rankFindings, type Finding } from './findings.js'
+import { computeRankScore, detectCompactionHazard, detectDormantToolSchema, detectDuplicateToolCall, detectFindings, detectInactiveSkillReference, detectOversizedToolResult, detectPrefixCacheBreak, detectUnboundedDelegation, extractToolDefinitionsFromRecord, lintRecommendationD8, rankFindings, type Finding } from './findings.js'
 import {
   CanonStore,
   SCHEMA_VERSION,
@@ -200,6 +200,31 @@ describe('Detector 1: dormant-tool-schema', () => {
     expect(findings[0]!.estimatedWasteTokens).toBe(600)
     expect(findings[0]!.measurementClass).toBe('deterministic')
     expect(findings[0]!.errorBar).toEqual({ lower: 480, upper: 720 })
+  })
+
+  it('does NOT attribute a measured part count when the catalogue array has unnamed siblings', () => {
+    // One named tool plus an unnamed entry: the harness count covers the whole
+    // blob and must not be pinned on the named tool alone.
+    const defText = JSON.stringify([{ name: 'unused_linter' }, { description: 'unnamed sibling' }])
+    const record = makeMockRecord({
+      spanId: 'turn-1',
+      op: 'llm.invoke',
+      parts: [{ part: 'tool_definitions', text: defText, tokens: 200 }],
+    })
+
+    expect(extractToolDefinitionsFromRecord(record)).toEqual([{ name: 'unused_linter' }])
+
+    const turns = [1, 2, 3].map((n) =>
+      makeMockRecord({
+        spanId: `turn-${n}`,
+        op: 'llm.invoke',
+        parts: [{ part: 'tool_definitions', text: defText, tokens: 200 }],
+      }),
+    )
+    const findings = detectDormantToolSchema({ records: turns })
+    expect(findings.length).toBe(1)
+    expect(findings[0]!.estimatedWasteTokens).toBeUndefined()
+    expect(findings[0]!.measurementClass).toBe('coverage-gap')
   })
 
   it('does NOT flag tool schema if tool is invoked in any turn', () => {
