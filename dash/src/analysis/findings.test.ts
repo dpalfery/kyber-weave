@@ -6,7 +6,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import crypto from 'node:crypto'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { computeRankScore, detectCompactionHazard, detectDormantToolSchema, detectDuplicateToolCall, detectFindings, detectInactiveSkillReference, detectOversizedToolResult, detectPrefixCacheBreak, detectUnboundedDelegation, lintRecommendationD8, rankFindings, type Finding } from './findings.js'
+import { computeRankScore, detectCompactionHazard, detectDormantToolSchema, detectDuplicateToolCall, detectFindings, detectInactiveSkillReference, detectOversizedToolResult, detectPrefixCacheBreak, detectUnboundedDelegation, extractToolDefinitionsFromRecord, lintRecommendationD8, rankFindings, type Finding } from './findings.js'
 import {
   CanonStore,
   SCHEMA_VERSION,
@@ -154,8 +154,98 @@ describe('Detector 1: dormant-tool-schema', () => {
     expect(f.evidenceLinks.length).toBeGreaterThanOrEqual(2)
     expect(f.evidenceLinks[0]?.spanId).toBe('turn-1')
     expect(f.evidenceLinks[1]?.spanId).toBe('turn-3')
-    expect(f.estimatedWasteTokens).toBeGreaterThan(0)
-    expect(f.errorBar!.lower).toBeLessThanOrEqual(f.errorBar!.upper)
+    // Text-only tool_definitions parts carry no harness-reported size: the
+    // finding stays a coverage gap rather than inventing length/4 tokens.
+    expect(f.estimatedWasteTokens).toBeUndefined()
+    expect(f.errorBar).toBeUndefined()
+    expect(f.measurementClass).toBe('coverage-gap')
+  })
+
+  it('does NOT treat text-derived schema sizes from records as measured deterministic waste', () => {
+    const defText = JSON.stringify([{ name: 'unused_linter', description: 'runs linter' }])
+    const turns = [1, 2, 3].map((n) =>
+      makeMockRecord({
+        spanId: `turn-${n}`,
+        op: 'llm.invoke',
+        parts: [{ part: 'tool_definitions', text: defText }],
+      }),
+    )
+
+    const findings = detectDormantToolSchema({ records: turns })
+
+    expect(findings.length).toBe(1)
+    expect(findings[0]!.estimatedWasteTokens).toBeUndefined()
+    expect(findings[0]!.errorBar).toBeUndefined()
+    expect(findings[0]!.measurementClass).toBe('coverage-gap')
+    expect(findings[0]!.rankScore).toBe(0)
+    expect(findings[0]!.measurementClass).not.toBe('deterministic')
+    // length/4 of the serialized definition must not leak into the estimate
+    const invented = Math.max(1, Math.ceil(JSON.stringify({ name: 'unused_linter', description: 'runs linter' }).length / 4)) * 3
+    expect(findings[0]!.estimatedWasteTokens).not.toBe(invented)
+  })
+
+  it('multiplies a harness-reported part.tokens schema size across resident turns from records', () => {
+    const defText = JSON.stringify([{ name: 'unused_linter', description: 'runs linter' }])
+    const turns = [1, 2, 3].map((n) =>
+      makeMockRecord({
+        spanId: `turn-${n}`,
+        op: 'llm.invoke',
+        parts: [{ part: 'tool_definitions', text: defText, tokens: 200 }],
+      }),
+    )
+
+    const findings = detectDormantToolSchema({ records: turns })
+
+    expect(findings.length).toBe(1)
+    expect(findings[0]!.estimatedWasteTokens).toBe(600)
+    expect(findings[0]!.measurementClass).toBe('deterministic')
+    expect(findings[0]!.errorBar).toEqual({ lower: 480, upper: 720 })
+  })
+
+  it('does NOT attribute a measured part count when the catalogue array has unnamed siblings', () => {
+    // One named tool plus an unnamed entry: the harness count covers the whole
+    // blob and must not be pinned on the named tool alone.
+    const defText = JSON.stringify([{ name: 'unused_linter' }, { description: 'unnamed sibling' }])
+    const record = makeMockRecord({
+      spanId: 'turn-1',
+      op: 'llm.invoke',
+      parts: [{ part: 'tool_definitions', text: defText, tokens: 200 }],
+    })
+
+    expect(extractToolDefinitionsFromRecord(record)).toEqual([{ name: 'unused_linter' }])
+
+    const turns = [1, 2, 3].map((n) =>
+      makeMockRecord({
+        spanId: `turn-${n}`,
+        op: 'llm.invoke',
+        parts: [{ part: 'tool_definitions', text: defText, tokens: 200 }],
+      }),
+    )
+    const findings = detectDormantToolSchema({ records: turns })
+    expect(findings.length).toBe(1)
+    expect(findings[0]!.estimatedWasteTokens).toBeUndefined()
+    expect(findings[0]!.measurementClass).toBe('coverage-gap')
+  })
+
+  it('merges measured toolDefinitions counts into residency already built from unmeasured records', () => {
+    const defText = JSON.stringify([{ name: 'unused_linter' }])
+    const turns = [1, 2, 3].map((n) =>
+      makeMockRecord({
+        spanId: `turn-${n}`,
+        op: 'llm.invoke',
+        parts: [{ part: 'tool_definitions', text: defText }],
+      }),
+    )
+
+    const findings = detectDormantToolSchema({
+      records: turns,
+      toolDefinitions: [{ name: 'unused_linter', tokens: 200 }],
+    })
+
+    expect(findings.length).toBe(1)
+    expect(findings[0]!.estimatedWasteTokens).toBe(600)
+    expect(findings[0]!.measurementClass).toBe('deterministic')
+    expect(findings[0]!.errorBar).toEqual({ lower: 480, upper: 720 })
   })
 
   it('does NOT flag tool schema if tool is invoked in any turn', () => {
@@ -257,6 +347,34 @@ describe('Detector 1: dormant-tool-schema', () => {
     expect(flaggedTools.some((t) => t.includes('"Read"'))).toBe(true)
     expect(flaggedTools.some((t) => t.includes('"Write"'))).toBe(true)
     expect(flaggedTools.some((t) => t.includes('"Glob"'))).toBe(true)
+  })
+
+  it('does NOT fabricate 150 tokens when schema size cannot be derived, marking estimatedWasteTokens undefined and measurementClass coverage-gap', () => {
+    const findings = detectDormantToolSchema({
+      sessionId: 'session-1',
+      turnsCount: 4,
+      toolDefinitions: [{ name: 'unused_linter' }],
+    })
+
+    expect(findings.length).toBe(1)
+    expect(findings[0]!.estimatedWasteTokens).toBeUndefined()
+    expect(findings[0]!.errorBar).toBeUndefined()
+    expect(findings[0]!.measurementClass).toBe('coverage-gap')
+    expect(findings[0]!.rankScore).toBe(0)
+    expect(findings[0]!.estimatedWasteTokens).not.toBe(600)
+  })
+
+  it('multiplies a measured schema size across resident turns', () => {
+    const findings = detectDormantToolSchema({
+      sessionId: 'session-1',
+      turnsCount: 4,
+      toolDefinitions: [{ name: 'unused_linter', tokens: 200 }],
+    })
+
+    expect(findings.length).toBe(1)
+    expect(findings[0]!.estimatedWasteTokens).toBe(800)
+    expect(findings[0]!.measurementClass).toBe('deterministic')
+    expect(findings[0]!.errorBar).toEqual({ lower: 640, upper: 960 })
   })
 })
 
@@ -828,6 +946,37 @@ describe('Detector 4: prefix-cache-break', () => {
     })
 
     expect(findings.length).toBe(0)
+  })
+
+  it('does NOT fabricate 500 tokens when fresh input cannot be derived, marking estimatedWasteTokens undefined and measurementClass coverage-gap', () => {
+    const findings = detectPrefixCacheBreak({
+      sessionId: 'session-1',
+      turns: [
+        { spanId: 'llm-turn-1', turnIndex: 0, prefixText: 'System prompt v1. timestamp A. Act as expert.' },
+        { spanId: 'llm-turn-2', turnIndex: 1, prefixText: 'System prompt v1. timestamp B. Act as expert.' },
+      ],
+    })
+
+    expect(findings.length).toBe(1)
+    expect(findings[0]!.estimatedWasteTokens).toBeUndefined()
+    expect(findings[0]!.errorBar).toBeUndefined()
+    expect(findings[0]!.measurementClass).toBe('coverage-gap')
+    expect(findings[0]!.rankScore).toBe(0)
+  })
+
+  it('uses the measured fresh-input size without a 150-token floor', () => {
+    const findings = detectPrefixCacheBreak({
+      sessionId: 'session-1',
+      turns: [
+        { spanId: 'llm-turn-1', turnIndex: 0, prefixText: 'System prompt v1. timestamp A. Act as expert.', freshInput: 80 },
+        { spanId: 'llm-turn-2', turnIndex: 1, prefixText: 'System prompt v1. timestamp B. Act as expert.', freshInput: 80 },
+      ],
+    })
+
+    expect(findings.length).toBe(1)
+    expect(findings[0]!.estimatedWasteTokens).toBe(80)
+    expect(findings[0]!.measurementClass).toBe('deterministic')
+    expect(findings[0]!.errorBar).toEqual({ lower: 64, upper: 100 })
   })
 })
 
@@ -1457,6 +1606,46 @@ describe('Detector 7: inactive-skill-reference & Decision D16 Compliance', () =>
     })
 
     expect(findings.length).toBe(0)
+  })
+
+  it('does NOT fabricate 120 tokens when skill-block size cannot be derived, marking estimatedWasteTokens undefined and measurementClass coverage-gap', () => {
+    const findings = detectInactiveSkillReference({
+      sessionId: 'session-1',
+      referencedSkills: ['docker_deploy'],
+      executedSkills: [],
+    })
+
+    expect(findings.length).toBe(1)
+    expect(findings[0]!.estimatedWasteTokens).toBeUndefined()
+    expect(findings[0]!.errorBar).toBeUndefined()
+    expect(findings[0]!.measurementClass).toBe('coverage-gap')
+    expect(findings[0]!.rankScore).toBe(0)
+    expect(findings[0]!.confidence).toBe('heuristic')
+  })
+
+  it('multiplies a measured skill-block size across resident turns', () => {
+    const turn1 = makeMockRecord({
+      spanId: 'turn-skill-1',
+      op: 'llm.invoke',
+      content: { system_prompt: '<skill name="docker_deploy">Deploy containers to swarm</skill>' },
+    })
+    const turn2 = makeMockRecord({
+      spanId: 'turn-skill-2',
+      op: 'llm.invoke',
+      content: { system_prompt: '<skill name="docker_deploy">Deploy containers to swarm</skill>' },
+    })
+
+    const findings = detectInactiveSkillReference({
+      records: [turn1, turn2],
+      executedSkills: [],
+      skillTokens: { docker_deploy: 80 },
+    })
+
+    expect(findings.length).toBe(1)
+    // turnsCount = max(record count, 3) stays the measured-path formula
+    expect(findings[0]!.estimatedWasteTokens).toBe(240)
+    expect(findings[0]!.measurementClass).toBe('inferred')
+    expect(findings[0]!.errorBar).toEqual({ lower: 120, upper: 360 })
   })
 })
 
