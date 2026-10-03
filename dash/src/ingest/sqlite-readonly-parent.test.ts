@@ -333,8 +333,14 @@ describe('SQLite read-only parent fallback', () => {
       chmodSync(dbPath, 0o644)
       skip(`SKIP: chmod 000 did not make ${dbPath} unreadable for this process`)
       return
-    } catch {
-      // Source is unreadable — the branch isSourceUnreadable must prefer this errno.
+    } catch (err) {
+      const code = typeof err === 'object' && err !== null && 'code' in err
+        ? (err as { code?: unknown }).code
+        : undefined
+      if (code !== 'EACCES' && code !== 'EPERM') {
+        skip(`SKIP: ${dbPath} inaccessible for a non-permission reason (${String(code)})`)
+        return
+      }
     }
     try {
       let thrown: unknown
