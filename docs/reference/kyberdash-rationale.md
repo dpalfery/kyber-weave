@@ -4,7 +4,7 @@ title: KyberDash measurable rationale
 doc-type: reference
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-02
+last-reviewed: 2026-10-03
 ---
 
 # KyberDash measurable rationale
@@ -59,7 +59,7 @@ count. Regression coverage: `dash/kyber/canon/tokens.test.ts`.
 
 ### R4.7 — Flat token validation and finite checks (Issue #227)
 
-When parsers fall back to flat token counters (e.g. KiloCode SQLite stores emitting `tokens_input`, `tokens_output`, etc.), unvalidated values can inject `NaN`, `Infinity`, or string types into token accounting. Flat tokens are wrapped in `finiteOrUndefined` checks so non-finite numbers or string values are rejected as absent (yielding 0) rather than corrupting cost calculations, while preserving nested `tokens` and `usage` object precedence.
+When parsers read token counters from nested `tokens`/`usage` objects or flat fallbacks (e.g. KiloCode SQLite stores emitting `tokens_input`, `tokens_output`, etc.), unvalidated values can inject `NaN`, `Infinity`, or string types into token accounting. Nested and flat sources share one `finiteOrUndefined` check so non-finite numbers or string values are rejected as absent (yielding 0) rather than corrupting cost calculations, while preserving nested `tokens` and `usage` object precedence.
 
 ## Cost attribution (Requirement 5)
 
