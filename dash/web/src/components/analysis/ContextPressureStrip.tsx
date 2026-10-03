@@ -1,3 +1,4 @@
+import { barPercent, formatPercentRatio } from '../../lib/labels.js'
 import { cn, fmtTokens } from '../../lib/utils.js'
 
 export interface ContextPressureStripProps {
@@ -43,19 +44,25 @@ export function ContextPressureStrip({
     )
   }
 
-  const medPercent =
+  const medRatio =
     typeof pressureMedian === 'number'
-      ? Math.min(100, Math.max(0, Math.round(pressureMedian * 100)))
+      ? pressureMedian
       : typeof medianTokens === 'number' && typeof maxContextTokens === 'number' && maxContextTokens > 0
-        ? Math.min(100, Math.max(0, Math.round((medianTokens / maxContextTokens) * 100)))
+        ? medianTokens / maxContextTokens
         : 0
 
-  const p95Percent =
+  const p95Ratio =
     typeof pressureP95 === 'number'
-      ? Math.min(100, Math.max(0, Math.round(pressureP95 * 100)))
+      ? pressureP95
       : typeof p95Tokens === 'number' && typeof maxContextTokens === 'number' && maxContextTokens > 0
-        ? Math.min(100, Math.max(0, Math.round((p95Tokens / maxContextTokens) * 100)))
-        : medPercent
+        ? p95Tokens / maxContextTokens
+        : medRatio
+
+  const medLabel = formatPercentRatio(medRatio)
+  const p95Label = formatPercentRatio(p95Ratio)
+  const medPercent = barPercent(medRatio)
+  const p95Percent = barPercent(p95Ratio)
+  const overflow = medRatio > 1 || p95Ratio > 1
 
   return (
     <div
@@ -68,14 +75,14 @@ export function ContextPressureStrip({
         </span>
         <div className="flex items-center gap-2 font-mono text-xs tabular-nums text-foreground">
           <span title="Median context pressure">
-            med: <span className="font-semibold">{medPercent}%</span>
+            med: <span className="font-semibold">{medLabel}</span>
             {medianTokens !== undefined && medianTokens !== null && (
               <span className="text-tertiary-foreground text-[10.5px]"> ({fmtTokens(medianTokens)})</span>
             )}
           </span>
           <span className="text-border">|</span>
           <span title="P95 context pressure">
-            p95: <span className="font-semibold">{p95Percent}%</span>
+            p95: <span className="font-semibold">{p95Label}</span>
             {p95Tokens !== undefined && p95Tokens !== null && (
               <span className="text-tertiary-foreground text-[10.5px]"> ({fmtTokens(p95Tokens)})</span>
             )}
@@ -116,6 +123,11 @@ export function ContextPressureStrip({
         <span>Compaction threshold (~85%)</span>
         <span>100% {maxContextTokens ? `(${fmtTokens(maxContextTokens)})` : ''}</span>
       </div>
+      {overflow && (
+        <p className="mt-1 text-[10.5px] text-amber-700 dark:text-amber-400" data-testid="context-pressure-overflow">
+          Window overflow: med {medLabel}, p95 {p95Label}. The bar caps at 100%; the figures do not.
+        </p>
+      )}
     </div>
   )
 }

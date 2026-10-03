@@ -527,7 +527,23 @@ describe('schema migration v14 -> v15 (refresh coverage window)', () => {
     const setup = new DatabaseSync(path)
     const before = setup.prepare('PRAGMA table_info(refresh_run)').all() as { name: string }[]
     if (before.some((column) => column.name === 'history_weeks')) {
-      setup.exec('ALTER TABLE refresh_run DROP COLUMN history_weeks')
+      // node:sqlite rejects DROP COLUMN with "incomplete input"; rebuild the
+      // v14 shape instead so the 15→16 ADD COLUMN path still runs.
+      setup.exec(`
+        CREATE TABLE refresh_run_v14 (
+          id TEXT PRIMARY KEY,
+          started_at TEXT NOT NULL,
+          completed_at TEXT,
+          status TEXT NOT NULL,
+          pid INTEGER NOT NULL,
+          trigger TEXT NOT NULL,
+          summary TEXT
+        );
+        INSERT INTO refresh_run_v14 (id, started_at, completed_at, status, pid, trigger, summary)
+          SELECT id, started_at, completed_at, status, pid, trigger, summary FROM refresh_run;
+        DROP TABLE refresh_run;
+        ALTER TABLE refresh_run_v14 RENAME TO refresh_run;
+      `)
     }
     setup.prepare('UPDATE metadata SET value = ? WHERE key = ?').run('14', 'schema_version')
     setup

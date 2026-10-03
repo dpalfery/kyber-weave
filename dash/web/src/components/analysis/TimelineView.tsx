@@ -1,5 +1,6 @@
 import * as React from 'react'
 
+import { formatDuration, formatSpanLabel } from '../../lib/labels.js'
 import { fetchSpanAttributes } from '../../lib/kyberApi.js'
 
 export type CostBlock = {
@@ -64,7 +65,7 @@ function NodeRow({
         tabIndex={onSelect ? 0 : undefined}
       >
         <span className="shrink-0 font-mono text-[11px] text-tertiary-foreground">{node.kind}</span>
-        <span className="min-w-0 flex-1 truncate font-medium">{node.name}</span>
+        <span className="min-w-0 flex-1 truncate font-medium">{formatSpanLabel(node.name)}</span>
         {node.isSubagent && (
           <span className="shrink-0 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">subagent</span>
         )}
@@ -89,7 +90,7 @@ function NodeRow({
             </span>
           )
         })()}
-        <span className="shrink-0 tabular-nums text-xs text-tertiary-foreground">{node.durationMs}ms</span>
+        <span className="shrink-0 tabular-nums text-xs text-tertiary-foreground">{formatDuration(node.durationMs)}</span>
         <CostBadge cost={node.cost} />
       </div>
       {node.children.map((child) => (
@@ -173,7 +174,7 @@ export function TimelineView({
           )}
         </div>
         <div className="mt-3 flex gap-2 text-xs text-tertiary-foreground">
-          <span>Total: {root.durationMs}ms</span>
+          <span>Total: {formatDuration(root.durationMs)}</span>
           <span>·</span>
           <CostBadge cost={root.cost} />
         </div>
