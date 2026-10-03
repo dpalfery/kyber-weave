@@ -17,6 +17,7 @@ export { getAllProviders }
 export type { SessionSource }
 
 const DEFAULT_PARSER_CONTRACT_VERSION = '1'
+const KILO_PARSER_CONTRACT_VERSION = '2'
 const CLAUDE_PARSER_CONTRACT_VERSION = '3'
 
 const GEMINI_EXCLUSION_REASON =
@@ -35,9 +36,15 @@ function excluded(reason: string): ProviderDisposition {
 
 function descriptor(partial: Omit<HarnessSourceDescriptor, 'parserContractVersion'>): HarnessSourceDescriptor {
   const isClaude = partial.providerName === 'claude' || partial.harnessId.startsWith('claude')
+  const isKilo = partial.providerName === 'kilo-code' || partial.harnessId.startsWith('kilo')
+  const parserContractVersion = isClaude
+    ? CLAUDE_PARSER_CONTRACT_VERSION
+    : isKilo
+      ? KILO_PARSER_CONTRACT_VERSION
+      : DEFAULT_PARSER_CONTRACT_VERSION
   return {
     ...partial,
-    parserContractVersion: isClaude ? CLAUDE_PARSER_CONTRACT_VERSION : DEFAULT_PARSER_CONTRACT_VERSION,
+    parserContractVersion,
   }
 }
 
