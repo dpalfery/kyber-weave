@@ -8,6 +8,8 @@ import type * as React from 'react'
 
 import {
   CompareRuns,
+  compareOptionLabels,
+  formatComparePickerTurns,
   formatCompareRunOptionLabel,
   isComparePickerVisible,
   type RunCandidate,
@@ -166,14 +168,32 @@ describe('CompareRuns option labels (D4)', () => {
     // Same sentinel as the tokens branch — not a fabricated `0t`.
     expect(label).toMatch(/ · — · — · /)
     expect(label).not.toMatch(/\b0t\b/)
+    expect(formatComparePickerTurns(undefined, 0)).toBe('—')
+    expect(formatComparePickerTurns(0, 0)).toBe('0')
+    expect(formatComparePickerTurns(undefined, 4)).toBe('4')
+
+    const unknown = run({
+      runId: 'run-unknown-turns',
+      harness: 'cursor',
+      turnCount: undefined,
+      totalInput: 100,
+      totalOutput: 20,
+    })
+    renderCompare(<CompareRuns runs={[unknown]} initialRunAId="run-unknown-turns" />)
+    const option = within(screen.getByTestId('compare-run-a')).getByRole('option', {
+      name: /run-unknown-turns|—/,
+    })
+    expect(option.textContent).toContain('—')
+    expect(option.textContent).not.toContain('0t')
+    const pickerCard = screen.getByTestId('compare-run-a').parentElement
+    expect(pickerCard?.textContent).toMatch(/Turns:\s*—/)
+    expect(pickerCard?.textContent).not.toMatch(/Turns:\s*0/)
   })
 
-  it('sets title with full runId and cwd only when truncation collides', () => {
-    // Two long ids that share the same shortRunId elision ends after stripping
-    // the derived prefix — force collision by using identical display short forms
-    // via the same truncated middle-elision pattern with different full ids that
-    // still collapse to one label body except shortId. Prefer asserting: when two
-    // options share the same visible label text, both carry a title with runId + cwd.
+  it('appends cwd basename to colliding option text so visible labels differ', () => {
+    // Two long ids that share the same shortRunId elision after stripping the
+    // derived prefix — the D4 bodies collide, so the visible text must carry
+    // a discriminator. `<option title>` is not a substitute (Chrome ignores it).
     const sharedHarness = 'cursor'
     const runs = [
       run({
@@ -206,11 +226,40 @@ describe('CompareRuns option labels (D4)', () => {
     expect(options).toHaveLength(2)
     const labels = options.map((o) => o.textContent ?? '')
     // shortRunId keeps first 9 + … + last 8 → both become aaaaaaaaa…bbbbbbbb
-    expect(labels[0]).toBe(labels[1])
+    expect(labels[0]).not.toBe(labels[1])
+    expect(labels.some((label) => label.includes('proj-a'))).toBe(true)
+    expect(labels.some((label) => label.includes('proj-b'))).toBe(true)
     for (const opt of options) {
-      expect(opt.title).toContain(opt.value)
-      expect(opt.title).toMatch(/\/Users\/hal\/proj-/)
+      expect(opt.title).toBe('')
     }
+  })
+
+  it('falls back to a stable ordinal when colliding cwd basenames also collide', () => {
+    const runs = [
+      run({
+        runId: 'derived:cursor:aaaaaaaaaXXXXXXXXXbbbbbbbb',
+        harness: 'cursor',
+        workingDirectory: '/Users/hal/proj',
+        turnCount: 1,
+        totalInput: 10,
+        totalOutput: 10,
+        started: '2026-09-15T14:30:00.000Z',
+      }),
+      run({
+        runId: 'derived:cursor:aaaaaaaaaYYYYYYYYYbbbbbbbb',
+        harness: 'cursor',
+        workingDirectory: '/tmp/proj',
+        turnCount: 1,
+        totalInput: 10,
+        totalOutput: 10,
+        started: '2026-09-15T14:30:00.000Z',
+      }),
+    ]
+    const labels = [...compareOptionLabels(runs).values()]
+    expect(labels).toHaveLength(2)
+    expect(labels[0]).not.toBe(labels[1])
+    expect(labels.some((label) => label.endsWith(' · 1'))).toBe(true)
+    expect(labels.some((label) => label.endsWith(' · 2'))).toBe(true)
   })
 })
 

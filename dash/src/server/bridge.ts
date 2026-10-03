@@ -1967,6 +1967,11 @@ export class KyberBridge {
    * Session identity table for the open corpus. Prefer the store's builder;
    * otherwise rebuild from the same distinct `(key, harness)` query so the
    * direct-DB bridge path resolves claimed ids the way findings/runs do.
+   *
+   * The DISTINCT scan walks the whole records table. `compareRuns` therefore
+   * resolves this once and hands the table to both sides — two identical
+   * rebuilds would double the cost on the #190 path, and `records_by_session`
+   * does not help a DISTINCT over every key.
    */
   private sessionIdentities(): SessionIdentities {
     if (this.store) return this.store.sessionIdentities()
@@ -1991,14 +1996,13 @@ export class KyberBridge {
    * Thin load for `compareRuns` — does not re-derive run boundaries (D16).
    * Resolves split/late shares the way findings do (`shareOf` →
    * `recordsForShare` / bare session) and twin-dedupes per execution.
-   * Caller supplies `identities` so a comparison can share one table scan
-   * across both runs rather than rebuilding it per side.
    */
-  private recordsForRun(runId: string, identities: SessionIdentities): CanonicalRecord[] {
+  private recordsForRun(runId: string, identitiesFor: () => SessionIdentities): CanonicalRecord[] {
     const executions = this.listExecutions(runId)
     if (executions.length === 0) {
       return this.recordsForSessionKey(runId)
     }
+    const identities = identitiesFor()
     const records: CanonicalRecord[] = []
     for (const execution of executions) {
       const sessionId = execution.sessionId ?? execution.executionId
@@ -2025,9 +2029,14 @@ export class KyberBridge {
     const runB = this.getRun(runBId)
     if (runA === undefined || runB === undefined) return null
 
-    // One identity table for both sides — recordsForRun used to rebuild it
-    // per run (two full DISTINCT scans on the direct-DB path).
-    const identities = this.sessionIdentities()
+    // Lazy so a pair of execution-less ids still skips the DISTINCT scan;
+    // once either side needs shares, both reuse the same table.
+    let identities: SessionIdentities | undefined
+    const identitiesFor = (): SessionIdentities => {
+      identities ??= this.sessionIdentities()
+      return identities
+    }
+
     const summary = compareStoredRuns(
       {
         runId: runA.runId,
@@ -2035,7 +2044,7 @@ export class KyberBridge {
         ...(runA.label ? { label: runA.label } : {}),
         ...(runA.workingDirectory !== undefined ? { workingDirectory: runA.workingDirectory } : {}),
         ...(runA.outcome !== undefined ? { outcome: runA.outcome } : {}),
-        turns: this.recordsForRun(runA.runId, identities),
+        turns: this.recordsForRun(runA.runId, identitiesFor),
       },
       {
         runId: runB.runId,
@@ -2043,7 +2052,7 @@ export class KyberBridge {
         ...(runB.label ? { label: runB.label } : {}),
         ...(runB.workingDirectory !== undefined ? { workingDirectory: runB.workingDirectory } : {}),
         ...(runB.outcome !== undefined ? { outcome: runB.outcome } : {}),
-        turns: this.recordsForRun(runB.runId, identities),
+        turns: this.recordsForRun(runB.runId, identitiesFor),
       },
       options,
     )

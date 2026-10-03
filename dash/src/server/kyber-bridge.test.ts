@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createRequire } from 'node:module'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -1914,44 +1914,6 @@ describe('KyberBridge.compareRuns split-share identity (issue #190 / D1)', () =>
     }
   })
 
-  it('resolves session identities once per compareRuns call', async () => {
-    // compareRuns loads turns for both runs; each must not rebuild the
-    // full-table SessionIdentities set (kilo finding on recordsForRun).
-    const store = new CanonStore(':memory:')
-    store.upsertMany([
-      turnRecord('split-cur', 'cursor', 'k-split', '2026-09-03T10:00:00.000Z'),
-      turnRecord('split-vs', 'copilot-chat', 'k-split', '2026-09-03T10:01:00.000Z'),
-    ])
-    await buildSessions(store)
-    await buildRuns(store)
-
-    const cursorSplitRun = store.listRuns('cursor').find((run) =>
-      store.listExecutions(run.runId).some((execution) => execution.sessionId === 'cursor:k-split'),
-    )
-    const vscodeSplitRun = store.listRuns('copilot-vscode').find((run) =>
-      store
-        .listExecutions(run.runId)
-        .some((execution) => execution.sessionId === 'copilot-vscode:k-split'),
-    )
-    expect(cursorSplitRun).toBeDefined()
-    expect(vscodeSplitRun).toBeDefined()
-
-    const bridge = new KyberBridge({ canonPath: ':memory:', store })
-    const identitiesSpy = vi.spyOn(store, 'sessionIdentities')
-    try {
-      identitiesSpy.mockClear()
-      const split = bridge.compareRuns(cursorSplitRun!.runId, vscodeSplitRun!.runId)
-      expect(split).not.toBeNull()
-      expect(split!.runA.turnCount).toBeGreaterThan(0)
-      expect(split!.runB.turnCount).toBeGreaterThan(0)
-      expect(identitiesSpy).toHaveBeenCalledTimes(1)
-    } finally {
-      identitiesSpy.mockRestore()
-      bridge.close()
-      store.close()
-    }
-  })
-
   it('resolves split-share the same way on the direct-DB path (no injected store)', async () => {
     const store = new CanonStore(':memory:')
     store.upsertMany([
@@ -1981,6 +1943,51 @@ describe('KyberBridge.compareRuns split-share identity (issue #190 / D1)', () =>
       expect(split!.runB.turnCount).toBeGreaterThan(0)
       expect(split!.pairs.length).toBeGreaterThan(0)
       expect(bridge.compareRuns('missing-a', cursorSplitRun!.runId)).toBeNull()
+    } finally {
+      bridge.close()
+      try {
+        store.close()
+      } catch {
+        // Bridge closed the injected shared handle.
+      }
+    }
+  })
+
+  it('rebuilds SessionIdentities once when compareRuns loads two executed sides', async () => {
+    const store = new CanonStore(':memory:')
+    store.upsertMany([
+      turnRecord('split-cur', 'cursor', 'k-split', '2026-09-03T10:00:00.000Z'),
+      turnRecord('split-vs', 'copilot-chat', 'k-split', '2026-09-03T10:01:00.000Z'),
+    ])
+    await buildSessions(store)
+    await buildRuns(store)
+
+    const cursorSplitRun = store.listRuns('cursor').find((run) =>
+      store.listExecutions(run.runId).some((execution) => execution.sessionId === 'cursor:k-split'),
+    )
+    const vscodeSplitRun = store.listRuns('copilot-vscode').find((run) =>
+      store
+        .listExecutions(run.runId)
+        .some((execution) => execution.sessionId === 'copilot-vscode:k-split'),
+    )
+    expect(cursorSplitRun).toBeDefined()
+    expect(vscodeSplitRun).toBeDefined()
+
+    const db = store.getDatabase()
+    const originalPrepare = db.prepare.bind(db)
+    let identityScans = 0
+    db.prepare = ((sql: string) => {
+      if (sql.includes('SELECT DISTINCT COALESCE(session_id, trace_id)')) identityScans += 1
+      return originalPrepare(sql)
+    }) as typeof db.prepare
+
+    const bridge = new KyberBridge({ canonDb: db })
+    try {
+      const split = bridge.compareRuns(cursorSplitRun!.runId, vscodeSplitRun!.runId)
+      expect(split).not.toBeNull()
+      expect(split!.runA.turnCount).toBeGreaterThan(0)
+      expect(split!.runB.turnCount).toBeGreaterThan(0)
+      expect(identityScans).toBe(1)
     } finally {
       bridge.close()
       try {
