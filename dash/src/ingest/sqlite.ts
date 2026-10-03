@@ -13,14 +13,14 @@ import { getCacheDir } from './cache-dir.js'
 
 const requireForSqlite = createRequire(import.meta.url)
 
-type Row = Record<string, unknown>
+export type Row = Record<string, unknown>
 
 export type SqliteDatabase = {
   query<T extends Row = Row>(sql: string, params?: unknown[]): T[]
   close(): void
 }
 
-type DatabaseSyncInstance = {
+export type DatabaseSyncInstance = {
   prepare(sql: string): { all(...params: unknown[]): Row[] }
   exec?(sql: string): void
   close(): void
@@ -278,6 +278,14 @@ export function setSqliteCopyFileForTest(fn: typeof copyFileSync | ((sourcePath:
   copyFileImpl = (fn as ((sourcePath: string, destinationPath: string) => void) | null) ?? copyFileBestEffort
 }
 
+let openImmutableHook: ((url: string) => DatabaseSyncInstance | void) | null = null
+
+export function setSqliteOpenImmutableForTest(
+  fn: ((url: string) => DatabaseSyncInstance | void) | null,
+): void {
+  openImmutableHook = fn
+}
+
 function copyOptionalFile(sourcePath: string, destinationPath: string): boolean {
   try {
     copyFileImpl(sourcePath, destinationPath)
@@ -394,6 +402,12 @@ function openReadonlyCache(path: string, originalError: unknown): DatabaseSyncIn
   const Driver = DatabaseSync
   if (Driver === null) throw new Error(getSqliteLoadError())
 
+  function openImmutable(url: string): DatabaseSyncInstance {
+    const overridden = openImmutableHook?.(url)
+    if (overridden) return overridden
+    return new Driver!(url, { readOnly: true })
+  }
+
   let fingerprint: DatabaseFingerprint
   try {
     fingerprint = fingerprintDatabase(path)
@@ -408,7 +422,7 @@ function openReadonlyCache(path: string, originalError: unknown): DatabaseSyncIn
   // and read the source in place.
   if (fingerprint.walBytes === 0 && sqliteSupportsUriFilenames()) {
     try {
-      return new Driver(`${pathToFileURL(path).href}?immutable=1`, { readOnly: true })
+      return openImmutable(`${pathToFileURL(path).href}?immutable=1`)
     } catch {
       // Understood but refused: the copy covers it.
     }
@@ -422,7 +436,7 @@ function openReadonlyCache(path: string, originalError: unknown): DatabaseSyncIn
     // so a nonempty WAL would silently drop committed rows.
     if (errorCode(err) === 'EPERM' && fingerprint.walBytes === 0 && sqliteSupportsUriFilenames()) {
       try {
-        const db = new Driver(`${pathToFileURL(path).href}?immutable=1`, { readOnly: true })
+        const db = openImmutable(`${pathToFileURL(path).href}?immutable=1`)
         warnSqliteOnce(
           path,
           `kyberdash: SQLite database ${path} cannot be copied (${describeError(err)}); ` +
