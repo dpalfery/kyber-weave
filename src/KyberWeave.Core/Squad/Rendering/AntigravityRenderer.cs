@@ -350,6 +350,7 @@ public sealed class AntigravityRenderer : ISquadRenderer
 
     private static string? ResolveReasoningEffort(string modelProfile) => modelProfile switch
     {
+        "architect" => "high",
         "deep-planning" => "high",
         "reviewer" => "high",
         "general" => "medium",

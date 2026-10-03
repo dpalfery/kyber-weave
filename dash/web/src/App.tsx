@@ -71,6 +71,27 @@ function hrefFromWindow(): string {
   return `${window.location.pathname}${window.location.search}`
 }
 
+function pageHeading(section: KyberPage, location: SpineLocation): string {
+  if (section === 'compare' || location.level === 'compare') return 'Compare'
+  if (section === 'sessions') return 'Sessions'
+  if (section === 'quarantine' || location.level === 'quarantine') return 'Quarantine'
+  if (section === 'problems' || location.level === 'problems') return 'Problems'
+  switch (location.level) {
+    case 'harness':
+      return location.harnessId ? `Harness · ${location.harnessId}` : 'Harness'
+    case 'run':
+      return 'Run'
+    case 'execution':
+      return 'Execution'
+    case 'turn':
+      return 'Turn'
+    case 'finding':
+      return 'Finding'
+    default:
+      return 'Context Doctor'
+  }
+}
+
 function pageFor(location: SpineLocation): KyberPage {
   if (location.level === 'quarantine') return 'quarantine'
   if (location.level === 'problems') return 'problems'
@@ -514,15 +535,7 @@ export function App({ initialPage = 'context-doctor', initialPath, initialNotFou
           <main className="min-w-0 flex-1 overflow-y-auto pr-0.5">
             <div className="mb-3 flex items-baseline justify-between">
               <h1 className="font-display text-xl tracking-tight text-foreground" data-testid="page-title">
-                {section === 'compare'
-                  ? 'Compare'
-                  : section === 'sessions'
-                    ? 'Sessions'
-                    : showSpine
-                      ? 'Context Doctor'
-                      : section === 'quarantine'
-                        ? 'Quarantine'
-                        : 'Problems'}
+                {pageHeading(section, location)}
               </h1>
             </div>
 
@@ -531,6 +544,7 @@ export function App({ initialPage = 'context-doctor', initialPath, initialNotFou
             ) : showSpine ? (
               location.level === 'context-doctor' ? (
                 <ContextDoctor
+                  key="context-doctor"
                   onSelectHarness={(harnessId) => openSpine({ level: 'harness', harnessId })}
                   onSelectRun={(runId, harnessId) => openSpine({ level: 'run', runId, harnessId })}
                   onSelectFinding={(findingId) => openSpine({ level: 'finding', findingId })}
@@ -538,6 +552,7 @@ export function App({ initialPage = 'context-doctor', initialPath, initialNotFou
                 />
               ) : location.level === 'harness' ? (
                 <HarnessDetail
+                  key={`harness:${location.harnessId}`}
                   harnessId={location.harnessId!}
                   onSelectAll={() => openSpine({ level: 'context-doctor' }, 'goTo')}
                   onSelectRun={(runId) => openSpine({ level: 'run', harnessId: location.harnessId, runId })}
@@ -546,6 +561,7 @@ export function App({ initialPage = 'context-doctor', initialPath, initialNotFou
                 />
               ) : location.level === 'run' || location.level === 'execution' ? (
                 <RunDetail
+                  key={`run:${location.runId}:${location.executionId ?? ''}`}
                   runId={location.runId!}
                   executionId={location.level === 'execution' ? location.executionId : undefined}
                   onSelectAll={() => openSpine({ level: 'context-doctor' }, 'goTo')}
@@ -556,6 +572,7 @@ export function App({ initialPage = 'context-doctor', initialPath, initialNotFou
                 />
               ) : location.level === 'turn' ? (
                 <TurnDetail
+                  key={`turn:${location.runId}:${location.executionId ?? ''}:${location.turnIndex}`}
                   runId={location.runId!}
                   executionId={location.executionId}
                   turnIndex={location.turnIndex!}
@@ -568,6 +585,7 @@ export function App({ initialPage = 'context-doctor', initialPath, initialNotFou
                 <CompareRuns initialRunAId={location.compareA} initialRunBId={location.compareB} />
               ) : (
                 <FindingDetail
+                  key={`finding:${location.findingId}`}
                   findingId={location.findingId}
                   onSelectAll={() => openSpine({ level: 'context-doctor' }, 'goTo')}
                   onSelectHarness={(harnessId) => openSpine({ level: 'harness', harnessId }, 'goTo')}
