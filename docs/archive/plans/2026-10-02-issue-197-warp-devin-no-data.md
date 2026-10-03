@@ -2,7 +2,7 @@
 id: plans/2026-10-02-issue-197-warp-devin-no-data
 title: "KyberDash: surface and fix Warp/Devin producing no data (#197)"
 doc-type: plan
-status: current
+status: complete
 component: KyberDash
 owner: dpalfery
 last-reviewed: 2026-10-02
@@ -19,12 +19,11 @@ code-refs:
 
 # KyberDash: surface and fix Warp/Devin producing no data (#197)
 
-**Status: Ready** (recorded in frontmatter as `status: current` — the plan
-vocabulary has no `ready` value). Approve-and-execute gate recorded
+**Status: Complete, archived 2026-10-02.** Approve-and-execute gate recorded
 2026-10-02 by the orchestrator under the no-human-tonight protocol: all
 questions were grounded in repo docs or carried as open questions with
 conservative defaults; none required a human answer. Development mode:
-`test-first` (default). Branch: `hal.hermes.opencode/issue-197-warp-devin-no-data` (created from `origin/main`).
+`test-first` (default). Branch: `hal.hermes.opencode/issue-197-warp-devin-no-data` (created from `origin/main`). T1–T5 complete. Archived per KW-DOC-LIFECYCLE-003.
 
 This plan addresses [issue #197](https://github.com/dpalfery/kyber-weave/issues/197):
 Warp reports 4 checkpoints, last success 2026-09-24, 0 records because the sqlite
