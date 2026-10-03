@@ -300,7 +300,18 @@ describe('SQLite read-only parent fallback', () => {
 
     const stderr = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
     try {
-      expect(() => readValue(dbPath)).toThrow()
+      let thrown: unknown
+      try {
+        readValue(dbPath)
+      } catch (err) {
+        thrown = err
+      }
+      expect(thrown).toBeDefined()
+      const code = typeof thrown === 'object' && thrown !== null && 'code' in thrown
+        ? (thrown as { code?: unknown }).code
+        : undefined
+      // Cache-dir EACCES must stay a sidecar/open error, not a source TCC denial.
+      expect(code === 'EACCES' || code === 'EPERM').toBe(false)
       const notices = stderr.mock.calls.filter(([chunk]) => String(chunk).includes('cache copy could not be written'))
       expect(notices).toHaveLength(1)
       expect(String(notices[0]?.[0])).toContain(dbPath)
