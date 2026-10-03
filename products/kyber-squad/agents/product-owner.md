@@ -5,6 +5,7 @@ description: "Headless specification specialist: persists requirements, design, 
 invocation: subagent
 model-profile: general
 capability-profile: product-planning
+devin-capability-profile: product-planning-devin
 copilot-tools: [vscode, read, codegraph/*, kyber-weave/*, context7/*, edit, search, agent, web, todo]
 delegates-to: [research-agent]
 fallback: role-skill

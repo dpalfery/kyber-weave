@@ -35,6 +35,7 @@ public sealed class SquadSourceTests
             first.Agents,
             agent => Assert.Equal(["vscode", "read"], agent.CopilotTools));
         Assert.All(first.Agents, agent => Assert.Null(agent.CopilotCapabilityProfile));
+        Assert.All(first.Agents, agent => Assert.Null(agent.DevinCapabilityProfile));
         Assert.Equal(["test-dev"], first.Skills.Select(skill => skill.Name));
         Assert.Equal(
             first.Agents.Select(agent => (agent.Name, agent.SourcePath, agent.BodyDigest)),
@@ -510,6 +511,133 @@ public sealed class SquadSourceTests
         Diagnostic diagnostic = AssertInvalid(fixture, "agents/architect.md", "not marked as Copilot-only");
 
         Assert.Contains("target: copilot", diagnostic.Hint!, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void LoadAgentWithDevinSpecificCapabilityProfileSucceeds()
+    {
+        using SquadFixture fixture = SquadFixture.CreateValid();
+        fixture.Replace(
+            "profiles/capabilities.yml",
+            "profiles:\n",
+            "profiles:\n" +
+            "  architect-devin:\n" +
+            "    target: devin\n" +
+            "    permissions:\n" +
+            "      filesystem.read: allow\n" +
+            "      filesystem.write: allow\n" +
+            "      delegate: ask\n");
+        fixture.Replace(
+            "agents/architect.md",
+            "capability-profile: architect\n",
+            "capability-profile: architect\n" +
+            "devin-capability-profile: architect-devin\n");
+
+        SquadSource source = SquadSourceLoader.Load(fixture.Path);
+        SquadAgent architect = Assert.Single(source.Agents, agent => agent.Name == "architect");
+
+        Assert.Equal("architect", architect.CapabilityProfile);
+        Assert.Equal("architect-devin", architect.DevinCapabilityProfile);
+        Assert.Equal("devin", source.CapabilityProfiles.Profiles["architect-devin"].Target);
+        Assert.Equal(SquadPermissionDecision.Deny, source.CapabilityProfiles.Profiles["architect"].Permissions["filesystem.write"]);
+        Assert.Equal(SquadPermissionDecision.Allow, source.CapabilityProfiles.Profiles["architect-devin"].Permissions["filesystem.write"]);
+    }
+
+    [Fact]
+    public void LoadDevinSpecificProfileAsSharedProfileFailsClosed()
+    {
+        using SquadFixture fixture = SquadFixture.CreateValid();
+        fixture.Replace(
+            "profiles/capabilities.yml",
+            "profiles:\n",
+            "profiles:\n" +
+            "  architect-devin:\n" +
+            "    target: devin\n" +
+            "    permissions:\n" +
+            "      filesystem.read: allow\n" +
+            "      filesystem.write: allow\n" +
+            "      delegate: ask\n");
+        fixture.Replace(
+            "agents/architect.md",
+            "capability-profile: architect\n",
+            "capability-profile: architect\n" +
+            "devin-capability-profile: architect-devin\n");
+        fixture.Replace(
+            "agents/csharp-dev.md",
+            "capability-profile: worker",
+            "capability-profile: architect-devin");
+
+        Diagnostic diagnostic = AssertInvalid(fixture, "agents/csharp-dev.md", "Devin-only");
+
+        Assert.Contains("shared capability profile", diagnostic.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("devin-capability-profile", diagnostic.Hint!, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void LoadAgentReferencesUnknownDevinCapabilityProfileFailsClosed()
+    {
+        using SquadFixture fixture = SquadFixture.CreateValid();
+        fixture.Replace(
+            "agents/architect.md",
+            "capability-profile: architect\n",
+            "capability-profile: architect\n" +
+            "devin-capability-profile: missing-devin\n");
+
+        Diagnostic diagnostic = AssertInvalid(fixture, "agents/architect.md", "missing-devin");
+
+        Assert.Contains("unknown Devin capability profile", diagnostic.Message, StringComparison.Ordinal);
+        Assert.Contains("profiles/capabilities.yml", diagnostic.Hint!, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void LoadDevinOverrideReferencesSharedProfileFailsClosed()
+    {
+        using SquadFixture fixture = SquadFixture.CreateValid();
+        fixture.Replace(
+            "agents/architect.md",
+            "capability-profile: architect\n",
+            "capability-profile: architect\n" +
+            "devin-capability-profile: architect\n");
+
+        Diagnostic diagnostic = AssertInvalid(fixture, "agents/architect.md", "not marked as Devin-only");
+
+        Assert.Contains("target: devin", diagnostic.Hint!, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Devin lowers primary identities to skills and never consults
+    /// <c>devin-capability-profile</c> for their tools, so a named override on a
+    /// primary agent would validate and then evaporate.
+    /// </summary>
+    [Fact]
+    public void LoadDevinOverrideOnPrimaryAgentFailsClosed()
+    {
+        using SquadFixture fixture = SquadFixture.CreateValid();
+        fixture.Replace(
+            "profiles/capabilities.yml",
+            "profiles:\n",
+            "profiles:\n" +
+            "  architect-devin:\n" +
+            "    target: devin\n" +
+            "    permissions:\n" +
+            "      filesystem.read: allow\n" +
+            "      filesystem.write: allow\n" +
+            "      delegate: ask\n");
+        fixture.Replace(
+            "agents/csharp-dev.md",
+            "invocation: subagent\n",
+            "invocation: primary\n");
+        fixture.Replace(
+            "agents/csharp-dev.md",
+            "capability-profile: worker\n",
+            "capability-profile: worker\n" +
+            "devin-capability-profile: architect-devin\n");
+
+        Diagnostic diagnostic = AssertInvalid(fixture, "agents/csharp-dev.md", "primary agent");
+
+        Assert.Contains("primary agent", diagnostic.Message, StringComparison.Ordinal);
+        Assert.Contains("skill", diagnostic.Hint!, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("devin-capability-profile", diagnostic.Hint!, StringComparison.Ordinal);
     }
 
     [Fact]

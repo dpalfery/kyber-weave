@@ -254,12 +254,15 @@ public static class SquadSourceLoader
             string? target = TryGetScalar(profile, "target", file.RelativePath);
             if (target is not null)
             {
-                RequireLiteral(
-                    target,
-                    $"profiles.{name}.target",
-                    "copilot",
-                    file.RelativePath,
-                    "Use 'copilot' for a target-specific capability profile or omit target for a shared profile.");
+                if (!string.Equals(target, "copilot", StringComparison.Ordinal) &&
+                    !string.Equals(target, "devin", StringComparison.Ordinal))
+                {
+                    SquadSourceValidator.Throw(
+                        $"Capability profile '{name}' uses unsupported target '{target}'.",
+                        $"profiles.{name}.target",
+                        file.RelativePath,
+                        "Use 'copilot' or 'devin' for a target-specific capability profile or omit target for a shared profile.");
+                }
             }
 
             YamlMappingNode permissionsNode = RequireMapping(profile, "permissions", file.RelativePath);
@@ -563,7 +566,7 @@ public static class SquadSourceLoader
         YamlMappingNode root = ParseYamlMapping(file with { Content = frontmatter.Yaml }, frontmatter.LineOffset);
         EnsureOnlyFields(
             root,
-            ["schema", "name", "description", "invocation", "model-profile", "capability-profile", "copilot-capability-profile", "copilot-tools", "delegates-to", "fallback", "aliases"],
+            ["schema", "name", "description", "invocation", "model-profile", "capability-profile", "copilot-capability-profile", "copilot-tools", "devin-capability-profile", "delegates-to", "fallback", "aliases"],
             file.RelativePath,
             frontmatter.LineOffset);
 
@@ -620,6 +623,7 @@ public static class SquadSourceLoader
             RequireScalar(root, "capability-profile", file.RelativePath, frontmatter.LineOffset),
             TryGetScalar(root, "copilot-capability-profile", file.RelativePath, frontmatter.LineOffset),
             copilotTools,
+            TryGetScalar(root, "devin-capability-profile", file.RelativePath, frontmatter.LineOffset),
             delegates,
             RequireScalar(root, "fallback", file.RelativePath, frontmatter.LineOffset),
             aliases,
