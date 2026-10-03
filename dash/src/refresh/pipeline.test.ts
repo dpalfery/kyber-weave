@@ -424,6 +424,10 @@ describe('refresh pipeline: parser contract version & checkpoint invalidation', 
     const dbPath = join(root, 'canon.db')
     const store = new CanonStore(dbPath)
     try {
+      // Seed outside the run window but inside the 14-day content-retention
+      // floor. historyWeeks:1 → window starts 2026-09-05; retention cutoff is
+      // 2026-08-29. A default 2-week window coincides with retention, so the
+      // out-of-window gap would be purged before this assertion (#276).
       const transcriptPath = join(root, 'desktop-parts-session.jsonl')
       writeFileSync(
         transcriptPath,
@@ -431,7 +435,7 @@ describe('refresh pipeline: parser contract version & checkpoint invalidation', 
           type: 'assistant',
           sessionId: 'desktop-parts-session',
           uuid: 'turn-1',
-          timestamp: '2026-09-06T10:00:00.000Z',
+          timestamp: '2026-09-01T10:00:00.000Z',
           entrypoint: 'claude-desktop',
           message: {
             model: 'claude-sonnet-4-5',
@@ -484,7 +488,7 @@ describe('refresh pipeline: parser contract version & checkpoint invalidation', 
             nativeRecordId: parentCall!.turnId ?? null,
             sourceRevision: revisionToken,
             parserVersion: '3',
-            importedAtUtc: '2026-09-06T10:00:00.000Z',
+            importedAtUtc: '2026-09-01T10:00:00.000Z',
             locationToken: '~/.claude/projects',
           },
         ],
@@ -499,8 +503,8 @@ describe('refresh pipeline: parser contract version & checkpoint invalidation', 
           revisionToken,
           coveredFromUtc: '2026-08-01T00:00:00.000Z',
           coveredThroughUtc: '2026-09-20T00:00:00.000Z',
-          lastAttemptUtc: '2026-09-06T10:00:00.000Z',
-          lastSuccessUtc: '2026-09-06T10:00:00.000Z',
+          lastAttemptUtc: '2026-09-01T10:00:00.000Z',
+          lastSuccessUtc: '2026-09-01T10:00:00.000Z',
           lastStatus: 'ok',
           lastErrorCode: null,
           unitCount: 1,
@@ -517,18 +521,24 @@ describe('refresh pipeline: parser contract version & checkpoint invalidation', 
 
       const provider = fixtureProvider('claude', [sessionSource], (s) => loadClaudeCalls(s.path))
 
-      const report = await refreshHarnessSources(store, {
-        getAllProviders: async () => [provider],
-        descriptors: [descriptor!],
-        jobConcurrency: 1,
-        writerCapacity: 1,
-        commandStartedAt: new Date('2026-09-12T18:00:00.000Z'),
-        parseAllSessions: async () => undefined,
-      })
+      const report = await refreshHarnessSources(
+        store,
+        {
+          getAllProviders: async () => [provider],
+          descriptors: [descriptor!],
+          jobConcurrency: 1,
+          writerCapacity: 1,
+          commandStartedAt: new Date('2026-09-12T18:00:00.000Z'),
+          parseAllSessions: async () => undefined,
+        },
+        { historyWeeks: 1 },
+      )
 
       const updatedCheckpoint = store.getSourceCheckpoint('claude-desktop', sourceKey)
       expect(updatedCheckpoint?.parserContractVersion).toBe('4')
       expect(updatedCheckpoint?.lastStatus).toBe('ok')
+      // Repair widened to the prior coverage floor, not the 1-week run window.
+      expect(updatedCheckpoint?.coveredFromUtc).toBe('2026-08-01T00:00:00.000Z')
 
       const claudeRow = report.rows.find((r) => r.harnessId === 'claude-desktop')
       expect(claudeRow).toBeDefined()

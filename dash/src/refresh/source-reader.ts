@@ -229,7 +229,13 @@ export function sliceCallsToWindow(
   return { inWindow, problems }
 }
 
-async function readNativeUnit(
+/**
+ * Re-read one native unit under an explicit date range. Used by the
+ * orchestrator when a parser-contract bump must repair rows older than the
+ * run's `--history-weeks` window: the first pass already forced a re-read
+ * (checkpoint not reusable), and this call only widens the slice.
+ */
+export async function readNativeUnit(
   harnessId: HarnessId,
   provider: Provider,
   source: SessionSource,
