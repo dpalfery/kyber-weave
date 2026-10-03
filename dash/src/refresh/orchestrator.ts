@@ -28,6 +28,7 @@ import { defaultJobConcurrency, runJobsSettled } from './scheduler.js'
 import {
   iterateNativeUnits as productionIterateNativeUnits,
   utcHistoryWindow,
+  type NativeEmptyReason,
   type NativeUnit,
   type SourceReaderDependencies,
 } from './source-reader.js'
@@ -318,6 +319,7 @@ async function runHarnessJob(context: JobContext): Promise<HarnessJobRow> {
       importedAtUtc: context.importedAtUtc,
       recordCount: reusable ? (previous?.recordCount ?? 0) + created : merged.length,
       status: ingestResult.problems.length > 0 || unit.problems.length > 0 ? 'partial' : 'ok',
+      emptyReason: unit.emptyReason,
     })
     const provenance = provenanceRows(outgoing, unit, descriptor, context.importedAtUtc)
     try {
@@ -434,6 +436,7 @@ function checkpointFor(
     importedAtUtc: string
     recordCount: number
     status: SourceCheckpoint['lastStatus']
+    emptyReason?: NativeEmptyReason
   },
 ): SourceCheckpoint {
   return {
@@ -450,7 +453,12 @@ function checkpointFor(
     lastAttemptUtc: extras.importedAtUtc,
     lastSuccessUtc: extras.importedAtUtc,
     lastStatus: extras.status,
-    lastErrorCode: extras.status === 'ok' || extras.status === 'unchanged' ? null : extras.status,
+    lastErrorCode:
+      extras.status === 'ok' || extras.status === 'unchanged'
+        ? extras.recordCount === 0
+          ? (extras.emptyReason ?? null)
+          : null
+        : extras.status,
     unitCount: 1,
     recordCount: extras.recordCount,
   }
