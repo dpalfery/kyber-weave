@@ -237,6 +237,7 @@ public sealed class PiRendererContractTests : IDisposable
             // Derive agent membership from the loaded source, but assert against approved tokens.
             string expectedModel = agent.ModelProfile switch
             {
+                "architect" => "zai/glm-5.3",
                 "deep-planning" => "zai/glm-5.3",
                 "fast" => "opencode/muse-spark-1.3-contributor-free",
                 "general" => "opencode/muse-spark-1.3-contributor-free",
@@ -956,6 +957,7 @@ public sealed class PiRendererContractTests : IDisposable
     /// This contract pins the approved mapping directly from the plan.
     /// </summary>
     [Theory]
+    [InlineData("architect", "zai/glm-5.3", "high")]
     [InlineData("deep-planning", "zai/glm-5.3", "high")]
     [InlineData("reviewer", "opencode-go/kimi-k2.7-code", "high")]
     [InlineData("general", "opencode/muse-spark-1.3-contributor-free", "medium")]

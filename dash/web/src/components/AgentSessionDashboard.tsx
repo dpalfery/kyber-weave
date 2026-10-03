@@ -1,5 +1,6 @@
 import { useState, useMemo, useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { formatDuration, formatModelLabel, formatSpanLabel } from '../lib/labels.js'
 import { cn, usd, fmtTokens, fmtNum } from '../lib/utils.js'
 import { Card } from './ui/card.js'
 import { Skeleton } from './ui/skeleton.js'
@@ -223,14 +224,7 @@ export type DrawerContent =
 // Helpers & Formatters
 // ---------------------------------------------------------------------------
 
-export function formatDuration(ms?: number | null): string {
-  if (ms == null || !isFinite(ms)) return '—'
-  if (ms < 1000) return `${Math.round(ms)}ms`
-  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`
-  const minutes = Math.floor(ms / 60000)
-  const seconds = Math.round((ms % 60000) / 1000)
-  return `${minutes}m ${seconds}s`
-}
+export { formatDuration } from '../lib/labels.js'
 
 export function formatCredits(c?: number | null): string {
   if (c == null || !isFinite(c)) return '—'
@@ -265,9 +259,9 @@ function adaptTimelineNode(node: SessionTimelineNode, parentId: string | null = 
       ? node.children.map((c) => adaptTimelineNode(c, node.spanId))
       : [],
     startMs: node.offsetMs ?? node.startMs ?? 0,
-    durationMs: node.durationMs ?? 0,
+    durationMs: typeof node.durationMs === 'number' && node.durationMs > 0 ? node.durationMs : 0,
     kind: node.kind ?? node.op ?? 'span',
-    name: node.name ?? 'unnamed',
+    name: formatSpanLabel(node.name),
     status:
       typeof node.status === 'string'
         ? node.status
@@ -435,7 +429,7 @@ export function AgentSessionContent({
       parentId: null,
       children: timelineNodes.map((n) => adaptTimelineNode(n, 'session-root')),
       startMs: 0,
-      durationMs: session.summary?.duration_ms ?? 0,
+      durationMs: session.summary?.duration_ms && session.summary.duration_ms > 0 ? session.summary.duration_ms : 0,
       kind: 'session',
       name: session.label || `${session.harness || 'Agent'} Session`,
       attributes: {},
@@ -527,7 +521,7 @@ export function AgentSessionContent({
         // Issue #184: transport `turnIndex` is 0-based; humans see 1-based.
         setDrawerTitle(`Turn ${turnIndex + 1} · ${bucketName}`)
         setDrawerSubtitle(
-          `Bucket analysis · ${turn.model ? `Model: ${turn.model} · ` : ''}${fmtTokens(total || turn.cumulative_input || turn.input)} total tokens`
+          `Bucket analysis · ${turn.model ? `Model: ${formatModelLabel(turn.model)} · ` : ''}${fmtTokens(total || turn.cumulative_input || turn.input)} total tokens`
         )
         setDrawerContent({
           turnIndex,
@@ -545,7 +539,7 @@ export function AgentSessionContent({
         // Issue #184: transport `turnIndex` is 0-based; humans see 1-based.
         setDrawerTitle(`Turn ${turnIndex + 1}`)
         setDrawerSubtitle(
-          `${turn.model ? `Model: ${turn.model} · ` : ''}${formatDuration(turn.durationMs)}`
+          `${turn.model ? `Model: ${formatModelLabel(turn.model)} · ` : ''}${formatDuration(turn.durationMs)}`
         )
         setDrawerContent(turn)
       }
@@ -1236,7 +1230,10 @@ export function AgentSessionContent({
                 {flattenedTimeline.map(({ node, depth }, idx) => {
                   const offset = node.offsetMs ?? node.startMs ?? 0
                   const leftPct = (offset / maxTimelineSpan) * 100
-                  const widthPct = Math.max(((node.durationMs ?? 0) / maxTimelineSpan) * 100, 0.7)
+                  const measuredDuration = typeof node.durationMs === 'number' && node.durationMs > 0
+                  const widthPct = measuredDuration
+                    ? Math.max((node.durationMs! / maxTimelineSpan) * 100, 0.7)
+                    : 0
                   const opKey = node.op || node.kind || ''
                   const opColor = TIMELINE_OP_COLORS[opKey] || '#64748b'
                   const isSelected = selectedSpanId === node.spanId
@@ -1257,9 +1254,9 @@ export function AgentSessionContent({
                       <span
                         className="truncate text-foreground font-medium shrink-0"
                         style={{ width: `${Math.max(240 - depth * 12, 100)}px`, paddingLeft: `${depth * 12}px` }}
-                        title={node.name}
+                        title={formatSpanLabel(node.name)}
                       >
-                        {node.name || 'unnamed'}
+                        {formatSpanLabel(node.name)}
                       </span>
 
                       {/* Horizontal Duration Bar Track */}
@@ -1271,7 +1268,7 @@ export function AgentSessionContent({
                             width: `${widthPct}%`,
                             backgroundColor: opColor,
                           }}
-                          title={`${node.name} · ${node.durationMs}ms`}
+                          title={`${formatSpanLabel(node.name)} · ${formatDuration(node.durationMs)}`}
                         />
                       </div>
 

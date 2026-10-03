@@ -167,6 +167,19 @@ export function HarnessDetail({
     }
   }, [harness, rollupMissing, unbuiltReason])
 
+  const payloadCounts =
+    harness?.payload !== null && typeof harness?.payload === 'object'
+      ? (harness.payload as { sessionCount?: unknown; runCount?: unknown })
+      : undefined
+  const payloadSessionCount =
+    typeof payloadCounts?.sessionCount === 'number' ? payloadCounts.sessionCount : undefined
+  const payloadRunCount = typeof payloadCounts?.runCount === 'number' ? payloadCounts.runCount : undefined
+  // Live list and served rollup must agree on the label. Prefer the live run
+  // list and the served session count (routes overlay live table counts) so
+  // the header cannot read 67 while the matrix reads 66.
+  const sessionCount = harness?.sessionCount ?? payloadSessionCount ?? '—'
+  const runCount = harness?.runCount ?? payloadRunCount ?? runs.length
+
   const coveragePct =
     typeof harness?.fieldCoverage === 'number'
       ? `${Math.round(harness.fieldCoverage * 100)}%`
@@ -208,10 +221,18 @@ export function HarnessDetail({
           </div>
           <div className="rounded border border-border/70 bg-card px-3 py-1.5 text-right">
             <div className="text-[10px] uppercase tracking-wider text-tertiary-foreground">
+              Sessions
+            </div>
+            <div className="font-mono font-semibold text-foreground" data-testid="harness-session-count">
+              {sessionCount}
+            </div>
+          </div>
+          <div className="rounded border border-border/70 bg-card px-3 py-1.5 text-right">
+            <div className="text-[10px] uppercase tracking-wider text-tertiary-foreground">
               Recorded Runs
             </div>
-            <div className="font-mono font-semibold text-foreground">
-              {runs.length}
+            <div className="font-mono font-semibold text-foreground" data-testid="harness-run-count">
+              {runCount}
             </div>
           </div>
         </div>
