@@ -19,17 +19,23 @@ code-refs:
 
 # KyberDash: surface and fix Warp/Devin producing no data (#197)
 
-**Status: Complete, archived 2026-10-02.** Approve-and-execute gate recorded
-2026-10-02 by the orchestrator under the no-human-tonight protocol: all
-questions were grounded in repo docs or carried as open questions with
-conservative defaults; none required a human answer. Development mode:
-`test-first` (default). Branch: `hal.hermes.opencode/issue-197-warp-devin-no-data` (created from
-`origin/main`). T1–T5 complete. Review round 2: the branch merged main so
+**Status: Complete, archived 2026-10-02; decisions harvested 2026-10-03.**
+Approve-and-execute gate recorded 2026-10-02 by the orchestrator under the
+no-human-tonight protocol: all questions were grounded in repo docs or carried
+as open questions with conservative defaults; none required a human answer.
+Development mode: `test-first` (default). Branch:
+`hal.hermes.opencode/issue-197-warp-devin-no-data` (created from `origin/main`).
+T1–T5 complete (checklist below). Review round 2: the branch merged main so
 `copyFileBestEffort` (#257) is in scope — a copyfile(2) EPERM/EACCES now falls
 back to read/write, so Warp produces records whenever the bytes are readable,
 and the surfaced permission-denied state covers only true TCC denials. Both
 halves are required by the issue title: produce data where possible, surface
-the reason where not. Archived per KW-DOC-LIFECYCLE-003.
+the reason where not. Durable decisions harvested into
+[dash/architecture.md](../../dash/architecture.md),
+[dash/runbook.md](../../dash/runbook.md), and
+[dash/telemetry-inventory.md](../../dash/telemetry-inventory.md). No ADR —
+A3/A4 (and OQ1/OQ2) apply existing honest-unobservability rules. Archived per
+KW-DOC-LIFECYCLE-003.
 
 This plan addresses [issue #197](https://github.com/dpalfery/kyber-weave/issues/197):
 Warp reports 4 checkpoints, last success 2026-09-24, 0 records because the sqlite
@@ -87,10 +93,30 @@ unknown cost is stated as unknown. Nothing is written to any live store.
 | T4 | Honest-cost marker: when the Devin rate is missing, downstream cost is labeled unknown/estimated per the repo's `costIsEstimated`/unknown conventions rather than presented as measured $0. | Folded into T1's assertions; this row names the contract for review. | `dash/src/providers/devin.ts`, tests |
 | T5 | Closeout: docs validate + docs drift, gate suite, archive plan to `docs/archive/plans/`, index sync. | Verification contract below | docs index files |
 
+### Task completion
+
+- [x] **T1** — `dash/src/providers/devin.ts` discovers and parses without `acuUsdRate`; `devin.test.ts` pins tokens + `costIsEstimated: true`.
+- [x] **T2** — `dash/src/cli/doctor.ts` appends the missing-rate verdict; `doctor.test.ts` asserts `devin.acuUsdRate` in the string.
+- [x] **T3** — Warp denials drain into doctor probe `accessError: 'permission-denied'`; `doctor.test.ts` / `warp.test.ts` cover EPERM/EACCES and cache-dir false positives.
+- [x] **T4** — Folded into T1: missing rate yields `costUSD: 0` with `costIsEstimated: true`, never a measured zero.
+- [x] **T5** — Plan archived under `docs/archive/plans/`; inventory row updated; decisions harvested (this section).
+
+## Harvested decisions
+
+No ADR — decisions recorded in the files below (honest-unobservability already governs the product rule).
+
+| Decision | Canonical home |
+|---|---|
+| A1 (PLAN path), A2 (`test-first`), A5 (no live-store writes), A6 (disclose known-failing tests) | Process / run constraints only — no product contract to harvest beyond this plan. |
+| A3 — Devin discovery/parse independent of `devin.acuUsdRate`; missing rate ⇒ ingest + honest unknown cost; doctor names the rate | [dash/architecture.md](../../dash/architecture.md) (CostBlock / Devin rate paragraph), [dash/runbook.md](../../dash/runbook.md) (§8), [dash/telemetry-inventory.md](../../dash/telemetry-inventory.md) (Devin row) |
+| A4 — Warp source EPERM/EACCES surfaced as permission-denied; readable bytes still produce records via `copyFileBestEffort`; cache-write ≠ TCC; no fabricated rows | [dash/architecture.md](../../dash/architecture.md) (Local harness-source refresh / Warp paragraph), [dash/runbook.md](../../dash/runbook.md) (§9), [dash/telemetry-inventory.md](../../dash/telemetry-inventory.md) (Warp row) |
+| OQ1 — `costUSD: 0` + `costIsEstimated` + doctor missing-rate text (not omit cost) | Same homes as A3 |
+| OQ2 — probe `exists: true` + `accessError: 'permission-denied'` and verdict both carry the denial | Same homes as A4 |
+
 ## Open questions (ungrounded — conservative default taken)
 
-- **OQ1 — Devin unknown-cost representation.** No doc fixes the exact field. Default: keep `costUSD: 0` only where the AGENTS honest-measurement prose allows a zero (never presented as measured), set the existing unknown/estimated convention, and surface the missing rate in doctor. If the repo convention proves to be "omit cost", follow it in T4.
-- **OQ2 — Warp surfaced-state channel.** Whether the EPERM belongs in doctor's verdict, the probePaths `exists` semantics, or both. Default: both — `exists` stays true, a `readable: false`/permission note in the verdict.
+- **OQ1 — Devin unknown-cost representation.** No doc fixes the exact field. Default: keep `costUSD: 0` only where the AGENTS honest-measurement prose allows a zero (never presented as measured), set the existing unknown/estimated convention, and surface the missing rate in doctor. If the repo convention proves to be "omit cost", follow it in T4. **Resolved as default; harvested with A3.**
+- **OQ2 — Warp surfaced-state channel.** Whether the EPERM belongs in doctor's verdict, the probePaths `exists` semantics, or both. Default: both — `exists` stays true, a `readable: false`/permission note in the verdict. **Resolved as default; harvested with A4.**
 
 ## Verification contract
 

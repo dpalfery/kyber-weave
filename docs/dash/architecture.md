@@ -205,6 +205,17 @@ stored harness id; split client surfaces stay distinct. A Gemini **selector labe
 appear in the UI as usage / survey chrome; it is not `harness=gemini` in `canon.db`. There is
 no dashboard refresh button.
 
+**Warp sqlite open and doctor permission denial (issue #197).** Warp's Group Containers
+database is opened through the read-only sqlite cache (`openDatabase` /
+`copyFileBestEffort`). When the source bytes are readable, a copyfile(2) EPERM/EACCES falls
+back to read/write so records are still produced. A true source-side EACCES/EPERM (macOS TCC)
+is noted via `noteWarpDbAccessDenial` and folded into doctor's probe rows as
+`accessError: 'permission-denied'` with `exists: true`; the verdict names permission denied
+(and Full Disk Access on darwin) instead of "does not exist" or "holds no sessions".
+Cache-directory write failures are not reclassified as source TCC denials. Checkpoints that
+parse zero records remain a truthful count of parsed records — no fabricated rows, no TCC
+workaround.
+
 The contract is [ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md).
 
 ## The shared canonical projection
@@ -330,6 +341,13 @@ reads it, the next projection reprices it, and a re-ingest overwrite self-heals 
 projection. Reprojecting a correct store writes nothing, and `harness` blocks are never touched.
 `isCopilotHarness` (`copilot-rates.ts`) is the single Copilot-family predicate used to route a turn
 to the credits table.
+
+**Devin rate is pricing, not discovery (issue #197).** `createDevinProvider.discoverSessions`
+and `DevinSessionParser.parse` do not gate on `devin.acuUsdRate`. When the rate is missing or
+non-finite, transcripts still ingest; each call carries `costUSD: 0` with `costIsEstimated: true`
+so the figure is never a measured zero, and `kyberdash doctor` appends
+`costs unpriced — set devin.acuUsdRate in ~/.kyberdash/config.json` rather than reporting the
+sessions db as holding no sessions ([honest unobservability](../rules/honest-unobservability.md)).
 
 **Published-path rules.**
 
