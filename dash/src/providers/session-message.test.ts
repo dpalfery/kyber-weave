@@ -104,6 +104,44 @@ describe('buildAssistantCall flat token fallbacks', () => {
     expect(usageOnly!.cacheCreationInputTokens).toBe(40)
   })
 
+  it('treats nested string token fields as absent', () => {
+    const nested = buildAssistantCall({
+      ...base,
+      data: {
+        role: 'assistant',
+        modelID: 'claude-opus-4-6',
+        tokens: { input: '100' as unknown as number, output: 50 },
+      },
+    })
+    expect(nested).not.toBeNull()
+    expect(nested!.inputTokens).toBe(0)
+    expect(nested!.outputTokens).toBe(50)
+
+    const usage = buildAssistantCall({
+      ...base,
+      data: {
+        role: 'assistant',
+        modelID: 'claude-opus-4-6',
+        usage: { input_tokens: '100' as unknown as number, output_tokens: 50 },
+      },
+    })
+    expect(usage).not.toBeNull()
+    expect(usage!.inputTokens).toBe(0)
+    expect(usage!.outputTokens).toBe(50)
+  })
+
+  it('normalizes a model object to providerID/id', () => {
+    const call = buildAssistantCall({
+      ...base,
+      data: {
+        role: 'assistant',
+        model: { id: 'claude-sonnet-4', providerID: 'anthropic' },
+      },
+    })
+    expect(call).not.toBeNull()
+    expect(call!.model).toBe('anthropic/claude-sonnet-4')
+  })
+
   it('recognizes markdown parts as substantive text activity', () => {
     const call = buildAssistantCall({
       providerName: 'kilo-code',

@@ -8,7 +8,10 @@ import type { ParsedProviderCall } from './types.js'
 export type MessageData = {
   role: string
   modelID?: string
-  model?: string
+  // Kilo (and some OpenCode-shaped stores) persist model as `{ id, providerID }`
+  // rather than a string; the object branch in `buildAssistantCall` is live
+  // only when this union includes that shape.
+  model?: string | { id?: string; providerID?: string }
   cost?: number
   tokens?: {
     input?: number
@@ -84,7 +87,7 @@ export function parseTimestamp(raw: number): string {
 // through JSON). Anything that is not a finite number must behave as absent so
 // the fallback default applies, instead of leaking into cost maths as a string
 // or NaN (PR #264 review).
-const finiteOrUndefined = (v: number | undefined): number | undefined =>
+const finiteOrUndefined = (v: unknown): number | undefined =>
   typeof v === 'number' && Number.isFinite(v) ? v : undefined
 
 export function buildAssistantCall(opts: {
@@ -99,11 +102,11 @@ export function buildAssistantCall(opts: {
   const { data, parts } = opts
 
   const tokens = {
-    input: data.tokens?.input ?? data.usage?.input_tokens ?? finiteOrUndefined(data.tokens_input) ?? 0,
-    output: data.tokens?.output ?? data.usage?.output_tokens ?? finiteOrUndefined(data.tokens_output) ?? 0,
-    reasoning: data.tokens?.reasoning ?? finiteOrUndefined(data.tokens_reasoning) ?? 0,
-    cacheRead: data.tokens?.cache?.read ?? data.usage?.cache_read_input_tokens ?? finiteOrUndefined(data.tokens_cache_read) ?? 0,
-    cacheWrite: data.tokens?.cache?.write ?? data.usage?.cache_creation_input_tokens ?? finiteOrUndefined(data.tokens_cache_write) ?? 0,
+    input: finiteOrUndefined(data.tokens?.input ?? data.usage?.input_tokens ?? data.tokens_input) ?? 0,
+    output: finiteOrUndefined(data.tokens?.output ?? data.usage?.output_tokens ?? data.tokens_output) ?? 0,
+    reasoning: finiteOrUndefined(data.tokens?.reasoning ?? data.tokens_reasoning) ?? 0,
+    cacheRead: finiteOrUndefined(data.tokens?.cache?.read ?? data.usage?.cache_read_input_tokens ?? data.tokens_cache_read) ?? 0,
+    cacheWrite: finiteOrUndefined(data.tokens?.cache?.write ?? data.usage?.cache_creation_input_tokens ?? data.tokens_cache_write) ?? 0,
   }
 
   const toolParts = parts.filter((p) => (p.type === 'tool' || p.type === 'tool-call' || p.type === 'tool_call') && normalizeToolName(p.tool))
@@ -147,9 +150,8 @@ export function buildAssistantCall(opts: {
   if (!model && typeof data.model === 'string' && data.model.trim()) {
     model = data.model.trim()
   } else if (!model && data.model !== null && typeof data.model === 'object' && !Array.isArray(data.model)) {
-    const obj = data.model as Record<string, unknown>
-    const id = typeof obj['id'] === 'string' ? obj['id'].trim() : ''
-    const providerID = typeof obj['providerID'] === 'string' ? obj['providerID'].trim() : ''
+    const id = typeof data.model.id === 'string' ? data.model.id.trim() : ''
+    const providerID = typeof data.model.providerID === 'string' ? data.model.providerID.trim() : ''
     if (id && providerID) model = `${providerID}/${id}`
     else if (id) model = id
   }
