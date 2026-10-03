@@ -78,6 +78,13 @@ export function parseTimestamp(raw: number): string {
 // null when the message has no tokens, no cost, and no substantive parts (an
 // empty or errored turn worth skipping). Shared by the SQLite and file-based
 // OpenCode parsers so both attribute tokens, tools, and cost identically.
+// Divergent stores sometimes persist token fields as strings (or NaN slips in
+// through JSON). Anything that is not a finite number must behave as absent so
+// the fallback default applies, instead of leaking into cost maths as a string
+// or NaN (PR #264 review).
+const finiteOrUndefined = (v: number | undefined): number | undefined =>
+  typeof v === 'number' && Number.isFinite(v) ? v : undefined
+
 export function buildAssistantCall(opts: {
   providerName: string
   dedupKey: string
@@ -90,9 +97,9 @@ export function buildAssistantCall(opts: {
   const { data, parts } = opts
 
   const tokens = {
-    input: data.tokens?.input ?? data.usage?.input_tokens ?? data.tokens_input ?? 0,
-    output: data.tokens?.output ?? data.usage?.output_tokens ?? data.tokens_output ?? 0,
-    reasoning: data.tokens?.reasoning ?? data.tokens_reasoning ?? 0,
+    input: data.tokens?.input ?? data.usage?.input_tokens ?? finiteOrUndefined(data.tokens_input) ?? 0,
+    output: data.tokens?.output ?? data.usage?.output_tokens ?? finiteOrUndefined(data.tokens_output) ?? 0,
+    reasoning: data.tokens?.reasoning ?? finiteOrUndefined(data.tokens_reasoning) ?? 0,
     cacheRead: data.tokens?.cache?.read ?? data.usage?.cache_read_input_tokens ?? 0,
     cacheWrite: data.tokens?.cache?.write ?? data.usage?.cache_creation_input_tokens ?? 0,
   }
