@@ -260,5 +260,76 @@ describe('bridge compareRuns: empty execution keys fall back to the run id (issu
     expect(summary!.runA.turnCount).toBe(1)
     expect(summary!.runB.turnCount).toBe(1)
   })
+
+  it('uses executionId when sessionId is an empty string', () => {
+    // sessionId ?? executionId keeps "", so the filter drops that key and
+    // the run falls back to runId — omitting records keyed by executionId.
+    db.prepare(
+      'INSERT INTO run (run_id, harness, grouping_basis) VALUES (?, ?, ?)',
+    ).run('run-blank-session-a', 'cursor', 'derived')
+    db.prepare(
+      'INSERT INTO run (run_id, harness, grouping_basis) VALUES (?, ?, ?)',
+    ).run('run-blank-session-b', 'cursor', 'derived')
+    db.prepare(
+      `INSERT INTO execution
+       (execution_id, run_id, session_id, harness, is_root, parent_linkage_json)
+       VALUES (?, ?, ?, ?, 1, ?)`,
+    ).run(
+      'exec-blank-session-a',
+      'run-blank-session-a',
+      '',
+      'cursor',
+      JSON.stringify('measured'),
+    )
+    db.prepare(
+      `INSERT INTO execution
+       (execution_id, run_id, session_id, harness, is_root, parent_linkage_json)
+       VALUES (?, ?, ?, ?, 1, ?)`,
+    ).run(
+      'exec-blank-session-b',
+      'run-blank-session-b',
+      'exec-blank-session-b',
+      'cursor',
+      JSON.stringify('measured'),
+    )
+    for (const [runId, sessionId] of [
+      ['run-blank-session-a', 'exec-blank-session-a'],
+      ['run-blank-session-b', 'exec-blank-session-b'],
+    ] as const) {
+      db.prepare(
+        `INSERT INTO records
+         (span_id, source, harness, session_id, name, op, kind, timestamp,
+          duration_ms, status, tokens_json, content_json, cost_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        `span-${runId}`,
+        'otel',
+        'cursor',
+        sessionId,
+        'llm',
+        'llm.invoke',
+        'model',
+        '2026-10-01T00:00:00.000Z',
+        10,
+        'success',
+        JSON.stringify({
+          freshInput: 100,
+          cacheRead: 0,
+          cacheCreation: 0,
+          output: 10,
+          reportedInput: 100,
+          reportedOutput: 10,
+        }),
+        JSON.stringify({}),
+        JSON.stringify({}),
+      )
+    }
+
+    const summary = bridge.compareRuns('run-blank-session-a', 'run-blank-session-b')
+
+    expect(summary).not.toBeNull()
+    expect(summary!.runA.turnCount).toBe(1)
+    expect(summary!.runB.turnCount).toBe(1)
+  })
 })
 

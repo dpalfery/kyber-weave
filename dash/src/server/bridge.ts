@@ -1936,7 +1936,9 @@ export class KyberBridge {
     const keys = [
       ...new Set(
         executions
-          .map((execution) => execution.sessionId ?? execution.executionId)
+          // Empty string is a present but unusable session id — fall through
+          // to executionId (?? would keep "" and drop the execution's key).
+          .map((execution) => execution.sessionId || execution.executionId)
           .filter((key) => key.length > 0),
       ),
     ]
