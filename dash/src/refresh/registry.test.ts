@@ -271,6 +271,21 @@ describe('HarnessSourceRegistry', () => {
     })).toBe('1')
   })
 
+  it('assigns claude contract version 3 by named harness or claude provider, not a claude- prefix', () => {
+    expect(parserContractVersionFor({
+      providerName: 'claude',
+      harnessId: 'claude-cli',
+    })).toBe('3')
+    expect(parserContractVersionFor({
+      providerName: 'other',
+      harnessId: 'claude-desktop',
+    })).toBe('3')
+    expect(parserContractVersionFor({
+      providerName: 'claude-experimental',
+      harnessId: 'claude-something-else',
+    })).toBe('1')
+  })
+
   it('classifies Antigravity roots into three jobs and never Gemini', () => {
     expect(classifySessionSource({
       source: source({

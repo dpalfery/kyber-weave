@@ -24,6 +24,9 @@ const CLAUDE_PARSER_CONTRACT_VERSION = '3'
 const CODEX_PARSER_CONTRACT_VERSION = '2'
 const KILO_PARSER_CONTRACT_VERSION = '2'
 
+const CLAUDE_HARNESS_IDS = ['claude-cli', 'claude-desktop', 'claude-unclassified'] as const
+const KILO_HARNESS_IDS = ['kilo-shared-runtime', 'kilo-vscode-legacy'] as const
+
 const GEMINI_EXCLUSION_REASON =
   'Gemini represents chat history and model usage, not a coding harness. It must not be a harness id or rollup filter.'
 
@@ -39,7 +42,7 @@ function excluded(reason: string): ProviderDisposition {
 }
 
 export function parserContractVersionFor(partial: { providerName: string; harnessId: string }): string {
-  if (partial.providerName === 'claude' || partial.harnessId.startsWith('claude')) {
+  if (partial.providerName === 'claude' || CLAUDE_HARNESS_IDS.some((id) => id === partial.harnessId)) {
     return CLAUDE_PARSER_CONTRACT_VERSION
   }
   if (partial.providerName === 'codex') {
@@ -47,11 +50,7 @@ export function parserContractVersionFor(partial: { providerName: string; harnes
   }
   // Opt in by named harness or the kilo-code provider — not a `kilo` prefix —
   // so a future kilo-shaped harness does not inherit contract 2 by accident.
-  if (
-    partial.providerName === 'kilo-code' ||
-    partial.harnessId === 'kilo-shared-runtime' ||
-    partial.harnessId === 'kilo-vscode-legacy'
-  ) {
+  if (partial.providerName === 'kilo-code' || KILO_HARNESS_IDS.some((id) => id === partial.harnessId)) {
     return KILO_PARSER_CONTRACT_VERSION
   }
   return DEFAULT_PARSER_CONTRACT_VERSION
@@ -66,7 +65,7 @@ function descriptor(partial: Omit<HarnessSourceDescriptor, 'parserContractVersio
 
 export const PROVIDER_DISPOSITIONS: Record<string, ProviderDisposition> = {
   antigravity: job(['antigravity', 'antigravity-cli', 'antigravity-ide']),
-  claude: job(['claude-cli', 'claude-desktop', 'claude-unclassified']),
+  claude: job(CLAUDE_HARNESS_IDS),
   cline: job(['cline']),
   'cline-cli': job(['cline-cli']),
   codewhale: job(['codewhale']),
@@ -79,7 +78,7 @@ export const PROVIDER_DISPOSITIONS: Record<string, ProviderDisposition> = {
   gemini: excluded(GEMINI_EXCLUSION_REASON),
   hermes: job(['hermes']),
   'ibm-bob': job(['ibm-bob']),
-  'kilo-code': job(['kilo-shared-runtime', 'kilo-vscode-legacy']),
+  'kilo-code': job(KILO_HARNESS_IDS),
   kiro: job(['kiro-cli', 'kiro-ide']),
   kimi: job(['kimi']),
   kimicode: { kind: 'alias-of', harnessId: 'kimi-code' },
@@ -525,9 +524,7 @@ export type HarnessContentCapability = {
 }
 
 const READER_HARNESS_IDS = new Set([
-  'claude-cli',
-  'claude-desktop',
-  'claude-unclassified',
+  ...CLAUDE_HARNESS_IDS,
   'codex-cli',
   'codex-desktop',
   'codex-unclassified',
@@ -535,8 +532,7 @@ const READER_HARNESS_IDS = new Set([
   'copilot-vscode',
   'cursor',
   'cursor-agent',
-  'kilo-shared-runtime',
-  'kilo-vscode-legacy',
+  ...KILO_HARNESS_IDS,
   'opencode',
   'pi',
 ])
