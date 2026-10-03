@@ -18,6 +18,11 @@ export type { SessionSource }
 
 const DEFAULT_PARSER_CONTRACT_VERSION = '1'
 const CLAUDE_PARSER_CONTRACT_VERSION = '3'
+// v2: issue #189 / PR #264 — Codex camelCase token usage and Kilo flat
+// tokens_input/tokens_output fallbacks. Old zero-record checkpoints under v1
+// must not be reused or previously dropped sessions stay missing after upgrade.
+const CODEX_PARSER_CONTRACT_VERSION = '2'
+const KILO_PARSER_CONTRACT_VERSION = '2'
 
 const GEMINI_EXCLUSION_REASON =
   'Gemini represents chat history and model usage, not a coding harness. It must not be a harness id or rollup filter.'
@@ -35,9 +40,16 @@ function excluded(reason: string): ProviderDisposition {
 
 function descriptor(partial: Omit<HarnessSourceDescriptor, 'parserContractVersion'>): HarnessSourceDescriptor {
   const isClaude = partial.providerName === 'claude' || partial.harnessId.startsWith('claude')
+  const parserContractVersion = isClaude
+    ? CLAUDE_PARSER_CONTRACT_VERSION
+    : partial.providerName === 'codex'
+      ? CODEX_PARSER_CONTRACT_VERSION
+      : partial.providerName === 'kilo-code'
+        ? KILO_PARSER_CONTRACT_VERSION
+        : DEFAULT_PARSER_CONTRACT_VERSION
   return {
     ...partial,
-    parserContractVersion: isClaude ? CLAUDE_PARSER_CONTRACT_VERSION : DEFAULT_PARSER_CONTRACT_VERSION,
+    parserContractVersion,
   }
 }
 
