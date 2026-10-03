@@ -237,6 +237,72 @@ describe('claudeReader', () => {
     expect(texts.join('\n')).not.toContain('untimestamped')
   })
 
+  // loadClaudeCalls keeps the first usage-line timestamp when collapsing a
+  // contiguous request/response pair. timestampOfGroup must use that same
+  // instant; using the last line drops (or keeps) the turn when a window
+  // boundary falls inside the ≤60s merge gap on an unpaired group.
+  it('keeps an unpaired merged turn when only the first usage timestamp is in the window (#276)', async () => {
+    const usage = {
+      input_tokens: 150,
+      output_tokens: 45,
+      cache_read_input_tokens: 300,
+      cache_creation_input_tokens: 200,
+    }
+    const path = writeTranscript([
+      {
+        type: 'user',
+        sessionId: 'session-straddle',
+        message: { role: 'user', content: [{ type: 'text', text: 'straddle question' }] },
+      },
+      {
+        type: 'assistant',
+        sessionId: 'session-straddle',
+        uuid: 'req-straddle',
+        timestamp: '2026-09-10T12:00:25.000Z',
+        message: {
+          // no message.id — unpaired; window slice cannot rescue via nativeRecordId
+          model: 'claude-sonnet-4-5',
+          usage,
+          content: [
+            { type: 'tool_use', id: 'tu_1', name: 'Bash', input: { command: 'pwd' } },
+          ],
+        },
+      },
+      {
+        type: 'user',
+        sessionId: 'session-straddle',
+        message: {
+          role: 'user',
+          content: [{ type: 'tool_result', tool_use_id: 'tu_1', content: '/tmp' }],
+        },
+      },
+      {
+        type: 'assistant',
+        sessionId: 'session-straddle',
+        uuid: 'res-straddle',
+        // 20s later — still merges (≤60s), but past the window end
+        timestamp: '2026-09-10T12:00:45.000Z',
+        message: {
+          model: 'claude-sonnet-4-5',
+          usage,
+          content: [{ type: 'text', text: 'straddle answer' }],
+        },
+      },
+    ])
+
+    const dateRange = {
+      start: new Date('2026-09-10T12:00:00.000Z'),
+      end: new Date('2026-09-10T12:00:30.000Z'),
+    }
+    const turns: ReaderTurn[] = []
+    for await (const turn of claudeReader.read(path, dateRange)) turns.push(turn)
+
+    expect(turns).toHaveLength(1)
+    expect(turns[0]!.nativeRecordId).toBeUndefined()
+    const texts = turns[0]!.parts.map((p) => p.text)
+    expect(texts).toEqual(expect.arrayContaining(['straddle question', 'straddle answer']))
+  })
+
   it('leaves nativeRecordId unset when message.id is absent so positional pairing remains (#216 T2)', async () => {
     const path = writeTranscript([
       {

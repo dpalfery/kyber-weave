@@ -190,12 +190,15 @@ function nativeRecordIdOfGroup(group: readonly string[]): string | undefined {
 
 /**
  * Usage-line timestamp for a turn group, matching the instant `loadClaudeCalls`
- * and `sliceCallsToWindow` use. Missing or malformed timestamps are unusable
- * instants — the same rows `sliceCallsToWindow` drops when a refresh window is
- * set — so a date-ranged read must exclude them too.
+ * keeps on a collapsed contiguous pair (the first usage line) and that
+ * `sliceCallsToWindow` therefore sees. Walking from the last usage line would
+ * disagree when a window boundary falls inside the ≤60s merge gap. Missing or
+ * malformed timestamps are unusable instants — the same rows
+ * `sliceCallsToWindow` drops when a refresh window is set — so a date-ranged
+ * read must exclude them too.
  */
 function timestampOfGroup(group: readonly string[]): Date | undefined {
-  for (let i = group.length - 1; i >= 0; i--) {
+  for (let i = 0; i < group.length; i++) {
     if (claudeUsageOf(group[i]!) === undefined) continue
     let record: Record<string, unknown>
     try {
