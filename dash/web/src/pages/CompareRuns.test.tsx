@@ -6,7 +6,7 @@ import { render, screen, cleanup, fireEvent, within } from '@testing-library/rea
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type * as React from 'react'
 
-import { CompareRuns, type RunCandidate } from './CompareRuns.js'
+import { CompareRuns, isComparePickerVisible, type RunCandidate } from './CompareRuns.js'
 import * as kyberApi from '../lib/kyberApi.js'
 import type { KyberRunComparison } from '../lib/kyberApi.js'
 
@@ -195,6 +195,23 @@ describe('CompareRuns option labels (D4)', () => {
 })
 
 describe('CompareRuns picker filters (D2)', () => {
+  it('hides measured zero turnCount but keeps unknown (undefined) turnCount', () => {
+    const measuredZero = run({ runId: 'empty-turns', harness: 'cursor', turnCount: 0 })
+    const unknownTurns = run({ runId: 'unknown-turns', harness: 'cursor', turnCount: undefined })
+    const withTurns = run({ runId: 'parent-ok', harness: 'cursor', turnCount: 4 })
+
+    expect(isComparePickerVisible(measuredZero, false)).toBe(false)
+    expect(isComparePickerVisible(unknownTurns, false)).toBe(true)
+    expect(isComparePickerVisible(withTurns, false)).toBe(true)
+
+    renderCompare(<CompareRuns runs={[withTurns, measuredZero, unknownTurns]} />)
+    const values = within(screen.getByTestId('compare-run-a'))
+      .getAllByRole('option')
+      .map((o) => (o as HTMLOptionElement).value)
+      .filter(Boolean)
+    expect(values).toEqual(['parent-ok', 'unknown-turns'])
+  })
+
   it('default list omits is_subagent runs and zero turnCount runs', () => {
     const runs = [
       run({ runId: 'parent-ok', harness: 'cursor', turnCount: 4 }),

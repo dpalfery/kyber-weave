@@ -168,7 +168,7 @@ export function formatCompareRunOptionLabel(run: RunCandidate): string {
 
 /** D2: hide zero-turn runs always; hide subagents unless the toggle is on. */
 export function isComparePickerVisible(run: RunCandidate, showSubagents: boolean): boolean {
-  if ((run.turnCount ?? 0) === 0) return false
+  if (run.turnCount === 0) return false
   if (!showSubagents && run.isSubagent === true) return false
   return true
 }
