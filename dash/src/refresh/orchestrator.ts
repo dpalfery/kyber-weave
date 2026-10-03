@@ -309,7 +309,6 @@ async function runHarnessJob(context: JobContext): Promise<HarnessJobRow> {
       revisionToken: unit.revision?.token ?? previous?.revisionToken ?? 'unknown',
       parserContractVersion: descriptor.parserContractVersion,
     }
-    const reusable = checkpointIsReusable(previous, coverageRequest)
     const outgoing = recordsForUncoveredCommit(merged, store, previous, requested, coverageRequest)
     const created = outgoing.filter((record) => store.get(record.spanId) === undefined).length
     const updated = outgoing.length - created
@@ -317,7 +316,10 @@ async function runHarnessJob(context: JobContext): Promise<HarnessJobRow> {
       coveredFromUtc: context.coveredFromUtc,
       coveredThroughUtc: context.coveredThroughUtc,
       importedAtUtc: context.importedAtUtc,
-      recordCount: reusable ? (previous?.recordCount ?? 0) + created : merged.length,
+      recordCount:
+        previous?.parserContractVersion !== descriptor.parserContractVersion
+          ? merged.length
+          : (previous?.recordCount ?? 0) + created,
       status: ingestResult.problems.length > 0 || unit.problems.length > 0 ? 'partial' : 'ok',
       emptyReason: unit.emptyReason,
     })

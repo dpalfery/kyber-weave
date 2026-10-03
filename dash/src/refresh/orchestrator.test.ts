@@ -490,6 +490,64 @@ describe('refreshHarnessSources', () => {
     }
   })
 
+  it('keeps recordCount cumulative across revisions when unit has records older than dateRange.start', async () => {
+    const store = temporaryStore()
+    const piSource = source('pi', 'growing-session')
+    const olderCall = {
+      ...call('pi', 'pi-grow'),
+      timestamp: '2026-08-15T12:00:00.000Z',
+      deduplicationKey: 'pi:pi-grow:turn-1',
+      userMessage: 'older turn before current window',
+    }
+    const newerCall = {
+      ...call('pi', 'pi-grow'),
+      timestamp: '2026-09-08T12:00:00.000Z',
+      deduplicationKey: 'pi:pi-grow:turn-2',
+      userMessage: 'appended turn in current window',
+    }
+
+    let currentCalls = [olderCall]
+    let currentMtime = 1_000
+
+    const dependencies = {
+      getAllProviders: async () => [
+        nativeProvider('pi', [piSource], new Map([[piSource.path, currentCalls]])),
+      ],
+      descriptors: descriptors('pi'),
+      jobConcurrency: 1,
+      commandStartedAt: new Date('2026-08-20T18:00:00.000Z'),
+      parseAllSessions: async () => undefined,
+      fingerprintFile: async () => ({ dev: 1, ino: 1, mtimeMs: currentMtime, sizeBytes: currentMtime }),
+    }
+
+    try {
+      // First refresh: window is [2026-08-06, 2026-08-20]. olderCall is inside window.
+      const first = await refreshHarnessSources(store, dependencies)
+      expect(first.rows[0]).toMatchObject({ status: 'ok', created: 1 })
+      const initialCheckpoint = store.listSourceCheckpoints('pi')[0]
+      expect(initialCheckpoint?.recordCount).toBe(1)
+
+      // Append new turn and advance commandStartedAt to 2026-09-12.
+      // Window is now [2026-08-29, 2026-09-12].
+      // olderCall (2026-08-15) is now older than dateRange.start (aged out).
+      // newerCall (2026-09-08) is inside window.
+      currentCalls = [olderCall, newerCall]
+      currentMtime = 2_000
+
+      const second = await refreshHarnessSources(store, {
+        ...dependencies,
+        commandStartedAt: new Date('2026-09-12T18:00:00.000Z'),
+      })
+      expect(second.rows[0]).toMatchObject({ status: 'ok', created: 1 })
+
+      const updatedCheckpoint = store.listSourceCheckpoints('pi')[0]
+      expect(updatedCheckpoint?.revisionToken).not.toBe(initialCheckpoint?.revisionToken)
+      expect(updatedCheckpoint?.recordCount).toBe(2)
+    } finally {
+      store.close()
+    }
+  })
+
   it('records the coverage window on the refresh run row', async () => {
     const store = temporaryStore()
     try {
