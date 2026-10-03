@@ -20,6 +20,7 @@ import {
   ingestProviders as productionIngestProviders,
   PROVIDER_PARSE_ERROR,
   type Provider,
+  type ProviderLoaderResult,
 } from '../synth/provider.js'
 import { provenanceFor } from '../synth/synth.js'
 
@@ -437,12 +438,11 @@ async function ingestUnit(
   // only from ProviderLoad.filePath. Remapping provider onto a bare call array
   // recovers counters but strips parts (#216). Vary only whether the path is
   // still on disk — missing paths stay on the bare-array recovery path.
+  // existsSync is sampled once per unit on purpose (not per loader invocation).
   const filePath = existsSync(unit.source.path) ? unit.source.path : undefined
-  return await ingest([descriptor.harnessId], () =>
-    filePath !== undefined
-      ? { ...loadFields, calls: remappedCalls, filePath }
-      : remappedCalls,
-  )
+  const retryLoad: ProviderLoaderResult =
+    filePath === undefined ? remappedCalls : { ...loadFields, calls: remappedCalls, filePath }
+  return await ingest([descriptor.harnessId], () => retryLoad)
 }
 
 function failedRow(harnessId: string, error: Error, fallback = 'harness job failed'): HarnessJobRow {
