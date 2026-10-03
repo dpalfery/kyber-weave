@@ -38,19 +38,29 @@ function excluded(reason: string): ProviderDisposition {
   return { kind: 'excluded', reason }
 }
 
+export function parserContractVersionFor(partial: { providerName: string; harnessId: string }): string {
+  if (partial.providerName === 'claude' || partial.harnessId.startsWith('claude')) {
+    return CLAUDE_PARSER_CONTRACT_VERSION
+  }
+  if (partial.providerName === 'codex') {
+    return CODEX_PARSER_CONTRACT_VERSION
+  }
+  // Opt in by named harness or the kilo-code provider — not a `kilo` prefix —
+  // so a future kilo-shaped harness does not inherit contract 2 by accident.
+  if (
+    partial.providerName === 'kilo-code' ||
+    partial.harnessId === 'kilo-shared-runtime' ||
+    partial.harnessId === 'kilo-vscode-legacy'
+  ) {
+    return KILO_PARSER_CONTRACT_VERSION
+  }
+  return DEFAULT_PARSER_CONTRACT_VERSION
+}
+
 function descriptor(partial: Omit<HarnessSourceDescriptor, 'parserContractVersion'>): HarnessSourceDescriptor {
-  const isClaude = partial.providerName === 'claude' || partial.harnessId.startsWith('claude')
-  const isKilo = partial.providerName === 'kilo-code' || partial.harnessId.startsWith('kilo')
-  const parserContractVersion = isClaude
-    ? CLAUDE_PARSER_CONTRACT_VERSION
-    : partial.providerName === 'codex'
-      ? CODEX_PARSER_CONTRACT_VERSION
-      : isKilo
-        ? KILO_PARSER_CONTRACT_VERSION
-        : DEFAULT_PARSER_CONTRACT_VERSION
   return {
     ...partial,
-    parserContractVersion,
+    parserContractVersion: parserContractVersionFor(partial),
   }
 }
 
