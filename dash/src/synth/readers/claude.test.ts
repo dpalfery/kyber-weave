@@ -1,10 +1,11 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { afterAll, describe, expect, it } from 'vitest'
 
-import { claudeReader, readClaudeSession } from './claude.js'
+import { loadClaudeCalls } from '../../providers/claude.js'
+import { claudeReader, readClaudeSession, splitClaudeTurns } from './claude.js'
 import type { ReaderTurn } from './types.js'
 
 const tempRoots: string[] = []
@@ -437,6 +438,76 @@ describe('claudeReader', () => {
     expect(turnB.parts.map((p) => p.text)).toEqual(
       expect.arrayContaining(['content of B']),
     )
+  })
+
+  // loadClaudeCalls measures the merge gap from the first usage line of the
+  // accumulated call. A last-line walk fuses t=0,+40s,+80s (40≤60 twice)
+  // while the parser emits two calls (0→80 > 60s).
+  it('splits a three-usage-line chain the same way loadClaudeCalls does (#276)', () => {
+    const usage = {
+      input_tokens: 150,
+      output_tokens: 45,
+      cache_read_input_tokens: 300,
+      cache_creation_input_tokens: 200,
+    }
+    const assistant = (timestamp: string, id?: string) => ({
+      type: 'assistant',
+      sessionId: 'session-three-line',
+      uuid: `uuid-${timestamp}`,
+      timestamp,
+      message: {
+        ...(id !== undefined ? { id } : {}),
+        model: 'claude-sonnet-4-5',
+        usage,
+        content: [{ type: 'text', text: `answer at ${timestamp}` }],
+      },
+    })
+    const path = writeTranscript([
+      assistant('2026-09-01T12:00:00.000Z', 'msg-first'),
+      assistant('2026-09-01T12:00:40.000Z'),
+      assistant('2026-09-01T12:01:20.000Z', 'msg-third'),
+    ])
+    const lines = readFileSync(path, 'utf-8').split(/\r?\n/).filter((line) => line.trim() !== '')
+    const calls = loadClaudeCalls(path)
+    expect(splitClaudeTurns(lines)).toHaveLength(calls.length)
+    expect(calls).toHaveLength(2)
+  })
+
+  it('does not fuse a model-less middle record the parser would keep separate (#276)', () => {
+    const usage = {
+      input_tokens: 150,
+      output_tokens: 45,
+      cache_read_input_tokens: 300,
+      cache_creation_input_tokens: 200,
+    }
+    const path = writeTranscript([
+      {
+        type: 'assistant',
+        sessionId: 'session-model-gap',
+        uuid: 'uuid-named',
+        timestamp: '2026-09-01T12:00:00.000Z',
+        message: {
+          id: 'msg-named',
+          model: 'claude-sonnet-4-5',
+          usage,
+          content: [{ type: 'text', text: 'named model' }],
+        },
+      },
+      {
+        type: 'assistant',
+        sessionId: 'session-model-gap',
+        uuid: 'uuid-unknown',
+        timestamp: '2026-09-01T12:00:10.000Z',
+        message: {
+          usage,
+          content: [{ type: 'text', text: 'no model' }],
+        },
+      },
+    ])
+    const lines = readFileSync(path, 'utf-8').split(/\r?\n/).filter((line) => line.trim() !== '')
+    const calls = loadClaudeCalls(path)
+    expect(splitClaudeTurns(lines)).toHaveLength(calls.length)
+    expect(calls).toHaveLength(2)
   })
 
   it('measures stored conversation and tool results, but not unavailable system prompts or tool definitions', async () => {

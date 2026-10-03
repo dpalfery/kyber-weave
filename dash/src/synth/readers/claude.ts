@@ -66,7 +66,9 @@ function parseLineUsageInfo(rawLine: string): {
   return {
     messageId: message ? claudeText(message['id']) : undefined,
     sessionId: claudeText(record['sessionId']),
-    model: message ? claudeText(message['model']) : undefined,
+    // Same default as loadClaudeCalls — a missing model must not let the
+    // reader fuse a pair the parser would split as 'unknown' vs a real name.
+    model: message ? (claudeText(message['model']) ?? 'unknown') : 'unknown',
     inputTokens: claudeCount(usage['input_tokens']),
     outputTokens: claudeCount(usage['output_tokens']),
     cacheReadTokens: claudeCount(usage['cache_read_input_tokens']),
@@ -146,9 +148,13 @@ export function splitClaudeTurns(lines: readonly string[]): string[][] {
   if (rawGroups.length <= 1) return rawGroups
 
   const mergedGroups: string[][] = []
-  // Parallel to loadClaudeCalls' nativeMessageIds: the defined message.id
-  // learned for each merged group, retained across id-less halves.
+  // Parallel to loadClaudeCalls: the defined message.id and the first usage
+  // line of each merged group. prevCall.timestamp / counters / model are
+  // never rewritten on merge, so the gap must be measured from that first
+  // line — walking the last usage line fuses a t=0,+40s,+80s chain that
+  // the parser splits (0→80 > 60s).
   const mergedMessageIds: Array<string | undefined> = []
+  const mergedFirstUsage: Array<ReturnType<typeof parseLineUsageInfo>> = []
   for (let i = 0; i < rawGroups.length; i++) {
     const group = rawGroups[i]!
     const lastLine = group[group.length - 1]!
@@ -157,17 +163,11 @@ export function splitClaudeTurns(lines: readonly string[]): string[][] {
     if (mergedGroups.length > 0) {
       const prevMerged = mergedGroups[mergedGroups.length - 1]!
       const prevMessageId = mergedMessageIds[mergedMessageIds.length - 1]
-      let prevUsageInfo: ReturnType<typeof parseLineUsageInfo>
-      for (let j = prevMerged.length - 1; j >= 0; j--) {
-        prevUsageInfo = parseLineUsageInfo(prevMerged[j]!)
-        if (prevUsageInfo !== undefined) break
-      }
-      // Compare usage against the last counters, but message.id against the
-      // id learned for the whole prior group (A, absent, B must not fuse).
+      const prevFirstUsage = mergedFirstUsage[mergedFirstUsage.length - 1]
       const prevForMatch =
-        prevUsageInfo === undefined
+        prevFirstUsage === undefined
           ? undefined
-          : { ...prevUsageInfo, messageId: prevMessageId ?? prevUsageInfo.messageId }
+          : { ...prevFirstUsage, messageId: prevMessageId ?? prevFirstUsage.messageId }
       if (prevForMatch !== undefined && isMatchingTurnUsage(prevForMatch, usageInfo)) {
         prevMerged.push(...group)
         if (prevMessageId === undefined && usageInfo?.messageId !== undefined) {
@@ -178,6 +178,7 @@ export function splitClaudeTurns(lines: readonly string[]): string[][] {
     }
     mergedGroups.push([...group])
     mergedMessageIds.push(usageInfo?.messageId)
+    mergedFirstUsage.push(usageInfo)
   }
 
   return mergedGroups
@@ -186,8 +187,8 @@ export function splitClaudeTurns(lines: readonly string[]): string[][] {
 /**
  * Pairing identity for one turn group. Uses `message.id` only — that is what
  * `loadClaudeCalls` stamps as `turnId`. Emitting the transcript `uuid` here
- * would populate the id map while leaving calls turnId-less, which disables
- * positional pairing for every turn in the file (Cursor's id-map contract).
+ * would invent ids the parser never stamps as `turnId`, so those calls could
+ * not join through the id map.
  */
 function nativeRecordIdOfGroup(group: readonly string[]): string | undefined {
   for (let i = 0; i < group.length; i++) {
@@ -507,6 +508,7 @@ export const readClaudeParts = readClaudeTranscript
  */
 export class ClaudeContentReader implements ContentReader {
   readonly harness = 'claude-code'
+  readonly positionalPairingSafe = true
 
   /**
    * Claude's transcript has no invocation-counter boundary like Codex's
