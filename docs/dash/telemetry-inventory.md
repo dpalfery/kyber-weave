@@ -45,13 +45,57 @@ Values are never summed across the two sources. `KyberBridge` reads `canon.db` o
 | Copilot Chat | Content-enabled OTLP capture maps observed system instructions, messages, rules, skills, tool definitions, tool results, and session identity into canonical buckets. Input-message normalization separates input text from response envelopes without negative residuals. | Observed per-server schema availability remains source-dependent. |
 | Copilot CLI | SQLite ingest preserves its reported ASAD taxonomy, including `context_*_tokens` and `context_tier`. Persisted harness id is `copilot-cli`, not collapsed into `copilot`. | Omitted reported buckets remain unavailable rather than zero. |
 | Copilot VS Code | Native journal request replay into input-side `ReaderTurn` snapshots keyed by native request id via `copilotVscodeReader`. Reconstructs instructions and user message while excluding current model output from input context. | Window and pressure measured; unobserved buckets explicit `null` with reason. |
-| Claude Code | Enhanced-telemetry counters and dot-folder conversation/tool-result content can enter canonical records. | System prompts and tool schemas from raw API-body logs require the owner to enable `OTEL_LOG_RAW_API_BODIES=1`; that has not been assumed or configured here. |
+| Claude Code (`claude-cli`, `claude-desktop`, `claude-code`) | Enhanced-telemetry counters plus JSONL conversation and tool-result parts on file-synth (`synth:`) records when the Claude content reader is paired at ingest ([issue #216](https://github.com/dpalfery/kyber-weave/issues/216)). | `system_prompt` and `tool_definitions` stay not measurable from session files; raw API-body logs require owner-enabled `OTEL_LOG_RAW_API_BODIES=1`. See [Claude Desktop and CLI file-synth parts](#claude-desktop-and-cli-file-synth-parts-issue-216). |
 | Codex | Dot-folder ingestion supplies the system prompt, instructions, conversation, tool results, and context window contained in rollout data. | Availability is limited to fields the source actually supplies. |
 | Codex OTLP (collector path) | Codex exports logs and spans only when the owner points its exporters at the collector. `codexAdapter` claims spans by fingerprint (`codex.*` namespace plus `gen_ai.usage.*`), never by `service.name` (`codex_cli_rs`, `codex_exec`, `codex-app-server`), so records are harness `codex` without a CLI/exec/app-server split. Sessions correlate on `conversation.id`. Only an allowlist (`model`, `slug`, `conversation.id`, `event.timestamp`, `gen_ai.usage.*`, `codex.usage.*`) is persisted; prompts, tool arguments/output, `user.email` and account ids are dropped. The adapter assumes cache-inclusive input; an exclusive payload fails validation with a negative fresh input instead of being miscounted. `model` is absent on the `handle_responses` span, so such a record has no model until log enrichment is built. | Owner-capture gates before production use of this path: (1) the exported span name of `handle_responses`, (2) whether log records carry `trace_id`/`span_id`, (3) the token convention. |
 | pi | Reader support is implemented and respects OTLP/file source precedence. | No current live collection claim is made. |
 | Cursor | `cursorReader` extracts available user prompt, instructions, and tool context from SQLite storage without claiming an unobserved complete historical prefix. `cursor-hook` emits deterministic OTLP traces. | Window and pressure measured only when the bubble stores `contextWindow`; otherwise not measurable with reason. Unobserved historical buckets explicit `null` with reason. |
 | OpenCode | Its current disabled OTel configuration is represented as not collectable with a reason. | Owner enablement is required before collection can be verified. |
 | Kilo Code | The surveyed empty local store and undocumented OTel surface are represented as not collectable with a reason. | No zero-valued data is fabricated. |
+
+## Claude Desktop and CLI file-synth parts (issue #216)
+
+**[VERIFIED]** `claude-desktop` and `claude-cli` enter the store through `dash refresh`
+as file-synthesized `synth:` spans (wire source `codeburn/claude-desktop` /
+Claude CLI equivalents). When ingest pairs counter calls with
+`ClaudeContentReader` turns, those records carry structured parts the transcript
+actually supplies — the turn inspector is not inherently empty for conversation
+content. Closeout of [#216](https://github.com/dpalfery/kyber-weave/issues/216)
+is to keep that capture path durable and documented; content is never fabricated.
+
+| Content bucket | From Claude session JSONL? | Notes |
+|---|---|---|
+| `conversation_history` | Yes | Message text and thinking blocks from the transcript. |
+| `tool_result_content` | Yes | When `tool_result` blocks are present. |
+| `system_prompt` | No | Honest `not_measurable` — session files omit the runtime system prompt. |
+| `tool_definitions` | No | Honest `not_measurable` — files record invocations, not definition schemas. |
+
+Prefix-byte reconstruction for those two omitted buckets still requires
+`OTEL_LOG_RAW_API_BODIES=1` (same gate as the Claude Code survey row above).
+Success for Desktop/CLI file synth is non-empty conversation (and tool results
+when present), not a full five-block inspector.
+
+Pairing that attaches parts (shipped with the #216 capture fix):
+
+- `ClaudeContentReader` emits `nativeRecordId` from Claude `message.id` so
+  `matchingTurns` can join to the call's `turnId` instead of relying only on
+  positional order.
+- The reader honors the same UTC `dateRange` as refresh window-sliced calls, so
+  a partial history window cannot attach an out-of-window turn's text.
+- When a unit's first ingest returns zero records, the refresh orchestrator
+  retries with `filePath` retained so the content reader still runs; a bare
+  call array (no path) recovers counters only and strips parts.
+
+Repair for rows ingested before part capture: advancing the Claude family
+`parserContractVersion` in the harness-source registry makes prior
+`source_checkpoint` rows stale. The next owner `dash refresh` re-reads
+transcripts and re-synthesizes affected units still inside the 14-day
+content-retention window
+([ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md),
+[ADR 0018](../adr/0018-kyberdash-content-retention-purge.md)).
+Rows older than that floor are not rewritten.
+`kyber backfill` cannot repair file-synth rows — their stored `raw` is the
+counter call, not the message body.
 
 ## Antigravity aggregate-token investigation (T7)
 

@@ -51,6 +51,8 @@ code-refs:
   - projectCanonicalStore
   - CanonicalProjectionScheduler
   - buildContextReport
+  - ClaudeContentReader
+  - ingestProviders
 ---
 
 # KyberDash architecture
@@ -208,6 +210,27 @@ appear in the UI as usage / survey chrome; it is not `harness=gemini` in `canon.
 no dashboard refresh button.
 
 The contract is [ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md).
+
+### Claude Desktop and CLI file-synth content
+
+`claude-cli` and `claude-desktop` share the Claude JSONL path: counter envelopes
+from the session file are synthesized into `synth:` records, and
+`ingestProviders` attaches `ClaudeContentReader` parts when a turn pairs.
+Buckets the transcript supplies — `conversation_history` and
+`tool_result_content` — land on the record; `system_prompt` and
+`tool_definitions` remain `not_measurable` from session files alone (raw API
+body logging is a separate owner gate). Pairing uses `nativeRecordId`
+(Claude `message.id`) matched to the call `turnId`, the reader honors the
+refresh `dateRange` so window-sliced calls stay aligned, and the orchestrator
+fallback keeps `filePath` so a zero-record retry does not strip the reader
+([issue #216](https://github.com/dpalfery/kyber-weave/issues/216)). Advancing
+the Claude family `parserContractVersion` invalidates stale checkpoints so a
+subsequent `dash refresh` re-synthesizes historical empty desktop rows that
+still fall inside the 14-day content-retention window. Older rows stay
+counters-only: `purgeExpiredContent` empties their parts in the same run
+([ADR 0018](../adr/0018-kyberdash-content-retention-purge.md)). The
+bucket table and repair boundary are in the
+[telemetry inventory](telemetry-inventory.md#claude-desktop-and-cli-file-synth-parts-issue-216).
 
 ## The shared canonical projection
 
