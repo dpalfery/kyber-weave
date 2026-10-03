@@ -31,9 +31,8 @@ import { CanonStore } from './store.js'
  *
  * Window: commandStartedAt 2026-10-01T12:00:00Z, 2 weeks => start 2026-09-17.
  *
- * Passing tests characterise CURRENT behaviour. The single failing test at the
- * bottom is the INTENTIONAL RED contract for the follow-up task (honest-
- * unobservability: a zero-record unit must say why).
+ * Passing tests characterise the T3 contract: a zero-record unit persists why
+ * (`window_filtered` or `no_recordable_events`) on the checkpoint.
  */
 
 const COMMAND_STARTED_AT = new Date('2026-10-01T12:00:00.000Z')

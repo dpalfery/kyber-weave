@@ -72,14 +72,14 @@ describe('codex collector — OTLP ingest (T1 diagnostic)', () => {
   })
 
   it('shared-usage-only span from codex_cli_rs is quarantined as unclaimed (service.name is not evidence)', () => {
-    // Current behaviour: Codex has no adapter in the ingest.ts ADAPTERS registry,
-    // so the span is quarantined with reason 'unclaimed'.
+    // R6.2: service.name alone is not evidence. Without a `codex.*` attribute the
+    // fingerprint does not fire, so the span stays unclaimed.
     const store = new CanonStore(':memory:')
     const span = createCodexOtlpSpan()
 
     const outcome = ingestBatch([span], store)
 
-    expect(outcome.accepted, 'no adapter claims a codex-cli span').toBe(0)
+    expect(outcome.accepted, 'shared GenAI usage alone does not claim Codex').toBe(0)
     expect(outcome.quarantined, 'the span is quarantined, not dropped').toBe(1)
 
     const quarantine = store.getQuarantine('span-codex-001')

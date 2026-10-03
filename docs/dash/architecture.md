@@ -6,7 +6,7 @@ component: KyberDash
 source-root: dash
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-02
+last-reviewed: 2026-10-03
 decided-by:
   - adr/0020-kyberdash-one-time-fork
   - adr/0008-kyberdash-single-canonical-store
@@ -196,7 +196,7 @@ yields no records persists its reason on the checkpoint's `last_error_code` (sta
 `ok`): `window_filtered` when the parser produced calls that all predate the coverage
 window (`sliceCallsToWindow`), `no_recordable_events` when it produced none (for Codex,
 no `token_count` or model events). A unit with records, or with problems, carries no such
-reason. The Codex OTLP adapter (`canon/adapters/codex.ts`) is the fifth fingerprint voter; see the Codex OTLP note in [telemetry-inventory](telemetry-inventory.md). After jobs
+reason. The Codex OTLP adapter (`canon/adapters/codex.ts`) is the sixth fingerprint voter; see the Codex OTLP note in [telemetry-inventory](telemetry-inventory.md). After jobs
 drain, `purgeExpiredContent` empties content older than 14 days without touching
 `records.raw` ([ADR 0018](../adr/0018-kyberdash-content-retention-purge.md)), then the store
 is projected through `projectCanonicalStore` — the same shared entry the live receiver uses
