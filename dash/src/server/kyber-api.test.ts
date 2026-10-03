@@ -2157,3 +2157,293 @@ describe('GET /api/kyber/runs executions scoping (thread routes.ts:567)', () => 
     }
   })
 })
+
+// Issue #190 plan T1 RED: Compare must resolve canonical shares, dedupe model
+// turns, and refuse fabricated zero totals/history when evidence is missing.
+describe('GET /api/kyber/compare/runs split-identity and honest availability (issue #190)', () => {
+  type CompareFixture = {
+    store: CanonStore
+    runAId: string
+    runBId: string
+    ghostRunId: string
+    expectedTurnCountPerRun: number
+    expectedTokensA: number
+    expectedTokensB: number
+  }
+
+  function usage(
+    freshInput: number,
+    cacheRead: number,
+    output: number,
+  ): CanonicalRecord['tokens'] {
+    return {
+      freshInput,
+      cacheRead,
+      cacheCreation: 0,
+      output,
+      reportedInput: freshInput + cacheRead,
+      reportedOutput: output,
+    }
+  }
+
+  function nativeShareRecord(
+    spanId: string,
+    harness: string,
+    nativeKey: string,
+    cwd: string,
+    over: Partial<CanonicalRecord> = {},
+  ): CanonicalRecord {
+    return {
+      spanId,
+      traceId: `trace-${nativeKey}`,
+      parentSpanId: null,
+      sessionId: nativeKey,
+      source: 'synthetic',
+      harness,
+      name: 'llm_request',
+      op: 'llm.invoke',
+      kind: 'client',
+      timestamp: '2026-09-06T12:00:00.000Z',
+      durationMs: 100,
+      status: 'ok',
+      tokens: usage(800, 200, 150),
+      content: { system_prompt: 'fixture' },
+      cost: { basis: 'published', status: 'priced', value: 0.02, currency: 'USD' },
+      raw: { cwd },
+      ...over,
+    }
+  }
+
+  async function seedSplitIdentityCompareFixture(): Promise<CompareFixture> {
+    const store = new CanonStore(':memory:')
+    const cwdA = '/repo/compare-native-a'
+    const cwdB = '/repo/compare-native-b'
+    const keyA = 'cmp-native-a'
+    const keyB = 'cmp-native-b'
+
+    store.upsertMany([
+      // Native key A — cursor share: OTLP turn, file twin, second model turn, auxiliary tool.
+      nativeShareRecord('cmp-a-otel-1', 'cursor', keyA, cwdA, {
+        timestamp: '2026-09-06T12:00:00.000Z',
+        tokens: usage(800, 200, 150),
+      }),
+      nativeShareRecord('cmp-a-file-1', 'cursor-agent', keyA, cwdA, {
+        source: 'codeburn/cursor-agent',
+        timestamp: '2026-09-06T12:00:02.000Z',
+        tokens: usage(800, 200, 150),
+      }),
+      nativeShareRecord('cmp-a-otel-2', 'cursor', keyA, cwdA, {
+        timestamp: '2026-09-06T12:00:10.000Z',
+        tokens: usage(400, 100, 50),
+      }),
+      {
+        spanId: 'cmp-a-tool-1',
+        traceId: `trace-${keyA}`,
+        parentSpanId: null,
+        sessionId: keyA,
+        source: 'synthetic',
+        harness: 'cursor',
+        name: 'read_file',
+        op: 'tool.invoke',
+        kind: 'internal',
+        timestamp: '2026-09-06T12:00:05.000Z',
+        durationMs: 20,
+        status: 'ok',
+        tokens: usage(0, 0, 0),
+        content: {},
+        cost: { basis: 'unknown', status: 'no_rate' },
+        raw: { cwd: cwdA },
+      },
+      // Native key A — copilot-cli share (split identity; not selected for compare runs).
+      nativeShareRecord('cmp-a-cli-1', 'copilot-cli', keyA, cwdA, {
+        timestamp: '2026-09-06T12:00:20.000Z',
+        tokens: usage(50, 0, 10),
+      }),
+
+      // Native key B — cursor share with different measured totals.
+      nativeShareRecord('cmp-b-otel-1', 'cursor', keyB, cwdB, {
+        timestamp: '2026-09-06T13:00:00.000Z',
+        tokens: usage(500, 100, 80),
+      }),
+      nativeShareRecord('cmp-b-file-1', 'cursor-agent', keyB, cwdB, {
+        source: 'codeburn/cursor-agent',
+        timestamp: '2026-09-06T13:00:02.000Z',
+        tokens: usage(500, 100, 80),
+      }),
+      nativeShareRecord('cmp-b-otel-2', 'cursor', keyB, cwdB, {
+        timestamp: '2026-09-06T13:00:10.000Z',
+        tokens: usage(300, 50, 40),
+      }),
+      {
+        spanId: 'cmp-b-tool-1',
+        traceId: `trace-${keyB}`,
+        parentSpanId: null,
+        sessionId: keyB,
+        source: 'synthetic',
+        harness: 'cursor',
+        name: 'grep_search',
+        op: 'tool.invoke',
+        kind: 'internal',
+        timestamp: '2026-09-06T13:00:05.000Z',
+        durationMs: 20,
+        status: 'ok',
+        tokens: usage(0, 0, 0),
+        content: {},
+        cost: { basis: 'unknown', status: 'no_rate' },
+        raw: { cwd: cwdB },
+      },
+      nativeShareRecord('cmp-b-cli-1', 'copilot-cli', keyB, cwdB, {
+        timestamp: '2026-09-06T13:00:20.000Z',
+        tokens: usage(40, 0, 5),
+      }),
+    ])
+
+    await buildSessions(store)
+    await buildRuns(store)
+
+    const cursorRuns = store.listRuns('cursor')
+    expect(cursorRuns).toHaveLength(2)
+
+    const runA = cursorRuns.find((run) => run.workingDirectory === cwdA)
+    const runB = cursorRuns.find((run) => run.workingDirectory === cwdB)
+    expect(runA).toBeDefined()
+    expect(runB).toBeDefined()
+
+    const execA = store.listExecutions(runA!.runId)
+    expect(execA.some((execution) => execution.sessionId === `cursor:${keyA}`)).toBe(true)
+
+    const ghostRunId = 'derived:cursor:unresolvable-ghost:0'
+    store.upsertRun({
+      runId: ghostRunId,
+      harness: 'cursor',
+      label: 'ghost run with no resolvable records',
+      groupingBasis: 'derived',
+      groupingRule: 'session_fallback',
+      workingDirectory: '/repo/unresolvable-ghost',
+      started: '2026-09-06T14:00:00.000Z',
+      ended: '2026-09-06T14:00:01.000Z',
+      executionCount: 1,
+    })
+    store.upsertExecutions([
+      {
+        executionId: 'cursor:unresolvable-ghost',
+        runId: ghostRunId,
+        sessionId: 'cursor:unresolvable-ghost',
+        parentExecutionId: null,
+        harness: 'cursor',
+        agentName: null,
+        isRoot: true,
+        started: '2026-09-06T14:00:00.000Z',
+        ended: '2026-09-06T14:00:01.000Z',
+        parentLinkage: 'measured',
+      },
+    ])
+
+    const expectedTokensA = 1150 + 550
+    const expectedTokensB = 680 + 390
+
+    return {
+      store,
+      runAId: runA!.runId,
+      runBId: runB!.runId,
+      ghostRunId,
+      expectedTurnCountPerRun: 2,
+      expectedTokensA,
+      expectedTokensB,
+    }
+  }
+
+  it('compares two derived runs from split native keys with deduped model turns and measured token delta', async () => {
+    const fixture = await seedSplitIdentityCompareFixture()
+    const bridge = new KyberBridge({ canonPath: ':memory:', store: fixture.store })
+    const server = await runWebDashboard({ port: 0, open: false, kyberBridge: bridge, writeStdout: () => {} })
+
+    try {
+      const compareBase = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
+      const res = await fetch(
+        `${compareBase}/api/kyber/compare/runs?runA=${encodeURIComponent(fixture.runAId)}&runB=${encodeURIComponent(fixture.runBId)}`,
+      )
+      expect(res.status).toBe(200)
+      expect(res.headers.get('content-type')).toContain('application/json')
+
+      const body = (await res.json()) as {
+        runA: { turnCount: number; totalTokens: number }
+        runB: { turnCount: number; totalTokens: number }
+        totals: Record<string, unknown>
+        pairs: unknown[]
+      }
+
+      expect(body.runA.turnCount).toBe(fixture.expectedTurnCountPerRun)
+      expect(body.runB.turnCount).toBe(fixture.expectedTurnCountPerRun)
+      expect(body.runA.totalTokens).toBe(fixture.expectedTokensA)
+      expect(body.runB.totalTokens).toBe(fixture.expectedTokensB)
+      expect(body.totals.tokenDelta).toBe(fixture.expectedTokensB - fixture.expectedTokensA)
+      expect(body.pairs.length).toBeGreaterThan(0)
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+      bridge.close()
+      fixture.store.close()
+    }
+  })
+
+  it('returns unavailable comparison totals with a reason when a selected run resolves no records', async () => {
+    const fixture = await seedSplitIdentityCompareFixture()
+    const bridge = new KyberBridge({ canonPath: ':memory:', store: fixture.store })
+    const server = await runWebDashboard({ port: 0, open: false, kyberBridge: bridge, writeStdout: () => {} })
+
+    try {
+      const compareBase = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
+      const res = await fetch(
+        `${compareBase}/api/kyber/compare/runs?runA=${encodeURIComponent(fixture.runAId)}&runB=${encodeURIComponent(fixture.ghostRunId)}`,
+      )
+      expect(res.status).toBe(200)
+
+      const body = (await res.json()) as {
+        runB: { turnCount?: number; totalTokens?: number; metricsReason?: string; availability?: string }
+        totals: Record<string, unknown>
+      }
+
+      expect(body.totals.availability).toBe('unavailable')
+      expect(typeof body.totals.reason).toBe('string')
+      expect(String(body.totals.reason).length).toBeGreaterThan(0)
+      expect(body.totals.tokenDelta).toBeUndefined()
+      expect(body.runB.totalTokens).not.toBe(0)
+      expect(body.runB.turnCount).toBeUndefined()
+      expect(body.runB.availability).toBe('unavailable')
+      expect(typeof body.runB.metricsReason).toBe('string')
+      expect(String(body.runB.metricsReason).length).toBeGreaterThan(0)
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+      bridge.close()
+      fixture.store.close()
+    }
+  })
+
+  it('omits recommendation history and refuses promotion when no completed-pair count is supplied', async () => {
+    const fixture = await seedSplitIdentityCompareFixture()
+    const bridge = new KyberBridge({ canonPath: ':memory:', store: fixture.store })
+    const server = await runWebDashboard({ port: 0, open: false, kyberBridge: bridge, writeStdout: () => {} })
+
+    try {
+      const compareBase = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
+      const res = await fetch(
+        `${compareBase}/api/kyber/compare/runs?runA=${encodeURIComponent(fixture.runAId)}&runB=${encodeURIComponent(fixture.runBId)}`,
+      )
+      expect(res.status).toBe(200)
+
+      const body = (await res.json()) as {
+        verdict: Record<string, unknown> & { canPromote: boolean; meetsSufficiencyThreshold: boolean; refusalReason?: string }
+      }
+
+      expect(body.verdict.completedPairCount).toBeUndefined()
+      expect(body.verdict.historyAvailability).toBe('unavailable')
+      expect(body.verdict.canPromote).toBe(false)
+      expect(body.verdict.meetsSufficiencyThreshold).toBe(false)
+      expect(String(body.verdict.refusalReason ?? '')).not.toMatch(/observed 1 completed pair/)
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+      bridge.close()
+      fixture.store.close()
+    }
+  })
+})

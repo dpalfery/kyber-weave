@@ -785,16 +785,23 @@ export async function fetchCalibration(opts?: { runId?: string }): Promise<Kyber
 /** Task phase used by phase-aligned run comparison. */
 export type KyberTaskPhase = 'exploration' | 'implementation' | 'verification' | 'resolution'
 
+/** Whether a comparison figure was measured or is explicitly unavailable (issue #190). */
+export type KyberComparisonAvailability = 'measured' | 'unavailable' | 'not_measurable'
+
 export interface KyberComparisonVerdict {
   status: 'promoted' | 'candidate_only' | 'insufficient_history' | 'outcome_regression' | 'neutral'
-  pairCount: number
-  completedPairCount: number
-  meetsSufficiencyThreshold: boolean
-  outcomeRegression: boolean
+  pairCount?: number
+  /** Omitted when recommendation history is not measured — never treat absence as zero. */
+  completedPairCount?: number
+  meetsSufficiencyThreshold?: boolean
+  outcomeRegression?: boolean
   canPromote: boolean
-  recommendation: string
+  recommendation?: string
   refusalReason?: string
-  summary: string
+  summary?: string
+  /** When history is not store-backed, the pair stays manual-only with no n / 5 display. */
+  historyAvailability?: KyberComparisonAvailability | 'not_measured'
+  historyReason?: string
 }
 
 export interface KyberPhaseAlignedTurnPair {
@@ -806,30 +813,49 @@ export interface KyberPhaseAlignedTurnPair {
   reading: string
 }
 
+/** One run side of `GET /api/kyber/compare/runs`. Numeric fields may be absent when unavailable. */
+export interface KyberComparisonRunSide {
+  runId: string
+  harness: string
+  label?: string
+  outcome?: unknown
+  totalTokens?: number
+  totalCost?: number
+  turnCount?: number
+  availability?: KyberComparisonAvailability
+  reason?: string
+  /** Per-run metrics unavailability reason (issue #190 additive field). */
+  metricsReason?: string
+}
+
+/** Aggregate totals for a run pair; token delta exists only when both runs are comparable. */
+export interface KyberComparisonTotals {
+  tokensA?: number
+  tokensB?: number
+  tokenDelta?: number
+  turnCountA?: number
+  turnCountB?: number
+  turnDelta?: number
+  costA?: number
+  costB?: number
+  costDelta?: number
+  costComparable?: boolean
+  costRefusalReason?: string
+  availability?: KyberComparisonAvailability
+  reason?: string
+  /** Explicit refusal when token delta cannot be reported (issue #190 additive field). */
+  tokenDeltaReason?: string
+  [key: string]: unknown
+}
+
 /** `GET /api/kyber/compare/runs` body — engine `ComparisonSummary` without turn `raw`. */
 export interface KyberRunComparison {
-  runA: {
-    runId: string
-    harness: string
-    label?: string
-    outcome?: unknown
-    totalTokens: number
-    totalCost?: number
-    turnCount: number
-  }
-  runB: {
-    runId: string
-    harness: string
-    label?: string
-    outcome?: unknown
-    totalTokens: number
-    totalCost?: number
-    turnCount: number
-  }
+  runA: KyberComparisonRunSide
+  runB: KyberComparisonRunSide
   taskFamily?: string
   pairs: KyberPhaseAlignedTurnPair[]
   phaseSummaries: Record<KyberTaskPhase, Record<string, unknown>>
-  totals: Record<string, unknown>
+  totals: KyberComparisonTotals
   verdict: KyberComparisonVerdict
 }
 
@@ -840,14 +866,13 @@ export interface KyberRunComparison {
 export async function fetchRunComparison(
   runAId: string,
   runBId: string,
-  opts?: { completedPairCount?: number },
 ): Promise<KyberRunComparison> {
+  // Public compare does not accept a caller-supplied completedPairCount: that
+  // would invent recommendation-history sufficiency. History is unavailable
+  // until a store-backed measurement exists (issue #190).
   const params = new URLSearchParams()
   params.set('runA', runAId)
   params.set('runB', runBId)
-  if (opts?.completedPairCount !== undefined) {
-    params.set('completedPairCount', String(opts.completedPairCount))
-  }
   return fetchJson<KyberRunComparison>(`/api/kyber/compare/runs?${params.toString()}`)
 }
 

@@ -302,6 +302,28 @@ describe('Signal Comparison and Telemetry Honesty (Criterion 1 & 4)', () => {
     expect(cacheSignal!.reason).toContain('not measurable in Run A')
   })
 
+  it('renders not_measurable turn token usage as not_comparable without a fabricated zero delta', () => {
+    const turnA = makeTurn('exploration', {
+      measurability: {
+        token_usage: notMeasurable('hook omitted input counters'),
+      },
+      tokens: { freshInput: 800, cacheRead: 200, output: 150, all: 1150 },
+    })
+    const turnB = makeTurn('exploration', {
+      tokens: { freshInput: 400, cacheRead: 600, output: 100, all: 1100 },
+    })
+
+    const pairs = alignByPhase([turnA], [turnB])
+    const totalSignal = pairs[0]!.signals.find((s) => s.name === 'total_tokens')!
+
+    expect(totalSignal.status).toBe('not_comparable')
+    expect(totalSignal.delta).toBeUndefined()
+    expect(totalSignal.delta).not.toBe(0)
+    expect(totalSignal.runAValue).toBeUndefined()
+    expect(totalSignal.runBValue).toBeUndefined()
+    expect(String(totalSignal.reason ?? '')).toContain('not measurable')
+  })
+
   it('computes exact deltas when signals are measurable in both runs', () => {
     const turnA = makeTurn('implementation', {
       tokens: { freshInput: 800, cacheRead: 200, output: 200, all: 1200 },
@@ -498,6 +520,118 @@ describe('compareRuns Workflow & Outcome Guards (Criterion 3)', () => {
     const impPair = summary.pairs.find((p) => p.phase === 'implementation')!
     expect(impPair.runATurn).toBeNull()
     expect(impPair.runBTurn).not.toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Issue #190 — honest availability and history (plan T1 RED)
+// ---------------------------------------------------------------------------
+
+describe('compareRuns availability when a side has no comparable turns (issue #190)', () => {
+  it('reports unavailable totals with a reason instead of numeric zero when Run B has no turns', () => {
+    const summary = compareRuns(
+      {
+        runId: 'run-measured',
+        harness: 'cursor',
+        outcome: successOutcome(),
+        turns: [makeTurn('exploration', { tokens: { freshInput: 800, cacheRead: 200, output: 150, all: 1150 } })],
+      },
+      {
+        runId: 'run-empty',
+        harness: 'cursor',
+        outcome: successOutcome(),
+        turns: [],
+      },
+    )
+
+    const totals = summary.totals as Record<string, unknown>
+    expect(totals.availability).toBe('unavailable')
+    expect(typeof totals.reason).toBe('string')
+    expect(String(totals.reason).length).toBeGreaterThan(0)
+    expect(totals.tokensB).toBeUndefined()
+    expect(totals.tokenDelta).toBeUndefined()
+    expect(summary.runB.totalTokens).not.toBe(0)
+    expect(summary.runB.turnCount).toBeUndefined()
+    expect(summary.runB.metricsReason).toContain('run-empty')
+    expect(summary.runB.availability).toBe('unavailable')
+  })
+
+  it('reports unavailable totals when token telemetry is not_measurable instead of Token Delta 0', () => {
+    const summary = compareRuns(
+      {
+        runId: 'run-a',
+        harness: 'cursor',
+        outcome: successOutcome(),
+        turns: [
+          makeTurn('exploration', {
+            measurability: {
+              token_usage: notMeasurable('hook omitted input counters'),
+            },
+          }),
+        ],
+      },
+      {
+        runId: 'run-b',
+        harness: 'cursor',
+        outcome: successOutcome(),
+        turns: [makeTurn('exploration')],
+      },
+    )
+
+    const totals = summary.totals as Record<string, unknown>
+    expect(totals.availability).toBe('unavailable')
+    expect(String(totals.reason ?? '')).toContain('not measurable')
+    expect(totals.tokenDelta).toBeUndefined()
+    expect(totals.tokensA).toBeUndefined()
+    expect(summary.runA.totalTokens).toBeUndefined()
+    expect(summary.runA.turnCount).toBe(1)
+  })
+})
+
+describe('compareRuns omits inferred recommendation history (issue #190)', () => {
+  it('does not invent a completed-pair count or promotion when history is omitted', () => {
+    const summary = compareRuns(
+      {
+        runId: 'run-a',
+        harness: 'cursor',
+        outcome: successOutcome(),
+        turns: [makeTurn('exploration')],
+      },
+      {
+        runId: 'run-b',
+        harness: 'copilot-cli',
+        outcome: successOutcome(),
+        turns: [makeTurn('exploration')],
+      },
+    )
+
+    const verdict = summary.verdict as Record<string, unknown>
+    expect(verdict.completedPairCount).toBeUndefined()
+    expect(verdict.historyAvailability).toBe('unavailable')
+    expect(summary.verdict.canPromote).toBe(false)
+    expect(summary.verdict.meetsSufficiencyThreshold).toBe(false)
+    expect(String(summary.verdict.refusalReason ?? '')).not.toMatch(/observed 1 completed pair/)
+  })
+
+  it('still honors an explicitly supplied trusted completed-pair count', () => {
+    const summary = compareRuns(
+      {
+        runId: 'run-a',
+        harness: 'cursor',
+        outcome: successOutcome(),
+        turns: [makeTurn('exploration')],
+      },
+      {
+        runId: 'run-b',
+        harness: 'copilot-cli',
+        outcome: successOutcome(),
+        turns: [makeTurn('exploration')],
+      },
+      { completedPairCount: 6 },
+    )
+
+    expect(summary.verdict.completedPairCount).toBe(6)
+    expect(summary.verdict.canPromote).toBe(true)
   })
 })
 

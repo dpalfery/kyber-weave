@@ -472,13 +472,9 @@ export function handleKyberRequest(
       sendKyberJson(res, 400, { error: 'Missing runA or runB' })
       return true
     }
-    const pairCountParam = url.searchParams.get('completedPairCount')
-    const completedPairCount = pairCountParam ? parseInt(pairCountParam, 10) : undefined
-    const comparison = bridge.compareRuns(
-      runA,
-      runB,
-      completedPairCount !== undefined && !isNaN(completedPairCount) ? { completedPairCount } : undefined,
-    )
+    // Recommendation history is not caller-supplied on the public route (issue
+    // #190): an arbitrary query count is not store-backed measurement.
+    const comparison = bridge.compareRuns(runA, runB)
     if (!comparison) {
       sendKyberJson(res, 404, { error: 'Run not found' })
       return true

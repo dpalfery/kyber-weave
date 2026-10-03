@@ -7,7 +7,12 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { createRequire } from 'node:module'
 import { APPROXIMATE_TOKENIZER, tokenizerName } from '../canon/tokens.js'
-import { normalizeHarnessName } from '../canon/measurability.js'
+import {
+  SessionIdentities,
+  canonicalHarnessId,
+  normalizeHarnessName,
+} from '../canon/measurability.js'
+import { dedupeTwinTurns } from '../canon/twin-dedupe.js'
 import { refreshProcessIsAlive } from '../canon/refresh-run.js'
 import {
   CanonStore,
@@ -1893,26 +1898,65 @@ export class KyberBridge {
     }
   }
 
+  /** Persisted share ids for the current store — same table `buildRuns` reads. */
+  private sessionIdentities(): SessionIdentities {
+    if (this.store) return this.store.sessionIdentities()
+    const db = this.getDb()
+    if (!this.hasTable(db, 'records')) return new SessionIdentities([])
+    try {
+      const pairs = db!
+        .prepare(
+          `SELECT DISTINCT COALESCE(session_id, trace_id) AS key, harness
+           FROM records
+           WHERE COALESCE(session_id, trace_id) IS NOT NULL`,
+        )
+        .all() as { key: string; harness: string }[]
+      return new SessionIdentities(pairs)
+    } catch {
+      return new SessionIdentities([])
+    }
+  }
+
+  /** One harness share of a session key — mirrors `CanonStore.recordsForShare`. */
+  private recordsForShare(key: string, harness: string): CanonicalRecord[] {
+    if (this.store) return this.store.recordsForShare(key, harness)
+    const canonical = normalizeHarnessName(harness)
+    return this.recordsForSessionKey(key).filter(
+      (record) => canonicalHarnessId(record.harness) === canonical,
+    )
+  }
+
   /**
    * Records belonging to a run via its executions' session keys.
-   * Thin load for `compareRuns` — does not re-derive run boundaries (D16).
+   * Resolves qualified ids through `SessionIdentities.shareOf`, dedupes twin
+   * collectors per share, and returns only `llm.invoke` model turns (issue #190).
    */
   private recordsForRun(runId: string): CanonicalRecord[] {
     const executions = this.listExecutions(runId)
-    const keys = [
-      ...new Set(
-        executions.map((execution) => execution.sessionId ?? execution.executionId).filter((key) => key.length > 0),
-      ),
-    ]
-    if (keys.length === 0) {
-      return this.recordsForSessionKey(runId)
-    }
-    const seen = new Set<string>()
+    const keys =
+      executions.length > 0
+        ? [
+            ...new Set(
+              executions
+                .map((execution) => execution.sessionId ?? execution.executionId)
+                .filter((key) => key.length > 0),
+            ),
+          ]
+        : [runId]
+    const identities = this.sessionIdentities()
+    const seenSpanIds = new Set<string>()
     const records: CanonicalRecord[] = []
-    for (const key of keys) {
-      for (const record of this.recordsForSessionKey(key)) {
-        if (seen.has(record.spanId)) continue
-        seen.add(record.spanId)
+    for (const sessionId of keys) {
+      const share = identities.shareOf(sessionId)
+      const shareRecords =
+        share === undefined
+          ? this.recordsForSessionKey(sessionId)
+          : this.recordsForShare(share.key, share.harness)
+      const deduped = dedupeTwinTurns(shareRecords, share?.key ?? sessionId)
+      for (const record of deduped) {
+        if (record.op !== 'llm.invoke') continue
+        if (seenSpanIds.has(record.spanId)) continue
+        seenSpanIds.add(record.spanId)
         records.push(record)
       }
     }
