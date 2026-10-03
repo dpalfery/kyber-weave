@@ -221,6 +221,28 @@ describe('Scorecard Component (Decision D3 & D9 Compliance)', () => {
     expect(html).toContain('—')
   })
 
+  it('does not label Context Hygiene as a composite score, and shows overflow past 100%', () => {
+    const html = renderToStaticMarkup(
+      <Scorecard
+        data={{
+          dimensions: {
+            ...mockScorecardData.dimensions,
+            contextHygiene: {
+              key: 'contextHygiene',
+              name: 'Context Hygiene',
+              value: 1.08,
+              status: 'measured',
+            },
+          },
+        }}
+      />,
+    )
+    expect(html).toContain('108%')
+    expect(html).toContain('pressure')
+    expect(html).not.toMatch(/>score</i)
+    expect(DIMENSION_METADATA.contextHygiene.unitLabel).toBe('pressure')
+  })
+
   it('formatDimensionDisplay formats correctly', () => {
     // Measured percent
     const d1 = formatDimensionDisplay({
@@ -569,6 +591,16 @@ describe('ContextPressureStrip & BaselineSelect', () => {
     )
     expect(measuredHtml).toContain('Compaction threshold (~85%)')
     expect(measuredHtml).not.toContain('~75%')
+  })
+
+  it('shows context pressure overflow instead of clipping med/p95 to 100%', () => {
+    const html = renderToStaticMarkup(
+      <ContextPressureStrip pressureMedian={1.08} pressureP95={1.09} />,
+    )
+    expect(html).toContain('108%')
+    expect(html).toContain('109%')
+    expect(html).toContain('context-pressure-overflow')
+    expect(html).toContain('Window overflow')
   })
 
   it('renders BaselineSelect with default baseline options', () => {

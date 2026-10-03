@@ -1,3 +1,4 @@
+import { formatPercentRatio, isRatioDimension } from '../../lib/labels.js'
 import { cn, usd } from '../../lib/utils.js'
 import { Card } from '../ui/card.js'
 import type {
@@ -28,7 +29,7 @@ export const DIMENSION_METADATA: Record<
   contextHygiene: {
     name: 'Context Hygiene',
     description: 'Context pressure, compaction stability, and resident payload cleanliness',
-    unitLabel: 'score',
+    unitLabel: 'pressure',
     defaultUnmeasuredReason: 'Telemetry missing: context composition not recorded',
   },
   cacheEfficiency: {
@@ -108,8 +109,10 @@ export function formatDimensionDisplay(dim?: ScorecardDimensionValue): {
   const v = dim.value
   let display = String(v)
   if (typeof v === 'number') {
-    if (v >= 0 && v <= 1) {
-      display = `${Math.round(v * 100)}%`
+    // Hygiene / cache / delegation / continuity are ratios. Pressure can
+    // exceed 1.0 when the window is over-full — show 108%, never a "score".
+    if (isRatioDimension(dim.key) || (v >= 0 && v <= 1)) {
+      display = formatPercentRatio(v)
     } else {
       display = Number.isInteger(v) ? String(v) : v.toFixed(2)
     }

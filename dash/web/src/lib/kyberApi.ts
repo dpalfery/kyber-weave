@@ -538,6 +538,8 @@ export interface KyberHarnessSummary {
   harness: string
   name?: string
   sampleCount: number
+  /** Live session rows for this harness, overlaid on the rollup when served. */
+  sessionCount?: number
   contextPressureMedian?: number | null
   contextPressureP95?: number | null
   cacheHitRate?: number | null
@@ -777,6 +779,28 @@ export interface KyberCalibrationSummary {
 
 type KyberCalibrationResponse = KyberCalibrationSummary & {
   calibration?: KyberCalibrationSummary
+}
+
+export async function recordFindingPrediction(finding: {
+  id?: string
+  runId?: string
+  estimatedWasteTokens?: number | null
+  confidence?: string | number
+  errorBar?: { lower?: number; upper?: number }
+}): Promise<void> {
+  if (!finding.id || !finding.runId) return
+  if (finding.estimatedWasteTokens == null) return
+  await fetch('/api/kyber/predictions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      findingId: finding.id,
+      runId: finding.runId,
+      predictedWasteTokens: finding.estimatedWasteTokens,
+      confidence: finding.confidence,
+      errorBar: finding.errorBar,
+    }),
+  })
 }
 
 export async function fetchCalibration(opts?: { runId?: string }): Promise<KyberCalibrationSummary> {
