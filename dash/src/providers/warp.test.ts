@@ -355,4 +355,21 @@ skipUnlessSqlite('warp provider', () => {
     expect(seen.has('warp:conv-3:ex-invalid-ts')).toBe(false)
     expect(seen.has('warp:conv-3:ex-pending')).toBe(false)
   })
+
+  it('propagates error when opening the database fails during parse', async () => {
+    const dbPath = join(tmpDir, 'unopenable.sqlite')
+    const provider = createWarpProvider(dbPath)
+    const source = {
+      path: `${dbPath}:conv-1`,
+      project: 'warp',
+      provider: 'warp',
+    }
+    const parser = provider.createSessionParser(source, new Set())
+    await expect(async () => {
+      for await (const _ of parser.parse()) {
+        // should throw
+      }
+    }).rejects.toThrow()
+  })
 })
+

@@ -2,7 +2,7 @@ import { readdir, stat } from "fs/promises";
 import { basename, join } from "path";
 import { homedir } from "os";
 
-import { getShortModelName } from "../pricing/models.js";
+import { calculateCost, getShortModelName } from "../pricing/models.js";
 import { openDatabase } from "../ingest/sqlite.js";
 import { readConfig } from "../config.js";
 import type {
@@ -479,7 +479,6 @@ class DevinSessionParser implements SessionParser {
     const project = getProjectName(this.source, session);
     const projectPath = getProjectPath(session);
     const costFactor = await getCostFactor();
-    if (costFactor === null) return;
 
     for (let index = 0; index < transcript.steps.length; index++) {
       const step = transcript.steps[index];
@@ -500,6 +499,27 @@ class DevinSessionParser implements SessionParser {
       const userMessage =
         getFirstUserMessageBeforeStep(transcript.steps, index) ?? "";
 
+      const rawModel =
+        firstPresentString(
+          step.metadata?.generation_model,
+          step.extra?.generation_model,
+          step.model_name,
+          transcript.agent?.model_name,
+          session?.model,
+        ) ?? model;
+      const costIsEstimated = costFactor === null;
+      const costUSD =
+        costFactor !== null
+          ? usage.committedAcuCost * costFactor
+          : calculateCost(
+              rawModel,
+              usage.inputTokens,
+              usage.outputTokens,
+              usage.cacheCreationInputTokens,
+              usage.cacheReadInputTokens,
+              0,
+            );
+
       yield {
         provider: DEVIN_PROVIDER_NAME,
         model,
@@ -510,7 +530,8 @@ class DevinSessionParser implements SessionParser {
         cachedInputTokens: usage.cacheReadInputTokens,
         reasoningTokens: 0,
         webSearchRequests: 0,
-        costUSD: usage.committedAcuCost * costFactor,
+        costUSD,
+        ...(costIsEstimated ? { costIsEstimated: true } : {}),
         tools,
         bashCommands: [],
         timestamp,
@@ -526,7 +547,11 @@ class DevinSessionParser implements SessionParser {
 }
 
 function resolveDevinCliDir(override?: string): string {
-  return override && override.trim() ? override : DEFAULT_DEVIN_CLI_DIR;
+  if (override && override.trim()) return override;
+  if (process.env['DEVIN_CLI_DIR'] && process.env['DEVIN_CLI_DIR'].trim()) {
+    return process.env['DEVIN_CLI_DIR'].trim();
+  }
+  return DEFAULT_DEVIN_CLI_DIR;
 }
 
 function getDevinDiscoveryRoots(cliDir: string): {
@@ -570,8 +595,6 @@ export function createDevinProvider(cliDir?: string): Provider {
     },
 
     async discoverSessions(): Promise<SessionSource[]> {
-      if ((await getCostFactor()) === null) return [];
-
       const entries = await readdir(transcriptsDir).catch(() => []);
       const metadata = getSessionMetadata();
       const sources: SessionSource[] = [];
@@ -614,4 +637,4 @@ export function createDevinProvider(cliDir?: string): Provider {
   };
 }
 
-export const devin = createDevinProvider(DEFAULT_DEVIN_CLI_DIR);
+export const devin = createDevinProvider();

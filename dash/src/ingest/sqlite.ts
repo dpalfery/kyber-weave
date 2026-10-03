@@ -257,9 +257,15 @@ function unlinkQuietly(path: string): void {
   }
 }
 
+let copyFileImpl = copyFileSync
+
+export function setSqliteCopyFileForTest(fn: typeof copyFileSync | null): void {
+  copyFileImpl = fn ?? copyFileSync
+}
+
 function copyOptionalFile(sourcePath: string, destinationPath: string): boolean {
   try {
-    copyFileSync(sourcePath, destinationPath)
+    copyFileImpl(sourcePath, destinationPath)
     return true
   } catch (err) {
     if (errorCode(err) === 'ENOENT') return false
@@ -347,7 +353,7 @@ function readOnlyCachePath(sourcePath: string, fingerprint: DatabaseFingerprint)
   const tempBase = `${cachePath}.tmp-${process.pid}-${randomBytes(8).toString('hex')}`
   const tempWal = tempBase + '-wal'
   try {
-    copyFileSync(sourcePath, tempBase)
+    copyFileImpl(sourcePath, tempBase)
     const copiedWal = copyOptionalFile(sourcePath + '-wal', tempWal)
 
     // Do not publish a cache made from a moving database. A live WAL writer will
@@ -397,6 +403,19 @@ function openReadonlyCache(path: string, originalError: unknown): DatabaseSyncIn
   try {
     cachedPath = readOnlyCachePath(path, fingerprint)
   } catch (err) {
+    if (errorCode(err) === 'EPERM' && sqliteSupportsUriFilenames()) {
+      try {
+        const db = new Driver(`${pathToFileURL(path).href}?immutable=1`, { readOnly: true })
+        warnSqliteOnce(
+          path,
+          `kyberdash: SQLite database ${path} cannot be copied (${describeError(err)}); ` +
+          'falling back to direct immutable read.\n',
+        )
+        return db
+      } catch {
+        // Direct immutable read also failed; fall through to warning and throw
+      }
+    }
     warnSqliteOnce(
       path,
       `kyberdash: SQLite database ${path} is in a read-only directory and its cache copy could not be written ` +

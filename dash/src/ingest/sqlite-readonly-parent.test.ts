@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   isSqliteReadonlyError,
   openDatabase,
+  setSqliteCopyFileForTest,
   sqliteSupportsUriFilenames,
 } from './sqlite.js'
 import {
@@ -307,6 +308,28 @@ describe('SQLite read-only parent fallback', () => {
     } finally {
       stderr.mockRestore()
       chmodSync(cacheRoot, 0o755)
+    }
+  })
+
+  it('falls back to immutable read when cache copy fails with EPERM', ({ skip }) => {
+    if (!sqliteSupportsUriFilenames()) return skip()
+    const dbPath = join(sourceRoot, 'state.vscdb')
+    writeUncheckpointedWalDatabase(dbPath)
+    if (!makeSourceParentReadOnly(skip)) return
+
+    setSqliteCopyFileForTest(() => {
+      const err = new Error('operation not permitted, copyfile')
+      Object.assign(err, { code: 'EPERM' })
+      throw err
+    })
+    const stderr = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
+    try {
+      expect(readValue(dbPath)).toBe(1)
+      const notices = stderr.mock.calls.filter(([chunk]) => String(chunk).includes('falling back to direct immutable read'))
+      expect(notices).toHaveLength(1)
+    } finally {
+      setSqliteCopyFileForTest(null)
+      stderr.mockRestore()
     }
   })
 

@@ -33,6 +33,7 @@ const FILE_PROVIDERS: Record<string, string[]> = {
   'codewhale.ts': ['codewhale'],
   'codex.ts': ['codex'],
   'copilot.ts': ['copilot'],
+  'devin.ts': ['devin'],
   'droid.ts': ['droid'],
   'dsh.ts': ['dsh'],
   'hermes.ts': ['hermes'],

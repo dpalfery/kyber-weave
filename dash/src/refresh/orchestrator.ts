@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
@@ -255,6 +255,18 @@ async function runHarnessJob(context: JobContext): Promise<HarnessJobRow> {
   }
 
   if (units.length === 0) {
+    const provider = context.providers.find((p) => p.name === descriptor.providerName)
+    if (provider?.probeRoots) {
+      try {
+        const roots = await provider.probeRoots()
+        const present = roots.filter((r) => existsSync(r.path))
+        if (present.length > 0) {
+          row.diagnostic = `${present[0]!.path} holds no sessions`
+        }
+      } catch {
+        // probeRoots failed
+      }
+    }
     return row
   }
 
@@ -271,6 +283,7 @@ async function runHarnessJob(context: JobContext): Promise<HarnessJobRow> {
     row.changed += 1
     row.problems += unit.problems.length
     for (const problem of unit.problems) {
+      row.diagnostic ??= safeDiagnostic(new Error(problem.message), 'harness unit problem')
       store.recordProblem({
         spanId: `harness:${descriptor.harnessId}:${unit.sourceKey}:${problem.code}`,
         harness: descriptor.harnessId,
@@ -399,6 +412,7 @@ function previousFingerprintsFor(
   const fingerprints = new Map<string, { dev: number; ino: number; mtimeMs: number; sizeBytes: number }>()
   const requested = { fromUtc: coveredFromUtc, throughUtc: coveredThroughUtc }
   for (const checkpoint of store.listSourceCheckpoints(descriptor.harnessId)) {
+    if (checkpoint.recordCount === 0) continue
     const request = {
       revisionToken: checkpoint.revisionToken,
       parserContractVersion: descriptor.parserContractVersion,

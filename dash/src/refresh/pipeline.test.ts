@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import { CanonStore } from '../canon/store.js'
-import type { SessionSource } from '../providers/types.js'
+import type { ParsedProviderCall, Provider, SessionSource } from '../providers/types.js'
 import { Synthesizer } from '../synth/synth.js'
 import { loadClaudeCalls } from '../synth/readers/claude.js'
 import { fixtureProvider } from './fixtures/integration-harness.js'
@@ -416,4 +416,182 @@ describe('refresh pipeline: parser contract version & checkpoint invalidation', 
       store.close()
     }
   })
+
+  it('surfaces parse error diagnostic and records problem when native unit fails to parse', async () => {
+    const root = tempDir()
+    const dbPath = join(root, 'canon.db')
+    const store = new CanonStore(dbPath)
+
+    try {
+      const transcriptPath = join(root, 'broken-session.jsonl')
+      writeFileSync(transcriptPath, 'invalid json\n', 'utf8')
+
+      const sessionSource: SessionSource = {
+        path: transcriptPath,
+        provider: 'warp',
+        project: 'warp',
+      }
+      const descriptor = descriptorFor('warp')
+      expect(descriptor).toBeDefined()
+
+      const provider = fixtureProvider('warp', [sessionSource], () => new Error('Group Containers not readable: EPERM'))
+
+      const report = await refreshHarnessSources(store, {
+        getAllProviders: async () => [provider],
+        descriptors: [descriptor!],
+        jobConcurrency: 1,
+        writerCapacity: 1,
+        commandStartedAt: new Date('2026-09-12T18:00:00.000Z'),
+        parseAllSessions: async () => undefined,
+      })
+
+      const warpRow = report.rows.find((r) => r.harnessId === 'warp')
+      expect(warpRow).toBeDefined()
+      expect(warpRow?.status).toBe('failed')
+      expect(warpRow?.diagnostic).toContain('Group Containers not readable: EPERM')
+
+      const problems = store.getProblems()
+      expect(problems.some((p) => p.code === 'PROVIDER_PARSE_ERROR' && p.message.includes('Group Containers not readable: EPERM'))).toBe(true)
+
+      const checkpoint = store.getSourceCheckpoint('warp', sourceKeyFor('warp', sessionSource))
+      expect(checkpoint?.lastStatus).not.toBe('ok')
+    } finally {
+      store.close()
+    }
+  })
+
+  it('does not skip a native unit as unchanged when the prior checkpoint had 0 records', async () => {
+    const root = tempDir()
+    const dbPath = join(root, 'canon.db')
+    const store = new CanonStore(dbPath)
+
+    try {
+      const transcriptPath = join(root, 'session.jsonl')
+      writeFileSync(transcriptPath, '{"type":"turn"}\n', 'utf8')
+
+      const stat = statSync(transcriptPath)
+      const revisionToken = revisionTokenFor({
+        dev: stat.dev,
+        ino: stat.ino,
+        mtimeMs: stat.mtimeMs,
+        sizeBytes: stat.size,
+      })
+
+      const sessionSource: SessionSource = {
+        path: transcriptPath,
+        provider: 'warp',
+        project: 'warp',
+      }
+      const sourceKey = sourceKeyFor('warp', sessionSource)
+
+      // Pre-seed a vacuous checkpoint with 0 records from an earlier failed run
+      store.commitSourceUnit({
+        records: [],
+        provenance: [],
+        checkpoint: {
+          harnessId: 'warp',
+          sourceKey,
+          providerId: 'warp',
+          parserId: 'warp',
+          parserContractVersion: '1',
+          format: 'sqlite',
+          sourceRootLabel: 'db',
+          revisionToken,
+          coveredFromUtc: '2026-08-01T00:00:00.000Z',
+          coveredThroughUtc: '2026-09-20T00:00:00.000Z',
+          lastAttemptUtc: '2026-09-24T10:00:00.000Z',
+          lastSuccessUtc: '2026-09-24T10:00:00.000Z',
+          lastStatus: 'ok',
+          lastErrorCode: null,
+          unitCount: 1,
+          recordCount: 0,
+        },
+      })
+
+      const descriptor = descriptorFor('warp')
+      expect(descriptor).toBeDefined()
+
+      let parseAttempts = 0
+      const provider: Provider = {
+        name: 'warp',
+        displayName: 'Warp',
+        modelDisplayName: (m) => m,
+        toolDisplayName: (t) => t,
+        discoverSessions: async () => [sessionSource],
+        createSessionParser() {
+          return {
+            async *parse(): AsyncGenerator<ParsedProviderCall> {
+              parseAttempts++
+              throw new Error('Group Containers not readable: EPERM')
+            },
+          }
+        },
+      }
+
+      const report = await refreshHarnessSources(store, {
+        getAllProviders: async () => [provider],
+        descriptors: [descriptor!],
+        jobConcurrency: 1,
+        writerCapacity: 1,
+        commandStartedAt: new Date('2026-09-28T18:00:00.000Z'),
+        parseAllSessions: async () => undefined,
+      })
+
+      // Must re-attempt rather than skipping as unchanged (skipped = 0, changed = 1 or failed)
+      expect(parseAttempts).toBe(1)
+      const warpRow = report.rows.find((r) => r.harnessId === 'warp')
+      expect(warpRow?.skipped).toBe(0)
+      expect(warpRow?.status).toBe('failed')
+      expect(warpRow?.diagnostic).toContain('Group Containers not readable: EPERM')
+    } finally {
+      store.close()
+    }
+  })
+
+  it('surfaces a diagnostic when 0 units are discovered but probe roots exist on disk', async () => {
+    const root = tempDir()
+    const dbPath = join(root, 'canon.db')
+    const store = new CanonStore(dbPath)
+
+    try {
+      const probeFile = join(root, 'sessions.db')
+      writeFileSync(probeFile, '', 'utf8')
+
+      const descriptor = descriptorFor('devin')
+      expect(descriptor).toBeDefined()
+
+      const provider: Provider = {
+        name: 'devin',
+        displayName: 'Devin',
+        modelDisplayName: (m) => m,
+        toolDisplayName: (t) => t,
+        probeRoots: async () => [{ path: probeFile, label: 'db' }],
+        discoverSessions: async () => [],
+        createSessionParser() {
+          return {
+            async *parse() {},
+          }
+        },
+      }
+
+      const report = await refreshHarnessSources(store, {
+        getAllProviders: async () => [provider],
+        descriptors: [descriptor!],
+        jobConcurrency: 1,
+        writerCapacity: 1,
+        commandStartedAt: new Date('2026-09-28T18:00:00.000Z'),
+        parseAllSessions: async () => undefined,
+      })
+
+      const devinRow = report.rows.find((r) => r.harnessId === 'devin')
+      expect(devinRow).toBeDefined()
+      expect(devinRow?.units).toBe(0)
+      expect(devinRow?.status).toBe('unavailable')
+      expect(devinRow?.diagnostic).toContain('holds no sessions')
+    } finally {
+      store.close()
+    }
+  })
 });
+
+

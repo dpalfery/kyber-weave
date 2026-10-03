@@ -1,3 +1,4 @@
+import { existsSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
 
@@ -328,7 +329,7 @@ function createParser(source: SessionSource, seenKeys: Set<string>): SessionPars
         db = openDatabase(dbPath)
       } catch (err) {
         process.stderr.write(`kyberdash: cannot open Warp database: ${err instanceof Error ? err.message : err}\n`)
-        return
+        throw err
       }
 
       try {
@@ -423,11 +424,12 @@ function createParser(source: SessionSource, seenKeys: Set<string>): SessionPars
 }
 
 async function discoverFromDb(dbPath: string): Promise<SessionSource[]> {
+  if (!existsSync(dbPath)) return []
   let db: SqliteDatabase
   try {
     db = openDatabase(dbPath)
-  } catch {
-    return []
+  } catch (err) {
+    throw new Error(`cannot open Warp database '${dbPath}': ${err instanceof Error ? err.message : err}`)
   }
 
   try {
