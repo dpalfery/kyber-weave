@@ -57,7 +57,8 @@ import {
   type MetricAvailability,
   type TokenUsage,
 } from '../canon/types.js'
-import { exclusiveConvention, inclusiveConvention } from '../canon/adapters/copilot.js'
+import { convertInclusiveCounts, exclusiveConvention } from '../canon/adapters/copilot.js'
+import { billableOutputTokens } from '../pricing/models.js'
 // The detector keys duplicates on serializeToolArgs; the producer reuses the
 // same canonical form so both identities agree by construction. Acyclic:
 // analysis/findings.ts never imports synth (it reads canonical records).
@@ -294,6 +295,24 @@ export function conventionFor(
   return conventions.get(provider) ?? DEFAULT_CONVENTION
 }
 
+/**
+ * Fold exclusive reasoning into `output` so the canonical subset invariant
+ * holds (issue #193).
+ *
+ * `ParsedProviderCall.reasoningTokens` is exclusive of `outputTokens` except
+ * for the providers `billableOutputTokens` already names (claude, codex,
+ * copilot). TokenUsage.reasoning is a subset of output, never an addition,
+ * so exclusive reasoning has to be added on the way in. Copilot store and
+ * shutdown rows that carry reasoning with output 0 stay unfolder — folding
+ * would manufacture output from reasoning alone (#240, #241).
+ */
+function foldExclusiveReasoning(tokens: TokenUsage, provider: string): TokenUsage {
+  if (tokens.reasoning === undefined) return tokens
+  const billed = billableOutputTokens(provider, tokens.output, tokens.reasoning)
+  if (billed === tokens.output) return tokens
+  return { ...tokens, output: billed, reportedOutput: billed }
+}
+
 // ---------------------------------------------------------------------------
 // Measurability declarations for the file-sourced path (R7.6, R8.5, R10.2)
 // ---------------------------------------------------------------------------
@@ -384,10 +403,11 @@ export function synthesizeCall(
     cacheCreation: call.cacheCreationInputTokens,
     ...(call.reasoningTokens !== 0 ? { reasoning: call.reasoningTokens } : {}),
   }
-  const tokens: TokenUsage =
+  const converted: TokenUsage =
     conventionFor(call.provider, conventions) === 'inclusive'
-      ? inclusiveConvention(counts)
+      ? convertInclusiveCounts(counts)
       : exclusiveConvention(counts)
+  const tokens = foldExclusiveReasoning(converted, call.provider)
 
   const harness = harnessIdFor(call, envelope)
   const sessionId = nativeSessionIdFor(call, envelope)

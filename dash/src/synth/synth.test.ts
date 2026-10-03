@@ -15,9 +15,9 @@ import { createHash } from 'node:crypto'
 //     tested property of `synthesizeCall`'s purity rather than an accident
 //     of one fixture's shape.
 //
-// Alongside them: the R4.2 convention conversion (including the
-// inverted-convention case failing loudly through `validateTokens`, the
-// check that exists precisely because this conversion once went wrong), the
+// Alongside them: the R4.2 convention conversion (including exclusive-shaped
+// counters recovering through exclusive conversion rather than going
+// negative or clamping — issue #193), the
 // R3.2 identity scheme (span id = upstream's deduplication key, extended,
 // which is what makes re-synthesis idempotent), the R5.x cost bases, and the
 // R7.6/R8.5/R10.2 measurability declarations.
@@ -294,25 +294,81 @@ describe('token conversion (R4.2)', () => {
     expect(validateTokens(record.tokens)).toEqual({ valid: true })
   })
 
-  it('fails loudly when the inverted convention is applied — R4.2’s measured failure', () => {
-    // Feed exclusive-shaped counters (input EXCLUDES cache) through the
-    // inclusive conversion: fresh goes negative and the record validator
-    // rejects it. This is the exact miscount R4.2 exists to catch — clamping
-    // the subtraction would turn it into a silently underpriced record.
+  it('recovers exclusive-shaped counters instead of storing negative fresh (issue #193)', () => {
+    // Inclusive subtraction of exclusive counters is impossible: cache cannot
+    // be a subset of a smaller input. The conversion takes fresh as claimed
+    // and reassembles the reported total — not a clamp to zero, which would
+    // drop the 1_000 claimed tokens.
     const inverted = new Map<string, TokenConvention>([['claude', 'inclusive']])
     const record = synthesizeCall(
       call({
         provider: 'claude',
-        inputTokens: 1_000, // fresh-only, but read as if cache-inclusive
+        inputTokens: 1_000, // fresh-only, but declared inclusive
         cacheReadInputTokens: 3_800,
         cacheCreationInputTokens: 120,
       }),
       inverted,
     )
-    expect(record.tokens.freshInput).toBe(1_000 - 3_800 - 120)
-    const problem = tokenValidator(record)
-    expect(problem?.code).toBe('TOKEN_NEGATIVE_FRESH')
-    expect(problem?.location).toBe(record.spanId)
+    expect(record.tokens).toEqual({
+      freshInput: 1_000,
+      cacheRead: 3_800,
+      cacheCreation: 120,
+      output: 240,
+      reportedInput: 1_000 + 3_800 + 120,
+      reportedOutput: 240,
+    })
+    expect(validateTokens(record.tokens)).toEqual({ valid: true })
+    expect(tokenValidator(record)).toBeUndefined()
+  })
+
+  it('folds exclusive reasoning into output so it is a subset (issue #193)', () => {
+    // Antigravity-cli reports thinking separately from response (935 vs 590
+    // in the live audit). TokenUsage.reasoning is a subset of output, so the
+    // conversion adds the exclusive thinking tokens rather than rejecting
+    // the record as TOKEN_REASONING_EXCEEDS_OUTPUT.
+    const record = synthesizeCall(
+      call({
+        provider: 'antigravity',
+        inputTokens: 2_000,
+        cacheReadInputTokens: 0,
+        cacheCreationInputTokens: 0,
+        cachedInputTokens: 0,
+        outputTokens: 590,
+        reasoningTokens: 935,
+      }),
+    )
+    expect(record.tokens).toEqual({
+      freshInput: 2_000,
+      cacheRead: 0,
+      cacheCreation: 0,
+      output: 590 + 935,
+      reasoning: 935,
+      reportedInput: 2_000,
+      reportedOutput: 590 + 935,
+    })
+    expect(record.tokens.reasoning).toBeLessThanOrEqual(record.tokens.output)
+    expect(validateTokens(record.tokens)).toEqual({ valid: true })
+    expect(tokenValidator(record)).toBeUndefined()
+  })
+
+  it('does not manufacture output from copilot reasoning on an output-absent row (#240)', () => {
+    // Copilot store/shutdown rows carry reasoning with output 0 by design.
+    // Folding would invent output from reasoning alone; those rows stay
+    // rejected so #240/#241 can give them an honest unobservable treatment.
+    const record = synthesizeCall(
+      call({
+        provider: 'copilot',
+        inputTokens: 3,
+        cacheReadInputTokens: 49_394,
+        cacheCreationInputTokens: 0,
+        cachedInputTokens: 0,
+        outputTokens: 0,
+        reasoningTokens: 127,
+      }),
+    )
+    expect(record.tokens.output).toBe(0)
+    expect(record.tokens.reasoning).toBe(127)
+    expect(tokenValidator(record)?.code).toBe('TOKEN_REASONING_EXCEEDS_OUTPUT')
   })
 })
 
