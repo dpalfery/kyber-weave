@@ -453,13 +453,14 @@ and validates.
   `STATUS: PLAN_WRITE_ERROR` on a plan it had already drafted. Two grants produce that failure
   together — `ask` narrows to withheld on subagents, and the shared profiles hold `process.execute:
   ask` (`architect`) or `deny` (`product-planning`). `architect-devin` and
-  `product-planning-devin` mirror their shared profiles with `process.execute: allow`, which is what
-  restores file creation through the shell on this target. `architect` carries the matching
-  instruction: its plan-authoring reference tells it to initialise a destination that does not exist
-  before editing, and its `PLAN_READY` contract requires `docs validate` and `docs drift` to pass.
-  `product-owner` has no equivalent authoring guidance — it is granted the shell, and relies on it
-  plus the conductor's pre-creation fallback — though its `SPEC_FINALIZED` contract does require
-  validating the documentation corpus. `docs-dev` and `task-reviewer` deliberately name no
+  `product-planning-devin` mirror their shared profiles with `process.execute: allow`. For
+  `architect`, this restores file creation through the shell on this target: `architect` carries the
+  matching instruction in its plan-authoring reference telling it to initialise a destination that
+  does not exist before editing, and its `PLAN_READY` contract requires `docs validate` and
+  `docs drift` to pass. `product-owner` has no equivalent shell-routing instruction: it is granted
+  the shell, but depends on the conductor's pre-creation fallback to create new specification files
+  rather than authoring unaided, though the grant allows its `SPEC_FINALIZED` contract to validate
+  the documentation corpus. `docs-dev` and `task-reviewer` deliberately name no
   Devin profile and keep narrowing: neither has an execution-dependent completion contract, and a
   grant with no reader is not made. With `filesystem.write: allow` beside the shell, these two roles
   also no longer raise `capability-not-isolable` on Devin. The conductor's `intake-path`, `plan-path`,

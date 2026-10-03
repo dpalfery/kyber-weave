@@ -78,7 +78,7 @@ During a conductor intake run on Devin Desktop / CLI (`squad install --target de
   - Without `exec`, `architect` cannot initialize the file via `touch` or shell redirection.
 
 ### 2.3 Goal
-Enable Devin `architect` (and `product-owner`) to reliably persist newly created plans and specs, either by enabling target-appropriate creation capabilities or establishing conductor pre-creation invariants, backed by automated tests.
+Enable Devin `architect` (and `product-owner`) to reliably persist newly created plans and specs (`architect` via target profile and shell initialization, and `product-owner` via target profile and conductor pre-creation fallback), backed by automated tests.
 
 ---
 
@@ -87,7 +87,7 @@ Enable Devin `architect` (and `product-owner`) to reliably persist newly created
 1. **Copilot precedent:** Copilot encountered a similar constraint (no `ask` state, strict tool allow-list) and introduced `copilot-capability-profile: architect-copilot` in `capabilities.yml` with `process.execute: allow`.
 2. **Execution requirement in plan authoring:** `architect/references/plan-authoring.md` requires running `docs validate` and `docs drift` before declaring `PLAN_READY`. With `process.execute` withheld, `architect` on Devin cannot run these checks anyway.
 3. **Renderer degradation accounting:** If `process.execute` is `allow` and `filesystem.write` is `allow`, `CapabilityDegradations.BuildCapabilityNotIsolable` returns `null` (no degradation), because write access is already granted.
-4. **Agent instructions:** If `exec` is granted on Devin, `architect/references/plan-authoring.md` (and `product-owner`'s references) should include explicit guidance for Devin on how to initialize nonexistent files before editing.
+4. **Agent instructions:** If `exec` is granted on Devin, `architect/references/plan-authoring.md` includes explicit guidance for Devin on how to initialize nonexistent files before editing. `product-owner` has no equivalent shell-routing instruction in canonical source and depends on conductor pre-creation fallback to create new files.
 
 ---
 

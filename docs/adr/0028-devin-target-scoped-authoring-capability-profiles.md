@@ -82,10 +82,13 @@ ready, and both were unreachable on this target for the same reason.
 5. **Authoring guidance is harness-neutral, and only `architect` carries it.** `architect`'s
    `plan-authoring` reference tells the role that where file editing requires an existing
    destination — Devin is the known case — it initialises the file through the shell before editing.
-   `product-owner` is granted the shell but has no equivalent instruction: no authoring reference or
-   skill tells it to initialise a destination, so its route to a new specification file is the grant
-   plus decision 4's pre-creation fallback. That asymmetry is left as delivered rather than closed
-   here; adding the instruction would be a change to canonical product source, not to this decision.
+   `product-owner` is granted the shell (enabling documentation validation under `SPEC_FINALIZED`),
+   but has no equivalent instruction: no authoring reference or skill tells it to initialise a
+   destination. On Devin, `product-owner` authoring of new files therefore depends on decision 4's
+   conductor pre-creation fallback rather than on its own instruction; it cannot author a new
+   specification file unaided. That asymmetry is left as delivered rather than closed here; adding
+   instruction-level shell routing would be a change to canonical product source, not to this
+   decision.
 
 ## Alternatives rejected
 
@@ -113,8 +116,10 @@ ready, and both were unreachable on this target for the same reason.
   to name. The record is still emitted for Devin roles that grant execution while withholding writes.
 - Devin authoring roles hold a shell. That is a real widening of what the deployed subagent can do,
   accepted because the alternative is a harness that cannot create the artifact the role exists to
-  write. The shared profile's narrower intent — a grant scoped to two commands rather than a shell —
-  is preserved everywhere else.
+  write (`architect` uses it to initialise files before editing, while `product-owner` uses it for
+  corpus validation and depends on the conductor pre-creation fallback for new files). The shared
+  profile's narrower intent — a grant scoped to two commands rather than a shell — is preserved
+  everywhere else.
 - The `write`-does-not-create-files finding is a harness observation, not a documented Devin
   contract. It is the one claim here to re-check against a real install if Devin's tool surface
   changes; ADR 0025's real-install confirmations are still open on the same build.

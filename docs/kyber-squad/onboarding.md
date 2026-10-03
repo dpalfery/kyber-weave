@@ -308,14 +308,16 @@ keep loading after installing `devin`. Squad never writes or removes anything un
 **Authoring roles on Devin**: Devin's file-change tools cannot create a file that does not exist,
 so a role that only edits could not start a new plan or specification. `architect` and
 `product-owner` therefore render on Devin from the `architect-devin` and `product-planning-devin`
-capability profiles, which grant `exec` alongside the write tools, so both can create a new file
-through the shell. `architect`'s plan-authoring reference tells it to initialise the destination
-before editing, and its `PLAN_READY` contract requires `docs validate` and `docs drift` to pass.
-`product-owner` carries no equivalent authoring guidance: it is granted the shell, and its
-`SPEC_FINALIZED` contract requires validating the documentation corpus. Every other role renders
-from its shared profile and keeps `ask` narrowing to withheld. If a plan or spec write still fails on
-a missing file, create the empty file and re-run the request — the conductor does this for you when
-the harness withholds file creation from subagents. See
+capability profiles, which grant `exec` alongside the write tools. `architect`'s plan-authoring
+reference tells it to initialise the destination via shell (e.g. `touch <file>`) before editing,
+enabling autonomous file creation, and its `PLAN_READY` contract requires `docs validate` and
+`docs drift` to pass. In contrast, `product-owner` carries no shell-routing instruction: it is
+granted the shell to satisfy its `SPEC_FINALIZED` corpus-validation contract, but on Devin its
+authoring of new specification files depends on the conductor pre-creation fallback rather than on
+its own instruction. It cannot create new specification files unaided. Every other role renders from
+its shared profile and keeps `ask` narrowing to withheld. If a plan or spec write still fails on a
+missing file, create the empty file and re-run the request — the conductor does this for you when the
+harness withholds file creation from subagents. See
 [ADR 0028](../adr/0028-devin-target-scoped-authoring-capability-profiles.md).
 
 **Conductor and delegation**: Devin has no primary-agent primitive, so the conductor is
