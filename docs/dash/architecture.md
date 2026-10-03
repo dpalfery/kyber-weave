@@ -29,6 +29,8 @@ keywords:
   - otlp
   - refresh
   - sessions
+  - tool_yield
+  - tool_calls
 code-refs:
   - Synthesizer
   - OtlpReceiver
@@ -633,6 +635,20 @@ join inside `dedupeTwinTurns` (issue #231): the merge takes the per-dimension ma
 prefers the fuller row as keeper, and joined counters are never summed. File+file twin
 pairs under the folded `cursor` share are admitted, not only OTel+file. Raw ingest rows
 remain provenance; the join applies when derived tables rebuild.
+
+Copilot OTLP sessions are excluded from the `tool_yield` digest deliberately. No Copilot
+producer path can yet vouch that tool-call telemetry is complete, so an absent
+`tools_invoked` is not a measured zero — the session stays out of the denominator rather than
+reporting yield `0` ([honest unobservability](../rules/honest-unobservability.md)).
+Re-inclusion requires both of the following; either alone would fabricate a measurement:
+
+1. A Copilot producer path that can vouch for completeness declares `tool_calls: 'measured'`
+   on its records. `buildSessionRow` then emits `tools_invoked: []` for span-less sessions and
+   the digest counts a measured zero.
+2. Tool spans (`execute_tool` / `tool.invoke`) must join the conversation's session key. Today
+   those spans lack session-identity attributes, so they key by `trace_id` while chat spans key
+   by conversation id — different session rows. Declaring `tool_calls: 'measured'` without
+   fixing that attribution would report `toolYield 0` for sessions that invoked tools.
 
 Findings are materialized in `canon.db` at session/run build time with a `detector_version` schema
 stamp (Decision D17): an informational mark of which detector semantics built the rows, so
