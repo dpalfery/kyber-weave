@@ -81,6 +81,14 @@ public sealed class SquadSourceTests
     /// - Both changed values and unchanged values, to catch regressions
     /// </summary>
     [Theory]
+    [InlineData("architect", "claude", "opus")]
+    [InlineData("architect", "codex", "gpt-5.6-sol")]
+    [InlineData("architect", "copilot", "GPT-5.6 Sol (copilot)")]
+    [InlineData("architect", "cursor", "gpt-5.6-sol[context=272k,reasoning=high,fast=false]")]
+    [InlineData("architect", "kilo", "glm5.3")]
+    [InlineData("architect", "opencode", "zai-coding-plan/glm-5.3")]
+    [InlineData("architect", "pi", "zai/glm-5.3[thinking=high]")]
+    [InlineData("architect", "devin", "claude-opus-5-5-high")]
     [InlineData("deep-planning", "claude", "opus")]
     [InlineData("deep-planning", "codex", "gpt-5.6-sol")]
     [InlineData("deep-planning", "copilot", "GPT-5.6 Sol (copilot)")]
@@ -153,18 +161,20 @@ public sealed class SquadSourceTests
     }
 
     /// <summary>
-    /// Pins the Antigravity column of each model profile (issue #209). Architect-class
-    /// <c>deep-planning</c> is <c>claude-opus-4-6</c>; every other profile is Gemini Flash.
+    /// Pins the Antigravity column of each model profile (issue #209). Only the dedicated
+    /// <c>architect</c> profile is <c>claude-opus-4-6-thinking</c>; every other profile —
+    /// including shared <c>deep-planning</c> used by non-architect agents — is Gemini Flash.
     /// Without this pin, <c>deep-planning</c> and <c>reviewer</c> can silently return to
     /// <c>pro</c> (Gemini 3.1 Pro) and still pass renderer tests that only echo <c>models.yml</c>.
     /// </summary>
     [Theory]
-    [InlineData("deep-planning", "claude-opus-4-6")]
+    [InlineData("architect", "claude-opus-4-6-thinking")]
+    [InlineData("deep-planning", "flash")]
     [InlineData("fast", "flash")]
     [InlineData("general", "flash")]
     [InlineData("orchestration", "flash")]
     [InlineData("reviewer", "flash")]
-    public void ModelsYmlAntigravityColumnPinsDeepPlanningOnClaudeOpusAndOtherProfilesOnFlash(
+    public void ModelsYmlAntigravityColumnPinsArchitectOnClaudeOpusThinkingAndOtherProfilesOnFlash(
         string profileName,
         string expectedAntigravityModel)
     {
@@ -180,6 +190,30 @@ public sealed class SquadSourceTests
         Assert.True(
             actualValue == expectedAntigravityModel,
             $"Profile '{profileName}' antigravity is '{actualValue}' but should be '{expectedAntigravityModel}'.");
+    }
+
+    /// <summary>
+    /// Issue #209: only the <c>architect</c> agent may own the Opus Antigravity profile.
+    /// Shared <c>deep-planning</c> stays Flash so <c>sql-database-architect</c> and
+    /// <c>bug-crusher-investigator</c> cannot inherit Opus through profile membership.
+    /// </summary>
+    [Fact]
+    public void ArchitectAloneOwnsArchitectModelProfileAndDeepPlanningPeersStayOnDeepPlanning()
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+
+        SquadAgent architect = Assert.Single(source.Agents, agent => agent.Name == "architect");
+        Assert.Equal("architect", architect.ModelProfile);
+
+        foreach (string peerName in new[] { "sql-database-architect", "bug-crusher-investigator" })
+        {
+            SquadAgent peer = Assert.Single(source.Agents, agent => agent.Name == peerName);
+            Assert.Equal("deep-planning", peer.ModelProfile);
+        }
+
+        Assert.DoesNotContain(
+            source.Agents.Where(agent => agent.Name != "architect"),
+            agent => string.Equals(agent.ModelProfile, "architect", StringComparison.Ordinal));
     }
 
     /// <summary>

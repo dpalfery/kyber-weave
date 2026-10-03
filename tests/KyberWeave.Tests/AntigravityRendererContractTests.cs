@@ -1046,14 +1046,15 @@ public sealed class AntigravityRendererContractTests : IDisposable
     }
 
     /// <summary>
-    /// Pins rendered Antigravity models by value (issue #209). Architect is on
-    /// <c>deep-planning</c>, which renders <c>claude-opus-4-6</c>; every other
-    /// profile renders Gemini Flash. The previous inherit/flash/pro enum allowed
-    /// <c>pro</c> on deep-planning and reviewer, which installed Gemini 3.1 Pro
-    /// instead of the intended mapping.
+    /// Pins rendered Antigravity models by agent identity (issue #209): only
+    /// <c>architect</c> renders <c>claude-opus-4-6-thinking</c>; every other
+    /// agent — including <c>sql-database-architect</c> and
+    /// <c>bug-crusher-investigator</c> on shared <c>deep-planning</c> — renders
+    /// Gemini Flash. Asserting by profile would incorrectly allow Opus for those
+    /// peers.
     /// </summary>
     [Fact]
-    public async Task RenderAsync_Antigravity_DeepPlanningRunsOnClaudeOpusAndOtherProfilesOnFlash()
+    public async Task RenderAsync_Antigravity_OnlyArchitectRunsOnClaudeOpusThinkingAndEveryOtherAgentOnFlash()
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
         SquadRendererRegistry registry = new([new AntigravityRenderer()]);
@@ -1067,7 +1068,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         SquadAgent architect = Assert.Single(source.Agents, agent => agent.Name == "architect");
-        Assert.Equal("deep-planning", architect.ModelProfile);
+        Assert.Equal("architect", architect.ModelProfile);
 
         foreach (SquadAgent agent in source.Agents)
         {
@@ -1077,8 +1078,8 @@ public sealed class AntigravityRendererContractTests : IDisposable
 
             YamlMappingNode frontmatter = ReadFrontmatter(agentFile);
             string model = RequireScalar(frontmatter, "model");
-            string expectedModel = string.Equals(agent.ModelProfile, "deep-planning", StringComparison.Ordinal)
-                ? "claude-opus-4-6"
+            string expectedModel = string.Equals(agent.Name, "architect", StringComparison.Ordinal)
+                ? "claude-opus-4-6-thinking"
                 : "flash";
 
             Assert.True(
@@ -1107,6 +1108,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
         // D9: reasoning_effort must match approved per-profile mapping
         Dictionary<string, string> expectedReasoningEffort = new(StringComparer.Ordinal)
         {
+            { "architect", "high" },
             { "deep-planning", "high" },
             { "reviewer", "high" },
             { "general", "medium" },
