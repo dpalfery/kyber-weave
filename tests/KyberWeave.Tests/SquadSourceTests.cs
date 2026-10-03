@@ -604,6 +604,42 @@ public sealed class SquadSourceTests
         Assert.Contains("target: devin", diagnostic.Hint!, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// Devin lowers primary identities to skills and never consults
+    /// <c>devin-capability-profile</c> for their tools, so a named override on a
+    /// primary agent would validate and then evaporate.
+    /// </summary>
+    [Fact]
+    public void LoadDevinOverrideOnPrimaryAgentFailsClosed()
+    {
+        using SquadFixture fixture = SquadFixture.CreateValid();
+        fixture.Replace(
+            "profiles/capabilities.yml",
+            "profiles:\n",
+            "profiles:\n" +
+            "  architect-devin:\n" +
+            "    target: devin\n" +
+            "    permissions:\n" +
+            "      filesystem.read: allow\n" +
+            "      filesystem.write: allow\n" +
+            "      delegate: ask\n");
+        fixture.Replace(
+            "agents/csharp-dev.md",
+            "invocation: subagent\n",
+            "invocation: primary\n");
+        fixture.Replace(
+            "agents/csharp-dev.md",
+            "capability-profile: worker\n",
+            "capability-profile: worker\n" +
+            "devin-capability-profile: architect-devin\n");
+
+        Diagnostic diagnostic = AssertInvalid(fixture, "agents/csharp-dev.md", "primary agent");
+
+        Assert.Contains("primary agent", diagnostic.Message, StringComparison.Ordinal);
+        Assert.Contains("skill", diagnostic.Hint!, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("devin-capability-profile", diagnostic.Hint!, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void LoadVersionSourceIsNotAssemblyReportsRequiredLiteralAtManifestLocation()
     {

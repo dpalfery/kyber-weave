@@ -47,8 +47,8 @@ ready, and both were unreachable on this target for the same reason.
 
 ## Decision
 
-1. **A Devin-scoped capability profile is resolved when the agent names one.** An agent may declare
-   `devin-capability-profile`, and `DevinRenderer` resolves `agent.DevinCapabilityProfile ??
+1. **A Devin-scoped capability profile is resolved when a subagent names one.** A subagent may
+   declare `devin-capability-profile`, and `DevinRenderer` resolves `agent.DevinCapabilityProfile ??
    agent.CapabilityProfile` for every permission lookup it performs — granted tools, degradation
    records, MCP entitlement, and the pure-orchestrator exclusion. The field is declared in the agent
    schema, carried on `SquadAgent`, parsed by `SquadSourceLoader`, and checked by
@@ -66,8 +66,10 @@ ready, and both were unreachable on this target for the same reason.
    rejected as an agent's shared `capability-profile` — the shared-profile diagnostic now names the
    target and points at the matching `<target>-capability-profile` field — and a
    `devin-capability-profile` naming a profile without `target: devin` is rejected. An unknown name
-   is rejected. The result is that granting `process.execute: allow` on Devin cannot leak to Claude,
-   Cursor, Codex, or any other target, which is the same guarantee `architect-copilot` carries.
+   is rejected. A primary agent naming the field is rejected: Devin lowers primary identities to
+   skills, which carry no tool allow-list, so the override would validate and then evaporate. The
+   result is that granting `process.execute: allow` on Devin cannot leak to Claude, Cursor, Codex, or
+   any other target, which is the same guarantee `architect-copilot` carries.
 
 4. **The conductor pre-creates the destination as a fallback, documented rather than implemented.**
    The conductor runs in the main Devin Local session with shell access the subagent does not have,

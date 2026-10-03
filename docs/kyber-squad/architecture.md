@@ -376,9 +376,11 @@ and validates.
   consumed by other renderers. `DevinRenderer` resolves `agent.DevinCapabilityProfile ??
   agent.CapabilityProfile` for every permission lookup it performs — granted tools, degradation
   records, MCP entitlement, and the pure-orchestrator exclusion — so an agent that names none
-  renders exactly as before. Validation is what keeps the envelope scoped: a profile marked
-  `target: devin` is rejected as an agent's shared `capability-profile`, and a
-  `devin-capability-profile` naming a profile without that marker is rejected
+  renders exactly as before.   Validation is what keeps the envelope scoped: a profile marked
+  `target: devin` is rejected as an agent's shared `capability-profile`, a
+  `devin-capability-profile` naming a profile without that marker is rejected,
+  and a primary agent naming one is rejected because Devin lowers primaries to
+  skills with no tool allow-list
   ([ADR 0028](../adr/0028-devin-target-scoped-authoring-capability-profiles.md)).
 - **Copilot tool order ([ADR 0017](../adr/0017-copilot-deterministic-tool-order.md))**:
   `CopilotRenderer` emits `CopilotToolCatalog.Normalize(agent.CopilotTools)` — membership from

@@ -113,6 +113,17 @@ public static class SquadSourceValidator
                     "devin-capability-profile to use the shared profile.");
             }
 
+            if (agent.DevinCapabilityProfile is not null &&
+                agent.Invocation != SquadInvocation.Subagent)
+            {
+                Throw(
+                    $"Agent '{agent.Name}' declares a Devin capability profile, but it is a primary agent.",
+                    agent.Name,
+                    agent.SourcePath,
+                    "Devin renders primary identities as skills and carries no tool allow-list. " +
+                    "Remove devin-capability-profile or change invocation to subagent.");
+            }
+
             if (!fallbacks.Profiles.ContainsKey(agent.Fallback))
             {
                 Throw(
