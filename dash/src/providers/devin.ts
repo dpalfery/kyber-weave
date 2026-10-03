@@ -1,8 +1,8 @@
 import { readdir, stat } from "fs/promises";
-import { basename, join } from "path";
+import { basename, join, resolve } from "path";
 import { homedir } from "os";
 
-import { calculateCost, getShortModelName } from "../pricing/models.js";
+import { calculateCost, getModelCosts, getShortModelName } from "../pricing/models.js";
 import { openDatabase } from "../ingest/sqlite.js";
 import { readConfig } from "../config.js";
 import type {
@@ -507,12 +507,20 @@ class DevinSessionParser implements SessionParser {
           transcript.agent?.model_name,
           session?.model,
         ) ?? model;
+      const pricingModel =
+        /^MODEL_/.test(rawModel) && getModelCosts(rawModel) === null
+          ? firstPresentString(
+              step.model_name,
+              transcript.agent?.model_name,
+              session?.model,
+            ) ?? model
+          : rawModel;
       const costIsEstimated = costFactor === null;
       const costUSD =
         costFactor !== null
           ? usage.committedAcuCost * costFactor
           : calculateCost(
-              rawModel,
+              pricingModel,
               usage.inputTokens,
               usage.outputTokens,
               usage.cacheCreationInputTokens,
@@ -546,10 +554,20 @@ class DevinSessionParser implements SessionParser {
   }
 }
 
+function expandHome(p: string): string {
+  if (p === '~') return homedir();
+  if (p.startsWith('~/') || p.startsWith('~\\')) {
+    return join(homedir(), p.slice(2));
+  }
+  return p;
+}
+
 function resolveDevinCliDir(override?: string): string {
-  if (override && override.trim()) return override;
+  if (override && override.trim()) {
+    return resolve(expandHome(override.trim()));
+  }
   if (process.env['DEVIN_CLI_DIR'] && process.env['DEVIN_CLI_DIR'].trim()) {
-    return process.env['DEVIN_CLI_DIR'].trim();
+    return resolve(expandHome(process.env['DEVIN_CLI_DIR'].trim()));
   }
   return DEFAULT_DEVIN_CLI_DIR;
 }

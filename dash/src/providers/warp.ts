@@ -1,4 +1,4 @@
-import { existsSync } from 'fs'
+import { statSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
 
@@ -424,7 +424,14 @@ function createParser(source: SessionSource, seenKeys: Set<string>): SessionPars
 }
 
 async function discoverFromDb(dbPath: string): Promise<SessionSource[]> {
-  if (!existsSync(dbPath)) return []
+  try {
+    statSync(dbPath)
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException)?.code
+    if (code === 'ENOENT' || code === 'ENOTDIR') return []
+    // Non-ENOENT lookup errors (EACCES, EPERM, etc.) fall through to openDatabase
+    // so database access errors can be propagated and surfaced as diagnostics.
+  }
   let db: SqliteDatabase
   try {
     db = openDatabase(dbPath)

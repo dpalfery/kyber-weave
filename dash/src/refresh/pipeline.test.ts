@@ -592,6 +592,50 @@ describe('refresh pipeline: parser contract version & checkpoint invalidation', 
       store.close()
     }
   })
+
+  it('surfaces a diagnostic when probeRoots fails', async () => {
+    const root = tempDir()
+    const dbPath = join(root, 'canon.db')
+    const store = new CanonStore(dbPath)
+
+    try {
+      const descriptor = descriptorFor('devin')
+      expect(descriptor).toBeDefined()
+
+      const provider: Provider = {
+        name: 'devin',
+        displayName: 'Devin',
+        modelDisplayName: (m) => m,
+        toolDisplayName: (t) => t,
+        probeRoots: async () => {
+          throw new Error('EPERM: operation not permitted')
+        },
+        discoverSessions: async () => [],
+        createSessionParser() {
+          return {
+            async *parse() {},
+          }
+        },
+      }
+
+      const report = await refreshHarnessSources(store, {
+        getAllProviders: async () => [provider],
+        descriptors: [descriptor!],
+        jobConcurrency: 1,
+        writerCapacity: 1,
+        commandStartedAt: new Date('2026-09-28T18:00:00.000Z'),
+        parseAllSessions: async () => undefined,
+      })
+
+      const devinRow = report.rows.find((r) => r.harnessId === 'devin')
+      expect(devinRow).toBeDefined()
+      expect(devinRow?.units).toBe(0)
+      expect(devinRow?.status).toBe('unavailable')
+      expect(devinRow?.diagnostic).toContain('EPERM: operation not permitted')
+    } finally {
+      store.close()
+    }
+  })
 });
 
 

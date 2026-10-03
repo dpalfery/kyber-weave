@@ -1,5 +1,5 @@
 import { mkdtemp, rm } from 'fs/promises'
-import { mkdirSync } from 'fs'
+import { chmodSync, mkdirSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { createRequire } from 'node:module'
@@ -370,6 +370,18 @@ skipUnlessSqlite('warp provider', () => {
         // should throw
       }
     }).rejects.toThrow()
+  })
+
+  it('propagates error when database exists but access is denied during discovery', async () => {
+    const dbPath = join(tmpDir, 'permission-denied.sqlite')
+    writeFileSync(dbPath, '')
+    try {
+      chmodSync(dbPath, 0o000)
+      const provider = createWarpProvider(dbPath)
+      await expect(provider.discoverSessions()).rejects.toThrow()
+    } finally {
+      chmodSync(dbPath, 0o644)
+    }
   })
 })
 

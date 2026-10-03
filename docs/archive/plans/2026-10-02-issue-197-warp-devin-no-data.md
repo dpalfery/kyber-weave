@@ -108,7 +108,7 @@ This plan fixes [issue #197](https://github.com/dpalfery/kyber-weave/issues/197)
 | T1 (RED) | `dash/src/providers/devin.test.ts` | `./node_modules/.bin/vitest run src/providers/devin.test.ts` | Devin discovers and parses sessions without `devin.acuUsdRate` configured in `config.json` | Fails because `discoverSessions` returns `[]` and `parse` yields 0 calls | Passes with estimated/fallback cost |
 | T2 (RED) | `dash/src/providers/warp.test.ts` & `dash/src/ingest/sqlite-readonly-parent.test.ts` | `./node_modules/.bin/vitest run src/providers/warp.test.ts` | Warp parser propagates errors when `openDatabase` fails; SQLite attempts immutable open if copy fails | Fails on error swallowing | Passes with error propagation and immutable fallback |
 | T3 (RED) | `dash/src/refresh/pipeline.test.ts` | `./node_modules/.bin/vitest run src/refresh/pipeline.test.ts` | Refresh surfaces parse error diagnostics instead of silent ok/skipped row with 0 records | Fails before error handling in reader/orchestrator | Passes with diagnostic surfaced in row and problems table |
-| T4 (DOCS) | `docs validate .` & `docs drift .` | `/Users/hal/.dotnet/dotnet run --project src/KyberWeave.Cli --no-build -c Release -- docs validate .` | Governed documentation and plan lifecycle clean | N/A | 0 findings |
+| T4 (DOCS) | `docs validate .` & `docs drift .` | `dotnet run --project src/KyberWeave.Cli --no-build -c Release -- docs validate .` | Governed documentation and plan lifecycle clean | N/A | 0 findings |
 | T5 | Archival | KW-DOC-LIFECYCLE-003 | Move plan to `docs/archive/plans/` before opening PR | N/A | `docs validate . --merge-ready` passes |
 
 ## Dispatchable tasks
