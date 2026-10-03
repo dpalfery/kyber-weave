@@ -609,6 +609,65 @@ describe('refreshHarnessSources', () => {
     }
   })
 
+  it('reconciles contract-bump recordCount to live records after a quarantine', async () => {
+    const store = temporaryStore()
+    const piSource = source('pi', 'quarantine-bump-session')
+    const olderCall = {
+      ...call('pi', 'pi-quarantine'),
+      timestamp: '2026-08-15T12:00:00.000Z',
+      deduplicationKey: 'pi:pi-quarantine:turn-1',
+      userMessage: 'older turn before current window',
+    }
+    const newerCall = {
+      ...call('pi', 'pi-quarantine'),
+      timestamp: '2026-09-08T12:00:00.000Z',
+      deduplicationKey: 'pi:pi-quarantine:turn-2',
+      userMessage: 'appended turn in current window',
+    }
+
+    let currentCalls = [olderCall]
+    let currentMtime = 1_000
+    const [baseDescriptor] = descriptors('pi')
+
+    const dependencies = {
+      getAllProviders: async () => [
+        nativeProvider('pi', [piSource], new Map([[piSource.path, currentCalls]])),
+      ],
+      descriptors: [{ ...baseDescriptor, parserContractVersion: '1' }],
+      jobConcurrency: 1,
+      commandStartedAt: new Date('2026-08-20T18:00:00.000Z'),
+      parseAllSessions: async () => undefined,
+      fingerprintFile: async () => ({ dev: 1, ino: 1, mtimeMs: currentMtime, sizeBytes: currentMtime }),
+    }
+
+    try {
+      const first = await refreshHarnessSources(store, dependencies)
+      expect(first.rows[0]).toMatchObject({ status: 'ok', created: 1 })
+      const initialRecords = store.listAll()
+      expect(initialRecords).toHaveLength(1)
+      const quarantined = initialRecords[0]!
+      store.quarantineAndDelete(quarantined.spanId, ['gen_ai'], 'unclaimed')
+      expect(store.get(quarantined.spanId)).toBeUndefined()
+
+      currentCalls = [olderCall, newerCall]
+      currentMtime = 2_000
+
+      const second = await refreshHarnessSources(store, {
+        ...dependencies,
+        descriptors: [{ ...baseDescriptor, parserContractVersion: '2' }],
+        commandStartedAt: new Date('2026-09-12T18:00:00.000Z'),
+      })
+      expect(second.rows[0]).toMatchObject({ status: 'ok', created: 1 })
+
+      const updatedCheckpoint = store.listSourceCheckpoints('pi')[0]
+      expect(updatedCheckpoint?.parserContractVersion).toBe('2')
+      expect(store.listAll()).toHaveLength(1)
+      expect(updatedCheckpoint?.recordCount).toBe(1)
+    } finally {
+      store.close()
+    }
+  })
+
   it('records the coverage window on the refresh run row', async () => {
     const store = temporaryStore()
     try {

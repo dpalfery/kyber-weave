@@ -1109,6 +1109,22 @@ describe('source checkpoint and provenance', () => {
     store.close()
   })
 
+  it('counts live records for a source and excludes quarantined provenance ghosts', () => {
+    const store = new CanonStore(':memory:')
+    store.commitSourceUnit({
+      records: [record({ sessionId: 'agent-7f3' })],
+      provenance: [provenance()],
+      checkpoint: checkpoint(),
+    })
+
+    expect(store.countLiveRecordsForSource('pi', 'session:agent-7f3')).toBe(1)
+    store.quarantineAndDelete('span-1', ['gen_ai'], 'unclaimed')
+    expect(store.get('span-1')).toBeUndefined()
+    expect(store.listProvenanceForSource('pi', 'session:agent-7f3')).toHaveLength(1)
+    expect(store.countLiveRecordsForSource('pi', 'session:agent-7f3')).toBe(0)
+    store.close()
+  })
+
   it('invalidates a checkpoint on parser-contract change without deleting canonical rows', () => {
     const store = new CanonStore(':memory:')
     store.commitSourceUnit({

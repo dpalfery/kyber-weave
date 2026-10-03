@@ -318,7 +318,7 @@ async function runHarnessJob(context: JobContext): Promise<HarnessJobRow> {
       importedAtUtc: context.importedAtUtc,
       recordCount:
         previous?.parserContractVersion !== descriptor.parserContractVersion
-          ? store.listProvenanceForSource(descriptor.harnessId, unit.sourceKey).length + created
+          ? store.countLiveRecordsForSource(descriptor.harnessId, unit.sourceKey) + created
           : (previous?.recordCount ?? 0) + created,
       status: ingestResult.problems.length > 0 || unit.problems.length > 0 ? 'partial' : 'ok',
       emptyReason: unit.emptyReason,
