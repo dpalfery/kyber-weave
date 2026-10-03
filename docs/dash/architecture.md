@@ -6,7 +6,7 @@ component: KyberDash
 source-root: dash
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-02
+last-reviewed: 2026-10-03
 decided-by:
   - adr/0020-kyberdash-one-time-fork
   - adr/0008-kyberdash-single-canonical-store
@@ -193,7 +193,12 @@ refresh run additionally records its coverage window in `refresh_run.history_wee
 `--history-weeks` value of that run. Rows predating window tracking read as `null`, which
 every surface renders as unknown with the reason "recorded before window tracking", never
 coerced to a default or to zero
-([honest unobservability](../rules/honest-unobservability.md)). After jobs
+([honest unobservability](../rules/honest-unobservability.md)). A changed unit that
+yields no records persists its reason on the checkpoint's `last_error_code` (status stays
+`ok`): `window_filtered` when the parser produced calls that all predate the coverage
+window (`sliceCallsToWindow`), `no_recordable_events` when it produced none (for Codex,
+no `token_count` or model events). A unit with records, or with problems, carries no such
+reason. The Codex OTLP adapter (`canon/adapters/codex.ts`) is the sixth fingerprint voter; see the Codex OTLP note in [telemetry-inventory](telemetry-inventory.md). After jobs
 drain, `purgeExpiredContent` empties content older than 14 days without touching
 `records.raw` ([ADR 0018](../adr/0018-kyberdash-content-retention-purge.md)), then the store
 is projected through `projectCanonicalStore` — the same shared entry the live receiver uses
@@ -744,7 +749,7 @@ The web dashboard server wires HTTP requests directly to `KyberBridge`:
 | `/api/kyber/quarantine` | `GET` | `{ entries: QuarantineRow[] }` | Quarantined spans; supports `?limit=`. |
 | `/api/kyber/problems` | `GET` | `{ problems: ProblemRow[] }` | Recorded problems; supports `?limit=`. |
 | `/api/kyber/meta` | `GET` | `MetaResult` | Tokenizer configuration, rates, span counts, and sources. |
-| `/api/kyber/coverage` | `GET` | `{ refresh, ingest, quarantineByReason, checkpoints }` | Ingest coverage: persisted refresh window (`history_weeks`, null = unknown), per-source ingest activity (`records` counts joined with `ingest_log` sums and `lastReceivedAt`; `{ status: 'unknown' }` when nothing is recorded), per-reason quarantine counts, and `source_checkpoint` statuses including `partial`. |
+| `/api/kyber/coverage` | `GET` | `{ refresh, ingest, quarantineByReason, checkpoints }` | Ingest coverage: persisted refresh window (`history_weeks`, null = unknown), per-source ingest activity (`records` counts joined with `ingest_log` sums and `lastReceivedAt`; `{ status: 'unknown' }` when nothing is recorded), per-reason quarantine counts, and `source_checkpoint` statuses including `partial` and the persisted zero-record reason (`lastErrorCode`). |
 | `/api/kyber/report` | `GET` | `ContextReport` | The versioned context report for the query scope (`harness`, `session`, `run`, `days`); the same document `kyberdash report` prints. |
 
 All `/api/kyber/*` responses return standard headers (`content-type: application/json; charset=utf-8`, `cache-control: no-store`). Unrecognized `/api/kyber/*` routes return HTTP 404 JSON (guaranteed never to fall through to SPA HTML), and non-GET requests return HTTP 405 Method Not Allowed.

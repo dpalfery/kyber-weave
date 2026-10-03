@@ -162,6 +162,48 @@ type CodexTokenUsage = {
   output_tokens?: number
   reasoning_output_tokens?: number
   total_tokens?: number
+  // camelCase spellings seen in the wild (issue #196): some emitters wrap the
+  // same counters in a JS-style casing; keep them alongside the canonical
+  // snake_case rather than teaching every consumer two spellings.
+  inputTokens?: number
+  cachedInputTokens?: number
+  cacheWriteInputTokens?: number
+  outputTokens?: number
+  reasoningOutputTokens?: number
+  totalTokens?: number
+}
+
+function tokenNumber(v: unknown): number | undefined {
+  return typeof v === 'number' && Number.isFinite(v) ? v : undefined
+}
+
+/** Outlook onto a usage block: canonical snake_case, with camelCase fallback. */
+function normalizeTokenUsage(raw: CodexTokenUsage | undefined): CodexTokenUsage | undefined {
+  if (!raw) return undefined
+  return {
+    input_tokens: raw.input_tokens ?? tokenNumber(raw.inputTokens),
+    cached_input_tokens: raw.cached_input_tokens ?? tokenNumber(raw.cachedInputTokens),
+    cache_write_input_tokens: raw.cache_write_input_tokens ?? tokenNumber(raw.cacheWriteInputTokens),
+    output_tokens: raw.output_tokens ?? tokenNumber(raw.outputTokens),
+    reasoning_output_tokens: raw.reasoning_output_tokens ?? tokenNumber(raw.reasoningOutputTokens),
+    total_tokens: raw.total_tokens ?? tokenNumber(raw.totalTokens),
+  }
+}
+
+function normalizeTokenInfo(info: unknown): { model?: string; model_name?: string; last_token_usage?: CodexTokenUsage; total_token_usage?: CodexTokenUsage } | undefined {
+  if (info === null || typeof info !== 'object' || Array.isArray(info)) return undefined
+  const raw = info as Record<string, unknown> & {
+    last_token_usage?: CodexTokenUsage
+    total_token_usage?: CodexTokenUsage
+    lastTokenUsage?: CodexTokenUsage
+    totalTokenUsage?: CodexTokenUsage
+  }
+  return {
+    ...(typeof raw.model === 'string' ? { model: raw.model } : {}),
+    ...(typeof raw.model_name === 'string' ? { model_name: raw.model_name } : {}),
+    last_token_usage: normalizeTokenUsage(raw.last_token_usage ?? raw.lastTokenUsage),
+    total_token_usage: normalizeTokenUsage(raw.total_token_usage ?? raw.totalTokenUsage),
+  }
 }
 
 const RAW_HEAD_BYTES = 64 * 1024
@@ -349,17 +391,23 @@ function durationValueMs(value: unknown): number | undefined {
   return undefined
 }
 
-function getRawTokenUsage(head: string, field: 'last_token_usage' | 'total_token_usage'): CodexTokenUsage | undefined {
+function getRawTokenUsage(head: string, field: 'last_token_usage' | 'total_token_usage' | 'lastTokenUsage' | 'totalTokenUsage'): CodexTokenUsage | undefined {
   const match = new RegExp(`"${field}"\\s*:\\s*\\{([^}]*)\\}`).exec(head)
   if (!match) return undefined
   const body = match[1]!
+  return tokenUsageBody(body)
+}
+
+function tokenUsageBody(body: string): CodexTokenUsage {
+  const num = (snake: string, camel: string): number | undefined =>
+    getRawJsonNumberField(body, snake) ?? getRawJsonNumberField(body, camel)
   return {
-    input_tokens: getRawJsonNumberField(body, 'input_tokens'),
-    cached_input_tokens: getRawJsonNumberField(body, 'cached_input_tokens'),
-    cache_write_input_tokens: getRawJsonNumberField(body, 'cache_write_input_tokens'),
-    output_tokens: getRawJsonNumberField(body, 'output_tokens'),
-    reasoning_output_tokens: getRawJsonNumberField(body, 'reasoning_output_tokens'),
-    total_tokens: getRawJsonNumberField(body, 'total_tokens'),
+    input_tokens: num('input_tokens', 'inputTokens'),
+    cached_input_tokens: num('cached_input_tokens', 'cachedInputTokens'),
+    cache_write_input_tokens: num('cache_write_input_tokens', 'cacheWriteInputTokens'),
+    output_tokens: num('output_tokens', 'outputTokens'),
+    reasoning_output_tokens: num('reasoning_output_tokens', 'reasoningOutputTokens'),
+    total_tokens: num('total_tokens', 'totalTokens'),
   }
 }
 
@@ -476,8 +524,8 @@ function parseCodexLine(line: string | Buffer): CodexEntry | null {
       : getRawJsonStringField(pHead, field)
   const compactModel = payloadString('model')
   const compactModelName = getRawJsonStringField(pHead, 'model_name')
-  const compactLastUsage = getRawTokenUsage(pHead, 'last_token_usage')
-  const compactTotalUsage = getRawTokenUsage(pHead, 'total_token_usage')
+  const compactLastUsage = getRawTokenUsage(pHead, 'last_token_usage') ?? getRawTokenUsage(pHead, 'lastTokenUsage')
+  const compactTotalUsage = getRawTokenUsage(pHead, 'total_token_usage') ?? getRawTokenUsage(pHead, 'totalTokenUsage')
   const compactInfo = compactModel || compactModelName || compactLastUsage || compactTotalUsage
     ? { model: compactModel, model_name: compactModelName, last_token_usage: compactLastUsage, total_token_usage: compactTotalUsage }
     : undefined
@@ -1085,7 +1133,7 @@ function createParser(source: SessionSource, seenKeys: Set<string>, capture?: { 
           // timestamps clustered at the fork creation time. Skip replayed
           // events (within 5s of fork) to avoid double-counting.
           if (forkCutoff && entry.timestamp && entry.timestamp < forkCutoff) continue
-          const info = entry.payload.info
+          const info = normalizeTokenInfo(entry.payload.info)
           if (!info) {
             if (pendingOutputChars === 0 && pendingUserMessage.length === 0) continue
             const estInput = estimateTokensFromChars(pendingUserMessage.length)
