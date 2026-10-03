@@ -34,6 +34,7 @@ import { basename, extname } from 'path'
 import { claudeCount, claudeText, claudeUsageOf } from '../../providers/claude.js'
 import { detectUserCorrection } from '../../canon/outcome.js'
 import type { ContentPart } from '../../canon/types.js'
+import type { DateRange } from '../../types.js'
 import type { ContentReader, ReaderToolCall, ReaderToolResult, ReaderTurn } from './types.js'
 
 export {
@@ -163,6 +164,63 @@ export function splitClaudeTurns(lines: readonly string[]): string[][] {
   }
 
   return mergedGroups
+}
+
+/**
+ * Pairing identity for one turn group. Uses `message.id` only — that is what
+ * `loadClaudeCalls` stamps as `turnId`. Emitting the transcript `uuid` here
+ * would populate the id map while leaving calls turnId-less, which disables
+ * positional pairing for every turn in the file (Cursor's id-map contract).
+ */
+function nativeRecordIdOfGroup(group: readonly string[]): string | undefined {
+  for (let i = group.length - 1; i >= 0; i--) {
+    if (claudeUsageOf(group[i]!) === undefined) continue
+    let record: Record<string, unknown>
+    try {
+      record = JSON.parse(group[i]!) as Record<string, unknown>
+    } catch {
+      continue
+    }
+    const message = record['message'] as Record<string, unknown> | undefined
+    const messageId = message ? claudeText(message['id']) : undefined
+    if (messageId !== undefined) return messageId
+  }
+  return undefined
+}
+
+/**
+ * Usage-line timestamp for a turn group, matching the instant `loadClaudeCalls`
+ * and `sliceCallsToWindow` use. Missing or malformed timestamps are unusable
+ * instants — the same rows `sliceCallsToWindow` drops when a refresh window is
+ * set — so a date-ranged read must exclude them too.
+ */
+function timestampOfGroup(group: readonly string[]): Date | undefined {
+  for (let i = group.length - 1; i >= 0; i--) {
+    if (claudeUsageOf(group[i]!) === undefined) continue
+    let record: Record<string, unknown>
+    try {
+      record = JSON.parse(group[i]!) as Record<string, unknown>
+    } catch {
+      continue
+    }
+    const raw = claudeText(record['timestamp'])
+    if (raw === undefined) return undefined
+    const instant = new Date(raw)
+    return Number.isNaN(instant.getTime()) ? undefined : instant
+  }
+  return undefined
+}
+
+function groupInDateRange(group: readonly string[], dateRange?: DateRange): boolean {
+  if (dateRange === undefined) return true
+  const timestamp = timestampOfGroup(group)
+  // Align with sliceCallsToWindow: no usable instant → not in the window.
+  // Keeping these rows would leave the reader ahead of window-sliced calls and
+  // let positional pairing attach their text to a later in-window call.
+  if (timestamp === undefined) return false
+  if (timestamp < dateRange.start) return false
+  if (timestamp > dateRange.end) return false
+  return true
 }
 
 /** Result of reading a full session transcript, including its identifier. */
@@ -436,7 +494,7 @@ export class ClaudeContentReader implements ContentReader {
    * it is joined to the canonical session only after the file reader has
    * established the session identity, rather than inventing turns from roles.
    */
-  async *read(filePath: string): AsyncGenerator<ReaderTurn> {
+  async *read(filePath: string, dateRange?: DateRange): AsyncGenerator<ReaderTurn> {
     // One turn per assistant request, so a turn pairs with the call
     // `loadClaudeCalls` emitted for the same request. Reading the whole
     // transcript as a single turn would put every part on the first record and
@@ -449,6 +507,11 @@ export class ClaudeContentReader implements ContentReader {
     }
 
     for (const group of splitClaudeTurns(lines)) {
+      // Refresh window-slices counter calls; emit the same window here so
+      // positional pairing cannot attach an out-of-window turn's text. Id maps
+      // (`nativeRecordId` ↔ `turnId`) remain the durable pairing key.
+      if (!groupInDateRange(group, dateRange)) continue
+
       const session = readClaudeSession(group)
       if (
         session.parts.length === 0 &&
@@ -458,9 +521,11 @@ export class ClaudeContentReader implements ContentReader {
       ) {
         continue
       }
+      const nativeRecordId = nativeRecordIdOfGroup(group)
       yield {
         parts: session.parts,
         ...(session.sessionId !== undefined ? { sessionId: session.sessionId } : {}),
+        ...(nativeRecordId !== undefined ? { nativeRecordId } : {}),
         ...(session.terminationReason !== undefined ? { terminationReason: session.terminationReason } : {}),
         ...(session.exitCode !== undefined ? { exitCode: session.exitCode } : {}),
         ...(session.isCorrection !== undefined ? { isCorrection: session.isCorrection, correctionRule: session.correctionRule } : {}),

@@ -376,6 +376,312 @@ describe('D5 reader integration', () => {
     const invokes = result.records.filter((r) => r.op === 'llm.invoke')
     expect(invokes).toHaveLength(1)
     expect(invokes[0]?.tokens.reportedInput).toBe(64075)
+    // #216: pair collapse must retain fused transcript parts, not counters-only.
+    expect(invokes[0]?.parts?.length).toBeGreaterThan(0)
+    expect(invokes[0]?.parts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ part: 'conversation_history', text: 'question' }),
+        expect.objectContaining({ part: 'conversation_history', text: 'answer' }),
+      ]),
+    )
+    expect(invokes[0]?.content.conversation_history).toContain('question')
+    expect(invokes[0]?.content.conversation_history).toContain('answer')
+  })
+
+  // Issue #216 / plan T1: claude-desktop synth must carry capturable parts.
+  // On the ProviderLoad(filePath) path this currently PASSES (regression pin);
+  // live empty inspectors are attributed to refresh pairing/fallback (T2) or
+  // unrepaired store (T5), not this ingest seam alone.
+  it('attaches conversation and tool_result parts on claude-desktop synth (#216)', async () => {
+    const usage = {
+      input_tokens: 150,
+      output_tokens: 45,
+      cache_read_input_tokens: 300,
+      cache_creation_input_tokens: 200,
+    }
+    const root = mkdtempSync(join(tmpdir(), 'kyber-desktop-parts-216-'))
+    tempRoots.push(root)
+    const filePath = join(root, 'session.jsonl')
+    writeFileSync(
+      filePath,
+      [
+        JSON.stringify({
+          type: 'user',
+          sessionId: 'desk-parts-216',
+          message: {
+            role: 'user',
+            content: [
+              { type: 'text', text: 'Check git status' },
+              { type: 'tool_result', tool_use_id: 'tu_bash_216', content: 'On branch main' },
+            ],
+          },
+        }),
+        JSON.stringify({
+          type: 'assistant',
+          sessionId: 'desk-parts-216',
+          uuid: 'desk-216-asst',
+          timestamp: '2026-09-01T12:00:00.000Z',
+          message: {
+            id: 'msg-desk-216',
+            model: 'claude-sonnet-4-5',
+            usage,
+            content: [{ type: 'text', text: 'You are on main.' }],
+          },
+        }),
+      ].join('\n') + '\n',
+    )
+
+    const result = await ingestProviders(['claude-desktop'], () => ({
+      calls: [],
+      filePath,
+      harnessId: 'claude-desktop',
+      sourceKey: 'claude-desktop:desk-parts-216',
+    }))
+
+    expect(result.problems).toEqual([])
+    const invokes = result.records.filter((r) => r.op === 'llm.invoke')
+    expect(invokes).toHaveLength(1)
+    const invoke = invokes[0]!
+    expect(invoke.parts?.length).toBeGreaterThan(0)
+    expect(invoke.parts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ part: 'conversation_history', text: 'Check git status' }),
+        expect.objectContaining({ part: 'conversation_history', text: 'You are on main.' }),
+        expect.objectContaining({ part: 'tool_result_content', text: 'On branch main' }),
+      ]),
+    )
+    expect(invoke.content.conversation_history).toContain('Check git status')
+    expect(invoke.content.conversation_history).toContain('You are on main.')
+    expect(invoke.content.tool_result_content).toContain('On branch main')
+  })
+
+  it('does not fabricate claude-desktop parts when the transcript has no content (#216)', async () => {
+    const usage = {
+      input_tokens: 10,
+      output_tokens: 5,
+      cache_read_input_tokens: 0,
+      cache_creation_input_tokens: 0,
+    }
+    const root = mkdtempSync(join(tmpdir(), 'kyber-desktop-empty-216-'))
+    tempRoots.push(root)
+    const filePath = join(root, 'session.jsonl')
+    writeFileSync(
+      filePath,
+      JSON.stringify({
+        type: 'assistant',
+        sessionId: 'desk-empty-216',
+        uuid: 'desk-empty-asst',
+        timestamp: '2026-09-01T12:00:00.000Z',
+        message: {
+          id: 'msg-desk-empty-216',
+          model: 'claude-sonnet-4-5',
+          usage,
+          content: [],
+        },
+      }) + '\n',
+    )
+
+    const result = await ingestProviders(['claude-desktop'], () => ({
+      calls: [],
+      filePath,
+      harnessId: 'claude-desktop',
+      sourceKey: 'claude-desktop:desk-empty-216',
+    }))
+
+    expect(result.problems).toEqual([])
+    const invokes = result.records.filter((r) => r.op === 'llm.invoke')
+    expect(invokes).toHaveLength(1)
+    const invoke = invokes[0]!
+    expect(invoke.parts ?? []).toEqual([])
+    expect(invoke.content).toEqual({})
+  })
+
+  // Issue #216 / plan T2: refresh window-slices calls but the Claude reader
+  // historically yielded every turn. Positional pairing then attaches an
+  // earlier turn's text to the in-window call. Id-based pairing (or a
+  // date-aligned reader) must keep same-turn content.
+  it('pairs window-sliced claude-desktop calls with the same-turn reader content (#216 T2)', async () => {
+    const usageEarly = {
+      input_tokens: 100,
+      output_tokens: 20,
+      cache_read_input_tokens: 0,
+      cache_creation_input_tokens: 0,
+    }
+    const usageLate = {
+      input_tokens: 200,
+      output_tokens: 40,
+      cache_read_input_tokens: 50,
+      cache_creation_input_tokens: 10,
+    }
+    const root = mkdtempSync(join(tmpdir(), 'kyber-desktop-window-216-'))
+    tempRoots.push(root)
+    const filePath = join(root, 'session.jsonl')
+    writeFileSync(
+      filePath,
+      [
+        JSON.stringify({
+          type: 'user',
+          sessionId: 'desk-window-216',
+          message: { role: 'user', content: [{ type: 'text', text: 'early question' }] },
+        }),
+        JSON.stringify({
+          type: 'assistant',
+          sessionId: 'desk-window-216',
+          uuid: 'desk-early-asst',
+          timestamp: '2026-08-01T12:00:00.000Z',
+          message: {
+            id: 'msg-desk-early',
+            model: 'claude-sonnet-4-5',
+            usage: usageEarly,
+            content: [{ type: 'text', text: 'early answer' }],
+          },
+        }),
+        JSON.stringify({
+          type: 'user',
+          sessionId: 'desk-window-216',
+          message: { role: 'user', content: [{ type: 'text', text: 'late question' }] },
+        }),
+        JSON.stringify({
+          type: 'assistant',
+          sessionId: 'desk-window-216',
+          uuid: 'desk-late-asst',
+          timestamp: '2026-09-10T12:00:00.000Z',
+          message: {
+            id: 'msg-desk-late',
+            model: 'claude-sonnet-4-5',
+            usage: usageLate,
+            content: [{ type: 'text', text: 'late answer' }],
+          },
+        }),
+      ].join('\n') + '\n',
+    )
+
+    // Refresh already sliced counters to the in-window turn only.
+    const windowedCall = call({
+      provider: 'claude',
+      model: 'claude-sonnet-4-5',
+      inputTokens: 200,
+      outputTokens: 40,
+      cacheCreationInputTokens: 10,
+      cacheReadInputTokens: 50,
+      cachedInputTokens: 50,
+      timestamp: '2026-09-10T12:00:00.000Z',
+      sessionId: 'desk-window-216',
+      turnId: 'msg-desk-late',
+      deduplicationKey: 'claude:desk-window-216:desk-late-asst',
+      userMessage: '',
+    })
+    const dateRange = {
+      start: new Date('2026-09-01T00:00:00.000Z'),
+      end: new Date('2026-09-12T00:00:00.000Z'),
+    }
+
+    const result = await ingestProviders(['claude-desktop'], () => ({
+      calls: [windowedCall],
+      filePath,
+      dateRange,
+      harnessId: 'claude-desktop',
+      sourceKey: 'claude-desktop:desk-window-216',
+    }))
+
+    expect(result.problems).toEqual([])
+    const invokes = result.records.filter((r) => r.op === 'llm.invoke')
+    expect(invokes).toHaveLength(1)
+    const invoke = invokes[0]!
+    expect(invoke.parts?.length).toBeGreaterThan(0)
+    expect(invoke.content.conversation_history).toContain('late question')
+    expect(invoke.content.conversation_history).toContain('late answer')
+    expect(invoke.content.conversation_history).not.toContain('early question')
+    expect(invoke.content.conversation_history).not.toContain('early answer')
+  })
+
+  // Untimestamped turns: loadClaudeCalls stamps epoch 0 and sliceCallsToWindow
+  // drops them, but a reader that kept them would still yield the early turn.
+  // Without message.id, positional pairing then attaches that text to the
+  // sole in-window call.
+  it('does not attach untimestamped early-turn text to a windowed call without message.id (#216)', async () => {
+    const usage = {
+      input_tokens: 100,
+      output_tokens: 20,
+      cache_read_input_tokens: 0,
+      cache_creation_input_tokens: 0,
+    }
+    const root = mkdtempSync(join(tmpdir(), 'kyber-desktop-no-ts-216-'))
+    tempRoots.push(root)
+    const filePath = join(root, 'session.jsonl')
+    writeFileSync(
+      filePath,
+      [
+        JSON.stringify({
+          type: 'user',
+          sessionId: 'desk-no-ts-216',
+          message: { role: 'user', content: [{ type: 'text', text: 'untimestamped early question' }] },
+        }),
+        JSON.stringify({
+          type: 'assistant',
+          sessionId: 'desk-no-ts-216',
+          uuid: 'desk-early-no-ts',
+          // no timestamp — counters path drops via sliceCallsToWindow
+          message: {
+            model: 'claude-sonnet-4-5',
+            usage,
+            content: [{ type: 'text', text: 'untimestamped early answer' }],
+          },
+        }),
+        JSON.stringify({
+          type: 'user',
+          sessionId: 'desk-no-ts-216',
+          message: { role: 'user', content: [{ type: 'text', text: 'windowed question' }] },
+        }),
+        JSON.stringify({
+          type: 'assistant',
+          sessionId: 'desk-no-ts-216',
+          uuid: 'desk-late-no-id',
+          timestamp: '2026-09-10T12:00:00.000Z',
+          message: {
+            model: 'claude-sonnet-4-5',
+            usage: { ...usage, input_tokens: 200, output_tokens: 40 },
+            content: [{ type: 'text', text: 'windowed answer' }],
+          },
+        }),
+      ].join('\n') + '\n',
+    )
+
+    const windowedCall = call({
+      provider: 'claude',
+      model: 'claude-sonnet-4-5',
+      inputTokens: 200,
+      outputTokens: 40,
+      cacheCreationInputTokens: 0,
+      cacheReadInputTokens: 0,
+      cachedInputTokens: 0,
+      timestamp: '2026-09-10T12:00:00.000Z',
+      sessionId: 'desk-no-ts-216',
+      // no turnId — forces positional pairing
+      deduplicationKey: 'claude:desk-no-ts-216:desk-late-no-id',
+      userMessage: '',
+    })
+    const dateRange = {
+      start: new Date('2026-09-01T00:00:00.000Z'),
+      end: new Date('2026-09-12T00:00:00.000Z'),
+    }
+
+    const result = await ingestProviders(['claude-desktop'], () => ({
+      calls: [windowedCall],
+      filePath,
+      dateRange,
+      harnessId: 'claude-desktop',
+      sourceKey: 'claude-desktop:desk-no-ts-216',
+    }))
+
+    expect(result.problems).toEqual([])
+    const invokes = result.records.filter((r) => r.op === 'llm.invoke')
+    expect(invokes).toHaveLength(1)
+    const history = invokes[0]!.content.conversation_history ?? ''
+    expect(history).toContain('windowed question')
+    expect(history).toContain('windowed answer')
+    expect(history).not.toContain('untimestamped early question')
+    expect(history).not.toContain('untimestamped early answer')
   })
 })
 

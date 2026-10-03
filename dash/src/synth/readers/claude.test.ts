@@ -109,6 +109,8 @@ describe('claudeReader', () => {
     const turns = await readTurns(path)
     expect(turns).toHaveLength(1)
     const turn = turns[0]!
+    // Pairing keys must match loadClaudeCalls' turnId (message.id).
+    expect(turn.nativeRecordId).toBe('msg-1')
     expect(turn.toolCalls).toHaveLength(1)
     expect(turn.toolCalls?.[0]?.name).toBe('Bash')
     expect(turn.toolResults).toHaveLength(1)
@@ -116,6 +118,150 @@ describe('claudeReader', () => {
     const texts = turn.parts.map((p) => p.text)
     expect(texts).toContain('Check git status')
     expect(texts).toContain('You are on main.')
+  })
+
+  it('sets nativeRecordId from message.id and honors dateRange (#216 T2)', async () => {
+    const usage = {
+      input_tokens: 100,
+      output_tokens: 20,
+      cache_read_input_tokens: 0,
+      cache_creation_input_tokens: 0,
+    }
+    const path = writeTranscript([
+      {
+        type: 'user',
+        sessionId: 'session-window-read',
+        message: { role: 'user', content: [{ type: 'text', text: 'before window' }] },
+      },
+      {
+        type: 'assistant',
+        sessionId: 'session-window-read',
+        uuid: 'uuid-before',
+        timestamp: '2026-08-01T12:00:00.000Z',
+        message: {
+          id: 'msg-before',
+          model: 'claude-sonnet-4-5',
+          usage,
+          content: [{ type: 'text', text: 'before answer' }],
+        },
+      },
+      {
+        type: 'user',
+        sessionId: 'session-window-read',
+        message: { role: 'user', content: [{ type: 'text', text: 'inside window' }] },
+      },
+      {
+        type: 'assistant',
+        sessionId: 'session-window-read',
+        uuid: 'uuid-inside',
+        timestamp: '2026-09-10T12:00:00.000Z',
+        message: {
+          id: 'msg-inside',
+          model: 'claude-sonnet-4-5',
+          usage: { ...usage, input_tokens: 200 },
+          content: [{ type: 'text', text: 'inside answer' }],
+        },
+      },
+    ])
+
+    const dateRange = {
+      start: new Date('2026-09-01T00:00:00.000Z'),
+      end: new Date('2026-09-12T00:00:00.000Z'),
+    }
+    const turns: ReaderTurn[] = []
+    for await (const turn of claudeReader.read(path, dateRange)) turns.push(turn)
+
+    expect(turns).toHaveLength(1)
+    expect(turns[0]!.nativeRecordId).toBe('msg-inside')
+    expect(turns[0]!.parts.map((p) => p.text)).toEqual(
+      expect.arrayContaining(['inside window', 'inside answer']),
+    )
+    expect(turns[0]!.parts.map((p) => p.text).join('\n')).not.toContain('before window')
+  })
+
+  // sliceCallsToWindow drops missing/malformed timestamps; the reader must
+  // do the same when dateRange is set, or positional pairing skews.
+  it('excludes untimestamped turns when dateRange is set (#216 date-range parity)', async () => {
+    const usage = {
+      input_tokens: 100,
+      output_tokens: 20,
+      cache_read_input_tokens: 0,
+      cache_creation_input_tokens: 0,
+    }
+    const path = writeTranscript([
+      {
+        type: 'user',
+        sessionId: 'session-no-ts',
+        message: { role: 'user', content: [{ type: 'text', text: 'untimestamped question' }] },
+      },
+      {
+        type: 'assistant',
+        sessionId: 'session-no-ts',
+        uuid: 'uuid-no-ts',
+        // no timestamp — loadClaudeCalls stamps epoch 0; sliceCallsToWindow drops it
+        message: {
+          model: 'claude-sonnet-4-5',
+          usage,
+          content: [{ type: 'text', text: 'untimestamped answer' }],
+        },
+      },
+      {
+        type: 'user',
+        sessionId: 'session-no-ts',
+        message: { role: 'user', content: [{ type: 'text', text: 'windowed question' }] },
+      },
+      {
+        type: 'assistant',
+        sessionId: 'session-no-ts',
+        uuid: 'uuid-windowed',
+        timestamp: '2026-09-10T12:00:00.000Z',
+        message: {
+          model: 'claude-sonnet-4-5',
+          usage: { ...usage, input_tokens: 200 },
+          content: [{ type: 'text', text: 'windowed answer' }],
+        },
+      },
+    ])
+
+    const dateRange = {
+      start: new Date('2026-09-01T00:00:00.000Z'),
+      end: new Date('2026-09-12T00:00:00.000Z'),
+    }
+    const turns: ReaderTurn[] = []
+    for await (const turn of claudeReader.read(path, dateRange)) turns.push(turn)
+
+    expect(turns).toHaveLength(1)
+    expect(turns[0]!.nativeRecordId).toBeUndefined()
+    const texts = turns[0]!.parts.map((p) => p.text)
+    expect(texts).toEqual(expect.arrayContaining(['windowed question', 'windowed answer']))
+    expect(texts.join('\n')).not.toContain('untimestamped')
+  })
+
+  it('leaves nativeRecordId unset when message.id is absent so positional pairing remains (#216 T2)', async () => {
+    const path = writeTranscript([
+      {
+        type: 'assistant',
+        sessionId: 'session-uuid-only',
+        uuid: 'uuid-only-asst',
+        timestamp: '2026-09-01T12:00:00.000Z',
+        message: {
+          model: 'claude-sonnet-4-5',
+          usage: {
+            input_tokens: 10,
+            output_tokens: 5,
+            cache_read_input_tokens: 0,
+            cache_creation_input_tokens: 0,
+          },
+          content: [{ type: 'text', text: 'uuid-keyed answer' }],
+        },
+      },
+    ])
+
+    const turns = await readTurns(path)
+    expect(turns).toHaveLength(1)
+    // uuid alone is not a pairing key: loadClaudeCalls only stamps turnId from
+    // message.id, and an orphan nativeRecordId would block positional pairing.
+    expect(turns[0]!.nativeRecordId).toBeUndefined()
   })
 
   it('keeps turns separate when adjacent assistant lines have differing native message IDs', async () => {

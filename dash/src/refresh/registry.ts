@@ -17,7 +17,7 @@ export { getAllProviders }
 export type { SessionSource }
 
 const DEFAULT_PARSER_CONTRACT_VERSION = '1'
-const CLAUDE_PARSER_CONTRACT_VERSION = '3'
+const CLAUDE_PARSER_CONTRACT_VERSION = '4'
 
 const GEMINI_EXCLUSION_REASON =
   'Gemini represents chat history and model usage, not a coding harness. It must not be a harness id or rollup filter.'

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
@@ -361,13 +361,24 @@ async function ingestUnit(
     sourceKey: unit.sourceKey,
   }))
   if (loaded.records.length > 0 || unit.envelopes.length === 0) return loaded
-  const fallback = await ingest([descriptor.harnessId], () =>
-    unit.envelopes.map((envelope) => ({
-      ...envelope.call,
-      provider: descriptor.harnessId,
-    })),
-  )
-  return fallback
+
+  const remappedCalls = unit.envelopes.map((envelope) => ({
+    ...envelope.call,
+    provider: descriptor.harnessId,
+  }))
+  // When the source file is on disk, keep ProviderLoad so the content reader
+  // still runs. A bare call array is only for unreadable/missing paths — that
+  // path recovers counters but strips parts (#216).
+  if (existsSync(unit.source.path)) {
+    return await ingest([descriptor.harnessId], () => ({
+      calls: remappedCalls,
+      filePath: unit.source.path,
+      dateRange,
+      harnessId: descriptor.harnessId,
+      sourceKey: unit.sourceKey,
+    }))
+  }
+  return await ingest([descriptor.harnessId], () => remappedCalls)
 }
 
 function failedRow(harnessId: string, error: Error, fallback = 'harness job failed'): HarnessJobRow {
