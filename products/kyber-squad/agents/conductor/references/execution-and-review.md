@@ -38,6 +38,15 @@ Invoke `task-reviewer` after each worker completion with the mode, pass number, 
 
 The reviewer requires matching Test-contract and RED/GREEN evidence only in test-first mode. In standard mode it requires the approved verification contract and current evidence.
 
+## Iteration circuit-breaker and loop detection
+
+The conductor enforces an iteration circuit-breaker to halt thrashing test-fix loops across rework cycles:
+
+- **Cluster-level retry limit:** Maximum of 2 rework dispatches for the same failing fixture or subsystem failure cluster across the run. If a failure cluster persists across 2 rework attempts, the circuit-breaker trips on that cluster.
+- **Oscillation detection:** If a fix for Failure Cluster A causes regression in Failure Cluster B, and a fix for B regresses A (or rework alternates between failure signatures), the loop detector trips immediately.
+- **Circuit-breaker escalation:** When the circuit-breaker trips—or when a worker returns `STATUS: ESCALATION`—halt rework for that task immediately. Do not dispatch further workers for that failure cluster. Record the escalation in the run's findings collection as `CIRCUIT_BREAKER_TRIGGER: <reason>` with the affected failure cluster, contradictory invariants, and blast radius.
+- **Architect mediation:** Tripped circuit-breakers must not be ignored or bypassed. When the queue drains to the findings collection, `architect` investigates the failure cluster, assesses whether coupled test fixtures assert conflicting invariants or legacy details, and authors an intake recommendation or Draft plan to resolve the architectural conflict.
+
 ## Findings and final council
 
 When the ready queue is empty and every task has left the ladder, drain a non-empty findings collection through `architect`. Any resulting Draft plan goes through its normal user approval gate before execution.

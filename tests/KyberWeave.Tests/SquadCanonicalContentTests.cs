@@ -282,6 +282,35 @@ public sealed class SquadCanonicalContentTests
     }
 
     [Fact]
+    public void LoadConductorDefinesIterationCircuitBreakerAndOscillationDetection()
+    {
+        string contract = ReadAgentContract("conductor");
+
+        Assert.Contains("circuit-breaker", contract, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("loop detection", contract, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("failure cluster", contract, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("oscillation", contract, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData("csharp-dev")]
+    [InlineData("test-dev")]
+    [InlineData("github-devops")]
+    public void LoadDeveloperAgentsDefineJevCheckpointsAndIterationCircuitBreaker(string agentName)
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadAgent agent = Assert.Single(source.Agents, a => a.Name == agentName);
+
+        Assert.Contains("JEV", agent.InstructionBody, StringComparison.Ordinal);
+        Assert.Contains("circuit breaker", agent.InstructionBody, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("STATUS: ESCALATION", agent.InstructionBody, StringComparison.Ordinal);
+        Assert.Contains("CIRCUIT_BREAKER_TRIGGER", agent.InstructionBody, StringComparison.Ordinal);
+        Assert.Contains("FAILURE_CLUSTER", agent.InstructionBody, StringComparison.Ordinal);
+        Assert.Contains("CONTRADICTORY_INVARIANTS", agent.InstructionBody, StringComparison.Ordinal);
+        Assert.Contains("BLAST_RADIUS", agent.InstructionBody, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void LoadProductOwnerIsHeadlessAndReturnsStructuredPhaseAndGapMarkers()
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);

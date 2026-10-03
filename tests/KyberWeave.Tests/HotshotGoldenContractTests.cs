@@ -42,8 +42,11 @@ public sealed partial class HotshotGoldenContractTests
         "architect",
         "code-reviewer",      // in-process council when the harness gives subagents no agent tool (ADR 0025)
         "conductor",
+        "csharp-dev",         // JEV checkpoints and iteration circuit-breaker (issue #249)
+        "github-devops",      // JEV checkpoints and iteration circuit-breaker (issue #249)
         "product-owner",
-        "task-reviewer"
+        "task-reviewer",
+        "test-dev"            // JEV checkpoints and iteration circuit-breaker (issue #249)
     ];
 
     /// <summary>

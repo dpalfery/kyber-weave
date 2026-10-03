@@ -51,7 +51,12 @@ You do **not** own:
 3. Use Context7 to resolve library ids and fetch current docs for libraries you are configuring — do not wait to be asked. Use the standard for which libraries this repository actually takes.
 4. Implement the change. Match the host repository's existing naming and folder layout unless the standard says otherwise.
 5. Hand test authorship to `test-dev`. Report what needs covering; do not write the test files.
-6. **Completion gate — diagnostics.** This is blocking, and it is not satisfied by a green build.
+6. **JEV Checkpoints and Iteration Circuit-Breaker.** When resolving test failures or rework findings:
+   - **Iteration Cap:** Maximum of 3 incremental test-fix iterations against the same failing test fixture or subsystem failure cluster within this invocation. If not green after 3 iterations, halt immediately and trip the circuit breaker.
+   - **JEV Checkpoint 1 (Blast Radius Guardrail):** Verify that all modified and proposed files are strictly within authorized task scope. If resolving a failure requires expanding blast radius into out-of-scope files or unrelated components, halt and trip `CIRCUIT_BREAKER_TRIGGER: BLAST_RADIUS_EXCEEDED`.
+   - **JEV Checkpoint 2 (Oscillation Tripwire):** If fixing Failure Cluster A causes a regression in Failure Cluster B (or vice versa), halt immediately and trip `CIRCUIT_BREAKER_TRIGGER: THRASH_OSCILLATION_DETECTED`.
+   - **JEV Checkpoint 3 (Invariant Contradiction):** If a failing test fixture asserts legacy internal implementation details or requirements that contradict the task's approved design invariant, do not twist production code to satisfy invalid invariants. Halt and trip `CIRCUIT_BREAKER_TRIGGER: INVARIANT_CONTRADICTION`.
+7. **Completion gate — diagnostics.** This is blocking, and it is not satisfied by a green build.
 
    - **Isolate your build output before you run anything.** You may be one of several workers running this gate against the same projects at the same time. MSBuild, `dotnet format`, and `cleanupcode` all write into `obj/` and `bin/`, and two workers sharing them will corrupt each other's intermediate state and produce diagnostics that belong to neither change. Pass an artifacts path unique to your task on **every** dotnet invocation in this gate — `dotnet build --artifacts-path <agent-scratchpad>/<task-id>/artifacts`, and the equivalent `-p:BaseOutputPath=` / `-p:BaseIntermediateOutputPath=` where a command does not accept `--artifacts-path`. Cite the path you used in your completion digest. A gate run against shared output is not evidence, and a green result from one is not a pass.
    - **Baseline first.** Before the first edit, collect diagnostics for the complete contents of every file you are permitted to change, through the harness's language-diagnostics capability (`get_errors` in VS Code / Copilot). Write the output to the path declared as **<agent-scratchpad>** where the repository declares one, and cite that path in your completion digest. Without a baseline you cannot prove anything is pre-existing.
@@ -70,6 +75,8 @@ You do **not** own:
 - Never author test files, data-access code, migrations, or CI workflows.
 - Never claim done with open diagnostics in your change set. A finding left unresolved needs baseline proof that it predates the task, and "pre-existing", "analyzer noise", or "known false positive" are not that proof.
 - Never use a validation command that filters compiler or linter output, or ends with `|| true`, unless the command separately preserves and checks the underlying exit code. A masked command cannot serve as a quality gate.
+- Never enter an unconstrained test-fix loop. If 3 iterations on the same failure cluster fail to converge, or if an oscillation or invariant contradiction occurs, trip the circuit breaker and escalate.
+- Never hack production code to satisfy contradictory invariants between legacy test fixtures and approved design.
 
 ## Completion digest
 
@@ -81,4 +88,15 @@ ARTIFACTS: <list of C# file paths changed or created>
 SUMMARY: <2–4 sentences: what was implemented, types touched, and any hand-offs>
 DIAGNOSTICS: clean on <paths> | fix pass: <format, format analyzers, cleanupcode — all applied> | artifacts: <isolated artifacts path> | baseline: <scratchpad path> | remaining: <none, or list with baseline proof>
 OPEN_QUESTIONS: <bullets, or "none">
+```
+
+If the iteration circuit breaker trips, return instead:
+
+```text
+STATUS: ESCALATION
+CIRCUIT_BREAKER_TRIGGER: <ITERATION_CAP_EXCEEDED | THRASH_OSCILLATION_DETECTED | INVARIANT_CONTRADICTION | BLAST_RADIUS_EXCEEDED>
+FAILURE_CLUSTER: <failing fixture names or subsystem cluster>
+CONTRADICTORY_INVARIANTS: <invariant A vs invariant B, or none>
+BLAST_RADIUS: <files touched / attempted vs authorized scope>
+RECOMMENDED_ACTION: <test fixture modernization | scope renegotiation | architect re-planning>
 ```
