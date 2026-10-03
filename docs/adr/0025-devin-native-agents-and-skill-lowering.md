@@ -4,7 +4,7 @@ title: Native Devin Agents, Pinned Models, and In-Process Delegation
 doc-type: adr
 status: current
 owner: dpalfery
-last-reviewed: 2026-09-27
+last-reviewed: 2026-10-03
 ---
 
 # ADR 0025: Native Devin Agents, Pinned Models, and In-Process Delegation
@@ -191,5 +191,8 @@ today". Cloud also offers fewer models than Desktop.
 - [ADR 0021](0021-zcode-command-lowering-and-resource-relocation.md) — MCP by enumerated tool
   name, and a doctor check paired with a renderer decision
 - [ADR 0022](0022-antigravity-native-agents.md) — the `.agents/` tree Devin also reads
+- [ADR 0028](0028-devin-target-scoped-authoring-capability-profiles.md) — target-scoped
+  authoring profiles that change which capability Devin resolves for two roles, without
+  changing decisions 3 and 4 here
 - [Kyber-Squad architecture](../kyber-squad/architecture.md) — §8 rendering
 - [Kyber-Squad onboarding](../kyber-squad/onboarding.md) — Devin notes
