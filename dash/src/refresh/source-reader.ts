@@ -76,15 +76,23 @@ export type NativeUnit = {
  */
 export type NativeEmptyReason = 'window_filtered' | 'no_recordable_events'
 
+/**
+ * Providers whose `createSessionParser` applies `dateRange` before yield.
+ * Only these may be probed without a coverage window when classifying empty
+ * units; other empty sources are already unfiltered at yield time.
+ */
+const PROVIDERS_DATE_FILTER_BEFORE_YIELD = new Set(['cursor'])
+
 /** Result of parsing one native source for refresh. */
 export type ParsedCallBatch = {
   calls: readonly ParsedProviderCall[]
   /**
    * Recordable calls the provider discarded solely for predating `dateRange`.
-   * Used when the parser applies the window itself (Cursor) so empty-unit
-   * classification can still say `window_filtered`.
+   * `number` when known (including 0); `null` when a date-filtering provider's
+   * probe failed (unknown — do not invent a reason); omitted when the provider
+   * does not date-filter before yield (N/A).
    */
-  preWindowRecordable?: number
+  preWindowRecordable?: number | null
 }
 
 export type NativeClassifierEvidence = {
@@ -259,7 +267,7 @@ async function readNativeUnit(
     calls.length,
     envelopes.length,
     problems.length,
-    batch.preWindowRecordable ?? 0,
+    batch.preWindowRecordable,
   )
   return { harnessId, sourceKey, source, status, revision, envelopes, problems, ...(emptyReason ? { emptyReason } : {}) }
 }
@@ -275,10 +283,18 @@ function emptyReasonFor(
   parsed: number,
   enveloped: number,
   problems: number,
-  preWindowRecordable = 0,
+  preWindowRecordable?: number | null,
 ): NativeEmptyReason | undefined {
   if (enveloped > 0 || problems > 0) return undefined
-  return parsed + preWindowRecordable === 0 ? 'no_recordable_events' : 'window_filtered'
+  if (parsed > 0) return 'window_filtered'
+  // Probe failed on a date-filtering provider: leave reason unset rather than
+  // inventing no_recordable_events from an unavailable count.
+  if (preWindowRecordable === null) return undefined
+  if (typeof preWindowRecordable === 'number') {
+    return preWindowRecordable > 0 ? 'window_filtered' : 'no_recordable_events'
+  }
+  // Omitted: provider does not pre-filter; an empty yield means an empty source.
+  return 'no_recordable_events'
 }
 
 function changeStatus(
@@ -321,17 +337,27 @@ async function parseSourceCalls(
     return { calls, preWindowRecordable: preWindowRecordableCount }
   }
 
-  // Cursor (and any parser that applies dateRange before yield) returns no
-  // calls here even when the source holds only pre-window recordable work.
-  // Probe without the coverage window and count those rows.
-  const unfiltered = await collectParsedCalls(provider, source, undefined)
-  const startMs = dateRange.start.getTime()
-  let preWindowRecordable = 0
-  for (const call of unfiltered.calls) {
-    const timestamp = Date.parse(call.timestamp)
-    if (Number.isFinite(timestamp) && timestamp < startMs) preWindowRecordable += 1
+  // Only providers that apply dateRange before yield need an unfiltered probe.
+  // Codex/Copilot/Gemini (etc.) already yield every recordable call; probing
+  // them would repeat a full parse on every empty source.
+  if (!PROVIDERS_DATE_FILTER_BEFORE_YIELD.has(provider.name)) {
+    return { calls }
   }
-  return { calls, preWindowRecordable }
+
+  try {
+    const unfiltered = await collectParsedCalls(provider, source, undefined)
+    const startMs = dateRange.start.getTime()
+    let preWindowRecordable = 0
+    for (const call of unfiltered.calls) {
+      const timestamp = Date.parse(call.timestamp)
+      if (Number.isFinite(timestamp) && timestamp < startMs) preWindowRecordable += 1
+    }
+    return { calls, preWindowRecordable }
+  } catch {
+    // Probe is classification-only; a locked DB or parser throw must not drop
+    // the unit. Leave the count unknown.
+    return { calls, preWindowRecordable: null }
+  }
 }
 
 async function warmClaudeSpecialPath(dependencies: SourceReaderDependencies): Promise<void> {
