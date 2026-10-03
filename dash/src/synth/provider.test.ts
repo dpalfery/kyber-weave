@@ -599,81 +599,6 @@ describe('D5 reader integration', () => {
   // drops them, but a reader that kept them would still yield the early turn.
   // Without message.id, positional pairing then attaches that text to the
   // sole in-window call.
-  // Kilo #276: one message.id used to set hasNativeIds for the whole file, so
-  // an id-less sibling call resolved to undefined and synthesized empty history.
-  it('keeps conversation history on an id-less Claude turn when a sibling turn has message.id (#276 mixed file)', async () => {
-    const usageId = {
-      input_tokens: 100,
-      output_tokens: 20,
-      cache_read_input_tokens: 0,
-      cache_creation_input_tokens: 0,
-    }
-    const usageIdless = {
-      input_tokens: 200,
-      output_tokens: 40,
-      cache_read_input_tokens: 10,
-      cache_creation_input_tokens: 5,
-    }
-    const root = mkdtempSync(join(tmpdir(), 'kyber-desktop-mixed-ids-276-'))
-    tempRoots.push(root)
-    const filePath = join(root, 'session.jsonl')
-    writeFileSync(
-      filePath,
-      [
-        JSON.stringify({
-          type: 'user',
-          sessionId: 'desk-mixed-276',
-          message: { role: 'user', content: [{ type: 'text', text: 'id-bearing question' }] },
-        }),
-        JSON.stringify({
-          type: 'assistant',
-          sessionId: 'desk-mixed-276',
-          uuid: 'desk-mixed-id-asst',
-          timestamp: '2026-09-10T12:00:00.000Z',
-          message: {
-            id: 'msg-mixed-id',
-            model: 'claude-sonnet-4-5',
-            usage: usageId,
-            content: [{ type: 'text', text: 'id-bearing answer' }],
-          },
-        }),
-        JSON.stringify({
-          type: 'user',
-          sessionId: 'desk-mixed-276',
-          message: { role: 'user', content: [{ type: 'text', text: 'id-less question' }] },
-        }),
-        JSON.stringify({
-          type: 'assistant',
-          sessionId: 'desk-mixed-276',
-          uuid: 'desk-mixed-idless-asst',
-          timestamp: '2026-09-10T12:02:00.000Z',
-          message: {
-            model: 'claude-sonnet-4-5',
-            usage: usageIdless,
-            content: [{ type: 'text', text: 'id-less answer' }],
-          },
-        }),
-      ].join('\n') + '\n',
-    )
-
-    const result = await ingestProviders(['claude-desktop'], () => ({
-      calls: [],
-      filePath,
-      harnessId: 'claude-desktop',
-      sourceKey: 'claude-desktop:desk-mixed-276',
-    }))
-
-    expect(result.problems).toEqual([])
-    const invokes = result.records.filter((r) => r.op === 'llm.invoke')
-    expect(invokes).toHaveLength(2)
-    const idBearing = invokes.find((r) => (r.content.conversation_history ?? '').includes('id-bearing question'))
-    const idLess = invokes.find((r) => (r.content.conversation_history ?? '').includes('id-less question'))
-    expect(idBearing?.content.conversation_history).toContain('id-bearing answer')
-    expect(idLess).toBeDefined()
-    expect(idLess?.content.conversation_history).toContain('id-less answer')
-    expect(idLess?.parts?.length).toBeGreaterThan(0)
-  })
-
   it('does not attach untimestamped early-turn text to a windowed call without message.id (#216)', async () => {
     const usage = {
       input_tokens: 100,
@@ -757,6 +682,81 @@ describe('D5 reader integration', () => {
     expect(history).toContain('windowed answer')
     expect(history).not.toContain('untimestamped early question')
     expect(history).not.toContain('untimestamped early answer')
+  })
+
+  // Kilo #276: one message.id used to set hasNativeIds for the whole file, so
+  // an id-less sibling call resolved to undefined and synthesized empty history.
+  it('keeps conversation history on an id-less Claude turn when a sibling turn has message.id (#276 mixed file)', async () => {
+    const usageId = {
+      input_tokens: 100,
+      output_tokens: 20,
+      cache_read_input_tokens: 0,
+      cache_creation_input_tokens: 0,
+    }
+    const usageIdless = {
+      input_tokens: 200,
+      output_tokens: 40,
+      cache_read_input_tokens: 10,
+      cache_creation_input_tokens: 5,
+    }
+    const root = mkdtempSync(join(tmpdir(), 'kyber-desktop-mixed-ids-276-'))
+    tempRoots.push(root)
+    const filePath = join(root, 'session.jsonl')
+    writeFileSync(
+      filePath,
+      [
+        JSON.stringify({
+          type: 'user',
+          sessionId: 'desk-mixed-276',
+          message: { role: 'user', content: [{ type: 'text', text: 'id-bearing question' }] },
+        }),
+        JSON.stringify({
+          type: 'assistant',
+          sessionId: 'desk-mixed-276',
+          uuid: 'desk-mixed-id-asst',
+          timestamp: '2026-09-10T12:00:00.000Z',
+          message: {
+            id: 'msg-mixed-id',
+            model: 'claude-sonnet-4-5',
+            usage: usageId,
+            content: [{ type: 'text', text: 'id-bearing answer' }],
+          },
+        }),
+        JSON.stringify({
+          type: 'user',
+          sessionId: 'desk-mixed-276',
+          message: { role: 'user', content: [{ type: 'text', text: 'id-less question' }] },
+        }),
+        JSON.stringify({
+          type: 'assistant',
+          sessionId: 'desk-mixed-276',
+          uuid: 'desk-mixed-idless-asst',
+          timestamp: '2026-09-10T12:02:00.000Z',
+          message: {
+            model: 'claude-sonnet-4-5',
+            usage: usageIdless,
+            content: [{ type: 'text', text: 'id-less answer' }],
+          },
+        }),
+      ].join('\n') + '\n',
+    )
+
+    const result = await ingestProviders(['claude-desktop'], () => ({
+      calls: [],
+      filePath,
+      harnessId: 'claude-desktop',
+      sourceKey: 'claude-desktop:desk-mixed-276',
+    }))
+
+    expect(result.problems).toEqual([])
+    const invokes = result.records.filter((r) => r.op === 'llm.invoke')
+    expect(invokes).toHaveLength(2)
+    const idBearing = invokes.find((r) => (r.content.conversation_history ?? '').includes('id-bearing question'))
+    const idLess = invokes.find((r) => (r.content.conversation_history ?? '').includes('id-less question'))
+    expect(idBearing?.content.conversation_history).toContain('id-bearing answer')
+    expect(idLess).toBeDefined()
+    expect(idLess?.content.conversation_history).toContain('id-less answer')
+    expect(idLess?.parts?.length).toBeGreaterThan(0)
   })
 })
 
