@@ -1,5 +1,5 @@
 import { createRequire } from 'node:module'
-import { copyFileSync, existsSync, mkdirSync, readdirSync, renameSync, statSync, unlinkSync, utimesSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs'
 import { createHash, randomBytes } from 'node:crypto'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -257,10 +257,25 @@ function unlinkQuietly(path: string): void {
   }
 }
 
-let copyFileImpl = copyFileSync
+/**
+ * `copyFile` uses the copyfile(2) syscall, which returns EPERM on some
+ * macOS container paths (Warp's Application Support sqlite). A read/write
+ * fallback still works when the process can read the bytes.
+ */
+export function copyFileBestEffort(sourcePath: string, destinationPath: string): void {
+  try {
+    copyFileSync(sourcePath, destinationPath)
+  } catch (err) {
+    const code = errorCode(err)
+    if (code !== 'EPERM' && code !== 'EACCES') throw err
+    writeFileSync(destinationPath, readFileSync(sourcePath))
+  }
+}
 
-export function setSqliteCopyFileForTest(fn: typeof copyFileSync | null): void {
-  copyFileImpl = fn ?? copyFileSync
+let copyFileImpl: (sourcePath: string, destinationPath: string) => void = copyFileBestEffort
+
+export function setSqliteCopyFileForTest(fn: typeof copyFileSync | ((sourcePath: string, destinationPath: string) => void) | null): void {
+  copyFileImpl = (fn as ((sourcePath: string, destinationPath: string) => void) | null) ?? copyFileBestEffort
 }
 
 function copyOptionalFile(sourcePath: string, destinationPath: string): boolean {

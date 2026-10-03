@@ -6,7 +6,7 @@
 // mkdir's the parent, and a typo that left a new canon.db behind would be a
 // worse failure than the message.
 
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -137,7 +137,9 @@ describe('kyberdash report exit codes (R11.12)', () => {
   it('exits 1 when the store cannot be read', async () => {
     const home = await makeHome()
     const db = join(home, 'not-a-store')
-    await writeFile(db, 'this is not sqlite')
+    // node:sqlite accepts garbage bytes as an empty database; a directory
+    // is a readable path that still cannot be opened as a store.
+    await mkdir(db)
     const res = runCli(['report', '--db', db], home)
     expect(res.status, res.stderr).toBe(1)
     expect(res.stderr).toContain(db)
