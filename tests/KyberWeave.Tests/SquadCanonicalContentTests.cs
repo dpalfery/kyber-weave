@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
 using Xunit;
@@ -10,6 +11,30 @@ public sealed class SquadCanonicalContentTests
     private const string MigrationSchema = "kyber-squad.migration/v1";
     private const string MigrationSourceCommit = "677c3a876ba9c62f1083608596b238c9deaff167";
     private const string DefaultOrchestrationTrigger = "default entry point";
+
+    /// <summary>
+    /// Closed <c>CIRCUIT_BREAKER_TRIGGER</c> vocabulary. Presence checks cannot
+    /// reject a fifth token, so harvested trigger lines must equal this set.
+    /// </summary>
+    private static readonly string[] CircuitBreakerTriggerTokens =
+    [
+        "BLAST_RADIUS_EXCEEDED",
+        "INVARIANT_CONTRADICTION",
+        "ITERATION_CAP_EXCEEDED",
+        "THRASH_OSCILLATION_DETECTED",
+    ];
+
+    private static readonly Regex CircuitBreakerTriggerEnumeration = new(
+        @"CIRCUIT_BREAKER_TRIGGER:\s*<(?<list>[^>]+)>",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    private static readonly Regex CircuitBreakerTriggerSingleton = new(
+        @"CIRCUIT_BREAKER_TRIGGER:\s*`?(?<token>[A-Z][A-Z0-9_]*)`?(?!\s*[|<])",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    private static readonly Regex CircuitBreakerTriggerToken = new(
+        @"[A-Z][A-Z0-9_]*",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
     private static readonly string[] RetiredAgentIdentities =
     [
@@ -282,6 +307,50 @@ public sealed class SquadCanonicalContentTests
     }
 
     [Fact]
+    public void LoadConductorDefinesIterationCircuitBreakerAndOscillationDetection()
+    {
+        string contract = ReadAgentContract("conductor");
+
+        Assert.Contains("circuit-breaker", contract, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("loop detection", contract, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("failure cluster", contract, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("oscillation", contract, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Maximum of 2 rework dispatches", contract, StringComparison.Ordinal);
+        Assert.Contains("ITERATION_CAP_EXCEEDED", contract, StringComparison.Ordinal);
+        Assert.Contains("THRASH_OSCILLATION_DETECTED", contract, StringComparison.Ordinal);
+        Assert.Contains("INVARIANT_CONTRADICTION", contract, StringComparison.Ordinal);
+        Assert.Contains("BLAST_RADIUS_EXCEEDED", contract, StringComparison.Ordinal);
+        Assert.Contains("ESCALATION: circuit-breaker", contract, StringComparison.Ordinal);
+        Assert.Contains("RECOMMENDED_ACTION", contract, StringComparison.Ordinal);
+        AssertClosedCircuitBreakerTriggerSet(contract);
+    }
+
+    [Theory]
+    [InlineData("csharp-dev")]
+    [InlineData("test-dev")]
+    [InlineData("github-devops")]
+    public void LoadDeveloperAgentsDefineJevCheckpointsAndIterationCircuitBreaker(string agentName)
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadAgent agent = Assert.Single(source.Agents, a => a.Name == agentName);
+
+        Assert.Contains("Maximum of 3 incremental", agent.InstructionBody, StringComparison.Ordinal);
+        Assert.Contains("JEV", agent.InstructionBody, StringComparison.Ordinal);
+        Assert.Contains("circuit breaker", agent.InstructionBody, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("STATUS: ESCALATION", agent.InstructionBody, StringComparison.Ordinal);
+        Assert.Contains("CIRCUIT_BREAKER_TRIGGER", agent.InstructionBody, StringComparison.Ordinal);
+        Assert.Contains("ITERATION_CAP_EXCEEDED", agent.InstructionBody, StringComparison.Ordinal);
+        Assert.Contains("THRASH_OSCILLATION_DETECTED", agent.InstructionBody, StringComparison.Ordinal);
+        Assert.Contains("INVARIANT_CONTRADICTION", agent.InstructionBody, StringComparison.Ordinal);
+        Assert.Contains("BLAST_RADIUS_EXCEEDED", agent.InstructionBody, StringComparison.Ordinal);
+        Assert.Contains("FAILURE_CLUSTER", agent.InstructionBody, StringComparison.Ordinal);
+        Assert.Contains("CONTRADICTORY_INVARIANTS", agent.InstructionBody, StringComparison.Ordinal);
+        Assert.Contains("BLAST_RADIUS", agent.InstructionBody, StringComparison.Ordinal);
+        Assert.Contains("RECOMMENDED_ACTION", agent.InstructionBody, StringComparison.Ordinal);
+        AssertClosedCircuitBreakerTriggerSet(agent.InstructionBody);
+    }
+
+    [Fact]
     public void LoadProductOwnerIsHeadlessAndReturnsStructuredPhaseAndGapMarkers()
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
@@ -378,6 +447,20 @@ public sealed class SquadCanonicalContentTests
     private static bool IsVersionedIdentity(string name) =>
         name.EndsWith("-v2", StringComparison.Ordinal) ||
         name.EndsWith("-v3", StringComparison.Ordinal);
+
+    private static void AssertClosedCircuitBreakerTriggerSet(string contract)
+    {
+        string[] harvested = CircuitBreakerTriggerEnumeration.Matches(contract)
+            .SelectMany(match => CircuitBreakerTriggerToken.Matches(match.Groups["list"].Value)
+                .Select(token => token.Value))
+            .Concat(CircuitBreakerTriggerSingleton.Matches(contract)
+                .Select(match => match.Groups["token"].Value))
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.Equal(CircuitBreakerTriggerTokens, harvested);
+    }
 
     private static string ReadAgentContract(string name)
     {

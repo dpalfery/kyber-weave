@@ -5,7 +5,7 @@ doc-type: onboarding
 component: KyberSquad
 source-root: src/KyberWeave.Core/Squad
 owner: dpalfery
-last-reviewed: 2026-09-30
+last-reviewed: 2026-10-03
 status: current
 decided-by:
   - adr/0019-pi-native-subagents-and-primary-lowering
@@ -498,6 +498,19 @@ Use `pr-review-fix-comments` when you prefer step-by-step approval for each fix.
 
 ---
 
+## Delivery circuit-breaker
+
+Deployed `conductor`, `csharp-dev`, `test-dev`, and `github-devops` agents stop
+unbounded test-fix loops: 3 incremental fixes per worker invocation, 2 conductor
+rework dispatches per failure cluster per run, A→B→A oscillation detection, and
+escalation through `STATUS: ESCALATION` / `ESCALATION: circuit-breaker`. Caps,
+cluster identity, JEV checkpoints, and the closed trigger set are in
+[architecture §9](architecture.md#9-conductor-execution-circuit-breaker) and the
+[requirements harvest](requirements.md#conductor-execution-circuit-breaker).
+Kyber-Squad has no separate runbook; this onboarding page is the operator pointer.
+
+---
+
 ## Packaging (`squad pack`)
 
 `kyber-weave squad pack` is a maintainer-only command for building release archives. It requires execution from the root of the Kyber-Weave repository containing `KyberWeave.sln` and `products/kyber-squad/squad.yml`:
@@ -551,7 +564,7 @@ leaves them untouched; a human will refresh them after a fresh Kyber-Weave relea
 
 ## Related
 
-- [Kyber-Squad architecture](architecture.md) — transaction engine, AgentIR, lowering, and state model
-- [Requirements and degradation contract](requirements.md) — KS-001 through KS-008 specifications
+- [Kyber-Squad architecture](architecture.md) — transaction engine, AgentIR, lowering, state model, and conductor execution circuit-breaker
+- [Requirements and degradation contract](requirements.md) — KS-001 through KS-008 specifications and the circuit-breaker harvest
 - [Configuration](../configuration.md) — configuring squad settings in `.kyber-weave/kyber-weave.yml`
 - [Distribution and release flow](../distribution.md) — release packaging and artifact verification
