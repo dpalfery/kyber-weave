@@ -8,7 +8,7 @@ import { recordValidationProblems } from '../canon/adapters/quarantine.js'
 // refresh and the live OTLP collector must run the ONE full projection over
 // the canonical store (plan T20 → T21), or the two ingress paths drift.
 import { projectCanonicalStore } from '../canon/projection.js'
-import { CONTENT_RETENTION_DAYS, purgeExpiredContent } from '../canon/retention.js'
+import { contentRetentionFloorMs, purgeExpiredContent } from '../canon/retention.js'
 import type { CoverageInterval, RecordProvenance, SourceCheckpoint } from '../canon/source-state.js'
 import { checkpointIsReusable, uncoveredIntervals } from '../canon/source-state.js'
 import type { RefreshTrigger } from '../canon/refresh-run.js'
@@ -228,18 +228,29 @@ async function runHarnessJob(context: JobContext): Promise<HarnessJobRow> {
     status: 'unavailable',
   }
 
+  const coverageBySourceKey = new Map<string, { dateRange: DateRange; coveredFromUtc: string }>()
+  let anyVersionInvalidated = false
+  for (const checkpoint of store.listSourceCheckpoints(descriptor.harnessId)) {
+    coverageBySourceKey.set(
+      checkpoint.sourceKey,
+      coverageForVersionRepair(descriptor, checkpoint, context.dateRange, context.coveredFromUtc),
+    )
+    if (checkpoint.parserContractVersion !== descriptor.parserContractVersion) {
+      anyVersionInvalidated = true
+    }
+  }
+
   let units: NativeUnit[]
   try {
     units = await context.iterate(descriptor.harnessId, {
       providers: context.providers,
       dateRange: context.dateRange,
-      dateRangeFor: (sourceKey) =>
-        coverageForVersionRepair(
-          descriptor,
-          store.getSourceCheckpoint(descriptor.harnessId, sourceKey),
-          context.dateRange,
-          context.coveredFromUtc,
-        ).dateRange,
+      ...(anyVersionInvalidated
+        ? {
+            dateRangeFor: (sourceKey: string) =>
+              coverageBySourceKey.get(sourceKey)?.dateRange ?? context.dateRange,
+          }
+        : {}),
       previousFingerprints: previousFingerprintsFor(
         store,
         descriptor,
@@ -281,26 +292,27 @@ async function runHarnessJob(context: JobContext): Promise<HarnessJobRow> {
     row.changed += 1
 
     // Parser-contract repair (#216): the default `--history-weeks` window can
-    // be narrower than the span already stored on the checkpoint. The first
-    // read already used coverageForVersionRepair via dateRangeFor — do not
-    // parse again. The claimed checkpoint floor is preserved; the slice is
-    // clamped to the 14-day content-retention floor so this run does not
-    // ingest parts that purgeExpiredContent will empty on the way out.
+    // be narrower than the span already stored on the checkpoint. Coverage
+    // was decided once before iterate (coverageBySourceKey) and fed to the
+    // first read via dateRangeFor — do not parse again. The claimed
+    // checkpoint floor is preserved; the slice is clamped to the 14-day
+    // content-retention floor so this run does not ingest parts that
+    // purgeExpiredContent will empty on the way out.
     const previous = store.getSourceCheckpoint(descriptor.harnessId, unit.sourceKey)
-    const repaired = coverageForVersionRepair(
-      descriptor,
-      previous,
-      context.dateRange,
-      context.coveredFromUtc,
-    )
-    const activeUnit = unit
+    const repaired = coverageBySourceKey.get(unit.sourceKey)
+      ?? coverageForVersionRepair(
+        descriptor,
+        previous,
+        context.dateRange,
+        context.coveredFromUtc,
+      )
     const activeDateRange = repaired.dateRange
     const activeCoveredFromUtc = repaired.coveredFromUtc
 
-    row.problems += activeUnit.problems.length
-    for (const problem of activeUnit.problems) {
+    row.problems += unit.problems.length
+    for (const problem of unit.problems) {
       store.recordProblem({
-        spanId: `harness:${descriptor.harnessId}:${activeUnit.sourceKey}:${problem.code}`,
+        spanId: `harness:${descriptor.harnessId}:${unit.sourceKey}:${problem.code}`,
         harness: descriptor.harnessId,
         severity: 'error',
         code: problem.code,
@@ -309,11 +321,11 @@ async function runHarnessJob(context: JobContext): Promise<HarnessJobRow> {
       })
     }
 
-    const ingestResult = await ingestUnit(context.ingest, descriptor, activeUnit, activeDateRange)
+    const ingestResult = await ingestUnit(context.ingest, descriptor, unit, activeDateRange)
     for (const problem of ingestResult.problems) {
       store.recordProblem({
         ...problem,
-        spanId: `harness:${descriptor.harnessId}:${activeUnit.sourceKey}`,
+        spanId: `harness:${descriptor.harnessId}:${unit.sourceKey}`,
         harness: descriptor.harnessId,
         timestamp: context.importedAtUtc,
       })
@@ -332,21 +344,21 @@ async function runHarnessJob(context: JobContext): Promise<HarnessJobRow> {
       throughUtc: context.coveredThroughUtc,
     }
     const coverageRequest = {
-      revisionToken: activeUnit.revision?.token ?? previous?.revisionToken ?? 'unknown',
+      revisionToken: unit.revision?.token ?? previous?.revisionToken ?? 'unknown',
       parserContractVersion: descriptor.parserContractVersion,
     }
     const outgoing = recordsForUncoveredCommit(merged, store, previous, requested, coverageRequest)
     const created = outgoing.filter((record) => store.get(record.spanId) === undefined).length
     const updated = outgoing.length - created
-    const checkpoint = checkpointFor(descriptor, activeUnit, {
+    const checkpoint = checkpointFor(descriptor, unit, {
       coveredFromUtc: activeCoveredFromUtc,
       coveredThroughUtc: context.coveredThroughUtc,
       importedAtUtc: context.importedAtUtc,
       recordCount: (previous?.recordCount ?? 0) + created,
-      status: ingestResult.problems.length > 0 || activeUnit.problems.length > 0 ? 'partial' : 'ok',
-      emptyReason: activeUnit.emptyReason,
+      status: ingestResult.problems.length > 0 || unit.problems.length > 0 ? 'partial' : 'ok',
+      emptyReason: unit.emptyReason,
     })
-    const provenance = provenanceRows(outgoing, activeUnit, descriptor, context.importedAtUtc)
+    const provenance = provenanceRows(outgoing, unit, descriptor, context.importedAtUtc)
     try {
       await context.writer.enqueue({ records: outgoing, provenance, checkpoint })
       row.created += created
@@ -374,8 +386,6 @@ function jobStatus(row: HarnessJobRow, writerFailed: boolean): HarnessJobStatus 
   if (row.problems > 0) return 'partial'
   return 'ok'
 }
-
-const MS_PER_DAY = 24 * 60 * 60 * 1000
 
 /**
  * Decide the parser-contract repair slice before any file read.
@@ -409,7 +419,7 @@ function coverageForVersionRepair(
     return { dateRange: defaultRange, coveredFromUtc: defaultCoveredFrom }
   }
 
-  const retentionFloorMs = defaultRange.end.getTime() - CONTENT_RETENTION_DAYS * MS_PER_DAY
+  const retentionFloorMs = contentRetentionFloorMs(defaultRange.end)
   const repairStartMs = Math.max(claimedFloorMs, retentionFloorMs)
   if (repairStartMs >= defaultRange.start.getTime()) {
     return { dateRange: defaultRange, coveredFromUtc: previous.coveredFromUtc }

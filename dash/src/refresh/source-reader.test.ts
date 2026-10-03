@@ -313,12 +313,15 @@ describe('iterateNativeUnits', () => {
     const previous = fingerprint({ mtimeMs: 100, sizeBytes: 40 })
     const previousFingerprints = new Map([['pi:pi-1', previous]])
 
+    const dateRangeFor = vi.fn(() => range())
     const unchanged = await readHarness('pi', providers, {
       previousFingerprints,
       fingerprintFile: async () => previous,
+      dateRangeFor,
     })
     expect(unchanged[0]!.status).toBe('unchanged')
     expect(unchanged[0]!.envelopes).toEqual([])
+    expect(dateRangeFor).not.toHaveBeenCalled()
 
     const changed = await readHarness('pi', providers, {
       previousFingerprints,
