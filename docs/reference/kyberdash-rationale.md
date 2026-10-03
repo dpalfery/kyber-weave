@@ -59,7 +59,7 @@ count. Regression coverage: `dash/kyber/canon/tokens.test.ts`.
 
 ### R4.7 — Flat token validation and finite checks (Issue #227)
 
-When parsers read token counters from nested `tokens`/`usage` objects or flat fallbacks (e.g. KiloCode SQLite stores emitting `tokens_input`, `tokens_output`, etc.), unvalidated values can inject `NaN`, `Infinity`, or string types into token accounting. Nested and flat sources share one `finiteOrUndefined` check so non-finite numbers or string values are rejected as absent (yielding 0) rather than corrupting cost calculations, while preserving nested `tokens` and `usage` object precedence.
+When parsers read token counters from nested `tokens`/`usage` objects or flat fallbacks (e.g. KiloCode SQLite stores emitting `tokens_input`, `tokens_output`, etc.), unvalidated values can inject `NaN`, `Infinity`, or string types into token accounting. Nested and flat sources each pass through `finiteOrUndefined`, so a non-finite or string winner is rejected as absent and the next candidate (then 0) applies, rather than corrupting cost calculations. Nested `tokens` and `usage` still win when they are finite numbers.
 
 ## Cost attribution (Requirement 5)
 
