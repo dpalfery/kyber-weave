@@ -227,6 +227,27 @@ describe('Detector 1: dormant-tool-schema', () => {
     expect(findings[0]!.measurementClass).toBe('coverage-gap')
   })
 
+  it('merges measured toolDefinitions counts into residency already built from unmeasured records', () => {
+    const defText = JSON.stringify([{ name: 'unused_linter' }])
+    const turns = [1, 2, 3].map((n) =>
+      makeMockRecord({
+        spanId: `turn-${n}`,
+        op: 'llm.invoke',
+        parts: [{ part: 'tool_definitions', text: defText }],
+      }),
+    )
+
+    const findings = detectDormantToolSchema({
+      records: turns,
+      toolDefinitions: [{ name: 'unused_linter', tokens: 200 }],
+    })
+
+    expect(findings.length).toBe(1)
+    expect(findings[0]!.estimatedWasteTokens).toBe(600)
+    expect(findings[0]!.measurementClass).toBe('deterministic')
+    expect(findings[0]!.errorBar).toEqual({ lower: 480, upper: 720 })
+  })
+
   it('does NOT flag tool schema if tool is invoked in any turn', () => {
     const turn1 = makeMockRecord({
       spanId: 'turn-1',

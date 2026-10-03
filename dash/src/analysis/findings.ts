@@ -471,11 +471,18 @@ export function detectDormantToolSchema(input: DormantToolSchemaInput): Finding[
     }
   }
 
-  // 2. Also incorporate directly supplied toolDefinitions if provided
+  // 2. Also incorporate directly supplied toolDefinitions if provided.
+  // When records already seeded an unmeasured residency for the same name,
+  // still merge a positive supplied count (max with any existing measured
+  // value) so the deterministic waste path is not skipped as coverage-gap.
   if (input.toolDefinitions && input.toolDefinitions.length > 0) {
     const totalTurns = input.turnsCount ?? Math.max(turnRecords.length, 3)
     for (const def of input.toolDefinitions) {
-      if (!toolResidency.has(def.name)) {
+      const existing = toolResidency.get(def.name)
+      if (existing && def.tokens !== undefined && def.tokens > 0) {
+        existing.tokens = Math.max(existing.tokens ?? 0, def.tokens)
+      }
+      if (!existing) {
         const turnsList: { spanId: string; turnIndex: number }[] = []
         for (let i = 0; i < totalTurns; i++) {
           const spanId = turnRecords[i]?.spanId ?? `turn-span-${i}`
