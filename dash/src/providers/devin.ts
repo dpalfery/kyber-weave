@@ -174,6 +174,10 @@ const DEVIN_TRANSCRIPTS_SUBDIR = "transcripts";
 const DEVIN_SESSIONS_DB = "sessions.db";
 const DEVIN_EFFORT_TIERS = new Set(["xhigh", "high", "medium", "low"]);
 
+// One stderr note per process when the rate is missing; per-record repetition
+// would flood stderr on hosts that never configure it.
+let warnedMissingRate = false;
+
 function parseTranscript(raw: string): DevinAgentTrajectory | null {
   try {
     return JSON.parse(raw) as DevinAgentTrajectory;
@@ -479,7 +483,15 @@ class DevinSessionParser implements SessionParser {
     const project = getProjectName(this.source, session);
     const projectPath = getProjectPath(session);
     const costFactor = await getCostFactor();
-    if (costFactor === null) return;
+    // Issue #197: a missing acuUsdRate must not swallow the real record. The
+    // USD figure is then honestly unknown: costUSD 0 with costIsEstimated, and
+    // one stderr note — never a fabricated rate, never a silent omission.
+    if (costFactor === null && !warnedMissingRate) {
+      warnedMissingRate = true;
+      process.stderr.write(
+        'kyberdash: no devin.acuUsdRate configured in ~/.kyberdash/config.json — Devin token usage is ingested but costs show $0 (unknown), not a measured zero.\n',
+      );
+    }
 
     for (let index = 0; index < transcript.steps.length; index++) {
       const step = transcript.steps[index];
@@ -510,7 +522,8 @@ class DevinSessionParser implements SessionParser {
         cachedInputTokens: usage.cacheReadInputTokens,
         reasoningTokens: 0,
         webSearchRequests: 0,
-        costUSD: usage.committedAcuCost * costFactor,
+        costUSD: costFactor === null ? 0 : usage.committedAcuCost * costFactor,
+        ...(costFactor === null ? { costIsEstimated: true } : {}),
         tools,
         bashCommands: [],
         timestamp,
@@ -570,8 +583,9 @@ export function createDevinProvider(cliDir?: string): Provider {
     },
 
     async discoverSessions(): Promise<SessionSource[]> {
-      if ((await getCostFactor()) === null) return [];
-
+      // Issue #197: discovery no longer waits on devin.acuUsdRate. The rate
+      // prices an already-real record; gating discovery on it flattened every
+      // Devin session to "no sessions" on hosts without the rate configured.
       const entries = await readdir(transcriptsDir).catch(() => []);
       const metadata = getSessionMetadata();
       const sources: SessionSource[] = [];

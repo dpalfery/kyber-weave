@@ -100,15 +100,34 @@ describe('devin provider', () => {
     ])
   })
 
-  it('stays disabled until the Devin ACU rate is configured', async () => {
-    await writeTranscript('glimmer-platinum.json', {
+  it('discovers and parses transcripts without an ACU rate; cost stays honestly unknown', async () => {
+    // Issue #197: a missing devin.acuUsdRate must not disable the provider —
+    // tokens, tools, and sessions are real, only the USD figure is unknown.
+    const filePath = await writeTranscript('glimmer-platinum.json', {
       session_id: 'session-123',
-      steps: [{ step_id: 's1', metadata: { committed_acu_cost: 0.5 } }],
+      steps: [{
+        step_id: 2,
+        metadata: {
+          created_at: '2027-01-15T08:00:01.000Z',
+          committed_acu_cost: 0.5,
+          metrics: { input_tokens: 10, output_tokens: 4 },
+        },
+      }],
     })
 
     const provider = createDevinProvider(tmpDir)
-    expect(await provider.discoverSessions()).toEqual([])
-    expect(await parseTranscript(join(tmpDir, 'transcripts', 'glimmer-platinum.json'))).toEqual([])
+    expect(await provider.discoverSessions()).toEqual([
+      { path: filePath, project: 'devin', provider: 'devin' },
+    ])
+    const calls = await parseTranscript(filePath)
+    expect(calls).toHaveLength(1)
+    expect(calls[0]).toMatchObject({
+      inputTokens: 10,
+      outputTokens: 4,
+      costUSD: 0,
+      costIsEstimated: true,
+      deduplicationKey: 'devin:session-123:2',
+    })
   })
 
   it('parses per-step ACUs, tokens, tools, and model resolution', async () => {

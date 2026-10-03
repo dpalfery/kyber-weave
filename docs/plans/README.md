@@ -19,6 +19,7 @@ A plan is open only while it is built. The pull request that finishes it archive
 
 | Plan | Status | Date | Goal |
 |---|---|---|---|
+| [2026-10-02-issue-197-warp-devin-no-data.md](2026-10-02-issue-197-warp-devin-no-data.md) | Ready | 2026-10-02 | Fix [issue #197](https://github.com/dpalfery/kyber-weave/issues/197): make Warp and Devin honestly produce data — Devin ingests transcripts without requiring `devin.acuUsdRate` (unknown cost is never a measured $0), and Warp's Group Containers EPERM is surfaced by doctor instead of silently skipped. Development mode: test-first. |
 
 Pipeline T9 and spine S-docs harvested 2026-09-13 into [dash/architecture.md](../dash/architecture.md), [dash/runbook.md](../dash/runbook.md), [dash/telemetry-inventory.md](../dash/telemetry-inventory.md), [ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md), and [ADR 0018](../adr/0018-kyberdash-content-retention-purge.md). ADRs 0012–0015 remain the spine harvest (0014 notes that `kyber purge-content` was not shipped). Residual risks (T8 live-source coverage, findings client-side harness filter) live on the archived plans — they are not shipped claims.
 

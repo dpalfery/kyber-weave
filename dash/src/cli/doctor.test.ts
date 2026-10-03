@@ -1,11 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { mkdtemp, mkdir, writeFile, rm } from 'fs/promises'
+import { mkdtemp, mkdir, writeFile, rm, chmod } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
 
 import { collectDoctorReport, renderDoctorTable, renderDoctorJson } from './doctor.js'
 import { createCodexProvider } from '../providers/codex.js'
 import { createOpenCodeProvider } from '../providers/opencode.js'
+import { createDevinProvider } from '../providers/devin.js'
 import { emptyCache, type SessionCache } from '../ingest/session-cache.js'
 import type { Provider, ProbeRoot, SessionSource } from '../providers/types.js'
 
@@ -493,5 +494,52 @@ describe('collectDoctorReport - claude retention note', () => {
       expect(noSettings.claudeRetention).toBeUndefined()
       expect(renderDoctorTable(noSettings, { color: false })).not.toContain('deletes transcripts')
     })
+  })
+})
+
+// ── Issue #197: missing-rate transparency + permission-denied probe roots ──
+
+describe('collectDoctorReport - devin rate transparency (#197)', () => {
+  it('a missing ACU rate names the rate gap, not "no sessions"', async () => {
+    // HOME redirected so no ~/.kyberdash/config.json can supply devin.acuUsdRate.
+    const prevHome = process.env['HOME']
+    process.env['HOME'] = tmpDir
+    try {
+      await mkdir(join(tmpDir, 'transcripts'), { recursive: true })
+      await writeFile(join(tmpDir, 'transcripts', 's1.json'), JSON.stringify({ steps: [] }))
+      const provider = createDevinProvider(tmpDir)
+      const report = await collectDoctorReport('all', { providers: [provider], cache: emptyCache() })
+      const r = only(report, 'devin')
+
+      expect(r.candidatesFound).toBeGreaterThanOrEqual(1)
+      expect(r.verdict).toContain('devin.acuUsdRate')
+    } finally {
+      if (prevHome === undefined) delete process.env['HOME']
+      else process.env['HOME'] = prevHome
+    }
+  })
+})
+
+describe('collectDoctorReport - permission-denied probe root (#197)', () => {
+  it('an unreadable probe path reports permission denied, not "does not exist"', async () => {
+    const locked = join(tmpDir, 'locked')
+    await mkdir(locked)
+    const inner = join(locked, 'warp.sqlite')
+    await writeFile(inner, 'x')
+    await chmod(locked, 0o000)
+    try {
+      const provider = fakeProvider({
+        name: 'warp',
+        probeRoots: async () => [{ path: inner, label: 'db' }],
+      })
+      const report = await collectDoctorReport('all', { providers: [provider], cache: emptyCache() })
+      const r = only(report, 'warp')
+
+      expect(r.status).toBe('empty')
+      expect(r.probePaths[0]).toMatchObject({ exists: false })
+      expect(r.verdict).toMatch(/permission denied|not readable/i)
+    } finally {
+      await chmod(locked, 0o755)
+    }
   })
 })

@@ -1,4 +1,5 @@
 import { existsSync } from 'fs'
+import { statSync } from 'fs'
 import { readFile } from 'fs/promises'
 import { dirname, join } from 'path'
 
@@ -16,6 +17,7 @@ import {
 } from '../ingest/session-cache.js'
 import { renderTable } from './text-table.js'
 import { collectLauncherNotes, type LauncherNote } from '../ingest/launcher-homes.js'
+import { readConfig } from '../config.js'
 import { BRAND } from '../brand-overlay.js'
 
 // ── Types ──────────────────────────────────────────────────────────────
@@ -24,6 +26,11 @@ export type DoctorProbePath = {
   path: string
   label: string
   exists: boolean
+  /// Set when the path does not exist per access() but the OS says the
+  /// parent/container exists yet refuses to let us stat it (macOS TCC EPERM on
+  /// Group Containers, or EACCES). Doctor-visible issue #197: this must not
+  /// collapse into "does not exist; tool likely not installed".
+  accessError?: 'permission-denied'
 }
 
 export type DoctorEnvOverride = {
@@ -178,7 +185,24 @@ function collectEnvOverrides(providerName: string): DoctorEnvOverride[] {
 async function collectProbePaths(provider: Provider): Promise<DoctorProbePath[]> {
   if (!provider.probeRoots) return []
   const roots = await provider.probeRoots()
-  return roots.map(r => ({ path: r.path, label: r.label, exists: existsSync(r.path) }))
+  return roots.map(r => {
+    const exists = existsSync(r.path)
+    if (exists) return { path: r.path, label: r.label, exists }
+    // access() said "not accessible" — distinguish a genuinely absent path
+    // from a TCC-guarded one (EPERM/EACCES at stat time, even though the
+    // parent dir listing works) so the verdict does not claim the tool was
+    // never installed (issue #197, Warp Group Containers EPERM).
+    try {
+      statSync(r.path)
+      return { path: r.path, label: r.label, exists }
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code
+      if (code === 'EPERM' || code === 'EACCES') {
+        return { path: r.path, label: r.label, exists, accessError: 'permission-denied' as const }
+      }
+      return { path: r.path, label: r.label, exists }
+    }
+  })
 }
 
 // A discovered source path can carry a virtual suffix (`<db>#cursor-ws=...`,
@@ -217,6 +241,13 @@ function emptyVerdict(
   const known = probePaths.filter(p => p.label !== 'discovered')
   const missing = known.filter(p => !p.exists)
   const present = known.filter(p => p.exists)
+
+  // A TCC-guarded probe root must not be misreported as "tool likely not
+  // installed" (issue #197 — Warp's Group Containers sqlite copy fails EPERM).
+  const denied = known.filter(p => p.accessError === 'permission-denied')
+  if (denied.length > 0) {
+    return `NOTHING FOUND (${denied[0]!.path} is not readable — permission denied; macOS requires granting the app Full Disk Access for this container)`
+  }
 
   // No known probe roots to check: honest, override-aware fallback.
   if (known.length === 0) {
@@ -323,6 +354,14 @@ async function collectOneProvider(
     } else {
       base.status = 'ok'
       base.verdict = `OK (${pluralSessions(base.candidatesFound)})`
+      // Issue #197: a missing Devin rate must not hide cost as measured $0 —
+      // name the gap in the verdict instead.
+      if (provider.name === 'devin') {
+        const rate = (await readConfig()).devin?.acuUsdRate
+        if (!(typeof rate === 'number' && rate > 0)) {
+          base.verdict += '; costs unpriced — set devin.acuUsdRate in ~/.kyberdash/config.json'
+        }
+      }
     }
   } catch (err) {
     base.status = 'error'
