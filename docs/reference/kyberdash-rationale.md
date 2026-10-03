@@ -30,9 +30,11 @@ OpenTelemetry specification distinguishes its meanings:
 
 Applying Copilot's convention to pi produced **negative fresh input on 293 of 307 measured
 spans** (the input figure counted as inclusive while the cache classes were added separately,
-so the decomposition no longer summed). Applying pi's convention to Copilot **double-counts
-input by up to 2×** (inclusive input already contains the cache classes; counting them again
-adds them a second time).
+so the decomposition no longer summed). Those counters cannot be inclusive — cache is not a
+subset of a smaller total — and now convert exclusively rather than being stored as
+negative fresh or clamped to zero (issue #193). Applying pi's convention to Copilot
+**double-counts input by up to 2×** (inclusive input already contains the cache classes;
+counting them again adds them a second time).
 
 The consequence is architectural: adapters must convert each harness's convention **on the way
 in**, and `TokenUsage` must store `freshInput + cacheRead + cacheCreation` disjointly so the

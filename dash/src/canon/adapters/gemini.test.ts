@@ -95,12 +95,11 @@ describe('geminiAdapter.normalize — the documented convention (R4.2)', () => {
   })
 })
 
-describe('geminiAdapter — the inverted convention must fail loudly (R4.2)', () => {
-  it('rejects exclusive-shaped counters with TOKEN_NEGATIVE_FRESH', () => {
-    // If Gemini's input were read the pi way — cache excluded — the
-    // inclusive subtraction removes cache twice. Cache-heavy turns go
-    // negative exactly like the pi/Copilot inversion, and validation is the
-    // alarm; no clamping may stand in its way.
+describe('geminiAdapter — exclusive-shaped counters convert exclusively (issue #193)', () => {
+  it('recovers exclusive-shaped counters instead of negative fresh', () => {
+    // Cache cannot be a subset of a smaller input. Convert exclusively:
+    // fresh as claimed, reported total reassembled. Clamping to 0 would
+    // drop the 200 claimed tokens.
     const record = geminiAdapter.normalize(
       rawSpan({
         spanId: 's1',
@@ -109,12 +108,13 @@ describe('geminiAdapter — the inverted convention must fail loudly (R4.2)', ()
       }),
     )
 
-    expect(record.tokens.freshInput).toBe(200 - 1_000)
-    expect(geminiAdapter.validate(record)).toMatchObject({
-      severity: 'error',
-      code: TOKEN_NEGATIVE_FRESH,
-      location: 's1',
+    expect(record.tokens).toMatchObject({
+      freshInput: 200,
+      cacheRead: 1_000,
+      cacheCreation: 0,
+      reportedInput: 1_200,
     })
+    expect(geminiAdapter.validate(record)).toBeUndefined()
   })
 
   it('rejects thoughts reported outside output (assumption 3)', () => {
@@ -127,6 +127,29 @@ describe('geminiAdapter — the inverted convention must fail loudly (R4.2)', ()
     expect(geminiAdapter.validate(record)).toMatchObject({
       severity: 'error',
       code: TOKEN_REASONING_EXCEEDS_OUTPUT,
+    })
+  })
+
+  // Same incomplete-record guard as Copilot: an unreadable input with a
+  // present cache read must stay rejected, not become exclusive zero.
+  it('rejects an unreadable input counter rather than treating it as exclusive zero', () => {
+    const record = geminiAdapter.normalize(
+      rawSpan({
+        spanId: 's-unreadable',
+        attributes: {
+          'gen_ai.usage.input_tokens': 'unknown',
+          'gen_ai.usage.cached_tokens': 500,
+          'gen_ai.usage.output_tokens': 10,
+          'gemini.session.id': 'g-77',
+        },
+      }),
+    )
+
+    expect(record.tokens.freshInput).toBeLessThan(0)
+    expect(record.tokens.reportedInput).toBe(0)
+    expect(geminiAdapter.validate(record)).toMatchObject({
+      severity: 'error',
+      code: TOKEN_NEGATIVE_FRESH,
     })
   })
 })
