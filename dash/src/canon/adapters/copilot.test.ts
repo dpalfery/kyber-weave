@@ -113,6 +113,31 @@ describe('copilotAdapter.normalize — the inclusive convention (R4.2)', () => {
     expect(record.measurability).toMatchObject({ reasoning: { availability: 'not_measurable' } })
   })
 
+  // Issue #235 / A7: Copilot OTLP never vouches for tool-call completeness, so
+  // normalize must not stamp tool_calls measurability. Presence would let
+  // buildSessionRow emit tools_invoked: [] and pull span-less sessions into
+  // tool_yield as a fabricated measured zero.
+  it('does not declare tool_calls measurability on normalize (issue #235 / A7)', () => {
+    const withDefs = copilotAdapter.normalize(
+      rawSpan({
+        spanId: 's1',
+        attributes: {
+          ...copilotCounts(),
+          'copilot_chat.chat_session_id': 'sess-a7',
+          'gen_ai.tool.definitions': JSON.stringify([{ name: 'synthetic_tool' }]),
+        },
+      }),
+    )
+    const usageOnly = copilotAdapter.normalize(
+      rawSpan({ spanId: 's2', attributes: copilotCounts() }),
+    )
+
+    expect(withDefs.measurability?.tool_calls).toBeUndefined()
+    expect(usageOnly.measurability?.tool_calls).toBeUndefined()
+    expect(withDefs.measurability).not.toHaveProperty('tool_calls')
+    expect(usageOnly.measurability).not.toHaveProperty('tool_calls')
+  })
+
   it('preserves capture-enabled prompt, response, tool content, and the Copilot session identity', () => {
     const attributes = {
       ...copilotCounts(),
