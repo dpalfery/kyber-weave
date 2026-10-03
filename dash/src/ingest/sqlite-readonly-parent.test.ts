@@ -311,7 +311,26 @@ describe('SQLite read-only parent fallback', () => {
     }
   })
 
-  it('falls back to immutable read when cache copy fails with EPERM', ({ skip }) => {
+  it('still reads an empty-WAL database when cache copy fails with EPERM', ({ skip }) => {
+    if (!sqliteSupportsUriFilenames()) return skip()
+    const dbPath = join(sourceRoot, 'state.vscdb')
+    createClosedWalDatabase(dbPath)
+    if (!makeSourceParentReadOnly(skip)) return
+
+    setSqliteCopyFileForTest(() => {
+      const err = new Error('operation not permitted, copyfile')
+      Object.assign(err, { code: 'EPERM' })
+      throw err
+    })
+    try {
+      // Empty WAL: the early immutable open succeeds before any copy is needed.
+      expect(readValue(dbPath)).toBe(1)
+    } finally {
+      setSqliteCopyFileForTest(null)
+    }
+  })
+
+  it('refuses an incomplete immutable read when EPERM copy fails with a nonempty WAL', ({ skip }) => {
     if (!sqliteSupportsUriFilenames()) return skip()
     const dbPath = join(sourceRoot, 'state.vscdb')
     writeUncheckpointedWalDatabase(dbPath)
@@ -324,9 +343,10 @@ describe('SQLite read-only parent fallback', () => {
     })
     const stderr = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
     try {
-      expect(readValue(dbPath)).toBe(1)
-      const notices = stderr.mock.calls.filter(([chunk]) => String(chunk).includes('falling back to direct immutable read'))
-      expect(notices).toHaveLength(1)
+      // Row 2 lives only in the -wal; immutable would omit it, so refuse rather
+      // than return a silent partial snapshot.
+      expect(() => readValue(dbPath)).toThrow()
+      expect(stderr.mock.calls.filter(([chunk]) => String(chunk).includes('falling back to direct immutable read'))).toHaveLength(0)
     } finally {
       setSqliteCopyFileForTest(null)
       stderr.mockRestore()

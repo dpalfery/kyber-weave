@@ -418,7 +418,9 @@ function openReadonlyCache(path: string, originalError: unknown): DatabaseSyncIn
   try {
     cachedPath = readOnlyCachePath(path, fingerprint)
   } catch (err) {
-    if (errorCode(err) === 'EPERM' && sqliteSupportsUriFilenames()) {
+    // Same gate as the empty-WAL fast path above: immutable ignores -wal frames,
+    // so a nonempty WAL would silently drop committed rows.
+    if (errorCode(err) === 'EPERM' && fingerprint.walBytes === 0 && sqliteSupportsUriFilenames()) {
       try {
         const db = new Driver(`${pathToFileURL(path).href}?immutable=1`, { readOnly: true })
         warnSqliteOnce(
