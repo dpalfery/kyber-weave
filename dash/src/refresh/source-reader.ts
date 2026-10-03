@@ -70,10 +70,22 @@ export type NativeUnit = {
 
 /**
  * Persisted on a zero-record checkpoint so an empty unit is explained, not silent.
- * `window_filtered`: the parser yielded calls but all predate the coverage window.
- * `no_recordable_events`: the parser yielded no calls (no usage/model events).
+ * `window_filtered`: recordable calls exist but all predate the coverage window
+ * (including when the provider parser applied the window before yielding).
+ * `no_recordable_events`: no usage/model events in the source at all.
  */
 export type NativeEmptyReason = 'window_filtered' | 'no_recordable_events'
+
+/** Result of parsing one native source for refresh. */
+export type ParsedCallBatch = {
+  calls: readonly ParsedProviderCall[]
+  /**
+   * Recordable calls the provider discarded solely for predating `dateRange`.
+   * Used when the parser applies the window itself (Cursor) so empty-unit
+   * classification can still say `window_filtered`.
+   */
+  preWindowRecordable?: number
+}
 
 export type NativeClassifierEvidence = {
   originator?: string | null
@@ -90,7 +102,7 @@ export type SourceReaderDependencies = {
     provider: Provider,
     source: SessionSource,
     dateRange: DateRange,
-  ) => Promise<readonly ParsedProviderCall[]>
+  ) => Promise<ParsedCallBatch | readonly ParsedProviderCall[]>
   parseAllSessions?: (dateRange?: DateRange, providerFilter?: string) => Promise<unknown>
   peekEvidence?: (source: SessionSource) => Promise<NativeClassifierEvidence>
 }
@@ -234,19 +246,39 @@ async function readNativeUnit(
     }
   }
 
-  const calls = dependencies.parseCalls
-    ? await dependencies.parseCalls(provider, source, dependencies.dateRange)
-    : await parseSourceCalls(provider, source, dependencies.dateRange)
+  const batch = normalizeParsedBatch(
+    dependencies.parseCalls
+      ? await dependencies.parseCalls(provider, source, dependencies.dateRange)
+      : await parseSourceCalls(provider, source, dependencies.dateRange),
+  )
+  const calls = batch.calls
   const { inWindow, problems } = sliceCallsToWindow(calls, dependencies.dateRange)
   const revisionToken = revision?.token ?? 'unknown'
   const envelopes = inWindow.map(parsed => toEnvelope(harnessId, sourceKey, source, parsed, revisionToken))
-  const emptyReason = emptyReasonFor(calls.length, envelopes.length, problems.length)
+  const emptyReason = emptyReasonFor(
+    calls.length,
+    envelopes.length,
+    problems.length,
+    batch.preWindowRecordable ?? 0,
+  )
   return { harnessId, sourceKey, source, status, revision, envelopes, problems, ...(emptyReason ? { emptyReason } : {}) }
 }
 
-function emptyReasonFor(parsed: number, enveloped: number, problems: number): NativeEmptyReason | undefined {
+function normalizeParsedBatch(
+  result: ParsedCallBatch | readonly ParsedProviderCall[],
+): ParsedCallBatch {
+  if (!Array.isArray(result) && 'calls' in result) return result
+  return { calls: result as readonly ParsedProviderCall[] }
+}
+
+function emptyReasonFor(
+  parsed: number,
+  enveloped: number,
+  problems: number,
+  preWindowRecordable = 0,
+): NativeEmptyReason | undefined {
   if (enveloped > 0 || problems > 0) return undefined
-  return parsed === 0 ? 'no_recordable_events' : 'window_filtered'
+  return parsed + preWindowRecordable === 0 ? 'no_recordable_events' : 'window_filtered'
 }
 
 function changeStatus(
@@ -261,18 +293,45 @@ function changeStatus(
   return 'new'
 }
 
+async function collectParsedCalls(
+  provider: Provider,
+  source: SessionSource,
+  dateRange: DateRange | undefined,
+): Promise<{ calls: ParsedProviderCall[]; preWindowRecordableCount?: number }> {
+  const parser = provider.createSessionParser(source, new Set(), dateRange)
+  const calls: ParsedProviderCall[] = []
+  for await (const parsed of parser.parse()) calls.push(parsed)
+  return { calls, preWindowRecordableCount: parser.preWindowRecordableCount }
+}
+
 async function parseSourceCalls(
   provider: Provider,
   source: SessionSource,
   dateRange: DateRange,
-): Promise<ParsedProviderCall[]> {
-  const parser = provider.createSessionParser(source, new Set(), dateRange)
-  const calls: ParsedProviderCall[] = []
-  for await (const parsed of parser.parse()) calls.push(parsed)
+): Promise<ParsedCallBatch> {
+  const { calls, preWindowRecordableCount } = await collectParsedCalls(provider, source, dateRange)
   if (calls.length === 0 && provider.name === 'claude') {
-    return loadClaudeCalls(source.path)
+    // Claude's directory parser is empty; the transcript loader is unfiltered
+    // and sliceCallsToWindow classifies pre-window rows.
+    return { calls: loadClaudeCalls(source.path) }
   }
-  return calls
+  if (calls.length > 0) return { calls }
+
+  if (typeof preWindowRecordableCount === 'number') {
+    return { calls, preWindowRecordable: preWindowRecordableCount }
+  }
+
+  // Cursor (and any parser that applies dateRange before yield) returns no
+  // calls here even when the source holds only pre-window recordable work.
+  // Probe without the coverage window and count those rows.
+  const unfiltered = await collectParsedCalls(provider, source, undefined)
+  const startMs = dateRange.start.getTime()
+  let preWindowRecordable = 0
+  for (const call of unfiltered.calls) {
+    const timestamp = Date.parse(call.timestamp)
+    if (Number.isFinite(timestamp) && timestamp < startMs) preWindowRecordable += 1
+  }
+  return { calls, preWindowRecordable }
 }
 
 async function warmClaudeSpecialPath(dependencies: SourceReaderDependencies): Promise<void> {

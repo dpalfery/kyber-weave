@@ -304,6 +304,66 @@ describe('iterateNativeUnits', () => {
     expect(changed[0]!.envelopes).toHaveLength(1)
   })
 
+  it('classifies parser-pre-filtered pre-window calls as window_filtered (Cursor-shaped)', async () => {
+    // Production Cursor applies dateRange inside createSessionParser, so
+    // source-reader sees zero yielded calls even when the DB holds only
+    // pre-window recordable work. That must be window_filtered, not
+    // no_recordable_events.
+    const source: SessionSource = {
+      path: '/native/cursor/state.vscdb#orphan',
+      project: '(no folder)',
+      provider: 'cursor',
+    }
+    const preWindow = call({
+      provider: 'cursor',
+      sessionId: 'composer-old',
+      timestamp: '2026-08-01T12:00:00.000Z',
+    })
+    const cursorLike: Provider = {
+      name: 'cursor',
+      displayName: 'Cursor',
+      modelDisplayName: model => model,
+      toolDisplayName: tool => tool,
+      discoverSessions: async () => [source],
+      createSessionParser(_source, _seen, dateRange) {
+        return {
+          async *parse(): AsyncGenerator<ParsedProviderCall> {
+            if (dateRange && Date.parse(preWindow.timestamp) < dateRange.start.getTime()) return
+            yield preWindow
+          },
+        }
+      },
+    }
+
+    const units = await readHarness('cursor', [cursorLike])
+    expect(units).toHaveLength(1)
+    expect(units[0]!.envelopes).toEqual([])
+    expect(units[0]!.problems).toEqual([])
+    expect(units[0]!.emptyReason).toBe('window_filtered')
+  })
+
+  it('keeps no_recordable_events when the parser has no pre-window recordable calls either', async () => {
+    const source: SessionSource = {
+      path: '/native/cursor/empty.vscdb#orphan',
+      project: '(no folder)',
+      provider: 'cursor',
+    }
+    const emptyCursor: Provider = {
+      name: 'cursor',
+      displayName: 'Cursor',
+      modelDisplayName: model => model,
+      toolDisplayName: tool => tool,
+      discoverSessions: async () => [source],
+      createSessionParser() {
+        return { async *parse(): AsyncGenerator<ParsedProviderCall> {} }
+      },
+    }
+
+    const units = await readHarness('cursor', [emptyCursor])
+    expect(units).toHaveLength(1)
+    expect(units[0]!.emptyReason).toBe('no_recordable_events')
+  })
+
   it('iterates native units with a bounded worker pool', async () => {
     const sources: SessionSource[] = Array.from({ length: 6 }, (_, index) => ({
       path: `/native/pi/${index}.jsonl`,
