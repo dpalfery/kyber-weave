@@ -198,6 +198,10 @@ Coverage route: `GET /api/kyber/coverage` returns the refresh window, per-source
 activity (record counts from `records`, log sums and `lastReceivedAt` from `ingest_log`),
 per-reason quarantine counts, and `source_checkpoint` statuses including `partial`. An
 empty log and empty table yield `{ status: 'unknown' }` with a reason, never a zero.
+The Context Doctor coverage panel lists sources discovered but not ingested, grouped by
+their persisted reason: `window_filtered` (all native records predate the refresh window;
+widen `--history-weeks` to ingest them) or `no_recordable_events` (the file holds no usage
+or model events, so there is nothing to ingest).
 
 ### 3. Raw Content Backfill and Re-normalization
 
