@@ -568,7 +568,31 @@ here.
   `canon.db-wal` or `canon.db-shm` from the old file. A replacement that leaves those sidecars
   behind can make SQLite misread the new file; the server has no way to detect that case.
 
-### 7. A model shows "no published rate"
+### 7. Devin doctor says costs unpriced, or cost shows $0
+
+- **Cause**: `~/.kyberdash/config.json` has no finite positive `devin.acuUsdRate` (absent,
+  non-numeric, `<= 0`, or a JSON literal such as `1e400` that parses as `Infinity`).
+- **Behavior**: transcripts still ingest. Token fields parse. Cost is unknown (`costUSD: 0`
+  with `costIsEstimated: true`), never a measured zero. Doctor's Devin verdict names the
+  missing rate instead of "holds no sessions".
+- **Fix**: set `devin.acuUsdRate` to the USD-per-ACU rate. Do not invent a figure to make
+  the tile look priced.
+
+### 8. Warp doctor says permission denied, or Warp checkpoints stay at 0 records
+
+- **Cause**: the Warp sqlite path exists but the process cannot read it (typically macOS
+  TCC on Group Containers), *or* kyberdash could not write its own sqlite cache copy.
+- **Behavior**: a readable database that only failed `copyfile(2)` is copied via read/write
+  and produces records. A true source-unreadable `EPERM`/`EACCES` is surfaced as
+  `<path> is not readable — permission denied` (Full Disk Access on macOS; owner/permissions
+  otherwise). Discovery returns no sessions; the 0-record checkpoint is the parsed count.
+  An unwritable `KYBERDASH_CACHE_DIR` is kyberdash's cache, not a Warp TCC denial — doctor
+  must not prescribe Full Disk Access for that case.
+- **Fix**: on macOS grant Full Disk Access to the process reading Warp. There is no TCC
+  workaround and no retry as another user. Check cache-directory ownership if the denial
+  is kyberdash's own write.
+
+### 9. A model shows "no published rate"
 
 - **Cause**: Claude Code and Codex turns are priced from the bundled published table, and Copilot
   turns from the Copilot credits table. A model in neither table is honestly unpriced; rates are
@@ -581,25 +605,6 @@ here.
   cache-creation rate to state a surcharge.
 - **Other statuses**: "partially priced" means some turns are unpriced (no figure is shown),
   "not billed" is a flat-rate model, and "out of scope" means the table does not name the harness.
-
-### 8. Devin doctor says costs unpriced (or used to say "holds no sessions")
-
-- **Cause**: Devin prices ACU usage from `devin.acuUsdRate` in `~/.kyberdash/config.json`. A
-  missing or non-finite rate used to disable discovery entirely; that is fixed (issue #197).
-  Sessions and tokens still ingest; cost stays unknown (`costIsEstimated`) until the rate is set.
-- **Fix**: Set a positive finite `devin.acuUsdRate` in `~/.kyberdash/config.json`, then re-run
-  `kyberdash doctor` / refresh. Doctor names the missing rate in the verdict; it must not claim
-  the sessions db holds no sessions when transcripts exist.
-
-### 9. Warp doctor says permission denied (macOS Full Disk Access)
-
-- **Cause**: Warp stores history under a Group Containers path that macOS TCC may deny. When the
-  source is unreadable, doctor reports `permission denied` (and Full Disk Access on darwin) with
-  the probe path still marked present — not "does not exist" or "holds no sessions".
-- **Fix**: On macOS, grant Full Disk Access to the process that runs `kyberdash` (Terminal,
-  the tray, or your IDE). When the bytes are readable, `copyFileBestEffort` already falls back
-  from a copyfile(2) EPERM so records are produced; an unwritable KyberDash cache directory is
-  a separate failure and must not be diagnosed as Warp TCC denial.
 
 ---
 
