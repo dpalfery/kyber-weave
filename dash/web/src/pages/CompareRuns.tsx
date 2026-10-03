@@ -152,7 +152,7 @@ function toCandidate(row: KyberRunSummary): RunCandidate {
  */
 export function formatCompareRunOptionLabel(run: RunCandidate): string {
   const localDate = fmtRunTimestamp(run.started).date
-  const turns = `${run.turnCount ?? 0}t`
+  const turns = run.turnCount === undefined ? '—' : `${run.turnCount}t`
   const input = run.totalInput
   const output = run.totalOutput
   const hasTokens =
@@ -625,7 +625,7 @@ export function CompareRuns({
               {runA && (
                 <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-tertiary-foreground">
                   <span>Harness: <strong className="text-foreground">{runA.harness}</strong></span>
-                  <span>Turns: <strong className="text-foreground">{comparison?.runA.turnCount ?? runA.turnCount ?? runA.turns.length}</strong></span>
+                  <span>Turns: <strong className="text-foreground">{comparison?.runA.turnCount ?? runA.turnCount ?? '—'}</strong></span>
                   <span>
                     Outcome:{' '}
                     <strong
@@ -667,7 +667,7 @@ export function CompareRuns({
               {runB && (
                 <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-tertiary-foreground">
                   <span>Harness: <strong className="text-foreground">{runB.harness}</strong></span>
-                  <span>Turns: <strong className="text-foreground">{comparison?.runB.turnCount ?? runB.turnCount ?? runB.turns.length}</strong></span>
+                  <span>Turns: <strong className="text-foreground">{comparison?.runB.turnCount ?? runB.turnCount ?? '—'}</strong></span>
                   <span>
                     Outcome:{' '}
                     <strong

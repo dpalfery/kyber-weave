@@ -6,7 +6,12 @@ import { render, screen, cleanup, fireEvent, within } from '@testing-library/rea
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type * as React from 'react'
 
-import { CompareRuns, isComparePickerVisible, type RunCandidate } from './CompareRuns.js'
+import {
+  CompareRuns,
+  formatCompareRunOptionLabel,
+  isComparePickerVisible,
+  type RunCandidate,
+} from './CompareRuns.js'
 import * as kyberApi from '../lib/kyberApi.js'
 import type { KyberRunComparison } from '../lib/kyberApi.js'
 
@@ -146,6 +151,21 @@ describe('CompareRuns option labels (D4)', () => {
     const selectA = screen.getByTestId('compare-run-a')
     const option = within(selectA).getByRole('option', { name: /run-no-tokens|2t/ })
     expect(option.textContent).toContain('—')
+  })
+
+  it('shows — for turns when turnCount is undefined (unmeasured)', () => {
+    const label = formatCompareRunOptionLabel(
+      run({
+        runId: 'run-unknown-turns',
+        harness: 'cursor',
+        turnCount: undefined,
+        totalInput: undefined,
+        totalOutput: undefined,
+      }),
+    )
+    // Same sentinel as the tokens branch — not a fabricated `0t`.
+    expect(label).toMatch(/ · — · — · /)
+    expect(label).not.toMatch(/\b0t\b/)
   })
 
   it('sets title with full runId and cwd only when truncation collides', () => {
