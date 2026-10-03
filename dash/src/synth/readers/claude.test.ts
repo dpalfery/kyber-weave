@@ -368,6 +368,77 @@ describe('claudeReader', () => {
     expect(turns).toHaveLength(2)
   })
 
+  // loadClaudeCalls refuses to collapse when defined message.ids conflict
+  // (A, absent, B). splitClaudeTurns must do the same: merging on matching
+  // usage alone indexes the fused turn under B and lets matchingTurns attach
+  // A's content to call B while leaving call A unmatched.
+  it('keeps turns separate when defined message.ids conflict across an id-less middle record (#276)', async () => {
+    const usage = {
+      input_tokens: 150,
+      output_tokens: 45,
+      cache_read_input_tokens: 300,
+      cache_creation_input_tokens: 200,
+    }
+    const path = writeTranscript([
+      {
+        type: 'user',
+        sessionId: 'session-id-conflict',
+        message: { role: 'user', content: [{ type: 'text', text: 'prompt for A' }] },
+      },
+      {
+        type: 'assistant',
+        sessionId: 'session-id-conflict',
+        uuid: 'uuid-a',
+        timestamp: '2026-09-01T12:00:00.000Z',
+        message: {
+          id: 'msg-A',
+          model: 'claude-sonnet-4-5',
+          usage,
+          content: [{ type: 'text', text: 'content of A' }],
+        },
+      },
+      {
+        type: 'assistant',
+        sessionId: 'session-id-conflict',
+        uuid: 'uuid-absent',
+        timestamp: '2026-09-01T12:00:10.000Z',
+        message: {
+          // no message.id — may fuse with a matching neighbor, but must not
+          // bridge two conflicting defined ids
+          model: 'claude-sonnet-4-5',
+          usage,
+          content: [{ type: 'text', text: 'content without id' }],
+        },
+      },
+      {
+        type: 'assistant',
+        sessionId: 'session-id-conflict',
+        uuid: 'uuid-b',
+        timestamp: '2026-09-01T12:00:20.000Z',
+        message: {
+          id: 'msg-B',
+          model: 'claude-sonnet-4-5',
+          usage,
+          content: [{ type: 'text', text: 'content of B' }],
+        },
+      },
+    ])
+
+    const turns = await readTurns(path)
+    expect(turns.map((t) => t.nativeRecordId)).toEqual(['msg-A', 'msg-B'])
+    const turnA = turns.find((t) => t.nativeRecordId === 'msg-A')!
+    const turnB = turns.find((t) => t.nativeRecordId === 'msg-B')!
+    const textsA = turnA.parts.map((p) => p.text)
+    expect(textsA).toEqual(
+      expect.arrayContaining(['prompt for A', 'content of A', 'content without id']),
+    )
+    expect(textsA.join('\n')).not.toContain('content of B')
+    expect(turnB.parts.map((p) => p.text).join('\n')).not.toContain('content of A')
+    expect(turnB.parts.map((p) => p.text)).toEqual(
+      expect.arrayContaining(['content of B']),
+    )
+  })
+
   it('measures stored conversation and tool results, but not unavailable system prompts or tool definitions', async () => {
     const path = writeTranscript([
       {

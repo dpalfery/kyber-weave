@@ -123,6 +123,9 @@ function isMatchingTurnUsage(
  *
  * Contiguous assistant records sharing identical usage counters within the turn
  * window are grouped into a single turn to fuse paired request/response halves (#232).
+ * A defined `message.id` learned earlier in the group still conflicts with a
+ * later different defined id — matching `loadClaudeCalls`' contiguous-pair rule
+ * — so an id-less middle record cannot bridge A and B into one turn.
  *
  * Lines after the last assistant record are emitted as a trailing group so a
  * transcript that never reported usage still reads as a single turn.
@@ -143,6 +146,9 @@ export function splitClaudeTurns(lines: readonly string[]): string[][] {
   if (rawGroups.length <= 1) return rawGroups
 
   const mergedGroups: string[][] = []
+  // Parallel to loadClaudeCalls' nativeMessageIds: the defined message.id
+  // learned for each merged group, retained across id-less halves.
+  const mergedMessageIds: Array<string | undefined> = []
   for (let i = 0; i < rawGroups.length; i++) {
     const group = rawGroups[i]!
     const lastLine = group[group.length - 1]!
@@ -150,17 +156,28 @@ export function splitClaudeTurns(lines: readonly string[]): string[][] {
 
     if (mergedGroups.length > 0) {
       const prevMerged = mergedGroups[mergedGroups.length - 1]!
+      const prevMessageId = mergedMessageIds[mergedMessageIds.length - 1]
       let prevUsageInfo: ReturnType<typeof parseLineUsageInfo>
       for (let j = prevMerged.length - 1; j >= 0; j--) {
         prevUsageInfo = parseLineUsageInfo(prevMerged[j]!)
         if (prevUsageInfo !== undefined) break
       }
-      if (prevUsageInfo !== undefined && isMatchingTurnUsage(prevUsageInfo, usageInfo)) {
+      // Compare usage against the last counters, but message.id against the
+      // id learned for the whole prior group (A, absent, B must not fuse).
+      const prevForMatch =
+        prevUsageInfo === undefined
+          ? undefined
+          : { ...prevUsageInfo, messageId: prevMessageId ?? prevUsageInfo.messageId }
+      if (prevForMatch !== undefined && isMatchingTurnUsage(prevForMatch, usageInfo)) {
         prevMerged.push(...group)
+        if (prevMessageId === undefined && usageInfo?.messageId !== undefined) {
+          mergedMessageIds[mergedMessageIds.length - 1] = usageInfo.messageId
+        }
         continue
       }
     }
     mergedGroups.push([...group])
+    mergedMessageIds.push(usageInfo?.messageId)
   }
 
   return mergedGroups
