@@ -1445,6 +1445,24 @@ export class CanonStore {
     return rows.map(toRecordProvenance)
   }
 
+  /**
+   * Live canonical rows attributed to a source unit. Provenance outlives
+   * quarantine (the audit row stays; the record does not), so a contract-bump
+   * reconciliation that counted provenance would bake deleted spans into
+   * `recordCount`. This join is the population the checkpoint actually means.
+   */
+  countLiveRecordsForSource(harnessId: string, sourceKey: string): number {
+    const row = this.db
+      .prepare(
+        `SELECT COUNT(*) AS n
+         FROM record_provenance p
+         INNER JOIN records r ON r.span_id = p.span_id
+         WHERE p.harness_id = ? AND p.source_key = ?`,
+      )
+      .get(harnessId, sourceKey) as { n: unknown }
+    return typeof row.n === 'number' ? row.n : Number(row.n) || 0
+  }
+
   spanIdsForSource(harnessId: string, sourceKey: string): string[] {
     return (
       this.db
