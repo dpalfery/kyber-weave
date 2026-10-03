@@ -157,8 +157,9 @@ function callsAndTurns(
 /**
  * Pair parser calls with turns from their shared session file. A reader turn
  * names the same session when available; an unnamed turn remains positionally
- * attributable to that file. Extra calls or turns are left unpaired rather
- * than borrowing content from an adjacent invocation.
+ * attributable to that file unless every turn carries a native id (Cursor).
+ * Extra calls or turns are left unpaired rather than borrowing content from
+ * an adjacent invocation.
  */
 function matchingTurns(
   calls: readonly ParsedProviderCall[],
@@ -170,7 +171,11 @@ function matchingTurns(
       turnsById.set(turn.nativeRecordId, turn)
     }
   }
-  const hasNativeIds = turnsById.size > 0
+  // Id-only pairing is safe only when every turn in the file has an id.
+  // A single Claude message.id used to flip the whole file to id-only, which
+  // left every id-less neighbor unpaired (empty parts). Mixed files keep
+  // positional fallback; Cursor all-id files still skip it.
+  const hasNativeIds = turns.length > 0 && turns.every((turn) => turn.nativeRecordId !== undefined)
 
   return calls.map((call, index) => {
     const positional = turns[index]

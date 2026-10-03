@@ -79,7 +79,10 @@ Pairing that attaches parts (shipped with the #216 capture fix):
 
 - `ClaudeContentReader` emits `nativeRecordId` from Claude `message.id` so
   `matchingTurns` can join to the call's `turnId` instead of relying only on
-  positional order.
+  positional order. Id-only pairing applies only when every reader turn
+  carries `nativeRecordId`; mixed transcripts keep positional fallback so an
+  id-less neighbor is not left empty. Files where every turn has an id
+  (Cursor) still skip positional pairing.
 - The reader honors the same UTC `dateRange` as refresh window-sliced calls, so
   a partial history window cannot attach an out-of-window turn's text.
 - When a unit's first ingest returns zero records, the refresh orchestrator

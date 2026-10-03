@@ -220,7 +220,9 @@ Buckets the transcript supplies — `conversation_history` and
 `tool_result_content` — land on the record; `system_prompt` and
 `tool_definitions` remain `not_measurable` from session files alone (raw API
 body logging is a separate owner gate). Pairing uses `nativeRecordId`
-(Claude `message.id`) matched to the call `turnId`, the reader honors the
+(Claude `message.id`) matched to the call `turnId` when every turn in the
+file has an id; a mixed file (some turns omit `message.id`) keeps positional
+fallback so those id-less calls still receive parts. The reader honors the
 refresh `dateRange` so window-sliced calls stay aligned, and the orchestrator
 fallback keeps `filePath` so a zero-record retry does not strip the reader
 ([issue #216](https://github.com/dpalfery/kyber-weave/issues/216)). Advancing
