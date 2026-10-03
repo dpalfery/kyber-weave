@@ -142,6 +142,30 @@ describe('iterateNativeUnits', () => {
     ])
   })
 
+  it('uses dateRangeFor when a source needs a wider slice than the job window', async () => {
+    const source: SessionSource = {
+      path: '/native/pi/repair-wide.jsonl',
+      project: 'kyber',
+      provider: 'pi',
+    }
+    const units = await readHarness('pi', [
+      provider('pi', [source], new Map([
+        [source.path, [
+          call({ provider: 'pi', sessionId: 'chat-1', timestamp: '2026-08-30T12:00:00.000Z', turnId: 'older' }),
+          call({ provider: 'pi', sessionId: 'chat-1', timestamp: '2026-09-05T12:00:00.000Z', turnId: 'in-window' }),
+        ]],
+      ])),
+    ], {
+      dateRangeFor: () => ({
+        start: new Date('2026-08-29T00:00:00.000Z'),
+        end: new Date('2026-09-12T23:59:59.999Z'),
+      }),
+    })
+
+    expect(units).toHaveLength(1)
+    expect(units[0]!.envelopes.map(envelope => envelope.nativeRecordId)).toEqual(['older', 'in-window'])
+  })
+
   it('recovers Claude through the special parse seam and directory expansion, not the empty parser', async () => {
     const root = tempRoot()
     const projectDir = join(root, '.claude', 'projects', 'app')
@@ -468,35 +492,6 @@ describe('iterateNativeUnits', () => {
     expect(units[0]!.envelopes).toEqual([])
     expect(units[0]!.problems).toEqual([])
     expect(units[0]!.emptyReason).toBeUndefined()
-  })
-
-  it('uses dateRangeFor(sourceKey) when present instead of the job dateRange', async () => {
-    const source: SessionSource = {
-      path: '/native/pi/wide.jsonl',
-      project: 'kyber',
-      provider: 'pi',
-      sourceId: 'wide-1',
-    }
-    const wideStart = new Date('2026-08-01T00:00:00.000Z')
-    const parseCalls = vi.fn(async () => [
-      call({ provider: 'pi', sessionId: 'wide-1', timestamp: '2026-08-05T12:00:00.000Z' }),
-      call({ provider: 'pi', sessionId: 'wide-1', timestamp: '2026-09-05T12:00:00.000Z', turnId: 'in-default' }),
-    ])
-
-    const units = await readHarness('pi', [provider('pi', [source], new Map())], {
-      parseCalls,
-      dateRangeFor: (sourceKey) => {
-        expect(sourceKey).toBe('pi:wide-1')
-        return { start: wideStart, end: range().end }
-      },
-    })
-
-    expect(parseCalls).toHaveBeenCalledTimes(1)
-    expect(parseCalls.mock.calls[0]![2]).toEqual({ start: wideStart, end: range().end })
-    expect(units[0]!.envelopes.map(envelope => envelope.timestamp)).toEqual([
-      '2026-08-05T12:00:00.000Z',
-      '2026-09-05T12:00:00.000Z',
-    ])
   })
 
   it('iterates native units with a bounded worker pool', async () => {

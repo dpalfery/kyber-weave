@@ -104,10 +104,9 @@ export type SourceReaderDependencies = {
   providers: readonly Provider[]
   dateRange: DateRange
   /**
-   * Per-source override for the parse/slice window. Used when a parser-contract
-   * bump must widen past the run's `--history-weeks` floor before the first
-   * read, so version repair stays one concurrent parse instead of a narrow
-   * pass plus a sequential re-read.
+   * Per-source override for `dateRange`. The orchestrator uses this so a
+   * parser-contract repair can widen (or clamp) the first read instead of
+   * parsing once under the job window and again under the repair window.
    */
   dateRangeFor?: (sourceKey: string) => DateRange
   concurrency?: number
@@ -237,9 +236,9 @@ export function sliceCallsToWindow(
 }
 
 /**
- * Read one native unit under the job date range, or under `dateRangeFor(sourceKey)`
- * when the orchestrator has already decided a parser-contract repair must widen
- * past `--history-weeks` before the first concurrent pass.
+ * Read one native source. Uses `dateRangeFor(sourceKey)` when the caller has
+ * already decided a per-source slice (parser-contract repair); otherwise the
+ * job `dateRange`.
  */
 export async function readNativeUnit(
   harnessId: HarnessId,
@@ -248,6 +247,7 @@ export async function readNativeUnit(
   dependencies: SourceReaderDependencies,
 ): Promise<NativeUnit> {
   const sourceKey = sourceKeyFor(harnessId, source)
+  const dateRange = dependencies.dateRangeFor?.(sourceKey) ?? dependencies.dateRange
   const fingerprintFn = dependencies.fingerprintFile ?? upstreamFingerprintFile
   const fingerprint = await fingerprintFn(source.path)
   const revision = fingerprint ? { fingerprint, token: revisionTokenFor(fingerprint) } : null
@@ -266,7 +266,6 @@ export async function readNativeUnit(
     }
   }
 
-  const dateRange = dependencies.dateRangeFor?.(sourceKey) ?? dependencies.dateRange
   const batch = normalizeParsedBatch(
     dependencies.parseCalls
       ? await dependencies.parseCalls(provider, source, dateRange)

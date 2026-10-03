@@ -89,8 +89,11 @@ Pairing that attaches parts (shipped with the #216 capture fix):
 Repair for rows ingested before part capture: advancing the Claude family
 `parserContractVersion` in the harness-source registry makes prior
 `source_checkpoint` rows stale. The next owner `dash refresh` re-reads
-transcripts and re-synthesizes affected units
-([ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md)).
+transcripts and re-synthesizes affected units still inside the 14-day
+content-retention window
+([ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md),
+[ADR 0018](../adr/0018-kyberdash-content-retention-purge.md)).
+Rows older than that floor are not rewritten.
 `kyber backfill` cannot repair file-synth rows — their stored `raw` is the
 counter call, not the message body.
 

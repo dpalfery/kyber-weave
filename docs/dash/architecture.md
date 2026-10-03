@@ -223,7 +223,10 @@ refresh `dateRange` so window-sliced calls stay aligned, and the orchestrator
 fallback keeps `filePath` so a zero-record retry does not strip the reader
 ([issue #216](https://github.com/dpalfery/kyber-weave/issues/216)). Advancing
 the Claude family `parserContractVersion` invalidates stale checkpoints so a
-subsequent `dash refresh` re-synthesizes historical empty desktop rows. The
+subsequent `dash refresh` re-synthesizes historical empty desktop rows that
+still fall inside the 14-day content-retention window. Older rows stay
+counters-only: `purgeExpiredContent` empties their parts in the same run
+([ADR 0018](../adr/0018-kyberdash-content-retention-purge.md)). The
 bucket table and repair boundary are in the
 [telemetry inventory](telemetry-inventory.md#claude-desktop-and-cli-file-synth-parts-issue-216).
 
