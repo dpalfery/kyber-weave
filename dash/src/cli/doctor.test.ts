@@ -73,6 +73,20 @@ function only(report: Awaited<ReturnType<typeof collectDoctorReport>>, name: str
   return r
 }
 
+const deniedProbeFs = {
+  existsSync: () => false,
+  statSync: () => {
+    const err = new Error('EACCES: permission denied') as NodeJS.ErrnoException
+    err.code = 'EACCES'
+    throw err
+  },
+}
+
+function restoreProcessPlatform(original: PropertyDescriptor | undefined): void {
+  if (original) Object.defineProperty(process, 'platform', original)
+  else delete (process as { platform?: NodeJS.Platform }).platform
+}
+
 let tmpDir: string
 beforeEach(async () => { tmpDir = await mkdtemp(join(tmpdir(), 'doctor-test-')) })
 afterEach(async () => { await rm(tmpDir, { recursive: true, force: true }) })
@@ -658,19 +672,11 @@ describe('collectDoctorReport - permission-denied probe root (#197)', () => {
       name: 'warp',
       probeRoots: async () => [{ path: inner, label: 'db' }],
     })
-    const deniedFs = {
-      existsSync: () => false,
-      statSync: () => {
-        const err = new Error('EACCES: permission denied') as NodeJS.ErrnoException
-        err.code = 'EACCES'
-        throw err
-      },
-    }
     try {
       const report = await collectDoctorReport('all', {
         providers: [provider],
         cache: emptyCache(),
-        probeFs: deniedFs,
+        probeFs: deniedProbeFs,
       })
       const r = only(report, 'warp')
       expect(r.verdict).toContain('permission denied')
@@ -694,23 +700,16 @@ describe('collectDoctorReport - permission-denied probe root (#197)', () => {
       probeRoots: async () => [{ path: inner, label: 'db' }],
     })
     const original = Object.getOwnPropertyDescriptor(process, 'platform')
-    Object.defineProperty(process, 'platform', { value: 'darwin' })
+    Object.defineProperty(process, 'platform', { configurable: true, value: 'darwin' })
     try {
       const report = await collectDoctorReport('all', {
         providers: [provider],
         cache: emptyCache(),
-        probeFs: {
-          existsSync: () => false,
-          statSync: () => {
-            const err = new Error('EACCES: permission denied') as NodeJS.ErrnoException
-            err.code = 'EACCES'
-            throw err
-          },
-        },
+        probeFs: deniedProbeFs,
       })
       expect(only(report, 'warp').verdict).toMatch(/on macOS grant Full Disk Access/)
     } finally {
-      if (original) Object.defineProperty(process, 'platform', original)
+      restoreProcessPlatform(original)
     }
   })
 
@@ -727,14 +726,7 @@ describe('collectDoctorReport - permission-denied probe root (#197)', () => {
     const report = await collectDoctorReport('all', {
       providers: [provider],
       cache: emptyCache(),
-      probeFs: {
-        existsSync: () => false,
-        statSync: () => {
-          const err = new Error('EACCES: permission denied') as NodeJS.ErrnoException
-          err.code = 'EACCES'
-          throw err
-        },
-      },
+      probeFs: deniedProbeFs,
     })
     const r = only(report, 'warp')
     expect(r.verdict).toContain(first)
