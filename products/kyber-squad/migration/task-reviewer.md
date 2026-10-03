@@ -6,7 +6,7 @@ selected-baseline: .github/agents/task-reviewer.agent.md
 sources:
   .github/agents/task-reviewer.agent.md: e096cb7d1507f7d6f1bc635dbc893d8f41a0289d105bfa5648bb2db5ba74b61c
   .github/agents/task-reviewer-v3.agent.md: 27bc894fd3ed5b56172d4210d9f2ff3ac716fe7c8d79ee11a15d1d4c4800a1f8
-final-body-sha256: c2e7fbf50604282f1d039ea114c8431415455dd9b14a5d5850e5a3740c96f86b
+final-body-sha256: 71bda654c67ca9e7d4d89514024d37e5b9b3470ba9e725a817965653b71ed767
 ---
 # task-reviewer migration
 

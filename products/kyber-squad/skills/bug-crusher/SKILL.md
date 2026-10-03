@@ -55,6 +55,9 @@ Read the investigator's findings against this list. **Any single hit means escal
 - `ROOT CAUSE` is `UNKNOWN`, hedged, or offers competing hypotheses.
 - It touches authentication, authorization, secrets, data migrations, persistence schema, or a public API contract.
 - The proposed fix is to change a test's assertion or delete a test. A test that asserts the wrong thing is a requirements question, not a defect.
+- Conflicting invariants: existing test fixtures assert legacy internals or contradict the intended fix design.
+- Thrash oscillation detected: resolving one failure cluster causes another to fail, or fixes alternate between clusters.
+- Blast radius exceeds triage scope: the fix touches unexpected files or spills across component boundaries.
 - It needs a new file, a new dependency, or a signature change with existing callers.
 - The same symptom has come back after a previous fix.
 - Two fix attempts have already failed (§4).
@@ -68,11 +71,13 @@ Note what these have in common: each one means the cost of being wrong is no lon
 3. **Verify** before claiming anything. Run the exact command that reproduced the failure and show it now passes, then run the surrounding suite or build to show nothing else regressed. Against the Test-contract tests from step 1, show GREEN. "It should work now" is not verification; paste the output.
 4. **Review — always.** Spawn `task-reviewer` on the change, including fixes you applied yourself — your own edits get *more* scrutiny, not less, because you made them without reading the surrounding code, on the investigator's word. Two preconditions, both cheap: the worker's completion gate has run its deterministic fix pass (formatter, analyzer code fixes, `cleanupcode` scoped to the changed files), so nothing mechanical reaches the reviewer; and the Test-contract row with matching RED/GREEN evidence from steps 1 and 3 is present. Pass `development-mode: test-first`. If RED was never established, that is a `test-dev` task to establish it, not a reason to summon the council. A `FAIL` sends the work back with the fix list attached plus that same Test-contract row and RED/GREEN evidence verbatim, and you get three passes in total. **A `FAIL` on pass 3, or an `ESCALATION: end-of-run`, does not start a review** — it escalates to `architect`, which plans the remedy. `code-reviewer` reviews the finished fix once, before it ships, and never a single task along the way.
 
-## 4. Attempt budget
+## 4. Attempt budget & failure cluster circuit-breaker
 
-You get **two** fix attempts. A first miss is fair — the investigator's diagnosis was close but incomplete. A second miss means the model of the problem is wrong, not the patch, and further attempts are just sampling from the wrong distribution. On the second failure, escalate to `architect` and carry all evidence with you: both attempted fixes, why each failed, and the investigator's original findings. That accumulated evidence is worth a great deal to the architect — hand it over rather than making it start cold.
+You get **two** fix attempts per failure cluster. A failure cluster is a group of failing tests or symptoms sharing a fixture, namespace, or subsystem error signature. A first miss is fair — the investigator's diagnosis was close but incomplete. A second miss means the model of the problem is wrong, not the patch, and further attempts are just sampling from the wrong distribution.
 
-Count attempts per defect, not per file, and count a `FAIL` rework that fails verification as an attempt.
+If a fix attempt for cluster A causes failure in cluster B, and repairing B causes A to fail again (oscillation), trip the circuit-breaker immediately on recurrence without waiting for attempt exhaustion. On the second failure or upon oscillation, escalate to `architect` and carry all evidence with you: both attempted fixes, why each failed, and the investigator's original findings. That accumulated evidence is worth a great deal to the architect — hand it over rather than making it start cold.
+
+Count attempts per defect and per failure cluster, not per file, and count a `FAIL` rework that fails verification as an attempt.
 
 ## 5. Escalated path — architect, then specialists
 

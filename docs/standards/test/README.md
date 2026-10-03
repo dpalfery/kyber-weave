@@ -61,6 +61,13 @@ guarantee breaks.
 New behaviour ships with the test that would fail without it. A bug fix ships with a
 regression test whose name encodes the scenario that was broken.
 
+**Never couple tests to legacy internals:** Avoid asserting transient internal implementation
+details (such as exact relative rollback paths, duplicate lease keys, or private mutable states)
+that conflict with architectural evolutions or refactorings. When an agent or developer
+discovers an existing test fixture asserting legacy internals against an approved design change,
+halt and reconcile the contradictory invariants via an escalation or decision rather than contorting
+production code to satisfy contradictory invariants simultaneously.
+
 ## Isolation and assertions
 
 Tests run in any order and do not depend on each other. Each test arranges its own data.

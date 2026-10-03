@@ -38,6 +38,19 @@ Invoke `task-reviewer` after each worker completion with the mode, pass number, 
 
 The reviewer requires matching Test-contract and RED/GREEN evidence only in test-first mode. In standard mode it requires the approved verification contract and current evidence.
 
+## Iteration circuit-breaker and thrash prevention
+
+Prevent runaway test-fix thrash loops across workers and rework cycles:
+
+- **Enforced retry threshold per failure cluster:** Track rework attempts per failing test fixture and subsystem failure cluster. A failure cluster is a group of failing tests sharing a fixture, namespace, or error signature. Limit retries to at most two attempts (three total runs) against the same failing fixture or failure cluster before tripping the circuit-breaker.
+- **Oscillation detection:** If resolving failure cluster A introduces or re-activates failure cluster B, and subsequent work on B causes A to fail again, detect thrash oscillation and trip the circuit-breaker immediately on recurrence.
+- **Conflicting invariants halt and escalation:** When an implementation change breaks a test fixture that asserts legacy internals, transient internal states, or contradictory requirements against the approved design, workers must not contort the implementation to satisfy mutually incompatible invariants. The worker must halt and emit `STATUS: CONFLICTING_INVARIANTS` or `ESCALATION: conflicting-test-fixture`. Conductor immediately pulls the task and enters it into the findings collection for architectural reconciliation.
+- **JEV blast-radius checkpoints:** Evaluate deterministic Judgment/Execution Verification (JEV) blast-radius checkpoints at every worker completion and before task review:
+  1. *File scope:* Edits must remain strictly within the task's declared file scope.
+  2. *Architectural layers:* Changes must not cross into unapproved architectural layers or external subsystems.
+  3. *Scope creep limit:* For bounded defects or single-task plans, touching more than three files or introducing unplanned cross-subsystem edits trips the circuit-breaker immediately.
+- **Escalation path:** When the circuit-breaker trips (retry limit reached, oscillation detected, conflicting invariants reported, or blast radius exceeded), halt all further rework on the task, log the trip reason, failure cluster, diff, and evidence packet, and route directly to the findings collection for `architect` resolution.
+
 ## Findings and final council
 
 When the ready queue is empty and every task has left the ladder, drain a non-empty findings collection through `architect`. Any resulting Draft plan goes through its normal user approval gate before execution.

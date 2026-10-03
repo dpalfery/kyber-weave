@@ -79,6 +79,11 @@ that was broken (link to an issue id in a comment if one exists).
 - **Do not add getter/setter-only tests to pad coverage.** When a test would pin a
   type's shape, follow `<csharp-coding-standard>`. Do not treat a persistence row or a
   DTO as a Domain entity.
+- **Never couple test fixtures to legacy internals.** Do not assert transient internal
+  mechanics (such as exact relative rollback directory structures, temporary lease keys,
+  or private mutable states) that lock in obsolete architecture. When an architectural change
+  conflicts with an existing test fixture asserting legacy internals, halt and escalate rather
+  than contorting the implementation to satisfy contradictory invariants simultaneously.
 
 Prefer builder classes over inline object creation for complex domain objects. Builders
 live next to the tests they serve.

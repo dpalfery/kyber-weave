@@ -40,8 +40,10 @@ Establish the scoped change with status, diff, and narrow file reads. Do not run
 1. Check every acceptance criterion against the current artifact and name the path or line that proves it. Unlocatable evidence is unmet.
 2. Confirm every path and claim in the completion digest against the tree. Unsupported is not the same as false, but both require correction before PASS.
 3. Read the nearest governing instructions and standards for the changed scope. Report only human-judgment deviations; mechanical formatting and analyzer issues mean the worker's deterministic completion gate did not run.
-4. Reject demonstrably incomplete work and change outside the task's authorized scope.
-5. Record serious out-of-scope council concerns as `ESCALATION: end-of-run` without attempting a full security, performance, dependency, or cross-system analysis.
+4. **JEV blast-radius checkpoint:** Verify that changes stay strictly within the task's authorized file scope and layer boundaries. Reject scope creep where a fix touches unapproved files or spills across layers; escalate with `ESCALATION: blast-radius-exceeded`.
+5. **Conflicting invariants detection:** Check if the worker modified tests or contorted implementation to satisfy legacy internal assertions that contradict the task design. Escalate with `ESCALATION: conflicting-test-fixture`.
+6. Reject demonstrably incomplete work and change outside the task's authorized scope.
+7. Record serious out-of-scope council concerns as `ESCALATION: end-of-run` without attempting a full security, performance, dependency, or cross-system analysis.
 
 ## Three-pass ladder
 
@@ -49,7 +51,7 @@ Establish the scoped change with status, diff, and narrow file reads. Do not run
 - **Pass 2:** re-check pass-1 fixes and anything those fixes broke. Do not re-review already-passing scope.
 - **Pass 3:** the final, narrow re-check. A FAIL on pass 3 enters the conductor's findings collection. There is no pass 4.
 
-A fixable FAIL on pass 1 or pass 2 uses `ESCALATION: none`. `end-of-run` is reserved for a council-owned concern, an unreviewable diff, or another finding the worker cannot settle within this task. It marks the finding for collection; it never starts a review.
+A fixable FAIL on pass 1 or pass 2 uses `ESCALATION: none`. `circuit-breaker-tripped`, `conflicting-test-fixture`, and `blast-radius-exceeded` immediately halt further passes and enter the findings collection for architectural reconciliation. `end-of-run` is reserved for a council-owned concern, an unreviewable diff, or another finding the worker cannot settle within this task. It marks the finding for collection; it never starts a review.
 
 ## Fix comments
 
@@ -63,10 +65,10 @@ Return exactly:
 TASK REVIEW — pass {1|2|3}
 MODE:     test-first | standard
 RESULT:   PASS | FAIL
-ESCALATION: none | end-of-run
+ESCALATION: none | end-of-run | circuit-breaker-tripped | conflicting-test-fixture | blast-radius-exceeded
 CHECKED:  <criteria met>/<criteria total> · standards: <names> · files: <count>
 EVIDENCE: <RED/GREEN contract | verification contract and current run>
-NOT COVERED: security modelling, authorization and tenancy, performance at scale, blast radius, dependency supply chain, cross-file duplication, analyzer triage, test adequacy and coverage
+NOT COVERED: security modelling, authorization and tenancy, performance at scale, repository-wide blast radius, dependency supply chain, cross-file duplication, analyzer triage, test adequacy and coverage
 FIXES:    <numbered list, or none>
 ```
 

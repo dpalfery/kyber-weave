@@ -282,6 +282,46 @@ public sealed class SquadCanonicalContentTests
     }
 
     [Fact]
+    public void LoadConductorDefinesIterationCircuitBreakerAndFailureClusterLimits()
+    {
+        string contract = ReadAgentContract("conductor");
+
+        Assert.Contains("circuit-breaker", contract, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("failure cluster", contract, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("oscillation", contract, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("blast radius", contract, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("conflicting invariants", contract, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void LoadTaskReviewerAuditsBlastRadiusAndEscalatesConflictingInvariants()
+    {
+        string contract = ReadAgentContract("task-reviewer");
+
+        Assert.Contains("blast radius", contract, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("conflicting invariants", contract, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void LoadBugCrusherSkillDefinesIterationThresholdAndOscillationTripwire()
+    {
+        string skill = ReadSkillContract("bug-crusher");
+
+        Assert.Contains("failure cluster", skill, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("oscillation", skill, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void LoadTestCodingStandardForbidsCoupledInternalTestAssertions()
+    {
+        string standardPath = Path.Combine(ProductRoot, "standards", "test", "README.md");
+        string standard = File.ReadAllText(standardPath);
+
+        Assert.Contains("legacy internals", standard, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("contradictory invariants", standard, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void LoadProductOwnerIsHeadlessAndReturnsStructuredPhaseAndGapMarkers()
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
