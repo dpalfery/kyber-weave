@@ -674,6 +674,38 @@ describe('ContextDoctor ingest + coverage panel (issues #189/#198/#199, T9)', ()
     expect(html).toContain('430536')
   })
 
+  it('renders zero-record sources with their persisted reason, grouped and verbatim (#196)', () => {
+    const unit = (sourceKey: string, lastErrorCode: string | null, recordCount = 0) => ({
+      ...KNOWN_COVERAGE.checkpoints![0]!,
+      harnessId: 'codex-cli',
+      sourceKey,
+      lastStatus: 'ok',
+      lastErrorCode,
+      recordCount,
+    })
+    const coverage: KyberCoverage = {
+      ...KNOWN_COVERAGE,
+      checkpoints: [
+        unit('a', 'window_filtered'),
+        unit('b', 'window_filtered'),
+        unit('c', 'no_recordable_events'),
+        unit('d', null, 4),
+      ],
+    }
+    const html = renderWithQuery(<ContextDoctor initialCoverage={coverage} />)
+    expect(html).toContain('data-testid="coverage-zero-record"')
+    expect(html).toContain('3 sources discovered but not ingested')
+    expect(html).toContain('window_filtered')
+    expect(html).toContain('no_recordable_events')
+    const rows = html.match(/data-testid="coverage-zero-record-reason"/g) ?? []
+    expect(rows).toHaveLength(2)
+  })
+
+  it('renders no zero-record section when every ok checkpoint has records', () => {
+    const html = renderWithQuery(<ContextDoctor initialCoverage={UNKNOWN_COVERAGE} />)
+    expect(html).not.toContain('data-testid="coverage-zero-record"')
+  })
+
   it('renders unknown receiver status without inventing zeros', () => {
     const html = renderWithQuery(<ContextDoctor initialCoverage={UNKNOWN_COVERAGE} />)
     expect(html).toContain(
