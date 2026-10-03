@@ -15,11 +15,19 @@ import { createRequire } from 'node:module'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { CanonStore } from '../canon/store.js'
+import {
+  clearCodexMemCaches,
+  CODEX_CACHE_VERSION,
+  fingerprintFile as fingerprintCodexFile,
+  readCachedCodexResults,
+} from '../ingest/codex-cache.js'
+import { fingerprintFile } from '../ingest/session-cache.js'
 import { createCodexProvider } from '../providers/codex.js'
 import { createKiloCodeProvider } from '../providers/kilo-code.js'
 
 import { refreshHarnessSources } from './orchestrator.js'
-import { descriptorFor } from './registry.js'
+import { descriptorFor, sourceKeyFor } from './registry.js'
+import { revisionTokenFor } from './source-reader.js'
 import { COMMAND_STARTED_AT } from './fixtures/integration-harness.js'
 
 const requireForTest = createRequire(import.meta.url)
@@ -389,6 +397,301 @@ describe('issue #189 T3 (codex)', () => {
       expect(codexCli.length).toBeGreaterThan(0)
     } finally {
       store.close()
+    }
+  })
+})
+
+// Upgrade invalidation (PR #264 CodeRabbit P1): previously dropped sessions
+// sit behind a reusable zero-record checkpoint and/or an empty Codex exact
+// cache hit. Bumping parserContractVersion (Codex, KiloCode) and
+// CODEX_CACHE_VERSION must force a re-parse so those sessions land.
+const OLD_PARSER_CONTRACT_VERSION = '1'
+
+describe('issue #189 upgrade: old zero-record checkpoints must not be reused', () => {
+  it('re-parses kilo-shared-runtime after an old zero-record checkpoint', async () => {
+    expect(descriptorFor('kilo-shared-runtime')?.parserContractVersion).not.toBe(
+      OLD_PARSER_CONTRACT_VERSION,
+    )
+
+    const kiloDir = join(root, 'xdg', 'kilo')
+    mkdirSync(kiloDir, { recursive: true })
+    const dbPath = join(kiloDir, 'kilo.db')
+    const db = openSqlite(dbPath)
+    db.exec(`
+      CREATE TABLE session (
+        id TEXT PRIMARY KEY, project_id TEXT NOT NULL, parent_id TEXT,
+        slug TEXT NOT NULL, directory TEXT NOT NULL, title TEXT NOT NULL,
+        version TEXT NOT NULL, time_created INTEGER, time_updated INTEGER,
+        time_archived INTEGER
+      );
+      CREATE TABLE message (
+        id TEXT PRIMARY KEY, session_id TEXT NOT NULL,
+        time_created INTEGER, time_updated INTEGER, data TEXT NOT NULL
+      );
+      CREATE TABLE part (
+        id TEXT PRIMARY KEY, message_id TEXT NOT NULL,
+        session_id TEXT NOT NULL, time_created INTEGER,
+        time_updated INTEGER, data TEXT NOT NULL
+      );
+    `)
+    const now = Date.parse('2026-09-10T10:00:00.000Z')
+    db.prepare(`INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, time_created, time_updated, time_archived)
+                VALUES ('sess-kilo-upgrade', 'proj-1', NULL, 'slug-u', '/home/user/myproject', 'Kilo upgrade', '1.0', ?, ?, NULL)`).run(now, now)
+    db.prepare(`INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('msg-1', 'sess-kilo-upgrade', ?, ?, ?)`)
+      .run(now, now, JSON.stringify({ role: 'user' }))
+    db.prepare(`INSERT INTO part (id, message_id, session_id, time_created, time_updated, data) VALUES ('part-1', 'msg-1', 'sess-kilo-upgrade', ?, ?, ?)`)
+      .run(now, now, JSON.stringify({ type: 'text', text: 'hello kilo' }))
+    db.prepare(`INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES ('msg-2', 'sess-kilo-upgrade', ?, ?, ?)`)
+      .run(now + 1000, now + 1000, JSON.stringify({
+        role: 'assistant',
+        modelID: 'claude-opus-4-6',
+        cost: 0.01,
+        tokens: { input: 100, output: 50, reasoning: 0, cache: { read: 0, write: 0 } },
+      }))
+    db.prepare(`INSERT INTO part (id, message_id, session_id, time_created, time_updated, data) VALUES ('part-2', 'msg-2', 'sess-kilo-upgrade', ?, ?, ?)`)
+      .run(now + 1000, now + 1000, JSON.stringify({ type: 'text', text: 'hi there' }))
+    db.close()
+
+    const sourcePath = `${dbPath}:sess-kilo-upgrade`
+    const fingerprint = await fingerprintFile(sourcePath)
+    expect(fingerprint).not.toBeNull()
+    const revisionToken = revisionTokenFor(fingerprint!)
+    const sourceKey = sourceKeyFor('kilo-shared-runtime', {
+      path: sourcePath,
+      project: 'myproject',
+      provider: 'kilo-code',
+    })
+
+    const store = new CanonStore(join(root, 'canon-upgrade-kilo.db'))
+    try {
+      store.commitSourceUnit({
+        records: [],
+        provenance: [],
+        checkpoint: {
+          harnessId: 'kilo-shared-runtime',
+          sourceKey,
+          providerId: 'kilo-code',
+          parserId: 'kilo-code',
+          parserContractVersion: OLD_PARSER_CONTRACT_VERSION,
+          format: 'sqlite',
+          sourceRootLabel: '~/.local/share/kilo/kilo.db',
+          revisionToken,
+          coveredFromUtc: '2000-01-01T00:00:00.000Z',
+          coveredThroughUtc: '2099-01-01T00:00:00.000Z',
+          lastAttemptUtc: '2026-09-10T10:00:00.000Z',
+          lastSuccessUtc: '2026-09-10T10:00:00.000Z',
+          lastStatus: 'ok',
+          lastErrorCode: null,
+          unitCount: 1,
+          recordCount: 0,
+        },
+      })
+
+      await refreshHarnessSources(
+        store,
+        {
+          getAllProviders: async () => [createKiloCodeProvider()],
+          descriptors: descriptors('kilo-shared-runtime', 'kilo-vscode-legacy'),
+          jobConcurrency: 1,
+          writerCapacity: 1,
+          commandStartedAt: COMMAND_STARTED_AT,
+          parseAllSessions: async () => undefined,
+        },
+        { historyWeeks: 5200 },
+      )
+
+      const kiloRecords = store
+        .listAll()
+        .filter((record) => String(record.harness).includes('kilo'))
+      expect(
+        kiloRecords.length,
+        'old zero-record kilo checkpoint must not skip re-parse after parser-contract bump',
+      ).toBeGreaterThan(0)
+
+      const updated = store.getSourceCheckpoint('kilo-shared-runtime', sourceKey)
+      expect(updated?.parserContractVersion).toBe(
+        descriptorFor('kilo-shared-runtime')!.parserContractVersion,
+      )
+      expect(updated?.recordCount).toBeGreaterThan(0)
+    } finally {
+      store.close()
+    }
+  })
+
+  it('re-parses codex-cli after an old zero-record checkpoint and empty v15 cache', async () => {
+    expect(descriptorFor('codex-cli')?.parserContractVersion).not.toBe(OLD_PARSER_CONTRACT_VERSION)
+    expect(CODEX_CACHE_VERSION).toBeGreaterThan(15)
+
+    const codexHome = join(root, '.codex')
+    const dayDir = join(codexHome, 'sessions', '2026', '09', '10')
+    mkdirSync(dayDir, { recursive: true })
+    const rolloutPath = join(dayDir, 'rollout-upgrade-1.jsonl')
+    writeFileSync(
+      rolloutPath,
+      [
+        JSON.stringify({
+          type: 'session_meta',
+          timestamp: '2026-09-10T10:00:00Z',
+          payload: {
+            cwd: '/Users/test/myproject',
+            originator: 'codex_cli_rs',
+            session_id: 'sess-upgrade-1',
+            model: 'gpt-5.3-codex',
+          },
+        }),
+        JSON.stringify({
+          type: 'event_msg',
+          timestamp: '2026-09-10T10:01:00Z',
+          payload: {
+            type: 'token_count',
+            info: {
+              model: 'gpt-5.3-codex',
+              last_token_usage: {
+                input_tokens: 100,
+                cached_input_tokens: 0,
+                output_tokens: 50,
+                reasoning_output_tokens: 0,
+                total_tokens: 150,
+              },
+              total_token_usage: {
+                input_tokens: 100,
+                cached_input_tokens: 0,
+                output_tokens: 50,
+                reasoning_output_tokens: 0,
+                total_tokens: 150,
+              },
+            },
+          },
+        }),
+      ].join('\n') + '\n',
+    )
+
+    const fingerprint = await fingerprintFile(rolloutPath)
+    expect(fingerprint).not.toBeNull()
+    const revisionToken = revisionTokenFor(fingerprint!)
+    const sourceKey = sourceKeyFor('codex-cli', {
+      path: rolloutPath,
+      project: 'myproject',
+      provider: 'codex',
+    })
+
+    const cacheDir = join(root, 'cache')
+    mkdirSync(cacheDir, { recursive: true })
+    // Seed the pre-bump empty exact hit under the OLD versioned filename.
+    writeFileSync(
+      join(cacheDir, 'codex-results.v15.json'),
+      JSON.stringify({
+        version: 15,
+        files: {
+          [rolloutPath]: {
+            dev: fingerprint!.dev,
+            ino: fingerprint!.ino,
+            mtimeMs: fingerprint!.mtimeMs,
+            sizeBytes: fingerprint!.sizeBytes,
+            project: 'stale-empty',
+            calls: [],
+          },
+        },
+      }),
+    )
+
+    const previousCacheDir = process.env['KYBERDASH_CACHE_DIR']
+    process.env['KYBERDASH_CACHE_DIR'] = cacheDir
+    clearCodexMemCaches()
+
+    const store = new CanonStore(join(root, 'canon-upgrade-codex.db'))
+    try {
+      store.commitSourceUnit({
+        records: [],
+        provenance: [],
+        checkpoint: {
+          harnessId: 'codex-cli',
+          sourceKey,
+          providerId: 'codex',
+          parserId: 'codex',
+          parserContractVersion: OLD_PARSER_CONTRACT_VERSION,
+          format: 'jsonl',
+          sourceRootLabel: '~/.codex/sessions',
+          revisionToken,
+          coveredFromUtc: '2000-01-01T00:00:00.000Z',
+          coveredThroughUtc: '2099-01-01T00:00:00.000Z',
+          lastAttemptUtc: '2026-09-10T10:00:00.000Z',
+          lastSuccessUtc: '2026-09-10T10:00:00.000Z',
+          lastStatus: 'ok',
+          lastErrorCode: null,
+          unitCount: 1,
+          recordCount: 0,
+        },
+      })
+
+      await refreshHarnessSources(
+        store,
+        {
+          getAllProviders: async () => [createCodexProvider(codexHome)],
+          descriptors: descriptors('codex-cli', 'codex-desktop', 'codex-unclassified'),
+          jobConcurrency: 1,
+          writerCapacity: 1,
+          commandStartedAt: COMMAND_STARTED_AT,
+          parseAllSessions: async () => undefined,
+        },
+        { historyWeeks: 5200 },
+      )
+
+      const codexCli = store.listAll().filter((record) => record.harness === 'codex-cli')
+      expect(
+        codexCli.length,
+        'old zero-record codex checkpoint + empty v15 cache must not skip re-parse after bump',
+      ).toBeGreaterThan(0)
+
+      const updated = store.getSourceCheckpoint('codex-cli', sourceKey)
+      expect(updated?.parserContractVersion).toBe(descriptorFor('codex-cli')!.parserContractVersion)
+      expect(updated?.recordCount).toBeGreaterThan(0)
+    } finally {
+      store.close()
+      clearCodexMemCaches()
+      if (previousCacheDir === undefined) delete process.env['KYBERDASH_CACHE_DIR']
+      else process.env['KYBERDASH_CACHE_DIR'] = previousCacheDir
+    }
+  })
+})
+
+describe('issue #189 upgrade: old empty Codex cache must not exact-hit', () => {
+  it('does not serve an exact hit from a v15 empty Codex cache entry', async () => {
+    expect(CODEX_CACHE_VERSION).toBeGreaterThan(15)
+
+    const cacheDir = join(root, 'cache-v15')
+    mkdirSync(cacheDir, { recursive: true })
+    const sourcePath = join(root, 'rollout-empty-v15.jsonl')
+    writeFileSync(sourcePath, '{}\n')
+    const fingerprint = await fingerprintCodexFile(sourcePath)
+    expect(fingerprint).not.toBeNull()
+
+    writeFileSync(
+      join(cacheDir, 'codex-results.v15.json'),
+      JSON.stringify({
+        version: 15,
+        files: {
+          [sourcePath]: {
+            dev: fingerprint!.dev,
+            ino: fingerprint!.ino,
+            mtimeMs: fingerprint!.mtimeMs,
+            sizeBytes: fingerprint!.sizeBytes,
+            project: 'stale-empty',
+            calls: [],
+          },
+        },
+      }),
+    )
+
+    const previousCacheDir = process.env['KYBERDASH_CACHE_DIR']
+    process.env['KYBERDASH_CACHE_DIR'] = cacheDir
+    clearCodexMemCaches()
+    try {
+      expect(await readCachedCodexResults(sourcePath)).toBeNull()
+    } finally {
+      clearCodexMemCaches()
+      if (previousCacheDir === undefined) delete process.env['KYBERDASH_CACHE_DIR']
+      else process.env['KYBERDASH_CACHE_DIR'] = previousCacheDir
     }
   })
 })
