@@ -1953,6 +1953,51 @@ describe('KyberBridge.compareRuns split-share identity (issue #190 / D1)', () =>
     }
   })
 
+  it('rebuilds SessionIdentities once when compareRuns loads two executed sides', async () => {
+    const store = new CanonStore(':memory:')
+    store.upsertMany([
+      turnRecord('split-cur', 'cursor', 'k-split', '2026-09-03T10:00:00.000Z'),
+      turnRecord('split-vs', 'copilot-chat', 'k-split', '2026-09-03T10:01:00.000Z'),
+    ])
+    await buildSessions(store)
+    await buildRuns(store)
+
+    const cursorSplitRun = store.listRuns('cursor').find((run) =>
+      store.listExecutions(run.runId).some((execution) => execution.sessionId === 'cursor:k-split'),
+    )
+    const vscodeSplitRun = store.listRuns('copilot-vscode').find((run) =>
+      store
+        .listExecutions(run.runId)
+        .some((execution) => execution.sessionId === 'copilot-vscode:k-split'),
+    )
+    expect(cursorSplitRun).toBeDefined()
+    expect(vscodeSplitRun).toBeDefined()
+
+    const db = store.getDatabase()
+    const originalPrepare = db.prepare.bind(db)
+    let identityScans = 0
+    db.prepare = ((sql: string) => {
+      if (sql.includes('SELECT DISTINCT COALESCE(session_id, trace_id)')) identityScans += 1
+      return originalPrepare(sql)
+    }) as typeof db.prepare
+
+    const bridge = new KyberBridge({ canonDb: db })
+    try {
+      const split = bridge.compareRuns(cursorSplitRun!.runId, vscodeSplitRun!.runId)
+      expect(split).not.toBeNull()
+      expect(split!.runA.turnCount).toBeGreaterThan(0)
+      expect(split!.runB.turnCount).toBeGreaterThan(0)
+      expect(identityScans).toBe(1)
+    } finally {
+      bridge.close()
+      try {
+        store.close()
+      } catch {
+        // Bridge closed the injected shared handle.
+      }
+    }
+  })
+
   it('twin-dedupes compare turnCount per execution like findings (not raw undeduped rows)', async () => {
     // Live twin shape (issue #182 / ADR 0009 D4): one session key under
     // claude-code (OTLP) and claude-desktop (file) with byte-identical
