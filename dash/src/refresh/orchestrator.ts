@@ -228,15 +228,25 @@ async function runHarnessJob(context: JobContext): Promise<HarnessJobRow> {
     status: 'unavailable',
   }
 
-  const coverageBySourceKey = new Map<string, { dateRange: DateRange; coveredFromUtc: string }>()
+  const checkpoints = store.listSourceCheckpoints(descriptor.harnessId)
+  const checkpointBySourceKey = new Map(
+    checkpoints.map((checkpoint) => [checkpoint.sourceKey, checkpoint]),
+  )
   let anyVersionInvalidated = false
-  for (const checkpoint of store.listSourceCheckpoints(descriptor.harnessId)) {
-    coverageBySourceKey.set(
-      checkpoint.sourceKey,
-      coverageForVersionRepair(descriptor, checkpoint, context.dateRange, context.coveredFromUtc),
-    )
+  for (const checkpoint of checkpoints) {
     if (checkpoint.parserContractVersion !== descriptor.parserContractVersion) {
       anyVersionInvalidated = true
+      break
+    }
+  }
+
+  const coverageBySourceKey = new Map<string, { dateRange: DateRange; coveredFromUtc: string }>()
+  if (anyVersionInvalidated) {
+    for (const checkpoint of checkpoints) {
+      coverageBySourceKey.set(
+        checkpoint.sourceKey,
+        coverageForVersionRepair(descriptor, checkpoint, context.dateRange, context.coveredFromUtc),
+      )
     }
   }
 
@@ -252,10 +262,10 @@ async function runHarnessJob(context: JobContext): Promise<HarnessJobRow> {
           }
         : {}),
       previousFingerprints: previousFingerprintsFor(
-        store,
         descriptor,
         context.coveredFromUtc,
         context.coveredThroughUtc,
+        checkpoints,
       ),
       parseAllSessions: context.parseAllSessions,
       ...(context.fingerprintFile ? { fingerprintFile: context.fingerprintFile } : {}),
@@ -298,14 +308,11 @@ async function runHarnessJob(context: JobContext): Promise<HarnessJobRow> {
     // checkpoint floor is preserved; the slice is clamped to the 14-day
     // content-retention floor so this run does not ingest parts that
     // purgeExpiredContent will empty on the way out.
-    const previous = store.getSourceCheckpoint(descriptor.harnessId, unit.sourceKey)
-    const repaired = coverageBySourceKey.get(unit.sourceKey)
-      ?? coverageForVersionRepair(
-        descriptor,
-        previous,
-        context.dateRange,
-        context.coveredFromUtc,
-      )
+    const previous = checkpointBySourceKey.get(unit.sourceKey)
+    const repaired = coverageBySourceKey.get(unit.sourceKey) ?? {
+      dateRange: context.dateRange,
+      coveredFromUtc: context.coveredFromUtc,
+    }
     const activeDateRange = repaired.dateRange
     const activeCoveredFromUtc = repaired.coveredFromUtc
 
@@ -488,14 +495,14 @@ function safeDiagnostic(error: Error, fallback: string): string {
 }
 
 function previousFingerprintsFor(
-  store: CanonStore,
   descriptor: HarnessSourceDescriptor,
   coveredFromUtc: string,
   coveredThroughUtc: string,
+  checkpoints: readonly SourceCheckpoint[],
 ): Map<string, { dev: number; ino: number; mtimeMs: number; sizeBytes: number }> {
   const fingerprints = new Map<string, { dev: number; ino: number; mtimeMs: number; sizeBytes: number }>()
   const requested = { fromUtc: coveredFromUtc, throughUtc: coveredThroughUtc }
-  for (const checkpoint of store.listSourceCheckpoints(descriptor.harnessId)) {
+  for (const checkpoint of checkpoints) {
     const request = {
       revisionToken: checkpoint.revisionToken,
       parserContractVersion: descriptor.parserContractVersion,
