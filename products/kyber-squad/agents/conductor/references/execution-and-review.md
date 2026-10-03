@@ -40,11 +40,15 @@ The reviewer requires matching Test-contract and RED/GREEN evidence only in test
 
 ## Iteration circuit-breaker and loop detection
 
-The conductor enforces an iteration circuit-breaker to halt thrashing test-fix loops across rework cycles:
+The conductor enforces an iteration circuit-breaker to halt thrashing test-fix loops across rework cycles.
+
+A **failure cluster** is identified by the sorted set of failing test IDs, or—when no test IDs exist—the failing subsystem, job, or step label. That identity is the unit of account for the cluster-level retry limit and for oscillation detection.
+
+Every worker invocation is cold and self-contained. The per-cluster **dispatch tally** therefore lives on the run's persisted execution artifact (or the task artifact when the run has not yet written one). Each time the conductor re-evaluates the queue or dispatches a worker, it reads that tally, increments it for the cluster being dispatched, and writes it back. A cold worker does not keep a private across-run counter; it receives the current tally with the artifact. The worker's inner 3-iteration cap is per invocation and does not persist.
 
 - **Cluster-level retry limit:** Maximum of 2 rework dispatches for the same failing fixture or subsystem failure cluster across the run. If a failure cluster persists across 2 rework attempts, the circuit-breaker trips on that cluster.
 - **Oscillation detection:** If a fix for Failure Cluster A causes regression in Failure Cluster B, and a fix for B regresses A (or rework alternates between failure signatures), the loop detector trips immediately.
-- **Circuit-breaker escalation:** When the circuit-breaker trips—or when a worker returns `STATUS: ESCALATION`—halt rework for that task immediately. Do not dispatch further workers for that failure cluster. Record the escalation in the run's findings collection as `CIRCUIT_BREAKER_TRIGGER: <reason>` with the affected failure cluster, contradictory invariants, and blast radius.
+- **Circuit-breaker escalation:** When the circuit-breaker trips—or when a worker returns `STATUS: ESCALATION`—halt rework for that task immediately. Do not dispatch further workers for that failure cluster. Record the finding in the run's findings collection using the same `ESCALATION:` prefix as `ESCALATION: end-of-run`, with the key `ESCALATION: circuit-breaker`. Include `CIRCUIT_BREAKER_TRIGGER:` with exactly one of `ITERATION_CAP_EXCEEDED`, `THRASH_OSCILLATION_DETECTED`, `INVARIANT_CONTRADICTION`, or `BLAST_RADIUS_EXCEEDED`, plus the affected failure cluster, contradictory invariants, blast radius, and the worker's `RECOMMENDED_ACTION`. Reject any other trigger token; do not invent a reason.
 - **Architect mediation:** Tripped circuit-breakers must not be ignored or bypassed. When the queue drains to the findings collection, `architect` investigates the failure cluster, assesses whether coupled test fixtures assert conflicting invariants or legacy details, and authors an intake recommendation or Draft plan to resolve the architectural conflict.
 
 ## Findings and final council

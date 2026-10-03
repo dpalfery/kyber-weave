@@ -5,7 +5,7 @@ source-commit: 677c3a876ba9c62f1083608596b238c9deaff167
 selected-baseline: .github/agents/github-devops.agent.md
 sources:
   .github/agents/github-devops.agent.md: 52ed73aca2f79ad7f57ccaad94299fa96827f34c5e97133728b037aa3a6d2593
-final-body-sha256: 4b80cf45caf173166be4b3a450f552887c8ee17a872ff85da8bb76d8ce7c6673
+final-body-sha256: 5637c40143743ee74c7d9d92166a45f6dcb072d838b657a9f90f788c13794da0
 ---
 # github-devops migration
 

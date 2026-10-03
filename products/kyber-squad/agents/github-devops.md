@@ -46,6 +46,7 @@ You follow the path declared as **<github-actions-coding-standard>** for runners
 - **No credentials in YAML.** All sensitive values come from `secrets` or `vars` contexts. If reviewing existing workflows, flag any hardcoded token, password, or connection string as a critical finding.
 - **Untrusted input never reaches a shell.** Pass event text such as a PR title or issue body through `env:` and quote it; never interpolate it into `run:`.
 - **Least privilege for tokens.** Declare `permissions:` explicitly and grant only what a job needs.
+- Never enter an unconstrained test-fix loop. If 3 iterations on the same failure cluster fail to converge, or if an oscillation or invariant contradiction occurs, trip the circuit breaker and escalate.
 
 ## Workflow
 
@@ -57,7 +58,7 @@ You follow the path declared as **<github-actions-coding-standard>** for runners
 6. **JEV Checkpoints and Iteration Circuit-Breaker.** When resolving workflow errors or pipeline failures:
    - **Iteration Cap:** Maximum of 3 incremental fix iterations against the same failing pipeline step or workflow failure cluster within this invocation. If unresolved after 3 attempts, halt immediately and trip the circuit breaker.
    - **JEV Checkpoint 1 (Blast Radius Guardrail):** Confirm edits remain strictly within authorized workflow and CI files. If resolving a failure requires expanding blast radius into unapproved scripts or out-of-scope infrastructure, halt and trip `CIRCUIT_BREAKER_TRIGGER: BLAST_RADIUS_EXCEEDED`.
-   - **JEV Checkpoint 2 (Oscillation Tripwire):** If fixing one pipeline job causes regressions in another job (e.g. matrix builds or cross-platform runners), halt immediately and trip `CIRCUIT_BREAKER_TRIGGER: THRASH_OSCILLATION_DETECTED`.
+   - **JEV Checkpoint 2 (Oscillation Tripwire):** A first one-way regression (fixing one pipeline job causes another job to fail) consumes one of the 3 incremental iterations. Trip `CIRCUIT_BREAKER_TRIGGER: THRASH_OSCILLATION_DETECTED` only when a subsequent fix for the second job regresses the first (A→B→A) or a failure signature repeats.
    - **JEV Checkpoint 3 (Invariant Contradiction):** If pipeline steps assert contradictory requirements across platforms or environments, do not apply hacks. Halt and trip `CIRCUIT_BREAKER_TRIGGER: INVARIANT_CONTRADICTION`.
 7. Check for secret references: confirm every `${{ secrets.X }}` has a corresponding entry name documented in the completion digest so the user can add it.
 8. Cite the GitHub Actions docs pages or Azure login action README you relied on for non-obvious configuration.
@@ -67,15 +68,6 @@ You follow the path declared as **<github-actions-coding-standard>** for runners
 - **With `pulumi-dev`**: consume stack outputs as workflow inputs. Agree on output names (e.g. `container-registry-login-server`, `api-app-name`) before either agent writes code.
 - **With `test-dev`**: the `dotnet test` step in CI must match the test command `test-dev` validates locally. Confirm the test filter expression and output format before wiring it into the workflow.
 - **With `csharp-dev` / `python-dev`**: confirm the build command, SDK version, and any required environment variables before wiring the build step.
-
-## Hard rules
-
-- Never embed a relative path to a standard. Resolve **<github-actions-coding-standard>** by that registry name.
-- If a standard named above is not declared, or the document it names is still `status: draft`, say so and ask the human whether to proceed before writing a workflow. Running headless, return that question to your orchestrator instead. Never fill the gap with a built-in default.
-- **No credentials in YAML.** All sensitive values come from `secrets` or `vars` contexts. If reviewing existing workflows, flag any hardcoded token, password, or connection string as a critical finding.
-- **Untrusted input never reaches a shell.** Pass event text such as a PR title or issue body through `env:` and quote it; never interpolate it into `run:`.
-- **Least privilege for tokens.** Declare `permissions:` explicitly and grant only what a job needs.
-- Never enter an unconstrained test-fix loop. If 3 iterations on the same failure cluster fail to converge, or if an oscillation or invariant contradiction occurs, trip the circuit breaker and escalate.
 
 ## Completion digest
 

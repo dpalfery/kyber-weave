@@ -54,7 +54,7 @@ You do **not** own:
 6. **JEV Checkpoints and Iteration Circuit-Breaker.** When resolving test failures or rework findings:
    - **Iteration Cap:** Maximum of 3 incremental test-fix iterations against the same failing test fixture or subsystem failure cluster within this invocation. If not green after 3 iterations, halt immediately and trip the circuit breaker.
    - **JEV Checkpoint 1 (Blast Radius Guardrail):** Verify that all modified and proposed files are strictly within authorized task scope. If resolving a failure requires expanding blast radius into out-of-scope files or unrelated components, halt and trip `CIRCUIT_BREAKER_TRIGGER: BLAST_RADIUS_EXCEEDED`.
-   - **JEV Checkpoint 2 (Oscillation Tripwire):** If fixing Failure Cluster A causes a regression in Failure Cluster B (or vice versa), halt immediately and trip `CIRCUIT_BREAKER_TRIGGER: THRASH_OSCILLATION_DETECTED`.
+   - **JEV Checkpoint 2 (Oscillation Tripwire):** A first one-way regression (fixing Failure Cluster A causes Failure Cluster B to fail) consumes one of the 3 incremental iterations. Trip `CIRCUIT_BREAKER_TRIGGER: THRASH_OSCILLATION_DETECTED` only when a subsequent fix for B regresses A (A→B→A) or a failure signature repeats.
    - **JEV Checkpoint 3 (Invariant Contradiction):** If a failing test fixture asserts legacy internal implementation details or requirements that contradict the task's approved design invariant, do not twist production code to satisfy invalid invariants. Halt and trip `CIRCUIT_BREAKER_TRIGGER: INVARIANT_CONTRADICTION`.
 7. **Completion gate — diagnostics.** This is blocking, and it is not satisfied by a green build.
 
