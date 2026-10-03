@@ -444,6 +444,32 @@ describe('iterateNativeUnits', () => {
     expect(units[0]!.emptyReason).toBeUndefined()
   })
 
+  it('treats injected parseCalls empty array for Cursor as unknown, not no_recordable_events', async () => {
+    const source: SessionSource = {
+      path: '/native/cursor/injected.vscdb#orphan',
+      project: '(no folder)',
+      provider: 'cursor',
+    }
+    const cursor: Provider = {
+      name: 'cursor',
+      displayName: 'Cursor',
+      modelDisplayName: model => model,
+      toolDisplayName: tool => tool,
+      discoverSessions: async () => [source],
+      createSessionParser() {
+        throw new Error('createSessionParser must not run when parseCalls is injected')
+      },
+    }
+
+    const units = await readHarness('cursor', [cursor], {
+      parseCalls: async () => [],
+    })
+    expect(units).toHaveLength(1)
+    expect(units[0]!.envelopes).toEqual([])
+    expect(units[0]!.problems).toEqual([])
+    expect(units[0]!.emptyReason).toBeUndefined()
+  })
+
   it('iterates native units with a bounded worker pool', async () => {
     const sources: SessionSource[] = Array.from({ length: 6 }, (_, index) => ({
       path: `/native/pi/${index}.jsonl`,

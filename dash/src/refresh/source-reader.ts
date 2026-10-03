@@ -263,11 +263,20 @@ async function readNativeUnit(
   const { inWindow, problems } = sliceCallsToWindow(calls, dependencies.dateRange)
   const revisionToken = revision?.token ?? 'unknown'
   const envelopes = inWindow.map(parsed => toEnvelope(harnessId, sourceKey, source, parsed, revisionToken))
+  // Injected parseCalls that returns a bare empty array omits preWindowRecordable.
+  // For providers that date-filter before yield, that omission is unknown (same as
+  // a failed probe), not "zero pre-window rows".
+  const preWindowRecordable =
+    batch.preWindowRecordable !== undefined
+      ? batch.preWindowRecordable
+      : PROVIDERS_DATE_FILTER_BEFORE_YIELD.has(provider.name)
+        ? null
+        : undefined
   const emptyReason = emptyReasonFor(
     calls.length,
     envelopes.length,
     problems.length,
-    batch.preWindowRecordable,
+    preWindowRecordable,
   )
   return { harnessId, sourceKey, source, status, revision, envelopes, problems, ...(emptyReason ? { emptyReason } : {}) }
 }
