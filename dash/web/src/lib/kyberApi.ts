@@ -585,6 +585,11 @@ export interface KyberRunSummary {
   turnCount?: number
   totalInput?: number | null
   totalOutput?: number | null
+  /**
+   * True when any session linked to the run is a subagent session.
+   * Served on `/api/kyber/runs` so Compare can default-exclude subagent noise (issue #190 D2).
+   */
+  isSubagent?: boolean
   costUsd?: number | null
   /** Present only when `costUsd` sums priced sessions beside unpriced ones. */
   costStatus?: 'partial'

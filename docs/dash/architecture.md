@@ -49,6 +49,10 @@ code-refs:
   - projectCanonicalStore
   - CanonicalProjectionScheduler
   - buildContextReport
+  - SessionIdentities
+  - recordsForShare
+  - compareRuns
+  - dedupeTwinTurns
 ---
 
 # KyberDash architecture
@@ -632,7 +636,12 @@ longer emit.
 
 Comparing runs across prompt revisions or harness configurations requires phase alignment.
 `alignByPhase` aligns runs by logical task phase (discovery, editing, verification) rather than
-chronological turn index. Comparison verdicts enforce a statistical sufficiency threshold
+chronological turn index. `KyberBridge.compareRuns` (served at `GET /api/kyber/compare/runs`)
+loads each side's turns the same way findings and runs resolve session identity: for each
+execution, `SessionIdentities.shareOf` maps the claimed session id to a share, then
+`recordsForShare` (or bare session records when the id is not a claimed share) gathers the
+rows, and `dedupeTwinTurns` collapses twin-collector duplicates per execution before
+phase alignment. Comparison verdicts enforce a statistical sufficiency threshold
 ($n \ge 5$ completed pairs without outcome regression) before promoting observations to advice.
 Diagnostic predictions are logged and scored in `dash/src/analysis/calibration.ts`.
 
@@ -722,7 +731,7 @@ The web dashboard server wires HTTP requests directly to `KyberBridge`:
 | `/api/kyber/predictions` | `GET`, `POST` | `{ predictions: Prediction[] }` | Query or record prediction calibration entries. |
 | `/api/kyber/calibration` | `GET` | `CalibrationSummary` | Calibration curve and scoring summary. |
 | `/api/kyber/compare` | `GET` | `ComparisonTableResult` | Cross-harness comparison matrix. |
-| `/api/kyber/compare/runs` | `GET` | `RunComparisonResult` | Phase-aligned comparison between two runs. |
+| `/api/kyber/compare/runs` | `GET` | `RunComparisonResult` | Phase-aligned comparison between two runs; turns loaded via `SessionIdentities` share resolution and per-execution twin-dedupe. |
 | `/api/kyber/review` | `POST` | `ReviewResponse` | Opt-in LLM context review invocation (D10). |
 | `/api/kyber/review/status` | `GET` | `{ provider, isConfigured }` | Review provider configuration status. |
 | `/api/kyber/quarantine` | `GET` | `{ entries: QuarantineRow[] }` | Quarantined spans; supports `?limit=`. |

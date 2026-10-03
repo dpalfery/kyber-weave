@@ -7,7 +7,15 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { createRequire } from 'node:module'
 import { APPROXIMATE_TOKENIZER, tokenizerName } from '../canon/tokens.js'
-import { normalizeHarnessName } from '../canon/measurability.js'
+import {
+  SessionIdentities,
+  canonicalHarnessId,
+  harnessExportsCacheCounter,
+  normalizeHarnessName,
+  sourceDisplayName,
+  type SourceKind,
+} from '../canon/measurability.js'
+import { dedupeTwinTurns } from '../canon/twin-dedupe.js'
 import { refreshProcessIsAlive } from '../canon/refresh-run.js'
 import {
   CanonStore,
@@ -25,7 +33,6 @@ import {
   type HarnessRollupDbRow,
   type ExecutionDbRow,
 } from '../canon/store.js'
-import { sourceDisplayName, type SourceKind } from '../canon/measurability.js'
 import {
   toSourceCheckpoint,
   type SourceCheckpoint,
@@ -63,7 +70,6 @@ import {
   assembleRollup,
   digestSessionPayloads,
 } from '../canon/harnesses.js'
-import { harnessExportsCacheCounter } from '../canon/measurability.js'
 import { buildScorecard, type Scorecard } from '../analysis/scorecard.js'
 import type { AsadSessionPayload } from '../canon/sessions.js'
 
@@ -1894,27 +1900,65 @@ export class KyberBridge {
   }
 
   /**
+   * One canonical harness's share of a session key — same filter as
+   * `CanonStore.recordsForShare`, including the direct-DB path so compare
+   * does not depend on an injected store for split-share resolution.
+   */
+  private recordsForShareKey(key: string, harness: string): CanonicalRecord[] {
+    if (this.store) return this.store.recordsForShare(key, harness)
+    const canonical = normalizeHarnessName(harness)
+    return this.recordsForSessionKey(key).filter(
+      (record) => canonicalHarnessId(record.harness) === canonical,
+    )
+  }
+
+  /**
+   * Session identity table for the open corpus. Prefer the store's builder;
+   * otherwise rebuild from the same distinct `(key, harness)` query so the
+   * direct-DB bridge path resolves claimed ids the way findings/runs do.
+   */
+  private sessionIdentities(): SessionIdentities {
+    if (this.store) return this.store.sessionIdentities()
+    const db = this.getDb()
+    if (!this.hasTable(db, 'records')) return new SessionIdentities([])
+    try {
+      const pairs = db!
+        .prepare(
+          `SELECT DISTINCT COALESCE(session_id, trace_id) AS key, harness
+           FROM records
+           WHERE COALESCE(session_id, trace_id) IS NOT NULL`,
+        )
+        .all() as { key: string; harness: string }[]
+      return new SessionIdentities(pairs)
+    } catch {
+      return new SessionIdentities([])
+    }
+  }
+
+  /**
    * Records belonging to a run via its executions' session keys.
    * Thin load for `compareRuns` — does not re-derive run boundaries (D16).
+   * Resolves split/late shares the way findings do (`shareOf` →
+   * `recordsForShare` / bare session) and twin-dedupes per execution.
    */
   private recordsForRun(runId: string): CanonicalRecord[] {
     const executions = this.listExecutions(runId)
-    const keys = [
-      ...new Set(
-        executions.map((execution) => execution.sessionId ?? execution.executionId).filter((key) => key.length > 0),
-      ),
-    ]
-    if (keys.length === 0) {
+    if (executions.length === 0) {
       return this.recordsForSessionKey(runId)
     }
-    const seen = new Set<string>()
+    const identities = this.sessionIdentities()
     const records: CanonicalRecord[] = []
-    for (const key of keys) {
-      for (const record of this.recordsForSessionKey(key)) {
-        if (seen.has(record.spanId)) continue
-        seen.add(record.spanId)
-        records.push(record)
-      }
+    for (const execution of executions) {
+      const sessionId = execution.sessionId ?? execution.executionId
+      if (sessionId.length === 0) continue
+      const share = identities.shareOf(sessionId)
+      const shareRecords =
+        share === undefined
+          ? this.recordsForSessionKey(sessionId)
+          : this.recordsForShareKey(share.key, share.harness)
+      // Twin collectors describe the same turns twice (issue #182, ADR 0009
+      // D4). Scoped per execution, never across them — same as findings.
+      records.push(...dedupeTwinTurns(shareRecords, share?.key ?? sessionId))
     }
     records.sort((a, b) => String(a.timestamp).localeCompare(String(b.timestamp)))
     return records
@@ -2893,6 +2937,40 @@ export class KyberBridge {
       roots.push(node)
     }
     return roots
+  }
+
+  /**
+   * Subagent flags for selected sessions (issue #190 D2). Keyed `IN` lookup of
+   * `(session_id, is_subagent)` only — never materializes the session table
+   * via uncapped `listSessions()`, and never pulls payloads.
+   */
+  sessionSubagentFlags(sessionIds: readonly string[]): Map<string, boolean> {
+    const uniqueIds = [...new Set(sessionIds)].filter((id) => id.length > 0)
+    const out = new Map<string, boolean>()
+    if (uniqueIds.length === 0) return out
+
+    const db = this.getDb()
+    if (!this.hasTable(db, 'session')) return out
+    const chunkSize = 900
+    for (let offset = 0; offset < uniqueIds.length; offset += chunkSize) {
+      const chunk = uniqueIds.slice(offset, offset + chunkSize)
+      const placeholders = chunk.map(() => '?').join(', ')
+      try {
+        const rows = db!
+          .prepare(
+            `SELECT session_id, is_subagent FROM session WHERE session_id IN (${placeholders})`,
+          )
+          .all(...chunk) as Array<{ session_id: unknown; is_subagent: unknown }>
+        for (const row of rows) {
+          if (typeof row.session_id !== 'string') continue
+          out.set(row.session_id, Boolean(row.is_subagent))
+        }
+      } catch (err) {
+        console.warn('[KyberBridge] Failed querying session subagent flags from canon.db:', err)
+        return out
+      }
+    }
+    return out
   }
 
   /**

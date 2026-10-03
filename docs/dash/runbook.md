@@ -6,7 +6,7 @@ status: current
 component: KyberDash
 source-root: dash
 owner: dpalfery
-last-reviewed: 2026-10-01
+last-reviewed: 2026-10-02
 code-refs:
   - registerKyberCommands
   - refreshHarnessSources
@@ -375,6 +375,9 @@ controls appear on Usage only.
   - *Execution Timeline / Call Tree*: Hierarchical span call tree with duration, status badges, and auxiliary flags.
   - *Inspector Drawer (`SessionInspectorDrawer`)*: Slide-out drawer with XML tag folding (`<instructions>`, `<environment_info>`, `<context>`) and formatted tool call/result trees.
 - **Compare** (rail): Phase-aligned run comparison (`page-compare`), not a fifth header tab.
+  Both pickers start at "Select a run" (deep-link `?a=&b=` counts as explicit selection). The
+  default list hides subagent sessions and zero-turn runs; optional "Show subagents" reveals
+  the former. Comparison fetches only when both ids are set and distinct.
 - **Usage**: Device spend overview, multi-provider cost rollups, top projects, daily spend, Share.
 - **Quarantine**: Quarantined spans holding unrecognized namespaces or malformed attributes.
 - **Problems**: Recorded token reconciliation mismatches, validation anomalies, and parser errors.
@@ -431,6 +434,9 @@ curl -s http://127.0.0.1:3000/api/kyber/review/status | jq .
 
 # Cross-harness comparison matrix
 curl -s http://127.0.0.1:3000/api/kyber/compare | jq .
+
+# Phase-aligned run comparison (turns via SessionIdentities share resolution)
+curl -s "http://127.0.0.1:3000/api/kyber/compare/runs?a=RUN_A&b=RUN_B" | jq .
 
 # Quarantine entries and problems
 curl -s http://127.0.0.1:3000/api/kyber/quarantine | jq .
