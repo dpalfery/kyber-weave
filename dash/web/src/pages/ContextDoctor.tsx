@@ -8,6 +8,7 @@ import {
   fetchFindings,
   type FindingsPage,
   type KyberCoverage,
+  type KyberCoverageCheckpoint,
   type KyberCoverageRefresh,
   type KyberHarnessSummary,
   type KyberFinding,
@@ -477,6 +478,8 @@ export function CoverageIngestPanel({ coverage }: { coverage: KyberCoverage }) {
   const { refresh, ingest, quarantineByReason, checkpoints } = coverage
   const partialUnits =
     checkpoints === null ? [] : checkpoints.filter((unit) => unit.lastStatus === 'partial')
+  const zeroRecordByReason = zeroRecordReasons(checkpoints)
+  const zeroRecordTotal = zeroRecordByReason.reduce((sum, [, count]) => sum + count, 0)
   const receiverLine =
     ingest.status === 'unknown'
       ? 'no receiver activity recorded — receiver status is not observable from this page'
@@ -558,8 +561,46 @@ export function CoverageIngestPanel({ coverage }: { coverage: KyberCoverage }) {
           </div>
         )
       )}
+      {zeroRecordTotal > 0 && (
+        <div className="mt-density-cluster text-density-xs" data-testid="coverage-zero-record">
+          <p>
+            {zeroRecordTotal} source{zeroRecordTotal === 1 ? '' : 's'} discovered but not ingested
+          </p>
+          <ul className="mt-density-hair flex flex-col gap-density-hair">
+            {zeroRecordByReason.map(([reason, count]) => (
+              <li
+                key={reason}
+                data-testid="coverage-zero-record-reason"
+                className="flex flex-wrap items-baseline justify-between gap-density-cluster text-muted-foreground"
+              >
+                <span>{reason}</span>
+                <span>{count}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </section>
   )
+}
+
+/**
+ * Zero-record checkpoints grouped by their persisted reason (issue #196).
+ * Only `ok`/`unchanged` units that carry a reason count: failed and partial
+ * units already surface through their own status, and a unit with no reason
+ * is never given an invented one.
+ */
+function zeroRecordReasons(
+  checkpoints: readonly KyberCoverageCheckpoint[] | null,
+): [string, number][] {
+  if (checkpoints === null) return []
+  const counts = new Map<string, number>()
+  for (const unit of checkpoints) {
+    if (unit.recordCount !== 0 || unit.lastErrorCode === null) continue
+    if (unit.lastStatus !== 'ok' && unit.lastStatus !== 'unchanged') continue
+    counts.set(unit.lastErrorCode, (counts.get(unit.lastErrorCode) ?? 0) + 1)
+  }
+  return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
 }
 
 /**
@@ -767,7 +808,13 @@ export function ContextDoctor({
 
   const harnesses = useMemo((): ScorecardMatrixRow[] => {
     const fromRollups = (harnessesData ?? []).filter((h) => isObservedHarness(h.harness))
-    if (fromRollups.length > 0) return fromRollups
+    if (fromRollups.length > 0) {
+      return fromRollups.map((row) => ({
+        ...row,
+        sessionCount: row.sessionCount,
+        sampleCount: row.sessionCount ?? row.sampleCount,
+      }))
+    }
 
     const observed = [...new Set((runsData ?? []).map((run) => run.harness).filter(isObservedHarness))]
     return observed.map((harness) => ({
