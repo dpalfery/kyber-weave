@@ -190,7 +190,7 @@ export function splitClaudeTurns(lines: readonly string[]): string[][] {
  * positional pairing for every turn in the file (Cursor's id-map contract).
  */
 function nativeRecordIdOfGroup(group: readonly string[]): string | undefined {
-  for (let i = group.length - 1; i >= 0; i--) {
+  for (let i = 0; i < group.length; i++) {
     if (claudeUsageOf(group[i]!) === undefined) continue
     let record: Record<string, unknown>
     try {
