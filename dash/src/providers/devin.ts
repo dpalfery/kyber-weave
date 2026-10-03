@@ -178,6 +178,11 @@ const DEVIN_EFFORT_TIERS = new Set(["xhigh", "high", "medium", "low"]);
 // would flood stderr on hosts that never configure it.
 let warnedMissingRate = false;
 
+/** Test seam: clear the once-per-process missing-rate warning latch. */
+export function resetDevinMissingRateWarningForTests(): void {
+  warnedMissingRate = false;
+}
+
 function parseTranscript(raw: string): DevinAgentTrajectory | null {
   try {
     return JSON.parse(raw) as DevinAgentTrajectory;
@@ -483,15 +488,6 @@ class DevinSessionParser implements SessionParser {
     const project = getProjectName(this.source, session);
     const projectPath = getProjectPath(session);
     const costFactor = await getCostFactor();
-    // Issue #197: a missing acuUsdRate must not swallow the real record. The
-    // USD figure is then honestly unknown: costUSD 0 with costIsEstimated, and
-    // one stderr note — never a fabricated rate, never a silent omission.
-    if (costFactor === null && !warnedMissingRate) {
-      warnedMissingRate = true;
-      process.stderr.write(
-        'kyberdash: no devin.acuUsdRate configured in ~/.kyberdash/config.json — Devin token usage is ingested but costs show $0 (unknown), not a measured zero.\n',
-      );
-    }
 
     for (let index = 0; index < transcript.steps.length; index++) {
       const step = transcript.steps[index];
@@ -511,6 +507,16 @@ class DevinSessionParser implements SessionParser {
       const tools = getToolNames(step);
       const userMessage =
         getFirstUserMessageBeforeStep(transcript.steps, index) ?? "";
+
+      // Issue #197: warn on the first unpriced call actually emitted — not when
+      // an empty transcript is parsed before any usage exists (that would latch
+      // the once-per-process flag and silence a later priced gap).
+      if (costFactor === null && !warnedMissingRate) {
+        warnedMissingRate = true;
+        process.stderr.write(
+          'kyberdash: no devin.acuUsdRate configured in ~/.kyberdash/config.json — Devin token usage is ingested but costs show $0 (unknown), not a measured zero.\n',
+        );
+      }
 
       yield {
         provider: DEVIN_PROVIDER_NAME,

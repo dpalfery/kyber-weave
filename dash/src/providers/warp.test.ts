@@ -1,11 +1,11 @@
 import { mkdtemp, rm } from 'fs/promises'
-import { mkdirSync } from 'fs'
+import { chmodSync, mkdirSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { createRequire } from 'node:module'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { createWarpProvider } from './warp.js'
+import { createWarpProvider, drainWarpDbAccessDenials } from './warp.js'
 import { isSqliteAvailable } from '../ingest/sqlite.js'
 import type { ParsedProviderCall } from './types.js'
 
@@ -310,6 +310,24 @@ skipUnlessSqlite('warp provider', () => {
     expect(calls[0]!.bashCommands).toEqual(['npm', 'git'])
     expect(calls[1]!.tools).toEqual([])
     expect(calls[1]!.bashCommands).toEqual([])
+  })
+
+  it('exposes open EACCES as a drainable access denial for doctor (#197)', async ({ skip }) => {
+    // chmod bit clearing is a no-op on Windows; the doctor suite covers the
+    // injected-error path. Here we pin the real discoverFromDb → drain wire.
+    if (process.platform === 'win32') skip()
+    if (!isSqliteAvailable()) skip()
+
+    drainWarpDbAccessDenials()
+    const dbPath = createWarpDb(tmpDir)
+    chmodSync(dbPath, 0o000)
+    try {
+      const provider = createWarpProvider(dbPath)
+      expect(await provider.discoverSessions()).toEqual([])
+      expect(drainWarpDbAccessDenials()).toEqual([dbPath])
+    } finally {
+      chmodSync(dbPath, 0o644)
+    }
   })
 
   it('skips pending or invalid exchanges and does not poison seenKeys for skipped rows', async () => {

@@ -7,6 +7,8 @@ import { collectDoctorReport, renderDoctorTable, renderDoctorJson } from './doct
 import { createCodexProvider } from '../providers/codex.js'
 import { createOpenCodeProvider } from '../providers/opencode.js'
 import { createDevinProvider } from '../providers/devin.js'
+import { createWarpProvider, drainWarpDbAccessDenials } from '../providers/warp.js'
+import { isSqliteAvailable } from '../ingest/sqlite.js'
 import { emptyCache, type SessionCache } from '../ingest/session-cache.js'
 import type { Provider, ProbeRoot, SessionSource } from '../providers/types.js'
 
@@ -522,24 +524,107 @@ describe('collectDoctorReport - devin rate transparency (#197)', () => {
 
 describe('collectDoctorReport - permission-denied probe root (#197)', () => {
   it('an unreadable probe path reports permission denied, not "does not exist"', async () => {
-    const locked = join(tmpDir, 'locked')
-    await mkdir(locked)
-    const inner = join(locked, 'warp.sqlite')
-    await writeFile(inner, 'x')
-    await chmod(locked, 0o000)
+    // Inject a controlled EACCES — chmod(0o000) is a no-op on Windows, so the
+    // probe seam must not depend on POSIX permission bits.
+    const inner = join(tmpDir, 'locked', 'warp.sqlite')
+    const provider = fakeProvider({
+      name: 'warp',
+      probeRoots: async () => [{ path: inner, label: 'db' }],
+    })
+    const report = await collectDoctorReport('all', {
+      providers: [provider],
+      cache: emptyCache(),
+      probeFs: {
+        existsSync: () => false,
+        statSync: () => {
+          const err = new Error('EACCES: permission denied') as NodeJS.ErrnoException
+          err.code = 'EACCES'
+          throw err
+        },
+      },
+    })
+    const r = only(report, 'warp')
+
+    expect(r.status).toBe('empty')
+    expect(r.probePaths[0]).toMatchObject({ exists: false, accessError: 'permission-denied' })
+    expect(r.verdict).toMatch(/permission denied|not readable/i)
+  })
+
+  it('an existing Warp db that fails open with EPERM reports permission denied, not empty sessions', async () => {
+    const dbPath = join(tmpDir, 'warp.sqlite')
+    await writeFile(dbPath, 'x')
+    const provider = fakeProvider({
+      name: 'warp',
+      probeRoots: async () => [{ path: dbPath, label: 'db' }],
+    })
+    const report = await collectDoctorReport('all', {
+      providers: [provider],
+      cache: emptyCache(),
+      probeFs: {
+        existsSync: () => true,
+        statSync: () => ({}),
+        checkAccess: () => {
+          const err = new Error('EPERM: operation not permitted') as NodeJS.ErrnoException
+          err.code = 'EPERM'
+          throw err
+        },
+      },
+    })
+    const r = only(report, 'warp')
+
+    expect(r.status).toBe('empty')
+    expect(r.probePaths[0]).toMatchObject({ exists: true, accessError: 'permission-denied' })
+    expect(r.verdict).toMatch(/permission denied|not readable/i)
+    expect(r.verdict).not.toMatch(/holds no sessions/i)
+  })
+
+  it('folds discoverFromDb access denials into the Warp doctor verdict', async ({ skip }) => {
+    // Production path: existsSync true, open fails EACCES, drain → emptyVerdict.
+    // chmod bit clearing is ineffective on Windows (covered by checkAccess above).
+    if (process.platform === 'win32') skip()
+    if (!isSqliteAvailable()) skip()
+
+    drainWarpDbAccessDenials()
+    const dbPath = join(tmpDir, 'warp.sqlite')
+    await writeFile(dbPath, 'x')
+    await chmod(dbPath, 0o000)
     try {
-      const provider = fakeProvider({
-        name: 'warp',
-        probeRoots: async () => [{ path: inner, label: 'db' }],
-      })
+      const provider = createWarpProvider(dbPath)
       const report = await collectDoctorReport('all', { providers: [provider], cache: emptyCache() })
       const r = only(report, 'warp')
 
       expect(r.status).toBe('empty')
-      expect(r.probePaths[0]).toMatchObject({ exists: false })
+      expect(r.probePaths[0]).toMatchObject({ exists: true, accessError: 'permission-denied' })
       expect(r.verdict).toMatch(/permission denied|not readable/i)
+      expect(r.verdict).not.toMatch(/holds no sessions/i)
     } finally {
-      await chmod(locked, 0o755)
+      await chmod(dbPath, 0o644)
+      drainWarpDbAccessDenials()
     }
+  })
+
+  it('propagates unexpected probe errors (ELOOP) as an ERROR row, not absence', async () => {
+    const inner = join(tmpDir, 'loop', 'warp.sqlite')
+    const provider = fakeProvider({
+      name: 'warp',
+      probeRoots: async () => [{ path: inner, label: 'db' }],
+    })
+    const report = await collectDoctorReport('all', {
+      providers: [provider],
+      cache: emptyCache(),
+      probeFs: {
+        existsSync: () => false,
+        statSync: () => {
+          const err = new Error('ELOOP: too many symbolic links') as NodeJS.ErrnoException
+          err.code = 'ELOOP'
+          throw err
+        },
+      },
+    })
+    const r = only(report, 'warp')
+
+    expect(r.status).toBe('error')
+    expect(r.verdict).toMatch(/^ERROR \(/)
+    expect(r.verdict).toMatch(/ELOOP|symbolic links/i)
   })
 })

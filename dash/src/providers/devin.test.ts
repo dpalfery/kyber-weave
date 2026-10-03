@@ -2,10 +2,10 @@ import { createRequire } from 'node:module'
 import { mkdir, mkdtemp, rm, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { isSqliteAvailable } from '../ingest/sqlite.js'
-import { createDevinProvider } from './devin.js'
+import { createDevinProvider, resetDevinMissingRateWarningForTests } from './devin.js'
 import type { ParsedProviderCall } from './types.js'
 
 /// `node:sqlite` is loaded through `createRequire` rather than a static import so
@@ -128,6 +128,39 @@ describe('devin provider', () => {
       costIsEstimated: true,
       deduplicationKey: 'devin:session-123:2',
     })
+  })
+
+  it('warns on the first unpriced call, not when an empty transcript is parsed first', async () => {
+    resetDevinMissingRateWarningForTests()
+    const emptyPath = await writeTranscript('empty.json', {
+      session_id: 'empty-session',
+      steps: [],
+    })
+    const pricedPath = await writeTranscript('usage.json', {
+      session_id: 'usage-session',
+      steps: [{
+        step_id: 1,
+        metadata: {
+          created_at: '2027-01-15T08:00:01.000Z',
+          committed_acu_cost: 0.25,
+          metrics: { input_tokens: 3, output_tokens: 1 },
+        },
+      }],
+    })
+
+    const stderr = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
+    try {
+      expect(await parseTranscript(emptyPath)).toHaveLength(0)
+      expect(stderr.mock.calls.some(([chunk]) => String(chunk).includes('devin.acuUsdRate'))).toBe(false)
+
+      const calls = await parseTranscript(pricedPath)
+      expect(calls).toHaveLength(1)
+      expect(calls[0]).toMatchObject({ costUSD: 0, costIsEstimated: true })
+      expect(stderr.mock.calls.filter(([chunk]) => String(chunk).includes('devin.acuUsdRate'))).toHaveLength(1)
+    } finally {
+      stderr.mockRestore()
+      resetDevinMissingRateWarningForTests()
+    }
   })
 
   it('parses per-step ACUs, tokens, tools, and model resolution', async () => {

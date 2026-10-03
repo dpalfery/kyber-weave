@@ -402,6 +402,10 @@ function openReadonlyCache(path: string, originalError: unknown): DatabaseSyncIn
       `kyberdash: SQLite database ${path} is in a read-only directory and its cache copy could not be written ` +
       `(${describeError(err)}); skipping this database.\n`,
     )
+    // Prefer EPERM/EACCES from the copy so callers (Warp doctor, #197) can
+    // surface a TCC denial instead of an opaque sidecar SQLITE_CANTOPEN.
+    const code = errorCode(err)
+    if (code === 'EPERM' || code === 'EACCES') throw err
     throw originalError
   }
   return new Driver(cachedPath, { readOnly: true })
