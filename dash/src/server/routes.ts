@@ -125,6 +125,37 @@ function parseTurnContentPath(pathname: string): { sessionId: string; turnIndex:
   }
 }
 
+interface PaginationParams {
+  limit: number
+  offset: number
+  page: number
+}
+
+function parsePaginationParams(url: URL, defaultLimit = 200): PaginationParams {
+  const limitParam = url.searchParams.get('limit')
+  const parsedLimit = limitParam !== null && limitParam.trim() !== '' ? parseInt(limitParam, 10) : undefined
+  const limit = parsedLimit !== undefined && !isNaN(parsedLimit) && parsedLimit > 0 ? parsedLimit : defaultLimit
+
+  const offsetParam = url.searchParams.get('offset')
+  const parsedOffset = offsetParam !== null && offsetParam.trim() !== '' ? parseInt(offsetParam, 10) : undefined
+
+  const pageParam = url.searchParams.get('page')
+  const parsedPage = pageParam !== null && pageParam.trim() !== '' ? parseInt(pageParam, 10) : undefined
+
+  let offset = 0
+  let page = 1
+
+  if (parsedOffset !== undefined && !isNaN(parsedOffset)) {
+    offset = Math.max(0, parsedOffset)
+    page = Math.floor(offset / limit) + 1
+  } else if (parsedPage !== undefined && !isNaN(parsedPage)) {
+    page = Math.max(1, parsedPage)
+    offset = Math.max(0, (page - 1) * limit)
+  }
+
+  return { limit, offset, page }
+}
+
 /**
  * Verbatim zero-data reason off a rollup payload, or null when the row holds
  * data (T8, issues #189/#199). Zero-data rows keep their rollup reason
@@ -471,10 +502,16 @@ export function handleKyberRequest(
       sendKyberJson(res, 405, { error: 'Method Not Allowed' })
       return true
     }
-    const limitParam = url.searchParams.get('limit')
-    const limit = limitParam ? parseInt(limitParam, 10) : undefined
-    const entries = bridge.getQuarantine(limit && !isNaN(limit) ? limit : 200)
-    sendKyberJson(res, 200, { entries })
+    const { limit, offset, page } = parsePaginationParams(url, 200)
+    const entries = bridge.getQuarantine(limit, offset)
+    const total = bridge.getQuarantineCount()
+    sendKyberJson(res, 200, {
+      entries,
+      data: entries,
+      total,
+      page,
+      limit,
+    })
     return true
   }
 
@@ -483,10 +520,16 @@ export function handleKyberRequest(
       sendKyberJson(res, 405, { error: 'Method Not Allowed' })
       return true
     }
-    const limitParam = url.searchParams.get('limit')
-    const limit = limitParam ? parseInt(limitParam, 10) : undefined
-    const problems = bridge.getProblems(limit && !isNaN(limit) ? limit : 200)
-    sendKyberJson(res, 200, { problems })
+    const { limit, offset, page } = parsePaginationParams(url, 200)
+    const problems = bridge.getProblems(limit, offset)
+    const total = bridge.getProblemCount()
+    sendKyberJson(res, 200, {
+      problems,
+      data: problems,
+      total,
+      page,
+      limit,
+    })
     return true
   }
 

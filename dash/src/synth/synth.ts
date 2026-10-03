@@ -64,6 +64,7 @@ import { billableOutputTokens } from '../pricing/models.js'
 // analysis/findings.ts never imports synth (it reads canonical records).
 import { serializeToolArgs } from '../analysis/findings.js'
 import { FILE_SOURCE_PREFIX, measurabilityFor } from '../canon/measurability.js'
+import { TWIN_TURN_MAX_SKEW_MS } from '../canon/twin-dedupe.js'
 import type {
   ReaderToolCall,
   ReaderToolResult,
@@ -758,6 +759,222 @@ function chunk<T>(items: readonly T[], size: number): T[][] {
   return chunks
 }
 
+function isZeroCounters(call: ParsedProviderCall): boolean {
+  return (
+    call.inputTokens === 0 &&
+    call.outputTokens === 0 &&
+    call.cacheReadInputTokens === 0 &&
+    call.cacheCreationInputTokens === 0 &&
+    (call.cachedInputTokens ?? 0) === 0 &&
+    (call.reasoningTokens ?? 0) === 0
+  )
+}
+
+function isCandidateCollapse(call: ParsedProviderCall, harnessId?: string): boolean {
+  if (isZeroCounters(call)) return false
+  const harness = harnessId ?? call.provider
+  return (
+    harness === 'claude-desktop' ||
+    harness === 'kyberdash/claude-desktop' ||
+    call.provider === 'claude-desktop'
+  )
+}
+
+function callCounterKey(call: ParsedProviderCall): string {
+  return [
+    call.sessionId ?? '',
+    call.provider,
+    call.model,
+    call.inputTokens,
+    call.outputTokens,
+    call.cacheReadInputTokens,
+    call.cacheCreationInputTokens,
+    call.reasoningTokens ?? 0,
+  ].join(':')
+}
+
+function mergeReaderTurns(keeper?: ReaderTurn, donor?: ReaderTurn): ReaderTurn | undefined {
+  if (!keeper && !donor) return undefined
+  if (!keeper) return donor
+  if (!donor) return keeper
+
+  const seenParts = new Set((keeper.parts ?? []).map((p) => `${p.part}\0${p.text}`))
+  const extraParts = (donor.parts ?? []).filter((p) => {
+    const k = `${p.part}\0${p.text}`
+    if (seenParts.has(k)) return false
+    seenParts.add(k)
+    return true
+  })
+  const parts = [...(keeper.parts ?? []), ...extraParts]
+
+  const toolCalls = [
+    ...(keeper.toolCalls ?? []),
+    ...(donor.toolCalls ?? []).filter((dt) => !keeper.toolCalls?.some((kt) => kt.id === dt.id)),
+  ]
+
+  const toolResults = [
+    ...(keeper.toolResults ?? []),
+    ...(donor.toolResults ?? []).filter((dr) => !keeper.toolResults?.some((kr) => kr.toolCallId === dr.toolCallId)),
+  ]
+
+  const toolsOffered = Array.from(new Set([...(keeper.toolsOffered ?? []), ...(donor.toolsOffered ?? [])]))
+
+  return {
+    ...keeper,
+    parts,
+    ...(toolCalls.length > 0 ? { toolCalls } : {}),
+    ...(toolResults.length > 0 ? { toolResults } : {}),
+    ...(toolsOffered.length > 0 ? { toolsOffered } : {}),
+    terminationReason: keeper.terminationReason ?? donor.terminationReason,
+    exitCode: keeper.exitCode ?? donor.exitCode,
+    isCorrection: keeper.isCorrection ?? donor.isCorrection,
+    correctionRule: keeper.correctionRule ?? donor.correctionRule,
+  }
+}
+
+function mergeParsedCalls(keeper: ParsedProviderCall, donor: ParsedProviderCall): ParsedProviderCall {
+  const tools = Array.from(new Set([...(keeper.tools ?? []), ...(donor.tools ?? [])]))
+  const bashCommands = Array.from(new Set([...(keeper.bashCommands ?? []), ...(donor.bashCommands ?? [])]))
+  const toolSequence = [...(keeper.toolSequence ?? []), ...(donor.toolSequence ?? [])]
+
+  return {
+    ...keeper,
+    tools,
+    bashCommands,
+    ...(toolSequence.length > 0 ? { toolSequence } : {}),
+    webSearchRequests: Math.max(keeper.webSearchRequests ?? 0, donor.webSearchRequests ?? 0),
+    activeDurationMs: Math.max(keeper.activeDurationMs ?? 0, donor.activeDurationMs ?? 0),
+  }
+}
+
+function mergeEnvelopes(keeper: SourceRecordEnvelope, donor: SourceRecordEnvelope): SourceRecordEnvelope {
+  const mergedCall = mergeParsedCalls(keeper.call, donor.call)
+  const mergedReaderTurn = mergeReaderTurns(keeper.readerTurn, donor.readerTurn)
+  return {
+    ...keeper,
+    call: mergedCall,
+    ...(mergedReaderTurn !== undefined ? { readerTurn: mergedReaderTurn } : {}),
+  }
+}
+
+function collapseKey(counterKey: string, nativeId: string | undefined): string {
+  return nativeId === undefined ? counterKey : `${counterKey}\0${nativeId}`
+}
+
+export function collapseEnvelopeTurns(envelopes: readonly SourceRecordEnvelope[]): SourceRecordEnvelope[] {
+  if (envelopes.length <= 1) return [...envelopes]
+
+  const byKey = new Map<string, SourceRecordEnvelope[]>()
+  for (const env of envelopes) {
+    if (!isCandidateCollapse(env.call, env.harnessId)) continue
+    const key = collapseKey(callCounterKey(env.call), env.nativeRecordId)
+    const list = byKey.get(key) ?? []
+    list.push(env)
+    byKey.set(key, list)
+  }
+
+  const dropped = new Set<SourceRecordEnvelope>()
+  const mergedInto = new Map<SourceRecordEnvelope, SourceRecordEnvelope>()
+
+  for (const group of byKey.values()) {
+    if (group.length <= 1) continue
+    const sorted = [...group].sort(
+      (a, b) => new Date(a.call.timestamp).getTime() - new Date(b.call.timestamp).getTime(),
+    )
+    let cluster: SourceRecordEnvelope[] = []
+    const closeCluster = () => {
+      if (cluster.length > 1) {
+        const keeper = cluster[0]!
+        let current = keeper
+        for (let i = 1; i < cluster.length; i++) {
+          const donor = cluster[i]!
+          dropped.add(donor)
+          current = mergeEnvelopes(current, donor)
+        }
+        mergedInto.set(keeper, current)
+      }
+      cluster = []
+    }
+    for (const env of sorted) {
+      const first = cluster[0]
+      const exceedsSpan =
+        first !== undefined &&
+        Math.abs(new Date(env.call.timestamp).getTime() - new Date(first.call.timestamp).getTime()) >
+          TWIN_TURN_MAX_SKEW_MS
+      if (exceedsSpan) closeCluster()
+      cluster.push(env)
+    }
+    closeCluster()
+  }
+
+  return envelopes.flatMap((env) => {
+    if (dropped.has(env)) return []
+    const merged = mergedInto.get(env)
+    return [merged ?? env]
+  })
+}
+
+type CallAndTurn = {
+  call: ParsedProviderCall
+  readerTurn?: ReaderTurn
+}
+
+export function collapseCallAndTurns(items: readonly CallAndTurn[]): CallAndTurn[] {
+  if (items.length <= 1) return [...items]
+
+  const byKey = new Map<string, CallAndTurn[]>()
+  for (const item of items) {
+    if (!isCandidateCollapse(item.call)) continue
+    const key = collapseKey(callCounterKey(item.call), item.call.turnId)
+    const list = byKey.get(key) ?? []
+    list.push(item)
+    byKey.set(key, list)
+  }
+
+  const dropped = new Set<CallAndTurn>()
+  const mergedInto = new Map<CallAndTurn, CallAndTurn>()
+
+  for (const group of byKey.values()) {
+    if (group.length <= 1) continue
+    const sorted = [...group].sort(
+      (a, b) => new Date(a.call.timestamp).getTime() - new Date(b.call.timestamp).getTime(),
+    )
+    let cluster: CallAndTurn[] = []
+    const closeCluster = () => {
+      if (cluster.length > 1) {
+        const keeper = cluster[0]!
+        let current = keeper
+        for (let i = 1; i < cluster.length; i++) {
+          const donor = cluster[i]!
+          dropped.add(donor)
+          current = {
+            call: mergeParsedCalls(current.call, donor.call),
+            readerTurn: mergeReaderTurns(current.readerTurn, donor.readerTurn),
+          }
+        }
+        mergedInto.set(keeper, current)
+      }
+      cluster = []
+    }
+    for (const item of sorted) {
+      const first = cluster[0]
+      const exceedsSpan =
+        first !== undefined &&
+        Math.abs(new Date(item.call.timestamp).getTime() - new Date(first.call.timestamp).getTime()) >
+          TWIN_TURN_MAX_SKEW_MS
+      if (exceedsSpan) closeCluster()
+      cluster.push(item)
+    }
+    closeCluster()
+  }
+
+  return items.flatMap((item) => {
+    if (dropped.has(item)) return []
+    const merged = mergedInto.get(item)
+    return [merged ?? item]
+  })
+}
+
 /**
  * The span synthesizer (task 9.1). `synthesize` is the serial reference
  * path; `synthesizeSerial` names it explicitly so the parity test reads as
@@ -786,24 +1003,27 @@ export class Synthesizer {
     parsedCalls: readonly ParsedProviderCall[],
     readerTurns?: readonly (ReaderTurn | undefined)[],
   ): CanonicalRecord[] {
+    const rawItems: CallAndTurn[] = parsedCalls.map((call, index) => ({
+      call,
+      readerTurn: readerTurns?.[index],
+    }))
+    const collapsed = collapseCallAndTurns(rawItems)
+
     const sessionToolResults = new Map<string, ReaderToolResult>()
-    if (readerTurns) {
-      for (const turn of readerTurns) {
-        if (turn?.toolResults) {
-          for (const res of turn.toolResults) {
-            if (res.toolCallId) {
-              sessionToolResults.set(res.toolCallId, res)
-            }
+    for (const item of collapsed) {
+      if (item.readerTurn?.toolResults) {
+        for (const res of item.readerTurn.toolResults) {
+          if (res.toolCallId) {
+            sessionToolResults.set(res.toolCallId, res)
           }
         }
       }
     }
 
-    return parsedCalls.flatMap((call, index) => {
-      if (isExcludedHarness(call.provider)) return []
-      const readerTurn = readerTurns?.[index]
-      const parent = synthesizeCall(call, this.conventions, readerTurn, undefined, index)
-      const toolRecords = synthesizeToolCalls(parent, call, readerTurn, sessionToolResults)
+    return collapsed.flatMap((item, index) => {
+      if (isExcludedHarness(item.call.provider)) return []
+      const parent = synthesizeCall(item.call, this.conventions, item.readerTurn, undefined, index)
+      const toolRecords = synthesizeToolCalls(parent, item.call, item.readerTurn, sessionToolResults)
       return [parent, ...toolRecords]
     })
   }
@@ -814,8 +1034,9 @@ export class Synthesizer {
    * persisted as harnesses. Token validation remains the quarantine seam.
    */
   synthesizeEnvelopes(envelopes: readonly SourceRecordEnvelope[]): CanonicalRecord[] {
+    const collapsed = collapseEnvelopeTurns(envelopes)
     const sessionToolResults = new Map<string, ReaderToolResult>()
-    for (const envelope of envelopes) {
+    for (const envelope of collapsed) {
       if (envelope.readerTurn?.toolResults) {
         for (const res of envelope.readerTurn.toolResults) {
           if (res.toolCallId) {
@@ -825,7 +1046,7 @@ export class Synthesizer {
       }
     }
 
-    return envelopes.flatMap((envelope, index) => {
+    return collapsed.flatMap((envelope, index) => {
       if (isExcludedHarness(envelope.harnessId) || isExcludedHarness(envelope.call.provider)) return []
       const parent = synthesizeCall(envelope.call, this.conventions, envelope.readerTurn, envelope, index)
       const toolRecords = synthesizeToolCalls(parent, envelope.call, envelope.readerTurn, sessionToolResults)

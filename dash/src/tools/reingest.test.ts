@@ -329,7 +329,14 @@ describe('reingestFromExports — rebuilding the corpus from existing exports (R
     // The GenAI-only span had no claimant in its batch: quarantined with the
     // namespace it actually carried, never guessed into a harness (R6.1).
     expect(store.listQuarantine()).toEqual([
-      { spanId: S_ORPHAN, namespaces: ['gen_ai'], reason: 'unclaimed' },
+      {
+        spanId: S_ORPHAN,
+        namespaces: ['gen_ai'],
+        reason: 'unclaimed',
+        source: 'orphan-exporter',
+        name: 'tool.exec',
+        timestamp: '2025-08-29T14:40:02.000Z',
+      },
     ])
 
     // Exclusive-shaped Copilot counters (input 100, cache 500) convert
@@ -482,8 +489,22 @@ describe('reingestFromExports — rebuilding the corpus from existing exports (R
     expect(store.get(S_HEALTH)).toBeUndefined()
     expect(store.get(S_HTTP_SERVER)).toBeUndefined()
     expect(store.listQuarantine()).toEqual([
-      { spanId: S_HEALTH, namespaces: ['gen_ai'], reason: 'non-model span' },
-      { spanId: S_HTTP_SERVER, namespaces: ['gen_ai', 'http'], reason: 'non-model span' },
+      {
+        spanId: S_HEALTH,
+        namespaces: ['gen_ai'],
+        reason: 'non-model span',
+        source: 'gemini-statusline',
+        name: 'GlobalHttpApi.health',
+        timestamp: '2025-08-29T14:40:00.100Z',
+      },
+      {
+        spanId: S_HTTP_SERVER,
+        namespaces: ['gen_ai', 'http'],
+        reason: 'non-model span',
+        source: 'gemini-statusline',
+        name: 'GET /v1/status',
+        timestamp: '2025-08-29T14:40:00.105Z',
+      },
     ])
 
     store.close()

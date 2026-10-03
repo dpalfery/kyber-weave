@@ -667,11 +667,24 @@ export const copilotAdapter: HarnessAdapter = {
   namespaces: ['gen_ai', ...COPILOT_VENDOR_NAMESPACES],
 
   detect(span) {
+    const isCopilotEvidence =
+      hasNamespace(span.attributes, ['copilot_chat', 'github.copilot', 'copilot']) ||
+      span.name.startsWith('copilot_chat') ||
+      span.name.startsWith('copilot')
     // An explicit Gemini system identity outranks a generic Copilot exporter
-    // label that may be attached by the collector or wrapper process.
-    if (span.attributes['gen_ai.system'] === 'gemini') return 0
+    // label that may be attached by the collector or wrapper process, unless
+    // the span carries explicit copilot_chat or copilot evidence.
+    // When both gemini system and antigravity agent identity are present,
+    // Antigravity outranks Copilot.
+    if (span.attributes['gen_ai.system'] === 'gemini') {
+      if (span.attributes['gen_ai.agent.name'] === 'antigravity' || !isCopilotEvidence) {
+        return 0
+      }
+    }
     let score = 0
-    if (hasNamespace(span.attributes, COPILOT_VENDOR_NAMESPACES)) score += VENDOR_EVIDENCE
+    if (hasNamespace(span.attributes, COPILOT_VENDOR_NAMESPACES) || isCopilotEvidence) {
+      score += VENDOR_EVIDENCE
+    }
     if (INPUT_TOKEN_KEYS.some((key) => key in span.attributes)) score += USAGE_EVIDENCE
     return Math.min(1, score)
   },
