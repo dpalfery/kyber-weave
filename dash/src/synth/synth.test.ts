@@ -15,9 +15,9 @@ import { createHash } from 'node:crypto'
 //     tested property of `synthesizeCall`'s purity rather than an accident
 //     of one fixture's shape.
 //
-// Alongside them: the R4.2 convention conversion (including the
-// inverted-convention case failing loudly through `validateTokens`, the
-// check that exists precisely because this conversion once went wrong), the
+// Alongside them: the R4.2 convention conversion (including exclusive-shaped
+// counters recovering through exclusive conversion rather than going
+// negative or clamping — issue #193), the
 // R3.2 identity scheme (span id = upstream's deduplication key, extended,
 // which is what makes re-synthesis idempotent), the R5.x cost bases, and the
 // R7.6/R8.5/R10.2 measurability declarations.
@@ -33,6 +33,8 @@ import {
   DEFAULT_CONVENTION,
   PROVIDER_CONVENTIONS,
   Synthesizer,
+  collapseCallAndTurns,
+  collapseEnvelopeTurns,
   conventionFor,
   costBlockFor,
   measurabilityFor,
@@ -292,25 +294,81 @@ describe('token conversion (R4.2)', () => {
     expect(validateTokens(record.tokens)).toEqual({ valid: true })
   })
 
-  it('fails loudly when the inverted convention is applied — R4.2’s measured failure', () => {
-    // Feed exclusive-shaped counters (input EXCLUDES cache) through the
-    // inclusive conversion: fresh goes negative and the record validator
-    // rejects it. This is the exact miscount R4.2 exists to catch — clamping
-    // the subtraction would turn it into a silently underpriced record.
+  it('recovers exclusive-shaped counters instead of storing negative fresh (issue #193)', () => {
+    // Inclusive subtraction of exclusive counters is impossible: cache cannot
+    // be a subset of a smaller input. The conversion takes fresh as claimed
+    // and reassembles the reported total — not a clamp to zero, which would
+    // drop the 1_000 claimed tokens.
     const inverted = new Map<string, TokenConvention>([['claude', 'inclusive']])
     const record = synthesizeCall(
       call({
         provider: 'claude',
-        inputTokens: 1_000, // fresh-only, but read as if cache-inclusive
+        inputTokens: 1_000, // fresh-only, but declared inclusive
         cacheReadInputTokens: 3_800,
         cacheCreationInputTokens: 120,
       }),
       inverted,
     )
-    expect(record.tokens.freshInput).toBe(1_000 - 3_800 - 120)
-    const problem = tokenValidator(record)
-    expect(problem?.code).toBe('TOKEN_NEGATIVE_FRESH')
-    expect(problem?.location).toBe(record.spanId)
+    expect(record.tokens).toEqual({
+      freshInput: 1_000,
+      cacheRead: 3_800,
+      cacheCreation: 120,
+      output: 240,
+      reportedInput: 1_000 + 3_800 + 120,
+      reportedOutput: 240,
+    })
+    expect(validateTokens(record.tokens)).toEqual({ valid: true })
+    expect(tokenValidator(record)).toBeUndefined()
+  })
+
+  it('folds exclusive reasoning into output so it is a subset (issue #193)', () => {
+    // Antigravity-cli reports thinking separately from response (935 vs 590
+    // in the live audit). TokenUsage.reasoning is a subset of output, so the
+    // conversion adds the exclusive thinking tokens rather than rejecting
+    // the record as TOKEN_REASONING_EXCEEDS_OUTPUT.
+    const record = synthesizeCall(
+      call({
+        provider: 'antigravity',
+        inputTokens: 2_000,
+        cacheReadInputTokens: 0,
+        cacheCreationInputTokens: 0,
+        cachedInputTokens: 0,
+        outputTokens: 590,
+        reasoningTokens: 935,
+      }),
+    )
+    expect(record.tokens).toEqual({
+      freshInput: 2_000,
+      cacheRead: 0,
+      cacheCreation: 0,
+      output: 590 + 935,
+      reasoning: 935,
+      reportedInput: 2_000,
+      reportedOutput: 590 + 935,
+    })
+    expect(record.tokens.reasoning).toBeLessThanOrEqual(record.tokens.output)
+    expect(validateTokens(record.tokens)).toEqual({ valid: true })
+    expect(tokenValidator(record)).toBeUndefined()
+  })
+
+  it('does not manufacture output from copilot reasoning on an output-absent row (#240)', () => {
+    // Copilot store/shutdown rows carry reasoning with output 0 by design.
+    // Folding would invent output from reasoning alone; those rows stay
+    // rejected so #240/#241 can give them an honest unobservable treatment.
+    const record = synthesizeCall(
+      call({
+        provider: 'copilot',
+        inputTokens: 3,
+        cacheReadInputTokens: 49_394,
+        cacheCreationInputTokens: 0,
+        cachedInputTokens: 0,
+        outputTokens: 0,
+        reasoningTokens: 127,
+      }),
+    )
+    expect(record.tokens.output).toBe(0)
+    expect(record.tokens.reasoning).toBe(127)
+    expect(tokenValidator(record)?.code).toBe('TOKEN_REASONING_EXCEEDS_OUTPUT')
   })
 })
 
@@ -664,6 +722,218 @@ describe('Task 5 — child tool.invoke span generation and result truncation', (
     expect(child?.attributes?.['gen_ai.tool.status']).toBe('ok')
     expect((child?.raw as Record<string, unknown>)?.['arguments']).toEqual({ command: 'ls' })
     expect((child?.raw as Record<string, unknown>)?.['result']).toBe('file1\nfile2')
+  })
+
+  it('synthesizeEnvelopes collapses request/response pair calls with identical counters into one canonical record', () => {
+    const synthesizer = new Synthesizer()
+    const call1 = call({
+      provider: 'claude',
+      sessionId: 's-pair',
+      timestamp: '2026-09-23T22:43:53.000Z',
+      inputTokens: 2,
+      outputTokens: 563,
+      cacheReadInputTokens: 39096,
+      cacheCreationInputTokens: 24977,
+      cachedInputTokens: 39096,
+      deduplicationKey: 'claude:s-pair:req',
+    })
+    const call2 = call({
+      provider: 'claude',
+      sessionId: 's-pair',
+      timestamp: '2026-09-23T22:43:58.000Z',
+      inputTokens: 2,
+      outputTokens: 563,
+      cacheReadInputTokens: 39096,
+      cacheCreationInputTokens: 24977,
+      cachedInputTokens: 39096,
+      deduplicationKey: 'claude:s-pair:res',
+    })
+    const env1 = envelope({
+      harnessId: 'claude-desktop',
+      call: call1,
+      readerTurn: {
+        parts: [{ part: 'system_prompt', text: 'req prompt' }],
+        toolCalls: [
+          { id: 'tu_bash', name: 'Bash', arguments: { command: 'ls' } },
+        ],
+        toolResults: [
+          { toolCallId: 'tu_bash', content: 'file1\nfile2' },
+        ],
+      },
+    })
+    const env2 = envelope({
+      harnessId: 'claude-desktop',
+      call: call2,
+      readerTurn: {
+        parts: [{ part: 'conversation_history', text: 'res reply' }],
+      },
+    })
+
+    const records = synthesizer.synthesizeEnvelopes([env1, env2])
+    const parentRecords = records.filter((r) => r.op === 'llm.invoke')
+    const toolRecords = records.filter((r) => r.op === 'tool.invoke') as ToolInvokeRecord[]
+
+    expect(parentRecords).toHaveLength(1)
+    const parent = parentRecords[0]!
+    expect(parent.spanId).toBe(spanIdFor(call1, env1, 0))
+    expect(parent.tokens.reportedInput).toBe(64075)
+    expect(parent.content.system_prompt).toBe('req prompt')
+    expect(parent.content.conversation_history).toBe('res reply')
+
+    expect(toolRecords).toHaveLength(1)
+    expect(toolRecords[0]!.parentSpanId).toBe(parent.spanId)
+  })
+
+  it('does not collapse Claude calls with same counters within skew when nativeMessageIds differ', () => {
+    const synthesizer = new Synthesizer()
+    const call1 = call({
+      provider: 'claude',
+      sessionId: 's-diff-native',
+      timestamp: '2026-09-23T22:43:53.000Z',
+      inputTokens: 2,
+      outputTokens: 563,
+      cacheReadInputTokens: 39096,
+      cacheCreationInputTokens: 24977,
+      cachedInputTokens: 39096,
+      turnId: 'msg-1',
+      deduplicationKey: 'claude:s-diff-native:msg-1',
+    })
+    const call2 = call({
+      provider: 'claude',
+      sessionId: 's-diff-native',
+      timestamp: '2026-09-23T22:43:58.000Z',
+      inputTokens: 2,
+      outputTokens: 563,
+      cacheReadInputTokens: 39096,
+      cacheCreationInputTokens: 24977,
+      cachedInputTokens: 39096,
+      turnId: 'msg-2',
+      deduplicationKey: 'claude:s-diff-native:msg-2',
+    })
+    const env1 = envelope({
+      harnessId: 'claude-desktop',
+      nativeRecordId: call1.turnId,
+      call: call1,
+    })
+    const env2 = envelope({
+      harnessId: 'claude-desktop',
+      nativeRecordId: call2.turnId,
+      call: call2,
+    })
+
+    // Both survive in envelope synthesis (collapseEnvelopeTurns)
+    const envRecords = synthesizer.synthesizeEnvelopes([env1, env2])
+    expect(envRecords.filter((r) => r.op === 'llm.invoke')).toHaveLength(2)
+
+    // Both survive in direct call synthesis (collapseCallAndTurns)
+    const call1Desktop = { ...call1, provider: 'claude-desktop' }
+    const call2Desktop = { ...call2, provider: 'claude-desktop' }
+    const callRecords = synthesizer.synthesize([call1Desktop, call2Desktop])
+    expect(callRecords.filter((r) => r.op === 'llm.invoke')).toHaveLength(2)
+
+    // Calls with one present and one missing ID stay separate
+    const callNoId = call({
+      provider: 'claude-desktop',
+      sessionId: 's-diff-native',
+      timestamp: '2026-09-23T22:43:55.000Z',
+      inputTokens: 2,
+      outputTokens: 563,
+      cacheReadInputTokens: 39096,
+      cacheCreationInputTokens: 24977,
+      cachedInputTokens: 39096,
+      turnId: undefined,
+      deduplicationKey: 'claude-desktop:s-diff-native:no-id',
+    })
+    const mixedRecords = synthesizer.synthesize([call1Desktop, callNoId])
+    expect(mixedRecords.filter((r) => r.op === 'llm.invoke')).toHaveLength(2)
+  })
+
+  it('does not collapse equal-counter turns for non-Claude desktop harnesses like codex-desktop', () => {
+    const synthesizer = new Synthesizer()
+    const call1 = call({
+      provider: 'codex',
+      sessionId: 's-codex',
+      timestamp: '2026-09-23T22:43:53.000Z',
+      inputTokens: 100,
+      outputTokens: 50,
+      deduplicationKey: 'codex:s-codex:1',
+    })
+    const call2 = call({
+      provider: 'codex',
+      sessionId: 's-codex',
+      timestamp: '2026-09-23T22:43:58.000Z',
+      inputTokens: 100,
+      outputTokens: 50,
+      deduplicationKey: 'codex:s-codex:2',
+    })
+    const env1 = envelope({
+      harnessId: 'codex-desktop',
+      call: call1,
+    })
+    const env2 = envelope({
+      harnessId: 'codex-desktop',
+      call: call2,
+    })
+
+    const records = synthesizer.synthesizeEnvelopes([env1, env2])
+    const parentRecords = records.filter((r) => r.op === 'llm.invoke')
+    expect(parentRecords).toHaveLength(2)
+  })
+
+  it('preserves the larger web-search count when collapsing turns in mergeParsedCalls', () => {
+    const call1 = call({
+      provider: 'claude',
+      sessionId: 's-websearch',
+      timestamp: '2026-09-23T22:43:53.000Z',
+      inputTokens: 2,
+      outputTokens: 563,
+      cacheReadInputTokens: 39096,
+      cacheCreationInputTokens: 24977,
+      cachedInputTokens: 39096,
+      webSearchRequests: 1,
+      deduplicationKey: 'claude:s-websearch:req',
+    })
+    const call2 = call({
+      provider: 'claude',
+      sessionId: 's-websearch',
+      timestamp: '2026-09-23T22:43:58.000Z',
+      inputTokens: 2,
+      outputTokens: 563,
+      cacheReadInputTokens: 39096,
+      cacheCreationInputTokens: 24977,
+      cachedInputTokens: 39096,
+      webSearchRequests: 3,
+      deduplicationKey: 'claude:s-websearch:res',
+    })
+    const env1 = envelope({
+      harnessId: 'claude-desktop',
+      call: call1,
+    })
+    const env2 = envelope({
+      harnessId: 'claude-desktop',
+      call: call2,
+    })
+
+    const collapsedEnvelopes = collapseEnvelopeTurns([env1, env2])
+    expect(collapsedEnvelopes).toHaveLength(1)
+    expect(collapsedEnvelopes[0]!.call.webSearchRequests).toBe(3)
+
+    // Also verify when keeper has higher count than donor
+    const call1High = { ...call1, webSearchRequests: 5 }
+    const call2Low = { ...call2, webSearchRequests: 2 }
+    const env1High = envelope({ harnessId: 'claude-desktop', call: call1High })
+    const env2Low = envelope({ harnessId: 'claude-desktop', call: call2Low })
+    const collapsedHighFirst = collapseEnvelopeTurns([env1High, env2Low])
+    expect(collapsedHighFirst).toHaveLength(1)
+    expect(collapsedHighFirst[0]!.call.webSearchRequests).toBe(5)
+
+    // Also verify collapseCallAndTurns
+    const collapsedCalls = collapseCallAndTurns([
+      { call: { ...call1, provider: 'claude-desktop' } },
+      { call: { ...call2, provider: 'claude-desktop' } },
+    ])
+    expect(collapsedCalls).toHaveLength(1)
+    expect(collapsedCalls[0]!.call.webSearchRequests).toBe(3)
   })
 
   it('truncates large tool results (>64KB) in parts and preserves original byte count in attributes', () => {
