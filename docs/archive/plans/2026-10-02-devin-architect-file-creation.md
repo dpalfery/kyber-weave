@@ -14,6 +14,8 @@ development-mode: test-first
 **Status: Complete.** Delivered per test-first development mode. Archived per `KW-DOC-LIFECYCLE-003`.
 Addresses GitHub issue [#161](https://github.com/dpalfery/kyber-weave/issues/161): Devin renderer's architect subagent profile cannot create new files, blocking plan persistence.
 
+Decisions Q1–Q3 harvested 2026-10-03 as [ADR 0028](../../adr/0028-devin-target-scoped-authoring-capability-profiles.md) (mechanism and scope; Q1 was resolved as the combined option (c) — the Devin-scoped profile is the mechanism and the conductor pre-creation protocol is the documented fallback — and Q2 is the scope boundary that keeps `docs-dev` and `task-reviewer` unwidened), with the behaviour in [Kyber-Squad architecture](../../kyber-squad/architecture.md) §8, [requirements](../../kyber-squad/requirements.md) KS-002 and the Devin matrix row, and [onboarding](../../kyber-squad/onboarding.md).
+
 **Development mode:** `test-first`.
 
 ---

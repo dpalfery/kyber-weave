@@ -5,12 +5,13 @@ doc-type: onboarding
 component: KyberSquad
 source-root: src/KyberWeave.Core/Squad
 owner: dpalfery
-last-reviewed: 2026-09-30
+last-reviewed: 2026-10-03
 status: current
 decided-by:
   - adr/0019-pi-native-subagents-and-primary-lowering
   - adr/0022-antigravity-native-agents
   - adr/0025-devin-native-agents-and-skill-lowering
+  - adr/0028-devin-target-scoped-authoring-capability-profiles
 code-refs:
   - SquadDeploymentPlan
 ---
@@ -303,6 +304,19 @@ the two targets per repository.
 **Coming from Windsurf**: Devin still imports `.windsurf/skills/`, so hand-authored skills there
 keep loading after installing `devin`. Squad never writes or removes anything under
 `.windsurf/`; a skill there that shares a Squad skill's name is one of the duplicates above.
+
+**Authoring roles on Devin**: Devin's file-change tools cannot create a file that does not exist,
+so a role that only edits could not start a new plan or specification. `architect` and
+`product-owner` therefore render on Devin from the `architect-devin` and `product-planning-devin`
+capability profiles, which grant `exec` alongside the write tools, so both can create a new file
+through the shell. `architect`'s plan-authoring reference tells it to initialise the destination
+before editing, and its `PLAN_READY` contract requires `docs validate` and `docs drift` to pass.
+`product-owner` carries no equivalent authoring guidance: it is granted the shell, and its
+`SPEC_FINALIZED` contract requires validating the documentation corpus. Every other role renders
+from its shared profile and keeps `ask` narrowing to withheld. If a plan or spec write still fails on
+a missing file, create the empty file and re-run the request — the conductor does this for you when
+the harness withholds file creation from subagents. See
+[ADR 0028](../adr/0028-devin-target-scoped-authoring-capability-profiles.md).
 
 **Conductor and delegation**: Devin has no primary-agent primitive, so the conductor is
 deployed as the skill `conductor` — invoke it as `/conductor` — and runs in the main Devin Local
