@@ -156,14 +156,15 @@ function callsAndTurns(
 
 /**
  * Pair parser calls with turns from their shared session file. A reader turn
- * names the same session when available; an unnamed turn remains positionally
- * attributable to that file unless every turn carries a native id (Cursor).
- * Extra calls or turns are left unpaired rather than borrowing content from
- * an adjacent invocation.
+ * names the same session when available; an unnamed Claude turn remains
+ * positionally attributable to that file. A `turnId` miss is left unpaired
+ * rather than borrowing content from an adjacent invocation. Cursor readers
+ * never take the positional arm — their yielded list is a filtered subset.
  */
 function matchingTurns(
   calls: readonly ParsedProviderCall[],
   turns: readonly ReaderTurn[],
+  positionalPairingSafe: boolean,
 ): Array<ReaderTurn | undefined> {
   const turnsById = new Map<string, ReaderTurn>()
   for (const turn of turns) {
@@ -171,17 +172,11 @@ function matchingTurns(
       turnsById.set(turn.nativeRecordId, turn)
     }
   }
-  // Id-only pairing is safe only when every turn in the file has an id.
-  // A single Claude message.id used to flip the whole file to id-only, which
-  // left every id-less neighbor unpaired (empty parts). Mixed files keep
-  // positional fallback; Cursor all-id files still skip it.
-  const hasNativeIds = turns.length > 0 && turns.every((turn) => turn.nativeRecordId !== undefined)
 
   return calls.map((call, index) => {
-    const positional = turns[index]
     const turn = call.turnId === undefined
-      ? (hasNativeIds ? undefined : positional)
-      : turnsById.get(call.turnId) ?? (hasNativeIds ? undefined : positional)
+      ? (positionalPairingSafe ? turns[index] : undefined)
+      : turnsById.get(call.turnId)
     if (turn === undefined) return undefined
     if (turn.sessionId !== undefined && turn.sessionId !== call.sessionId) return undefined
     if (turn.nativeRecordId !== undefined && call.turnId !== undefined && turn.nativeRecordId !== call.turnId) {
@@ -304,7 +299,9 @@ export async function ingestProviders(
 
       const reader = readerFor(identity) ?? readerFor(provider)
       const [calls, turns] = await callsAndTurns(identity, loaded, reader)
-      const paired = turns === undefined ? undefined : matchingTurns(calls, turns)
+      const paired = turns === undefined
+        ? undefined
+        : matchingTurns(calls, turns, reader?.positionalPairingSafe === true)
       if (loaded.harnessId !== undefined) {
         records.push(...synthesizer.synthesizeEnvelopes(envelopesFor(identity, loaded, calls, paired)))
       } else {
