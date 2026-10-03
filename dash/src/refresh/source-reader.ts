@@ -247,7 +247,6 @@ export async function readNativeUnit(
   dependencies: SourceReaderDependencies,
 ): Promise<NativeUnit> {
   const sourceKey = sourceKeyFor(harnessId, source)
-  const dateRange = dependencies.dateRangeFor?.(sourceKey) ?? dependencies.dateRange
   const fingerprintFn = dependencies.fingerprintFile ?? upstreamFingerprintFile
   const fingerprint = await fingerprintFn(source.path)
   const revision = fingerprint ? { fingerprint, token: revisionTokenFor(fingerprint) } : null
@@ -266,6 +265,7 @@ export async function readNativeUnit(
     }
   }
 
+  const dateRange = dependencies.dateRangeFor?.(sourceKey) ?? dependencies.dateRange
   const batch = normalizeParsedBatch(
     dependencies.parseCalls
       ? await dependencies.parseCalls(provider, source, dateRange)

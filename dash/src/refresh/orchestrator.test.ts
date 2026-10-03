@@ -405,6 +405,27 @@ describe('refreshHarnessSources', () => {
     }
   })
 
+  it('does not rewind recordCount when iterate yields the same sourceKey twice', async () => {
+    const store = temporaryStore()
+    try {
+      const first = unit('pi', 'session', [call('pi', 'pi-session')])
+      const duplicate = unit('pi', 'session', [call('pi', 'pi-session')])
+      await refreshHarnessSources(store, {
+        getAllProviders: async () => [],
+        descriptors: descriptors('pi'),
+        jobConcurrency: 1,
+        writerCapacity: 1,
+        commandStartedAt: new Date('2026-09-12T00:00:00.000Z'),
+        parseAllSessions: async () => undefined,
+        iterateNativeUnits: async (): Promise<NativeUnit[]> => [first, duplicate],
+      })
+      expect(store.listAll()).toHaveLength(1)
+      expect(store.getSourceCheckpoint('pi', first.sourceKey)?.recordCount).toBe(1)
+    } finally {
+      store.close()
+    }
+  })
+
   it('does not grow diagnostic rows when the same invalid source is processed again', async () => {
     const store = temporaryStore()
     try {
