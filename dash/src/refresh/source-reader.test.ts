@@ -154,7 +154,7 @@ describe('iterateNativeUnits', () => {
           call({ provider: 'pi', sessionId: 'chat-1', timestamp: '2026-08-30T12:00:00.000Z', turnId: 'older' }),
           call({ provider: 'pi', sessionId: 'chat-1', timestamp: '2026-09-05T12:00:00.000Z', turnId: 'in-window' }),
         ]],
-      ))),
+      ])),
     ], {
       dateRangeFor: () => ({
         start: new Date('2026-08-29T00:00:00.000Z'),
