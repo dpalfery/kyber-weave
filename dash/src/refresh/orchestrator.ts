@@ -8,7 +8,7 @@ import { recordValidationProblems } from '../canon/adapters/quarantine.js'
 // refresh and the live OTLP collector must run the ONE full projection over
 // the canonical store (plan T20 → T21), or the two ingress paths drift.
 import { projectCanonicalStore } from '../canon/projection.js'
-import { purgeExpiredContent } from '../canon/retention.js'
+import { CONTENT_RETENTION_DAYS, purgeExpiredContent } from '../canon/retention.js'
 import type { CoverageInterval, RecordProvenance, SourceCheckpoint } from '../canon/source-state.js'
 import { checkpointIsReusable, uncoveredIntervals } from '../canon/source-state.js'
 import type { RefreshTrigger } from '../canon/refresh-run.js'
@@ -29,7 +29,6 @@ import type { HarnessJobRow, HarnessJobStatus, RefreshReport } from './report.js
 import { defaultJobConcurrency, runJobsSettled } from './scheduler.js'
 import {
   iterateNativeUnits as productionIterateNativeUnits,
-  readNativeUnit,
   utcHistoryWindow,
   type NativeEmptyReason,
   type NativeUnit,
@@ -234,6 +233,13 @@ async function runHarnessJob(context: JobContext): Promise<HarnessJobRow> {
     units = await context.iterate(descriptor.harnessId, {
       providers: context.providers,
       dateRange: context.dateRange,
+      dateRangeFor: (sourceKey) =>
+        coverageForVersionRepair(
+          descriptor,
+          store.getSourceCheckpoint(descriptor.harnessId, sourceKey),
+          context.dateRange,
+          context.coveredFromUtc,
+        ).dateRange,
       previousFingerprints: previousFingerprintsFor(
         store,
         descriptor,
@@ -275,13 +281,19 @@ async function runHarnessJob(context: JobContext): Promise<HarnessJobRow> {
     row.changed += 1
 
     // Parser-contract repair (#216): the default `--history-weeks` window can
-    // be narrower than the span already stored on the checkpoint. Widen the
-    // re-read to previous.coveredFromUtc → now so historical empty rows outside
-    // the run window still reach recordsForUncoveredCommit. Fingerprint
-    // invalidation already forced one file read; this only widens the slice.
+    // be narrower than the span already stored on the checkpoint. The first
+    // read already used coverageForVersionRepair via dateRangeFor — do not
+    // parse again. The claimed checkpoint floor is preserved; the slice is
+    // clamped to the 14-day content-retention floor so this run does not
+    // ingest parts that purgeExpiredContent will empty on the way out.
     const previous = store.getSourceCheckpoint(descriptor.harnessId, unit.sourceKey)
-    const repaired = await unitForVersionRepair(context, descriptor, unit, previous)
-    const activeUnit = repaired.unit
+    const repaired = coverageForVersionRepair(
+      descriptor,
+      previous,
+      context.dateRange,
+      context.coveredFromUtc,
+    )
+    const activeUnit = unit
     const activeDateRange = repaired.dateRange
     const activeCoveredFromUtc = repaired.coveredFromUtc
 
@@ -363,48 +375,48 @@ function jobStatus(row: HarnessJobRow, writerFailed: boolean): HarnessJobStatus 
   return 'ok'
 }
 
-async function unitForVersionRepair(
-  context: JobContext,
+const MS_PER_DAY = 24 * 60 * 60 * 1000
+
+/**
+ * Decide the parser-contract repair slice before any file read.
+ *
+ * When `parserContractVersion` invalidates a checkpoint whose claimed floor
+ * is older than `--history-weeks`, widen toward that floor so historical
+ * empty rows outside the run window still reach recordsForUncoveredCommit.
+ * Clamp the slice to the content-retention floor: rows older than
+ * CONTENT_RETENTION_DAYS lose parts in this same refresh, so re-ingesting
+ * them is wasted work. The checkpoint keeps `previous.coveredFromUtc` — that
+ * is what was claimed, not what this run rewrote.
+ */
+function coverageForVersionRepair(
   descriptor: HarnessSourceDescriptor,
-  unit: NativeUnit,
   previous: SourceCheckpoint | undefined,
-): Promise<{ unit: NativeUnit; dateRange: DateRange; coveredFromUtc: string }> {
-  const defaultRange = context.dateRange
-  const defaultCoveredFrom = context.coveredFromUtc
+  defaultRange: DateRange,
+  defaultCoveredFrom: string,
+): { dateRange: DateRange; coveredFromUtc: string } {
   const versionInvalidated =
     previous !== undefined &&
     previous.parserContractVersion !== descriptor.parserContractVersion
-  if (
-    !versionInvalidated ||
-    previous === undefined ||
-    previous.coveredFromUtc >= defaultCoveredFrom
-  ) {
-    return { unit, dateRange: defaultRange, coveredFromUtc: defaultCoveredFrom }
+  if (!versionInvalidated || previous === undefined) {
+    return { dateRange: defaultRange, coveredFromUtc: defaultCoveredFrom }
+  }
+  if (previous.coveredFromUtc >= defaultCoveredFrom) {
+    return { dateRange: defaultRange, coveredFromUtc: defaultCoveredFrom }
   }
 
-  const provider = context.providers.find((entry) => entry.name === descriptor.providerName)
-  if (!provider) {
-    return { unit, dateRange: defaultRange, coveredFromUtc: defaultCoveredFrom }
+  const claimedFloorMs = Date.parse(previous.coveredFromUtc)
+  if (!Number.isFinite(claimedFloorMs)) {
+    return { dateRange: defaultRange, coveredFromUtc: defaultCoveredFrom }
   }
 
-  const repairRange: DateRange = {
-    start: new Date(previous.coveredFromUtc),
-    end: defaultRange.end,
+  const retentionFloorMs = defaultRange.end.getTime() - CONTENT_RETENTION_DAYS * MS_PER_DAY
+  const repairStartMs = Math.max(claimedFloorMs, retentionFloorMs)
+  if (repairStartMs >= defaultRange.start.getTime()) {
+    return { dateRange: defaultRange, coveredFromUtc: previous.coveredFromUtc }
   }
-  const reread = await readNativeUnit(descriptor.harnessId, provider, unit.source, {
-    providers: context.providers,
-    dateRange: repairRange,
-    // Empty map: the first pass already decided this unit changed; do not
-    // skip via fingerprint when widening the slice for repair.
-    previousFingerprints: new Map(),
-    ...(context.fingerprintFile ? { fingerprintFile: context.fingerprintFile } : {}),
-    ...(context.parseCalls ? { parseCalls: context.parseCalls } : {}),
-  })
+
   return {
-    // Keep the first-pass change status; the empty fingerprint map would
-    // otherwise report every repair reread as `new`.
-    unit: { ...reread, status: unit.status },
-    dateRange: repairRange,
+    dateRange: { start: new Date(repairStartMs), end: defaultRange.end },
     coveredFromUtc: previous.coveredFromUtc,
   }
 }
@@ -554,8 +566,9 @@ function timestampOutsideCovered(timestampUtc: string, covered: CoverageInterval
  * payload upserts over the stale one. Span identity is nativeRecordId-only —
  * parts never enter it — so without this override a version bump would advance
  * the checkpoint and leave empty historical rows forever. The ingest path
- * pairs this with a widened re-read over `previous.coveredFromUtc → now` so
- * rows older than the run's `--history-weeks` window are still in `merged`.
+ * pairs this with a first-pass slice from
+ * `max(previous.coveredFromUtc, content-retention floor) → now` so rows
+ * older than `--history-weeks` but still retainable are in `merged`.
  * Revision-only or coverage-gap reopenings stay filtered: those are not a
  * parser-contract repair.
  */

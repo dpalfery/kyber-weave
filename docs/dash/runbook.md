@@ -6,7 +6,7 @@ status: current
 component: KyberDash
 source-root: dash
 owner: dpalfery
-last-reviewed: 2026-10-02
+last-reviewed: 2026-10-03
 code-refs:
   - registerKyberCommands
   - refreshHarnessSources
@@ -179,8 +179,11 @@ Parser-contract bumps: each harness-source descriptor carries a
 attaching conversation/tool-result parts on Desktop/CLI file-synth records
 ([issue #216](https://github.com/dpalfery/kyber-weave/issues/216)) — that version
 advances and the next `dash refresh` treats prior `source_checkpoint` rows as
-stale, re-reads transcript files, and re-synthesizes affected units. No separate
-repair command is required; prefer a temporary `--db` when validating a bump.
+stale, re-reads transcript files, and re-synthesizes affected units still
+inside the 14-day content-retention window. Rows older than that floor are
+not rewritten — the same refresh would empty their parts via
+`purgeExpiredContent`. No separate repair command is required; prefer a
+temporary `--db` when validating a bump.
 Capturable versus inherent-empty Claude buckets are recorded in the
 [telemetry inventory](telemetry-inventory.md#claude-desktop-and-cli-file-synth-parts-issue-216).
 

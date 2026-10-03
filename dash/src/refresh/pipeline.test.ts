@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 
+import { CONTENT_RETENTION_DAYS } from '../canon/retention.js'
 import { CanonStore } from '../canon/store.js'
 import type { SessionSource } from '../providers/types.js'
 import { Synthesizer } from '../synth/synth.js'
@@ -551,6 +552,271 @@ describe('refresh pipeline: parser contract version & checkpoint invalidation', 
       const refreshed = store.get(legacyTurnRecord!.spanId)
       expect(refreshed?.parts?.length).toBeGreaterThan(0)
       expect(refreshed?.parts?.some((part) => part.text === 'hello from desktop')).toBe(true)
+    } finally {
+      store.close()
+    }
+  })
+
+  it('parses a version-invalidated unit once under the widened repair range (#276)', async () => {
+    const root = tempDir()
+    const dbPath = join(root, 'canon.db')
+    const store = new CanonStore(dbPath)
+    try {
+      const started = new Date('2026-09-12T18:00:00.000Z')
+      const transcriptPath = join(root, 'desktop-once-parse.jsonl')
+      writeFileSync(
+        transcriptPath,
+        JSON.stringify({
+          type: 'assistant',
+          sessionId: 'desktop-once-parse',
+          uuid: 'turn-1',
+          timestamp: '2026-09-01T10:00:00.000Z',
+          entrypoint: 'claude-desktop',
+          message: {
+            model: 'claude-sonnet-4-5',
+            usage: { input_tokens: 11, output_tokens: 7 },
+            content: [{ type: 'text', text: 'hello from desktop' }],
+          },
+        }) + '\n',
+        'utf8',
+      )
+
+      const stat = statSync(transcriptPath)
+      const revisionToken = revisionTokenFor({
+        dev: stat.dev,
+        ino: stat.ino,
+        mtimeMs: stat.mtimeMs,
+        sizeBytes: stat.size,
+      })
+      const sessionSource: SessionSource = {
+        path: transcriptPath,
+        provider: 'claude',
+        project: 'test-project',
+        sourceKind: 'claude-desktop',
+      }
+      const sourceKey = sourceKeyFor('claude-desktop', sessionSource)
+      const [parentCall] = loadClaudeCalls(transcriptPath)
+      const [legacyTurnRecord] = new Synthesizer().synthesizeEnvelopes([
+        {
+          harnessId: 'claude-desktop',
+          sourceKey,
+          nativeSessionId: parentCall!.sessionId,
+          nativeRecordId: parentCall!.turnId,
+          call: parentCall!,
+          sourceRevision: revisionToken,
+        },
+      ])
+      expect(legacyTurnRecord!.parts ?? []).toHaveLength(0)
+
+      store.commitSourceUnit({
+        records: [legacyTurnRecord!],
+        provenance: [
+          {
+            spanId: legacyTurnRecord!.spanId,
+            harnessId: 'claude-desktop',
+            sourceKey,
+            nativeSessionId: legacyTurnRecord!.sessionId ?? null,
+            nativeRecordId: parentCall!.turnId ?? null,
+            sourceRevision: revisionToken,
+            parserVersion: '3',
+            importedAtUtc: '2026-09-01T10:00:00.000Z',
+            locationToken: '~/.claude/projects',
+          },
+        ],
+        checkpoint: {
+          harnessId: 'claude-desktop',
+          sourceKey,
+          providerId: 'claude',
+          parserId: 'claude',
+          parserContractVersion: '3',
+          format: 'jsonl',
+          sourceRootLabel: '~/.claude/projects',
+          revisionToken,
+          coveredFromUtc: '2026-08-01T00:00:00.000Z',
+          coveredThroughUtc: '2026-09-20T00:00:00.000Z',
+          lastAttemptUtc: '2026-09-01T10:00:00.000Z',
+          lastSuccessUtc: '2026-09-01T10:00:00.000Z',
+          lastStatus: 'ok',
+          lastErrorCode: null,
+          unitCount: 1,
+          recordCount: 1,
+        },
+      })
+
+      const descriptor = descriptorFor('claude-desktop')
+      const provider = fixtureProvider('claude', [sessionSource], (s) => loadClaudeCalls(s.path))
+      const parseStarts: Date[] = []
+      const report = await refreshHarnessSources(
+        store,
+        {
+          getAllProviders: async () => [provider],
+          descriptors: [descriptor!],
+          jobConcurrency: 1,
+          writerCapacity: 1,
+          commandStartedAt: started,
+          parseAllSessions: async () => undefined,
+          parseCalls: async (_provider, source, dateRange) => {
+            parseStarts.push(dateRange.start)
+            return loadClaudeCalls(source.path)
+          },
+        },
+        { historyWeeks: 1 },
+      )
+
+      const retentionFloor = new Date(started.getTime() - CONTENT_RETENTION_DAYS * 24 * 60 * 60 * 1000)
+      const weekWindowStart = new Date(started.getTime() - 7 * 24 * 60 * 60 * 1000)
+      expect(parseStarts).toHaveLength(1)
+      expect(parseStarts[0]!.getTime()).toBe(retentionFloor.getTime())
+      expect(parseStarts[0]!.getTime()).toBeLessThan(weekWindowStart.getTime())
+
+      const claudeRow = report.rows.find((row) => row.harnessId === 'claude-desktop')
+      expect(claudeRow?.updated).toBe(1)
+      const refreshed = store.get(legacyTurnRecord!.spanId)
+      expect(refreshed?.parts?.some((part) => part.text === 'hello from desktop')).toBe(true)
+    } finally {
+      store.close()
+    }
+  })
+
+  it('does not re-ingest parser-contract rows older than the content-retention floor (#276)', async () => {
+    const root = tempDir()
+    const dbPath = join(root, 'canon.db')
+    const store = new CanonStore(dbPath)
+    try {
+      const started = new Date('2026-09-12T18:00:00.000Z')
+      const transcriptPath = join(root, 'desktop-retention-clamp.jsonl')
+      writeFileSync(
+        transcriptPath,
+        [
+          JSON.stringify({
+            type: 'assistant',
+            sessionId: 'desktop-retention-clamp',
+            uuid: 'turn-june',
+            timestamp: '2026-06-15T10:00:00.000Z',
+            entrypoint: 'claude-desktop',
+            message: {
+              model: 'claude-sonnet-4-5',
+              usage: { input_tokens: 11, output_tokens: 7 },
+              content: [{ type: 'text', text: 'hello from june' }],
+            },
+          }),
+          JSON.stringify({
+            type: 'assistant',
+            sessionId: 'desktop-retention-clamp',
+            uuid: 'turn-sept',
+            timestamp: '2026-09-01T10:00:00.000Z',
+            entrypoint: 'claude-desktop',
+            message: {
+              model: 'claude-sonnet-4-5',
+              usage: { input_tokens: 11, output_tokens: 7 },
+              content: [{ type: 'text', text: 'hello from september' }],
+            },
+          }),
+        ].join('\n') + '\n',
+        'utf8',
+      )
+
+      const stat = statSync(transcriptPath)
+      const revisionToken = revisionTokenFor({
+        dev: stat.dev,
+        ino: stat.ino,
+        mtimeMs: stat.mtimeMs,
+        sizeBytes: stat.size,
+      })
+      const sessionSource: SessionSource = {
+        path: transcriptPath,
+        provider: 'claude',
+        project: 'test-project',
+        sourceKind: 'claude-desktop',
+      }
+      const sourceKey = sourceKeyFor('claude-desktop', sessionSource)
+      const calls = loadClaudeCalls(transcriptPath)
+      expect(calls).toHaveLength(2)
+      const [juneCall, septCall] = calls
+      const [juneRecord, septRecord] = new Synthesizer().synthesizeEnvelopes(
+        [juneCall, septCall].map((call) => ({
+          harnessId: 'claude-desktop' as const,
+          sourceKey,
+          nativeSessionId: call!.sessionId,
+          nativeRecordId: call!.turnId,
+          call: call!,
+          sourceRevision: revisionToken,
+        })),
+      )
+      expect(juneRecord!.parts ?? []).toHaveLength(0)
+      expect(septRecord!.parts ?? []).toHaveLength(0)
+
+      store.commitSourceUnit({
+        records: [juneRecord!, septRecord!],
+        provenance: [
+          {
+            spanId: juneRecord!.spanId,
+            harnessId: 'claude-desktop',
+            sourceKey,
+            nativeSessionId: juneRecord!.sessionId ?? null,
+            nativeRecordId: juneCall!.turnId ?? null,
+            sourceRevision: revisionToken,
+            parserVersion: '3',
+            importedAtUtc: '2026-06-15T10:00:00.000Z',
+            locationToken: '~/.claude/projects',
+          },
+          {
+            spanId: septRecord!.spanId,
+            harnessId: 'claude-desktop',
+            sourceKey,
+            nativeSessionId: septRecord!.sessionId ?? null,
+            nativeRecordId: septCall!.turnId ?? null,
+            sourceRevision: revisionToken,
+            parserVersion: '3',
+            importedAtUtc: '2026-09-01T10:00:00.000Z',
+            locationToken: '~/.claude/projects',
+          },
+        ],
+        checkpoint: {
+          harnessId: 'claude-desktop',
+          sourceKey,
+          providerId: 'claude',
+          parserId: 'claude',
+          parserContractVersion: '3',
+          format: 'jsonl',
+          sourceRootLabel: '~/.claude/projects',
+          revisionToken,
+          coveredFromUtc: '2026-06-01T00:00:00.000Z',
+          coveredThroughUtc: '2026-09-20T00:00:00.000Z',
+          lastAttemptUtc: '2026-06-15T10:00:00.000Z',
+          lastSuccessUtc: '2026-06-15T10:00:00.000Z',
+          lastStatus: 'ok',
+          lastErrorCode: null,
+          unitCount: 1,
+          recordCount: 2,
+        },
+      })
+
+      const descriptor = descriptorFor('claude-desktop')
+      const provider = fixtureProvider('claude', [sessionSource], (s) => loadClaudeCalls(s.path))
+      const report = await refreshHarnessSources(
+        store,
+        {
+          getAllProviders: async () => [provider],
+          descriptors: [descriptor!],
+          jobConcurrency: 1,
+          writerCapacity: 1,
+          commandStartedAt: started,
+          parseAllSessions: async () => undefined,
+        },
+        { historyWeeks: 1 },
+      )
+
+      const claudeRow = report.rows.find((row) => row.harnessId === 'claude-desktop')
+      expect(claudeRow?.updated).toBe(1)
+      expect(store.getSourceCheckpoint('claude-desktop', sourceKey)?.coveredFromUtc).toBe(
+        '2026-06-01T00:00:00.000Z',
+      )
+
+      const juneRefreshed = store.get(juneRecord!.spanId)
+      const septRefreshed = store.get(septRecord!.spanId)
+      expect(juneRefreshed?.parts ?? []).toHaveLength(0)
+      expect(septRefreshed?.parts?.some((part) => part.text === 'hello from september')).toBe(true)
     } finally {
       store.close()
     }
