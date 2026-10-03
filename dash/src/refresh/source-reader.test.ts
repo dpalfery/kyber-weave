@@ -304,6 +304,172 @@ describe('iterateNativeUnits', () => {
     expect(changed[0]!.envelopes).toHaveLength(1)
   })
 
+  it('classifies parser-pre-filtered pre-window calls as window_filtered (Cursor-shaped)', async () => {
+    // Production Cursor applies dateRange inside createSessionParser, so
+    // source-reader sees zero yielded calls even when the DB holds only
+    // pre-window recordable work. That must be window_filtered, not
+    // no_recordable_events.
+    const source: SessionSource = {
+      path: '/native/cursor/state.vscdb#orphan',
+      project: '(no folder)',
+      provider: 'cursor',
+    }
+    const preWindow = call({
+      provider: 'cursor',
+      sessionId: 'composer-old',
+      timestamp: '2026-08-01T12:00:00.000Z',
+    })
+    const cursorLike: Provider = {
+      name: 'cursor',
+      displayName: 'Cursor',
+      modelDisplayName: model => model,
+      toolDisplayName: tool => tool,
+      discoverSessions: async () => [source],
+      createSessionParser(_source, _seen, dateRange) {
+        return {
+          async *parse(): AsyncGenerator<ParsedProviderCall> {
+            if (dateRange && Date.parse(preWindow.timestamp) < dateRange.start.getTime()) return
+            yield preWindow
+          },
+        }
+      },
+    }
+
+    const units = await readHarness('cursor', [cursorLike])
+    expect(units).toHaveLength(1)
+    expect(units[0]!.envelopes).toEqual([])
+    expect(units[0]!.problems).toEqual([])
+    expect(units[0]!.emptyReason).toBe('window_filtered')
+  })
+
+  it('keeps no_recordable_events when the parser has no pre-window recordable calls either', async () => {
+    const source: SessionSource = {
+      path: '/native/cursor/empty.vscdb#orphan',
+      project: '(no folder)',
+      provider: 'cursor',
+    }
+    const emptyCursor: Provider = {
+      name: 'cursor',
+      displayName: 'Cursor',
+      modelDisplayName: model => model,
+      toolDisplayName: tool => tool,
+      discoverSessions: async () => [source],
+      createSessionParser() {
+        return { async *parse(): AsyncGenerator<ParsedProviderCall> {} }
+      },
+    }
+
+    const units = await readHarness('cursor', [emptyCursor])
+    expect(units).toHaveLength(1)
+    expect(units[0]!.emptyReason).toBe('no_recordable_events')
+  })
+
+  it('does not unfiltered-probe providers that do not date-filter before yield', async () => {
+    const source: SessionSource = {
+      path: '/native/pi/empty.jsonl',
+      project: 'kyber',
+      provider: 'pi',
+    }
+    let parses = 0
+    const pi: Provider = {
+      name: 'pi',
+      displayName: 'pi',
+      modelDisplayName: model => model,
+      toolDisplayName: tool => tool,
+      discoverSessions: async () => [source],
+      createSessionParser(_source, _seen, dateRange) {
+        parses += 1
+        if (dateRange === undefined) {
+          throw new Error('unfiltered probe must not run for non-date-filtering providers')
+        }
+        return { async *parse(): AsyncGenerator<ParsedProviderCall> {} }
+      },
+    }
+
+    const units = await readHarness('pi', [pi])
+    expect(parses).toBe(1)
+    expect(units).toHaveLength(1)
+    expect(units[0]!.emptyReason).toBe('no_recordable_events')
+  })
+
+  it('uses SessionParser.preWindowRecordableCount without a second parse', async () => {
+    const source: SessionSource = {
+      path: '/native/cursor/reported.vscdb#orphan',
+      project: '(no folder)',
+      provider: 'cursor',
+    }
+    let parses = 0
+    const cursor: Provider = {
+      name: 'cursor',
+      displayName: 'Cursor',
+      modelDisplayName: model => model,
+      toolDisplayName: tool => tool,
+      discoverSessions: async () => [source],
+      createSessionParser(_source, _seen, dateRange) {
+        parses += 1
+        return {
+          preWindowRecordableCount: dateRange ? 2 : 0,
+          async *parse(): AsyncGenerator<ParsedProviderCall> {},
+        }
+      },
+    }
+
+    const units = await readHarness('cursor', [cursor])
+    expect(parses).toBe(1)
+    expect(units[0]!.emptyReason).toBe('window_filtered')
+  })
+
+  it('leaves emptyReason unset when a Cursor pre-window probe fails', async () => {
+    const source: SessionSource = {
+      path: '/native/cursor/locked.vscdb#orphan',
+      project: '(no folder)',
+      provider: 'cursor',
+    }
+    const cursor: Provider = {
+      name: 'cursor',
+      displayName: 'Cursor',
+      modelDisplayName: model => model,
+      toolDisplayName: tool => tool,
+      discoverSessions: async () => [source],
+      createSessionParser(_source, _seen, dateRange) {
+        if (dateRange === undefined) throw new Error('sqlite busy')
+        return { async *parse(): AsyncGenerator<ParsedProviderCall> {} }
+      },
+    }
+
+    const units = await readHarness('cursor', [cursor])
+    expect(units).toHaveLength(1)
+    expect(units[0]!.envelopes).toEqual([])
+    expect(units[0]!.problems).toEqual([])
+    expect(units[0]!.emptyReason).toBeUndefined()
+  })
+
+  it('treats injected parseCalls empty array for Cursor as unknown, not no_recordable_events', async () => {
+    const source: SessionSource = {
+      path: '/native/cursor/injected.vscdb#orphan',
+      project: '(no folder)',
+      provider: 'cursor',
+    }
+    const cursor: Provider = {
+      name: 'cursor',
+      displayName: 'Cursor',
+      modelDisplayName: model => model,
+      toolDisplayName: tool => tool,
+      discoverSessions: async () => [source],
+      createSessionParser() {
+        throw new Error('createSessionParser must not run when parseCalls is injected')
+      },
+    }
+
+    const units = await readHarness('cursor', [cursor], {
+      parseCalls: async () => [],
+    })
+    expect(units).toHaveLength(1)
+    expect(units[0]!.envelopes).toEqual([])
+    expect(units[0]!.problems).toEqual([])
+    expect(units[0]!.emptyReason).toBeUndefined()
+  })
+
   it('iterates native units with a bounded worker pool', async () => {
     const sources: SessionSource[] = Array.from({ length: 6 }, (_, index) => ({
       path: `/native/pi/${index}.jsonl`,

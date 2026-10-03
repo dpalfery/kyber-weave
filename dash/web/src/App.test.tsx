@@ -214,6 +214,17 @@ describe('App: Page Switching & Title Rendering', () => {
     clearHooks()
   })
 
+  it('does not repeat Context Doctor as the page title on a harness view (issue #194)', () => {
+    const qc = createTestQueryClient()
+    const html = renderHtml(
+      <QueryClientProvider client={qc}>
+        <App initialPath="/harness/claude-desktop" />
+      </QueryClientProvider>
+    )
+    const title = html.match(/data-testid="page-title"[^>]*>([^<]*)</)?.[1]
+    expect(title).toBe('Harness · claude-desktop')
+  })
+
   it('renders the Context Doctor landing page by default', () => {
     const qc = createTestQueryClient()
     const html = renderHtml(

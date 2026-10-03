@@ -1350,6 +1350,57 @@ export class KyberBridge {
   }
 
   /**
+   * Per-harness session counts (issue #194 presentation overlay).
+   *
+   * <remarks>
+   * The harness list must agree with `/sessions` without materializing the
+   * session table: an uncapped `listSessions()` is forbidden on this path
+   * (coverage-window seam). Both branches select only `harness` and fold
+   * counts in JS. A harness with no rows is absent from the map — unknown,
+   * never a fabricated 0 that would overwrite a rollup `sessionCount`.
+   * </remarks>
+   */
+  countSessionsByHarness(): Map<string, number> {
+    return this.countHarnessColumn('session')
+  }
+
+  /**
+   * Per-harness run counts, same contract as `countSessionsByHarness`.
+   */
+  countRunsByHarness(): Map<string, number> {
+    return this.countHarnessColumn('run')
+  }
+
+  private countHarnessColumn(table: 'session' | 'run'): Map<string, number> {
+    const counts = new Map<string, number>()
+    const add = (harness: unknown): void => {
+      if (typeof harness !== 'string' || harness === '') return
+      counts.set(harness, (counts.get(harness) ?? 0) + 1)
+    }
+    if (this.store) {
+      try {
+        if (table === 'session') {
+          for (const row of this.store.listSessionTimeColumns()) add(row.harness)
+        } else {
+          for (const row of this.store.listRuns()) add(row.harness)
+        }
+      } catch {
+        return new Map<string, number>()
+      }
+      return counts
+    }
+    const db = this.getDb()
+    if (!this.hasTable(db, table)) return counts
+    try {
+      const rows = db!.prepare(`SELECT harness FROM ${table}`).all() as Array<{ harness: unknown }>
+      for (const row of rows) add(row.harness)
+    } catch {
+      return new Map<string, number>()
+    }
+    return counts
+  }
+
+  /**
    * Get the full precomputed view payload for a given session ID.
    * The canonical session payload is returned without route-level adaptation.
    * Strings longer than maxLen are safely truncated to prevent oversized JSON responses.

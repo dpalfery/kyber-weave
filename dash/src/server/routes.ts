@@ -162,6 +162,39 @@ function parsePaginationParams(url: URL, defaultLimit = 200): PaginationParams {
  * word-for-word: no surface may render `0 sessions` where the truth is none
  * in the coverage window.
  */
+function payloadNumber(payload: unknown, key: 'sessionCount' | 'runCount'): number | undefined {
+  if (payload === null || typeof payload !== 'object') return undefined
+  const value = (payload as Record<string, unknown>)[key]
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+}
+
+/**
+ * Live session/run counts keyed by harness, so the harness list cannot drift
+ * from `/sessions` and `/runs` (issue #194). Only harnesses that have a row
+ * appear in the map — a miss falls back to the stored rollup figure.
+ */
+function liveHarnessCounts(bridge: KyberBridge): {
+  sessions: Map<string, number>
+  runs: Map<string, number>
+} {
+  // Narrow-column counts — never uncapped listSessions() (coverage-window seam).
+  return { sessions: bridge.countSessionsByHarness(), runs: bridge.countRunsByHarness() }
+}
+
+function withLiveCounts<T extends { harness: string; sampleCount: number; payload?: unknown }>(
+  row: T,
+  live: { sessions: Map<string, number>; runs: Map<string, number> },
+): T & { sessionCount: number; runCount: number; sampleCount: number } {
+  const sessionCount = live.sessions.get(row.harness) ?? payloadNumber(row.payload, 'sessionCount') ?? row.sampleCount
+  const runCount = live.runs.get(row.harness) ?? payloadNumber(row.payload, 'runCount') ?? row.sampleCount
+  return {
+    ...row,
+    sessionCount,
+    runCount,
+    sampleCount: live.sessions.get(row.harness) ?? row.sampleCount,
+  }
+}
+
 function noDataReasonOf(row: { payload?: unknown }): string | null {
   if (row.payload !== null && typeof row.payload === 'object' && 'reason' in row.payload) {
     const reason = (row.payload as { reason?: unknown }).reason
@@ -752,8 +785,9 @@ export function handleKyberRequest(
     const allCheckpoints = bridge.getSourceCheckpointStatuses()
     const checkpointsByHarness =
       allCheckpoints === null ? null : groupCheckpointsByHarness(allCheckpoints)
+    const liveCounts = liveHarnessCounts(bridge)
     const harnesses = bridge.listHarnessRollups().map((row) => ({
-      ...row,
+      ...withLiveCounts(row, liveCounts),
       family: harnessFamily(row.harness),
       noDataReason: inWindowNoDataReason(row.harness, latestByHarness, coveredFrom, noDataReasonOf(row)),
       checkpointSummary:
@@ -799,7 +833,7 @@ export function handleKyberRequest(
     // as no-data on the detail route exactly as on the list route.
     const { coveredFrom: detailCoveredFrom, latestByHarness: detailLatest } = windowContextOf(bridge)
     sendKyberJson(res, 200, {
-      ...rollup,
+      ...withLiveCounts(rollup, liveHarnessCounts(bridge)),
       family: harnessFamily(rollup.harness),
       noDataReason: inWindowNoDataReason(
         rollup.harness,

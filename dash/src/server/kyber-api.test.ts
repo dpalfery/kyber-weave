@@ -1034,6 +1034,8 @@ describe('Backend Contract Tests: /api/kyber/* Endpoints', () => {
         expect(byId.get('claude-code')?.sampleCount).toBe(0)
         expect(byId.get('claude-cli')?.sampleCount).toBe(0)
         expect(byId.get('pi')?.sampleCount).toBe(2)
+        expect(byId.get('pi')?.sessionCount).toBe(2)
+        expect(byId.get('pi')?.runCount).toBe(1)
 
         // Detail route scopes the same way: desktop-recorded checkpoints on
         // the claude-code row (issue #182).
@@ -1045,6 +1047,65 @@ describe('Backend Contract Tests: /api/kyber/* Endpoints', () => {
         await new Promise<void>((resolve) => t8Server.close(() => resolve()))
         t8Bridge.close()
         store.close()
+      }
+    })
+
+    it('overlays live session counts so harnesses agree with /sessions (issue #194)', async () => {
+      // Shared raw db: `/sessions` reads via listSessions() and the overlay
+      // counts via the narrow harness-column seam. A store-plus-`:memory:`
+      // pair would be two databases — that is not the production path.
+      const db = new DatabaseSync(':memory:')
+      db.exec(`
+        CREATE TABLE harness_rollup (
+          harness TEXT PRIMARY KEY, sample_count INTEGER NOT NULL DEFAULT 0,
+          context_pressure_median REAL, context_pressure_p95 REAL,
+          cache_hit_rate REAL, tool_yield REAL, delegation_overhead REAL,
+          field_coverage REAL, measurability_json TEXT NOT NULL, payload TEXT
+        );
+        CREATE TABLE session (
+          session_id TEXT PRIMARY KEY, harness TEXT NOT NULL, label TEXT,
+          is_subagent INTEGER NOT NULL DEFAULT 0, parent_session TEXT,
+          agent_name TEXT, repo TEXT, branch TEXT,
+          started TEXT, ended TEXT, payload TEXT NOT NULL
+        );
+      `)
+      db.prepare(
+        'INSERT INTO harness_rollup (harness, sample_count, measurability_json, payload) VALUES (?, ?, ?, ?)',
+      ).run(
+        'claude-desktop',
+        66,
+        '{}',
+        JSON.stringify({ sessionCount: 66, runCount: 66, executionCount: 66 }),
+      )
+      const session = (id: string) =>
+        db
+          .prepare('INSERT INTO session (session_id, harness, started, ended, payload) VALUES (?, ?, ?, ?, ?)')
+          .run(id, 'claude-desktop', '2026-09-30T00:00:00.000Z', '2026-09-30T00:01:00.000Z', '{}')
+      session('live-1')
+      session('live-2')
+      const bridge = new KyberBridge({ canonDb: db })
+      const srv = await runWebDashboard({ port: 0, open: false, kyberBridge: bridge, writeStdout: () => {} })
+      try {
+        const baseUrl = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`
+        const harnesses = (await (await fetch(`${baseUrl}/api/kyber/harnesses`)).json()) as {
+          harnesses: Array<{ harness: string; sampleCount: number; sessionCount: number; runCount: number }>
+        }
+        const row = harnesses.harnesses.find((h) => h.harness === 'claude-desktop')
+        expect(row?.sessionCount).toBe(2)
+        expect(row?.sampleCount).toBe(2)
+        const sessions = (await (await fetch(`${baseUrl}/api/kyber/sessions?harness=claude-desktop`)).json()) as {
+          sessions: unknown[]
+        }
+        expect(sessions.sessions).toHaveLength(2)
+        const detail = (await (await fetch(`${baseUrl}/api/kyber/harness/claude-desktop`)).json()) as {
+          sessionCount: number
+          sampleCount: number
+        }
+        expect(detail.sessionCount).toBe(2)
+        expect(detail.sampleCount).toBe(2)
+      } finally {
+        await new Promise<void>((resolve) => srv.close(() => resolve()))
+        bridge.close()
       }
     })
 

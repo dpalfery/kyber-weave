@@ -48,7 +48,7 @@ export function CalibrationSummary({ data, isLoading, isError, className }: Cali
       ? 'Calibration summary could not be loaded.'
       : isLoading
         ? 'Loading calibration from scored prediction pairs…'
-        : 'Not yet calibrated: no scored prediction pairs are available.')
+        : 'Not yet calibrated: no scored prediction pairs are available. Open a finding to log its waste prediction, then compare two runs of the same task family (n ≥ 5 scored pairs) to populate this curve.')
 
   const populatedBins = calibrated ? (data?.bins ?? []).filter(binHasObservations) : []
   const chartEmpty = !calibrated || populatedBins.length === 0
@@ -110,7 +110,7 @@ export function CalibrationSummary({ data, isLoading, isError, className }: Cali
           <p className="text-xs text-muted-foreground leading-relaxed">
             {isLoading
               ? 'Calibration chart is empty until scored prediction pairs load.'
-              : 'No calibration curve to plot. Observed accuracy is unmeasured until at least five scored pairs exist; this panel does not invent a percentage.'}
+              : 'No calibration curve to plot. Observed accuracy is unmeasured until at least five scored pairs exist; this panel does not invent a percentage. Path: inspect a finding (logs a pending prediction), then Compare two comparable runs to score it.'}
           </p>
         ) : (
           <div className="space-y-2.5" role="img" aria-label="Stated confidence versus observed accuracy by bin">
