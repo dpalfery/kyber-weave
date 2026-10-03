@@ -156,7 +156,7 @@ describe('refresh pipeline: parser contract version & checkpoint invalidation', 
       // and advance the checkpoint's parser_contract_version to '2'.
       const updatedCheckpoint = store.getSourceCheckpoint('claude-cli', sourceKey)
       expect(updatedCheckpoint).toBeDefined()
-      expect(updatedCheckpoint?.parserContractVersion).toBe('2')
+      expect(updatedCheckpoint?.parserContractVersion).toBe(descriptor!.parserContractVersion)
       expect(updatedCheckpoint?.lastStatus).toBe('ok')
 
       const claudeRow = report.rows.find((r) => r.harnessId === 'claude-cli')
@@ -288,11 +288,11 @@ describe('refresh pipeline: parser contract version & checkpoint invalidation', 
       store.close()
     }
   })
-  it("scopes parserContractVersion 2 specifically to Claude descriptors while other harnesses remain at 1", () => {
+  it("scopes parserContractVersion 3 specifically to Claude descriptors while other harnesses remain at 1", () => {
     const claudeCli = descriptorFor("claude-cli")
     const claudeDesktop = descriptorFor("claude-desktop")
-    expect(claudeCli?.parserContractVersion).toBe("2")
-    expect(claudeDesktop?.parserContractVersion).toBe("2")
+    expect(claudeCli?.parserContractVersion).toBe("3")
+    expect(claudeDesktop?.parserContractVersion).toBe("3")
 
     const codex = descriptorFor("codex-cli")
     const copilot = descriptorFor("copilot-cli")
@@ -300,5 +300,120 @@ describe('refresh pipeline: parser contract version & checkpoint invalidation', 
     expect(codex?.parserContractVersion).toBe("1")
     expect(copilot?.parserContractVersion).toBe("1")
     expect(cursor?.parserContractVersion).toBe("1")
+  })
+
+  it("re-reads transcript files and advances parserContractVersion from 2 to 3 for claude-desktop (#232)", async () => {
+    const root = tempDir()
+    const dbPath = join(root, 'canon.db')
+    const store = new CanonStore(dbPath)
+    try {
+      const transcriptPath = join(root, 'paired-session.jsonl')
+      writeFileSync(
+        transcriptPath,
+        JSON.stringify({
+          type: 'assistant',
+          sessionId: 'paired-session',
+          uuid: 'turn-1',
+          timestamp: '2026-09-06T10:00:00.000Z',
+          entrypoint: 'claude-desktop',
+          message: {
+            model: 'claude-sonnet-4-5',
+            usage: { input_tokens: 11, output_tokens: 7 },
+          },
+        }) + '\n',
+        'utf8',
+      )
+
+      const stat = statSync(transcriptPath)
+      const revisionToken = revisionTokenFor({
+        dev: stat.dev,
+        ino: stat.ino,
+        mtimeMs: stat.mtimeMs,
+        sizeBytes: stat.size,
+      })
+
+      const sessionSource: SessionSource = {
+        path: transcriptPath,
+        provider: 'claude',
+        project: 'test-project',
+        sourceKind: 'claude-desktop',
+      }
+      const sourceKey = sourceKeyFor('claude-desktop', sessionSource)
+
+      const [parentCall] = loadClaudeCalls(transcriptPath)
+      const [legacyTurnRecord] = new Synthesizer().synthesizeEnvelopes([
+        {
+          harnessId: 'claude-desktop',
+          sourceKey,
+          nativeSessionId: parentCall!.sessionId,
+          nativeRecordId: parentCall!.turnId,
+          call: parentCall!,
+          sourceRevision: revisionToken,
+        },
+      ])
+
+      store.commitSourceUnit({
+        records: [legacyTurnRecord!],
+        provenance: [
+          {
+            spanId: legacyTurnRecord!.spanId,
+            harnessId: 'claude-desktop',
+            sourceKey,
+            nativeSessionId: legacyTurnRecord!.sessionId ?? null,
+            nativeRecordId: parentCall!.turnId ?? null,
+            sourceRevision: revisionToken,
+            parserVersion: '2',
+            importedAtUtc: '2026-09-06T10:00:00.000Z',
+            locationToken: '~/.claude/projects',
+          },
+        ],
+        checkpoint: {
+          harnessId: 'claude-desktop',
+          sourceKey,
+          providerId: 'claude',
+          parserId: 'claude',
+          parserContractVersion: '2',
+          format: 'jsonl',
+          sourceRootLabel: '~/.claude/projects',
+          revisionToken,
+          coveredFromUtc: '2026-08-01T00:00:00.000Z',
+          coveredThroughUtc: '2026-09-20T00:00:00.000Z',
+          lastAttemptUtc: '2026-09-06T10:00:00.000Z',
+          lastSuccessUtc: '2026-09-06T10:00:00.000Z',
+          lastStatus: 'ok',
+          lastErrorCode: null,
+          unitCount: 1,
+          recordCount: 1,
+        },
+      })
+
+      const initialCheckpoint = store.getSourceCheckpoint('claude-desktop', sourceKey)
+      expect(initialCheckpoint?.parserContractVersion).toBe('2')
+
+      const descriptor = descriptorFor('claude-desktop')
+      expect(descriptor).toBeDefined()
+
+      const provider = fixtureProvider('claude', [sessionSource], (s) => loadClaudeCalls(s.path))
+
+      const report = await refreshHarnessSources(store, {
+        getAllProviders: async () => [provider],
+        descriptors: [descriptor!],
+        jobConcurrency: 1,
+        writerCapacity: 1,
+        commandStartedAt: new Date('2026-09-12T18:00:00.000Z'),
+        parseAllSessions: async () => undefined,
+      })
+
+      const updatedCheckpoint = store.getSourceCheckpoint('claude-desktop', sourceKey)
+      expect(updatedCheckpoint?.parserContractVersion).toBe('3')
+      expect(updatedCheckpoint?.lastStatus).toBe('ok')
+
+      const claudeRow = report.rows.find((r) => r.harnessId === 'claude-desktop')
+      expect(claudeRow).toBeDefined()
+      expect(claudeRow?.changed).toBe(1)
+      expect(claudeRow?.skipped).toBe(0)
+    } finally {
+      store.close()
+    }
   })
 });

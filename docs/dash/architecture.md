@@ -220,13 +220,27 @@ prevent, and the manual `kyberdash build` command runs the same derivation.
 The live collector does not call the projection inline. Accepted span batches and successful
 log enrichment mark a serialized `CanonicalProjectionScheduler` dirty instead:
 
+- The scheduler **debounces**: a pass starts only after the ingest stream has been quiet for
+  `DEFAULT_PROJECTION_IDLE_MS` (10s), at the staleness cap `DEFAULT_PROJECTION_MAX_WAIT_MS`
+  (10min) if dirt never quiesces, and never sooner than `DEFAULT_PROJECTION_MIN_INTERVAL_MS`
+  (10min) after the previous pass started. Sustained traffic therefore costs at most one full
+  pass per 10 minutes; `request()` never starts one immediately.
 - At most one pass runs at a time; a burst of dirty marks costs one pass plus **one trailing
-  pass**, never one projection per batch.
+  (scheduled, not immediate) pass**, never one projection per batch.
 - A failed pass rolls nothing back — records the writer already committed stay committed —
-  reports the error, and leaves the work dirty; the next request retries it. A slow or failing
-  projection can therefore never block, reject, or drop accepted ingestion.
+  reports the error, and leaves the work dirty; the next request or `drain()` retries it. A
+  slow or failing projection can therefore never block, reject, or drop accepted ingestion.
 - Shutdown orders receiver stop, writer stop, projection drain, then store close: `drain()`
-  and `close()` resolve only once no pass is in flight and no trailing pass is owed.
+  and `close()` bypass the debounce/floor schedule, attempt any owed work immediately,
+  and resolve once no pass is in flight and no trailing pass is owed — a failed pass
+  can still leave work dirty, to be retried by the next request or `drain()`. Those
+  knobs limit
+  when a projection pass may START, not how fresh derived sessions are: a batch that
+  arrives just after a pass started can wait nearly the full minimum interval (the 10s
+  idle window plus a floor up to 10min) for the next pass, and slow or failed passes can
+  delay visible results further. Under saturation, at most one new pass starts per
+  10 minutes, so derived sessions trail the last accepted batch by roughly the idle
+  window after the stream quiets, and worst-case by the 10-minute caps.
 
 `KyberBridge.listSessions()` (`dash/src/server/bridge.ts`) reads only the canonical derived
 `session` cache. Raw `records` are never synthesized into sessions for reporting: until the
@@ -283,9 +297,14 @@ The invariant is `freshInput + cacheRead + cacheCreation === reportedInput`, che
 is what makes the invariant checkable at all; a model that stored "input" as one number could
 not detect the pi/Copilot convention inversion of R4.2 — the same `gen_ai.usage.input_tokens`
 attribute key with opposite meanings across harnesses. Adapters convert each harness's
-convention on the way in; a decomposition that yields negative fresh input, or that does not
-reconcile to the reported total, rejects the record and writes a problem rather than storing
-it (R4.4).
+convention on the way in. When inclusive subtraction is impossible — cache exceeds the
+input that supposedly contains it — the counters are exclusive-shaped and convert that
+way rather than being stored as negative fresh or clamped to zero. File-side exclusive
+reasoning (Antigravity-cli thinking counted separately from response) is folded into
+`output` so the subset invariant holds; Copilot rows that carry reasoning with output
+absent stay unfolded so that absence stays visible. A decomposition that is still
+negative, or that does not reconcile to the reported total, rejects the record and
+writes a problem rather than storing it (R4.4).
 
 ### `CostBlock` and cost basis
 

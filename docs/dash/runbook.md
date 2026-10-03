@@ -82,7 +82,10 @@ flowchart TD
 - **One shared projection**: whichever entry fills the store — `dash refresh`, live OTLP
   ingest, or a manual `kyber build` — the derived data every surface reads is produced by the
   same `projectCanonicalStore()` projection over `buildSessions()`. There is no second
-  derivation and no raw-record reporting path.
+  derivation and no raw-record reporting path. The live collector's scheduler runs that
+  projection on a debounced cadence (10s idle window, 10min staleness cap, 10min minimum
+  pass interval; `drain()`/`close()` bypass it) — see
+  [The shared canonical projection](architecture.md#the-shared-canonical-projection).
 - **No upstream remote**: `dash/` no longer tracks CodeBurn. A clone made while it did
   may still carry the `codeburn` git remote; nothing uses it, so remove it with
   `git remote remove codeburn`.

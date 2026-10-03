@@ -53,6 +53,109 @@ describe('claudeReader', () => {
     ])
   })
 
+  it('yields 1 ReaderTurn per turn for paired request/response assistant lines (#232)', async () => {
+    const usage = {
+      input_tokens: 150,
+      output_tokens: 45,
+      cache_read_input_tokens: 300,
+      cache_creation_input_tokens: 200,
+    }
+    const path = writeTranscript([
+      {
+        type: 'user',
+        sessionId: 'session-paired-read',
+        message: { role: 'user', content: [{ type: 'text', text: 'Check git status' }] },
+      },
+      {
+        type: 'assistant',
+        sessionId: 'session-paired-read',
+        uuid: 'req-1',
+        timestamp: '2026-09-01T12:00:00.000Z',
+        message: {
+          id: 'msg-1',
+          model: 'claude-sonnet-4-5',
+          usage,
+          content: [
+            { type: 'tool_use', id: 'tu_bash_1', name: 'Bash', input: { command: 'git status' } },
+          ],
+        },
+      },
+      {
+        type: 'user',
+        sessionId: 'session-paired-read',
+        message: {
+          role: 'user',
+          content: [
+            { type: 'tool_result', tool_use_id: 'tu_bash_1', content: 'On branch main' },
+          ],
+        },
+      },
+      {
+        type: 'assistant',
+        sessionId: 'session-paired-read',
+        uuid: 'res-1',
+        timestamp: '2026-09-01T12:00:05.000Z',
+        message: {
+          id: 'msg-1',
+          model: 'claude-sonnet-4-5',
+          usage,
+          content: [
+            { type: 'text', text: 'You are on main.' },
+          ],
+        },
+      },
+    ])
+
+    const turns = await readTurns(path)
+    expect(turns).toHaveLength(1)
+    const turn = turns[0]!
+    expect(turn.toolCalls).toHaveLength(1)
+    expect(turn.toolCalls?.[0]?.name).toBe('Bash')
+    expect(turn.toolResults).toHaveLength(1)
+    expect(turn.toolResults?.[0]?.content).toBe('On branch main')
+    const texts = turn.parts.map((p) => p.text)
+    expect(texts).toContain('Check git status')
+    expect(texts).toContain('You are on main.')
+  })
+
+  it('keeps turns separate when adjacent assistant lines have differing native message IDs', async () => {
+    const usage = {
+      input_tokens: 150,
+      output_tokens: 45,
+      cache_read_input_tokens: 300,
+      cache_creation_input_tokens: 200,
+    }
+    const path = writeTranscript([
+      {
+        type: 'assistant',
+        sessionId: 'session-diff-ids',
+        uuid: 'req-1',
+        timestamp: '2026-09-01T12:00:00.000Z',
+        message: {
+          id: 'msg-1',
+          model: 'claude-sonnet-4-5',
+          usage,
+          content: [{ type: 'text', text: 'First response' }],
+        },
+      },
+      {
+        type: 'assistant',
+        sessionId: 'session-diff-ids',
+        uuid: 'res-1',
+        timestamp: '2026-09-01T12:00:05.000Z',
+        message: {
+          id: 'msg-2',
+          model: 'claude-sonnet-4-5',
+          usage,
+          content: [{ type: 'text', text: 'Second response' }],
+        },
+      },
+    ])
+
+    const turns = await readTurns(path)
+    expect(turns).toHaveLength(2)
+  })
+
   it('measures stored conversation and tool results, but not unavailable system prompts or tool definitions', async () => {
     const path = writeTranscript([
       {
