@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import { AdapterRegistry } from './registry.js'
 import { rawSpan } from './testing.js'
-import { TOKEN_SUM_MISMATCH } from '../types.js'
+import { TOKEN_NEGATIVE_FRESH, TOKEN_SUM_MISMATCH } from '../types.js'
 import {
   canonicalSessionId,
   convertInclusiveCounts,
@@ -218,6 +218,30 @@ describe('copilotAdapter — exclusive-shaped counters convert exclusively (issu
       cacheCreation: 400,
       output: 210,
     }).freshInput).toBe(500)
+  })
+
+  // An unreadable input counter must not be folded to exclusive zero: with
+  // cache read present, the old inclusive conversion rejected negative fresh;
+  // treating "unknown" as input=0 then falling back exclusively would accept
+  // an incomplete record (CodeRabbit on #255).
+  it('rejects an unreadable input counter rather than treating it as exclusive zero', () => {
+    const record = copilotAdapter.normalize(
+      rawSpan({
+        spanId: 's-unreadable',
+        attributes: {
+          'gen_ai.usage.input_tokens': 'unknown',
+          'gen_ai.usage.cache_read.input_tokens': 500,
+          'gen_ai.usage.output_tokens': 10,
+        },
+      }),
+    )
+
+    expect(record.tokens.freshInput).toBeLessThan(0)
+    expect(record.tokens.reportedInput).toBe(0)
+    expect(copilotAdapter.validate(record)).toMatchObject({
+      severity: 'error',
+      code: TOKEN_NEGATIVE_FRESH,
+    })
   })
 
   it('surfaces a corrupted sum as TOKEN_SUM_MISMATCH', () => {

@@ -510,6 +510,13 @@ export function exclusiveConvention(counts: {
  * reassembling the reported total keeps every class and satisfies the
  * identity.
  *
+ * Exclusive fallback requires a present, parsed input claim. `readCounter`
+ * folds absent or unreadable values to 0; treating that zero as exclusive
+ * fresh would accept an incomplete record (cache read alone becoming a valid
+ * reported total) that inclusive conversion correctly rejected as negative
+ * fresh. Callers that already hold a numeric claim omit `inputPresent`
+ * (defaults to present); OTLP adapters pass the parse outcome explicitly.
+ *
  * The primitive `inclusiveConvention` stays unclamped so a caller that wants
  * the raw subtraction (tests, inverted-convention probes) still sees it.
  */
@@ -519,9 +526,14 @@ export function convertInclusiveCounts(counts: {
   cacheCreation: number
   output: number
   reasoning?: number
+  /** False when the input counter was absent or unreadable. */
+  inputPresent?: boolean
 }): TokenUsage {
   const inclusive = inclusiveConvention(counts)
-  return inclusive.freshInput < 0 ? exclusiveConvention(counts) : inclusive
+  if (inclusive.freshInput < 0 && counts.inputPresent !== false) {
+    return exclusiveConvention(counts)
+  }
+  return inclusive
 }
 
 /**
@@ -536,8 +548,14 @@ export function validateRecordTokens(record: CanonicalRecord) {
 
 /** Read the raw counters every GenAI-emitting harness shares. */
 export function readUsageCounters(attributes: Record<string, unknown>) {
+  // Input presence is tracked separately: convertInclusiveCounts may only
+  // fall back to exclusive when the harness actually claimed an input
+  // figure. Folding an unreadable value to 0 via readCounter alone would
+  // make cache-only incomplete spans look exclusive-valid.
+  const input = readOptionalCounter(attributes, INPUT_TOKEN_KEYS)
   return {
-    input: readCounter(attributes, INPUT_TOKEN_KEYS),
+    input: input ?? 0,
+    inputPresent: input !== undefined,
     output: readCounter(attributes, OUTPUT_TOKEN_KEYS),
     cacheRead: readCounter(attributes, CACHE_READ_KEYS),
     cacheCreation: readCounter(attributes, CACHE_CREATION_KEYS),
@@ -703,9 +721,11 @@ export const copilotAdapter: HarnessAdapter = {
   /**
    * Convert Copilot's cache-inclusive counters into the disjoint classes
    * (R4.2): fresh = input − cacheRead − cacheCreation. When that subtraction
-   * is negative the counters are exclusive-shaped and convert that way
-   * rather than being stored as negative fresh or clamped to zero
-   * (issue #193).
+   * is negative and the input counter was present and parsed, the counters
+   * are exclusive-shaped and convert that way rather than being stored as
+   * negative fresh or clamped to zero (issue #193). An unreadable input
+   * keeps the inclusive (negative) result so validation still rejects the
+   * incomplete record.
    */
   normalize(raw) {
     const record = baseRecord(this, raw)
@@ -730,6 +750,7 @@ export const copilotAdapter: HarnessAdapter = {
       cacheRead: counters.cacheRead,
       cacheCreation: counters.cacheCreation,
       output: counters.output,
+      inputPresent: counters.inputPresent,
       ...(counters.reasoning !== 0 ? { reasoning: counters.reasoning } : {}),
     })
     return record

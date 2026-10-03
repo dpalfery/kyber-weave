@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { rawSpan } from './testing.js'
 import { reconcileRequest } from './copilot.js'
 import { geminiAdapter } from './gemini.js'
-import { TOKEN_REASONING_EXCEEDS_OUTPUT } from '../types.js'
+import { TOKEN_NEGATIVE_FRESH, TOKEN_REASONING_EXCEEDS_OUTPUT } from '../types.js'
 
 // Gemini's convention is carried by documented assumptions pinned to the
 // session parser's recorded reading of its counters (dash/src/providers/
@@ -127,6 +127,29 @@ describe('geminiAdapter — exclusive-shaped counters convert exclusively (issue
     expect(geminiAdapter.validate(record)).toMatchObject({
       severity: 'error',
       code: TOKEN_REASONING_EXCEEDS_OUTPUT,
+    })
+  })
+
+  // Same incomplete-record guard as Copilot: an unreadable input with a
+  // present cache read must stay rejected, not become exclusive zero.
+  it('rejects an unreadable input counter rather than treating it as exclusive zero', () => {
+    const record = geminiAdapter.normalize(
+      rawSpan({
+        spanId: 's-unreadable',
+        attributes: {
+          'gen_ai.usage.input_tokens': 'unknown',
+          'gen_ai.usage.cached_tokens': 500,
+          'gen_ai.usage.output_tokens': 10,
+          'gemini.session.id': 'g-77',
+        },
+      }),
+    )
+
+    expect(record.tokens.freshInput).toBeLessThan(0)
+    expect(record.tokens.reportedInput).toBe(0)
+    expect(geminiAdapter.validate(record)).toMatchObject({
+      severity: 'error',
+      code: TOKEN_NEGATIVE_FRESH,
     })
   })
 })

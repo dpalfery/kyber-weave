@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { rawSpan } from './testing.js'
+import { TOKEN_NEGATIVE_FRESH } from '../types.js'
 import { antigravityAdapter } from './antigravity.js'
 import antigravitySpan from './__fixtures__/antigravity-span.json' with { type: 'json' }
 
@@ -82,5 +83,27 @@ describe('antigravityAdapter.normalize — the Gemini-vocabulary convention (R4.
       reportedInput: 1_200,
     })
     expect(antigravityAdapter.validate(record)).toBeUndefined()
+  })
+
+  // Same incomplete-record guard as Copilot/Gemini: unreadable input must
+  // not become exclusive zero when cache read is present.
+  it('rejects an unreadable input counter rather than treating it as exclusive zero', () => {
+    const record = antigravityAdapter.normalize(
+      rawSpan({
+        spanId: 's-unreadable',
+        attributes: agentAttributes({
+          'gen_ai.usage.input_tokens': 'unknown',
+          'gen_ai.usage.cached_tokens': 500,
+          'gen_ai.usage.output_tokens': 10,
+        }),
+      }),
+    )
+
+    expect(record.tokens.freshInput).toBeLessThan(0)
+    expect(record.tokens.reportedInput).toBe(0)
+    expect(antigravityAdapter.validate(record)).toMatchObject({
+      severity: 'error',
+      code: TOKEN_NEGATIVE_FRESH,
+    })
   })
 })

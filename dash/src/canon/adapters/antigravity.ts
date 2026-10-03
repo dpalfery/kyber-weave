@@ -83,6 +83,7 @@ export const antigravityAdapter: HarnessAdapter = {
       cacheRead: counters.cacheRead,
       cacheCreation: 0,
       output: counters.output,
+      inputPresent: counters.inputPresent,
       ...(thoughts !== 0 ? { reasoning: thoughts } : {}),
     })
     return record
