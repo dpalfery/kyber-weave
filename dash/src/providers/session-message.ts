@@ -76,6 +76,10 @@ export function parseTimestamp(raw: number): string {
   return new Date(ms).toISOString()
 }
 
+// Build a ParsedProviderCall from one assistant message and its parts. Returns
+// null when the message has no tokens, no cost, and no substantive parts (an
+// empty or errored turn worth skipping). Shared by the SQLite and file-based
+// OpenCode parsers so both attribute tokens, tools, and cost identically.
 // Divergent stores sometimes persist token fields as strings (or NaN slips in
 // through JSON). Anything that is not a finite number must behave as absent so
 // the fallback default applies, instead of leaking into cost maths as a string
@@ -83,10 +87,6 @@ export function parseTimestamp(raw: number): string {
 const finiteOrUndefined = (v: number | undefined): number | undefined =>
   typeof v === 'number' && Number.isFinite(v) ? v : undefined
 
-// Build a ParsedProviderCall from one assistant message and its parts. Returns
-// null when the message has no tokens, no cost, and no substantive parts (an
-// empty or errored turn worth skipping). Shared by the SQLite and file-based
-// OpenCode parsers so both attribute tokens, tools, and cost identically.
 export function buildAssistantCall(opts: {
   providerName: string
   dedupKey: string

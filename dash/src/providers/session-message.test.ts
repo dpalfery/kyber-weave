@@ -2,6 +2,11 @@ import { describe, expect, it } from 'vitest'
 
 import { buildAssistantCall } from './session-message.js'
 
+// Regression for PR #264 review: the flat tokens_input/tokens_output/
+// tokens_reasoning fallbacks were not validated as finite numbers. A string
+// like "100" passed straight through buildAssistantCall, was persisted as a
+// string token field, and calculateCost treated it as zero — undercounting
+// cost. Invalid values must behave as absent so the `?? 0` default applies.
 describe('buildAssistantCall flat token fallbacks', () => {
   const base = {
     providerName: 'kilo-code',
