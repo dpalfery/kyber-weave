@@ -1,3 +1,4 @@
+import { statSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
 
@@ -312,7 +313,11 @@ function validateSchema(db: SqliteDatabase): boolean {
   }
 }
 
-function createParser(source: SessionSource, seenKeys: Set<string>): SessionParser {
+function createParser(
+  source: SessionSource,
+  seenKeys: Set<string>,
+  openDb: (path: string) => SqliteDatabase = openDatabase,
+): SessionParser {
   return {
     async *parse(): AsyncGenerator<ParsedProviderCall> {
       if (!isSqliteAvailable()) {
@@ -325,10 +330,10 @@ function createParser(source: SessionSource, seenKeys: Set<string>): SessionPars
 
       let db: SqliteDatabase
       try {
-        db = openDatabase(dbPath)
+        db = openDb(dbPath)
       } catch (err) {
         process.stderr.write(`kyberdash: cannot open Warp database: ${err instanceof Error ? err.message : err}\n`)
-        return
+        throw err
       }
 
       try {
@@ -422,12 +427,23 @@ function createParser(source: SessionSource, seenKeys: Set<string>): SessionPars
   }
 }
 
-async function discoverFromDb(dbPath: string): Promise<SessionSource[]> {
+async function discoverFromDb(
+  dbPath: string,
+  openDb: (path: string) => SqliteDatabase = openDatabase,
+): Promise<SessionSource[]> {
+  try {
+    statSync(dbPath)
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException)?.code
+    if (code === 'ENOENT' || code === 'ENOTDIR') return []
+    // Non-ENOENT lookup errors (EACCES, EPERM, etc.) fall through to openDatabase
+    // so database access errors can be propagated and surfaced as diagnostics.
+  }
   let db: SqliteDatabase
   try {
-    db = openDatabase(dbPath)
-  } catch {
-    return []
+    db = openDb(dbPath)
+  } catch (err) {
+    throw new Error(`cannot open Warp database '${dbPath}': ${err instanceof Error ? err.message : err}`)
   }
 
   try {
@@ -466,7 +482,10 @@ async function discoverFromDb(dbPath: string): Promise<SessionSource[]> {
   }
 }
 
-export function createWarpProvider(dbPathOverride?: string): Provider {
+export function createWarpProvider(
+  dbPathOverride?: string,
+  openDb: (path: string) => SqliteDatabase = openDatabase,
+): Provider {
   return {
     name: 'warp',
     displayName: 'Warp',
@@ -488,14 +507,14 @@ export function createWarpProvider(dbPathOverride?: string): Provider {
 
       const sessions: SessionSource[] = []
       for (const candidate of getDbCandidates(dbPathOverride)) {
-        const found = await discoverFromDb(candidate)
+        const found = await discoverFromDb(candidate, openDb)
         sessions.push(...found)
       }
       return sessions
     },
 
     createSessionParser(source: SessionSource, seenKeys: Set<string>): SessionParser {
-      return createParser(source, seenKeys)
+      return createParser(source, seenKeys, openDb)
     },
   }
 }

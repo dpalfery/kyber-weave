@@ -9,6 +9,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   isSqliteReadonlyError,
   openDatabase,
+  setSqliteCopyFileForTest,
+  setSqliteOpenImmutableForTest,
   sqliteSupportsUriFilenames,
 } from './sqlite.js'
 import {
@@ -307,6 +309,65 @@ describe('SQLite read-only parent fallback', () => {
     } finally {
       stderr.mockRestore()
       chmodSync(cacheRoot, 0o755)
+    }
+  })
+
+  it('still reads an empty-WAL database when cache copy fails with EPERM', ({ skip }) => {
+    if (!sqliteSupportsUriFilenames()) return skip()
+    const dbPath = join(sourceRoot, 'state.vscdb')
+    createClosedWalDatabase(dbPath)
+    if (!makeSourceParentReadOnly(skip)) return
+
+    let copyAttempts = 0
+    setSqliteCopyFileForTest(() => {
+      copyAttempts++
+      const err = new Error('operation not permitted, copyfile')
+      Object.assign(err, { code: 'EPERM' })
+      throw err
+    })
+
+    let immutableAttempts = 0
+    setSqliteOpenImmutableForTest(() => {
+      immutableAttempts++
+      if (immutableAttempts === 1) {
+        throw new Error('simulated immutable open failure')
+      }
+    })
+
+    const stderr = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
+    try {
+      expect(readValue(dbPath)).toBe(1)
+      expect(copyAttempts).toBeGreaterThan(0)
+      expect(immutableAttempts).toBe(2)
+      const notices = stderr.mock.calls.filter(([chunk]) => String(chunk).includes('falling back to direct immutable read'))
+      expect(notices).toHaveLength(1)
+    } finally {
+      setSqliteCopyFileForTest(null)
+      setSqliteOpenImmutableForTest(null)
+      stderr.mockRestore()
+    }
+  })
+
+  it('refuses an incomplete immutable read when EPERM copy fails with a nonempty WAL', ({ skip }) => {
+    if (!sqliteSupportsUriFilenames()) return skip()
+    const dbPath = join(sourceRoot, 'state.vscdb')
+    writeUncheckpointedWalDatabase(dbPath)
+    if (!makeSourceParentReadOnly(skip)) return
+
+    setSqliteCopyFileForTest(() => {
+      const err = new Error('operation not permitted, copyfile')
+      Object.assign(err, { code: 'EPERM' })
+      throw err
+    })
+    const stderr = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
+    try {
+      // Row 2 lives only in the -wal; immutable would omit it, so refuse rather
+      // than return a silent partial snapshot.
+      expect(() => readValue(dbPath)).toThrow()
+      expect(stderr.mock.calls.filter(([chunk]) => String(chunk).includes('falling back to direct immutable read'))).toHaveLength(0)
+    } finally {
+      setSqliteCopyFileForTest(null)
+      stderr.mockRestore()
     }
   })
 

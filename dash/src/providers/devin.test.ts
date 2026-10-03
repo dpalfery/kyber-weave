@@ -1,7 +1,7 @@
 import { createRequire } from 'node:module'
 import { mkdir, mkdtemp, rm, writeFile } from 'fs/promises'
 import { join } from 'path'
-import { tmpdir } from 'os'
+import { homedir, tmpdir } from 'os'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { isSqliteAvailable } from '../ingest/sqlite.js'
@@ -100,15 +100,107 @@ describe('devin provider', () => {
     ])
   })
 
-  it('stays disabled until the Devin ACU rate is configured', async () => {
-    await writeTranscript('glimmer-platinum.json', {
+  it('discovers and parses sessions when Devin ACU rate is not configured, using fallback model pricing', async () => {
+    // Note: configureDevinRate() is NOT called here
+    const filePath = await writeTranscript('glimmer-platinum.json', {
+      schema_version: '1',
       session_id: 'session-123',
-      steps: [{ step_id: 's1', metadata: { committed_acu_cost: 0.5 } }],
+      steps: [
+        {
+          step_id: 1,
+          model_name: 'claude-sonnet-4-6',
+          metadata: {
+            created_at: '2027-01-15T08:00:01.000Z',
+            committed_acu_cost: 0.5,
+            metrics: {
+              input_tokens: 1000,
+              output_tokens: 500,
+            },
+          },
+          tool_calls: [{ function_name: 'read_file' }],
+        },
+      ],
     })
 
     const provider = createDevinProvider(tmpDir)
-    expect(await provider.discoverSessions()).toEqual([])
-    expect(await parseTranscript(join(tmpDir, 'transcripts', 'glimmer-platinum.json'))).toEqual([])
+    const sources = await provider.discoverSessions()
+    expect(sources).toEqual([
+      { path: filePath, project: 'devin', provider: 'devin' },
+    ])
+
+    const calls = await parseTranscript(filePath)
+    expect(calls).toHaveLength(1)
+    expect(calls[0]!.inputTokens).toBe(1000)
+    expect(calls[0]!.outputTokens).toBe(500)
+    expect(calls[0]!.costIsEstimated).toBe(true)
+    expect(calls[0]!.costUSD).toBeGreaterThan(0)
+  })
+
+  it('honors DEVIN_CLI_DIR environment variable for discovery', async () => {
+    const customCliDir = join(tmpDir, 'custom-devin')
+    const transcriptsDir = join(customCliDir, 'transcripts')
+    await mkdir(transcriptsDir, { recursive: true })
+    const filePath = join(transcriptsDir, 'custom.json')
+    await writeFile(filePath, JSON.stringify({ steps: [] }))
+
+    process.env['DEVIN_CLI_DIR'] = customCliDir
+    try {
+      const provider = createDevinProvider()
+      const sources = await provider.discoverSessions()
+      expect(sources).toEqual([
+        { path: filePath, project: 'devin', provider: 'devin' },
+      ])
+    } finally {
+      delete process.env['DEVIN_CLI_DIR']
+    }
+  })
+
+  it('expands leading tilde in DEVIN_CLI_DIR to absolute path', async () => {
+    const sub = `.tmp-devin-test-${Date.now()}`
+    const targetDir = join(homedir(), sub)
+    const transcriptsDir = join(targetDir, 'transcripts')
+    await mkdir(transcriptsDir, { recursive: true })
+    const filePath = join(transcriptsDir, 'tilde.json')
+    await writeFile(filePath, JSON.stringify({ steps: [] }))
+
+    process.env['DEVIN_CLI_DIR'] = `~/${sub}`
+    try {
+      const provider = createDevinProvider()
+      const sources = await provider.discoverSessions()
+      expect(sources).toEqual([
+        { path: filePath, project: 'devin', provider: 'devin' },
+      ])
+    } finally {
+      delete process.env['DEVIN_CLI_DIR']
+      await rm(targetDir, { recursive: true, force: true })
+    }
+  })
+
+  it('falls back to model_name for pricing when generation_model is an opaque MODEL_ identifier', async () => {
+    const filePath = await writeTranscript('opaque-model.json', {
+      session_id: 'opaque-model-session',
+      steps: [
+        {
+          step_id: 1,
+          model_name: 'claude-sonnet-4-6',
+          metadata: {
+            created_at: '2027-01-15T08:00:01.000Z',
+            generation_model: 'MODEL_PRIVATE_11',
+            committed_acu_cost: 0.5,
+            metrics: {
+              input_tokens: 1000,
+              output_tokens: 500,
+            },
+          },
+          tool_calls: [{ function_name: 'read_file' }],
+        },
+      ],
+    })
+
+    const calls = await parseTranscript(filePath)
+    expect(calls).toHaveLength(1)
+    expect(calls[0]!.costIsEstimated).toBe(true)
+    expect(calls[0]!.costUSD).toBeGreaterThan(0)
   })
 
   it('parses per-step ACUs, tokens, tools, and model resolution', async () => {

@@ -1,5 +1,5 @@
 import { mkdtemp, rm } from 'fs/promises'
-import { mkdirSync } from 'fs'
+import { mkdirSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { createRequire } from 'node:module'
@@ -355,4 +355,32 @@ skipUnlessSqlite('warp provider', () => {
     expect(seen.has('warp:conv-3:ex-invalid-ts')).toBe(false)
     expect(seen.has('warp:conv-3:ex-pending')).toBe(false)
   })
+
+  it('propagates error when opening the database fails during parse', async () => {
+    const dbPath = join(tmpDir, 'unopenable.sqlite')
+    const provider = createWarpProvider(dbPath)
+    const source = {
+      path: `${dbPath}:conv-1`,
+      project: 'warp',
+      provider: 'warp',
+    }
+    const parser = provider.createSessionParser(source, new Set())
+    await expect(async () => {
+      for await (const _ of parser.parse()) {
+        // should throw
+      }
+    }).rejects.toThrow()
+  })
+
+  it('propagates error when database exists but access is denied during discovery', async () => {
+    const dbPath = join(tmpDir, 'permission-denied.sqlite')
+    writeFileSync(dbPath, '')
+    const provider = createWarpProvider(dbPath, () => {
+      const err = new Error('permission denied')
+      Object.assign(err, { code: 'EACCES' })
+      throw err
+    })
+    await expect(provider.discoverSessions()).rejects.toThrow()
+  })
 })
+

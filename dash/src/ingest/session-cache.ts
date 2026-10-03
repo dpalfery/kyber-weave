@@ -254,6 +254,7 @@ export const PROVIDER_ENV_VARS: Record<string, string[]> = {
   'lingtai-tui': ['LINGTAI_HOME', 'LINGTAI_TUI_HOME', 'LINGTAI_TUI_GLOBAL_DIR'],
   droid: ['FACTORY_DIR'],
   dsh: ['DSH_HOME'],
+  devin: ['DEVIN_CLI_DIR'],
   cursor: ['KYBERDASH_CURSOR_MAX_BUBBLES'],
   // XDG_DATA_HOME is stale here (cursor-agent never reads it) but deliberately
   // kept: removing it would force a re-parse to fix nothing.

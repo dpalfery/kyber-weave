@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { mkdirSync } from 'node:fs'
+import { mkdirSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
@@ -256,6 +256,18 @@ async function runHarnessJob(context: JobContext): Promise<HarnessJobRow> {
   }
 
   if (units.length === 0) {
+    const provider = context.providers.find((p) => p.name === descriptor.providerName)
+    if (provider?.probeRoots) {
+      try {
+        const roots = await provider.probeRoots()
+        const present = roots.filter((r) => isProbePathPresent(r.path))
+        if (present.length > 0) {
+          row.diagnostic = `${present[0]!.path} holds no sessions`
+        }
+      } catch (error) {
+        row.diagnostic = safeDiagnostic(asError(error), 'probe roots failed')
+      }
+    }
     return row
   }
 
@@ -272,6 +284,7 @@ async function runHarnessJob(context: JobContext): Promise<HarnessJobRow> {
     row.changed += 1
     row.problems += unit.problems.length
     for (const problem of unit.problems) {
+      row.diagnostic ??= safeDiagnostic(new Error(problem.message), 'harness unit problem')
       store.recordProblem({
         spanId: `harness:${descriptor.harnessId}:${unit.sourceKey}:${problem.code}`,
         harness: descriptor.harnessId,
@@ -392,6 +405,17 @@ function safeDiagnostic(error: Error, fallback: string): string {
   return message.replace(/\/(?:Users|home)\/[^\s:]+/g, '').replace(/\/native\/[^\s]+/g, 'source unit').trim() || fallback
 }
 
+function isProbePathPresent(path: string): boolean {
+  try {
+    statSync(path)
+    return true
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException)?.code
+    if (code === 'ENOENT' || code === 'ENOTDIR') return false
+    throw err
+  }
+}
+
 function previousFingerprintsFor(
   store: CanonStore,
   descriptor: HarnessSourceDescriptor,
@@ -401,6 +425,11 @@ function previousFingerprintsFor(
   const fingerprints = new Map<string, { dev: number; ino: number; mtimeMs: number; sizeBytes: number }>()
   const requested = { fromUtc: coveredFromUtc, throughUtc: coveredThroughUtc }
   for (const checkpoint of store.listSourceCheckpoints(descriptor.harnessId)) {
+    // Re-attempt sources whose prior checkpoint had 0 records so that sources
+    // previously suppressed or empty due to transient errors get another chance
+    // to ingest data rather than being permanently skipped by fingerprint match.
+    // Tradeoff: legitimately empty session sources will be reparsed each refresh.
+    if (checkpoint.recordCount === 0) continue
     const request = {
       revisionToken: checkpoint.revisionToken,
       parserContractVersion: descriptor.parserContractVersion,
@@ -483,7 +512,7 @@ function recordsForUncoveredCommit(
   requested: CoverageInterval,
   request: { revisionToken: string; parserContractVersion: string },
 ): CanonicalRecord[] {
-  const reusable = checkpointIsReusable(previous, request)
+  const reusable = previous?.recordCount !== 0 && checkpointIsReusable(previous, request)
   const gaps = uncoveredIntervals(previous, requested, request)
   return merged.filter((record) => {
     if (store.get(record.spanId) !== undefined) return false
