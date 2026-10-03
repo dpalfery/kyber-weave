@@ -490,6 +490,46 @@ describe('refreshHarnessSources', () => {
     }
   })
 
+  it('retains records when retrying a source that previously had a zero-record checkpoint', async () => {
+    const store = temporaryStore()
+    const started = new Date('2026-09-12T18:00:00.000Z')
+    let parsedRecords: ParsedProviderCall[] = []
+    try {
+      const dependencies = {
+        getAllProviders: async () => [],
+        descriptors: descriptors('pi'),
+        jobConcurrency: 1,
+        commandStartedAt: started,
+        parseAllSessions: async () => undefined,
+        iterateNativeUnits: async (): Promise<NativeUnit[]> => {
+          return [unit('pi', 'retry-session', parsedRecords)]
+        },
+      }
+
+      // First run: source produces 0 records, creating a zero-record checkpoint
+      const first = await refreshHarnessSources(store, dependencies, { historyWeeks: 2 })
+      expect(first.rows[0]).toMatchObject({ created: 0, updated: 0 })
+      const initialCheckpoint = store.listSourceCheckpoints('pi')[0]
+      expect(initialCheckpoint?.recordCount).toBe(0)
+
+      // Second run: source now produces records on retry
+      parsedRecords = [{
+        ...call('pi', 'pi-retry'),
+        timestamp: '2026-09-06T10:00:00.000Z',
+        deduplicationKey: 'pi:pi-retry:turn-1',
+        userMessage: 'retried pi turn',
+      }]
+
+      const second = await refreshHarnessSources(store, dependencies, { historyWeeks: 2 })
+      expect(second.rows[0]).toMatchObject({ created: 1, updated: 0 })
+      expect(store.listAll()).toHaveLength(1)
+      const updatedCheckpoint = store.listSourceCheckpoints('pi')[0]
+      expect(updatedCheckpoint?.recordCount).toBe(1)
+    } finally {
+      store.close()
+    }
+  })
+
   it('records the coverage window on the refresh run row', async () => {
     const store = temporaryStore()
     try {

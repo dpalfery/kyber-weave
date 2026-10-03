@@ -504,7 +504,7 @@ function recordsForUncoveredCommit(
   requested: CoverageInterval,
   request: { revisionToken: string; parserContractVersion: string },
 ): CanonicalRecord[] {
-  const reusable = checkpointIsReusable(previous, request)
+  const reusable = previous?.recordCount !== 0 && checkpointIsReusable(previous, request)
   const gaps = uncoveredIntervals(previous, requested, request)
   return merged.filter((record) => {
     if (store.get(record.spanId) !== undefined) return false
