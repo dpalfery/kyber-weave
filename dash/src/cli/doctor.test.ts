@@ -1,16 +1,26 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mkdtemp, mkdir, writeFile, rm, chmod } from 'fs/promises'
+import { chmodSync, copyFileSync, existsSync, mkdirSync, rmSync, statSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
+import { createRequire } from 'node:module'
 
 import { collectDoctorReport, renderDoctorTable, renderDoctorJson } from './doctor.js'
 import { createCodexProvider } from '../providers/codex.js'
 import { createOpenCodeProvider } from '../providers/opencode.js'
 import { createDevinProvider } from '../providers/devin.js'
 import { createWarpProvider, drainWarpDbAccessDenials } from '../providers/warp.js'
-import { isSqliteAvailable } from '../ingest/sqlite.js'
+import { isSqliteAvailable, openDatabase } from '../ingest/sqlite.js'
 import { emptyCache, type SessionCache } from '../ingest/session-cache.js'
 import type { Provider, ProbeRoot, SessionSource } from '../providers/types.js'
+
+const requireForTest = createRequire(import.meta.url)
+
+type NativeDatabase = {
+  exec(sql: string): void
+  prepare(sql: string): { run(...params: unknown[]): void }
+  close(): void
+}
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -621,6 +631,122 @@ describe('collectDoctorReport - permission-denied probe root (#197)', () => {
       expect(r.verdict).not.toMatch(/holds no sessions/i)
     } finally {
       await chmod(dbPath, 0o644)
+      drainWarpDbAccessDenials()
+    }
+  })
+
+  it('does not prescribe Full Disk Access for an unwritable cache (#197)', async ({ skip }) => {
+    // Readable Warp db forced onto the cache-copy path + unwritable
+    // KYBERDASH_CACHE_DIR must not surface as a TCC / Full Disk Access denial.
+    if (process.platform === 'win32') skip()
+    if (!isSqliteAvailable()) skip()
+
+    const sourceDir = join(tmpDir, 'source')
+    const cacheDir = join(tmpDir, 'cache')
+    mkdirSync(sourceDir, { recursive: true })
+    mkdirSync(cacheDir, { recursive: true })
+
+    const originDir = join(sourceDir, 'origin')
+    mkdirSync(originDir)
+    const originPath = join(originDir, 'warp.sqlite')
+    const dbPath = join(sourceDir, 'warp.sqlite')
+    const { DatabaseSync: Database } = requireForTest('node:sqlite') as {
+      DatabaseSync: new (path: string) => NativeDatabase
+    }
+    const writer = new Database(originPath)
+    writer.exec('PRAGMA journal_mode=WAL')
+    writer.exec(`
+      CREATE TABLE agent_conversations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        conversation_id TEXT NOT NULL,
+        conversation_data TEXT NOT NULL,
+        last_modified_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )
+    `)
+    writer.exec(`
+      CREATE TABLE ai_queries (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        exchange_id TEXT NOT NULL,
+        conversation_id TEXT NOT NULL,
+        start_ts DATETIME NOT NULL,
+        input TEXT NOT NULL,
+        working_directory TEXT,
+        output_status TEXT NOT NULL,
+        model_id TEXT NOT NULL DEFAULT '',
+        planning_model_id TEXT NOT NULL DEFAULT '',
+        coding_model_id TEXT NOT NULL DEFAULT ''
+      )
+    `)
+    writer.exec(`
+      CREATE TABLE blocks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        pane_leaf_uuid BLOB NOT NULL,
+        stylized_command BLOB NOT NULL,
+        stylized_output BLOB NOT NULL,
+        exit_code INTEGER NOT NULL,
+        did_execute BOOLEAN NOT NULL,
+        completed_ts DATETIME,
+        start_ts DATETIME,
+        block_id TEXT NOT NULL DEFAULT '',
+        ai_metadata TEXT
+      )
+    `)
+    writer.exec('PRAGMA wal_checkpoint(TRUNCATE)')
+    writer.exec('PRAGMA wal_autocheckpoint=0')
+    writer.prepare(
+      'INSERT INTO agent_conversations (conversation_id, conversation_data, last_modified_at) VALUES (?, ?, ?)',
+    ).run('conv-ro', '{}', '2026-05-18 10:00:00')
+    copyFileSync(originPath, dbPath)
+    copyFileSync(originPath + '-wal', dbPath + '-wal')
+    writer.close()
+    expect(statSync(dbPath + '-wal').size).toBeGreaterThan(0)
+    expect(existsSync(dbPath + '-shm')).toBe(false)
+
+    chmodSync(sourceDir, 0o555)
+    const probe = join(sourceDir, '.write-probe')
+    try {
+      writeFileSync(probe, '')
+      rmSync(probe)
+      chmodSync(sourceDir, 0o755)
+      skip(`SKIP: chmod 0555 did not make ${sourceDir} non-writable for this process`)
+      return
+    } catch {
+      // expected — parent is non-writable
+    }
+
+    const previousCacheDir = process.env['KYBERDASH_CACHE_DIR']
+    process.env['KYBERDASH_CACHE_DIR'] = cacheDir
+    chmodSync(cacheDir, 0o000)
+    drainWarpDbAccessDenials()
+    try {
+      // Same misattribution pin as the sqlite / warp cases: cache-dir EACCES must
+      // not surface as a permission errno that doctor could fold into FDA.
+      let thrown: unknown
+      try {
+        const db = openDatabase(dbPath)
+        try {
+          db.query('SELECT 1 AS ok FROM agent_conversations LIMIT 1')
+        } catch (err) {
+          thrown = err
+        }
+        try { db.close() } catch { /* query-time fallback may have closed it */ }
+      } catch (err) {
+        thrown = err
+      }
+      expect(thrown).toBeDefined()
+      const code = (thrown as NodeJS.ErrnoException | undefined)?.code
+      expect(code === 'EACCES' || code === 'EPERM').toBe(false)
+
+      const provider = createWarpProvider(dbPath)
+      const report = await collectDoctorReport('all', { providers: [provider], cache: emptyCache() })
+      const r = only(report, 'warp')
+
+      expect(r.verdict).not.toMatch(/Full Disk Access/i)
+    } finally {
+      chmodSync(cacheDir, 0o755)
+      chmodSync(sourceDir, 0o755)
+      if (previousCacheDir === undefined) delete process.env['KYBERDASH_CACHE_DIR']
+      else process.env['KYBERDASH_CACHE_DIR'] = previousCacheDir
       drainWarpDbAccessDenials()
     }
   })

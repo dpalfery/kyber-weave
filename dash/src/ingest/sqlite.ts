@@ -1,5 +1,5 @@
 import { createRequire } from 'node:module'
-import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs'
+import { accessSync, constants, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs'
 import { createHash, randomBytes } from 'node:crypto'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -391,9 +391,11 @@ function openReadonlyCache(path: string, originalError: unknown): DatabaseSyncIn
   let fingerprint: DatabaseFingerprint
   try {
     fingerprint = fingerprintDatabase(path)
-  } catch {
-    // Preserve the original SQLite error when the source disappeared or became
-    // inaccessible between the failed query and the fallback probe.
+  } catch (err) {
+    // Source-side TCC/denial during fingerprint (statSync) must stay visible to
+    // Warp doctor; collapse only non-permission failures to the original SQLite error.
+    const code = errorCode(err)
+    if (code === 'EPERM' || code === 'EACCES') throw err
     throw originalError
   }
 
@@ -417,10 +419,18 @@ function openReadonlyCache(path: string, originalError: unknown): DatabaseSyncIn
       `kyberdash: SQLite database ${path} is in a read-only directory and its cache copy could not be written ` +
       `(${describeError(err)}); skipping this database.\n`,
     )
-    // Prefer EPERM/EACCES from the copy so callers (Warp doctor, #197) can
-    // surface a TCC denial instead of an opaque sidecar SQLITE_CANTOPEN.
+    // Cache mkdir/copy/rename can throw EPERM/EACCES for kyberdash's own cache
+    // dir — that is not a Warp/source TCC denial. Only rethrow the errno when
+    // the source itself is unreadable; otherwise keep the original SQLite error.
     const code = errorCode(err)
-    if (code === 'EPERM' || code === 'EACCES') throw err
+    if (code === 'EPERM' || code === 'EACCES') {
+      try {
+        accessSync(path, constants.R_OK)
+      } catch (accessErr) {
+        const accessCode = errorCode(accessErr)
+        if (accessCode === 'EPERM' || accessCode === 'EACCES') throw err
+      }
+    }
     throw originalError
   }
   return new Driver(cachedPath, { readOnly: true })

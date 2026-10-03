@@ -310,6 +310,45 @@ describe('SQLite read-only parent fallback', () => {
     }
   })
 
+  it('does not rethrow cache-dir EACCES as a source permission denial', ({ skip }) => {
+    // Unwritable KYBERDASH_CACHE_DIR must stay a cache-health failure, not look
+    // like a TCC denial on the readable source (#197 / FDA false positive).
+    // openDatabase itself may succeed; the cache fallback runs on first query.
+    if (process.platform === 'win32') skip()
+    const dbPath = join(sourceRoot, 'state.vscdb')
+    writeUncheckpointedWalDatabase(dbPath)
+    if (!makeSourceParentReadOnly(skip)) return
+    chmodSync(cacheRoot, 0o000)
+
+    const stderr = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
+    try {
+      // Capture the query-time fallback error before close(); readValue's finally
+      // can replace EACCES with "database is not open" after the closed handle.
+      let thrown: unknown
+      try {
+        const db = openDatabase(dbPath)
+        try {
+          db.query('SELECT c FROM values_table')
+        } catch (err) {
+          thrown = err
+        }
+        try { db.close() } catch { /* query-time fallback may have closed it */ }
+      } catch (err) {
+        thrown = err
+      }
+      expect(thrown).toBeDefined()
+      const code = (thrown as NodeJS.ErrnoException | undefined)?.code
+      // Cache mkdir/copy EACCES must not be rethrown — that misattributes the
+      // failure to the source path for Warp doctor / Full Disk Access.
+      expect(code === 'EACCES' || code === 'EPERM').toBe(false)
+      const notices = stderr.mock.calls.filter(([chunk]) => String(chunk).includes('cache copy could not be written'))
+      expect(notices).toHaveLength(1)
+    } finally {
+      stderr.mockRestore()
+      chmodSync(cacheRoot, 0o755)
+    }
+  })
+
   it('keeps a genuinely missing database distinguishable from SQLITE_READONLY', () => {
     let thrown: unknown
     try {

@@ -1,12 +1,12 @@
 import { mkdtemp, rm } from 'fs/promises'
-import { chmodSync, mkdirSync } from 'fs'
+import { chmodSync, copyFileSync, existsSync, mkdirSync, rmSync, statSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { createRequire } from 'node:module'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createWarpProvider, drainWarpDbAccessDenials } from './warp.js'
-import { isSqliteAvailable } from '../ingest/sqlite.js'
+import { isSqliteAvailable, openDatabase } from '../ingest/sqlite.js'
 import type { ParsedProviderCall } from './types.js'
 
 const requireForTest = createRequire(import.meta.url)
@@ -46,11 +46,7 @@ afterEach(async () => {
   await rm(tmpDir, { recursive: true, force: true })
 })
 
-function createWarpDb(dir: string): string {
-  mkdirSync(dir, { recursive: true })
-  const dbPath = join(dir, 'warp.sqlite')
-  const { DatabaseSync: Database } = requireForTest('node:sqlite')
-  const db = new Database(dbPath)
+function createWarpSchema(db: TestDb): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS agent_conversations (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -102,8 +98,58 @@ function createWarpDb(dir: string): string {
       git_branch_name TEXT
     )
   `)
+}
+
+function createWarpDb(dir: string): string {
+  mkdirSync(dir, { recursive: true })
+  const dbPath = join(dir, 'warp.sqlite')
+  const { DatabaseSync: Database } = requireForTest('node:sqlite')
+  const db = new Database(dbPath)
+  createWarpSchema(db)
   db.close()
   return dbPath
+}
+
+/**
+ * Readable Warp db with a non-empty -wal and no -shm so openDatabase must take
+ * the read-only cache-copy path (same shape as sqlite-readonly-parent fixtures).
+ */
+function createUncheckpointedWalWarpDb(dir: string): string {
+  mkdirSync(dir, { recursive: true })
+  const originDir = join(dir, 'origin')
+  mkdirSync(originDir)
+  const originPath = join(originDir, 'warp.sqlite')
+  const dbPath = join(dir, 'warp.sqlite')
+  const { DatabaseSync: Database } = requireForTest('node:sqlite')
+  const writer = new Database(originPath)
+  writer.exec('PRAGMA journal_mode=WAL')
+  createWarpSchema(writer)
+  writer.exec('PRAGMA wal_checkpoint(TRUNCATE)')
+  writer.exec('PRAGMA wal_autocheckpoint=0')
+  writer.prepare(
+    'INSERT INTO agent_conversations (conversation_id, conversation_data, last_modified_at) VALUES (?, ?, ?)',
+  ).run('conv-ro', '{}', '2026-05-18 10:00:00')
+  copyFileSync(originPath, dbPath)
+  copyFileSync(originPath + '-wal', dbPath + '-wal')
+  writer.close()
+  expect(statSync(dbPath + '-wal').size).toBeGreaterThan(0)
+  expect(existsSync(dbPath + '-shm')).toBe(false)
+  return dbPath
+}
+
+/** Makes `dir` non-writable, or skips when chmod bits do not bind this process. */
+function makeReadOnly(dir: string, skip: (reason?: string) => void): boolean {
+  chmodSync(dir, 0o555)
+  const probe = join(dir, '.write-probe')
+  try {
+    writeFileSync(probe, '')
+  } catch {
+    return true
+  }
+  rmSync(probe)
+  chmodSync(dir, 0o755)
+  skip(`SKIP: chmod 0555 did not make ${dir} non-writable for this process`)
+  return false
 }
 
 function withTestDb(dbPath: string, fn: (db: TestDb) => void): void {
@@ -327,6 +373,60 @@ skipUnlessSqlite('warp provider', () => {
       expect(drainWarpDbAccessDenials()).toEqual([dbPath])
     } finally {
       chmodSync(dbPath, 0o644)
+    }
+  })
+
+  it('does not record an unwritable cache as a Warp access denial (#197)', async ({ skip }) => {
+    // Readable source + cache-dir EACCES must not noteWarpDbAccessDenial — that
+    // path is a kyberdash cache failure, not a TCC denial of the Warp db.
+    // On Node builds where the sidecar failure surfaces at query time,
+    // discoverFromDb's validateSchema catch swallows the throw before
+    // noteWarpDbAccessDenial; drain must still stay empty (no FDA false positive).
+    if (process.platform === 'win32') skip()
+    if (!isSqliteAvailable()) skip()
+
+    const sourceDir = join(tmpDir, 'source')
+    const cacheDir = join(tmpDir, 'cache')
+    mkdirSync(cacheDir, { recursive: true })
+    const dbPath = createUncheckpointedWalWarpDb(sourceDir)
+    if (!makeReadOnly(sourceDir, skip)) return
+
+    const previousCacheDir = process.env['KYBERDASH_CACHE_DIR']
+    process.env['KYBERDASH_CACHE_DIR'] = cacheDir
+    chmodSync(cacheDir, 0o000)
+    drainWarpDbAccessDenials()
+    try {
+      // Pin the misattribution at the sqlite boundary: cache-dir EACCES must not
+      // surface as a permission errno (the signal noteWarpDbAccessDenial keys on).
+      let thrown: unknown
+      try {
+        const db = openDatabase(dbPath)
+        try {
+          db.query('SELECT 1 AS ok FROM agent_conversations LIMIT 1')
+        } catch (err) {
+          thrown = err
+        }
+        try { db.close() } catch { /* query-time fallback may have closed it */ }
+      } catch (err) {
+        thrown = err
+      }
+      expect(thrown).toBeDefined()
+      const code = (thrown as NodeJS.ErrnoException | undefined)?.code
+      expect(code === 'EACCES' || code === 'EPERM').toBe(false)
+
+      const provider = createWarpProvider(dbPath)
+      // Query-time cache failure can leave the wrapper's db already closed; the
+      // discover finally may throw "database is not open". Sessions are still
+      // empty and — critically — must not be filed as a Warp access denial.
+      const sessions = await provider.discoverSessions().catch(() => [])
+      expect(sessions).toEqual([])
+      expect(drainWarpDbAccessDenials()).toEqual([])
+    } finally {
+      chmodSync(cacheDir, 0o755)
+      chmodSync(sourceDir, 0o755)
+      if (previousCacheDir === undefined) delete process.env['KYBERDASH_CACHE_DIR']
+      else process.env['KYBERDASH_CACHE_DIR'] = previousCacheDir
+      drainWarpDbAccessDenials()
     }
   })
 
