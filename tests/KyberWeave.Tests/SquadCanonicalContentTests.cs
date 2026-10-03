@@ -24,9 +24,13 @@ public sealed class SquadCanonicalContentTests
         "THRASH_OSCILLATION_DETECTED",
     ];
 
-    private static readonly Regex CircuitBreakerTriggerLine = new(
-        @"CIRCUIT_BREAKER_TRIGGER:\s*(?<list>.+)$",
-        RegexOptions.Multiline | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+    private static readonly Regex CircuitBreakerTriggerEnumeration = new(
+        @"CIRCUIT_BREAKER_TRIGGER:\s*<(?<list>[^>]+)>",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    private static readonly Regex CircuitBreakerTriggerSingleton = new(
+        @"CIRCUIT_BREAKER_TRIGGER:\s*`?(?<token>[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+)`?(?!\s*[|<])",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
     private static readonly Regex CircuitBreakerTriggerToken = new(
         @"[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+",
@@ -446,9 +450,11 @@ public sealed class SquadCanonicalContentTests
 
     private static void AssertClosedCircuitBreakerTriggerSet(string contract)
     {
-        string[] harvested = CircuitBreakerTriggerLine.Matches(contract)
+        string[] harvested = CircuitBreakerTriggerEnumeration.Matches(contract)
             .SelectMany(match => CircuitBreakerTriggerToken.Matches(match.Groups["list"].Value)
                 .Select(token => token.Value))
+            .Concat(CircuitBreakerTriggerSingleton.Matches(contract)
+                .Select(match => match.Groups["token"].Value))
             .Distinct(StringComparer.Ordinal)
             .Order(StringComparer.Ordinal)
             .ToArray();
