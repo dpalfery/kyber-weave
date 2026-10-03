@@ -92,9 +92,8 @@ const deniedProbeFs = {
   },
 }
 
-function restoreProcessPlatform(original: PropertyDescriptor | undefined): void {
-  if (original) Object.defineProperty(process, 'platform', original)
-  else delete (process as { platform?: NodeJS.Platform }).platform
+function restoreProcessPlatform(original: PropertyDescriptor): void {
+  Object.defineProperty(process, 'platform', original)
 }
 
 let tmpDir: string
@@ -826,6 +825,8 @@ describe('collectDoctorReport - permission-denied probe root (#197)', () => {
       probeRoots: async () => [{ path: inner, label: 'db' }],
     })
     const original = Object.getOwnPropertyDescriptor(process, 'platform')
+    if (original === undefined) throw new Error('process.platform is not an own property')
+    const hostPlatform = process.platform
     Object.defineProperty(process, 'platform', { configurable: true, value: 'darwin' })
     try {
       const report = await collectDoctorReport('all', {
@@ -837,6 +838,8 @@ describe('collectDoctorReport - permission-denied probe root (#197)', () => {
     } finally {
       restoreProcessPlatform(original)
     }
+    expect(process.platform).toBe(hostPlatform)
+    expect(Object.getOwnPropertyDescriptor(process, 'platform')?.configurable).toBe(true)
   })
 
   it('names the count when more than one probe root is permission-denied', async () => {
