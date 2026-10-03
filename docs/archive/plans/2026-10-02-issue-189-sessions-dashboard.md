@@ -2,7 +2,7 @@
 id: plans/2026-10-02-issue-189-sessions-dashboard
 title: Restore missing harness sessions behind issue #189 (KiloCode #227, Codex #196)
 doc-type: plan
-status: draft
+status: complete
 owner: dpalfery
 last-reviewed: 2026-10-02
 component: KyberDash
