@@ -17,6 +17,10 @@ export { getAllProviders }
 export type { SessionSource }
 
 const DEFAULT_PARSER_CONTRACT_VERSION = '1'
+// v4: issue #216 / PR #276 — capture conversation/tool_result parts onto Claude
+// synth records. Repair contract (option a): a version mismatch must upsert
+// corrected same-span rows over stale counters-only payloads (see
+// recordsForUncoveredCommit); the bump is not merely a checkpoint watermark.
 const CLAUDE_PARSER_CONTRACT_VERSION = '4'
 // v2: issue #189 / PR #264 — Codex camelCase token usage and Kilo flat
 // tokens_input/tokens_output fallbacks. Old zero-record checkpoints under v1

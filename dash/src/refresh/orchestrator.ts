@@ -486,6 +486,13 @@ function timestampOutsideCovered(timestampUtc: string, covered: CoverageInterval
  * Keep already-covered unchanged rows out of the commit. A widened history
  * window only writes the newly uncovered prefix/suffix; a revision change
  * writes spans that are not already in the store.
+ *
+ * Repair contract (#216 option a): when `parserContractVersion` alone
+ * invalidates the checkpoint, allow same-span rows through so the corrected
+ * payload upserts over the stale one. Span identity is nativeRecordId-only —
+ * parts never enter it — so without this override a version bump would advance
+ * the checkpoint and leave empty historical rows forever. Revision-only or
+ * coverage-gap reopenings stay filtered: those are not a parser-contract repair.
  */
 function recordsForUncoveredCommit(
   merged: readonly CanonicalRecord[],
@@ -496,8 +503,13 @@ function recordsForUncoveredCommit(
 ): CanonicalRecord[] {
   const reusable = checkpointIsReusable(previous, request)
   const gaps = uncoveredIntervals(previous, requested, request)
+  const versionInvalidated =
+    previous !== undefined &&
+    previous.parserContractVersion !== request.parserContractVersion
   return merged.filter((record) => {
-    if (store.get(record.spanId) !== undefined) return false
+    if (store.get(record.spanId) !== undefined) {
+      return versionInvalidated
+    }
     if (!reusable || previous === undefined) return true
     if (gaps.length === 0) return false
     return timestampOutsideCovered(recordTimestampUtc(record), {

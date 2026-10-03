@@ -419,7 +419,7 @@ describe('refresh pipeline: parser contract version & checkpoint invalidation', 
     }
   })
 
-  it("re-reads transcript files and advances parserContractVersion from 3 to 4 for claude-desktop (#216)", async () => {
+  it("re-synthesizes stale same-span claude-desktop rows with parts after parserContractVersion 3→4 (#216)", async () => {
     const root = tempDir()
     const dbPath = join(root, 'canon.db')
     const store = new CanonStore(dbPath)
@@ -458,6 +458,8 @@ describe('refresh pipeline: parser contract version & checkpoint invalidation', 
       }
       const sourceKey = sourceKeyFor('claude-desktop', sessionSource)
 
+      // Counters-only seed: no readerTurn, so parts stay absent — the historical
+      // shape left by pre-v4 ingest at the same span id.
       const [parentCall] = loadClaudeCalls(transcriptPath)
       const [legacyTurnRecord] = new Synthesizer().synthesizeEnvelopes([
         {
@@ -469,6 +471,7 @@ describe('refresh pipeline: parser contract version & checkpoint invalidation', 
           sourceRevision: revisionToken,
         },
       ])
+      expect(legacyTurnRecord!.parts ?? []).toHaveLength(0)
 
       store.commitSourceUnit({
         records: [legacyTurnRecord!],
@@ -531,6 +534,13 @@ describe('refresh pipeline: parser contract version & checkpoint invalidation', 
       expect(claudeRow).toBeDefined()
       expect(claudeRow?.changed).toBe(1)
       expect(claudeRow?.skipped).toBe(0)
+      // Repair contract: version-invalidated refresh must upsert the corrected
+      // payload over the stale same-span row, not only bump the checkpoint.
+      expect(claudeRow?.updated).toBe(1)
+
+      const refreshed = store.get(legacyTurnRecord!.spanId)
+      expect(refreshed?.parts?.length).toBeGreaterThan(0)
+      expect(refreshed?.parts?.some((part) => part.text === 'hello from desktop')).toBe(true)
     } finally {
       store.close()
     }
