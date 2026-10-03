@@ -16,6 +16,7 @@ export interface ScorecardMatrixRow {
   harness: string
   name?: string
   sampleCount?: number
+  sessionCount?: number
   scorecard?: ServedHarnessScorecard
   /**
    * Display-only family label (decision D3, issue #199): split client
@@ -393,14 +394,19 @@ function MatrixRow({
         <span className="truncate font-mono text-density-2xs text-tertiary-foreground">
           {displayId(row.harness)}
         </span>
-        {typeof row.sampleCount === 'number' && Number.isFinite(row.sampleCount) && (
-          <span
-            className="truncate font-mono text-density-2xs text-tertiary-foreground"
-            data-testid={`samples-${row.harness}`}
-          >
-            {row.sampleCount} samples
-          </span>
-        )}
+        {(() => {
+          const n = row.sessionCount ?? row.sampleCount
+          if (typeof n !== 'number' || !Number.isFinite(n)) return null
+          const noun = row.sessionCount != null ? 'sessions' : 'samples'
+          return (
+            <span
+              className="truncate font-mono text-density-2xs text-tertiary-foreground"
+              data-testid={`samples-${row.harness}`}
+            >
+              {n} {noun}
+            </span>
+          )
+        })()}
       </button>
       {ORDERED_DIMENSION_KEYS.map((key) => (
         <button

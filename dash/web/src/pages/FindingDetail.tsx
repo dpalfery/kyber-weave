@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { cn, fmtTokens } from '../lib/utils.js'
 import { Card } from '../components/ui/card.js'
@@ -6,6 +6,7 @@ import { Skeleton } from '../components/ui/skeleton.js'
 import {
   fetchCalibration,
   fetchFinding,
+  recordFindingPrediction,
   type KyberFinding,
   type KyberEvidenceLink,
 } from '../lib/kyberApi.js'
@@ -75,6 +76,15 @@ export function FindingDetail({
   })
 
   const finding: KyberFinding | undefined = fetchedFinding ?? initialFinding
+
+  // Task F4: log the waste prediction at inspect time so calibration has a
+  // path off 0 / 0. Scoring still needs a comparable run pair (Compare).
+  useEffect(() => {
+    if (!finding?.id || !finding.runId || finding.estimatedWasteTokens == null) return
+    void recordFindingPrediction(finding).catch(() => {
+      // Calibration logging is best-effort; a failed POST must not blank the page.
+    })
+  }, [finding])
 
   // D6 rank score computation
   const rankScore = useMemo(() => {

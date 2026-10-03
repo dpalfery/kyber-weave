@@ -808,7 +808,13 @@ export function ContextDoctor({
 
   const harnesses = useMemo((): ScorecardMatrixRow[] => {
     const fromRollups = (harnessesData ?? []).filter((h) => isObservedHarness(h.harness))
-    if (fromRollups.length > 0) return fromRollups
+    if (fromRollups.length > 0) {
+      return fromRollups.map((row) => ({
+        ...row,
+        sessionCount: row.sessionCount,
+        sampleCount: row.sessionCount ?? row.sampleCount,
+      }))
+    }
 
     const observed = [...new Set((runsData ?? []).map((run) => run.harness).filter(isObservedHarness))]
     return observed.map((harness) => ({
