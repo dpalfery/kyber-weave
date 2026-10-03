@@ -1,5 +1,5 @@
 import { createRequire } from 'node:module'
-import { copyFileSync, existsSync, mkdirSync, readdirSync, renameSync, statSync, unlinkSync, utimesSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs'
 import { createHash, randomBytes } from 'node:crypto'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -257,9 +257,24 @@ function unlinkQuietly(path: string): void {
   }
 }
 
-function copyOptionalFile(sourcePath: string, destinationPath: string): boolean {
+/**
+ * `copyFile` uses the copyfile(2) syscall, which returns EPERM on some
+ * macOS container paths (Warp's Application Support sqlite). A read/write
+ * fallback still works when the process can read the bytes.
+ */
+export function copyFileBestEffort(sourcePath: string, destinationPath: string): void {
   try {
     copyFileSync(sourcePath, destinationPath)
+  } catch (err) {
+    const code = errorCode(err)
+    if (code !== 'EPERM' && code !== 'EACCES') throw err
+    writeFileSync(destinationPath, readFileSync(sourcePath))
+  }
+}
+
+function copyOptionalFile(sourcePath: string, destinationPath: string): boolean {
+  try {
+    copyFileBestEffort(sourcePath, destinationPath)
     return true
   } catch (err) {
     if (errorCode(err) === 'ENOENT') return false
@@ -347,7 +362,7 @@ function readOnlyCachePath(sourcePath: string, fingerprint: DatabaseFingerprint)
   const tempBase = `${cachePath}.tmp-${process.pid}-${randomBytes(8).toString('hex')}`
   const tempWal = tempBase + '-wal'
   try {
-    copyFileSync(sourcePath, tempBase)
+    copyFileBestEffort(sourcePath, tempBase)
     const copiedWal = copyOptionalFile(sourcePath + '-wal', tempWal)
 
     // Do not publish a cache made from a moving database. A live WAL writer will

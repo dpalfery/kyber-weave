@@ -395,6 +395,7 @@ describe('AgentSessionDashboard: Formatters and Helpers', () => {
   it('formats durations properly', () => {
     expect(formatDuration(null)).toBe('—')
     expect(formatDuration(undefined)).toBe('—')
+    expect(formatDuration(0)).toBe('—')
     expect(formatDuration(450)).toBe('450ms')
     expect(formatDuration(2500)).toBe('2.5s')
     expect(formatDuration(65000)).toBe('1m 5s')
