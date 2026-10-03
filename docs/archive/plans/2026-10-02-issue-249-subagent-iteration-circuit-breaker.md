@@ -122,8 +122,8 @@ Root causes identified in issue [#249](https://github.com/dpalfery/kyber-weave/i
   - Update `products/kyber-squad/migration/{csharp-dev,test-dev,github-devops}.md` `final-body-sha256`.
   - Verify all unit and golden tests pass (GREEN).
 - [x] **T5 (Verification & Quality Gates): Run solution build, tests, and documentation gates**
-  - `/Users/hal/.dotnet/dotnet build KyberWeave.sln -c Release`
-  - `/Users/hal/.dotnet/dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build`
+  - `dotnet build KyberWeave.sln -c Release`
+  - `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build`
   - `dotnet run --project src/KyberWeave.Cli --no-build -c Release -- docs validate .`
   - `dotnet run --project src/KyberWeave.Cli --no-build -c Release -- docs drift .`
 
@@ -141,5 +141,5 @@ Root causes identified in issue [#249](https://github.com/dpalfery/kyber-weave/i
 - **Harvest:** No ADR is required. Decisions Q1–Q5 are durably recorded in this plan. The operational rules and invariants are harvested into:
   - `products/kyber-squad/agents/conductor.md` (shared lifecycle invariant for iteration circuit-breaker)
   - `products/kyber-squad/agents/conductor/references/execution-and-review.md` (cluster rework retry cap of 2, oscillation detection, `STATUS: ESCALATION` intake into findings, architect mediation)
-  - `products/kyber-squad/agents/csharp-dev.md`, `products/kyber-squad/agents/test-dev.md`, `products/kyber-squad/agents/github-devops.md` (JEV checkpoints 1–4, 3-iteration inner loop cap, oscillation tripwires, contradictory invariant escalation, and `STATUS: ESCALATION` completion digest)
+  - `products/kyber-squad/agents/csharp-dev.md`, `products/kyber-squad/agents/test-dev.md`, `products/kyber-squad/agents/github-devops.md` (three JEV checkpoints plus the iteration cap, 3-iteration inner loop cap, oscillation tripwires, contradictory invariant escalation, and `STATUS: ESCALATION` completion digest)
   - `tests/KyberWeave.Tests/SquadCanonicalContentTests.cs` and `tests/KyberWeave.Tests/HotshotGoldenContractTests.cs` (automated regression contract tests and golden manifest tracking)
