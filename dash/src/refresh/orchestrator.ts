@@ -29,7 +29,6 @@ import type { HarnessJobRow, HarnessJobStatus, RefreshReport } from './report.js
 import { defaultJobConcurrency, runJobsSettled } from './scheduler.js'
 import {
   iterateNativeUnits as productionIterateNativeUnits,
-  readNativeUnit,
   utcHistoryWindow,
   type NativeEmptyReason,
   type NativeUnit,
@@ -234,6 +233,11 @@ async function runHarnessJob(context: JobContext): Promise<HarnessJobRow> {
     units = await context.iterate(descriptor.harnessId, {
       providers: context.providers,
       dateRange: context.dateRange,
+      // Widen version-repair windows before the concurrent first pass so each
+      // affected unit is parsed once under the prior coverage floor (#276).
+      dateRangeFor: (sourceKey) =>
+        versionRepairWindow(store.getSourceCheckpoint(descriptor.harnessId, sourceKey), descriptor, context)
+          ?.dateRange ?? context.dateRange,
       previousFingerprints: previousFingerprintsFor(
         store,
         descriptor,
@@ -274,13 +278,11 @@ async function runHarnessJob(context: JobContext): Promise<HarnessJobRow> {
     }
     row.changed += 1
 
-    // Parser-contract repair (#216): the default `--history-weeks` window can
-    // be narrower than the span already stored on the checkpoint. Widen the
-    // re-read to previous.coveredFromUtc → now so historical empty rows outside
-    // the run window still reach recordsForUncoveredCommit. Fingerprint
-    // invalidation already forced one file read; this only widens the slice.
+    // Parser-contract repair (#216/#276): when the checkpoint's coverage floor
+    // is older than `--history-weeks`, iterate already widened via dateRangeFor.
+    // Here we only apply the widened metadata to ingest/checkpoint — no second parse.
     const previous = store.getSourceCheckpoint(descriptor.harnessId, unit.sourceKey)
-    const repaired = await unitForVersionRepair(context, descriptor, unit, previous)
+    const repaired = unitForVersionRepair(context, descriptor, unit, previous)
     const activeUnit = repaired.unit
     const activeDateRange = repaired.dateRange
     const activeCoveredFromUtc = repaired.coveredFromUtc
@@ -363,50 +365,39 @@ function jobStatus(row: HarnessJobRow, writerFailed: boolean): HarnessJobStatus 
   return 'ok'
 }
 
-async function unitForVersionRepair(
+function versionRepairWindow(
+  previous: SourceCheckpoint | undefined,
+  descriptor: HarnessSourceDescriptor,
+  context: Pick<JobContext, 'dateRange' | 'coveredFromUtc'>,
+): { dateRange: DateRange; coveredFromUtc: string } | undefined {
+  if (
+    previous === undefined ||
+    previous.parserContractVersion === descriptor.parserContractVersion ||
+    previous.coveredFromUtc >= context.coveredFromUtc
+  ) {
+    return undefined
+  }
+  return {
+    dateRange: {
+      start: new Date(previous.coveredFromUtc),
+      end: context.dateRange.end,
+    },
+    coveredFromUtc: previous.coveredFromUtc,
+  }
+}
+
+function unitForVersionRepair(
   context: JobContext,
   descriptor: HarnessSourceDescriptor,
   unit: NativeUnit,
   previous: SourceCheckpoint | undefined,
-): Promise<{ unit: NativeUnit; dateRange: DateRange; coveredFromUtc: string }> {
-  const defaultRange = context.dateRange
-  const defaultCoveredFrom = context.coveredFromUtc
-  const versionInvalidated =
-    previous !== undefined &&
-    previous.parserContractVersion !== descriptor.parserContractVersion
-  if (
-    !versionInvalidated ||
-    previous === undefined ||
-    previous.coveredFromUtc >= defaultCoveredFrom
-  ) {
-    return { unit, dateRange: defaultRange, coveredFromUtc: defaultCoveredFrom }
+): { unit: NativeUnit; dateRange: DateRange; coveredFromUtc: string } {
+  const repair = versionRepairWindow(previous, descriptor, context)
+  if (!repair) {
+    return { unit, dateRange: context.dateRange, coveredFromUtc: context.coveredFromUtc }
   }
-
-  const provider = context.providers.find((entry) => entry.name === descriptor.providerName)
-  if (!provider) {
-    return { unit, dateRange: defaultRange, coveredFromUtc: defaultCoveredFrom }
-  }
-
-  const repairRange: DateRange = {
-    start: new Date(previous.coveredFromUtc),
-    end: defaultRange.end,
-  }
-  const reread = await readNativeUnit(descriptor.harnessId, provider, unit.source, {
-    providers: context.providers,
-    dateRange: repairRange,
-    // Empty map: the first pass already decided this unit changed; do not
-    // skip via fingerprint when widening the slice for repair.
-    previousFingerprints: new Map(),
-    ...(context.fingerprintFile ? { fingerprintFile: context.fingerprintFile } : {}),
-    ...(context.parseCalls ? { parseCalls: context.parseCalls } : {}),
-  })
-  return {
-    // Keep the first-pass change status; the empty fingerprint map would
-    // otherwise report every repair reread as `new`.
-    unit: { ...reread, status: unit.status },
-    dateRange: repairRange,
-    coveredFromUtc: previous.coveredFromUtc,
-  }
+  // Unit envelopes already came from the widened concurrent pass.
+  return { unit, dateRange: repair.dateRange, coveredFromUtc: repair.coveredFromUtc }
 }
 
 async function ingestUnit(
@@ -554,8 +545,9 @@ function timestampOutsideCovered(timestampUtc: string, covered: CoverageInterval
  * payload upserts over the stale one. Span identity is nativeRecordId-only —
  * parts never enter it — so without this override a version bump would advance
  * the checkpoint and leave empty historical rows forever. The ingest path
- * pairs this with a widened re-read over `previous.coveredFromUtc → now` so
- * rows older than the run's `--history-weeks` window are still in `merged`.
+ * pairs this with a widened first-pass window over `previous.coveredFromUtc → now`
+ * (via `dateRangeFor`) so rows older than the run's `--history-weeks` window are
+ * still in `merged`.
  * Revision-only or coverage-gap reopenings stay filtered: those are not a
  * parser-contract repair.
  */

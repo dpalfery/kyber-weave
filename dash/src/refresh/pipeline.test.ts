@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { CanonStore } from '../canon/store.js'
 import type { SessionSource } from '../providers/types.js'
@@ -520,6 +520,9 @@ describe('refresh pipeline: parser contract version & checkpoint invalidation', 
       expect(descriptor!.parserContractVersion).toBe('4')
 
       const provider = fixtureProvider('claude', [sessionSource], (s) => loadClaudeCalls(s.path))
+      // Version-repair must widen before the concurrent first pass so the
+      // transcript is parsed once, not twice (narrow then sequential widen).
+      const parseCalls = vi.fn(async (_provider, source, _dateRange) => loadClaudeCalls(source.path))
 
       const report = await refreshHarnessSources(
         store,
@@ -530,6 +533,7 @@ describe('refresh pipeline: parser contract version & checkpoint invalidation', 
           writerCapacity: 1,
           commandStartedAt: new Date('2026-09-12T18:00:00.000Z'),
           parseAllSessions: async () => undefined,
+          parseCalls,
         },
         { historyWeeks: 1 },
       )
@@ -539,6 +543,11 @@ describe('refresh pipeline: parser contract version & checkpoint invalidation', 
       expect(updatedCheckpoint?.lastStatus).toBe('ok')
       // Repair widened to the prior coverage floor, not the 1-week run window.
       expect(updatedCheckpoint?.coveredFromUtc).toBe('2026-08-01T00:00:00.000Z')
+      expect(parseCalls).toHaveBeenCalledTimes(1)
+      expect(parseCalls.mock.calls[0]![2]).toEqual({
+        start: new Date('2026-08-01T00:00:00.000Z'),
+        end: new Date('2026-09-12T18:00:00.000Z'),
+      })
 
       const claudeRow = report.rows.find((r) => r.harnessId === 'claude-desktop')
       expect(claudeRow).toBeDefined()
