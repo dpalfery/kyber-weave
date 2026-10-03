@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
 using Xunit;
@@ -10,6 +11,26 @@ public sealed class SquadCanonicalContentTests
     private const string MigrationSchema = "kyber-squad.migration/v1";
     private const string MigrationSourceCommit = "677c3a876ba9c62f1083608596b238c9deaff167";
     private const string DefaultOrchestrationTrigger = "default entry point";
+
+    /// <summary>
+    /// Closed <c>CIRCUIT_BREAKER_TRIGGER</c> vocabulary. Presence checks cannot
+    /// reject a fifth token, so harvested trigger lines must equal this set.
+    /// </summary>
+    private static readonly string[] CircuitBreakerTriggerTokens =
+    [
+        "BLAST_RADIUS_EXCEEDED",
+        "INVARIANT_CONTRADICTION",
+        "ITERATION_CAP_EXCEEDED",
+        "THRASH_OSCILLATION_DETECTED",
+    ];
+
+    private static readonly Regex CircuitBreakerTriggerLine = new(
+        @"CIRCUIT_BREAKER_TRIGGER:\s*(?<list>.+)$",
+        RegexOptions.Multiline | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    private static readonly Regex CircuitBreakerTriggerToken = new(
+        @"[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
     private static readonly string[] RetiredAgentIdentities =
     [
@@ -297,6 +318,7 @@ public sealed class SquadCanonicalContentTests
         Assert.Contains("BLAST_RADIUS_EXCEEDED", contract, StringComparison.Ordinal);
         Assert.Contains("ESCALATION: circuit-breaker", contract, StringComparison.Ordinal);
         Assert.Contains("RECOMMENDED_ACTION", contract, StringComparison.Ordinal);
+        AssertClosedCircuitBreakerTriggerSet(contract);
     }
 
     [Theory]
@@ -321,6 +343,7 @@ public sealed class SquadCanonicalContentTests
         Assert.Contains("CONTRADICTORY_INVARIANTS", agent.InstructionBody, StringComparison.Ordinal);
         Assert.Contains("BLAST_RADIUS", agent.InstructionBody, StringComparison.Ordinal);
         Assert.Contains("RECOMMENDED_ACTION", agent.InstructionBody, StringComparison.Ordinal);
+        AssertClosedCircuitBreakerTriggerSet(agent.InstructionBody);
     }
 
     [Fact]
@@ -420,6 +443,18 @@ public sealed class SquadCanonicalContentTests
     private static bool IsVersionedIdentity(string name) =>
         name.EndsWith("-v2", StringComparison.Ordinal) ||
         name.EndsWith("-v3", StringComparison.Ordinal);
+
+    private static void AssertClosedCircuitBreakerTriggerSet(string contract)
+    {
+        string[] harvested = CircuitBreakerTriggerLine.Matches(contract)
+            .SelectMany(match => CircuitBreakerTriggerToken.Matches(match.Groups["list"].Value)
+                .Select(token => token.Value))
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.Equal(CircuitBreakerTriggerTokens, harvested);
+    }
 
     private static string ReadAgentContract(string name)
     {
