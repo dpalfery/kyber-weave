@@ -19,6 +19,10 @@ keywords:
   - deployment
   - agent
   - skill
+  - circuit-breaker
+  - JEV
+  - oscillation
+  - failure-cluster
 code-refs:
   - SquadTransaction
   - SquadStateStore
@@ -519,6 +523,117 @@ and validates.
 
 ---
 
+## 9. Conductor execution circuit-breaker
+
+The deployment engine in §1–§8 ships canonical agent bodies. Those bodies include a
+two-level iteration circuit-breaker that stops thrashing test-fix loops during delivery.
+The contract lives in `conductor`, `csharp-dev`, `test-dev`, and `github-devops`. No ADR
+records it: the caps, tripwires, and escalation key constrain those four instruction
+bodies, not the C# render or transaction engine, and they remain cheap to revise in the
+agent specs. The durable product claim is here.
+
+```mermaid
+flowchart TD
+    Cluster["Failure cluster\n(first-observed test ID)"]
+    Worker["Worker invocation\n3 incremental fixes"]
+    Conductor["Conductor run\n2 rework dispatches"]
+    JEV["JEV tripwire or cap"]
+    Escalation["STATUS: ESCALATION"]
+    Finding["ESCALATION: circuit-breaker"]
+    Architect["architect at queue drain"]
+
+    Cluster --> Worker
+    Cluster --> Conductor
+    Worker --> JEV
+    Conductor --> JEV
+    JEV --> Escalation
+    Escalation --> Finding
+    Finding --> Architect
+```
+
+### Failure-cluster identity and dispatch tally
+
+A **failure cluster** is keyed by the failing test ID first observed for that cluster,
+recorded on the execution artifact when the cluster is created (when no test IDs exist,
+the failing subsystem, job, or step label). A newly failing test joins the recorded
+cluster whose key it most recently co-failed with; if it co-fails with none, or with more
+than one, it forms a new cluster keyed by itself. A cold invocation reads the recorded
+key; it does not re-derive one from whatever is failing now. Distinct keys remain
+distinct clusters for A/B oscillation detection.
+
+Every worker invocation is cold. The per-cluster **dispatch tally** therefore lives on
+the run's persisted execution artifact (or the task artifact until the run writes one).
+The conductor increments that tally only when it dispatches a rework worker for the
+cluster. Re-evaluating the queue reads the tally and never increments it. A tally at or
+above the cluster limit trips the breaker before the dispatch. The worker's inner
+3-iteration cap is per invocation and does not persist.
+
+### Two-level caps (Q1)
+
+| Level | Cap | Scope |
+|---|---|---|
+| Worker inner loop | 3 incremental test-fix-verify attempts | Same failing fixture or cluster, one invocation |
+| Conductor rework | 2 rework dispatches | Same cluster, entire delivery run |
+
+A third unresolved worker attempt, or a third conductor dispatch of the same cluster,
+trips `CIRCUIT_BREAKER_TRIGGER: ITERATION_CAP_EXCEEDED`.
+
+### Oscillation (Q2)
+
+The shipped rule is A→B→A, not a first one-way regression. A first one-way change
+(fixing Failure Cluster A causes Failure Cluster B to fail) consumes one of the worker's
+3 incremental iterations. The worker trips `THRASH_OSCILLATION_DETECTED` only when a
+subsequent fix for B re-breaks A, or a failure signature repeats. The conductor trips
+the same token when rework alternates between two cluster signatures. The original plan
+wording ("A causes B to fail, **or** A → B → A") is historical; it would have burned the
+breaker on the first one-way regression.
+
+### Invariant contradiction (Q3)
+
+Workers must not twist production code or weaken tests to satisfy contradictory
+invariants. When a fixture asserts obsolete implementation details that conflict with
+the approved task design, the worker halts production-code churn and trips
+`INVARIANT_CONTRADICTION`.
+
+### JEV checkpoints (Q4)
+
+Every developer subagent (`csharp-dev`, `test-dev`, `github-devops`) runs these checks
+before and after each fix attempt:
+
+1. **Blast radius** — touched files stay inside authorized task scope. Out-of-scope work
+   trips `BLAST_RADIUS_EXCEEDED`.
+2. **Oscillation** — see Q2. Trips `THRASH_OSCILLATION_DETECTED`.
+3. **Invariant consistency** — see Q3. Trips `INVARIANT_CONTRADICTION`.
+4. **Iteration cap** — three attempts on this cluster in this invocation. Trips
+   `ITERATION_CAP_EXCEEDED`.
+
+Any tripwire emits `STATUS: ESCALATION` with the trigger, failure cluster, contradictory
+invariants, blast radius, and `RECOMMENDED_ACTION`.
+
+The closed trigger set is `ITERATION_CAP_EXCEEDED`, `THRASH_OSCILLATION_DETECTED`,
+`INVARIANT_CONTRADICTION`, and `BLAST_RADIUS_EXCEEDED`. Reject any other token; do not
+invent a reason. `KS-001`–`KS-008` are unchanged; this contract does not add a `KS-009`.
+
+### Escalation (Q5)
+
+When the breaker trips — or a worker returns `STATUS: ESCALATION` — the conductor
+immediately halts rework for that task, does not dispatch further workers for that
+cluster, and records the finding with `ESCALATION: circuit-breaker` (same `ESCALATION:`
+prefix as `ESCALATION: end-of-run`). Non-dependent queue tasks may continue. The run
+cannot complete while an unresolved circuit-breaker finding exists. At queue drain,
+`architect` investigates the cluster and authors an intake recommendation or Draft plan.
+
+Operational contracts remain in
+`products/kyber-squad/agents/conductor.md`,
+`products/kyber-squad/agents/conductor/references/execution-and-review.md`,
+`products/kyber-squad/agents/csharp-dev.md`,
+`products/kyber-squad/agents/test-dev.md`, and
+`products/kyber-squad/agents/github-devops.md`.
+Regression pins live in `tests/KyberWeave.Tests/SquadCanonicalContentTests.cs` and
+`HotshotGoldenContractTests.cs`.
+
+---
+
 ## Related
 
 - [ADR 0017](../adr/0017-copilot-deterministic-tool-order.md) — Copilot tool membership and global emission order
@@ -526,6 +641,7 @@ and validates.
 - [ADR 0022](../adr/0022-antigravity-native-agents.md) — Native per-agent Antigravity rendering and cross-target capability-not-isolable degradation
 - [ADR 0028](../adr/0028-devin-target-scoped-authoring-capability-profiles.md) — Devin target-scoped authoring profiles and the conductor pre-creation fallback
 - [Kyber-Squad adoption guide](onboarding.md) — CLI commands, flags, and workflows
-- [Requirements and degradation contract](requirements.md) — KS-001 through KS-008 specifications
+- [Requirements and degradation contract](requirements.md) — KS-001 through KS-008 specifications and the conductor execution circuit-breaker
 - [Configuration](../configuration.md) — repository configuration options
 - [The documentation ontology](../documentation-ontology.md) — governance framework
+- [Issue #249 plan](../archive/plans/2026-10-02-issue-249-subagent-iteration-circuit-breaker.md) — archived harvest source; Q1–Q5 resolved; no ADR
