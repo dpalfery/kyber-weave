@@ -487,3 +487,45 @@ describe('CompareRuns: honest unavailable metrics (#190)', () => {
     expect(text).not.toMatch(/Completed Pairs:\s*0/)
   })
 })
+
+describe('CompareRuns: measured history below threshold preserves the server refusal reason (#190)', () => {
+  afterEach(() => {
+    cleanup()
+  })
+
+  it('shows the server refusal reason instead of the client count message', () => {
+    const verdict: KyberRunComparison['verdict'] = {
+      status: 'insufficient_history',
+      pairCount: 0,
+      completedPairCount: 3,
+      historyAvailability: 'measured',
+      meetsSufficiencyThreshold: false,
+      outcomeRegression: false,
+      canPromote: false,
+      recommendation:
+        'Pairing proposed for manual review. At least 5 completed pairs without outcome regression are required before promoting automated recommendations.',
+      refusalReason:
+        'Auto-promotion refused: observed 3 completed pair(s), but minimum threshold is n >= 5 completed pairs. Automatic pairing is proposed only and requires manual confirmation.',
+      summary: '',
+    }
+    const comparison = { ...unavailableComparison(), verdict }
+    renderCompare(
+      <CompareRuns
+        runs={[
+          runCandidate({ runId: 'cursor-run-latest', harness: 'cursor' }),
+          runCandidate({ runId: 'claude-run-older', harness: 'claude-code' }),
+        ]}
+        selectedAId="cursor-run-latest"
+        selectedBId="claude-run-older"
+        comparison={comparison}
+      />,
+    )
+
+    const guard = screen.getByTestId('compare-n-guard')
+    const text = guard.textContent ?? ''
+
+    expect(text).toContain('Auto-promotion refused: observed 3 completed pair(s)')
+    expect(text).toContain('requires manual confirmation')
+    expect(text).not.toContain('Recommendation promotion refused')
+  })
+})

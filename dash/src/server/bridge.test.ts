@@ -182,3 +182,83 @@ describe('bridge quarantine problems: pagination and metadata contract (Task T3)
   })
 })
 
+describe('bridge compareRuns: empty execution keys fall back to the run id (issue #190)', () => {
+  let tempDir: string
+  let dbPath: string
+  let store: CanonStore
+  let db: DatabaseSync
+  let bridge: KyberBridge
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), 'kyber-bridge-compare-'))
+    dbPath = join(tempDir, 'canon.db')
+    store = new CanonStore(dbPath)
+    db = new DatabaseSync(dbPath)
+    bridge = new KyberBridge({ canonDb: db })
+  })
+
+  afterEach(() => {
+    bridge.close()
+    store.close()
+    rmSync(tempDir, { recursive: true, force: true })
+  })
+
+  it('compares records keyed by the run id when every execution key is empty', () => {
+    // Run A's only execution selects no session key: both its session id
+    // and its execution id are empty. Run B's execution resolves normally.
+    db.prepare(
+      'INSERT INTO run (run_id, harness, grouping_basis) VALUES (?, ?, ?)',
+    ).run('run-empty-keys-a', 'cursor', 'derived')
+    db.prepare(
+      'INSERT INTO run (run_id, harness, grouping_basis) VALUES (?, ?, ?)',
+    ).run('run-empty-keys-b', 'cursor', 'derived')
+    db.prepare(
+      `INSERT INTO execution
+       (execution_id, run_id, session_id, harness, is_root, parent_linkage_json)
+       VALUES ('', ?, NULL, ?, 1, ?)`,
+    ).run('run-empty-keys-a', 'cursor', JSON.stringify('measured'))
+    db.prepare(
+      `INSERT INTO execution
+       (execution_id, run_id, session_id, harness, is_root, parent_linkage_json)
+       VALUES (?, ?, ?, ?, 1, ?)`,
+    ).run('exec-b', 'run-empty-keys-b', 'run-empty-keys-b', 'cursor', JSON.stringify('measured'))
+    for (const runId of ['run-empty-keys-a', 'run-empty-keys-b']) {
+      db.prepare(
+        `INSERT INTO records
+         (span_id, source, harness, session_id, name, op, kind, timestamp,
+          duration_ms, status, tokens_json, content_json, cost_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        `span-${runId}`,
+        'otel',
+        'cursor',
+        runId,
+        'llm',
+        'llm.invoke',
+        'model',
+        '2026-10-01T00:00:00.000Z',
+        10,
+        'success',
+        JSON.stringify({
+          freshInput: 100,
+          cacheRead: 0,
+          cacheCreation: 0,
+          output: 10,
+          reportedInput: 100,
+          reportedOutput: 10,
+        }),
+        JSON.stringify({}),
+        JSON.stringify({}),
+      )
+    }
+
+    const summary = bridge.compareRuns('run-empty-keys-a', 'run-empty-keys-b')
+
+    expect(summary).not.toBeNull()
+    // The run id is the only session key Run A's execution offers; the
+    // records stored under it must reach the comparison, not be omitted.
+    expect(summary!.runA.turnCount).toBe(1)
+    expect(summary!.runB.turnCount).toBe(1)
+  })
+})
+

@@ -1933,16 +1933,16 @@ export class KyberBridge {
    */
   private recordsForRun(runId: string): CanonicalRecord[] {
     const executions = this.listExecutions(runId)
-    const keys =
-      executions.length > 0
-        ? [
-            ...new Set(
-              executions
-                .map((execution) => execution.sessionId ?? execution.executionId)
-                .filter((key) => key.length > 0),
-            ),
-          ]
-        : [runId]
+    const keys = [
+      ...new Set(
+        executions
+          .map((execution) => execution.sessionId ?? execution.executionId)
+          .filter((key) => key.length > 0),
+      ),
+    ]
+    // Executions can exist without selecting any session key (empty ids);
+    // the run id itself stays the lookup key in that case.
+    if (keys.length === 0) keys.push(runId)
     const identities = this.sessionIdentities()
     const seenSpanIds = new Set<string>()
     const records: CanonicalRecord[] = []

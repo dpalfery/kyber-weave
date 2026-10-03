@@ -546,9 +546,9 @@ export function CompareRuns({
         ? (verdict?.recommendation ??
           'The comparison between baseline and candidate satisfies the documented sufficiency threshold (n ≥ 5 completed pairs) with zero outcome regressions.')
         : (verdict?.refusalReason ??
-          completedPairCount != null
+          (completedPairCount != null
             ? `Recommendation promotion refused: observed ${completedPairCount} completed pair(s)${taskFamily ? ` for task family "${taskFamily}"` : ''}. Minimum threshold is n ≥ 5 completed pairs. Auto-pairing is proposed only.`
-            : 'Recommendation promotion refused: completed pair history is unavailable. Auto-pairing is proposed only.')
+            : 'Recommendation promotion refused: completed pair history is unavailable. Auto-pairing is proposed only.'))
 
   if (live && loadingRuns) {
     return (
