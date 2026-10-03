@@ -322,9 +322,16 @@ describe('D5 reader integration', () => {
   })
 
   it('pairs request/response paired calls with turns without generating duplicate records (#232)', async () => {
+    const usage = {
+      input_tokens: 2,
+      output_tokens: 563,
+      cache_read_input_tokens: 39096,
+      cache_creation_input_tokens: 24977,
+    }
     const call1 = call({
       provider: 'claude',
       sessionId: 's-duo',
+      turnId: 'msg-duo-1',
       timestamp: '2026-09-23T22:43:53.000Z',
       inputTokens: 2,
       outputTokens: 563,
@@ -336,6 +343,7 @@ describe('D5 reader integration', () => {
     const call2 = call({
       provider: 'claude',
       sessionId: 's-duo',
+      turnId: 'msg-duo-1',
       timestamp: '2026-09-23T22:43:58.000Z',
       inputTokens: 2,
       outputTokens: 563,
@@ -357,9 +365,28 @@ describe('D5 reader integration', () => {
         },
       }),
       JSON.stringify({
+        type: 'assistant',
         sessionId: 's-duo',
+        uuid: 'req-duo',
+        timestamp: '2026-09-23T22:43:53.000Z',
         message: {
+          id: 'msg-duo-1',
           role: 'assistant',
+          model: 'claude-sonnet-4-5',
+          usage,
+          content: [{ type: 'text', text: 'answer' }],
+        },
+      }),
+      JSON.stringify({
+        type: 'assistant',
+        sessionId: 's-duo',
+        uuid: 'res-duo',
+        timestamp: '2026-09-23T22:43:58.000Z',
+        message: {
+          id: 'msg-duo-1',
+          role: 'assistant',
+          model: 'claude-sonnet-4-5',
+          usage,
           content: [{ type: 'text', text: 'answer' }],
         },
       }),
@@ -376,6 +403,218 @@ describe('D5 reader integration', () => {
     const invokes = result.records.filter((r) => r.op === 'llm.invoke')
     expect(invokes).toHaveLength(1)
     expect(invokes[0]?.tokens.reportedInput).toBe(64075)
+    // #216: collapsed keeper must retain reader parts, not drop them on fuse.
+    expect(invokes[0]?.parts?.length).toBeGreaterThan(0)
+    expect(invokes[0]?.content.conversation_history).toContain('question')
+    expect(invokes[0]?.content.conversation_history).toContain('answer')
+    const buckets = (invokes[0]?.parts ?? []).map((p) => p.part)
+    expect(buckets).not.toContain('system_prompt')
+    expect(buckets).not.toContain('tool_definitions')
+  })
+
+  it('attaches conversation and tool-result parts to each claude-desktop keeper (#216)', async () => {
+    const usage1 = {
+      input_tokens: 100,
+      output_tokens: 40,
+      cache_read_input_tokens: 200,
+      cache_creation_input_tokens: 50,
+    }
+    const usage2 = {
+      input_tokens: 180,
+      output_tokens: 60,
+      cache_read_input_tokens: 400,
+      cache_creation_input_tokens: 80,
+    }
+    const root = mkdtempSync(join(tmpdir(), 'kyber-claude-desktop-parts-'))
+    tempRoots.push(root)
+    const filePath = join(root, 'session.jsonl')
+    writeFileSync(filePath, [
+      JSON.stringify({
+        type: 'user',
+        sessionId: 's-parts',
+        message: {
+          role: 'user',
+          content: [{ type: 'text', text: 'first question' }],
+        },
+      }),
+      JSON.stringify({
+        type: 'assistant',
+        sessionId: 's-parts',
+        uuid: 'asst-1',
+        timestamp: '2026-09-01T12:00:00.000Z',
+        message: {
+          id: 'msg-parts-1',
+          role: 'assistant',
+          model: 'claude-sonnet-4-5',
+          usage: usage1,
+          content: [
+            { type: 'text', text: 'first answer' },
+            { type: 'tool_use', id: 'tu_parts_1', name: 'Bash', input: { command: 'ls' } },
+          ],
+        },
+      }),
+      JSON.stringify({
+        type: 'user',
+        sessionId: 's-parts',
+        message: {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'second question' },
+            { type: 'tool_result', tool_use_id: 'tu_parts_1', content: 'listing output' },
+          ],
+        },
+      }),
+      JSON.stringify({
+        type: 'assistant',
+        sessionId: 's-parts',
+        uuid: 'asst-2',
+        timestamp: '2026-09-01T12:01:00.000Z',
+        message: {
+          id: 'msg-parts-2',
+          role: 'assistant',
+          model: 'claude-sonnet-4-5',
+          usage: usage2,
+          content: [{ type: 'text', text: 'second answer' }],
+        },
+      }),
+    ].join('\n') + '\n')
+
+    const result = await ingestProviders(['claude-desktop'], () => ({
+      calls: [],
+      filePath,
+      harnessId: 'claude-desktop',
+      sourceKey: 'claude-desktop:s-parts',
+    }))
+
+    expect(result.problems).toEqual([])
+    const invokes = result.records.filter((r) => r.op === 'llm.invoke')
+    expect(invokes).toHaveLength(2)
+
+    const first = invokes[0]!
+    const second = invokes[1]!
+    expect(first.parts?.some((p) => p.part === 'conversation_history')).toBe(true)
+    expect(first.content.conversation_history).toContain('first question')
+    expect(first.content.conversation_history).toContain('first answer')
+    expect(first.content.conversation_history).not.toContain('second question')
+
+    expect(second.parts?.some((p) => p.part === 'conversation_history')).toBe(true)
+    expect(second.parts?.some((p) => p.part === 'tool_result_content')).toBe(true)
+    expect(second.content.conversation_history).toContain('second question')
+    expect(second.content.conversation_history).toContain('second answer')
+    expect(second.content.tool_result_content).toContain('listing output')
+    expect(second.content.conversation_history).not.toContain('first question')
+
+    for (const invoke of invokes) {
+      const buckets = (invoke.parts ?? []).map((p) => p.part)
+      expect(buckets).not.toContain('system_prompt')
+      expect(buckets).not.toContain('tool_definitions')
+    }
+  })
+
+  it('does not attach a neighbor turn’s parts when call turnId is unpaired (#216)', async () => {
+    const usage = {
+      input_tokens: 100,
+      output_tokens: 40,
+      cache_read_input_tokens: 200,
+      cache_creation_input_tokens: 50,
+    }
+    const root = mkdtempSync(join(tmpdir(), 'kyber-claude-desktop-slice-'))
+    tempRoots.push(root)
+    const filePath = join(root, 'session.jsonl')
+    writeFileSync(filePath, [
+      JSON.stringify({
+        type: 'user',
+        sessionId: 's-slice',
+        message: { role: 'user', content: [{ type: 'text', text: 'neighbor question' }] },
+      }),
+      JSON.stringify({
+        type: 'assistant',
+        sessionId: 's-slice',
+        uuid: 'asst-neighbor',
+        timestamp: '2026-09-01T12:00:00.000Z',
+        message: {
+          id: 'msg-neighbor',
+          role: 'assistant',
+          model: 'claude-sonnet-4-5',
+          usage,
+          content: [{ type: 'text', text: 'neighbor answer' }],
+        },
+      }),
+      JSON.stringify({
+        type: 'user',
+        sessionId: 's-slice',
+        message: { role: 'user', content: [{ type: 'text', text: 'window question' }] },
+      }),
+      JSON.stringify({
+        type: 'assistant',
+        sessionId: 's-slice',
+        uuid: 'asst-window',
+        timestamp: '2026-09-01T12:05:00.000Z',
+        message: {
+          id: 'msg-window',
+          role: 'assistant',
+          model: 'claude-sonnet-4-5',
+          usage: { ...usage, input_tokens: 220 },
+          content: [{ type: 'text', text: 'window answer' }],
+        },
+      }),
+    ].join('\n') + '\n')
+
+    // Window-slice: only the later call is presented to ingest, while the reader
+    // still sees both turns. Native-id pairing must attach the matching turn —
+    // not the positional neighbor at index 0.
+    const windowCall = call({
+      provider: 'claude',
+      sessionId: 's-slice',
+      turnId: 'msg-window',
+      timestamp: '2026-09-01T12:05:00.000Z',
+      inputTokens: 220,
+      outputTokens: 40,
+      cacheReadInputTokens: 200,
+      cacheCreationInputTokens: 50,
+      cachedInputTokens: 200,
+      deduplicationKey: 'claude:s-slice:asst-window',
+    })
+
+    const result = await ingestProviders(['claude-desktop'], () => ({
+      calls: [windowCall],
+      filePath,
+      harnessId: 'claude-desktop',
+      sourceKey: 'claude-desktop:s-slice',
+    }))
+
+    expect(result.problems).toEqual([])
+    const invokes = result.records.filter((r) => r.op === 'llm.invoke')
+    expect(invokes).toHaveLength(1)
+    expect(invokes[0]?.content.conversation_history).toContain('window question')
+    expect(invokes[0]?.content.conversation_history).toContain('window answer')
+    expect(invokes[0]?.content.conversation_history).not.toContain('neighbor question')
+    expect(invokes[0]?.content.conversation_history).not.toContain('neighbor answer')
+
+    // Unpaired turnId: no borrowed neighbor content.
+    const orphan = await ingestProviders(['claude-desktop'], () => ({
+      calls: [
+        call({
+          provider: 'claude',
+          sessionId: 's-slice',
+          turnId: 'msg-missing',
+          timestamp: '2026-09-01T12:05:00.000Z',
+          inputTokens: 220,
+          outputTokens: 40,
+          cacheReadInputTokens: 200,
+          cacheCreationInputTokens: 50,
+          cachedInputTokens: 200,
+          deduplicationKey: 'claude:s-slice:orphan',
+        }),
+      ],
+      filePath,
+      harnessId: 'claude-desktop',
+      sourceKey: 'claude-desktop:s-slice-orphan',
+    }))
+    const orphanInvoke = orphan.records.filter((r) => r.op === 'llm.invoke')
+    expect(orphanInvoke).toHaveLength(1)
+    expect(orphanInvoke[0]?.parts ?? []).toEqual([])
+    expect(orphanInvoke[0]?.content.conversation_history ?? '').toBe('')
   })
 })
 

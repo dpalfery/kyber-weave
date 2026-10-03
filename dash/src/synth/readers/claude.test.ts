@@ -109,6 +109,8 @@ describe('claudeReader', () => {
     const turns = await readTurns(path)
     expect(turns).toHaveLength(1)
     const turn = turns[0]!
+    // Same field loadClaudeCalls uses for ParsedProviderCall.turnId (message.id).
+    expect(turn.nativeRecordId).toBe('msg-1')
     expect(turn.toolCalls).toHaveLength(1)
     expect(turn.toolCalls?.[0]?.name).toBe('Bash')
     expect(turn.toolResults).toHaveLength(1)
@@ -154,6 +156,62 @@ describe('claudeReader', () => {
 
     const turns = await readTurns(path)
     expect(turns).toHaveLength(2)
+    expect(turns[0]!.nativeRecordId).toBe('msg-1')
+    expect(turns[1]!.nativeRecordId).toBe('msg-2')
+  })
+
+  it('sets nativeRecordId from assistant message.id and keeps honest content buckets (#216)', async () => {
+    const usage = {
+      input_tokens: 150,
+      output_tokens: 45,
+      cache_read_input_tokens: 300,
+      cache_creation_input_tokens: 200,
+    }
+    const path = writeTranscript([
+      {
+        type: 'user',
+        sessionId: 'session-native-record-id',
+        message: {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'Inspect the workspace.' },
+            { type: 'tool_result', tool_use_id: 'tu_native_1', content: 'workspace listing' },
+          ],
+        },
+      },
+      {
+        type: 'assistant',
+        sessionId: 'session-native-record-id',
+        uuid: 'asst-native-1',
+        timestamp: '2026-09-01T12:00:00.000Z',
+        message: {
+          id: 'msg-native-42',
+          model: 'claude-sonnet-4-5',
+          usage,
+          content: [
+            { type: 'text', text: 'Here is the listing.' },
+            {
+              type: 'tool_use',
+              id: 'tu_native_1',
+              name: 'Bash',
+              input: { command: 'ls' },
+            },
+          ],
+        },
+      },
+    ])
+
+    const turns = await readTurns(path)
+    expect(turns).toHaveLength(1)
+    const turn = turns[0]!
+    // Must match loadClaudeCalls turnId = message.id so matchingTurns can pair parts.
+    expect(turn.nativeRecordId).toBe('msg-native-42')
+
+    const buckets = turn.parts.map((part) => part.part)
+    expect(buckets).toContain('conversation_history')
+    expect(buckets).toContain('tool_result_content')
+    expect(buckets).not.toContain('system_prompt')
+    expect(buckets).not.toContain('tool_definitions')
   })
 
   it('measures stored conversation and tool results, but not unavailable system prompts or tool definitions', async () => {

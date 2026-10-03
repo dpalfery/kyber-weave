@@ -4,7 +4,7 @@ title: Telemetry inventory — harness signal and content availability
 doc-type: reference
 status: draft
 owner: dpalfery
-last-reviewed: 2026-09-28
+last-reviewed: 2026-10-03
 ---
 
 # Telemetry inventory — verified harness signal and content availability
@@ -45,7 +45,7 @@ Values are never summed across the two sources. `KyberBridge` reads `canon.db` o
 | Copilot Chat | Content-enabled OTLP capture maps observed system instructions, messages, rules, skills, tool definitions, tool results, and session identity into canonical buckets. Input-message normalization separates input text from response envelopes without negative residuals. | Observed per-server schema availability remains source-dependent. |
 | Copilot CLI | SQLite ingest preserves its reported ASAD taxonomy, including `context_*_tokens` and `context_tier`. Persisted harness id is `copilot-cli`, not collapsed into `copilot`. | Omitted reported buckets remain unavailable rather than zero. |
 | Copilot VS Code | Native journal request replay into input-side `ReaderTurn` snapshots keyed by native request id via `copilotVscodeReader`. Reconstructs instructions and user message while excluding current model output from input context. | Window and pressure measured; unobserved buckets explicit `null` with reason. |
-| Claude Code | Enhanced-telemetry counters and dot-folder conversation/tool-result content can enter canonical records. | System prompts and tool schemas from raw API-body logs require the owner to enable `OTEL_LOG_RAW_API_BODIES=1`; that has not been assumed or configured here. |
+| Claude Code / Claude Desktop | Enhanced-telemetry counters and dot-folder transcript content enter canonical records via `ClaudeContentReader`: `conversation_history` (`text` / `thinking`) and `tool_result_content` (`tool_result`) attach to `synth:` spans when the JSONL carries them, so the kyberdash turn inspector shows those blocks. | `READER_UNMEASURABLE` keeps `system_prompt` and `tool_definitions` (and `schema_cost`) `not_measurable` from transcripts — Claude injects them at runtime and never writes them to disk. Empty inspector blocks after refresh mean the transcript lacked those parts (honest absence), not a turn-numbering bug. Raw API-body logs for live prompt/schema enrichment still require the owner to enable `OTEL_LOG_RAW_API_BODIES=1`; that has not been assumed or configured here. |
 | Codex | Dot-folder ingestion supplies the system prompt, instructions, conversation, tool results, and context window contained in rollout data. | Availability is limited to fields the source actually supplies. |
 | pi | Reader support is implemented and respects OTLP/file source precedence. | No current live collection claim is made. |
 | Cursor | `cursorReader` extracts available user prompt, instructions, and tool context from SQLite storage without claiming an unobserved complete historical prefix. `cursor-hook` emits deterministic OTLP traces. | Window and pressure measured only when the bubble stores `contextWindow`; otherwise not measurable with reason. Unobserved historical buckets explicit `null` with reason. |

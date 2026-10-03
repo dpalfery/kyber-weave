@@ -425,6 +425,22 @@ export const readClaudeContent = readClaudeTranscript
 export const readClaudeParts = readClaudeTranscript
 
 /**
+ * The Anthropic `message.id` on an assistant usage record — the same field
+ * {@link loadClaudeCalls} stamps as `ParsedProviderCall.turnId`. Matching on
+ * that id keeps content parts attached when refresh window-slices calls while
+ * the reader still walks the whole file (#216).
+ */
+function nativeRecordIdOfGroup(group: readonly string[]): string | undefined {
+  for (const rawLine of group) {
+    const info = parseLineUsageInfo(rawLine)
+    if (info?.messageId !== undefined && info.messageId !== '') {
+      return info.messageId
+    }
+  }
+  return undefined
+}
+
+/**
  * Content reader for Claude Code transcripts implementing {@link ContentReader}.
  */
 export class ClaudeContentReader implements ContentReader {
@@ -458,9 +474,11 @@ export class ClaudeContentReader implements ContentReader {
       ) {
         continue
       }
+      const nativeRecordId = nativeRecordIdOfGroup(group)
       yield {
         parts: session.parts,
         ...(session.sessionId !== undefined ? { sessionId: session.sessionId } : {}),
+        ...(nativeRecordId !== undefined ? { nativeRecordId } : {}),
         ...(session.terminationReason !== undefined ? { terminationReason: session.terminationReason } : {}),
         ...(session.exitCode !== undefined ? { exitCode: session.exitCode } : {}),
         ...(session.isCorrection !== undefined ? { isCorrection: session.isCorrection, correctionRule: session.correctionRule } : {}),

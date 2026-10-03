@@ -66,6 +66,24 @@ describe('Backend Contract Tests: GET /api/kyber/session/:id/content', () => {
     }
   }
 
+  // Issue #216 / T3: claude-desktop file-synth records use `codeburn/…`
+  // provenance and `synth:` span ids; the route must surface stored parts
+  // the same way Copilot fixtures already do.
+  function claudeDesktopTurn(
+    spanId: string,
+    parts: ContentPart[],
+    over: Partial<CanonicalRecord> = {},
+  ): CanonicalRecord {
+    return turn(spanId, parts, {
+      source: 'codeburn/claude-desktop',
+      harness: 'claude-desktop',
+      ...over,
+    })
+  }
+
+  const CD_CONVERSATION = 'user: why is the claude-desktop inspector empty?'
+  const CD_TOOL_RESULT = 'tool result: README.md contents for the inspector fixture'
+
   beforeAll(async () => {
     store = new CanonStore(':memory:')
     store.upsertMany([
@@ -193,6 +211,47 @@ describe('Backend Contract Tests: GET /api/kyber/session/:id/content', () => {
         harness: 'copilot',
         turns: [{ spanId: 'span-q0', model: 'm' }],
       },
+    })
+    // Issue #216 / T3: claude-desktop synth spans with stored parts must
+    // surface through the turn content route (happy path). A second session
+    // with empty parts pins #184 honest empty — named session/turn/span,
+    // no fabricated assembledText.
+    store.upsertMany([
+      claudeDesktopTurn(
+        'synth:claude-desktop:sess-cd-parts-001:turn-0',
+        [
+          { part: 'conversation_history', text: CD_CONVERSATION, tokens: 12 },
+          { part: 'tool_result_content', text: CD_TOOL_RESULT, tokens: 8 },
+        ],
+        {
+          sessionId: 'sess-cd-parts-001',
+          traceId: 'synth:claude-desktop:sess-cd-parts-001',
+          timestamp: '2026-10-02T10:00:00.000Z',
+        },
+      ),
+    ])
+    store.upsertSession({
+      sessionId: 'sess-cd-parts-001',
+      harness: 'claude-desktop',
+      label: 'Claude Desktop with parts',
+      payload: { id: 'sess-cd-parts-001', harness: 'claude-desktop' },
+    })
+    store.upsertMany([
+      claudeDesktopTurn(
+        'synth:claude-desktop:sess-cd-empty-001:turn-0',
+        [],
+        {
+          sessionId: 'sess-cd-empty-001',
+          traceId: 'synth:claude-desktop:sess-cd-empty-001',
+          timestamp: '2026-10-02T11:00:00.000Z',
+        },
+      ),
+    ])
+    store.upsertSession({
+      sessionId: 'sess-cd-empty-001',
+      harness: 'claude-desktop',
+      label: 'Claude Desktop empty parts',
+      payload: { id: 'sess-cd-empty-001', harness: 'claude-desktop' },
     })
 
     canonDb = new DatabaseSync(':memory:')
@@ -447,6 +506,54 @@ describe('Backend Contract Tests: GET /api/kyber/session/:id/content', () => {
       expect(body.truncated).toBe(true)
       expect(body.totalLength).toBeGreaterThan(100)
       expect(body.assembledText.length).toBeLessThanOrEqual(100)
+    })
+
+    describe('claude-desktop / synth: turn content (issue #216 / T3)', () => {
+      it('returns measurable conversation and tool-result parts for a synth span that stored them', async () => {
+        const res = await fetch(`${base}/api/kyber/session/sess-cd-parts-001/turn/0/content`)
+        expect(res.status).toBe(200)
+        assertStandardKyberHeaders(res)
+
+        const body = (await res.json()) as TurnContentResult
+        expect(body.sessionId).toBe('sess-cd-parts-001')
+        expect(body.turnIndex).toBe(0)
+        expect(body.spanId).toBe('synth:claude-desktop:sess-cd-parts-001:turn-0')
+        expect(body.parts.length).toBeGreaterThan(0)
+        expect(
+          body.parts.some((p) => p.part === 'conversation_history' || p.part === 'user_messages'),
+        ).toBe(true)
+        expect(body.parts.some((p) => p.part === 'tool_result_content')).toBe(true)
+
+        const convBlock = body.blocks.find((b) => b.key === 'conversation_history')
+        expect(convBlock?.text).toContain('why is the claude-desktop inspector empty?')
+        const toolBlock = body.blocks.find((b) => b.key === 'tool_result_content')
+        expect(toolBlock?.text).toBe(CD_TOOL_RESULT)
+        expect(body.assembledText.trim().length).toBeGreaterThan(0)
+        expect(body.assembledText).toContain('why is the claude-desktop inspector empty?')
+        expect(body.assembledText).toContain(CD_TOOL_RESULT)
+      })
+
+      it('keeps #184 honest empty when a synth span stored no parts (no fabricated assembledText)', async () => {
+        const res = await fetch(`${base}/api/kyber/session/sess-cd-empty-001/turn/0/content`)
+        expect(res.status).toBe(200)
+        assertStandardKyberHeaders(res)
+
+        const body = (await res.json()) as TurnContentResult
+        // Named whereabouts so an audit can tell honest absence from a
+        // mis-resolved neighbor (issue #184).
+        expect(body.sessionId).toBe('sess-cd-empty-001')
+        expect(body.turnIndex).toBe(0)
+        expect(body.spanId).toBe('synth:claude-desktop:sess-cd-empty-001:turn-0')
+        expect(body.parts).toEqual([])
+        expect(body.assembledText).toBe('')
+        for (const block of body.blocks) {
+          expect(block.text).toBe('')
+          expect(block.parts).toEqual([])
+        }
+        // No fabricated conversation or tool-result text from counters alone.
+        expect(body.assembledText).not.toContain('user:')
+        expect(body.assembledText).not.toContain('assistant:')
+      })
     })
   })
 })

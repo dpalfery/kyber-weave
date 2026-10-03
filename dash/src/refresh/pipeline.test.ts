@@ -288,11 +288,11 @@ describe('refresh pipeline: parser contract version & checkpoint invalidation', 
       store.close()
     }
   })
-  it("scopes parserContractVersion 3 specifically to Claude descriptors while other harnesses remain at 1", () => {
+  it("scopes parserContractVersion 4 specifically to Claude descriptors while other harnesses remain at 1", () => {
     const claudeCli = descriptorFor("claude-cli")
     const claudeDesktop = descriptorFor("claude-desktop")
-    expect(claudeCli?.parserContractVersion).toBe("3")
-    expect(claudeDesktop?.parserContractVersion).toBe("3")
+    expect(claudeCli?.parserContractVersion).toBe("4")
+    expect(claudeDesktop?.parserContractVersion).toBe("4")
 
     const codex = descriptorFor("codex-cli")
     const copilot = descriptorFor("copilot-cli")
@@ -302,7 +302,7 @@ describe('refresh pipeline: parser contract version & checkpoint invalidation', 
     expect(cursor?.parserContractVersion).toBe("1")
   })
 
-  it("re-reads transcript files and advances parserContractVersion from 2 to 3 for claude-desktop (#232)", async () => {
+  it("re-reads transcript files and advances parserContractVersion from 3 to 4 for claude-desktop (#216)", async () => {
     const root = tempDir()
     const dbPath = join(root, 'canon.db')
     const store = new CanonStore(dbPath)
@@ -362,7 +362,7 @@ describe('refresh pipeline: parser contract version & checkpoint invalidation', 
             nativeSessionId: legacyTurnRecord!.sessionId ?? null,
             nativeRecordId: parentCall!.turnId ?? null,
             sourceRevision: revisionToken,
-            parserVersion: '2',
+            parserVersion: '3',
             importedAtUtc: '2026-09-06T10:00:00.000Z',
             locationToken: '~/.claude/projects',
           },
@@ -372,7 +372,7 @@ describe('refresh pipeline: parser contract version & checkpoint invalidation', 
           sourceKey,
           providerId: 'claude',
           parserId: 'claude',
-          parserContractVersion: '2',
+          parserContractVersion: '3',
           format: 'jsonl',
           sourceRootLabel: '~/.claude/projects',
           revisionToken,
@@ -388,7 +388,7 @@ describe('refresh pipeline: parser contract version & checkpoint invalidation', 
       })
 
       const initialCheckpoint = store.getSourceCheckpoint('claude-desktop', sourceKey)
-      expect(initialCheckpoint?.parserContractVersion).toBe('2')
+      expect(initialCheckpoint?.parserContractVersion).toBe('3')
 
       const descriptor = descriptorFor('claude-desktop')
       expect(descriptor).toBeDefined()
@@ -405,7 +405,7 @@ describe('refresh pipeline: parser contract version & checkpoint invalidation', 
       })
 
       const updatedCheckpoint = store.getSourceCheckpoint('claude-desktop', sourceKey)
-      expect(updatedCheckpoint?.parserContractVersion).toBe('3')
+      expect(updatedCheckpoint?.parserContractVersion).toBe('4')
       expect(updatedCheckpoint?.lastStatus).toBe('ok')
 
       const claudeRow = report.rows.find((r) => r.harnessId === 'claude-desktop')

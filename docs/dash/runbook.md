@@ -6,7 +6,7 @@ status: current
 component: KyberDash
 source-root: dash
 owner: dpalfery
-last-reviewed: 2026-10-01
+last-reviewed: 2026-10-03
 code-refs:
   - registerKyberCommands
   - refreshHarnessSources
@@ -172,7 +172,11 @@ commits with `commitSourceUnit`, then runs `purgeExpiredContent` (14-day content
 projection over `buildSessions` that the live OTLP receiver also drives. Output is a
 per-harness table plus a derived summary; diagnostics for `failed`/`partial` rows go to
 stderr without chat content or raw paths. Use a temporary `--db` when experimenting. There is
-no dashboard refresh button.
+no dashboard refresh button. Claude family sources bump `PARSER_CONTRACT_VERSION` to `4`
+when the emitted `synth:` parts shape changes; run `kyberdash dash refresh` so checkpoints
+re-synthesize historical Desktop/Code sessions onto the new contract (empty inspector blocks
+after that refresh still mean the transcript had no conversation/tool-result text — see the
+[telemetry inventory](telemetry-inventory.md)).
 
 Coverage window persistence: every refresh run records its window in
 `refresh_run.history_weeks` (schema 15). The value is the `--history-weeks` argument of

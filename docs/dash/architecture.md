@@ -6,7 +6,7 @@ component: KyberDash
 source-root: dash
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-02
+last-reviewed: 2026-10-03
 decided-by:
   - adr/0020-kyberdash-one-time-fork
   - adr/0008-kyberdash-single-canonical-store
@@ -49,6 +49,8 @@ code-refs:
   - projectCanonicalStore
   - CanonicalProjectionScheduler
   - buildContextReport
+  - ClaudeContentReader
+  - READER_UNMEASURABLE
 ---
 
 # KyberDash architecture
@@ -387,6 +389,22 @@ most efficient. Content readers (such as `copilotVscodeReader` and `cursorReader
 into input-side `ReaderTurn` snapshots without attributing current response text to input context or
 inventing unobserved prefix history. Where total tokens and context window are known, pressure is
 measured independently from whether individual composition buckets are available.
+
+**Claude Desktop / Claude Code file ingest and the turn inspector.**
+`ClaudeContentReader` (`dash/src/synth/readers/claude.ts`) serves the Claude family
+providers (`claude`, `claude-code`, `claude-cli`, `claude-desktop`, …) through
+`PROVIDER_READERS`. From on-disk JSONL transcripts it buckets `text` / `thinking` into
+`conversation_history` and `tool_result` into `tool_result_content`, and pairs those parts
+onto `synth:` spans so the turn inspector
+(`GET /api/kyber/session/:id/turn/:index/content`) can show them when the transcript
+carries them. `system_prompt` and `tool_definitions` stay
+`not_measurable` for that family — they are listed in `READER_UNMEASURABLE` because Claude
+injects the runtime system prompt and tool schemas and never writes them to the transcript.
+kyberdash does not fabricate those buckets from counters. An empty inspector after
+`dash refresh` means the transcript (or that turn) had no conversation/tool-result blocks
+to capture — honest absence under [#184](https://github.com/dpalfery/kyber-weave/issues/184)
+empty-state UX — not a turn-numbering or resolver bug. Per-harness signal detail lives in
+the [telemetry inventory](telemetry-inventory.md).
 
 ### Store
 
