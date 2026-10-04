@@ -47,6 +47,8 @@ public static class SquadSourceLoader
         "antigravity", "warp", "factory", "pi", "zcode", "devin"
     };
 
+    private static readonly string[] TargetScopedProfileTargets = ["copilot", "devin"];
+
     /// <summary>Loads the default bundle from a canonical product source root.</summary>
     public static SquadSource Load(string root)
     {
@@ -252,17 +254,17 @@ public static class SquadSourceLoader
             YamlMappingNode profile = RequireMapping(node, name, file.RelativePath, nodeIsValue: true);
             EnsureOnlyFields(profile, ["target", "permissions"], file.RelativePath);
             string? target = TryGetScalar(profile, "target", file.RelativePath);
-            if (target is not null)
+            if (target is not null &&
+                !TargetScopedProfileTargets.Contains(target, StringComparer.Ordinal))
             {
-                if (!string.Equals(target, "copilot", StringComparison.Ordinal) &&
-                    !string.Equals(target, "devin", StringComparison.Ordinal))
-                {
-                    SquadSourceValidator.Throw(
-                        $"Capability profile '{name}' uses unsupported target '{target}'.",
-                        $"profiles.{name}.target",
-                        file.RelativePath,
-                        "Use 'copilot' or 'devin' for a target-specific capability profile or omit target for a shared profile.");
-                }
+                string allowed = string.Join(
+                    " or ",
+                    TargetScopedProfileTargets.Select(static name => $"'{name}'"));
+                SquadSourceValidator.Throw(
+                    $"Capability profile '{name}' uses unsupported target '{target}'.",
+                    $"profiles.{name}.target",
+                    file.RelativePath,
+                    $"Use {allowed} for a target-specific capability profile or omit target for a shared profile.");
             }
 
             YamlMappingNode permissionsNode = RequireMapping(profile, "permissions", file.RelativePath);

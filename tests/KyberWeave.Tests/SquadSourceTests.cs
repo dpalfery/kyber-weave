@@ -605,6 +605,33 @@ public sealed class SquadSourceTests
     }
 
     /// <summary>
+    /// A typo in <c>target:</c> on a capability profile must fail at load, not
+    /// become an unmarked shared profile that later evaporates at render.
+    /// </summary>
+    [Fact]
+    public void LoadCapabilityProfileWithUnknownTargetFailsClosed()
+    {
+        using SquadFixture fixture = SquadFixture.CreateValid();
+        fixture.Replace(
+            "profiles/capabilities.yml",
+            "profiles:\n",
+            "profiles:\n" +
+            "  mistyped-devin:\n" +
+            "    target: devni\n" +
+            "    permissions:\n" +
+            "      filesystem.read: allow\n" +
+            "      filesystem.write: allow\n" +
+            "      delegate: ask\n");
+
+        Diagnostic diagnostic = AssertInvalid(fixture, "profiles/capabilities.yml", "devni");
+
+        Assert.Contains("unsupported target", diagnostic.Message, StringComparison.Ordinal);
+        Assert.Contains("copilot", diagnostic.Hint!, StringComparison.Ordinal);
+        Assert.Contains("devin", diagnostic.Hint!, StringComparison.Ordinal);
+        Assert.Contains("profiles.mistyped-devin.target", diagnostic.Subject, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// Devin lowers primary identities to skills and never consults
     /// <c>devin-capability-profile</c> for their tools, so a named override on a
     /// primary agent would validate and then evaporate.
