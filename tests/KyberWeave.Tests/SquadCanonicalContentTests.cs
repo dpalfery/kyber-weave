@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
@@ -378,6 +379,27 @@ public sealed class SquadCanonicalContentTests
         Assert.Contains("STATUS: DESIGN_GAP", skillContract, StringComparison.Ordinal);
         Assert.Contains("GAPS:", skillContract, StringComparison.Ordinal);
         Assert.Contains("OPEN_QUESTIONS:", skillContract, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CapabilityProfilesSchemaAllowsTheTargetScopedVocabulary()
+    {
+        string path = Path.Combine(ProductRoot, "schemas", "capability-profiles.schema.json");
+        using JsonDocument document = JsonDocument.Parse(File.ReadAllText(path));
+        JsonElement target = document.RootElement
+            .GetProperty("properties")
+            .GetProperty("profiles")
+            .GetProperty("additionalProperties")
+            .GetProperty("properties")
+            .GetProperty("target");
+
+        Assert.False(target.TryGetProperty("const", out _));
+        string?[] allowed =
+        [
+            .. target.GetProperty("enum").EnumerateArray().Select(item => item.GetString())
+        ];
+        Assert.All(allowed, Assert.NotNull);
+        Assert.Equal(["copilot", "devin"], allowed);
     }
 
     [Fact]
