@@ -1,5 +1,5 @@
 import { readdir, stat } from "fs/promises";
-import { basename, join, resolve } from "path";
+import { basename, join } from "path";
 import { homedir } from "os";
 
 import { getShortModelName } from "../pricing/models.js";
@@ -544,22 +544,8 @@ class DevinSessionParser implements SessionParser {
   }
 }
 
-function expandHome(p: string): string {
-  if (p === '~') return homedir();
-  if (p.startsWith('~/') || p.startsWith('~\\')) {
-    return join(homedir(), p.slice(2));
-  }
-  return p;
-}
-
 function resolveDevinCliDir(override?: string): string {
-  if (override && override.trim()) {
-    return resolve(expandHome(override.trim()));
-  }
-  if (process.env['DEVIN_CLI_DIR'] && process.env['DEVIN_CLI_DIR'].trim()) {
-    return resolve(expandHome(process.env['DEVIN_CLI_DIR'].trim()));
-  }
-  return DEFAULT_DEVIN_CLI_DIR;
+  return override && override.trim() ? override : DEFAULT_DEVIN_CLI_DIR;
 }
 
 function getDevinDiscoveryRoots(cliDir: string): {
@@ -648,4 +634,4 @@ export function createDevinProvider(cliDir?: string): Provider {
   };
 }
 
-export const devin = createDevinProvider();
+export const devin = createDevinProvider(DEFAULT_DEVIN_CLI_DIR);

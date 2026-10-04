@@ -1,7 +1,7 @@
 import { createRequire } from 'node:module'
 import { mkdir, mkdtemp, rm, writeFile } from 'fs/promises'
 import { join } from 'path'
-import { homedir, tmpdir } from 'os'
+import { tmpdir } from 'os'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { isSqliteAvailable } from '../ingest/sqlite.js'
@@ -160,46 +160,6 @@ describe('devin provider', () => {
     } finally {
       stderr.mockRestore()
       resetDevinMissingRateWarningForTests()
-    }
-  })
-
-  it('honors DEVIN_CLI_DIR environment variable for discovery', async () => {
-    const customCliDir = join(tmpDir, 'custom-devin')
-    const transcriptsDir = join(customCliDir, 'transcripts')
-    await mkdir(transcriptsDir, { recursive: true })
-    const filePath = join(transcriptsDir, 'custom.json')
-    await writeFile(filePath, JSON.stringify({ steps: [] }))
-
-    process.env['DEVIN_CLI_DIR'] = customCliDir
-    try {
-      const provider = createDevinProvider()
-      const sources = await provider.discoverSessions()
-      expect(sources).toEqual([
-        { path: filePath, project: 'devin', provider: 'devin' },
-      ])
-    } finally {
-      delete process.env['DEVIN_CLI_DIR']
-    }
-  })
-
-  it('expands leading tilde in DEVIN_CLI_DIR to absolute path', async () => {
-    const sub = `.tmp-devin-test-${Date.now()}`
-    const targetDir = join(homedir(), sub)
-    const transcriptsDir = join(targetDir, 'transcripts')
-    await mkdir(transcriptsDir, { recursive: true })
-    const filePath = join(transcriptsDir, 'tilde.json')
-    await writeFile(filePath, JSON.stringify({ steps: [] }))
-
-    process.env['DEVIN_CLI_DIR'] = `~/${sub}`
-    try {
-      const provider = createDevinProvider()
-      const sources = await provider.discoverSessions()
-      expect(sources).toEqual([
-        { path: filePath, project: 'devin', provider: 'devin' },
-      ])
-    } finally {
-      delete process.env['DEVIN_CLI_DIR']
-      await rm(targetDir, { recursive: true, force: true })
     }
   })
 

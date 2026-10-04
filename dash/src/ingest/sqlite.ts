@@ -13,14 +13,14 @@ import { getCacheDir } from './cache-dir.js'
 
 const requireForSqlite = createRequire(import.meta.url)
 
-export type Row = Record<string, unknown>
+type Row = Record<string, unknown>
 
 export type SqliteDatabase = {
   query<T extends Row = Row>(sql: string, params?: unknown[]): T[]
   close(): void
 }
 
-export type DatabaseSyncInstance = {
+type DatabaseSyncInstance = {
   prepare(sql: string): { all(...params: unknown[]): Row[] }
   exec?(sql: string): void
   close(): void
@@ -288,23 +288,9 @@ export function copyFileBestEffort(sourcePath: string, destinationPath: string):
   }
 }
 
-let copyFileImpl: (sourcePath: string, destinationPath: string) => void = copyFileBestEffort
-
-export function setSqliteCopyFileForTest(fn: typeof copyFileSync | ((sourcePath: string, destinationPath: string) => void) | null): void {
-  copyFileImpl = (fn as ((sourcePath: string, destinationPath: string) => void) | null) ?? copyFileBestEffort
-}
-
-let openImmutableHook: ((url: string) => DatabaseSyncInstance | void) | null = null
-
-export function setSqliteOpenImmutableForTest(
-  fn: ((url: string) => DatabaseSyncInstance | void) | null,
-): void {
-  openImmutableHook = fn
-}
-
 function copyOptionalFile(sourcePath: string, destinationPath: string): boolean {
   try {
-    copyFileImpl(sourcePath, destinationPath)
+    copyFileBestEffort(sourcePath, destinationPath)
     return true
   } catch (err) {
     if (errorCode(err) === 'ENOENT') return false
@@ -392,7 +378,7 @@ function readOnlyCachePath(sourcePath: string, fingerprint: DatabaseFingerprint)
   const tempBase = `${cachePath}.tmp-${process.pid}-${randomBytes(8).toString('hex')}`
   const tempWal = tempBase + '-wal'
   try {
-    copyFileImpl(sourcePath, tempBase)
+    copyFileBestEffort(sourcePath, tempBase)
     const copiedWal = copyOptionalFile(sourcePath + '-wal', tempWal)
 
     // Do not publish a cache made from a moving database. A live WAL writer will
@@ -418,12 +404,6 @@ function openReadonlyCache(path: string, originalError: unknown): DatabaseSyncIn
   const Driver = DatabaseSync
   if (Driver === null) throw new Error(getSqliteLoadError())
 
-  function openImmutable(url: string): DatabaseSyncInstance {
-    const overridden = openImmutableHook?.(url)
-    if (overridden) return overridden
-    return new Driver!(url, { readOnly: true })
-  }
-
   let fingerprint: DatabaseFingerprint
   try {
     fingerprint = fingerprintDatabase(path)
@@ -439,7 +419,7 @@ function openReadonlyCache(path: string, originalError: unknown): DatabaseSyncIn
   // and read the source in place.
   if (fingerprint.walBytes === 0 && sqliteSupportsUriFilenames()) {
     try {
-      return openImmutable(`${pathToFileURL(path).href}?immutable=1`)
+      return new Driver(`${pathToFileURL(path).href}?immutable=1`, { readOnly: true })
     } catch {
       // Understood but refused: the copy covers it.
     }
@@ -449,21 +429,6 @@ function openReadonlyCache(path: string, originalError: unknown): DatabaseSyncIn
   try {
     cachedPath = readOnlyCachePath(path, fingerprint)
   } catch (err) {
-    // Same gate as the empty-WAL fast path above: immutable ignores -wal frames,
-    // so a nonempty WAL would silently drop committed rows.
-    if (errorCode(err) === 'EPERM' && fingerprint.walBytes === 0 && sqliteSupportsUriFilenames()) {
-      try {
-        const db = openImmutable(`${pathToFileURL(path).href}?immutable=1`)
-        warnSqliteOnce(
-          path,
-          `kyberdash: SQLite database ${path} cannot be copied (${describeError(err)}); ` +
-          'falling back to direct immutable read.\n',
-        )
-        return db
-      } catch {
-        // Direct immutable read also failed; fall through to warning and throw
-      }
-    }
     warnSqliteOnce(
       path,
       `kyberdash: SQLite database ${path} is in a read-only directory and its cache copy could not be written ` +
