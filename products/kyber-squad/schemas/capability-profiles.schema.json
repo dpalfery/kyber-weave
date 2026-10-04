@@ -18,7 +18,7 @@
         "additionalProperties": false,
         "required": ["permissions"],
         "properties": {
-          "target": { "const": "copilot" },
+          "target": { "enum": ["copilot", "devin"] },
           "permissions": {
             "type": "object",
             "additionalProperties": { "enum": ["deny", "ask", "allow"] }
