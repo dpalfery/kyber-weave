@@ -5,7 +5,7 @@ doc-type: architecture
 component: KyberSquad
 source-root: src/KyberWeave.Core/Squad
 owner: dpalfery
-last-reviewed: 2026-10-03
+last-reviewed: 2026-10-04
 status: current
 decided-by:
   - adr/0017-copilot-deterministic-tool-order
@@ -13,6 +13,7 @@ decided-by:
   - adr/0022-antigravity-native-agents
   - adr/0024-squad-global-receipt-layout-marker
   - adr/0025-devin-native-agents-and-skill-lowering
+  - adr/0028-devin-target-scoped-authoring-capability-profiles
 keywords:
   - multi-harness
   - deployment
@@ -104,7 +105,7 @@ Kyber-Squad treats agent and skill definitions as strictly typed, immutable sour
 - **Normalization Pipeline**: `SquadSourceLoader` parses frontmatter against `schemas/agent.schema.json`, validates capability bindings, computes an immutable SHA-256 instruction digest over the normalized body, and emits a structured `AgentIR` model.
 - **Strict Invariants**: Loaders reject undeclared profiles, missing capabilities, invalid invocation modes, path traversal attempts, or unrecognized frontmatter keys.
 - **Canonical Skills and Resources**: `SquadSourceLoader` loads the 24 top-level `SKILL.md`
-  identities. The canonical tree separately retains 67 supplemental files, giving 91 recursive
+  identities. The canonical tree separately retains 68 supplemental files, giving 92 recursive
   skill-tree files; `SquadPacker` carries that complete recursive tree into both package formats.
 
 ---
@@ -372,11 +373,19 @@ and validates.
 | `zcode` | `ZCodeRenderer` | `.zcode/agents/<name>.md`; the primary agent lowers to `.zcode/commands/<name>.md` | `.zcode/skills/<name>/SKILL.md` | Native |
 | `devin` | `DevinRenderer` | `.devin/agents/<name>/AGENT.md` | `.devin/skills/<name>/SKILL.md` (conductor lowered here) | Native |
 
-- **Copilot-only projection inputs**: each canonical agent declares exact `copilot-tools`, and
-  may name a target-scoped `copilot-capability-profile`. These fields validate and render the
-  Copilot allow-list and safety degradation only. They do not replace or widen the shared
-  `capability-profile`, fallback metadata, description, or instruction body consumed by other
-  renderers.
+- **Target-scoped projection inputs**: each canonical agent declares exact `copilot-tools`, and may
+  name a target-scoped `copilot-capability-profile` or `devin-capability-profile`. These fields
+  validate and render that one target's allow-list and safety degradation only. They do not replace
+  or widen the shared `capability-profile`, fallback metadata, description, or instruction body
+  consumed by other renderers. `DevinRenderer` resolves `agent.DevinCapabilityProfile ??
+  agent.CapabilityProfile` for every permission lookup it performs — granted tools, degradation
+  records, MCP entitlement, and the pure-orchestrator exclusion — so an agent that names none
+  renders exactly as before. Validation is what keeps the envelope scoped: a profile marked
+  `target: devin` is rejected as an agent's shared `capability-profile`, a
+  `devin-capability-profile` naming a profile without that marker is rejected,
+  and a primary agent naming one is rejected because Devin lowers primaries to
+  skills with no tool allow-list
+  ([ADR 0028](../adr/0028-devin-target-scoped-authoring-capability-profiles.md)).
 - **Copilot tool order ([ADR 0017](../adr/0017-copilot-deterministic-tool-order.md))**:
   `CopilotRenderer` emits `CopilotToolCatalog.Normalize(agent.CopilotTools)` — membership from
   the agent, order from one global catalog sequence (`vscode`, `read`, `todo`, MCP wildcards,
@@ -439,6 +448,29 @@ and validates.
   subagents, so it must never start the conductor by description match. Devin also loads
   `.agents/` natively and imports `.claude/`, `.github/skills/`, and `.windsurf/skills/` by
   default, so `squad doctor` warns when a workspace would load a Squad identity twice.
+- **`devin` cannot create a file with its write tools, so the authoring roles are granted a
+  target-scoped shell** ([ADR 0028](../adr/0028-devin-target-scoped-authoring-capability-profiles.md)).
+  The grant above is an upper bound on `allowed-tools`, not a statement about the tools the harness
+  hands the model: on the Devin CLI the tool exposed for file changes is `edit`, `apply_patch`
+  requires `agent.codex_tools`, and `edit` fails when the destination does not exist. A role whose
+  only write path is that tool can edit an artifact but not create one, so `architect` stopped at
+  `STATUS: PLAN_WRITE_ERROR` on a plan it had already drafted. Two grants produce that failure
+  together — `ask` narrows to withheld on subagents, and the shared profiles hold `process.execute:
+  ask` (`architect`) or `deny` (`product-planning`). `architect-devin` and
+  `product-planning-devin` mirror their shared profiles with `process.execute: allow`. Both roles
+  carry the matching initialise-before-edit instruction: `architect` in its plan-authoring
+  reference, and `product-owner` in its agent body and the skill's spec-authoring reference
+  (it cannot own an agent sidecar: a same-named skill already occupies the ZCode skills
+  directory that sidecar would need). Each tells the role to initialise a destination that
+  does not exist before editing. `architect`'s `PLAN_READY`
+  contract and `product-owner`'s `SPEC_FINALIZED` contract require `docs validate` and
+  `docs drift` to pass. `docs-dev` and `task-reviewer` deliberately name no
+  Devin profile and keep narrowing: neither has an execution-dependent completion contract, and a
+  grant with no reader is not made. With `filesystem.write: allow` beside the shell, these two roles
+  also no longer raise `capability-not-isolable` on Devin. The conductor's `intake-path`, `plan-path`,
+  and `spec-path` references pre-create an empty destination before dispatching, and again before
+  redispatching a role that reported a write error on a nonexistent file — the harness-neutral
+  fallback for any harness that withholds file creation from subagents.
 - **The one target-local exception to verbatim links is `zcode`**: ZCode scans both
   `.zcode/agents/` and `.zcode/commands/` recursively, so a closure beside its principal would
   register as phantom agents and commands rather than as resources. `ZCodeRenderer` therefore
@@ -460,7 +492,7 @@ and validates.
 - **Copilot emit today**: `CopilotRenderer` writes each agent's
   `.github/agents/<name>.agent.md` and each skill's `.github/skills/<name>/SKILL.md`, then
   `SquadResourceProjection.Append` places every file that owner's Markdown links reach beside
-  the principal. A fresh Copilot render is 121 files — 21 agents, 24 skills, plus projected
+  the principal. A fresh Copilot render is 122 files — 21 agents, 24 skills, plus projected
   closures — with authored relative links resolving in the output; every skill resource
   reaches this render except `skills/setup-dev-environment/agents/openai.yaml`, which stays
   packaged-only Codex skill-UI metadata. That count is the current
@@ -472,7 +504,7 @@ and validates.
   six explicitly evolved skills (`bug-crusher`, `code-review`, `product-owner`, `second-brain`,
   `create-pull-request`, and `pr-review-fix-comments`) still matches Hotshot golden bytes;
   `create-pull-request-github` is retired into `create-pull-request`. Canonical source and both
-  recursive package formats retain all 67 skill resources (91 files under
+  recursive package formats retain all 68 skill resources (92 files under
   `products/kyber-squad/skills/`) and resolve the retained references. Every retained resource
   now has a reviewed disposition in the
   [skill-resource dispositions audit](skill-resource-dispositions.md): non-policy content stays
@@ -607,6 +639,7 @@ Regression pins live in `tests/KyberWeave.Tests/SquadCanonicalContentTests.cs` a
 - [ADR 0017](../adr/0017-copilot-deterministic-tool-order.md) — Copilot tool membership and global emission order
 - [ADR 0021](../adr/0021-zcode-command-lowering-and-resource-relocation.md) — ZCode command lowering and resource relocation
 - [ADR 0022](../adr/0022-antigravity-native-agents.md) — Native per-agent Antigravity rendering and cross-target capability-not-isolable degradation
+- [ADR 0028](../adr/0028-devin-target-scoped-authoring-capability-profiles.md) — Devin target-scoped authoring profiles and the conductor pre-creation fallback
 - [Kyber-Squad adoption guide](onboarding.md) — CLI commands, flags, and workflows
 - [Requirements and degradation contract](requirements.md) — KS-001 through KS-008 specifications and the conductor execution circuit-breaker
 - [Configuration](../configuration.md) — repository configuration options

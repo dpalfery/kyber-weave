@@ -5,7 +5,7 @@ The plan file is durable state. A live agent instance is disposable.
 ## Start or resume
 
 1. Resolve the plans directory and **<plan-index>** through Config Reg, then read the index.
-2. Use a prompt-supplied `PLAN_FILE` only when its canonical path remains beneath the plans directory. If none is supplied, create a date-prefixed Draft plan and its index row before broad discovery.
+2. Use a prompt-supplied `PLAN_FILE` only when its canonical path remains beneath the plans directory. If none is supplied, create a date-prefixed Draft plan and its index row before broad discovery. On harnesses where file editing requires an existing destination file (such as Devin), initialize the file via shell (for example, `touch <file>`) before editing.
 3. Reconcile body status, frontmatter lifecycle, and index status in the same save. The body status is authoritative when they disagree.
 4. Reconcile conductor-supplied answers against the decision ledger before more discovery.
 5. Save after every discovery batch and before every status handoff.
