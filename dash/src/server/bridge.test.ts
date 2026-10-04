@@ -5,7 +5,12 @@ import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 
 import { CanonStore } from '../canon/store.js'
-import { KyberBridge, type ProblemRow, type QuarantineRow } from './bridge.js'
+import {
+  KyberBridge,
+  SHARE_DROP_WARN_LIMIT,
+  type ProblemRow,
+  type QuarantineRow,
+} from './bridge.js'
 
 type QuarantineRowWithTimestamp = QuarantineRow & { timestamp?: string | null }
 
@@ -501,9 +506,9 @@ describe('bridge compareRuns: empty execution keys fall back to the run id (issu
   })
 
   it('evicts the oldest share-drop warn key at the bound instead of clearing all', () => {
-    // SHARE_DROP_WARN_LIMIT is 1024. Pre-fill the private dedupe set, then drive
-    // one more distinct drop through recordsForShare so overflow is exercised
-    // without inserting 1025 full compare fixtures.
+    // Pre-fill the private dedupe set to the module bound, then drive one more
+    // distinct drop through recordsForShare so overflow is exercised without
+    // inserting SHARE_DROP_WARN_LIMIT + 1 full compare fixtures.
     type ShareDropInternals = {
       warnedShareDrops: Set<string>
       recordsForShare(
@@ -512,7 +517,7 @@ describe('bridge compareRuns: empty execution keys fall back to the run id (issu
       ): { records: unknown[]; dropNote?: string }
     }
     const internals = bridge as unknown as ShareDropInternals
-    const limit = 1024
+    const limit = SHARE_DROP_WARN_LIMIT
     const oldestKey = 'cursor\0sess-oldest'
     const newestSession = 'sess-newest'
     const newestKey = `cursor\0${newestSession}`

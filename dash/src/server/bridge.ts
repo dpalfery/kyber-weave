@@ -480,7 +480,7 @@ const DEFAULT_REOPEN_CHECK_INTERVAL_MS = 1000
 const STAT_FAILURE_WARN_INTERVAL_MS = 60_000
 
 /** Max distinct key+harness share-drop warnings remembered before the oldest entry is evicted. */
-const SHARE_DROP_WARN_LIMIT = 1024
+export const SHARE_DROP_WARN_LIMIT = 1024
 
 /**
  * Unclipped inspector payload. `_clip` stays on the session list and the
