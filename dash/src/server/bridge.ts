@@ -7,7 +7,12 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { createRequire } from 'node:module'
 import { APPROXIMATE_TOKENIZER, tokenizerName } from '../canon/tokens.js'
-import { normalizeHarnessName } from '../canon/measurability.js'
+import {
+  SessionIdentities,
+  canonicalHarnessId,
+  normalizeHarnessName,
+} from '../canon/measurability.js'
+import { dedupeTwinTurns } from '../canon/twin-dedupe.js'
 import { refreshProcessIsAlive } from '../canon/refresh-run.js'
 import {
   CanonStore,
@@ -473,6 +478,9 @@ const DEFAULT_REOPEN_CHECK_INTERVAL_MS = 1000
  * injected `now`, so it is deterministic under test.
  */
 const STAT_FAILURE_WARN_INTERVAL_MS = 60_000
+
+/** Max distinct key+harness share-drop warnings remembered before the oldest entry is evicted. */
+export const SHARE_DROP_WARN_LIMIT = 1024
 
 /**
  * Unclipped inspector payload. `_clip` stays on the session list and the
@@ -964,6 +972,20 @@ export class KyberBridge {
    * note on {@link reconcile}.
    */
   private lastStatFailureWarnAt?: number
+  /**
+   * Memoized session-identity map for compare. Keyed by a cheap records
+   * generation fingerprint (`COUNT`/`MAX(rowid)` plus file identity) so the
+   * full-table `SELECT DISTINCT` is not paid on every compare click; invalidated
+   * when records change or the owned handle is replaced.
+   */
+  private identitiesMemo?: { db: DatabaseSync; generation: string; value: SessionIdentities }
+  /**
+   * `key\0harness` pairs whose share-drop warning was already logged, so a
+   * Compare click on the same empty share does not re-warn forever. Bounded
+   * by {@link SHARE_DROP_WARN_LIMIT} (oldest entry evicted on overflow);
+   * cleared when the owned handle closes.
+   */
+  private readonly warnedShareDrops = new Set<string>()
 
   constructor(options?: KyberBridgeOptions) {
     this.canonPath =
@@ -1138,6 +1160,8 @@ export class KyberBridge {
       }
     }
     this.canonDb = undefined
+    this.identitiesMemo = undefined
+    this.warnedShareDrops.clear()
   }
 
   /**
@@ -1181,6 +1205,7 @@ export class KyberBridge {
    */
   close(): void {
     this.closed = true
+    this.identitiesMemo = undefined
     if (this.store && typeof this.store.getDatabase === 'function' && this.canonDb === this.store.getDatabase()) {
       this.canonDb = undefined
     } else {
@@ -1945,30 +1970,156 @@ export class KyberBridge {
   }
 
   /**
-   * Records belonging to a run via its executions' session keys.
-   * Thin load for `compareRuns` — does not re-derive run boundaries (D16).
+   * Cheap generation fingerprint for the identities memo: file identity (when
+   * owned) plus `PRAGMA data_version` (moves when another connection commits
+   * — ingest, backfill) and `total_changes()` (moves on any INSERT, UPDATE or
+   * DELETE through this connection, e.g. `CanonStore.setSessionId`). Both
+   * survive in-place updates and delete-then-reinsert, which a row count or
+   * max rowid would not, and neither scans `records`.
    */
-  private recordsForRun(runId: string): CanonicalRecord[] {
-    const executions = this.listExecutions(runId)
-    const keys = [
-      ...new Set(
-        executions.map((execution) => execution.sessionId ?? execution.executionId).filter((key) => key.length > 0),
-      ),
-    ]
-    if (keys.length === 0) {
-      return this.recordsForSessionKey(runId)
+  private identitiesGeneration(db: DatabaseSync): string | undefined {
+    const fileKey = this.identity
+      ? `${this.identity.dev}:${this.identity.ino}`
+      : this.canonPath
+    try {
+      const version = db.prepare('PRAGMA data_version').get() as { data_version: number } | undefined
+      const changes = db.prepare('SELECT total_changes() AS n').get() as { n: number } | undefined
+      if (version === undefined || changes === undefined) return undefined
+      return `${fileKey}:${version.data_version}:${changes.n}`
+    } catch {
+      // Unknown generation: never serve or store a memo (see sessionIdentities).
+      return undefined
     }
+  }
+
+  /** Persisted share ids for the current store — same table `buildRuns` reads. */
+  private sessionIdentities(): SessionIdentities {
+    const db =
+      this.store && typeof this.store.getDatabase === 'function'
+        ? this.store.getDatabase()
+        : this.getDb()
+    if (!db) return new SessionIdentities([])
+    if (!this.store && !this.hasTable(db, 'records')) return new SessionIdentities([])
+
+    const generation = this.identitiesGeneration(db)
+    if (
+      generation !== undefined &&
+      this.identitiesMemo?.db === db &&
+      this.identitiesMemo.generation === generation
+    ) {
+      return this.identitiesMemo.value
+    }
+
+    let value: SessionIdentities
+    if (this.store) {
+      value = this.store.sessionIdentities()
+    } else {
+      try {
+        const pairs = db
+          .prepare(
+            `SELECT DISTINCT COALESCE(session_id, trace_id) AS key, harness
+             FROM records
+             WHERE COALESCE(session_id, trace_id) IS NOT NULL`,
+          )
+          .all() as { key: string; harness: string }[]
+        value = new SessionIdentities(pairs)
+      } catch (err) {
+        console.warn('[KyberBridge] Failed reading session identities from canon.db:', err)
+        // A failed read is not a generation's answer — do not memoize it.
+        return new SessionIdentities([])
+      }
+    }
+    this.identitiesMemo = generation === undefined ? undefined : { db, generation, value }
+    return value
+  }
+
+  /**
+   * One harness share of a session key — mirrors `CanonStore.recordsForShare`.
+   * When records exist under the key but the harness filter (including
+   * excluded identities where `canonicalHarnessId` is null) drops them all,
+   * returns a `dropNote` for the side's `metricsReason` and warns once per
+   * key+harness (not once per Compare click).
+   */
+  private recordsForShare(
+    key: string,
+    harness: string,
+  ): { records: CanonicalRecord[]; dropNote?: string } {
+    const all = this.recordsForSessionKey(key)
+    const canonical = normalizeHarnessName(harness)
+    const records = all.filter(
+      (record) => canonicalHarnessId(record.harness) === canonical,
+    )
+    if (all.length === 0 || records.length > 0) return { records }
+    const excluded = canonicalHarnessId(harness) === null
+    const dropNote = excluded
+      ? `harness ${JSON.stringify(harness)} is an excluded identity; dropped ${all.length} record(s) under session key ${JSON.stringify(key)}`
+      : `no records matched harness ${JSON.stringify(harness)}; dropped ${all.length} record(s) under session key ${JSON.stringify(key)}`
+    const warnKey = `${canonical}\0${key}`
+    if (!this.warnedShareDrops.has(warnKey)) {
+      if (this.warnedShareDrops.size >= SHARE_DROP_WARN_LIMIT) {
+        const oldest = this.warnedShareDrops.values().next()
+        if (!oldest.done) this.warnedShareDrops.delete(oldest.value)
+      }
+      this.warnedShareDrops.add(warnKey)
+      console.warn(`[KyberBridge] Compare share: ${dropNote}`)
+    }
+    return { records, dropNote }
+  }
+
+  /**
+   * Records belonging to a run via its executions' session keys.
+   * Resolves qualified ids through `SessionIdentities.shareOf`, dedupes twin
+   * collectors per harness-scoped share, and returns only `llm.invoke` model
+   * turns (issue #190). `identities` is computed once per compare request.
+   */
+  private recordsForRun(
+    runId: string,
+    identities: SessionIdentities,
+  ): { records: CanonicalRecord[]; dropNotes: string[] } {
+    const executions = this.listExecutions(runId)
+    type Lookup = { key: string; harness: string }
+    const lookups: Lookup[] = []
     const seen = new Set<string>()
+    for (const execution of executions) {
+      // Empty string is a present but unusable session id — fall through
+      // to executionId (?? would keep "" and drop the execution's key).
+      const key = execution.sessionId || execution.executionId
+      if (!key || key.length === 0) continue
+      const harness = execution.harness
+      const dedupeId = `${normalizeHarnessName(harness)}\0${key}`
+      if (seen.has(dedupeId)) continue
+      seen.add(dedupeId)
+      lookups.push({ key, harness })
+    }
+    // Executions can exist without selecting any session key (empty ids);
+    // the run id itself stays the lookup key in that case.
+    if (lookups.length === 0) {
+      const harness =
+        executions[0]?.harness ?? this.getRun(runId)?.harness ?? 'unknown'
+      lookups.push({ key: runId, harness })
+    }
+    const seenSpanIds = new Set<string>()
     const records: CanonicalRecord[] = []
-    for (const key of keys) {
-      for (const record of this.recordsForSessionKey(key)) {
-        if (seen.has(record.spanId)) continue
-        seen.add(record.spanId)
+    const dropNotes: string[] = []
+    for (const { key: sessionId, harness } of lookups) {
+      const share = identities.shareOf(sessionId)
+      // One predicate for both the share hit and the share-miss fallback —
+      // recordsForShare scopes by harness and surfaces excluded-identity drops.
+      const { records: shareRecords, dropNote } = this.recordsForShare(
+        share?.key ?? sessionId,
+        share?.harness ?? harness,
+      )
+      if (dropNote !== undefined) dropNotes.push(dropNote)
+      const deduped = dedupeTwinTurns(shareRecords, share?.key ?? sessionId)
+      for (const record of deduped) {
+        if (record.op !== 'llm.invoke') continue
+        if (seenSpanIds.has(record.spanId)) continue
+        seenSpanIds.add(record.spanId)
         records.push(record)
       }
     }
     records.sort((a, b) => String(a.timestamp).localeCompare(String(b.timestamp)))
-    return records
+    return { records, dropNotes }
   }
 
   /**
@@ -1980,6 +2131,11 @@ export class KyberBridge {
     const runB = this.getRun(runBId)
     if (runA === undefined || runB === undefined) return null
 
+    // Identities are memoized per store generation — the DISTINCT scan reruns
+    // only after `records` changes, not on every compare request.
+    const identities = this.sessionIdentities()
+    const loadedA = this.recordsForRun(runA.runId, identities)
+    const loadedB = this.recordsForRun(runB.runId, identities)
     const summary = compareStoredRuns(
       {
         runId: runA.runId,
@@ -1987,7 +2143,7 @@ export class KyberBridge {
         ...(runA.label ? { label: runA.label } : {}),
         ...(runA.workingDirectory !== undefined ? { workingDirectory: runA.workingDirectory } : {}),
         ...(runA.outcome !== undefined ? { outcome: runA.outcome } : {}),
-        turns: this.recordsForRun(runA.runId),
+        turns: loadedA.records,
       },
       {
         runId: runB.runId,
@@ -1995,13 +2151,22 @@ export class KyberBridge {
         ...(runB.label ? { label: runB.label } : {}),
         ...(runB.workingDirectory !== undefined ? { workingDirectory: runB.workingDirectory } : {}),
         ...(runB.outcome !== undefined ? { outcome: runB.outcome } : {}),
-        turns: this.recordsForRun(runB.runId),
+        turns: loadedB.records,
       },
       options,
     )
 
+    // Tell the person staring at an empty side why its records were dropped,
+    // not just the log file (only when the side resolved no turns at all).
+    const withDropNotes = (side: ComparisonSummary['runA'], notes: string[]): ComparisonSummary['runA'] =>
+      side.availability === 'unavailable' && side.turnCount === undefined && notes.length > 0
+        ? { ...side, metricsReason: `${side.metricsReason} (${notes.join('; ')})` }
+        : side
+
     return {
       ...summary,
+      runA: withDropNotes(summary.runA, loadedA.dropNotes),
+      runB: withDropNotes(summary.runB, loadedB.dropNotes),
       pairs: summary.pairs.map((pair) => {
         const stripRaw = (turn: (typeof pair)['runATurn']) => {
           if (turn === null) return null
