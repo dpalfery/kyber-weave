@@ -385,7 +385,8 @@ public sealed class SquadCanonicalContentTests
     /// Pins the published schema enum, the loader vocabulary, and the
     /// canonical <c>target:</c> markers to one set so a <c>const: copilot</c>
     /// schema, a fourth or typo target in capabilities.yml, or a stale
-    /// schema entry fails closed.
+    /// schema entry fails closed. Membership is compared as sets: enum
+    /// order is not a published contract.
     /// </summary>
     [Fact]
     public void CapabilityProfilesSchemaAllowsTheTargetScopedVocabulary()
@@ -400,12 +401,16 @@ public sealed class SquadCanonicalContentTests
             .GetProperty("target");
 
         Assert.False(target.TryGetProperty("const", out _));
-        string?[] schemaTargets =
+        string[] schemaTargets =
         [
-            .. target.GetProperty("enum").EnumerateArray().Select(item => item.GetString())
+            .. target.GetProperty("enum").EnumerateArray()
+                .Select(item => item.GetString())
+                .OfType<string>()
         ];
-        Assert.All(schemaTargets, Assert.NotNull);
-        Assert.Equal(SquadSourceLoader.TargetScopedProfileTargets, schemaTargets);
+        Assert.Equal(target.GetProperty("enum").GetArrayLength(), schemaTargets.Length);
+        Assert.Equal(
+            SquadSourceLoader.TargetScopedProfileTargets.Order(StringComparer.Ordinal),
+            schemaTargets.Order(StringComparer.Ordinal));
 
         string[] declaredTargets = ReadCapabilityProfileTargets();
         Assert.All(

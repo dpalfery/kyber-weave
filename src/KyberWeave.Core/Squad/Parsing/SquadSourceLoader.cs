@@ -51,8 +51,10 @@ public static class SquadSourceLoader
     /// Internal so the canonical-content pin can compare the published schema enum
     /// and the <c>target:</c> markers in capabilities.yml against the same set the
     /// loader enforces. The schema file is not applied at load time.
+    /// <c>IReadOnlyList&lt;string&gt;</c> keeps the widened field from remaining a
+    /// mutable array another assembly can reorder.
     /// </remarks>
-    internal static readonly string[] TargetScopedProfileTargets = ["copilot", "devin"];
+    internal static readonly IReadOnlyList<string> TargetScopedProfileTargets = ["copilot", "devin"];
 
     /// <summary>Loads the default bundle from a canonical product source root.</summary>
     public static SquadSource Load(string root)
