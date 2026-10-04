@@ -692,6 +692,17 @@ turns (auxiliary and tool records do not inflate turn counts), and deduplicates 
 when repeated execution keys appear in one run. Phase alignment and token totals operate on
 that deduped turn set only.
 
+The share-miss fallback goes through the same `recordsForShare` harness predicate as a share
+hit. When that predicate drops every record under a key (an excluded identity such as Gemini,
+or a sibling harness), the side's `metricsReason` names the drop and the bridge warns once per
+key and harness rather than on every Compare request. `SessionIdentities` is memoized on the
+bridge per database handle and store generation — `PRAGMA data_version` (commits from other
+connections, such as ingest or backfill) plus `total_changes()` (any write through the bridge's
+own connection, including in-place `UPDATE`s like `setSessionId`) — so the
+`SELECT DISTINCT … FROM records` scan reruns only after the store changes. Per-phase
+`phaseSummaries` token fields follow the totals rule: a phase with any unmeasurable turn omits
+`tokensA`/`tokensB`/`tokenDelta` and carries the first coverage gap as `tokensUnavailableReason`.
+
 **Current-pair measurement vs recommendation history.** Token totals, per-run turn counts, and
 phase-aligned pairs describe the two runs the user selected now. They are independent of
 recommendation-history sufficiency: the n ≥ 5 completed-pair guard in Decision D11 applies

@@ -1491,8 +1491,11 @@ export function compareRuns(
     const phasePairs = pairs.filter((p) => p.phase === phase)
     const turnsA = phasePairs.filter((p) => p.runATurn !== null).length
     const turnsB = phasePairs.filter((p) => p.runBTurn !== null).length
-    let tokensA: number | undefined = 0
-    let tokensB: number | undefined = 0
+    // Sums cover measurable turns only and are published only when no turn in
+    // the phase lacked token telemetry (`tokensUnavailableReason` unset) — the
+    // same honesty contract as totals; a partial sum is never emitted.
+    let tokensA = 0
+    let tokensB = 0
     let tokensUnavailableReason: string | undefined
     let costA: number | undefined
     let costB: number | undefined
@@ -1501,10 +1504,10 @@ export function compareRuns(
       if (p.runATurn) {
         const tokens = getComparableTurnTokens(p.runATurn)
         if (tokens === undefined) {
-          tokensUnavailableReason =
+          // First coverage gap wins on both sides — never iteration-order dependent.
+          tokensUnavailableReason ??=
             tokenCoverageUnavailable(p.runATurn) ?? 'Token telemetry unavailable'
-          tokensA = undefined
-        } else if (tokensA !== undefined) {
+        } else {
           tokensA += tokens
         }
         const c = getTurnCost(p.runATurn)
@@ -1513,12 +1516,9 @@ export function compareRuns(
       if (p.runBTurn) {
         const tokens = getComparableTurnTokens(p.runBTurn)
         if (tokens === undefined) {
-          tokensUnavailableReason =
-            tokensUnavailableReason ??
-            tokenCoverageUnavailable(p.runBTurn) ??
-            'Token telemetry unavailable'
-          tokensB = undefined
-        } else if (tokensB !== undefined) {
+          tokensUnavailableReason ??=
+            tokenCoverageUnavailable(p.runBTurn) ?? 'Token telemetry unavailable'
+        } else {
           tokensB += tokens
         }
         const c = getTurnCost(p.runBTurn)
@@ -1526,15 +1526,6 @@ export function compareRuns(
       }
     }
 
-    // One unmeasurable turn withholds the whole phase token rollup — same
-    // honesty contract as totals (never publish a zero-inflated delta).
-    if (tokensUnavailableReason !== undefined) {
-      tokensA = undefined
-      tokensB = undefined
-    }
-
-    const tokenDelta =
-      tokensA !== undefined && tokensB !== undefined ? tokensB - tokensA : undefined
     const costDelta =
       costA !== undefined && costB !== undefined ? costB - costA : undefined
 
@@ -1542,21 +1533,20 @@ export function compareRuns(
     if (tokensUnavailableReason !== undefined) {
       reading = `Phase ${phase}: ${turnsA} turns in Run A; ${turnsB} turns in Run B. Tokens unavailable (${tokensUnavailableReason}).`
     } else if (turnsA === 0 && turnsB > 0) {
-      reading = `Phase ${phase}: Omitted in Run A; Run B executed ${turnsB} turns (${(tokensB ?? 0).toLocaleString()} tokens).`
+      reading = `Phase ${phase}: Omitted in Run A; Run B executed ${turnsB} turns (${tokensB.toLocaleString()} tokens).`
     } else if (turnsB === 0 && turnsA > 0) {
-      reading = `Phase ${phase}: Executed ${turnsA} turns in Run A (${(tokensA ?? 0).toLocaleString()} tokens); omitted in Run B.`
+      reading = `Phase ${phase}: Executed ${turnsA} turns in Run A (${tokensA.toLocaleString()} tokens); omitted in Run B.`
     } else {
-      reading = `Phase ${phase}: ${turnsA} turns in Run A (${(tokensA ?? 0).toLocaleString()} tokens); ${turnsB} turns in Run B (${(tokensB ?? 0).toLocaleString()} tokens).`
+      reading = `Phase ${phase}: ${turnsA} turns in Run A (${tokensA.toLocaleString()} tokens); ${turnsB} turns in Run B (${tokensB.toLocaleString()} tokens).`
     }
 
     phaseSummaries[phase] = {
       phase,
       turnsA,
       turnsB,
-      ...(tokensA !== undefined ? { tokensA } : {}),
-      ...(tokensB !== undefined ? { tokensB } : {}),
-      ...(tokenDelta !== undefined ? { tokenDelta } : {}),
-      ...(tokensUnavailableReason !== undefined ? { tokensUnavailableReason } : {}),
+      ...(tokensUnavailableReason === undefined
+        ? { tokensA, tokensB, tokenDelta: tokensB - tokensA }
+        : { tokensUnavailableReason }),
       costA,
       costB,
       costDelta,

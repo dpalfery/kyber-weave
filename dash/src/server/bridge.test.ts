@@ -198,6 +198,9 @@ describe('bridge compareRuns: empty execution keys fall back to the run id (issu
   })
 
   afterEach(() => {
+    // Spies die with the test whatever its verdict — a failed assertion must
+    // not leave console.warn or db.prepare mocked for later tests.
+    vi.restoreAllMocks()
     bridge.close()
     store.close()
     rmSync(tempDir, { recursive: true, force: true })
@@ -477,16 +480,24 @@ describe('bridge compareRuns: empty execution keys fall back to the run id (issu
 
     expect(summary).not.toBeNull()
     expect(summary!.runA.availability).toBe('unavailable')
-    expect(
-      warn.mock.calls.some(
+    const shareDropWarnings = () =>
+      warn.mock.calls.filter(
         (args) =>
           typeof args[0] === 'string' &&
           args[0].includes('[KyberBridge]') &&
           args[0].includes('excluded') &&
           args[0].includes('gemini'),
-      ),
-    ).toBe(true)
-    warn.mockRestore()
+      ).length
+    expect(shareDropWarnings()).toBe(1)
+    // The empty side explains the drop in its own reason, not only the log.
+    if (summary!.runA.availability === 'unavailable') {
+      expect(summary!.runA.metricsReason).toContain('excluded identity')
+      expect(summary!.runA.metricsReason).toContain('dropped 1 record(s)')
+    }
+
+    // A second Compare click on the same empty share does not re-warn.
+    expect(bridge.compareRuns('run-gemini-excl', 'run-cursor-peer')).not.toBeNull()
+    expect(shareDropWarnings()).toBe(1)
   })
 
   it('memoizes session identities across compareRuns until records change', () => {
@@ -581,7 +592,26 @@ describe('bridge compareRuns: empty execution keys fall back to the run id (issu
       (args) => typeof args[0] === 'string' && args[0].includes('SELECT DISTINCT COALESCE(session_id'),
     ).length
     expect(afterChangeCalls).toBe(2)
-    prepareSpy.mockRestore()
+
+    const distinctCalls = () =>
+      prepareSpy.mock.calls.filter(
+        (args) => typeof args[0] === 'string' && args[0].includes('SELECT DISTINCT COALESCE(session_id'),
+      ).length
+
+    // In-place UPDATE from another connection (backfill's setSessionId): row
+    // count and max rowid are unchanged, but data_version moves — must miss.
+    store.setSessionId('span-memo-extra', 'sess-memo-moved')
+    expect(bridge.compareRuns('run-memo-a', 'run-memo-b')).not.toBeNull()
+    expect(distinctCalls()).toBe(3)
+
+    // In-place UPDATE on the bridge's own connection: total_changes() moves.
+    db.prepare('UPDATE records SET session_id = ? WHERE span_id = ?').run('sess-memo-a', 'span-memo-extra')
+    expect(bridge.compareRuns('run-memo-a', 'run-memo-b')).not.toBeNull()
+    expect(distinctCalls()).toBe(4)
+
+    // No writes since: warm memo again.
+    expect(bridge.compareRuns('run-memo-a', 'run-memo-b')).not.toBeNull()
+    expect(distinctCalls()).toBe(4)
   })
 })
 

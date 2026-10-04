@@ -684,6 +684,36 @@ describe('compareRuns availability when a side has no comparable turns (issue #1
     expect(phase.reading).toMatch(/tokens unavailable/i)
     expect(phase.reading).not.toMatch(/\b0 tokens\b/)
   })
+
+  it('reports the first coverage gap on both sides regardless of iteration order', () => {
+    const gap = (reason: string) =>
+      makeTurn('exploration', { measurability: { token_usage: notMeasurable(reason) } })
+    const summary = compareRuns(
+      { runId: 'run-a', harness: 'cursor', outcome: successOutcome(), turns: [gap('A first gap'), gap('A second gap')] },
+      { runId: 'run-b', harness: 'cursor', outcome: successOutcome(), turns: [gap('B gap')] },
+    )
+    const phase = summary.phaseSummaries.exploration
+    expect(phase.tokensUnavailableReason).toContain('A first gap')
+    expect(phase.tokensUnavailableReason).not.toContain('A second gap')
+  })
+
+  it('publishes measured phase tokens and delta when every turn is measurable', () => {
+    const summary = compareRuns(
+      { runId: 'run-a', harness: 'cursor', outcome: successOutcome(), turns: [makeTurn('exploration')] },
+      {
+        runId: 'run-b',
+        harness: 'cursor',
+        outcome: successOutcome(),
+        turns: [makeTurn('exploration'), makeTurn('exploration')],
+      },
+    )
+    const phase = summary.phaseSummaries.exploration
+    expect(phase.tokensA).toBe(1150)
+    expect(phase.tokensB).toBe(2300)
+    expect(phase.tokenDelta).toBe(1150)
+    expect(phase.tokensUnavailableReason).toBeUndefined()
+    expect(phase.reading).toContain(`${(1150).toLocaleString()} tokens`)
+  })
 })
 
 describe('compareRuns omits inferred recommendation history (issue #190)', () => {
