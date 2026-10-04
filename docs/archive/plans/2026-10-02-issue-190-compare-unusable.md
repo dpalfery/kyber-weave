@@ -84,7 +84,7 @@ ontology, and without "fixing" the disclosed host test failures below.
 | D1 | **Q1 → (a):** Fix `recordsForRun` to mirror findings/runs: `sessionIdentities().shareOf(id)` then `recordsForShare` / bare `recordsForSession`; apply the same twin-dedupe scope findings use (`dedupeTwinTurns` per execution). Keep `alignByPhase` on `CanonicalRecord`s (phase inference preserved). Options (b)/(c) declined for this PR. | Conductor-relayed answer Q1=a, 2026-10-02; approve-and-execute "Hal approves" |
 | D2 | **Q2 → (a):** Approved as client default-exclude of `is_subagent` / zero-`turnCount` runs with optional "Show subagents" toggle; defer twin-run collapse. **DROPPED at merge** — 56edaf9 took main's Compare UI (#269); acb15fa removed the orphaned keyed `isSubagent` enrichment. As shipped: harness filter only (no subagent exclusion, no zero-turn filter, no toggle). Options (b)/(c)/(d) declined for this PR. | Conductor-relayed answer Q2=a, 2026-10-02; approve-and-execute "Hal approves"; DROPPED at merge (acb15fa) |
 | D3 | **Q3 → (a):** Both pickers start empty with "Select a run"; fetch comparison only when both ids are non-empty, distinct, and explicitly set. Treat deep-link / `initialRunAId` / `initialRunBId` as explicit selection (not silent list default). Options (b)/(c-as-auto-default) declined. | Conductor-relayed answer Q3=a (+ deep-link as explicit), 2026-10-02; approve-and-execute "Hal approves" |
-| D4 | **Q4 → (a):** Option label `{localDate} · {harness} · {turnCount}t · {tokens} · {shortId}` with optional `label` prefix when present; `tokens` = measured input+output or "—" when absent. When truncated labels collide, append a unique cwd basename (or a stable ordinal) to the visible `<option>` text; put full `runId` + `workingDirectory` on the `<select>` `title` (not `<option title>` — Chrome does not surface those). Server-composed `displayLabel` (c) declined for this PR. | Conductor-relayed answer Q4=a, 2026-10-02; approve-and-execute "Hal approves"; as-shipped collision disambiguation (commit 1be212a) |
+| D4 | **Q4 → (a):** Approved as option label with date/harness/size/id and truncation-collision disambiguation. **As shipped after merge** (main's Compare UI via 56edaf9): `formatRunOption` = `{date} · {harness} · {turnCount} turns · {name}` only — no tokens field, no truncation-collision suffix, no `<select title>` / tooltip. Pre-merge collision work (1be212a) was superseded with the file. Server-composed `displayLabel` (c) declined for this PR. | Conductor-relayed answer Q4=a, 2026-10-02; approve-and-execute "Hal approves"; post-merge: labels only (no tooltip, no collision disambiguation) |
 | A7 | Approve-and-execute: finalize Draft → Ready; implementation may proceed on T1–T6 under D1–D4. | Explicit user approval relayed as "Hal approves", 2026-10-02 |
 
 All ledger questions (Q1–Q4) are resolved into D1–D4; none remain open. The Draft
@@ -154,14 +154,15 @@ Docs MCP unavailable — fallback path used (see provenance above).
 ## Test contract (`test-first`)
 
 Locked to D1–D4 (Q1=a, Q2=a, Q3=a with deep-link as explicit selection, Q4=a
-with tooltip on truncation collision). Changing this contract returns the plan
-to Draft and requires reapproval.
+as labels only after merge — no tooltip, no truncation-collision
+disambiguation). Changing this contract returns the plan to Draft and requires
+reapproval.
 
 | Task | Test project or file | Runner command | Observable behavior | RED evidence required | GREEN acceptance |
 |---|---|---|---|---|---|
 | T1 (RED) | `dash/src/server/kyber-bridge.test.ts` and/or `dash/src/server/kyber-api.test.ts` (compare/runs) | `npm --prefix dash exec vitest run src/server/kyber-bridge.test.ts src/server/kyber-api.test.ts` (narrow `-t` compare/split as needed) | Store with a **split-share** session key (two harnesses on one raw key) → executions carry claimed `sessionId` → `GET /api/kyber/compare/runs` (or `bridge.compareRuns`) returns `runA.turnCount` / `runB.turnCount` > 0 and `pairs.length` > 0 when records exist; bare-key (non-split) runs still compare; twin-dedupe scope matches findings when both apply | New assertions fail on current `recordsForRun` | — |
 | T2 (GREEN) | same | same | Same assertions pass after D1 join fix (`shareOf` → `recordsForShare` + twin-dedupe; phase inference via `alignByPhase` preserved) | — | Focused file(s) green; no fabricated sample data on 404 paths |
-| T3 (RED→GREEN) | `dash/web/src/components/analysis/kyber-views.test.tsx` and/or new `CompareRuns` test module | `npm --prefix dash exec vitest run src/components/analysis/kyber-views.test.tsx` (and new file if added) | Both pickers expose empty "Select a run"; no auto-select of `runs[0]`; fetch only when both ids explicitly set (deep-link/`initial*` count as explicit); options use `date · harness · Nt · tokens · shortId` (optional label prefix); tooltip with full runId + cwd when truncation collides; default list omits `is_subagent` / zero-`turnCount` runs with a "Show subagents" toggle | UI assertions fail on current markup/defaults | Pass after D2–D4 UI work |
+| T3 (RED→GREEN) | `dash/web/src/components/analysis/kyber-views.test.tsx` and/or new `CompareRuns` test module | `npm --prefix dash exec vitest run src/components/analysis/kyber-views.test.tsx` (and new file if added) | Both pickers expose empty "Select a run"; no auto-select of `runs[0]`; fetch only when both ids explicitly set (deep-link/`initial*` count as explicit); options use `date · harness · N turns · name` (labels only — no tooltip, no truncation-collision disambiguation); harness filter only (D2 subagent/zero-turn + toggle DROPPED at merge) | UI assertions fail on current markup/defaults | Pass after D3–D4 UI work retained post-merge |
 | T4 (RED→GREEN) | `dash/src/analysis/compare-runs.test.ts` (non-regression) | `npm --prefix dash exec vitest run src/analysis/compare-runs.test.ts` | Existing phase-align / sufficiency / outcome-guard contracts remain green; add fixture only if D1 needs pure `alignByPhase` coverage beyond bridge | Any accidental break shows RED | Full file green |
 | T5 | docs / plan inventory | `dotnet run --project src/KyberWeave.Cli --no-build -c Release -- docs validate .` and `docs drift .` | Architecture/runbook only if prose must name the share-resolved compare load; plan archived on finishing PR | N/A (docs gate) | Zero findings; `KW-DOC-LIFECYCLE-003` clear at merge |
 | T6 | review / host disclose | `npm --prefix dash run typecheck && npm --prefix dash run lint && npm --prefix dash run test && npm --prefix dash run check:reachable` | Suite green aside from A3 disclosures | N/A | Council + disclose migration + cursor DATE-ROT |
@@ -203,9 +204,10 @@ to Draft and requires reapproval.
   `dash/web/src/lib/kyberApi.ts` types if enriched; tests under
   `kyber-views.test.tsx` or dedicated Compare test.
 - **Acceptance:** Placeholders on A and B; no silent list default; deep-link /
-  `initial*` treated as explicit; labels show date/harness/size/shortId; tooltip
-  on truncation collision; default filter matches D2 with show-subagents toggle;
-  branding test still green (A4).
+  `initial*` treated as explicit; labels show `date · harness · N turns · name`
+  only (no tooltip, no truncation-collision disambiguation — pre-merge 1be212a
+  work superseded at merge); harness filter only (D2 DROPPED); branding test
+  still green (A4).
 - **Dependencies:** none beyond Ready (disjoint files from T1/T2).
 - **Required skills:** `test-dev` then TypeScript UI.
 
@@ -267,7 +269,7 @@ on the same `/api/kyber/runs` route T1/T2 touch.
 |---|---|
 | Fixing share resolution floods Compare with tool/aux spans as "turns" | D1 uses findings-style load + twin dedupe; revisit llm.invoke filter only with RED evidence vs Run Detail |
 | Filtering subagents hides the only comparable ZCode pair a user wants | D2 toggle "Show subagents"; never delete rows from the store |
-| Label truncation collides two runs | D4 appends unique cwd basename (or ordinal) to visible option text; full runId + cwd on the select `title` |
+| Label truncation collides two runs | Accepted risk post-merge: labels only (`formatRunOption`); no collision suffix or select `title` (pre-merge 1be212a superseded) |
 | Direct-DB bridge path bypasses `CanonStore.sessionIdentities` | T2 acceptance: same resolution or explicit store-required behavior with a test |
 | Host `ts-test` failures trip review engine | A3 disclose-only; do not expand scope to migration/DATE-ROT |
 
