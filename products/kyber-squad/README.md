@@ -57,7 +57,7 @@ products/kyber-squad/
 │   ├── task-reviewer/                  # Progressive-disclosure references (Markdown)
 │   ├── tauri-dev.md
 │   └── test-dev.md
-├── skills/                             # 24 canonical skill directories; 91 recursive files
+├── skills/                             # 24 canonical skill directories; 92 recursive files
 │   ├── app-docs-standard/
 │   ├── architecture-decision-record/
 │   ├── azure-cli/
