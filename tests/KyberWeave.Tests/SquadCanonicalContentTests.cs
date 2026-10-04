@@ -1,3 +1,5 @@
+using System.Text.Json;
+using System.Text.RegularExpressions;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
 using Xunit;
@@ -10,6 +12,30 @@ public sealed class SquadCanonicalContentTests
     private const string MigrationSchema = "kyber-squad.migration/v1";
     private const string MigrationSourceCommit = "677c3a876ba9c62f1083608596b238c9deaff167";
     private const string DefaultOrchestrationTrigger = "default entry point";
+
+    /// <summary>
+    /// Closed <c>CIRCUIT_BREAKER_TRIGGER</c> vocabulary. Presence checks cannot
+    /// reject a fifth token, so harvested trigger lines must equal this set.
+    /// </summary>
+    private static readonly string[] CircuitBreakerTriggerTokens =
+    [
+        "BLAST_RADIUS_EXCEEDED",
+        "INVARIANT_CONTRADICTION",
+        "ITERATION_CAP_EXCEEDED",
+        "THRASH_OSCILLATION_DETECTED",
+    ];
+
+    private static readonly Regex CircuitBreakerTriggerEnumeration = new(
+        @"CIRCUIT_BREAKER_TRIGGER:\s*<(?<list>[^>]+)>",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    private static readonly Regex CircuitBreakerTriggerSingleton = new(
+        @"CIRCUIT_BREAKER_TRIGGER:\s*`?(?<token>[A-Z][A-Z0-9_]*)`?(?!\s*[|<])",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    private static readonly Regex CircuitBreakerTriggerToken = new(
+        @"[A-Z][A-Z0-9_]*",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
     private static readonly string[] RetiredAgentIdentities =
     [
@@ -282,6 +308,50 @@ public sealed class SquadCanonicalContentTests
     }
 
     [Fact]
+    public void LoadConductorDefinesIterationCircuitBreakerAndOscillationDetection()
+    {
+        string contract = ReadAgentContract("conductor");
+
+        Assert.Contains("circuit-breaker", contract, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("loop detection", contract, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("failure cluster", contract, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("oscillation", contract, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Maximum of 2 rework dispatches", contract, StringComparison.Ordinal);
+        Assert.Contains("ITERATION_CAP_EXCEEDED", contract, StringComparison.Ordinal);
+        Assert.Contains("THRASH_OSCILLATION_DETECTED", contract, StringComparison.Ordinal);
+        Assert.Contains("INVARIANT_CONTRADICTION", contract, StringComparison.Ordinal);
+        Assert.Contains("BLAST_RADIUS_EXCEEDED", contract, StringComparison.Ordinal);
+        Assert.Contains("ESCALATION: circuit-breaker", contract, StringComparison.Ordinal);
+        Assert.Contains("RECOMMENDED_ACTION", contract, StringComparison.Ordinal);
+        AssertClosedCircuitBreakerTriggerSet(contract);
+    }
+
+    [Theory]
+    [InlineData("csharp-dev")]
+    [InlineData("test-dev")]
+    [InlineData("github-devops")]
+    public void LoadDeveloperAgentsDefineJevCheckpointsAndIterationCircuitBreaker(string agentName)
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadAgent agent = Assert.Single(source.Agents, a => a.Name == agentName);
+
+        Assert.Contains("Maximum of 3 incremental", agent.InstructionBody, StringComparison.Ordinal);
+        Assert.Contains("JEV", agent.InstructionBody, StringComparison.Ordinal);
+        Assert.Contains("circuit breaker", agent.InstructionBody, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("STATUS: ESCALATION", agent.InstructionBody, StringComparison.Ordinal);
+        Assert.Contains("CIRCUIT_BREAKER_TRIGGER", agent.InstructionBody, StringComparison.Ordinal);
+        Assert.Contains("ITERATION_CAP_EXCEEDED", agent.InstructionBody, StringComparison.Ordinal);
+        Assert.Contains("THRASH_OSCILLATION_DETECTED", agent.InstructionBody, StringComparison.Ordinal);
+        Assert.Contains("INVARIANT_CONTRADICTION", agent.InstructionBody, StringComparison.Ordinal);
+        Assert.Contains("BLAST_RADIUS_EXCEEDED", agent.InstructionBody, StringComparison.Ordinal);
+        Assert.Contains("FAILURE_CLUSTER", agent.InstructionBody, StringComparison.Ordinal);
+        Assert.Contains("CONTRADICTORY_INVARIANTS", agent.InstructionBody, StringComparison.Ordinal);
+        Assert.Contains("BLAST_RADIUS", agent.InstructionBody, StringComparison.Ordinal);
+        Assert.Contains("RECOMMENDED_ACTION", agent.InstructionBody, StringComparison.Ordinal);
+        AssertClosedCircuitBreakerTriggerSet(agent.InstructionBody);
+    }
+
+    [Fact]
     public void LoadProductOwnerIsHeadlessAndReturnsStructuredPhaseAndGapMarkers()
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
@@ -290,11 +360,68 @@ public sealed class SquadCanonicalContentTests
 
         Assert.DoesNotContain("ask, verbatim", productOwner.InstructionBody, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("GATE 1", productOwner.InstructionBody, StringComparison.Ordinal);
+        Assert.Contains("Invoke the `product-owner` skill", productOwner.InstructionBody, StringComparison.Ordinal);
+        Assert.Contains(
+            "initialize the file via shell (for example, `touch <file>`) before editing.",
+            productOwner.InstructionBody,
+            StringComparison.Ordinal);
+        Assert.Empty(productOwner.Resources);
+        SquadSkill productOwnerSkill = Assert.Single(source.Skills, skill => skill.Name == "product-owner");
+        SquadResource specAuthoring = Assert.Single(
+            productOwnerSkill.Resources,
+            resource => resource.RelativePath == "references/spec-authoring.md");
+        Assert.Contains(
+            "initialize the file via shell (for example, `touch <file>`) before editing.",
+            specAuthoring.Content,
+            StringComparison.Ordinal);
         Assert.Contains("STATUS: READY_FOR_REVIEW", skillContract, StringComparison.Ordinal);
         Assert.Contains("STATUS: REQUIREMENTS_GAP", skillContract, StringComparison.Ordinal);
         Assert.Contains("STATUS: DESIGN_GAP", skillContract, StringComparison.Ordinal);
         Assert.Contains("GAPS:", skillContract, StringComparison.Ordinal);
         Assert.Contains("OPEN_QUESTIONS:", skillContract, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Pins the published schema enum, the loader vocabulary, and the
+    /// canonical <c>target:</c> markers to one set so a <c>const: copilot</c>
+    /// schema, a fourth or typo target in capabilities.yml, or a stale
+    /// schema entry fails closed. A non-string enum entry fails naming
+    /// its <c>ValueKind</c> and raw text. Membership is compared as
+    /// sets: enum order is not a published contract.
+    /// </summary>
+    [Fact]
+    public void CapabilityProfilesSchemaAllowsTheTargetScopedVocabulary()
+    {
+        string schemaPath = Path.Combine(ProductRoot, "schemas", "capability-profiles.schema.json");
+        using JsonDocument document = JsonDocument.Parse(File.ReadAllText(schemaPath));
+        JsonElement target = document.RootElement
+            .GetProperty("properties")
+            .GetProperty("profiles")
+            .GetProperty("additionalProperties")
+            .GetProperty("properties")
+            .GetProperty("target");
+
+        Assert.False(target.TryGetProperty("const", out _));
+        JsonElement allowed = target.GetProperty("enum");
+        string[] schemaTargets =
+        [
+            .. allowed.EnumerateArray().Select(item =>
+                item.ValueKind == JsonValueKind.String
+                    ? item.GetString()!
+                    : throw new InvalidOperationException(
+                        $"Capability-profile schema enum entry {item.ValueKind} '{item.GetRawText()}' is not a string."))
+        ];
+        Assert.Equal(
+            SquadSourceLoader.TargetScopedProfileTargets.Order(StringComparer.Ordinal),
+            schemaTargets.Order(StringComparer.Ordinal));
+
+        string[] declaredTargets = ReadCapabilityProfileTargets();
+        Assert.All(
+            declaredTargets,
+            name => Assert.Contains(name, SquadSourceLoader.TargetScopedProfileTargets));
+        Assert.All(
+            SquadSourceLoader.TargetScopedProfileTargets,
+            name => Assert.Contains(name, declaredTargets));
     }
 
     [Fact]
@@ -379,6 +506,20 @@ public sealed class SquadCanonicalContentTests
         name.EndsWith("-v2", StringComparison.Ordinal) ||
         name.EndsWith("-v3", StringComparison.Ordinal);
 
+    private static void AssertClosedCircuitBreakerTriggerSet(string contract)
+    {
+        string[] harvested = CircuitBreakerTriggerEnumeration.Matches(contract)
+            .SelectMany(match => CircuitBreakerTriggerToken.Matches(match.Groups["list"].Value)
+                .Select(token => token.Value))
+            .Concat(CircuitBreakerTriggerSingleton.Matches(contract)
+                .Select(match => match.Groups["token"].Value))
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.Equal(CircuitBreakerTriggerTokens, harvested);
+    }
+
     private static string ReadAgentContract(string name)
     {
         string agentRoot = Path.Combine(ProductRoot, "agents");
@@ -400,6 +541,32 @@ public sealed class SquadCanonicalContentTests
                 StringComparison.Ordinal));
 
         return string.Join("\n", references.Prepend(Path.Combine(agentRoot, $"{name}.md")).Select(File.ReadAllText));
+    }
+
+    private static string[] ReadCapabilityProfileTargets()
+    {
+        string path = Path.Combine(ProductRoot, "profiles", "capabilities.yml");
+        YamlStream yaml = new YamlStream();
+        yaml.Load(new StringReader(File.ReadAllText(path)));
+        YamlMappingNode root = RequireMapping(yaml.Documents.Single().RootNode, "root", path);
+        YamlMappingNode profiles = RequireMapping(RequireNode(root, "profiles", path), "profiles", path);
+
+        return profiles.Children
+            .Select(pair => RequireMapping(pair.Value, "profile", path))
+            .Select(profile =>
+            {
+                foreach (KeyValuePair<YamlNode, YamlNode> field in profile.Children)
+                {
+                    if (field.Key is YamlScalarNode { Value: "target" })
+                    {
+                        return RequireScalar(field.Value, "target", path);
+                    }
+                }
+
+                return null;
+            })
+            .OfType<string>()
+            .ToArray();
     }
 
     private static string ReadSkillContract(string name)

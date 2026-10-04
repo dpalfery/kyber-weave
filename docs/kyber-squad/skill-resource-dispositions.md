@@ -5,14 +5,14 @@ doc-type: reference
 status: current
 component: KyberSquad
 owner: dpalfery
-last-reviewed: 2026-09-30
+last-reviewed: 2026-10-04
 ---
 
 # Skill-resource dispositions and policy-line ledger
 
-This reference is the content-preservation audit for the 67 supplemental files that sit
+This reference is the content-preservation audit for the 68 supplemental files that sit
 beside the 24 canonical `SKILL.md` files under `products/kyber-squad/skills/`. It exists so
-that, for every one of those 67 resources, a reader can answer three questions: what kind of
+that, for every one of those 68 resources, a reader can answer three questions: what kind of
 content it is, what happens to it, and — where it states a rule a host could reverse — where
 that rule now lives. It is a governed `reference` document (D5) and it outlives the plan that
 created it,
@@ -110,6 +110,7 @@ it stands, not this ledger's quotations of what it used to say.
 | `skills/product-owner/references/closeout-phase.md` | procedure | retain-in-place | rendered | — | Spec-closeout phase procedure; not a host-reversible policy (D2). |
 | `skills/product-owner/references/design-phase.md` | procedure | retain-in-place | rendered | — | Spec-design phase procedure; not a host-reversible policy (D2). |
 | `skills/product-owner/references/requirements-phase.md` | procedure | retain-in-place | rendered | — | Spec-requirements phase procedure; not a host-reversible policy (D2). |
+| `skills/product-owner/references/spec-authoring.md` | procedure | retain-in-place | rendered | — | Spec start-or-resume procedure, including harness-neutral initialise-before-edit; not a host-reversible policy (D2). |
 | `skills/product-owner/references/tasks-phase.md` | procedure | retain-in-place | rendered | — | Spec-tasks phase procedure; not a host-reversible policy (D2). |
 | `skills/python-dev/references/fact-grounded-coding.md` | procedure | retain-in-place | rendered | — | Microsoft Learn / Pylance verification procedure, the same shape as the dal-dev Prime Directive; not a host-reversible policy (D2). |
 | `skills/python-dev/references/pylance-docs.md` | technique | retain-in-place | rendered | — | Pylance tool reference; not a host-reversible policy (D2). |
