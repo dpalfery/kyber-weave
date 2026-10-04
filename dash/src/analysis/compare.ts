@@ -791,21 +791,36 @@ export type ComparisonTotalsUnavailable = {
 
 export type ComparisonTotals = ComparisonTotalsMeasured | ComparisonTotalsUnavailable
 
-export type ComparisonRunSide = {
+/** Measured run side — `totalTokens` is required proof of the claim. */
+export type ComparisonRunSideMeasured = {
   runId: string
   harness: string
   label?: string
   outcome?: OutcomeBlock
-  /** Omitted when the run resolved no comparable model turns — never fabricated zero. */
-  totalTokens?: number
+  availability: 'measured'
+  totalTokens: number
   totalCost?: number
-  /** Omitted when comparable turns are unavailable — never fabricated zero. */
-  turnCount?: number
-  availability?: 'measured' | 'unavailable'
-  reason?: string
-  /** Per-run metrics unavailability reason consumed by CompareRuns (issue #190). */
-  metricsReason?: string
+  turnCount: number
 }
+
+/**
+ * Unavailable run side — token totals withheld (no turns, coverage gap, or
+ * incomplete telemetry). `turnCount` is present only when turns resolved.
+ */
+export type ComparisonRunSideUnavailable = {
+  runId: string
+  harness: string
+  label?: string
+  outcome?: OutcomeBlock
+  availability: 'unavailable'
+  reason: string
+  /** Per-run metrics unavailability reason consumed by CompareRuns (issue #190). */
+  metricsReason: string
+  totalCost?: number
+  turnCount?: number
+}
+
+export type ComparisonRunSide = ComparisonRunSideMeasured | ComparisonRunSideUnavailable
 
 export type ComparisonSummary = {
   runA: ComparisonRunSide
@@ -1067,8 +1082,17 @@ function getTurnCost(turn: RunTurn | null): number | undefined {
   return turn.cost.value
 }
 
-/** Measurability keys that gate whether turn token totals may be summed (issue #190). */
-const TOKEN_COVERAGE_KEYS = ['token_usage', 'total_input', 'total_output', 'total_tokens'] as const
+/**
+ * Measurability keys that gate whether turn token totals may be summed
+ * (issue #190). `cache_creation` is stamped `not_measurable` by Gemini and
+ * Antigravity and is folded into `getComparableTurnTokens` via `?? 0`, so a
+ * gap here would silently omit tokens. `reasoning` is deliberately omitted:
+ * Copilot stamps it `not_measurable` on every turn while still exporting
+ * measurable total-token counters, and the sum path does not fold reasoning
+ * in. Dead rollup names (`total_input` / `total_output` / `total_tokens`) are
+ * never stamped on a turn and are omitted.
+ */
+const TOKEN_COVERAGE_KEYS = ['token_usage', 'cache_creation'] as const
 
 function tokenCoverageUnavailable(turn: RunTurn): string | undefined {
   for (const key of TOKEN_COVERAGE_KEYS) {
@@ -1087,6 +1111,11 @@ function findRunTokenCoverageGap(
     const turn = toRunTurn(run.turns[i]!, i, run.turns.length)
     const reason = tokenCoverageUnavailable(turn)
     if (reason !== undefined) return reason
+    // A turn with no measurable counters is a coverage gap even when no
+    // measurability key was stamped — otherwise getTurnTokens would invent 0.
+    if (getComparableTurnTokens(turn) === undefined) {
+      return 'Token telemetry unavailable'
+    }
   }
   return undefined
 }
@@ -1118,14 +1147,28 @@ function buildComparisonRunSide(
     }
   }
 
+  if (tokenGapReason !== undefined) {
+    return {
+      runId: input.runId,
+      harness: input.harness,
+      label: input.label,
+      outcome: input.outcome,
+      availability: 'unavailable',
+      reason: tokenGapReason,
+      metricsReason: tokenGapReason,
+      ...(totalCost !== undefined ? { totalCost } : {}),
+      turnCount,
+    }
+  }
+
   return {
     runId: input.runId,
     harness: input.harness,
     label: input.label,
     outcome: input.outcome,
     availability: 'measured',
-    ...(tokenGapReason === undefined ? { totalTokens } : {}),
-    totalCost,
+    totalTokens,
+    ...(totalCost !== undefined ? { totalCost } : {}),
     turnCount,
   }
 }
@@ -1488,7 +1531,7 @@ export function compareRuns(
     }
   }
 
-  // Compute total aggregates
+  // Compute total aggregates — only measurable turn tokens; never getTurnTokens' 0.
   let totalTokensA = 0
   let totalTokensB = 0
   let totalCostA: number | undefined
@@ -1496,12 +1539,14 @@ export function compareRuns(
 
   for (const p of pairs) {
     if (p.runATurn) {
-      totalTokensA += getTurnTokens(p.runATurn)
+      const tokens = getComparableTurnTokens(p.runATurn)
+      if (tokens !== undefined) totalTokensA += tokens
       const c = getTurnCost(p.runATurn)
       if (c !== undefined) totalCostA = (totalCostA ?? 0) + c
     }
     if (p.runBTurn) {
-      totalTokensB += getTurnTokens(p.runBTurn)
+      const tokens = getComparableTurnTokens(p.runBTurn)
+      if (tokens !== undefined) totalTokensB += tokens
       const c = getTurnCost(p.runBTurn)
       if (c !== undefined) totalCostB = (totalCostB ?? 0) + c
     }

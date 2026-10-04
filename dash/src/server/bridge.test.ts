@@ -331,5 +331,72 @@ describe('bridge compareRuns: empty execution keys fall back to the run id (issu
     expect(summary!.runA.turnCount).toBe(1)
     expect(summary!.runB.turnCount).toBe(1)
   })
+
+  it('scopes twin-dedupe to the execution harness when share resolution misses', () => {
+    // Bare session key with two harnesses sharing near-identical counters —
+    // unscoped dedupeTwinTurns would collapse them; harness scoping keeps both
+    // runs' own turns.
+    const sessionKey = 'shared-bare-session'
+    db.prepare(
+      'INSERT INTO run (run_id, harness, grouping_basis) VALUES (?, ?, ?)',
+    ).run('run-cursor-share', 'cursor', 'derived')
+    db.prepare(
+      'INSERT INTO run (run_id, harness, grouping_basis) VALUES (?, ?, ?)',
+    ).run('run-copilot-share', 'copilot-cli', 'derived')
+    db.prepare(
+      `INSERT INTO execution
+       (execution_id, run_id, session_id, harness, is_root, parent_linkage_json)
+       VALUES (?, ?, ?, ?, 1, ?)`,
+    ).run('exec-cursor-share', 'run-cursor-share', sessionKey, 'cursor', JSON.stringify('measured'))
+    db.prepare(
+      `INSERT INTO execution
+       (execution_id, run_id, session_id, harness, is_root, parent_linkage_json)
+       VALUES (?, ?, ?, ?, 1, ?)`,
+    ).run(
+      'exec-copilot-share',
+      'run-copilot-share',
+      sessionKey,
+      'copilot-cli',
+      JSON.stringify('measured'),
+    )
+    for (const [spanId, harness] of [
+      ['span-cursor-share', 'cursor'],
+      ['span-copilot-share', 'copilot-cli'],
+    ] as const) {
+      db.prepare(
+        `INSERT INTO records
+         (span_id, source, harness, session_id, name, op, kind, timestamp,
+          duration_ms, status, tokens_json, content_json, cost_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        spanId,
+        'otel',
+        harness,
+        sessionKey,
+        'llm',
+        'llm.invoke',
+        'model',
+        '2026-10-01T00:00:00.000Z',
+        10,
+        'success',
+        JSON.stringify({
+          freshInput: 100,
+          cacheRead: 0,
+          cacheCreation: 0,
+          output: 10,
+          reportedInput: 100,
+          reportedOutput: 10,
+        }),
+        JSON.stringify({}),
+        JSON.stringify({}),
+      )
+    }
+
+    const summary = bridge.compareRuns('run-cursor-share', 'run-copilot-share')
+
+    expect(summary).not.toBeNull()
+    expect(summary!.runA.turnCount).toBe(1)
+    expect(summary!.runB.turnCount).toBe(1)
+  })
 })
 

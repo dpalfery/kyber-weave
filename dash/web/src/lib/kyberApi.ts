@@ -825,7 +825,6 @@ export interface KyberComparisonVerdict {
   summary?: string
   /** When history is not store-backed, the pair stays manual-only with no n / 5 display. */
   historyAvailability?: KyberComparisonAvailability | 'not_measured'
-  historyReason?: string
 }
 
 export interface KyberPhaseAlignedTurnPair {
@@ -837,40 +836,66 @@ export interface KyberPhaseAlignedTurnPair {
   reading: string
 }
 
-/** One run side of `GET /api/kyber/compare/runs`. Numeric fields may be absent when unavailable. */
-export interface KyberComparisonRunSide {
+/** Measured run side of `GET /api/kyber/compare/runs`. */
+export type KyberComparisonRunSideMeasured = {
   runId: string
   harness: string
   label?: string
   outcome?: unknown
-  totalTokens?: number
+  availability: 'measured'
+  totalTokens: number
   totalCost?: number
-  turnCount?: number
-  availability?: KyberComparisonAvailability
-  reason?: string
-  /** Per-run metrics unavailability reason (issue #190 additive field). */
-  metricsReason?: string
+  turnCount: number
 }
 
-/** Aggregate totals for a run pair; token delta exists only when both runs are comparable. */
-export interface KyberComparisonTotals {
-  tokensA?: number
-  tokensB?: number
-  tokenDelta?: number
-  turnCountA?: number
-  turnCountB?: number
-  turnDelta?: number
+/** Unavailable run side — token totals withheld; never a fabricated zero. */
+export type KyberComparisonRunSideUnavailable = {
+  runId: string
+  harness: string
+  label?: string
+  outcome?: unknown
+  availability: 'unavailable'
+  reason: string
+  /** Per-run metrics unavailability reason (issue #190). */
+  metricsReason: string
+  totalCost?: number
+  turnCount?: number
+  totalTokens?: never
+}
+
+export type KyberComparisonRunSide =
+  | KyberComparisonRunSideMeasured
+  | KyberComparisonRunSideUnavailable
+
+/** Aggregate totals for a run pair — mirrors the server `ComparisonTotals` union. */
+export type KyberComparisonTotalsMeasured = {
+  availability: 'measured'
+  tokensA: number
+  tokensB: number
+  tokenDelta: number
+  turnCountA: number
+  turnCountB: number
+  turnDelta: number
   costA?: number
   costB?: number
   costDelta?: number
-  costComparable?: boolean
+  costComparable: boolean
   costRefusalReason?: string
-  availability?: KyberComparisonAvailability
-  reason?: string
-  /** Explicit refusal when token delta cannot be reported (issue #190 additive field). */
-  tokenDeltaReason?: string
-  [key: string]: unknown
 }
+
+export type KyberComparisonTotalsUnavailable = {
+  availability: 'unavailable'
+  reason: string
+  turnCountA: number
+  turnCountB: number
+  turnDelta: number
+  costComparable: boolean
+  costRefusalReason?: string
+}
+
+export type KyberComparisonTotals =
+  | KyberComparisonTotalsMeasured
+  | KyberComparisonTotalsUnavailable
 
 /** `GET /api/kyber/compare/runs` body — engine `ComparisonSummary` without turn `raw`. */
 export interface KyberRunComparison {

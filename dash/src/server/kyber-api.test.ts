@@ -2507,4 +2507,24 @@ describe('GET /api/kyber/compare/runs split-identity and honest availability (is
       fixture.store.close()
     }
   })
+
+  it('rejects retired completedPairCount query parameter with 400', async () => {
+    const fixture = await seedSplitIdentityCompareFixture()
+    const bridge = new KyberBridge({ canonPath: ':memory:', store: fixture.store })
+    const server = await runWebDashboard({ port: 0, open: false, kyberBridge: bridge, writeStdout: () => {} })
+
+    try {
+      const compareBase = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
+      const res = await fetch(
+        `${compareBase}/api/kyber/compare/runs?runA=${encodeURIComponent(fixture.runAId)}&runB=${encodeURIComponent(fixture.runBId)}&completedPairCount=6`,
+      )
+      expect(res.status).toBe(400)
+      const body = (await res.json()) as { error?: string }
+      expect(String(body.error ?? '')).toContain('completedPairCount is not accepted')
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+      bridge.close()
+      fixture.store.close()
+    }
+  })
 })

@@ -506,7 +506,16 @@ export function handleKyberRequest(
       return true
     }
     // Recommendation history is not caller-supplied on the public route (issue
-    // #190): an arbitrary query count is not store-backed measurement.
+    // #190): an arbitrary query count is not store-backed measurement. Reject
+    // the retired parameter rather than silently ignoring it (same house rule
+    // as parseReportScope for a bad `days`).
+    if (url.searchParams.has('completedPairCount')) {
+      sendKyberJson(res, 400, {
+        error:
+          'completedPairCount is not accepted: recommendation history is not caller-supplied (issue #190)',
+      })
+      return true
+    }
     const comparison = bridge.compareRuns(runA, runB)
     if (!comparison) {
       sendKyberJson(res, 404, { error: 'Run not found' })

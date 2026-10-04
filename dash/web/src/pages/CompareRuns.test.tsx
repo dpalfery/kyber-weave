@@ -124,46 +124,46 @@ const emptyPhaseSummaries = {
   resolution: {},
 } as KyberRunComparison['phaseSummaries']
 
-/** Future-facing unavailable comparison the T2/T4 pair must render honestly. */
-function unavailableComparison(): KyberRunComparison & {
-  runA: KyberRunComparison['runA'] & { metricsReason?: string }
-  runB: KyberRunComparison['runB'] & { metricsReason?: string }
-  totals: Record<string, unknown>
-  verdict: KyberRunComparison['verdict'] & { historyReason?: string }
-} {
+/** Server-shaped unavailable comparison — mirrors `ComparisonSummary` from compare.ts. */
+function unavailableComparison(): KyberRunComparison {
   return {
     runA: {
       runId: 'cursor-run-latest',
       harness: 'cursor',
       label: 'Issue 190 baseline',
-      totalTokens: 0,
-      turnCount: 0,
+      availability: 'unavailable',
+      reason: 'no comparable canonical turns for Run A',
       metricsReason: 'no comparable canonical turns for Run A',
     },
     runB: {
       runId: 'claude-run-older',
       harness: 'claude-code',
       label: 'Claude candidate',
-      totalTokens: 0,
-      turnCount: 0,
+      availability: 'unavailable',
+      reason: 'no comparable canonical turns for Run B',
       metricsReason: 'no comparable canonical turns for Run B',
     },
     pairs: [],
     phaseSummaries: emptyPhaseSummaries,
     totals: {
-      tokenDelta: 0,
-      tokenDeltaReason: 'token totals are not comparable for this pair',
+      availability: 'unavailable',
+      reason: 'token totals are not comparable for this pair',
+      turnCountA: 0,
+      turnCountB: 0,
+      turnDelta: 0,
+      costComparable: true,
     },
     verdict: {
       status: 'insufficient_history',
       pairCount: 0,
-      completedPairCount: 0,
+      historyAvailability: 'unavailable',
       meetsSufficiencyThreshold: false,
       outcomeRegression: false,
       canPromote: false,
       recommendation: '',
       summary: '',
-      historyReason: 'recommendation history is not measured',
+      refusalReason:
+        'Recommendation promotion refused: completed pair history is unavailable. Auto-pairing is proposed only.',
     },
   }
 }
@@ -482,9 +482,133 @@ describe('CompareRuns: honest unavailable metrics (#190)', () => {
     const guard = screen.getByTestId('compare-n-guard')
     const text = guard.textContent ?? ''
 
+    expect(text).toContain('Recommendation history: —')
     expect(text).toContain('recommendation history is not measured')
+    expect(text).toContain('Token Delta: —')
+    expect(text).toContain('token totals are not comparable for this pair')
     expect(text).not.toMatch(/0\s*\/\s*5/)
     expect(text).not.toMatch(/Completed Pairs:\s*0/)
+  })
+
+  it('does not mislabel an outcome-regression refusal as a history gap', () => {
+    const comparison: KyberRunComparison = {
+      ...unavailableComparison(),
+      totals: {
+        availability: 'measured',
+        tokensA: 100,
+        tokensB: 120,
+        tokenDelta: 20,
+        turnCountA: 1,
+        turnCountB: 1,
+        turnDelta: 0,
+        costComparable: true,
+      },
+      runA: {
+        runId: 'cursor-run-latest',
+        harness: 'cursor',
+        availability: 'measured',
+        totalTokens: 100,
+        turnCount: 1,
+      },
+      runB: {
+        runId: 'claude-run-older',
+        harness: 'claude-code',
+        availability: 'measured',
+        totalTokens: 120,
+        turnCount: 1,
+      },
+      verdict: {
+        status: 'outcome_regression',
+        pairCount: 1,
+        historyAvailability: 'unavailable',
+        meetsSufficiencyThreshold: false,
+        outcomeRegression: true,
+        canPromote: false,
+        recommendation: '',
+        summary: '',
+        refusalReason:
+          'Promotion refused: outcome regression detected between paired runs. Modifications cannot be recommended when correctness or test outcomes regress.',
+      },
+    }
+    renderCompare(
+      <CompareRuns
+        runs={[
+          runCandidate({
+            runId: 'cursor-run-latest',
+            harness: 'cursor',
+            outcome: { status: 'success' },
+          }),
+          runCandidate({
+            runId: 'claude-run-older',
+            harness: 'claude-code',
+            outcome: { status: 'failure' },
+          }),
+        ]}
+        selectedAId="cursor-run-latest"
+        selectedBId="claude-run-older"
+        comparison={comparison}
+      />,
+    )
+
+    const guard = screen.getByTestId('compare-n-guard')
+    const text = guard.textContent ?? ''
+
+    expect(text).toContain('Recommendation history: — (recommendation history is not measured)')
+    expect(text).toContain('Outcome Regression Guard Refusal')
+    expect(text).toContain('outcome regression detected between paired runs')
+    // History row must not wear the outcome-regression refusal text.
+    expect(text).not.toMatch(
+      /Recommendation history: — \(Promotion refused: outcome regression/,
+    )
+  })
+})
+
+describe('CompareRuns: confirm pair clears harness filters (#190)', () => {
+  afterEach(() => {
+    cleanup()
+  })
+
+  it('loads a proposed pair that the active harness filter would have excluded', () => {
+    const onConfirmPair = vi.fn()
+    renderCompare(
+      <CompareRuns
+        runs={[
+          runCandidate({ runId: 'cursor-run-latest', harness: 'cursor' }),
+          runCandidate({ runId: 'claude-run-older', harness: 'claude-code' }),
+        ]}
+        proposedPairs={[
+          {
+            pairId: 'pair-1',
+            runAId: 'cursor-run-latest',
+            runBId: 'claude-run-older',
+            taskFamily: 'issue-190',
+            confidence: 0.9,
+            heuristics: ['same-task-family'],
+            reasons: ['same task family'],
+            completedPairCount: 2,
+            meetsSufficiencyThreshold: false,
+            canPromote: false,
+            recommendationStatus: 'proposed_only',
+            verdictMessage: 'proposed only',
+          },
+        ]}
+        onConfirmPair={onConfirmPair}
+        comparison={unavailableComparison()}
+      />,
+    )
+
+    // Restrict Run A to claude-code so cursor-run-latest is filtered out.
+    fireEvent.change(screen.getByTestId('compare-run-a-harness-filter'), {
+      target: { value: 'claude-code' },
+    })
+    // Drawer starts open when proposed pairs are supplied.
+    fireEvent.click(screen.getByRole('button', { name: /Confirm & Load Pair/i }))
+
+    const selectA = screen.getByTestId('compare-run-a') as HTMLSelectElement
+    const selectB = screen.getByTestId('compare-run-b') as HTMLSelectElement
+    expect(selectA.value).toBe('cursor-run-latest')
+    expect(selectB.value).toBe('claude-run-older')
+    expect(onConfirmPair).toHaveBeenCalledWith('pair-1')
   })
 })
 

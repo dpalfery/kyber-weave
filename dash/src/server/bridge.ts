@@ -1963,7 +1963,8 @@ export class KyberBridge {
         )
         .all() as { key: string; harness: string }[]
       return new SessionIdentities(pairs)
-    } catch {
+    } catch (err) {
+      console.warn('[KyberBridge] Failed reading session identities from canon.db:', err)
       return new SessionIdentities([])
     }
   }
@@ -1980,30 +1981,44 @@ export class KyberBridge {
   /**
    * Records belonging to a run via its executions' session keys.
    * Resolves qualified ids through `SessionIdentities.shareOf`, dedupes twin
-   * collectors per share, and returns only `llm.invoke` model turns (issue #190).
+   * collectors per harness-scoped share, and returns only `llm.invoke` model
+   * turns (issue #190). `identities` is computed once per compare request.
    */
-  private recordsForRun(runId: string): CanonicalRecord[] {
+  private recordsForRun(runId: string, identities: SessionIdentities): CanonicalRecord[] {
     const executions = this.listExecutions(runId)
-    const keys = [
-      ...new Set(
-        executions
-          // Empty string is a present but unusable session id — fall through
-          // to executionId (?? would keep "" and drop the execution's key).
-          .map((execution) => execution.sessionId || execution.executionId)
-          .filter((key) => key.length > 0),
-      ),
-    ]
+    type Lookup = { key: string; harness: string }
+    const lookups: Lookup[] = []
+    const seen = new Set<string>()
+    for (const execution of executions) {
+      // Empty string is a present but unusable session id — fall through
+      // to executionId (?? would keep "" and drop the execution's key).
+      const key = execution.sessionId || execution.executionId
+      if (!key || key.length === 0) continue
+      const harness = execution.harness
+      const dedupeId = `${normalizeHarnessName(harness)}\0${key}`
+      if (seen.has(dedupeId)) continue
+      seen.add(dedupeId)
+      lookups.push({ key, harness })
+    }
     // Executions can exist without selecting any session key (empty ids);
     // the run id itself stays the lookup key in that case.
-    if (keys.length === 0) keys.push(runId)
-    const identities = this.sessionIdentities()
+    if (lookups.length === 0) {
+      const harness =
+        executions[0]?.harness ?? this.getRun(runId)?.harness ?? 'unknown'
+      lookups.push({ key: runId, harness })
+    }
     const seenSpanIds = new Set<string>()
     const records: CanonicalRecord[] = []
-    for (const sessionId of keys) {
+    for (const { key: sessionId, harness } of lookups) {
       const share = identities.shareOf(sessionId)
+      // When share resolution misses, still scope by the execution's harness
+      // before twin-dedupe — an unscoped load can collapse cross-harness turns
+      // that share counters and timestamps.
       const shareRecords =
         share === undefined
-          ? this.recordsForSessionKey(sessionId)
+          ? this.recordsForSessionKey(sessionId).filter(
+              (r) => canonicalHarnessId(r.harness) === normalizeHarnessName(harness),
+            )
           : this.recordsForShare(share.key, share.harness)
       const deduped = dedupeTwinTurns(shareRecords, share?.key ?? sessionId)
       for (const record of deduped) {
@@ -2026,6 +2041,8 @@ export class KyberBridge {
     const runB = this.getRun(runBId)
     if (runA === undefined || runB === undefined) return null
 
+    // One full-table identity scan per compare request — not once per side.
+    const identities = this.sessionIdentities()
     const summary = compareStoredRuns(
       {
         runId: runA.runId,
@@ -2033,7 +2050,7 @@ export class KyberBridge {
         ...(runA.label ? { label: runA.label } : {}),
         ...(runA.workingDirectory !== undefined ? { workingDirectory: runA.workingDirectory } : {}),
         ...(runA.outcome !== undefined ? { outcome: runA.outcome } : {}),
-        turns: this.recordsForRun(runA.runId),
+        turns: this.recordsForRun(runA.runId, identities),
       },
       {
         runId: runB.runId,
@@ -2041,7 +2058,7 @@ export class KyberBridge {
         ...(runB.label ? { label: runB.label } : {}),
         ...(runB.workingDirectory !== undefined ? { workingDirectory: runB.workingDirectory } : {}),
         ...(runB.outcome !== undefined ? { outcome: runB.outcome } : {}),
-        turns: this.recordsForRun(runB.runId),
+        turns: this.recordsForRun(runB.runId, identities),
       },
       options,
     )

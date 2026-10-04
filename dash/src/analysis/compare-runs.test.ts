@@ -544,16 +544,19 @@ describe('compareRuns availability when a side has no comparable turns (issue #1
       },
     )
 
-    const totals = summary.totals as Record<string, unknown>
-    expect(totals.availability).toBe('unavailable')
-    expect(typeof totals.reason).toBe('string')
-    expect(String(totals.reason).length).toBeGreaterThan(0)
-    expect(totals.tokensB).toBeUndefined()
-    expect(totals.tokenDelta).toBeUndefined()
-    expect(summary.runB.totalTokens).not.toBe(0)
-    expect(summary.runB.turnCount).toBeUndefined()
-    expect(summary.runB.metricsReason).toContain('run-empty')
+    expect(summary.totals.availability).toBe('unavailable')
+    if (summary.totals.availability === 'unavailable') {
+      expect(typeof summary.totals.reason).toBe('string')
+      expect(summary.totals.reason.length).toBeGreaterThan(0)
+      expect('tokensB' in summary.totals).toBe(false)
+      expect('tokenDelta' in summary.totals).toBe(false)
+    }
     expect(summary.runB.availability).toBe('unavailable')
+    if (summary.runB.availability === 'unavailable') {
+      expect('totalTokens' in summary.runB).toBe(false)
+      expect(summary.runB.turnCount).toBeUndefined()
+      expect(summary.runB.metricsReason).toContain('run-empty')
+    }
   })
 
   it('reports unavailable totals when token telemetry is not_measurable instead of Token Delta 0', () => {
@@ -578,13 +581,76 @@ describe('compareRuns availability when a side has no comparable turns (issue #1
       },
     )
 
-    const totals = summary.totals as Record<string, unknown>
-    expect(totals.availability).toBe('unavailable')
-    expect(String(totals.reason ?? '')).toContain('not measurable')
-    expect(totals.tokenDelta).toBeUndefined()
-    expect(totals.tokensA).toBeUndefined()
-    expect(summary.runA.totalTokens).toBeUndefined()
-    expect(summary.runA.turnCount).toBe(1)
+    expect(summary.totals.availability).toBe('unavailable')
+    if (summary.totals.availability === 'unavailable') {
+      expect(summary.totals.reason).toContain('not measurable')
+      expect('tokenDelta' in summary.totals).toBe(false)
+      expect('tokensA' in summary.totals).toBe(false)
+    }
+    expect(summary.runA.availability).toBe('unavailable')
+    if (summary.runA.availability === 'unavailable') {
+      expect('totalTokens' in summary.runA).toBe(false)
+      expect(summary.runA.metricsReason).toContain('hook omitted input counters')
+      expect(summary.runA.turnCount).toBe(1)
+    }
+  })
+
+  it('reports unavailable totals when cache_creation is not_measurable (Gemini/Antigravity)', () => {
+    const summary = compareRuns(
+      {
+        runId: 'run-gemini',
+        harness: 'gemini',
+        outcome: successOutcome(),
+        turns: [
+          makeTurn('exploration', {
+            measurability: {
+              cache_creation: notMeasurable(
+                'Gemini explicit caching has no write counter.',
+              ),
+            },
+          }),
+        ],
+      },
+      {
+        runId: 'run-b',
+        harness: 'cursor',
+        outcome: successOutcome(),
+        turns: [makeTurn('exploration')],
+      },
+    )
+
+    expect(summary.totals.availability).toBe('unavailable')
+    if (summary.totals.availability === 'unavailable') {
+      expect(summary.totals.reason).toContain('not measurable')
+    }
+    expect(summary.runA.availability).toBe('unavailable')
+    if (summary.runA.availability === 'unavailable') {
+      expect('totalTokens' in summary.runA).toBe(false)
+      expect(summary.runA.turnCount).toBe(1)
+    }
+  })
+
+  it('reports unavailable totals when a turn has no token telemetry at all', () => {
+    const summary = compareRuns(
+      {
+        runId: 'run-a',
+        harness: 'cursor',
+        outcome: successOutcome(),
+        turns: [makeTurn('exploration', { tokens: undefined })],
+      },
+      {
+        runId: 'run-b',
+        harness: 'cursor',
+        outcome: successOutcome(),
+        turns: [makeTurn('exploration')],
+      },
+    )
+
+    expect(summary.totals.availability).toBe('unavailable')
+    expect(summary.runA.availability).toBe('unavailable')
+    if (summary.runA.availability === 'unavailable') {
+      expect('totalTokens' in summary.runA).toBe(false)
+    }
   })
 })
 

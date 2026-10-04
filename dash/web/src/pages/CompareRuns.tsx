@@ -183,30 +183,35 @@ function runMetricsUnavailable(
   side?: KyberComparisonRunSide,
 ): { unavailable: true; reason: string } | { unavailable: false } {
   if (!side) return { unavailable: false }
-  const reason = side.metricsReason ?? (side.availability === 'unavailable' ? side.reason : undefined)
-  return reason ? { unavailable: true, reason } : { unavailable: false }
+  if (side.availability === 'unavailable') {
+    return { unavailable: true, reason: side.metricsReason || side.reason }
+  }
+  return { unavailable: false }
 }
 
 function tokenDeltaUnavailable(
   totals?: KyberComparisonTotals,
 ): { unavailable: true; reason: string } | { unavailable: false } {
   if (!totals) return { unavailable: false }
-  const reason =
-    totals.tokenDeltaReason ??
-    (totals.availability === 'unavailable' ? totals.reason : undefined)
-  return reason ? { unavailable: true, reason } : { unavailable: false }
+  if (totals.availability === 'unavailable') {
+    return { unavailable: true, reason: totals.reason }
+  }
+  return { unavailable: false }
 }
 
 function historyUnavailable(
   verdict?: KyberComparisonVerdict,
 ): { unavailable: true; reason: string } | { unavailable: false } {
   if (!verdict) return { unavailable: false }
-  const reason =
-    verdict.historyReason ??
-    (verdict.historyAvailability === 'unavailable' || verdict.historyAvailability === 'not_measurable'
-      ? (verdict.refusalReason ?? 'recommendation history is not measured')
-      : undefined)
-  return reason ? { unavailable: true, reason } : { unavailable: false }
+  // History reason is its own decision — never borrow verdict.refusalReason
+  // (that text belongs to outcome-regression / sufficiency refusals).
+  if (
+    verdict.historyAvailability === 'unavailable' ||
+    verdict.historyAvailability === 'not_measurable'
+  ) {
+    return { unavailable: true, reason: 'recommendation history is not measured' }
+  }
+  return { unavailable: false }
 }
 
 function toTurn(raw: Record<string, unknown> | null): RunTurnSummary | null {
@@ -488,19 +493,25 @@ export function CompareRuns({
     comparison?.pairs.map(toAlignedPair) ??
     (runA && runB ? alignTurnsByPhase(runA.turns, runB.turns) : [])
 
+  const runAMetrics = runMetricsUnavailable(comparison?.runA)
+  const runBMetrics = runMetricsUnavailable(comparison?.runB)
+  // Never recompute via sumTurnTokens when the engine reported unavailability —
+  // that helper has no measurability gate and would re-derive withheld totals.
   const totalTokensA =
-    asNumber(comparison?.runA.totalTokens) ?? sumTurnTokens(runA?.turns ?? [])
+    asNumber(comparison?.runA.totalTokens) ??
+    (runAMetrics.unavailable ? undefined : sumTurnTokens(runA?.turns ?? []))
   const totalTokensB =
-    asNumber(comparison?.runB.totalTokens) ?? sumTurnTokens(runB?.turns ?? [])
+    asNumber(comparison?.runB.totalTokens) ??
+    (runBMetrics.unavailable ? undefined : sumTurnTokens(runB?.turns ?? []))
   const tokenDeltaState = tokenDeltaUnavailable(comparison?.totals)
+  const measuredTokenDelta =
+    comparison?.totals.availability === 'measured' ? comparison.totals.tokenDelta : undefined
   const tokenDelta = tokenDeltaState.unavailable
     ? undefined
-    : (asNumber(comparison?.totals.tokenDelta) ??
+    : (asNumber(measuredTokenDelta) ??
       (totalTokensA !== undefined && totalTokensB !== undefined
         ? totalTokensB - totalTokensA
         : undefined))
-  const runAMetrics = runMetricsUnavailable(comparison?.runA)
-  const runBMetrics = runMetricsUnavailable(comparison?.runB)
 
   const activeProposedPair = proposedPairs.find(
     (p) =>
@@ -511,7 +522,7 @@ export function CompareRuns({
   const verdict = comparison?.verdict
   const historyState = historyUnavailable(verdict)
   const completedPairCount =
-    verdict?.completedPairCount ?? activeProposedPair?.completedPairCount
+    verdict?.completedPairCount ?? activeProposedPair?.completedPairCount ?? undefined
   const isOutcomeRegression =
     verdict?.outcomeRegression ??
     (runA?.outcome?.status === 'success' &&
@@ -532,23 +543,27 @@ export function CompareRuns({
     onSelectRunB?.(id)
   }
   const handleConfirmPair = (pairId: string, pAId: string, pBId: string) => {
+    // Clear harness filters first — otherwise the filter-clearing effects wipe
+    // a confirmed pair that the active filter excludes, and nothing loads.
+    setHarnessFilterA('')
+    setHarnessFilterB('')
     handleSelectA(pAId)
     handleSelectB(pBId)
     onConfirmPair?.(pairId)
   }
 
-  const guardMessage = historyState.unavailable
-    ? historyState.reason
-    : isOutcomeRegression
-      ? (verdict?.refusalReason ??
-        'Outcome regression detected between Run A and Run B. Modifications cannot be promoted to recommendations when task correctness degrades.')
-      : canPromote
-        ? (verdict?.recommendation ??
-          'The comparison between baseline and candidate satisfies the documented sufficiency threshold (n ≥ 5 completed pairs) with zero outcome regressions.')
-        : (verdict?.refusalReason ??
-          (completedPairCount != null
-            ? `Recommendation promotion refused: observed ${completedPairCount} completed pair(s)${taskFamily ? ` for task family "${taskFamily}"` : ''}. Minimum threshold is n ≥ 5 completed pairs. Auto-pairing is proposed only.`
-            : 'Recommendation promotion refused: completed pair history is unavailable. Auto-pairing is proposed only.'))
+  // Guard text is the verdict decision (regression / sufficiency), not the
+  // history-availability row — that has its own label below.
+  const guardMessage = isOutcomeRegression
+    ? (verdict?.refusalReason ??
+      'Outcome regression detected between Run A and Run B. Modifications cannot be promoted to recommendations when task correctness degrades.')
+    : canPromote
+      ? (verdict?.recommendation ??
+        'The comparison between baseline and candidate satisfies the documented sufficiency threshold (n ≥ 5 completed pairs) with zero outcome regressions.')
+      : (verdict?.refusalReason ??
+        (completedPairCount != null
+          ? `Recommendation promotion refused: observed ${completedPairCount} completed pair(s)${taskFamily ? ` for task family "${taskFamily}"` : ''}. Minimum threshold is n ≥ 5 completed pairs. Auto-pairing is proposed only.`
+          : 'Recommendation promotion refused: completed pair history is unavailable. Auto-pairing is proposed only.'))
 
   if (live && loadingRuns) {
     return (
@@ -612,7 +627,9 @@ export function CompareRuns({
               </span>
             </div>
             <span className="text-[11px] font-medium text-tertiary-foreground">
-              Sufficiency: n = {completedPairCount} / 5 min
+              {completedPairCount != null
+                ? `Sufficiency: n = ${completedPairCount} / 5 min`
+                : 'Sufficiency: — (recommendation history is not measured)'}
             </span>
           </div>
 
