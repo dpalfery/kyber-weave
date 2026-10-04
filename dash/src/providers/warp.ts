@@ -6,7 +6,7 @@ import { calculateCost, getShortModelName } from '../pricing/models.js'
 import { blobToText, getSqliteLoadError, isSqliteAvailable, openDatabase, type SqliteDatabase } from '../ingest/sqlite.js'
 import { estimateTokensFromChars } from '../pricing/token-estimate.js'
 import type { ProbeRoot, ParsedProviderCall, Provider, SessionParser, SessionSource } from './types.js'
-import { safeNumber } from '../ingest/parser.js'
+import { safeNumber } from '../ingest/numbers.js'
 
 const WARP_GROUP_CONTAINER = '2BBY89MBSN.dev.warp'
 const WARP_STABLE_BUNDLE_ID = 'dev.warp.Warp-Stable'
@@ -422,11 +422,30 @@ function createParser(source: SessionSource, seenKeys: Set<string>): SessionPars
   }
 }
 
+/// Paths whose open/copy failed with EPERM/EACCES during discovery. Doctor
+/// drains this so a TCC-denied Warp DB is not reported as "holds no sessions"
+/// (issue #197). discoverSessions still returns [] — honest empty parse count.
+const warpDbAccessDenials = new Set<string>()
+
+export function drainWarpDbAccessDenials(): string[] {
+  const out = [...warpDbAccessDenials]
+  warpDbAccessDenials.clear()
+  return out
+}
+
+function noteWarpDbAccessDenial(dbPath: string, err: unknown): void {
+  const code = (err as NodeJS.ErrnoException | undefined)?.code
+  if (code === 'EPERM' || code === 'EACCES') warpDbAccessDenials.add(dbPath)
+}
+
 async function discoverFromDb(dbPath: string): Promise<SessionSource[]> {
   let db: SqliteDatabase
   try {
     db = openDatabase(dbPath)
-  } catch {
+  } catch (err) {
+    // Expose permission failures for doctor; still return [] so refresh keeps
+    // recording an honest zero-record checkpoint rather than aborting.
+    noteWarpDbAccessDenial(dbPath, err)
     return []
   }
 

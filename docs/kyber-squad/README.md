@@ -4,7 +4,7 @@ title: Kyber-Squad — Multi-Harness Agent & Skill Deployment Control Plane
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-09-30
+last-reviewed: 2026-10-04
 ---
 
 # Kyber-Squad — Multi-Harness Agent & Skill Deployment Control Plane
@@ -52,9 +52,9 @@ Modifying local developer environments or repository-level agent configurations 
 The canonical product contains 24 `SKILL.md` files. `code-review-loop` is authored in Kyber-Squad;
 every imported skill except the six explicitly evolved skills (`bug-crusher`, `code-review`,
 `product-owner`, `second-brain`, `create-pull-request`, and `pr-review-fix-comments`) matches
-the designated Hotshot golden copy byte for byte. It also retains 67 supplemental references, scripts, provider
-instructions, and metadata files, for 91 files under
-`products/kyber-squad/skills/`. Recursive APM and Agent Plugins packages carry all 91 files and
+the designated Hotshot golden copy byte for byte. It also retains 68 supplemental references, scripts, provider
+instructions, and metadata files, for 92 files under
+`products/kyber-squad/skills/`. Recursive APM and Agent Plugins packages carry all 92 files and
 preserve each retained local reference.
 
 The [code-review-loop skill](../../products/kyber-squad/skills/code-review-loop/SKILL.md)
@@ -65,7 +65,7 @@ another review. The existing
 
 A fresh GitHub Copilot render projects each owner's linked resources beside its principal:
 21 `.github/agents/<name>.agent.md` files, 24 `.github/skills/<name>/SKILL.md` files, and the
-linked resources, 121 files total, with authored relative links resolving in the output. Every
+linked resources, 122 files total, with authored relative links resolving in the output. Every
 skill resource reaches every render except `skills/setup-dev-environment/agents/openai.yaml`,
 which is packaged-only Codex skill-UI metadata. Every retained resource now has a reviewed
 disposition in the [skill-resource dispositions audit](skill-resource-dispositions.md):
@@ -86,6 +86,6 @@ refreshed by a human after a fresh Kyber-Weave release candidate exists.
 Explore the full Kyber-Squad documentation suite:
 
 * **[Adoption & Usage Guide](onboarding.md)** — Installing, updating, scoping (`--global`), targeting specific harnesses, and running health checks.
-* **[Architecture](architecture.md)** — AgentIR intermediate representation, role-skill lowering pipeline, capability lattice, state store, and transaction engine.
-* **[Requirements & Degradation Matrix](requirements.md)** — Detailed KS-001 through KS-008 specifications, harness feature matrices, and degradation taxonomy.
+* **[Architecture](architecture.md)** — AgentIR intermediate representation, role-skill lowering pipeline, capability lattice, state store, transaction engine, and conductor execution circuit-breaker.
+* **[Requirements & Degradation Matrix](requirements.md)** — Detailed KS-001 through KS-008 specifications, harness feature matrices, degradation taxonomy, and the circuit-breaker harvest.
 * **[Skill-Resource Dispositions](skill-resource-dispositions.md)** — The content-preservation audit and policy-line ledger for every retained skill resource.

@@ -2,10 +2,10 @@ import { createRequire } from 'node:module'
 import { mkdir, mkdtemp, rm, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { isSqliteAvailable } from '../ingest/sqlite.js'
-import { createDevinProvider } from './devin.js'
+import { createDevinProvider, resetDevinMissingRateWarningForTests } from './devin.js'
 import type { ParsedProviderCall } from './types.js'
 
 /// `node:sqlite` is loaded through `createRequire` rather than a static import so
@@ -100,15 +100,67 @@ describe('devin provider', () => {
     ])
   })
 
-  it('stays disabled until the Devin ACU rate is configured', async () => {
-    await writeTranscript('glimmer-platinum.json', {
+  it('discovers and parses transcripts without an ACU rate; cost stays honestly unknown', async () => {
+    // Issue #197: a missing devin.acuUsdRate must not disable the provider —
+    // tokens, tools, and sessions are real, only the USD figure is unknown.
+    const filePath = await writeTranscript('glimmer-platinum.json', {
       session_id: 'session-123',
-      steps: [{ step_id: 's1', metadata: { committed_acu_cost: 0.5 } }],
+      steps: [{
+        step_id: 2,
+        metadata: {
+          created_at: '2027-01-15T08:00:01.000Z',
+          committed_acu_cost: 0.5,
+          metrics: { input_tokens: 10, output_tokens: 4 },
+        },
+      }],
     })
 
     const provider = createDevinProvider(tmpDir)
-    expect(await provider.discoverSessions()).toEqual([])
-    expect(await parseTranscript(join(tmpDir, 'transcripts', 'glimmer-platinum.json'))).toEqual([])
+    expect(await provider.discoverSessions()).toEqual([
+      { path: filePath, project: 'devin', provider: 'devin' },
+    ])
+    const calls = await parseTranscript(filePath)
+    expect(calls).toHaveLength(1)
+    expect(calls[0]).toMatchObject({
+      inputTokens: 10,
+      outputTokens: 4,
+      costUSD: 0,
+      costIsEstimated: true,
+      deduplicationKey: 'devin:session-123:2',
+    })
+  })
+
+  it('warns on the first unpriced call, not when an empty transcript is parsed first', async () => {
+    resetDevinMissingRateWarningForTests()
+    const emptyPath = await writeTranscript('empty.json', {
+      session_id: 'empty-session',
+      steps: [],
+    })
+    const pricedPath = await writeTranscript('usage.json', {
+      session_id: 'usage-session',
+      steps: [{
+        step_id: 1,
+        metadata: {
+          created_at: '2027-01-15T08:00:01.000Z',
+          committed_acu_cost: 0.25,
+          metrics: { input_tokens: 3, output_tokens: 1 },
+        },
+      }],
+    })
+
+    const stderr = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
+    try {
+      expect(await parseTranscript(emptyPath)).toHaveLength(0)
+      expect(stderr.mock.calls.some(([chunk]) => String(chunk).includes('devin.acuUsdRate'))).toBe(false)
+
+      const calls = await parseTranscript(pricedPath)
+      expect(calls).toHaveLength(1)
+      expect(calls[0]).toMatchObject({ costUSD: 0, costIsEstimated: true })
+      expect(stderr.mock.calls.filter(([chunk]) => String(chunk).includes('devin.acuUsdRate'))).toHaveLength(1)
+    } finally {
+      stderr.mockRestore()
+      resetDevinMissingRateWarningForTests()
+    }
   })
 
   it('parses per-step ACUs, tokens, tools, and model resolution', async () => {
