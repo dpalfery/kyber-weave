@@ -316,7 +316,10 @@ async function runHarnessJob(context: JobContext): Promise<HarnessJobRow> {
       coveredFromUtc: context.coveredFromUtc,
       coveredThroughUtc: context.coveredThroughUtc,
       importedAtUtc: context.importedAtUtc,
-      recordCount: (previous?.recordCount ?? 0) + created,
+      recordCount:
+        previous?.parserContractVersion !== descriptor.parserContractVersion
+          ? store.countLiveRecordsForSource(descriptor.harnessId, unit.sourceKey) + created
+          : (previous?.recordCount ?? 0) + created,
       status: ingestResult.problems.length > 0 || unit.problems.length > 0 ? 'partial' : 'ok',
       emptyReason: unit.emptyReason,
     })

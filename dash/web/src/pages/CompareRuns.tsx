@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Card } from '../components/ui/card.js'
 import { Skeleton } from '../components/ui/skeleton.js'
@@ -13,11 +13,13 @@ import {
 import {
   fetchRunComparison,
   fetchRuns,
+  type KyberComparisonRunSide,
+  type KyberComparisonTotals,
+  type KyberComparisonVerdict,
   type KyberPhaseAlignedTurnPair,
   type KyberRunComparison,
   type KyberRunSummary,
 } from '../lib/kyberApi.js'
-import { fmtRunTimestamp, shortRunId } from '../lib/utils.js'
 
 export type OutcomeSummary = {
   status: 'success' | 'failure' | 'abandoned' | 'inconclusive' | 'not_measurable'
@@ -37,14 +39,9 @@ export type RunCandidate = {
   repo?: string | null
   started?: string
   ended?: string
+  turnCount?: number
   outcome?: OutcomeSummary
   turns: RunTurnSummary[]
-  /** Measured turn count from `/api/kyber/runs` (picker size + D2 filter). */
-  turnCount?: number
-  totalInput?: number | null
-  totalOutput?: number | null
-  /** True when any linked session is a subagent (D2 picker filter). */
-  isSubagent?: boolean
 }
 
 export type ProposedPairCandidate = {
@@ -137,169 +134,96 @@ function toCandidate(row: KyberRunSummary): RunCandidate {
     workingDirectory: row.workingDirectory,
     started: row.started ?? undefined,
     ended: row.ended ?? undefined,
+    turnCount: row.turnCount,
     outcome: toOutcome(row.outcome),
     turns: [],
-    turnCount: row.turnCount,
-    totalInput: row.totalInput,
-    totalOutput: row.totalOutput,
-    isSubagent: row.isSubagent === true,
   }
 }
 
-/**
- * Picker option text (D4): `{localDate} · {harness} · {turnCount}t · {tokens} · {shortId}`
- * with an optional `label` prefix. Unmeasured turns and tokens are "—", not a
- * fabricated zero — the same honesty `isComparePickerVisible` uses for D2.
- */
-export function formatCompareRunOptionLabel(run: RunCandidate): string {
-  const localDate = fmtRunTimestamp(run.started).date
-  const turns = run.turnCount === undefined ? '—' : `${run.turnCount}t`
-  const input = run.totalInput
-  const output = run.totalOutput
-  const hasTokens =
-    (typeof input === 'number' && Number.isFinite(input)) ||
-    (typeof output === 'number' && Number.isFinite(output))
-  const tokens = hasTokens
-    ? ((typeof input === 'number' ? input : 0) + (typeof output === 'number' ? output : 0)).toLocaleString()
-    : '—'
-  const shortId = shortRunId(run.runId, run.harness)
-  const body = `${localDate} · ${run.harness} · ${turns} · ${tokens} · ${shortId}`
-  return run.label ? `${run.label} · ${body}` : body
+function isoDateLabel(started?: string): string {
+  if (!started) return 'date unknown'
+  const prefix = started.slice(0, 10)
+  return /^\d{4}-\d{2}-\d{2}$/.test(prefix) ? prefix : 'date unknown'
 }
 
-/**
- * Picker-card Turns figure. Measured counts win; a loaded turn list is a last
- * resort. `toCandidate` always sets `turns: []`, so treating length as a
- * fallback would reprint the #190 "Turns: 0" lie for unmeasured runs.
- */
-export function formatComparePickerTurns(measured: number | undefined, loadedTurns: number): string {
-  if (measured !== undefined) return String(measured)
-  if (loadedTurns > 0) return String(loadedTurns)
-  return '—'
+function turnCountLabel(turnCount?: number): string {
+  return turnCount != null && Number.isFinite(turnCount) ? `${turnCount} turns` : 'turns unknown'
 }
 
-/** D2: hide zero-turn runs always; hide subagents unless the toggle is on. */
-export function isComparePickerVisible(run: RunCandidate, showSubagents: boolean): boolean {
-  if (run.turnCount === 0) return false
-  if (!showSubagents && run.isSubagent === true) return false
-  return true
+function shortRunId(runId: string): string {
+  return runId.length <= 12 ? runId : `…${runId.slice(-8)}`
 }
 
-function workingDirectoryBasename(cwd: string | null | undefined): string | undefined {
-  const trimmed = cwd?.trim()
-  if (!trimmed) return undefined
-  const parts = trimmed.replace(/\\/g, '/').split('/').filter(Boolean)
-  return parts.at(-1)
+function formatRunOption(run: RunCandidate): string {
+  const name =
+    run.label && run.label !== run.runId
+      ? `${run.label} (${shortRunId(run.runId)})`
+      : (run.label ?? run.runId)
+  return `${isoDateLabel(run.started)} · ${run.harness} · ${turnCountLabel(run.turnCount)} · ${name}`
 }
 
-/**
- * Visible `<option>` text. Colliding D4 labels get a cwd basename (or a stable
- * ordinal) appended so Chrome/Firefox users can tell the rows apart — `<option
- * title>` is not reliably surfaced.
- */
-export function compareOptionLabels(runs: readonly RunCandidate[]): Map<string, string> {
-  const base = new Map<string, string>()
+function observedHarnesses(runs: RunCandidate[]): string[] {
+  const seen = new Set<string>()
+  const harnesses: string[] = []
   for (const run of runs) {
-    base.set(run.runId, formatCompareRunOptionLabel(run))
-  }
-  const groups = new Map<string, RunCandidate[]>()
-  for (const run of runs) {
-    const label = base.get(run.runId) ?? formatCompareRunOptionLabel(run)
-    const group = groups.get(label) ?? []
-    group.push(run)
-    groups.set(label, group)
-  }
-  const visible = new Map<string, string>()
-  for (const run of runs) {
-    const label = base.get(run.runId) ?? formatCompareRunOptionLabel(run)
-    const group = groups.get(label) ?? [run]
-    if (group.length === 1) {
-      visible.set(run.runId, label)
-      continue
+    if (!seen.has(run.harness)) {
+      seen.add(run.harness)
+      harnesses.push(run.harness)
     }
-    const basename = workingDirectoryBasename(run.workingDirectory)
-    const used = group.map((sibling) => workingDirectoryBasename(sibling.workingDirectory))
-    const basenameUnique = basename !== undefined && used.filter((name) => name === basename).length === 1
-    if (basenameUnique) {
-      visible.set(run.runId, `${label} · ${basename}`)
-      continue
-    }
-    visible.set(run.runId, `${label} · ${group.findIndex((sibling) => sibling.runId === run.runId) + 1}`)
   }
-  return visible
+  return harnesses
 }
 
-function selectedRunTitle(run: RunCandidate | undefined): string | undefined {
-  if (!run) return undefined
-  const cwd = run.workingDirectory?.trim()
-  // HTML title attributes collapse newlines; keep the pair on one readable line.
-  return cwd ? `${run.runId} · ${cwd}` : run.runId
+function filterRunsByHarness(runs: RunCandidate[], harness: string): RunCandidate[] {
+  if (harness === '') return runs
+  return runs.filter((run) => run.harness === harness)
 }
 
-function RunPickerCard({
-  id,
-  heading,
-  selectedId,
-  onChange,
-  run,
-  outcome,
-  turnCount,
-  pickerRuns,
-  optionLabels,
-}: {
-  id: string
-  heading: string
-  selectedId: string
-  onChange: (id: string) => void
-  run: RunCandidate | undefined
-  outcome: OutcomeSummary | undefined
-  turnCount: string
-  pickerRuns: readonly RunCandidate[]
-  optionLabels: ReadonlyMap<string, string>
-}) {
-  return (
-    <Card className="flex flex-col gap-2 p-4">
-      <label htmlFor={id} className="text-[11px] font-semibold uppercase tracking-wider text-heading">
-        {heading}
-      </label>
-      <select
-        id={id}
-        data-testid={id}
-        value={selectedId}
-        title={selectedRunTitle(run)}
-        onChange={(e) => onChange(e.target.value)}
-        className="rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-      >
-        <option value="">Select a run</option>
-        {pickerRuns.map((candidate) => {
-          const label = optionLabels.get(candidate.runId) ?? formatCompareRunOptionLabel(candidate)
-          return (
-            <option key={candidate.runId} value={candidate.runId}>
-              {label}
-            </option>
-          )
-        })}
-      </select>
-      {run && (
-        <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-tertiary-foreground">
-          <span>Harness: <strong className="text-foreground">{run.harness}</strong></span>
-          <span>Turns: <strong className="text-foreground">{turnCount}</strong></span>
-          <span>
-            Outcome:{' '}
-            <strong
-              className={
-                outcome?.status === 'success'
-                  ? 'text-emerald-600 dark:text-emerald-400'
-                  : 'text-rose-600 dark:text-rose-400'
-              }
-            >
-              {outcome?.status ?? 'unobserved'}
-            </strong>
-          </span>
-        </div>
-      )}
-    </Card>
-  )
+function runMetricsUnavailable(
+  side?: KyberComparisonRunSide,
+): { unavailable: true; reason: string } | { unavailable: false } {
+  if (!side) return { unavailable: false }
+  if (side.availability === 'unavailable') {
+    return { unavailable: true, reason: side.metricsReason || side.reason }
+  }
+  return { unavailable: false }
+}
+
+/** Prefer the engine's turnCount; em-dash only when the count is genuinely absent. */
+function runTurnCount(
+  side: KyberComparisonRunSide | undefined,
+  fallback: number | undefined,
+): number | undefined {
+  if (side?.turnCount !== undefined) return side.turnCount
+  // Token unavailability withholds totals, not turn counts — only skip the
+  // client fallback when the engine withheld the count (no turns resolved).
+  if (side?.availability === 'unavailable') return undefined
+  return fallback
+}
+
+function tokenDeltaUnavailable(
+  totals?: KyberComparisonTotals,
+): { unavailable: true; reason: string } | { unavailable: false } {
+  if (!totals) return { unavailable: false }
+  if (totals.availability === 'unavailable') {
+    return { unavailable: true, reason: totals.reason }
+  }
+  return { unavailable: false }
+}
+
+function historyUnavailable(
+  verdict?: KyberComparisonVerdict,
+): { unavailable: true; reason: string } | { unavailable: false } {
+  if (!verdict) return { unavailable: false }
+  // History reason is its own decision — never borrow verdict.refusalReason
+  // (that text belongs to outcome-regression / sufficiency refusals).
+  if (
+    verdict.historyAvailability === 'unavailable' ||
+    verdict.historyAvailability === 'not_measurable'
+  ) {
+    return { unavailable: true, reason: 'recommendation history is not measured' }
+  }
+  return { unavailable: false }
 }
 
 function toTurn(raw: Record<string, unknown> | null): RunTurnSummary | null {
@@ -377,6 +301,37 @@ function toAlignedPair(pair: KyberPhaseAlignedTurnPair): PhaseAlignedTurnPair {
   }
 }
 
+function tryTurnTokenTotal(turn: RunTurnSummary): number | undefined {
+  if (typeof turn.tokens?.all === 'number') return turn.tokens.all
+  const reportedInput = turn.tokens?.reportedInput
+  const output = turn.tokens?.output
+  if (typeof reportedInput === 'number' && typeof output === 'number') {
+    return reportedInput + output
+  }
+  const fresh = turn.tokens?.freshInput
+  const cache = turn.tokens?.cacheRead
+  const cacheCreation = turn.tokens?.cacheCreation
+  if (
+    typeof fresh === 'number' &&
+    typeof cache === 'number' &&
+    typeof output === 'number'
+  ) {
+    return fresh + cache + (cacheCreation ?? 0) + output
+  }
+  return undefined
+}
+
+function sumTurnTokens(turns: RunTurnSummary[]): number | undefined {
+  if (turns.length === 0) return undefined
+  let sum = 0
+  for (const turn of turns) {
+    const total = tryTurnTokenTotal(turn)
+    if (total === undefined) return undefined
+    sum += total
+  }
+  return sum
+}
+
 function alignTurnsByPhase(turnsA: RunTurnSummary[], turnsB: RunTurnSummary[]): PhaseAlignedTurnPair[] {
   const pairs: PhaseAlignedTurnPair[] = []
 
@@ -389,47 +344,64 @@ function alignTurnsByPhase(turnsA: RunTurnSummary[], turnsB: RunTurnSummary[]): 
       const turnA = phaseTurnsA[i] ?? null
       const turnB = phaseTurnsB[i] ?? null
 
-      const tokensA =
-        turnA?.tokens?.all ??
-        (turnA?.tokens?.reportedInput ?? 0) + (turnA?.tokens?.output ?? 0)
-      const tokensB =
-        turnB?.tokens?.all ??
-        (turnB?.tokens?.reportedInput ?? 0) + (turnB?.tokens?.output ?? 0)
-      const delta = turnA && turnB ? tokensB - tokensA : undefined
+      const tokensA = turnA ? tryTurnTokenTotal(turnA) : undefined
+      const tokensB = turnB ? tryTurnTokenTotal(turnB) : undefined
+      const delta =
+        tokensA !== undefined && tokensB !== undefined ? tokensB - tokensA : undefined
 
       const reading =
         turnA && turnB
-          ? `Phase ${phase}: Run A spent ${tokensA.toLocaleString()} tokens; Run B spent ${tokensB.toLocaleString()} tokens (delta: ${delta && delta > 0 ? '+' : ''}${delta?.toLocaleString()}).`
+          ? tokensA !== undefined && tokensB !== undefined
+            ? `Phase ${phase}: Run A spent ${tokensA.toLocaleString()} tokens; Run B spent ${tokensB.toLocaleString()} tokens (delta: ${delta && delta > 0 ? '+' : ''}${delta?.toLocaleString()}).`
+            : `Phase ${phase}: Token telemetry unavailable for one or both runs in this phase slot.`
           : turnA
-            ? `Phase ${phase}: Run A executed ${tokensA.toLocaleString()} tokens; Run B completed phase in fewer turns.`
-            : `Phase ${phase}: Run B executed ${tokensB.toLocaleString()} tokens; Run A completed phase in fewer turns.`
+            ? tokensA !== undefined
+              ? `Phase ${phase}: Run A executed ${tokensA.toLocaleString()} tokens; Run B completed phase in fewer turns.`
+              : `Phase ${phase}: Run A token telemetry unavailable; Run B completed phase in fewer turns.`
+            : tokensB !== undefined
+              ? `Phase ${phase}: Run B executed ${tokensB.toLocaleString()} tokens; Run A completed phase in fewer turns.`
+              : `Phase ${phase}: Run B token telemetry unavailable; Run A completed phase in fewer turns.`
+
+      const tokenSignal: SignalComparison =
+        turnA && turnB
+          ? tokensA !== undefined && tokensB !== undefined
+            ? {
+                name: 'total_tokens',
+                label: 'Tokens',
+                unit: 'tokens',
+                runAValue: tokensA,
+                runBValue: tokensB,
+                delta,
+                status: 'compared',
+              }
+            : {
+                name: 'total_tokens',
+                label: 'Tokens',
+                unit: 'tokens',
+                status: 'not_comparable',
+                reason: 'Token telemetry unavailable in one or both paired turns',
+              }
+          : {
+              name: 'total_tokens',
+              label: 'Tokens',
+              unit: 'tokens',
+              runAValue: turnA && tokensA !== undefined ? tokensA : undefined,
+              runBValue: turnB && tokensB !== undefined ? tokensB : undefined,
+              status: turnA ? 'missing_in_b' : 'missing_in_a',
+            }
 
       pairs.push({
         phase,
         phaseIndex: i,
         runATurn: turnA,
         runBTurn: turnB,
-        signals: [
-          {
-            name: 'total_tokens',
-            label: 'Tokens',
-            unit: 'tokens',
-            runAValue: turnA ? tokensA : undefined,
-            runBValue: turnB ? tokensB : undefined,
-            delta,
-            status: turnA && turnB ? 'compared' : turnA ? 'missing_in_b' : 'missing_in_a',
-          },
-        ],
+        signals: [tokenSignal],
         reading,
       })
     }
   }
 
   return pairs
-}
-
-function turnTokenTotal(turn: RunTurnSummary): number {
-  return turn.tokens?.all ?? (turn.tokens?.reportedInput ?? 0) + (turn.tokens?.output ?? 0)
 }
 
 export function CompareRuns({
@@ -449,8 +421,9 @@ export function CompareRuns({
   const live = injectedRuns === undefined
   const [localA, setLocalA] = useState<string | undefined>(undefined)
   const [localB, setLocalB] = useState<string | undefined>(undefined)
+  const [harnessFilterA, setHarnessFilterA] = useState('')
+  const [harnessFilterB, setHarnessFilterB] = useState('')
   const [showProposedDrawer, setShowProposedDrawer] = useState(true)
-  const [showSubagents, setShowSubagents] = useState(false)
 
   const {
     data: fetchedRuns,
@@ -468,21 +441,47 @@ export function CompareRuns({
     [injectedRuns, fetchedRuns],
   )
 
-  // D3: no silent list default. Deep-link / initial* / controlled props count as explicit.
-  const selectedAId = propA ?? localA ?? initialRunAId ?? ''
-  const selectedBId = propB ?? localB ?? initialRunBId ?? ''
+  const rawSelectedAId = propA ?? localA ?? initialRunAId ?? ''
+  const rawSelectedBId = propB ?? localB ?? initialRunBId ?? ''
 
-  // D2 filters apply, but an explicitly selected id must stay in the <select>
-  // options so deep-links / controlled props do not render a blank value while
-  // compare still fetches. Do not auto-toggle Show subagents — preserve filter intent.
-  const pickerRuns = useMemo(() => {
-    const pinned = new Set([selectedAId, selectedBId].filter((id) => id !== ''))
-    return runs.filter(
-      (r) => isComparePickerVisible(r, showSubagents) || pinned.has(r.runId),
-    )
-  }, [runs, showSubagents, selectedAId, selectedBId])
+  const harnesses = useMemo(() => observedHarnesses(runs), [runs])
+  const filteredRunsA = useMemo(
+    () => filterRunsByHarness(runs, harnessFilterA),
+    [runs, harnessFilterA],
+  )
+  const filteredRunsB = useMemo(
+    () => filterRunsByHarness(runs, harnessFilterB),
+    [runs, harnessFilterB],
+  )
 
-  const optionLabels = useMemo(() => compareOptionLabels(pickerRuns), [pickerRuns])
+  // Effective selection is empty when the chosen id is not visible in the filtered
+  // inventory — including deep-linked initialRun* ids excluded by a harness filter.
+  const selectedAId =
+    rawSelectedAId !== '' && filteredRunsA.some((run) => run.runId === rawSelectedAId)
+      ? rawSelectedAId
+      : ''
+  const selectedBId =
+    rawSelectedBId !== '' && filteredRunsB.some((run) => run.runId === rawSelectedBId)
+      ? rawSelectedBId
+      : ''
+
+  // When a harness filter hides the active local selection, clear it so compare stops
+  // rather than keeping an orphaned value that is invisible in the dropdown.
+  useEffect(() => {
+    if (!live || propA !== undefined) return
+    if (localA && !filteredRunsA.some((run) => run.runId === localA)) {
+      setLocalA(undefined)
+      onSelectRunA?.('')
+    }
+  }, [filteredRunsA, localA, live, onSelectRunA, propA])
+
+  useEffect(() => {
+    if (!live || propB !== undefined) return
+    if (localB && !filteredRunsB.some((run) => run.runId === localB)) {
+      setLocalB(undefined)
+      onSelectRunB?.('')
+    }
+  }, [filteredRunsB, localB, live, onSelectRunB, propB])
 
   const canFetchComparison = live && selectedAId !== '' && selectedBId !== '' && selectedAId !== selectedBId
 
@@ -506,13 +505,33 @@ export function CompareRuns({
     comparison?.pairs.map(toAlignedPair) ??
     (runA && runB ? alignTurnsByPhase(runA.turns, runB.turns) : [])
 
+  const runAMetrics = runMetricsUnavailable(comparison?.runA)
+  const runBMetrics = runMetricsUnavailable(comparison?.runB)
+  const turnCountA = runTurnCount(
+    comparison?.runA,
+    runA ? (runA.turnCount ?? runA.turns.length) : undefined,
+  )
+  const turnCountB = runTurnCount(
+    comparison?.runB,
+    runB ? (runB.turnCount ?? runB.turns.length) : undefined,
+  )
+  // Never recompute via sumTurnTokens when the engine reported unavailability —
+  // that helper has no measurability gate and would re-derive withheld totals.
   const totalTokensA =
     asNumber(comparison?.runA.totalTokens) ??
-    (runA?.turns ?? []).reduce((sum, t) => sum + turnTokenTotal(t), 0)
+    (runAMetrics.unavailable ? undefined : sumTurnTokens(runA?.turns ?? []))
   const totalTokensB =
     asNumber(comparison?.runB.totalTokens) ??
-    (runB?.turns ?? []).reduce((sum, t) => sum + turnTokenTotal(t), 0)
-  const tokenDelta = asNumber(comparison?.totals.tokenDelta) ?? totalTokensB - totalTokensA
+    (runBMetrics.unavailable ? undefined : sumTurnTokens(runB?.turns ?? []))
+  const tokenDeltaState = tokenDeltaUnavailable(comparison?.totals)
+  const measuredTokenDelta =
+    comparison?.totals.availability === 'measured' ? comparison.totals.tokenDelta : undefined
+  const tokenDelta = tokenDeltaState.unavailable
+    ? undefined
+    : (asNumber(measuredTokenDelta) ??
+      (totalTokensA !== undefined && totalTokensB !== undefined
+        ? totalTokensB - totalTokensA
+        : undefined))
 
   const activeProposedPair = proposedPairs.find(
     (p) =>
@@ -521,13 +540,16 @@ export function CompareRuns({
   )
 
   const verdict = comparison?.verdict
-  // Honest n: API 0/1 for this pair when the client omits completedPairCount. Never invent 6.
-  const completedPairCount = verdict?.completedPairCount ?? activeProposedPair?.completedPairCount ?? 0
+  const historyState = historyUnavailable(verdict)
+  const completedPairCount =
+    verdict?.completedPairCount ?? activeProposedPair?.completedPairCount
   const isOutcomeRegression =
     verdict?.outcomeRegression ??
     (runA?.outcome?.status === 'success' &&
       (runB?.outcome?.status === 'failure' || runB?.outcome?.status === 'abandoned'))
-  const canPromote = verdict?.canPromote ?? (completedPairCount >= 5 && !isOutcomeRegression)
+  const canPromote =
+    verdict?.canPromote ??
+    (completedPairCount != null && completedPairCount >= 5 && !isOutcomeRegression)
   const taskFamily = comparison?.taskFamily ?? taskFamilyProp ?? runA?.taskFamily ?? runB?.taskFamily
   const outcomeA = toOutcome(comparison?.runA.outcome) ?? runA?.outcome
   const outcomeB = toOutcome(comparison?.runB.outcome) ?? runB?.outcome
@@ -541,11 +563,17 @@ export function CompareRuns({
     onSelectRunB?.(id)
   }
   const handleConfirmPair = (pairId: string, pAId: string, pBId: string) => {
+    // Clear harness filters first — otherwise the filter-clearing effects wipe
+    // a confirmed pair that the active filter excludes, and nothing loads.
+    setHarnessFilterA('')
+    setHarnessFilterB('')
     handleSelectA(pAId)
     handleSelectB(pBId)
     onConfirmPair?.(pairId)
   }
 
+  // Guard text is the verdict decision (regression / sufficiency), not the
+  // history-availability row — that has its own label below.
   const guardMessage = isOutcomeRegression
     ? (verdict?.refusalReason ??
       'Outcome regression detected between Run A and Run B. Modifications cannot be promoted to recommendations when task correctness degrades.')
@@ -553,7 +581,9 @@ export function CompareRuns({
       ? (verdict?.recommendation ??
         'The comparison between baseline and candidate satisfies the documented sufficiency threshold (n ≥ 5 completed pairs) with zero outcome regressions.')
       : (verdict?.refusalReason ??
-        `Recommendation promotion refused: observed ${completedPairCount} completed pair(s)${taskFamily ? ` for task family "${taskFamily}"` : ''}. Minimum threshold is n ≥ 5 completed pairs. Auto-pairing is proposed only.`)
+        (completedPairCount != null
+          ? `Recommendation promotion refused: observed ${completedPairCount} completed pair(s)${taskFamily ? ` for task family "${taskFamily}"` : ''}. Minimum threshold is n ≥ 5 completed pairs. Auto-pairing is proposed only.`
+          : 'Recommendation promotion refused: completed pair history is unavailable. Auto-pairing is proposed only.'))
 
   if (live && loadingRuns) {
     return (
@@ -617,7 +647,9 @@ export function CompareRuns({
               </span>
             </div>
             <span className="text-[11px] font-medium text-tertiary-foreground">
-              Sufficiency: n = {completedPairCount} / 5 min
+              {completedPairCount != null
+                ? `Sufficiency: n = ${completedPairCount} / 5 min`
+                : 'Sufficiency: — (recommendation history is not measured)'}
             </span>
           </div>
 
@@ -688,42 +720,142 @@ export function CompareRuns({
       )}
 
       {runs.length > 0 ? (
-        <div className="flex flex-col gap-3">
-          <div className="flex items-center justify-end">
-            <label className="flex items-center gap-2 text-xs text-foreground">
-              <input
-                type="checkbox"
-                checked={showSubagents}
-                onChange={(e) => setShowSubagents(e.target.checked)}
-                data-testid="compare-show-subagents"
-              />
-              Show subagents
-            </label>
-          </div>
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <RunPickerCard
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <Card className="flex flex-col gap-2 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <label htmlFor="compare-run-a" className="text-[11px] font-semibold uppercase tracking-wider text-heading">
+                Run A (Baseline)
+              </label>
+              <label className="text-[11px] text-tertiary-foreground">
+                Harness:{' '}
+                <select
+                  data-testid="compare-run-a-harness-filter"
+                  value={harnessFilterA}
+                  onChange={(e) => setHarnessFilterA(e.target.value)}
+                  className="rounded-md border border-border bg-background px-2 py-0.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                >
+                  <option value="">All harnesses</option>
+                  {harnesses.map((harness) => (
+                    <option key={harness} value={harness}>
+                      {harness}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <select
               id="compare-run-a"
-              heading="Run A (Baseline)"
-              selectedId={selectedAId}
-              onChange={handleSelectA}
-              run={runA}
-              outcome={outcomeA}
-              turnCount={formatComparePickerTurns(comparison?.runA.turnCount ?? runA?.turnCount, runA?.turns.length ?? 0)}
-              pickerRuns={pickerRuns}
-              optionLabels={optionLabels}
-            />
-            <RunPickerCard
+              data-testid="compare-run-a"
+              value={selectedAId}
+              onChange={(e) => handleSelectA(e.target.value)}
+              className="rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+            >
+              <option value="">Select a run</option>
+              {filteredRunsA.map((r) => (
+                <option key={r.runId} value={r.runId}>
+                  {formatRunOption(r)}
+                </option>
+              ))}
+            </select>
+            {runA && (
+              <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-tertiary-foreground">
+                <span>Harness: <strong className="text-foreground">{runA.harness}</strong></span>
+                <span>
+                  Turns:{' '}
+                  {turnCountA === undefined ? (
+                    <>
+                      <strong className="text-foreground">—</strong>
+                      {runAMetrics.unavailable && runAMetrics.reason ? (
+                        <span className="text-muted-foreground"> ({runAMetrics.reason})</span>
+                      ) : null}
+                    </>
+                  ) : (
+                    <strong className="text-foreground">{turnCountA}</strong>
+                  )}
+                </span>
+                <span>
+                  Outcome:{' '}
+                  <strong
+                    className={
+                      outcomeA?.status === 'success'
+                        ? 'text-emerald-600 dark:text-emerald-400'
+                        : 'text-rose-600 dark:text-rose-400'
+                    }
+                  >
+                    {outcomeA?.status ?? 'unobserved'}
+                  </strong>
+                </span>
+              </div>
+            )}
+          </Card>
+
+          <Card className="flex flex-col gap-2 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <label htmlFor="compare-run-b" className="text-[11px] font-semibold uppercase tracking-wider text-heading">
+                Run B (Candidate)
+              </label>
+              <label className="text-[11px] text-tertiary-foreground">
+                Harness:{' '}
+                <select
+                  data-testid="compare-run-b-harness-filter"
+                  value={harnessFilterB}
+                  onChange={(e) => setHarnessFilterB(e.target.value)}
+                  className="rounded-md border border-border bg-background px-2 py-0.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                >
+                  <option value="">All harnesses</option>
+                  {harnesses.map((harness) => (
+                    <option key={harness} value={harness}>
+                      {harness}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <select
               id="compare-run-b"
-              heading="Run B (Candidate)"
-              selectedId={selectedBId}
-              onChange={handleSelectB}
-              run={runB}
-              outcome={outcomeB}
-              turnCount={formatComparePickerTurns(comparison?.runB.turnCount ?? runB?.turnCount, runB?.turns.length ?? 0)}
-              pickerRuns={pickerRuns}
-              optionLabels={optionLabels}
-            />
-          </div>
+              data-testid="compare-run-b"
+              value={selectedBId}
+              onChange={(e) => handleSelectB(e.target.value)}
+              className="rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+            >
+              <option value="">Select a run</option>
+              {filteredRunsB.map((r) => (
+                <option key={r.runId} value={r.runId}>
+                  {formatRunOption(r)}
+                </option>
+              ))}
+            </select>
+            {runB && (
+              <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-tertiary-foreground">
+                <span>Harness: <strong className="text-foreground">{runB.harness}</strong></span>
+                <span>
+                  Turns:{' '}
+                  {turnCountB === undefined ? (
+                    <>
+                      <strong className="text-foreground">—</strong>
+                      {runBMetrics.unavailable && runBMetrics.reason ? (
+                        <span className="text-muted-foreground"> ({runBMetrics.reason})</span>
+                      ) : null}
+                    </>
+                  ) : (
+                    <strong className="text-foreground">{turnCountB}</strong>
+                  )}
+                </span>
+                <span>
+                  Outcome:{' '}
+                  <strong
+                    className={
+                      outcomeB?.status === 'success'
+                        ? 'text-emerald-600 dark:text-emerald-400'
+                        : 'text-rose-600 dark:text-rose-400'
+                    }
+                  >
+                    {outcomeB?.status ?? 'unobserved'}
+                  </strong>
+                </span>
+              </div>
+            )}
+          </Card>
         </div>
       ) : null}
 
@@ -761,15 +893,34 @@ export function CompareRuns({
                   ? 'Outcome Regression Guard Refusal'
                   : canPromote
                     ? 'Sufficiency Threshold Met (n ≥ 5)'
-                    : 'Candidate Only (n < 5 Minimum Required)'}
+                    : historyState.unavailable
+                      ? 'Candidate Only (Manual Pair)'
+                      : 'Candidate Only (n < 5 Minimum Required)'}
               </span>
-              <span className="text-xs font-medium text-foreground">
-                Completed Pairs: {completedPairCount} / 5 minimum
-              </span>
+              {historyState.unavailable ? (
+                <span className="text-xs font-medium text-foreground">
+                  Recommendation history: — ({historyState.reason})
+                </span>
+              ) : completedPairCount != null ? (
+                <span className="text-xs font-medium text-foreground">
+                  Completed Pairs: {completedPairCount} / 5 minimum
+                </span>
+              ) : null}
             </div>
 
             <span className="text-xs tabular-nums text-tertiary-foreground">
-              Token Delta: {tokenDelta > 0 ? `+${tokenDelta.toLocaleString()}` : tokenDelta.toLocaleString()}
+              {tokenDeltaState.unavailable ? (
+                <>
+                  Token Delta: — ({tokenDeltaState.reason})
+                </>
+              ) : (
+                <>
+                  Token Delta:{' '}
+                  {tokenDelta != null && tokenDelta > 0
+                    ? `+${tokenDelta.toLocaleString()}`
+                    : tokenDelta?.toLocaleString() ?? '—'}
+                </>
+              )}
             </span>
           </div>
 

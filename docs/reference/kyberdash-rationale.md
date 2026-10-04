@@ -4,7 +4,7 @@ title: KyberDash measurable rationale
 doc-type: reference
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-02
+last-reviewed: 2026-10-03
 ---
 
 # KyberDash measurable rationale
@@ -56,6 +56,10 @@ identity and are presented as a lower bound. On the `o200k_base` proxy tokenizer
 unattributed residual measured **2.8–4.4% on one model against 35–41% on another** — the
 difference is the tokenizer, not missing content, and the figure must not read as a true
 count. Regression coverage: `dash/kyber/canon/tokens.test.ts`.
+
+### R4.7 — Flat token validation and finite checks (Issue #227)
+
+When parsers read token counters from nested `tokens`/`usage` objects or flat fallbacks (e.g. KiloCode SQLite stores emitting `tokens_input`, `tokens_output`, etc.), unvalidated values can inject `NaN`, `Infinity`, or string types into token accounting. Nested and flat sources each pass through `finiteOrUndefined`, so a non-finite or string winner is rejected as absent and the next candidate (then 0) applies, rather than corrupting cost calculations. Nested `tokens` and `usage` still win when they are finite numbers.
 
 ## Cost attribution (Requirement 5)
 

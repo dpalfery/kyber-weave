@@ -51,9 +51,11 @@ code-refs:
   - projectCanonicalStore
   - CanonicalProjectionScheduler
   - buildContextReport
+  - CompareRuns
+  - compareRuns
   - SessionIdentities
   - recordsForShare
-  - compareRuns
+  - alignByPhase
   - dedupeTwinTurns
 ---
 
@@ -202,7 +204,7 @@ yields no records persists its reason on the checkpoint's `last_error_code` (sta
 `ok`): `window_filtered` when the parser produced calls that all predate the coverage
 window (`sliceCallsToWindow`), `no_recordable_events` when it produced none (for Codex,
 no `token_count` or model events). A unit with records, or with problems, carries no such
-reason. The Codex OTLP adapter (`canon/adapters/codex.ts`) is the sixth fingerprint voter; see the Codex OTLP note in [telemetry-inventory](telemetry-inventory.md). Warp's Group Containers
+reason. The Codex OTLP adapter (`canon/adapters/codex.ts`) is the sixth fingerprint voter; see the Codex OTLP note in [telemetry-inventory](telemetry-inventory.md). When parser extraction rules change or a parser defect is repaired, bumping the harness descriptor's `parserContractVersion` (e.g. `KILO_PARSER_CONTRACT_VERSION = '2'` in `dash/src/refresh/registry.ts` for `kilo-shared-runtime` and `kilo-vscode-legacy`) invalidates reusable checkpoints without deleting historical metadata, forcing the orchestrator to re-parse units and commit newly extracted records. When a unit's stored `parserContractVersion` differs from the descriptor's, `refreshHarnessSources` rebuilds `recordCount` from live records attributed to that source (`record_provenance` joined to `records`, so quarantined or deleted rows do not count) plus records created in this pass; revision-token and `lastStatus` changes carry the previous count forward (`(previous?.recordCount ?? 0) + created`) because a revision change re-parses within the current window only. Warp's Group Containers
 sqlite is opened through `openDatabase`. A copyfile(2) `EPERM`/`EACCES` on the cache copy
 falls back to read/write (`copyFileBestEffort`, issue #194 / PR #257), so records are produced whenever the
 bytes are readable. A true source-unreadable denial (typically macOS TCC on Group Containers)
@@ -290,6 +292,13 @@ inheritance for still-undecided spans belonging to a source already confidently 
 per-instance suffixes, does not track content, and is not stable across reconfiguration
 (the rationale is in [KyberDash measurable rationale](../reference/kyberdash-rationale.md)). Records no adapter claims with sufficient confidence are
 **quarantined** with their observed attribute namespaces and never guessed at (R6.1).
+
+### Provider call extraction contracts
+
+Upstream provider parsers produce `ParsedProviderCall` turns consumed by `Synthesizer`. Two contracts govern turn extraction and filtering in `session-message.ts` and `sqlite-session-parser.ts`:
+
+- **Token extraction precedence and finite validation:** Nested usage structures (`data.tokens` or `data.usage`) take precedence over flat counters (`tokens_input`, `tokens_output`, `tokens_reasoning`, `tokens_cache_read`, `tokens_cache_write`) used by stores such as KiloCode. Every candidate — nested or flat — passes through `finiteOrUndefined` on its own: strings, `NaN`, and `Infinity` are rejected as absent so the next candidate (and finally 0) applies, rather than corrupting downstream token and cost arithmetic.
+- **Substantive part recognition:** Assistant turns with zero-token and zero-cost values are retained as substantive activity if they contain text output. Both `type: 'text'` and `type: 'markdown'` parts are recognized as substantive text in `hasTextOutput` and `hasAnySubstantiveParts`, preventing assistant markdown responses from being dropped as silent no-op calls. User prompt extraction similarly accepts markdown parts, and model resolution normalizes both string identifiers and `{ id, providerID }` object descriptors.
 
 ## Canonical model
 
@@ -676,14 +685,42 @@ longer emit.
 ### Run Comparison and Phase Alignment (Decision D11)
 
 Comparing runs across prompt revisions or harness configurations requires phase alignment.
-`alignByPhase` aligns runs by logical task phase (discovery, editing, verification) rather than
-chronological turn index. `KyberBridge.compareRuns` (served at `GET /api/kyber/compare/runs`)
-loads each side's turns the same way findings and runs resolve session identity: for each
-execution, `SessionIdentities.shareOf` maps the claimed session id to a share, then
-`recordsForShare` (or bare session records when the id is not a claimed share) gathers the
-rows, and `dedupeTwinTurns` collapses twin-collector duplicates per execution before
-phase alignment. Comparison verdicts enforce a statistical sufficiency threshold
-($n \ge 5$ completed pairs without outcome regression) before promoting observations to advice.
+`alignByPhase` aligns runs by logical task phase (exploration, implementation, verification,
+resolution) rather than chronological turn index. The comparison loader must read the same
+canonical share that created each execution — the same rule `buildRuns` and `buildFindings`
+already follow — not join a derived execution's persisted `sessionId` directly to
+`records.session_id` when a split native key stores rows under their native id while the
+derived row carries a qualified id such as `cursor:<native-key>`.
+
+`KyberBridge.recordsForRun` (`dash/src/server/bridge.ts`) resolves each execution's session
+key through the store's `SessionIdentities.shareOf`; when a share resolves it reads
+`recordsForShare`, otherwise it retains the legitimate unsplit-session lookup. Within each
+share it applies the existing `dedupeTwinTurns` rule, keeps only `op === 'llm.invoke'` model
+turns (auxiliary and tool records do not inflate turn counts), and deduplicates by span id
+when repeated execution keys appear in one run. Phase alignment and token totals operate on
+that deduped turn set only.
+
+The share-miss fallback goes through the same `recordsForShare` harness predicate as a share
+hit. When that predicate drops every record under a key (an excluded identity such as Gemini,
+or a sibling harness), the side's `metricsReason` names the drop and the bridge warns once per
+key and harness rather than on every Compare request. `SessionIdentities` is memoized on the
+bridge per database handle and store generation — `PRAGMA data_version` (commits from other
+connections, such as ingest or backfill) plus `total_changes()` (any write through the bridge's
+own connection, including in-place `UPDATE`s like `setSessionId`) — so the
+`SELECT DISTINCT … FROM records` scan reruns only after the store changes. Per-phase
+`phaseSummaries` token fields follow the totals rule: a phase with any unmeasurable turn omits
+`tokensA`/`tokensB`/`tokenDelta` and carries the first coverage gap as `tokensUnavailableReason`.
+
+**Current-pair measurement vs recommendation history.** Token totals, per-run turn counts, and
+phase-aligned pairs describe the two runs the user selected now. They are independent of
+recommendation-history sufficiency: the n ≥ 5 completed-pair guard in Decision D11 applies
+only when a trusted caller supplies an explicitly measured `completedPairCount` (internal
+analysis and unit tests). The public `GET /api/kyber/compare/runs` route does not accept a
+caller-supplied historical count as measured fact; when no store-backed history exists the
+verdict omits `completedPairCount`, sets `historyAvailability: 'unavailable'`, and keeps
+`canPromote: false` so the pair stays manual-only. Absent comparable turns or token coverage
+returns a first-class unavailable state with a reason — never a fabricated zero turn count,
+token delta, or `0 / 5` history display ([honest unobservability](../rules/honest-unobservability.md)).
 Diagnostic predictions are logged and scored in `dash/src/analysis/calibration.ts`.
 
 ### Opt-In LLM Context Review Seam (ADR 0015)
@@ -734,7 +771,17 @@ The React web dashboard provides progressive-disclosure views matching the 6-lev
 - **`HarnessDetail.tsx`**: Per-harness rollups, coverage indicators, labelled grouping basis, and run browser.
 - **`RunDetail.tsx`**: Multi-agent run topology, execution tree, run scorecard, and grouping label.
 - **`FindingDetail.tsx`**: In-depth finding view with evidence table, confidence basis, risk caveats, and calibration summary.
-- **`CompareRuns.tsx`**: Phase-aligned run diffing with outcome regression guards, reached from the spine rail.
+- **`CompareRuns.tsx`**: Phase-aligned run diffing with outcome regression guards, reached from
+  the spine rail. Run A and Run B both begin at **Select a run** unless the route supplies
+  explicit `a`/`b` deep-link ids; kyberdash fetches comparison data only after two distinct
+  ids are chosen. Each selector has an independent harness filter (`All harnesses` plus
+  observed canonical ids) that narrows the newest-first inventory without inferring subagent
+  role from id, label, or size — harness filtering excludes a harness such as ZCode only when
+  the user selects it, not because kyberdash classifies parent vs subagent runs. Options render
+  as ISO date (or `date unknown`), harness, measured turn count (or `turns unknown`), then
+  human label plus a shortened distinguishing id; the full run id remains the option value.
+  Unavailable turn totals, token delta, and recommendation history render as `—` with the API
+  reason, never as numeric zero or a threshold such as `0 / 5`.
 - **`ContextInspector.tsx`**: Full unclipped context viewer with part tabs and copy-out protocol.
 - **`ContextReviewPanel.tsx`**: Opt-in LLM review console with credential safety.
 - **`ScorecardMatrix.tsx`**: Cross-harness six-dimension matrix on Context Doctor.
@@ -761,7 +808,7 @@ The web dashboard server wires HTTP requests directly to `KyberBridge`:
 |---|---|---|---|
 | `/api/kyber/harnesses` | `GET` | `{ harnesses: HarnessRollupRow[] }` | List harness rollups with 6-dimension availability. Each row carries its display-level `family`, the verbatim rollup `noDataReason` for zero-data harnesses, and a `source_checkpoint` summary (`ok` / `partial` / `failed` / `unavailable` counts). |
 | `/api/kyber/harness/:id` | `GET` | `HarnessRollupRow` | Detail for a single harness including coverage metrics. |
-| `/api/kyber/runs` | `GET` | `{ runs: RunRow[] }` | List runs; supports `?harness=`. |
+| `/api/kyber/runs` | `GET` | `{ runs: RunRow[] }` | List runs newest-first; supports `?harness=`. Each row carries `started`, `harness`, measured `turnCount` when derivable, and optional `label` for Compare inventory labels. |
 | `/api/kyber/run/:id` | `GET` | `{ run, executionTree, executions, findings }` | Complete run detail with parent/child execution tree. |
 | `/api/kyber/sessions` | `GET` | `{ sessions: SessionSummary[] }` | List sessions; supports `?limit=` and `?harness=`. |
 | `/api/kyber/session/:id` | `GET` | `SessionPayload` | Full session payload with turns, context, tools, and timeline. |
@@ -772,7 +819,7 @@ The web dashboard server wires HTTP requests directly to `KyberBridge`:
 | `/api/kyber/predictions` | `GET`, `POST` | `{ predictions: Prediction[] }` | Query or record prediction calibration entries. |
 | `/api/kyber/calibration` | `GET` | `CalibrationSummary` | Calibration curve and scoring summary. |
 | `/api/kyber/compare` | `GET` | `ComparisonTableResult` | Cross-harness comparison matrix. |
-| `/api/kyber/compare/runs` | `GET` | `RunComparisonResult` | Phase-aligned comparison between two runs; turns loaded via `SessionIdentities` share resolution and per-execution twin-dedupe. |
+| `/api/kyber/compare/runs` | `GET` | `RunComparisonResult` | Phase-aligned comparison between two runs. Requires `?runA=` and `?runB=` (aliases `a`, `b`). Loads turns through canonical share resolution and `llm.invoke` dedupe as above. Response includes phase-aligned `pairs`, per-run sides with optional `availability`/`metricsReason`, aggregate `totals` with `availability: 'measured' \| 'unavailable'` (token delta exists only when both runs resolve comparable turns), and a `verdict` with `historyAvailability`, `canPromote`, and `completedPairCount` present only when history was explicitly measured. The public route never treats a query parameter as store-backed recommendation history. |
 | `/api/kyber/review` | `POST` | `ReviewResponse` | Opt-in LLM context review invocation (D10). |
 | `/api/kyber/review/status` | `GET` | `{ provider, isConfigured }` | Review provider configuration status. |
 | `/api/kyber/quarantine` | `GET` | `{ entries: QuarantineRow[] }` | Quarantined spans; supports `?limit=`. |
