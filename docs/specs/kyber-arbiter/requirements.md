@@ -19,7 +19,7 @@ keywords:
 
 **Phase status:** Approved
 
-Owner approved 2026-10-03 ('ARBITER; yes to LENS/REFUTE; approve' plus three-phase split), relayed by the main session. Amended 2026-10-03 per owner direction D29 (build it right first). Amended 2026-10-03 with owner decisions D30–D33 (answers to Q12–Q14 and the 80/20 direction), given with the design approval and relayed by the main session.
+Owner approved 2026-10-03 ('ARBITER; yes to LENS/REFUTE; approve' plus three-phase split), relayed by the main session. Amended 2026-10-03 per owner direction D29 (build it right first). Amended 2026-10-03 with owner decisions D30–D33 (answers to Q12–Q14 and the 80/20 direction), given with the design approval and relayed by the main session. Amended 2026-10-04 per owner direction ("we said we would implement in 3 phases not only design for phase 1. create a spec for all 3 phases please"): D32 is corrected to the owner's own words, and D34 is added. Relayed by the main session.
 
 ## Introduction
 
@@ -446,7 +446,7 @@ The Squad's in-flight decisions are made by the model being governed. Delegation
 
 **D26 constraints:**
 
-- The Arbiter specification, design, and tasks cover Phase 1 (Phase 1 tasks).
+- The specification, design and tasks cover all three phases (D34).
 - Each phase's tasks and deliverables are justified by size per area (Requirement 24).
 - The human reviewer will see size escalations as phases exceed `review.policy.max-reviewable-lines: 10000`.
 - Whether each harness phase ships as its own PR or all phases ship as one PR was left to Q12, which D32 answers.
@@ -516,14 +516,26 @@ The Squad's in-flight decisions are made by the model being governed. Delegation
 
 ### Decision D32: Each delivery phase ships as its own PR
 
-**Owner answer (2026-10-03), to Q12:** Each delivery phase ships as its own PR.
+**Owner answer (2026-10-03), to Q12:** "each phase is its on PR yes".
 
 **D32 constraints:**
 
-- This specification's tasks cover Phase 1.
-- Phases 2 and 3 become todos at closeout, and are planned later from the canonical documentation.
+- Each delivery phase ships as its own PR. That is the whole decision.
+- Where each phase's PR merges is open as Q16 (see the task list).
 
-*Provenance: owner, 2026-10-03.*
+*Provenance: owner, 2026-10-03. Corrected 2026-10-04: an earlier wording added "the tasks cover Phase 1 and Phases 2 and 3 become todos", which the owner did not say.*
+
+### Decision D34: The specification covers all three phases
+
+**Owner direction (2026-10-04):** "we said we would implement in 3 phases not only design for phase 1. create a spec for all 3 phases please".
+
+**D34 constraints:**
+
+- The task list covers Phase 1, Phase 2 and Phase 3.
+- No phase is deferred to a todo.
+- A single closeout follows Phase 3 and archives the specification.
+
+*Provenance: owner, 2026-10-04.*
 
 ### Decision D33: 80/20, no speculative mechanisms
 
@@ -551,7 +563,7 @@ The Squad's in-flight decisions are made by the model being governed. Delegation
 
 **Recommendation:** **(a).** Separate pushes allow each phase to be reviewed on its own merits. `docs validate --merge-ready` fails while a spec is open, so Phase 2 and Phase 3 specifications cannot ship with Phase 1.
 
-*Status: ANSWERED. D32 (owner, 2026-10-03) chose (a).*
+*Status: ANSWERED. D32 (owner, 2026-10-03): each phase ships as its own PR. Option (a)'s wording, which said the specification covers only Phase 1, was not part of the answer, and D34 supersedes it.*
 
 ## Design inputs
 

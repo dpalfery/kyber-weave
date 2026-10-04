@@ -12,9 +12,9 @@ component: KyberSquad
 
 **Phase status:** Approved
 
-Owner approved 2026-10-03 ('approve design'), with D30–D33, relayed by the main session.
+Owner approved 2026-10-03 ('approve design'), with D30–D33, relayed by the main session. Delivery wording in §13 was corrected 2026-10-04 for D32 and D34, at the owner's direction.
 
-The approved [requirements](requirements.md) are the authority: decisions D1–D33 and Requirements 1–25. This document cites them as `Dn` and `Req n.m` and does not restate them. Under D33 it covers only what is needed now, and sub-agents keep their own implementation decisions.
+The approved [requirements](requirements.md) are the authority: decisions D1–D34 and Requirements 1–25. This document cites them as `Dn` and `Req n.m` and does not restate them. Under D33 it covers only what is needed now, and sub-agents keep their own implementation decisions.
 
 - **Harness facts** come from vendor documentation. Each is cited by a key that §21 resolves to a URL and a read date. Under D7, an undocumented capability is treated as supported until a defect says otherwise.
 - **Code facts** were read at `rev=13dcb73` (§18).
@@ -997,7 +997,7 @@ The packet is a worker's whole context (Req 25.1). There are two mechanisms (Req
 | Distribution of the third binary (§1.11) | 1 | Phase 1 hooks call it |
 | Squad wiring for Claude, Copilot and OpenCode; `squad` CLI plumbing; the `global-scope` degradation | 1 | These targets use frontmatter or their own files only, so the receipt schema does not change |
 | Agent and skill contracts (§10.9, Phase 1 rows) | 1 | Every hooked harness depends on the headers, markers and envelope handling |
-| ADR 0028 and the Arbiter documentation (`docs/kyber-arbiter/`, the rule reference, configuration) | 1 | Record D1–D29 and the identifiers as shipped |
+| ADR 0028 and the Arbiter documentation (`docs/kyber-arbiter/`, the rule reference, configuration) | 1 | Record D1–D34 and the identifiers as shipped. Later phases extend these documents with what they deliver |
 | Owned blocks, receipt v3, block drift, ADR 0029 | 2 | Codex and Cursor are the first targets whose hook file is shared (D28) |
 | Cursor and Codex adapters and renderers; the Pi renderer, reusing the plugin envelope | 2 | D28 |
 | Kilo, Antigravity, Factory and Devin adapters and renderers; the Factory shadowing check | 3 | D28 |
@@ -1012,7 +1012,12 @@ No Phase 1 harness needs the fallback:
 
 A defect that disproves one of these before Phase 3 ships is recorded as `arbiter-not-enforced` for the affected trigger on that harness, until the fallback exists (R2).
 
-**Delivery (D32).** Each phase ships as its own PR. This specification's tasks cover Phase 1. At closeout, Phases 2 and 3 become todos, which are planned later from the canonical documentation.
+**Delivery (D32, D34).**
+
+- Each phase ships as its own PR, with its own verification and its own review.
+- The task list covers all three phases, and each phase updates the canonical documentation for what it delivers.
+- One closeout after Phase 3 archives the specification.
+- Where each phase's PR merges is open (Q16, in the task list).
 
 ## 14. Size per area per phase (Req 24)
 
@@ -1174,7 +1179,9 @@ All read at `rev=13dcb73`.
 
 ## 20. Open questions
 
-None. The owner answered every question on 2026-10-03:
+None from the design phase. The tasks phase raised Q15 (Claude return observation), Q16 (phase PRs and the open-specification rule) and Q17 (Antigravity return observation). The [task list](tasks.md#pending-decisions) records all three. Q15 and Q17, once answered, amend §9.2, §10.2 and §10.5.
+
+The owner answered every design-phase question on 2026-10-03:
 
 | Question | Answered by | Applied in |
 |---|---|---|
