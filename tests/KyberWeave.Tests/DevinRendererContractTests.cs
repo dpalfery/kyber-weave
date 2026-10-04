@@ -237,35 +237,60 @@ public sealed class DevinRendererContractTests : IDisposable
 
     /// <summary>
     /// Both Devin authoring roles hold <c>process.execute: allow</c> and must carry the
-    /// harness-neutral initialise-before-edit sentence in an owned reference. The conductor
-    /// pre-creates a missing destination only as fallback.
+    /// harness-neutral initialise-before-edit sentence. <c>architect</c> owns it in
+    /// <c>plan-authoring</c>; <c>product-owner</c> carries it in the agent body and the
+    /// skill's <c>spec-authoring</c> reference, because a same-named skill already occupies
+    /// the ZCode skills directory an agent sidecar would need. The conductor pre-creates a
+    /// missing destination only as fallback.
     /// </summary>
-    [Theory]
-    [InlineData("architect", "architect/references/plan-authoring.md")]
-    [InlineData("product-owner", "product-owner/references/spec-authoring.md")]
-    public async Task RenderAsync_Devin_AuthoringRolesCarryInitialiseBeforeEditInstruction(
-        string agentName,
-        string resourcePath)
+    [Fact]
+    public async Task RenderAsync_Devin_AuthoringRolesCarryInitialiseBeforeEditInstruction()
     {
         const string initialiseInstruction =
             "On harnesses where file editing requires an existing destination file (such as Devin), initialize the file via shell (for example, `touch <file>`) before editing.";
 
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
-        SquadAgent agent = Assert.Single(source.Agents, a => a.Name == agentName);
-        SquadResource resource = Assert.Single(
-            agent.Resources,
-            r => r.RelativePath == resourcePath);
-        Assert.Contains(initialiseInstruction, resource.Content, StringComparison.Ordinal);
+        SquadAgent architect = Assert.Single(source.Agents, a => a.Name == "architect");
+        SquadResource planAuthoring = Assert.Single(
+            architect.Resources,
+            r => r.RelativePath == "architect/references/plan-authoring.md");
+        Assert.Contains(initialiseInstruction, planAuthoring.Content, StringComparison.Ordinal);
+
+        SquadAgent productOwner = Assert.Single(source.Agents, a => a.Name == "product-owner");
+        Assert.Empty(productOwner.Resources);
+        Assert.Contains(initialiseInstruction, productOwner.InstructionBody, StringComparison.Ordinal);
+
+        SquadSkill productOwnerSkill = Assert.Single(source.Skills, s => s.Name == "product-owner");
+        SquadResource specAuthoring = Assert.Single(
+            productOwnerSkill.Resources,
+            r => r.RelativePath == "references/spec-authoring.md");
+        Assert.Contains(initialiseInstruction, specAuthoring.Content, StringComparison.Ordinal);
 
         SquadRenderResult result = await RenderDevinAsync(ProductRoot);
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
-        SquadDeploymentFile file = Assert.Single(
+        SquadDeploymentFile architectFile = Assert.Single(
             result.Files,
-            f => f.RelativePath == $".devin/agents/{agentName}/{resourcePath}");
+            f => f.RelativePath == ".devin/agents/architect/architect/references/plan-authoring.md");
         Assert.Contains(
             initialiseInstruction,
-            Encoding.UTF8.GetString(file.Content.Span),
+            Encoding.UTF8.GetString(architectFile.Content.Span),
+            StringComparison.Ordinal);
+
+        SquadDeploymentFile productOwnerAgent = Assert.Single(
+            result.Files,
+            f => f.RelativePath == ".devin/agents/product-owner/AGENT.md");
+        Assert.Contains(
+            initialiseInstruction,
+            Encoding.UTF8.GetString(productOwnerAgent.Content.Span),
+            StringComparison.Ordinal);
+
+        SquadDeploymentFile productOwnerSkillFile = Assert.Single(
+            result.Files,
+            f => f.RelativePath == ".devin/skills/product-owner/references/spec-authoring.md");
+        Assert.Contains(
+            initialiseInstruction,
+            Encoding.UTF8.GetString(productOwnerSkillFile.Content.Span),
             StringComparison.Ordinal);
     }
 

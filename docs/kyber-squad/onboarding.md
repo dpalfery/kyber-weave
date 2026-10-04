@@ -309,9 +309,9 @@ keep loading after installing `devin`. Squad never writes or removes anything un
 so a role that only edits could not start a new plan or specification. `architect` and
 `product-owner` therefore render on Devin from the `architect-devin` and `product-planning-devin`
 capability profiles, which grant `exec` alongside the write tools. Both roles carry the same
-harness-neutral initialise-before-edit instruction: `architect`'s plan-authoring reference and
-`product-owner`'s spec-authoring reference tell each role to initialise the destination via shell
-(e.g. `touch <file>`) before editing. `architect`'s `PLAN_READY` contract and `product-owner`'s
+harness-neutral initialise-before-edit instruction: `architect`'s plan-authoring reference, and
+`product-owner`'s agent body plus the skill's spec-authoring reference, tell each role to
+initialise the destination via shell (e.g. `touch <file>`) before editing. `architect`'s `PLAN_READY` contract and `product-owner`'s
 `SPEC_FINALIZED` contract still require `docs validate` and `docs drift` to pass. Every other role
 renders from its shared profile and keeps `ask` narrowing to withheld. If a plan or spec write still
 fails on a missing file, create the empty file and re-run the request — the conductor does this as
@@ -543,9 +543,9 @@ kyber-weave squad pack --format all --out ./artifacts
 Running `squad pack` outside the repository root fails immediately with a diagnostic directing the operator to rerun the command from the Kyber-Weave repository root (or run `squad install` if deploying agents and skills to a project).
 
 Both archive formats recurse through each skill directory. They contain all 24 canonical
-`SKILL.md` files plus the 67 retained supplemental resources, and retained local skill references
+`SKILL.md` files plus the 68 retained supplemental resources, and retained local skill references
 must resolve in the extracted package. The APM archive additionally contains the 21 canonical
-agents with their 11 owned reference files; the Agent Plugins archive never contains agents or
+agents with their 10 owned reference files; the Agent Plugins archive never contains agents or
 agent-owned resources. A fresh deployment renders every file an owner's Markdown links reach
 beside its principal — 122 files on Copilot today — with authored relative links resolving inside
 the target output; every skill resource reaches this render except

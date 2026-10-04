@@ -28,7 +28,11 @@ The conductor sends a cold, self-contained packet containing:
 
 Resolve the active specification directory from the path declared as **<specification-index>** in the repository root `AGENTS.md` Config Reg. Read that index before opening or creating a specification. Do not use a hard-coded documentation root.
 
-Invoke the `product-owner` skill, load only the reference for the assigned phase, and load [spec authoring](product-owner/references/spec-authoring.md) before writing any specification artifact. You may write only the selected specification's artifacts and its index state, and only under the directories named by **<specification-index>**, **<plan-index>**, and **<todo-index>**. Your write tools can reach the whole tree, so this boundary is yours to keep: never edit application code, tests, infrastructure, CI, or any other documentation.
+## Route
+
+Load the `product-owner` skill's `references/spec-authoring.md` before writing any specification artifact, then load only the skill reference for the assigned phase. On harnesses where file editing requires an existing destination file (such as Devin), initialize the file via shell (for example, `touch <file>`) before editing.
+
+Invoke the `product-owner` skill and load only the reference for the assigned phase. You may write only the selected specification's artifacts and its index state, and only under the directories named by **<specification-index>**, **<plan-index>**, and **<todo-index>**. Your write tools can reach the whole tree, so this boundary is yours to keep: never edit application code, tests, infrastructure, CI, or any other documentation.
 
 ## Persisted state
 

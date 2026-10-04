@@ -80,10 +80,12 @@ ready, and both were unreachable on this target for the same reason.
    target that withholds file creation from subagents without a Devin-scoped profile to fall back on.
 
 5. **Authoring guidance is harness-neutral, and both authoring roles carry it.** `architect`'s
-   `plan-authoring` reference and `product-owner`'s `spec-authoring` reference tell each role that
-   where file editing requires an existing destination — Devin is the known case — it initialises
-   the file through the shell before editing. The conductor pre-creation protocol (decision 4)
-   remains the fallback if a write still fails on a nonexistent file.
+   `plan-authoring` reference tells the role that where file editing requires an existing
+   destination — Devin is the known case — it initialises the file through the shell before editing.
+   `product-owner` carries the same sentence in its agent body and in the skill's `spec-authoring`
+   reference (the role shares its name with a skill, so it cannot own an agent sidecar: ZCode would
+   have to project that closure into the skill's directory). The conductor pre-creation protocol
+   (decision 4) remains the fallback if a write still fails on a nonexistent file.
 
 ## Alternatives rejected
 
@@ -129,6 +131,6 @@ ready, and both were unreachable on this target for the same reason.
 - [Kyber-Squad architecture](../kyber-squad/architecture.md) — §8 rendering, target-scoped profiles and where `architect-copilot` is declared
 - [`products/kyber-squad/profiles/capabilities.yml`](../../products/kyber-squad/profiles/capabilities.yml) — the `architect-copilot`, `architect-devin`, and `product-planning-devin` profiles
 - [`products/kyber-squad/agents/architect/references/plan-authoring.md`](../../products/kyber-squad/agents/architect/references/plan-authoring.md) — architect initialise-before-edit instruction
-- [`products/kyber-squad/agents/product-owner/references/spec-authoring.md`](../../products/kyber-squad/agents/product-owner/references/spec-authoring.md) — product-owner initialise-before-edit instruction
+- [`products/kyber-squad/skills/product-owner/references/spec-authoring.md`](../../products/kyber-squad/skills/product-owner/references/spec-authoring.md) — product-owner initialise-before-edit instruction
 - [Kyber-Squad onboarding](../kyber-squad/onboarding.md) — Devin notes for operators
 - [Kyber-Squad requirements](../kyber-squad/requirements.md) — KS-002 non-broadening contract

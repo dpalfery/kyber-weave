@@ -360,12 +360,14 @@ public sealed class SquadCanonicalContentTests
         Assert.DoesNotContain("ask, verbatim", productOwner.InstructionBody, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("GATE 1", productOwner.InstructionBody, StringComparison.Ordinal);
         Assert.Contains(
-            "product-owner/references/spec-authoring.md",
+            "initialize the file via shell (for example, `touch <file>`) before editing.",
             productOwner.InstructionBody,
             StringComparison.Ordinal);
+        Assert.Empty(productOwner.Resources);
+        SquadSkill productOwnerSkill = Assert.Single(source.Skills, skill => skill.Name == "product-owner");
         SquadResource specAuthoring = Assert.Single(
-            productOwner.Resources,
-            resource => resource.RelativePath == "product-owner/references/spec-authoring.md");
+            productOwnerSkill.Resources,
+            resource => resource.RelativePath == "references/spec-authoring.md");
         Assert.Contains(
             "initialize the file via shell (for example, `touch <file>`) before editing.",
             specAuthoring.Content,

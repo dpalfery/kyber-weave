@@ -46,7 +46,6 @@ products/kyber-squad/
 │   ├── github-devops.md
 │   ├── maui-dev.md
 │   ├── product-owner.md
-│   ├── product-owner/                  # Progressive-disclosure references (Markdown)
 │   ├── pulumi-dev.md
 │   ├── python-dev.md
 │   ├── react-dev.md
@@ -125,7 +124,7 @@ in Kyber-Squad. Every imported raw `SKILL.md` except the six explicitly evolved 
 (`bug-crusher`, `code-review`, `product-owner`, `second-brain`,
 `create-pull-request`, and `pr-review-fix-comments`) is byte-identical to the designated
 Hotshot golden copy; `create-pull-request-github` is retired into `create-pull-request`. The canonical
-tree also retains 67 supplemental resources, for 91 skill-tree files in total; recursive APM and
+tree also retains 68 supplemental resources, for 92 skill-tree files in total; recursive APM and
 Agent Plugins packages preserve those resources and their local references.
 
 `code-review-loop` completes an authorized code review feedback cycle: validated fixes,

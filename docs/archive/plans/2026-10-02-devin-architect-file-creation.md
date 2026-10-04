@@ -87,7 +87,7 @@ Enable Devin `architect` (and `product-owner`) to reliably persist newly created
 1. **Copilot precedent:** Copilot encountered a similar constraint (no `ask` state, strict tool allow-list) and introduced `copilot-capability-profile: architect-copilot` in `capabilities.yml` with `process.execute: allow`.
 2. **Execution requirement in plan authoring:** `architect/references/plan-authoring.md` requires running `docs validate` and `docs drift` before declaring `PLAN_READY`. With `process.execute` withheld, `architect` on Devin cannot run these checks anyway.
 3. **Renderer degradation accounting:** If `process.execute` is `allow` and `filesystem.write` is `allow`, `CapabilityDegradations.BuildCapabilityNotIsolable` returns `null` (no degradation), because write access is already granted.
-4. **Agent instructions:** If `exec` is granted on Devin, `architect/references/plan-authoring.md` and `product-owner/references/spec-authoring.md` include the same harness-neutral guidance to initialize nonexistent files via shell before editing. Conductor pre-creation remains the fallback if a write still fails on a nonexistent file.
+4. **Agent instructions:** If `exec` is granted on Devin, `architect/references/plan-authoring.md` and the `product-owner` skill's `references/spec-authoring.md` (plus the same sentence in the `product-owner` agent body) include the harness-neutral guidance to initialize nonexistent files via shell before editing. `product-owner` cannot own an agent sidecar because a same-named skill already occupies that identity on ZCode. Conductor pre-creation remains the fallback if a write still fails on a nonexistent file.
 
 ---
 
@@ -109,7 +109,7 @@ Automated tests in `tests/KyberWeave.Tests/`:
 
 - [x] **T1: Failing Tests for Devin Architect Capabilities** (`tests/KyberWeave.Tests/DevinRendererContractTests.cs`)
 - [x] **T2: Capability Profile & Rendering Updates** (`products/kyber-squad/profiles/capabilities.yml`, `src/KyberWeave.Core/Squad/Rendering/DevinRenderer.cs`)
-- [x] **T3: Authoring Reference Guidance for Devin** (`products/kyber-squad/agents/architect/references/plan-authoring.md`, `products/kyber-squad/agents/product-owner/references/spec-authoring.md`, `products/kyber-squad/agents/conductor/references/plan-path.md`)
+- [x] **T3: Authoring Reference Guidance for Devin** (`products/kyber-squad/agents/architect/references/plan-authoring.md`, `products/kyber-squad/skills/product-owner/references/spec-authoring.md`, `products/kyber-squad/agents/conductor/references/plan-path.md`)
 - [x] **T4: Documentation Checks and Regression Suite** (`docs validate .`, `docs drift .`, `dotnet test`)
 - [x] **T5: PR Creation and Handoff** (Draft PR against trunk titled `[issue #161] [hal.hermes.agy] Devin architect can create new files`)
 

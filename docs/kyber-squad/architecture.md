@@ -105,7 +105,7 @@ Kyber-Squad treats agent and skill definitions as strictly typed, immutable sour
 - **Normalization Pipeline**: `SquadSourceLoader` parses frontmatter against `schemas/agent.schema.json`, validates capability bindings, computes an immutable SHA-256 instruction digest over the normalized body, and emits a structured `AgentIR` model.
 - **Strict Invariants**: Loaders reject undeclared profiles, missing capabilities, invalid invocation modes, path traversal attempts, or unrecognized frontmatter keys.
 - **Canonical Skills and Resources**: `SquadSourceLoader` loads the 24 top-level `SKILL.md`
-  identities. The canonical tree separately retains 67 supplemental files, giving 91 recursive
+  identities. The canonical tree separately retains 68 supplemental files, giving 92 recursive
   skill-tree files; `SquadPacker` carries that complete recursive tree into both package formats.
 
 ---
@@ -456,11 +456,13 @@ and validates.
   only write path is that tool can edit an artifact but not create one, so `architect` stopped at
   `STATUS: PLAN_WRITE_ERROR` on a plan it had already drafted. Two grants produce that failure
   together — `ask` narrows to withheld on subagents, and the shared profiles hold `process.execute:
-  ask` (`architect`) or `deny` (`product-planning`).   `architect-devin` and
+  ask` (`architect`) or `deny` (`product-planning`). `architect-devin` and
   `product-planning-devin` mirror their shared profiles with `process.execute: allow`. Both roles
   carry the matching initialise-before-edit instruction: `architect` in its plan-authoring
-  reference and `product-owner` in its spec-authoring reference, each telling the role to
-  initialise a destination that does not exist before editing. `architect`'s `PLAN_READY`
+  reference, and `product-owner` in its agent body and the skill's spec-authoring reference
+  (it cannot own an agent sidecar: a same-named skill already occupies the ZCode skills
+  directory that sidecar would need). Each tells the role to initialise a destination that
+  does not exist before editing. `architect`'s `PLAN_READY`
   contract and `product-owner`'s `SPEC_FINALIZED` contract require `docs validate` and
   `docs drift` to pass. `docs-dev` and `task-reviewer` deliberately name no
   Devin profile and keep narrowing: neither has an execution-dependent completion contract, and a
@@ -502,7 +504,7 @@ and validates.
   six explicitly evolved skills (`bug-crusher`, `code-review`, `product-owner`, `second-brain`,
   `create-pull-request`, and `pr-review-fix-comments`) still matches Hotshot golden bytes;
   `create-pull-request-github` is retired into `create-pull-request`. Canonical source and both
-  recursive package formats retain all 67 skill resources (91 files under
+  recursive package formats retain all 68 skill resources (92 files under
   `products/kyber-squad/skills/`) and resolve the retained references. Every retained resource
   now has a reviewed disposition in the
   [skill-resource dispositions audit](skill-resource-dispositions.md): non-policy content stays
