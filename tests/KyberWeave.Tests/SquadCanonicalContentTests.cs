@@ -401,13 +401,15 @@ public sealed class SquadCanonicalContentTests
             .GetProperty("target");
 
         Assert.False(target.TryGetProperty("const", out _));
+        JsonElement allowed = target.GetProperty("enum");
         string[] schemaTargets =
         [
-            .. target.GetProperty("enum").EnumerateArray()
-                .Select(item => item.GetString())
-                .OfType<string>()
+            .. allowed.EnumerateArray().Select(item =>
+                item.GetString()
+                ?? throw new InvalidOperationException(
+                    $"Capability-profile schema enum entry '{item}' is not a string."))
         ];
-        Assert.Equal(target.GetProperty("enum").GetArrayLength(), schemaTargets.Length);
+        Assert.Equal(allowed.GetArrayLength(), schemaTargets.Length);
         Assert.Equal(
             SquadSourceLoader.TargetScopedProfileTargets.Order(StringComparer.Ordinal),
             schemaTargets.Order(StringComparer.Ordinal));
