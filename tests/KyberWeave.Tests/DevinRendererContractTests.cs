@@ -236,6 +236,40 @@ public sealed class DevinRendererContractTests : IDisposable
     }
 
     /// <summary>
+    /// Both Devin authoring roles hold <c>process.execute: allow</c> and must carry the
+    /// harness-neutral initialise-before-edit sentence in an owned reference. The conductor
+    /// pre-creates a missing destination only as fallback.
+    /// </summary>
+    [Theory]
+    [InlineData("architect", "architect/references/plan-authoring.md")]
+    [InlineData("product-owner", "product-owner/references/spec-authoring.md")]
+    public async Task RenderAsync_Devin_AuthoringRolesCarryInitialiseBeforeEditInstruction(
+        string agentName,
+        string resourcePath)
+    {
+        const string initialiseInstruction =
+            "On harnesses where file editing requires an existing destination file (such as Devin), initialize the file via shell (for example, `touch <file>`) before editing.";
+
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadAgent agent = Assert.Single(source.Agents, a => a.Name == agentName);
+        SquadResource resource = Assert.Single(
+            agent.Resources,
+            r => r.RelativePath == resourcePath);
+        Assert.Contains(initialiseInstruction, resource.Content, StringComparison.Ordinal);
+
+        SquadRenderResult result = await RenderDevinAsync(ProductRoot);
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        SquadDeploymentFile file = Assert.Single(
+            result.Files,
+            f => f.RelativePath == $".devin/agents/{agentName}/{resourcePath}");
+        Assert.Contains(
+            initialiseInstruction,
+            Encoding.UTF8.GetString(file.Content.Span),
+            StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// Devin reads an agent from either <c>agents/&lt;name&gt;.md</c> or
     /// <c>agents/&lt;name&gt;/AGENT.md</c>. Mixing the two for one name is ambiguous, so the
     /// renderer uses the directory layout only, and anything else inside an agent's directory

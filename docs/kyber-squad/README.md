@@ -4,7 +4,7 @@ title: Kyber-Squad — Multi-Harness Agent & Skill Deployment Control Plane
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-03
+last-reviewed: 2026-10-04
 ---
 
 # Kyber-Squad — Multi-Harness Agent & Skill Deployment Control Plane
@@ -65,7 +65,7 @@ another review. The existing
 
 A fresh GitHub Copilot render projects each owner's linked resources beside its principal:
 21 `.github/agents/<name>.agent.md` files, 24 `.github/skills/<name>/SKILL.md` files, and the
-linked resources, 121 files total, with authored relative links resolving in the output. Every
+linked resources, 122 files total, with authored relative links resolving in the output. Every
 skill resource reaches every render except `skills/setup-dev-environment/agents/openai.yaml`,
 which is packaged-only Codex skill-UI metadata. Every retained resource now has a reviewed
 disposition in the [skill-resource dispositions audit](skill-resource-dispositions.md):

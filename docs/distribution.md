@@ -5,7 +5,7 @@ doc-type: reference
 status: current
 component: Distribution
 owner: dpalfery
-last-reviewed: 2026-09-29
+last-reviewed: 2026-10-04
 ---
 
 # Distribution and release flow
@@ -97,7 +97,7 @@ In addition to binary executables, each GitHub Release publishes two version-mat
 
 | Asset Name | Format | Contents |
 |---|---|---|
-| `kyber-squad-<version>.zip` | APM bundle | All 21 canonical agents with their 10 owned references, 23 skills with 66 supplemental resources, profiles, schemas, and `mcp.json` |
+| `kyber-squad-<version>.zip` | APM bundle | All 21 canonical agents with their 11 owned references, 23 skills with 66 supplemental resources, profiles, schemas, and `mcp.json` |
 | `kyber-squad-plugin-<version>.zip` | Agent Plugins v1 | All 23 portable skills, their 66 supplemental resources, and MCP server configuration; never agents or agent-owned resources |
 
 ### Packaging via `squad pack`

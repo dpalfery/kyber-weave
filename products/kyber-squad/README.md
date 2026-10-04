@@ -46,6 +46,7 @@ products/kyber-squad/
 │   ├── github-devops.md
 │   ├── maui-dev.md
 │   ├── product-owner.md
+│   ├── product-owner/                  # Progressive-disclosure references (Markdown)
 │   ├── pulumi-dev.md
 │   ├── python-dev.md
 │   ├── react-dev.md
@@ -135,7 +136,7 @@ workflow for step-by-step approvals.
 Renderers project every file an owner's Markdown links reach beside its principal output, with
 authored relative links preserved, so the former dangling-reference defect is closed for every
 linked resource: a fresh Copilot render now emits the 45 principal files plus each owner's linked
-resources (121 files total). Every skill resource reaches every render except
+resources (122 files total). Every skill resource reaches every render except
 `skills/setup-dev-environment/agents/openai.yaml`, which is packaged-only Codex skill-UI metadata.
 The tracked root `.github/` self-deployment predates resource delivery and remains a stale
 snapshot until a human refreshes it after a release candidate; packages and fresh renders carry

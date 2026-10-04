@@ -4,7 +4,7 @@ title: Devin Target-Scoped Capability Profiles for Headless Authoring Roles, wit
 doc-type: adr
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-03
+last-reviewed: 2026-10-04
 component: KyberSquad
 ---
 
@@ -79,16 +79,11 @@ ready, and both were unreachable on this target for the same reason.
    harness-neutral degradation protocol, not Devin-specific text, and it is the path for a future
    target that withholds file creation from subagents without a Devin-scoped profile to fall back on.
 
-5. **Authoring guidance is harness-neutral, and only `architect` carries it.** `architect`'s
-   `plan-authoring` reference tells the role that where file editing requires an existing
-   destination — Devin is the known case — it initialises the file through the shell before editing.
-   `product-owner` is granted the shell (enabling documentation validation under `SPEC_FINALIZED`),
-   but has no equivalent instruction: no authoring reference or skill tells it to initialise a
-   destination. On Devin, `product-owner` authoring of new files therefore depends on decision 4's
-   conductor pre-creation fallback rather than on its own instruction; it cannot author a new
-   specification file unaided. That asymmetry is left as delivered rather than closed here; adding
-   instruction-level shell routing would be a change to canonical product source, not to this
-   decision.
+5. **Authoring guidance is harness-neutral, and both authoring roles carry it.** `architect`'s
+   `plan-authoring` reference and `product-owner`'s `spec-authoring` reference tell each role that
+   where file editing requires an existing destination — Devin is the known case — it initialises
+   the file through the shell before editing. The conductor pre-creation protocol (decision 4)
+   remains the fallback if a write still fails on a nonexistent file.
 
 ## Alternatives rejected
 
@@ -116,10 +111,10 @@ ready, and both were unreachable on this target for the same reason.
   to name. The record is still emitted for Devin roles that grant execution while withholding writes.
 - Devin authoring roles hold a shell. That is a real widening of what the deployed subagent can do,
   accepted because the alternative is a harness that cannot create the artifact the role exists to
-  write (`architect` uses it to initialise files before editing, while `product-owner` uses it for
-  corpus validation and depends on the conductor pre-creation fallback for new files). The shared
-  profile's narrower intent — a grant scoped to two commands rather than a shell — is preserved
-  everywhere else.
+  write. Both roles use the shell to initialise a missing destination before editing and to run
+  their documentation checks; the conductor pre-creation protocol stays as the fallback if a write
+  still fails on a nonexistent file. The shared profile's narrower intent — a grant scoped to two
+  commands rather than a shell — is preserved everywhere else.
 - The `write`-does-not-create-files finding is a harness observation, not a documented Devin
   contract. It is the one claim here to re-check against a real install if Devin's tool surface
   changes; ADR 0025's real-install confirmations are still open on the same build.
@@ -133,5 +128,7 @@ ready, and both were unreachable on this target for the same reason.
 - [ADR 0017](0017-copilot-deterministic-tool-order.md) — Copilot tool membership and emission order, the projection the `copilot-capability-profile` field feeds
 - [Kyber-Squad architecture](../kyber-squad/architecture.md) — §8 rendering, target-scoped profiles and where `architect-copilot` is declared
 - [`products/kyber-squad/profiles/capabilities.yml`](../../products/kyber-squad/profiles/capabilities.yml) — the `architect-copilot`, `architect-devin`, and `product-planning-devin` profiles
+- [`products/kyber-squad/agents/architect/references/plan-authoring.md`](../../products/kyber-squad/agents/architect/references/plan-authoring.md) — architect initialise-before-edit instruction
+- [`products/kyber-squad/agents/product-owner/references/spec-authoring.md`](../../products/kyber-squad/agents/product-owner/references/spec-authoring.md) — product-owner initialise-before-edit instruction
 - [Kyber-Squad onboarding](../kyber-squad/onboarding.md) — Devin notes for operators
 - [Kyber-Squad requirements](../kyber-squad/requirements.md) — KS-002 non-broadening contract

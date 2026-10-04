@@ -5,7 +5,7 @@ doc-type: architecture
 component: KyberSquad
 source-root: src/KyberWeave.Core/Squad
 owner: dpalfery
-last-reviewed: 2026-10-03
+last-reviewed: 2026-10-04
 status: current
 decided-by:
   - adr/0017-copilot-deterministic-tool-order
@@ -456,15 +456,13 @@ and validates.
   only write path is that tool can edit an artifact but not create one, so `architect` stopped at
   `STATUS: PLAN_WRITE_ERROR` on a plan it had already drafted. Two grants produce that failure
   together — `ask` narrows to withheld on subagents, and the shared profiles hold `process.execute:
-  ask` (`architect`) or `deny` (`product-planning`). `architect-devin` and
-  `product-planning-devin` mirror their shared profiles with `process.execute: allow`. For
-  `architect`, this restores file creation through the shell on this target: `architect` carries the
-  matching instruction in its plan-authoring reference telling it to initialise a destination that
-  does not exist before editing, and its `PLAN_READY` contract requires `docs validate` and
-  `docs drift` to pass. `product-owner` has no equivalent shell-routing instruction: it is granted
-  the shell, but depends on the conductor's pre-creation fallback to create new specification files
-  rather than authoring unaided, though the grant allows its `SPEC_FINALIZED` contract to validate
-  the documentation corpus. `docs-dev` and `task-reviewer` deliberately name no
+  ask` (`architect`) or `deny` (`product-planning`).   `architect-devin` and
+  `product-planning-devin` mirror their shared profiles with `process.execute: allow`. Both roles
+  carry the matching initialise-before-edit instruction: `architect` in its plan-authoring
+  reference and `product-owner` in its spec-authoring reference, each telling the role to
+  initialise a destination that does not exist before editing. `architect`'s `PLAN_READY`
+  contract and `product-owner`'s `SPEC_FINALIZED` contract require `docs validate` and
+  `docs drift` to pass. `docs-dev` and `task-reviewer` deliberately name no
   Devin profile and keep narrowing: neither has an execution-dependent completion contract, and a
   grant with no reader is not made. With `filesystem.write: allow` beside the shell, these two roles
   also no longer raise `capability-not-isolable` on Devin. The conductor's `intake-path`, `plan-path`,
@@ -492,7 +490,7 @@ and validates.
 - **Copilot emit today**: `CopilotRenderer` writes each agent's
   `.github/agents/<name>.agent.md` and each skill's `.github/skills/<name>/SKILL.md`, then
   `SquadResourceProjection.Append` places every file that owner's Markdown links reach beside
-  the principal. A fresh Copilot render is 121 files — 21 agents, 24 skills, plus projected
+  the principal. A fresh Copilot render is 122 files — 21 agents, 24 skills, plus projected
   closures — with authored relative links resolving in the output; every skill resource
   reaches this render except `skills/setup-dev-environment/agents/openai.yaml`, which stays
   packaged-only Codex skill-UI metadata. That count is the current

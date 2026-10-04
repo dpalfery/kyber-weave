@@ -359,6 +359,17 @@ public sealed class SquadCanonicalContentTests
 
         Assert.DoesNotContain("ask, verbatim", productOwner.InstructionBody, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("GATE 1", productOwner.InstructionBody, StringComparison.Ordinal);
+        Assert.Contains(
+            "product-owner/references/spec-authoring.md",
+            productOwner.InstructionBody,
+            StringComparison.Ordinal);
+        SquadResource specAuthoring = Assert.Single(
+            productOwner.Resources,
+            resource => resource.RelativePath == "product-owner/references/spec-authoring.md");
+        Assert.Contains(
+            "initialize the file via shell (for example, `touch <file>`) before editing.",
+            specAuthoring.Content,
+            StringComparison.Ordinal);
         Assert.Contains("STATUS: READY_FOR_REVIEW", skillContract, StringComparison.Ordinal);
         Assert.Contains("STATUS: REQUIREMENTS_GAP", skillContract, StringComparison.Ordinal);
         Assert.Contains("STATUS: DESIGN_GAP", skillContract, StringComparison.Ordinal);
