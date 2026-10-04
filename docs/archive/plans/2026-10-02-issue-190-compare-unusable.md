@@ -26,8 +26,9 @@ code-refs:
 `hal.hermes.cursor/issue-190-compare-unusable`. Decision-complete: Q1–Q4 locked
 as D1–D4. Approve-and-execute 2026-10-02 ("Hal approves"). T1–T6 complete:
 share-resolved `recordsForRun` (`shareOf` → `recordsForShare` + per-execution
-`dedupeTwinTurns`), Compare picker empty defaults / labels / subagent·zero-turn
-filters, architecture/runbook harvest in
+`dedupeTwinTurns`), Compare picker empty defaults / labels / harness filter
+(D2 subagent·zero-turn filters and keyed `isSubagent` enrichment DROPPED at
+merge — acb15fa), architecture/runbook harvest in
 [dash/architecture.md](../../dash/architecture.md) and
 [dash/runbook.md](../../dash/runbook.md). End-of-run code-review council
 **VERDICT: APPROVE**, with A3 disclosure of known host `ts-test` risk (migration
@@ -81,7 +82,7 @@ ontology, and without "fixing" the disclosed host test failures below.
 | A5 | Closeout verification includes dash typecheck/lint/test/check:reachable (or the plan's focused vitest plus those gates), `docs validate .`, and `docs drift .`. | Conductor assignment |
 | A6 | Archive this plan on the finishing PR before `--merge-ready` (`KW-DOC-LIFECYCLE-003`); open PR to `main` with body starting `Fixes #190`. | Conductor assignment + lifecycle rule |
 | D1 | **Q1 → (a):** Fix `recordsForRun` to mirror findings/runs: `sessionIdentities().shareOf(id)` then `recordsForShare` / bare `recordsForSession`; apply the same twin-dedupe scope findings use (`dedupeTwinTurns` per execution). Keep `alignByPhase` on `CanonicalRecord`s (phase inference preserved). Options (b)/(c) declined for this PR. | Conductor-relayed answer Q1=a, 2026-10-02; approve-and-execute "Hal approves" |
-| D2 | **Q2 → (a):** Client default-exclude runs whose linked session(s) are `is_subagent` and runs with zero measured `turnCount`; optional "Show subagents" toggle. Defer twin-run collapse until labels + filters prove insufficient. Options (b)/(c)/(d) declined for this PR. | Conductor-relayed answer Q2=a, 2026-10-02; approve-and-execute "Hal approves" |
+| D2 | **Q2 → (a):** Approved as client default-exclude of `is_subagent` / zero-`turnCount` runs with optional "Show subagents" toggle; defer twin-run collapse. **DROPPED at merge** — 56edaf9 took main's Compare UI (#269); acb15fa removed the orphaned keyed `isSubagent` enrichment. As shipped: harness filter only (no subagent exclusion, no zero-turn filter, no toggle). Options (b)/(c)/(d) declined for this PR. | Conductor-relayed answer Q2=a, 2026-10-02; approve-and-execute "Hal approves"; DROPPED at merge (acb15fa) |
 | D3 | **Q3 → (a):** Both pickers start empty with "Select a run"; fetch comparison only when both ids are non-empty, distinct, and explicitly set. Treat deep-link / `initialRunAId` / `initialRunBId` as explicit selection (not silent list default). Options (b)/(c-as-auto-default) declined. | Conductor-relayed answer Q3=a (+ deep-link as explicit), 2026-10-02; approve-and-execute "Hal approves" |
 | D4 | **Q4 → (a):** Option label `{localDate} · {harness} · {turnCount}t · {tokens} · {shortId}` with optional `label` prefix when present; `tokens` = measured input+output or "—" when absent. When truncated labels collide, append a unique cwd basename (or a stable ordinal) to the visible `<option>` text; put full `runId` + `workingDirectory` on the `<select>` `title` (not `<option title>` — Chrome does not surface those). Server-composed `displayLabel` (c) declined for this PR. | Conductor-relayed answer Q4=a, 2026-10-02; approve-and-execute "Hal approves"; as-shipped collision disambiguation (commit 1be212a) |
 | A7 | Approve-and-execute: finalize Draft → Ready; implementation may proceed on T1–T6 under D1–D4. | Explicit user approval relayed as "Hal approves", 2026-10-02 |
@@ -313,7 +314,7 @@ dotnet run --project src/KyberWeave.Cli --no-build -c Release -- docs drift .
 | Check | Result |
 |---|---|
 | T1 RED / T2 GREEN (share-resolved compare load) | Complete — `recordsForRun` via `shareOf` → `recordsForShare` / bare session + per-execution `dedupeTwinTurns`; split-share + twin-dedupe bridge contracts green |
-| T3 picker defaults / labels / filters | Complete — empty "Select a run"; D4 labels; D2 subagent/zero-turn filter + "Show subagents"; keyed `isSubagent` enrichment; deep-link keeps selected options in the list |
+| T3 picker defaults / labels / filters | Complete — empty "Select a run"; labels (`date · harness · N turns · name`); harness filter; deep-link keeps selected options in the list. D2 subagent/zero-turn filter + "Show subagents" and keyed `isSubagent` enrichment **DROPPED at merge** (acb15fa) |
 | T4 compare-runs non-regression | Complete — `compare-runs.test.ts` full file green (no analysis signature change) |
 | T5 docs / archive | Complete — D1 join + Compare UX harvested into [dash/architecture.md](../../dash/architecture.md) and [dash/runbook.md](../../dash/runbook.md); plan archived 2026-10-02 |
 | T6 review / A3 disclose | Complete — council **APPROVE**; A3 disclose migration DROP COLUMN + cursor DATE-ROT (disclose-only; not fixed; not reproduced on standalone dash suite 4279/0); development complete |
