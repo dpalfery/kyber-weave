@@ -1944,12 +1944,10 @@ describe('KyberBridge.compareRuns split-share identity (issue #190 / D1)', () =>
       expect(split!.pairs.length).toBeGreaterThan(0)
       expect(bridge.compareRuns('missing-a', cursorSplitRun!.runId)).toBeNull()
     } finally {
+      // Direct-DB: bridge was given the store's handle without the store, so
+      // bridge.close() would close it. Close the owning store first.
+      store.close()
       bridge.close()
-      try {
-        store.close()
-      } catch {
-        // Bridge closed the injected shared handle.
-      }
     }
   })
 
@@ -1989,12 +1987,10 @@ describe('KyberBridge.compareRuns split-share identity (issue #190 / D1)', () =>
       expect(split!.runB.turnCount).toBeGreaterThan(0)
       expect(identityScans).toBe(1)
     } finally {
+      // Direct-DB: bridge was given the store's handle without the store, so
+      // bridge.close() would close it. Close the owning store first.
+      store.close()
       bridge.close()
-      try {
-        store.close()
-      } catch {
-        // Bridge closed the injected shared handle.
-      }
     }
   })
 
