@@ -465,6 +465,66 @@ describe('CompareRuns: honest unavailable metrics (#190)', () => {
     expect(page).not.toMatch(/Turns:\s*0\b/)
   })
 
+  it('shows measured turnCount when tokens are withheld but turns resolved', () => {
+    // availability:unavailable means tokens withheld — turnCount may still be known
+    // (buildComparisonRunSide ships it on the token-gap branch).
+    const comparison: KyberRunComparison = {
+      ...unavailableComparison(),
+      runA: {
+        runId: 'cursor-run-latest',
+        harness: 'gemini',
+        label: 'Gemini baseline',
+        availability: 'unavailable',
+        reason: 'Gemini explicit caching has no write counter.',
+        metricsReason: 'Gemini explicit caching has no write counter.',
+        turnCount: 12,
+      },
+      runB: {
+        runId: 'claude-run-older',
+        harness: 'claude-code',
+        label: 'Claude candidate',
+        availability: 'unavailable',
+        reason: 'Gemini explicit caching has no write counter.',
+        metricsReason: 'Gemini explicit caching has no write counter.',
+        turnCount: 8,
+      },
+      totals: {
+        availability: 'unavailable',
+        reason: 'Gemini explicit caching has no write counter.',
+        turnCountA: 12,
+        turnCountB: 8,
+        turnDelta: -4,
+        costComparable: true,
+      },
+    }
+    renderCompare(
+      <CompareRuns
+        runs={[
+          runCandidate({
+            runId: 'cursor-run-latest',
+            harness: 'gemini',
+            label: 'Gemini baseline',
+            turnCount: 12,
+          }),
+          runCandidate({
+            runId: 'claude-run-older',
+            harness: 'claude-code',
+            label: 'Claude candidate',
+            turnCount: 8,
+          }),
+        ]}
+        selectedAId="cursor-run-latest"
+        selectedBId="claude-run-older"
+        comparison={comparison}
+      />,
+    )
+
+    const page = screen.getByTestId('page-compare').textContent ?? ''
+    expect(page).toMatch(/Turns:\s*12/)
+    expect(page).toMatch(/Turns:\s*8/)
+    expect(page).not.toMatch(/Turns:\s*—/)
+  })
+
   it('states recommendation history is unavailable instead of showing zero of five', () => {
     const comparison = unavailableComparison()
     renderCompare(

@@ -739,9 +739,12 @@ export type PhaseSummary = {
   phase: TaskPhase
   turnsA: number
   turnsB: number
-  tokensA: number
-  tokensB: number
-  tokenDelta: number
+  /** Present only when every contributing turn has measurable tokens. */
+  tokensA?: number
+  tokensB?: number
+  tokenDelta?: number
+  /** Why phase token fields were withheld — mirrors totals.availability:'unavailable'. */
+  tokensUnavailableReason?: string
   costA?: number
   costB?: number
   costDelta?: number
@@ -1050,14 +1053,6 @@ function toRunTurn(
   }
 }
 
-function getTurnTokens(turn: RunTurn | null): number {
-  if (!turn || !turn.tokens) return 0
-  if (typeof turn.tokens.all === 'number') return turn.tokens.all
-  const inp = turn.tokens.reportedInput ?? (turn.tokens.freshInput ?? 0) + (turn.tokens.cacheRead ?? 0)
-  return inp + (turn.tokens.output ?? 0)
-}
-
-/** Turn token total only when telemetry is measurable and present — no fabricated zeros. */
 function getComparableTurnTokens(turn: RunTurn | null): number | undefined {
   if (!turn) return undefined
   if (tokenCoverageUnavailable(turn) !== undefined) return undefined
@@ -1075,6 +1070,10 @@ function getComparableTurnTokens(turn: RunTurn | null): number | undefined {
     return fresh + cache + (cacheCreation ?? 0) + output
   }
   return undefined
+}
+
+function formatTokenCount(tokens: number | undefined): string {
+  return tokens === undefined ? 'tokens unavailable' : `${tokens.toLocaleString()} tokens`
 }
 
 function getTurnCost(turn: RunTurn | null): number | undefined {
@@ -1112,7 +1111,8 @@ function findRunTokenCoverageGap(
     const reason = tokenCoverageUnavailable(turn)
     if (reason !== undefined) return reason
     // A turn with no measurable counters is a coverage gap even when no
-    // measurability key was stamped — otherwise getTurnTokens would invent 0.
+    // measurability key was stamped — otherwise fabricated zeros would land
+    // in totals.
     if (getComparableTurnTokens(turn) === undefined) {
       return 'Token telemetry unavailable'
     }
@@ -1357,25 +1357,28 @@ function buildTurnReading(
   turnB: RunTurn | null
 ): string {
   if (turnA !== null && turnB !== null) {
-    const tokensA = getTurnTokens(turnA)
-    const tokensB = getTurnTokens(turnB)
-    const delta = tokensB - tokensA
-    const deltaStr = delta >= 0 ? `+${delta.toLocaleString()}` : delta.toLocaleString()
+    const tokensA = getComparableTurnTokens(turnA)
+    const tokensB = getComparableTurnTokens(turnB)
     const toolsA = (turnA.tools ?? []).length > 0 ? ` [tools: ${turnA.tools!.join(', ')}]` : ''
     const toolsB = (turnB.tools ?? []).length > 0 ? ` [tools: ${turnB.tools!.join(', ')}]` : ''
+    if (tokensA === undefined || tokensB === undefined) {
+      return `Phase ${phase} (turn ${turnA.turnIndex + 1} vs ${turnB.turnIndex + 1}): Run A ${formatTokenCount(tokensA)}${toolsA}; Run B ${formatTokenCount(tokensB)}${toolsB}. Token delta unavailable.`
+    }
+    const delta = tokensB - tokensA
+    const deltaStr = delta >= 0 ? `+${delta.toLocaleString()}` : delta.toLocaleString()
     return `Phase ${phase} (turn ${turnA.turnIndex + 1} vs ${turnB.turnIndex + 1}): Run A used ${tokensA.toLocaleString()} tokens${toolsA}; Run B used ${tokensB.toLocaleString()} tokens${toolsB}. Delta: ${deltaStr} tokens.`
   }
 
   if (turnA !== null) {
-    const tokensA = getTurnTokens(turnA)
+    const tokensA = getComparableTurnTokens(turnA)
     const toolsA = (turnA.tools ?? []).length > 0 ? ` [tools: ${turnA.tools!.join(', ')}]` : ''
-    return `Phase ${phase} (turn ${turnA.turnIndex + 1}): Run A executed ${tokensA.toLocaleString()} tokens${toolsA}; Run B required no turns in this phase slot (completed phase faster).`
+    return `Phase ${phase} (turn ${turnA.turnIndex + 1}): Run A executed ${formatTokenCount(tokensA)}${toolsA}; Run B required no turns in this phase slot (completed phase faster).`
   }
 
   if (turnB !== null) {
-    const tokensB = getTurnTokens(turnB)
+    const tokensB = getComparableTurnTokens(turnB)
     const toolsB = (turnB.tools ?? []).length > 0 ? ` [tools: ${turnB.tools!.join(', ')}]` : ''
-    return `Phase ${phase} (turn ${turnB.turnIndex + 1}): Run B executed ${tokensB.toLocaleString()} tokens${toolsB}; Run A had no corresponding turn in this phase slot (omitted or completed faster).`
+    return `Phase ${phase} (turn ${turnB.turnIndex + 1}): Run B executed ${formatTokenCount(tokensB)}${toolsB}; Run A had no corresponding turn in this phase slot (omitted or completed faster).`
   }
 
   return `Phase ${phase}: No turns recorded in either run.`
@@ -1488,42 +1491,72 @@ export function compareRuns(
     const phasePairs = pairs.filter((p) => p.phase === phase)
     const turnsA = phasePairs.filter((p) => p.runATurn !== null).length
     const turnsB = phasePairs.filter((p) => p.runBTurn !== null).length
-    let tokensA = 0
-    let tokensB = 0
+    let tokensA: number | undefined = 0
+    let tokensB: number | undefined = 0
+    let tokensUnavailableReason: string | undefined
     let costA: number | undefined
     let costB: number | undefined
 
     for (const p of phasePairs) {
       if (p.runATurn) {
-        tokensA += getTurnTokens(p.runATurn)
+        const tokens = getComparableTurnTokens(p.runATurn)
+        if (tokens === undefined) {
+          tokensUnavailableReason =
+            tokenCoverageUnavailable(p.runATurn) ?? 'Token telemetry unavailable'
+          tokensA = undefined
+        } else if (tokensA !== undefined) {
+          tokensA += tokens
+        }
         const c = getTurnCost(p.runATurn)
         if (c !== undefined) costA = (costA ?? 0) + c
       }
       if (p.runBTurn) {
-        tokensB += getTurnTokens(p.runBTurn)
+        const tokens = getComparableTurnTokens(p.runBTurn)
+        if (tokens === undefined) {
+          tokensUnavailableReason =
+            tokensUnavailableReason ??
+            tokenCoverageUnavailable(p.runBTurn) ??
+            'Token telemetry unavailable'
+          tokensB = undefined
+        } else if (tokensB !== undefined) {
+          tokensB += tokens
+        }
         const c = getTurnCost(p.runBTurn)
         if (c !== undefined) costB = (costB ?? 0) + c
       }
     }
 
-    const tokenDelta = tokensB - tokensA
+    // One unmeasurable turn withholds the whole phase token rollup — same
+    // honesty contract as totals (never publish a zero-inflated delta).
+    if (tokensUnavailableReason !== undefined) {
+      tokensA = undefined
+      tokensB = undefined
+    }
+
+    const tokenDelta =
+      tokensA !== undefined && tokensB !== undefined ? tokensB - tokensA : undefined
     const costDelta =
       costA !== undefined && costB !== undefined ? costB - costA : undefined
 
-    let reading = `Phase ${phase}: ${turnsA} turns in Run A (${tokensA.toLocaleString()} tokens); ${turnsB} turns in Run B (${tokensB.toLocaleString()} tokens).`
-    if (turnsA === 0 && turnsB > 0) {
-      reading = `Phase ${phase}: Omitted in Run A; Run B executed ${turnsB} turns (${tokensB.toLocaleString()} tokens).`
+    let reading: string
+    if (tokensUnavailableReason !== undefined) {
+      reading = `Phase ${phase}: ${turnsA} turns in Run A; ${turnsB} turns in Run B. Tokens unavailable (${tokensUnavailableReason}).`
+    } else if (turnsA === 0 && turnsB > 0) {
+      reading = `Phase ${phase}: Omitted in Run A; Run B executed ${turnsB} turns (${(tokensB ?? 0).toLocaleString()} tokens).`
     } else if (turnsB === 0 && turnsA > 0) {
-      reading = `Phase ${phase}: Executed ${turnsA} turns in Run A (${tokensA.toLocaleString()} tokens); omitted in Run B.`
+      reading = `Phase ${phase}: Executed ${turnsA} turns in Run A (${(tokensA ?? 0).toLocaleString()} tokens); omitted in Run B.`
+    } else {
+      reading = `Phase ${phase}: ${turnsA} turns in Run A (${(tokensA ?? 0).toLocaleString()} tokens); ${turnsB} turns in Run B (${(tokensB ?? 0).toLocaleString()} tokens).`
     }
 
     phaseSummaries[phase] = {
       phase,
       turnsA,
       turnsB,
-      tokensA,
-      tokensB,
-      tokenDelta,
+      ...(tokensA !== undefined ? { tokensA } : {}),
+      ...(tokensB !== undefined ? { tokensB } : {}),
+      ...(tokenDelta !== undefined ? { tokenDelta } : {}),
+      ...(tokensUnavailableReason !== undefined ? { tokensUnavailableReason } : {}),
       costA,
       costB,
       costDelta,
@@ -1531,7 +1564,7 @@ export function compareRuns(
     }
   }
 
-  // Compute total aggregates — only measurable turn tokens; never getTurnTokens' 0.
+  // Compute total aggregates — only measurable turn tokens; never fabricated zeros.
   let totalTokensA = 0
   let totalTokensB = 0
   let totalCostA: number | undefined

@@ -652,6 +652,38 @@ describe('compareRuns availability when a side has no comparable turns (issue #1
       expect('totalTokens' in summary.runA).toBe(false)
     }
   })
+
+  it('withholds phase-summary token fields when turn tokens are not measurable', () => {
+    // Phase rollups must not invent 0 via getTurnTokens while totals refuse.
+    const summary = compareRuns(
+      {
+        runId: 'run-a',
+        harness: 'cursor',
+        outcome: successOutcome(),
+        turns: [
+          makeTurn('exploration', {
+            measurability: {
+              token_usage: notMeasurable('hook omitted input counters'),
+            },
+          }),
+        ],
+      },
+      {
+        runId: 'run-b',
+        harness: 'cursor',
+        outcome: successOutcome(),
+        turns: [makeTurn('exploration')],
+      },
+    )
+
+    const phase = summary.phaseSummaries.exploration
+    expect(phase.tokensA).toBeUndefined()
+    expect(phase.tokensB).toBeUndefined()
+    expect(phase.tokenDelta).toBeUndefined()
+    expect(phase.tokensUnavailableReason).toContain('hook omitted input counters')
+    expect(phase.reading).toMatch(/tokens unavailable/i)
+    expect(phase.reading).not.toMatch(/\b0 tokens\b/)
+  })
 })
 
 describe('compareRuns omits inferred recommendation history (issue #190)', () => {

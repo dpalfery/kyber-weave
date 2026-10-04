@@ -189,6 +189,18 @@ function runMetricsUnavailable(
   return { unavailable: false }
 }
 
+/** Prefer the engine's turnCount; em-dash only when the count is genuinely absent. */
+function runTurnCount(
+  side: KyberComparisonRunSide | undefined,
+  fallback: number | undefined,
+): number | undefined {
+  if (side?.turnCount !== undefined) return side.turnCount
+  // Token unavailability withholds totals, not turn counts — only skip the
+  // client fallback when the engine withheld the count (no turns resolved).
+  if (side?.availability === 'unavailable') return undefined
+  return fallback
+}
+
 function tokenDeltaUnavailable(
   totals?: KyberComparisonTotals,
 ): { unavailable: true; reason: string } | { unavailable: false } {
@@ -495,6 +507,14 @@ export function CompareRuns({
 
   const runAMetrics = runMetricsUnavailable(comparison?.runA)
   const runBMetrics = runMetricsUnavailable(comparison?.runB)
+  const turnCountA = runTurnCount(
+    comparison?.runA,
+    runA ? (runA.turnCount ?? runA.turns.length) : undefined,
+  )
+  const turnCountB = runTurnCount(
+    comparison?.runB,
+    runB ? (runB.turnCount ?? runB.turns.length) : undefined,
+  )
   // Never recompute via sumTurnTokens when the engine reported unavailability —
   // that helper has no measurability gate and would re-derive withheld totals.
   const totalTokensA =
@@ -522,7 +542,7 @@ export function CompareRuns({
   const verdict = comparison?.verdict
   const historyState = historyUnavailable(verdict)
   const completedPairCount =
-    verdict?.completedPairCount ?? activeProposedPair?.completedPairCount ?? undefined
+    verdict?.completedPairCount ?? activeProposedPair?.completedPairCount
   const isOutcomeRegression =
     verdict?.outcomeRegression ??
     (runA?.outcome?.status === 'success' &&
@@ -742,17 +762,15 @@ export function CompareRuns({
                 <span>Harness: <strong className="text-foreground">{runA.harness}</strong></span>
                 <span>
                   Turns:{' '}
-                  {runAMetrics.unavailable ? (
+                  {turnCountA === undefined ? (
                     <>
                       <strong className="text-foreground">—</strong>
-                      {runAMetrics.reason ? (
+                      {runAMetrics.unavailable && runAMetrics.reason ? (
                         <span className="text-muted-foreground"> ({runAMetrics.reason})</span>
                       ) : null}
                     </>
                   ) : (
-                    <strong className="text-foreground">
-                      {comparison?.runA.turnCount ?? runA.turnCount ?? runA.turns.length}
-                    </strong>
+                    <strong className="text-foreground">{turnCountA}</strong>
                   )}
                 </span>
                 <span>
@@ -812,17 +830,15 @@ export function CompareRuns({
                 <span>Harness: <strong className="text-foreground">{runB.harness}</strong></span>
                 <span>
                   Turns:{' '}
-                  {runBMetrics.unavailable ? (
+                  {turnCountB === undefined ? (
                     <>
                       <strong className="text-foreground">—</strong>
-                      {runBMetrics.reason ? (
+                      {runBMetrics.unavailable && runBMetrics.reason ? (
                         <span className="text-muted-foreground"> ({runBMetrics.reason})</span>
                       ) : null}
                     </>
                   ) : (
-                    <strong className="text-foreground">
-                      {comparison?.runB.turnCount ?? runB.turnCount ?? runB.turns.length}
-                    </strong>
+                    <strong className="text-foreground">{turnCountB}</strong>
                   )}
                 </span>
                 <span>

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -397,6 +397,191 @@ describe('bridge compareRuns: empty execution keys fall back to the run id (issu
     expect(summary).not.toBeNull()
     expect(summary!.runA.turnCount).toBe(1)
     expect(summary!.runB.turnCount).toBe(1)
+  })
+
+  it('warns when an excluded harness identity drops all share records', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const sessionKey = 'gemini-excluded-session'
+    db.prepare(
+      'INSERT INTO run (run_id, harness, grouping_basis) VALUES (?, ?, ?)',
+    ).run('run-gemini-excl', 'gemini', 'derived')
+    db.prepare(
+      'INSERT INTO run (run_id, harness, grouping_basis) VALUES (?, ?, ?)',
+    ).run('run-cursor-peer', 'cursor', 'derived')
+    db.prepare(
+      `INSERT INTO execution
+       (execution_id, run_id, session_id, harness, is_root, parent_linkage_json)
+       VALUES (?, ?, ?, ?, 1, ?)`,
+    ).run('exec-gemini-excl', 'run-gemini-excl', sessionKey, 'gemini', JSON.stringify('measured'))
+    db.prepare(
+      `INSERT INTO execution
+       (execution_id, run_id, session_id, harness, is_root, parent_linkage_json)
+       VALUES (?, ?, ?, ?, 1, ?)`,
+    ).run('exec-cursor-peer', 'run-cursor-peer', 'cursor-peer-session', 'cursor', JSON.stringify('measured'))
+    db.prepare(
+      `INSERT INTO records
+       (span_id, source, harness, session_id, name, op, kind, timestamp,
+        duration_ms, status, tokens_json, content_json, cost_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      'span-gemini-excl',
+      'otel',
+      'gemini',
+      sessionKey,
+      'llm',
+      'llm.invoke',
+      'model',
+      '2026-10-01T00:00:00.000Z',
+      10,
+      'success',
+      JSON.stringify({
+        freshInput: 100,
+        cacheRead: 0,
+        cacheCreation: 0,
+        output: 10,
+        reportedInput: 100,
+        reportedOutput: 10,
+      }),
+      JSON.stringify({}),
+      JSON.stringify({}),
+    )
+    db.prepare(
+      `INSERT INTO records
+       (span_id, source, harness, session_id, name, op, kind, timestamp,
+        duration_ms, status, tokens_json, content_json, cost_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      'span-cursor-peer',
+      'otel',
+      'cursor',
+      'cursor-peer-session',
+      'llm',
+      'llm.invoke',
+      'model',
+      '2026-10-01T00:00:00.000Z',
+      10,
+      'success',
+      JSON.stringify({
+        freshInput: 100,
+        cacheRead: 0,
+        cacheCreation: 0,
+        output: 10,
+        reportedInput: 100,
+        reportedOutput: 10,
+      }),
+      JSON.stringify({}),
+      JSON.stringify({}),
+    )
+
+    const summary = bridge.compareRuns('run-gemini-excl', 'run-cursor-peer')
+
+    expect(summary).not.toBeNull()
+    expect(summary!.runA.availability).toBe('unavailable')
+    expect(
+      warn.mock.calls.some(
+        (args) =>
+          typeof args[0] === 'string' &&
+          args[0].includes('[KyberBridge]') &&
+          args[0].includes('excluded') &&
+          args[0].includes('gemini'),
+      ),
+    ).toBe(true)
+    warn.mockRestore()
+  })
+
+  it('memoizes session identities across compareRuns until records change', () => {
+    db.prepare(
+      'INSERT INTO run (run_id, harness, grouping_basis) VALUES (?, ?, ?)',
+    ).run('run-memo-a', 'cursor', 'derived')
+    db.prepare(
+      'INSERT INTO run (run_id, harness, grouping_basis) VALUES (?, ?, ?)',
+    ).run('run-memo-b', 'cursor', 'derived')
+    for (const [runId, sessionId] of [
+      ['run-memo-a', 'sess-memo-a'],
+      ['run-memo-b', 'sess-memo-b'],
+    ] as const) {
+      db.prepare(
+        `INSERT INTO execution
+         (execution_id, run_id, session_id, harness, is_root, parent_linkage_json)
+         VALUES (?, ?, ?, ?, 1, ?)`,
+      ).run(`exec-${runId}`, runId, sessionId, 'cursor', JSON.stringify('measured'))
+      db.prepare(
+        `INSERT INTO records
+         (span_id, source, harness, session_id, name, op, kind, timestamp,
+          duration_ms, status, tokens_json, content_json, cost_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        `span-${runId}`,
+        'otel',
+        'cursor',
+        sessionId,
+        'llm',
+        'llm.invoke',
+        'model',
+        '2026-10-01T00:00:00.000Z',
+        10,
+        'success',
+        JSON.stringify({
+          freshInput: 100,
+          cacheRead: 0,
+          cacheCreation: 0,
+          output: 10,
+          reportedInput: 100,
+          reportedOutput: 10,
+        }),
+        JSON.stringify({}),
+        JSON.stringify({}),
+      )
+    }
+
+    const prepareSpy = vi.spyOn(db, 'prepare')
+    expect(bridge.compareRuns('run-memo-a', 'run-memo-b')).not.toBeNull()
+    const firstDistinctCalls = prepareSpy.mock.calls.filter(
+      (args) => typeof args[0] === 'string' && args[0].includes('SELECT DISTINCT COALESCE(session_id'),
+    ).length
+    expect(firstDistinctCalls).toBe(1)
+
+    expect(bridge.compareRuns('run-memo-a', 'run-memo-b')).not.toBeNull()
+    const secondDistinctCalls = prepareSpy.mock.calls.filter(
+      (args) => typeof args[0] === 'string' && args[0].includes('SELECT DISTINCT COALESCE(session_id'),
+    ).length
+    // Memoized: second compare must not re-issue the full-table DISTINCT.
+    expect(secondDistinctCalls).toBe(1)
+
+    // Inserting a record changes the generation fingerprint — cache must miss.
+    db.prepare(
+      `INSERT INTO records
+       (span_id, source, harness, session_id, name, op, kind, timestamp,
+        duration_ms, status, tokens_json, content_json, cost_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      'span-memo-extra',
+      'otel',
+      'cursor',
+      'sess-memo-a',
+      'llm',
+      'llm.invoke',
+      'model',
+      '2026-10-01T00:00:01.000Z',
+      10,
+      'success',
+      JSON.stringify({
+        freshInput: 50,
+        cacheRead: 0,
+        cacheCreation: 0,
+        output: 5,
+        reportedInput: 50,
+        reportedOutput: 5,
+      }),
+      JSON.stringify({}),
+      JSON.stringify({}),
+    )
+    expect(bridge.compareRuns('run-memo-a', 'run-memo-b')).not.toBeNull()
+    const afterChangeCalls = prepareSpy.mock.calls.filter(
+      (args) => typeof args[0] === 'string' && args[0].includes('SELECT DISTINCT COALESCE(session_id'),
+    ).length
+    expect(afterChangeCalls).toBe(2)
+    prepareSpy.mockRestore()
   })
 })
 

@@ -969,6 +969,13 @@ export class KyberBridge {
    * note on {@link reconcile}.
    */
   private lastStatFailureWarnAt?: number
+  /**
+   * Memoized session-identity map for compare. Keyed by a cheap records
+   * generation fingerprint (`COUNT`/`MAX(rowid)` plus file identity) so the
+   * full-table `SELECT DISTINCT` is not paid on every compare click; invalidated
+   * when records change or the owned handle is replaced.
+   */
+  private identitiesMemo?: { generation: string; value: SessionIdentities }
 
   constructor(options?: KyberBridgeOptions) {
     this.canonPath =
@@ -1143,6 +1150,7 @@ export class KyberBridge {
       }
     }
     this.canonDb = undefined
+    this.identitiesMemo = undefined
   }
 
   /**
@@ -1186,6 +1194,7 @@ export class KyberBridge {
    */
   close(): void {
     this.closed = true
+    this.identitiesMemo = undefined
     if (this.store && typeof this.store.getDatabase === 'function' && this.canonDb === this.store.getDatabase()) {
       this.canonDb = undefined
     } else {
@@ -1949,33 +1958,81 @@ export class KyberBridge {
     }
   }
 
-  /** Persisted share ids for the current store — same table `buildRuns` reads. */
-  private sessionIdentities(): SessionIdentities {
-    if (this.store) return this.store.sessionIdentities()
-    const db = this.getDb()
-    if (!this.hasTable(db, 'records')) return new SessionIdentities([])
+  /**
+   * Cheap generation fingerprint for the identities memo: file identity (when
+   * owned) plus `COUNT(*)`/`MAX(rowid)` on `records`. SQLite can answer that
+   * without the DISTINCT full scan that `sessionIdentities` itself pays.
+   */
+  private identitiesGeneration(db: DatabaseSync): string {
+    const fileKey = this.identity
+      ? `${this.identity.dev}:${this.identity.ino}`
+      : this.canonPath
     try {
-      const pairs = db!
-        .prepare(
-          `SELECT DISTINCT COALESCE(session_id, trace_id) AS key, harness
-           FROM records
-           WHERE COALESCE(session_id, trace_id) IS NOT NULL`,
-        )
-        .all() as { key: string; harness: string }[]
-      return new SessionIdentities(pairs)
-    } catch (err) {
-      console.warn('[KyberBridge] Failed reading session identities from canon.db:', err)
-      return new SessionIdentities([])
+      const row = db
+        .prepare('SELECT COUNT(*) AS n, MAX(rowid) AS m FROM records')
+        .get() as { n: number; m: number | null } | undefined
+      return `${fileKey}:${row?.n ?? 0}:${row?.m ?? 0}`
+    } catch {
+      return `${fileKey}:unavailable`
     }
   }
 
-  /** One harness share of a session key — mirrors `CanonStore.recordsForShare`. */
+  /** Persisted share ids for the current store — same table `buildRuns` reads. */
+  private sessionIdentities(): SessionIdentities {
+    const db =
+      this.store && typeof this.store.getDatabase === 'function'
+        ? this.store.getDatabase()
+        : this.getDb()
+    if (!db) return new SessionIdentities([])
+    if (!this.store && !this.hasTable(db, 'records')) return new SessionIdentities([])
+
+    const generation = this.identitiesGeneration(db)
+    if (this.identitiesMemo?.generation === generation) {
+      return this.identitiesMemo.value
+    }
+
+    let value: SessionIdentities
+    if (this.store) {
+      value = this.store.sessionIdentities()
+    } else {
+      try {
+        const pairs = db
+          .prepare(
+            `SELECT DISTINCT COALESCE(session_id, trace_id) AS key, harness
+             FROM records
+             WHERE COALESCE(session_id, trace_id) IS NOT NULL`,
+          )
+          .all() as { key: string; harness: string }[]
+        value = new SessionIdentities(pairs)
+      } catch (err) {
+        console.warn('[KyberBridge] Failed reading session identities from canon.db:', err)
+        value = new SessionIdentities([])
+      }
+    }
+    this.identitiesMemo = { generation, value }
+    return value
+  }
+
+  /**
+   * One harness share of a session key — mirrors `CanonStore.recordsForShare`.
+   * Warns when records exist under the key but the harness filter (including
+   * excluded identities where `canonicalHarnessId` is null) drops them all.
+   */
   private recordsForShare(key: string, harness: string): CanonicalRecord[] {
-    if (this.store) return this.store.recordsForShare(key, harness)
+    const all = this.recordsForSessionKey(key)
     const canonical = normalizeHarnessName(harness)
-    return this.recordsForSessionKey(key).filter(
+    const filtered = all.filter(
       (record) => canonicalHarnessId(record.harness) === canonical,
     )
+    if (all.length > 0 && filtered.length === 0) {
+      const excluded = canonicalHarnessId(harness) === null
+      console.warn(
+        excluded
+          ? `[KyberBridge] Compare share for key ${JSON.stringify(key)}: harness ${JSON.stringify(harness)} is excluded (canonicalHarnessId=null); dropped ${all.length} record(s)`
+          : `[KyberBridge] Compare share for key ${JSON.stringify(key)}: no records matched harness ${JSON.stringify(harness)}; dropped ${all.length} record(s)`,
+      )
+    }
+    return filtered
   }
 
   /**
@@ -2011,15 +2068,12 @@ export class KyberBridge {
     const records: CanonicalRecord[] = []
     for (const { key: sessionId, harness } of lookups) {
       const share = identities.shareOf(sessionId)
-      // When share resolution misses, still scope by the execution's harness
-      // before twin-dedupe — an unscoped load can collapse cross-harness turns
-      // that share counters and timestamps.
-      const shareRecords =
-        share === undefined
-          ? this.recordsForSessionKey(sessionId).filter(
-              (r) => canonicalHarnessId(r.harness) === normalizeHarnessName(harness),
-            )
-          : this.recordsForShare(share.key, share.harness)
+      // One predicate for both the share hit and the share-miss fallback —
+      // recordsForShare scopes by harness and surfaces excluded-identity drops.
+      const shareRecords = this.recordsForShare(
+        share?.key ?? sessionId,
+        share?.harness ?? harness,
+      )
       const deduped = dedupeTwinTurns(shareRecords, share?.key ?? sessionId)
       for (const record of deduped) {
         if (record.op !== 'llm.invoke') continue
