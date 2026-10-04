@@ -288,16 +288,18 @@ describe('refresh pipeline: parser contract version & checkpoint invalidation', 
       store.close()
     }
   })
-  it("scopes parserContractVersion 3 specifically to Claude descriptors while other harnesses remain at 1", () => {
+  it("scopes parserContractVersion bumps to Claude (3), Codex/Kilo (2), and leaves others at 1", () => {
     const claudeCli = descriptorFor("claude-cli")
     const claudeDesktop = descriptorFor("claude-desktop")
     expect(claudeCli?.parserContractVersion).toBe("3")
     expect(claudeDesktop?.parserContractVersion).toBe("3")
 
     const codex = descriptorFor("codex-cli")
+    const kilo = descriptorFor("kilo-shared-runtime")
     const copilot = descriptorFor("copilot-cli")
     const cursor = descriptorFor("cursor")
-    expect(codex?.parserContractVersion).toBe("1")
+    expect(codex?.parserContractVersion).toBe("2")
+    expect(kilo?.parserContractVersion).toBe("2")
     expect(copilot?.parserContractVersion).toBe("1")
     expect(cursor?.parserContractVersion).toBe("1")
   })

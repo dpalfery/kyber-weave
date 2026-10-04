@@ -42,8 +42,11 @@ public sealed partial class HotshotGoldenContractTests
         "architect",
         "code-reviewer",      // in-process council when the harness gives subagents no agent tool (ADR 0025)
         "conductor",
+        "csharp-dev",         // JEV checkpoints and iteration circuit-breaker (issue #249)
+        "github-devops",      // JEV checkpoints and iteration circuit-breaker (issue #249)
         "product-owner",
-        "task-reviewer"
+        "task-reviewer",
+        "test-dev"            // JEV checkpoints and iteration circuit-breaker (issue #249)
     ];
 
     /// <summary>
@@ -538,6 +541,22 @@ public sealed partial class HotshotGoldenContractTests
             if (goldenModel == sourceModel)
             {
                 mismatches.Add($"model-evolved agent '{modelEvolvedName}' has unchanged model (should differ from golden)");
+            }
+        }
+
+        // Guard: an EvolvedAgentIdentities entry that still matches golden silently
+        // disables every field comparison. Fail so a stale name is removed rather than rotting.
+        foreach (string evolvedName in EvolvedAgentIdentities)
+        {
+            GoldenAgentEntry goldenEntry = manifest.Agents.FirstOrDefault(entry => AgentName(entry.Path) == evolvedName);
+            if (string.IsNullOrEmpty(goldenEntry.Path) || !sourceAgents.TryGetValue(evolvedName, out SquadAgent? sourceAgent))
+            {
+                continue;
+            }
+
+            if (string.Equals(goldenEntry.BodySha256, sourceAgent.BodyDigest, StringComparison.Ordinal))
+            {
+                mismatches.Add($"evolved agent '{evolvedName}' matches golden; remove it from the list");
             }
         }
 

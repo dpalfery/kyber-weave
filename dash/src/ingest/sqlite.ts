@@ -1,5 +1,5 @@
 import { createRequire } from 'node:module'
-import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs'
+import { accessSync, constants, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs'
 import { createHash, randomBytes } from 'node:crypto'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -213,6 +213,22 @@ function errorCode(err: unknown): string | undefined {
   return typeof code === 'string' ? code : undefined
 }
 
+function isPermissionDeniedCode(code: string | undefined): boolean {
+  return code === 'EPERM' || code === 'EACCES'
+}
+
+/// True when the source database itself cannot be read. Cache-dir mkdir/copy/
+/// rename failures also surface as EPERM/EACCES, and those must not be blamed
+/// on the Warp/TCC path (issue #197 / PR #266).
+function isSourceUnreadable(path: string): boolean {
+  try {
+    accessSync(path, constants.R_OK)
+    return false
+  } catch (err) {
+    return isPermissionDeniedCode(errorCode(err))
+  }
+}
+
 function describeError(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
@@ -411,9 +427,10 @@ function openReadonlyCache(path: string, originalError: unknown): DatabaseSyncIn
   let fingerprint: DatabaseFingerprint
   try {
     fingerprint = fingerprintDatabase(path)
-  } catch {
-    // Preserve the original SQLite error when the source disappeared or became
-    // inaccessible between the failed query and the fallback probe.
+  } catch (err) {
+    // A source-side TCC/EACCES is the fact doctor needs; any other probe
+    // failure (gone between open and fingerprint) keeps the original open error.
+    if (isPermissionDeniedCode(errorCode(err))) throw err
     throw originalError
   }
 
@@ -452,6 +469,10 @@ function openReadonlyCache(path: string, originalError: unknown): DatabaseSyncIn
       `kyberdash: SQLite database ${path} is in a read-only directory and its cache copy could not be written ` +
       `(${describeError(err)}); skipping this database.\n`,
     )
+    // Prefer a source-read EPERM/EACCES so Warp doctor can name a TCC denial.
+    // Cache-dir mkdir/copy/rename failures stay the original sidecar error —
+    // those are kyberdash's own cache, not the Warp database.
+    if (isPermissionDeniedCode(errorCode(err)) && isSourceUnreadable(path)) throw err
     throw originalError
   }
   return new Driver(cachedPath, { readOnly: true })

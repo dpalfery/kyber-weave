@@ -1,4 +1,3 @@
-import { statSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
 
@@ -7,7 +6,7 @@ import { calculateCost, getShortModelName } from '../pricing/models.js'
 import { blobToText, getSqliteLoadError, isSqliteAvailable, openDatabase, type SqliteDatabase } from '../ingest/sqlite.js'
 import { estimateTokensFromChars } from '../pricing/token-estimate.js'
 import type { ProbeRoot, ParsedProviderCall, Provider, SessionParser, SessionSource } from './types.js'
-import { safeNumber } from '../ingest/parser.js'
+import { safeNumber } from '../ingest/numbers.js'
 
 const WARP_GROUP_CONTAINER = '2BBY89MBSN.dev.warp'
 const WARP_STABLE_BUNDLE_ID = 'dev.warp.Warp-Stable'
@@ -313,11 +312,7 @@ function validateSchema(db: SqliteDatabase): boolean {
   }
 }
 
-function createParser(
-  source: SessionSource,
-  seenKeys: Set<string>,
-  openDb: (path: string) => SqliteDatabase = openDatabase,
-): SessionParser {
+function createParser(source: SessionSource, seenKeys: Set<string>): SessionParser {
   return {
     async *parse(): AsyncGenerator<ParsedProviderCall> {
       if (!isSqliteAvailable()) {
@@ -330,10 +325,10 @@ function createParser(
 
       let db: SqliteDatabase
       try {
-        db = openDb(dbPath)
+        db = openDatabase(dbPath)
       } catch (err) {
         process.stderr.write(`kyberdash: cannot open Warp database: ${err instanceof Error ? err.message : err}\n`)
-        throw err
+        return
       }
 
       try {
@@ -427,23 +422,31 @@ function createParser(
   }
 }
 
-async function discoverFromDb(
-  dbPath: string,
-  openDb: (path: string) => SqliteDatabase = openDatabase,
-): Promise<SessionSource[]> {
-  try {
-    statSync(dbPath)
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException)?.code
-    if (code === 'ENOENT' || code === 'ENOTDIR') return []
-    // Non-ENOENT lookup errors (EACCES, EPERM, etc.) fall through to openDatabase
-    // so database access errors can be propagated and surfaced as diagnostics.
-  }
+/// Paths whose open/copy failed with EPERM/EACCES during discovery. Doctor
+/// drains this so a TCC-denied Warp DB is not reported as "holds no sessions"
+/// (issue #197). discoverSessions still returns [] — honest empty parse count.
+const warpDbAccessDenials = new Set<string>()
+
+export function drainWarpDbAccessDenials(): string[] {
+  const out = [...warpDbAccessDenials]
+  warpDbAccessDenials.clear()
+  return out
+}
+
+function noteWarpDbAccessDenial(dbPath: string, err: unknown): void {
+  const code = (err as NodeJS.ErrnoException | undefined)?.code
+  if (code === 'EPERM' || code === 'EACCES') warpDbAccessDenials.add(dbPath)
+}
+
+async function discoverFromDb(dbPath: string): Promise<SessionSource[]> {
   let db: SqliteDatabase
   try {
-    db = openDb(dbPath)
+    db = openDatabase(dbPath)
   } catch (err) {
-    throw new Error(`cannot open Warp database '${dbPath}': ${err instanceof Error ? err.message : err}`)
+    // Expose permission failures for doctor; still return [] so refresh keeps
+    // recording an honest zero-record checkpoint rather than aborting.
+    noteWarpDbAccessDenial(dbPath, err)
+    return []
   }
 
   try {
@@ -482,10 +485,7 @@ async function discoverFromDb(
   }
 }
 
-export function createWarpProvider(
-  dbPathOverride?: string,
-  openDb: (path: string) => SqliteDatabase = openDatabase,
-): Provider {
+export function createWarpProvider(dbPathOverride?: string): Provider {
   return {
     name: 'warp',
     displayName: 'Warp',
@@ -507,14 +507,14 @@ export function createWarpProvider(
 
       const sessions: SessionSource[] = []
       for (const candidate of getDbCandidates(dbPathOverride)) {
-        const found = await discoverFromDb(candidate, openDb)
+        const found = await discoverFromDb(candidate)
         sessions.push(...found)
       }
       return sessions
     },
 
     createSessionParser(source: SessionSource, seenKeys: Set<string>): SessionParser {
-      return createParser(source, seenKeys, openDb)
+      return createParser(source, seenKeys)
     },
   }
 }

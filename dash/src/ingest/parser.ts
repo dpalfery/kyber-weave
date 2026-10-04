@@ -14,6 +14,7 @@ import { getClaudeConfigDirs, getDesktopSessionsDirs } from '../providers/claude
 import { kimicodeLineageForSource } from '../providers/kimicode.js'
 import { isSqliteBusyError } from './sqlite.js'
 import { getCacheDir } from './cache-dir.js'
+import { safeNumber } from './numbers.js'
 import {
   isHermesLedgerPublicationError,
   isHermesObservationKey,
@@ -1165,14 +1166,6 @@ function getMessageId(entry: JournalEntry): string | null {
   if (entry.type !== 'assistant') return null
   const msg = entry.message as AssistantMessageContent | undefined
   return msg?.id ?? null
-}
-
-export function safeNumber(value: unknown): number {
-  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0
-}
-
-export function isPositiveNumber(value: unknown): value is number {
-  return typeof value === 'number' && Number.isFinite(value) && value > 0
 }
 
 function extractClaudeCacheCreation(usage: {

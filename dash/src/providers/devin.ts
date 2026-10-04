@@ -2,7 +2,7 @@ import { readdir, stat } from "fs/promises";
 import { basename, join, resolve } from "path";
 import { homedir } from "os";
 
-import { calculateCost, getModelCosts, getShortModelName } from "../pricing/models.js";
+import { getShortModelName } from "../pricing/models.js";
 import { openDatabase } from "../ingest/sqlite.js";
 import { readConfig } from "../config.js";
 import type {
@@ -13,7 +13,7 @@ import type {
   ParsedProviderCall,
 } from "./types.js";
 import { readSessionFile } from "../ingest/fs-utils.js";
-import { isPositiveNumber, safeNumber } from "../ingest/parser.js";
+import { isPositiveNumber, safeNumber } from "../ingest/numbers.js";
 
 type AgentTrajectory<StepType extends Step = Step, AgentExtra = unknown> = {
   schema_version: string;
@@ -173,6 +173,15 @@ const DEVIN_PROVIDER_DISPLAY_NAME = "Devin";
 const DEVIN_TRANSCRIPTS_SUBDIR = "transcripts";
 const DEVIN_SESSIONS_DB = "sessions.db";
 const DEVIN_EFFORT_TIERS = new Set(["xhigh", "high", "medium", "low"]);
+
+// One stderr note per process when the rate is missing; per-record repetition
+// would flood stderr on hosts that never configure it.
+let warnedMissingRate = false;
+
+/** Test seam: clear the once-per-process missing-rate warning latch. */
+export function resetDevinMissingRateWarningForTests(): void {
+  warnedMissingRate = false;
+}
 
 function parseTranscript(raw: string): DevinAgentTrajectory | null {
   try {
@@ -499,34 +508,15 @@ class DevinSessionParser implements SessionParser {
       const userMessage =
         getFirstUserMessageBeforeStep(transcript.steps, index) ?? "";
 
-      const rawModel =
-        firstPresentString(
-          step.metadata?.generation_model,
-          step.extra?.generation_model,
-          step.model_name,
-          transcript.agent?.model_name,
-          session?.model,
-        ) ?? model;
-      const pricingModel =
-        /^MODEL_/.test(rawModel) && getModelCosts(rawModel) === null
-          ? firstPresentString(
-              step.model_name,
-              transcript.agent?.model_name,
-              session?.model,
-            ) ?? model
-          : rawModel;
-      const costIsEstimated = costFactor === null;
-      const costUSD =
-        costFactor !== null
-          ? usage.committedAcuCost * costFactor
-          : calculateCost(
-              pricingModel,
-              usage.inputTokens,
-              usage.outputTokens,
-              usage.cacheCreationInputTokens,
-              usage.cacheReadInputTokens,
-              0,
-            );
+      // Issue #197: warn on the first unpriced call actually emitted — not when
+      // an empty transcript is parsed before any usage exists (that would latch
+      // the once-per-process flag and silence a later priced gap).
+      if (costFactor === null && !warnedMissingRate) {
+        warnedMissingRate = true;
+        process.stderr.write(
+          'kyberdash: no devin.acuUsdRate configured in ~/.kyberdash/config.json — Devin token usage is ingested but costs show $0 (unknown), not a measured zero.\n',
+        );
+      }
 
       yield {
         provider: DEVIN_PROVIDER_NAME,
@@ -538,8 +528,8 @@ class DevinSessionParser implements SessionParser {
         cachedInputTokens: usage.cacheReadInputTokens,
         reasoningTokens: 0,
         webSearchRequests: 0,
-        costUSD,
-        ...(costIsEstimated ? { costIsEstimated: true } : {}),
+        costUSD: costFactor === null ? 0 : usage.committedAcuCost * costFactor,
+        ...(costFactor === null ? { costIsEstimated: true } : {}),
         tools,
         bashCommands: [],
         timestamp,
@@ -613,6 +603,9 @@ export function createDevinProvider(cliDir?: string): Provider {
     },
 
     async discoverSessions(): Promise<SessionSource[]> {
+      // Issue #197: discovery no longer waits on devin.acuUsdRate. The rate
+      // prices an already-real record; gating discovery on it flattened every
+      // Devin session to "no sessions" on hosts without the rate configured.
       const entries = await readdir(transcriptsDir).catch(() => []);
       const metadata = getSessionMetadata();
       const sources: SessionSource[] = [];

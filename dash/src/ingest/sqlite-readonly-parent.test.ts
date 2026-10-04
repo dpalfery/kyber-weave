@@ -1,4 +1,4 @@
-import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
+import { accessSync, chmodSync, constants, copyFileSync, existsSync, mkdirSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
@@ -302,7 +302,18 @@ describe('SQLite read-only parent fallback', () => {
 
     const stderr = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
     try {
-      expect(() => readValue(dbPath)).toThrow()
+      let thrown: unknown
+      try {
+        readValue(dbPath)
+      } catch (err) {
+        thrown = err
+      }
+      expect(thrown).toBeDefined()
+      const code = typeof thrown === 'object' && thrown !== null && 'code' in thrown
+        ? (thrown as { code?: unknown }).code
+        : undefined
+      // Cache-dir EACCES must stay a sidecar/open error, not a source TCC denial.
+      expect(code === 'EACCES' || code === 'EPERM').toBe(false)
       const notices = stderr.mock.calls.filter(([chunk]) => String(chunk).includes('cache copy could not be written'))
       expect(notices).toHaveLength(1)
       expect(String(notices[0]?.[0])).toContain(dbPath)
@@ -368,6 +379,45 @@ describe('SQLite read-only parent fallback', () => {
     } finally {
       setSqliteCopyFileForTest(null)
       stderr.mockRestore()
+    }
+  })
+
+  it('rethrows a source-read denial even when the cache dir is also unwritable', ({ skip }) => {
+    // chmod bit clearing is ineffective on Windows (warp.test.ts skips the same way).
+    if (process.platform === 'win32') skip()
+    const dbPath = join(sourceRoot, 'state.vscdb')
+    writeUncheckpointedWalDatabase(dbPath)
+    if (!makeReadOnly(cacheRoot, skip)) return
+    chmodSync(dbPath, 0o000)
+    try {
+      accessSync(dbPath, constants.R_OK)
+      chmodSync(dbPath, 0o644)
+      skip(`SKIP: chmod 000 did not make ${dbPath} unreadable for this process`)
+      return
+    } catch (err) {
+      const code = typeof err === 'object' && err !== null && 'code' in err
+        ? (err as { code?: unknown }).code
+        : undefined
+      if (code !== 'EACCES' && code !== 'EPERM') {
+        skip(`SKIP: ${dbPath} inaccessible for a non-permission reason (${String(code)})`)
+        return
+      }
+    }
+    try {
+      let thrown: unknown
+      try {
+        readValue(dbPath)
+      } catch (err) {
+        thrown = err
+      }
+      expect(thrown).toBeDefined()
+      const code = typeof thrown === 'object' && thrown !== null && 'code' in thrown
+        ? (thrown as { code?: unknown }).code
+        : undefined
+      expect(code === 'EACCES' || code === 'EPERM').toBe(true)
+    } finally {
+      chmodSync(dbPath, 0o644)
+      chmodSync(cacheRoot, 0o755)
     }
   })
 
