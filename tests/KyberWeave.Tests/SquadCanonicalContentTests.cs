@@ -359,6 +359,7 @@ public sealed class SquadCanonicalContentTests
 
         Assert.DoesNotContain("ask, verbatim", productOwner.InstructionBody, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("GATE 1", productOwner.InstructionBody, StringComparison.Ordinal);
+        Assert.Contains("Invoke the `product-owner` skill", productOwner.InstructionBody, StringComparison.Ordinal);
         Assert.Contains(
             "initialize the file via shell (for example, `touch <file>`) before editing.",
             productOwner.InstructionBody,
