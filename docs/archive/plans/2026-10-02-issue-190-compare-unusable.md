@@ -67,8 +67,10 @@ useful parent runs with twin noise and ZCode subagent runs.
 canon store yields non-zero turn counts, a non-empty phase-aligned pair list when
 either side has turns, and honest token deltas from those turns; (2) neither
 picker silently defaults; (3) each option is labeled with date, harness, and size
-(turns and/or tokens) so a human can pick among hundreds; (4) picker noise from
-subagents / empty runs is reduced per D2 — test-first, without widening the
+(turns — as shipped; pre-merge D4 also planned tokens) so a human can pick among
+hundreds; (4) picker noise is
+reduced by harness filter only (D2 subagent/zero-turn filters DROPPED at merge —
+acb15fa; ZCode subagent runs remain visible) — test-first, without widening the
 ontology, and without "fixing" the disclosed host test failures below.
 
 ## Approved decisions
@@ -139,11 +141,12 @@ Docs MCP unavailable — fallback path used (see provenance above).
    `toCandidate` and does not render `started` in the `<option>` text.
 
 7. **List noise**: `fetchRuns()` is unfiltered; session rows carry
-   `is_subagent` (`store.ts` session schema) but Compare never reads it. Twin
-   harness fold (#182) collapses `cursor-agent` → `cursor` at the derived
+   `is_subagent` (`store.ts` session schema) but Compare never reads it (keyed
+   `isSubagent` enrichment DROPPED at merge — acb15fa; harness filter only).
+   Twin harness fold (#182) collapses `cursor-agent` → `cursor` at the derived
    layer; residual "twin duplicates" in the picker are likely distinct derived
-   runs / complementary histories, not a second front-end id — filter + labels
-   first (D2); twin collapse deferred.
+   runs / complementary histories, not a second front-end id — twin collapse
+   deferred.
 
 8. **Branding**: `dash/src/branding/user-visible-name.test.ts` `ALLOWED` list
    gates `codeburn/*` wire keys; user-visible copy must say kyberdash (A4).
@@ -197,12 +200,13 @@ reapproval.
 
 ### T3 — RED→GREEN: picker defaults, labels, filters
 
-- **Objective:** Implement D2–D4 on `CompareRuns` / `toCandidate` (and minimal
-  API enrichment only if D2 requires `is_subagent` on the runs list).
+- **Objective:** Implement D2–D4 on `CompareRuns` / `toCandidate`. (Pre-merge
+  plan allowed keyed `is_subagent` list enrichment; that path was DROPPED at
+  merge — acb15fa; shipped harness filter only.)
 - **Files/symbols:** `dash/web/src/pages/CompareRuns.tsx` (`toCandidate`,
-  `selectedAId`/`selectedBId`, `<select>` options);
-  `dash/web/src/lib/kyberApi.ts` types if enriched; tests under
-  `kyber-views.test.tsx` or dedicated Compare test.
+  `selectedAId`/`selectedBId`, `<select>` options); tests under
+  `kyber-views.test.tsx` or dedicated Compare test. (Pre-merge plan allowed
+  `kyberApi.ts` enrichment for `is_subagent`; DROPPED at merge — acb15fa.)
 - **Acceptance:** Placeholders on A and B; no silent list default; deep-link /
   `initial*` treated as explicit; labels show `date · harness · N turns · name`
   only (no tooltip, no truncation-collision disambiguation — pre-merge 1be212a
@@ -254,21 +258,22 @@ T2 + T3 + T4 + T5 → T6 (review / gates)
 |---|---|---|
 | T1 | — | server compare tests |
 | T2 | T1 | `bridge.ts` (+ helpers) |
-| T3 | — | `CompareRuns.tsx` / web tests (+ optional API list enrichment) |
+| T3 | — | `CompareRuns.tsx` / web tests (no API list enrichment — D2 DROPPED) |
 | T4 | T2 if analysis changes; else — | `compare-runs.test.ts` / `compare.ts` |
 | T5 | T2, T3 | docs + plan inventory |
 | T6 | T2–T5 | PR / gates |
 
 **MAX_CONCURRENCY: 2** after Ready (T1∥T3, then T2∥T3 if T3 not finished, then
-T4∥T5 when scopes stay disjoint). Drop to **1** if T3 adds `is_subagent` fields
-on the same `/api/kyber/runs` route T1/T2 touch.
+T4∥T5 when scopes stay disjoint). The contingency to drop to **1** if T3 added
+`is_subagent` fields on `/api/kyber/runs` never applied — D2 keyed enrichment
+was DROPPED at merge (acb15fa).
 
 ## Risks
 
 | Risk | Mitigation |
 |---|---|
 | Fixing share resolution floods Compare with tool/aux spans as "turns" | D1 uses findings-style load + twin dedupe; revisit llm.invoke filter only with RED evidence vs Run Detail |
-| Filtering subagents hides the only comparable ZCode pair a user wants | D2 toggle "Show subagents"; never delete rows from the store |
+| Filtering subagents hides the only comparable ZCode pair a user wants | Not applicable: D2 subagent filter DROPPED at merge (acb15fa); harness filter only — ZCode subagent runs remain unfiltered in Compare |
 | Label truncation collides two runs | Accepted risk post-merge: labels only (`formatRunOption`); no collision suffix or select `title` (pre-merge 1be212a superseded) |
 | Direct-DB bridge path bypasses `CanonStore.sessionIdentities` | T2 acceptance: same resolution or explicit store-required behavior with a test |
 | Host `ts-test` failures trip review engine | A3 disclose-only; do not expand scope to migration/DATE-ROT |
