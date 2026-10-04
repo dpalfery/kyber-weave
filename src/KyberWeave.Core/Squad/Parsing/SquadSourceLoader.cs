@@ -47,7 +47,12 @@ public static class SquadSourceLoader
         "antigravity", "warp", "factory", "pi", "zcode", "devin"
     };
 
-    private static readonly string[] TargetScopedProfileTargets = ["copilot", "devin"];
+    /// <remarks>
+    /// Internal so the canonical-content pin can compare the published schema enum
+    /// and the <c>target:</c> markers in capabilities.yml against the same set the
+    /// loader enforces. The schema file is not applied at load time.
+    /// </remarks>
+    internal static readonly string[] TargetScopedProfileTargets = ["copilot", "devin"];
 
     /// <summary>Loads the default bundle from a canonical product source root.</summary>
     public static SquadSource Load(string root)

@@ -381,11 +381,17 @@ public sealed class SquadCanonicalContentTests
         Assert.Contains("OPEN_QUESTIONS:", skillContract, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// Pins the published schema enum, the loader vocabulary, and the
+    /// canonical <c>target:</c> markers to one set so a <c>const: copilot</c>
+    /// schema, a fourth or typo target in capabilities.yml, or a stale
+    /// schema entry fails closed.
+    /// </summary>
     [Fact]
     public void CapabilityProfilesSchemaAllowsTheTargetScopedVocabulary()
     {
-        string path = Path.Combine(ProductRoot, "schemas", "capability-profiles.schema.json");
-        using JsonDocument document = JsonDocument.Parse(File.ReadAllText(path));
+        string schemaPath = Path.Combine(ProductRoot, "schemas", "capability-profiles.schema.json");
+        using JsonDocument document = JsonDocument.Parse(File.ReadAllText(schemaPath));
         JsonElement target = document.RootElement
             .GetProperty("properties")
             .GetProperty("profiles")
@@ -394,12 +400,20 @@ public sealed class SquadCanonicalContentTests
             .GetProperty("target");
 
         Assert.False(target.TryGetProperty("const", out _));
-        string?[] allowed =
+        string?[] schemaTargets =
         [
             .. target.GetProperty("enum").EnumerateArray().Select(item => item.GetString())
         ];
-        Assert.All(allowed, Assert.NotNull);
-        Assert.Equal(["copilot", "devin"], allowed);
+        Assert.All(schemaTargets, Assert.NotNull);
+        Assert.Equal(SquadSourceLoader.TargetScopedProfileTargets, schemaTargets);
+
+        string[] declaredTargets = ReadCapabilityProfileTargets();
+        Assert.All(
+            declaredTargets,
+            name => Assert.Contains(name, SquadSourceLoader.TargetScopedProfileTargets));
+        Assert.All(
+            SquadSourceLoader.TargetScopedProfileTargets,
+            name => Assert.Contains(name, declaredTargets));
     }
 
     [Fact]
@@ -519,6 +533,32 @@ public sealed class SquadCanonicalContentTests
                 StringComparison.Ordinal));
 
         return string.Join("\n", references.Prepend(Path.Combine(agentRoot, $"{name}.md")).Select(File.ReadAllText));
+    }
+
+    private static string[] ReadCapabilityProfileTargets()
+    {
+        string path = Path.Combine(ProductRoot, "profiles", "capabilities.yml");
+        YamlStream yaml = new YamlStream();
+        yaml.Load(new StringReader(File.ReadAllText(path)));
+        YamlMappingNode root = RequireMapping(yaml.Documents.Single().RootNode, "root", path);
+        YamlMappingNode profiles = RequireMapping(RequireNode(root, "profiles", path), "profiles", path);
+
+        return profiles.Children
+            .Select(pair => RequireMapping(pair.Value, "profile", path))
+            .Select(profile =>
+            {
+                foreach (KeyValuePair<YamlNode, YamlNode> field in profile.Children)
+                {
+                    if (field.Key is YamlScalarNode { Value: "target" })
+                    {
+                        return RequireScalar(field.Value, "target", path);
+                    }
+                }
+
+                return null;
+            })
+            .OfType<string>()
+            .ToArray();
     }
 
     private static string ReadSkillContract(string name)
