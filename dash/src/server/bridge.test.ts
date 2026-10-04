@@ -500,6 +500,85 @@ describe('bridge compareRuns: empty execution keys fall back to the run id (issu
     expect(shareDropWarnings()).toBe(1)
   })
 
+  it('evicts the oldest share-drop warn key at the bound instead of clearing all', () => {
+    // SHARE_DROP_WARN_LIMIT is 1024. Pre-fill the private dedupe set, then drive
+    // one more distinct drop through recordsForShare so overflow is exercised
+    // without inserting 1025 full compare fixtures.
+    type ShareDropInternals = {
+      warnedShareDrops: Set<string>
+      recordsForShare(
+        key: string,
+        harness: string,
+      ): { records: unknown[]; dropNote?: string }
+    }
+    const internals = bridge as unknown as ShareDropInternals
+    const limit = 1024
+    const oldestKey = 'cursor\0sess-oldest'
+    const newestSession = 'sess-newest'
+    const newestKey = `cursor\0${newestSession}`
+
+    const insertDropRecord = (sessionId: string, spanId: string) => {
+      db.prepare(
+        `INSERT INTO records
+         (span_id, source, harness, session_id, name, op, kind, timestamp,
+          duration_ms, status, tokens_json, content_json, cost_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        spanId,
+        'otel',
+        'copilot-cli',
+        sessionId,
+        'llm',
+        'llm.invoke',
+        'model',
+        '2026-10-01T00:00:00.000Z',
+        10,
+        'success',
+        JSON.stringify({
+          freshInput: 100,
+          cacheRead: 0,
+          cacheCreation: 0,
+          output: 10,
+          reportedInput: 100,
+          reportedOutput: 10,
+        }),
+        JSON.stringify({}),
+        JSON.stringify({}),
+      )
+    }
+    insertDropRecord('sess-oldest', 'span-drop-oldest')
+    insertDropRecord(newestSession, 'span-drop-newest')
+
+    internals.warnedShareDrops.add(oldestKey)
+    for (let i = 0; i < limit - 1; i++) {
+      internals.warnedShareDrops.add(`cursor\0fill-${i}`)
+    }
+    expect(internals.warnedShareDrops.size).toBe(limit)
+
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const shareDropWarnings = () =>
+      warn.mock.calls.filter(
+        (args) => typeof args[0] === 'string' && args[0].includes('[KyberBridge] Compare share:'),
+      ).length
+
+    expect(internals.recordsForShare(newestSession, 'cursor').dropNote).toBeDefined()
+    expect(shareDropWarnings()).toBe(1)
+    // Bound held; only the oldest entry was removed — not a mass clear.
+    expect(internals.warnedShareDrops.size).toBe(limit)
+    expect(internals.warnedShareDrops.has(newestKey)).toBe(true)
+    expect(internals.warnedShareDrops.has(oldestKey)).toBe(false)
+    expect(internals.warnedShareDrops.has('cursor\0fill-0')).toBe(true)
+
+    // The evicted oldest key may warn again; the newest key stays silenced.
+    expect(internals.recordsForShare('sess-oldest', 'cursor').dropNote).toBeDefined()
+    expect(shareDropWarnings()).toBe(2)
+    expect(internals.recordsForShare(newestSession, 'cursor').dropNote).toBeDefined()
+    expect(shareDropWarnings()).toBe(2)
+    expect(internals.warnedShareDrops.size).toBe(limit)
+
+    warn.mockRestore()
+  })
+
   it('memoizes session identities across compareRuns until records change', () => {
     db.prepare(
       'INSERT INTO run (run_id, harness, grouping_basis) VALUES (?, ?, ?)',

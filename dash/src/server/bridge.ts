@@ -479,7 +479,7 @@ const DEFAULT_REOPEN_CHECK_INTERVAL_MS = 1000
  */
 const STAT_FAILURE_WARN_INTERVAL_MS = 60_000
 
-/** Max distinct key+harness share-drop warnings remembered before the dedupe set resets. */
+/** Max distinct key+harness share-drop warnings remembered before the oldest entry is evicted. */
 const SHARE_DROP_WARN_LIMIT = 1024
 
 /**
@@ -982,7 +982,8 @@ export class KyberBridge {
   /**
    * `key\0harness` pairs whose share-drop warning was already logged, so a
    * Compare click on the same empty share does not re-warn forever. Bounded
-   * by {@link SHARE_DROP_WARN_LIMIT}; cleared with the identities memo.
+   * by {@link SHARE_DROP_WARN_LIMIT} (oldest entry evicted on overflow);
+   * cleared when the owned handle closes.
    */
   private readonly warnedShareDrops = new Set<string>()
 
@@ -2055,7 +2056,10 @@ export class KyberBridge {
       : `no records matched harness ${JSON.stringify(harness)}; dropped ${all.length} record(s) under session key ${JSON.stringify(key)}`
     const warnKey = `${canonical}\0${key}`
     if (!this.warnedShareDrops.has(warnKey)) {
-      if (this.warnedShareDrops.size >= SHARE_DROP_WARN_LIMIT) this.warnedShareDrops.clear()
+      if (this.warnedShareDrops.size >= SHARE_DROP_WARN_LIMIT) {
+        const oldest = this.warnedShareDrops.values().next()
+        if (!oldest.done) this.warnedShareDrops.delete(oldest.value)
+      }
       this.warnedShareDrops.add(warnKey)
       console.warn(`[KyberBridge] Compare share: ${dropNote}`)
     }
