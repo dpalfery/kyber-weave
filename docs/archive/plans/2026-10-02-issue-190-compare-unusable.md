@@ -200,9 +200,7 @@ reapproval.
 
 ### T3 — RED→GREEN: picker defaults, labels, filters
 
-- **Objective:** Implement D2–D4 on `CompareRuns` / `toCandidate`. (Pre-merge
-  plan allowed keyed `is_subagent` list enrichment; that path was DROPPED at
-  merge — acb15fa; shipped harness filter only.)
+- **Objective:** Implement D3–D4 plus the harness filter on `CompareRuns` / `toCandidate`.
 - **Files/symbols:** `dash/web/src/pages/CompareRuns.tsx` (`toCandidate`,
   `selectedAId`/`selectedBId`, `<select>` options); tests under
   `kyber-views.test.tsx` or dedicated Compare test. (Pre-merge plan allowed
