@@ -311,7 +311,8 @@ so a role that only edits could not start a new plan or specification. `architec
 capability profiles, which grant `exec` alongside the write tools. Both roles carry the same
 harness-neutral initialise-before-edit instruction: `architect`'s plan-authoring reference, and
 `product-owner`'s agent body plus the skill's spec-authoring reference, tell each role to
-initialise the destination via shell (e.g. `touch <file>`) before editing. `architect`'s `PLAN_READY` contract and `product-owner`'s
+initialise the destination via shell (e.g. `touch <file>`) before editing.
+`architect`'s `PLAN_READY` contract and `product-owner`'s
 `SPEC_FINALIZED` contract still require `docs validate` and `docs drift` to pass. Every other role
 renders from its shared profile and keeps `ask` narrowing to withheld. If a plan or spec write still
 fails on a missing file, create the empty file and re-run the request — the conductor does this as
