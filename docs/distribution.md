@@ -97,8 +97,8 @@ In addition to binary executables, each GitHub Release publishes two version-mat
 
 | Asset Name | Format | Contents |
 |---|---|---|
-| `kyber-squad-<version>.zip` | APM bundle | All 21 canonical agents with their 10 owned references, 23 skills with 66 supplemental resources, profiles, schemas, and `mcp.json` |
-| `kyber-squad-plugin-<version>.zip` | Agent Plugins v1 | All 23 portable skills, their 66 supplemental resources, and MCP server configuration; never agents or agent-owned resources |
+| `kyber-squad-<version>.zip` | APM bundle | All 21 canonical agents with their 10 owned references, 24 skills with 68 supplemental resources, profiles, schemas, and `mcp.json` |
+| `kyber-squad-plugin-<version>.zip` | Agent Plugins v1 | All 24 portable skills, their 68 supplemental resources, and MCP server configuration; never agents or agent-owned resources |
 
 ### Packaging via `squad pack`
 
@@ -117,8 +117,8 @@ kyber-weave squad pack --format all --out ./artifacts
 
 `squad pack` requires the current working directory to be the repository root containing `KyberWeave.sln` and `products/kyber-squad/squad.yml`. It does not fall back to embedded binaries or network sources.
 
-Both formats package `skills/` recursively: 23 `SKILL.md` files plus 66 retained resources, for
-89 skill-tree files. Every retained resource has a reviewed disposition in the
+Both formats package `skills/` recursively: 24 `SKILL.md` files plus 68 retained resources, for
+92 skill-tree files. Every retained resource has a reviewed disposition in the
 [skill-resource dispositions audit](kyber-squad/skill-resource-dispositions.md): non-policy
 content stays in its skill directory as its durable home, portable policy lives in the
 `products/kyber-squad/standards/` templates, and nothing was deleted; their omission from the
