@@ -57,7 +57,7 @@ products/kyber-squad/
 │   ├── task-reviewer/                  # Progressive-disclosure references (Markdown)
 │   ├── tauri-dev.md
 │   └── test-dev.md
-├── skills/                             # 24 canonical skill directories; 91 recursive files
+├── skills/                             # 24 canonical skill directories; 92 recursive files
 │   ├── app-docs-standard/
 │   ├── architecture-decision-record/
 │   ├── azure-cli/
@@ -103,6 +103,7 @@ invocation: subagent             # primary | subagent
 model-profile: deep-planning
 capability-profile: architect
 copilot-capability-profile: architect-copilot
+devin-capability-profile: architect-devin
 copilot-tools: [vscode, execute, read, agent, edit, search, web, todo]
 delegates-to: [azure-reader, research-agent]
 fallback: role-skill
@@ -123,7 +124,7 @@ in Kyber-Squad. Every imported raw `SKILL.md` except the six explicitly evolved 
 (`bug-crusher`, `code-review`, `product-owner`, `second-brain`,
 `create-pull-request`, and `pr-review-fix-comments`) is byte-identical to the designated
 Hotshot golden copy; `create-pull-request-github` is retired into `create-pull-request`. The canonical
-tree also retains 67 supplemental resources, for 91 skill-tree files in total; recursive APM and
+tree also retains 68 supplemental resources, for 92 skill-tree files in total; recursive APM and
 Agent Plugins packages preserve those resources and their local references.
 
 `code-review-loop` completes an authorized code review feedback cycle: validated fixes,
@@ -134,7 +135,7 @@ workflow for step-by-step approvals.
 Renderers project every file an owner's Markdown links reach beside its principal output, with
 authored relative links preserved, so the former dangling-reference defect is closed for every
 linked resource: a fresh Copilot render now emits the 45 principal files plus each owner's linked
-resources (121 files total). Every skill resource reaches every render except
+resources (122 files total). Every skill resource reaches every render except
 `skills/setup-dev-environment/agents/openai.yaml`, which is packaged-only Codex skill-UI metadata.
 The tracked root `.github/` self-deployment predates resource delivery and remains a stale
 snapshot until a human refreshes it after a release candidate; packages and fresh renders carry

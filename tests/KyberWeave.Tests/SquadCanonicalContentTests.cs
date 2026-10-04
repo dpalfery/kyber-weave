@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
@@ -359,11 +360,68 @@ public sealed class SquadCanonicalContentTests
 
         Assert.DoesNotContain("ask, verbatim", productOwner.InstructionBody, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("GATE 1", productOwner.InstructionBody, StringComparison.Ordinal);
+        Assert.Contains("Invoke the `product-owner` skill", productOwner.InstructionBody, StringComparison.Ordinal);
+        Assert.Contains(
+            "initialize the file via shell (for example, `touch <file>`) before editing.",
+            productOwner.InstructionBody,
+            StringComparison.Ordinal);
+        Assert.Empty(productOwner.Resources);
+        SquadSkill productOwnerSkill = Assert.Single(source.Skills, skill => skill.Name == "product-owner");
+        SquadResource specAuthoring = Assert.Single(
+            productOwnerSkill.Resources,
+            resource => resource.RelativePath == "references/spec-authoring.md");
+        Assert.Contains(
+            "initialize the file via shell (for example, `touch <file>`) before editing.",
+            specAuthoring.Content,
+            StringComparison.Ordinal);
         Assert.Contains("STATUS: READY_FOR_REVIEW", skillContract, StringComparison.Ordinal);
         Assert.Contains("STATUS: REQUIREMENTS_GAP", skillContract, StringComparison.Ordinal);
         Assert.Contains("STATUS: DESIGN_GAP", skillContract, StringComparison.Ordinal);
         Assert.Contains("GAPS:", skillContract, StringComparison.Ordinal);
         Assert.Contains("OPEN_QUESTIONS:", skillContract, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Pins the published schema enum, the loader vocabulary, and the
+    /// canonical <c>target:</c> markers to one set so a <c>const: copilot</c>
+    /// schema, a fourth or typo target in capabilities.yml, or a stale
+    /// schema entry fails closed. A non-string enum entry fails naming
+    /// its <c>ValueKind</c> and raw text. Membership is compared as
+    /// sets: enum order is not a published contract.
+    /// </summary>
+    [Fact]
+    public void CapabilityProfilesSchemaAllowsTheTargetScopedVocabulary()
+    {
+        string schemaPath = Path.Combine(ProductRoot, "schemas", "capability-profiles.schema.json");
+        using JsonDocument document = JsonDocument.Parse(File.ReadAllText(schemaPath));
+        JsonElement target = document.RootElement
+            .GetProperty("properties")
+            .GetProperty("profiles")
+            .GetProperty("additionalProperties")
+            .GetProperty("properties")
+            .GetProperty("target");
+
+        Assert.False(target.TryGetProperty("const", out _));
+        JsonElement allowed = target.GetProperty("enum");
+        string[] schemaTargets =
+        [
+            .. allowed.EnumerateArray().Select(item =>
+                item.ValueKind == JsonValueKind.String
+                    ? item.GetString()!
+                    : throw new InvalidOperationException(
+                        $"Capability-profile schema enum entry {item.ValueKind} '{item.GetRawText()}' is not a string."))
+        ];
+        Assert.Equal(
+            SquadSourceLoader.TargetScopedProfileTargets.Order(StringComparer.Ordinal),
+            schemaTargets.Order(StringComparer.Ordinal));
+
+        string[] declaredTargets = ReadCapabilityProfileTargets();
+        Assert.All(
+            declaredTargets,
+            name => Assert.Contains(name, SquadSourceLoader.TargetScopedProfileTargets));
+        Assert.All(
+            SquadSourceLoader.TargetScopedProfileTargets,
+            name => Assert.Contains(name, declaredTargets));
     }
 
     [Fact]
@@ -483,6 +541,32 @@ public sealed class SquadCanonicalContentTests
                 StringComparison.Ordinal));
 
         return string.Join("\n", references.Prepend(Path.Combine(agentRoot, $"{name}.md")).Select(File.ReadAllText));
+    }
+
+    private static string[] ReadCapabilityProfileTargets()
+    {
+        string path = Path.Combine(ProductRoot, "profiles", "capabilities.yml");
+        YamlStream yaml = new YamlStream();
+        yaml.Load(new StringReader(File.ReadAllText(path)));
+        YamlMappingNode root = RequireMapping(yaml.Documents.Single().RootNode, "root", path);
+        YamlMappingNode profiles = RequireMapping(RequireNode(root, "profiles", path), "profiles", path);
+
+        return profiles.Children
+            .Select(pair => RequireMapping(pair.Value, "profile", path))
+            .Select(profile =>
+            {
+                foreach (KeyValuePair<YamlNode, YamlNode> field in profile.Children)
+                {
+                    if (field.Key is YamlScalarNode { Value: "target" })
+                    {
+                        return RequireScalar(field.Value, "target", path);
+                    }
+                }
+
+                return null;
+            })
+            .OfType<string>()
+            .ToArray();
     }
 
     private static string ReadSkillContract(string name)
