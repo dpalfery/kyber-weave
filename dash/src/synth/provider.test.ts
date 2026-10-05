@@ -1023,6 +1023,58 @@ describe('T3 static source capability readers', () => {
     expect(result.records[0]?.content.instruction_context).toBeUndefined()
     expect(result.records[1]?.content.instruction_context).toContain('Cursor tool context')
   })
+
+  // Codex parser always stamps turnId; codexReader never emits nativeRecordId.
+  // Id lookup misses and must fall back to positional pairing (#276 review).
+  it('pairs a Codex call with file-synth turn parts when the reader has no nativeRecordId (#276)', async () => {
+    const sessionId = '00000000-0000-4000-8000-000000000099'
+    const root = mkdtempSync(join(tmpdir(), 'kyber-codex-pairing-276-'))
+    tempRoots.push(root)
+    const filePath = join(root, 'rollout-pairing.jsonl')
+    writeFileSync(
+      filePath,
+      [
+        JSON.stringify({
+          type: 'session_meta',
+          payload: {
+            session_id: sessionId,
+            base_instructions: { text: 'You are a synthetic Codex agent for pairing tests.' },
+          },
+        }),
+        JSON.stringify({
+          type: 'response_item',
+          payload: {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: 'codex pairing conversation' }],
+          },
+        }),
+        JSON.stringify({
+          type: 'event_msg',
+          payload: { type: 'token_count', info: { last_token_usage: { input_tokens: 12 } } },
+        }),
+      ].join('\n') + '\n',
+    )
+
+    const result = await ingestProviders(['codex'], () => ({
+      calls: [
+        call({
+          provider: 'codex',
+          model: 'gpt-5.2-codex',
+          sessionId,
+          turnId: `${sessionId}:t0`,
+          deduplicationKey: `codex:${sessionId}:t0`,
+        }),
+      ],
+      filePath,
+    }))
+
+    expect(result.problems).toEqual([])
+    expect(result.records).toHaveLength(1)
+    const record = result.records[0]!
+    expect((record.parts ?? []).length).toBeGreaterThan(0)
+    expect(record.content.conversation_history).toContain('codex pairing conversation')
+  })
 })
 
 describe('T4 — source-unit ingest seam', () => {

@@ -508,7 +508,6 @@ export const readClaudeParts = readClaudeTranscript
  */
 export class ClaudeContentReader implements ContentReader {
   readonly harness = 'claude-code'
-  readonly positionalPairingSafe = true
 
   /**
    * Claude's transcript has no invocation-counter boundary like Codex's

@@ -155,16 +155,16 @@ function callsAndTurns(
 }
 
 /**
- * Pair parser calls with turns from their shared session file. A reader turn
- * names the same session when available; an unnamed Claude turn remains
- * positionally attributable to that file. A `turnId` miss is left unpaired
- * rather than borrowing content from an adjacent invocation. Cursor readers
- * never take the positional arm — their yielded list is a filtered subset.
+ * Pair parser calls with turns from their shared session file. Prefer native
+ * id match when both sides carry one; otherwise fall back to `turns[index]`
+ * unless the reader declares positional pairing unsafe (Cursor — filtered
+ * turn list). An id-map miss still takes the positional arm for safe readers
+ * so Codex/Pi keep parts when the reader never emits `nativeRecordId`.
  */
 function matchingTurns(
   calls: readonly ParsedProviderCall[],
   turns: readonly ReaderTurn[],
-  positionalPairingSafe: boolean,
+  positionalPairingUnsafe: boolean,
 ): Array<ReaderTurn | undefined> {
   const turnsById = new Map<string, ReaderTurn>()
   for (const turn of turns) {
@@ -174,9 +174,8 @@ function matchingTurns(
   }
 
   return calls.map((call, index) => {
-    const turn = call.turnId === undefined
-      ? (positionalPairingSafe ? turns[index] : undefined)
-      : turnsById.get(call.turnId)
+    const byId = call.turnId !== undefined ? turnsById.get(call.turnId) : undefined
+    const turn = byId ?? (positionalPairingUnsafe ? undefined : turns[index])
     if (turn === undefined) return undefined
     if (turn.sessionId !== undefined && turn.sessionId !== call.sessionId) return undefined
     if (turn.nativeRecordId !== undefined && call.turnId !== undefined && turn.nativeRecordId !== call.turnId) {
@@ -301,7 +300,7 @@ export async function ingestProviders(
       const [calls, turns] = await callsAndTurns(identity, loaded, reader)
       const paired = turns === undefined
         ? undefined
-        : matchingTurns(calls, turns, reader?.positionalPairingSafe === true)
+        : matchingTurns(calls, turns, reader?.positionalPairingUnsafe === true)
       if (loaded.harnessId !== undefined) {
         records.push(...synthesizer.synthesizeEnvelopes(envelopesFor(identity, loaded, calls, paired)))
       } else {

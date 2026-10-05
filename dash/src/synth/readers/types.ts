@@ -100,9 +100,10 @@ export type ReaderTurn = {
 export interface ContentReader {
   read(filePath: string, dateRange?: DateRange): AsyncIterable<ReaderTurn>
   /**
-   * When true, `matchingTurns` may attach an id-less call to `turns[index]`.
-   * Claude needs that for mixed `message.id` transcripts. Cursor yields a
-   * filtered turn list, so positional pairing would steal another turn's parts.
+   * When true, `matchingTurns` must not fall back to `turns[index]`. Cursor
+   * yields a filtered turn list (a subset of requests), so positional pairing
+   * would steal another turn's parts. Readers that omit this keep main's
+   * index-pairing behaviour for id-less calls and id-map misses.
    */
-  readonly positionalPairingSafe?: boolean
+  readonly positionalPairingUnsafe?: boolean
 }
