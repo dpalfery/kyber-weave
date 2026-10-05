@@ -2,7 +2,7 @@
 id: plans/2026-10-04-pr-276-review-findings
 title: "KyberDash: PR #276 review findings (pairing invert, Claude sessionId fuse, docs)"
 doc-type: plan
-status: current
+status: complete
 component: KyberDash
 owner: dpalfery
 last-reviewed: 2026-10-04
@@ -22,22 +22,26 @@ decided-by:
 
 # KyberDash: PR #276 review findings (pairing invert, Claude sessionId fuse, docs)
 
-**Status: Ready — execution authority.** Development mode: `test-first`. Target
-branch: `hal.hermes.cursor/issue-216-claude-desktop-parts` @ `e59a5c7`. Escalated
-from bug-crusher on three [PR #276](https://github.com/dpalfery/kyber-weave/pull/276)
-review findings. Human mandate: fix all three with locked preferred approaches,
-one commit per finding, push, no GitHub review comments.
+**Status: complete, delivered 2026-10-04.** Development mode: `test-first`. Target
+branch: `hal.hermes.cursor/issue-216-claude-desktop-parts`. Escalated from
+bug-crusher on three [PR #276](https://github.com/dpalfery/kyber-weave/pull/276)
+review findings. Complete: T1–T6; every review thread resolved. Fixing commits —
+F1 `5d7fbe5` (invert to `positionalPairingUnsafe`), F2 `13d2b22` (Claude reader
+sessionId stem fuse), F3 `e303e65` (architecture + telemetry-inventory). Archived
+per KW-DOC-LIFECYCLE-003. No ADR — behavior restore + doc alignment under ADR 0009
+/ ADR 0014.
 
 **Approve-and-execute.** Conductor returned explicit human approval 2026-10-04
-("Fix these 3" + locked A1–A5). Frontmatter `status: current` (ontology has no
-`ready` value). Draft ledger removed; implementation may proceed on T1–T6.
+("Fix these 3" + locked A1–A5). Frontmatter was `status: current` during execution
+(ontology has no `ready` value); now `complete`. Draft ledger was removed before
+T1–T6.
 
 **Discovery provenance.** Kyber-Weave MCP `docs_*` tools were **unavailable** in
 this harness (no MCP docs namespace). Docs discovery fell back to
-[`docs/README.md`](../README.md), [`docs/dash/architecture.md`](../dash/architecture.md),
-[`docs/dash/telemetry-inventory.md`](../dash/telemetry-inventory.md), and archived
-plans [`2026-10-02-issue-216-claude-desktop-parts`](../archive/plans/2026-10-02-issue-216-claude-desktop-parts.md)
-/ [`2026-10-01-pr-233-review-follow-up`](../archive/plans/2026-10-01-pr-233-review-follow-up.md).
+[`docs/README.md`](../../README.md), [`docs/dash/architecture.md`](../../dash/architecture.md),
+[`docs/dash/telemetry-inventory.md`](../../dash/telemetry-inventory.md), and archived
+plans [`2026-10-02-issue-216-claude-desktop-parts`](2026-10-02-issue-216-claude-desktop-parts.md)
+/ [`2026-10-01-pr-233-review-follow-up`](2026-10-01-pr-233-review-follow-up.md).
 Code discovery used shell `codegraph explore` against the existing
 `.codegraph/` index, then Read/Grep for line-accurate citations.
 `git rev-parse --show-toplevel` = `/Users/hal/git/cursor/kyber-weave-43`.
@@ -144,7 +148,7 @@ Self-gathered (docs MCP unavailable; CodeGraph via shell).
 
 ## Tasks
 
-### T1 — RED: Codex positional pairing + Cursor pin (F1) — skill: `test-dev`
+### T1 — RED: Codex positional pairing + Cursor pin (F1) — skill: `test-dev` — COMPLETE
 
 **Objective.** Prove Codex rollout ingest attaches reader parts; keep Cursor
 non-positional regression.
@@ -158,7 +162,7 @@ commit** after T2 (test-first discipline inside the finding commit).
 
 **Depends on:** A1. **Skills:** `test-dev`.
 
-### T2 — GREEN: invert to `positionalPairingUnsafe` (F1) — implementor
+### T2 — GREEN: invert to `positionalPairingUnsafe` (F1) — implementor — COMPLETE
 
 **Objective.** Restore default index pairing; Cursor opts out.
 
@@ -180,7 +184,7 @@ touched scope.
 
 **Depends on:** T1. **Skills:** (dash TypeScript practice; no named skill).
 
-### T3 — RED: mixed sessionId length parity (F2) — skill: `test-dev`
+### T3 — RED: mixed sessionId length parity (F2) — skill: `test-dev` — COMPLETE
 
 **Objective.** Pin `loadClaudeCalls` vs `splitClaudeTurns` length on a transcript
 where some usage lines omit `sessionId` and others set a different id than the
@@ -193,7 +197,7 @@ file stem.
 **Depends on:** A2; may start in parallel with T1 if file lock on
 `claude.test.ts` only. **Skills:** `test-dev`.
 
-### T4 — GREEN: stem in `parseLineUsageInfo` (F2) — implementor
+### T4 — GREEN: stem in `parseLineUsageInfo` (F2) — implementor — COMPLETE
 
 **Objective.** Mirror `providers/claude.ts:324` in the reader fuse path.
 
@@ -210,7 +214,7 @@ callers/tests to pass stem when exercising fuse.
 the Safe property — low conflict; parallel OK with care). **Skills:**
 (dash TypeScript).
 
-### T5 — Docs align to invert contract (F3) — skill: `app-docs-standard`
+### T5 — Docs align to invert contract (F3) — skill: `app-docs-standard` — COMPLETE
 
 **Objective.** Update both dash docs; no application code.
 
@@ -225,12 +229,11 @@ framing with: positional by default unless `positionalPairingUnsafe`.
 
 **Depends on:** T2 (F1 landed). **Skills:** `app-docs-standard`.
 
-### T6 — Push, gates, review closeout — no-test
+### T6 — Push, gates, review closeout — no-test — COMPLETE
 
 **Objective.** Push three commits (no force); run dash gates; disclose known
-failures; do **not** post GitHub review comments. Plan archive is a later
-merge-ready / docs-dev closeout (KW-DOC-LIFECYCLE-003), not part of the three
-finding commits unless the PR is merging immediately.
+failures; do **not** post GitHub review comments. Plan archive is this closeout
+(KW-DOC-LIFECYCLE-003): complete and move to `docs/archive/plans/`.
 
 **Gates.**
 
@@ -293,9 +296,8 @@ See T6. Focused RED/GREEN commands in the Test contract table. Full
 ## Review and docs-dev closeout
 
 End-of-run `code-review` council over the three commits. No ADR expected.
-docs-dev: when the PR is merge-ready, archive this plan to
-`docs/archive/plans/` and clear the Active Plans row
-(`KW-DOC-LIFECYCLE-003`).
+**Closeout complete 2026-10-04:** plan archived to `docs/archive/plans/` and the
+Active Plans row cleared (`KW-DOC-LIFECYCLE-003`).
 
 ## GAPS
 
