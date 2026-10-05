@@ -4,7 +4,7 @@ title: Kyber-Weave Plan Inventory
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-04
+last-reviewed: 2026-10-05
 ---
 
 # Kyber-Weave Plan Inventory
@@ -17,7 +17,12 @@ A plan is open only while it is built. The pull request that finishes it archive
 
 ## Active Plans
 
-None. Pipeline T9 and spine S-docs harvested 2026-09-13 into [dash/architecture.md](../dash/architecture.md), [dash/runbook.md](../dash/runbook.md), [dash/telemetry-inventory.md](../dash/telemetry-inventory.md), [ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md), and [ADR 0018](../adr/0018-kyberdash-content-retention-purge.md). ADRs 0012–0015 remain the spine harvest (0014 notes that `kyber purge-content` was not shipped). Residual risks (T8 live-source coverage, findings client-side harness filter) live on the archived plans — they are not shipped claims.
+| Plan | Status | Date | Goal |
+|---|---|---|---|
+| [2026-10-05-apm-self-dependency-docs-init.md](2026-10-05-apm-self-dependency-docs-init.md) | Ready — approved 2026-10-05 (A7: user entry-prompt pre-authorization "Hal approves", adopted by the conductor; A1–A6 locked); development-mode: test-first | 2026-10-05 | Fix [issue #285](https://github.com/dpalfery/kyber-weave/issues/285): repo-root `apm.yml` lists `dpalfery/kyber-weave` as its own dependency, so the `apm install` behind `docs init`'s skill deployment aborts on a circular dependency in every consuming repo. Remove the entry (keep the `targets: [agent-skills]` pin; A1, decided from code — the dependency walk lives in the external APM loader and the abort is consumer-side), `git rm` the tracked self-install `apm.lock.yaml` (A4), pin the invariant with a manifest-guard test in the .NET suite (A3), and verify live in a scratch dir with a post-merge owner gate (A5). |
+
+Pipeline T9 and spine S-docs harvested 2026-09-13 into [dash/architecture.md](../dash/architecture.md), [dash/runbook.md](../dash/runbook.md), [dash/telemetry-inventory.md](../dash/telemetry-inventory.md), [ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md), and [ADR 0018](../adr/0018-kyberdash-content-retention-purge.md). ADRs 0012–0015 remain the spine harvest (0014 notes that `kyber purge-content` was not shipped). Residual risks (T8 live-source coverage, findings client-side harness filter) live on the archived plans — they are not shipped claims.
+
 
 ## Archived Plans
 
