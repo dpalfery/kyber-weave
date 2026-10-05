@@ -558,6 +558,84 @@ describe('claudeReader', () => {
     expect(calls.map((c) => c.sessionId)).toEqual(['real-session', 'file-stem-session'])
   })
 
+  // loadClaudeCalls coerces a missing timestamp to epoch before the ≤60s gate.
+  // Both-missing → 0 vs 0 → fuse; one-missing vs a real time >60s later → split.
+  it('fuses both-missing timestamps the same way loadClaudeCalls does (#276 merge-gap)', () => {
+    const usage = {
+      input_tokens: 150,
+      output_tokens: 45,
+      cache_read_input_tokens: 300,
+      cache_creation_input_tokens: 200,
+    }
+    const path = writeTranscript([
+      {
+        type: 'assistant',
+        sessionId: 'session-both-missing-ts',
+        uuid: 'uuid-a',
+        message: {
+          id: 'msg-shared',
+          model: 'claude-sonnet-4-5',
+          usage,
+          content: [{ type: 'text', text: 'first half' }],
+        },
+      },
+      {
+        type: 'assistant',
+        sessionId: 'session-both-missing-ts',
+        uuid: 'uuid-b',
+        message: {
+          id: 'msg-shared',
+          model: 'claude-sonnet-4-5',
+          usage,
+          content: [{ type: 'text', text: 'second half' }],
+        },
+      },
+    ])
+    const lines = readFileSync(path, 'utf-8').split(/\r?\n/).filter((line) => line.trim() !== '')
+    const calls = loadClaudeCalls(path)
+    expect(splitClaudeTurns(lines, basename(path, extname(path)))).toHaveLength(calls.length)
+    expect(calls).toHaveLength(1)
+  })
+
+  it('splits one-missing timestamp past the 60s gate the same way loadClaudeCalls does (#276 merge-gap)', () => {
+    const usage = {
+      input_tokens: 150,
+      output_tokens: 45,
+      cache_read_input_tokens: 300,
+      cache_creation_input_tokens: 200,
+    }
+    const path = writeTranscript([
+      {
+        type: 'assistant',
+        sessionId: 'session-one-missing-ts',
+        uuid: 'uuid-epoch',
+        // no timestamp — parser coerces to epoch; gap to the next line is huge
+        message: {
+          id: 'msg-shared',
+          model: 'claude-sonnet-4-5',
+          usage,
+          content: [{ type: 'text', text: 'missing timestamp' }],
+        },
+      },
+      {
+        type: 'assistant',
+        sessionId: 'session-one-missing-ts',
+        uuid: 'uuid-later',
+        timestamp: '2026-09-01T12:00:00.000Z',
+        message: {
+          id: 'msg-shared',
+          model: 'claude-sonnet-4-5',
+          usage,
+          content: [{ type: 'text', text: 'real timestamp >60s after epoch' }],
+        },
+      },
+    ])
+    const lines = readFileSync(path, 'utf-8').split(/\r?\n/).filter((line) => line.trim() !== '')
+    const calls = loadClaudeCalls(path)
+    expect(splitClaudeTurns(lines, basename(path, extname(path)))).toHaveLength(calls.length)
+    expect(calls).toHaveLength(2)
+  })
+
   it('measures stored conversation and tool results, but not unavailable system prompts or tool definitions', async () => {
     const path = writeTranscript([
       {

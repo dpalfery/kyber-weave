@@ -109,12 +109,12 @@ function isMatchingTurnUsage(
     prev.cacheCreationTokens === 0
   if (isZero) return false
 
-  if (prev.timestamp && next.timestamp) {
-    const prevTime = new Date(prev.timestamp).getTime()
-    const nextTime = new Date(next.timestamp).getTime()
-    if (Number.isFinite(prevTime) && Number.isFinite(nextTime)) {
-      if (Math.abs(nextTime - prevTime) > 60_000) return false
-    }
+  // Same epoch default as loadClaudeCalls — a missing timestamp must not
+  // skip the ≤60s gate and fuse a pair the parser would split.
+  const prevTime = new Date(prev.timestamp ?? new Date(0).toISOString()).getTime()
+  const nextTime = new Date(next.timestamp ?? new Date(0).toISOString()).getTime()
+  if (Number.isFinite(prevTime) && Number.isFinite(nextTime)) {
+    if (Math.abs(nextTime - prevTime) > 60_000) return false
   }
   return true
 }
@@ -134,7 +134,10 @@ function isMatchingTurnUsage(
  * `sessionId` resolves to the transcript file stem on both sides, exactly as
  * `loadClaudeCalls` does, so a mixed-presence pair splits instead of fusing.
  * A missing `message.model` resolves to `'unknown'`, exactly as `loadClaudeCalls`
- * does, so an unknown/real-model pair splits instead of fusing.
+ * does, so an unknown/real-model pair splits instead of fusing. A missing
+ * timestamp resolves to epoch, exactly as `loadClaudeCalls` does, so the ≤60s
+ * merge-gap gate always evaluates and a missing/real-time pair past 60s splits
+ * instead of fusing.
  *
  * Lines after the last assistant record are emitted as a trailing group so a
  * transcript that never reported usage still reads as a single turn.
