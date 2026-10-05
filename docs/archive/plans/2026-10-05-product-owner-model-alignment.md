@@ -2,7 +2,7 @@
 id: plans/2026-10-05-product-owner-model-alignment
 title: "Squad: Align product-owner with the architect model profile and remove haiku everywhere (#286)"
 doc-type: plan
-status: current
+status: complete
 component: KyberSquad
 owner: dpalfery
 last-reviewed: 2026-10-05
@@ -11,7 +11,7 @@ development-mode: test-first
 
 # Squad: Align product-owner with the architect model profile and remove haiku everywhere (#286)
 
-**Status: Ready.** Approved by Hal (approve-and-execute gate exercised 2026-10-05).  
+**Status: Complete, archived 2026-10-05.** Approved by Hal (approve-and-execute gate exercised 2026-10-05). Archived per KW-DOC-LIFECYCLE-003.  
 **Date:** 2026-10-05  
 **Development mode:** `test-first`  
 **Goal:** Address GitHub issue [#286](https://github.com/dpalfery/kyber-weave/issues/286): align the `product-owner` subagent model profile with `architect` across every harness, remove `haiku` from Kyber-Squad models across all harnesses, and raise `general.claude` to `sonnet` so general profile consumers (`dal-dev`, `github-devops`, `pulumi-dev`, `tauri-dev`) do not silently regress or leak `architect` top-tier models.
