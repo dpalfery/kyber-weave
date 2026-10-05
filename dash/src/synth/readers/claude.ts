@@ -44,7 +44,7 @@ export {
   loadClaudeCalls,
 } from '../../providers/claude.js'
 
-function parseLineUsageInfo(rawLine: string): {
+function parseLineUsageInfo(rawLine: string, fileStem: string): {
   messageId?: string
   sessionId?: string
   model?: string
@@ -65,7 +65,9 @@ function parseLineUsageInfo(rawLine: string): {
   const message = record['message'] as Record<string, unknown> | undefined
   return {
     messageId: message ? claudeText(message['id']) : undefined,
-    sessionId: claudeText(record['sessionId']),
+    // Same stem substitution as loadClaudeCalls — a missing sessionId must
+    // not let the reader fuse a pair the parser would split on file stem.
+    sessionId: claudeText(record['sessionId']) ?? fileStem,
     // Same default as loadClaudeCalls — a missing model must not let the
     // reader fuse a pair the parser would split as 'unknown' vs a real name.
     model: message ? (claudeText(message['model']) ?? 'unknown') : 'unknown',
@@ -85,7 +87,8 @@ function isMatchingTurnUsage(
   if (prev.messageId !== undefined && next.messageId !== undefined && prev.messageId !== next.messageId) {
     return false
   }
-  if (prev.sessionId !== undefined && next.sessionId !== undefined && prev.sessionId !== next.sessionId) {
+  // Strict compare after stem substitution — mirrors isContiguousPair.
+  if (prev.sessionId !== next.sessionId) {
     return false
   }
   if (prev.model !== undefined && next.model !== undefined && prev.model !== next.model) {
@@ -132,7 +135,7 @@ function isMatchingTurnUsage(
  * Lines after the last assistant record are emitted as a trailing group so a
  * transcript that never reported usage still reads as a single turn.
  */
-export function splitClaudeTurns(lines: readonly string[]): string[][] {
+export function splitClaudeTurns(lines: readonly string[], fileStem: string): string[][] {
   const rawGroups: string[][] = []
   let current: string[] = []
 
@@ -158,7 +161,7 @@ export function splitClaudeTurns(lines: readonly string[]): string[][] {
   for (let i = 0; i < rawGroups.length; i++) {
     const group = rawGroups[i]!
     const lastLine = group[group.length - 1]!
-    const usageInfo = parseLineUsageInfo(lastLine)
+    const usageInfo = parseLineUsageInfo(lastLine, fileStem)
 
     if (mergedGroups.length > 0) {
       const prevMerged = mergedGroups[mergedGroups.length - 1]!
@@ -527,7 +530,7 @@ export class ClaudeContentReader implements ContentReader {
       return
     }
 
-    for (const group of splitClaudeTurns(lines)) {
+    for (const group of splitClaudeTurns(lines, basename(filePath, extname(filePath)))) {
       // Refresh window-slices counter calls; emit the same window here so
       // positional pairing cannot attach an out-of-window turn's text. Id maps
       // (`nativeRecordId` ↔ `turnId`) remain the durable pairing key.

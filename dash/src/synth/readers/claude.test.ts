@@ -1,6 +1,6 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, extname, join } from 'node:path'
 
 import { afterAll, describe, expect, it } from 'vitest'
 
@@ -469,7 +469,7 @@ describe('claudeReader', () => {
     ])
     const lines = readFileSync(path, 'utf-8').split(/\r?\n/).filter((line) => line.trim() !== '')
     const calls = loadClaudeCalls(path)
-    expect(splitClaudeTurns(lines)).toHaveLength(calls.length)
+    expect(splitClaudeTurns(lines, basename(path, extname(path)))).toHaveLength(calls.length)
     expect(calls).toHaveLength(2)
   })
 
@@ -506,8 +506,56 @@ describe('claudeReader', () => {
     ])
     const lines = readFileSync(path, 'utf-8').split(/\r?\n/).filter((line) => line.trim() !== '')
     const calls = loadClaudeCalls(path)
-    expect(splitClaudeTurns(lines)).toHaveLength(calls.length)
+    expect(splitClaudeTurns(lines, basename(path, extname(path)))).toHaveLength(calls.length)
     expect(calls).toHaveLength(2)
+  })
+
+  // loadClaudeCalls substitutes the file stem for a missing sessionId and
+  // compares strictly; the reader used to tolerate undefined and fuse when
+  // message.id matches across the pair.
+  it('splits mixed sessionId presence the same way loadClaudeCalls does (#276)', () => {
+    const usage = {
+      input_tokens: 150,
+      output_tokens: 45,
+      cache_read_input_tokens: 300,
+      cache_creation_input_tokens: 200,
+    }
+    const dir = mkdtempSync(join(tmpdir(), 'kyber-claude-sessionid-276-'))
+    tempRoots.push(dir)
+    const path = join(dir, 'file-stem-session.jsonl')
+    writeFileSync(
+      path,
+      [
+        JSON.stringify({
+          type: 'assistant',
+          sessionId: 'real-session',
+          uuid: 'uuid-real',
+          timestamp: '2026-09-01T12:00:00.000Z',
+          message: {
+            id: 'msg-shared',
+            model: 'claude-sonnet-4-5',
+            usage,
+            content: [{ type: 'text', text: 'with sessionId' }],
+          },
+        }),
+        JSON.stringify({
+          type: 'assistant',
+          uuid: 'uuid-stem',
+          timestamp: '2026-09-01T12:00:10.000Z',
+          message: {
+            id: 'msg-shared',
+            model: 'claude-sonnet-4-5',
+            usage,
+            content: [{ type: 'text', text: 'sessionId omitted' }],
+          },
+        }),
+      ].join('\n') + '\n',
+    )
+    const lines = readFileSync(path, 'utf-8').split(/\r?\n/).filter((line) => line.trim() !== '')
+    const calls = loadClaudeCalls(path)
+    expect(splitClaudeTurns(lines, basename(path, extname(path)))).toHaveLength(calls.length)
+    expect(calls).toHaveLength(2)
+    expect(calls.map((c) => c.sessionId)).toEqual(['real-session', 'file-stem-session'])
   })
 
   it('measures stored conversation and tool results, but not unavailable system prompts or tool definitions', async () => {
