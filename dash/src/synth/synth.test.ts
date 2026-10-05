@@ -370,6 +370,32 @@ describe('token conversion (R4.2)', () => {
     expect(record.tokens.reasoning).toBe(127)
     expect(tokenValidator(record)?.code).toBe('TOKEN_REASONING_EXCEEDS_OUTPUT')
   })
+
+  it('surfaces reasoning on outputless copilot shutdown rollup without manufacturing output (#241)', () => {
+    // Copilot shutdown rollups carry output 0 by design (excluded to prevent
+    // double-counting per-turn calls) while reasoning rides alongside.
+    // The fix must be honest unobservability: surface reasoning on outputless
+    // rollups without inventing output, and declare output not_measurable.
+    const record = synthesizeCall(
+      call({
+        provider: 'copilot',
+        sessionId: 'sess-shutdown-1',
+        deduplicationKey: 'copilot:sess-shutdown-1:shutdown:claude-sonnet-4-5:1',
+        inputTokens: 4,
+        cacheReadInputTokens: 35_495,
+        cacheCreationInputTokens: 35_783,
+        cachedInputTokens: 0,
+        outputTokens: 0,
+        reasoningTokens: 31,
+      }),
+    )
+    expect(record.tokens.output).toBe(0)
+    expect(record.tokens.reasoning).toBe(31)
+    expect(record.measurability?.output).toMatchObject({
+      availability: 'not_measurable',
+    })
+    expect(tokenValidator(record)).toBeUndefined()
+  })
 })
 
 // ---------------------------------------------------------------------------
