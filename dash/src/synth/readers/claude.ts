@@ -46,8 +46,8 @@ export {
 
 function parseLineUsageInfo(rawLine: string, fileStem: string): {
   messageId?: string
-  sessionId?: string
-  model?: string
+  sessionId: string
+  model: string
   inputTokens: number
   outputTokens: number
   cacheReadTokens: number
@@ -130,7 +130,9 @@ function isMatchingTurnUsage(
  * window are grouped into a single turn to fuse paired request/response halves (#232).
  * A defined `message.id` learned earlier in the group still conflicts with a
  * later different defined id — matching `loadClaudeCalls`' contiguous-pair rule
- * — so an id-less middle record cannot bridge A and B into one turn.
+ * — so an id-less middle record cannot bridge A and B into one turn. A missing
+ * `sessionId` resolves to the transcript file stem on both sides, exactly as
+ * `loadClaudeCalls` does, so a mixed-presence pair splits instead of fusing.
  *
  * Lines after the last assistant record are emitted as a trailing group so a
  * transcript that never reported usage still reads as a single turn.
