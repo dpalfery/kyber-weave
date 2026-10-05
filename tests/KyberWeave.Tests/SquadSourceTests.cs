@@ -106,7 +106,7 @@ public sealed class SquadSourceTests
     [InlineData("fast", "opencode", "opencode/muse-spark-1.3-contributor-free")]
     [InlineData("fast", "pi", "opencode/muse-spark-1.3-contributor-free[thinking=low]")]
     [InlineData("fast", "devin", "deepseek-v4-1-flash-high")]
-    [InlineData("general", "claude", "haiku")]
+    [InlineData("general", "claude", "sonnet")]
     [InlineData("general", "codex", "gpt-5.6-terra")]
     [InlineData("general", "copilot", "Grok 4.6 (copilot)")]
     [InlineData("general", "cursor", "grok-4.6[]")]
@@ -161,6 +161,24 @@ public sealed class SquadSourceTests
         }
     }
 
+    [Fact]
+    public void ModelsYmlCarriesNoHaikuResolutionAcrossAllProfiles()
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+
+        foreach ((string profileName, SquadModelProfile profile) in source.ModelProfiles.Profiles)
+        {
+            Assert.DoesNotContain("haiku", profile.Default, StringComparison.OrdinalIgnoreCase);
+            foreach ((string harness, string model) in profile.HarnessModels)
+            {
+                Assert.False(
+                    model.Contains("haiku", StringComparison.OrdinalIgnoreCase),
+                    $"Profile '{profileName}' on harness '{harness}' unexpectedly resolves to '{model}'.");
+            }
+        }
+    }
+
+
     /// <summary>
     /// Pins the Antigravity column of each model profile (issue #209). Only the dedicated
     /// <c>architect</c> profile is <c>claude-opus-4-6</c>; every other profile —
@@ -194,17 +212,20 @@ public sealed class SquadSourceTests
     }
 
     /// <summary>
-    /// Issue #209: only the <c>architect</c> agent may own the Opus Antigravity profile.
-    /// Shared <c>deep-planning</c> stays Flash so <c>sql-database-architect</c> and
+    /// Issue #209 / Issue #286: only the <c>architect</c> and <c>product-owner</c> agents may own the
+    /// Opus Antigravity profile. Shared <c>deep-planning</c> stays Flash so <c>sql-database-architect</c> and
     /// <c>bug-crusher-investigator</c> cannot inherit Opus through profile membership.
     /// </summary>
     [Fact]
-    public void ArchitectAloneOwnsArchitectModelProfileAndDeepPlanningPeersStayOnDeepPlanning()
+    public void ArchitectAndProductOwnerOwnArchitectModelProfileAndDeepPlanningPeersStayOnDeepPlanning()
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
 
         SquadAgent architect = Assert.Single(source.Agents, agent => agent.Name == "architect");
         Assert.Equal("architect", architect.ModelProfile);
+
+        SquadAgent productOwner = Assert.Single(source.Agents, agent => agent.Name == "product-owner");
+        Assert.Equal("architect", productOwner.ModelProfile);
 
         foreach (string peerName in new[] { "sql-database-architect", "bug-crusher-investigator" })
         {
@@ -213,7 +234,7 @@ public sealed class SquadSourceTests
         }
 
         Assert.DoesNotContain(
-            source.Agents.Where(agent => agent.Name != "architect"),
+            source.Agents.Where(agent => agent.Name != "architect" && agent.Name != "product-owner"),
             agent => string.Equals(agent.ModelProfile, "architect", StringComparison.Ordinal));
     }
 
