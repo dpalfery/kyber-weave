@@ -29,6 +29,7 @@ import { contextLimitOf } from '../canon/context-window.js'
 import { CanonStore } from '../canon/store.js'
 import { Synthesizer } from './synth.js'
 import { PROVIDER_PARSE_ERROR, ingestProviders } from './provider.js'
+import { codexReader } from './readers/codex.js'
 
 // ---------------------------------------------------------------------------
 // Fixture kit
@@ -1055,6 +1056,15 @@ describe('T3 static source capability readers', () => {
         }),
       ].join('\n') + '\n',
     )
+
+    // Premise: only the positional arm can attach parts for this fixture.
+    // If codexReader starts emitting nativeRecordId, this fails with a why.
+    const readerTurns: Array<{ nativeRecordId?: string }> = []
+    for await (const turn of codexReader.read(filePath)) readerTurns.push(turn)
+    expect(readerTurns.length).toBeGreaterThan(0)
+    for (const turn of readerTurns) {
+      expect(turn.nativeRecordId).toBeUndefined()
+    }
 
     const result = await ingestProviders(['codex'], () => ({
       calls: [
