@@ -352,6 +352,34 @@ public sealed class SquadCanonicalContentTests
     }
 
     [Fact]
+    public void LoadDocsDevDefinesCloseoutMappingTableAndWaiverConventions()
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadAgent docsDev = Assert.Single(source.Agents, a => a.Name == "docs-dev");
+
+        Assert.Contains("Plan closeout", docsDev.InstructionBody, StringComparison.Ordinal);
+        Assert.Contains("mapping table", docsDev.InstructionBody, StringComparison.Ordinal);
+        Assert.Contains("ADR waiver", docsDev.InstructionBody, StringComparison.Ordinal);
+        Assert.Contains("Documentation waiver", docsDev.InstructionBody, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void LoadArchitectAndConductorDefinePermanentDecisionTableContract()
+    {
+        string architectContract = ReadAgentContract("architect");
+        string conductorContract = ReadAgentContract("conductor");
+
+        Assert.Contains("Decisions", architectContract, StringComparison.Ordinal);
+        Assert.Contains("Mitigating and supporting information", architectContract, StringComparison.Ordinal);
+        Assert.Contains("Status / approval provenance", architectContract, StringComparison.Ordinal);
+        Assert.Contains("NO_QUESTIONS", architectContract, StringComparison.Ordinal);
+
+        Assert.Contains("Decisions", conductorContract, StringComparison.Ordinal);
+        Assert.Contains("PLAN_READY", conductorContract, StringComparison.Ordinal);
+        Assert.Contains("PLAN_FINALIZED", conductorContract, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void LoadProductOwnerIsHeadlessAndReturnsStructuredPhaseAndGapMarkers()
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
