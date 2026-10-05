@@ -238,10 +238,12 @@ Buckets the transcript supplies — `conversation_history` and
 body logging is a separate owner gate). Pairing uses `nativeRecordId`
 (Claude `message.id`) matched to the call `turnId`. Id-less calls and
 id-map misses fall back to `turns[index]` unless the reader declares
-`positionalPairingUnsafe`. Cursor is never paired positionally. The reader
-honors the refresh `dateRange` so window-sliced calls stay aligned, and the
-orchestrator fallback keeps `filePath` so a zero-record retry does not strip
-the reader
+`positionalPairingUnsafe`. A positional fallback whose turn carries its own
+`nativeRecordId` still requires that id to equal the call's `turnId`, so
+readers that stamp ids only reach the positional arm for id-less calls.
+Cursor is never paired positionally. The reader honors the refresh
+`dateRange` so window-sliced calls stay aligned, and the orchestrator
+fallback keeps `filePath` so a zero-record retry does not strip the reader
 ([issue #216](https://github.com/dpalfery/kyber-weave/issues/216)). Advancing
 the Claude family `parserContractVersion` invalidates stale checkpoints so a
 subsequent `dash refresh` re-synthesizes historical empty desktop rows that
