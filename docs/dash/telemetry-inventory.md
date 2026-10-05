@@ -80,9 +80,9 @@ when present), not a full five-block inspector.
 Pairing that attaches parts (shipped with the #216 capture fix):
 
 - `ClaudeContentReader` emits `nativeRecordId` from Claude `message.id` so
-  `matchingTurns` can join to the call's `turnId`. Claude sets
-  `positionalPairingSafe` so an id-less call may still pair by index; a
-  `turnId` miss stays unpaired. Cursor never takes the positional arm.
+  `matchingTurns` can join to the call's `turnId`. Id-less calls and id-map
+  misses fall back to `turns[index]` unless the reader declares
+  `positionalPairingUnsafe`. Cursor is never paired positionally.
 - The reader honors the same UTC `dateRange` as refresh window-sliced calls, so
   a partial history window cannot attach an out-of-window turn's text.
 - When a unit's first ingest returns zero records, the refresh orchestrator

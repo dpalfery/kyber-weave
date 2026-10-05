@@ -236,11 +236,12 @@ Buckets the transcript supplies — `conversation_history` and
 `tool_result_content` — land on the record; `system_prompt` and
 `tool_definitions` remain `not_measurable` from session files alone (raw API
 body logging is a separate owner gate). Pairing uses `nativeRecordId`
-(Claude `message.id`) matched to the call `turnId`. Claude keeps positional
-fallback for id-less calls (`positionalPairingSafe`); a `turnId` miss stays
-unpaired, and Cursor never leaves id-only pairing. The reader honors the
-refresh `dateRange` so window-sliced calls stay aligned, and the orchestrator
-fallback keeps `filePath` so a zero-record retry does not strip the reader
+(Claude `message.id`) matched to the call `turnId`. Id-less calls and
+id-map misses fall back to `turns[index]` unless the reader declares
+`positionalPairingUnsafe`. Cursor is never paired positionally. The reader
+honors the refresh `dateRange` so window-sliced calls stay aligned, and the
+orchestrator fallback keeps `filePath` so a zero-record retry does not strip
+the reader
 ([issue #216](https://github.com/dpalfery/kyber-weave/issues/216)). Advancing
 the Claude family `parserContractVersion` invalidates stale checkpoints so a
 subsequent `dash refresh` re-synthesizes historical empty desktop rows that
