@@ -91,7 +91,7 @@ function isMatchingTurnUsage(
   if (prev.sessionId !== next.sessionId) {
     return false
   }
-  if (prev.model !== undefined && next.model !== undefined && prev.model !== next.model) {
+  if (prev.model !== next.model) {
     return false
   }
   if (
