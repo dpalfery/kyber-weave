@@ -133,6 +133,8 @@ function isMatchingTurnUsage(
  * — so an id-less middle record cannot bridge A and B into one turn. A missing
  * `sessionId` resolves to the transcript file stem on both sides, exactly as
  * `loadClaudeCalls` does, so a mixed-presence pair splits instead of fusing.
+ * A missing `message.model` resolves to `'unknown'`, exactly as `loadClaudeCalls`
+ * does, so an unknown/real-model pair splits instead of fusing.
  *
  * Lines after the last assistant record are emitted as a trailing group so a
  * transcript that never reported usage still reads as a single turn.
