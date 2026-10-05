@@ -155,11 +155,13 @@ function callsAndTurns(
 }
 
 /**
- * Pair parser calls with turns from their shared session file. Prefer native
- * id match when both sides carry one; otherwise fall back to `turns[index]`
- * unless the reader declares positional pairing unsafe (Cursor — filtered
- * turn list). An id-map miss still takes the positional arm for safe readers
- * so Codex/Pi keep parts when the reader never emits `nativeRecordId`.
+ * Pair parser calls with turns from their shared session file. When
+ * `call.turnId` is set, look it up in the id map and re-validate a hit;
+ * otherwise fall back to `turns[index]` unless the reader declares
+ * positional pairing unsafe (Cursor — filtered turn list). An id-map miss
+ * still takes the positional arm for readers that have not declared
+ * `positionalPairingUnsafe` so Codex/Pi keep parts when the reader never
+ * emits `nativeRecordId`.
  */
 function matchingTurns(
   calls: readonly ParsedProviderCall[],
