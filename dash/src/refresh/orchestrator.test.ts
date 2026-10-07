@@ -2,13 +2,13 @@
 // failures, no Gemini harness, and writes proportional to changed units.
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import type { ParsedProviderCall, Provider, SessionSource } from '../synth/provider.js'
-import { PROVIDER_PARSE_ERROR } from '../synth/provider.js'
+import { ingestProviders as productionIngestProviders, PROVIDER_PARSE_ERROR } from '../synth/provider.js'
 import { CanonStore } from '../canon/store.js'
 import { descriptorFor } from './registry.js'
 import type { NativeUnit } from './source-reader.js'
@@ -400,6 +400,27 @@ describe('refreshHarnessSources', () => {
       expect(first.rows[0]).toMatchObject({ status: 'ok', created: 1, updated: 0 })
       expect(second.rows[0]).toMatchObject({ status: 'unchanged', created: 0, updated: 0 })
       expect(store.listAll()).toHaveLength(1)
+    } finally {
+      store.close()
+    }
+  })
+
+  it('does not rewind recordCount when iterate yields the same sourceKey twice', async () => {
+    const store = temporaryStore()
+    try {
+      const first = unit('pi', 'session', [call('pi', 'pi-session')])
+      const duplicate = unit('pi', 'session', [call('pi', 'pi-session')])
+      await refreshHarnessSources(store, {
+        getAllProviders: async () => [],
+        descriptors: descriptors('pi'),
+        jobConcurrency: 1,
+        writerCapacity: 1,
+        commandStartedAt: new Date('2026-09-12T00:00:00.000Z'),
+        parseAllSessions: async () => undefined,
+        iterateNativeUnits: async (): Promise<NativeUnit[]> => [first, duplicate],
+      })
+      expect(store.listAll()).toHaveLength(1)
+      expect(store.getSourceCheckpoint('pi', first.sourceKey)?.recordCount).toBe(1)
     } finally {
       store.close()
     }
@@ -899,6 +920,237 @@ describe('refreshHarnessSources — shared projection entry point', () => {
       // the writer drained before the projection ran. A projection racing
       // the writer would have seen zero records here.
       expect(projectionProbe.calls[0]?.recordsAtCall).toBe(1)
+    } finally {
+      store.close()
+    }
+  })
+
+  // Issue #216 / plan T2: when the first ingest returns zero records, the
+  // fallback must keep filePath (and thus the Claude reader). A bare call
+  // array strips the reader and persists counters-only spans.
+  it('preserves filePath on ingest fallback so claude-desktop parts survive (#216 T2)', async () => {
+    const store = temporaryStore()
+    const root = mkdtempSync(join(tmpdir(), 'kyber-desktop-fallback-216-'))
+    temporaryRoots.push(root)
+    const filePath = join(root, 'session.jsonl')
+    const usage = {
+      input_tokens: 150,
+      output_tokens: 45,
+      cache_read_input_tokens: 0,
+      cache_creation_input_tokens: 0,
+    }
+    writeFileSync(
+      filePath,
+      [
+        JSON.stringify({
+          type: 'user',
+          sessionId: 'desk-fallback-216',
+          message: { role: 'user', content: [{ type: 'text', text: 'fallback question' }] },
+        }),
+        JSON.stringify({
+          type: 'assistant',
+          sessionId: 'desk-fallback-216',
+          uuid: 'desk-fallback-asst',
+          timestamp: '2026-09-10T12:00:00.000Z',
+          message: {
+            id: 'msg-desk-fallback',
+            model: 'claude-sonnet-4-5',
+            usage,
+            content: [{ type: 'text', text: 'fallback answer' }],
+          },
+        }),
+      ].join('\n') + '\n',
+    )
+
+    const parsedCall: ParsedProviderCall = {
+      provider: 'claude',
+      model: 'claude-sonnet-4-5',
+      inputTokens: 150,
+      outputTokens: 45,
+      cacheCreationInputTokens: 0,
+      cacheReadInputTokens: 0,
+      cachedInputTokens: 0,
+      reasoningTokens: 0,
+      webSearchRequests: 0,
+      costUSD: 0,
+      tools: [],
+      bashCommands: [],
+      timestamp: '2026-09-10T12:00:00.000Z',
+      speed: 'standard',
+      deduplicationKey: 'claude:desk-fallback-216:desk-fallback-asst',
+      userMessage: '',
+      sessionId: 'desk-fallback-216',
+      turnId: 'msg-desk-fallback',
+    }
+
+    const loaderShapes: unknown[] = []
+    let ingestPasses = 0
+
+    try {
+      const report = await refreshHarnessSources(store, {
+        getAllProviders: async () => [],
+        descriptors: descriptors('claude-desktop'),
+        jobConcurrency: 1,
+        commandStartedAt: new Date('2026-09-12T00:00:00.000Z'),
+        parseAllSessions: async () => undefined,
+        iterateNativeUnits: async (): Promise<NativeUnit[]> => {
+          const session: SessionSource = {
+            path: filePath,
+            project: 'fixture-project',
+            provider: 'claude',
+          }
+          return [{
+            harnessId: 'claude-desktop',
+            sourceKey: 'claude-desktop:desk-fallback-216',
+            source: session,
+            status: 'new',
+            revision: {
+              fingerprint: { dev: 1, ino: 1, mtimeMs: 1, sizeBytes: 1 },
+              token: '1:1:1:1',
+            },
+            envelopes: [{
+              harnessId: 'claude-desktop',
+              sourceKey: 'claude-desktop:desk-fallback-216',
+              source: session,
+              nativeSessionId: parsedCall.sessionId,
+              timestamp: parsedCall.timestamp,
+              call: parsedCall,
+              revisionToken: '1:1:1:1',
+            }],
+            problems: [],
+          }]
+        },
+        ingestProviders: async (providers, loader) => {
+          ingestPasses += 1
+          const loaded = loader(providers[0]!)
+          loaderShapes.push(loaded)
+          // Force the zero-record path that triggers ingestUnit's fallback.
+          if (ingestPasses === 1) return { records: [], problems: [] }
+          return productionIngestProviders(providers, () => loaded)
+        },
+      })
+
+      expect(report.rows[0]?.status).toBe('ok')
+      // Second parse is intentional (#216): ProviderLoad.filePath is what
+      // attaches reader turns; a bare remapped array strips parts.
+      expect(ingestPasses).toBe(2)
+      // On-disk source: both passes share one ProviderLoad shape — only
+      // calls.provider is remapped on the zero-record retry. Drift on any
+      // other field (filePath/harnessId/sourceKey/dateRange) is the bug the
+      // #276 hoist fixes.
+      expect(Array.isArray(loaderShapes[0])).toBe(false)
+      expect(Array.isArray(loaderShapes[1])).toBe(false)
+      const firstLoad = loaderShapes[0] as {
+        filePath?: string
+        harnessId?: string
+        sourceKey?: string
+        dateRange?: unknown
+        calls: ParsedProviderCall[]
+      }
+      const retryLoad = loaderShapes[1] as typeof firstLoad
+      expect(retryLoad).toMatchObject({
+        filePath: firstLoad.filePath,
+        harnessId: firstLoad.harnessId,
+        sourceKey: firstLoad.sourceKey,
+        dateRange: firstLoad.dateRange,
+      })
+      expect(retryLoad).toMatchObject({
+        filePath,
+        harnessId: 'claude-desktop',
+        sourceKey: 'claude-desktop:desk-fallback-216',
+      })
+      expect(firstLoad.calls[0]?.provider).toBe('claude')
+      expect(retryLoad.calls[0]?.provider).toBe('claude-desktop')
+
+      const records = store.listAll().filter((r) => r.op === 'llm.invoke')
+      expect(records).toHaveLength(1)
+      expect(records[0]?.parts?.length).toBeGreaterThan(0)
+      expect(records[0]?.content.conversation_history).toContain('fallback question')
+      expect(records[0]?.content.conversation_history).toContain('fallback answer')
+    } finally {
+      store.close()
+    }
+  })
+
+  it('retries a missing on-disk path as a remapped bare call array (#276)', async () => {
+    const store = new CanonStore(':memory:')
+    const root = mkdtempSync(join(tmpdir(), 'kyber-desktop-missing-216-'))
+    temporaryRoots.push(root)
+    const filePath = join(root, 'does-not-exist.jsonl')
+
+    const parsedCall: ParsedProviderCall = {
+      provider: 'claude',
+      model: 'claude-sonnet-4-5',
+      inputTokens: 150,
+      outputTokens: 45,
+      cacheCreationInputTokens: 0,
+      cacheReadInputTokens: 0,
+      cachedInputTokens: 0,
+      reasoningTokens: 0,
+      webSearchRequests: 0,
+      costUSD: 0,
+      tools: [],
+      bashCommands: [],
+      timestamp: '2026-09-10T12:00:00.000Z',
+      speed: 'standard',
+      deduplicationKey: 'claude:desk-missing-216:desk-missing-asst',
+      userMessage: '',
+      sessionId: 'desk-missing-216',
+      turnId: 'msg-desk-missing',
+    }
+
+    const loaderShapes: unknown[] = []
+    let ingestPasses = 0
+
+    try {
+      const report = await refreshHarnessSources(store, {
+        getAllProviders: async () => [],
+        descriptors: descriptors('claude-desktop'),
+        jobConcurrency: 1,
+        commandStartedAt: new Date('2026-09-12T00:00:00.000Z'),
+        parseAllSessions: async () => undefined,
+        iterateNativeUnits: async (): Promise<NativeUnit[]> => {
+          const session: SessionSource = {
+            path: filePath,
+            project: 'fixture-project',
+            provider: 'claude',
+          }
+          return [{
+            harnessId: 'claude-desktop',
+            sourceKey: 'claude-desktop:desk-missing-216',
+            source: session,
+            status: 'new',
+            revision: {
+              fingerprint: { dev: 1, ino: 1, mtimeMs: 1, sizeBytes: 1 },
+              token: '1:1:1:1',
+            },
+            envelopes: [{
+              harnessId: 'claude-desktop',
+              sourceKey: 'claude-desktop:desk-missing-216',
+              source: session,
+              nativeSessionId: parsedCall.sessionId,
+              timestamp: parsedCall.timestamp,
+              call: parsedCall,
+              revisionToken: '1:1:1:1',
+            }],
+            problems: [],
+          }]
+        },
+        ingestProviders: async (providers, loader) => {
+          ingestPasses += 1
+          const loaded = loader(providers[0]!)
+          loaderShapes.push(loaded)
+          if (ingestPasses === 1) return { records: [], problems: [] }
+          return productionIngestProviders(providers, () => loaded)
+        },
+      })
+
+      expect(report.rows[0]?.status).toBe('ok')
+      expect(ingestPasses).toBe(2)
+      expect(Array.isArray(loaderShapes[0])).toBe(false)
+      expect(Array.isArray(loaderShapes[1])).toBe(true)
+      const retryLoad = loaderShapes[1] as ParsedProviderCall[]
+      expect(retryLoad[0]?.provider).toBe('claude-desktop')
     } finally {
       store.close()
     }
