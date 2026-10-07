@@ -17,6 +17,11 @@ export const CONTENT_PURGED_THROUGH_KEY = 'content_purged_through'
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000
 
+/** Instant `now` minus CONTENT_RETENTION_DAYS, in epoch milliseconds. */
+export function contentRetentionFloorMs(now: Date): number {
+  return now.getTime() - CONTENT_RETENTION_DAYS * MS_PER_DAY
+}
+
 export type PurgeExpiredContentResult = {
   purged: number
   cutoffUtc: string
@@ -40,7 +45,7 @@ export function purgeExpiredContent(
   store: CanonStore,
   now: Date = new Date(),
 ): PurgeExpiredContentResult {
-  const cutoffMs = now.getTime() - CONTENT_RETENTION_DAYS * MS_PER_DAY
+  const cutoffMs = contentRetentionFloorMs(now)
   const cutoffUtc = new Date(cutoffMs).toISOString()
   let purged = 0
 
