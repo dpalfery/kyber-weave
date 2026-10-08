@@ -326,13 +326,14 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         ISquadRenderer renderer = _renderer ?? SquadCommandComposition.ResolveRenderer();
         ISquadGlobalRootResolver globalRoots = _globalRoots ?? SquadCommandComposition.ResolveGlobalRoots();
         SquadStateStore stateStore = _stateStore ?? SquadCommandComposition.ResolveStateStore(_userPaths);
-        SquadReceipt? receipt = stateStore.ReadReceipt(workingDirectory, SquadDeploymentScope.Global);
-        IReadOnlyList<SquadReceipt> siblingReceipts = stateStore.ListOtherGlobalReceipts(workingDirectory);
 
         List<SquadUnmanagedPathCollision> collisions = [];
         bool invalidGlobalRoot = false;
         try
         {
+            SquadReceipt? receipt = stateStore.ReadReceipt(workingDirectory, SquadDeploymentScope.Global);
+            IReadOnlyList<SquadReceipt> siblingReceipts = stateStore.ListOtherGlobalReceipts(workingDirectory);
+
             foreach (SquadTarget target in renderer.SupportedTargets)
             {
                 // A future native renderer whose per-user directory is not yet verified
@@ -375,7 +376,11 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
                     siblingReceipts));
             }
         }
-        catch (SquadRenderValidationException ex)
+        catch (Exception ex) when (
+            ex is SquadRenderValidationException
+                or InvalidDataException
+                or IOException
+                or UnauthorizedAccessException)
         {
             AnsiConsole.MarkupLine(
                 $"  [red]fail[/] Global unmanaged-collision scan failed: {Markup.Escape(ex.Message)}");
