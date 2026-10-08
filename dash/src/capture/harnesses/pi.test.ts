@@ -210,10 +210,11 @@ describe('pi mixed OTLP and file session window (P2.5)', () => {
     expect(records.length).toBeGreaterThanOrEqual(2)
 
     const row = buildSessionRow(MIXED_SESSION_ID, records, (text) => text.length)
-    const context = row.payload.context as {
-      contextLimit?: number
-      contextLimitSource?: string
-    }
+    const context = (
+      row.payload as {
+        context: { contextLimit?: number; contextLimitSource?: string }
+      }
+    ).context
     expect(context.contextLimit).toBe(DECLARED_WINDOW)
     expect(context.contextLimitSource).toBe('declared')
 
