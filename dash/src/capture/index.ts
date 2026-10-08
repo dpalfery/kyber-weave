@@ -7,11 +7,15 @@
 // — never at module load — so tests run entirely under a temporary HOME.
 //
 // A managed declaration may name several config files. JSON and JSONC values
-// keep their JSON types; TOML and YAML managed blocks stay strings. Status
-// can report declared warnings and a process-env snippet without writing
-// either. The six registry writers are pending-discovery stubs: they report
-// "not yet supported" and are never written. Callers (and tests) may inject
-// managed writers; `enable`/`disable`/`status` treat both kinds uniformly.
+// keep their JSON types; TOML and YAML managed blocks stay strings. An
+// ensure-if-absent key shares that file with the always-written keys: the
+// core reads the document first, inserts the key only when it is absent, and
+// leaves a present one out of the receipt. The harness stays a declaration,
+// not a second editor. Status can report declared warnings and a process-env
+// snippet without writing either. The six registry writers are
+// pending-discovery stubs: they report "not yet supported" and are never
+// written. Callers (and tests) may inject managed writers;
+// `enable`/`disable`/`status` treat both kinds uniformly.
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
@@ -99,6 +103,7 @@ type ResolvedConfigFile = {
   path: string
   format: CaptureFileFormat
   desiredKeys: (endpoint: string) => Record<string, JsonScalar>
+  ensureIfAbsentKeys?: (endpoint: string) => Record<string, JsonScalar>
 }
 
 /**
@@ -113,6 +118,7 @@ function declaredFiles(writer: ManagedHarnessWriter, home: string): ResolvedConf
       path: file.resolvePath(home),
       format: file.format,
       desiredKeys: file.desiredKeys,
+      ensureIfAbsentKeys: file.ensureIfAbsentKeys,
     }))
   }
   return [
@@ -120,6 +126,7 @@ function declaredFiles(writer: ManagedHarnessWriter, home: string): ResolvedConf
       path: writer.resolvePath(home),
       format: writer.format,
       desiredKeys: writer.desiredKeys,
+      ensureIfAbsentKeys: writer.ensureIfAbsentKeys,
     },
   ]
 }
@@ -129,6 +136,42 @@ function jsonDesiredMatches(
   desired: JsonScalar,
 ): boolean {
   return current?.present === true && current.value === desired
+}
+
+function isJsonScalar(value: unknown): value is JsonScalar {
+  return (
+    value === null ||
+    typeof value === 'string' ||
+    typeof value === 'boolean' ||
+    typeof value === 'number'
+  )
+}
+
+/**
+ * Always-written keys plus ensure-if-absent keys the document does not
+ * already contain. Presence comes from the file just read: a present ensure
+ * key keeps the owner's value and stays out of this map, so the existing
+ * JSON editor never replaces it and the receipt never records it. Disable
+ * restores every receipted key; recording an owner key would put the
+ * candidate back or call the owner's value drift. A name that is in both
+ * maps is always-written.
+ */
+function jsonWritesAfterRead(
+  content: string,
+  always: Record<string, JsonScalar>,
+  ensure: Record<string, JsonScalar>,
+): Record<string, JsonScalar> {
+  const writes: Record<string, JsonScalar> = { ...always }
+  const candidates: string[] = []
+  for (const key of Object.keys(ensure)) {
+    if (!(key in always)) candidates.push(key)
+  }
+  if (candidates.length === 0) return writes
+  const found = readJsonKeys(content, candidates)
+  for (const key of candidates) {
+    if (!found[key]?.present) writes[key] = ensure[key]!
+  }
+  return writes
 }
 
 /**
@@ -375,17 +418,24 @@ function enableFile(
   const err: string[] = []
 
   if (file.format === 'json' || file.format === 'jsonc') {
-    const current = readJsonKeys(content, Object.keys(desired))
-    const upToDate = Object.entries(desired).every(([key, value]) =>
+    // Absence is decided from the bytes just read. Present ensure keys are
+    // omitted here so applyJsonEdits — the only JSON editor — never sees them.
+    const desiredWrites = jsonWritesAfterRead(
+      content,
+      desired,
+      file.ensureIfAbsentKeys?.(endpoint) ?? {},
+    )
+    const current = readJsonKeys(content, Object.keys(desiredWrites))
+    const upToDate = Object.entries(desiredWrites).every(([key, value]) =>
       jsonDesiredMatches(current[key], value),
     )
     if (upToDate) {
       out.push(`harness ${writer.id}: already enabled (no-op): ${path}`)
       return { exitCode: 0, out, err }
     }
-    const applied = applyJsonEdits(content, desired)
+    const applied = applyJsonEdits(content, desiredWrites)
     if (dryRun) {
-      out.push(...dryRunLines(path, desired, applied.prior))
+      out.push(...dryRunLines(path, desiredWrites, applied.prior))
       return { exitCode: 0, out, err }
     }
     const preSha = sha256Hex(content)
@@ -395,7 +445,12 @@ function enableFile(
       exitCode: 0,
       out,
       err,
-      record: { desired, prior: applied.prior, preSha, postSha: sha256Hex(applied.content) },
+      record: {
+        desired: desiredWrites,
+        prior: applied.prior,
+        preSha,
+        postSha: sha256Hex(applied.content),
+      },
     }
   }
 
@@ -472,12 +527,17 @@ async function runEnable(
       err.push(...enabled.err)
       if (enabled.exitCode !== 0) exitCode = enabled.exitCode
       if (enabled.record === undefined) continue
+      const existing = receipt.files.find((entry) => entry.path === file.path)
+      const ensure =
+        file.format === 'json' || file.format === 'jsonc'
+          ? (file.ensureIfAbsentKeys?.(endpoint) ?? {})
+          : {}
       upsertReceipt(
         receipt,
         file.path,
         file.format,
         writer.id,
-        enabled.record.desired,
+        retainWrittenEnsureKeys(enabled.record.desired, ensure, existing),
         enabled.record.prior,
         enabled.record.preSha,
         enabled.record.postSha,
@@ -496,6 +556,28 @@ async function runEnable(
     stdout: out.length > 0 ? `${out.join('\n')}\n` : '',
     stderr: err.length > 0 ? `${err.join('\n')}\n` : '',
   }
+}
+
+/**
+ * A later enable omits an ensure key that is already present, but disable
+ * still has to remove the copy an earlier enable inserted. Rebuilding the
+ * receipt from only this write would forget that key. Always-written keys
+ * are already in `written`. Writers with no ensure map are unchanged.
+ */
+function retainWrittenEnsureKeys(
+  written: Record<string, JsonScalar>,
+  ensure: Record<string, JsonScalar>,
+  existing: ReceiptFileRecord | undefined,
+): Record<string, JsonScalar> {
+  if (existing === undefined || Object.keys(ensure).length === 0) return written
+  const merged: Record<string, JsonScalar> = { ...written }
+  for (const key of Object.keys(ensure)) {
+    if (key in merged) continue
+    const recorded = existing.keys[key]
+    if (recorded === undefined || !isJsonScalar(recorded.written)) continue
+    merged[key] = recorded.written
+  }
+  return merged
 }
 
 function upsertReceipt(
