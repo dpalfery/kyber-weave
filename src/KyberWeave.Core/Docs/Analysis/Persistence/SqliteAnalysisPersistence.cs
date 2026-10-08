@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using KyberWeave.Core.Docs.Analysis.Model;
 using KyberWeave.Core.Processes;
 
@@ -24,6 +25,12 @@ public sealed class SqliteAnalysisPersistence : IAnalysisPersistence
     private const double NormalizedVectorTolerance = 0.0001;
     private const int BusyTimeoutMilliseconds = 250;
     private const int BusyAttempts = 3;
+    private const int SqliteBusyResultCode = 5;
+    private const int SqliteLockedResultCode = 6;
+    private static readonly Regex LockedWordRegex = new(@"\blocked\b", RegexOptions.IgnoreCase);
+    private static readonly Regex BusyWordRegex = new(@"\bbusy\b", RegexOptions.IgnoreCase);
+    private static readonly Regex SqliteBusyOrLockedRegex = new(
+        @"SQLITE_(BUSY|LOCKED)", RegexOptions.IgnoreCase);
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.General);
     private readonly string _repositoryRoot;
 
@@ -336,22 +343,21 @@ public sealed class SqliteAnalysisPersistence : IAnalysisPersistence
 
             if (result.ExitCode == 0) return result.StandardOutput;
 
-            string reason = result.StandardError.Trim();
-            if (IsBusy(reason))
+            if (IsBusy(result))
             {
                 if (attempt < BusyAttempts) continue;
                 throw new InvalidOperationException(
                     $"The documentation analysis cache remained locked after {BusyAttempts} bounded attempts. " +
-                    FailureDetail(result, reason));
+                    FailureDetail(result));
             }
 
-            if (IsOperationalFailure(reason))
+            if (IsOperationalFailure(result))
             {
                 throw new InvalidOperationException(
-                    "The documentation analysis cache could not be accessed. " + FailureDetail(result, reason));
+                    "The documentation analysis cache could not be accessed. " + FailureDetail(result));
             }
 
-            throw CorruptCache(FailureDetail(result, reason));
+            throw CorruptCache(FailureDetail(result));
         }
 
         throw new InvalidOperationException("The documentation analysis cache operation did not complete.");
@@ -610,23 +616,73 @@ public sealed class SqliteAnalysisPersistence : IAnalysisPersistence
         }
     }
 
-    private static bool IsBusy(string reason) =>
-        reason.Contains("locked", StringComparison.OrdinalIgnoreCase)
-        || reason.Contains("busy", StringComparison.OrdinalIgnoreCase);
+    private static bool IsBusy(ProcessResult result)
+    {
+        // The sqlite3 CLI reports lock contention as free text on either stream, with
+        // wording that shifts between builds, so classify on both streams, the SQLite
+        // result code suffix ("(5)" SQLITE_BUSY, "(6)" SQLITE_LOCKED), and the phrases
+        // the lock fixture and production retries have been observed to emit. An empty
+        // failure that carries only the busy result code must not read as corruption:
+        // there is no corrupt payload to point at, only a lock that outlasted retries.
+        string output = CombinedOutput(result);
+        if (output.Contains("database is locked", StringComparison.OrdinalIgnoreCase)
+            || output.Contains("database is busy", StringComparison.OrdinalIgnoreCase)
+            || LockedWordRegex.IsMatch(output)
+            || BusyWordRegex.IsMatch(output)
+            || (HasResultCodeSuffix(output, SqliteBusyResultCode)
+                && (SqliteBusyOrLockedRegex.IsMatch(output) || SuffixOnSqliteLine(output, SqliteBusyResultCode)))
+            || (HasResultCodeSuffix(output, SqliteLockedResultCode)
+                && (SqliteBusyOrLockedRegex.IsMatch(output) || SuffixOnSqliteLine(output, SqliteLockedResultCode))))
+        {
+            return true;
+        }
 
-    private static bool IsOperationalFailure(string reason) =>
-        reason.Contains("readonly", StringComparison.OrdinalIgnoreCase)
-        || reason.Contains("read-only", StringComparison.OrdinalIgnoreCase)
-        || reason.Contains("disk i/o", StringComparison.OrdinalIgnoreCase)
-        || reason.Contains("unable to open database", StringComparison.OrdinalIgnoreCase)
-        || reason.Contains("permission denied", StringComparison.OrdinalIgnoreCase)
-        || reason.Contains("database or disk is full", StringComparison.OrdinalIgnoreCase)
-        || reason.Contains("interrupted", StringComparison.OrdinalIgnoreCase);
+        return result.ExitCode == SqliteBusyResultCode
+            || result.ExitCode == SqliteLockedResultCode;
+    }
 
-    private static string FailureDetail(ProcessResult result, string reason) =>
-        reason.Length == 0
+    private static bool IsOperationalFailure(ProcessResult result)
+    {
+        string reason = CombinedOutput(result);
+        return reason.Contains("readonly", StringComparison.OrdinalIgnoreCase)
+            || reason.Contains("read-only", StringComparison.OrdinalIgnoreCase)
+            || reason.Contains("disk i/o", StringComparison.OrdinalIgnoreCase)
+            || reason.Contains("unable to open database", StringComparison.OrdinalIgnoreCase)
+            || reason.Contains("permission denied", StringComparison.OrdinalIgnoreCase)
+            || reason.Contains("database or disk is full", StringComparison.OrdinalIgnoreCase)
+            || reason.Contains("interrupted", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string FailureDetail(ProcessResult result)
+    {
+        string reason = CombinedOutput(result).Trim();
+        return reason.Length == 0
             ? $"sqlite3 exited with code {result.ExitCode}."
             : $"sqlite3 exited with code {result.ExitCode}: {reason}";
+    }
+
+    private static string CombinedOutput(ProcessResult result) =>
+        result.StandardOutput + "\n" + result.StandardError;
+
+    private static bool HasResultCodeSuffix(string output, int resultCode) =>
+        output.Contains(
+            $"({resultCode.ToString(CultureInfo.InvariantCulture)})",
+            StringComparison.Ordinal);
+
+    private static bool SuffixOnSqliteLine(string output, int resultCode)
+    {
+        string suffix = $"({resultCode.ToString(CultureInfo.InvariantCulture)})";
+        foreach (string line in Lines(output))
+        {
+            if (line.Contains(suffix, StringComparison.Ordinal)
+                && line.Contains("sqlite", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     private void EnsureAvailable()
     {

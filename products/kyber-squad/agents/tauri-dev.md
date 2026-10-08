@@ -40,6 +40,8 @@ contract, but stop there — don't build UI components.
 
 When a request mixes both sides, do your half, write the contract down, and use the handoff.
 
+Your packet is your whole scope. Do not open files under the directories named by **<plan-index>** and **<specification-index>**. If the packet is insufficient, return a blocker instead of reading the plan or spec.
+
 ## Operating workflow
 
 1. **Read the standard.** Read the path declared as **<tauri-coding-standard>** before

@@ -41,8 +41,9 @@ function antigravityStatusDetail(home: string): readonly string[] {
   } else {
     lines.push(`statusline bridge: ${command}`)
     const script = readBridgeScript(command)
+    // A digit boundary: `4318` must not match inside `14318` or `43180`.
     lines.push(
-      script !== undefined && script.includes(RECEIVER_PORT)
+      script !== undefined && new RegExp(`(^|[^0-9])${RECEIVER_PORT}([^0-9]|$)`).test(script)
         ? `bridge route: the statusline script posts to ${RECEIVER_PORT}`
         : 'bridge route: the statusline script does not name the receiver port',
     )

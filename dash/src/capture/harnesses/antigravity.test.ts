@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { snapshotFile } from '../file-snapshot.js'
+import { snapshotFile } from '../testing.js'
 import { runCapture } from '../index.js'
 import { antigravityHarness } from './antigravity.js'
 
