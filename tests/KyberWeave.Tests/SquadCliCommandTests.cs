@@ -779,6 +779,46 @@ public sealed class SquadCliCommandTests : IDisposable
         Assert.Contains("Doctor found issues", execution.Output, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Theory]
+    [InlineData("")]
+    [InlineData("   \n\t ")]
+    public void Doctor_GlobalScope_BlankSiblingReceipt_DoesNotCrash(string blankReceipt)
+    {
+        string tempHome = Path.Combine(_temp.Path, $"doctor-blank-sibling-home-{blankReceipt.Length}");
+        Directory.CreateDirectory(tempHome);
+        string userHome = Path.Combine(_temp.Path, $"doctor-blank-sibling-user-{blankReceipt.Length}");
+        FakeUserPaths userPaths = new(userHome);
+        SquadGlobalRoots globalRoots = new(_ => null, tempHome);
+        SquadStateStore stateStore = new(userPaths);
+
+        string siblingRepo = Path.Combine(_temp.Path, $"doctor-blank-sibling-repo-{blankReceipt.Length}");
+        Directory.CreateDirectory(siblingRepo);
+        string siblingReceiptPath = stateStore.ResolveReceiptPath(siblingRepo, SquadDeploymentScope.Global);
+        Directory.CreateDirectory(Path.GetDirectoryName(siblingReceiptPath)!);
+        File.WriteAllText(siblingReceiptPath, blankReceipt);
+
+        FakeProcessExecutor executor = new FakeProcessExecutor()
+            .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
+        SquadDoctorCommand command = new(
+            executor,
+            userPaths,
+            workingDirectory: KyberWeaveTestPaths.ToolRoot,
+            globalRoots: globalRoots,
+            stateStore: stateStore);
+
+        CommandExecution execution = Capture(() => command.Execute(
+            null!,
+            new SquadDoctorSettings
+            {
+                Path = KyberWeaveTestPaths.ToolRoot,
+                Global = true
+            }));
+
+        Assert.Equal(1, execution.ExitCode);
+        Assert.Contains("Global unmanaged-collision scan failed", execution.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Doctor found issues", execution.Output, StringComparison.OrdinalIgnoreCase);
+    }
+
     [Fact]
     public void Doctor_GlobalScope_CorruptLocalReceipt_DoesNotCrash()
     {

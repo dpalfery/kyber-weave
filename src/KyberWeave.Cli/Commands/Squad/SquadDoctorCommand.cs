@@ -380,7 +380,7 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
             ex is SquadRenderValidationException
                 or InvalidDataException
                 or IOException
-                or UnauthorizedAccessException)
+                or UnauthorizedAccessException or ArgumentException)
         {
             AnsiConsole.MarkupLine(
                 $"  [red]fail[/] Global unmanaged-collision scan failed: {Markup.Escape(ex.Message)}");
