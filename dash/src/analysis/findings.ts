@@ -1300,10 +1300,13 @@ export function detectCompactionHazard(input: CompactionHazardInput): Finding[] 
       // child calls. The spend is real, but the single-turn reading is
       // inferred, never deterministic.
       const overWindow = peakTurn.tokens > limit
-      const confidence: FindingConfidence = overWindow ? 'heuristic' : 'deterministic'
       // A declared window is configured, not measured (D12): even a peak
-      // inside it reads as inferred, never deterministic.
-      const measurementClass = overWindow || isDeclaredWindow ? ('inferred' as const) : ('deterministic' as const)
+      // inside it reads as inferred, and an inferred finding ranks below a
+      // deterministic one of comparable volume (ADR 0013 D6), so confidence
+      // drops to heuristic with it.
+      const inferred = overWindow || isDeclaredWindow
+      const confidence: FindingConfidence = inferred ? 'heuristic' : 'deterministic'
+      const measurementClass = inferred ? ('inferred' as const) : ('deterministic' as const)
 
       // Link prior turn and peak turn
       const priorTurn = group.turns.find((t) => t.turnIndex !== peakTurn.turnIndex) ?? group.turns[0]!
@@ -1377,12 +1380,12 @@ export function detectCompactionHazard(input: CompactionHazardInput): Finding[] 
         rankScore,
         measurementClass,
         confidenceBasis: overWindow
-          ? 'Peak turn input tokens exceed the reported context window, so single-turn attribution is inferred (likely aggregate of child calls) rather than measured.'
+          ? `Peak turn input tokens exceed the ${isDeclaredWindow ? 'declared' : 'reported'} context window, so single-turn attribution is inferred (likely aggregate of child calls) rather than measured.`
           : isDeclaredWindow
             ? 'Compared against the session-declared window; the spend is measured, but the percentage against a declared window is inferred rather than measured.'
             : 'Deterministically measured by comparing the session peak turn input tokens against the context window in effect for that session.',
         whatWouldRaiseIt: overWindow
-          ? 'Harness emission of per-turn input counters that reconcile with the reported window.'
+          ? `Harness emission of per-turn input counters that reconcile with the ${isDeclaredWindow ? 'declared' : 'reported'} window.`
           : isDeclaredWindow
             ? 'Harness reporting of the context window in session telemetry would let the percentage be measured.'
             : 'Deterministic measurement; confidence is at ceiling.',
