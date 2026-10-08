@@ -2,7 +2,7 @@
 id: plans/2026-10-05-apm-self-dependency-docs-init
 title: "docs init: remove the apm.yml self-dependency (#285)"
 doc-type: plan
-status: current
+status: complete
 component: DocGraph
 owner: dpalfery
 last-reviewed: 2026-10-05
@@ -11,7 +11,7 @@ development-mode: test-first
 
 # docs init: remove the apm.yml self-dependency (#285)
 
-**Status: Ready — implementation authority.** Decisions Q1–Q4 are locked as A3–A6
+**Status: Complete, archived 2026-10-05.** Decisions Q1–Q4 are locked as A3–A6
 (conductor-relay answers, 2026-10-05 — the harness could not prompt the user, so the
 recommended option was adopted for each). Approve-and-execute is recorded as A7
 (2026-10-05): the user's entry prompt pre-authorized treating the decision-complete
