@@ -31,8 +31,8 @@ own user-level config:
 - Pi: files under `~/.pi/agent/`
 - Antigravity: its settings file
 
-Leaving those edits to the user, as ADR 0026 does for status lines, means about six files in
-four formats, each with its own key names. A single wrong key fails silently: the harness runs,
+Leaving those edits to the user, as ADR 0026 does for status lines, means six harnesses, each
+with its own user-level config location and key names. A single wrong key fails silently: the harness runs,
 nothing is exported, and the dashboard shows a coverage gap that looks the same as a harness that
 cannot export. Agents editing the files by hand is worse. Nobody can inspect what changed or
 undo it.
@@ -49,8 +49,9 @@ probe at `OTLP_HEALTHZ_PATH` (`dash/src/otel/receiver.ts`).
 
 ## Decision
 
-1. **A KyberDash CLI command owns the harness telemetry keys.** `kyberdash capture` writes the
-   per-harness user-level config listed above, and only the keys that enable telemetry export.
+1. **A KyberDash CLI command owns the harness telemetry keys.** `kyberdash kyber capture`
+   (status | enable | disable) writes the per-harness user-level config listed above, and only
+   the keys that enable telemetry export.
    It is:
    - inspectable: `capture status` reports each harness's state, and a dry run prints the
      key-level change without writing;
@@ -75,8 +76,8 @@ probe at `OTLP_HEALTHZ_PATH` (`dash/src/otel/receiver.ts`).
 
 ## Alternatives Considered
 
-- **Manual activation, as ADR 0026 does.** Rejected for KyberDash. There are six harnesses and
-  several keys each, and a mistake fails silently. Status lines are a convenience, but telemetry
+- **Manual activation, as ADR 0026 does.** Rejected for KyberDash. There are six harnesses,
+  each with its own user-level config location and key names, and a mistake fails silently. Status lines are a convenience, but telemetry
   export is the data KyberDash runs on. The tool also cannot report what it never reads.
 - **Whole-file backup and restore.** Rejected. Restoring a file snapshot discards every edit the
   user, or the harness itself, made after `enable`. Key-level restore preserves those edits and
@@ -105,6 +106,9 @@ probe at `OTLP_HEALTHZ_PATH` (`dash/src/otel/receiver.ts`).
 - Two components now take opposite positions on harness settings. The boundary between them is
   this record's scope clause. A future component that wants to write harness settings needs its
   own record.
+- Content is captured in full — system prompt, user prompts, tool schemas, tool arguments and
+  output, skills and all turn data — with identity fields (`user.email`, account, organization
+  and uuid ids) dropped at the receiver.
 
 ## Related
 

@@ -19,11 +19,11 @@ Accepted, 2026-10-07. Records decisions D5 and D12 of the KyberDash context-capt
 
 Context pressure is the share of the context window a turn fills. Its denominator is the window
 size, and very few harnesses report that in per-turn telemetry. Without a window, pressure is
-`not_measurable`, and so is the compaction-hazard finding that depends on it.
+`not_measurable`, and the compaction-hazard finding that depends on it is not emitted.
 
 Some harnesses declare a window in their own local configuration. Pi's `models-store.json`
 carries a `contextWindow` per model, and a statusline payload can carry `context_window_size`.
-The harness itself uses that number to decide when to compact, but it is a configured value, not
+The harness declares that number in its own local config, but it is a configured value, not
 a measurement of the turn. A configuration that is stale or wrong produces a confident-looking
 percentage that is wrong.
 
@@ -46,6 +46,11 @@ KyberDash already keeps two vocabularies apart. Availability (`measured`, `deriv
 5. **The compaction-hazard finding fires against a declared window, with measurement class
    `inferred` and a "declared window" caveat.** Under ADR 0013 decision 2 (D6), it therefore
    ranks below deterministic findings of comparable volume.
+6. **Window precedence is reported, then declared, then default — and a default window is
+   never used for pressure.** The #181 refusal to fabricate a window stands: with neither a
+   reported nor a declared window, pressure stays `not_measurable` and the session stays an
+   unknown-window session. The compaction-hazard finding fires only against a declared or
+   reported window, never a default one.
 
 ## Alternatives Considered
 
@@ -55,8 +60,8 @@ KyberDash already keeps two vocabularies apart. Availability (`measured`, `deriv
 - **A model catalog of published windows.** Rejected. It is a second source of truth that has to
   track every model release. It also cannot know the tier, variant or harness override the
   session actually used.
-- **Ignore declared windows and leave pressure `not_measurable`.** Rejected. It discards the one
-  number the harness itself uses to decide when to compact, and leaves compaction hazards
+- **Ignore declared windows and leave pressure `not_measurable`.** Rejected. It discards the
+  number the harness declares in its own local config, and leaves compaction hazards
   invisible for every harness that does not report a window per turn.
 - **Fire the compaction finding as `deterministic` when a window is declared.** Rejected. The
   finding is only as good as the denominator, and ADR 0013 decision 2 exists so that inferred

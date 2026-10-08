@@ -27,12 +27,14 @@ logs, and once by a dot-folder file such as `~/.claude/projects/**/*.jsonl`. ADR
 chose between them for content at the level of the whole record. If the OTel record carried any
 parts at all, the file row contributed none.
 
-That rule was written when OTel content was rare. KyberDash now asks every harness to export all
-content it can, so an OTel record routinely carries some content buckets and not others. Claude
+ADR 0009 chose the whole-record rule on the ground that the file path holds what was actually
+sent. KyberDash now asks every harness to export all content it can, so an OTel record routinely carries some content buckets and not others. Claude
 Code's `claude_code.api_request_body` log, for example, supplies the system prompt and the tool
 definitions, while the conversation history may only be on disk. Under a whole-record rule, one
-OTel part is enough to hide every bucket the file holds and the OTel record does not. The turn
-then reports less context than the harness actually sent.
+OTel part is enough to hide every bucket the file holds and the OTel record does not. D10
+changes the rule per bucket: OTel now wins whenever it has parts for that bucket, because the
+whole-record rule discards buckets only the file carries. The turn then reports less context
+than the harness actually sent.
 
 Content is addressed through the canonical content keys in `dash/src/canon/types.ts`
 (`system_prompt`, `tool_definitions`, `instruction_context`, `conversation_history`,
@@ -48,25 +50,26 @@ Content is addressed through the canonical content keys in `dash/src/canon/types
    record or wholly from the file row, never from both.
 4. **Counters are unchanged.** They still come from the OTel record and are never summed across
    sources, exactly as ADR 0009 decision 4 states.
+5. **Scope is OTel-and-file pairings only.** The rule applies to every OTel-and-file pairing,
+   whatever the harness. File-and-file joins (#231, #232) keep their existing behaviour.
 
 ## Alternatives Considered
 
 - **Keep the whole-record rule.** Rejected. Once OTel export is enabled for content, the rule
   discards file content for exactly the turns where both sources exist. Those are the
   best-instrumented turns.
-- **File first, per bucket.** Rejected. With full content export enabled, the OTel record carries
-  the request as the harness assembled it for the provider. A file transcript is a
-  harness-specific rendering of the same turn, and its shape varies between harness versions.
+- **File first, per bucket.** Rejected. The OTel record is the counter source, and precedence
+  per bucket needs one rule that never mixes sources within a bucket, so OTel stays first.
 - **Merge both sources within a bucket.** Rejected. The two sources describe the same call, so
   concatenating them double-counts the bucket's tokens. Deduplicating text across two encodings
   of one prompt is not reliable enough to rank findings on.
 
 ## Consequences
 
-- One turn's content can now come from two sources, split by bucket. The source of each bucket
-  must be recoverable, so a figure built from it can be traced back to the record that supplied
-  it.
-- Twin deduplication (`dash/src/canon/twin-dedupe.ts`) changes from choosing a donor record to
+- One turn's content can now come from two sources, split by bucket. Nothing in this decision
+  records per-bucket provenance.
+- Twin deduplication (`dash/src/canon/twin-dedupe.ts`), for OTel-and-file pairings only,
+  changes from choosing a donor record to
   choosing a donor per bucket. Its existing comment, which restates ADR 0009 decision 4, has to
   change with it.
 - Turns that were previously under-reported gain buckets once this ships. Context totals for
