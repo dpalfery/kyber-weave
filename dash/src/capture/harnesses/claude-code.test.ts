@@ -86,9 +86,41 @@ function readEnv(content: string, key: string) {
   return readJsonKeys(content, [envDotted(key)])[envDotted(key)]
 }
 
+/**
+ * `//` and `/*` are comments only outside a JSON string. A value such as
+ * `http://127.0.0.1:4318` contains those slash pairs as data; rejecting
+ * every pair would fail valid strict JSON.
+ */
+function hasJsonCommentOutsideString(content: string): boolean {
+  let inString = false
+  let escaped = false
+  for (let index = 0; index < content.length; index++) {
+    const char = content[index]!
+    if (inString) {
+      if (escaped) {
+        escaped = false
+        continue
+      }
+      if (char === '\\') {
+        escaped = true
+        continue
+      }
+      if (char === '"') inString = false
+      continue
+    }
+    if (char === '"') {
+      inString = true
+      continue
+    }
+    const next = content[index + 1]
+    if (char === '/' && (next === '/' || next === '*')) return true
+  }
+  return false
+}
+
 function expectStrictJsonSettings(content: string): void {
   expect(() => JSON.parse(content)).not.toThrow()
-  expect(content).not.toMatch(/\/\//)
+  expect(hasJsonCommentOutsideString(content)).toBe(false)
   const parsed = JSON.parse(content) as { env?: Record<string, unknown> }
   expect(parsed.env).toBeDefined()
   for (const value of Object.values(parsed.env!)) {
