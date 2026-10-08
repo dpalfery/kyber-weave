@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Xunit;
 using YamlDotNet.RepresentationModel;
 
@@ -21,6 +22,15 @@ public sealed class ApmManifestGuardTests
         Path.Combine(KyberWeaveTestPaths.ToolRoot, "apm.yml");
 
     /// <summary>
+    /// Matches this repository's owner/name in every form APM accepts for a GitHub package:
+    /// shorthand, <c>github.com/</c>, <c>https://</c>/<c>ssh://</c> URLs, and <c>git@</c>
+    /// SCP-style remotes, with an optional <c>.git</c> suffix and trailing slashes.
+    /// </summary>
+    private static readonly Regex SelfDependency = new(
+        @"^(?:(?:https?|ssh|git)://(?:[^@/]+@)?(?:www\.)?github\.com/|(?:[^@/]+@)?github\.com:|(?:www\.)?github\.com/)?dpalfery/kyber-weave(?:\.git)?/*$",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+    /// <summary>
     /// A self-dependency entry — in either <c>dependencies.apm</c> or
     /// <c>devDependencies.apm</c>, string form with or without a <c>#ref</c> suffix, or
     /// object form carrying <c>git: dpalfery/kyber-weave</c> — makes every external
@@ -31,7 +41,110 @@ public sealed class ApmManifestGuardTests
     [Fact]
     public void TheRepositoryManifestDeclaresNoApmSelfDependency()
     {
-        YamlMappingNode root = LoadManifest();
+        YamlMappingNode root = ParseManifest(File.ReadAllText(ApmManifestPath));
+
+        IReadOnlyList<string> offenders = FindSelfDependencies(root);
+
+        Assert.True(
+            offenders.Count == 0,
+            "apm.yml must not declare dpalfery/kyber-weave as its own dependency " +
+            "(circular dependency aborts `apm install` and the docs init skill deployment, " +
+            $"issue #285): found {string.Join(", ", offenders)}.");
+    }
+
+    [Theory]
+    [InlineData("dpalfery/kyber-weave")]
+    [InlineData("dpalfery/kyber-weave#v0.1.1")]
+    [InlineData("dpalfery/kyber-weave.git")]
+    [InlineData("dpalfery/kyber-weave/")]
+    [InlineData("\"  dpalfery/kyber-weave  \"")]
+    [InlineData("github.com/dpalfery/kyber-weave")]
+    [InlineData("https://github.com/dpalfery/kyber-weave")]
+    [InlineData("https://github.com/dpalfery/kyber-weave.git")]
+    [InlineData("https://github.com/dpalfery/kyber-weave/")]
+    [InlineData("https://github.com/dpalfery/kyber-weave.git#main")]
+    [InlineData("https://www.github.com/DPALFERY/Kyber-Weave.git")]
+    [InlineData("git@github.com:dpalfery/kyber-weave.git")]
+    [InlineData("ssh://git@github.com/dpalfery/kyber-weave.git")]
+    [InlineData("git: https://github.com/dpalfery/kyber-weave.git")]
+    [InlineData("git: dpalfery/kyber-weave")]
+    public void EverySelfDependencyFormInApmDependenciesIsDetected(string entry)
+    {
+        YamlMappingNode root = ParseManifest(ManifestWithApmEntry("dependencies", entry));
+
+        Assert.NotEmpty(FindSelfDependencies(root));
+    }
+
+    [Fact]
+    public void SelfDependencyInDevDependenciesIsDetected()
+    {
+        YamlMappingNode root = ParseManifest(
+            ManifestWithApmEntry("devDependencies", "https://github.com/dpalfery/kyber-weave.git"));
+
+        Assert.NotEmpty(FindSelfDependencies(root));
+    }
+
+    [Theory]
+    [InlineData("dpalfery/kyber-weave-docs")]
+    [InlineData("dpalfery/kyber-weave-docs#v1")]
+    [InlineData("dpalfery/kyber-weaver")]
+    [InlineData("someone-else/kyber-weave")]
+    [InlineData("https://github.com/dpalfery/kyber-weave-docs.git")]
+    [InlineData("https://github.com/someone-else/kyber-weave")]
+    [InlineData("https://gitlab.com/dpalfery/kyber-weave")]
+    [InlineData("git: https://github.com/dpalfery/kyber-weave-docs")]
+    public void OtherPackagesAreNotFlaggedAsSelfDependencies(string entry)
+    {
+        YamlMappingNode root = ParseManifest(ManifestWithApmEntry("dependencies", entry));
+
+        Assert.Empty(FindSelfDependencies(root));
+    }
+
+    /// <summary>
+    /// A malformed manifest must fail with a readable assertion, not an
+    /// <c>IndexOutOfRangeException</c> or <c>InvalidCastException</c> from the loader.
+    /// </summary>
+    [Theory]
+    [InlineData("")]
+    [InlineData("just a scalar")]
+    [InlineData("- a\n- b\n")]
+    [InlineData("name: a\n---\nname: b\n")]
+    public void MalformedManifestFailsWithAReadableAssertion(string text)
+    {
+        Assert.ThrowsAny<Xunit.Sdk.XunitException>(() => ParseManifest(text));
+    }
+
+    [Fact]
+    public void TheRepositoryManifestPinsAgentSkillsTargets()
+    {
+        YamlMappingNode root = ParseManifest(File.ReadAllText(ApmManifestPath));
+
+        Assert.True(
+            root.Children.TryGetValue(new YamlScalarNode("targets"), out YamlNode? targetsNode),
+            "apm.yml must pin targets (see the why-comment above it).");
+        YamlSequenceNode targets = Assert.IsType<YamlSequenceNode>(targetsNode);
+        string[] values = targets.Children
+            .Select(c => Assert.IsType<YamlScalarNode>(c).Value!)
+            .ToArray();
+        Assert.Equal(["agent-skills"], values);
+    }
+
+    private static YamlMappingNode ParseManifest(string text)
+    {
+        YamlStream stream = new();
+        using StringReader reader = new(text);
+        stream.Load(reader);
+
+        Assert.Single(stream.Documents);
+        return Assert.IsType<YamlMappingNode>(stream.Documents[0].RootNode);
+    }
+
+    private static string ManifestWithApmEntry(string section, string entry) =>
+        $"{section}:\n  apm:\n    - {entry}\n";
+
+    private static IReadOnlyList<string> FindSelfDependencies(YamlMappingNode root)
+    {
+        List<string> offenders = [];
 
         foreach (string section in new[] { "dependencies", "devDependencies" })
         {
@@ -45,42 +158,12 @@ public sealed class ApmManifestGuardTests
             foreach (YamlNode entry in apmEntries.Children)
             {
                 string offender = IdentifyOffender(entry);
-                Assert.True(
-                    offender.Length == 0,
-                    $"apm.yml {section}.apm must not declare dpalfery/kyber-weave as its own " +
-                    $"dependency (circular dependency aborts `apm install` and the docs init " +
-                    $"skill deployment, issue #285): found '{offender}'.");
+                if (offender.Length > 0)
+                    offenders.Add($"{section}.apm '{offender}'");
             }
         }
-    }
 
-    /// <summary>
-    /// The <c>targets: [agent-skills]</c> pin is a deliberate, documented non-negotiable
-    /// (root AGENTS.md): it scopes <c>apm compile</c>/install outputs to
-    /// <c>.agents/skills/</c> so the hand-authored AGENTS.md files stay untouched. This
-    /// fix keeps the pin byte-for-byte; the guard holds it in place.
-    /// </summary>
-    [Fact]
-    public void TheRepositoryManifestPinsAgentSkillsTargets()
-    {
-        YamlMappingNode root = LoadManifest();
-
-        Assert.True(
-            root.Children.TryGetValue(new YamlScalarNode("targets"), out YamlNode? targetsNode),
-            "apm.yml must pin targets (see the why-comment above it).");
-        YamlSequenceNode targets = Assert.IsType<YamlSequenceNode>(targetsNode);
-        string[] values = targets.Children
-            .Select(c => Assert.IsType<YamlScalarNode>(c).Value!)
-            .ToArray();
-        Assert.Equal(["agent-skills"], values);
-    }
-
-    private static YamlMappingNode LoadManifest()
-    {
-        YamlStream stream = new();
-        using StringReader reader = new(File.ReadAllText(ApmManifestPath));
-        stream.Load(reader);
-        return (YamlMappingNode)stream.Documents[0].RootNode;
+        return offenders;
     }
 
     private static bool TryGetSection(
@@ -120,7 +203,7 @@ public sealed class ApmManifestGuardTests
         if (string.IsNullOrWhiteSpace(value))
             return false;
 
-        string withoutRef = value.Split('#', 2)[0].TrimEnd();
-        return string.Equals(withoutRef, "dpalfery/kyber-weave", StringComparison.OrdinalIgnoreCase);
+        string withoutRef = value.Split('#', 2)[0].Trim();
+        return SelfDependency.IsMatch(withoutRef);
     }
 }
