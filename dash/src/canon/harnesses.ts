@@ -136,8 +136,21 @@ function isWindowSource(value: unknown): value is ContextLimitSource {
   return value === 'reported' || value === 'declared' || value === 'default'
 }
 
-/** The evidence a digest carries for the content- and window-dependent dimensions. */
-export function evidenceOf(digest: SessionDigest): DimensionEvidence {
+/** A denominator a pressure ratio can actually be taken against. */
+function positiveFiniteLimit(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0
+}
+
+/**
+ * The evidence a digest carries for the content- and window-dependent dimensions.
+ *
+ * The sets stay sets. Widening them to an optional iterable would hide `.has`
+ * and make an empty provenance claim look like a missing field.
+ */
+export function evidenceOf(digest: SessionDigest): {
+  bucketParts: Set<string>
+  windowSources: Set<ContextLimitSource>
+} {
   return { bucketParts: digest.bucketParts, windowSources: digest.windowSources }
 }
 
@@ -171,8 +184,13 @@ export function digestSessionPayloads(payloads: Iterable<AsadSessionPayload>): S
     // unreported denominator presented as harness pressure is the same
     // fabrication the compaction detector stopped emitting.
     const context = payload.context
-    const windowSource = (context as { contextLimitSource?: unknown } | undefined)?.contextLimitSource
-    if (isWindowSource(windowSource)) digest.windowSources.add(windowSource)
+    const windowClaim = context as { contextLimit?: unknown; contextLimitSource?: unknown } | undefined
+    const windowSource = windowClaim?.contextLimitSource
+    // A source name without a usable limit is not a window. Recording it would
+    // let a rollup treat an empty claim as provenance and lift a static refusal.
+    if (isWindowSource(windowSource) && positiveFiniteLimit(windowClaim?.contextLimit)) {
+      digest.windowSources.add(windowSource)
+    }
     const windowUnknown = windowSource === 'default'
     if (windowUnknown) digest.unknownWindowSessions += 1
     if (context && context.measurable === true && !windowUnknown && Array.isArray(context.turns) && context.turns.length > 0) {
