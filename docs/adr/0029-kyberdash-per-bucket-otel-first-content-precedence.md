@@ -28,13 +28,13 @@ chose between them for content at the level of the whole record. If the OTel rec
 parts at all, the file row contributed none.
 
 ADR 0009 chose the whole-record rule on the ground that the file path holds what was actually
-sent. KyberDash now asks every harness to export all content it can, so an OTel record routinely carries some content buckets and not others. Claude
-Code's `claude_code.api_request_body` log, for example, supplies the system prompt and the tool
-definitions, while the conversation history may only be on disk. Under a whole-record rule, one
-OTel part is enough to hide every bucket the file holds and the OTel record does not. D10
-changes the rule per bucket: OTel now wins whenever it has parts for that bucket, because the
-whole-record rule discards buckets only the file carries. The turn then reports less context
-than the harness actually sent.
+sent. KyberDash now asks every harness to export all content it can, so an OTel record routinely
+carries some content buckets and not others. Claude Code's `claude_code.api_request_body` log,
+for example, supplies the system prompt and the tool definitions, while the conversation history
+may only be on disk. Under a whole-record rule, one OTel part is enough to hide every bucket the
+file holds and the OTel record does not, so under that rule the turn reports less context than
+the harness actually sent. D10 changes the rule per bucket: OTel now wins whenever it has parts
+for that bucket, and file parts fill the rest.
 
 Content is addressed through the canonical content keys in `dash/src/canon/types.ts`
 (`system_prompt`, `tool_definitions`, `instruction_context`, `conversation_history`,
