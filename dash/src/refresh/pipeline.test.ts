@@ -290,11 +290,11 @@ describe('refresh pipeline: parser contract version & checkpoint invalidation', 
       store.close()
     }
   })
-  it("scopes parserContractVersion bumps to Claude (4), Codex/Kilo/Cursor/Pi (2), and leaves others at 1", () => {
+  it("scopes parserContractVersion bumps to Claude (5), Codex/Kilo/Cursor/Pi (2), and leaves others at 1", () => {
     const claudeCli = descriptorFor("claude-cli")
     const claudeDesktop = descriptorFor("claude-desktop")
-    expect(claudeCli?.parserContractVersion).toBe("4")
-    expect(claudeDesktop?.parserContractVersion).toBe("4")
+    expect(claudeCli?.parserContractVersion).toBe("5")
+    expect(claudeDesktop?.parserContractVersion).toBe("5")
 
     const codex = descriptorFor("codex-cli")
     const kilo = descriptorFor("kilo-shared-runtime")
@@ -308,7 +308,7 @@ describe('refresh pipeline: parser contract version & checkpoint invalidation', 
     expect(copilot?.parserContractVersion).toBe("1")
   })
 
-  it("re-reads transcript files and advances parserContractVersion from 2 to 4 for claude-desktop (#232)", async () => {
+  it("re-reads transcript files and advances parserContractVersion from 2 to 5 for claude-desktop (#232)", async () => {
     const root = tempDir()
     const dbPath = join(root, 'canon.db')
     const store = new CanonStore(dbPath)
@@ -411,7 +411,7 @@ describe('refresh pipeline: parser contract version & checkpoint invalidation', 
       })
 
       const updatedCheckpoint = store.getSourceCheckpoint('claude-desktop', sourceKey)
-      expect(updatedCheckpoint?.parserContractVersion).toBe('4')
+      expect(updatedCheckpoint?.parserContractVersion).toBe('5')
       expect(updatedCheckpoint?.lastStatus).toBe('ok')
 
       const claudeRow = report.rows.find((r) => r.harnessId === 'claude-desktop')
@@ -423,7 +423,7 @@ describe('refresh pipeline: parser contract version & checkpoint invalidation', 
     }
   })
 
-  it("re-synthesizes stale same-span claude-desktop rows with parts after parserContractVersion 3→4 (#216)", async () => {
+  it("re-synthesizes stale same-span claude-desktop rows with parts after parserContractVersion 3→5 (#216)", async () => {
     const root = tempDir()
     const dbPath = join(root, 'canon.db')
     const store = new CanonStore(dbPath)
@@ -521,7 +521,7 @@ describe('refresh pipeline: parser contract version & checkpoint invalidation', 
 
       const descriptor = descriptorFor('claude-desktop')
       expect(descriptor).toBeDefined()
-      expect(descriptor!.parserContractVersion).toBe('4')
+      expect(descriptor!.parserContractVersion).toBe('5')
 
       const provider = fixtureProvider('claude', [sessionSource], (s) => loadClaudeCalls(s.path))
       // Version-repair must widen before the concurrent first pass so the
@@ -544,7 +544,7 @@ describe('refresh pipeline: parser contract version & checkpoint invalidation', 
       )
 
       const updatedCheckpoint = store.getSourceCheckpoint('claude-desktop', sourceKey)
-      expect(updatedCheckpoint?.parserContractVersion).toBe('4')
+      expect(updatedCheckpoint?.parserContractVersion).toBe('5')
       expect(updatedCheckpoint?.lastStatus).toBe('ok')
       // Checkpoint keeps the claimed prior floor; the parse slice is clamped to
       // the content-retention window (#276).

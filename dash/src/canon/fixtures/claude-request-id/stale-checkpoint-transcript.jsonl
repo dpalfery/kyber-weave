@@ -1,0 +1,1 @@
+{"type":"assistant","sessionId":"claude-contract-repair-session","requestId":"req_contractRepairSynthetic","uuid":"turn-contract-repair","timestamp":"2026-10-02T15:00:00.000Z","message":{"id":"msg_contractRepairSynthetic","model":"claude-sonnet-4-5","usage":{"input_tokens":120,"output_tokens":40},"content":[{"type":"text","text":"contract repair fixture"}]}}
