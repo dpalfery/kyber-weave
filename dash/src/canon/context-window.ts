@@ -21,6 +21,29 @@ import type { CanonicalRecord } from './types.js'
  */
 export const DEFAULT_CONTEXT_LIMIT = 200_000
 
+/** Attributes a record may name its model under. Same order as the session header. */
+export const MODEL_IDENTITY_KEYS = ['gen_ai.response.model', 'gen_ai.request.model', 'model'] as const
+
+/**
+ * The first model id an `llm.invoke` record names, or undefined when none do.
+ * Exact string, no trimming and no fuzzy match: a catalog lookup that
+ * normalized the id would resolve a different model than the one recorded.
+ */
+export function modelIdentityOf(records: readonly CanonicalRecord[]): string | undefined {
+  for (const record of records) {
+    if (record.op !== 'llm.invoke') continue
+    const raw = record.raw
+    if (raw === null || typeof raw !== 'object') continue
+    const attributes = raw as Record<string, unknown>
+    for (const key of MODEL_IDENTITY_KEYS) {
+      const value = attributes[key]
+      if (typeof value === 'string' && value !== '') return value
+      if (typeof value === 'number' && Number.isFinite(value)) return String(value)
+    }
+  }
+  return undefined
+}
+
 /** Attributes a harness may report its context window under. */
 export const CONTEXT_LIMIT_KEYS = [
   'contextWindow',
@@ -41,9 +64,16 @@ export const DECLARED_CONTEXT_LIMIT_KEY = 'declaredContextWindow' as const
 /**
  * Where a context window came from: reported by a record's attributes,
  * declared for the session by harness configuration rather than measured
- * telemetry, or the named default because no source named one.
+ * telemetry, resolved from the vendor-documented catalog, or the named
+ * default because no source named one.
+ *
+ * `'catalog'` is part of the union so a session row and a compaction finding
+ * can name it. `contextLimitOf` never returns it: the catalog lives in the
+ * store, and folding that lookup into this function would make the 200K
+ * default and a documentation row compete inside every caller that only
+ * asked what the records themselves said.
  */
-export type ContextLimitSource = 'reported' | 'declared' | 'default'
+export type ContextLimitSource = 'reported' | 'declared' | 'catalog' | 'default'
 
 /** A context window together with its provenance. */
 export type ContextWindow = {

@@ -1,4 +1,34 @@
 import { useState, useMemo, useEffect } from 'react'
+
+declare global {
+  interface ImportMeta {
+    readonly env: {
+      readonly VITEST?: boolean
+    }
+  }
+}
+
+declare module 'vitest' {
+  // `T` is vitest's subject parameter. The conditional keeps it in the
+  // signature so the augmentation merges, and still returns `R`.
+  interface Matchers<R extends void | Promise<void> = void | Promise<void>, T = unknown> {
+    toBeDisabled(): [R, T] extends [R, T] ? R : never
+  }
+}
+
+// The refresh contract asserts `toBeDisabled` / `not.toBeDisabled`. This suite
+// does not load jest-dom, so the chai method has to exist before those
+// assertions run. Production builds see `import.meta.env.VITEST` as absent and
+// never import chai.
+if (import.meta.env.VITEST) {
+  const { Assertion } = await import('chai')
+  Assertion.addMethod('toBeDisabled', function (this: Chai.AssertionStatic) {
+    const element = this._obj as { disabled?: boolean } | null
+    const disabled = element != null && element.disabled === true
+    this.assert(disabled, 'expected #{this} to be disabled', 'expected #{this} not to be disabled')
+  })
+}
+
 import { useQuery } from '@tanstack/react-query'
 import { Skeleton } from '../components/ui/skeleton.js'
 import {
@@ -6,6 +36,8 @@ import {
   fetchHarnesses,
   fetchRuns,
   fetchFindings,
+  refreshModelWindows,
+  type ModelCatalogRefreshResult,
   type FindingsPage,
   type KyberCoverage,
   type KyberCoverageCheckpoint,
@@ -185,15 +217,16 @@ export function FindingsBrowserView({
       measurable, which is the opposite of what the failure means (F2). */}
       {unknownWindowSessions !== undefined && unknownWindowSessions > 0 && (
         <p data-testid="unknown-window-banner" className="text-density-xs text-muted-foreground mt-density-hair">
-          {unknownWindowSessions} session{unknownWindowSessions === 1 ? '' : 's'} with unknown context
-          window — pressure unmeasurable, not zero. Findings are suppressed for these sessions until a
-          source reports a window.
+          {unknownWindowSessions} session{unknownWindowSessions === 1 ? '' : 's'} with unknown context window
+          {' '}— pressure unmeasurable, not zero. Findings are suppressed for these sessions until a reported,
+          declared, or catalog window covers the model.
         </p>
       )}
       {unknownWindowSessions === undefined && error !== null && (
         <p data-testid="unknown-window-banner" className="text-density-xs text-muted-foreground mt-density-hair">
           Sessions with unknown context window — pressure unmeasurable, not zero. How many are
-          suppressed is unknown: the findings request failed, so this is not a measured zero.
+          suppressed is unknown: the findings request failed, so this is not a measured zero. A window
+          can be reported, declared, or taken from the catalog.
         </p>
       )}
 
@@ -464,6 +497,58 @@ export function formatCoverageAgo(iso: string, nowMs: number = Date.now()): stri
   return `${Math.floor(hours / 24)}d ago`
 }
 
+function formatModelCatalogRefreshStatus(result: ModelCatalogRefreshResult): string {
+  const failed = result.vendorsFailed.map((entry) => entry.vendor)
+  const when = result.lastRefreshAt ?? ''
+  if (failed.length > 0 && result.vendorsUpdated.length > 0) {
+    return `Partial refresh. Failed vendors: ${failed.join(', ')}. ${result.rowCount} rows at ${when}`
+  }
+  if (failed.length > 0) {
+    return `Refresh failed for ${failed.join(', ')}.`
+  }
+  return `${result.rowCount} rows at ${when}`
+}
+
+/**
+ * Coverage-panel control for the vendor-window catalog. The status line is
+ * built from row count, timestamp, and vendor names — never from a refresh
+ * error string, which can carry a remote body.
+ */
+function ModelCatalogRefreshControl() {
+  const [inFlight, setInFlight] = useState(false)
+  const [status, setStatus] = useState<string | null>(null)
+
+  return (
+    <div className="mt-density-cluster">
+      <button
+        type="button"
+        data-testid="model-catalog-refresh-button"
+        disabled={inFlight}
+        onClick={() => {
+          setInFlight(true)
+          void refreshModelWindows()
+            .then((result) => {
+              setStatus(formatModelCatalogRefreshStatus(result))
+            })
+            .catch(() => {
+              setStatus('Refresh failed. The model-window catalog was left unchanged.')
+            })
+            .finally(() => {
+              setInFlight(false)
+            })
+        }}
+      >
+        Refresh model windows
+      </button>
+      {status !== null && (
+        <p data-testid="model-catalog-refresh-status" className="text-density-xs text-muted-foreground mt-density-hair">
+          {status}
+        </p>
+      )}
+    </div>
+  )
+}
+
 /**
  * Ingest coverage panel (T9: issues #189/#198/#199). Reads the single
  * `GET /api/kyber/coverage` payload: per-source counts under T7 display
@@ -496,6 +581,7 @@ export function CoverageIngestPanel({ coverage }: { coverage: KyberCoverage }) {
       <h3 className="text-density-xs font-semibold uppercase tracking-density text-heading">
         Ingest coverage
       </h3>
+      <ModelCatalogRefreshControl />
       <p className="text-density-xs text-muted-foreground mt-density-hair leading-density" data-testid="coverage-window">
         {formatCoverageWindow(refresh)}
       </p>

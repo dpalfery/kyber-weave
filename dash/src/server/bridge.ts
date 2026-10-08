@@ -71,6 +71,16 @@ import {
 import { harnessExportsCacheCounter } from '../canon/measurability.js'
 import { buildScorecard, type Scorecard } from '../analysis/scorecard.js'
 import type { AsadSessionPayload } from '../canon/sessions.js'
+import { projectCanonicalStore } from '../canon/projection.js'
+import {
+  MODEL_WINDOW_CATALOG_SOURCES,
+  getModelCatalogSnapshot,
+  readBundledVendorCatalog,
+  refreshModelWindowCatalog,
+  type ModelCatalogSnapshot,
+  type ModelWindowCatalogRefreshResult,
+  type ModelWindowCatalogVendor,
+} from '../canon/model-window-catalog.js'
 
 const _require = createRequire(import.meta.url)
 const { DatabaseSync } = _require('node:sqlite') as {
@@ -3702,6 +3712,62 @@ export class KyberBridge {
    * unreadable table reads as no rows, matching `getQuarantineCount`'s
    * zero-on-absent contract for this seam.
    */
+  /**
+   * Catalog snapshot for `GET /api/kyber/model-catalog`.
+   *
+   * An empty table is filled from the bundled registry once. The fill is not
+   * the user action: it does not rebuild derived rows. A later POST does.
+   */
+  getModelCatalog(): ModelCatalogSnapshot {
+    const store = this.store
+    if (store === undefined) {
+      const vendors = {} as ModelCatalogSnapshot['vendors']
+      for (const vendor of Object.keys(MODEL_WINDOW_CATALOG_SOURCES) as ModelWindowCatalogVendor[]) {
+        vendors[vendor] = {
+          documentationUrl: MODEL_WINDOW_CATALOG_SOURCES[vendor].documentationUrl,
+          status: 'unknown',
+          rowCount: 0,
+          lastRefreshAt: null,
+        }
+      }
+      return { rowCount: 0, lastRefreshAt: null, vendors }
+    }
+    const current = getModelCatalogSnapshot(store)
+    if (current.rowCount === 0) {
+      refreshModelWindowCatalog(store, {
+        readVendor: readBundledVendorCatalog,
+        now: () => new Date().toISOString(),
+      })
+    }
+    return getModelCatalogSnapshot(store)
+  }
+
+  /**
+   * User-facing refresh. One derived rebuild runs only after a vendor's rows
+   * actually changed; the count is how many times that hook ran, which the
+   * refresh itself caps at one.
+   */
+  async refreshModelCatalog(): Promise<
+    ModelCatalogSnapshot & ModelWindowCatalogRefreshResult & { derivedRebuildCount: number }
+  > {
+    const store = this.store
+    if (store === undefined) {
+      return { ...this.getModelCatalog(), vendorsUpdated: [], vendorsFailed: [], derivedRebuildCount: 0 }
+    }
+    let derivedRebuildCount = 0
+    let rebuild: Promise<unknown> | undefined
+    const result = refreshModelWindowCatalog(store, {
+      readVendor: readBundledVendorCatalog,
+      now: () => new Date().toISOString(),
+      rebuildDerived: () => {
+        derivedRebuildCount += 1
+        rebuild = projectCanonicalStore(store)
+      },
+    })
+    if (rebuild !== undefined) await rebuild
+    return { ...getModelCatalogSnapshot(store), ...result, derivedRebuildCount }
+  }
+
   getQuarantineCountsByReason(): Array<{ reason: string; count: number }> {
     if (this.store) {
       try {

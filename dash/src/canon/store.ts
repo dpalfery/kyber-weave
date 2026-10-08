@@ -308,6 +308,30 @@ CREATE TABLE IF NOT EXISTS prediction (
 CREATE INDEX IF NOT EXISTS prediction_by_finding ON prediction (finding_id);
 CREATE INDEX IF NOT EXISTS prediction_by_run ON prediction (run_id);
 CREATE INDEX IF NOT EXISTS prediction_by_created_at ON prediction (created_at);
+-- Vendor-documented model windows (D15). A new table, not a new column on
+-- an existing one, so CREATE IF NOT EXISTS on every open covers a store
+-- already stamped at SCHEMA_VERSION. The version stays at 17: the projection
+-- contract still requires that stamp, and an IF NOT EXISTS table does not
+-- need a migration step to appear.
+CREATE TABLE IF NOT EXISTS model_context_window_catalog (
+  lookup_id TEXT PRIMARY KEY,
+  canonical_model_id TEXT NOT NULL,
+  context_window INTEGER NOT NULL CHECK (context_window > 0),
+  vendor TEXT NOT NULL,
+  documentation_url TEXT NOT NULL,
+  retrieved_at TEXT NOT NULL,
+  source_revision TEXT
+);
+CREATE INDEX IF NOT EXISTS model_context_window_catalog_by_vendor
+  ON model_context_window_catalog (vendor);
+-- Per-vendor refresh outcome, separate from the rows so a failed refresh can
+-- record its error without deleting the last rows that validated.
+CREATE TABLE IF NOT EXISTS model_context_window_catalog_vendor (
+  vendor TEXT PRIMARY KEY,
+  status TEXT NOT NULL,
+  last_refresh_at TEXT,
+  last_error TEXT
+);
 ` + SOURCE_STATE_SQL + REFRESH_RUN_SQL
 
 /** Map a `refresh_run` row out of SQLite's column names. */
