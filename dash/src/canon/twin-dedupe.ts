@@ -11,9 +11,21 @@ import type { CanonicalRecord, TokenUsage } from './types.js'
 // folds the twin surfaces onto one canonical id, both rows land in one share,
 // and every sum over the share would count the turn twice.
 //
-// ADR 0009 D4 states the precedence: counters come from the OTel row, content
-// comes from the file row when the OTel row carries no parts, and values are
-// never summed across sources for the same turn.
+// ADR 0009 D4 states the precedence: counters come from the OTel row and values
+// are never summed across sources for the same turn. D10 amends how content
+// merges: per canonical bucket, OTel first. A bucket the OTel row carries keeps
+// only the OTel row's parts; the file row fills only the buckets the OTel row
+// lacks, so no bucket ever holds text from both sources. A union by exact text
+// would keep both sources' renderings of one bucket whenever they differ in a
+// byte, and count that context twice. File-and-file joins (#231, #232) are one
+// source kind and keep their union.
+//
+// When both rows name the turn, no inference is needed: Claude Code's OTel
+// `llm_request` stamps `gen_ai.response.id`, and the transcript row carries
+// the same API `message.id` as its native record id. That id join runs first
+// and depends on neither counter equality nor the skew window — the two
+// collectors are known to disagree on both — so counter matching below is the
+// fallback for rows that do not carry the id.
 //
 // The rule is deliberately conservative: a file row paired with a
 // non-file row over identical reported counters is treated as the same turn
@@ -112,6 +124,28 @@ function cachedTimestampMs(record: CanonicalRecord): number {
   return ms
 }
 
+/** The API response id an OTel row reports; Claude Code stamps the message id here. */
+function otelResponseIdOf(record: CanonicalRecord): string | undefined {
+  const raw = record.raw
+  if (typeof raw !== 'object' || raw === null) return undefined
+  const value = (raw as Record<string, unknown>)['gen_ai.response.id']
+  return typeof value === 'string' && value !== '' ? value : undefined
+}
+
+/**
+ * The harness's own record id on a synthesized file row (`message.id` for a
+ * Claude transcript). A digest fallback is stamped when the transcript names
+ * no id; it identifies nothing an OTel row could carry, so it never joins.
+ */
+function fileNativeIdOf(record: CanonicalRecord): string | undefined {
+  const raw = record.raw
+  if (typeof raw !== 'object' || raw === null) return undefined
+  const provenance = (raw as { provenance?: { nativeRecordId?: unknown; recordDigest?: unknown } }).provenance
+  if (provenance === undefined || provenance.recordDigest !== undefined) return undefined
+  const value = provenance.nativeRecordId
+  return typeof value === 'string' && value !== '' ? value : undefined
+}
+
 function hasParts(record: CanonicalRecord): boolean {
   return (record.parts !== undefined && record.parts.length > 0) || Object.keys(record.content).length > 0
 }
@@ -201,11 +235,14 @@ function preferFullerKeeper(a: CanonicalRecord, b: CanonicalRecord): CanonicalRe
 
 /**
  * Collapse same-turn twin observations within one canonical-harness share.
- * Pure: input order is preserved, no record is mutated. Rows sharing exact
- * counters cluster by timestamp proximity (span within `TWIN_TURN_MAX_SKEW_MS`);
- * a cluster holding both source kinds is one turn observed twice, so its file
- * rows drop and its content transplants pairwise onto the content-less OTel
- * rows nearest in time. A second pass (#231) joins file+file rows under an
+ * Pure: input order is preserved, no record is mutated. An OTel row whose
+ * `gen_ai.response.id` equals a file row's native id in the same session is
+ * that turn, whatever its counters or timestamp. The remaining rows sharing
+ * exact counters cluster by timestamp proximity (span within
+ * `TWIN_TURN_MAX_SKEW_MS`); a cluster holding both source kinds is one turn
+ * observed twice, so its file rows drop and its content transplants pairwise
+ * onto the OTel rows nearest in time. Every OTel-and-file merge is per bucket,
+ * OTel first (D10). A further pass (#231) joins file+file rows under an
  * evidenced Cursor twin share whose counters differ but stand in a
  * complementary/subset relation under the same skew window, merging by
  * per-dimension max onto the fuller keeper (partials assign to at most one
@@ -215,9 +252,16 @@ function preferFullerKeeper(a: CanonicalRecord, b: CanonicalRecord): CanonicalRe
  * records keep both collectors' rows as provenance.
  */
 export function dedupeTwinTurns(records: readonly CanonicalRecord[], shareKey?: string): CanonicalRecord[] {
+  const dropped = new Set<CanonicalRecord>()
+  const transplant = new Map<CanonicalRecord, CanonicalRecord>()
+  const idJoined = collapseIdJoins(records, shareKey, dropped, transplant)
+
   const byCounter = new Map<CounterKey, CanonicalRecord[]>()
   for (const record of records) {
     if (record.op !== 'llm.invoke') continue
+    // A row already paired by id has its twin; counter matching could only
+    // hand it a second, different turn's file row.
+    if (idJoined.has(record)) continue
     // An all-zero row shares one key with every other all-zero row in the
     // share, which identifies nothing. Excluding them here means they are never
     // clustered at all, rather than relying on a later guard to un-merge them.
@@ -228,8 +272,6 @@ export function dedupeTwinTurns(records: readonly CanonicalRecord[], shareKey?: 
     byCounter.set(key, list)
   }
 
-  const dropped = new Set<CanonicalRecord>()
-  const transplant = new Map<CanonicalRecord, CanonicalRecord>()
   for (const turns of byCounter.values()) {
     const ordered = [...turns].sort((a, b) => cachedTimestampMs(a) - cachedTimestampMs(b))
     let cluster: CanonicalRecord[] = []
@@ -260,11 +302,10 @@ export function dedupeTwinTurns(records: readonly CanonicalRecord[], shareKey?: 
     if (donor === undefined) {
       return tokens === record.tokens ? [record] : [{ ...record, tokens }]
     }
-    // ADR 0009 D4: the OTel row's counters stand; the file row's content
-    // fills only what the OTel row did not carry — keeper parts first, then
-    // donor parts not already present, so a paired non-needy keeper never
-    // loses its own content to its twin's (review M2). For #231 file+file
-    // joins the keeper already carries maxed counters via `tokenOverride`.
+    if (!isFileSource(record.source)) return [mergeOtelFirst(record, donor)]
+    // File+file joins (#231, #232): keeper parts first, then donor parts not
+    // already present, so the keeper never loses its own content to its
+    // twin's (review M2). #231 keepers carry maxed counters via `tokenOverride`.
     const seen = new Set((record.parts ?? []).map((part) => `${part.part}\u0000${part.text}`))
     const extraParts = (donor.parts ?? []).filter((part) => {
       const key = `${part.part}\u0000${part.text}`
@@ -288,6 +329,101 @@ export function dedupeTwinTurns(records: readonly CanonicalRecord[], shareKey?: 
       },
     ]
   })
+}
+
+/**
+ * Pair OTel rows with file rows that name the same turn: the OTel row's
+ * `gen_ai.response.id` equals the file row's native id under one session key.
+ * Matched file rows drop and become content donors; the OTel row keeps its
+ * counters. Should two OTel rows report one id, the earliest takes the file
+ * row and the other stays — same-kind rows are never dropped. Returns every
+ * row the pass paired, so the counter pass leaves them alone.
+ */
+function collapseIdJoins(
+  records: readonly CanonicalRecord[],
+  shareKey: string | undefined,
+  dropped: Set<CanonicalRecord>,
+  transplant: Map<CanonicalRecord, CanonicalRecord>,
+): Set<CanonicalRecord> {
+  const joined = new Set<CanonicalRecord>()
+  const keeperById = new Map<string, CanonicalRecord>()
+  for (const record of records) {
+    if (record.op !== 'llm.invoke' || isFileSource(record.source)) continue
+    const id = otelResponseIdOf(record)
+    if (id === undefined) continue
+    const key = `${sessionKeyOf(record, shareKey)}\u0000${id}`
+    const known = keeperById.get(key)
+    if (known === undefined || cachedTimestampMs(record) < cachedTimestampMs(known)) keeperById.set(key, record)
+  }
+  if (keeperById.size === 0) return joined
+
+  for (const record of records) {
+    if (record.op !== 'llm.invoke' || !isFileSource(record.source)) continue
+    const id = fileNativeIdOf(record)
+    if (id === undefined) continue
+    const keeper = keeperById.get(`${sessionKeyOf(record, shareKey)}\u0000${id}`)
+    if (keeper === undefined) continue
+    dropped.add(record)
+    joined.add(record)
+    joined.add(keeper)
+    if (!hasParts(record)) continue
+    const existing = transplant.get(keeper)
+    transplant.set(keeper, existing === undefined ? record : mergeDonors(existing, record))
+  }
+  return joined
+}
+
+/**
+ * D10: the OTel row's counters and every bucket it carries stand; the file
+ * donor fills only the buckets the OTel row lacks. A bucket counts as carried
+ * whether the OTel row holds it as parts or only as flat content.
+ *
+ * The turn inspector reads `parts` first and consults flat `content` only
+ * when `parts` is empty, so a merged record with non-empty `parts` must also
+ * carry every content bucket as a part — otherwise a flat-only bucket would
+ * vanish from the inspector. Flat-only buckets therefore promote to parts
+ * (`{ part, text }`, the existing part shape here): the OTel row's flat-only
+ * buckets first, then the filled file flat-only buckets. One source per
+ * bucket still holds, because promotion only restates a bucket its own side
+ * already carried. When neither side contributes a part, `parts` stays unset
+ * and flat `content` alone remains visible to the inspector.
+ */
+function mergeOtelFirst(record: CanonicalRecord, donor: CanonicalRecord): CanonicalRecord {
+  const keeperParts = record.parts ?? []
+  const keeperBuckets = new Set<string>(keeperParts.map((part) => part.part))
+  const held = new Set<string>([...keeperBuckets, ...Object.keys(record.content)])
+  const fillParts = (donor.parts ?? []).filter((part) => !held.has(part.part))
+  const fillContent = Object.fromEntries(
+    Object.entries(donor.content).filter(([bucket]) => !held.has(bucket)),
+  ) as CanonicalRecord['content']
+  // No part anywhere: keep `parts` unset so the inspector synthesizes from
+  // flat content; promoting here would only add a shape nothing asked for.
+  if (keeperParts.length === 0 && fillParts.length === 0) {
+    return {
+      ...record,
+      content: {
+        ...fillContent,
+        ...record.content,
+      },
+    }
+  }
+  const fillBuckets = new Set<string>(fillParts.map((part) => part.part))
+  const otelFlatParts = Object.entries(record.content)
+    .filter(([bucket]) => !keeperBuckets.has(bucket))
+    .map(([bucket, text]) => ({ part: bucket, text }) as (typeof keeperParts)[number])
+  const fileFlatParts = Object.entries(fillContent)
+    .filter(([bucket]) => !fillBuckets.has(bucket))
+    .map(([bucket, text]) => ({ part: bucket, text }) as (typeof keeperParts)[number])
+  const parts = [...keeperParts, ...otelFlatParts, ...fillParts, ...fileFlatParts]
+  return {
+    ...record,
+    parts,
+    content: {
+      ...fillContent,
+      ...record.content,
+      ...contentFromParts(parts),
+    },
+  }
 }
 
 /** Cursor IDE file collector — not `cursor-agent` (harness or `codeburn/` source). */
