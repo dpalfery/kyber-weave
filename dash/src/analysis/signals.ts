@@ -20,6 +20,7 @@ import {
   harnessDimensionAvailability,
   prefixAvailability,
 } from '../canon/measurability.js'
+import type { ContextLimitSource } from '../canon/context-window.js'
 import { isNotMeasurable } from '../canon/types.js'
 import type {
   CanonicalRecord,
@@ -378,7 +379,9 @@ export function toolYield(input: ToolYieldInput): SignalResult<number> {
   }
 
   if (harness) {
-    const dimAvail = harnessDimensionAvailability(harness, 'tool_yield')
+    // Supplied definitions are the evidence the harness's static refusal assumes is absent.
+    const bucketParts = input.definedTools && input.definedTools.length > 0 ? ['tool_definitions'] : []
+    const dimAvail = harnessDimensionAvailability(harness, 'tool_yield', { bucketParts })
     if (isNotMeasurable(dimAvail)) {
       return { status: 'not_measurable', reason: dimAvail.reason }
     }
@@ -642,6 +645,8 @@ export type CompactionPressureInput = {
   harness?: string
   peakInputTokens?: number
   contextLimit?: number
+  /** Where `contextLimit` came from; omitted by callers that predate window provenance. */
+  contextLimitSource?: ContextLimitSource
   turns?: readonly { inputTokens?: number; reportedInput?: number }[]
   measurability?: Measurability
 }
@@ -650,9 +655,14 @@ export const DEFAULT_CONTEXT_WINDOW_LIMIT = 200_000
 
 /**
  * Measures context window consumption and compaction risk: `peakInputTokens / contextLimit`.
+ *
+ * A `default` window is the named guess, so pressure against it is refused (#181). A
+ * `declared` window is harness configuration rather than telemetry, so pressure
+ * against it is `derived` and `inferred`, never `measured` (D5).
  */
 export function compactionPressure(input: CompactionPressureInput): SignalResult<number> {
   const harness = input.harness
+  const source = input.contextLimitSource
 
   if (input.measurability) {
     const tokenAvail = input.measurability['token_usage']
@@ -661,8 +671,16 @@ export function compactionPressure(input: CompactionPressureInput): SignalResult
     }
   }
 
+  if (source === 'default') {
+    return {
+      status: 'not_measurable',
+      reason: 'No source reported a context window; pressure against the default window is unmeasurable, not zero.',
+    }
+  }
+
   if (harness) {
-    const dimAvail = harnessDimensionAvailability(harness, 'context_pressure')
+    const windowSources = source === undefined ? [] : [source]
+    const dimAvail = harnessDimensionAvailability(harness, 'context_pressure', { windowSources })
     if (isNotMeasurable(dimAvail)) {
       return { status: 'not_measurable', reason: dimAvail.reason }
     }
@@ -694,18 +712,22 @@ export function compactionPressure(input: CompactionPressureInput): SignalResult
   const ratio = peak / limit
   const risk: 'low' | 'moderate' | 'high' | 'critical' =
     ratio >= 0.9 ? 'critical' : ratio >= 0.75 ? 'high' : ratio >= 0.5 ? 'moderate' : 'low'
+  const declared = source === 'declared'
 
   return {
-    status: 'measured',
+    status: declared ? 'derived' : 'measured',
     value: ratio,
-    measurementClass: 'deterministic',
-    confidence: 'high',
-    confidenceBasis: 'Computed from peak turn input tokens relative to the declared context window limit.',
+    measurementClass: declared ? 'inferred' : 'deterministic',
+    confidence: declared ? 'medium' : 'high',
+    confidenceBasis: declared
+      ? 'Computed from peak turn input tokens relative to a context window the harness declares in its configuration, not one its telemetry reported.'
+      : 'Computed from peak turn input tokens relative to the declared context window limit.',
     numerator: peak,
     denominator: limit,
     metadata: {
       peakInputTokens: peak,
       contextLimit: limit,
+      ...(source !== undefined ? { contextLimitSource: source } : {}),
       remainingTokens: Math.max(0, limit - peak),
       compactionRisk: risk,
     },
