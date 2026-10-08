@@ -5,7 +5,7 @@ source-commit: 677c3a876ba9c62f1083608596b238c9deaff167
 selected-baseline: .github/agents/docs-dev.agent.md
 sources:
   .github/agents/docs-dev.agent.md: db63b4d3b09d0d352c5381feb6821e3fb982acdf49ad44f3b5d33861343410b0
-final-body-sha256: 8a9b16216a1ff6e171cb09d9d976075654d720a4aa3b2c7ad42d11da94b53b16
+final-body-sha256: c34b75d566a967b49ecc8c694c1d6e31742ee381ba8e83472a5a67ed9e026349
 ---
 # docs-dev migration
 

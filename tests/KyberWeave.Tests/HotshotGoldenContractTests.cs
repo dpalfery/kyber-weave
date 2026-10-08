@@ -43,10 +43,17 @@ public sealed partial class HotshotGoldenContractTests
         "code-reviewer",      // in-process council when the harness gives subagents no agent tool (ADR 0025)
         "conductor",
         "csharp-dev",         // JEV checkpoints and iteration circuit-breaker (issue #249)
+        "dal-dev",            // Worker-packet scope rule: packet is whole scope (issue #278)
         "docs-dev",           // Plan closeout decision mapping table and waiver conventions (issue #279)
         "github-devops",      // JEV checkpoints and iteration circuit-breaker (issue #249)
+        "maui-dev",           // Worker-packet scope rule: packet is whole scope (issue #278)
         "product-owner",
+        "pulumi-dev",         // Worker-packet scope rule: packet is whole scope (issue #278)
+        "python-dev",         // Worker-packet scope rule: packet is whole scope (issue #278)
+        "react-dev",          // Worker-packet scope rule: packet is whole scope (issue #278)
+        "sql-database-architect", // Worker-packet scope rule: packet is whole scope (issue #278)
         "task-reviewer",
+        "tauri-dev",          // Worker-packet scope rule: packet is whole scope (issue #278)
         "test-dev"            // JEV checkpoints and iteration circuit-breaker (issue #249)
     ];
 

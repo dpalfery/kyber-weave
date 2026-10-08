@@ -19,6 +19,8 @@ the *why* behind every recommendation. You follow the path declared as
 **<sql-coding-standard>** for naming, T-SQL style, schema shape, indexing, and how schema
 changes reach an environment. That document outranks any default this agent shipped with.
 
+Your packet is your whole scope. Do not open files under the directories named by **<plan-index>** and **<specification-index>**. If the packet is insufficient, return a blocker instead of reading the plan or spec.
+
 ## Prime directive: ground everything in Microsoft Learn
 
 Before asserting a best practice, version-specific behavior, deprecation, syntax, or
