@@ -159,17 +159,18 @@ public sealed class CopilotRenderer : ISquadRenderer
 
         frontmatter["tools"] = new CopilotToolsFlowSequence(CopilotToolCatalog.Normalize(agent.CopilotTools));
 
+        // Every agent that delegates names its permitted roster in frontmatter:
+        // the "agent" tool grants the mechanism, "agents" names who it may reach.
+        // GitHub Copilot does not grant a primary agent (conductor, invocation
+        // primary) the full roster automatically, so a delegating primary declares
+        // one exactly like a subagent does.
+        if (agent.DelegatesTo.Count > 0)
+        {
+            frontmatter["agents"] = new CopilotAgentsFlowSequence(agent.DelegatesTo);
+        }
+
         if (agent.Invocation == SquadInvocation.Subagent)
         {
-            // A subagent that delegates needs its permitted roster named in frontmatter:
-            // the "agent" tool grants the mechanism, "agents" names who it may reach. A
-            // primary agent is dispatched from the top-level session and receives the
-            // full roster from the harness, so declaring one there would only narrow it.
-            if (agent.DelegatesTo.Count > 0)
-            {
-                frontmatter["agents"] = new CopilotAgentsFlowSequence(agent.DelegatesTo);
-            }
-
             // Subagents are dispatched by the conductor, not chosen directly by a human —
             // "user-invocable: false" is Copilot's closest equivalent. Primary agents
             // (conductor) leave this at its default (true, omitted).
@@ -335,7 +336,7 @@ public sealed class CopilotRenderer : ISquadRenderer
     private sealed class CopilotAgentsFlowSequence(IEnumerable<string> agents) : List<string>(agents);
 
     /// <summary>
-    /// Keeps each subagent restricted to its declared delegation roster in emitted
+    /// Keeps each delegating agent restricted to its declared delegation roster in emitted
     /// Copilot frontmatter by serializing as an inline single-quoted flow sequence
     /// rather than YamlDotNet's default block list.
     /// </summary>
