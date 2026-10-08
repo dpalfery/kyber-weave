@@ -155,14 +155,18 @@ function callsAndTurns(
 }
 
 /**
- * Pair parser calls with turns from their shared session file. A reader turn
- * names the same session when available; an unnamed turn remains positionally
- * attributable to that file. Extra calls or turns are left unpaired rather
- * than borrowing content from an adjacent invocation.
+ * Pair parser calls with turns from their shared session file. When
+ * `call.turnId` is set, look it up in the id map and re-validate a hit;
+ * otherwise fall back to `turns[index]` unless the reader declares
+ * positional pairing unsafe (Cursor — filtered turn list). An id-map miss
+ * still takes the positional arm for readers that have not declared
+ * `positionalPairingUnsafe` so Codex/Pi keep parts when the reader never
+ * emits `nativeRecordId`.
  */
 function matchingTurns(
   calls: readonly ParsedProviderCall[],
   turns: readonly ReaderTurn[],
+  positionalPairingUnsafe: boolean,
 ): Array<ReaderTurn | undefined> {
   const turnsById = new Map<string, ReaderTurn>()
   for (const turn of turns) {
@@ -170,13 +174,10 @@ function matchingTurns(
       turnsById.set(turn.nativeRecordId, turn)
     }
   }
-  const hasNativeIds = turnsById.size > 0
 
   return calls.map((call, index) => {
-    const positional = turns[index]
-    const turn = call.turnId === undefined
-      ? (hasNativeIds ? undefined : positional)
-      : turnsById.get(call.turnId) ?? (hasNativeIds ? undefined : positional)
+    const byId = call.turnId !== undefined ? turnsById.get(call.turnId) : undefined
+    const turn = byId ?? (positionalPairingUnsafe ? undefined : turns[index])
     if (turn === undefined) return undefined
     if (turn.sessionId !== undefined && turn.sessionId !== call.sessionId) return undefined
     if (turn.nativeRecordId !== undefined && call.turnId !== undefined && turn.nativeRecordId !== call.turnId) {
@@ -299,7 +300,9 @@ export async function ingestProviders(
 
       const reader = readerFor(identity) ?? readerFor(provider)
       const [calls, turns] = await callsAndTurns(identity, loaded, reader)
-      const paired = turns === undefined ? undefined : matchingTurns(calls, turns)
+      const paired = turns === undefined
+        ? undefined
+        : matchingTurns(calls, turns, reader?.positionalPairingUnsafe === true)
       if (loaded.harnessId !== undefined) {
         records.push(...synthesizer.synthesizeEnvelopes(envelopesFor(identity, loaded, calls, paired)))
       } else {
