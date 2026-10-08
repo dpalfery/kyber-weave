@@ -98,6 +98,34 @@ public sealed class GitHubSquadReleaseSourceAuthTests
     }
 
     [Fact]
+    public async Task DownloadAndExtractAsyncWithEmptyGitHubTokenFallsThroughToGhToken()
+    {
+        const string GhToken = "gh-fallback-real-token";
+        byte[] archiveBytes = CreateArchive(("payload/manifest.json", "canonical"));
+        string checksum = Sha256(archiveBytes);
+        using RecordingHandler handler = ReleaseHandler(archiveBytes, $"{checksum}  {AssetName}\n");
+        using TempDirectory temp = new();
+        using ISquadReleaseSource source = new GitHubSquadReleaseSource(
+            handler,
+            ApiRoot,
+            readEnvironment: name => name switch
+            {
+                "GITHUB_TOKEN" => string.Empty,
+                "GH_TOKEN" => GhToken,
+                _ => null
+            });
+
+        await source.DownloadAndExtractAsync(
+            new SquadReleaseRequest(Repository, Version, Path.Combine(temp.Path, "squad")),
+            CancellationToken.None);
+
+        (Uri _, string? authorization) = Assert.Single(
+            handler.Requests,
+            request => string.Equals(request.Uri.Host, ApiRoot.Host, StringComparison.OrdinalIgnoreCase));
+        Assert.Equal($"Bearer {GhToken}", authorization);
+    }
+
+    [Fact]
     public async Task DownloadAndExtractAsyncWithoutTokenSendsNoAuthorization()
     {
         byte[] archiveBytes = CreateArchive(("payload/manifest.json", "canonical"));
@@ -141,6 +169,39 @@ public sealed class GitHubSquadReleaseSourceAuthTests
         (Uri _, string? apiAuthorization) = Assert.Single(
             handler.Requests,
             request => string.Equals(request.Uri.Host, ApiRoot.Host, StringComparison.OrdinalIgnoreCase));
+        Assert.Equal($"Bearer {Token}", apiAuthorization);
+        (Uri _, string? redirectAuthorization) = Assert.Single(
+            handler.Requests,
+            request => request.Uri == redirectTarget);
+        Assert.Null(redirectAuthorization);
+    }
+
+    [Fact]
+    public async Task DownloadAndExtractAsyncStripsAuthorizationOnSameHostDifferentPortRedirect()
+    {
+        byte[] archiveBytes = CreateArchive(("payload/manifest.json", "canonical"));
+        string checksum = Sha256(archiveBytes);
+        Uri redirectTarget = new UriBuilder(ApiRoot.Scheme, ApiRoot.Host, 8443, "/squad.zip").Uri;
+        using RecordingHandler handler = ReleaseHandler(
+            archiveBytes,
+            $"{checksum}  {AssetName}\n",
+            redirectArchiveTo: redirectTarget);
+        using TempDirectory temp = new();
+        using ISquadReleaseSource source = new GitHubSquadReleaseSource(
+            handler,
+            ApiRoot,
+            readEnvironment: name => name == "GITHUB_TOKEN" ? Token : null);
+
+        SquadReleaseResult result = await source.DownloadAndExtractAsync(
+            new SquadReleaseRequest(Repository, Version, Path.Combine(temp.Path, "squad")),
+            CancellationToken.None);
+
+        Assert.Equal(checksum, result.Checksum.Sha256);
+        (Uri _, string? apiAuthorization) = Assert.Single(
+            handler.Requests,
+            request => request.Uri.Host.Equals(ApiRoot.Host, StringComparison.OrdinalIgnoreCase) &&
+                request.Uri.Port == ApiRoot.Port &&
+                !request.Uri.Equals(redirectTarget));
         Assert.Equal($"Bearer {Token}", apiAuthorization);
         (Uri _, string? redirectAuthorization) = Assert.Single(
             handler.Requests,

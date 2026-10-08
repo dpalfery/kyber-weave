@@ -87,8 +87,12 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
     /// </remarks>
     private static string? ReadToken(Func<string, string?> readEnvironment)
     {
-        string? token = readEnvironment("GITHUB_TOKEN") ?? readEnvironment("GH_TOKEN");
-        return string.IsNullOrWhiteSpace(token) ? null : token.Trim();
+        string? githubToken = readEnvironment("GITHUB_TOKEN");
+        if (!string.IsNullOrWhiteSpace(githubToken))
+            return githubToken.Trim();
+
+        string? ghToken = readEnvironment("GH_TOKEN");
+        return string.IsNullOrWhiteSpace(ghToken) ? null : ghToken.Trim();
     }
 
     /// <inheritdoc />
@@ -311,7 +315,8 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
     }
 
     private bool IsApiHost(Uri uri) =>
-        string.Equals(uri.Host, _apiRoot.Host, StringComparison.OrdinalIgnoreCase);
+        string.Equals(uri.Host, _apiRoot.Host, StringComparison.OrdinalIgnoreCase) &&
+        uri.Port == _apiRoot.Port;
 
     /// <summary>
     /// Surfaces the anonymous-rate-limit remedy on 403 only when no token was sent, so
