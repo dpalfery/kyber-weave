@@ -581,6 +581,51 @@ describe('CanonStore quarantine, problems, and ingest log', () => {
     store.close()
   })
 
+  it('reconciles source problems to exactly the keep-set, leaving neighbours alone (#243)', () => {
+    const store = new CanonStore(':memory:')
+    const sourceProblem = (spanId: string, code: string) => ({
+      spanId,
+      severity: 'error' as const,
+      code,
+      message: `${code} in source`,
+      harness: 'pi',
+    })
+    store.recordProblem(sourceProblem('harness:pi:pi:session:FUTURE_DATED', 'FUTURE_DATED'))
+    store.recordProblem(sourceProblem('harness:pi:pi:session:MALFORMED_TIMESTAMP', 'MALFORMED_TIMESTAMP'))
+    store.recordProblem(sourceProblem('harness:pi:pi:other:MALFORMED_TIMESTAMP', 'MALFORMED_TIMESTAMP'))
+    store.recordProblem(sourceProblem('harness:codex-cli:pi:session:FUTURE_DATED', 'FUTURE_DATED'))
+    store.recordProblem(sourceProblem('harness:pi:pi:session', 'PROVIDER_PARSE_ERROR'))
+    store.recordProblem(sourceProblem('harness:pi:job', 'PROVIDER_PARSE_ERROR'))
+    store.recordProblem({ ...sourceProblem('span-1', 'TOKEN_SUM_MISMATCH'), harness: 'pi' })
+
+    store.reconcileSourceProblems('pi', 'pi:session', ['MALFORMED_TIMESTAMP'])
+
+    expect(store.getProblems('harness:pi:pi:session:FUTURE_DATED')).toEqual([])
+    expect(store.getProblems('harness:pi:pi:session:MALFORMED_TIMESTAMP')).toHaveLength(1)
+    expect(store.getProblems('harness:pi:pi:other:MALFORMED_TIMESTAMP')).toHaveLength(1)
+    expect(store.getProblems('harness:codex-cli:pi:session:FUTURE_DATED')).toHaveLength(1)
+    expect(store.getProblems('harness:pi:pi:session')).toHaveLength(1)
+    expect(store.getProblems('harness:pi:job')).toHaveLength(1)
+    expect(store.getProblems('span-1')).toHaveLength(1)
+    store.close()
+  })
+
+  it('ignores a source-problem-shaped row whose trailing segment is not its code (#243)', () => {
+    const store = new CanonStore(':memory:')
+    store.recordProblem({
+      spanId: 'harness:pi:pi:session:STALE',
+      severity: 'error' as const,
+      code: 'FUTURE_DATED',
+      message: 'code and trailing segment disagree',
+      harness: 'pi',
+    })
+
+    store.reconcileSourceProblems('pi', 'pi:session', [])
+
+    expect(store.getProblems('harness:pi:pi:session:STALE')).toHaveLength(1)
+    store.close()
+  })
+
   it('migrates duplicate legacy diagnostics into one stable row transactionally', () => {
     const path = tempStorePath()
     const initial = new CanonStore(path)
