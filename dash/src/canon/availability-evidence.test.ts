@@ -283,6 +283,15 @@ describe('signals — the inputs are the evidence', () => {
     expect(result.status).toBe('not_measurable')
   })
 
+  it('refuses compaction pressure when a window source names no limit', () => {
+    for (const harness of ['opencode', 'copilot']) {
+      for (const contextLimitSource of ['reported', 'declared'] as const) {
+        const result = compactionPressure({ harness, peakInputTokens: 100_000, contextLimitSource })
+        expect(result.status, `${harness}/${contextLimitSource}`).toBe('not_measurable')
+      }
+    }
+  })
+
   it('returns the static OpenCode reason when no window is named', () => {
     const result = compactionPressure({ harness: 'opencode', peakInputTokens: 64_000, contextLimit: 128_000 })
     expect(result).toEqual({
