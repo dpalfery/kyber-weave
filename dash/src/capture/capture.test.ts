@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Command } from 'commander'
+import { Command, CommanderError } from 'commander'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import { registerKyberCommands } from '../cli/register.js'
@@ -93,6 +93,20 @@ describe('kyber capture command registration', () => {
     }
     const enable = capture?.commands.find((command) => command.name() === 'enable')
     expect((enable?.options ?? []).map((option) => option.long)).toContain('--dry-run')
+  })
+
+  it.each([
+    ['unknown harness', ['kyber', 'capture', 'enable', '--harness', 'no-such-harness']],
+    ['non-OTLP endpoint', ['kyber', 'capture', 'enable', '--endpoint', 'grpc://127.0.0.1:4317']],
+  ])('exits 2 through the CLI for %s', async (_label, args) => {
+    const program = new Command()
+    program.exitOverride()
+    program.configureOutput({ writeOut: () => {}, writeErr: () => {} })
+    registerKyberCommands(program)
+
+    const error = await program.parseAsync(['node', 'kyberdash', ...args]).catch((e: unknown) => e)
+    expect(error).toBeInstanceOf(CommanderError)
+    expect((error as CommanderError).exitCode).toBe(2)
   })
 })
 

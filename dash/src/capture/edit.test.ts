@@ -80,7 +80,7 @@ describe('edit-block (TOML and YAML managed block)', () => {
 
     const reverted = revertBlockEdits(applied.content, {
       'otel.endpoint': { written: 'http://127.0.0.1:4318', prior: { present: false } },
-    })
+    }, 'toml')
     expect(reverted.drift).toEqual([])
     expect(reverted.content).toBe('theme = "dark"\n')
   })
@@ -126,7 +126,7 @@ describe('receipt', () => {
     expect(loaded?.version).toBe(1)
     expect(loaded?.files).toHaveLength(1)
     expect(loaded?.files[0]?.keys['otel.endpoint']?.written).toBe('http://127.0.0.1:4318')
-    expect(readFileSync(join(home, '.kyberdash', 'capture-receipt.json'), 'utf8')).toContain('capture-receipt')
+    expect(readFileSync(join(home, '.kyberdash', 'capture-receipt.json'), 'utf8')).toContain('otel.endpoint')
   })
 
   it('loads null when no receipt was recorded', () => {
