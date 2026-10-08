@@ -479,9 +479,9 @@ curl -s http://127.0.0.1:3000/api/kyber/compare | jq .
 # Phase-aligned run comparison (requires two run ids; no caller-supplied history count)
 curl -s "http://127.0.0.1:3000/api/kyber/compare/runs?runA=run-a&runB=run-b" | jq .
 
-# Quarantine entries and problems with pagination (issue #192; supports ?limit=, ?offset=, ?page=)
-curl -s "http://127.0.0.1:3000/api/kyber/quarantine?limit=50&offset=0&page=1" | jq .
-curl -s "http://127.0.0.1:3000/api/kyber/problems?limit=50&offset=0&page=1" | jq .
+# Quarantine entries and problems with pagination (issue #192; supports ?limit= with ?offset= or ?page=; offset takes precedence when both are supplied)
+curl -s "http://127.0.0.1:3000/api/kyber/quarantine?limit=50&offset=0" | jq .
+curl -s "http://127.0.0.1:3000/api/kyber/problems?limit=50&page=1" | jq .
 
 # Coverage route (refresh window, ingest activity, checkpoints)
 curl -s http://127.0.0.1:3000/api/kyber/coverage | jq .
