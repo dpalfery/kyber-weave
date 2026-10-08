@@ -67,16 +67,12 @@ describe('T5 Cursor turn pairing', () => {
       userMessage: 'synthetic pairing prompt about workspace wiring',
       turnId: REQUEST,
     })
-    const replyCall = {
-      ...cursorCall({
-        inputTokens: 240,
-        outputTokens: 60,
-        deduplicationKey: `cursor:${SESSION}:reply`,
-      }),
-      // Pairing-only key: distinct from the identity-bearing turnId. Cast
-      // keeps this compiling before `pairingId` lands on the type (RED).
-      ...({ pairingId: REQUEST } as { pairingId?: string }),
-    } as ParsedProviderCall
+    const replyCall = cursorCall({
+      inputTokens: 240,
+      outputTokens: 60,
+      deduplicationKey: `cursor:${SESSION}:reply`,
+      pairingId: REQUEST,
+    })
 
     const result = await ingestProviders(['cursor'], () => ({
       calls: [promptCall, replyCall],
@@ -153,8 +149,8 @@ describe('T5 Cursor turn pairing', () => {
       const reply = calls.find((entry) => entry.deduplicationKey.endsWith(':reply'))
       expect(prompt?.turnId).toBe(REQUEST)
       expect(reply?.turnId).toBeUndefined()
-      expect((reply as Record<string, unknown>)['pairingId']).toBe(REQUEST)
-      expect((prompt as Record<string, unknown>)['pairingId']).toBeUndefined()
+      expect(reply?.pairingId).toBe(REQUEST)
+      expect(prompt?.pairingId).toBeUndefined()
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
