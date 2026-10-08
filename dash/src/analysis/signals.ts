@@ -678,6 +678,19 @@ export function compactionPressure(input: CompactionPressureInput): SignalResult
     }
   }
 
+  // A window claim without a window is not evidence; checked before the evidence lift so it
+  // cannot clear a static refusal, and before the default fallback so the guess never wears
+  // reported or declared provenance (#181).
+  if (
+    (source === 'reported' || source === 'declared') &&
+    !(typeof input.contextLimit === 'number' && Number.isFinite(input.contextLimit) && input.contextLimit > 0)
+  ) {
+    return {
+      status: 'not_measurable',
+      reason: `The ${source} context window source named a window but supplied no limit; pressure is unmeasurable, not zero.`,
+    }
+  }
+
   if (harness) {
     const windowSources = source === undefined ? [] : [source]
     const dimAvail = harnessDimensionAvailability(harness, 'context_pressure', { windowSources })
