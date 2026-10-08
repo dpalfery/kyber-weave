@@ -1,0 +1,50 @@
+{
+  "synthetic-provider": {
+    "models": [
+      {
+        "id": "synthetic-pi-test-model",
+        "name": "Synthetic Pi Test Model",
+        "api": "openai-completions",
+        "provider": "synthetic-provider",
+        "baseUrl": "https://example.invalid/v1",
+        "reasoning": false,
+        "input": ["text"],
+        "cost": {
+          "input": 0.1,
+          "output": 0.2,
+          "cacheRead": 0.01,
+          "cacheWrite": 0
+        },
+        "compat": {
+          "supportsStore": false
+        },
+        "contextWindow": 250000,
+        "maxTokens": 32000,
+        "type": "chat"
+      },
+      {
+        "id": "synthetic-pi-other-model",
+        "name": "Synthetic Pi Other Model",
+        "api": "openai-completions",
+        "provider": "synthetic-provider",
+        "baseUrl": "https://example.invalid/v1",
+        "reasoning": true,
+        "input": ["text"],
+        "cost": {
+          "input": 0.3,
+          "output": 0.9,
+          "cacheRead": 0.03,
+          "cacheWrite": 0
+        },
+        "compat": {
+          "supportsStore": false
+        },
+        "contextWindow": 128000,
+        "maxTokens": 16000,
+        "type": "chat"
+      }
+    ],
+    "checkedAt": "2026-10-01T00:00:00.000Z",
+    "lastModified": "2026-10-01T00:00:00.000Z"
+  }
+}
