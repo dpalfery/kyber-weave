@@ -20,12 +20,15 @@ import type { CanonicalRecord, TokenUsage } from './types.js'
 // byte, and count that context twice. File-and-file joins (#231, #232) are one
 // source kind and keep their union.
 //
-// When both rows name the turn, no inference is needed: Claude Code's OTel
-// `llm_request` stamps `gen_ai.response.id`, and the transcript row carries
-// the same API `message.id` as its native record id. That id join runs first
+// When both rows name the turn, no inference is needed. Claude Code's OTel
+// `llm_request` stamps `request_id` (falling back to a `req_`-shaped
+// `gen_ai.response.id`) and the transcript row carries that same API request
+// id as raw `requestId`. A `msg_`-shaped `gen_ai.response.id` still matches
+// the transcript `message.id` (native record id). That id join runs first
 // and depends on neither counter equality nor the skew window — the two
 // collectors are known to disagree on both — so counter matching below is the
-// fallback for rows that do not carry the id.
+// fallback for rows that share neither id. Disagreeing ids do not veto that
+// fallback: exact counters still join.
 //
 // The rule is deliberately conservative: a file row paired with a
 // non-file row over identical reported counters is treated as the same turn
@@ -124,12 +127,35 @@ function cachedTimestampMs(record: CanonicalRecord): number {
   return ms
 }
 
-/** The API response id an OTel row reports; Claude Code stamps the message id here. */
-function otelResponseIdOf(record: CanonicalRecord): string | undefined {
+function rawString(record: CanonicalRecord, key: string): string | undefined {
   const raw = record.raw
   if (typeof raw !== 'object' || raw === null) return undefined
-  const value = (raw as Record<string, unknown>)['gen_ai.response.id']
+  const value = (raw as Record<string, unknown>)[key]
   return typeof value === 'string' && value !== '' ? value : undefined
+}
+
+/** The API response id an OTel row reports. Older builds stamp `message.id` (`msg_…`) here; current Claude Code stamps the request id (`req_…`). */
+function otelResponseIdOf(record: CanonicalRecord): string | undefined {
+  return rawString(record, 'gen_ai.response.id')
+}
+
+/**
+ * Request id an OTel row can join to a file row's `requestId`.
+ * `request_id` wins; `gen_ai.response.id` is used only when it is `req_`-shaped
+ * and `request_id` is absent, so a `msg_`-shaped response id stays on the
+ * message-id comparison.
+ */
+function otelRequestJoinId(record: CanonicalRecord): string | undefined {
+  const requestId = rawString(record, 'request_id')
+  if (requestId !== undefined) return requestId
+  const responseId = otelResponseIdOf(record)
+  if (responseId !== undefined && responseId.startsWith('req_')) return responseId
+  return undefined
+}
+
+/** Transcript request id copied onto the synthesized file row. */
+function fileRequestIdOf(record: CanonicalRecord): string | undefined {
+  return rawString(record, 'requestId')
 }
 
 /**
@@ -236,8 +262,11 @@ function preferFullerKeeper(a: CanonicalRecord, b: CanonicalRecord): CanonicalRe
 /**
  * Collapse same-turn twin observations within one canonical-harness share.
  * Pure: input order is preserved, no record is mutated. An OTel row whose
- * `gen_ai.response.id` equals a file row's native id in the same session is
- * that turn, whatever its counters or timestamp. The remaining rows sharing
+ * `request_id` (or a `req_`-shaped `gen_ai.response.id`) equals a file row's
+ * `requestId`, or whose `gen_ai.response.id` equals that file row's native
+ * id (`message.id`, which is what keeps `msg_`-shaped ids joining), in the
+ * same session is that turn, whatever its counters or timestamp. The remaining
+ * rows sharing
  * exact counters cluster by timestamp proximity (span within
  * `TWIN_TURN_MAX_SKEW_MS`); a cluster holding both source kinds is one turn
  * observed twice, so its file rows drop and its content transplants pairwise
@@ -332,12 +361,16 @@ export function dedupeTwinTurns(records: readonly CanonicalRecord[], shareKey?: 
 }
 
 /**
- * Pair OTel rows with file rows that name the same turn: the OTel row's
- * `gen_ai.response.id` equals the file row's native id under one session key.
- * Matched file rows drop and become content donors; the OTel row keeps its
- * counters. Should two OTel rows report one id, the earliest takes the file
- * row and the other stays — same-kind rows are never dropped. Returns every
- * row the pass paired, so the counter pass leaves them alone.
+ * Pair OTel rows with file rows that name the same turn under one session key.
+ * Two keys qualify, and either is enough: the OTel `request_id` (or a
+ * `req_`-shaped `gen_ai.response.id` when `request_id` is absent) equals the
+ * file row's `requestId`, or `gen_ai.response.id` equals the file row's native
+ * id (`message.id`, including `msg_`-shaped ids). Matched file rows drop and
+ * become content donors; the OTel row keeps its counters. Should two OTel rows
+ * report one id, the earliest takes the file row and the other stays —
+ * same-kind rows are never dropped. Returns every row the pass paired, so the
+ * counter pass leaves them alone. Rows this pass does not pair stay eligible
+ * for exact-counter matching; a mismatched id is not a veto there.
  */
 function collapseIdJoins(
   records: readonly CanonicalRecord[],
@@ -346,29 +379,47 @@ function collapseIdJoins(
   transplant: Map<CanonicalRecord, CanonicalRecord>,
 ): Set<CanonicalRecord> {
   const joined = new Set<CanonicalRecord>()
-  const keeperById = new Map<string, CanonicalRecord>()
+  const keeperByMessageId = new Map<string, CanonicalRecord>()
+  const keeperByRequestId = new Map<string, CanonicalRecord>()
+  const rememberEarliest = (map: Map<string, CanonicalRecord>, key: string, record: CanonicalRecord) => {
+    const known = map.get(key)
+    if (known === undefined || cachedTimestampMs(record) < cachedTimestampMs(known)) map.set(key, record)
+  }
   for (const record of records) {
     if (record.op !== 'llm.invoke' || isFileSource(record.source)) continue
-    const id = otelResponseIdOf(record)
-    if (id === undefined) continue
-    const key = `${sessionKeyOf(record, shareKey)}\u0000${id}`
-    const known = keeperById.get(key)
-    if (known === undefined || cachedTimestampMs(record) < cachedTimestampMs(known)) keeperById.set(key, record)
+    const session = sessionKeyOf(record, shareKey)
+    const messageId = otelResponseIdOf(record)
+    if (messageId !== undefined) rememberEarliest(keeperByMessageId, `${session}\u0000${messageId}`, record)
+    const requestId = otelRequestJoinId(record)
+    if (requestId !== undefined) rememberEarliest(keeperByRequestId, `${session}\u0000${requestId}`, record)
   }
-  if (keeperById.size === 0) return joined
+  if (keeperByMessageId.size === 0 && keeperByRequestId.size === 0) return joined
+
+  const adopt = (keeper: CanonicalRecord, file: CanonicalRecord) => {
+    dropped.add(file)
+    joined.add(file)
+    joined.add(keeper)
+    if (!hasParts(file)) return
+    const existing = transplant.get(keeper)
+    transplant.set(keeper, existing === undefined ? file : mergeDonors(existing, file))
+  }
 
   for (const record of records) {
     if (record.op !== 'llm.invoke' || !isFileSource(record.source)) continue
-    const id = fileNativeIdOf(record)
-    if (id === undefined) continue
-    const keeper = keeperById.get(`${sessionKeyOf(record, shareKey)}\u0000${id}`)
-    if (keeper === undefined) continue
-    dropped.add(record)
-    joined.add(record)
-    joined.add(keeper)
-    if (!hasParts(record)) continue
-    const existing = transplant.get(keeper)
-    transplant.set(keeper, existing === undefined ? record : mergeDonors(existing, record))
+    const session = sessionKeyOf(record, shareKey)
+    const messageId = fileNativeIdOf(record)
+    if (messageId !== undefined) {
+      const byMessage = keeperByMessageId.get(`${session}\u0000${messageId}`)
+      if (byMessage !== undefined) {
+        adopt(byMessage, record)
+        continue
+      }
+    }
+    const requestId = fileRequestIdOf(record)
+    if (requestId === undefined) continue
+    const byRequest = keeperByRequestId.get(`${session}\u0000${requestId}`)
+    if (byRequest === undefined) continue
+    adopt(byRequest, record)
   }
   return joined
 }

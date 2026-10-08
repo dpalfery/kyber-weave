@@ -21,7 +21,10 @@ const DEFAULT_PARSER_CONTRACT_VERSION = '1'
 // synth records. Repair contract (option a): a version mismatch must upsert
 // corrected same-span rows over stale counters-only payloads (see
 // recordsForUncoveredCommit); the bump is not merely a checkpoint watermark.
-const CLAUDE_PARSER_CONTRACT_VERSION = '4'
+// v5: P2.0 — stamp the transcript's top-level requestId so twin dedupe can
+// join OTel `request_id` to the file row. Same repair contract: stale
+// checkpoints must be re-read, or file rows stay without the join key.
+const CLAUDE_PARSER_CONTRACT_VERSION = '5'
 // v2: issue #189 / PR #264 — Codex camelCase token usage and Kilo flat
 // tokens_input/tokens_output fallbacks. Old zero-record checkpoints under v1
 // must not be reused or previously dropped sessions stay missing after upgrade.
