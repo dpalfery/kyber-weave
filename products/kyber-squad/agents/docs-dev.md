@@ -37,7 +37,7 @@ Your packet is your whole scope, with one exception: a plan or spec closeout tas
 
 ## Workflow
 
-1. Read the relevant source code and existing documentation named by the packet.
+1. Read only the source code and existing documentation named by the packet. A closeout task also reads the plan or spec artifact being closed.
 2. Identify documentation gaps, outdated sections, or missing context.
 3. Write or update documentation files. Follow the existing style, tone, and structure of the repository.
 4. Verify accuracy by cross-referencing with source code. Use Context7 or Microsoft Learn MCP servers to verify library/API behavior before documenting it.
