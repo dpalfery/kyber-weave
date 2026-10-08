@@ -19,7 +19,7 @@ function sessionPayload(
     harness: 'claude-code',
     summary: { turn_count: 1, total_input: 1000, total_output: 100 },
     context,
-  } as AsadSessionPayload
+  } as unknown as AsadSessionPayload
 }
 
 describe('P2.R: digestSessionPayloads window source guard', () => {

@@ -658,7 +658,9 @@ export const DEFAULT_CONTEXT_WINDOW_LIMIT = 200_000
  *
  * A `default` window is the named guess, so pressure against it is refused (#181). A
  * `declared` window is harness configuration rather than telemetry, so pressure
- * against it is `derived` and `inferred`, never `measured` (D5).
+ * against it is `derived` and `inferred`, never `measured` (D5). A missing limit is
+ * not filled from `DEFAULT_CONTEXT_WINDOW_LIMIT`: that guess would report a ratio
+ * against a window nobody named.
  */
 export function compactionPressure(input: CompactionPressureInput): SignalResult<number> {
   const harness = input.harness
@@ -679,8 +681,8 @@ export function compactionPressure(input: CompactionPressureInput): SignalResult
   }
 
   // A window claim without a window is not evidence; checked before the evidence lift so it
-  // cannot clear a static refusal, and before the default fallback so the guess never wears
-  // reported or declared provenance (#181).
+  // cannot clear a static refusal, and before the missing-limit refusal so the reason names
+  // the source that claimed a window (#181).
   if (
     (source === 'reported' || source === 'declared') &&
     !(typeof input.contextLimit === 'number' && Number.isFinite(input.contextLimit) && input.contextLimit > 0)
@@ -714,7 +716,16 @@ export function compactionPressure(input: CompactionPressureInput): SignalResult
     }
   }
 
-  const limit = input.contextLimit ?? DEFAULT_CONTEXT_WINDOW_LIMIT
+  // An explicit limit, even one equal to the 200K constant, is the caller's
+  // window. Filling a missing one from that constant is the #181 guess.
+  if (input.contextLimit === undefined) {
+    return {
+      status: 'not_measurable',
+      reason: 'No source named a context window; pressure is unmeasurable, not a ratio against the default window.',
+    }
+  }
+
+  const limit = input.contextLimit
   if (limit <= 0) {
     return {
       status: 'not_measurable',
