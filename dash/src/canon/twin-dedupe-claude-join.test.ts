@@ -233,3 +233,103 @@ describe('dedupeTwinTurns per-bucket precedence, OTel first (D10)', () => {
     expect(out[0]!.content).toEqual({ conversation_history: 'otel flat' })
   })
 })
+
+describe('dedupeTwinTurns D10 flat-only buckets survive the merge (T6 rework 1)', () => {
+  it('promotes an OTel flat-only bucket when the file fills another bucket', () => {
+    const fileSys = 'file system prompt'
+    const out = dedupeTwinTurns([
+      otelTurn('otel-1', { responseId: 'msg_1', content: { conversation_history: 'otel flat' } }),
+      fileTurn('synth:claude-code:s:msg_1', {
+        nativeRecordId: 'msg_1',
+        ...withParts([
+          { part: 'conversation_history', text: 'user: synthetic question' },
+          { part: 'system_prompt', text: fileSys },
+        ]),
+      }),
+    ])
+
+    expect(out).toHaveLength(1)
+    expect(out[0]!.parts).toEqual([
+      { part: 'conversation_history', text: 'otel flat' },
+      { part: 'system_prompt', text: fileSys },
+    ])
+    expect(out[0]!.content).toEqual({
+      conversation_history: 'otel flat',
+      system_prompt: fileSys,
+    })
+  })
+
+  it('promotes a filled file flat-only bucket when the OTel record has parts', () => {
+    const otelSys: ContentPart[] = [{ part: 'system_prompt', text: 'synthetic system prompt' }]
+    const out = dedupeTwinTurns([
+      otelTurn('otel-1', { responseId: 'msg_1', ...withParts(otelSys) }),
+      fileTurn('synth:claude-code:s:msg_1', {
+        nativeRecordId: 'msg_1',
+        content: { conversation_history: 'file history flat' },
+      }),
+    ])
+
+    expect(out).toHaveLength(1)
+    expect(out[0]!.parts).toEqual([
+      { part: 'system_prompt', text: 'synthetic system prompt' },
+      { part: 'conversation_history', text: 'file history flat' },
+    ])
+    // One source per bucket (D10): system_prompt from OTel, history from the file.
+    expect(out[0]!.content).toEqual({
+      system_prompt: 'synthetic system prompt',
+      conversation_history: 'file history flat',
+    })
+  })
+
+  it('keeps every content bucket visible in parts whenever parts is non-empty', () => {
+    const cases = [
+      dedupeTwinTurns([
+        otelTurn('otel-1', { responseId: 'msg_1', content: { conversation_history: 'otel flat' } }),
+        fileTurn('synth:claude-code:s:msg_1', {
+          nativeRecordId: 'msg_1',
+          ...withParts([
+            { part: 'conversation_history', text: 'user: synthetic question' },
+            { part: 'system_prompt', text: 'file system prompt' },
+          ]),
+        }),
+      ]),
+      dedupeTwinTurns([
+        otelTurn(
+          'otel-1',
+          { responseId: 'msg_1', ...withParts([{ part: 'system_prompt', text: 'synthetic system prompt' }]) },
+        ),
+        fileTurn('synth:claude-code:s:msg_1', {
+          nativeRecordId: 'msg_1',
+          content: { conversation_history: 'file history flat' },
+        }),
+      ]),
+    ]
+    for (const out of cases) {
+      expect(out).toHaveLength(1)
+      const merged = out[0]!
+      if ((merged.parts ?? []).length > 0) {
+        for (const bucket of Object.keys(merged.content)) {
+          expect(merged.parts!.some((part) => part.part === bucket)).toBe(true)
+        }
+      }
+    }
+  })
+
+  it('still pairs identical counters with different ids through the exact-counter path', () => {
+    // Intentional: real Claude OTel ids are request ids, not message ids, so
+    // rows that name different ids still join when their counters agree (#182).
+    const out = dedupeTwinTurns([
+      otelTurn('otel-1', { responseId: 'req_abc' }),
+      fileTurn('synth:claude-code:s:msg_xyz', {
+        nativeRecordId: 'msg_xyz',
+        tokens: { ...countersA },
+        ...withParts(history),
+      }),
+    ])
+
+    expect(out).toHaveLength(1)
+    expect(out[0]!.spanId).toBe('otel-1')
+    expect(out[0]!.tokens).toEqual(countersA)
+    expect(out[0]!.parts).toEqual(history)
+  })
+})
