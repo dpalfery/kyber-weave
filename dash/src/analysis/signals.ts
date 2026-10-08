@@ -139,9 +139,23 @@ export function contextReuse(input: ContextReuseInput): SignalResult<number> {
     }
   }
 
+  if (input.turns && input.turns.length > 0) {
+    if (input.turns.some((turn) => turn.cacheRead === undefined)) {
+      return {
+        status: 'not_measurable',
+        reason: 'Cache read counter is absent; absence is not a measured zero.',
+      }
+    }
+  } else if (input.cacheRead === undefined) {
+    return {
+      status: 'not_measurable',
+      reason: 'Cache read counter is absent; absence is not a measured zero.',
+    }
+  }
+
   // Accumulate token classes
   let fresh = input.freshInput ?? 0
-  let cacheRead = input.cacheRead ?? 0
+  let cacheRead = input.cacheRead as number
   let cacheCreation = input.cacheCreation ?? 0
 
   if (input.turns && input.turns.length > 0) {
@@ -150,7 +164,7 @@ export function contextReuse(input: ContextReuseInput): SignalResult<number> {
     cacheCreation = 0
     for (const turn of input.turns) {
       fresh += turn.freshInput ?? (turn.input !== undefined && turn.cacheRead !== undefined ? Math.max(0, turn.input - turn.cacheRead) : 0)
-      cacheRead += turn.cacheRead ?? 0
+      cacheRead += turn.cacheRead as number
       cacheCreation += turn.cacheCreation ?? 0
     }
   }
@@ -300,19 +314,23 @@ export function prefixStability(input: PrefixStabilityInput): SignalResult<numbe
 
   // Calculate counter fallback if totalInput and cacheRead are accessible
   let totalInput = input.totalInput ?? 0
-  let cacheRead = input.cacheRead ?? 0
-
+  let cacheRead: number | undefined = input.cacheRead
   if (input.turns && input.turns.length > 0 && totalInput === 0) {
     for (const t of input.turns) {
-      if (t.tokens) {
-        totalInput += t.tokens.reportedInput || (t.tokens.freshInput + t.tokens.cacheRead + t.tokens.cacheCreation)
-        cacheRead += t.tokens.cacheRead
+      if (!t.tokens) continue
+      if (t.tokens.cacheRead === undefined) {
+        return { status: 'not_measurable', reason: 'Cache read counter is absent; absence is not a measured zero.' }
       }
+      totalInput += t.tokens.reportedInput || (t.tokens.freshInput + t.tokens.cacheRead + t.tokens.cacheCreation)
+      cacheRead = (cacheRead ?? 0) + t.tokens.cacheRead
     }
   }
+  if (cacheRead === undefined && totalInput > 0) {
+    return { status: 'not_measurable', reason: 'Cache read counter is absent; absence is not a measured zero.' }
+  }
 
-  if (fallbackPermitted && totalInput > 0) {
-    const fallbackRatio = cacheRead / totalInput
+  if (fallbackPermitted && totalInput > 0 && cacheRead !== undefined) {
+    const fallbackRatio = (cacheRead as number) / totalInput
     return {
       status: 'derived',
       value: Math.min(1.0, Math.max(0.0, fallbackRatio)),

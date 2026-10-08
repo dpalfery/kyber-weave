@@ -82,6 +82,31 @@ describe('Signal 1: contextReuse / contextReuseRatio (Task F1 / ADR 0009 / ADR 0
     if (isSignalMeasurable(zeroHit)) expect(zeroHit.value).toBe(0.0)
   })
 
+  it('emits not_measurable when cacheRead is absent (undefined is not a measured zero)', () => {
+    const res = contextReuse({ freshInput: 100 })
+    expect(res.status).toBe('not_measurable')
+    expect((res as { reason: string }).reason).toMatch(/absent/i)
+  })
+
+  it('emits not_measurable when any turn cacheRead is absent', () => {
+    const res = contextReuse({
+      freshInput: 100,
+      cacheRead: 50,
+      turns: [{ freshInput: 100, cacheRead: 50 }, { freshInput: 20 }],
+    })
+    expect(res.status).toBe('not_measurable')
+    expect((res as { reason: string }).reason).toMatch(/absent/i)
+  })
+
+  it('treats numeric cacheRead 0 as a measured zero ratio with positive fresh input', () => {
+    const res = contextReuse({ freshInput: 500, cacheRead: 0 })
+    expect(isSignalMeasurable(res)).toBe(true)
+    if (isSignalMeasurable(res)) {
+      expect(res.status).toBe('measured')
+      expect(res.value).toBe(0)
+    }
+  })
+
   it('aggregates across turns when turns are provided', () => {
     const res = contextReuse({
       turns: [
