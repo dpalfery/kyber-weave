@@ -19,6 +19,7 @@ import { measuredInput, sumCosts } from './cost.js'
 import { isCopilotHarness, priceCopilotTurn } from './copilot-rates.js'
 import { isPublishedTableHarness, pricePublishedTurn } from './published-pricing.js'
 import { contextLimitOf } from './context-window.js'
+import { catalogWindowForRecords } from './model-window-catalog.js'
 import { groupByCanonicalHarness, harnessExportsCacheCounter, normalizeHarnessName, surveyFamily } from './measurability.js'
 import { dedupeTwinTurns } from './twin-dedupe.js'
 import { buildFindings } from './findings.js'
@@ -378,7 +379,7 @@ export async function buildSessions(store: CanonStore): Promise<BuildSessionsRep
         continue
       }
       const sessionId = identities.claim(key.key, harness)
-      store.upsertSession(buildSessionRow(sessionId, merged, countTokens))
+      store.upsertSession(buildSessionRow(sessionId, merged, countTokens, store))
       built.add(sessionId)
       report.built += 1
     }
@@ -416,6 +417,7 @@ export function buildSessionRow(
   sessionId: string,
   records: readonly CanonicalRecord[],
   countTokens: (text: string) => number,
+  store?: CanonStore,
 ): SessionRow {
   const turnRecords = records.filter(isTurn)
   const first = records[0]!
@@ -445,7 +447,13 @@ export function buildSessionRow(
   // Same rule the finding detector uses (`contextLimitOf`): first turn record
   // to name a window wins, default otherwise, so a session row and a
   // compaction finding built from the same records can never disagree.
-  const window = contextLimitOf(records)
+  // Catalog replaces only that default. A reported or declared window stays
+  // what the records said; the 200K constant is not relabelled as catalog.
+  const telemetryWindow = contextLimitOf(records)
+  const window =
+    telemetryWindow.contextLimitSource === 'default' && store !== undefined
+      ? (catalogWindowForRecords(records, store) ?? telemetryWindow)
+      : telemetryWindow
   const contextLimit = window.contextLimit
   const measurability = mergeMeasurability(records)
   const context = analyzeContext(contextTurns, {

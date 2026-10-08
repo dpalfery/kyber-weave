@@ -13,7 +13,7 @@
 
 import crypto from 'node:crypto'
 import { normalizeWhitespace, hashNormalized } from './signals.js'
-import { contextLimitOf } from '../canon/context-window.js'
+import { contextLimitOf, type ContextWindow } from '../canon/context-window.js'
 import { canonicalHarnessId, normalizeHarnessName, type SessionIdentities } from '../canon/measurability.js'
 import type { CanonicalRecord } from '../canon/types.js'
 import type { OutcomeBlock } from '../canon/outcome.js'
@@ -1146,6 +1146,12 @@ export type CompactionHazardInput = {
    * say the key was split or which id the share was given.
    */
   sessionIdentities?: SessionIdentities
+  /**
+   * Consulted only when the group's own records name no usable window.
+   * Returning a catalog window lets the detector fire without treating the
+   * 200K default as that window. Returning undefined keeps the default skip.
+   */
+  resolveWindow?: (records: readonly CanonicalRecord[]) => ContextWindow | undefined
 }
 
 /**
@@ -1270,19 +1276,27 @@ export function detectCompactionHazard(input: CompactionHazardInput): Finding[] 
     // An explicit limit is a caller declaration, not an assumption. It is
     // recorded as 'reported' because 'default' is reserved for the named
     // 200,000 fallback that applies when nothing anywhere names a window.
-    const window =
+    const telemetryWindow =
       input.contextLimit !== undefined
         ? { contextLimit: input.contextLimit, contextLimitSource: 'reported' as const }
         : contextLimitOf(group.records)
+    // Catalog is only a fallback for the named default. A reported or
+    // declared window already decided the group; a documentation row must
+    // not override it, and the 200K constant is still not a window.
+    const catalogWindow =
+      telemetryWindow.contextLimitSource === 'default' ? input.resolveWindow?.(group.records) : undefined
+    const window = catalogWindow ?? telemetryWindow
     // Issue #181 (honest unobservability): a ratio against the guessed
-    // default window is not a measurement. With no reported window there is
-    // no finding — the "window unreported" state is surfaced where
-    // pressure is shown, not as a deterministic percentage. A declared
-    // window (D12) does fire: the spend is measured, but the percentage
-    // against a configured window is inferred, never deterministic.
+    // default window is not a measurement. With no reported, declared, or
+    // catalog window there is no finding — the "window unreported" state is
+    // surfaced where pressure is shown, not as a deterministic percentage. A
+    // declared window (D12) or a vendor-catalog window (D15) does fire: the
+    // spend is measured, but the percentage against a configured or
+    // documented window is inferred, never deterministic.
     if (window.contextLimitSource === 'default') continue
     const limit = window.contextLimit
     const isDeclaredWindow = window.contextLimitSource === 'declared'
+    const isCatalogWindow = window.contextLimitSource === 'catalog'
 
     let peakTurn: TurnContext = group.turns[0]!
     for (const t of group.turns) {
@@ -1304,7 +1318,7 @@ export function detectCompactionHazard(input: CompactionHazardInput): Finding[] 
       // inside it reads as inferred, and an inferred finding ranks below a
       // deterministic one of comparable volume (ADR 0013 D6), so confidence
       // drops to heuristic with it.
-      const inferred = overWindow || isDeclaredWindow
+      const inferred = overWindow || isDeclaredWindow || isCatalogWindow
       const confidence: FindingConfidence = inferred ? 'heuristic' : 'deterministic'
       const measurementClass = inferred ? ('inferred' as const) : ('deterministic' as const)
 
@@ -1325,10 +1339,14 @@ export function detectCompactionHazard(input: CompactionHazardInput): Finding[] 
       ]
 
       const recommendation = `Apply progressive disclosure and relocate historical conversation turns into structured checkpoints or rollups before reaching the 85% window limit.`
+      const baseCaveat =
+        'Abrupt context compaction or summarization risks discarding early user constraints or domain definitions.'
       const outcomeRiskCaveat = deriveOutcomeRiskCaveat(
         outcome,
         'compaction-hazard',
-        'Abrupt context compaction or summarization risks discarding early user constraints or domain definitions.',
+        isCatalogWindow
+          ? `${baseCaveat} The window is a vendor catalog value, not a harness-reported measurement, so the percentage is inferred, never measured.`
+          : baseCaveat,
       )
 
       const rankScore = computeRankScore(estimatedWasteTokens, confidence, discount)
@@ -1336,24 +1354,32 @@ export function detectCompactionHazard(input: CompactionHazardInput): Finding[] 
       // The raw window stays in the parenthetical (it is what the ratio was
       // computed against); the trailing sentence names the window and where it
       // came from. The default branch is gone with the default skip above:
-      // every emitted finding was measured against a reported or declared window.
+      // every emitted finding names a reported, declared, or catalog window.
       const windowPhrase =
         input.contextLimit !== undefined
           ? 'declared by the caller'
-          : isDeclaredWindow
-            ? 'declared for the session'
-            : 'reported by session telemetry'
+          : isCatalogWindow
+            ? 'taken from the vendor catalog'
+            : isDeclaredWindow
+              ? 'declared for the session'
+              : 'reported by session telemetry'
 
       // An over-window peak aggregates child calls into one turn's number
       // (issue #181): say so in the mechanism rather than printing a
       // physically impossible percentage as a deterministic claim.
+      const windowKind = isCatalogWindow ? 'vendor catalog' : isDeclaredWindow ? 'declared' : 'reported'
       const aggregateCaveat = overWindow
-        ? ` The peak exceeds the ${isDeclaredWindow ? 'declared' : 'reported'} window itself, so the turn's token attribution likely aggregates child calls rather than one turn's context; the spend is measured, the single-turn reading is inferred.`
+        ? ` The peak exceeds the ${windowKind} window itself, so the turn's token attribution likely aggregates child calls rather than one turn's context; the spend is measured, the single-turn reading is inferred.`
         : ''
       // A declared window is configured, not measured (D12): say so in the
       // mechanism so the percentage is never read as a deterministic claim.
+      // A catalog window is documentation, not telemetry (D15): same honesty,
+      // different provenance, so the two caveats do not share a sentence.
       const declaredCaveat = isDeclaredWindow
         ? ` The window is a declared window, not a harness-reported measurement, so the percentage is inferred.`
+        : ''
+      const catalogCaveat = isCatalogWindow
+        ? ` The window is a vendor catalog value, not a harness-reported measurement, so the percentage is inferred.`
         : ''
 
       findings.push({
@@ -1363,9 +1389,9 @@ export function detectCompactionHazard(input: CompactionHazardInput): Finding[] 
         // a measurement: the title says the window was exceeded (review)
         // while the mechanism carries the figures with their caveat.
         title: overWindow
-          ? `Compaction Hazard: Context consumption exceeds the ${isDeclaredWindow ? 'declared' : 'reported'} window without summarization plan`
+          ? `Compaction Hazard: Context consumption exceeds the ${windowKind} window without summarization plan`
           : `Compaction Hazard: Context consumption reached ${Math.round(ratio * 100)}% of window without summarization plan`,
-        mechanism: `Peak context consumption reached ${peakTurn.tokens} tokens (${Math.round(ratio * 100)}% of ${limit} token window), exceeding the 85% safety boundary without active compaction or summarization. Window of record: ${limit.toLocaleString('en-US')} tokens (${windowPhrase}).${aggregateCaveat}${declaredCaveat}`,
+        mechanism: `Peak context consumption reached ${peakTurn.tokens} tokens (${Math.round(ratio * 100)}% of ${limit} token window), exceeding the 85% safety boundary without active compaction or summarization. Window of record: ${limit.toLocaleString('en-US')} tokens (${windowPhrase}).${aggregateCaveat}${declaredCaveat}${catalogCaveat}`,
         evidenceLinks,
         confidence,
         estimatedWasteTokens,
@@ -1380,15 +1406,19 @@ export function detectCompactionHazard(input: CompactionHazardInput): Finding[] 
         rankScore,
         measurementClass,
         confidenceBasis: overWindow
-          ? `Peak turn input tokens exceed the ${isDeclaredWindow ? 'declared' : 'reported'} context window, so single-turn attribution is inferred (likely aggregate of child calls) rather than measured.`
-          : isDeclaredWindow
-            ? 'Compared against the session-declared window; the spend is measured, but the percentage against a declared window is inferred rather than measured.'
-            : 'Deterministically measured by comparing the session peak turn input tokens against the context window in effect for that session.',
+          ? `Peak turn input tokens exceed the ${windowKind} context window, so single-turn attribution is inferred (likely aggregate of child calls) rather than measured.`
+          : isCatalogWindow
+            ? 'Compared against a vendor catalog window; the spend is measured, but the percentage against a vendor catalog is inferred rather than measured.'
+            : isDeclaredWindow
+              ? 'Compared against the session-declared window; the spend is measured, but the percentage against a declared window is inferred rather than measured.'
+              : 'Deterministically measured by comparing the session peak turn input tokens against the context window in effect for that session.',
         whatWouldRaiseIt: overWindow
-          ? `Harness emission of per-turn input counters that reconcile with the ${isDeclaredWindow ? 'declared' : 'reported'} window.`
-          : isDeclaredWindow
+          ? `Harness emission of per-turn input counters that reconcile with the ${windowKind} window.`
+          : isCatalogWindow
             ? 'Harness reporting of the context window in session telemetry would let the percentage be measured.'
-            : 'Deterministic measurement; confidence is at ceiling.',
+            : isDeclaredWindow
+              ? 'Harness reporting of the context window in session telemetry would let the percentage be measured.'
+              : 'Deterministic measurement; confidence is at ceiling.',
         payload: {
           contextLimit: limit,
           contextLimitSource: window.contextLimitSource,
@@ -1645,6 +1675,8 @@ export type DetectFindingsInput = {
   contextLimit?: number
   /** Passed to the compaction-hazard detector; see `CompactionHazardInput`. */
   sessionIdentities?: SessionIdentities
+  /** Passed through when `compactionHazard` does not supply its own. */
+  resolveWindow?: (records: readonly CanonicalRecord[]) => ContextWindow | undefined
   // Granular detector overrides
   dormantToolSchema?: DormantToolSchemaInput
   duplicateToolCall?: DuplicateToolCallInput
@@ -1726,6 +1758,7 @@ export function detectFindings(input: DetectFindingsInput): Finding[] {
       outcome: input.compactionHazard?.outcome ?? input.outcome,
       contextLimit: input.compactionHazard?.contextLimit ?? input.contextLimit,
       sessionIdentities: input.compactionHazard?.sessionIdentities ?? input.sessionIdentities,
+      resolveWindow: input.compactionHazard?.resolveWindow ?? input.resolveWindow,
     }),
   )
 
