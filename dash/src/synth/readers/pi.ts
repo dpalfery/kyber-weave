@@ -19,6 +19,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
 }
 
+function nonEmptyString(value: unknown): string | undefined {
+  return typeof value === 'string' && value !== '' ? value : undefined
+}
+
 function textParts(content: unknown, order: { value: number }): ContentPart[] {
   const blocks = Array.isArray(content) ? content : [content]
   const parts: ContentPart[] = []
@@ -47,52 +51,92 @@ export type PiReaderOptions = {
 }
 
 /** Resolve the pi models-store path from a home directory (HOME by default). */
-export function piModelsStorePath(homeDir: string = process.env['HOME'] ?? homedir()): string {
+export function piModelsStorePath(homeDir: string = process.env['HOME'] || homedir()): string {
   return join(homeDir, '.pi', 'agent', 'models-store.json')
+}
+
+/** The model a turn ran on, with the provider group the transcript named for it. */
+export type PiTurnModel = {
+  model: string
+  provider?: string
 }
 
 /**
  * Resolve the turn's model the way the provider parser does: the first
  * assistant message's own model wins, falling back to the session model from
- * `model_change`. Returns undefined when the transcript named no model, so
- * no store lookup is attempted — an unknown model must never gain a default.
+ * `model_change`. The provider follows the same order. Returns undefined when
+ * the transcript named no model, so no store lookup is attempted — an unknown
+ * model must never gain a default.
  */
-export function turnModel(firstAssistantModel: string | undefined, resolvedModel: string): string | undefined {
-  if (firstAssistantModel !== undefined) return firstAssistantModel
-  return resolvedModel !== '' ? resolvedModel : undefined
+export function turnModel(
+  firstAssistant: { model?: string; provider?: string },
+  session: { model?: string; provider?: string },
+): PiTurnModel | undefined {
+  const model = firstAssistant.model ?? session.model
+  if (model === undefined || model === '') return undefined
+  const provider = firstAssistant.provider ?? session.provider
+  return provider !== undefined && provider !== '' ? { model, provider } : { model }
 }
 
-/** The segment after the last `/`: store ids are bare while transcripts may qualify. */
-function bareModelId(model: string): string {
-  return model.includes('/') ? model.slice(model.lastIndexOf('/') + 1) : model
+function usableWindow(entry: Record<string, unknown>): number | undefined {
+  const window = entry['contextWindow']
+  return typeof window === 'number' && Number.isFinite(window) && window > 0 ? window : undefined
+}
+
+function groupEntries(store: Record<string, unknown>, provider: string): Record<string, unknown>[] | undefined {
+  if (!Object.hasOwn(store, provider)) return undefined
+  const group = store[provider]
+  if (!isRecord(group) || !Array.isArray(group['models'])) return undefined
+  return group['models'].filter(isRecord)
+}
+
+function windowInGroup(store: Record<string, unknown>, provider: string, id: string): number | undefined {
+  const entry = groupEntries(store, provider)?.find((candidate) => candidate['id'] === id)
+  return entry !== undefined ? usableWindow(entry) : undefined
 }
 
 /**
  * Find the declared context window for a turn model in a parsed
  * `models-store.json` document (`{ [provider]: { models: [{ id,
- * contextWindow }] } }`). Matches a bare store id against either the full
- * transcript model or its bare segment. Returns undefined when nothing
- * matches or the matched entry names no usable window — never a default.
+ * contextWindow }] } }`).
+ *
+ * @remarks
+ * The same model id can sit under several provider groups with different
+ * windows, so a window is returned only for an unambiguous match. With a
+ * known provider, only that group is searched, by exact id. Without one, a
+ * `group/model` prefix counts as the provider only when it names a store
+ * group; otherwise every entry with that exact id must declare the same
+ * window. Ids are never truncated at `/`: `org/model` is a different model
+ * from a bare `model` under some other provider. Anything else is a guess,
+ * and a guess is undefined — never a default.
  */
-export function declaredWindowForModel(model: string | undefined, store: unknown): number | undefined {
-  if (model === undefined || model === '') return undefined
+export function declaredWindowForModel(turn: PiTurnModel | undefined, store: unknown): number | undefined {
+  if (turn === undefined || turn.model === '') return undefined
   if (!isRecord(store)) return undefined
-  const want = bareModelId(model)
-  if (want === '') return undefined
-  for (const group of Object.values(store)) {
-    if (!isRecord(group)) continue
-    const models = group['models']
-    if (!Array.isArray(models)) continue
-    for (const entry of models) {
-      if (!isRecord(entry)) continue
-      const id = entry['id']
-      if (typeof id !== 'string' || id === '') continue
-      if (id !== model && bareModelId(id) !== want) continue
-      const window = entry['contextWindow']
-      return typeof window === 'number' && Number.isFinite(window) && window > 0 ? window : undefined
+  const { model, provider } = turn
+
+  if (provider !== undefined) {
+    const exact = windowInGroup(store, provider, model)
+    if (exact !== undefined) return exact
+    const prefix = `${provider}/`
+    return model.startsWith(prefix) ? windowInGroup(store, provider, model.slice(prefix.length)) : undefined
+  }
+
+  const slash = model.indexOf('/')
+  if (slash > 0 && groupEntries(store, model.slice(0, slash)) !== undefined) {
+    return windowInGroup(store, model.slice(0, slash), model.slice(slash + 1))
+  }
+
+  let agreed: number | undefined
+  for (const group of Object.keys(store)) {
+    for (const entry of groupEntries(store, group) ?? []) {
+      if (entry['id'] !== model) continue
+      const window = usableWindow(entry)
+      if (window === undefined || (agreed !== undefined && agreed !== window)) return undefined
+      agreed = window
     }
   }
-  return undefined
+  return agreed
 }
 
 /**
@@ -101,7 +145,7 @@ export function declaredWindowForModel(model: string | undefined, store: unknown
  * document all mean no window — never a default, never an error.
  */
 export async function loadDeclaredWindow(
-  model: string | undefined,
+  model: PiTurnModel | undefined,
   storePath: string,
 ): Promise<number | undefined> {
   if (model === undefined) return undefined
@@ -134,10 +178,11 @@ export const piReader: ContentReader = {
     let detectedCorrectionRule: string | undefined
     // The turn's model, resolved the way the provider parser resolves it: a
     // session-level `model_change` entry sets the session model, and the
-    // first assistant message's own model wins for the turn. Stays undefined
-    // when the transcript named no model, so no store lookup is attempted.
-    let resolvedModel = ''
-    let firstAssistantModel: string | undefined
+    // first assistant message's own model wins for the turn. Each source keeps
+    // the provider it named, because a model id alone can sit under several
+    // provider groups with different windows.
+    let sessionModel: { model?: string; provider?: string } = {}
+    let firstAssistant: { model?: string; provider?: string } | undefined
 
     try {
       for await (const line of lines) {
@@ -154,7 +199,11 @@ export const piReader: ContentReader = {
           continue
         }
         if (entry['type'] === 'model_change') {
-          if (typeof entry['model'] === 'string' && entry['model'] !== '') resolvedModel = entry['model']
+          const model = nonEmptyString(entry['model'])
+          if (model !== undefined) {
+            const provider = nonEmptyString(entry['provider'])
+            sessionModel = provider !== undefined ? { model, provider } : { model }
+          }
           continue
         }
         if (entry['type'] === 'exit' || entry['type'] === 'session_end') {
@@ -167,9 +216,12 @@ export const piReader: ContentReader = {
 
         const msgRole = entry['message']['role']
         const msgContent = entry['message']['content']
-        if (msgRole === 'assistant' && firstAssistantModel === undefined) {
-          const model = entry['message']['model']
-          if (typeof model === 'string' && model !== '') firstAssistantModel = model
+        if (msgRole === 'assistant' && firstAssistant === undefined) {
+          const model = nonEmptyString(entry['message']['model'])
+          if (model !== undefined) {
+            const provider = nonEmptyString(entry['message']['provider'])
+            firstAssistant = provider !== undefined ? { model, provider } : { model }
+          }
         }
         if (msgRole === 'user' || msgRole === undefined) {
           const rawText = typeof msgContent === 'string'
@@ -204,7 +256,7 @@ export const piReader: ContentReader = {
       // unparseable store yields no window, never a default, and the lookup
       // never throws.
       const declaredContextWindow = await loadDeclaredWindow(
-        turnModel(firstAssistantModel, resolvedModel),
+        turnModel(firstAssistant ?? {}, sessionModel),
         options?.modelsStorePath ?? piModelsStorePath(options?.homeDir),
       )
       yield {
