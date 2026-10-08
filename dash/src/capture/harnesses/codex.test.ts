@@ -1,7 +1,9 @@
 import {
+  closeSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readFileSync,
   rmSync,
   statSync,
@@ -25,6 +27,16 @@ function makeHome(): string {
   const home = mkdtempSync(join(tmpdir(), 'kyber-codex-capture-'))
   temporaryHomes.push(home)
   return home
+}
+
+/** Path read via a descriptor so it is not a stat-then-read on the same path. */
+function readUtf8(path: string): string {
+  const fd = openSync(path, 'r')
+  try {
+    return readFileSync(fd, 'utf8')
+  } finally {
+    closeSync(fd)
+  }
 }
 
 function codexConfigPath(home: string): string {
@@ -99,7 +111,7 @@ describe('codex capture writer (P2.3, status-only)', () => {
       })
       expect(enabledExisting.exitCode).toBe(0)
       expect(enabledExisting.stdout).not.toMatch(/not yet supported/i)
-      expect(readFileSync(existingPath, 'utf8')).toBe(before)
+      expect(readUtf8(existingPath)).toBe(before)
       expect(statSync(existingPath).mtimeMs).toBe(mtimeBefore)
 
       const receiptPath = join(homeExisting, '.kyberdash', 'capture-receipt.json')
@@ -123,7 +135,7 @@ describe('codex capture writer (P2.3, status-only)', () => {
 
       expect(disabled.exitCode).toBe(0)
       expect(disabled.stdout).not.toMatch(/not yet supported/i)
-      expect(readFileSync(configPath, 'utf8')).toBe(before)
+      expect(readUtf8(configPath)).toBe(before)
       expect(statSync(configPath).mtimeMs).toBe(mtimeBefore)
     },
   )

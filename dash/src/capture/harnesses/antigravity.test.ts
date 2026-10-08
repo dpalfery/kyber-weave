@@ -1,7 +1,9 @@
 import {
+  closeSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readFileSync,
   rmSync,
   statSync,
@@ -25,6 +27,16 @@ function makeHome(): string {
   const home = mkdtempSync(join(tmpdir(), 'kyber-antigravity-capture-'))
   temporaryHomes.push(home)
   return home
+}
+
+/** Path read via a descriptor so it is not a stat-then-read on the same path. */
+function readUtf8(path: string): string {
+  const fd = openSync(path, 'r')
+  try {
+    return readFileSync(fd, 'utf8')
+  } finally {
+    closeSync(fd)
+  }
 }
 
 function settingsPath(home: string): string {
@@ -114,7 +126,7 @@ describe('antigravity capture writer (P2.6, status-only bridge route)', () => {
     })
     expect(enabled.exitCode).toBe(0)
     expect(enabled.stdout).not.toMatch(/not yet supported/i)
-    expect(readFileSync(settings, 'utf8')).toBe(before)
+    expect(readUtf8(settings)).toBe(before)
     expect(statSync(settings).mtimeMs).toBe(mtimeBefore)
 
     const disabled = await runCapture('disable', {
@@ -124,7 +136,7 @@ describe('antigravity capture writer (P2.6, status-only bridge route)', () => {
     })
     expect(disabled.exitCode).toBe(0)
     expect(disabled.stdout).not.toMatch(/not yet supported/i)
-    expect(readFileSync(settings, 'utf8')).toBe(before)
+    expect(readUtf8(settings)).toBe(before)
 
     const receiptPath = join(home, '.kyberdash', 'capture-receipt.json')
     expect(existsSync(receiptPath)).toBe(false)

@@ -1,4 +1,14 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import {
+  closeSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  openSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
@@ -47,6 +57,16 @@ function makeHome(): string {
   const home = mkdtempSync(join(tmpdir(), 'kyber-copilot-capture-'))
   temporaryHomes.push(home)
   return home
+}
+
+/** Path read via a descriptor so it is not a stat-then-read on the same path. */
+function readUtf8(path: string): string {
+  const fd = openSync(path, 'r')
+  try {
+    return readFileSync(fd, 'utf8')
+  } finally {
+    closeSync(fd)
+  }
 }
 
 function vscodeUserSettingsPaths(home: string): { stable: string; insiders: string } {
@@ -308,8 +328,8 @@ describe('copilot capture writer (P2.1b)', () => {
       })
       expect(disabled.exitCode).toBe(0)
 
-      expect(readFileSync(zshrc, 'utf8')).toBe(rcInitial)
-      expect(readFileSync(zshenv, 'utf8')).toBe(rcInitial)
+      expect(readUtf8(zshrc)).toBe(rcInitial)
+      expect(readUtf8(zshenv)).toBe(rcInitial)
       expect(statSync(zshrc).mtimeMs).toBe(zshrcMtimeBefore)
       expect(statSync(zshenv).mtimeMs).toBe(zshenvMtimeBefore)
     })

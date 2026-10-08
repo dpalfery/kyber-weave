@@ -1,7 +1,9 @@
 import {
+  closeSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readFileSync,
   rmSync,
   statSync,
@@ -68,6 +70,16 @@ function makeHome(): string {
   const home = mkdtempSync(join(tmpdir(), 'kyber-writer-seam-'))
   temporaryHomes.push(home)
   return home
+}
+
+/** Path read via a descriptor so it is not a stat-then-read on the same path. */
+function readUtf8(path: string): string {
+  const fd = openSync(path, 'r')
+  try {
+    return readFileSync(fd, 'utf8')
+  } finally {
+    closeSync(fd)
+  }
 }
 
 function writeJsonc(path: string, content: string): void {
@@ -473,8 +485,8 @@ describe('capture writer declaration seam (P2.W)', () => {
         })
         expect(disabled.exitCode).toBe(0)
 
-        expect(readFileSync(zshrc, 'utf8')).toBe(rcInitial)
-        expect(readFileSync(bashrc, 'utf8')).toBe(rcInitial)
+        expect(readUtf8(zshrc)).toBe(rcInitial)
+        expect(readUtf8(bashrc)).toBe(rcInitial)
         expect(statSync(zshrc).mtimeMs).toBe(zshrcMtimeBefore)
         expect(statSync(bashrc).mtimeMs).toBe(bashrcMtimeBefore)
       },
