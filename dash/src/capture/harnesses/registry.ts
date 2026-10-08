@@ -28,6 +28,11 @@ export type PendingHarnessWriter = {
   reason: string
   resolvePath: (home: string) => string
   format: CaptureFileFormat
+  /**
+   * Extra status lines. A status-only writer reads a route here and never
+   * writes it. `enable` and `disable` do not call this.
+   */
+  statusDetail?: (home: string) => readonly string[]
 }
 
 /**

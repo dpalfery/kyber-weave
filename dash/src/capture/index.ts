@@ -223,6 +223,11 @@ function statusLines(
       const { found } = readTextIfPresent(path)
       lines.push(`  config: ${path} (${found ? 'found' : 'missing'})`)
       lines.push(`  ${writer.reason}`)
+      // Status text only. The callback must not write; enable and disable
+      // never invoke it, so a status-only route cannot grow a receipt.
+      if (writer.statusDetail !== undefined) {
+        for (const line of writer.statusDetail(home)) lines.push(`  ${line}`)
+      }
       continue
     }
     for (const file of declaredFiles(writer, home)) {

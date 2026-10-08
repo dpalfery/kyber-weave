@@ -2694,12 +2694,18 @@ export class KyberBridge {
         }
         if (owner === null) {
           const payload = this.getSessionPayload<{ context?: { contextLimitSource?: string } }>(sessionId)
-          return payload?.context?.contextLimitSource === 'default' ? 1 : 0
+          return payload?.context?.contextLimitSource === 'default' ||
+            payload?.context?.contextLimitSource === 'absent'
+            ? 1
+            : 0
         }
         if (owner === undefined || normalizeHarnessName(owner) !== normalizeHarnessName(harness)) return 0
       }
       const payload = this.getSessionPayload<{ context?: { contextLimitSource?: string } }>(sessionId)
-      return payload?.context?.contextLimitSource === 'default' ? 1 : 0
+      return payload?.context?.contextLimitSource === 'default' ||
+        payload?.context?.contextLimitSource === 'absent'
+        ? 1
+        : 0
     }
     if (runId !== undefined && runId !== '') {
       // Same fold rule as everywhere else (review): a run scoped to a legacy
@@ -2718,8 +2724,10 @@ export class KyberBridge {
       ]
       return ids.filter(
         (id) =>
-          this.getSessionPayload<{ context?: { contextLimitSource?: string } }>(id)?.context?.contextLimitSource ===
-          'default',
+          ['default', 'absent'].includes(
+            this.getSessionPayload<{ context?: { contextLimitSource?: string } }>(id)?.context
+              ?.contextLimitSource ?? '',
+          ),
       ).length
     }
     // Harness and workspace scopes read the persisted rollups (review): the
@@ -2802,7 +2810,7 @@ export class KyberBridge {
     }
     if (!this.hasTable(db, 'session')) return 0
     try {
-      const conds = [`json_extract(payload, '$.context.contextLimitSource') = 'default'`]
+      const conds = [`json_extract(payload, '$.context.contextLimitSource') IN ('default', 'absent')`]
       const params: (string | number)[] = []
       if (harness !== undefined && harness !== '') {
         conds.push('LOWER(harness) = LOWER(?)')

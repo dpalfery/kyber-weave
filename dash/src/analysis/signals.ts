@@ -673,10 +673,13 @@ export function compactionPressure(input: CompactionPressureInput): SignalResult
     }
   }
 
-  if (source === 'default') {
+  if (source === 'default' || source === 'absent') {
     return {
       status: 'not_measurable',
-      reason: 'No source reported a context window; pressure against the default window is unmeasurable, not zero.',
+      reason:
+        source === 'absent'
+          ? 'The Antigravity bridge declared no context window; pressure is unmeasurable, not a ratio against a default window.'
+          : 'No source reported a context window; pressure against the default window is unmeasurable, not zero.',
     }
   }
 

@@ -64,16 +64,33 @@ export const DECLARED_CONTEXT_LIMIT_KEY = 'declaredContextWindow' as const
 /**
  * Where a context window came from: reported by a record's attributes,
  * declared for the session by harness configuration rather than measured
- * telemetry, resolved from the vendor-documented catalog, or the named
- * default because no source named one.
+ * telemetry, resolved from the vendor-documented catalog, the named
+ * default because no source named one, or absent because an Antigravity
+ * bridge span named none.
  *
  * `'catalog'` is part of the union so a session row and a compaction finding
  * can name it. `contextLimitOf` never returns it: the catalog lives in the
  * store, and folding that lookup into this function would make the 200K
  * default and a documentation row compete inside every caller that only
  * asked what the records themselves said.
+ *
+ * `'absent'` is the Antigravity statusline bridge (G1-Q2 = (b)) with no
+ * `declaredContextWindow`. The 200K default must not stand in for that
+ * span, and a catalog row must not be invented for a window the user has
+ * not declared. `contextLimit` is 0: there is no denominator.
  */
-export type ContextLimitSource = 'reported' | 'declared' | 'catalog' | 'default'
+export type ContextLimitSource = 'reported' | 'declared' | 'catalog' | 'default' | 'absent'
+
+/**
+ * True when the source names no usable window. `'default'` is the 200K
+ * placeholder other harnesses still carry; `'absent'` is a bridge span that
+ * must not carry that placeholder. Callers that suppress a ratio against a
+ * guessed denominator treat both the same, and must not promote `'absent'`
+ * into a catalog lookup.
+ */
+export function isUnnamedContextWindow(source: string | undefined): boolean {
+  return source === 'default' || source === 'absent'
+}
 
 /** A context window together with its provenance. */
 export type ContextWindow = {
@@ -165,5 +182,35 @@ export function contextLimitOf(records: readonly CanonicalRecord[]): ContextWind
     // falls to the default rather than scanning on to a later record.
     return { contextLimit: DEFAULT_CONTEXT_LIMIT, contextLimitSource: 'default' }
   }
+  // The statusline bridge emits no window of its own. A group whose invokes
+  // are all that bridge, and that named neither a reported nor a declared
+  // window, must not inherit the 200K placeholder — and must not fall through
+  // to a catalog row the user never declared.
+  if (antigravityBridgeGroup(records)) {
+    return { contextLimit: 0, contextLimitSource: 'absent' }
+  }
   return { contextLimit: DEFAULT_CONTEXT_LIMIT, contextLimitSource: 'default' }
+}
+
+/** An OTLP chat span from the user's Antigravity statusline bridge. */
+function isAntigravityBridgeSpan(record: CanonicalRecord): boolean {
+  const raw = record.raw
+  if (raw === null || typeof raw !== 'object') return false
+  return (raw as Record<string, unknown>)['gen_ai.agent.name'] === 'antigravity'
+}
+
+/**
+ * True when every `llm.invoke` in the group is a bridge span. File-side
+ * Antigravity turns do not carry `gen_ai.agent.name`, so they keep the
+ * shared default. A mixed group keeps it too: one non-bridge invoke is
+ * enough to leave the placeholder rule in place.
+ */
+function antigravityBridgeGroup(records: readonly CanonicalRecord[]): boolean {
+  let sawInvoke = false
+  for (const record of records) {
+    if (record.op !== 'llm.invoke') continue
+    sawInvoke = true
+    if (!isAntigravityBridgeSpan(record)) return false
+  }
+  return sawInvoke
 }

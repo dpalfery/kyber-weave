@@ -385,7 +385,7 @@ function buildLatestSession(
       ? 'harness exported no message structure for this session'
       : context.contextLimit === undefined
         ? context.unavailableReason
-        : context.contextLimitSource === 'default'
+        : context.contextLimitSource === 'default' || context.contextLimitSource === 'absent'
           ? 'source reported no context window'
           : undefined
 
@@ -437,8 +437,8 @@ function buildLatestSession(
   }
 }
 
-/** Provenance the report can carry. `catalog` is D15; the canon source union grows later. */
-type ReportWindowSource = 'reported' | 'declared' | 'catalog' | 'default'
+/** Provenance the report can carry. `catalog` is D15; `absent` is a bridge span with no declared window. */
+type ReportWindowSource = 'reported' | 'declared' | 'catalog' | 'default' | 'absent'
 
 /**
  * A declared or catalog window is not telemetry (D5, D15). Returning `measured`
@@ -487,7 +487,8 @@ function extractContext(payload: { context?: unknown; turns?: unknown[] } | unde
     rawLimitSource === 'reported' ||
     rawLimitSource === 'declared' ||
     rawLimitSource === 'catalog' ||
-    rawLimitSource === 'default'
+    rawLimitSource === 'default' ||
+    rawLimitSource === 'absent'
       ? rawLimitSource
       : undefined
   const contextLimit = finiteNumber(context.contextLimit)
@@ -495,7 +496,7 @@ function extractContext(payload: { context?: unknown; turns?: unknown[] } | unde
   const turnIndex = finiteNumber(turn?.index) ?? finiteNumber(payloadTurn?.index) ?? 0
   const turnPressure = finiteNumber(turn?.pressure)
   const pressure =
-    contextLimitSource === 'default'
+    contextLimitSource === 'default' || contextLimitSource === 'absent'
       ? undefined
       : turnPressure ??
         (reportedInput !== undefined && contextLimit !== undefined && contextLimit > 0
