@@ -437,7 +437,7 @@ function buildLatestSession(
 
 type LatestContext = {
   contextLimit?: number
-  contextLimitSource?: 'reported' | 'default'
+  contextLimitSource?: 'reported' | 'declared' | 'default'
   measurable: boolean
   unavailableReason: string
   bucketReasons: Partial<Record<BucketKey, string>>
@@ -464,7 +464,9 @@ function extractContext(payload: { context?: unknown; turns?: unknown[] } | unde
   const lastBuckets = asObject(last?.buckets)
   const rawLimitSource = context.contextLimitSource
   const contextLimitSource =
-    rawLimitSource === 'reported' || rawLimitSource === 'default' ? rawLimitSource : undefined
+    rawLimitSource === 'reported' || rawLimitSource === 'declared' || rawLimitSource === 'default'
+      ? rawLimitSource
+      : undefined
   const contextLimit = finiteNumber(context.contextLimit)
   const reportedInput = finiteNumber(last?.reported_input)
   const turnIndex = finiteNumber(turn?.index) ?? finiteNumber(payloadTurn?.index) ?? 0
