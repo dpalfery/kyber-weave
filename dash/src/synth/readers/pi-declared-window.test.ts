@@ -75,6 +75,38 @@ function sessionEntries(model: string): unknown[] {
   ]
 }
 
+// Real pi shape: the assistant message names its provider group and the bare
+// model id; `model_change` may carry the provider too.
+function providerSessionEntries(
+  model: string,
+  provider: { message?: string; modelChange?: string },
+): unknown[] {
+  return [
+    { type: 'session', id: 'synthetic-pi-session', timestamp: '2026-10-01T00:00:00.000Z' },
+    {
+      type: 'model_change',
+      model,
+      ...(provider.modelChange !== undefined ? { provider: provider.modelChange } : {}),
+    },
+    {
+      type: 'message',
+      timestamp: '2026-10-01T00:00:01.000Z',
+      message: { role: 'user', content: [{ type: 'text', text: 'Synthetic pi request.' }] },
+    },
+    {
+      type: 'message',
+      timestamp: '2026-10-01T00:00:02.000Z',
+      message: {
+        role: 'assistant',
+        ...(provider.message !== undefined ? { provider: provider.message } : {}),
+        model,
+        content: [{ type: 'text', text: 'Synthetic pi reply.' }],
+        usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0 },
+      },
+    },
+  ]
+}
+
 async function readTurns(path: string): Promise<ReaderTurn[]> {
   const turns: ReaderTurn[] = []
   for await (const turn of piReader.read(path)) turns.push(turn)
@@ -106,6 +138,73 @@ describe('pi declared context window', () => {
     const home = useTempHome()
     installStore(home, 'this is not JSON {')
     const [turn] = await readTurns(writePiSession(sessionEntries(QUALIFIED_MODEL)))
+    expect(turn?.declaredContextWindow).toBeUndefined()
+  })
+})
+
+// The same model id can sit under several provider groups with different
+// windows. A window attributed to the wrong provider is a guess, and a guess
+// must be absent.
+describe('pi declared context window, provider-scoped', () => {
+  const BARE_MODEL = 'synthetic-pi-test-model'
+  const ALT_WINDOW = 1_000_000
+
+  it('uses the assistant message provider group for a bare model', async () => {
+    const home = useTempHome()
+    installStore(home, JSON.stringify(modelsStoreFixture))
+    const [turn] = await readTurns(
+      writePiSession(providerSessionEntries(BARE_MODEL, { message: 'synthetic-alt-provider' })),
+    )
+    expect(turn?.declaredContextWindow).toBe(ALT_WINDOW)
+  })
+
+  it('falls back to the model_change provider when the assistant message names none', async () => {
+    const home = useTempHome()
+    installStore(home, JSON.stringify(modelsStoreFixture))
+    const [turn] = await readTurns(
+      writePiSession(providerSessionEntries(BARE_MODEL, { modelChange: 'synthetic-alt-provider' })),
+    )
+    expect(turn?.declaredContextWindow).toBe(ALT_WINDOW)
+  })
+
+  it('carries no window when the provider group is absent from the store', async () => {
+    const home = useTempHome()
+    installStore(home, JSON.stringify(modelsStoreFixture))
+    const [turn] = await readTurns(
+      writePiSession(providerSessionEntries(BARE_MODEL, { message: 'synthetic-absent-provider' })),
+    )
+    expect(turn?.declaredContextWindow).toBeUndefined()
+  })
+
+  it('carries no window for a bare model with no provider whose groups disagree', async () => {
+    const home = useTempHome()
+    installStore(home, JSON.stringify(modelsStoreFixture))
+    const [turn] = await readTurns(writePiSession(providerSessionEntries(BARE_MODEL, {})))
+    expect(turn?.declaredContextWindow).toBeUndefined()
+  })
+
+  it('carries the window for a bare model with no provider whose groups all agree', async () => {
+    const home = useTempHome()
+    installStore(home, JSON.stringify(modelsStoreFixture))
+    const [turn] = await readTurns(writePiSession(providerSessionEntries('synthetic-pi-shared-model', {})))
+    expect(turn?.declaredContextWindow).toBe(64_000)
+  })
+
+  it('uses the group named by a qualified group/model prefix', async () => {
+    const home = useTempHome()
+    installStore(home, JSON.stringify(modelsStoreFixture))
+    const [turn] = await readTurns(
+      writePiSession(providerSessionEntries(`synthetic-alt-provider/${BARE_MODEL}`, {})),
+    )
+    expect(turn?.declaredContextWindow).toBe(ALT_WINDOW)
+  })
+
+  it('carries no window for a namespaced org/model whose bare segment belongs to another provider', async () => {
+    const home = useTempHome()
+    installStore(home, JSON.stringify(modelsStoreFixture))
+    const [turn] = await readTurns(
+      writePiSession(providerSessionEntries('synthetic-org/synthetic-pi-other-model', {})),
+    )
     expect(turn?.declaredContextWindow).toBeUndefined()
   })
 })
