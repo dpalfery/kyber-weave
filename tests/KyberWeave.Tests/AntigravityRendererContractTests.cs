@@ -1046,15 +1046,15 @@ public sealed class AntigravityRendererContractTests : IDisposable
     }
 
     /// <summary>
-    /// Pins rendered Antigravity models by agent identity (issue #209): only
-    /// <c>architect</c> renders <c>claude-opus-4-6</c>; every other
+    /// Pins rendered Antigravity models by agent identity (issue #209 / issue #286): only
+    /// <c>architect</c> and <c>product-owner</c> render <c>claude-opus-4-6</c>; every other
     /// agent — including <c>sql-database-architect</c> and
     /// <c>bug-crusher-investigator</c> on shared <c>deep-planning</c> — renders
     /// Gemini Flash. Asserting by profile would incorrectly allow Opus for those
     /// peers.
     /// </summary>
     [Fact]
-    public async Task RenderAsync_Antigravity_OnlyArchitectRunsOnClaudeOpusAndEveryOtherAgentOnFlash()
+    public async Task RenderAsync_Antigravity_ArchitectAndProductOwnerRunOnClaudeOpusAndEveryOtherAgentOnFlash()
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
         SquadRendererRegistry registry = new([new AntigravityRenderer()]);
@@ -1070,6 +1070,9 @@ public sealed class AntigravityRendererContractTests : IDisposable
         SquadAgent architect = Assert.Single(source.Agents, agent => agent.Name == "architect");
         Assert.Equal("architect", architect.ModelProfile);
 
+        SquadAgent productOwner = Assert.Single(source.Agents, agent => agent.Name == "product-owner");
+        Assert.Equal("architect", productOwner.ModelProfile);
+
         foreach (SquadAgent agent in source.Agents)
         {
             SquadDeploymentFile agentFile = Assert.Single(
@@ -1078,7 +1081,8 @@ public sealed class AntigravityRendererContractTests : IDisposable
 
             YamlMappingNode frontmatter = ReadFrontmatter(agentFile);
             string model = RequireScalar(frontmatter, "model");
-            string expectedModel = string.Equals(agent.Name, "architect", StringComparison.Ordinal)
+            string expectedModel = string.Equals(agent.Name, "architect", StringComparison.Ordinal) ||
+                                   string.Equals(agent.Name, "product-owner", StringComparison.Ordinal)
                 ? "claude-opus-4-6"
                 : "flash";
 

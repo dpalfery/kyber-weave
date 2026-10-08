@@ -103,6 +103,12 @@ export type NativeClassifierEvidence = {
 export type SourceReaderDependencies = {
   providers: readonly Provider[]
   dateRange: DateRange
+  /**
+   * Per-source override for `dateRange`. The orchestrator uses this so a
+   * parser-contract repair can widen (or clamp) the first read instead of
+   * parsing once under the job window and again under the repair window.
+   */
+  dateRangeFor?: (sourceKey: string) => DateRange
   concurrency?: number
   previousFingerprints?: ReadonlyMap<string, FileFingerprint>
   fingerprintFile?: (path: string) => Promise<FileFingerprint | null>
@@ -229,6 +235,11 @@ export function sliceCallsToWindow(
   return { inWindow, problems }
 }
 
+/**
+ * Read one native source. Uses `dateRangeFor(sourceKey)` when the caller has
+ * already decided a per-source slice (parser-contract repair); otherwise the
+ * job `dateRange`.
+ */
 async function readNativeUnit(
   harnessId: HarnessId,
   provider: Provider,
@@ -254,13 +265,14 @@ async function readNativeUnit(
     }
   }
 
+  const dateRange = dependencies.dateRangeFor?.(sourceKey) ?? dependencies.dateRange
   const batch = normalizeParsedBatch(
     dependencies.parseCalls
-      ? await dependencies.parseCalls(provider, source, dependencies.dateRange)
-      : await parseSourceCalls(provider, source, dependencies.dateRange),
+      ? await dependencies.parseCalls(provider, source, dateRange)
+      : await parseSourceCalls(provider, source, dateRange),
   )
   const calls = batch.calls
-  const { inWindow, problems } = sliceCallsToWindow(calls, dependencies.dateRange)
+  const { inWindow, problems } = sliceCallsToWindow(calls, dateRange)
   const revisionToken = revision?.token ?? 'unknown'
   const envelopes = inWindow.map(parsed => toEnvelope(harnessId, sourceKey, source, parsed, revisionToken))
   // Injected parseCalls that returns a bare empty array omits preWindowRecordable.

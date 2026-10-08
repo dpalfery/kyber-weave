@@ -3,7 +3,7 @@ schema: kyber-squad.agent/v1
 name: product-owner
 description: "Headless specification specialist: persists requirements, design, and mode-aware tasks for one feature, then returns structured phase and gap digests to conductor. Produces planning artifacts only and never prompts the user."
 invocation: subagent
-model-profile: general
+model-profile: architect
 capability-profile: product-planning
 devin-capability-profile: product-planning-devin
 copilot-tools: [vscode, read, codegraph/*, kyber-weave/*, context7/*, edit, search, agent, web, todo]

@@ -850,6 +850,10 @@ function mergeReaderTurns(keeper?: ReaderTurn, donor?: ReaderTurn): ReaderTurn |
   return {
     ...keeper,
     parts,
+    // Collapse must keep a pairing id when only the donor carried one (#216 / #232).
+    ...(keeper.nativeRecordId !== undefined || donor.nativeRecordId !== undefined
+      ? { nativeRecordId: keeper.nativeRecordId ?? donor.nativeRecordId }
+      : {}),
     ...(toolCalls.length > 0 ? { toolCalls } : {}),
     ...(toolResults.length > 0 ? { toolResults } : {}),
     ...(toolsOffered.length > 0 ? { toolsOffered } : {}),
