@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { snapshotFile } from '../file-snapshot.js'
+import { snapshotFile } from '../testing.js'
 
 import { readJsonKeys } from '../edit-json.js'
 import { runCapture } from '../index.js'

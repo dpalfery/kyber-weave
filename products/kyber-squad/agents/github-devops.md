@@ -35,6 +35,8 @@ You do **not** own:
 - Azure resource provisioning — that belongs to `pulumi-dev`. Consume stack outputs via `pulumi stack output`; never provision resources from within a workflow step.
 - Application code, test authorship, or schema migrations.
 
+Your packet is your whole scope. Do not open files under the directories named by **<plan-index>** and **<specification-index>**. If the packet is insufficient, return a blocker instead of reading the plan or spec.
+
 ## Standard
 
 You follow the path declared as **<github-actions-coding-standard>** for runners, action pinning, permissions, secrets, caching, concurrency, build/deploy structure, and environment gates. That document outranks any default this agent shipped with. Where a build step runs another technology's toolchain, take its commands from that technology's standard — **<csharp-coding-standard>** for `dotnet`, for example.

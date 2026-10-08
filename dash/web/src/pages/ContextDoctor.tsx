@@ -1,34 +1,4 @@
 import { useState, useMemo, useEffect } from 'react'
-
-declare global {
-  interface ImportMeta {
-    readonly env: {
-      readonly VITEST?: boolean
-    }
-  }
-}
-
-declare module 'vitest' {
-  // `T` is vitest's subject parameter. The conditional keeps it in the
-  // signature so the augmentation merges, and still returns `R`.
-  interface Matchers<R extends void | Promise<void> = void | Promise<void>, T = unknown> {
-    toBeDisabled(): [R, T] extends [R, T] ? R : never
-  }
-}
-
-// The refresh contract asserts `toBeDisabled` / `not.toBeDisabled`. This suite
-// does not load jest-dom, so the chai method has to exist before those
-// assertions run. Production builds see `import.meta.env.VITEST` as absent and
-// never import chai.
-if (import.meta.env.VITEST) {
-  const { Assertion } = await import('chai')
-  Assertion.addMethod('toBeDisabled', function (this: Chai.AssertionStatic) {
-    const element = this._obj as { disabled?: boolean } | null
-    const disabled = element != null && element.disabled === true
-    this.assert(disabled, 'expected #{this} to be disabled', 'expected #{this} not to be disabled')
-  })
-}
-
 import { useQuery } from '@tanstack/react-query'
 import { Skeleton } from '../components/ui/skeleton.js'
 import {
