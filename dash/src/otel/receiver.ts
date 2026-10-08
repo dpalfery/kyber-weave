@@ -33,6 +33,8 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { createRequire } from 'node:module'
 import { promisify } from 'node:util'
 
+import { stripIdentityAttributes } from './identity.js'
+
 const execFileAsync = promisify(execFile)
 
 /** The OTLP/HTTP standard port (R2.1). */
@@ -489,9 +491,11 @@ export function decodeOtlpJson(body: string): OtlpSpan[] {
     const resource =
       resourceRaw === undefined || resourceRaw === null
         ? {}
-        : attributesFromJson(
-            expectObject(resourceRaw, `${rsWhere}.resource`).attributes,
-            `${rsWhere}.resource.attributes`,
+        : stripIdentityAttributes(
+            attributesFromJson(
+              expectObject(resourceRaw, `${rsWhere}.resource`).attributes,
+              `${rsWhere}.resource.attributes`,
+            ),
           )
 
     const scopeSpansRaw = resourceSpan.scopeSpans
@@ -537,7 +541,7 @@ export function decodeOtlpLogJson(body: string): OtlpLog[] {
     const resource =
       resourceRaw === undefined || resourceRaw === null
         ? {}
-        : attributesFromJson(expectObject(resourceRaw, `${where}.resource`).attributes, `${where}.resource.attributes`)
+        : stripIdentityAttributes(attributesFromJson(expectObject(resourceRaw, `${where}.resource`).attributes, `${where}.resource.attributes`))
     const scopes = resourceLog.scopeLogs
     if (scopes === undefined || scopes === null) continue
     if (!Array.isArray(scopes)) throw new OtlpDecodeError(`${where}.scopeLogs must be an array`)
@@ -552,7 +556,7 @@ export function decodeOtlpLogJson(body: string): OtlpLog[] {
         const recordWhere = `${scopeWhere}.logRecords[${li}]`
         const record = expectObject(recordRaw, recordWhere)
         const time = nanosToBigInt(record.timeUnixNano, `${recordWhere}.timeUnixNano`)
-        const attributes = attributesFromJson(record.attributes, `${recordWhere}.attributes`)
+        const attributes = stripIdentityAttributes(attributesFromJson(record.attributes, `${recordWhere}.attributes`))
         const session = attributes.session_id
         const sessionId = typeof session === 'string' ? session : null
         const traceId = record.traceId === undefined || record.traceId === null || record.traceId === ''
@@ -577,7 +581,7 @@ export function decodeOtlpLogJson(body: string): OtlpLog[] {
           timestamp: nanosToIsoTimestamp(time),
           body,
           attributes,
-          resource,
+          resource: stripIdentityAttributes(resource),
           scope,
         })
       }
@@ -623,8 +627,8 @@ function spanFromJson(
     timestamp: nanosToIsoTimestamp(start),
     durationMs: nanosDeltaToMs(start, end),
     status: statusFromJson(span.status, `${where}.status`),
-    attributes: attributesFromJson(span.attributes, `${where}.attributes`),
-    resource,
+    attributes: stripIdentityAttributes(attributesFromJson(span.attributes, `${where}.attributes`)),
+    resource: stripIdentityAttributes(resource),
     scope,
   }
 }
@@ -910,7 +914,8 @@ export function decodeOtlpProtobuf(body: Uint8Array): OtlpSpan[] {
   for (const [rsIndex, resourceSpan] of pbMessages(request, 1, 'resource_spans').entries()) {
     const rsWhere = `resource_spans[${rsIndex}]`
     const resourceMessage = pbMessage(resourceSpan, 1)
-    const resource = resourceMessage === undefined ? {} : pbKeyValues(resourceMessage, 1)
+    const resource =
+      resourceMessage === undefined ? {} : stripIdentityAttributes(pbKeyValues(resourceMessage, 1))
 
     for (const [ssIndex, scopeSpans] of pbMessages(resourceSpan, 2, `${rsWhere}.scope_spans`).entries()) {
       const ssWhere = `${rsWhere}.scope_spans[${ssIndex}]`
@@ -937,7 +942,8 @@ export function decodeOtlpLogProtobuf(body: Uint8Array): OtlpLog[] {
   for (const [ri, resourceLogs] of pbMessages(request, 1, 'resource_logs').entries()) {
     const where = `resource_logs[${ri}]`
     const resourceMessage = pbMessage(resourceLogs, 1)
-    const resource = resourceMessage === undefined ? {} : pbKeyValues(resourceMessage, 1)
+    const resource =
+      resourceMessage === undefined ? {} : stripIdentityAttributes(pbKeyValues(resourceMessage, 1))
     for (const [, scopeLogs] of pbMessages(resourceLogs, 2, `${where}.scope_logs`).entries()) {
       const scopeMessage = pbMessage(scopeLogs, 1)
       const scope: OtlpScope = {}
@@ -950,7 +956,7 @@ export function decodeOtlpLogProtobuf(body: Uint8Array): OtlpLog[] {
         if (time === undefined) throw new OtlpDecodeError(`${where}.time_unix_nano is required`)
         const trace = pbBytes(logMessage, 9)
         const span = pbBytes(logMessage, 10)
-        const attributes = pbKeyValues(logMessage, 6)
+        const attributes = stripIdentityAttributes(pbKeyValues(logMessage, 6))
         const session = attributes.session_id
         const sessionId = typeof session === 'string' ? session : null
         const bodyMessage = pbMessage(logMessage, 5)
@@ -974,7 +980,7 @@ export function decodeOtlpLogProtobuf(body: Uint8Array): OtlpLog[] {
           timestamp: nanosToIsoTimestamp(time),
           body,
           attributes,
-          resource,
+          resource: stripIdentityAttributes(resource),
           scope,
         })
       }
@@ -1020,8 +1026,8 @@ function spanFromProtobuf(
     timestamp: nanosToIsoTimestamp(start),
     durationMs: nanosDeltaToMs(start, end),
     status,
-    attributes: pbKeyValues(message, 9),
-    resource,
+    attributes: stripIdentityAttributes(pbKeyValues(message, 9)),
+    resource: stripIdentityAttributes(resource),
     scope,
   }
 }
