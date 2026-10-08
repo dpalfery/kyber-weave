@@ -50,6 +50,13 @@ export type CaptureConfigFile = {
    * number, null). TOML and YAML are still written as strings by the core.
    */
   desiredKeys: (endpoint: string) => Record<string, JsonScalar>
+  /**
+   * Keys inserted only when this file does not already contain them. A
+   * present key keeps the owner's value and is left out of the receipt, so
+   * `disable` cannot restore or overwrite it. The core decides absence after
+   * it reads the file; the harness does not edit.
+   */
+  ensureIfAbsentKeys?: (endpoint: string) => Record<string, JsonScalar>
 }
 
 /**
@@ -86,6 +93,11 @@ export type ManagedHarnessWriter = {
    * shape. When `configFiles` is set, those files are what `enable` writes.
    */
   desiredKeys: (endpoint: string) => Record<string, JsonScalar>
+  /**
+   * Single-file ensure-if-absent keys. When `configFiles` is set, each
+   * file's own `ensureIfAbsentKeys` is what `enable` reads instead.
+   */
+  ensureIfAbsentKeys?: (endpoint: string) => Record<string, JsonScalar>
   /** When set, each entry is written, receipted and restored on its own. */
   configFiles?: readonly CaptureConfigFile[]
   statusWarnings?: readonly CaptureStatusWarning[]
