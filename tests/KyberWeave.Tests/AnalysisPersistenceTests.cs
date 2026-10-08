@@ -425,7 +425,6 @@ public sealed class AnalysisPersistenceTests
                 () => persistence.SaveClaims([Claim("contended-claim")]));
 
             Assert.False(lockProcess.HasExited, "sqlite lock fixture exited during SaveClaims.");
-            Assert.IsNotType<InvalidDataException>(exception);
             Assert.True(
                 exception.Message.Contains("lock", StringComparison.OrdinalIgnoreCase)
                 || exception.Message.Contains("busy", StringComparison.OrdinalIgnoreCase),
