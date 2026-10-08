@@ -63,6 +63,7 @@ import { billableOutputTokens } from '../pricing/models.js'
 // same canonical form so both identities agree by construction. Acyclic:
 // analysis/findings.ts never imports synth (it reads canonical records).
 import { serializeToolArgs } from '../analysis/findings.js'
+import { DECLARED_CONTEXT_LIMIT_KEY } from '../canon/context-window.js'
 import { FILE_SOURCE_PREFIX, measurabilityFor } from '../canon/measurability.js'
 import { TWIN_TURN_MAX_SKEW_MS } from '../canon/twin-dedupe.js'
 import type {
@@ -417,6 +418,13 @@ export function synthesizeCall(
     : {
         ...call,
         ...(readerTurn.contextWindow !== undefined ? { contextWindow: readerTurn.contextWindow } : {}),
+        // A declared window rides under the dedicated declared key alone:
+        // filing it under `contextWindow` would promote configured
+        // provenance to reported, and `contextLimitOf` reads the declared
+        // key only when no record reports one.
+        ...(readerTurn.declaredContextWindow !== undefined
+          ? { [DECLARED_CONTEXT_LIMIT_KEY]: readerTurn.declaredContextWindow }
+          : {}),
         ...(readerTurn.terminationReason !== undefined ? { terminationReason: readerTurn.terminationReason } : {}),
         ...(readerTurn.exitCode !== undefined ? { exitCode: readerTurn.exitCode } : {}),
         ...(readerTurn.isCorrection !== undefined ? { isCorrection: readerTurn.isCorrection, correctionRule: readerTurn.correctionRule } : {}),
