@@ -42,7 +42,7 @@ profiles:
   general:
     default: inherit
     antigravity: flash
-    claude: haiku
+    claude: sonnet
     codex: gpt-5.6-terra
     copilot: Grok 4.6 (copilot)
     cursor: grok-4.6[]

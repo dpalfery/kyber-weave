@@ -41,7 +41,7 @@ Values are never summed across the two sources. `KyberBridge` reads `canon.db` o
 
 | Harness/source | Verified collection outcome | Availability or gate |
 |---|---|---|
-| Gemini statusline / Antigravity | Gemini **model** attribution recognizes `gen_ai.system = "gemini"`; non-model trace noise is quarantined. Antigravity roots (`antigravity` / `antigravity-cli` / `antigravity-ide`) are distinct harness jobs. The `kyberdash kyber antigravity-statusline` recorder appends `agy` payloads to `antigravity-statusline.jsonl`, which refresh resolves to harness **`antigravity-cli`** — the recorder path attributes there, not to `gemini`. Canonical records must not use harness `gemini`; legacy `gemini` records remain quarantined as `excluded_harness` and are not migrated. | Tool names are available; per-server schemas remain source-dependent. |
+| Gemini statusline / Antigravity | Gemini **model** attribution recognizes `gen_ai.system = "gemini"`; non-model trace noise is quarantined. Antigravity roots (`antigravity` / `antigravity-cli` / `antigravity-ide`) are distinct harness jobs. The `kyberdash kyber antigravity-statusline` recorder appends `agy` payloads to `antigravity-statusline.jsonl`, which refresh resolves to harness **`antigravity-cli`** — the recorder path attributes there, not to `gemini`. OTLP spans asserting `gen_ai.agent.name = "antigravity"` are claimed by `antigravityAdapter` as harness **`antigravity`**, with `geminiAdapter` yielding. Canonical records must not use harness `gemini`. Legacy `gemini`-attributed records from source `agy` are not automatically migrated, but records with sufficient Antigravity evidence can be re-attributed through source-scoped repair (`kyber renormalize --source agy`), while genuine agent-name-less spans remain quarantined as `excluded_harness`. | Tool names are available; per-server schemas remain source-dependent. |
 | Copilot Chat | Content-enabled OTLP capture maps observed system instructions, messages, rules, skills, tool definitions, tool results, and session identity into canonical buckets. Input-message normalization separates input text from response envelopes without negative residuals. | Observed per-server schema availability remains source-dependent. |
 | Copilot CLI | SQLite ingest preserves its reported ASAD taxonomy, including `context_*_tokens` and `context_tier`. Persisted harness id is `copilot-cli`, not collapsed into `copilot`. | Omitted reported buckets remain unavailable rather than zero. |
 | Copilot VS Code | Native journal request replay into input-side `ReaderTurn` snapshots keyed by native request id via `copilotVscodeReader`. Reconstructs instructions and user message while excluding current model output from input context. | Window and pressure measured; unobserved buckets explicit `null` with reason. |
@@ -102,6 +102,18 @@ content-retention window
 Rows older than that floor are not rewritten.
 `kyber backfill` cannot repair file-synth rows — their stored `raw` is the
 counter call, not the message body.
+
+## Tool extraction support by harness (issue #180)
+
+| Harness | Tool Extraction Status | Implementation / Scope |
+|---|---|---|
+| Claude Code / Desktop | **Implemented** | Extracted by Claude reader (`dash/src/synth/readers/claude.ts`) and synthesized into child `tool.invoke` spans; results bounded at 64KiB with `truncated: true` and original byte count recorded in `gen_ai.tool.result_bytes`. Structured error status preserved. |
+| Codex | Deferred | Tracked in follow-up issue [#210](https://github.com/dpalfery/kyber-weave/issues/210). |
+| Copilot CLI & VS Code | Deferred | Tracked in follow-up issue [#211](https://github.com/dpalfery/kyber-weave/issues/211). |
+| Cursor | Deferred | Tracked in follow-up issue [#212](https://github.com/dpalfery/kyber-weave/issues/212). |
+| Antigravity | Deferred | Tracked in follow-up issue [#213](https://github.com/dpalfery/kyber-weave/issues/213). |
+| ZCode | Deferred | Tracked in follow-up issue [#214](https://github.com/dpalfery/kyber-weave/issues/214). |
+| OpenCode | Deferred | Tracked in follow-up issue [#215](https://github.com/dpalfery/kyber-weave/issues/215). |
 
 ## Antigravity aggregate-token investigation (T7)
 

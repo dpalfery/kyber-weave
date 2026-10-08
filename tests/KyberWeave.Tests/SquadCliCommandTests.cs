@@ -659,6 +659,204 @@ public sealed class SquadCliCommandTests : IDisposable
     }
 
     [Fact]
+    public async Task Doctor_GlobalScope_CleanInstall_ReportsNoUnmanagedCollisions()
+    {
+        string tempHome = Path.Combine(_temp.Path, "doctor-clean-install-home");
+        Directory.CreateDirectory(tempHome);
+        string userHome = Path.Combine(_temp.Path, "doctor-clean-install-user");
+        FakeUserPaths userPaths = new(userHome);
+        SquadGlobalRoots globalRoots = new(_ => null, tempHome);
+        SquadStateStore stateStore = new(userPaths);
+        using CorpusSquadReleaseSource releaseSource = new();
+        SquadLifecycleService service = new(
+            releaseSource,
+            SquadCommandComposition.ResolveRenderer(),
+            stateStore,
+            globalRoots: globalRoots);
+
+        SquadLifecycleResult installResult = await service.InstallAsync(new SquadInstallRequest(
+            TargetRoot: KyberWeaveTestPaths.ToolRoot,
+            Scope: SquadDeploymentScope.Global,
+            Targets: [SquadTarget.Cursor],
+            Version: "1.2.3"));
+
+        Assert.True(installResult.Success);
+
+        // Simulate a file recorded in the receipt whose bytes differ from the local source render
+        // (the authoritative repro in issue #283: receipt-managed file flagged as unmanaged by doctor)
+        string csharpDevFile = Path.Combine(tempHome, ".cursor", "agents", "csharp-dev.md");
+        string priorBytes = "prior-release-csharp-dev-content";
+        await File.WriteAllTextAsync(csharpDevFile, priorBytes);
+        string priorDigest = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(priorBytes)));
+        SquadReceipt? receipt = stateStore.ReadReceipt(KyberWeaveTestPaths.ToolRoot, SquadDeploymentScope.Global);
+        Assert.NotNull(receipt);
+        List<SquadOwnedFile> updatedFiles = receipt.Files.Select(f =>
+            f.RelativePath == "agents/csharp-dev.md" && f.Target == "cursor"
+                ? f with { Sha256 = priorDigest }
+                : f).ToList();
+        string receiptPath = stateStore.ResolveReceiptPath(KyberWeaveTestPaths.ToolRoot, SquadDeploymentScope.Global);
+        await File.WriteAllTextAsync(receiptPath, stateStore.SerializeReceipt(receipt with { Files = updatedFiles }));
+
+        FakeProcessExecutor executor = new FakeProcessExecutor()
+            .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
+        SquadDoctorCommand command = new(
+            executor,
+            userPaths,
+            workingDirectory: KyberWeaveTestPaths.ToolRoot,
+            globalRoots: globalRoots);
+
+        CommandExecution execution = Capture(() => command.Execute(
+            null!,
+            new SquadDoctorSettings
+            {
+                Path = KyberWeaveTestPaths.ToolRoot,
+                Global = true
+            }));
+
+        string normalizedOutput = string.Join(
+            ' ',
+            execution.Output.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        Assert.Equal(0, execution.ExitCode);
+        Assert.Contains("Global unmanaged collisions: none", normalizedOutput, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("warn Unmanaged global file", execution.Output, StringComparison.Ordinal);
+
+        // A genuine unmanaged colliding file (not recorded in receipt) is warned
+        string unmanagedFile = Path.Combine(tempHome, ".pi", "agent", "agents", "architect.md");
+        Directory.CreateDirectory(Path.GetDirectoryName(unmanagedFile)!);
+        await File.WriteAllTextAsync(unmanagedFile, "unmanaged-architect-content");
+
+        CommandExecution unmanagedExecution = Capture(() => command.Execute(
+            null!,
+            new SquadDoctorSettings
+            {
+                Path = KyberWeaveTestPaths.ToolRoot,
+                Global = true
+            }));
+
+        string unmanagedOutput = string.Join(
+            ' ',
+            unmanagedExecution.Output.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        Assert.Contains("warn", unmanagedOutput, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("agents/architect.md", unmanagedOutput.Replace('\\', '/'), StringComparison.Ordinal);
+        Assert.DoesNotContain("csharp-dev", unmanagedOutput, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Doctor_GlobalScope_CorruptSiblingReceipt_DoesNotCrash()
+    {
+        string tempHome = Path.Combine(_temp.Path, "doctor-corrupt-sibling-home");
+        Directory.CreateDirectory(tempHome);
+        string userHome = Path.Combine(_temp.Path, "doctor-corrupt-sibling-user");
+        FakeUserPaths userPaths = new(userHome);
+        SquadGlobalRoots globalRoots = new(_ => null, tempHome);
+        SquadStateStore stateStore = new(userPaths);
+
+        string siblingRepo = Path.Combine(_temp.Path, "doctor-corrupt-sibling-repo");
+        Directory.CreateDirectory(siblingRepo);
+        string siblingReceiptPath = stateStore.ResolveReceiptPath(siblingRepo, SquadDeploymentScope.Global);
+        Directory.CreateDirectory(Path.GetDirectoryName(siblingReceiptPath)!);
+        File.WriteAllText(siblingReceiptPath, "{ this is corrupt json \n");
+
+        FakeProcessExecutor executor = new FakeProcessExecutor()
+            .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
+        SquadDoctorCommand command = new(
+            executor,
+            userPaths,
+            workingDirectory: KyberWeaveTestPaths.ToolRoot,
+            globalRoots: globalRoots,
+            stateStore: stateStore);
+
+        CommandExecution execution = Capture(() => command.Execute(
+            null!,
+            new SquadDoctorSettings
+            {
+                Path = KyberWeaveTestPaths.ToolRoot,
+                Global = true
+            }));
+
+        Assert.Equal(1, execution.ExitCode);
+        Assert.Contains("Global unmanaged-collision scan failed", execution.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Doctor found issues", execution.Output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   \n\t ")]
+    public void Doctor_GlobalScope_BlankSiblingReceipt_DoesNotCrash(string blankReceipt)
+    {
+        string tempHome = Path.Combine(_temp.Path, $"doctor-blank-sibling-home-{blankReceipt.Length}");
+        Directory.CreateDirectory(tempHome);
+        string userHome = Path.Combine(_temp.Path, $"doctor-blank-sibling-user-{blankReceipt.Length}");
+        FakeUserPaths userPaths = new(userHome);
+        SquadGlobalRoots globalRoots = new(_ => null, tempHome);
+        SquadStateStore stateStore = new(userPaths);
+
+        string siblingRepo = Path.Combine(_temp.Path, $"doctor-blank-sibling-repo-{blankReceipt.Length}");
+        Directory.CreateDirectory(siblingRepo);
+        string siblingReceiptPath = stateStore.ResolveReceiptPath(siblingRepo, SquadDeploymentScope.Global);
+        Directory.CreateDirectory(Path.GetDirectoryName(siblingReceiptPath)!);
+        File.WriteAllText(siblingReceiptPath, blankReceipt);
+
+        FakeProcessExecutor executor = new FakeProcessExecutor()
+            .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
+        SquadDoctorCommand command = new(
+            executor,
+            userPaths,
+            workingDirectory: KyberWeaveTestPaths.ToolRoot,
+            globalRoots: globalRoots,
+            stateStore: stateStore);
+
+        CommandExecution execution = Capture(() => command.Execute(
+            null!,
+            new SquadDoctorSettings
+            {
+                Path = KyberWeaveTestPaths.ToolRoot,
+                Global = true
+            }));
+
+        Assert.Equal(1, execution.ExitCode);
+        Assert.Contains("Global unmanaged-collision scan failed", execution.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Doctor found issues", execution.Output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Doctor_GlobalScope_CorruptLocalReceipt_DoesNotCrash()
+    {
+        string tempHome = Path.Combine(_temp.Path, "doctor-corrupt-local-home");
+        Directory.CreateDirectory(tempHome);
+        string userHome = Path.Combine(_temp.Path, "doctor-corrupt-local-user");
+        FakeUserPaths userPaths = new(userHome);
+        SquadGlobalRoots globalRoots = new(_ => null, tempHome);
+        SquadStateStore stateStore = new(userPaths);
+
+        string receiptPath = stateStore.ResolveReceiptPath(KyberWeaveTestPaths.ToolRoot, SquadDeploymentScope.Global);
+        Directory.CreateDirectory(Path.GetDirectoryName(receiptPath)!);
+        File.WriteAllText(receiptPath, "{ corrupt local json \n");
+
+        FakeProcessExecutor executor = new FakeProcessExecutor()
+            .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
+        SquadDoctorCommand command = new(
+            executor,
+            userPaths,
+            workingDirectory: KyberWeaveTestPaths.ToolRoot,
+            globalRoots: globalRoots,
+            stateStore: stateStore);
+
+        CommandExecution execution = Capture(() => command.Execute(
+            null!,
+            new SquadDoctorSettings
+            {
+                Path = KyberWeaveTestPaths.ToolRoot,
+                Global = true
+            }));
+
+        Assert.Equal(1, execution.ExitCode);
+        Assert.Contains("Global unmanaged-collision scan failed", execution.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Doctor found issues", execution.Output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+
     public async Task Install_GlobalScope_StillRefusesUnmanagedCollision()
     {
         string tempHome = Path.Combine(_temp.Path, "install-global-collision-home");

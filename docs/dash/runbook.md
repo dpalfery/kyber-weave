@@ -231,6 +231,12 @@ from other sources — and their derived sessions — are left untouched.
 Prefer it whenever the repair is scoped to one source (for example,
 re-attributing live Antigravity rows after an adapter change).
 
+#### Tool Result Truncation and Parser Checkpoint Re-synthesis (issues #180, #232)
+
+Tool execution outputs captured during file or OTLP ingest are bounded to 64KiB (`MAX_TOOL_RESULT_BYTES = 65_536`) in stored parts (`part: 'tool_result_content'`). Truncated records carry `truncated: true`, with pre-truncation byte length stored in `attributes['gen_ai.tool.result_bytes']`.
+
+When reader extraction or normalization contracts change (such as tool extraction in #180 or request/response turn deduplication in #232), the source's `PARSER_CONTRACT_VERSION` in `dash/src/refresh/registry.ts` is incremented. Running `kyber-weave dash refresh` detects that existing `source_checkpoint` entries carry an older contract version, marks them stale, and automatically re-reads and re-synthesizes historical sessions without requiring manual database deletion.
+
 > **Warning:** unscoped `kyber renormalize` quarantines every row the
 > fingerprint vote cannot claim, including file-sourced rows (`codeburn/*`),
 > which carry no OTLP attributes to vote on. Never run it unscoped on a
@@ -418,9 +424,15 @@ sessions across all available harnesses. The other tabs come from the canonical 
 inventory: each distinct nonempty harness ID with sessions gets one tab, regardless of how
 many sessions share that ID. A harness without sessions has no tab.
 
-Select a harness tab to show only sessions with that exact harness ID. Client variants stay
-separate: Claude Code, Claude Desktop and Claude CLI; Codex Desktop and Codex CLI;
-Antigravity CLI and Antigravity IDE; and each Copilot client. Labels describe the tabs;
+Select a harness tab to show only sessions with that exact harness ID. Under the
+harvested #182 twin fold, client front-ends fold onto their primary harness: Claude Desktop
+folds onto Claude Code (and Cursor Agent onto Cursor) for derived rows, rollups, and API
+filters, so Claude Desktop turns appear under the Claude Code tab rather than a duplicate
+surface. The two evidenced exceptions where variants stay separate are: (1) file-side
+standalone sessions that lack OTLP twins remain directly retrievable by session ID, and
+(2) unclipped content inspection preserves the raw origin. Other client variants stay
+separate: Codex Desktop and Codex CLI; Antigravity CLI and Antigravity IDE; and each
+Copilot client. Labels describe the tabs;
 future or unknown harness IDs use their stored ID as the label and remain selectable.
 **Agent Sessions (All)** restores sessions across harnesses.
 
@@ -448,7 +460,7 @@ curl -s http://127.0.0.1:3000/api/kyber/run/run-copilot-001 | jq .
 curl -s http://127.0.0.1:3000/api/kyber/sessions | jq .
 curl -s http://127.0.0.1:3000/api/kyber/session/sess-copilot-001 | jq .
 
-# Inspect unclipped assembled turn context (Task G1 / Decision D14)
+# Inspect unclipped assembled turn context (ADR 0014, issue #184; 0-based turn index)
 curl -s "http://127.0.0.1:3000/api/kyber/session/sess-copilot-001/turn/0/content" | jq .
 
 # Query ranked telemetry findings (Task F3 / Decision D5 / D6)
@@ -467,9 +479,9 @@ curl -s http://127.0.0.1:3000/api/kyber/compare | jq .
 # Phase-aligned run comparison (requires two run ids; no caller-supplied history count)
 curl -s "http://127.0.0.1:3000/api/kyber/compare/runs?runA=run-a&runB=run-b" | jq .
 
-# Quarantine entries and problems
-curl -s http://127.0.0.1:3000/api/kyber/quarantine | jq .
-curl -s http://127.0.0.1:3000/api/kyber/problems | jq .
+# Quarantine entries and problems with pagination (issue #192; supports ?limit= with ?offset= or ?page=; offset takes precedence when both are supplied)
+curl -s "http://127.0.0.1:3000/api/kyber/quarantine?limit=50&offset=0" | jq .
+curl -s "http://127.0.0.1:3000/api/kyber/problems?limit=50&page=1" | jq .
 
 # Coverage route (refresh window, ingest activity, checkpoints)
 curl -s http://127.0.0.1:3000/api/kyber/coverage | jq .
