@@ -222,7 +222,14 @@ function statusLines(
       const path = writer.resolvePath(home)
       const { found } = readTextIfPresent(path)
       lines.push(`  config: ${path} (${found ? 'found' : 'missing'})`)
-      lines.push(`  ${writer.reason}`)
+      const described = writer.describeStatus?.(home)
+      if (described !== undefined && described.length > 0) {
+        // Home-dependent status (Pi names the loaded extension). The static
+        // reason stays the enable/disable skip line, so this path never writes.
+        lines.push(...described)
+      } else {
+        lines.push(`  ${writer.reason}`)
+      }
       continue
     }
     for (const file of declaredFiles(writer, home)) {

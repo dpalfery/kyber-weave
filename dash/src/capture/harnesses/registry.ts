@@ -28,6 +28,12 @@ export type PendingHarnessWriter = {
   reason: string
   resolvePath: (home: string) => string
   format: CaptureFileFormat
+  /**
+   * Status lines that depend on the home directory. When set, `status`
+   * prints these instead of the static `reason`. `enable` and `disable`
+   * still skip the writer and never write config.
+   */
+  describeStatus?: (home: string) => readonly string[]
 }
 
 /**
