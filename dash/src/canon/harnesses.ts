@@ -7,14 +7,17 @@
 // derived one marks the result derived. A harness with zero collectable sessions appears in
 // the catalogued list with a stated reason and no computed dimensions.
 
+import type { ContextLimitSource } from './context-window.js'
 import {
   harnessDimensionAvailability,
   isExcludedHarnessIdentity,
   normalizeHarnessName,
+  type DimensionEvidence,
 } from './measurability.js'
 import { HARNESS_DESCRIPTORS } from '../refresh/registry.js'
 import { CanonStore } from './store.js'
 import {
+  CANONICAL_CONTENT_KEYS,
   isNotMeasurable,
   notMeasurable,
   type HarnessRollupRow,
@@ -46,10 +49,10 @@ export type CoverageDimension = (typeof COVERAGE_DIMENSIONS)[number]
  * or tool definitions) have their coverage degraded proportionately, preventing
  * uninstrumented harnesses from appearing efficient by silence.
  */
-export function coverageFor(harness: string): number {
+export function coverageFor(harness: string, evidence?: DimensionEvidence): number {
   let covered = 0
   for (const dim of COVERAGE_DIMENSIONS) {
-    const avail = harnessDimensionAvailability(harness, dim)
+    const avail = harnessDimensionAvailability(harness, dim, evidence)
     if (!isNotMeasurable(avail)) {
       covered += 1
     }
@@ -98,6 +101,44 @@ export type SessionDigest = {
   totalDefinedTools: number
   totalInvokedTools: number
   subagentSessions: number
+  /** Canonical content parts any session carried, the evidence for tool dimensions. */
+  bucketParts: Set<string>
+  /** Window provenance of every session that named one, the evidence for pressure. */
+  windowSources: Set<ContextLimitSource>
+}
+
+/** True when a stored bucket value is an observed, positive token count. */
+function observedBucket(value: unknown): boolean {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0
+}
+
+/**
+ * Record the content parts a session payload shows evidence of: a positive
+ * count in its first or last context bucket, or a tool catalogue it observed
+ * (`tools_offered`, or a tool row carrying schema tokens).
+ */
+function collectBucketParts(payload: AsadSessionPayload, parts: Set<string>): void {
+  const context = payload.context as Record<string, unknown> | undefined
+  for (const edge of ['first', 'last']) {
+    const buckets = (context?.[edge] as { buckets?: Record<string, unknown> } | undefined)?.buckets
+    if (buckets === undefined || buckets === null || typeof buckets !== 'object') continue
+    for (const key of CANONICAL_CONTENT_KEYS) {
+      if (observedBucket(buckets[key])) parts.add(key)
+    }
+  }
+  if (Array.isArray(payload.summary?.tools_offered)) parts.add('tool_definitions')
+  if (Array.isArray(payload.tools) && payload.tools.some((tool) => observedBucket(tool?.schema_tokens))) {
+    parts.add('tool_definitions')
+  }
+}
+
+function isWindowSource(value: unknown): value is ContextLimitSource {
+  return value === 'reported' || value === 'declared' || value === 'default'
+}
+
+/** The evidence a digest carries for the content- and window-dependent dimensions. */
+export function evidenceOf(digest: SessionDigest): DimensionEvidence {
+  return { bucketParts: digest.bucketParts, windowSources: digest.windowSources }
 }
 
 /**
@@ -116,10 +157,13 @@ export function digestSessionPayloads(payloads: Iterable<AsadSessionPayload>): S
     totalDefinedTools: 0,
     totalInvokedTools: 0,
     subagentSessions: 0,
+    bucketParts: new Set(),
+    windowSources: new Set(),
   }
 
   for (const payload of payloads) {
     digest.count += 1
+    collectBucketParts(payload, digest.bucketParts)
 
     // Context pressure: the peak of a session's per-turn pressures.
     // Pressures measured against the guessed 200,000 default window are
@@ -127,13 +171,20 @@ export function digestSessionPayloads(payloads: Iterable<AsadSessionPayload>): S
     // unreported denominator presented as harness pressure is the same
     // fabrication the compaction detector stopped emitting.
     const context = payload.context
-    const windowUnknown = (context as { contextLimitSource?: string } | undefined)?.contextLimitSource === 'default'
+    const windowSource = (context as { contextLimitSource?: unknown } | undefined)?.contextLimitSource
+    if (isWindowSource(windowSource)) digest.windowSources.add(windowSource)
+    const windowUnknown = windowSource === 'default'
     if (windowUnknown) digest.unknownWindowSessions += 1
     if (context && context.measurable === true && !windowUnknown && Array.isArray(context.turns) && context.turns.length > 0) {
       const pressures = context.turns
         .map((t: unknown) => (t as { pressure?: number })?.pressure)
         .filter((pressure: unknown): pressure is number => typeof pressure === 'number' && Number.isFinite(pressure))
-      if (pressures.length > 0) digest.peakPressures.push(Math.max(...pressures))
+      if (pressures.length > 0) {
+        digest.peakPressures.push(Math.max(...pressures))
+        // A declared window is harness configuration, not telemetry (D5):
+        // pressure against it is derived, never measured.
+        if (windowSource === 'declared') digest.anyDerived = true
+      }
       if (context.derivedCounts) digest.anyDerived = true
     } else if (!windowUnknown && Array.isArray(payload.turns) && payload.turns.length > 0) {
       // Legacy fallback path: pressures can only be derived when the payload
@@ -282,7 +333,8 @@ export function assembleRollup(
       ? `for harness "${input.scope.harness}"`
       : `for run "${input.scope.runId}"`
 
-  const fieldCoverage = coverageFor(harness)
+  const evidence = evidenceOf(digest)
+  const fieldCoverage = coverageFor(harness, evidence)
   const measurability: Record<string, MetricAvailability> = {}
 
   // Case 1: Zero recorded runs/sessions.
@@ -331,7 +383,7 @@ export function assembleRollup(
   // 1. Context Pressure (Median & P95)
   let contextPressureMedian: number | null = null
   let contextPressureP95: number | null = null
-  const pressureAvail = harnessDimensionAvailability(harness, 'context_pressure')
+  const pressureAvail = harnessDimensionAvailability(harness, 'context_pressure', evidence)
 
   if (isNotMeasurable(pressureAvail)) {
     contextPressureMedian = null
@@ -341,7 +393,7 @@ export function assembleRollup(
     measurability['context_pressure_p95'] = pressureAvail
   } else {
     const peakPressures = digest.peakPressures
-    const anyDerived = digest.anyDerived
+    const anyDerived = digest.anyDerived || pressureAvail === 'derived'
 
     if (peakPressures.length > 0) {
       peakPressures.sort((a, b) => a - b)
@@ -389,7 +441,7 @@ export function assembleRollup(
 
   // 3. Tool Yield
   let toolYield: number | null = null
-  const toolAvail = harnessDimensionAvailability(harness, 'tool_yield')
+  const toolAvail = harnessDimensionAvailability(harness, 'tool_yield', evidence)
 
   if (isNotMeasurable(toolAvail)) {
     toolYield = null
