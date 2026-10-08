@@ -716,8 +716,8 @@ export function ContextDoctor({
     queryFn: () => fetchRuns(),
   })
 
-  // Headline findings across the entire workspace (top-5 card below). The
-  // query fetches a full page; the card renders five via `maxItems`.
+  // Headline findings across the entire workspace. The query fetches a full
+  // page; the card keeps four on screen and scrolls the rest.
   const { data: headlineData, isLoading: loadingFindings } = useQuery({
     queryKey: ['kyber-findings-workspace'],
     queryFn: () => fetchFindings({ limit: FINDINGS_PAGE_SIZE }),
@@ -871,7 +871,6 @@ export function ContextDoctor({
       ) : (
         <FindingList
           findings={headline}
-          maxItems={5}
           title="Highest-Leverage Workspace Findings"
           description="Ranked by estimated waste, outcome risk, and confidence. Deterministic evidence beats inferred claims."
           onSelectFinding={onSelectFinding}
