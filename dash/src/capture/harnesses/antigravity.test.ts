@@ -1,17 +1,10 @@
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
+import { snapshotFile } from '../file-snapshot.js'
 import { runCapture } from '../index.js'
 import { antigravityHarness } from './antigravity.js'
 
@@ -104,8 +97,7 @@ describe('antigravity capture writer (P2.6, status-only bridge route)', () => {
   it.skipIf(process.platform === 'win32')('enable and disable write nothing under a temporary HOME', async () => {
     const home = makeHome()
     const settings = installBridgeLayout(home).settings
-    const before = readFileSync(settings, 'utf8')
-    const mtimeBefore = statSync(settings).mtimeMs
+    const before = snapshotFile(settings)
 
     const enabled = await runCapture('enable', {
       homeDir: home,
@@ -114,8 +106,9 @@ describe('antigravity capture writer (P2.6, status-only bridge route)', () => {
     })
     expect(enabled.exitCode).toBe(0)
     expect(enabled.stdout).not.toMatch(/not yet supported/i)
-    expect(readFileSync(settings, 'utf8')).toBe(before)
-    expect(statSync(settings).mtimeMs).toBe(mtimeBefore)
+    const afterEnable = snapshotFile(settings)
+    expect(afterEnable.text).toBe(before.text)
+    expect(afterEnable.mtimeMs).toBe(before.mtimeMs)
 
     const disabled = await runCapture('disable', {
       homeDir: home,
@@ -124,7 +117,7 @@ describe('antigravity capture writer (P2.6, status-only bridge route)', () => {
     })
     expect(disabled.exitCode).toBe(0)
     expect(disabled.stdout).not.toMatch(/not yet supported/i)
-    expect(readFileSync(settings, 'utf8')).toBe(before)
+    expect(snapshotFile(settings).text).toBe(before.text)
 
     const receiptPath = join(home, '.kyberdash', 'capture-receipt.json')
     expect(existsSync(receiptPath)).toBe(false)

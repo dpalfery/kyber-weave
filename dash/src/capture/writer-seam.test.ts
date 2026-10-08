@@ -1,16 +1,10 @@
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+import { snapshotFile } from './file-snapshot.js'
 
 import { readJsonKeys } from './edit-json.js'
 import { runCapture } from './index.js'
@@ -440,8 +434,8 @@ describe('capture writer declaration seam (P2.W)', () => {
         const rcInitial = '# synthetic shell rc — must stay untouched\n'
         writeFileSync(zshrc, rcInitial)
         writeFileSync(bashrc, rcInitial)
-        const zshrcMtimeBefore = statSync(zshrc).mtimeMs
-        const bashrcMtimeBefore = statSync(bashrc).mtimeMs
+        const zshrcBefore = snapshotFile(zshrc)
+        const bashrcBefore = snapshotFile(bashrc)
 
         const status = await runCapture('status', {
           homeDir: home,
@@ -473,10 +467,12 @@ describe('capture writer declaration seam (P2.W)', () => {
         })
         expect(disabled.exitCode).toBe(0)
 
-        expect(readFileSync(zshrc, 'utf8')).toBe(rcInitial)
-        expect(readFileSync(bashrc, 'utf8')).toBe(rcInitial)
-        expect(statSync(zshrc).mtimeMs).toBe(zshrcMtimeBefore)
-        expect(statSync(bashrc).mtimeMs).toBe(bashrcMtimeBefore)
+        const zshrcAfter = snapshotFile(zshrc)
+        const bashrcAfter = snapshotFile(bashrc)
+        expect(zshrcAfter.text).toBe(rcInitial)
+        expect(bashrcAfter.text).toBe(rcInitial)
+        expect(zshrcAfter.mtimeMs).toBe(zshrcBefore.mtimeMs)
+        expect(bashrcAfter.mtimeMs).toBe(bashrcBefore.mtimeMs)
       },
     )
   })

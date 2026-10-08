@@ -280,11 +280,20 @@ describe('capture status and receiver liveness', () => {
     expect(existsSync(join(home, 'Library', 'LaunchAgents'))).toBe(false)
   })
 
-  it('reports pending-discovery harnesses as not yet supported', async () => {
+  it('reports concrete registry status instead of a "not yet supported" stub', async () => {
     const home = makeHome()
     const result = await runCapture('status', { homeDir: home, fetchHealth: NO_LISTENER })
     expect(result.exitCode).toBe(0)
-    expect(result.stdout).toMatch(/not yet supported/i)
+    expect(result.stdout).not.toMatch(/not yet supported/i)
+    expect(result.stdout).toContain('harness copilot (Copilot)')
+    expect(result.stdout).toContain('harness claude-code (Claude Code)')
+    expect(result.stdout).toContain('harness codex (Codex)')
+    expect(result.stdout).toContain('harness opencode (OpenCode)')
+    expect(result.stdout).toContain('harness pi (Pi)')
+    expect(result.stdout).toContain('harness antigravity (Antigravity)')
+    expect(result.stdout).toContain('no [otel] table is present; coverage comes from session files')
+    expect(result.stdout).toContain('statusline bridge')
+    expect(result.stdout).toContain('declaredContextWindow')
   })
 })
 

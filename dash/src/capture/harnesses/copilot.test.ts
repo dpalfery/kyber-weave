@@ -1,8 +1,10 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+import { snapshotFile } from '../file-snapshot.js'
 
 import { readJsonKeys } from '../edit-json.js'
 import { runCapture } from '../index.js'
@@ -291,8 +293,8 @@ describe('copilot capture writer (P2.1b)', () => {
       const rcInitial = '# synthetic shell rc — must stay untouched\n'
       writeFileSync(zshrc, rcInitial)
       writeFileSync(zshenv, rcInitial)
-      const zshrcMtimeBefore = statSync(zshrc).mtimeMs
-      const zshenvMtimeBefore = statSync(zshenv).mtimeMs
+      const zshrcBefore = snapshotFile(zshrc)
+      const zshenvBefore = snapshotFile(zshenv)
 
       const enabled = await runCapture('enable', {
         homeDir: home,
@@ -308,10 +310,12 @@ describe('copilot capture writer (P2.1b)', () => {
       })
       expect(disabled.exitCode).toBe(0)
 
-      expect(readFileSync(zshrc, 'utf8')).toBe(rcInitial)
-      expect(readFileSync(zshenv, 'utf8')).toBe(rcInitial)
-      expect(statSync(zshrc).mtimeMs).toBe(zshrcMtimeBefore)
-      expect(statSync(zshenv).mtimeMs).toBe(zshenvMtimeBefore)
+      const zshrcAfter = snapshotFile(zshrc)
+      const zshenvAfter = snapshotFile(zshenv)
+      expect(zshrcAfter.text).toBe(rcInitial)
+      expect(zshenvAfter.text).toBe(rcInitial)
+      expect(zshrcAfter.mtimeMs).toBe(zshrcBefore.mtimeMs)
+      expect(zshenvAfter.mtimeMs).toBe(zshenvBefore.mtimeMs)
     })
   })
 

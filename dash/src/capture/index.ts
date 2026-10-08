@@ -12,9 +12,10 @@
 // core reads the document first, inserts the key only when it is absent, and
 // leaves a present one out of the receipt. The harness stays a declaration,
 // not a second editor. Status can report declared warnings and a process-env
-// snippet without writing either. The six registry writers are
-// pending-discovery stubs: they report "not yet supported" and are never
-// written. Callers (and tests) may inject managed writers;
+// snippet without writing either. The registry is mixed: managed writers are
+// written on enable and restored on disable, while pending ones (codex,
+// antigravity) report their own reason and are never written. Callers (and
+// tests) may inject managed writers;
 // `enable`/`disable`/`status` treat both kinds uniformly.
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'

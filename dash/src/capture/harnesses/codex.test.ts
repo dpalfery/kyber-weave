@@ -1,17 +1,10 @@
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
+import { snapshotFile } from '../file-snapshot.js'
 import { runCapture } from '../index.js'
 import { codexHarness } from './codex.js'
 
@@ -89,8 +82,7 @@ describe('codex capture writer (P2.3, status-only)', () => {
 
       const homeExisting = makeHome()
       const existingPath = writeCodexConfig(homeExisting, CONFIG_WITHOUT_OTEL)
-      const before = readFileSync(existingPath, 'utf8')
-      const mtimeBefore = statSync(existingPath).mtimeMs
+      const before = snapshotFile(existingPath)
 
       const enabledExisting = await runCapture('enable', {
         homeDir: homeExisting,
@@ -99,8 +91,9 @@ describe('codex capture writer (P2.3, status-only)', () => {
       })
       expect(enabledExisting.exitCode).toBe(0)
       expect(enabledExisting.stdout).not.toMatch(/not yet supported/i)
-      expect(readFileSync(existingPath, 'utf8')).toBe(before)
-      expect(statSync(existingPath).mtimeMs).toBe(mtimeBefore)
+      const afterEnable = snapshotFile(existingPath)
+      expect(afterEnable.text).toBe(before.text)
+      expect(afterEnable.mtimeMs).toBe(before.mtimeMs)
 
       const receiptPath = join(homeExisting, '.kyberdash', 'capture-receipt.json')
       expect(existsSync(receiptPath)).toBe(false)
@@ -112,8 +105,7 @@ describe('codex capture writer (P2.3, status-only)', () => {
     async () => {
       const home = makeHome()
       const configPath = writeCodexConfig(home, CONFIG_WITHOUT_OTEL)
-      const before = readFileSync(configPath, 'utf8')
-      const mtimeBefore = statSync(configPath).mtimeMs
+      const before = snapshotFile(configPath)
 
       const disabled = await runCapture('disable', {
         homeDir: home,
@@ -123,8 +115,9 @@ describe('codex capture writer (P2.3, status-only)', () => {
 
       expect(disabled.exitCode).toBe(0)
       expect(disabled.stdout).not.toMatch(/not yet supported/i)
-      expect(readFileSync(configPath, 'utf8')).toBe(before)
-      expect(statSync(configPath).mtimeMs).toBe(mtimeBefore)
+      const after = snapshotFile(configPath)
+      expect(after.text).toBe(before.text)
+      expect(after.mtimeMs).toBe(before.mtimeMs)
     },
   )
 
