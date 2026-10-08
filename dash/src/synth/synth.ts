@@ -383,6 +383,23 @@ export function costBlockFor(call: ParsedProviderCall): CostBlock {
  * session trace — a parsed call carries no parent evidence, and no parent is
  * invented (R4.3's rule, applied on the way in rather than at the end).
  */
+/**
+ * True when the call is a Copilot shutdown rollup leg (dash/src/providers/copilot.ts:
+ * dedup key `copilot:<sid>:shutdown:<model>:<n>`).
+ *
+ * Output tokens are intentionally excluded (0) from shutdown rollups to avoid
+ * double-counting with per-turn assistant.message events. Honest unobservability
+ * declares output as not measurable rather than a measured zero so reasoning
+ * can be surfaced without violating the subset invariant (issue #241).
+ */
+export function isCopilotShutdownRollup(call: ParsedProviderCall): boolean {
+  return (
+    call.provider === 'copilot' &&
+    call.outputTokens === 0 &&
+    call.deduplicationKey.includes(':shutdown:')
+  )
+}
+
 export function synthesizeCall(
   call: ParsedProviderCall,
   conventions: ReadonlyMap<string, TokenConvention> = PROVIDER_CONVENTIONS,
@@ -422,6 +439,17 @@ export function synthesizeCall(
         ...(readerTurn.isCorrection !== undefined ? { isCorrection: readerTurn.isCorrection, correctionRule: readerTurn.correctionRule } : {}),
       }
 
+  const measurability = {
+    ...measurabilityFor(call.provider),
+    ...(isCopilotShutdownRollup(call)
+      ? {
+          output: notMeasurable(
+            'Output tokens are excluded from Copilot shutdown rollups to avoid double-counting per-turn requests.',
+          ),
+        }
+      : {}),
+  }
+
   return {
     spanId: spanIdFor(call, envelope, ordinal),
     traceId: traceIdFor(call, envelope),
@@ -448,7 +476,7 @@ export function synthesizeCall(
     content: readerTurn === undefined ? {} : contentFromParts(readerTurn.parts),
     ...(readerTurn !== undefined ? { parts: readerTurn.parts } : {}),
     cost: costBlockFor(call),
-    measurability: measurabilityFor(call.provider),
+    measurability,
     raw: { ...rawCall, provenance },
   }
 }

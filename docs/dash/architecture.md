@@ -369,9 +369,12 @@ input that supposedly contains it — the counters are exclusive-shaped and conv
 way rather than being stored as negative fresh or clamped to zero. File-side exclusive
 reasoning (Antigravity-cli thinking counted separately from response) is folded into
 `output` so the subset invariant holds; Copilot rows that carry reasoning with output
-absent stay unfolded so that absence stays visible. A decomposition that is still
-negative, or that does not reconcile to the reported total, rejects the record and
-writes a problem rather than storing it (R4.4).
+absent stay unfolded so that absence stays visible. Copilot shutdown rollups carry output 0
+by design (excluded to prevent double-counting per-turn calls) while reasoning rides alongside;
+these rows declare `output` as `not_measurable` on `measurability`, allowing `validateTokens`
+to surface measured reasoning without manufacturing output or failing the subset invariant
+(issue #241). A decomposition that is still negative, or that does not reconcile to the reported
+total, rejects the record and writes a problem rather than storing it (R4.4).
 
 ### `CostBlock` and cost basis
 
