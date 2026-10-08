@@ -95,6 +95,8 @@ describe('capture writer seam — dotted literal root property (P2.W)', () => {
     const literalRoot = readJsonKeys(written, [LITERAL_ROOT])[LITERAL_ROOT]
     expect(literalRoot.present).toBe(true)
     expect(isRecord(literalRoot.value)).toBe(true)
+    // `expect` does not narrow. The guard exists so `.enabled` / `.protocol` typecheck.
+    if (!isRecord(literalRoot.value)) throw new Error('literal root value must be an object')
     expect(literalRoot.value.enabled).toBe(true)
     expect(literalRoot.value.protocol).toBe(PROTOCOL_VALUE)
 
