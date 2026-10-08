@@ -112,6 +112,37 @@ describe('declared context-window provenance (T2)', () => {
     expect(finding.payload?.contextLimitSource).toBe('declared')
   })
 
+  it('ranks a declared-window finding below the same-peak reported-window finding (D12, ADR 0013 D6)', () => {
+    const reportedTurn = (spanId: string, reportedInput: number) =>
+      turn(spanId, [], {
+        op: 'llm.invoke',
+        tokens: tokens({ freshInput: reportedInput, reportedInput }),
+        raw: { contextWindow: 100_000 },
+      })
+    const declared = detectCompactionHazard({
+      records: [declaredTurn('decl-early', 100_000, 50_000), declaredTurn('decl-peak', 100_000, 90_000)],
+    })
+    const reported = detectCompactionHazard({
+      records: [reportedTurn('rep-early', 50_000), reportedTurn('rep-peak', 90_000)],
+    })
+    expect(declared).toHaveLength(1)
+    expect(reported).toHaveLength(1)
+    const declaredFinding = declared[0]!
+    const reportedFinding = reported[0]!
+    expect(declaredFinding.confidence).not.toBe('deterministic')
+    expect(declaredFinding.rankScore).toBeLessThan(reportedFinding.rankScore!)
+  })
+
+  it('names the declared window in the basis when the peak exceeds it', () => {
+    const findings = detectCompactionHazard({
+      records: [declaredTurn('decl-early', 100_000, 50_000), declaredTurn('decl-over', 100_000, 120_000)],
+    })
+    expect(findings).toHaveLength(1)
+    const finding = findings[0]!
+    expect(finding.confidenceBasis).not.toContain('reported context window')
+    expect(finding.confidenceBasis).toMatch(/declared/i)
+  })
+
   it('still yields no finding for a default-window session', () => {
     const bare = (spanId: string, reportedInput: number) =>
       turn(spanId, [], {
