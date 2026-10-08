@@ -8,10 +8,12 @@
 //
 // The rule is pattern-based rather than a fixed list so Phase 2 harnesses
 // stay out of this file: any `email` key, any key ending in `account_id` or
-// `account_uuid` (in any separator spelling), and any `id`/`uuid` key under
-// an identity principal (`user`, `enduser`, `org`, `organization`,
-// `account`) is identity. `session.id`, `conversation.id` and the whole
-// `gen_ai.*` namespace are retained — they are correlation and usage
+// `account_uuid` (in any separator spelling), and any `id`/`uuid`/`guid` key
+// directly under an identity principal (`user`, `enduser`, `org`,
+// `organization`, `account`) is identity. A principal elsewhere in the key
+// (`user.message.id`, `account.session.id`) is a correlation key, not
+// identity. `session.id`, `conversation.id` and the whole `gen_ai.*`
+// namespace are retained — they are correlation and usage
 // evidence, not identity.
 
 /** Attribute keys that are correlation, never identity. */
@@ -35,14 +37,33 @@ const IDENTITY_PRINCIPALS = new Set([
 const IDENTITY_SUFFIXES = new Set(['id', 'uuid', 'guid'])
 
 function tokensOf(key: string): string[] {
-  return key.toLowerCase().split(/[._-]+/).filter((token) => token.length > 0)
+  const tokens: string[] = []
+  for (const part of key.split(/[._-]+/)) {
+    // A camelCase boundary is a separator too (`userId` is `user.id` in
+    // another spelling): split a lower-to-upper step and an acronym-to-word
+    // step (`userID`, `organizationId`).
+    for (const token of part.split(/(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])/)) {
+      const lower = token.toLowerCase()
+      if (lower.length > 0) tokens.push(lower)
+    }
+  }
+  return tokens
 }
 
 /**
  * True when an attribute key carries account identity. Matching is
- * case-insensitive and separator-insensitive (`user.id`, `user_id` and
- * `userId` are the same key shape); `gen_ai.*` and the retained
- * correlation keys never match.
+ * case-insensitive and treats `.`, `_`, `-` and camelCase boundaries as the
+ * same separator (`user.id`, `user_id` and `userId` are the same key shape):
+ * any key whose final segment is `email` (plus the bare `email` key and
+ * `userEmail`-style fusions behind an identity principal), any key whose
+ * fused spelling ends in `account_id` / `account_uuid` / `account_guid`
+ * (`acme.accountId`), and any key whose final segment is `id` / `uuid` /
+ * `guid` directly under an identity principal (`user`, `enduser`, `org`,
+ * `organization`, `account` and plurals). A principal elsewhere in the key
+ * is not enough (`user.message.id`, `account.session.id` stay), and a
+ * principal fused to its suffix with no separator or camel boundary
+ * (`userid`) is not matched. `gen_ai.*` and the retained correlation keys
+ * never match.
  */
 export function isIdentityAttribute(key: string): boolean {
   const lower = key.toLowerCase()
@@ -73,14 +94,13 @@ export function isIdentityAttribute(key: string): boolean {
   }
 
   // `user.id`, `organization.id`, `enduser.id` and their org/account id/uuid
-  // variants, in dotted, underscored or camel spelling.
+  // variants, in dotted, underscored, dashed or camel spelling. The principal
+  // must sit directly before the trailing id: `user.message.id` names a
+  // message, `account.session.id` names a session — neither names an
+  // account, so neither is stripped.
   if (IDENTITY_SUFFIXES.has(last)) {
-    if (tokens.some((token) => IDENTITY_PRINCIPALS.has(token))) return true
-    for (const principal of IDENTITY_PRINCIPALS) {
-      for (const suffix of IDENTITY_SUFFIXES) {
-        if (compact === `${principal}${suffix}`) return true
-      }
-    }
+    const head = tokens[tokens.length - 2]
+    if (head !== undefined && IDENTITY_PRINCIPALS.has(head)) return true
   }
 
   return false

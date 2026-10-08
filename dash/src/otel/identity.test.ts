@@ -306,3 +306,34 @@ describe('receiver near-miss retention (T4 rework 1)', () => {
     }
   })
 })
+
+// CamelCase identity shapes (T4 rework 1, item 3): per D4 ("and similar"),
+// `userId` is the same key as `user.id`, so it is stripped; `sessionId` is
+// the same key as `session.id`, so it is retained.
+
+const CAMEL_IDENTITY_KEYS = [
+  'userId',
+  'orgId',
+  'organizationId',
+  'enduserId',
+  'accountId',
+  'userEmail',
+]
+
+describe('receiver camelCase identity shapes (T4 rework 1)', () => {
+  it('strips camelCase identity keys through decode', () => {
+    const attributes = Object.fromEntries(CAMEL_IDENTITY_KEYS.map((key) => [key, `synth-${key}`]))
+    const spans = decodeOtlpJson(traceBody(attributes, {}))
+    expect(spans).toHaveLength(1)
+    for (const key of CAMEL_IDENTITY_KEYS) {
+      expect(spans[0]?.attributes, `camelCase identity ${key}`).not.toHaveProperty(key)
+    }
+  })
+
+  it('retains camelCase correlation keys through decode', () => {
+    const spans = decodeOtlpJson(traceBody({ sessionId: 'synth-session-1', conversationId: 'synth-conversation-1' }, {}))
+    expect(spans).toHaveLength(1)
+    expect(spans[0]?.attributes['sessionId']).toBe('synth-session-1')
+    expect(spans[0]?.attributes['conversationId']).toBe('synth-conversation-1')
+  })
+})
