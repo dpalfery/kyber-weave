@@ -43,6 +43,7 @@ public sealed partial class HotshotGoldenContractTests
         "code-reviewer",      // in-process council when the harness gives subagents no agent tool (ADR 0025)
         "conductor",
         "csharp-dev",         // JEV checkpoints and iteration circuit-breaker (issue #249)
+        "docs-dev",           // Plan closeout decision mapping table and waiver conventions (issue #279)
         "github-devops",      // JEV checkpoints and iteration circuit-breaker (issue #249)
         "product-owner",
         "task-reviewer",

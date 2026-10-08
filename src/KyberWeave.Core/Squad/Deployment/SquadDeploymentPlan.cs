@@ -622,15 +622,19 @@ public sealed class SquadDeploymentPlan
 
     /// <summary>
     /// Lists every rendered path that already exists at its resolved physical location
-    /// with bytes that do not match the render. <c>squad doctor --global</c> surfaces
-    /// the whole set as warnings; <see cref="CreateInstall"/> still throws on the first
-    /// via the existing unmanaged-collision rule.
+    /// with bytes that do not match the render. Files recorded as managed in the
+    /// deployment's receipt (or sibling global receipts) are excluded from collision
+    /// reporting. <c>squad doctor --global</c> surfaces the whole set as warnings;
+    /// <see cref="CreateInstall"/> still throws on the first via the existing
+    /// unmanaged-collision rule.
     /// </summary>
     public static IReadOnlyList<SquadUnmanagedPathCollision> CollectUnmanagedCollisions(
         string targetRoot,
         SquadDeploymentScope scope,
         IReadOnlyList<SquadDeploymentFile> renderedFiles,
-        ISquadGlobalRootResolver? globalRoots)
+        ISquadGlobalRootResolver? globalRoots,
+        SquadReceipt? receipt = null,
+        IReadOnlyList<SquadReceipt>? siblingGlobalReceipts = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(targetRoot);
         ArgumentNullException.ThrowIfNull(renderedFiles);
@@ -641,9 +645,35 @@ public sealed class SquadDeploymentPlan
             scope,
             globalRoots,
             renderedFiles);
+
+        HashSet<string> managedIdentities = new(StringComparer.Ordinal);
+        if (receipt is not null)
+        {
+            foreach (SquadOwnedFile file in receipt.Files)
+            {
+                managedIdentities.Add(DeployedFileIdentity(file.Target, SquadPathPolicy.NormalizeRelativePath(file.RelativePath)));
+            }
+        }
+
+        if (siblingGlobalReceipts is not null)
+        {
+            foreach (SquadReceipt sibling in siblingGlobalReceipts)
+            {
+                foreach (SquadOwnedFile file in sibling.Files)
+                {
+                    managedIdentities.Add(DeployedFileIdentity(file.Target, SquadPathPolicy.NormalizeRelativePath(file.RelativePath)));
+                }
+            }
+        }
+
         List<SquadUnmanagedPathCollision> collisions = [];
         foreach (NormalizedDeploymentFile rendered in normalizedFiles)
         {
+            if (managedIdentities.Contains(DeployedFileIdentity(rendered.File.Target, rendered.File.RelativePath)))
+            {
+                continue;
+            }
+
             if (Directory.Exists(rendered.FullPath))
             {
                 collisions.Add(ToCollision(rendered));
