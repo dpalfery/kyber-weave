@@ -290,7 +290,7 @@ describe('refresh pipeline: parser contract version & checkpoint invalidation', 
       store.close()
     }
   })
-  it("scopes parserContractVersion bumps to Claude (4), Codex/Kilo (2), and leaves others at 1", () => {
+  it("scopes parserContractVersion bumps to Claude (4), Codex/Kilo/Cursor/Pi (2), and leaves others at 1", () => {
     const claudeCli = descriptorFor("claude-cli")
     const claudeDesktop = descriptorFor("claude-desktop")
     expect(claudeCli?.parserContractVersion).toBe("4")
@@ -298,12 +298,14 @@ describe('refresh pipeline: parser contract version & checkpoint invalidation', 
 
     const codex = descriptorFor("codex-cli")
     const kilo = descriptorFor("kilo-shared-runtime")
-    const copilot = descriptorFor("copilot-cli")
     const cursor = descriptorFor("cursor")
+    const pi = descriptorFor("pi")
+    const copilot = descriptorFor("copilot-cli")
     expect(codex?.parserContractVersion).toBe("2")
     expect(kilo?.parserContractVersion).toBe("2")
+    expect(cursor?.parserContractVersion).toBe("2")
+    expect(pi?.parserContractVersion).toBe("2")
     expect(copilot?.parserContractVersion).toBe("1")
-    expect(cursor?.parserContractVersion).toBe("1")
   })
 
   it("re-reads transcript files and advances parserContractVersion from 2 to 4 for claude-desktop (#232)", async () => {
