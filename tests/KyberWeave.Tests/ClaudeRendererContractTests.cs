@@ -576,6 +576,94 @@ public sealed class ClaudeRendererContractTests : IDisposable
     }
 
     /// <summary>
+    /// Pins the Claude model of the <c>product-owner</c> planning specialist by value (issue #286).
+    /// Resolves to <c>opus</c> on Claude, providing exact parity with <c>architect</c>.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_Claude_ProductOwnerRunsOnArchitectModel()
+    {
+        SquadRendererRegistry registry = new([new ClaudeRenderer()]);
+        SquadRenderRequest request = new(
+            SourceDirectory: ProductRoot,
+            Targets: [SquadTarget.Claude],
+            Scope: SquadDeploymentScope.Project);
+
+        SquadRenderResult result = await registry.RenderAsync(request);
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+        SquadDeploymentFile file = Assert.Single(
+            result.Files,
+            f => f.RelativePath == ".claude/agents/product-owner.md");
+        (YamlMappingNode frontmatter, _) = SplitFrontmatter(
+            Encoding.UTF8.GetString(file.Content.Span),
+            "product-owner");
+        Assert.Equal("opus", RequireScalar(frontmatter, "model", "product-owner"));
+    }
+
+    /// <summary>
+    /// Pins the Claude model of the <c>general</c>-profile workers by value (issue #286).
+    /// When <c>general.claude</c> is raised from <c>haiku</c> to <c>sonnet</c>, these agents
+    /// execute on Sonnet without leaking the architect profile.
+    /// </summary>
+    [Theory]
+    [InlineData("dal-dev")]
+    [InlineData("github-devops")]
+    [InlineData("pulumi-dev")]
+    [InlineData("tauri-dev")]
+    public async Task RenderAsync_Claude_GeneralProfileWorkersRunOnSonnet(string agent)
+    {
+        SquadRendererRegistry registry = new([new ClaudeRenderer()]);
+        SquadRenderRequest request = new(
+            SourceDirectory: ProductRoot,
+            Targets: [SquadTarget.Claude],
+            Scope: SquadDeploymentScope.Project);
+
+        SquadRenderResult result = await registry.RenderAsync(request);
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+        SquadDeploymentFile file = Assert.Single(
+            result.Files,
+            f => f.RelativePath == $".claude/agents/{agent}.md");
+        (YamlMappingNode frontmatter, _) = SplitFrontmatter(
+            Encoding.UTF8.GetString(file.Content.Span),
+            agent);
+        Assert.Equal("sonnet", RequireScalar(frontmatter, "model", agent));
+    }
+
+    /// <summary>
+    /// Asserts that no agent in the rendered Claude squad uses <c>haiku</c> (issue #286).
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_Claude_NoAgentRunsOnHaiku()
+    {
+        SquadRendererRegistry registry = new([new ClaudeRenderer()]);
+        SquadRenderRequest request = new(
+            SourceDirectory: ProductRoot,
+            Targets: [SquadTarget.Claude],
+            Scope: SquadDeploymentScope.Project);
+
+        SquadRenderResult result = await registry.RenderAsync(request);
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+        IEnumerable<SquadDeploymentFile> agentFiles = result.Files
+            .Where(f => f.RelativePath.StartsWith(".claude/agents/", StringComparison.Ordinal)
+                && f.RelativePath.EndsWith(".md", StringComparison.Ordinal)
+                && f.RelativePath.Count(c => c == '/') == 2);
+
+        foreach (SquadDeploymentFile file in agentFiles)
+        {
+            (YamlMappingNode frontmatter, _) = SplitFrontmatter(
+                Encoding.UTF8.GetString(file.Content.Span),
+                file.RelativePath);
+            string model = RequireScalar(frontmatter, "model", file.RelativePath);
+            Assert.False(
+                model.Contains("haiku", StringComparison.OrdinalIgnoreCase),
+                $"Agent '{file.RelativePath}' in Claude render unexpectedly has model '{model}'.");
+        }
+    }
+
+
+    /// <summary>
     /// Row (b): Project scope renders the primary agent as both a subagent and an entry-point
     /// skill, each with its resource closure, under the same degradation records.
     /// </summary>
