@@ -7,7 +7,7 @@
 // derived one marks the result derived. A harness with zero collectable sessions appears in
 // the catalogued list with a stated reason and no computed dimensions.
 
-import type { ContextLimitSource } from './context-window.js'
+import { isUnnamedContextWindow, type ContextLimitSource } from './context-window.js'
 import {
   harnessDimensionAvailability,
   isExcludedHarnessIdentity,
@@ -191,7 +191,9 @@ export function digestSessionPayloads(payloads: Iterable<AsadSessionPayload>): S
     if (isWindowSource(windowSource) && positiveFiniteLimit(windowClaim?.contextLimit)) {
       digest.windowSources.add(windowSource)
     }
-    const windowUnknown = windowSource === 'default'
+    const windowUnknown = isUnnamedContextWindow(
+      typeof windowSource === 'string' ? windowSource : undefined,
+    )
     if (windowUnknown) digest.unknownWindowSessions += 1
     if (context && context.measurable === true && !windowUnknown && Array.isArray(context.turns) && context.turns.length > 0) {
       const pressures = context.turns

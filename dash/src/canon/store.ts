@@ -2405,7 +2405,9 @@ export class CanonStore {
    * not counted either way.
    */
   countUnknownWindowSessions(harness?: string): number {
-    const conditions = [`json_extract(payload, '$.context.contextLimitSource') = 'default'`]
+    const conditions = [
+      `json_extract(payload, '$.context.contextLimitSource') IN ('default', 'absent')`,
+    ]
     const params: string[] = []
     if (harness !== undefined && harness !== '') {
       conditions.push('harness = ?')

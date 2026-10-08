@@ -224,9 +224,13 @@ function statusLines(
       lines.push(`  config: ${path} (${found ? 'found' : 'missing'})`)
       const described = writer.describeStatus?.(home)
       if (described !== undefined && described.length > 0) {
-        // Home-dependent status (Pi names the loaded extension). The static
-        // reason stays the enable/disable skip line, so this path never writes.
-        lines.push(...described)
+        // Replaces the static reason. Pi returns lines that are already
+        // indented; Antigravity returns bare lines, which get the same
+        // two-space prefix as the rest of status. enable and disable never
+        // call this, so a status-only route cannot grow a receipt.
+        for (const line of described) {
+          lines.push(line.startsWith('  ') ? line : `  ${line}`)
+        }
       } else {
         lines.push(`  ${writer.reason}`)
       }

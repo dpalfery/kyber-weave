@@ -13,7 +13,7 @@
 
 import crypto from 'node:crypto'
 import { normalizeWhitespace, hashNormalized } from './signals.js'
-import { contextLimitOf, type ContextWindow } from '../canon/context-window.js'
+import { contextLimitOf, isUnnamedContextWindow, type ContextWindow } from '../canon/context-window.js'
 import { canonicalHarnessId, normalizeHarnessName, type SessionIdentities } from '../canon/measurability.js'
 import type { CanonicalRecord } from '../canon/types.js'
 import type { OutcomeBlock } from '../canon/outcome.js'
@@ -1293,7 +1293,10 @@ export function detectCompactionHazard(input: CompactionHazardInput): Finding[] 
     // declared window (D12) or a vendor-catalog window (D15) does fire: the
     // spend is measured, but the percentage against a configured or
     // documented window is inferred, never deterministic.
-    if (window.contextLimitSource === 'default') continue
+    // A bridge span that declared no window (`absent`) is the same refusal as
+    // the 200K placeholder: there is no denominator. Catalog is not consulted
+    // for `absent` — that lookup stays on `default` alone, above.
+    if (isUnnamedContextWindow(window.contextLimitSource)) continue
     const limit = window.contextLimit
     const isDeclaredWindow = window.contextLimitSource === 'declared'
     const isCatalogWindow = window.contextLimitSource === 'catalog'

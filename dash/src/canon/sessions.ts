@@ -18,7 +18,7 @@ import { auxiliarySpend, buildTimeline, subagentSessions } from '../analysis/tim
 import { measuredInput, sumCosts } from './cost.js'
 import { isCopilotHarness, priceCopilotTurn } from './copilot-rates.js'
 import { isPublishedTableHarness, pricePublishedTurn } from './published-pricing.js'
-import { contextLimitOf } from './context-window.js'
+import { contextLimitOf, DEFAULT_CONTEXT_LIMIT } from './context-window.js'
 import { catalogWindowForRecords } from './model-window-catalog.js'
 import { groupByCanonicalHarness, harnessExportsCacheCounter, normalizeHarnessName, surveyFamily } from './measurability.js'
 import { dedupeTwinTurns } from './twin-dedupe.js'
@@ -454,10 +454,14 @@ export function buildSessionRow(
     telemetryWindow.contextLimitSource === 'default' && store !== undefined
       ? (catalogWindowForRecords(records, store) ?? telemetryWindow)
       : telemetryWindow
-  const contextLimit = window.contextLimit
+  // `analyzeContext` rejects a non-positive limit. An absent bridge window
+  // has none: composition still buckets against the placeholder, and the
+  // published payload drops that placeholder so 200K is not stored as the
+  // window (G1-Q2 = (b)).
+  const analysisLimit = window.contextLimit > 0 ? window.contextLimit : DEFAULT_CONTEXT_LIMIT
   const measurability = mergeMeasurability(records)
   const context = analyzeContext(contextTurns, {
-    contextLimit,
+    contextLimit: analysisLimit,
     contextLimitSource: window.contextLimitSource,
     countTokens,
     ...(measurability !== undefined ? { measurability } : {}),
@@ -598,8 +602,27 @@ export function buildSessionRow(
         : {},
     reported_input: unavailableFor(measurability, 'token_usage') ?? reportedInput,
   })
+  const serialized = serializeContext(context)
+  // Drop the analysis placeholder. A stored 200K limit, or a pressure figure
+  // computed against it, would be the default window standing in for a bridge
+  // span that declared none.
+  const publishedContext =
+    window.contextLimitSource === 'absent'
+      ? {
+          ...serialized,
+          contextLimit: 0,
+          ...(serialized.measurable
+            ? {
+                turns: serialized.turns.map((turn) => {
+                  const { pressure: _pressure, headroom: _headroom, ...rest } = turn
+                  return rest
+                }),
+              }
+            : {}),
+        }
+      : serialized
   const contextShape = {
-    ...serializeContext(context),
+    ...publishedContext,
     contextLimitSource: window.contextLimitSource,
     first: contextBucket(analyzedTurns[0], measuredTurns[0]?.tokens.reportedInput ?? 0),
     last: contextBucket(

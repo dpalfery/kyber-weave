@@ -29,9 +29,10 @@ export type PendingHarnessWriter = {
   resolvePath: (home: string) => string
   format: CaptureFileFormat
   /**
-   * Status lines that depend on the home directory. When set, `status`
-   * prints these instead of the static `reason`. `enable` and `disable`
-   * still skip the writer and never write config.
+   * Home-dependent status lines. When set and non-empty, `status` prints
+   * these instead of the static `reason`. Pi names the loaded extension;
+   * Antigravity reports the statusline bridge. `enable` and `disable` do
+   * not call this and never write config.
    */
   describeStatus?: (home: string) => readonly string[]
 }
