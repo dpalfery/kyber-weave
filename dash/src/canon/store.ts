@@ -1516,6 +1516,11 @@ export class CanonStore {
     return row === undefined ? undefined : toRecord(row)
   }
 
+  /** Membership only — no payload decompression or JSON parse. */
+  has(spanId: string): boolean {
+    return this.db.prepare('SELECT 1 FROM records WHERE span_id = ? LIMIT 1').get(spanId) !== undefined
+  }
+
   /**
    * Span ids in storage order. Exposed for passes that must walk the whole
    * corpus without holding it in memory — `listAll` decompresses every raw

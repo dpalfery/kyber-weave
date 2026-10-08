@@ -174,6 +174,19 @@ per-harness table plus a derived summary; diagnostics for `failed`/`partial` row
 stderr without chat content or raw paths. Use a temporary `--db` when experimenting. There is
 no dashboard refresh button.
 
+Parser-contract bumps: each harness-source descriptor carries a
+`parserContractVersion`. When Claude family parsing output changes — for example
+attaching conversation/tool-result parts on Desktop/CLI file-synth records
+([issue #216](https://github.com/dpalfery/kyber-weave/issues/216)) — that version
+advances and the next `dash refresh` treats prior `source_checkpoint` rows as
+stale, re-reads transcript files, and re-synthesizes affected units still
+inside the 14-day content-retention window. Rows older than that floor are
+not rewritten — the same refresh would empty their parts via
+`purgeExpiredContent`. No separate repair command is required; prefer a
+temporary `--db` when validating a bump.
+Capturable versus inherent-empty Claude buckets are recorded in the
+[telemetry inventory](telemetry-inventory.md#claude-desktop-and-cli-file-synth-parts-issue-216).
+
 Coverage window persistence: every refresh run records its window in
 `refresh_run.history_weeks` (schema 15). The value is the `--history-weeks` argument of
 that run (default 2). Rows written before window tracking read as `null`, which surfaces
