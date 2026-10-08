@@ -17,13 +17,15 @@ A plan is open only while it is built. The pull request that finishes it archive
 
 ## Active Plans
 
-None. Pipeline T9 and spine S-docs harvested 2026-09-13 into [dash/architecture.md](../dash/architecture.md), [dash/runbook.md](../dash/runbook.md), [dash/telemetry-inventory.md](../dash/telemetry-inventory.md), [ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md), and [ADR 0018](../adr/0018-kyberdash-content-retention-purge.md). ADRs 0012–0015 remain the spine harvest (0014 notes that `kyber purge-content` was not shipped). Residual risks (T8 live-source coverage, findings client-side harness filter) live on the archived plans — they are not shipped claims.
+None.
+
 
 
 ## Archived Plans
 
 | Plan | Status | Date | Archive Date | Canonical Docs / Harvested ADRs | Goal |
 |---|---|---|---|---|---|
+| [2026-10-05-doctor-receipt-lookup.md](../archive/plans/2026-10-05-doctor-receipt-lookup.md) | Complete | 2026-10-05 | 2026-10-05 | None — bug fix under existing Squad deployment architecture; decisions D1–D4 recorded in the plan | Fix [issue #283](https://github.com/dpalfery/kyber-weave/issues/283): squad doctor --global unmanaged file checks use the same receipt lookup as status to avoid false positive collisions on clean install. Complete: T1–T5 test-first. Archived per KW-DOC-LIFECYCLE-003. |
 | [2026-10-07-issue-302-trivy-npm-cve-bumps.md](../archive/plans/2026-10-07-issue-302-trivy-npm-cve-bumps.md) | Complete | 2026-10-07 | 2026-10-07 | None — no CVE-bump procedure was added and no ADR was required | Fix [issue #302](https://github.com/dpalfery/kyber-weave/issues/302): resolve Trivy CVE-2026-90711 (`proxy-addr` 2.0.7 → 2.0.8) and CVE-2026-104850 (`@modelcontextprotocol/sdk` 1.30.0 → 1.31.0) by a surgical refresh of `dash/package-lock.json` only. Development mode: test-first. No new guard test. Complete: T1 oracle RED (`1.30.0 2.0.7`, exit 1 on `c5b35ec`); T2 oracle GREEN (`1.31.0 2.0.8`, exit 0); `dash/package.json` unchanged; council APPROVE, risk LOW, KW-REVIEW-024, 0 findings. Archived per KW-DOC-LIFECYCLE-003. |
 | [2026-10-05-product-owner-model-alignment.md](../archive/plans/2026-10-05-product-owner-model-alignment.md) | Complete | 2026-10-05 | 2026-10-05 | None — issue #286 fix; models.yml and agent alignment | Align product-owner subagent model profile with architect across all harnesses, remove haiku from Kyber-Squad models, and raise general.claude to sonnet ([issue #286](https://github.com/dpalfery/kyber-weave/issues/286)). Complete: test-first mode. Archived per KW-DOC-LIFECYCLE-003. |
 | [2026-10-04-pr-276-review-findings.md](../archive/plans/2026-10-04-pr-276-review-findings.md) | Complete | 2026-10-04 | 2026-10-04 | [dash/architecture.md](../dash/architecture.md), [dash/telemetry-inventory.md](../dash/telemetry-inventory.md); no ADR — behavior restore + doc alignment under ADR 0009 / ADR 0014 | Fix three [PR #276](https://github.com/dpalfery/kyber-weave/pull/276) review findings on `hal.hermes.cursor/issue-216-claude-desktop-parts`: invert pairing to `positionalPairingUnsafe` (Cursor-only opt-out), align Claude `parseLineUsageInfo` sessionId with file-stem fuse, update architecture + telemetry-inventory. Development mode: test-first. Complete: T1–T6; F1 `5d7fbe5`, F2 `13d2b22`, F3 `e303e65`. Archived per KW-DOC-LIFECYCLE-003. |
