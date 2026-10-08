@@ -419,17 +419,17 @@ public sealed class AnalysisPersistenceTests
         using Process lockProcess = StartSqliteLock(persistence.DatabasePath);
         try
         {
-            Exception? exception = Record.Exception(() => persistence.SaveClaims([Claim("contended-claim")]));
+            Assert.False(lockProcess.HasExited, "sqlite lock fixture exited before SaveClaims ran.");
 
-            if (exception is null)
-            {
-                Assert.Single(persistence.LoadClaims(["contended-claim"]));
-            }
-            else
-            {
-                Assert.IsNotType<InvalidDataException>(exception);
-                Assert.Contains("lock", exception.Message, StringComparison.OrdinalIgnoreCase);
-            }
+            InvalidOperationException exception = Assert.Throws<InvalidOperationException>(
+                () => persistence.SaveClaims([Claim("contended-claim")]));
+
+            Assert.False(lockProcess.HasExited, "sqlite lock fixture exited during SaveClaims.");
+            Assert.IsNotType<InvalidDataException>(exception);
+            Assert.True(
+                exception.Message.Contains("lock", StringComparison.OrdinalIgnoreCase)
+                || exception.Message.Contains("busy", StringComparison.OrdinalIgnoreCase),
+                $"Expected a lock/busy diagnostic, but got: {exception.Message}");
         }
         finally
         {
