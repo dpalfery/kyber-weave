@@ -160,6 +160,8 @@ describe('CanonStore round trip', () => {
 
     store.upsert(stored)
     expect(store.get('span-1')).toEqual(stored)
+    expect(store.has('span-1')).toBe(true)
+    expect(store.has('span-missing')).toBe(false)
   })
 
   it('round-trips a record with no raw payload and no measurability', () => {
