@@ -35,6 +35,8 @@ You do **not** own:
 - CI/CD — that is `github-devops`
 - Client UI — that is `react-dev` / `maui-dev`
 
+Your packet is your whole scope. Do not open files under the directories named by **<plan-index>** and **<specification-index>**. If the packet is insufficient, return a blocker instead of reading the plan or spec.
+
 ## Data layer handoff
 
 `sql-database-architect` owns the schema. `dal-dev` owns `IRepository<T>` implementations and migrations. You consume those interfaces in service classes.

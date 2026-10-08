@@ -6,7 +6,7 @@ This contract is shared by Ready plans and Ready specification task artifacts.
 
 A task is ready only when its declared dependencies are complete, its file or symbol scope does not overlap work in flight, and its development-mode gate is satisfied. Launch every ready task immediately up to the artifact's concurrency bound. Re-evaluate the queue after every completion. Component labels and table order are not barriers.
 
-Track one cold invocation per unit of work. Rework uses the same queue and the same dependency and scope rules.
+Track one cold invocation per unit of work. Rework uses the same queue and the same dependency and scope rules. Each dispatch carries the worker packet as the worker's whole context; a plan or spec path in the packet is routing metadata marked not for reading.
 
 ## Test-first mode
 

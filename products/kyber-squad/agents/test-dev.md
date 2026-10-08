@@ -36,11 +36,13 @@ You do **not** own:
 - Test environment provisioning — that is `pulumi-dev` or `github-devops`
 - Application or UI implementation — `csharp-dev`, `python-dev`, `maui-dev`, and `react-dev` write testable code; they do not author test files
 
+Your packet is your whole scope. Do not open files under the directories named by **<plan-index>** and **<specification-index>**. If the packet is insufficient, return a blocker instead of reading the plan or spec.
+
 ## Workflow
 
 1. Read the path declared as **<test-coding-standard>** before writing any test. When the test is C#, also read **<csharp-coding-standard>**. When the host has declared another language for the files under test, apply that language's coding-standard property the same way.
 2. Identify the sub-task and read **only** the matching `test-dev` skill reference. Do not pre-load every reference.
-3. Read the relevant implementation and its acceptance criteria (from `<docs-root>/plans/` if a plan exists). Identify the test boundaries: unit, integration, E2E.
+3. Read the relevant implementation and its acceptance criteria from the packet. Identify the test boundaries: unit, integration, E2E.
 4. Write the test file(s). Follow the naming and structure the standard requires for that layer.
 5. Run the tests with the command the standard names. Fix setup issues; do not change application code to make a test pass unless the implementation is wrong — escalate that.
 6. **JEV Checkpoints and Iteration Circuit-Breaker.** When resolving test failures or rework findings:
