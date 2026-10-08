@@ -27,6 +27,16 @@ const CLAUDE_PARSER_CONTRACT_VERSION = '4'
 // must not be reused or previously dropped sessions stay missing after upgrade.
 const CODEX_PARSER_CONTRACT_VERSION = '2'
 const KILO_PARSER_CONTRACT_VERSION = '2'
+// v2: token-bubble pairing via pairingId — usage spans now carry the model
+// context of the request they belong to. Stale counters-only checkpoints
+// under v1 must re-synthesize on installs that do not reset the owner's
+// store: the bump is the ADR 0016 repair contract (same-span upsert over
+// stale rows), not a migration.
+const CURSOR_PARSER_CONTRACT_VERSION = '2'
+// v2: declared context window read from models-store.json, scoped to the
+// turn's provider. Version-invalidated checkpoints re-open the unit so the
+// declared-window payload upserts over stale rows (ADR 0016 repair contract).
+const PI_PARSER_CONTRACT_VERSION = '2'
 
 const CLAUDE_HARNESS_IDS = ['claude-cli', 'claude-desktop', 'claude-unclassified'] as const
 const KILO_HARNESS_IDS = ['kilo-shared-runtime', 'kilo-vscode-legacy'] as const
@@ -56,6 +66,14 @@ export function parserContractVersionFor(partial: { providerName: string; harnes
   // so a future kilo-shaped harness does not inherit contract 2 by accident.
   if (partial.providerName === 'kilo-code' || KILO_HARNESS_IDS.some((id) => id === partial.harnessId)) {
     return KILO_PARSER_CONTRACT_VERSION
+  }
+  // Exact identity, not a cursor- prefix: the cursor-agent transcript parser
+  // did not change, so it keeps the default contract until its own repair.
+  if (partial.providerName === 'cursor' || partial.harnessId === 'cursor') {
+    return CURSOR_PARSER_CONTRACT_VERSION
+  }
+  if (partial.providerName === 'pi' || partial.harnessId === 'pi') {
+    return PI_PARSER_CONTRACT_VERSION
   }
   return DEFAULT_PARSER_CONTRACT_VERSION
 }
