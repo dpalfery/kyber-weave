@@ -378,6 +378,26 @@ describe('token conversion (R4.2)', () => {
     expect(tokenValidator(record)).toBeUndefined()
   })
 
+  it('treats a compaction copilot-store row as measured zero, not output-absent', () => {
+    const record = synthesizeCall(
+      call({
+        provider: 'copilot',
+        inputTokens: 3,
+        cacheReadInputTokens: 49_394,
+        cacheCreationInputTokens: 0,
+        cachedInputTokens: 0,
+        outputTokens: 0,
+        reasoningTokens: 127,
+        deduplicationKey: 'copilot-store:sess:1:abc',
+        initiator: 'compaction',
+      }),
+    )
+    expect(tokenValidator(record)?.code).toBe('TOKEN_REASONING_EXCEEDS_OUTPUT')
+    expect(
+      (record.measurability?.output as { reason?: string })?.reason ?? '',
+    ).not.toMatch(/store/i)
+  })
+
   it('still rejects copilot reasoning on a measured-zero output row', () => {
     // Same counters but a per-turn key (neither shutdown nor copilot-store):
     // output is a measured zero, so reasoning 127 still violates the subset

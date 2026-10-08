@@ -1068,9 +1068,7 @@ function getComparableTurnTokens(turn: RunTurn | null): number | undefined {
   const cacheCreation = turn.tokens.cacheCreation
   if (typeof fresh === 'number' && typeof cache === 'number' && typeof output === 'number') {
     if (cacheCreation === undefined) {
-      const cacheStamp = turn.measurability?.cache_creation
-      if (cacheStamp === undefined || !isNotMeasurable(cacheStamp)) return undefined
-      return fresh + cache + 0 + output
+      return undefined
     }
     return fresh + cache + cacheCreation + output
   }

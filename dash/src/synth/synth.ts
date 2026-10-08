@@ -403,18 +403,21 @@ export function isCopilotShutdownRollup(call: ParsedProviderCall): boolean {
 
 /**
  * True when the call is a Copilot row whose output is absent by design rather
- * than a measured zero: the shutdown rollup legs above, plus non-compaction
- * `copilot-store:` rows, which omit output because per-turn assistant
- * messages already own it. Both keep output at 0 (folding reasoning would
- * manufacture output) and declare it not measurable so the subset invariant
- * still validates (issue #240).
+ * than a measured zero: the shutdown rollup legs above, plus `copilot-store:`
+ * rows whose initiator is anything but 'compaction', which omit output
+ * because per-turn assistant messages already own it. A compaction store row
+ * is the CLI summarizing its own context with no assistant.message to pair
+ * with, so its output 0 stays a measured zero. Both absent cases keep output
+ * at 0 (folding reasoning would manufacture output) and declare it not
+ * measurable so the subset invariant still validates (issue #240).
  */
 export function isCopilotOutputAbsent(call: ParsedProviderCall): boolean {
   return (
     isCopilotShutdownRollup(call) ||
     (call.provider === 'copilot' &&
       call.outputTokens === 0 &&
-      call.deduplicationKey.startsWith('copilot-store:'))
+      call.deduplicationKey.startsWith('copilot-store:') &&
+      call.initiator !== 'compaction')
   )
 }
 
@@ -469,7 +472,7 @@ export function synthesizeCall(
     ...(isCopilotOutputAbsent(call)
       ? {
           output: notMeasurable(
-            call.deduplicationKey.startsWith('copilot-store:')
+            call.deduplicationKey.startsWith('copilot-store:') && call.initiator !== 'compaction'
               ? 'Non-compaction Copilot store rows omit output because per-turn assistant messages already own it, so output is absent rather than a measured zero.'
               : 'Output tokens are excluded from Copilot shutdown rollups to avoid double-counting per-turn requests.',
           ),
