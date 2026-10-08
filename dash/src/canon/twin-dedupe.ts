@@ -377,21 +377,51 @@ function collapseIdJoins(
  * D10: the OTel row's counters and every bucket it carries stand; the file
  * donor fills only the buckets the OTel row lacks. A bucket counts as carried
  * whether the OTel row holds it as parts or only as flat content.
+ *
+ * The turn inspector reads `parts` first and consults flat `content` only
+ * when `parts` is empty, so a merged record with non-empty `parts` must also
+ * carry every content bucket as a part — otherwise a flat-only bucket would
+ * vanish from the inspector. Flat-only buckets therefore promote to parts
+ * (`{ part, text }`, the existing part shape here): the OTel row's flat-only
+ * buckets first, then the filled file flat-only buckets. One source per
+ * bucket still holds, because promotion only restates a bucket its own side
+ * already carried. When neither side contributes a part, `parts` stays unset
+ * and flat `content` alone remains visible to the inspector.
  */
 function mergeOtelFirst(record: CanonicalRecord, donor: CanonicalRecord): CanonicalRecord {
-  const held = new Set<string>([...(record.parts ?? []).map((part) => part.part), ...Object.keys(record.content)])
+  const keeperParts = record.parts ?? []
+  const keeperBuckets = new Set<string>(keeperParts.map((part) => part.part))
+  const held = new Set<string>([...keeperBuckets, ...Object.keys(record.content)])
   const fillParts = (donor.parts ?? []).filter((part) => !held.has(part.part))
   const fillContent = Object.fromEntries(
     Object.entries(donor.content).filter(([bucket]) => !held.has(bucket)),
   ) as CanonicalRecord['content']
-  const parts = [...(record.parts ?? []), ...fillParts]
+  // No part anywhere: keep `parts` unset so the inspector synthesizes from
+  // flat content; promoting here would only add a shape nothing asked for.
+  if (keeperParts.length === 0 && fillParts.length === 0) {
+    return {
+      ...record,
+      content: {
+        ...fillContent,
+        ...record.content,
+      },
+    }
+  }
+  const fillBuckets = new Set<string>(fillParts.map((part) => part.part))
+  const otelFlatParts = Object.entries(record.content)
+    .filter(([bucket]) => !keeperBuckets.has(bucket))
+    .map(([bucket, text]) => ({ part: bucket, text }) as (typeof keeperParts)[number])
+  const fileFlatParts = Object.entries(fillContent)
+    .filter(([bucket]) => !fillBuckets.has(bucket))
+    .map(([bucket, text]) => ({ part: bucket, text }) as (typeof keeperParts)[number])
+  const parts = [...keeperParts, ...otelFlatParts, ...fillParts, ...fileFlatParts]
   return {
     ...record,
-    ...(fillParts.length > 0 ? { parts } : {}),
+    parts,
     content: {
       ...fillContent,
       ...record.content,
-      ...(fillParts.length > 0 ? contentFromParts(parts) : {}),
+      ...contentFromParts(parts),
     },
   }
 }
