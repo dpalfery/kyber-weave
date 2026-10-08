@@ -5,7 +5,12 @@
 // writer. Phase 2 tasks edit only their own writer file; the registry stays
 // a plain list. Config paths resolve from the HOME passed at call time —
 // never at module load — so tests run entirely under a temporary HOME.
+//
+// The managed-writer fields below are the shared declaration seam. Multi-file
+// paths, JSON scalar types, status warnings and the env snippet live here so
+// a harness module cannot grow a second writer that bypasses D11.
 
+import type { JsonScalar } from '../edit-json.js'
 import { antigravityHarness } from './antigravity.js'
 import { claudeCodeHarness } from './claude-code.js'
 import { codexHarness } from './codex.js'
@@ -25,6 +30,42 @@ export type PendingHarnessWriter = {
   format: CaptureFileFormat
 }
 
+/**
+ * One config file a managed harness owns. Each file is its own D11 unit:
+ * its path, format and desired values are independent of the others.
+ */
+export type CaptureConfigFile = {
+  fileId: string
+  format: CaptureFileFormat
+  resolvePath: (home: string) => string
+  /**
+   * Keys `enable` writes. JSON and JSONC keep JSON types (string, boolean,
+   * number, null). TOML and YAML are still written as strings by the core.
+   */
+  desiredKeys: (endpoint: string) => Record<string, JsonScalar>
+}
+
+/**
+ * A status-only warning. The core prints it when the key currently holds
+ * `whenValue`; it never writes the key, so the owner's value stays put.
+ */
+export type CaptureStatusWarning = {
+  fileId: string
+  key: string
+  whenValue: JsonScalar
+  warnText: string
+}
+
+/**
+ * Optional status text built from the capture process environment. The core
+ * reads `process.env` only — shell rc files are the user's and are never
+ * opened.
+ */
+export type CaptureStatusEnvSnippet = {
+  label: string
+  envKeys: readonly string[]
+}
+
 /** A harness with a mapped exporter surface: the keys `enable` writes. */
 export type ManagedHarnessWriter = {
   kind: 'managed'
@@ -32,8 +73,16 @@ export type ManagedHarnessWriter = {
   displayName: string
   resolvePath: (home: string) => string
   format: CaptureFileFormat
-  /** The exact keys (and OTLP/HTTP values) `enable` writes for an endpoint. */
-  desiredKeys: (endpoint: string) => Record<string, string>
+  /**
+   * The single-file surface. Strings remain valid. JSON scalars are accepted
+   * so a one-file declaration can write a boolean or number without a second
+   * shape. When `configFiles` is set, those files are what `enable` writes.
+   */
+  desiredKeys: (endpoint: string) => Record<string, JsonScalar>
+  /** When set, each entry is written, receipted and restored on its own. */
+  configFiles?: readonly CaptureConfigFile[]
+  statusWarnings?: readonly CaptureStatusWarning[]
+  statusEnvSnippet?: CaptureStatusEnvSnippet
 }
 
 export type CaptureHarnessWriter = PendingHarnessWriter | ManagedHarnessWriter
