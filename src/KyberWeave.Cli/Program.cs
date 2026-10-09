@@ -231,7 +231,8 @@ app.Configure(config =>
             .WithExample("review", "verdict", ".", "--findings", "findings.json", "--gates", "gates.json");
     });
 
-    // Kyber-Arbiter Read-Only Human Surfaces — validate, list, inspect, dry-run and audit.
+    // Kyber-Arbiter Human Surfaces — validate, list, inspect, dry-run, audit,
+    // and the provider setup, status and doctor verbs.
     config.AddBranch("arbiter", arbiter =>
     {
         arbiter.SetDescription("Validate Arbiter configuration and inspect rules, plans, evaluations and the decision log.");
@@ -255,6 +256,18 @@ app.Configure(config =>
         arbiter.AddCommand<ArbiterAuditCommand>("audit")
             .WithDescription("Report unpaired, undecided and unmarked dispatches from the ledger.")
             .WithExample("arbiter", "audit", "--plan", "docs/plans/plan.md");
+
+        arbiter.AddCommand<ArbiterSetupCommand>("setup")
+            .WithDescription("Choose the provider and store the TypeSafe key for the endpoint origin.")
+            .WithExample("arbiter", "setup", "--provider", "systemone", "--key-stdin");
+
+        arbiter.AddCommand<ArbiterStatusCommand>("status")
+            .WithDescription("Show the provider, model, endpoint origin and whether a key was found.")
+            .WithExample("arbiter", "status");
+
+        arbiter.AddCommand<ArbiterDoctorCommand>("doctor")
+            .WithDescription("Diagnose the Arbiter configuration, key, log ignore, binary and guard.")
+            .WithExample("arbiter", "doctor");
     });
 
     // Distribution: replace the running Release binaries. Not an artifact-class branch.
