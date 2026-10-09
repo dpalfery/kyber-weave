@@ -1,0 +1,15 @@
+{
+  "session_id": "sess-codex-1",
+  "transcript_path": "/repo/transcript.jsonl",
+  "cwd": "/repo",
+  "hook_event_name": "PreToolUse",
+  "model": "codex-1",
+  "turn_id": "turn-1",
+  "tool_name": "spawn_agent",
+  "tool_use_id": "toolu-codex-dispatch-1",
+  "tool_input": {
+    "message": "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/x.md\nTASK: 12.3\n\nImplement the adapter.",
+    "agent_type": "csharp-dev",
+    "task_name": "Implement T12.3"
+  }
+}
