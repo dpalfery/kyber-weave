@@ -531,6 +531,14 @@ public sealed class SquadPackAndReleaseTests : IDisposable
                     continue;
                 }
 
+                // The Arbiter's embedded agent and lens copies are the same kind of
+                // deliberate exception: host repositories have no canonical tree, so
+                // the rules read these copies instead.
+                if (IsAllowedArbiterEmbeddedInclude(path))
+                {
+                    continue;
+                }
+
                 if (TryGetAllowedKyberStandardTemplateInclude(path, out string technology))
                 {
                     Assert.Equal(
@@ -574,6 +582,26 @@ public sealed class SquadPackAndReleaseTests : IDisposable
 
         technology = string.Empty;
         return false;
+    }
+
+    /// <summary>
+    /// Core may embed the Arbiter's Squad agent and lens copies from
+    /// <c>products/kyber-squad/agents/*.md</c> and
+    /// <c>products/kyber-squad/skills/code-review/references/lenses/*.md</c> only.
+    /// Their logical names (<c>Arbiter.Roster.*</c>, <c>Arbiter.Lens.*</c>) carry no
+    /// raw-corpus token, so the resource-name check above already passes them; this
+    /// covers the project-file half. Any other products/kyber-squad path stays
+    /// prohibited.
+    /// </summary>
+    private static bool IsAllowedArbiterEmbeddedInclude(string path)
+    {
+        string normalized = path.Replace('\\', '/');
+        return normalized.Contains(
+                "products/kyber-squad/agents/",
+                StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains(
+                "products/kyber-squad/skills/code-review/references/lenses/",
+                StringComparison.OrdinalIgnoreCase);
     }
 
     private static readonly string[] TextFileExtensions =
