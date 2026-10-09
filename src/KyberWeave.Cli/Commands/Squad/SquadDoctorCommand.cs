@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Text.Json;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Squad.Deployment;
@@ -18,6 +19,8 @@ namespace KyberWeave.Cli.Commands.Squad;
 public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
 {
     private readonly IProcessExecutor? _executor;
+    private readonly ISquadUserPaths? _userPaths;
+    private readonly SquadStateStore? _stateStore;
     private readonly string? _workingDirectory;
     private readonly ISquadGlobalRootResolver? _globalRoots;
     private readonly ISquadRenderer? _renderer;
@@ -33,10 +36,12 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         ISquadUserPaths? userPaths = null,
         string? workingDirectory = null,
         ISquadGlobalRootResolver? globalRoots = null,
-        ISquadRenderer? renderer = null)
+        ISquadRenderer? renderer = null,
+        SquadStateStore? stateStore = null)
     {
-        _ = userPaths;
         _executor = executor;
+        _userPaths = userPaths;
+        _stateStore = stateStore;
         _workingDirectory = workingDirectory;
         _globalRoots = globalRoots;
         _renderer = renderer;
@@ -149,6 +154,11 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
 
         if (settings.Global &&
             ReportGlobalCollisions(workingDirectory, canonicalSourcePath, canonicalSourceValid))
+        {
+            hasIssues = true;
+        }
+
+        if (ReportOwnedBlockDrift(workingDirectory, settings.Global))
         {
             hasIssues = true;
         }
@@ -446,6 +456,157 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         }
 
         return invalidGlobalRoot;
+    }
+
+    /// <summary>
+    /// Reports receipt-owned hook blocks whose entries no longer match the file on disk:
+    /// a hand-edited or missing owned entry is drift (Req 8.4), naming the file and the
+    /// container.
+    /// </summary>
+    /// <remarks>
+    /// Blocks own entries, never files, so a missing or unparsable file drifts every entry
+    /// it should carry rather than reading as a whole-file miss. A deployment without a
+    /// receipt, or a receipt without blocks, is reported as skipped rather than failed:
+    /// there is nothing owned to drift. The format is resolved from the recorded relative
+    /// path the same way uninstall resolves it, so diagnosis never depends on a render
+    /// that may no longer exist.
+    /// </remarks>
+    /// <returns><see langword="true"/> when doctor should exit non-zero.</returns>
+    private bool ReportOwnedBlockDrift(string workingDirectory, bool isGlobal)
+    {
+        SquadDeploymentScope scope = SquadCommandComposition.ResolveScope(isGlobal);
+        SquadStateStore stateStore = _stateStore ?? SquadCommandComposition.ResolveStateStore(_userPaths);
+        ISquadGlobalRootResolver globalRoots = _globalRoots ?? SquadCommandComposition.ResolveGlobalRoots();
+
+        SquadReceipt? receipt;
+        try
+        {
+            receipt = stateStore.ReadReceipt(workingDirectory, scope);
+        }
+        catch (InvalidDataException ex)
+        {
+            AnsiConsole.MarkupLine($"  [red]fail[/] Owned blocks: cannot read the ownership receipt: {Markup.Escape(ex.Message)}");
+            return true;
+        }
+
+        if (receipt is null)
+        {
+            AnsiConsole.MarkupLine(
+                "  [grey]info[/] Owned blocks: not checked (no Kyber-Squad deployment found)");
+            return false;
+        }
+
+        if (receipt.Blocks.Count == 0)
+        {
+            AnsiConsole.MarkupLine("  [green]ok[/] Owned blocks: none");
+            return false;
+        }
+
+        bool hasDrift = false;
+        foreach (SquadOwnedBlock block in receipt.Blocks)
+        {
+            string suffix = scope == SquadDeploymentScope.Global ? $" ({block.Target})" : string.Empty;
+            string fileLabel = $"{Markup.Escape(block.RelativePath)}{suffix}";
+
+            string fullPath;
+            try
+            {
+                fullPath = SquadDeploymentPlan.ResolveOwnedFilePath(
+                    receipt,
+                    workingDirectory,
+                    globalRoots,
+                    new SquadOwnedFile(block.RelativePath, new string('0', 64), block.Target, false));
+            }
+            catch (Exception)
+            {
+                AnsiConsole.MarkupLine($"  [red]fail[/] Owned block drift: {fileLabel} (outside the deployment root)");
+                hasDrift = true;
+                continue;
+            }
+
+            if (!TryResolveBlockFormat(block, out SquadHookBlockFormat format))
+            {
+                AnsiConsole.MarkupLine($"  [red]fail[/] Owned block drift: {fileLabel} (unknown shared hook file)");
+                hasDrift = true;
+                continue;
+            }
+
+            if (!File.Exists(fullPath))
+            {
+                foreach (SquadOwnedBlockEntry entry in block.Entries)
+                {
+                    AnsiConsole.MarkupLine($"  [red]fail[/] Owned block drift: {fileLabel} {Markup.Escape(entry.Container)} (missing)");
+                }
+
+                if (block.Entries.Count == 0)
+                {
+                    AnsiConsole.MarkupLine($"  [red]fail[/] Owned block drift: {fileLabel} (missing)");
+                }
+
+                hasDrift = true;
+                continue;
+            }
+
+            string currentJson = File.ReadAllText(fullPath);
+            Dictionary<string, string> expected = new(StringComparer.Ordinal);
+            foreach (SquadOwnedBlockEntry entry in block.Entries)
+            {
+                expected[entry.Container] = entry.Sha256;
+            }
+
+            IReadOnlyList<SquadHookDrift> drifts;
+            try
+            {
+                drifts = SquadHookJsonBlock.FindDrift(format, currentJson, expected);
+            }
+            catch (Exception ex) when (ex is JsonException or InvalidOperationException)
+            {
+                foreach (SquadOwnedBlockEntry entry in block.Entries)
+                {
+                    AnsiConsole.MarkupLine($"  [red]fail[/] Owned block drift: {fileLabel} {Markup.Escape(entry.Container)} (unparsable)");
+                }
+
+                hasDrift = true;
+                continue;
+            }
+
+            foreach (SquadHookDrift drift in drifts)
+            {
+                AnsiConsole.MarkupLine($"  [red]fail[/] Owned block drift: {fileLabel} {Markup.Escape(drift.Location)} ({Markup.Escape(drift.Reason)})");
+                hasDrift = true;
+            }
+        }
+
+        if (!hasDrift)
+        {
+            int entryCount = receipt.Blocks.Sum(block => block.Entries.Count);
+            string entryWord = entryCount == 1 ? "entry" : "entries";
+            AnsiConsole.MarkupLine($"  [green]ok[/] Owned blocks: {receipt.Blocks.Count} blocks, {entryCount} {entryWord} healthy");
+        }
+
+        return hasDrift;
+    }
+
+    /// <summary>
+    /// Resolves the hook-file shape for a receipt-owned block from its recorded relative
+    /// path, so diagnosis never depends on a render that may no longer exist.
+    /// </summary>
+    private static bool TryResolveBlockFormat(SquadOwnedBlock block, out SquadHookBlockFormat format)
+    {
+        foreach (SquadHookBlockFormat candidate in Enum.GetValues<SquadHookBlockFormat>())
+        {
+            if (string.Equals(
+                    SquadHookJsonBlock.RelativePath(candidate),
+                    block.RelativePath,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                format = candidate;
+                return true;
+            }
+        }
+
+        format = default;
+        return false;
     }
 
     private static string GetCliVersion()
