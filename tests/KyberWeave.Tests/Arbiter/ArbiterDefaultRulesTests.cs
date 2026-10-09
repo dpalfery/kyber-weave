@@ -89,7 +89,7 @@ public sealed class ArbiterDefaultRulesTests
         ArbiterRule mode = ArbiterConfig.ProductDefaults.Rules.Single(r => r.Id == "KW-ARB-MODE-001");
 
         Assert.DoesNotContain("missing-contract", mode.Answers);
-        Assert.Equal(["not-required", "present", "missing"], mode.Answers);
+        Assert.Equal(["not-required", "present", "missing", "returns-unobservable"], mode.Answers);
     }
 
     [Fact]

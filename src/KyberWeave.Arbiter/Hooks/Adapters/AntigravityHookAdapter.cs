@@ -48,6 +48,12 @@ public sealed class AntigravityHookAdapter : IHarnessHookAdapter
     /// <inheritdoc/>
     public string HarnessToken => Token;
 
+    /// <remarks>
+    /// Antigravity's <c>PostToolUse</c> input carries no field holding the sub-agent's
+    /// result (Q17 evidence, [F10]), so returns are unobservable there.
+    /// </remarks>
+    public bool ObservesReturns => false;
+
     /// <inheritdoc/>
     public bool IsPassThrough(JsonElement payload, string? renderedCaller)
     {
