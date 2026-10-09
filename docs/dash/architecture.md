@@ -6,7 +6,7 @@ component: KyberDash
 source-root: dash
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-03
+last-reviewed: 2026-10-09
 decided-by:
   - adr/0020-kyberdash-one-time-fork
   - adr/0008-kyberdash-single-canonical-store
@@ -911,6 +911,13 @@ commands are registered and capability-granted (`get_view_state`, `refresh_now`,
 `core:event:allow-listen`/`core:event:allow-unlisten` grants; the webview holds no network
 permission and no analysis logic. The macOS status item is the KyberDash lightsaber projected
 as a monochrome template image (`icons/tray-template.svg`/`.png`).
+
+On macOS, tray click positions are converted from backing pixels using the status
+item window's scale before monitor lookup. Cursor fallback uses the primary display's
+scale, matching Tao's global cursor encoding. Work-area bounds and final placement
+use logical desktop coordinates, so
+moving the card between differently scaled monitors does not apply its previous
+monitor's scale to the new position. Negative and zero coordinates remain valid.
 
 On macOS the tray runs as a per-user launchd agent (label `io.github.dpalfery.kyberdash`)
 that starts at login and restarts only after an unsuccessful exit

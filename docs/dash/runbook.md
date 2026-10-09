@@ -6,7 +6,7 @@ status: current
 component: KyberDash
 source-root: dash
 owner: dpalfery
-last-reviewed: 2026-10-03
+last-reviewed: 2026-10-09
 code-refs:
   - registerKyberCommands
   - refreshHarnessSources
@@ -315,7 +315,48 @@ spawns exactly one `web --no-open` child (default loopback port **4747**) and, w
 allow, the OTLP receiver child (port **4318**), polls the report over loopback, and renders
 it. The webview holds no network permission and no analysis logic of its own.
 
-Local gates (after a one-time `npm --prefix dash/tray/ui ci`):
+#### Native development prerequisites
+
+The released tray needs no Rust installation. To build or test `dash/tray/`, install
+the stable Rust toolchain, Cargo, rustfmt, and Clippy. Use current stable Rust: the
+crate's `rust-version` is a minimum for its own source, not a pin for all locked
+dependencies. Node.js and npm are also required for the React UI.
+
+On macOS, install the Xcode Command Line Tools if `xcode-select -p` fails, then use
+Homebrew to install rustup, the Rust toolchain manager:
+
+```bash
+xcode-select -p || xcode-select --install
+brew install rustup
+export PATH="$(brew --prefix rustup)/bin:$PATH"
+rustup default stable
+rustup component add rustfmt clippy
+rustc --version
+cargo --version
+```
+
+Homebrew's rustup is keg-only. Add that `export PATH=...` line to `~/.zprofile`
+and `~/.zshrc` so both login shells and interactive terminals can find Cargo.
+It does not provide `rustup-init`; use `rustup default stable` to install the toolchain.
+If Xcode opens an installation dialog, finish it before building.
+
+On Windows, follow the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/)
+to install Microsoft C++ Build Tools with the **Desktop development with C++** workload
+and WebView2, then install Rust through [rustup](https://rustup.rs/) using the MSVC
+toolchain. In a fresh terminal, run `rustup default stable`,
+`rustup component add rustfmt clippy`, `rustc --version`, and `cargo --version`.
+
+From the repository root, prepare the frontend before a direct Cargo build or test:
+
+```bash
+npm --prefix dash/tray/ui ci
+npm --prefix dash/tray/ui run build
+```
+
+The frontend build creates the `ui/dist` assets embedded by `tauri.conf.json`.
+Build the native shell with `cargo build --locked --manifest-path dash/tray/src-tauri/Cargo.toml`.
+
+#### Local gates
 
 ```bash
 npm --prefix dash/tray/ui run typecheck
@@ -326,6 +367,11 @@ cd dash/tray/src-tauri && cargo fmt --check && cargo clippy -- -D warnings && ca
 `npm --prefix dash run lint` also covers the tray UI. To run the shell against a locally
 built CLI, build `dash/dist/cli.js` first (`npm --prefix dash run build:cli`) and point
 `KYBERDASH_BIN` at it.
+
+For a multi-monitor smoke check, open the card from each monitor's menu bar, including
+displays above or left of the primary and displays with different scaling. The card
+should open on the clicked display. Repeat after moving between 1× and 2× displays.
+The card closes when another app gains focus, so inspect its placement before switching apps.
 
 Deployed shape (per-user, no administrator rights). The Windows installer is unsigned; see
 [Windows: unsigned binaries and SmartScreen](../install.md#windows-unsigned-binaries-and-smartscreen)

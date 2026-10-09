@@ -452,7 +452,7 @@ pub fn run() {
                     {
                         toggle_popover(
                             tray.app_handle(),
-                            Some((position.x as i32, position.y as i32)),
+                            position::tray_click_anchor(tray, position),
                         );
                     }
                 })
