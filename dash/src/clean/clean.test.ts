@@ -139,6 +139,21 @@ describe('cleanDatabase (issue #312)', () => {
     }
   })
 
+  it('rejects an ambiguous scope combining --all with --harness instead of wiping all', async () => {
+    const store = temporaryStore()
+    try {
+      const ports = fakePorts()
+
+      await expect(
+        cleanDatabase(store, { all: true, harnesses: ['pi'] }, ports),
+      ).rejects.toThrow(/ambiguous/i)
+      expect(ports.pauseIngestion).not.toHaveBeenCalled()
+      expect(ports.resumeIngestion).not.toHaveBeenCalled()
+    } finally {
+      store.close()
+    }
+  })
+
   it('rejects an empty scope', async () => {
     const store = temporaryStore()
     try {

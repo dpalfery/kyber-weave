@@ -97,10 +97,16 @@ export async function cleanDatabase(
 /**
  * Resolve the wipe scope to canonical harness ids, or null for wipe-all.
  * Throws on an empty scope (no `--all`, no `--harness`) so a bare `dash
- * clean` can never wipe by accident.
+ * clean` can never wipe by accident, and on an ambiguous scope (`--all`
+ * with `--harness`) so a destructive op never fails open to a wider wipe.
  */
 function canonicalScope(scope: CleanScope): string[] | null {
-  if (scope.all === true) return null
+  if (scope.all === true) {
+    if ((scope.harnesses ?? []).length > 0) {
+      throw new Error('cleanDatabase: ambiguous scope — pass --all or --harness, not both')
+    }
+    return null
+  }
   const harnesses = [...new Set((scope.harnesses ?? []).map((h) => normalizeHarnessName(h)))]
   if (harnesses.length === 0) {
     throw new Error('cleanDatabase: scope selects nothing — pass --all or at least one --harness')
