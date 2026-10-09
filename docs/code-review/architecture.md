@@ -11,6 +11,7 @@ decided-by:
   - adr/0002-three-layer-review-council-verdict-engine
   - adr/0003-cross-file-duplication-and-prior-art-lenses
   - adr/0005-task-level-fast-review
+  - adr/0028-kyber-arbiter-three-step-decision-gates
 code-refs:
   - VerdictEngine
   - GateRunner
@@ -385,6 +386,36 @@ rather than performing it.
 but only lenses owning an outstanding finding re-run. The loop escalates after three cycles
 without the surviving-finding count falling — a loop that is not converging is not going to,
 and the usual cause needs a person.
+
+## Gate applicability and Arbiter review gates
+
+A gate may declare the paths it applies to, so a gate like `ts-typecheck` does not run on
+a .NET-only change:
+
+```yaml
+- id: ts-typecheck
+  run: [npm, run, --prefix, dash, typecheck]
+  blocking: true
+  applies-when:
+    paths: ["dash/**"]
+```
+
+With `review gates --base <ref>`, a gate whose patterns match no changed path is not
+executed and is reported with `KW-REVIEW-026` (Info) rather than omitted. The verdict
+engine counts such a gate as neither passed nor failed, so a verdict with not-applicable
+gates equals the verdict without them. Without `--base`, every gate runs. The Arbiter
+evaluates the match through `KW-ARB-GATE-001`; code-reviewer passes `--base` so the
+changed paths — recorded in the gate report — are the same ones lens-spawn facts reuse.
+
+Where Arbiter hooks are installed, the council's fan-out is itself gated. Before spawning
+lenses, code-reviewer carries `LENS: <name>` routing headers and the hook judges each lens's
+applicability to the change: a lens that does not apply is recorded as `SKIPPED` with the
+reason. Before the refutation pass, `REFUTE: <finding-id>` headers route each finding to
+claim verification against its quoted code; a verified finding keeps its refutation
+recorded as skipped. Quote fabrication and pre-existing code arrive as annotations that feed
+the existing quote check. The Arbiter never drops a finding on a model answer alone, and
+code-reviewer runs `kyber-weave arbiter audit --plan <PLAN_FILE>` at the end of a run and
+cites the result. See the [Kyber Arbiter architecture](../kyber-arbiter/architecture.md).
 
 ## Current limitations
 

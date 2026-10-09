@@ -9,6 +9,8 @@ code-refs:
   - KyberWeaveConfigLoader
   - OntologyConfig
   - SquadConfig
+  - ArbiterConfigLoader
+  - ReviewConfigLoader
 ---
 
 # Configuration
@@ -288,6 +290,61 @@ narrow `cache/` path and by the cache not already being tracked. Without that pr
 Kyber-Weave sends no document text. `prefer` falls back; `required` fails. `docs init`
 safely merges the ignore entry for new and existing hosts.
 
+## Arbiter configuration
+
+The `arbiter:` section governs the [Kyber Arbiter](kyber-arbiter/architecture.md). With no
+section, the Arbiter is disabled, the provider is `none`, and all 18 shipped rules are
+enabled. Hooks render only when `enabled` is true.
+
+```yaml
+arbiter:
+  enabled: true
+  provider:
+    kind: none            # none (default) | systemone
+    endpoint: https://api.typesafe.ai/v1   # or http://localhost:11434/v1 for Ollama
+    model: jev-1.13.0     # pinned; locally nimble or tev1
+    timeout-ms: 3000
+  rules:
+    - id: KW-ARB-SCOPE-002
+      confidence-at-least: 0.85
+    - id: HOST-MIGRATIONS-001
+      trigger: delegate
+      question: Does the task touch database migrations?
+      answers: [touches, clear]
+      decide:
+        - when: { fact: plan.task.files, intersects: ["src/**/Migrations/**"] }
+          answer: touches
+      effects: { touches: escalate, clear: allow }
+```
+
+A host may tune a shipped rule by id through `enabled`, `confidence-at-least` /
+`probability-below`, and `effects` only; any other field fails as `KW-ARB-CONFIG-005`.
+Host rule ids must not start with `KW-ARB-`. The per-user
+`~/.config/kyber-weave/arbiter.yml` override may hold `provider:` and nothing else, and
+replaces the repository's provider field by field. The API key never appears here — or in
+any hook or MCP file: it resolves from `TYPESAFE_API_KEY`, then the OS credential store
+entry for the endpoint origin. See the [runbook](kyber-arbiter/runbook.md) for `setup`,
+`status`, and `doctor`.
+
+### Gate `applies-when`
+
+A review gate may declare the paths it applies to:
+
+```yaml
+review:
+  gates:
+    - id: ts-typecheck
+      run: [npm, run, --prefix, dash, typecheck]
+      blocking: true
+      applies-when:
+        paths: ["dash/**"]
+```
+
+With `review gates --base <ref>`, a gate whose patterns match no changed path is not
+executed and is reported as not applicable (`KW-REVIEW-026`, Info) — neither passed nor
+failed. Without `--base`, every gate runs. `run` stays argv, as `.kyber-weave/kyber-weave.yml`
+requires.
+
 ## Squad configuration
 
 The `squad:` section governs agent and skill deployment via `kyber-weave squad`.
@@ -332,6 +389,7 @@ host config.
 ## Related
 
 - [The documentation ontology](documentation-ontology.md) — what these keys configure
+- [Kyber Arbiter architecture](kyber-arbiter/architecture.md) — engine, rules, and harness facts
 - [Kyber-Squad architecture](kyber-squad/architecture.md) — deployment and lowering engine
 - [Kyber-Squad onboarding](kyber-squad/onboarding.md) — usage and lifecycle guide
 - [Agent harness governance](context-hygiene/agents.md) — what the profiles affect

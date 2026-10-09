@@ -11,6 +11,7 @@ decided-by:
   - adr/0019-pi-native-subagents-and-primary-lowering
   - adr/0022-antigravity-native-agents
   - adr/0025-devin-native-agents-and-skill-lowering
+  - adr/0028-kyber-arbiter-three-step-decision-gates
 code-refs:
   - SquadDeploymentPlan
 ---
@@ -485,6 +486,29 @@ Locally modified files are preserved during uninstallation unless explicitly cle
 
 ---
 
+## Arbiter hooks
+
+`squad install` and `squad update` render [Kyber Arbiter](../kyber-arbiter/runbook.md)
+decision-gate hooks alongside the agents when the project's `arbiter.enabled` is true.
+Phase 1 wires `claude`, `copilot`, and `opencode`; any other target, and any global-scope
+install (which has no project configuration to read), renders no hooks and records
+`arbiter-not-enforced` in the receipt.
+
+A hook that never runs enforces nothing, so grant the trust gate at install time — the
+command prints the applicable step:
+
+| Harness | Trust step |
+|---|---|
+| Claude | Accept the workspace trust dialog. `claude -p` sessions never count and stay unenforced. |
+| Copilot in VS Code | Open a trusted workspace with `chat.useHooks` enabled. |
+| Copilot CLI, OpenCode | No documented trust gate. |
+
+Configure the provider and key per user with `kyber-weave arbiter setup`, and diagnose the
+whole installation — including the `kyber-weave-arbiter --version` probe — with
+`kyber-weave arbiter doctor` and `kyber-weave squad doctor`.
+
+---
+
 ## PR review workflows
 
 Use the [code-review-loop skill](../../products/kyber-squad/skills/code-review-loop/SKILL.md)
@@ -518,7 +542,7 @@ Running `squad pack` outside the repository root fails immediately with a diagno
 Both archive formats recurse through each skill directory. They contain all 24 canonical
 `SKILL.md` files plus the 67 retained supplemental resources, and retained local skill references
 must resolve in the extracted package. The APM archive additionally contains the 21 canonical
-agents with their 10 owned reference files; the Agent Plugins archive never contains agents or
+agents with their 11 owned reference files; the Agent Plugins archive never contains agents or
 agent-owned resources. A fresh deployment renders every file an owner's Markdown links reach
 beside its principal — 121 files on Copilot today — with authored relative links resolving inside
 the target output; every skill resource reaches this render except

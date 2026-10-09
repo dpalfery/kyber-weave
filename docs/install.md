@@ -18,16 +18,18 @@ curl -fsSL https://raw.githubusercontent.com/dpalfery/kyber-weave/main/scripts/i
 ```
 
 This installs the **latest stable release tag** to `~/.local/bin` without sudo, placing up to
-three binaries on your PATH:
+four binaries on your PATH:
 
 | Binary | Purpose |
 |---|---|
 | `kyber-weave` | The CLI — [docs](docgraph/governance.md), [skill](context-hygiene/skills.md), [agent](context-hygiene/agents.md), and [squad](kyber-squad/onboarding.md) commands |
 | `kyber-weave-mcp` | The [MCP server](docgraph/mcp-runbook.md) that serves documentation to an agent |
+| `kyber-weave-arbiter` | The [Kyber Arbiter](kyber-arbiter/runbook.md) hook binary that gates Squad delegations and review fan-out |
 | `kyberdash` | [KyberDash](dash/README.md) — token, cost, and context observability across agentic coding harnesses ([runbook](dash/runbook.md)) |
 
-`kyberdash` installs only from releases that publish it — see
-[KyberDash and the version floor](#kyberdash-and-the-version-floor).
+`kyber-weave-arbiter` installs from releases at or above its version floor, and
+`kyberdash` only from releases that publish it — see
+[the version floors](#kyberdash-and-the-version-floor).
 
 Make sure `~/.local/bin` is on your PATH:
 
@@ -43,6 +45,7 @@ export PATH="$HOME/.local/bin:$PATH"
 | `--prerelease` | `KYBER_WEAVE_PRERELEASE=1` | Resolve and install candidate/pre-release builds (e.g. `v*-rc.*`, `v*-dev.*`) |
 | `--install-dir <d>` | `KYBER_WEAVE_INSTALL_DIR` | Target directory (default `~/.local/bin`) |
 | `--no-mcp` | `KYBER_WEAVE_NO_MCP=1` | CLI only; skip the MCP server |
+| `--no-arbiter` | `KYBER_WEAVE_NO_ARBITER=1` | CLI + MCP; skip the Arbiter hook binary |
 | `--no-kyberdash` | `KYBER_WEAVE_NO_KYBERDASH=1` | CLI + MCP; skip the KyberDash binary |
 | `--with-menubar` | `KYBER_WEAVE_WITH_MENUBAR=1` | macOS only; also install the signed menubar app to `~/Applications` after verifying its SHA-256 and code signature |
 | — | `KYBER_WEAVE_RELEASE_ORIGIN` | Install from a loopback stand-in instead of GitHub. Unset keeps the GitHub release roots |
@@ -116,6 +119,12 @@ curl -fsSL https://raw.githubusercontent.com/dpalfery/kyber-weave/main/scripts/i
 `kyberdash --version` reports the KyberDash product version (for example `0.9.23`), not the
 Kyber-Weave release tag it shipped in. The two version lines are independent.
 
+The Arbiter has its own floor on the same pattern: `kyber-weave-arbiter-<rid>` assets first
+appear in **0.1.7-rc.17**. Releases before that publish none, so the script installs the CLI
+and MCP alone when it is not met. `kyber-weave-arbiter --version` prints
+`kyber-weave-arbiter <semver>`; `squad doctor` and `arbiter doctor` probe it. See
+[distribution](distribution.md#per-asset-version-floors) for the shared mechanism.
+
 ## Supported platforms
 
 `linux-x64`, `linux-arm64`, `osx-x64`, `osx-arm64` — and for KyberDash, the same platforms
@@ -176,7 +185,8 @@ status and print a `FAILED` line.
 ## Windows: unsigned binaries and SmartScreen
 
 The Windows tray installer (`kyberdash-tray-win-x64-setup.exe`) and all Windows `.exe`
-files inside release archives (`kyber-weave`, `kyber-weave-mcp`, and `kyberdash` in
+files inside release archives (`kyber-weave`, `kyber-weave-mcp`, `kyber-weave-arbiter`, and
+`kyberdash` in
 `win-x64` archives) are **not Authenticode-signed**. Signing has been deferred
 ([issue #132](https://github.com/dpalfery/kyber-weave/issues/132)); see
 [Code signing status](distribution.md#code-signing-status) for the rationale and integrity
@@ -237,6 +247,12 @@ kyber-weave-mcp --version
 kyber-weave-mcp -v
 ```
 
+Verify the Arbiter hook binary, when it was installed:
+
+```bash
+kyber-weave-arbiter --version
+```
+
 Verify KyberDash, when it was installed:
 
 ```bash
@@ -251,7 +267,8 @@ kyber-weave --help
 
 ## Updating
 
-`kyber-weave update` replaces the running CLI, the sibling `kyber-weave-mcp`, and an
+`kyber-weave update` replaces the running CLI, the sibling `kyber-weave-mcp`, an installed
+`kyber-weave-arbiter`, and an
 installed `kyberdash` in the same directory from GitHub Release assets, after verifying
 SHA-256 against `SHA256SUMS.txt`. It is the self-update path for binaries installed by this
 script (or placed from a Release by hand). It refuses `dotnet run` and `dotnet tool` installs.
@@ -261,11 +278,13 @@ kyber-weave update                    # latest stable Release
 kyber-weave update --release-candidate  # newest listed Release, including -rc and -dev
 kyber-weave update 0.2.0              # pin a tag (leading v is optional)
 kyber-weave update --no-mcp           # CLI only
+kyber-weave update --no-arbiter       # leave an installed arbiter unchanged
 kyber-weave update --no-kyberdash     # leave an installed kyberdash unchanged
 ```
 
 KyberDash is **replaced, never introduced**: update touches `kyberdash` only when it already
-sits beside the CLI. `--no-kyberdash` at install time is an opt-out that update respects, and
+sits beside the CLI. The Arbiter follows the same rule: update replaces an installed
+arbiter and reports an absent one rather than creating it. `--no-kyberdash` at install time is an opt-out that update respects, and
 a machine that installed before KyberDash existed never chose to run it. Both skips are
 logged. To add it later, re-run `install.sh`. Updating to a release below the version floor
 leaves `kyberdash` alone for the same reason the install skips it.
