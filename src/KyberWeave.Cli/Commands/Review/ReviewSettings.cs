@@ -13,6 +13,10 @@ public sealed class ReviewGatesSettings : AnalysisSettings
     [CommandOption("--stop-on-failure")]
     [Description("Skip the remaining gates once a blocking gate fails.")]
     public bool StopOnFailure { get; set; }
+
+    [CommandOption("--base <REF>")]
+    [Description("Only gates applying to paths changed since <REF> run; the rest report KW-REVIEW-026. Without it every gate runs.")]
+    public string? Base { get; set; }
 }
 
 /// <summary>Settings for <c>review duplicates</c>.</summary>
