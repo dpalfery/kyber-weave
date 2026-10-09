@@ -8,6 +8,7 @@
 // protobuf decoder rather than trusting it.
 
 import { createRequire } from 'node:module'
+import type { IncomingMessage, ServerResponse } from 'node:http'
 
 import { afterAll, describe, expect, it, vi } from 'vitest'
 
@@ -814,6 +815,45 @@ describe('OtlpReceiver pause for database clean (issue #312)', () => {
 
     expect((await fetch(`${url}${OTLP_ADMIN_PAUSE_PATH}`)).status).toBe(405)
     expect((await fetch(`${url}${OTLP_ADMIN_RESUME_PATH}`)).status).toBe(405)
+  })
+
+  it('rejects a cross-origin admin POST with 403 and stays unpaused (F3)', async () => {
+    const { receiver, url } = await startReceiver()
+
+    for (const path of [OTLP_ADMIN_PAUSE_PATH, OTLP_ADMIN_RESUME_PATH]) {
+      const response = await fetch(`${url}${path}`, {
+        method: 'POST',
+        headers: { Origin: 'https://evil.example' },
+        body: '{}',
+      })
+      expect(response.status).toBe(403)
+      expect(await response.json()).toMatchObject({ error: { code: 'OTLP_FORBIDDEN' } })
+    }
+    expect(receiver.isPaused()).toBe(false)
+
+    const accepted = await post(url, 'application/json', '{}')
+    expect(accepted.status).toBe(200)
+  })
+
+  it('rejects an admin pause from a non-loopback peer with 403 (F3)', async () => {
+    const receiver = new OtlpReceiver({ port: 0 })
+    const req = {
+      url: OTLP_ADMIN_PAUSE_PATH,
+      method: 'POST',
+      headers: {},
+      socket: { remoteAddress: '203.0.113.7' },
+    } as unknown as IncomingMessage
+    let status = 0
+    const res = {
+      setHeader: () => {},
+      writeHead: (s: number) => {
+        status = s
+      },
+      end: () => {},
+    } as unknown as ServerResponse
+    await receiver.handleRequest(req, res)
+    expect(status).toBe(403)
+    expect(receiver.isPaused()).toBe(false)
   })
 
   it('reports paused:true on healthz while paused, without breaking the tray probe', async () => {

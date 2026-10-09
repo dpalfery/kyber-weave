@@ -53,7 +53,9 @@ export const OTLP_HEALTHZ_PATH = '/healthz'
 
 /**
  * Ingestion-pause controls for a user-initiated database clean (issue #312).
- * POST-only, loopback-only like the rest of this server. While paused, the
+ * POST-only, and gated on a loopback TCP peer plus a loopback-or-absent
+ * `Origin` header, so a cross-origin `no-cors` POST from a visited website
+ * cannot pause ingestion. While paused, the
  * OTLP export paths shed load with 503 + Retry-After — exporters retry, so
  * pausing never drops telemetry — and `/healthz` keeps answering 200 with a
  * `paused` flag so the tray's hosting probe still recognizes the port as
@@ -1212,6 +1214,12 @@ export class OtlpReceiver {
         })
         return
       }
+      if (!isLoopbackAdminRequest(req)) {
+        respondJson(res, 403, {
+          error: { code: 'OTLP_FORBIDDEN', message: 'admin routes accept loopback requests only' },
+        })
+        return
+      }
       if (path === OTLP_ADMIN_PAUSE_PATH) {
         const leaseMs = await this.readPauseLeaseMs(req)
         this.pause(leaseMs)
@@ -1361,6 +1369,25 @@ export class OtlpReceiver {
 function respondJson(res: ServerResponse, status: number, body: Record<string, unknown>): void {
   res.writeHead(status, { 'content-type': 'application/json' })
   res.end(JSON.stringify(body))
+}
+
+/**
+ * Gate for the ingestion-pause admin routes. Two checks, matching the web
+ * dashboard's loopback guard (`dash/src/cli/web.ts`): the TCP peer must be a
+ * loopback address (the server's bind interface is configurable, so the bind
+ * alone does not prove the caller is local), and a browser `Origin` header —
+ * always present on a page-initiated POST, never sent by the loopback pause
+ * client or OTLP exporters — must itself be loopback. A `no-cors` fetch from
+ * any website the user visits therefore cannot pause ingestion.
+ */
+function isLoopbackAdminRequest(req: IncomingMessage): boolean {
+  const peer = req.socket?.remoteAddress ?? ''
+  const loopbackPeer =
+    peer === '127.0.0.1' || peer === '::1' || peer === '::ffff:127.0.0.1' || peer === 'localhost'
+  if (!loopbackPeer) return false
+  const origin = req.headers.origin
+  if (origin === undefined) return true
+  return /^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/.test(origin)
 }
 
 function headerValue(value: string | string[] | undefined): string {
