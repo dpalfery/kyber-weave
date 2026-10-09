@@ -20,7 +20,9 @@
       string marshalling in Arbiter/Credentials/WindowsCredentialStore.cs (CredWriteW /
       CredReadW take UTF-16 strings). The unsafe is confined to those generated stubs,
       which never load off Windows: every call site is gated by
-      OperatingSystem.IsWindows(). No hand-written unsafe code is allowed by this flag.
+      OperatingSystem.IsWindows(). AllowUnsafeBlocks applies assembly-wide, so it
+      permits hand-written unsafe too; none is present, and a source-scan test guards
+      that invariant.
     -->
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>

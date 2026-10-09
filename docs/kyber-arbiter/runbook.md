@@ -51,6 +51,11 @@ retries the blocked dispatch unchanged. Timeouts are bounded by `provider.timeou
 the harness budget; a hook killed mid-evaluation still leaves its ledger event, which
 `audit` reports as a decision-less entry.
 
+On the Copilot CLI target (`copilot-cli`) post-dispatch outcomes are advisory only:
+`Deny`, `PostBlock` and `PostAnnotation` all render as `additionalContext`, which the
+harness surfaces as context rather than enforcement. Pre-dispatch denies still block.
+`arbiter doctor` prints this limitation as an informational line.
+
 ## Setup, doctor, audit
 
 Three commands cover the provider lifecycle; the key is never shown and never stored in a
@@ -59,7 +64,7 @@ file:
 ```bash
 kyber-weave arbiter setup    # choose provider (none, TypeSafe cloud, local Ollama); stores the key in the OS credential store
 kyber-weave arbiter status   # provider, model, endpoint origin, whether a key resolves — never the value
-kyber-weave arbiter doctor   # warns on switched-off model rules, untuned models, missing keys, un-ignored log dirs, missing binaries
+kyber-weave arbiter doctor   # warns on switched-off model rules, untuned models, missing keys, un-ignored log dirs, missing binaries; notes the Copilot CLI post-dispatch advisory limitation
 ```
 
 Read-only inspection:

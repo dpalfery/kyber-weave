@@ -136,7 +136,10 @@ public sealed partial class WindowsCredentialStore : ICredentialStore
     /// The layout mirrors the native record field for field, with every string-typed
     /// field held as an explicit UTF-16 pointer rather than a managed string. Keeping
     /// the record blittable is what lets <c>LibraryImport</c> generate its marshalling
-    /// without unsafe blocks, so the project file stays untouched. Only the target,
+    /// without hand-written unsafe blocks. The generated stubs still need
+    /// <c>AllowUnsafeBlocks</c> in the project file, which applies assembly-wide:
+    /// no hand-written unsafe code is present, but the flag itself permits it, so a
+    /// source-scan test guards the invariant. Only the target,
     /// blob and persist take part in reads and writes; the remaining fields stay so
     /// the prefix offsets the native side fills match what <c>PtrToStructure</c> reads.
     /// </remarks>

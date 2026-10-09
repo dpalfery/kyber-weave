@@ -151,6 +151,10 @@ is true; a global install renders no hooks and records `arbiter-not-enforced`. T
 at install time — see the [runbook](runbook.md) and
 [Squad onboarding](../kyber-squad/onboarding.md).
 
+On the Copilot CLI target post-dispatch outcomes are advisory only: `Deny`,
+`PostBlock` and `PostAnnotation` all render as `additionalContext`, so a post-dispatch
+finding is surfaced as context rather than enforced. Pre-dispatch denies still block.
+
 ## Related
 
 - [Runbook](runbook.md) — operating the Arbiter day to day

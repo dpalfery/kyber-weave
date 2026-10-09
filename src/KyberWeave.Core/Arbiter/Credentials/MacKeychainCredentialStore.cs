@@ -57,6 +57,18 @@ public sealed class MacKeychainCredentialStore : ICredentialStore
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(origin);
         ArgumentException.ThrowIfNullOrEmpty(key);
+        if (HasNewline(origin))
+        {
+            throw new ArgumentException(
+                "The macOS keychain origin cannot contain newline characters.", nameof(origin));
+        }
+
+        if (HasNewline(key))
+        {
+            throw new ArgumentException(
+                "The macOS keychain key cannot contain newline characters: a newline would split the 'security -i' command.", nameof(key));
+        }
+
         ProcessStartInfo startInfo = new("security")
         {
             UseShellExecute = false,
@@ -67,8 +79,11 @@ public sealed class MacKeychainCredentialStore : ICredentialStore
         startInfo.ArgumentList.Add("-i");
 
         // Fed on stdin to `security -i`, not passed as argv: the key never appears in
-        // the process argument list, where any local user could read it.
-        string command = $"add-generic-password -U -s {Service} -a {origin} -w {key}\n";
+        // the process argument list, where any local user could read it. Origin and key
+        // are double-quoted with backslash and quote escaping so a space, quote or
+        // backslash is parsed as one argument; a newline cannot be quoted on this
+        // line protocol and is rejected above.
+        string command = $"add-generic-password -U -s {Service} -a {Quote(origin)} -w {Quote(key)}\n";
         ProcessResult result = _runner.Run(startInfo, command);
         if (result.ExitCode != 0)
         {
@@ -76,4 +91,10 @@ public sealed class MacKeychainCredentialStore : ICredentialStore
                 $"The macOS keychain write failed with exit code {result.ExitCode}.");
         }
     }
+
+    private static bool HasNewline(string value) =>
+        value.Contains('\n', StringComparison.Ordinal) || value.Contains('\r', StringComparison.Ordinal);
+
+    private static string Quote(string value) =>
+        "\"" + value.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal) + "\"";
 }

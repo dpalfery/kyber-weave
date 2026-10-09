@@ -446,9 +446,9 @@ public sealed class ClaudeRenderer : ISquadRenderer
     /// dispatches pre- and post-call; guarded implementation specialists gate their
     /// planning-path reads pre-call; every agent named in any dispatcher's
     /// <c>delegates-to</c> roster gates its hand-back pre-call on <c>SubagentHandback</c>.
-    /// A dispatcher that is also guarded keeps only the dispatch hooks: the dispatch gate
-    /// already observes every delegation, and a second read gate on the same caller would
-    /// double-report. The hand-back entry sits alongside whichever dispatch or guard entry
+    /// A dispatcher that is also guarded keeps both the dispatch hooks and the read
+    /// guard: the guard applies whenever a guarded agent runs, so the dispatch gate
+    /// observing delegations does not cover planning-path reads. The hand-back entry sits alongside whichever dispatch or guard entry
     /// the target already has. Returns null when the wiring is null or disabled so the
     /// render stays byte-identical to before the field existed.
     /// </summary>
@@ -494,7 +494,8 @@ public sealed class ClaudeRenderer : ISquadRenderer
         {
             preToolUse.Add(HookEntry(DispatchMatcher));
         }
-        else if (isGuarded)
+
+        if (isGuarded)
         {
             preToolUse.Add(HookEntry(ReadGuardMatcher));
         }

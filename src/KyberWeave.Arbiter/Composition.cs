@@ -9,11 +9,31 @@ namespace KyberWeave.Arbiter;
 public static class Composition
 {
     /// <summary>Dispatches <c>--version</c> and <c>hook</c>. Streams are parameters so the host contract is testable.</summary>
+    /// <remarks>
+    /// The hook path fails closed: the stdin read and the host construction run inside
+    /// the fail-closed path, so any exception yields that harness's deny document
+    /// carrying <c>KW-ARB-HOOK-001</c> rather than an empty-stdout error. Stdout carries
+    /// only the decision document; diagnostics go to <paramref name="stderr"/>.
+    /// </remarks>
     public static async Task<int> DispatchAsync(
         string[] args,
         TextReader stdin,
         TextWriter stdout,
         TextWriter stderr)
+    {
+        return await DispatchAsync(args, stdin, stdout, stderr, commandFactory: null).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Dispatches with an injectable host factory. Tests pass a throwing factory to prove
+    /// a construction fault still blocks; production passes null for the default host.
+    /// </summary>
+    internal static async Task<int> DispatchAsync(
+        string[] args,
+        TextReader stdin,
+        TextWriter stdout,
+        TextWriter stderr,
+        Func<TextWriter, HookCommand>? commandFactory)
     {
         ArgumentNullException.ThrowIfNull(args);
         ArgumentNullException.ThrowIfNull(stdin);
@@ -39,9 +59,19 @@ public static class Composition
                 return 2;
             }
 
-            string stdinText = await stdin.ReadToEndAsync().ConfigureAwait(false);
-            HookCommand command = CreateDefault(stderr);
-            return command.Run(harness, caller, stdinText, stdout, stderr);
+            try
+            {
+                string stdinText = await stdin.ReadToEndAsync().ConfigureAwait(false);
+                HookCommand command = (commandFactory ?? CreateDefault)(stderr);
+                return command.Run(harness, caller, stdinText, stdout, stderr);
+            }
+            catch (Exception ex)
+            {
+                // Fail closed: the stdin read or the host construction broke before the
+                // host's own catch existed. Yield this harness's block, never an
+                // empty-stdout error that Claude and Copilot treat as non-blocking.
+                return await FailClosedAsync(harness, caller, ex, stdout, stderr).ConfigureAwait(false);
+            }
         }
 
         await stderr.WriteLineAsync(
@@ -49,6 +79,88 @@ public static class Composition
             .ConfigureAwait(false);
         return 2;
     }
+
+    /// <summary>
+    /// Renders the fail-closed block for a fault before <see cref="HookCommand"/> ran.
+    /// Returns 0 carrying the block on stdout, or 2 when stdout itself is broken so the
+    /// harness still blocks on the exit code. Stdout carries only the block.
+    /// </summary>
+    private static async Task<int> FailClosedAsync(
+        string harness,
+        string? caller,
+        Exception fault,
+        TextWriter stdout,
+        TextWriter stderr)
+    {
+        string detail = OneLine(fault.Message);
+        string decisionId;
+        try
+        {
+            decisionId = ArbiterRecordId.New(DateTimeOffset.UtcNow);
+        }
+        catch (Exception)
+        {
+            decisionId = "unknown";
+        }
+
+        string block;
+        try
+        {
+            HarnessAdapterRegistry registry =
+                HarnessAdapterRegistry.CreateDefault(new ArbiterHookDecisionEngine());
+            if (registry.TryGet(harness, out IHarnessHookAdapter? adapter) && adapter is not null)
+            {
+                try
+                {
+                    block = adapter.RenderFailClosed(detail, caller, string.Empty, decisionId);
+                }
+                catch (Exception)
+                {
+                    block = FallbackBlock;
+                }
+            }
+            else
+            {
+                block = FallbackBlock;
+            }
+        }
+        catch (Exception)
+        {
+            block = FallbackBlock;
+        }
+
+        try
+        {
+            await stderr.WriteLineAsync(
+                $"{HookCommand.FailClosedCode}: hook host failed before evaluation: {detail}")
+                .ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            // Stderr is best effort; the block on stdout (or the exit code) still fails closed.
+        }
+
+        try
+        {
+            await stdout.WriteAsync(block).ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            // Stdout is broken, so no document can ride it: block on the exit code.
+            return 2;
+        }
+
+        return 0;
+    }
+
+    /// <summary>The last-resort block when even the harness adapter cannot render.</summary>
+    private static string FallbackBlock =>
+        """{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"KW-ARB-HOOK-001: hook host failed."}}""";
+
+    private static string OneLine(string message) =>
+        message.Replace("\r\n", " ", StringComparison.Ordinal)
+            .Replace('\n', ' ')
+            .Replace('\r', ' ');
 
     /// <summary>The <c>--version</c> line: <c>kyber-weave-arbiter &lt;semver&gt;</c>.</summary>
     public static string VersionLine() => $"kyber-weave-arbiter {GetVersion()}";

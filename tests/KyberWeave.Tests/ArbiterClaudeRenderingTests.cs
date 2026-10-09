@@ -252,22 +252,29 @@ public sealed class ArbiterClaudeRenderingTests : IDisposable
 
     /// <summary>
     /// Under the 6.6 hand-back contract a dispatch target's PreToolUse list holds its primary
-    /// entry plus at most one <c>^SubagentHandback$</c> entry; no other matcher may appear.
+    /// entry plus at most one <c>^SubagentHandback$</c> entry; a dispatcher that is also
+    /// guarded additionally keeps the read-guard entry, so that matcher may appear too.
+    /// No other matcher may appear.
     /// </summary>
     private static void AssertOnlyHandbackBeside(YamlSequenceNode entries, string primaryMatcher, string agent)
     {
+        string otherPrimary = string.Equals(primaryMatcher, DispatchMatcher, StringComparison.Ordinal)
+            ? ReadGuardMatcher
+            : DispatchMatcher;
         YamlMappingNode[] others = entries.Children.OfType<YamlMappingNode>()
             .Where(e => !string.Equals(RequireScalar(e, "matcher", agent), primaryMatcher, StringComparison.Ordinal))
             .ToArray();
 
-        Assert.True(
-            others.Length <= 1,
-            $"'{agent}' carries {others.Length} PreToolUse entries beside its primary entry; at most one hand-back entry is allowed.");
+        YamlMappingNode[] handback = others
+            .Where(e => string.Equals(RequireScalar(e, "matcher", agent), HandbackMatcher, StringComparison.Ordinal))
+            .ToArray();
+        YamlMappingNode[] overlap = others
+            .Where(e => string.Equals(RequireScalar(e, "matcher", agent), otherPrimary, StringComparison.Ordinal))
+            .ToArray();
 
-        foreach (YamlMappingNode other in others)
-        {
-            Assert.Equal(HandbackMatcher, RequireScalar(other, "matcher", agent));
-        }
+        Assert.True(
+            handback.Length <= 1 && overlap.Length <= 1 && others.Length == handback.Length + overlap.Length,
+            $"'{agent}' carries an unexpected PreToolUse entry beside its primary entry; only the hand-back entry and the dispatcher-guarded overlap entry are allowed.");
     }
 
     private static YamlMappingNode SplitFrontmatter(string text, string identity)

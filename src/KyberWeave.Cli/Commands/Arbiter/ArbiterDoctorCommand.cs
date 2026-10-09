@@ -21,7 +21,9 @@ namespace KyberWeave.Cli.Commands.Arbiter;
 /// through <c>git check-ignore -q artifacts/arbiter</c>), the binary warning
 /// (<c>KW-ARB-BIN-001</c>, through <see cref="ArbiterProcessProbe"/>), and the
 /// guard warning (<c>KW-ARB-GUARD-001</c>, when none of the plan, spec or todo
-/// index properties resolves to a path on disk).
+/// index properties resolves to a path on disk). It also notes the Copilot CLI
+/// post-dispatch advisory limitation as information (no diagnostic id: nothing is
+/// wrong, so there is nothing to suppress or baseline).
 /// </remarks>
 public sealed class ArbiterDoctorCommand : Command<ArbiterSettings>
 {
@@ -54,6 +56,7 @@ public sealed class ArbiterDoctorCommand : Command<ArbiterSettings>
         CheckLogIgnored(settings, report);
         CheckBinary(report);
         CheckGuard(config, settings, report);
+        CheckCopilotCliLimitation();
 
         CommandHelpers.Finish(report, settings, "arbiter doctor", "Rule");
         return report.HasErrors ? 1 : 0;
@@ -187,6 +190,18 @@ public sealed class ArbiterDoctorCommand : Command<ArbiterSettings>
             "No plan, spec or todo index is declared, so the Read guard protects nothing.",
             "arbiter",
             Hint: "Declare the plan, spec and todo indexes so the Read guard has something to protect."));
+    }
+
+    /// <summary>
+    /// Notes the Copilot CLI post-dispatch limitation as information: on the
+    /// <c>copilot-cli</c> target <c>Deny</c>, <c>PostBlock</c> and <c>PostAnnotation</c>
+    /// render only as <c>additionalContext</c>, so post-dispatch findings are advisory.
+    /// Informational only, hence no diagnostic id.
+    /// </summary>
+    private static void CheckCopilotCliLimitation()
+    {
+        AnsiConsole.MarkupLine(
+            "  [blue]info[/] Copilot CLI (copilot-cli): post-dispatch Deny/PostBlock/PostAnnotation render as additionalContext (advisory); pre-dispatch denies still block.");
     }
 
     private static bool IndexExists(string root, string path)
