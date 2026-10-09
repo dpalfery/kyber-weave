@@ -1,5 +1,8 @@
 using System.Diagnostics;
+using System.Globalization;
+using System.Text.Json;
 using System.Text.RegularExpressions;
+using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Credentials;
 using KyberWeave.Core.Arbiter.Facts;
@@ -9,6 +12,7 @@ using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Processes;
+using Spectre.Console;
 using YamlDotNet.Core;
 
 namespace KyberWeave.Cli.Commands.Arbiter;
@@ -49,6 +53,154 @@ public static class ArbiterCommandComposition
         if (OperatingSystem.IsMacOS())
             return new MacKeychainCredentialStore(CredentialProcessRunner());
         return new SecretServiceCredentialStore(CredentialProcessRunner());
+    }
+
+    /// <summary>The credential store the key is read from and written to.</summary>
+    /// <remarks>
+    /// Settable so <c>setup</c>, <c>status</c> and <c>doctor</c> tests inject a fake
+    /// store and assert the exact origin without touching the OS keychain.
+    /// </remarks>
+    public static Func<ICredentialStore> CredentialStore { get; set; } = () => CreateCredentialStore();
+
+    /// <summary>Reads a process environment variable; injected so tests stay hermetic.</summary>
+    public static Func<string, string?> GetEnvironmentVariable { get; set; } =
+        name => Environment.GetEnvironmentVariable(name);
+
+    /// <summary>Reads the TypeSafe key from stdin for <c>setup --key-stdin</c>.</summary>
+    public static Func<string?> KeyStdinReader { get; set; } = () => Console.In.ReadLine();
+
+    /// <summary>Prompts for the TypeSafe key with input hidden; the key is never echoed.</summary>
+    public static Func<string?> KeyPrompt { get; set; } = () => PromptKeyMasked();
+
+    /// <summary>The process boundary the Arbiter binary probe runs through.</summary>
+    /// <remarks>
+    /// <c>doctor</c> probes <c>kyber-weave-arbiter --version</c> through
+    /// <see cref="ArbiterProcessProbe"/> from the Squad surface; tests inject a stub
+    /// executor so the probe never leaves the process.
+    /// </remarks>
+    public static Func<IProcessExecutor> ArbiterProbeExecutor { get; set; } = () => ProcessExecutor.Instance;
+
+    /// <summary>
+    /// Resolves the key for <paramref name="endpoint"/> through the injected store and
+    /// environment, binding the environment key to the TypeSafe origin or the user
+    /// override's endpoint. A loopback endpoint needs no key and returns null.
+    /// </summary>
+    public static string? ResolveKey(KyberWeaveConfig config, string endpoint)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        ArgumentException.ThrowIfNullOrWhiteSpace(endpoint);
+        return ArbiterKeyResolver.Resolve(
+            endpoint, CredentialStore(), GetEnvironmentVariable, UserOverrideEndpoint(config));
+    }
+
+    /// <summary>
+    /// Resolves the key, treating a failing store as an absent key. A host without a
+    /// usable credential store reports <c>KW-ARB-KEY-001</c> rather than crashing
+    /// <c>status</c> and <c>doctor</c>; <c>setup</c> keeps the failure so it can hint
+    /// at <c>TYPESAFE_API_KEY</c> instead.
+    /// </summary>
+    public static string? TryResolveKey(KyberWeaveConfig config, string endpoint)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        ArgumentException.ThrowIfNullOrWhiteSpace(endpoint);
+        try
+        {
+            return ResolveKey(config, endpoint);
+        }
+        catch (Exception exception) when (exception is InvalidOperationException
+            or IOException
+            or UnauthorizedAccessException
+            or System.ComponentModel.Win32Exception)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Probes an Ollama <c>/api/version</c> URL for a 0.35 or later daemon, which
+    /// answers <c>{"version":"x.y.z"}</c>.
+    /// </summary>
+    /// <remarks>
+    /// Any transport, parse or version failure means "not found", never an error:
+    /// detection only suggests a model, so an absent daemon must not fail setup.
+    /// </remarks>
+    /// <returns>True with the daemon version when 0.35 or later answered.</returns>
+    public static bool TryDetectOllama(Uri versionUri, out string? version)
+    {
+        version = null;
+        ArgumentNullException.ThrowIfNull(versionUri);
+        if (versionUri.Scheme != Uri.UriSchemeHttp && versionUri.Scheme != Uri.UriSchemeHttps)
+            return false;
+
+        try
+        {
+            using HttpClient client = new(HttpHandler(), disposeHandler: true)
+            {
+                Timeout = TimeSpan.FromSeconds(5),
+            };
+            using HttpResponseMessage response = client.GetAsync(versionUri).GetAwaiter().GetResult();
+            if (!response.IsSuccessStatusCode)
+                return false;
+
+            string body = response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+            using JsonDocument document = JsonDocument.Parse(body);
+            if (!document.RootElement.TryGetProperty("version", out JsonElement versionElement)
+                || versionElement.ValueKind != JsonValueKind.String)
+            {
+                return false;
+            }
+
+            string? found = versionElement.GetString();
+            if (!IsOllamaSupported(found))
+                return false;
+
+            version = found;
+            return true;
+        }
+        catch (Exception exception) when (exception is HttpRequestException
+            or TaskCanceledException
+            or TimeoutException
+            or JsonException
+            or InvalidOperationException
+            or ObjectDisposedException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>Whether an Ollama <c>/api/version</c> version is 0.35 or later.</summary>
+    internal static bool IsOllamaSupported(string? version)
+    {
+        if (string.IsNullOrWhiteSpace(version))
+            return false;
+
+        Match match = Regex.Match(version.Trim(), @"^(?<major>\d+)\.(?<minor>\d+)");
+        if (!match.Success)
+            return false;
+
+        if (!int.TryParse(
+                match.Groups["major"].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int major)
+            || !int.TryParse(
+                match.Groups["minor"].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int minor))
+        {
+            return false;
+        }
+
+        return major > 0 || (major == 0 && minor >= 35);
+    }
+
+    private static string? PromptKeyMasked()
+    {
+        try
+        {
+            return AnsiConsole.Prompt(
+                new TextPrompt<string>("TypeSafe API key (input hidden, never echoed):").Secret());
+        }
+        catch (InvalidOperationException)
+        {
+            // Non-interactive console: there is no key to read.
+            return null;
+        }
     }
 
     /// <summary>
