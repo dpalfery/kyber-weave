@@ -1,5 +1,6 @@
 using System.Reflection;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
+using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
@@ -107,6 +108,13 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
             hasIssues = true;
         }
 
+        // 3b. Arbiter Probe — only when the host enabled the Arbiter. A missing binary or
+        // a version that differs from the CLI's is KW-ARB-BIN-001.
+        if (ReportArbiterBinary(workingDirectory))
+        {
+            hasIssues = true;
+        }
+
         // 4. Canonical Source (Maintainer check - only when inside repository root)
         string? canonicalSourcePath = SquadPackSourceLocator.Resolve(workingDirectory);
         bool canonicalSourceValid = false;
@@ -157,6 +165,57 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
     }
 
     public int Execute(CommandContext context, SquadDoctorSettings settings) => Execute(context, settings, CancellationToken.None);
+
+    /// <summary>
+    /// Probes the <c>kyber-weave-arbiter</c> binary when the host enabled the Arbiter.
+    /// </summary>
+    /// <remarks>
+    /// <c>KW-ARB-BIN-001</c> is a warning that the binary is missing from <c>PATH</c> or its
+    /// version differs from the CLI's. A disabled Arbiter needs no binary, so it is reported
+    /// as skipped rather than failed. An unreadable configuration also skips: doctor already
+    /// reports genuine canonical-source defects elsewhere, and a missing config means the
+    /// product-default disabled Arbiter.
+    /// </remarks>
+    /// <returns><see langword="true"/> when doctor should exit non-zero.</returns>
+    private bool ReportArbiterBinary(string workingDirectory)
+    {
+        KyberWeaveConfigLoadResult configResult = KyberWeaveConfigLoader.TryLoad(workingDirectory);
+        if (!configResult.Success || configResult.Config?.Arbiter.Enabled != true)
+        {
+            AnsiConsole.MarkupLine(
+                "  [grey]info[/] Kyber-Weave Arbiter: not checked (Arbiter is not enabled)");
+            return false;
+        }
+
+        ArbiterProcessProbe arbiterProbe = SquadCommandComposition.ResolveArbiterProbe(_executor);
+        ToolProbeResult arbiterResult = arbiterProbe.Probe();
+        string cliVersion = NormalizeCliVersion(GetCliVersion());
+
+        if (arbiterResult is { IsAvailable: true, Version: not null }
+            && string.Equals(arbiterResult.Version, cliVersion, StringComparison.Ordinal))
+        {
+            AnsiConsole.MarkupLine($"  [green]ok[/] Kyber-Weave Arbiter: [bold]kyber-weave-arbiter {Markup.Escape(arbiterResult.Version)}[/]");
+            return false;
+        }
+
+        string reason = arbiterResult.FailureReason
+            ?? (arbiterResult.Version is null
+                ? "The 'kyber-weave-arbiter' executable is not available on PATH."
+                : $"The 'kyber-weave-arbiter' version '{arbiterResult.Version}' differs from the CLI version '{cliVersion}'.");
+        AnsiConsole.MarkupLine($"  [red]fail[/] Kyber-Weave Arbiter [bold]KW-ARB-BIN-001[/]: {Markup.Escape(reason)}");
+        return true;
+    }
+
+    /// <summary>
+    /// Normalizes the CLI version for comparison against the probe's semver: the assembly
+    /// informational version may carry <c>+build</c> metadata the probe never emits.
+    /// </summary>
+    private static string NormalizeCliVersion(string version)
+    {
+        int plus = version.IndexOf('+', StringComparison.Ordinal);
+        string normalized = plus > 0 ? version[..plus] : version;
+        return normalized.Trim().TrimStart('v');
+    }
 
     /// <summary>
     /// Reports whether the ZCode installation declares the MCP servers the canonical toolchain

@@ -134,6 +134,11 @@ public sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
             return decision.ExitCode ?? 2;
         }
 
+        // The host's Arbiter settings travel into rendering (Req 22.2, 5.3): enabled
+        // verbatim, timeout-ms as whole hook seconds with headroom.
+        SquadArbiterWiring arbiterWiring = SquadCommandComposition.ResolveArbiterWiring(
+            configResult.Config?.Arbiter ?? Core.Arbiter.ArbiterConfig.ProductDefaults);
+
         SquadLifecycleService lifecycleService = SquadCommandComposition.CreateLifecycleService(
             userPaths: _userPaths,
             stateStore: stateStore,
@@ -147,7 +152,8 @@ public sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
             Exclusions: settings.Exclusions,
             Version: pinnedVersion,
             ReplaceManaged: settings.ReplaceManaged,
-            DryRun: settings.DryRun);
+            DryRun: settings.DryRun,
+            Arbiter: arbiterWiring);
 
         // A --global run writes beneath each selected target's own physical global root,
         // not beneath targetRoot — the state anchor. Resolve the roots the way the
@@ -187,6 +193,10 @@ public sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
                 {
                     AnsiConsole.MarkupLine($"[green]Successfully updated Kyber-Squad at [bold]{Markup.Escape(targetRoot)}[/].[/]");
                 }
+
+                // Until trust is granted the hooks stay off (§10.7), so the update names
+                // each selected target's trust gate where the audit cannot observe the gap.
+                SquadInstallCommand.WriteArbiterTrustSteps(decision.Targets, arbiterWiring);
 
                 return 0;
             }
