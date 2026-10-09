@@ -439,23 +439,124 @@ public sealed class CopilotRendererTests
         string root,
         string name,
         string capabilityProfile,
-        string copilotTools)
+        string copilotTools,
+        string invocation = "subagent",
+        string delegatesTo = "[]")
     {
         File.WriteAllText(Path.Combine(root, "agents", $"{name}.md"), $"""
             ---
             schema: kyber-squad.agent/v1
             name: {name}
             description: Test agent {name}
-            invocation: subagent
+            invocation: {invocation}
             model-profile: default
             capability-profile: {capabilityProfile}
             copilot-tools: {copilotTools}
-            delegates-to: []
+            delegates-to: {delegatesTo}
             fallback: none
             aliases: []
             ---
             Instruction body for {name}.
             """);
+    }
+
+    private static void WritePrimaryDelegationSquad(string root)
+    {
+        Directory.CreateDirectory(Path.Combine(root, "bundles"));
+        Directory.CreateDirectory(Path.Combine(root, "profiles"));
+        Directory.CreateDirectory(Path.Combine(root, "agents"));
+        Directory.CreateDirectory(Path.Combine(root, "schemas"));
+
+        foreach (string schemaFile in Directory.GetFiles(Path.Combine(ProductRoot, "schemas"), "*.json"))
+        {
+            File.Copy(schemaFile, Path.Combine(root, "schemas", Path.GetFileName(schemaFile)), overwrite: true);
+        }
+
+        File.WriteAllText(Path.Combine(root, "squad.yml"), """
+            schema: kyber-squad.squad/v1
+            name: test-squad
+            version-source: kyber-weave-assembly
+            default-bundle: full
+            bundles:
+              full: bundles/full.yml
+            profiles:
+              models: profiles/models.yml
+              capabilities: profiles/capabilities.yml
+              fallbacks: profiles/fallbacks.yml
+            toolchain: toolchain.yml
+            mcp: mcp.json
+            """);
+
+        File.WriteAllText(Path.Combine(root, "toolchain.yml"), """
+            schema: kyber-squad.toolchain/v1
+            required-features:
+              - agent-ir/v1
+            validated-release: null
+            """);
+
+        File.WriteAllText(Path.Combine(root, "mcp.json"), """{ "mcpServers": {} }""");
+
+        File.WriteAllText(Path.Combine(root, "bundles", "full.yml"), """
+            schema: kyber-squad.bundle/v1
+            name: full
+            agents:
+              - primary-boss
+              - primary-lonely
+              - delegating-sub
+              - worker-a
+            skills: []
+            """);
+
+        File.WriteAllText(Path.Combine(root, "profiles", "models.yml"), """
+            schema: kyber-squad.model-profiles/v1
+            profiles:
+              default:
+                default: inherit
+            """);
+
+        File.WriteAllText(Path.Combine(root, "profiles", "capabilities.yml"), """
+            schema: kyber-squad.capability-profiles/v1
+            capabilities:
+              - filesystem.read
+              - filesystem.search
+              - filesystem.write
+              - process.execute
+              - network.read
+              - network.publish
+              - delegate
+            profiles:
+              orchestrator:
+                permissions:
+                  filesystem.read: deny
+                  filesystem.search: deny
+                  filesystem.write: deny
+                  process.execute: deny
+                  network.read: deny
+                  network.publish: deny
+                  delegate: allow
+              plain:
+                permissions:
+                  filesystem.read: deny
+                  filesystem.search: deny
+                  filesystem.write: deny
+                  process.execute: deny
+                  network.read: deny
+                  network.publish: deny
+                  delegate: deny
+            """);
+
+        File.WriteAllText(Path.Combine(root, "profiles", "fallbacks.yml"), """
+            schema: kyber-squad.fallback-profiles/v1
+            profiles:
+              none:
+                no-primary-agent: skill
+                no-agent-primitive: skill
+            """);
+
+        WriteAgent(root, "primary-boss", "orchestrator", "[todo, vscode, agent]", "primary", "[worker-a]");
+        WriteAgent(root, "primary-lonely", "plain", "[todo, vscode]", "primary");
+        WriteAgent(root, "delegating-sub", "orchestrator", "[todo, vscode, agent]", "subagent", "[worker-a]");
+        WriteAgent(root, "worker-a", "plain", "[todo, vscode]");
     }
 
     private static string ExtractFrontmatterText(string markdown)
@@ -468,11 +569,12 @@ public sealed class CopilotRendererTests
     }
 
     /// <summary>
-    /// The "agent" tool grants a subagent the mechanism to delegate; "agents" names who it
-    /// may reach. Emitting only the first leaves architect and code-reviewer holding a tool
+    /// The "agent" tool grants an agent the mechanism to delegate; "agents" names who it
+    /// may reach. Emitting only the first leaves a delegating agent holding a tool
     /// with an empty roster — delegation that looks configured and silently does nothing.
-    /// A primary agent is dispatched from the top-level session and receives the full
-    /// roster from the harness, so declaring one there would only narrow it.
+    /// This holds for primary agents too: GitHub Copilot does not grant a primary agent
+    /// the full roster automatically, so a delegating primary declares its roster exactly
+    /// like a subagent does.
     /// </summary>
     [Theory]
     [InlineData("architect", "agents: ['azure-reader', 'research-agent']")]
@@ -490,17 +592,117 @@ public sealed class CopilotRendererTests
             ?.Trim();
 
         Assert.Equal(expectedAgentsLine, actual);
+        Assert.Contains("user-invocable: false", frontmatter, StringComparison.Ordinal);
     }
 
     /// <summary>
-    /// A subagent that delegates to nothing, and every primary agent, must carry no roster:
-    /// an empty or redundant "agents" key is a permission statement nobody meant to make.
+    /// The real product conductor is a primary agent with a delegation roster. GitHub
+    /// Copilot does not grant it the full roster automatically, so it declares its roster
+    /// exactly like a subagent does — but stays user-invocable, since it is the default
+    /// entry point a human chooses directly.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_DeclaresDelegationRosterForDelegatingPrimaryConductor()
+    {
+        string frontmatter = await RenderFrontmatterAsync("conductor");
+
+        string? actual = frontmatter
+            .Split('\n')
+            .FirstOrDefault(l => l.StartsWith("agents:", StringComparison.Ordinal))
+            ?.Trim();
+
+        Assert.Equal(
+            "agents: ['architect', 'azure-reader', 'bug-crusher-investigator', 'code-reviewer', " +
+            "'csharp-dev', 'dal-dev', 'docs-dev', 'github-devops', 'maui-dev', 'product-owner', " +
+            "'pulumi-dev', 'python-dev', 'react-dev', 'research-agent', 'sql-database-architect', " +
+            "'task-reviewer', 'tauri-dev', 'test-dev']",
+            actual);
+        Assert.DoesNotContain(
+            frontmatter.Split('\n'),
+            l => l.StartsWith("user-invocable:", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// A primary agent that delegates to nothing, like a non-delegating subagent, carries
+    /// no roster: an empty "agents" key is a permission statement nobody meant to make.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_OmitsDelegationRosterForPrimaryAgentWithoutDelegates()
+    {
+        using TempDirectory temp = new();
+        WritePrimaryDelegationSquad(temp.Path);
+        CopilotRenderer renderer = new();
+        SquadRenderResult result = await renderer.RenderAsync(new SquadRenderRequest(
+            SourceDirectory: temp.Path,
+            Targets: [SquadTarget.Copilot],
+            Scope: SquadDeploymentScope.Project));
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+        SquadDeploymentFile file = Assert.Single(
+            result.Files,
+            f => f.RelativePath == ".github/agents/primary-lonely.agent.md");
+
+        string frontmatter = ExtractFrontmatterText(Encoding.UTF8.GetString(file.Content.Span));
+        Assert.DoesNotContain(
+            frontmatter.Split('\n'),
+            l => l.StartsWith("agents:", StringComparison.Ordinal));
+        Assert.DoesNotContain(
+            frontmatter.Split('\n'),
+            l => l.StartsWith("user-invocable:", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// A delegating primary agent declares its roster without becoming non-invocable, and a
+    /// delegating subagent keeps both its roster and "user-invocable: false".
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_PrimaryDelegationRosterDoesNotImplyNonInvocable()
+    {
+        using TempDirectory temp = new();
+        WritePrimaryDelegationSquad(temp.Path);
+        CopilotRenderer renderer = new();
+        SquadRenderResult result = await renderer.RenderAsync(new SquadRenderRequest(
+            SourceDirectory: temp.Path,
+            Targets: [SquadTarget.Copilot],
+            Scope: SquadDeploymentScope.Project));
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        SquadDeploymentFile primary = Assert.Single(
+            result.Files,
+            f => f.RelativePath == ".github/agents/primary-boss.agent.md");
+        string primaryFrontmatter = ExtractFrontmatterText(Encoding.UTF8.GetString(primary.Content.Span));
+        Assert.Equal(
+            "agents: ['worker-a']",
+            primaryFrontmatter.Split('\n')
+                .FirstOrDefault(l => l.StartsWith("agents:", StringComparison.Ordinal))
+                ?.Trim());
+        Assert.DoesNotContain(
+            primaryFrontmatter.Split('\n'),
+            l => l.StartsWith("user-invocable:", StringComparison.Ordinal));
+
+        SquadDeploymentFile subagent = Assert.Single(
+            result.Files,
+            f => f.RelativePath == ".github/agents/delegating-sub.agent.md");
+        string subagentFrontmatter = ExtractFrontmatterText(Encoding.UTF8.GetString(subagent.Content.Span));
+        Assert.Equal(
+            "agents: ['worker-a']",
+            subagentFrontmatter.Split('\n')
+                .FirstOrDefault(l => l.StartsWith("agents:", StringComparison.Ordinal))
+                ?.Trim());
+        Assert.Contains("user-invocable: false", subagentFrontmatter, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A subagent that delegates to nothing must carry no roster: an empty "agents" key
+    /// is a permission statement nobody meant to make. (Primary agents are covered
+    /// separately: the conductor declares its roster, and a primary without delegates is
+    /// exercised through a synthetic source below.)
     /// </summary>
     [Theory]
     [InlineData("csharp-dev")]
     [InlineData("review-lens")]
     [InlineData("azure-reader")]
-    [InlineData("conductor")]
     public async Task RenderAsync_OmitsDelegationRosterWhereNoneIsDeclared(string agentName)
     {
         string frontmatter = await RenderFrontmatterAsync(agentName);

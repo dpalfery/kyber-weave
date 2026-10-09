@@ -980,6 +980,43 @@ export async function requestContextReview(
   return res.json() as Promise<KyberReviewResult>
 }
 
+/**
+ * Bounded catalog refresh. Vendor names and counts only — `error` strings
+ * from the server are dropped here so a remote body cannot reach the page.
+ */
+export interface ModelCatalogRefreshResult {
+  rowCount: number
+  lastRefreshAt: string | null
+  vendorsUpdated: string[]
+  vendorsFailed: { vendor: string }[]
+  derivedRebuildCount: number
+}
+
+function stringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return value.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0)
+}
+
+export async function refreshModelWindows(): Promise<ModelCatalogRefreshResult> {
+  const path = '/api/kyber/model-catalog/refresh'
+  const res = await fetch(path, { method: 'POST' })
+  if (!res.ok) throw new KyberApiError(res.status, path)
+  const json: unknown = await res.json()
+  const body = json !== null && typeof json === 'object' ? (json as Record<string, unknown>) : {}
+  const failed = Array.isArray(body.vendorsFailed) ? body.vendorsFailed : []
+  return {
+    rowCount: typeof body.rowCount === 'number' ? body.rowCount : 0,
+    lastRefreshAt: typeof body.lastRefreshAt === 'string' ? body.lastRefreshAt : null,
+    vendorsUpdated: stringList(body.vendorsUpdated),
+    vendorsFailed: failed.flatMap((entry) => {
+      if (entry === null || typeof entry !== 'object') return []
+      const vendor = (entry as { vendor?: unknown }).vendor
+      return typeof vendor === 'string' && vendor.length > 0 ? [{ vendor }] : []
+    }),
+    derivedRebuildCount: typeof body.derivedRebuildCount === 'number' ? body.derivedRebuildCount : 0,
+  }
+}
+
 export async function fetchReviewStatus(): Promise<{ provider: string; isConfigured: boolean }> {
   return fetchJson<{ provider: string; isConfigured: boolean }>('/api/kyber/review/status')
 }

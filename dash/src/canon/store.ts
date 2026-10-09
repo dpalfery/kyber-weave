@@ -308,6 +308,30 @@ CREATE TABLE IF NOT EXISTS prediction (
 CREATE INDEX IF NOT EXISTS prediction_by_finding ON prediction (finding_id);
 CREATE INDEX IF NOT EXISTS prediction_by_run ON prediction (run_id);
 CREATE INDEX IF NOT EXISTS prediction_by_created_at ON prediction (created_at);
+-- Vendor-documented model windows (D15). A new table, not a new column on
+-- an existing one, so CREATE IF NOT EXISTS on every open covers a store
+-- already stamped at SCHEMA_VERSION. The version stays at 17: the projection
+-- contract still requires that stamp, and an IF NOT EXISTS table does not
+-- need a migration step to appear.
+CREATE TABLE IF NOT EXISTS model_context_window_catalog (
+  lookup_id TEXT PRIMARY KEY,
+  canonical_model_id TEXT NOT NULL,
+  context_window INTEGER NOT NULL CHECK (context_window > 0),
+  vendor TEXT NOT NULL,
+  documentation_url TEXT NOT NULL,
+  retrieved_at TEXT NOT NULL,
+  source_revision TEXT
+);
+CREATE INDEX IF NOT EXISTS model_context_window_catalog_by_vendor
+  ON model_context_window_catalog (vendor);
+-- Per-vendor refresh outcome, separate from the rows so a failed refresh can
+-- record its error without deleting the last rows that validated.
+CREATE TABLE IF NOT EXISTS model_context_window_catalog_vendor (
+  vendor TEXT PRIMARY KEY,
+  status TEXT NOT NULL,
+  last_refresh_at TEXT,
+  last_error TEXT
+);
 ` + SOURCE_STATE_SQL + REFRESH_RUN_SQL
 
 /** Map a `refresh_run` row out of SQLite's column names. */
@@ -624,6 +648,11 @@ export const MIGRATIONS: Record<number, (db: Database) => void> = {
       }
     }
   },
+}
+
+/** Escape a literal for a LIKE pattern: backslash, percent, and underscore match themselves. */
+function escapeLike(literal: string): string {
+  return literal.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_')
 }
 
 /** Stable per-span/code/location key; rows without a span keep their independent legacy identity. */
@@ -2381,7 +2410,9 @@ export class CanonStore {
    * not counted either way.
    */
   countUnknownWindowSessions(harness?: string): number {
-    const conditions = [`json_extract(payload, '$.context.contextLimitSource') = 'default'`]
+    const conditions = [
+      `json_extract(payload, '$.context.contextLimitSource') IN ('default', 'absent')`,
+    ]
     const params: string[] = []
     if (harness !== undefined && harness !== '') {
       conditions.push('harness = ?')
@@ -3003,6 +3034,34 @@ export class CanonStore {
   /** Total recorded problem count, without loading problem details. */
   countProblems(): number {
     return (this.db.prepare('SELECT COUNT(*) AS n FROM problems').get() as { n: number }).n
+  }
+
+  /**
+   * Reconcile source problems for one re-read source unit (#243): the set of
+   * source-problem rows for `harness` + `sourceKey` becomes exactly the codes
+   * in `keepCodes`, so a warning the reader no longer reports (a fixed
+   * FUTURE_DATED timestamp, a repaired MALFORMED_TIMESTAMP) does not stay
+   * forever after a clean re-import. Only rows whose span id is
+   * `harness:${harness}:${sourceKey}:${code}` are in scope: ingest problems on
+   * the bare `harness:id:sourceKey` span, the job row, TOKEN_* rows on real
+   * spans, and any other harness or source key are left alone. Call only for a
+   * unit the reader actually re-parsed — an unchanged unit skips the commit
+   * path entirely, and its standing warnings with it.
+   */
+  reconcileSourceProblems(harness: string, sourceKey: string, keepCodes: readonly string[]): void {
+    const prefix = `harness:${harness}:${sourceKey}:`
+    const rows = this.db
+      .prepare("SELECT span_id, code FROM problems WHERE span_id LIKE ? ESCAPE '\\'")
+      .all(`${escapeLike(prefix)}%`) as Array<{ span_id: unknown; code: unknown }>
+    const keep = new Set(keepCodes)
+    const remove = this.db.prepare('DELETE FROM problems WHERE span_id = ? AND code = ?')
+    for (const row of rows) {
+      if (typeof row.span_id !== 'string' || typeof row.code !== 'string') continue
+      if (!row.span_id.startsWith(prefix)) continue
+      const rest = row.span_id.slice(prefix.length)
+      if (rest.length === 0 || rest !== row.code) continue
+      if (!keep.has(row.code)) remove.run(row.span_id, row.code)
+    }
   }
 
   /** Append one ingest run to the audit log. */

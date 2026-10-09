@@ -71,6 +71,16 @@ import {
 import { harnessExportsCacheCounter } from '../canon/measurability.js'
 import { buildScorecard, type Scorecard } from '../analysis/scorecard.js'
 import type { AsadSessionPayload } from '../canon/sessions.js'
+import { projectCanonicalStore } from '../canon/projection.js'
+import {
+  MODEL_WINDOW_CATALOG_SOURCES,
+  getModelCatalogSnapshot,
+  readBundledVendorCatalog,
+  refreshModelWindowCatalog,
+  type ModelCatalogSnapshot,
+  type ModelWindowCatalogRefreshResult,
+  type ModelWindowCatalogVendor,
+} from '../canon/model-window-catalog.js'
 
 const _require = createRequire(import.meta.url)
 const { DatabaseSync } = _require('node:sqlite') as {
@@ -2684,12 +2694,18 @@ export class KyberBridge {
         }
         if (owner === null) {
           const payload = this.getSessionPayload<{ context?: { contextLimitSource?: string } }>(sessionId)
-          return payload?.context?.contextLimitSource === 'default' ? 1 : 0
+          return payload?.context?.contextLimitSource === 'default' ||
+            payload?.context?.contextLimitSource === 'absent'
+            ? 1
+            : 0
         }
         if (owner === undefined || normalizeHarnessName(owner) !== normalizeHarnessName(harness)) return 0
       }
       const payload = this.getSessionPayload<{ context?: { contextLimitSource?: string } }>(sessionId)
-      return payload?.context?.contextLimitSource === 'default' ? 1 : 0
+      return payload?.context?.contextLimitSource === 'default' ||
+        payload?.context?.contextLimitSource === 'absent'
+        ? 1
+        : 0
     }
     if (runId !== undefined && runId !== '') {
       // Same fold rule as everywhere else (review): a run scoped to a legacy
@@ -2708,8 +2724,10 @@ export class KyberBridge {
       ]
       return ids.filter(
         (id) =>
-          this.getSessionPayload<{ context?: { contextLimitSource?: string } }>(id)?.context?.contextLimitSource ===
-          'default',
+          ['default', 'absent'].includes(
+            this.getSessionPayload<{ context?: { contextLimitSource?: string } }>(id)?.context
+              ?.contextLimitSource ?? '',
+          ),
       ).length
     }
     // Harness and workspace scopes read the persisted rollups (review): the
@@ -2792,7 +2810,7 @@ export class KyberBridge {
     }
     if (!this.hasTable(db, 'session')) return 0
     try {
-      const conds = [`json_extract(payload, '$.context.contextLimitSource') = 'default'`]
+      const conds = [`json_extract(payload, '$.context.contextLimitSource') IN ('default', 'absent')`]
       const params: (string | number)[] = []
       if (harness !== undefined && harness !== '') {
         conds.push('LOWER(harness) = LOWER(?)')
@@ -3702,6 +3720,55 @@ export class KyberBridge {
    * unreadable table reads as no rows, matching `getQuarantineCount`'s
    * zero-on-absent contract for this seam.
    */
+  /**
+   * Catalog snapshot for `GET /api/kyber/model-catalog`.
+   *
+   * Read-only. An empty table stays empty until `POST /refresh` fills it;
+   * seeding here would make a GET rewrite the store.
+   */
+  getModelCatalog(): ModelCatalogSnapshot {
+    const store = this.store
+    if (store === undefined) {
+      const vendors = {} as ModelCatalogSnapshot['vendors']
+      for (const vendor of Object.keys(MODEL_WINDOW_CATALOG_SOURCES) as ModelWindowCatalogVendor[]) {
+        vendors[vendor] = {
+          documentationUrl: MODEL_WINDOW_CATALOG_SOURCES[vendor].documentationUrl,
+          status: 'unknown',
+          rowCount: 0,
+          lastRefreshAt: null,
+        }
+      }
+      return { rowCount: 0, lastRefreshAt: null, vendors }
+    }
+    return getModelCatalogSnapshot(store)
+  }
+
+  /**
+   * User-facing refresh. One derived rebuild runs only after a vendor's rows
+   * actually changed; the count is how many times that hook ran, which the
+   * refresh itself caps at one.
+   */
+  async refreshModelCatalog(): Promise<
+    ModelCatalogSnapshot & ModelWindowCatalogRefreshResult & { derivedRebuildCount: number }
+  > {
+    const store = this.store
+    if (store === undefined) {
+      return { ...this.getModelCatalog(), vendorsUpdated: [], vendorsFailed: [], derivedRebuildCount: 0 }
+    }
+    let derivedRebuildCount = 0
+    let rebuild: Promise<unknown> | undefined
+    const result = refreshModelWindowCatalog(store, {
+      readVendor: readBundledVendorCatalog,
+      now: () => new Date().toISOString(),
+      rebuildDerived: () => {
+        derivedRebuildCount += 1
+        rebuild = projectCanonicalStore(store)
+      },
+    })
+    if (rebuild !== undefined) await rebuild
+    return { ...getModelCatalogSnapshot(store), ...result, derivedRebuildCount }
+  }
+
   getQuarantineCountsByReason(): Array<{ reason: string; count: number }> {
     if (this.store) {
       try {

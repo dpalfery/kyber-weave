@@ -7,6 +7,11 @@ import { join } from 'node:path'
 import type { Command } from 'commander'
 import { CommanderError, InvalidArgumentError, Option } from 'commander'
 import { CanonStore } from '../canon/store.js'
+import {
+  DEFAULT_CAPTURE_ENDPOINT,
+  SUPPORTED_CAPTURE_HARNESS_IDS,
+} from '../capture/index.js'
+import type { CaptureAction } from '../capture/index.js'
 import type { CursorHookStdinOptions } from '../otel/cursor-hook.js'
 import type { recordAntigravityStatusLinePayload } from '../providers/antigravity.js'
 import { DEFAULT_HISTORY_WEEKS, refreshHarnessSources } from '../refresh/orchestrator.js'
@@ -103,6 +108,90 @@ export function registerKyberCommands(program: Command, dependencies: KyberComma
     .option('--host <host>', 'Host to bind to (default: 127.0.0.1)', '127.0.0.1')
     .option('--db <path>', 'Custom path for canon.db SQLite database')
     .action(runOtel)
+
+  // Harness OpenTelemetry capture (T8: D3, D9, D11). The subgroup points the
+  // six D6 harnesses' OTLP exporters at the KyberDash receiver: `status`
+  // reports per-harness state and receiver liveness, `enable` writes the
+  // exporter keys and records the receipt, `disable` restores per key and
+  // refuses on drift. macOS and Linux only; Windows reports unsupported.
+  const capture = kyber
+    .command('capture')
+    .description('Point harness OTLP exporters at the KyberDash receiver')
+  // Usage errors exit 2. Like `dash refresh`, each leaf remaps commander's
+  // `invalidArgument` to exit 2; the override lives on the leaves (not the
+  // `capture` parent) because that is where option-argument parsing fails.
+  const captureUsageExit = (error: Error): never => {
+    if (error instanceof CommanderError && error.code === 'commander.invalidArgument') {
+      throw new CommanderError(2, error.code, error.message)
+    }
+    throw error
+  }
+
+  const collectHarness = (value: string, previous: string[]): string[] => {
+    if (!SUPPORTED_CAPTURE_HARNESS_IDS.includes(value)) {
+      throw new InvalidArgumentError(
+        `--harness "${value}" is not a supported harness. Expected one of: ${SUPPORTED_CAPTURE_HARNESS_IDS.join(', ')}.`,
+      )
+    }
+    return [...previous, value]
+  }
+  const parseEndpoint = (value: string): string => {
+    if (!/^https?:\/\//i.test(value)) {
+      throw new InvalidArgumentError(
+        '--endpoint must be an OTLP/HTTP URL (http:// or https://). Only OTLP/HTTP protocols may be written.',
+      )
+    }
+    return value
+  }
+  const declareCaptureOptions = (sub: Command): Command =>
+    sub
+      .option(
+        '--harness <id>',
+        `Harness to act on (repeatable; default: ${SUPPORTED_CAPTURE_HARNESS_IDS.join(', ')})`,
+        collectHarness,
+        [] as string[],
+      )
+      .option('--endpoint <url>', 'OTLP receiver origin (default: http://127.0.0.1:4318)', parseEndpoint, DEFAULT_CAPTURE_ENDPOINT)
+
+  const runCaptureAction =
+    (action: CaptureAction) =>
+    async (opts: { harness?: string[]; endpoint?: string; dryRun?: boolean }): Promise<void> => {
+      const { runCapture } = await import('../capture/index.js')
+      const result = await runCapture(action, {
+        harnessIds: opts.harness !== undefined && opts.harness.length > 0 ? opts.harness : undefined,
+        endpoint: opts.endpoint,
+        dryRun: opts.dryRun,
+      })
+      if (result.stdout !== '') process.stdout.write(result.stdout)
+      if (result.stderr !== '') process.stderr.write(result.stderr)
+      process.exitCode = result.exitCode
+    }
+
+  declareCaptureOptions(
+    capture
+      .command('status')
+      .description('Report per-harness capture state and receiver liveness'),
+  )
+    .exitOverride(captureUsageExit)
+    .action(runCaptureAction('status'))
+
+  declareCaptureOptions(
+    capture
+      .command('enable')
+      .description('Write harness OTLP exporter keys and record the receipt')
+      .option('--dry-run', 'Print the exact per-file change and write nothing'),
+  )
+    .exitOverride(captureUsageExit)
+    .action(runCaptureAction('enable'))
+
+  declareCaptureOptions(
+    capture
+      .command('disable')
+      .description('Restore pre-enable values per key; refuse on drift')
+      .option('--dry-run', 'Print the exact per-file change and write nothing'),
+  )
+    .exitOverride(captureUsageExit)
+    .action(runCaptureAction('disable'))
 
   kyber
     .command('backfill')

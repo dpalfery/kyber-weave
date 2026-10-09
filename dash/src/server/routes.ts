@@ -1072,6 +1072,29 @@ export function handleKyberRequest(
     return true
   }
 
+  // Model-window catalog (D15). Refresh is matched first so a snapshot
+  // prefix cannot swallow it. Neither route reads a caller-supplied URL.
+  if (url.pathname === '/api/kyber/model-catalog/refresh') {
+    if (req.method !== 'POST') {
+      sendKyberJson(res, 405, { error: 'Method Not Allowed' })
+      return true
+    }
+    void bridge.refreshModelCatalog().then(
+      (body) => sendKyberJson(res, 200, body),
+      () => sendKyberJson(res, 500, { error: 'Model catalog refresh failed' }),
+    )
+    return true
+  }
+
+  if (url.pathname === '/api/kyber/model-catalog') {
+    if (req.method !== 'GET') {
+      sendKyberJson(res, 405, { error: 'Method Not Allowed' })
+      return true
+    }
+    sendKyberJson(res, 200, bridge.getModelCatalog())
+    return true
+  }
+
   // Precedence guard: any unhandled /api/kyber/* route MUST return JSON 404, never SPA HTML
   if (url.pathname.startsWith('/api/kyber/') || url.pathname === '/api/kyber') {
     sendKyberJson(res, 404, { error: 'Not found' })

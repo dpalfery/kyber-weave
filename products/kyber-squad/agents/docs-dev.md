@@ -33,9 +33,11 @@ You do **not** own:
 - CI/CD pipelines or DevOps configuration
 - Database schemas or migrations
 
+Your packet is your whole scope, with one exception: a plan or spec closeout task may read the plan or spec it is closing out. For all other work, do not open files under the directories named by **<plan-index>** and **<specification-index>**; if the packet is insufficient, return a blocker instead of reading the plan or spec.
+
 ## Workflow
 
-1. Read the relevant source code, existing documentation, and any related specs or designs.
+1. Read only the source code and existing documentation named by the packet. A closeout task also reads the plan or spec artifact being closed.
 2. Identify documentation gaps, outdated sections, or missing context.
 3. Write or update documentation files. Follow the existing style, tone, and structure of the repository.
 4. Verify accuracy by cross-referencing with source code. Use Context7 or Microsoft Learn MCP servers to verify library/API behavior before documenting it.

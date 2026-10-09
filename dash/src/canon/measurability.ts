@@ -59,6 +59,7 @@ import { copilotAdapter } from './adapters/copilot.js'
 import { geminiAdapter } from './adapters/gemini.js'
 import { antigravityAdapter } from './adapters/antigravity.js'
 import { piAdapter } from './adapters/pi.js'
+import type { ContextLimitSource } from './context-window.js'
 import { CANONICAL_CONTENT_KEYS, type Measurability, type MetricAvailability, type NotMeasurable } from './types.js'
 
 // ---------------------------------------------------------------------------
@@ -897,18 +898,85 @@ export function prefixAvailability(harness: string): PrefixAvailability {
 }
 
 /**
+ * What a harness's recorded sessions actually carried, for the dimensions whose
+ * availability depends on content or on a context window.
+ *
+ * <remarks>
+ * The static declarations below describe what a harness exports by default. A
+ * harness whose OpenTelemetry capture has been switched on can export more than
+ * that — tool schemas from Claude Code's raw API bodies, a window from OpenCode —
+ * and a static refusal would then deny data the store already holds. Evidence is
+ * what the sessions held, never a claim about the harness, so it can only lift a
+ * refusal; with no evidence the static answer is returned unchanged.
+ * </remarks>
+ */
+export type DimensionEvidence = {
+  /** Canonical content-bucket parts observed in the sessions (`tool_definitions`, ...). */
+  bucketParts?: Iterable<string>
+  /** Provenance of each window the sessions' pressures were measured against. */
+  windowSources?: Iterable<ContextLimitSource>
+}
+
+const TOOL_DIMENSIONS = new Set(['tool_yield', 'tool_definitions', 'schema_cost'])
+const PRESSURE_DIMENSIONS = new Set([
+  'context_pressure',
+  'context_pressure_median',
+  'context_pressure_p95',
+  'context_hygiene',
+  'pressure',
+])
+
+/**
+ * The availability the evidence alone supports for `dim`, or undefined when it
+ * supports nothing and the static declaration must answer.
+ *
+ * <remarks>
+ * A declared window is harness configuration, not telemetry (D5), so pressure
+ * against it is `derived` unless some session reported a window of its own. A
+ * `default` window is the named guess, not evidence of one (#181).
+ * </remarks>
+ */
+function evidencedAvailability(dim: string, evidence: DimensionEvidence | undefined): MetricAvailability | undefined {
+  if (evidence === undefined) return undefined
+  if (TOOL_DIMENSIONS.has(dim)) {
+    for (const part of evidence.bucketParts ?? []) {
+      if (part === 'tool_definitions') return 'measured'
+    }
+    return undefined
+  }
+  if (PRESSURE_DIMENSIONS.has(dim)) {
+    let declared = false
+    for (const source of evidence.windowSources ?? []) {
+      if (source === 'reported') return 'measured'
+      if (source === 'declared') declared = true
+    }
+    return declared ? 'derived' : undefined
+  }
+  return undefined
+}
+
+/**
  * Return the availability declaration for a specific diagnostic dimension of a harness
  * (Decision D3, ADR 0009, ADR 0011).
  *
  * In accordance with the core measurability discipline: where telemetry is absent
  * (e.g. prefix bytes on Cursor, cache counters on Aider, or tool schemas on raw transcripts),
  * this function emits an explicit `not_measurable` with its empirical reason, never
- * fabricating data or defaulting to a misleading zero.
+ * fabricating data or defaulting to a misleading zero. `evidence` from the harness's
+ * recorded sessions overrides the static answer for content- and window-dependent
+ * dimensions; without it the static answer is returned verbatim.
  */
-export function harnessDimensionAvailability(harness: string, dimension: string): MetricAvailability {
+export function harnessDimensionAvailability(
+  harness: string,
+  dimension: string,
+  evidence?: DimensionEvidence,
+): MetricAvailability {
   const normalized = normalizeHarnessName(harness)
   const family = surveyFamily(normalized)
   const dim = dimension.trim().toLowerCase()
+
+  const evidenced = evidencedAvailability(dim, evidence)
+  if (evidenced !== undefined) return evidenced
 
   // 1. Cache hit rate / cache efficiency: consult the Task E4 cache survey
   if (dim === 'cache_hit_rate' || dim === 'cache_efficiency' || dim === 'cache') {
