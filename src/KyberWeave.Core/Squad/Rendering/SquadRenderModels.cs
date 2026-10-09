@@ -31,7 +31,19 @@ public sealed record SquadRenderRequest(
     IReadOnlyList<SquadTarget> Targets,
     SquadDeploymentScope Scope,
     string? UserScopeDirectory = null,
-    string TranslationMode = "best-effort");
+    string TranslationMode = "best-effort",
+    SquadArbiterWiring? Arbiter = null);
+
+/// <summary>The host's Arbiter enforcement settings carried into a render.</summary>
+/// <remarks>
+/// Carried as render parameters rather than read from host configuration at render time so
+/// a render stays a pure function of its request, and so a request that omits the field
+/// renders byte for byte as it did before the field existed. Hook production keys off
+/// <see cref="ArbiterHookWiring"/>: hooks are produced only when <see cref="Enabled"/> is
+/// true and the scope is <see cref="SquadDeploymentScope.Project"/> (Req 22.4), and
+/// <see cref="HookTimeoutSeconds"/> becomes every produced hook's command timeout.
+/// </remarks>
+public sealed record SquadArbiterWiring(bool Enabled, int HookTimeoutSeconds);
 
 /// <summary>The structured result of a Squad render operation.</summary>
 public sealed record SquadRenderResult(
