@@ -11,7 +11,8 @@ namespace KyberWeave.Arbiter.Hooks.Adapters;
 /// The Claude Code hook dialect ([F1] of the task packet): <c>PreToolUse</c> on
 /// <c>Agent</c> (alias <c>Task</c>) for dispatch gating, the planning-path Read guard
 /// on <c>Read</c>/<c>Grep</c>/<c>Glob</c>/<c>Bash</c> for implementation specialists,
-/// and <c>PostToolUse</c> on <c>Agent</c> for return events.
+/// <c>PostToolUse</c> on <c>Agent</c> for return events, and <c>PreToolUse</c> on
+/// <c>SubagentHandback</c> for background-dispatch returns (Q15 decision, option (a)).
 /// </summary>
 /// <remarks>
 /// The payload's <c>agent_type</c> outranks the rendered <c>--caller</c>. An
@@ -19,7 +20,11 @@ namespace KyberWeave.Arbiter.Hooks.Adapters;
 /// before configuration loads. <c>updatedInput</c> replaces the entire input, so the
 /// strip path copies every <c>tool_input</c> field and only rewrites <c>prompt</c>.
 /// Background launches (<c>status: async_launched</c>) record the
-/// <c>tool_use_id</c>-to-<c>agentId</c> link and write nothing.
+/// <c>tool_use_id</c>-to-<c>agentId</c> link and write nothing. A hand-back is keyed
+/// by the payload's <c>agent_id</c>, joined to its dispatch through that link, and
+/// carries <c>tool_input.message</c> as the output; it is never denied, so a
+/// non-allow outcome returns <c>allow</c> with the envelope or note appended to
+/// <c>message</c> after one blank line.
 /// </remarks>
 public sealed class ClaudeHookAdapter : IHarnessHookAdapter
 {
@@ -34,6 +39,15 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
     /// with its later return within one session.
     /// </summary>
     internal static readonly ConcurrentDictionary<string, string> LaunchLinks = new();
+
+    /// <summary>
+    /// Hand-back returns by returning <c>agent_id</c>, mapped to the joined dispatch
+    /// <c>tool_use_id</c> where task 4.1's <c>agentId</c> link resolves one, and to
+    /// <see cref="string.Empty"/> where the return arrived with no join (unpaired, for
+    /// <c>KW-ARB-AUDIT-003</c> to report). A foreground <c>PostToolUse(Agent)</c> with
+    /// <c>status: completed</c> for a recorded <c>agentId</c> is not recorded twice.
+    /// </summary>
+    internal static readonly ConcurrentDictionary<string, string> HandbackReturns = new();
 
     /// <summary>Creates an adapter over the hook decision engine.</summary>
     public ClaudeHookAdapter(IHookDecisionEngine engine)
@@ -66,6 +80,11 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
         if (IsDispatchTool(tool))
         {
             return string.IsNullOrWhiteSpace(SubagentTypeOf(payload));
+        }
+
+        if (IsHandbackTool(tool))
+        {
+            return false;
         }
 
         if (IsReadTool(tool))
@@ -222,6 +241,11 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
                 : RenderPreDeny(verdict.Reason ?? "Denied by the Read guard (Req 25.2, Req 25.4).");
         }
 
+        if (IsHandbackTool(tool))
+        {
+            return HandleHandback(payload, caller, config);
+        }
+
         return string.Empty;
     }
 
@@ -265,6 +289,14 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
             target = GetString(toolInput, "subagent_type");
         }
 
+        // No double recording: a hand-back already delivered this return.
+        string? completedAgentId = GetString(response, "agentId");
+        if (!string.IsNullOrWhiteSpace(completedAgentId)
+            && HandbackReturns.ContainsKey(completedAgentId))
+        {
+            return string.Empty;
+        }
+
         HookOutcome outcome = _engine.DecidePostDispatch(caller, target, response.GetRawText(), config);
         return outcome.Kind switch
         {
@@ -282,6 +314,76 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
             _ => throw new InvalidOperationException(
                 $"Hook engine returned pre-dispatch outcome '{outcome.Kind}' for a post-dispatch event."),
         };
+    }
+
+    /// <summary>
+    /// Handles a background-dispatch return through <c>PreToolUse</c> on
+    /// <c>SubagentHandback</c>: records it under the payload's <c>agent_id</c>,
+    /// joined to its dispatch through task 4.1's <c>agentId</c> link, runs the
+    /// post-dispatch rules over <c>tool_input.message</c>, and delivers a non-allow
+    /// outcome as <c>allow</c> with the complete input (the envelope or note
+    /// appended to <c>message</c> after one blank line). The hand-back is never
+    /// denied: a return with no join is recorded unpaired and allowed.
+    /// </summary>
+    private string HandleHandback(JsonElement payload, string caller, KyberWeaveConfig config)
+    {
+        JsonElement toolInput = RequireToolInput(payload);
+        string? agentId = GetString(payload, "agent_id");
+        if (string.IsNullOrWhiteSpace(agentId))
+        {
+            throw new InvalidOperationException(
+                "Malformed Claude hook event: SubagentHandback carries no agent_id.");
+        }
+
+        string? message = GetString(toolInput, "message");
+        if (message is null)
+        {
+            throw new InvalidOperationException(
+                "Malformed Claude hook event: SubagentHandback input carries no message.");
+        }
+
+        HookOutcome outcome = _engine.DecidePostDispatch(caller, caller, message, config);
+        HandbackReturns[agentId] = JoinedToolUseId(agentId) ?? string.Empty;
+        return outcome.Kind switch
+        {
+            HookOutcomeKind.PassThrough => string.Empty,
+            HookOutcomeKind.Allow => string.Empty,
+            HookOutcomeKind.Deny => RenderHandbackAllow(
+                toolInput,
+                message,
+                outcome.Reason ?? throw new InvalidOperationException(
+                    "Hook engine denied without a reason.")),
+            HookOutcomeKind.PostBlock => RenderHandbackAllow(
+                toolInput,
+                message,
+                outcome.Reason ?? throw new InvalidOperationException(
+                    "Hook engine blocked without a reason.")),
+            HookOutcomeKind.PostAnnotation => RenderHandbackAllow(
+                toolInput,
+                message,
+                outcome.Reason ?? throw new InvalidOperationException(
+                    "Hook engine annotated without a note.")),
+            _ => throw new InvalidOperationException(
+                $"Hook engine returned pre-dispatch outcome '{outcome.Kind}' for a post-dispatch event."),
+        };
+    }
+
+    /// <summary>
+    /// Joins a returning <c>agent_id</c> to its dispatch through task 4.1's
+    /// <c>agentId</c> link. Null when the return arrived with no join: it is still
+    /// recorded, unpaired, for <c>KW-ARB-AUDIT-003</c> to report.
+    /// </summary>
+    private static string? JoinedToolUseId(string agentId)
+    {
+        foreach (KeyValuePair<string, string> link in LaunchLinks)
+        {
+            if (string.Equals(link.Value, agentId, StringComparison.Ordinal))
+            {
+                return link.Key;
+            }
+        }
+
+        return null;
     }
 
     private static string RepoRootOf(JsonElement payload)
@@ -329,6 +431,9 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
         || string.Equals(tool, "Grep", StringComparison.Ordinal)
         || string.Equals(tool, "Glob", StringComparison.Ordinal)
         || string.Equals(tool, "Bash", StringComparison.Ordinal);
+
+    private static bool IsHandbackTool(string? tool) =>
+        string.Equals(tool, "SubagentHandback", StringComparison.Ordinal);
 
     private static string RenderPreDeny(string reason) =>
         new JsonObject
@@ -393,6 +498,29 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
             ["decision"] = "block",
             ["reason"] = reason,
         }.ToJsonString();
+
+    /// <summary>
+    /// Delivers a non-allow post-dispatch outcome inside the hand-back: <c>allow</c>
+    /// with the complete input, the envelope or note appended to <c>message</c>
+    /// after one blank line. <c>updatedInput</c> replaces the entire input, so every
+    /// unchanged field is copied and only <c>message</c> is rewritten.
+    /// </summary>
+    private static string RenderHandbackAllow(JsonElement toolInput, string message, string note)
+    {
+        JsonObject updated = JsonNode.Parse(toolInput.GetRawText()) as JsonObject
+            ?? throw new InvalidOperationException(
+                "Malformed Claude hook event: tool_input is not a JSON object.");
+        updated["message"] = message + "\n\n" + note;
+        return new JsonObject
+        {
+            ["hookSpecificOutput"] = new JsonObject
+            {
+                ["hookEventName"] = "PreToolUse",
+                ["permissionDecision"] = "allow",
+                ["updatedInput"] = updated,
+            },
+        }.ToJsonString();
+    }
 
     private static string RenderPostAnnotation(string note) =>
         new JsonObject
