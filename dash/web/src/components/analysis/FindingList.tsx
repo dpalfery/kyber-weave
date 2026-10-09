@@ -375,6 +375,9 @@ export function FindingList({
         </p>
       ) : (
         <div
+          role="region"
+          tabIndex={0}
+          aria-label={title !== '' ? title : 'Findings'}
           className="mt-density-stack flex flex-col gap-density-cluster overflow-y-auto overscroll-contain pr-1"
           data-testid="finding-list-scroll"
           data-visible-cards={FINDING_LIST_VISIBLE_CARDS}

@@ -427,6 +427,9 @@ describe('FindingList (Decision D6 Ranking & D8 Recommendations)', () => {
     expect(html).toContain('data-testid="finding-list-scroll"')
     expect(html).toContain('data-visible-cards="4"')
     expect(html).toContain('overflow-y-auto')
+    expect(html).toContain('role="region"')
+    expect(html).toContain('tabindex="0"')
+    expect(html).toContain('aria-label="Highest-Leverage Diagnostic Findings"')
     for (let index = 0; index < many.length; index += 1) {
       expect(html).toContain(`finding-card-f-scroll-${index}`)
     }
