@@ -660,6 +660,106 @@ public sealed class UpdateCommandTests : IDisposable
         Assert.Equal("new-kyberdash", File.ReadAllText(installed));
     }
 
+    // ---- Arbiter: installed beside the CLI, updated with it ----
+
+    [Fact]
+    public void RunReplacesInstalledArbiter()
+    {
+        string installed = InstallArbiter();
+        using MapHandler handler = MapRelease("0.2.0", "osx-arm64", windows: false, withArbiter: true);
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
+
+        SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions("0.2.0", false, false));
+
+        Assert.Equal(0, outcome.ExitCode);
+        Assert.Equal("new-arbiter", File.ReadAllText(installed));
+    }
+
+    [Fact]
+    public void RunLeavesArbiterAloneWhenItIsNotInstalled()
+    {
+        // No kyber-weave-arbiter on disk, and the release map carries no arbiter asset:
+        // an update that tried to fetch one would fail on the unmapped URI.
+        using MapHandler handler = MapRelease("0.2.0", "osx-arm64", windows: false);
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
+
+        SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions("0.2.0", false, false));
+
+        Assert.Equal(0, outcome.ExitCode);
+        Assert.False(File.Exists(Path.Combine(_install.Path, "kyber-weave-arbiter")));
+    }
+
+    [Fact]
+    public void RunLeavesArbiterUntouchedWhenTheReleasePredatesIt()
+    {
+        // 0.1.7-rc.16 sorts below the arbiter floor, so no release at that tag carries the
+        // asset. The unmapped URI is the assertion: asking for it would fail here.
+        string installed = InstallArbiter();
+        using MapHandler handler = MapRelease("0.1.7-rc.16", "osx-arm64", windows: false);
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
+
+        SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions("0.1.7-rc.16", false, false));
+
+        Assert.Equal(0, outcome.ExitCode);
+        Assert.Equal("old-arbiter", File.ReadAllText(installed));
+    }
+
+    [Fact]
+    public void RunLeavesArbiterUntouchedUnderNoArbiter()
+    {
+        string installed = InstallArbiter();
+        using MapHandler handler = MapRelease("0.2.0", "osx-arm64", windows: false);
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
+
+        SelfUpdateOutcome outcome = Run(
+            handler,
+            host,
+            new SelfUpdateOptions("0.2.0", false, false, NoArbiter: true));
+
+        Assert.Equal(0, outcome.ExitCode);
+        Assert.Equal("old-arbiter", File.ReadAllText(installed));
+    }
+
+    [Fact]
+    public void RunReplacesInstalledArbiterOnWindows()
+    {
+        string installed = InstallArbiter(windows: true);
+        using MapHandler handler = MapRelease("0.2.0", "win-x64", windows: true, withArbiter: true);
+        SelfUpdateHost host = CreateHost("0.1.0", "win-x64", windows: true);
+
+        SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions("0.2.0", false, false));
+
+        Assert.Equal(0, outcome.ExitCode);
+        Assert.Equal("new-arbiter", File.ReadAllText(installed));
+    }
+
+    [Fact]
+    public void RunWhenArbiterCommitFailsLeavesTheRunningImageUntouched()
+    {
+        string installed = InstallArbiter();
+        using MapHandler handler = MapRelease("0.2.0", "osx-arm64", windows: false, withArbiter: true);
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
+
+        // A directory at the arbiter's staging path fails the commit, not the staging:
+        // Replace copies to ".kyber-weave-arbiter.new" first, and a copy over a
+        // directory throws. The arbiter itself stays an installed file, so the
+        // ShouldUpdateArbiter gate still takes the update path. By commit time the
+        // MCP binary is already in place, so the rollback below is the assertion.
+        Directory.CreateDirectory(Path.Combine(_install.Path, ".kyber-weave-arbiter.new"));
+        List<string> log = [];
+
+        using SelfUpdater updater = new SelfUpdater(handler, host, log.Add, _ => null);
+        SelfUpdateOutcome outcome = updater.Run(new SelfUpdateOptions("0.2.0", false, false));
+
+        Assert.Equal(1, outcome.ExitCode);
+        Assert.Equal("old-cli", File.ReadAllText(host.ProcessPath));
+        Assert.Equal("old-arbiter", File.ReadAllText(installed));
+        Assert.False(File.Exists(Path.Combine(_install.Path, "kyber-weave-mcp")));
+        Assert.DoesNotContain(
+            log,
+            line => line.StartsWith("installed kyber-weave ", StringComparison.Ordinal));
+    }
+
     // ---- tray delegation (task 9.3, Requirements 15.1-15.7) ----
 
     /// <summary>
@@ -831,7 +931,8 @@ public sealed class UpdateCommandTests : IDisposable
         string version,
         string rid,
         bool windows,
-        bool withKyberDash = false)
+        bool withKyberDash = false,
+        bool withArbiter = false)
     {
         MapHandler handler = new MapHandler();
         string tag = "v" + version;
@@ -862,6 +963,18 @@ public sealed class UpdateCommandTests : IDisposable
             handler.MapFile(GitHubReleaseClient.AssetUri(tag, dashName).AbsoluteUri, dashBytes);
         }
 
+        if (withArbiter)
+        {
+            // Ships like kyber-weave-mcp: published under this host's .NET RID.
+            string arbiterName = BinaryInstaller.ArchiveName("kyber-weave-arbiter", rid);
+            string arbiterArchive = Path.Combine(_assets.Path, arbiterName);
+            string arbiterFile = BinaryInstaller.InstalledFileName("kyber-weave-arbiter", windows);
+            WriteArchive(arbiterArchive, arbiterFile, "new-arbiter"u8.ToArray(), windows);
+            byte[] arbiterBytes = File.ReadAllBytes(arbiterArchive);
+            sums += $"{Sha(arbiterBytes)}  {arbiterName}\n";
+            handler.MapFile(GitHubReleaseClient.AssetUri(tag, arbiterName).AbsoluteUri, arbiterBytes);
+        }
+
         handler.MapFile(
             GitHubReleaseClient.AssetUri(tag, "SHA256SUMS.txt").AbsoluteUri,
             Encoding.UTF8.GetBytes(sums));
@@ -877,6 +990,16 @@ public sealed class UpdateCommandTests : IDisposable
             _install.Path,
             BinaryInstaller.InstalledFileName("kyberdash", windows));
         File.WriteAllText(path, "old-kyberdash");
+        return path;
+    }
+
+    /// <summary>Places an already-installed arbiter beside the CLI.</summary>
+    private string InstallArbiter(bool windows = false)
+    {
+        string path = Path.Combine(
+            _install.Path,
+            BinaryInstaller.InstalledFileName("kyber-weave-arbiter", windows));
+        File.WriteAllText(path, "old-arbiter");
         return path;
     }
 

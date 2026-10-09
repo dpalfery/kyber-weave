@@ -24,4 +24,8 @@ public sealed class UpdateSettings : CommandSettings
     [CommandOption("--no-menubar")]
     [Description("Leave an installed KyberDash tray unchanged.")]
     public bool NoMenubar { get; set; }
+
+    [CommandOption("--no-arbiter")]
+    [Description("Leave an installed kyber-weave-arbiter unchanged.")]
+    public bool NoArbiter { get; set; }
 }
