@@ -25,6 +25,12 @@ const RECEIVER_SERVICE = 'kyberdash-otlp'
 /** Pause lease handed to the receiver: a crashed cleaner resumes after 10 minutes. */
 export const CLEAN_PAUSE_LEASE_MS = 10 * 60 * 1000
 
+/**
+ * Hard ceiling for each receiver pause-port fetch. A hung receiver fails
+ * fast instead of hanging the clean forever before any row is wiped.
+ */
+export const CLEAN_PAUSE_TIMEOUT_MS = 5000
+
 export type ReceiverPauseOutcome = {
   /** True when a receiver was found and paused; false when the port was free or foreign. */
   paused: boolean
@@ -44,14 +50,16 @@ type HealthBody = {
 export async function pauseReceiver(
   baseUrl: string = RECEIVER_BASE_URL,
   leaseMs: number = CLEAN_PAUSE_LEASE_MS,
+  timeoutMs: number = CLEAN_PAUSE_TIMEOUT_MS,
 ): Promise<ReceiverPauseOutcome> {
-  if (!(await isOurReceiver(baseUrl))) return { paused: false }
+  if (!(await isOurReceiver(baseUrl, timeoutMs))) return { paused: false }
   let response: Response
   try {
     response = await fetch(`${baseUrl}${OTLP_ADMIN_PAUSE_PATH}`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ leaseMs }),
+      signal: AbortSignal.timeout(timeoutMs),
     })
   } catch (err) {
     throw new Error(`cleanDatabase: receiver pause request failed: ${message(err)}`)
@@ -63,10 +71,16 @@ export async function pauseReceiver(
 }
 
 /** Resume ingestion; a no-op when nothing was paused. Best-effort by design. */
-export async function resumeReceiver(baseUrl: string = RECEIVER_BASE_URL): Promise<void> {
-  if (!(await isOurReceiver(baseUrl))) return
+export async function resumeReceiver(
+  baseUrl: string = RECEIVER_BASE_URL,
+  timeoutMs: number = CLEAN_PAUSE_TIMEOUT_MS,
+): Promise<void> {
+  if (!(await isOurReceiver(baseUrl, timeoutMs))) return
   try {
-    await fetch(`${baseUrl}${OTLP_ADMIN_RESUME_PATH}`, { method: 'POST' })
+    await fetch(`${baseUrl}${OTLP_ADMIN_RESUME_PATH}`, {
+      method: 'POST',
+      signal: AbortSignal.timeout(timeoutMs),
+    })
   } catch {
     // The receiver auto-resumes on lease expiry; a failed resume request
     // must never fail a clean that already succeeded.
@@ -74,10 +88,12 @@ export async function resumeReceiver(baseUrl: string = RECEIVER_BASE_URL): Promi
 }
 
 /** True when the port answers healthz with our service identity. */
-async function isOurReceiver(baseUrl: string): Promise<boolean> {
+async function isOurReceiver(baseUrl: string, timeoutMs: number): Promise<boolean> {
   let response: Response
   try {
-    response = await fetch(`${baseUrl}${OTLP_HEALTHZ_PATH}`)
+    response = await fetch(`${baseUrl}${OTLP_HEALTHZ_PATH}`, {
+      signal: AbortSignal.timeout(timeoutMs),
+    })
   } catch {
     return false
   }

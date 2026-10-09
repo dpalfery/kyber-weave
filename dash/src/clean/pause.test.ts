@@ -13,7 +13,7 @@ import {
   OTLP_TRACES_PATH,
   OtlpReceiver,
 } from '../otel/receiver.js'
-import { pauseReceiver, resumeReceiver } from './pause.js'
+import { pauseReceiver, resumeReceiver, CLEAN_PAUSE_LEASE_MS } from './pause.js'
 
 const started: OtlpReceiver[] = []
 
@@ -113,6 +113,55 @@ describe('receiver pause port (issue #312)', () => {
       await expect(pauseReceiver(`http://127.0.0.1:${port}`)).rejects.toThrow(/refused|404|HTTP 404/)
     } finally {
       await new Promise<void>((resolve) => shim.close(() => resolve()))
+    }
+  })
+
+  it('fails fast when our receiver wedges on the pause path (issue #312 F7)', async () => {
+    // A hung receiver accepts the socket but never answers: the pause fetch
+    // must time out instead of hanging the clean forever before any row is
+    // wiped. The hang is simulated without touching fetch internals — the
+    // shim identifies as ours on healthz instantly, then stalls the pause.
+    const { createServer } = await import('node:http')
+    const shim = createServer((req, res) => {
+      if (req.url === OTLP_HEALTHZ_PATH) {
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ service: 'kyberdash-otlp', version: '0.0.0-test' }))
+        return
+      }
+      // Stall: hold the pause connection open without responding.
+    })
+    await new Promise<void>((resolve) => shim.listen(0, '127.0.0.1', resolve))
+    const address = shim.address()
+    const port = typeof address === 'object' && address !== null ? address.port : 0
+    try {
+      const start = Date.now()
+      await expect(
+        pauseReceiver(`http://127.0.0.1:${port}`, CLEAN_PAUSE_LEASE_MS, 250),
+      ).rejects.toThrow(/pause request failed|TimeoutError|aborted/i)
+      expect(Date.now() - start).toBeLessThan(10_000)
+    } finally {
+      await new Promise<void>((resolve) => shim.close(() => resolve()))
+    }
+  })
+
+  it('fails fast when the healthz probe wedges (issue #312 F7)', async () => {
+    // The port accepts connections but never answers healthz: the probe must
+    // time out and proceed without pausing rather than hang the clean.
+    const { createServer } = await import('node:net')
+    const stall = createServer((socket) => {
+      socket.resume()
+    })
+    await new Promise<void>((resolve) => stall.listen(0, '127.0.0.1', resolve))
+    const address = stall.address()
+    const port = typeof address === 'object' && address !== null ? address.port : 0
+    try {
+      const start = Date.now()
+      expect(await pauseReceiver(`http://127.0.0.1:${port}`, CLEAN_PAUSE_LEASE_MS, 250)).toEqual({
+        paused: false,
+      })
+      expect(Date.now() - start).toBeLessThan(10_000)
+    } finally {
+      await new Promise<void>((resolve) => stall.close(() => resolve()))
     }
   })
 })
