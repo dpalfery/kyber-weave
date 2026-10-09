@@ -89,6 +89,14 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// unresolvable <c>Agent</c> call fails rather than silently running with every tool.
 /// </para>
 /// <para>
+/// <strong>Arbiter extension (Req 6.2, 22.2, 25.1):</strong> When the render request carries an
+/// enabled <see cref="SquadArbiterWiring"/> under <see cref="SquadDeploymentScope.Project"/>
+/// scope, the renderer emits the owned file <c>.pi/extensions/kyber-arbiter.ts</c> from
+/// <see cref="RenderArbiterExtension(int)"/> for harness token <c>pi</c>. Nothing is rendered
+/// when the wiring is null or disabled, or the scope is Global (Req 22.2), so a render
+/// without Arbiter is byte-identical to before the field existed.
+/// </para>
+/// <para>
 /// <b>Primary-agent lowering.</b> Pi core has no primary-agent selection primitive —
 /// <c>.pi/SYSTEM.md</c> and <c>--system-prompt</c> replace the whole session prompt, not a
 /// per-agent one — so a canonical agent with <see cref="SquadInvocation.Primary"/> cannot
@@ -110,6 +118,7 @@ public sealed class PiRenderer : ISquadRenderer
 {
     private const string AgentsDirectory = ".pi/agents";
     private const string SkillsDirectory = ".pi/skills";
+    private const string ArbiterExtensionFileRelativePath = ".pi/extensions/kyber-arbiter.ts";
 
     /// <summary>
     /// Lowers the semantic capability vocabulary onto Pi's built-in tool names, verified
@@ -276,6 +285,18 @@ public sealed class PiRenderer : ISquadRenderer
             SquadResourceProjection.Append(files, principal, skill.Resources);
         }
 
+        // A null Arbiter must render byte for byte as before the field existed, so the
+        // guard lives here: only an enabled wiring at Project scope emits the owned
+        // extension shim. Under Global scope there is no project configuration to enforce
+        // from (Req 22.2).
+        if (request.Arbiter is not null && request.Arbiter.Enabled && request.Scope == SquadDeploymentScope.Project)
+        {
+            files.Add(new SquadDeploymentFile(
+                ArbiterExtensionFileRelativePath,
+                Encoding.UTF8.GetBytes(RenderArbiterExtension(request.Arbiter.HookTimeoutSeconds)),
+                "pi"));
+        }
+
         return Task.FromResult(new SquadRenderResult(true, files, degradations, [], []));
     }
 
@@ -347,6 +368,120 @@ public sealed class PiRenderer : ISquadRenderer
             $"{skillsDir}/{name}/SKILL.md",
             Encoding.UTF8.GetBytes(content),
             "pi");
+    }
+
+    /// <summary>
+    /// Renders the Pi project extension that bridges Pi tool calls to the
+    /// <c>kyber-weave-arbiter hook</c> binary through the task 4.3 plugin envelope.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Pi extensions default-export <c>function (pi) { … }</c> and load only in a trusted
+    /// project. The shim handles the <c>Agent</c> tool from
+    /// <c>@tintinweb/pi-subagents</c>: <c>pi.on("tool_call", …)</c> sends the
+    /// <c>before</c> envelope and <c>pi.on("tool_result", …)</c> sends the
+    /// <c>after</c> envelope, both shaped
+    /// <c>{schema, harness, phase, tool, call-id, session, cwd, args, result}</c> under
+    /// schema <c>kyber-arbiter.plugin-event/v1</c>, and both read back
+    /// <c>{decision, reason, args}</c>.
+    /// </para>
+    /// <para>
+    /// The shim spawns by argv with <c>node:child_process</c> <c>spawnSync</c> and no
+    /// shell — <c>pi.exec</c> takes no stdin, so Bun-style process APIs cannot carry the
+    /// envelope — writing the envelope on stdin via <c>input</c> with
+    /// <c>encoding: "utf8"</c> and <c>timeout</c> from
+    /// <see cref="SquadArbiterWiring.HookTimeoutSeconds"/> (spawnSync takes
+    /// milliseconds). A <c>block</c> decision before the call returns
+    /// <c>{block: true, reason}</c>; a returned <c>args</c> object is assigned field by
+    /// field onto <c>event.input</c>. After the call a <c>block</c> returns
+    /// <c>{content: [...event.content, {type: "text", text: reason}]}</c>. A spawn error
+    /// or a non-zero status blocks, so the call fails closed rather than passing through.
+    /// </para>
+    /// </remarks>
+    private static string RenderArbiterExtension(int timeoutSeconds)
+    {
+        int timeoutMs = timeoutSeconds * 1000;
+
+        return $$"""
+            import { spawnSync } from "node:child_process";
+
+            type ArbiterDecision = {
+              decision: "allow" | "block";
+              reason?: string;
+              args?: Record<string, unknown>;
+            };
+
+            function runArbiterHook(envelope: unknown): ArbiterDecision {
+              try {
+                const result = spawnSync("kyber-weave-arbiter", ["hook", "--harness", "pi"], {
+                  input: JSON.stringify(envelope),
+                  encoding: "utf8",
+                  timeout: {{timeoutMs}},
+                });
+                if (result.error) {
+                  return { decision: "block", reason: "kyber-arbiter: failed to spawn kyber-weave-arbiter: " + String(result.error) };
+                }
+                if (result.status !== 0) {
+                  return { decision: "block", reason: "kyber-arbiter: hook exited with status " + String(result.status) };
+                }
+                return JSON.parse(result.stdout as string) as ArbiterDecision;
+              } catch (err) {
+                return { decision: "block", reason: "kyber-arbiter: failed to run arbiter hook: " + String(err) };
+              }
+            }
+
+            export default function (pi: any) {
+              pi.on("tool_call", async (event: any) => {
+                if (event.toolName !== "Agent") {
+                  return;
+                }
+                const envelope = {
+                  schema: "kyber-arbiter.plugin-event/v1",
+                  harness: "pi",
+                  phase: "before",
+                  tool: event.toolName,
+                  "call-id": event.toolCallId,
+                  session: event.sessionId ?? event.session ?? "",
+                  cwd: process.cwd(),
+                  args: event.input,
+                };
+                const decision = runArbiterHook(envelope);
+                if (decision.decision === "block") {
+                  const reason = decision.reason ?? "blocked by kyber-arbiter";
+                  return { block: true, reason };
+                }
+                if (decision.args !== undefined) {
+                  for (const key of Object.keys(decision.args)) {
+                    event.input[key] = decision.args[key];
+                  }
+                }
+              });
+              pi.on("tool_result", async (event: any) => {
+                if (event.toolName !== "Agent") {
+                  return;
+                }
+                const envelope = {
+                  schema: "kyber-arbiter.plugin-event/v1",
+                  harness: "pi",
+                  phase: "after",
+                  tool: event.toolName,
+                  "call-id": event.toolCallId,
+                  session: event.sessionId ?? event.session ?? "",
+                  cwd: process.cwd(),
+                  args: event.input,
+                  result: {
+                    content: event.content,
+                    isError: event.isError,
+                  },
+                };
+                const decision = runArbiterHook(envelope);
+                if (decision.decision === "block") {
+                  const reason = decision.reason ?? "blocked by kyber-arbiter";
+                  return { content: [...event.content, { type: "text", text: reason }] };
+                }
+              });
+            }
+            """;
     }
 
     /// <summary>
