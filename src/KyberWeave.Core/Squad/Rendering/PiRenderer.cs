@@ -424,7 +424,11 @@ public sealed class PiRenderer : ISquadRenderer
                 if (result.status !== 0) {
                   return { decision: "block", reason: "kyber-arbiter: hook exited with status " + String(result.status) };
                 }
-                return JSON.parse(result.stdout as string) as ArbiterDecision;
+                const out = String(result.stdout ?? "");
+                if (out.trim() === "") {
+                  return { decision: "allow" };
+                }
+                return JSON.parse(out) as ArbiterDecision;
               } catch (err) {
                 return { decision: "block", reason: "kyber-arbiter: failed to run arbiter hook: " + String(err) };
               }

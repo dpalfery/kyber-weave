@@ -247,6 +247,24 @@ public sealed class ArbiterSetupCommandTests : IDisposable
         Assert.Contains("KW-ARB-CONFIG-006", execution.Output, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("copilot-cli")]
+    [InlineData("codex")]
+    [InlineData("cursor")]
+    public void Doctor_NamesEachAdvisoryPostDispatchTarget(string target)
+    {
+        string host = NewDir("doctor-advisory-" + target);
+
+        CommandExecution execution = Capture(() => new ArbiterDoctorCommand().Execute(
+            null!,
+            new ArbiterSettings { Path = host }));
+
+        // The runbook promises doctor surfaces every target whose post-dispatch
+        // findings are advisory; none may be silently missing.
+        Assert.Contains("(" + target + ")", execution.Output, StringComparison.Ordinal);
+        Assert.Contains("advisory", execution.Output, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void Doctor_UntunedModel_RaisesConfig007()
     {

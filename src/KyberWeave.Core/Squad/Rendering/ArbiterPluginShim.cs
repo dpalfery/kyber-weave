@@ -54,6 +54,9 @@ public static class ArbiterPluginShim
                 proc.stdin.end();
                 const text = await new Response(proc.stdout).text();
                 await proc.exited;
+                if (text.trim() === "") {
+                  return { decision: "allow" };
+                }
                 return JSON.parse(text) as ArbiterDecision;
               } catch (err) {
                 throw new Error("kyber-arbiter: failed to read arbiter decision: " + String(err));

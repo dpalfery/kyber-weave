@@ -183,11 +183,11 @@ pass as `{permission: "allow"}`, strip as `{permission: "allow", updated_input}`
 post-dispatch as `{additional_context}` (or `{}`) — because `failClosed` blocks when
 there is no output.
 
-On Codex and Copilot CLI, post-dispatch denials are advisory only
-(`additionalContext`): on Codex a `decision: block` would replace the sub-agent's
+On Codex, Copilot CLI and Cursor, post-dispatch denials are advisory only
+(`additionalContext` on the first two, `additional_context` on Cursor): on Codex a `decision: block` would replace the sub-agent's
 result, so every post-dispatch outcome — deny, block, or annotation — is delivered
-as `hookSpecificOutput.additionalContext`. Pre-dispatch denies still block on both
-targets.
+as `hookSpecificOutput.additionalContext`. Pre-dispatch denies still block on all
+three targets, and `arbiter doctor` prints an informational line for each.
 
 Trust steps for the new targets are surfaced at install time: Codex needs a trusted
 `.codex/` layer plus per-hook review through `/hooks` (every `squad update` that

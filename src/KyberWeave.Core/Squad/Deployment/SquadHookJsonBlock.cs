@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
@@ -46,7 +47,15 @@ public static class SquadHookJsonBlock
 
     private const string ModifiedReason = "modified";
 
-    private static readonly JsonSerializerOptions Indented = new() { WriteIndented = true };
+    // The relaxed encoder keeps the user's own text byte-faithful in the file (&&, quotes,
+    // angle brackets and non-ASCII would otherwise be rewritten as \uXXXX escapes). The
+    // digest stays on the default encoder inside CanonicalDigest, so recorded digests
+    // never depend on how the file was written.
+    private static readonly JsonSerializerOptions Indented = new()
+    {
+        WriteIndented = true,
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+    };
 
     /// <summary>The hook file owned through this format, as a portable relative path.</summary>
     public static string RelativePath(SquadHookBlockFormat format) =>
@@ -223,23 +232,96 @@ public static class SquadHookJsonBlock
 
         JsonObject root = ParseObject(currentJson);
         List<SquadHookDrift> drift = [];
+        Dictionary<string, HashSet<int>> claimed = new(StringComparer.Ordinal);
         foreach ((string pointer, string digest) in expectedDigests)
         {
             JsonNode? node = ResolvePointer(root, pointer);
-            if (node is null)
+            bool hasContainer = TrySplitPointer(pointer, out string containerPointer, out int recordedIndex);
+            if (node is not null
+                && string.Equals(CanonicalDigest(node), digest, StringComparison.Ordinal))
             {
-                drift.Add(new SquadHookDrift(pointer, MissingReason));
+                if (hasContainer)
+                {
+                    ClaimedIn(claimed, containerPointer).Add(recordedIndex);
+                }
+
+                continue;
             }
-            else if (!string.Equals(CanonicalDigest(node), digest, StringComparison.Ordinal))
+
+            // The recorded index is only a hint. A user who inserts a hook ahead of
+            // Squad's shifts it, and reading that as drift would also stop `squad update`
+            // from ever refreshing the entry. Look for the untouched entry in its container.
+            if (hasContainer && ResolvePointer(root, containerPointer) is JsonArray container)
             {
-                drift.Add(new SquadHookDrift(pointer, ModifiedReason));
+                HashSet<int> taken = ClaimedIn(claimed, containerPointer);
+                int found = IndexOfUnclaimedDigest(container, digest, taken);
+                if (found >= 0)
+                {
+                    taken.Add(found);
+                    continue;
+                }
             }
+
+            drift.Add(new SquadHookDrift(pointer, node is null ? MissingReason : ModifiedReason));
         }
 
         return drift;
     }
 
-    private static (string Content, IReadOnlyList<SquadHookOwnedEntry> Owned) SpliceContent(
+    private static HashSet<int> ClaimedIn(Dictionary<string, HashSet<int>> claimed, string containerPointer)
+    {
+        if (!claimed.TryGetValue(containerPointer, out HashSet<int>? taken))
+        {
+            taken = [];
+            claimed[containerPointer] = taken;
+        }
+
+        return taken;
+    }
+
+    private static int IndexOfUnclaimedDigest(JsonArray container, string digest, HashSet<int> taken)
+    {
+        for (int index = 0; index < container.Count; index++)
+        {
+            if (!taken.Contains(index)
+                && container[index] is JsonNode candidate
+                && string.Equals(CanonicalDigest(candidate), digest, StringComparison.Ordinal))
+            {
+                return index;
+            }
+        }
+
+        return -1;
+    }
+
+    private static bool TrySplitPointer(string pointer, out string containerPointer, out int index)
+    {
+        int slash = pointer.LastIndexOf('/');
+        if (slash > 0
+            && int.TryParse(
+                pointer.AsSpan(slash + 1),
+                System.Globalization.NumberStyles.None,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out index))
+        {
+            containerPointer = pointer[..slash];
+            return true;
+        }
+
+        containerPointer = string.Empty;
+        index = -1;
+        return false;
+    }
+
+    /// <summary>
+    /// Splices Squad's entries into hook-file <paramref name="existing"/> content without
+    /// touching the disk: the single implementation behind both <see cref="SpliceFile"/> and
+    /// the deployment plan, so a dry run and a real install can never disagree. A missing
+    /// or blank file starts from the format's minimal document. Throws
+    /// <see cref="JsonException"/> or <see cref="InvalidOperationException"/> when the
+    /// content is not a usable hook file, leaving the caller to decide how to report it.
+    /// </summary>
+    public static (string Content, IReadOnlyList<SquadHookOwnedEntry> Owned) SpliceContent(
         SquadHookBlockFormat format,
         string? existing,
         IReadOnlyList<JsonNode> preToolUse,
@@ -295,7 +377,12 @@ public static class SquadHookJsonBlock
         return (Serialize(root), owned);
     }
 
-    private static string RemoveContent(SquadHookBlockFormat format, string? existing)
+    /// <summary>
+    /// Removes Squad's entries from hook-file <paramref name="existing"/> content without
+    /// touching the disk, restoring the user's content. Same failure contract as
+    /// <see cref="SpliceContent"/>.
+    /// </summary>
+    public static string RemoveContent(SquadHookBlockFormat format, string? existing)
     {
         JsonObject root = ParseOrMinimal(format, existing);
 
@@ -575,6 +662,16 @@ public static class SquadHookJsonBlock
             SquadHookBlockFormat.Antigravity => "antigravity",
             _ => throw new ArgumentOutOfRangeException(nameof(format), format, "Unknown hook block format."),
         };
+
+    /// <summary>
+    /// Parses and re-serializes hook-file content exactly as a splice or removal would, so a
+    /// caller can tell "nothing of Squad's was in this file" apart from a real rewrite.
+    /// </summary>
+    public static string NormalizeContent(string json)
+    {
+        ArgumentNullException.ThrowIfNull(json);
+        return Serialize(ParseObject(json));
+    }
 
     private static string Serialize(JsonNode root) => root.ToJsonString(Indented) + "\n";
 }

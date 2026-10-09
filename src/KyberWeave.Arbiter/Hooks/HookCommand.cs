@@ -102,7 +102,7 @@ public sealed class HookCommand
             {
                 // The block renderer never throws by contract; this is the last resort
                 // so a host failure still fails closed when the renderer itself breaks.
-                block = """{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"KW-ARB-HOOK-001: hook host failed."}}""";
+                block = LastResortBlock.For(harness);
             }
 
             stdout.Write(block);

@@ -93,7 +93,15 @@ shapes — `.factory/hooks.json`, `.devin/hooks.v1.json`, and the Antigravity
 
 - **Splicing normalizes formatting.** The user's file is rewritten with normalized
   indentation on every install and update that touches the block, even when no hook
-  changed. The hooks themselves are untouched.
+  changed. The hooks themselves are untouched, and the user's own text is not
+  otherwise altered: the file is written with a relaxed JSON encoder, so characters
+  such as `&&`, quotes, angle brackets and non-ASCII letters stay as typed and are never
+  rewritten as `\uXXXX` escapes. Parsed content is identical before and after; only
+  whitespace changes.
+- **Drift is found by digest, not by position.** The receipt records each entry's index
+  as a hint. A user who inserts a hook ahead of Squad's entry shifts it, so the check
+  looks for the untouched entry anywhere in its container and reports drift only when
+  no such entry exists.
 - **v3 receipts need a current CLI.** A receipt with blocks is unreadable by older
   readers, which refuse it with exit code 1 rather than misreading ownership.
   Receipts without blocks are unaffected, so harnesses that need no shared file

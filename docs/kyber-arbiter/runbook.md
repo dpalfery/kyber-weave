@@ -63,7 +63,10 @@ harness surfaces as context rather than enforcement. Pre-dispatch denies still b
 On the Codex target (`codex`) post-dispatch outcomes are likewise advisory only: every
 post-dispatch outcome renders as `hookSpecificOutput.additionalContext`, because a
 `decision: block` there would replace the sub-agent's result.
-`arbiter doctor` prints these limitations as informational lines.
+On the Cursor target (`cursor`) the post-dispatch path writes only `additional_context`,
+so a post-dispatch finding is advisory there too; the pre-dispatch `permission: deny`
+still blocks.
+`arbiter doctor` prints one informational line for each of these three targets.
 
 ## Setup, doctor, audit
 
@@ -73,7 +76,7 @@ file:
 ```bash
 kyber-weave arbiter setup    # choose provider (none, TypeSafe cloud, local Ollama); stores the key in the OS credential store
 kyber-weave arbiter status   # provider, model, endpoint origin, whether a key resolves — never the value
-kyber-weave arbiter doctor   # warns on switched-off model rules, untuned models, missing keys, un-ignored log dirs, missing binaries; notes the Copilot CLI and Codex post-dispatch advisory limitations
+kyber-weave arbiter doctor   # warns on switched-off model rules, untuned models, missing keys, un-ignored log dirs, missing binaries; notes the Copilot CLI, Codex and Cursor post-dispatch advisory limitations
 ```
 
 Read-only inspection:

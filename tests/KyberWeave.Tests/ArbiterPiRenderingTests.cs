@@ -88,6 +88,20 @@ public sealed class ArbiterPiRenderingTests : IDisposable
     }
 
     [Fact]
+    public async Task RenderAsync_Extension_TreatsEmptyStdoutAsAllowBeforeParsing()
+    {
+        string content = await ExtensionContentAsync();
+
+        // Exit 0 with empty stdout is the host's allow (arbiter.enabled: false, or a
+        // dispatch with no target). JSON.parse("") would throw and wrongly block.
+        int emptyCheck = content.IndexOf("trim() === \"\"", StringComparison.Ordinal);
+        int parse = content.IndexOf("JSON.parse(", StringComparison.Ordinal);
+        Assert.True(emptyCheck >= 0, "extension must test for empty stdout");
+        Assert.True(parse > emptyCheck, "the empty-stdout check must precede JSON.parse");
+        Assert.Contains("{ decision: \"allow\" }", content, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task RenderAsync_Extension_AppendsReasonAfterCall()
     {
         string content = await ExtensionContentAsync();

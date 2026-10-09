@@ -1110,7 +1110,7 @@ public sealed class SquadDeploymentPlan
             }
 
             byte[] current = File.ReadAllBytes(fullPath);
-            string currentJson = DecodeBlockText(relativePath, current);
+            string currentJson = DecodeBlockText(relativePath, current, allowBlank: false);
             IReadOnlyList<SquadHookDrift> drifts = FindBlockDrift(block, relativePath, currentJson, previous);
             if (drifts.Count > 0 && !replaceManaged)
             {
@@ -1213,6 +1213,9 @@ public sealed class SquadDeploymentPlan
         try
         {
             currentText = DecodeBlockText(owned.RelativePath, currentBytes);
+            if (string.IsNullOrWhiteSpace(currentText))
+                return false;
+
             trimmed = RemoveBlockContent(FormatForTarget(owned), owned.RelativePath, currentText);
         }
         catch (SquadDeploymentConflictException)
@@ -1344,41 +1347,35 @@ public sealed class SquadDeploymentPlan
             ? new($"Squad hook block '{relativePath}' {detail}")
             : new($"Squad hook block '{relativePath}' {detail}", inner);
 
-    private static string DecodeBlockText(string relativePath, byte[] bytes)
+    private static string DecodeBlockText(string relativePath, byte[] bytes, bool allowBlank = true)
     {
         string text = Encoding.UTF8.GetString(bytes);
         if (text.Length > 0 && text[0] == '\uFEFF')
             text = text[1..];
         if (string.IsNullOrWhiteSpace(text))
         {
+            // A blank hook file is a minimal document, not an error: a user can create
+            // .codex/hooks.json empty and still expect `squad install` to work. A file a
+            // receipt already owns is different: Squad's entries cannot vanish silently.
+            if (allowBlank)
+                return string.Empty;
+
             throw BlockConflict(
                 relativePath,
-                "is empty. Move it aside before deploying Squad.");
+                "is empty although a receipt owns entries in it. Move it aside before deploying Squad.");
         }
 
         return text;
     }
 
-    private static readonly JsonSerializerOptions BlockJsonIndented = new() { WriteIndented = true };
-
-    private const string AntigravityGroupKey = "kyber-arbiter";
-
     /// <summary>
     /// Splices the managed entries into the current hook-file content, replacing Squad's
-    /// previous entries while leaving the user's entries in place. A missing file starts
-    /// from the format's minimal document. Returns the spliced content and the owned
-    /// entries written, with pointers and canonical digests for the receipt.
+    /// previous entries while leaving the user's entries in place. Planning must stay
+    /// side-effect free for dry runs, so this calls the content-level splice that
+    /// <see cref="SquadHookJsonBlock"/> owns: there is exactly one implementation, and a
+    /// dry run, an install and the file-level splice cannot drift apart. A missing or blank
+    /// file starts from the format's minimal document.
     /// </summary>
-    /// <remarks>
-    /// This mirrors <c>SquadHookJsonBlock</c>'s splice rather than calling it because that
-    /// type's content-level splice is not public and its file-level one writes to disk —
-    /// planning must stay side-effect free for dry runs. The container layout matches it
-    /// exactly (Cursor's camelCase containers, PascalCase everywhere else, Antigravity's
-    /// whole-group ownership), and the projected payloads are the renderer's entries
-    /// cloned, since a <see cref="JsonNode"/> can parent only once and one fragment may
-    /// plan several operations. Documented-field projection stays the renderer's job: by
-    /// the time a fragment reaches the plan it is already the file payload.
-    /// </remarks>
     private static (string Content, IReadOnlyList<SquadHookOwnedEntry> Owned) SpliceBlockContent(
         SquadHookBlockFormat format,
         string relativePath,
@@ -1386,247 +1383,50 @@ public sealed class SquadDeploymentPlan
         IReadOnlyList<JsonNode> preToolUse,
         IReadOnlyList<JsonNode> postToolUse)
     {
-        JsonObject root = ParseBlockRoot(relativePath, existingJson, MinimalBlockDocument(format));
-        List<SquadHookOwnedEntry> owned = [];
-
-        if (format == SquadHookBlockFormat.Antigravity)
+        try
         {
-            root.Remove(AntigravityGroupKey);
-            if (preToolUse.Count > 0 || postToolUse.Count > 0)
-            {
-                var group = new JsonObject
-                {
-                    ["PreToolUse"] = BlockEntryArray(preToolUse),
-                    ["PostToolUse"] = BlockEntryArray(postToolUse),
-                };
-                root[AntigravityGroupKey] = group;
-                CollectBlockOwned(group, $"/{AntigravityGroupKey}", owned);
-            }
+            return SquadHookJsonBlock.SpliceContent(format, existingJson, preToolUse, postToolUse);
         }
-        else
+        catch (Exception exception) when (exception is JsonException or InvalidOperationException)
         {
-            List<(string Pointer, JsonArray Array)> containers = BlockArrays(format, root, relativePath, create: true);
-            IReadOnlyList<JsonNode>[] managed = [preToolUse, postToolUse];
-            for (int i = 0; i < containers.Count; i++)
-            {
-                (string pointer, JsonArray array) = containers[i];
-                for (int index = array.Count - 1; index >= 0; index--)
-                {
-                    if (SquadHookJsonBlock.IsSquadEntry(format, array[index]))
-                        array.RemoveAt(index);
-                }
-
-                foreach (JsonNode entry in managed[i])
-                {
-                    JsonNode clone = entry.DeepClone();
-                    array.Add(clone);
-                    string entryPointer = $"{pointer}/{array.Count - 1}";
-                    owned.Add(new SquadHookOwnedEntry(entryPointer, SquadHookJsonBlock.CanonicalDigest(clone)));
-                }
-            }
-
-            if (format == SquadHookBlockFormat.Cursor && !root.ContainsKey("version"))
-                root["version"] = 1;
+            throw UnusableBlockFile(relativePath, exception);
         }
-
-        return (root.ToJsonString(BlockJsonIndented) + "\n", owned);
     }
 
-    /// <summary>
-    /// Removes Squad's entries from hook-file content, restoring the user's content.
-    /// </summary>
+    /// <summary>Removes Squad's entries from hook-file content, restoring the user's content.</summary>
     private static string RemoveBlockContent(
         SquadHookBlockFormat format,
         string relativePath,
         string existingJson)
     {
-        JsonObject root = ParseBlockRoot(relativePath, existingJson, MinimalBlockDocument(format));
-
-        if (format == SquadHookBlockFormat.Antigravity)
+        try
         {
-            root.Remove(AntigravityGroupKey);
+            return SquadHookJsonBlock.RemoveContent(format, existingJson);
         }
-        else
+        catch (Exception exception) when (exception is JsonException or InvalidOperationException)
         {
-            foreach ((_, JsonArray array) in BlockArrays(format, root, relativePath, create: false))
-            {
-                for (int index = array.Count - 1; index >= 0; index--)
-                {
-                    if (SquadHookJsonBlock.IsSquadEntry(format, array[index]))
-                        array.RemoveAt(index);
-                }
-            }
+            throw UnusableBlockFile(relativePath, exception);
         }
-
-        return root.ToJsonString(BlockJsonIndented) + "\n";
     }
 
     /// <summary>Serializes the parsed content back, so removal can tell "nothing ours left" apart from a rewrite.</summary>
-    private static string NormalizeBlockJson(string relativePath, string existingJson) =>
-        ParseBlockRoot(relativePath, existingJson).ToJsonString(BlockJsonIndented) + "\n";
-
-    private static JsonObject ParseBlockRoot(string relativePath, string existingJson)
+    private static string NormalizeBlockJson(string relativePath, string existingJson)
     {
         try
         {
-            return JsonNode.Parse(existingJson) as JsonObject
-                ?? throw new InvalidOperationException("A hook file must be a JSON object at its root.");
+            return SquadHookJsonBlock.NormalizeContent(existingJson);
         }
-        catch (Exception exception) when (
-            exception is JsonException or InvalidOperationException)
+        catch (Exception exception) when (exception is JsonException or InvalidOperationException)
         {
-            throw BlockConflict(
-                relativePath,
-                "does not parse as a hook file. Move it aside before deploying Squad.",
-                exception);
+            throw UnusableBlockFile(relativePath, exception);
         }
     }
 
-    private static JsonObject ParseBlockRoot(
-        string relativePath,
-        string? existingJson,
-        JsonObject minimal)
-    {
-        if (string.IsNullOrWhiteSpace(existingJson))
-            return minimal;
-
-        return ParseBlockRoot(relativePath, existingJson);
-    }
-
-    private static void CollectBlockOwned(JsonObject group, string prefix, List<SquadHookOwnedEntry> owned)
-    {
-        foreach (string container in new[] { "PreToolUse", "PostToolUse" })
-        {
-            if (group[container] is JsonArray array)
-            {
-                for (int index = 0; index < array.Count; index++)
-                {
-                    JsonNode node = array[index]!;
-                    owned.Add(new SquadHookOwnedEntry($"{prefix}/{container}/{index}", SquadHookJsonBlock.CanonicalDigest(node)));
-                }
-            }
-        }
-    }
-
-    private static JsonArray BlockEntryArray(IReadOnlyList<JsonNode> entries)
-    {
-        var array = new JsonArray();
-        foreach (JsonNode entry in entries)
-            array.Add(entry.DeepClone());
-        return array;
-    }
-
-    private static List<(string Pointer, JsonArray Array)> BlockArrays(
-        SquadHookBlockFormat format,
-        JsonObject root,
-        string relativePath,
-        bool create)
-    {
-        return format switch
-        {
-            SquadHookBlockFormat.Cursor => BlockCursorArrays(root, relativePath, create),
-            SquadHookBlockFormat.Codex => BlockPrefixedArrays(root, "/hooks", relativePath, create),
-            SquadHookBlockFormat.Factory or SquadHookBlockFormat.Devin => BlockRootArrays(root, relativePath, create),
-            _ => throw BlockConflict(
-                relativePath,
-                $"uses unknown hook block format '{format}'. Fix the upstream render before deploying it."),
-        };
-    }
-
-    private static List<(string Pointer, JsonArray Array)> BlockCursorArrays(
-        JsonObject root,
-        string relativePath,
-        bool create)
-    {
-        JsonObject hooks = create
-            ? EnsureBlockObject(root, "hooks", relativePath)
-            : root["hooks"] as JsonObject ?? new JsonObject();
-        List<(string Pointer, JsonArray Array)> containers = [];
-        foreach (string name in new[] { "preToolUse", "postToolUse" })
-            containers.Add(EnsureBlockArray(hooks, $"/hooks/{name}", name, relativePath, create));
-        return containers;
-    }
-
-    private static List<(string Pointer, JsonArray Array)> BlockPrefixedArrays(
-        JsonObject root,
-        string prefix,
-        string relativePath,
-        bool create)
-    {
-        JsonObject hooks = create
-            ? EnsureBlockObject(root, "hooks", relativePath)
-            : root["hooks"] as JsonObject ?? new JsonObject();
-        return BlockNamedArrays(hooks, prefix, relativePath, create);
-    }
-
-    private static List<(string Pointer, JsonArray Array)> BlockRootArrays(
-        JsonObject root,
-        string relativePath,
-        bool create) =>
-        BlockNamedArrays(root, string.Empty, relativePath, create);
-
-    private static List<(string Pointer, JsonArray Array)> BlockNamedArrays(
-        JsonObject parent,
-        string prefix,
-        string relativePath,
-        bool create)
-    {
-        List<(string Pointer, JsonArray Array)> containers = [];
-        foreach (string name in new[] { "PreToolUse", "PostToolUse" })
-            containers.Add(EnsureBlockArray(parent, $"{prefix}/{name}", name, relativePath, create));
-        return containers;
-    }
-
-    private static (string Pointer, JsonArray Array) EnsureBlockArray(
-        JsonObject parent,
-        string pointer,
-        string name,
-        string relativePath,
-        bool create)
-    {
-        if (parent[name] is JsonArray array)
-            return (pointer, array);
-
-        if (!create)
-            return (pointer, []);
-
-        if (parent[name] is not null)
-        {
-            throw BlockConflict(
-                relativePath,
-                $"has a hook container '{name}' that is not a JSON array. Move it aside before deploying Squad.");
-        }
-
-        JsonArray created = [];
-        parent[name] = created;
-        return (pointer, created);
-    }
-
-    private static JsonObject EnsureBlockObject(JsonObject parent, string name, string relativePath)
-    {
-        if (parent[name] is JsonObject existing)
-            return existing;
-
-        if (parent[name] is not null)
-        {
-            throw BlockConflict(
-                relativePath,
-                $"has a hook section '{name}' that is not a JSON object. Move it aside before deploying Squad.");
-        }
-
-        var created = new JsonObject();
-        parent[name] = created;
-        return created;
-    }
-
-    private static JsonObject MinimalBlockDocument(SquadHookBlockFormat format) =>
-        format switch
-        {
-            SquadHookBlockFormat.Cursor => new JsonObject { ["version"] = 1, ["hooks"] = new JsonObject() },
-            SquadHookBlockFormat.Codex => new JsonObject { ["hooks"] = new JsonObject() },
-            SquadHookBlockFormat.Factory or SquadHookBlockFormat.Devin or SquadHookBlockFormat.Antigravity => new JsonObject(),
-            _ => throw new ArgumentOutOfRangeException(nameof(format), format, "Unknown hook block format."),
-        };
+    private static SquadDeploymentConflictException UnusableBlockFile(string relativePath, Exception inner) =>
+        BlockConflict(
+            relativePath,
+            $"is not a usable hook file ({inner.Message}) Move it aside before deploying Squad.",
+            inner);
 
     internal static string DeployedFileIdentity(string target, string relativePath) =>
         target + '\0' + relativePath;
