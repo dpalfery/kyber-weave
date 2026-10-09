@@ -1,0 +1,23 @@
+{
+  "hook_event_name": "PreToolUse",
+  "toolCall": {
+    "name": "invoke_subagent",
+    "args": {
+      "Subagents": [
+        {
+          "TypeName": "csharp-dev",
+          "Role": "implementer",
+          "Prompt": "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/x.md\nTASK: 16.3\n\nImplement the adapter.",
+          "Workspace": "/repo"
+        }
+      ]
+    }
+  },
+  "stepIdx": 3,
+  "conversationId": "conv-antigravity-1",
+  "workspacePaths": [
+    "/repo"
+  ],
+  "transcriptPath": "/repo/.antigravity/transcript.json",
+  "modelName": "antigravity-test-model"
+}
