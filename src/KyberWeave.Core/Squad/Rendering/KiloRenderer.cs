@@ -28,11 +28,22 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// are recorded as structured degradations with code <c>permission-not-expressible</c> rather
 /// than inventing unenforceable fields or silently dropping constraints (preventing capability widening).
 /// </para>
+/// <para>
+/// <strong>Arbiter plugin shim (Req 6.3, 25.1):</strong> Kilo loads Bun plugins from
+/// <c>.kilo/plugin/*.ts</c> with the same plugin API as OpenCode, so when the render request
+/// carries an enabled <see cref="SquadArbiterWiring"/> under
+/// <see cref="SquadDeploymentScope.Project"/> scope, the renderer emits the owned file
+/// <c>.kilo/plugin/kyber-arbiter.ts</c> from <see cref="ArbiterPluginShim"/> for harness
+/// token <c>kilo</c>. Nothing is rendered when the wiring is null or disabled, or the scope
+/// is Global (Req 22.2), so a render without Arbiter is byte-identical to before the field
+/// existed.
+/// </para>
 /// </remarks>
 public sealed class KiloRenderer : ISquadRenderer
 {
     private const string AgentsDirectory = ".kilo/agents";
     private const string SkillsDirectory = ".kilo/skills";
+    private const string ArbiterPluginFileRelativePath = ".kilo/plugin/kyber-arbiter.ts";
 
     private static readonly ThreadLocal<ISerializer> YamlSerializer = new(
         () => new SerializerBuilder().Build());
@@ -122,6 +133,18 @@ public sealed class KiloRenderer : ISquadRenderer
             SquadDeploymentFile principal = RenderSkill(skill, request.Scope);
             files.Add(principal);
             SquadResourceProjection.Append(files, principal, skill.Resources);
+        }
+
+        // A null Arbiter must render byte for byte as before the field existed, so the
+        // guard lives here: only an enabled wiring at Project scope emits the owned
+        // plugin shim. Under Global scope there is no project configuration to enforce
+        // from (Req 22.4).
+        if (request.Arbiter is not null && request.Arbiter.Enabled && request.Scope == SquadDeploymentScope.Project)
+        {
+            files.Add(new SquadDeploymentFile(
+                ArbiterPluginFileRelativePath,
+                Encoding.UTF8.GetBytes(ArbiterPluginShim.Render(SquadTargetCatalog.GetToken(SquadTarget.Kilo))),
+                SquadTargetCatalog.GetToken(SquadTarget.Kilo)));
         }
 
         return Task.FromResult(new SquadRenderResult(true, files, degradations, [], []));
