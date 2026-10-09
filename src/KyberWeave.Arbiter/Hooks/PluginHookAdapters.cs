@@ -13,11 +13,17 @@ namespace KyberWeave.Arbiter.Hooks;
 /// </remarks>
 public static class PluginHookAdapters
 {
-    /// <summary>The plugin-hook adapters: OpenCode dispatches on <c>task</c>.</summary>
+    /// <summary>The plugin-hook adapters: OpenCode dispatches on <c>task</c>; Pi dispatches on <c>Agent</c>.</summary>
     public static IReadOnlyList<IHarnessHookAdapter> All(IHookDecisionEngine? engine = null) =>
         [new PluginHookAdapter(
             "opencode",
             "task",
+            "subagent_type",
+            "prompt",
+            engine ?? new ArbiterHookDecisionEngine()),
+        new PluginHookAdapter(
+            "pi",
+            "Agent",
             "subagent_type",
             "prompt",
             engine ?? new ArbiterHookDecisionEngine())];
