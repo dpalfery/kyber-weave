@@ -1416,15 +1416,20 @@ describe('CanonStore wipe (issue #312)', () => {
   it('rolls back the whole wipe when a delete fails', () => {
     const store = new CanonStore(':memory:')
     seedHarness(store, 'pi', 'span-pi', 'session:pi-1')
-    // Corrupt the checkpoint table's contract out from under the wipe so the
-    // checkpoint delete throws: the records must survive with it.
+    // Corrupt the checkpoint table's contract out from under the wipe: the
+    // replacement table carries a trigger that rejects the wiped source key,
+    // so the checkpoint delete throws and the records must survive with it.
     const db = store.getDatabase()
     db.exec('DROP TABLE source_checkpoint')
     db.exec(
       `CREATE TABLE source_checkpoint (
          harness_id TEXT PRIMARY KEY,
-         source_key TEXT NOT NULL CHECK (source_key <> 'session:pi-1')
-       )`,
+         source_key TEXT NOT NULL
+       );
+       CREATE TRIGGER wipe_must_fail BEFORE DELETE ON source_checkpoint
+       BEGIN
+         SELECT RAISE(ABORT, 'injected wipe failure');
+       END;`,
     )
     db.prepare('INSERT INTO source_checkpoint (harness_id, source_key) VALUES (?, ?)').run(
       'pi',
