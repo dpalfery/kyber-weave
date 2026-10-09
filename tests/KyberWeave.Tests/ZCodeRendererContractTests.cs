@@ -118,6 +118,8 @@ public sealed class ZCodeRendererContractTests : IDisposable
     /// </summary>
     private const string PureOrchestratorProfile = "orchestrator";
 
+    private const string ArbiterServer = "kyber-weave-arbiter";
+
     /// <summary>
     /// The fully qualified MCP tool names the canonical toolchain declares, transcribed here
     /// from source rather than from the renderer, in the same server-then-tool order.
@@ -125,11 +127,29 @@ public sealed class ZCodeRendererContractTests : IDisposable
     private static IReadOnlyList<string> ExpectedMcpToolNames(SquadSource source) =>
     [
         .. source.Toolchain.RequiredMcpTools
+            .Where(entry => !string.Equals(entry.Key, ArbiterServer, StringComparison.Ordinal))
             .OrderBy(entry => entry.Key, StringComparer.Ordinal)
             .SelectMany(entry => entry.Value
                 .OrderBy(tool => tool, StringComparer.Ordinal)
                 .Select(tool => $"mcp__{entry.Key}__{tool}"))
     ];
+
+    /// <summary>
+    /// The Arbiter server's tools, granted on ZCode to any principal whose profile allows
+    /// <c>decision.query</c> and never through the standard MCP grant.
+    /// </summary>
+    private static IReadOnlyList<string> ExpectedArbiterToolNames(SquadSource source) =>
+    [
+        .. source.Toolchain.RequiredMcpTools
+            .Where(entry => string.Equals(entry.Key, ArbiterServer, StringComparison.Ordinal))
+            .SelectMany(entry => entry.Value
+                .OrderBy(tool => tool, StringComparer.Ordinal)
+                .Select(tool => $"mcp__{entry.Key}__{tool}"))
+    ];
+
+    private static bool ExpectsArbiter(SquadCapabilityProfile profile) =>
+        profile.Permissions.TryGetValue("decision.query", out SquadPermissionDecision decision) &&
+        decision == SquadPermissionDecision.Allow;
 
     private static bool ExpectsMcp(SquadAgent agent, SquadCapabilityProfile profile) =>
         !string.Equals(agent.CapabilityProfile, PureOrchestratorProfile, StringComparison.Ordinal) &&
@@ -157,7 +177,8 @@ public sealed class ZCodeRendererContractTests : IDisposable
         return
         [
             .. ToolOrder.Where(granted.Contains),
-            .. ExpectsMcp(agent, profile) ? ExpectedMcpToolNames(source) : []
+            .. ExpectsMcp(agent, profile) ? ExpectedMcpToolNames(source) : [],
+            .. ExpectsArbiter(profile) ? ExpectedArbiterToolNames(source) : []
         ];
     }
 
@@ -924,6 +945,18 @@ public sealed class ZCodeRendererContractTests : IDisposable
                     expected,
                     tool => Assert.DoesNotContain(tool, tools, StringComparer.Ordinal));
             }
+
+            IReadOnlyList<string> arbiterTools = ExpectedArbiterToolNames(source);
+            if (ExpectsArbiter(source.CapabilityProfiles.Profiles[agent.CapabilityProfile]))
+            {
+                Assert.All(arbiterTools, tool => Assert.Contains(tool, tools, StringComparer.Ordinal));
+            }
+            else
+            {
+                Assert.All(
+                    arbiterTools,
+                    tool => Assert.DoesNotContain(tool, tools, StringComparer.Ordinal));
+            }
         }
 
         Assert.True(granted > 0, "No canonical agent was granted the declared MCP tools.");
@@ -951,7 +984,7 @@ public sealed class ZCodeRendererContractTests : IDisposable
                 result.Degradations,
                 d => d.CanonicalIdentity == agent.Name && d.Code == "permission-not-expressible");
             Assert.All(
-                source.Toolchain.RequiredMcpTools.Keys,
+                source.Toolchain.RequiredMcpTools.Keys.Where(server => server != ArbiterServer),
                 server => Assert.Contains(server, record.Details!, StringComparison.Ordinal));
         }
 
