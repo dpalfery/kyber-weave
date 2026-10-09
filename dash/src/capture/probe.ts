@@ -21,9 +21,56 @@ export type HealthFetcher = (url: string) => Promise<{ status: number; body: str
 
 const FETCH_TIMEOUT_MS = 5_000
 
-/** The liveness URL for an OTLP base endpoint such as `http://127.0.0.1:4318`. */
+/**
+ * The liveness URL for an OTLP base endpoint such as `http://127.0.0.1:4318`.
+ * Health is on the origin (`/healthz`), not under the traces path or query.
+ */
 export function healthzUrlForEndpoint(endpoint: string): string {
-  return `${endpoint.replace(/\/+$/, '')}/healthz`
+  const url = new URL(endpoint)
+  url.pathname = '/healthz'
+  url.search = ''
+  url.hash = ''
+  return url.toString()
+}
+
+/**
+ * A health payload is a short JSON object. Capping the read keeps a foreign
+ * listener from pinning the probe's heap, and cancelling stops the rest of
+ * the body from arriving.
+ */
+export const MAX_HEALTH_BODY_BYTES = 8_192
+
+async function readCappedText(response: Response, maxBytes: number): Promise<string> {
+  const body = response.body
+  if (body === null) return ''
+  const reader = body.getReader()
+  const chunks: Uint8Array[] = []
+  let total = 0
+  try {
+    while (total < maxBytes) {
+      const { done, value } = await reader.read()
+      if (done) break
+      if (value === undefined || value.byteLength === 0) continue
+      const room = maxBytes - total
+      if (value.byteLength <= room) {
+        chunks.push(value)
+        total += value.byteLength
+        continue
+      }
+      chunks.push(value.subarray(0, room))
+      total += room
+      break
+    }
+  } finally {
+    await reader.cancel()
+  }
+  const merged = new Uint8Array(total)
+  let offset = 0
+  for (const chunk of chunks) {
+    merged.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  return new TextDecoder('utf-8', { fatal: false }).decode(merged)
 }
 
 async function fetchWithTimeout(url: string): Promise<{ status: number; body: string }> {
@@ -31,7 +78,7 @@ async function fetchWithTimeout(url: string): Promise<{ status: number; body: st
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
   try {
     const response = await fetch(url, { method: 'GET', signal: controller.signal })
-    return { status: response.status, body: await response.text() }
+    return { status: response.status, body: await readCappedText(response, MAX_HEALTH_BODY_BYTES) }
   } finally {
     clearTimeout(timer)
   }
