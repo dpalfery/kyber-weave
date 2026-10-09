@@ -178,6 +178,12 @@ public sealed class DevinRenderer : ISquadRenderer
     private const string PureOrchestratorProfile = "orchestrator";
 
     /// <summary>
+    /// The Arbiter's MCP server, excluded from every Devin grant so no Devin principal receives
+    /// the Arbiter's tools through the standard MCP grant.
+    /// </summary>
+    private const string ArbiterServer = "kyber-weave-arbiter";
+
+    /// <summary>
     /// Lowers the semantic capability vocabulary onto Devin's core tool names, every tool that
     /// performs a capability included. <c>network.publish</c> is absent because no tool
     /// expresses it, and <c>delegate</c> because granting it cannot keep the roster (see the
@@ -709,6 +715,7 @@ public sealed class DevinRenderer : ISquadRenderer
     private static IReadOnlyList<string> QualifiedMcpToolNames(SquadSource source) =>
     [
         .. source.Toolchain.RequiredMcpTools
+            .Where(entry => !string.Equals(entry.Key, ArbiterServer, StringComparison.Ordinal))
             .OrderBy(entry => entry.Key, StringComparer.Ordinal)
             .SelectMany(entry => entry.Value
                 .OrderBy(tool => tool, StringComparer.Ordinal)
@@ -717,7 +724,9 @@ public sealed class DevinRenderer : ISquadRenderer
 
     /// <summary>The declared MCP server names, for a record naming what was withheld.</summary>
     private static IReadOnlyList<string> DeclaredMcpServerNames(SquadSource source) =>
-        [.. source.Toolchain.RequiredMcpTools.Keys.OrderBy(name => name, StringComparer.Ordinal)];
+        [.. source.Toolchain.RequiredMcpTools.Keys
+            .Where(name => !string.Equals(name, ArbiterServer, StringComparison.Ordinal))
+            .OrderBy(name => name, StringComparer.Ordinal)];
 
     private static string DescribeWithheldMcp(
         SquadAgent agent,
