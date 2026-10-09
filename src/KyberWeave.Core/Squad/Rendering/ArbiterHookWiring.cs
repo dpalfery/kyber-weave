@@ -47,7 +47,7 @@ public static class ArbiterHookWiring
 
     /// <summary>The hooked targets in stable derivation order for <see cref="BuildHooks"/>.</summary>
     private static readonly IReadOnlyList<SquadTarget> HookedSquadTargets =
-        [SquadTarget.Claude, SquadTarget.Copilot, SquadTarget.OpenCode];
+        [SquadTarget.Claude, SquadTarget.Codex, SquadTarget.Copilot, SquadTarget.Cursor, SquadTarget.OpenCode, SquadTarget.Pi];
 
     /// <summary>The capability profiles whose agents are implementation specialists.</summary>
     private static readonly HashSet<string> GuardedCapabilityProfiles =
@@ -56,7 +56,8 @@ public static class ArbiterHookWiring
     /// <summary>The targets on which Arbiter hooks are produced today.</summary>
     /// <remarks>
     /// Claude and Copilot in VS Code take per-agent hooks; OpenCode is gated through the
-    /// single project-level marker (D24) because it has no per-agent hook primitive. Which
+    /// single project-level marker (D24) because it has no per-agent hook primitive. Pi,
+    /// Codex and Cursor joined the hooked roster once their hook primitives landed. Which
     /// form each target takes is a renderer decision; membership here only means the target
     /// is enforced, so <see cref="TargetDegradations(IEnumerable{SquadTarget}, SquadDeploymentScope)"/> records nothing for it.
     /// </remarks>
@@ -80,8 +81,11 @@ public static class ArbiterHookWiring
     /// session never counts as trusted — headless runs execute no project sub-agent
     /// frontmatter hooks, which is why trust is surfaced at install time where the audit
     /// cannot observe the gap. Copilot in VS Code needs a trusted workspace with
-    /// <c>chat.useHooks</c> on. Only hooked targets with a trust gate appear; OpenCode's
-    /// marker carries no trust gate today.
+    /// <c>chat.useHooks</c> on. Codex needs a trusted <c>.codex/</c> layer plus a per-hook
+    /// review through <c>/hooks</c>, so every <c>squad update</c> that changes the hook
+    /// needs trust again. Pi needs project trust so that <c>.pi/extensions/</c> loads
+    /// (R17). Only hooked targets with a trust gate appear; OpenCode's marker and
+    /// Cursor's hooks carry no trust gate today.
     /// </remarks>
     public static IReadOnlyDictionary<SquadTarget, string> TrustSteps { get; } =
         new Dictionary<SquadTarget, string>
@@ -92,7 +96,14 @@ public static class ArbiterHookWiring
                 "sub-agent frontmatter hooks, so headless runs stay unenforced.",
             [SquadTarget.Copilot] =
                 "Open this project as a trusted workspace in VS Code and keep " +
-                "chat.useHooks enabled, or the hooks stay off."
+                "chat.useHooks enabled, or the hooks stay off.",
+            [SquadTarget.Codex] =
+                "Trust the project's `.codex/` layer, then review and trust the new hook " +
+                "through `/hooks`. Every `squad update` that changes the hook needs that " +
+                "review again, or the changed hook is skipped.",
+            [SquadTarget.Pi] =
+                "Trust the project so that `.pi/extensions/` loads. " +
+                "Until trust is granted the extension does not load and dispatches stay ungated."
         };
 
     /// <summary>Names the dispatcher agents: those with a non-empty <c>delegates-to</c> roster.</summary>

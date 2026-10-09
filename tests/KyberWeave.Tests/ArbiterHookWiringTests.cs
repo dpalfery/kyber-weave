@@ -24,7 +24,7 @@ public sealed class ArbiterHookWiringTests : IDisposable
     private static readonly string[] GuardedAgents =
         [ArbiterSquadFixture.CsharpDev, ArbiterSquadFixture.TestDev, ArbiterSquadFixture.GithubDevops];
 
-    private static readonly string[] HookedTargetTokens = ["claude", "copilot", "opencode"];
+    private static readonly string[] HookedTargetTokens = ["claude", "codex", "copilot", "cursor", "opencode", "pi"];
 
     /// <summary>Declared independently of <see cref="ArbiterHookWiring"/> so a change to
     /// either side has to be made deliberately in both.</summary>
@@ -84,11 +84,20 @@ public sealed class ArbiterHookWiringTests : IDisposable
     }
 
     [Fact]
-    public void HookedTargets_AreExactlyClaudeCopilotAndOpencode()
+    public void HookedTargets_AreExactlyTheSixHookedTargets()
     {
         Assert.Equal(
             new HashSet<string>(HookedTargetTokens, StringComparer.Ordinal),
             ArbiterHookWiring.HookedTargets);
+    }
+
+    [Fact]
+    public void HookedTargets_IncludePiCodexAndCursor()
+    {
+        // Task 12.7: Pi, Codex and Cursor are hooked, so they no longer record no-hook-support.
+        Assert.Contains("pi", ArbiterHookWiring.HookedTargets);
+        Assert.Contains("codex", ArbiterHookWiring.HookedTargets);
+        Assert.Contains("cursor", ArbiterHookWiring.HookedTargets);
     }
 
     [Fact]
@@ -103,7 +112,7 @@ public sealed class ArbiterHookWiringTests : IDisposable
     public void TrustSteps_NameClaudeAndCopilotGates()
     {
         Assert.Equal(
-            new HashSet<SquadTarget> { SquadTarget.Claude, SquadTarget.Copilot },
+            new HashSet<SquadTarget> { SquadTarget.Claude, SquadTarget.Copilot, SquadTarget.Codex, SquadTarget.Pi },
             ArbiterHookWiring.TrustSteps.Keys.ToHashSet());
 
         string claudeStep = ArbiterHookWiring.TrustSteps[SquadTarget.Claude];
@@ -117,10 +126,25 @@ public sealed class ArbiterHookWiringTests : IDisposable
     }
 
     [Fact]
+    public void TrustSteps_NameCodexAndPiGates()
+    {
+        // Task 12.7: Codex trusts the project's .codex/ layer then reviews each new hook
+        // through /hooks; Pi trusts the project so that .pi/extensions/ loads.
+        string codexStep = ArbiterHookWiring.TrustSteps[SquadTarget.Codex];
+        Assert.Contains(".codex", codexStep, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("/hooks", codexStep, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("squad update", codexStep, StringComparison.OrdinalIgnoreCase);
+
+        string piStep = ArbiterHookWiring.TrustSteps[SquadTarget.Pi];
+        Assert.Contains("trust", piStep, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(".pi/extensions", piStep, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void TargetDegradations_ProjectScope_LeavesHookedTargetsUnrecorded()
     {
         IReadOnlyList<SquadDegradationRecord> records = ArbiterHookWiring.TargetDegradations(
-            [SquadTarget.Claude, SquadTarget.Copilot, SquadTarget.OpenCode],
+            [SquadTarget.Claude, SquadTarget.Codex, SquadTarget.Copilot, SquadTarget.Cursor, SquadTarget.OpenCode, SquadTarget.Pi],
             SquadDeploymentScope.Project);
 
         Assert.Empty(records);
@@ -130,22 +154,22 @@ public sealed class ArbiterHookWiringTests : IDisposable
     public void TargetDegradations_ProjectScope_RecordsNoHookSupportForUnhookedTargets()
     {
         List<SquadDegradationRecord> records = ArbiterHookWiring.TargetDegradations(
-            [SquadTarget.Cursor, SquadTarget.Pi],
+            [SquadTarget.Warp, SquadTarget.Kilo],
             SquadDeploymentScope.Project).ToList();
 
         Assert.Equal(2, records.Count);
         Assert.All(records, record => Assert.Equal(DegradationCode, record.Code));
         Assert.Equal(
-            new HashSet<string> { "cursor", "pi" },
+            new HashSet<string> { "warp", "kilo" },
             records.Select(record => record.Target).ToHashSet());
         Assert.Contains(records, record =>
-            record.Target == "cursor" &&
+            record.Target == "warp" &&
             record == new SquadDegradationRecord(
-                "cursor", "arbiter", "arbiter", DegradationCode, string.Empty, "no-hook-support"));
+                "warp", "arbiter", "arbiter", DegradationCode, string.Empty, "no-hook-support"));
         Assert.Contains(records, record =>
-            record.Target == "pi" &&
+            record.Target == "kilo" &&
             record == new SquadDegradationRecord(
-                "pi", "arbiter", "arbiter", DegradationCode, string.Empty, "no-hook-support"));
+                "kilo", "arbiter", "arbiter", DegradationCode, string.Empty, "no-hook-support"));
     }
 
     [Fact]
