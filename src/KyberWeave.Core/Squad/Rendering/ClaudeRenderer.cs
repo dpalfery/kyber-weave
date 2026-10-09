@@ -68,11 +68,33 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// <c>no-primary-agent: omit</c>, no entry-point skill is emitted and the agent's records remain
 /// unchanged.
 /// </para>
+/// <para>
+/// <strong>Arbiter hooks (Req 6.1, 25.2):</strong> When the render request carries an
+/// enabled <see cref="SquadArbiterWiring"/> under <see cref="SquadDeploymentScope.Project"/>
+/// scope, dispatcher agents (non-empty <c>delegates-to</c>) gain frontmatter <c>hooks</c>
+/// with <c>PreToolUse</c> and <c>PostToolUse</c> entries matched on <c>^(Agent|Task)$</c>,
+/// and guarded implementation specialists (<c>worker</c> / <c>publishing-worker</c> profiles)
+/// gain a <c>PreToolUse</c> entry matched on <c>^(Read|Grep|Glob|Bash)$</c>. Each entry runs
+/// <c>kyber-weave-arbiter hook --harness claude --caller &lt;agent&gt;</c> with the wiring's
+/// timeout. The conductor's entry-point skill carries the same dispatch hooks as its agent.
+/// Per-agent hooks make the caller trusted without a new agent field, which
+/// <c>agent.schema.json</c> (<c>additionalProperties: false</c>) would refuse. Nothing is
+/// rendered when the wiring is null or disabled, or the scope is Global (Req 22.2), so a
+/// render without Arbiter is byte-identical to before the field existed.
+/// </para>
 /// </remarks>
 public sealed class ClaudeRenderer : ISquadRenderer
 {
     private const string AgentsDirectory = ".claude/agents";
     private const string SkillsDirectory = ".claude/skills";
+
+    /// <summary>
+    /// Anchored matchers for Arbiter frontmatter hooks. A matcher containing characters
+    /// outside <c>[A-Za-z0-9_-, |]</c> is an unanchored JavaScript regex, so both are
+    /// anchored explicitly.
+    /// </summary>
+    private const string DispatchMatcher = "^(Agent|Task)$";
+    private const string ReadGuardMatcher = "^(Read|Grep|Glob|Bash)$";
 
     private static readonly string[] BaseUngovernedTools = ["TodoWrite", "Skill"];
 
@@ -197,13 +219,26 @@ public sealed class ClaudeRenderer : ISquadRenderer
         List<SquadDeploymentFile> files = [];
         List<SquadDegradationRecord> degradations = [];
 
+        bool arbiterEnabled = request.Arbiter is not null &&
+            request.Arbiter.Enabled &&
+            request.Scope == SquadDeploymentScope.Project;
+        IReadOnlySet<string> dispatcherAgents = arbiterEnabled
+            ? ArbiterHookWiring.Dispatchers(source)
+            : new HashSet<string>(StringComparer.Ordinal);
+        IReadOnlySet<string> guardedAgents = arbiterEnabled
+            ? ArbiterHookWiring.GuardedAgents(source)
+            : new HashSet<string>(StringComparer.Ordinal);
+
         foreach (SquadAgent agent in source.Agents)
         {
             SquadDeploymentFile principal = RenderAgent(
                 agent,
                 source.ModelProfiles.Profiles,
                 source.CapabilityProfiles.Profiles,
-                request.Scope);
+                request.Scope,
+                request.Arbiter,
+                dispatcherAgents,
+                guardedAgents);
             files.Add(principal);
             SquadResourceProjection.Append(files, principal, agent.Resources);
 
@@ -225,7 +260,12 @@ public sealed class ClaudeRenderer : ISquadRenderer
                             "this renderer can resolve on its own.");
                     }
 
-                    SquadDeploymentFile skillPrincipal = RenderPrimaryAgentEntryPointSkill(agent, request.Scope);
+                    SquadDeploymentFile skillPrincipal = RenderPrimaryAgentEntryPointSkill(
+                        agent,
+                        request.Scope,
+                        request.Arbiter,
+                        dispatcherAgents,
+                        guardedAgents);
                     files.Add(skillPrincipal);
                     SquadResourceProjection.Append(files, skillPrincipal, agent.Resources);
 
@@ -276,7 +316,10 @@ public sealed class ClaudeRenderer : ISquadRenderer
         SquadAgent agent,
         IReadOnlyDictionary<string, SquadModelProfile> modelProfiles,
         IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
-        SquadDeploymentScope scope)
+        SquadDeploymentScope scope,
+        SquadArbiterWiring? arbiter,
+        IReadOnlySet<string> dispatcherAgents,
+        IReadOnlySet<string> guardedAgents)
     {
         Dictionary<string, object?> frontmatter = new(StringComparer.Ordinal)
         {
@@ -293,6 +336,12 @@ public sealed class ClaudeRenderer : ISquadRenderer
         // Always emit tools: omitting the key inherits every subagent tool (widening).
         frontmatter["tools"] = new ClaudeToolsFlowSequence(ResolveTools(agent, capabilityProfiles));
 
+        Dictionary<string, object?>? hooks = BuildArbiterHooks(agent, arbiter, dispatcherAgents, guardedAgents);
+        if (hooks is not null)
+        {
+            frontmatter["hooks"] = hooks;
+        }
+
         string content;
         lock (SerializerLock)
         {
@@ -308,7 +357,10 @@ public sealed class ClaudeRenderer : ISquadRenderer
 
     private static SquadDeploymentFile RenderPrimaryAgentEntryPointSkill(
         SquadAgent agent,
-        SquadDeploymentScope scope)
+        SquadDeploymentScope scope,
+        SquadArbiterWiring? arbiter,
+        IReadOnlySet<string> dispatcherAgents,
+        IReadOnlySet<string> guardedAgents)
     {
         string singleLineDescription = string.Join(" ", agent.Description.Split(
             ['\r', '\n'],
@@ -320,6 +372,14 @@ public sealed class ClaudeRenderer : ISquadRenderer
             ["description"] = singleLineDescription,
             ["license"] = "MIT"
         };
+
+        // The entry-point skill stays registered for the session, so a dispatching primary
+        // agent's skill carries the same dispatch hooks as its subagent file.
+        Dictionary<string, object?>? hooks = BuildArbiterHooks(agent, arbiter, dispatcherAgents, guardedAgents);
+        if (hooks is not null)
+        {
+            frontmatter["hooks"] = hooks;
+        }
 
         string content;
         lock (SerializerLock)
@@ -358,6 +418,65 @@ public sealed class ClaudeRenderer : ISquadRenderer
             $"{skillsDir}/{skill.Name}/SKILL.md",
             Encoding.UTF8.GetBytes(content),
             "claude");
+    }
+
+    /// <summary>
+    /// Builds the Arbiter frontmatter <c>hooks</c> value for one agent, or null when no hook
+    /// applies. Dispatchers (non-empty <c>delegates-to</c>) gate their <c>Agent</c>/<c>Task</c>
+    /// dispatches pre- and post-call; guarded implementation specialists gate their
+    /// planning-path reads pre-call. A dispatcher that is also guarded keeps only the
+    /// dispatch hooks: the dispatch gate already observes every delegation, and a second
+    /// read gate on the same caller would double-report. Returns null when the wiring is
+    /// null or disabled so the render stays byte-identical to before the field existed.
+    /// </summary>
+    private static Dictionary<string, object?>? BuildArbiterHooks(
+        SquadAgent agent,
+        SquadArbiterWiring? arbiter,
+        IReadOnlySet<string> dispatcherAgents,
+        IReadOnlySet<string> guardedAgents)
+    {
+        if (arbiter is null || !arbiter.Enabled)
+        {
+            return null;
+        }
+
+        bool isDispatcher = dispatcherAgents.Contains(agent.Name);
+        bool isGuarded = guardedAgents.Contains(agent.Name);
+
+        if (!isDispatcher && !isGuarded)
+        {
+            return null;
+        }
+
+        string command = ArbiterHookWiring.HookCommandLine(SquadTarget.Claude, agent.Name);
+
+        Dictionary<string, object?> HookEntry(string matcher) => new(StringComparer.Ordinal)
+        {
+            ["matcher"] = matcher,
+            ["hooks"] = new List<object?>
+            {
+                new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["type"] = "command",
+                    ["command"] = command,
+                    ["timeout"] = arbiter.HookTimeoutSeconds
+                }
+            }
+        };
+
+        if (isDispatcher)
+        {
+            return new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["PreToolUse"] = new List<object?> { HookEntry(DispatchMatcher) },
+                ["PostToolUse"] = new List<object?> { HookEntry(DispatchMatcher) }
+            };
+        }
+
+        return new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["PreToolUse"] = new List<object?> { HookEntry(ReadGuardMatcher) }
+        };
     }
 
     private static string? ResolveClaudeModel(
