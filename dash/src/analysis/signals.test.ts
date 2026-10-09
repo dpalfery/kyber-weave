@@ -65,6 +65,7 @@ describe('Signal 1: contextReuse / contextReuseRatio (Task F1 / ADR 0009 / ADR 0
     const res = contextReuseRatio({
       freshInput: 50,
       cacheRead: 50,
+      cacheCreation: 0,
     })
     expect(isSignalMeasurable(res)).toBe(true)
     if (isSignalMeasurable(res)) {
@@ -73,11 +74,11 @@ describe('Signal 1: contextReuse / contextReuseRatio (Task F1 / ADR 0009 / ADR 0
   })
 
   it('handles 100% cache hit and 0% cache hit edge cases cleanly', () => {
-    const fullHit = contextReuse({ freshInput: 0, cacheRead: 500 })
+    const fullHit = contextReuse({ freshInput: 0, cacheRead: 500, cacheCreation: 0 })
     expect(isSignalMeasurable(fullHit)).toBe(true)
     if (isSignalMeasurable(fullHit)) expect(fullHit.value).toBe(1.0)
 
-    const zeroHit = contextReuse({ freshInput: 500, cacheRead: 0 })
+    const zeroHit = contextReuse({ freshInput: 500, cacheRead: 0, cacheCreation: 0 })
     expect(isSignalMeasurable(zeroHit)).toBe(true)
     if (isSignalMeasurable(zeroHit)) expect(zeroHit.value).toBe(0.0)
   })
@@ -98,8 +99,25 @@ describe('Signal 1: contextReuse / contextReuseRatio (Task F1 / ADR 0009 / ADR 0
     expect((res as { reason: string }).reason).toMatch(/absent/i)
   })
 
+  it('emits not_measurable when cacheCreation is absent (undefined is not a measured zero)', () => {
+    const res = contextReuse({ freshInput: 100, cacheRead: 50 })
+    expect(res.status).toBe('not_measurable')
+    expect((res as { reason: string }).reason).toMatch(/cache creation/i)
+  })
+
+  it('emits not_measurable when any turn cacheCreation is absent', () => {
+    const res = contextReuse({
+      turns: [
+        { freshInput: 100, cacheRead: 50, cacheCreation: 0 },
+        { freshInput: 20, cacheRead: 10 },
+      ],
+    })
+    expect(res.status).toBe('not_measurable')
+    expect((res as { reason: string }).reason).toMatch(/cache creation/i)
+  })
+
   it('treats numeric cacheRead 0 as a measured zero ratio with positive fresh input', () => {
-    const res = contextReuse({ freshInput: 500, cacheRead: 0 })
+    const res = contextReuse({ freshInput: 500, cacheRead: 0, cacheCreation: 0 })
     expect(isSignalMeasurable(res)).toBe(true)
     if (isSignalMeasurable(res)) {
       expect(res.status).toBe('measured')
@@ -110,8 +128,8 @@ describe('Signal 1: contextReuse / contextReuseRatio (Task F1 / ADR 0009 / ADR 0
   it('aggregates across turns when turns are provided', () => {
     const res = contextReuse({
       turns: [
-        { freshInput: 100, cacheRead: 100 },
-        { freshInput: 20, cacheRead: 180 },
+        { freshInput: 100, cacheRead: 100, cacheCreation: 0 },
+        { freshInput: 20, cacheRead: 180, cacheCreation: 0 },
       ],
     })
     expect(isSignalMeasurable(res)).toBe(true)

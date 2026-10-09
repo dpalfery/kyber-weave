@@ -156,9 +156,15 @@ export function contextReuse(input: ContextReuseInput): SignalResult<number> {
           reason: 'Cache read counter is absent; absence is not a measured zero.',
         }
       }
+      if (turn.cacheCreation === undefined) {
+        return {
+          status: 'not_measurable',
+          reason: 'Cache creation counter is absent; absence is not a measured zero.',
+        }
+      }
       fresh += turn.freshInput ?? (turn.input !== undefined ? Math.max(0, turn.input - turn.cacheRead) : 0)
       cacheRead += turn.cacheRead
-      cacheCreation += turn.cacheCreation ?? 0
+      cacheCreation += turn.cacheCreation
     }
   } else {
     if (input.cacheRead === undefined) {
@@ -167,9 +173,15 @@ export function contextReuse(input: ContextReuseInput): SignalResult<number> {
         reason: 'Cache read counter is absent; absence is not a measured zero.',
       }
     }
+    if (input.cacheCreation === undefined) {
+      return {
+        status: 'not_measurable',
+        reason: 'Cache creation counter is absent; absence is not a measured zero.',
+      }
+    }
     fresh = input.freshInput ?? 0
     cacheRead = input.cacheRead
-    cacheCreation = input.cacheCreation ?? 0
+    cacheCreation = input.cacheCreation
   }
 
   let totalInput = fresh + cacheRead + cacheCreation
