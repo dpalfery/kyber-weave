@@ -22,6 +22,12 @@ function packageRoot() {
   return path.join(__dirname, "..");
 }
 
+// The RID-shaped key binaryFileName needs to decide the Windows ".exe" suffix;
+// in the override branch the platform, not a supported RID, drives the name.
+function nativeRid() {
+  return process.platform === "win32" ? "win-x64" : "linux-x64";
+}
+
 function vendorDir(rid) {
   return path.join(packageRoot(), "vendor", rid);
 }
@@ -247,16 +253,9 @@ async function ensureBinaries(options = {}) {
   if (overrideDir) {
     return {
       rid: "override",
-      cli: path.join(
-        overrideDir,
-        process.platform === "win32" ? "kyber-weave.exe" : "kyber-weave"
-      ),
-      mcp: path.join(
-        overrideDir,
-        process.platform === "win32"
-          ? "kyber-weave-mcp.exe"
-          : "kyber-weave-mcp"
-      ),
+      cli: path.join(overrideDir, binaryFileName("cli", nativeRid())),
+      mcp: path.join(overrideDir, binaryFileName("mcp", nativeRid())),
+      arbiter: path.join(overrideDir, binaryFileName("arbiter", nativeRid())),
     };
   }
 
@@ -275,21 +274,14 @@ async function ensureBinaries(options = {}) {
   const sums = await fetchSha256Sums(tag);
   const cli = await installToolBinary("cli", rid, version, sums);
   const mcp = await installToolBinary("mcp", rid, version, sums);
-  return { rid, cli, mcp };
+  const arbiter = await installToolBinary("arbiter", rid, version, sums);
+  return { rid, cli, mcp, arbiter };
 }
 
 function resolveInstalledBinary(tool) {
   const overrideDir = process.env.KYBER_WEAVE_BINARY_DIR;
   if (overrideDir) {
-    const name =
-      tool === "mcp"
-        ? process.platform === "win32"
-          ? "kyber-weave-mcp.exe"
-          : "kyber-weave-mcp"
-        : process.platform === "win32"
-          ? "kyber-weave.exe"
-          : "kyber-weave";
-    return path.join(overrideDir, name);
+    return path.join(overrideDir, binaryFileName(tool, nativeRid()));
   }
 
   const rid = resolveRid();

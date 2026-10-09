@@ -1,6 +1,6 @@
 # `@dpalfery/kyber-weave`
 
-Thin Node wrapper around **self-contained** Kyber-Weave binaries (`kyber-weave`, `kyber-weave-mcp`). End users do **not** need a .NET runtime.
+Thin Node wrapper around **self-contained** Kyber-Weave binaries (`kyber-weave`, `kyber-weave-mcp`, `kyber-weave-arbiter`). End users do **not** need a .NET runtime.
 
 The release workflow does not publish this package to npm; keep it for local/manual use. The documented install path is `scripts/install.sh`.
 
@@ -9,7 +9,7 @@ The release workflow does not publish this package to npm; keep it for local/man
 1. `npm i -g @dpalfery/kyber-weave` installs this small package.
 2. **postinstall** (and first CLI run if scripts were skipped) downloads the matching GitHub Release assets for your platform:
    - Tag = `v` + `package.json` `version` (e.g. `0.1.0` → `v0.1.0`)
-   - Assets: `kyber-weave-<rid>.tar.gz` / `.zip` and `kyber-weave-mcp-<rid>.tar.gz` / `.zip`
+   - Assets: `kyber-weave-<rid>.tar.gz` / `.zip`, `kyber-weave-mcp-<rid>.tar.gz` / `.zip`, and `kyber-weave-arbiter-<rid>.tar.gz` / `.zip`
    - Integrity: downloads `SHA256SUMS.txt` over **HTTPS only** (HTTP redirects rejected) and verifies each archive's SHA-256 before extract
 3. Binaries land under `vendor/<rid>/` inside the package install directory.
 
@@ -28,11 +28,12 @@ Supported RIDs: `linux-x64`, `linux-arm64`, `osx-x64`, `osx-arm64`, `win-x64`.
 npm i -g @dpalfery/kyber-weave
 kyber-weave --help
 kyber-weave-mcp --help
+kyber-weave-arbiter --help
 ```
 
 ## Offline / air-gapped
 
-Download Release assets from https://github.com/dpalfery/kyber-weave/releases, extract, and set `KYBER_WEAVE_BINARY_DIR` to that folder (must contain `kyber-weave` and `kyber-weave-mcp`, with `.exe` on Windows).
+Download Release assets from https://github.com/dpalfery/kyber-weave/releases, extract, and set `KYBER_WEAVE_BINARY_DIR` to that folder (must contain `kyber-weave`, `kyber-weave-mcp`, and `kyber-weave-arbiter`, with `.exe` on Windows).
 
 ## Licence
 

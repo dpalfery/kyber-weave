@@ -13,6 +13,11 @@ class KyberWeave < Formula
         url "https://github.com/dpalfery/kyber-weave/releases/download/v#{version}/kyber-weave-mcp-osx-arm64.tar.gz"
         sha256 "REPLACE_WITH_RELEASE_SHA256_OSX_ARM64_MCP"
       end
+
+      resource "arbiter" do
+        url "https://github.com/dpalfery/kyber-weave/releases/download/v#{version}/kyber-weave-arbiter-osx-arm64.tar.gz"
+        sha256 "REPLACE_WITH_RELEASE_SHA256_OSX_ARM64_ARBITER"
+      end
     end
     on_intel do
       url "https://github.com/dpalfery/kyber-weave/releases/download/v#{version}/kyber-weave-osx-x64.tar.gz"
@@ -21,6 +26,11 @@ class KyberWeave < Formula
       resource "mcp" do
         url "https://github.com/dpalfery/kyber-weave/releases/download/v#{version}/kyber-weave-mcp-osx-x64.tar.gz"
         sha256 "REPLACE_WITH_RELEASE_SHA256_OSX_X64_MCP"
+      end
+
+      resource "arbiter" do
+        url "https://github.com/dpalfery/kyber-weave/releases/download/v#{version}/kyber-weave-arbiter-osx-x64.tar.gz"
+        sha256 "REPLACE_WITH_RELEASE_SHA256_OSX_X64_ARBITER"
       end
     end
   end
@@ -34,6 +44,11 @@ class KyberWeave < Formula
         url "https://github.com/dpalfery/kyber-weave/releases/download/v#{version}/kyber-weave-mcp-linux-arm64.tar.gz"
         sha256 "REPLACE_WITH_RELEASE_SHA256_LINUX_ARM64_MCP"
       end
+
+      resource "arbiter" do
+        url "https://github.com/dpalfery/kyber-weave/releases/download/v#{version}/kyber-weave-arbiter-linux-arm64.tar.gz"
+        sha256 "REPLACE_WITH_RELEASE_SHA256_LINUX_ARM64_ARBITER"
+      end
     end
     on_intel do
       url "https://github.com/dpalfery/kyber-weave/releases/download/v#{version}/kyber-weave-linux-x64.tar.gz"
@@ -43,6 +58,11 @@ class KyberWeave < Formula
         url "https://github.com/dpalfery/kyber-weave/releases/download/v#{version}/kyber-weave-mcp-linux-x64.tar.gz"
         sha256 "REPLACE_WITH_RELEASE_SHA256_LINUX_X64_MCP"
       end
+
+      resource "arbiter" do
+        url "https://github.com/dpalfery/kyber-weave/releases/download/v#{version}/kyber-weave-arbiter-linux-x64.tar.gz"
+        sha256 "REPLACE_WITH_RELEASE_SHA256_LINUX_X64_ARBITER"
+      end
     end
   end
 
@@ -50,6 +70,9 @@ class KyberWeave < Formula
     bin.install "kyber-weave"
     resource("mcp").stage do
       bin.install "kyber-weave-mcp"
+    end
+    resource("arbiter").stage do
+      bin.install "kyber-weave-arbiter"
     end
   end
 

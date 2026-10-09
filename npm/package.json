@@ -27,7 +27,8 @@
   },
   "bin": {
     "kyber-weave": "bin/kyber-weave.js",
-    "kyber-weave-mcp": "bin/kyber-weave-mcp.js"
+    "kyber-weave-mcp": "bin/kyber-weave-mcp.js",
+    "kyber-weave-arbiter": "bin/kyber-weave-arbiter.js"
   },
   "files": [
     "bin/",
