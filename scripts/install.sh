@@ -3,7 +3,8 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/dpalfery/kyber-weave/main/scripts/install.sh | sh
 #
-# Downloads the self-contained `kyber-weave` and `kyber-weave-mcp` binaries for
+# Downloads the self-contained `kyber-weave`, `kyber-weave-mcp` and
+# `kyber-weave-arbiter` binaries for
 # this platform from a GitHub Release and verifies them against the release's
 # SHA256SUMS.txt. No .NET runtime, no sudo, no compiler required.
 #
@@ -12,6 +13,7 @@
 #   --prerelease          KYBER_WEAVE_PRERELEASE=1    include pre-release versions
 #   --install-dir <d>     KYBER_WEAVE_INSTALL_DIR     where to put binaries (default: ~/.local/bin)
 #   --no-mcp              KYBER_WEAVE_NO_MCP=1        install only the CLI, skip the MCP server
+#   --no-arbiter          KYBER_WEAVE_NO_ARBITER=1    skip the arbiter binary
 #   --no-kyberdash        KYBER_WEAVE_NO_KYBERDASH=1  install CLI + MCP, skip the KyberDash binary
 #   --with-menubar        KYBER_WEAVE_WITH_MENUBAR=1   (macOS only) after installing the CLI,
 #                                                     download, verify SHA256 + code signature,
@@ -47,9 +49,18 @@ KYBER_WEAVE_CURL_PROTO="=https"
 # that first shipped the assets.
 KYBERDASH_MIN_VERSION="0.1.7-rc.9"
 
+# First release publishing kyber-weave-arbiter-<rid> assets. Every earlier tag
+# carries no arbiter archive at all. This script is served unversioned from the
+# default branch and has to stay installable against every tag it can resolve,
+# so the arbiter step is gated on the resolved version instead of assumed.
+# Raising this floor is a behaviour change for anyone pinning an older
+# release: leave it at the tag that first shipped the assets.
+ARBITER_MIN_VERSION="0.1.7-rc.17"
+
 VERSION="${KYBER_WEAVE_VERSION:-}"
 INSTALL_DIR="${KYBER_WEAVE_INSTALL_DIR:-}"
 NO_MCP="${KYBER_WEAVE_NO_MCP:-}"
+NO_ARBITER="${KYBER_WEAVE_NO_ARBITER:-}"
 NO_KYBERDASH="${KYBER_WEAVE_NO_KYBERDASH:-}"
 WITH_MENUBAR="${KYBER_WEAVE_WITH_MENUBAR:-}"
 PRERELEASE="${KYBER_WEAVE_PRERELEASE:-}"
@@ -70,7 +81,8 @@ Kyber-Weave installer.
 
   curl -fsSL https://raw.githubusercontent.com/dpalfery/kyber-weave/main/scripts/install.sh | sh
 
-Downloads the self-contained `kyber-weave` and `kyber-weave-mcp` binaries for
+Downloads the self-contained `kyber-weave`, `kyber-weave-mcp` and
+`kyber-weave-arbiter` binaries for
 this platform from a GitHub Release and verifies them against the release's
 SHA256SUMS.txt. No .NET runtime, no sudo, no compiler required.
 
@@ -79,6 +91,7 @@ Options (flags, or the matching env vars):
   --prerelease          KYBER_WEAVE_PRERELEASE=1    include pre-release versions
   --install-dir <d>     KYBER_WEAVE_INSTALL_DIR     where to put binaries (default: ~/.local/bin)
   --no-mcp              KYBER_WEAVE_NO_MCP=1        install only the CLI, skip the MCP server
+  --no-arbiter          KYBER_WEAVE_NO_ARBITER=1    skip the arbiter binary
   --no-kyberdash        KYBER_WEAVE_NO_KYBERDASH=1  install CLI + MCP, skip the KyberDash binary
   --with-menubar        KYBER_WEAVE_WITH_MENUBAR=1   (macOS only) install the signed menubar app
                                                      verified SHA256 + codesign before placement
@@ -104,6 +117,7 @@ while [ $# -gt 0 ]; do
         --install-dir)  [ $# -ge 2 ] || die "--install-dir needs a value"; INSTALL_DIR="$2"; shift 2 ;;
         --install-dir=*) INSTALL_DIR="${1#*=}"; shift ;;
         --no-mcp)       NO_MCP=1; shift ;;
+        --no-arbiter)   NO_ARBITER=1; shift ;;
         --no-kyberdash) NO_KYBERDASH=1; shift ;;
         --with-menubar) WITH_MENUBAR=1; shift ;;
         --with-menubar=*) WITH_MENUBAR="${1#*=}"; [ "$WITH_MENUBAR" = "1" ] || die "--with-menubar expects 1 (got: ${WITH_MENUBAR})"; shift ;;
@@ -308,6 +322,13 @@ $(printf '%s' "$body" \
 #   exit 1 — the release predates KyberDash and has none
 kyber_weave_release_has_kyberdash() {
     [ "$(kyber_weave_semver_compare "$1" "$KYBERDASH_MIN_VERSION")" -ge 0 ]
+}
+
+# kyber_weave_release_has_arbiter <version>
+#   exit 0 — the release publishes kyber-weave-arbiter-<rid> assets
+#   exit 1 — the release predates the arbiter and has none
+kyber_weave_release_has_arbiter() {
+    [ "$(kyber_weave_semver_compare "$1" "$ARBITER_MIN_VERSION")" -ge 0 ]
 }
 
 # kyber_weave_lookup_checksum <sums-file> <archive> -> prints the expected
@@ -595,7 +616,7 @@ arch="$(uname -m)"
 # only ships tar.gz so its flow short-circuits here.
 case "$os" in
     MINGW*|MSYS*|CYGWIN*|Windows_NT)
-        die "Windows is not supported by this script. Download kyber-weave-win-x64.zip and kyber-weave-mcp-win-x64.zip from https://github.com/${OWNER}/${REPO}/releases and place them on your PATH." ;;
+        die "Windows is not supported by this script. Download kyber-weave-win-x64.zip, kyber-weave-mcp-win-x64.zip and kyber-weave-arbiter-win-x64.zip from https://github.com/${OWNER}/${REPO}/releases and place them on your PATH." ;;
 esac
 
 # Single source of truth for the platform -> Kyber-Weave RID mapping. The
@@ -671,6 +692,19 @@ elif ! kyber_weave_release_has_kyberdash "$VERSION"; then
     log "release ${VERSION} predates KyberDash (first published in ${KYBERDASH_MIN_VERSION}); skipping kyberdash"
 fi
 
+# One decision, read by the download, the install, the quarantine strip and
+# the closing log. A release older than ARBITER_MIN_VERSION has no arbiter
+# asset; fetching it anyway 404s, and because every archive is verified before
+# any is installed, that failure used to abort the whole install — leaving the
+# user with no CLI and no MCP either.
+INSTALL_ARBITER=1
+if [ -n "${NO_ARBITER}" ]; then
+    INSTALL_ARBITER=""
+elif ! kyber_weave_release_has_arbiter "$VERSION"; then
+    INSTALL_ARBITER=""
+    log "release ${VERSION} predates the arbiter (first published in ${ARBITER_MIN_VERSION}); skipping kyber-weave-arbiter"
+fi
+
 SUMS="${TMPDIR_KW}/SHA256SUMS.txt"
 fetch "${RELEASE_BASE}/${TAG}/SHA256SUMS.txt" "$SUMS" \
     || die "could not download SHA256SUMS.txt for ${TAG}. Does that release exist?"
@@ -701,6 +735,9 @@ verify_and_extract() {
 
 verify_and_extract "kyber-weave-${RID}.tar.gz"
 [ -n "$NO_MCP" ] || verify_and_extract "kyber-weave-mcp-${RID}.tar.gz"
+if [ -n "${INSTALL_ARBITER}" ]; then
+    verify_and_extract "kyber-weave-arbiter-${RID}.tar.gz"
+fi
 
 # KyberDash is a Node SEA single-executable shipping per spec D7. The artifact
 # archive is the KyberDash RID, not the Kyber-Weave RID, because the Node SEA
@@ -728,6 +765,9 @@ install_binary() {
 
 install_binary "kyber-weave"
 [ -n "$NO_MCP" ] || install_binary "kyber-weave-mcp"
+if [ -n "${INSTALL_ARBITER}" ]; then
+    install_binary "kyber-weave-arbiter"
+fi
 if [ -n "${INSTALL_KYBERDASH}" ]; then
     install_binary "kyberdash"
 fi
@@ -739,11 +779,13 @@ fi
 if [ "${RID%%-*}" = "osx" ] && command -v xattr >/dev/null 2>&1; then
     xattr -d com.apple.quarantine "${INSTALL_DIR}/kyber-weave" 2>/dev/null || true
     [ -n "$NO_MCP" ] || xattr -d com.apple.quarantine "${INSTALL_DIR}/kyber-weave-mcp" 2>/dev/null || true
+    [ -n "${INSTALL_ARBITER}" ] && xattr -d com.apple.quarantine "${INSTALL_DIR}/kyber-weave-arbiter" 2>/dev/null || true
     [ -n "${INSTALL_KYBERDASH}" ] && xattr -d com.apple.quarantine "${INSTALL_DIR}/kyberdash" 2>/dev/null || true
 fi
 
 log "installed kyber-weave ${VERSION} → ${INSTALL_DIR}/kyber-weave"
 [ -n "$NO_MCP" ] || log "installed kyber-weave-mcp ${VERSION} → ${INSTALL_DIR}/kyber-weave-mcp"
+[ -n "${INSTALL_ARBITER}" ] && log "installed kyber-weave-arbiter ${VERSION} → ${INSTALL_DIR}/kyber-weave-arbiter"
 [ -n "${INSTALL_KYBERDASH}" ] && log "installed kyberdash ${VERSION} → ${INSTALL_DIR}/kyberdash"
 
 case ":${PATH}:" in

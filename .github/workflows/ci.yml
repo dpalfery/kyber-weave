@@ -173,11 +173,22 @@ jobs:
           -p:IncludeNativeLibrariesForSelfExtract=true
           -o ./artifacts/mcp-linux-x64
 
+      - name: Publish Arbiter (self-contained single-file)
+        run: >
+          dotnet publish src/KyberWeave.Arbiter/KyberWeave.Arbiter.csproj
+          -c ${{ env.CONFIGURATION }}
+          -r linux-x64
+          --self-contained true
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -o ./artifacts/arbiter-linux-x64
+
       - name: Smoke --help
         run: |
           set -euo pipefail
           ./artifacts/cli-linux-x64/kyber-weave --help
           ./artifacts/mcp-linux-x64/kyber-weave-mcp --help || true
+          ./artifacts/arbiter-linux-x64/kyber-weave-arbiter --help || true
 
       - name: Upload RID smoke artifacts
         if: always()
@@ -187,6 +198,7 @@ jobs:
           path: |
             artifacts/cli-linux-x64/
             artifacts/mcp-linux-x64/
+            artifacts/arbiter-linux-x64/
           retention-days: 7
           if-no-files-found: warn
 
