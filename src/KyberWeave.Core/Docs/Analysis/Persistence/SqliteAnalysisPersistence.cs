@@ -18,7 +18,7 @@ namespace KyberWeave.Core.Docs.Analysis.Persistence;
 /// Every caller-controlled value is encoded as a SQLite BLOB literal, so prose cannot
 /// become SQL even when it contains quotes, newlines, or SQL-looking text.
 /// </remarks>
-public sealed class SqliteAnalysisPersistence : IAnalysisPersistence
+public sealed partial class SqliteAnalysisPersistence : IAnalysisPersistence
 {
     public const int SchemaVersion = 1;
 
@@ -27,10 +27,16 @@ public sealed class SqliteAnalysisPersistence : IAnalysisPersistence
     private const int BusyAttempts = 3;
     private const int SqliteBusyResultCode = 5;
     private const int SqliteLockedResultCode = 6;
-    private static readonly Regex LockedWordRegex = new(@"\blocked\b", RegexOptions.IgnoreCase);
-    private static readonly Regex BusyWordRegex = new(@"\bbusy\b", RegexOptions.IgnoreCase);
-    private static readonly Regex SqliteBusyOrLockedRegex = new(
-        @"SQLITE_(BUSY|LOCKED)", RegexOptions.IgnoreCase);
+
+    // Generated so a hostile sqlite message cannot hang the retry classifier.
+    [GeneratedRegex(@"\blocked\b", RegexOptions.IgnoreCase, matchTimeoutMilliseconds: 2000)]
+    private static partial Regex LockedWordRegex();
+
+    [GeneratedRegex(@"\bbusy\b", RegexOptions.IgnoreCase, matchTimeoutMilliseconds: 2000)]
+    private static partial Regex BusyWordRegex();
+
+    [GeneratedRegex(@"SQLITE_(BUSY|LOCKED)", RegexOptions.IgnoreCase, matchTimeoutMilliseconds: 2000)]
+    private static partial Regex SqliteBusyOrLockedRegex();
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.General);
     private readonly string _repositoryRoot;
 
@@ -627,12 +633,12 @@ public sealed class SqliteAnalysisPersistence : IAnalysisPersistence
         string output = CombinedOutput(result);
         if (output.Contains("database is locked", StringComparison.OrdinalIgnoreCase)
             || output.Contains("database is busy", StringComparison.OrdinalIgnoreCase)
-            || LockedWordRegex.IsMatch(output)
-            || BusyWordRegex.IsMatch(output)
+            || LockedWordRegex().IsMatch(output)
+            || BusyWordRegex().IsMatch(output)
             || (HasResultCodeSuffix(output, SqliteBusyResultCode)
-                && (SqliteBusyOrLockedRegex.IsMatch(output) || SuffixOnSqliteLine(output, SqliteBusyResultCode)))
+                && (SqliteBusyOrLockedRegex().IsMatch(output) || SuffixOnSqliteLine(output, SqliteBusyResultCode)))
             || (HasResultCodeSuffix(output, SqliteLockedResultCode)
-                && (SqliteBusyOrLockedRegex.IsMatch(output) || SuffixOnSqliteLine(output, SqliteLockedResultCode))))
+                && (SqliteBusyOrLockedRegex().IsMatch(output) || SuffixOnSqliteLine(output, SqliteLockedResultCode))))
         {
             return true;
         }
