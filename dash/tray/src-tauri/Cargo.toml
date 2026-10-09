@@ -37,11 +37,16 @@ fontdue = "0.9"
 reqwest = { version = "0.13", default-features = false, features = ["blocking", "json"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tauri = { version = "2", features = ["tray-icon", "image-png", "macos-private-api"] }
+tauri = { version = "2.11", features = ["tray-icon", "image-png", "macos-private-api"] }
 tauri-plugin-opener = "2"
 tauri-plugin-single-instance = "2"
 thiserror = "2"
 tokio = { version = "1", features = ["macros", "process", "io-util", "time", "rt-multi-thread"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# Tauri already brings objc2 into the lockfile. Its main-thread marker lets us
+# read the status item's own backing scale, rather than the popover's old scale.
+objc2 = "0.6"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_UI_WindowsAndMessaging"] }

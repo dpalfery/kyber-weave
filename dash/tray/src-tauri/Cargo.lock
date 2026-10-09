@@ -1987,6 +1987,7 @@ dependencies = [
  "chrono",
  "dirs",
  "fontdue",
+ "objc2",
  "reqwest",
  "serde",
  "serde_json",
