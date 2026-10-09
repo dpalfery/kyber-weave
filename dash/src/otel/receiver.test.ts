@@ -758,6 +758,7 @@ describe('OtlpReceiver GET /healthz (R10.6, R10.8)', () => {
     expect(await response.json()).toEqual({
       service: 'kyberdash-otlp',
       version: PACKAGE_VERSION,
+      paused: false,
     })
   })
 
@@ -860,25 +861,7 @@ describe('OtlpReceiver pause for database clean (issue #312)', () => {
   })
 })
 
-/** Smallest body the JSON trace decoder accepts: one empty span. */
+/** Smallest body the JSON trace decoder accepts: one fixture span. */
 function minimalTraceBody(): string {
-  return JSON.stringify({
-    resourceSpans: [
-      {
-        resource: {},
-        scopeSpans: [
-          {
-            scope: {},
-            spans: [
-              {
-                traceId: '0af7651916cd43dd8448eb211c80319c',
-                spanId: 'b7ad6b7169203331',
-                name: 'probe',
-              },
-            ],
-          },
-        ],
-      },
-    ],
-  })
+  return jsonFixture('hand-rolled')
 }
