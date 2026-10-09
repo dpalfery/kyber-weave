@@ -47,7 +47,12 @@ public static class ArbiterHookWiring
 
     /// <summary>The hooked targets in stable derivation order for <see cref="BuildHooks"/>.</summary>
     private static readonly IReadOnlyList<SquadTarget> HookedSquadTargets =
-        [SquadTarget.Claude, SquadTarget.Codex, SquadTarget.Copilot, SquadTarget.Cursor, SquadTarget.OpenCode, SquadTarget.Pi];
+        [SquadTarget.Claude, SquadTarget.Codex, SquadTarget.Copilot, SquadTarget.Cursor, SquadTarget.OpenCode, SquadTarget.Pi,
+         SquadTarget.Kilo, SquadTarget.Antigravity, SquadTarget.Factory, SquadTarget.Devin];
+
+    /// <summary>The fallback-only targets in stable derivation order for <see cref="FallbackTargets"/>.</summary>
+    private static readonly IReadOnlyList<SquadTarget> FallbackSquadTargets =
+        [SquadTarget.Warp, SquadTarget.ZCode];
 
     /// <summary>The capability profiles whose agents are implementation specialists.</summary>
     private static readonly HashSet<string> GuardedCapabilityProfiles =
@@ -57,9 +62,10 @@ public static class ArbiterHookWiring
     /// <remarks>
     /// Claude and Copilot in VS Code take per-agent hooks; OpenCode is gated through the
     /// single project-level marker (D24) because it has no per-agent hook primitive. Pi,
-    /// Codex and Cursor joined the hooked roster once their hook primitives landed. Which
-    /// form each target takes is a renderer decision; membership here only means the target
-    /// is enforced, so <see cref="TargetDegradations(IEnumerable{SquadTarget}, SquadDeploymentScope)"/> records nothing for it.
+    /// Codex and Cursor joined the hooked roster once their hook primitives landed, and
+    /// Kilo, Antigravity, Factory and Devin joined in Phase 3. Which form each target takes
+    /// is a renderer decision; membership here only means the target is enforced, so
+    /// <see cref="TargetDegradations(IEnumerable{SquadTarget}, SquadDeploymentScope)"/> records nothing for it.
     /// </remarks>
     public static IReadOnlySet<string> HookedTargets { get; } = HookedSquadTargets
         .Select(SquadTargetCatalog.GetToken)
@@ -69,13 +75,18 @@ public static class ArbiterHookWiring
     /// The targets whose only enforcement is the advisory D4 marker fallback (R7).
     /// </summary>
     /// <remarks>
-    /// Empty today: no approved target holds the fallback-only role. The set exists so a
-    /// future advisory-only target is one edit here, with the degradation kind
-    /// (<see cref="FallbackOnlyReason"/>) already derived and tested.
+    /// Warp and ZCode hold the fallback-only role: they have no hook primitive Squad can
+    /// write, so the marker is advisory and planner investigator dispatches stay ungated
+    /// there (R7). Because Squad also writes no MCP configuration for either (Req 6.5),
+    /// enforcement only begins once the user registers the arbiter server themselves — the
+    /// step <see cref="TrustSteps"/> carries for them.
     /// </remarks>
-    public static IReadOnlySet<string> FallbackTargets { get; } = new HashSet<string>(StringComparer.Ordinal);
+    public static IReadOnlySet<string> FallbackTargets { get; } = FallbackSquadTargets
+        .Select(SquadTargetCatalog.GetToken)
+        .ToHashSet(StringComparer.Ordinal);
 
-    /// <summary>The trust gate a user must grant before hooks run, keyed by target.</summary>
+    /// <summary>The trust gate a user must grant — or the setup step they must take —
+    /// before a target enforces, keyed by target.</summary>
     /// <remarks>
     /// From design §10.7: Claude needs the workspace trust dialog, and a <c>claude -p</c>
     /// session never counts as trusted — headless runs execute no project sub-agent
@@ -84,8 +95,10 @@ public static class ArbiterHookWiring
     /// <c>chat.useHooks</c> on. Codex needs a trusted <c>.codex/</c> layer plus a per-hook
     /// review through <c>/hooks</c>, so every <c>squad update</c> that changes the hook
     /// needs trust again. Pi needs project trust so that <c>.pi/extensions/</c> loads
-    /// (R17). Only hooked targets with a trust gate appear; OpenCode's marker and
-    /// Cursor's hooks carry no trust gate today.
+    /// (R17). Warp and ZCode carry no trust gate — they have no hooks to trust — but their
+    /// setup step appears here too (Req 6.5) so that <c>squad install</c> and
+    /// <c>squad update</c> print it, the same mitigation §10.7 prescribes. OpenCode's
+    /// marker and Cursor's hooks carry no trust gate today.
     /// </remarks>
     public static IReadOnlyDictionary<SquadTarget, string> TrustSteps { get; } =
         new Dictionary<SquadTarget, string>
@@ -103,7 +116,15 @@ public static class ArbiterHookWiring
                 "review again, or the changed hook is skipped.",
             [SquadTarget.Pi] =
                 "Trust the project so that `.pi/extensions/` loads. " +
-                "Until trust is granted the extension does not load and dispatches stay ungated."
+                "Until trust is granted the extension does not load and dispatches stay ungated.",
+            [SquadTarget.Warp] =
+                "Squad writes no MCP configuration for Warp, so register `kyber-weave-arbiter " +
+                "serve --repo-root <root>` as an MCP server in Warp's own MCP configuration. " +
+                "Until it is registered only the advisory marker fallback enforces there.",
+            [SquadTarget.ZCode] =
+                "Squad writes no MCP configuration for ZCode, so register `kyber-weave-arbiter " +
+                "serve --repo-root <root>` as an MCP server in ZCode's own MCP configuration. " +
+                "Until it is registered only the advisory marker fallback enforces there."
         };
 
     /// <summary>Names the dispatcher agents: those with a non-empty <c>delegates-to</c> roster.</summary>
@@ -204,8 +225,9 @@ public static class ArbiterHookWiring
 
     /// <summary>The set-parameterized derivation <see cref="TargetDegradations(IEnumerable{SquadTarget}, SquadDeploymentScope)"/> delegates to.</summary>
     /// <remarks>
-    /// Internal so the fallback-only kind stays testable while <see cref="FallbackTargets"/>
-    /// is empty; the public overload always passes the declared target data.
+    /// Internal so classification can also be pinned against hypothetical rosters —
+    /// membership alone decides the record kind; the public overload always passes the
+    /// declared target data.
     /// </remarks>
     internal static IReadOnlyList<SquadDegradationRecord> TargetDegradations(
         IEnumerable<SquadTarget> targets,

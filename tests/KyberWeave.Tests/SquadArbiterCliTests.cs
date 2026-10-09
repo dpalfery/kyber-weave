@@ -95,8 +95,11 @@ public sealed class SquadArbiterCliTests : IDisposable
     }
 
     [Fact]
-    public void Install_WithArbiterEnabled_RecordsNoHookSupportDegradation()
+    public void Install_WithArbiterEnabled_RecordsArbiterDegradationForFallbackTarget()
     {
+        // Task 17.5: antigravity joined the hooked roster, so a project-scope install no
+        // longer degrades it; the fallback-only target (warp) still records the code in
+        // the receipt — details stay on the renderer/wiring records.
         string targetDir = NewDir("arbiter-lifecycle-nohook");
         WriteArbiterConfig(targetDir, enabled: true, timeoutMs: 3000);
 
@@ -116,7 +119,7 @@ public sealed class SquadArbiterCliTests : IDisposable
             new SquadInstallSettings
             {
                 Path = targetDir,
-                Targets = ["antigravity"],
+                Targets = ["warp"],
                 Global = false,
                 DryRun = false,
                 Adopt = false,
@@ -129,7 +132,7 @@ public sealed class SquadArbiterCliTests : IDisposable
         Assert.Contains(
             receipt.Degradations,
             d => string.Equals(d.Code, "arbiter-not-enforced", StringComparison.Ordinal)
-                && string.Equals(d.Target, "antigravity", StringComparison.Ordinal));
+                && string.Equals(d.Target, "warp", StringComparison.Ordinal));
     }
 
     [Fact]

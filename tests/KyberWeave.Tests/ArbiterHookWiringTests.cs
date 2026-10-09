@@ -24,7 +24,12 @@ public sealed class ArbiterHookWiringTests : IDisposable
     private static readonly string[] GuardedAgents =
         [ArbiterSquadFixture.CsharpDev, ArbiterSquadFixture.TestDev, ArbiterSquadFixture.GithubDevops];
 
-    private static readonly string[] HookedTargetTokens = ["claude", "codex", "copilot", "cursor", "opencode", "pi"];
+    private static readonly string[] HookedTargetTokens =
+        ["claude", "codex", "copilot", "cursor", "opencode", "pi", "kilo", "antigravity", "factory", "devin"];
+
+    /// <summary>Declared independently of <see cref="ArbiterHookWiring"/> so a change to
+    /// either side has to be made deliberately in both.</summary>
+    private static readonly string[] FallbackTargetTokens = ["warp", "zcode"];
 
     /// <summary>Declared independently of <see cref="ArbiterHookWiring"/> so a change to
     /// either side has to be made deliberately in both.</summary>
@@ -84,7 +89,7 @@ public sealed class ArbiterHookWiringTests : IDisposable
     }
 
     [Fact]
-    public void HookedTargets_AreExactlyTheSixHookedTargets()
+    public void HookedTargets_AreExactlyTheTenHookedTargets()
     {
         Assert.Equal(
             new HashSet<string>(HookedTargetTokens, StringComparer.Ordinal),
@@ -101,18 +106,39 @@ public sealed class ArbiterHookWiringTests : IDisposable
     }
 
     [Fact]
-    public void FallbackTargets_AreEmptyUntilAFallbackTargetIsApproved()
+    public void HookedTargets_IncludeThePhase3Targets()
     {
-        // R7 keeps a placeholder for harnesses whose D4 marker fallback is advisory only.
-        // No approved target holds that role today; the set must not silently grow.
-        Assert.Empty(ArbiterHookWiring.FallbackTargets);
+        // Task 17.5: Kilo, Antigravity, Factory and Devin join the hooked roster, so they
+        // no longer record no-hook-support.
+        Assert.Contains("kilo", ArbiterHookWiring.HookedTargets);
+        Assert.Contains("antigravity", ArbiterHookWiring.HookedTargets);
+        Assert.Contains("factory", ArbiterHookWiring.HookedTargets);
+        Assert.Contains("devin", ArbiterHookWiring.HookedTargets);
+    }
+
+    [Fact]
+    public void FallbackTargets_AreExactlyWarpAndZcode()
+    {
+        // Task 17.5: Warp and ZCode hold the advisory D4 marker fallback role (R7);
+        // the set must not silently grow beyond the approved harnesses.
+        Assert.Equal(
+            new HashSet<string>(FallbackTargetTokens, StringComparer.Ordinal),
+            ArbiterHookWiring.FallbackTargets);
     }
 
     [Fact]
     public void TrustSteps_NameClaudeAndCopilotGates()
     {
         Assert.Equal(
-            new HashSet<SquadTarget> { SquadTarget.Claude, SquadTarget.Copilot, SquadTarget.Codex, SquadTarget.Pi },
+            new HashSet<SquadTarget>
+            {
+                SquadTarget.Claude,
+                SquadTarget.Copilot,
+                SquadTarget.Codex,
+                SquadTarget.Pi,
+                SquadTarget.Warp,
+                SquadTarget.ZCode
+            },
             ArbiterHookWiring.TrustSteps.Keys.ToHashSet());
 
         string claudeStep = ArbiterHookWiring.TrustSteps[SquadTarget.Claude];
@@ -141,54 +167,89 @@ public sealed class ArbiterHookWiringTests : IDisposable
     }
 
     [Fact]
+    public void TrustSteps_GiveWarpAndZCodeTheirOwnMcpSetupStep()
+    {
+        // Req 6.5: Squad writes no MCP configuration for Warp or ZCode, so the setup step
+        // tells the user to register the arbiter server in the harness's own MCP configuration.
+        foreach ((SquadTarget target, string harness) in
+            new[] { (SquadTarget.Warp, "Warp"), (SquadTarget.ZCode, "ZCode") })
+        {
+            string step = ArbiterHookWiring.TrustSteps[target];
+            Assert.Contains("kyber-weave-arbiter serve --repo-root <root>", step, StringComparison.Ordinal);
+            Assert.Contains("no MCP configuration", step, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains($"{harness}'s own MCP configuration", step, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
     public void TargetDegradations_ProjectScope_LeavesHookedTargetsUnrecorded()
     {
         IReadOnlyList<SquadDegradationRecord> records = ArbiterHookWiring.TargetDegradations(
-            [SquadTarget.Claude, SquadTarget.Codex, SquadTarget.Copilot, SquadTarget.Cursor, SquadTarget.OpenCode, SquadTarget.Pi],
+            [SquadTarget.Claude, SquadTarget.Codex, SquadTarget.Copilot, SquadTarget.Cursor, SquadTarget.OpenCode, SquadTarget.Pi,
+             SquadTarget.Kilo, SquadTarget.Antigravity, SquadTarget.Factory, SquadTarget.Devin],
             SquadDeploymentScope.Project);
 
         Assert.Empty(records);
     }
 
     [Fact]
-    public void TargetDegradations_ProjectScope_RecordsNoHookSupportForUnhookedTargets()
+    public void TargetDegradations_ProjectScope_RecordsFallbackOnlyForWarpAndZCode()
     {
+        // Task 17.5: with the Arbiter enabled the public derivation records the advisory
+        // D4 marker fallback for Warp and ZCode (R7) instead of no-hook-support.
         List<SquadDegradationRecord> records = ArbiterHookWiring.TargetDegradations(
-            [SquadTarget.Warp, SquadTarget.Kilo],
+            [SquadTarget.Warp, SquadTarget.ZCode],
             SquadDeploymentScope.Project).ToList();
 
         Assert.Equal(2, records.Count);
         Assert.All(records, record => Assert.Equal(DegradationCode, record.Code));
-        Assert.Equal(
-            new HashSet<string> { "warp", "kilo" },
-            records.Select(record => record.Target).ToHashSet());
         Assert.Contains(records, record =>
             record.Target == "warp" &&
             record == new SquadDegradationRecord(
-                "warp", "arbiter", "arbiter", DegradationCode, string.Empty, "no-hook-support"));
+                "warp", "arbiter", "arbiter", DegradationCode, string.Empty, "fallback-only"));
         Assert.Contains(records, record =>
-            record.Target == "kilo" &&
+            record.Target == "zcode" &&
             record == new SquadDegradationRecord(
-                "kilo", "arbiter", "arbiter", DegradationCode, string.Empty, "no-hook-support"));
+                "zcode", "arbiter", "arbiter", DegradationCode, string.Empty, "fallback-only"));
     }
 
     [Fact]
-    public void TargetDegradations_ClassifiesFallbackOnlyTargetsThroughTheTargetSets()
+    public void TargetDegradations_ProjectScope_ClassifiesEveryApprovedTarget()
     {
-        // FallbackTargets is empty today, so the fallback-only record kind is exercised
-        // through the set-parameterized derivation the public method delegates to: it must
-        // classify a fallback-set target as advisory-only (R7) and a hooked target as enforced.
+        // After Phase 3 every approved target is either hooked (no record) or fallback-only,
+        // so a project-scope derivation over the whole roster yields exactly the two
+        // fallback-only records.
         List<SquadDegradationRecord> records = ArbiterHookWiring.TargetDegradations(
-            [SquadTarget.Warp, SquadTarget.Pi],
+            SquadTargetCatalog.All,
+            SquadDeploymentScope.Project).ToList();
+
+        Assert.Equal(2, records.Count);
+        Assert.Equal(
+            new HashSet<string>(FallbackTargetTokens, StringComparer.Ordinal),
+            records.Select(record => record.Target).ToHashSet());
+        Assert.All(records, record => Assert.Equal("fallback-only", record.Details));
+    }
+
+    [Fact]
+    public void TargetDegradations_ClassifiesTargetsThroughTheTargetSets()
+    {
+        // The public derivation always passes the declared rosters; the set-parameterized
+        // overload pins that membership alone decides the record kind: a fallback-set target
+        // is advisory-only (R7), a hooked target is enforced, and a target in neither set
+        // still records no-hook-support.
+        List<SquadDegradationRecord> records = ArbiterHookWiring.TargetDegradations(
+            [SquadTarget.Warp, SquadTarget.Pi, SquadTarget.Devin],
             SquadDeploymentScope.Project,
             hookedTargets: new HashSet<string>(StringComparer.Ordinal) { "warp" },
             fallbackTargets: new HashSet<string>(StringComparer.Ordinal) { "pi" }).ToList();
 
-        Assert.Single(records);
-        Assert.Equal(
-            new SquadDegradationRecord(
-                "pi", "arbiter", "arbiter", DegradationCode, string.Empty, "fallback-only"),
-            records[0]);
+        Assert.Equal(2, records.Count);
+        Assert.Contains(records, record =>
+            record == new SquadDegradationRecord(
+                "pi", "arbiter", "arbiter", DegradationCode, string.Empty, "fallback-only"));
+        Assert.Contains(records, record =>
+            record == new SquadDegradationRecord(
+                "devin", "arbiter", "arbiter", DegradationCode, string.Empty, "no-hook-support"));
     }
 
     [Fact]
