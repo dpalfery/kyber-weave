@@ -10,6 +10,25 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { CanonStore } from '../canon/store.js'
 import { KyberBridge } from './bridge.js'
 
+// The bridge holds the store refresh lock around `cleanDatabase` (issue #312
+// F4). Stub only the acquire — every other lock export stays real — so these
+// tests never touch the real `~/.kyberdash` lock file.
+const { acquireStoreRefreshLockMock } = vi.hoisted(() => ({
+  acquireStoreRefreshLockMock: vi.fn(async () => ({
+    outcome: 'acquired' as const,
+    handle: {
+      token: 'clean-bridge-test',
+      release: async () => {},
+      verifyStillOwner: async () => true,
+    },
+  })),
+}))
+
+vi.mock('../refresh/lock.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../refresh/lock.js')>()
+  return { ...actual, acquireStoreRefreshLock: acquireStoreRefreshLockMock }
+})
+
 const temporaryRoots: string[] = []
 
 afterEach(() => {

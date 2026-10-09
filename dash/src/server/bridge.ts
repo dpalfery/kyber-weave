@@ -3775,18 +3775,15 @@ export class KyberBridge {
    * short-lived read-write `CanonStore` at this bridge's `canonPath` — the
    * same code the `dash clean` CLI runs — opened for the operation and closed
    * in a `finally`. Tests inject a `store` instead, which keeps the file
-   * untouched. A busy refresh lock surfaces as `CLEAN_BUSY` for the route's
-   * 409; anything else is a 500 with a bounded message.
+   * untouched. Both paths hold the store refresh lock for the operation, so
+   * concurrent cleans and refreshes serialize. A busy refresh lock surfaces
+   * as `CLEAN_BUSY` for the route's 409; anything else is a 500 with a
+   * bounded message.
    */
   async cleanDatabase(request: CleanRequest): Promise<CleanReport> {
-    if (this.store !== undefined) {
-      const { cleanDatabase, portsForClean } = await import('../clean/clean.js')
-      return cleanDatabase(this.store, request, portsForClean(this.store))
-    }
-    if (this.canonPath === ':memory:') {
+    if (this.store === undefined && this.canonPath === ':memory:') {
       throw new Error('cleanDatabase: no store to clean')
     }
-    const { CanonStore } = await import('../canon/store.js')
     const { cleanDatabase, portsForClean } = await import('../clean/clean.js')
     const { acquireStoreRefreshLock } = await import('../refresh/lock.js')
     const lock = await acquireStoreRefreshLock()
@@ -3795,11 +3792,18 @@ export class KyberBridge {
       busy.code = 'CLEAN_BUSY'
       throw busy
     }
-    const store = new CanonStore(this.canonPath)
     try {
-      return await cleanDatabase(store, request, portsForClean(store))
+      if (this.store !== undefined) {
+        return await cleanDatabase(this.store, request, portsForClean(this.store))
+      }
+      const { CanonStore } = await import('../canon/store.js')
+      const store = new CanonStore(this.canonPath)
+      try {
+        return await cleanDatabase(store, request, portsForClean(store))
+      } finally {
+        store.close()
+      }
     } finally {
-      store.close()
       await lock.handle.release()
     }
   }
