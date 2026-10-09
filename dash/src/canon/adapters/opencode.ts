@@ -121,7 +121,10 @@ function legacyMessageText(message: unknown): { role: string | undefined; text: 
     }
     return { role, text: texts.join('\n') }
   }
-  return { role, text: JSON.stringify(message) }
+  // `content` is a string or a part list. A missing or other value is not
+  // conversation text; stringifying the message would file role and metadata
+  // as if the user had sent them.
+  return undefined
 }
 
 /**

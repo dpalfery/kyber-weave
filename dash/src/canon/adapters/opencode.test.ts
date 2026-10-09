@@ -4,6 +4,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { ADAPTERS } from '../ingest.js'
+import { opencodeAdapter } from './opencode.js'
 import { AdapterRegistry } from './registry.js'
 import { rawSpan } from './testing.js'
 
@@ -48,5 +49,22 @@ describe('opencode adapter placeholder (T4)', () => {
     ])
     expect(attributed.get('pi-span')).toBe('pi')
     expect(attributed.get('codex-span')).toBe('codex')
+  })
+
+  it('does not file a message envelope as conversation when content is missing', () => {
+    const record = opencodeAdapter.normalize(
+      rawSpan({
+        spanId: 'legacy-missing-content',
+        attributes: {
+          'ai.prompt.messages': [
+            { role: 'user', content: 'keep this sentence' },
+            { role: 'user', content: null, id: 'synthetic-id' },
+          ],
+        },
+      }),
+    )
+    const text = (record.parts ?? []).map((part) => part.text).join('\n')
+    expect(text).toContain('keep this sentence')
+    expect(text).not.toContain('synthetic-id')
   })
 })
