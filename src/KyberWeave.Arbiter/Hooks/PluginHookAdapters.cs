@@ -8,10 +8,8 @@ namespace KyberWeave.Arbiter.Hooks;
 /// new shim is a single entry here.
 /// </summary>
 /// <remarks>
-/// The engine parameter is optional so the default registry composition keeps
-/// compiling unchanged: production answers through the shared allow-all engine
-/// until the serve/eval entry points replace it, while tests inject a scripted
-/// engine.
+/// The engine parameter is optional so single-adapter tests keep injecting a
+/// scripted engine; production passes its real engine through the registry.
 /// </remarks>
 public static class PluginHookAdapters
 {
@@ -22,5 +20,5 @@ public static class PluginHookAdapters
             "task",
             "subagent_type",
             "prompt",
-            engine ?? new AllowAllHookDecisionEngine())];
+            engine ?? new ArbiterHookDecisionEngine())];
 }

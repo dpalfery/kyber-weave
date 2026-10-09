@@ -94,12 +94,12 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
 
         if (string.Equals(eventName, "PreToolUse", StringComparison.Ordinal))
         {
-            return HandlePre(payload, tool, caller, config);
+            return HandlePre(payload, tool, caller, config, context);
         }
 
         if (string.Equals(eventName, "PostToolUse", StringComparison.Ordinal))
         {
-            return HandlePost(payload, tool, caller, config);
+            return HandlePost(payload, tool, caller, config, context);
         }
 
         throw new InvalidOperationException(
@@ -178,7 +178,7 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
         return string.IsNullOrWhiteSpace(renderedCaller) ? null : renderedCaller;
     }
 
-    private string HandlePre(JsonElement payload, string? tool, string caller, KyberWeaveConfig config)
+    private string HandlePre(JsonElement payload, string? tool, string caller, KyberWeaveConfig config, HookContext context)
     {
         if (IsDispatchTool(tool))
         {
@@ -193,7 +193,7 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
             string prompt = GetString(toolInput, "prompt")
                 ?? throw new InvalidOperationException(
                     "Malformed Claude hook event: Agent input carries no prompt.");
-            HookOutcome outcome = _engine.DecidePreDispatch(caller, target, prompt, config);
+            HookOutcome outcome = DecidePre(payload, caller, target, prompt, config, context);
             return outcome.Kind switch
             {
                 HookOutcomeKind.PassThrough => string.Empty,
@@ -225,7 +225,7 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
         return string.Empty;
     }
 
-    private string HandlePost(JsonElement payload, string? tool, string caller, KyberWeaveConfig config)
+    private string HandlePost(JsonElement payload, string? tool, string caller, KyberWeaveConfig config, HookContext context)
     {
         if (!IsDispatchTool(tool))
         {
@@ -259,13 +259,18 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
         }
 
         string? target = null;
+        string prompt = string.Empty;
         if (payload.TryGetProperty("tool_input", out JsonElement toolInput)
             && toolInput.ValueKind == JsonValueKind.Object)
         {
             target = GetString(toolInput, "subagent_type");
+            // The return classifies to its dispatch's trigger family, so the
+            // original prompt rides along best effort; without it the engine
+            // classifies from caller and target alone.
+            prompt = GetString(toolInput, "prompt") ?? string.Empty;
         }
 
-        HookOutcome outcome = _engine.DecidePostDispatch(caller, target, response.GetRawText(), config);
+        HookOutcome outcome = DecidePost(payload, caller, target, prompt, response.GetRawText(), config, context);
         return outcome.Kind switch
         {
             HookOutcomeKind.PassThrough => string.Empty,
@@ -282,6 +287,43 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
             _ => throw new InvalidOperationException(
                 $"Hook engine returned pre-dispatch outcome '{outcome.Kind}' for a post-dispatch event."),
         };
+    }
+
+    private HookOutcome DecidePre(
+        JsonElement payload,
+        string caller,
+        string? target,
+        string prompt,
+        KyberWeaveConfig config,
+        HookContext context)
+    {
+        if (_engine is IContextualHookDecisionEngine contextual)
+        {
+            return contextual.DecidePreDispatch(
+                Token, caller, target, prompt, config, context,
+                GetString(payload, "tool_use_id"), GetString(payload, "session_id"));
+        }
+
+        return _engine.DecidePreDispatch(caller, target, prompt, config);
+    }
+
+    private HookOutcome DecidePost(
+        JsonElement payload,
+        string caller,
+        string? target,
+        string prompt,
+        string toolOutput,
+        KyberWeaveConfig config,
+        HookContext context)
+    {
+        if (_engine is IContextualHookDecisionEngine contextual)
+        {
+            return contextual.DecidePostDispatch(
+                Token, caller, target, prompt, toolOutput, config, context,
+                GetString(payload, "tool_use_id"), GetString(payload, "session_id"));
+        }
+
+        return _engine.DecidePostDispatch(caller, target, toolOutput, config);
     }
 
     private static string RepoRootOf(JsonElement payload)

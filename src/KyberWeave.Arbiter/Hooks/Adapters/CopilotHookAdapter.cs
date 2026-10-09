@@ -109,7 +109,7 @@ public sealed class CopilotHookAdapter : IHarnessHookAdapter
 
         return schema == CopilotSchema.Local
             ? HandleLocal(payload, renderedCaller, config, context)
-            : HandleCli(payload, renderedCaller, config);
+            : HandleCli(payload, renderedCaller, config, context);
     }
 
     /// <inheritdoc/>
@@ -139,6 +139,45 @@ public sealed class CopilotHookAdapter : IHarnessHookAdapter
         }
     }
 
+    private HookOutcome DecidePre(
+        string harness,
+        JsonElement payload,
+        string caller,
+        string? target,
+        string prompt,
+        KyberWeaveConfig config,
+        HookContext context)
+    {
+        if (_engine is IContextualHookDecisionEngine contextual)
+        {
+            return contextual.DecidePreDispatch(
+                harness, caller, target, prompt, config, context,
+                GetString(payload, "tool_use_id"), sessionId: null);
+        }
+
+        return _engine.DecidePreDispatch(caller, target, prompt, config);
+    }
+
+    private HookOutcome DecidePost(
+        string harness,
+        JsonElement payload,
+        string caller,
+        string? target,
+        string prompt,
+        string toolOutput,
+        KyberWeaveConfig config,
+        HookContext context)
+    {
+        if (_engine is IContextualHookDecisionEngine contextual)
+        {
+            return contextual.DecidePostDispatch(
+                harness, caller, target, prompt, toolOutput, config, context,
+                GetString(payload, "tool_use_id"), sessionId: null);
+        }
+
+        return _engine.DecidePostDispatch(caller, target, toolOutput, config);
+    }
+
     private void LogSchemaDetection(CopilotSchema schema, HookContext context)
     {
         string detected = schema == CopilotSchema.Local ? VsCodeToken : CliToken;
@@ -163,7 +202,7 @@ public sealed class CopilotHookAdapter : IHarnessHookAdapter
 
         if (string.Equals(eventName, "PostToolUse", StringComparison.Ordinal))
         {
-            return HandleLocalPost(payload, tool, caller, config);
+            return HandleLocalPost(payload, tool, caller, config, context);
         }
 
         throw new InvalidOperationException(
@@ -198,7 +237,8 @@ public sealed class CopilotHookAdapter : IHarnessHookAdapter
                 ?? throw new InvalidOperationException(
                     "Malformed Copilot hook event: runSubagent input carries no prompt.");
 
-            HookOutcome outcome = _engine.DecidePreDispatch(caller, target, prompt, config);
+            HookOutcome outcome = DecidePre(
+                _harnessToken, payload, caller, target, prompt, config, context);
             string output = outcome.Kind switch
             {
                 HookOutcomeKind.PassThrough => string.Empty,
@@ -236,7 +276,7 @@ public sealed class CopilotHookAdapter : IHarnessHookAdapter
             : RenderLocalPreDeny(verdict.Reason ?? "Denied by the Read guard (Req 25.2, Req 25.4).");
     }
 
-    private string HandleLocalPost(JsonElement payload, string? tool, string caller, KyberWeaveConfig config)
+    private string HandleLocalPost(JsonElement payload, string? tool, string caller, KyberWeaveConfig config, HookContext context)
     {
         if (!IsLocalDispatchTool(tool))
         {
@@ -251,6 +291,7 @@ public sealed class CopilotHookAdapter : IHarnessHookAdapter
         }
 
         string? target = null;
+        string prompt = string.Empty;
         if (payload.TryGetProperty("tool_input", out JsonElement toolInput)
             && toolInput.ValueKind == JsonValueKind.Object)
         {
@@ -258,9 +299,11 @@ public sealed class CopilotHookAdapter : IHarnessHookAdapter
             target = !string.IsNullOrWhiteSpace(agentName)
                 ? agentName
                 : (string.Equals(caller, "unidentified", StringComparison.Ordinal) ? null : caller);
+            prompt = GetString(toolInput, "prompt") ?? string.Empty;
         }
 
-        HookOutcome outcome = _engine.DecidePostDispatch(caller, target, response.GetRawText(), config);
+        HookOutcome outcome = DecidePost(
+            _harnessToken, payload, caller, target, prompt, response.GetRawText(), config, context);
         return outcome.Kind switch
         {
             HookOutcomeKind.PassThrough => string.Empty,
@@ -279,7 +322,7 @@ public sealed class CopilotHookAdapter : IHarnessHookAdapter
         };
     }
 
-    private string HandleCli(JsonElement payload, string? renderedCaller, KyberWeaveConfig config)
+    private string HandleCli(JsonElement payload, string? renderedCaller, KyberWeaveConfig config, HookContext context)
     {
         // The CLI hook is project-wide: no caller field is documented. A rendered
         // caller is honoured when present, but the file Squad renders carries none.
@@ -293,7 +336,8 @@ public sealed class CopilotHookAdapter : IHarnessHookAdapter
 
         if (!isPost)
         {
-            HookOutcome outcome = _engine.DecidePreDispatch(caller, target, prompt, config);
+            HookOutcome outcome = DecidePre(
+                _harnessToken, payload, caller, target, prompt, config, context);
             return outcome.Kind switch
             {
                 HookOutcomeKind.PassThrough => string.Empty,
@@ -319,7 +363,8 @@ public sealed class CopilotHookAdapter : IHarnessHookAdapter
                 "Malformed Copilot CLI hook event: postToolUse carries no toolResult object.");
         }
 
-        HookOutcome postOutcome = _engine.DecidePostDispatch(caller, target, result.GetRawText(), config);
+        HookOutcome postOutcome = DecidePost(
+            _harnessToken, payload, caller, target, prompt, result.GetRawText(), config, context);
         return postOutcome.Kind switch
         {
             HookOutcomeKind.PassThrough => string.Empty,
