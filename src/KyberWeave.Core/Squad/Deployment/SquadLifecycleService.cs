@@ -174,11 +174,21 @@ public sealed class SquadLifecycleService
                 assetDigest: releaseResult.Checksum.Sha256,
                 extractionRoot: releaseResult.ExtractionRoot);
 
+            // Factory's block is dropped here rather than at render time when splicing it
+            // would shadow the user's settings hooks (§10.8, R18): shadowing is a property
+            // of the target's current files, not of the render request.
+            FactoryHooksShadowingOutcome shadowing = FactoryHooksShadowing.Resolve(
+                targetRoot,
+                request.Targets,
+                request.Arbiter,
+                request.Scope,
+                renderResult.Blocks);
+
             // With the Arbiter enabled, the targets and scope that stay unenforced are
             // recorded at render time (Req 22.4): the reason lands in the render record's
             // Details while the receipt keeps only the code.
             IReadOnlyList<SquadDegradation> degradations = AppendArbiterDegradations(
-                renderResult.Degradations,
+                renderResult.Degradations.Concat(shadowing.Degradations).ToList(),
                 request.Arbiter,
                 request.Targets,
                 request.Scope);
@@ -197,7 +207,7 @@ public sealed class SquadLifecycleService
                     timeProvider: _timeProvider,
                     globalRoots: _globalRoots,
                     siblingGlobalReceipts: siblingReceipts,
-                    blocks: renderResult.Blocks);
+                    blocks: shadowing.Blocks);
             }
             else
             {
@@ -212,7 +222,7 @@ public sealed class SquadLifecycleService
                     timeProvider: _timeProvider,
                     globalRoots: _globalRoots,
                     siblingGlobalReceipts: siblingReceipts,
-                    blocks: renderResult.Blocks);
+                    blocks: shadowing.Blocks);
             }
 
             if (request.DryRun)
@@ -331,8 +341,17 @@ public sealed class SquadLifecycleService
                 assetDigest: releaseResult.Checksum.Sha256,
                 extractionRoot: releaseResult.ExtractionRoot);
 
+            // Same drop as install: a user who adds a settings hooks key after installing
+            // must not have their next update create the shadowing file (§10.8, R18).
+            FactoryHooksShadowingOutcome shadowing = FactoryHooksShadowing.Resolve(
+                targetRoot,
+                targets,
+                request.Arbiter,
+                request.Scope,
+                renderResult.Blocks);
+
             IReadOnlyList<SquadDegradation> degradations = AppendArbiterDegradations(
-                renderResult.Degradations,
+                renderResult.Degradations.Concat(shadowing.Degradations).ToList(),
                 request.Arbiter,
                 targets,
                 request.Scope);
@@ -348,7 +367,7 @@ public sealed class SquadLifecycleService
                 timeProvider: _timeProvider,
                 globalRoots: _globalRoots,
                 siblingGlobalReceipts: SiblingGlobalReceipts(targetRoot, request.Scope),
-                blocks: renderResult.Blocks);
+                blocks: shadowing.Blocks);
 
             if (request.DryRun)
             {
