@@ -249,3 +249,126 @@ describe('dash refresh: one refresh at a time (R10.3, R10.4)', () => {
     expect(readLockHolder(directory)).toBeNull()
   })
 })
+
+// Issue #312, plan T6 RED: `dash clean` wipes a harness scope (or all) and
+// re-ingests it, through the central `cleanDatabase` module. The CLI is a thin
+// caller: scope flags, `--yes` confirmation, the refresh lock (exit 3 when
+// held, like refresh), and exit codes. The subcommand does not exist yet —
+// every test below fails until T6 lands it.
+describe('dash clean option validation', () => {
+  async function parseClean(args: string[]): Promise<CommanderError> {
+    const program = new Command()
+    program.exitOverride()
+    registerKyberCommands(program)
+    try {
+      await program.parseAsync(['node', 'kyberdash', 'dash', 'clean', ...args])
+      throw new Error('expected usage error')
+    } catch (error) {
+      if (error instanceof CommanderError) return error
+      throw error
+    }
+  }
+
+  it('registers clean beneath the top-level dash command with --all/--harness/--yes', () => {
+    const program = new Command()
+    registerKyberCommands(program)
+
+    const dash = program.commands.find((command) => command.name() === 'dash')
+    const clean = dash?.commands.find((command) => command.name() === 'clean')
+    expect(clean).toBeDefined()
+    expect(clean?.options.some((option) => option.long === '--all')).toBe(true)
+    expect(clean?.options.some((option) => option.long === '--harness')).toBe(true)
+    expect(clean?.options.some((option) => option.long === '--yes')).toBe(true)
+    expect(clean?.options.some((option) => option.long === '--reingest-weeks')).toBe(true)
+    expect(clean?.options.some((option) => option.long === '--no-reingest')).toBe(true)
+    expect(clean?.description()).toMatch(/clean/i)
+  })
+
+  it.each([
+    ['--all', '--harness', 'pi'],
+    [],
+  ])('exits 2 for conflicting or missing scope %s before creating the database', async (...args) => {
+    const root = mkdtempSync(join(tmpdir(), 'kyber-clean-usage-'))
+    temporaryRoots.push(root)
+    const db = join(root, 'must-not-exist', 'canon.db')
+    const error = await parseClean([...args, '--yes', '--db', db])
+    expect(error.exitCode).toBe(2)
+    expect(existsSync(db)).toBe(false)
+  })
+
+  it('exits 2 without --yes before creating the database', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'kyber-clean-usage-'))
+    temporaryRoots.push(root)
+    const db = join(root, 'must-not-exist', 'canon.db')
+    const error = await parseClean(['--all', '--db', db])
+    expect(error.exitCode).toBe(2)
+    expect(existsSync(db)).toBe(false)
+  })
+
+  it.each([
+    ['0'],
+    ['-1'],
+    ['1.5'],
+    ['abc'],
+  ])('exits 2 for --reingest-weeks %s before creating the database', async (value) => {
+    const root = mkdtempSync(join(tmpdir(), 'kyber-clean-usage-'))
+    temporaryRoots.push(root)
+    const db = join(root, 'must-not-exist', 'canon.db')
+    const error = await parseClean(['--all', '--yes', '--reingest-weeks', value, '--db', db])
+    expect(error.exitCode).toBe(2)
+    expect(existsSync(db)).toBe(false)
+  })
+})
+
+describe('dash clean: one clean at a time', () => {
+  /** Run `dash clean` with the lock reporting the given outcome, capturing its output. */
+  async function cleanWith(
+    outcome: 'acquired' | 'timed-out',
+  ): Promise<{ exitCode: number | undefined; stderr: string[]; cleaned: boolean }> {
+    const stderr: string[] = []
+    let cleaned = false
+    let released = false
+    const program = new Command()
+    program.exitOverride()
+    registerKyberCommands(program, {
+      write: () => {},
+      writeError: (line) => stderr.push(line),
+      createStore: () => new CanonStore(':memory:'),
+      acquireStoreRefreshLock: async () =>
+        outcome === 'acquired'
+          ? {
+              outcome: 'acquired',
+              handle: {
+                token: 't',
+                release: async () => { released = true },
+                verifyStillOwner: async () => true,
+              },
+            }
+          : { outcome: 'timed-out' },
+      cleanDatabase: (async () => {
+        cleaned = true
+        return { harnesses: ['*'], wipe: { harnesses: ['*'], records: 0, provenance: 0, checkpoints: 0 }, reingested: false, historyWeeks: null }
+      }) as never,
+    })
+
+    const previous = process.exitCode
+    process.exitCode = undefined
+    await program.parseAsync(['node', 'kyberdash', 'dash', 'clean', '--all', '--yes', '--no-reingest'])
+    const exitCode = process.exitCode
+    process.exitCode = previous
+    if (outcome === 'acquired') expect(released).toBe(true)
+    return { exitCode: exitCode as number | undefined, stderr, cleaned }
+  }
+
+  it('cleans and releases the lock when it is free', async () => {
+    const result = await cleanWith('acquired')
+    expect(result.cleaned).toBe(true)
+    expect(result.exitCode ?? 0).toBe(0)
+  })
+
+  it('exits 3 without writing when another operation holds the lock', async () => {
+    const result = await cleanWith('timed-out')
+    expect(result.exitCode).toBe(REFRESH_BUSY_EXIT_CODE)
+    expect(result.cleaned).toBe(false)
+  })
+})
