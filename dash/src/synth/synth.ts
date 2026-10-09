@@ -411,14 +411,34 @@ export function isCopilotShutdownRollup(call: ParsedProviderCall): boolean {
  * at 0 (folding reasoning would manufacture output) and declare it not
  * measurable so the subset invariant still validates (issue #240).
  */
-export function isCopilotOutputAbsent(call: ParsedProviderCall): boolean {
+const COPILOT_SHUTDOWN_OUTPUT_ABSENT_REASON =
+  'Output tokens are excluded from Copilot shutdown rollups to avoid double-counting per-turn requests.'
+
+const COPILOT_STORE_OUTPUT_ABSENT_REASON =
+  'Non-compaction Copilot store rows omit output because per-turn assistant messages already own it, so output is absent rather than a measured zero.'
+
+function copilotStoreOutputOmitted(call: ParsedProviderCall): boolean {
   return (
-    isCopilotShutdownRollup(call) ||
-    (call.provider === 'copilot' &&
-      call.outputTokens === 0 &&
-      call.deduplicationKey.startsWith('copilot-store:') &&
-      call.initiator !== 'compaction')
+    call.provider === 'copilot' &&
+    call.outputTokens === 0 &&
+    call.deduplicationKey.startsWith('copilot-store:') &&
+    call.initiator !== 'compaction'
   )
+}
+
+/**
+ * The not-measurable reason when Copilot left output off the row on purpose.
+ * Shutdown rollups and non-compaction store rows share this predicate with
+ * the reason text so the two cannot drift apart.
+ */
+export function copilotAbsentOutputReason(call: ParsedProviderCall): string | undefined {
+  if (isCopilotShutdownRollup(call)) return COPILOT_SHUTDOWN_OUTPUT_ABSENT_REASON
+  if (copilotStoreOutputOmitted(call)) return COPILOT_STORE_OUTPUT_ABSENT_REASON
+  return undefined
+}
+
+export function isCopilotOutputAbsent(call: ParsedProviderCall): boolean {
+  return copilotAbsentOutputReason(call) !== undefined
 }
 
 export function synthesizeCall(
@@ -467,17 +487,10 @@ export function synthesizeCall(
         ...(readerTurn.isCorrection !== undefined ? { isCorrection: readerTurn.isCorrection, correctionRule: readerTurn.correctionRule } : {}),
       }
 
+  const absentOutputReason = copilotAbsentOutputReason(call)
   const measurability = {
     ...measurabilityFor(call.provider),
-    ...(isCopilotOutputAbsent(call)
-      ? {
-          output: notMeasurable(
-            call.deduplicationKey.startsWith('copilot-store:') && call.initiator !== 'compaction'
-              ? 'Non-compaction Copilot store rows omit output because per-turn assistant messages already own it, so output is absent rather than a measured zero.'
-              : 'Output tokens are excluded from Copilot shutdown rollups to avoid double-counting per-turn requests.',
-          ),
-        }
-      : {}),
+    ...(absentOutputReason !== undefined ? { output: notMeasurable(absentOutputReason) } : {}),
   }
 
   return {
