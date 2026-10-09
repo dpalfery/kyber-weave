@@ -1021,6 +1021,59 @@ export async function fetchReviewStatus(): Promise<{ provider: string; isConfigu
   return fetchJson<{ provider: string; isConfigured: boolean }>('/api/kyber/review/status')
 }
 
+/**
+ * Database clean request. `confirm` is the browser's explicit consent to the
+ * irreversible wipe; `reingestWeeks: null` skips re-ingestion, omission means
+ * the server default (last 7 days).
+ */
+export interface CleanDatabaseRequest {
+  all?: boolean
+  harnesses?: string[]
+  reingestWeeks?: number | null
+  confirm: true
+}
+
+/** Bounded clean summary. Counts only — never a remote error string. */
+export interface CleanDatabaseResult {
+  harnesses: string[]
+  records: number
+  reingested: boolean
+  historyWeeks: number | null
+}
+
+function cleanCount(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0
+}
+
+/**
+ * Bounded database clean. The scope and counts are echoed from the server;
+ * `error` strings are dropped here so a remote body cannot reach the page —
+ * callers distinguish outcomes by `KyberApiError.status` (400 usage, 409
+ * busy) instead.
+ */
+export async function cleanDatabase(request: CleanDatabaseRequest): Promise<CleanDatabaseResult> {
+  const path = '/api/kyber/clean'
+  const res = await fetch(path, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(request),
+  })
+  if (!res.ok) throw new KyberApiError(res.status, path)
+  const json: unknown = await res.json()
+  const body = json !== null && typeof json === 'object' ? (json as Record<string, unknown>) : {}
+  const wipe = body.wipe !== null && typeof body.wipe === 'object'
+    ? (body.wipe as Record<string, unknown>)
+    : {}
+  return {
+    harnesses: stringList(body.harnesses),
+    records: cleanCount(wipe.records),
+    reingested: body.reingested === true,
+    historyWeeks: typeof body.historyWeeks === 'number' && Number.isFinite(body.historyWeeks)
+      ? body.historyWeeks
+      : null,
+  }
+}
+
 // ===========================================================================
 // Ingest coverage (plan docs/plans/2026-09-30-issues-189-198-199 T9,
 // issues #189/#198/#199): one read-only payload carrying the refresh window,

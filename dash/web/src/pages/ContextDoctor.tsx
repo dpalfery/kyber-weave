@@ -23,6 +23,7 @@ import {
   formatCoverageWindow,
 } from '../components/analysis/index.js'
 import type { ScorecardMatrixRow, ScorecardCoverageWindow } from '../components/analysis/ScorecardMatrix.js'
+import { CleanDatabaseControl } from '../components/maintenance/CleanDatabaseControl.js'
 
 export interface ContextDoctorProps {
   initialHarnesses?: KyberHarnessSummary[]
@@ -529,7 +530,13 @@ function ModelCatalogRefreshControl() {
  * owns ingest activity only — the matrix banner and row grouping below
  * belong to T10.
  */
-export function CoverageIngestPanel({ coverage }: { coverage: KyberCoverage }) {
+export function CoverageIngestPanel({
+  coverage,
+  harnesses = [],
+}: {
+  coverage: KyberCoverage
+  harnesses?: KyberHarnessSummary[]
+}) {
   const { refresh, ingest, quarantineByReason, checkpoints } = coverage
   const partialUnits =
     checkpoints === null ? [] : checkpoints.filter((unit) => unit.lastStatus === 'partial')
@@ -552,6 +559,7 @@ export function CoverageIngestPanel({ coverage }: { coverage: KyberCoverage }) {
         Ingest coverage
       </h3>
       <ModelCatalogRefreshControl />
+      <CleanDatabaseControl harnesses={harnesses} />
       <p className="text-density-xs text-muted-foreground mt-density-hair leading-density" data-testid="coverage-window">
         {formatCoverageWindow(refresh)}
       </p>
@@ -920,7 +928,9 @@ export function ContextDoctor({
         </div>
       </div>
 
-      {coverageData && <CoverageIngestPanel coverage={coverageData} />}
+      {coverageData && (
+        <CoverageIngestPanel coverage={coverageData} harnesses={harnessesData ?? []} />
+      )}
 
       {loadingFindings ? (
         <Skeleton className="h-44 w-full" />
