@@ -66,6 +66,13 @@ public interface IHarnessHookAdapter
     /// <summary>The <c>--harness</c> token this adapter serves (for example <c>claude</c>).</summary>
     string HarnessToken { get; }
 
+    /// <summary>
+    /// Whether the harness delivers a sub-agent's return to the post-dispatch hook. When
+    /// false, <c>READY-001</c> and <c>MODE-001</c> answer <c>returns-unobservable</c>
+    /// (Q17 option (a)): pre-dispatch gating still runs, completion order is advisory.
+    /// </summary>
+    bool ObservesReturns => true;
+
     /// <summary>True when the event passes untouched. Must not touch configuration:
     /// the host returns before <c>.kyber-weave/kyber-weave.yml</c> is loaded.</summary>
     bool IsPassThrough(JsonElement payload, string? renderedCaller);
