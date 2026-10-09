@@ -358,9 +358,10 @@ public sealed class GitHubSquadReleaseSourceAuthTests
             HttpRequestMessage request,
             CancellationToken cancellationToken)
         {
-            Assert.NotNull(request.RequestUri);
-            Requests.Add((request.RequestUri, request.Headers.Authorization?.ToString()));
-            if (!_responses.TryGetValue(request.RequestUri, out Queue<Func<HttpRequestMessage, HttpResponseMessage>>? queue) ||
+            Uri? requestUri = request.RequestUri;
+            Assert.NotNull(requestUri);
+            Requests.Add((requestUri, request.Headers.Authorization?.ToString()));
+            if (!_responses.TryGetValue(requestUri, out Queue<Func<HttpRequestMessage, HttpResponseMessage>>? queue) ||
                 queue.Count == 0)
             {
                 throw new InvalidOperationException($"Unexpected HTTP request: {request.RequestUri}");
