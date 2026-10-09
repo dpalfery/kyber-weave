@@ -2,7 +2,7 @@
 id: plans/2026-10-09-issue-312-clean-kyberdash-db
 title: "Clean the KyberDash database from the web dash and tray (#312)"
 doc-type: plan
-status: current
+status: complete
 component: KyberDash
 owner: dpalfery
 last-reviewed: 2026-10-09
