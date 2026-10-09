@@ -17,6 +17,9 @@ import type { recordAntigravityStatusLinePayload } from '../providers/antigravit
 import { DEFAULT_HISTORY_WEEKS, refreshHarnessSources } from '../refresh/orchestrator.js'
 import { REFRESH_TRIGGERS, type RefreshTrigger } from '../canon/refresh-run.js'
 import { acquireStoreRefreshLock, readLockHolder, stateDir } from '../refresh/lock.js'
+import { formatRefreshDiagnostics, formatRefreshReport } from '../refresh/report.js'
+import { MAX_CLEAN_REINGEST_WEEKS } from '../clean/clean.js'
+import { formatCleanReport } from '../clean/report.js'
 
 /**
  * `dash refresh` found another refresh holding the lock (R10.4). Distinct from 1 (the
@@ -24,8 +27,6 @@ import { acquireStoreRefreshLock, readLockHolder, stateDir } from '../refresh/lo
  * all — can tell "already running" from "broken" without parsing the message.
  */
 export const REFRESH_BUSY_EXIT_CODE = 3
-import { formatRefreshDiagnostics, formatRefreshReport } from '../refresh/report.js'
-import { formatCleanReport } from '../clean/report.js'
 
 export type KyberCommandDependencies = {
   readStdin?: () => Promise<string>
@@ -53,6 +54,25 @@ function createHistoryWeeksParser(): (value: string) => number {
       throw new InvalidArgumentError('conflicting --history-weeks values')
     }
     seen = weeks
+    return weeks
+  }
+}
+
+/**
+ * Parse `--reingest-weeks` for `dash clean`: a whole-week window between 1 and
+ * MAX_CLEAN_REINGEST_WEEKS (one year). Re-ingestion scans source logs week by
+ * week, so an unbounded window turns a typo into a multi-millennia
+ * self-inflicted DoS (F6). Rejected at parse time, before the store opens.
+ */
+function createCleanReingestWeeksParser(): (value: string) => number {
+  return (value: string) => {
+    if (!/^[1-9][0-9]*$/.test(value)) {
+      throw new InvalidArgumentError('--reingest-weeks must be a positive integer')
+    }
+    const weeks = Number(value)
+    if (!Number.isSafeInteger(weeks) || weeks > MAX_CLEAN_REINGEST_WEEKS) {
+      throw new InvalidArgumentError(`--reingest-weeks must be between 1 and ${MAX_CLEAN_REINGEST_WEEKS}`)
+    }
     return weeks
   }
 }
@@ -335,8 +355,8 @@ export function registerKyberCommands(program: Command, dependencies: KyberComma
     .option('--harness <id...>', 'Wipe one or more harnesses (repeatable value)')
     .option(
       '--reingest-weeks <n>',
-      'Re-ingest window in whole weeks after the wipe (default: 1)',
-      createHistoryWeeksParser(),
+      'Re-ingest window in whole weeks after the wipe (default: 1, max: 52)',
+      createCleanReingestWeeksParser(),
     )
     .option('--no-reingest', 'Skip re-ingestion after the wipe')
     .option('--yes', 'Confirm the irreversible wipe')

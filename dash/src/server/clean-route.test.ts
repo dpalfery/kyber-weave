@@ -129,6 +129,8 @@ describe('POST /api/kyber/clean (issue #312)', () => {
     ['missing scope', { confirm: true }],
     ['both scopes', { all: true, harnesses: ['pi'], confirm: true }],
     ['bad window', { all: true, confirm: true, reingestWeeks: 0 }],
+    ['oversized window', { all: true, confirm: true, reingestWeeks: 53 }],
+    ['absurd window', { all: true, confirm: true, reingestWeeks: Number.MAX_SAFE_INTEGER }],
     ['malformed body', '{not json'],
   ])('rejects %s with 400', async (_label, payload) => {
     const { status, body } = await postClean(bridgeStub(), payload)

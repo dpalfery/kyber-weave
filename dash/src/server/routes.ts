@@ -18,6 +18,7 @@ import { createRequire } from 'node:module'
 import { harnessFamily, normalizeHarnessName } from '../canon/measurability.js'
 import type { SourceCheckpoint } from '../canon/source-state.js'
 import type { CleanRequest } from '../clean/clean.js'
+import { MAX_CLEAN_REINGEST_WEEKS } from '../clean/clean.js'
 
 /** The build this server is, carried on `/meta` so a client can check it (R6.7). */
 const KYBERDASH_VERSION = String(
@@ -371,8 +372,9 @@ const MAX_CLEAN_BODY_BYTES = 64 * 1024
 /**
  * Validate a `POST /api/kyber/clean` body: exactly one scope (`all` or a
  * non-empty `harnesses` list), explicit `confirm: true`, and — when present —
- * a positive-integer `reingestWeeks` or explicit null to skip re-ingestion.
- * Anything else answers 400 with nothing wiped.
+ * a `reingestWeeks` between 1 and MAX_CLEAN_REINGEST_WEEKS (one year) or
+ * explicit null to skip re-ingestion. Anything else answers 400 with nothing
+ * wiped.
  */
 function parseCleanBody(bodyText: string): CleanRequest | undefined {
   let parsed: unknown
@@ -399,7 +401,7 @@ function parseCleanBody(bodyText: string): CleanRequest | undefined {
     const weeks = body['reingestWeeks']
     if (weeks === null) {
       request.reingestWeeks = null
-    } else if (typeof weeks === 'number' && Number.isSafeInteger(weeks) && weeks >= 1) {
+    } else if (typeof weeks === 'number' && Number.isSafeInteger(weeks) && weeks >= 1 && weeks <= MAX_CLEAN_REINGEST_WEEKS) {
       request.reingestWeeks = weeks
     } else {
       return undefined

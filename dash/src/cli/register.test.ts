@@ -310,6 +310,8 @@ describe('dash clean option validation', () => {
     ['-1'],
     ['1.5'],
     ['abc'],
+    ['53'],
+    ['9007199254740991'],
   ])('exits 2 for --reingest-weeks %s before creating the database', async (value) => {
     const root = mkdtempSync(join(tmpdir(), 'kyber-clean-usage-'))
     temporaryRoots.push(root)

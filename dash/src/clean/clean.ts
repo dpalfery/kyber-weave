@@ -52,6 +52,14 @@ export type CleanReport = {
 export const DEFAULT_CLEAN_REINGEST_WEEKS = 1
 
 /**
+ * Upper bound on the re-ingest window: one year. Re-ingestion scans source
+ * logs week by week, so an unbounded window turns a typo into a
+ * multi-millennia self-inflicted DoS (F6). The route and CLI parsers enforce
+ * the same bound so bad input is rejected before anything is wiped.
+ */
+export const MAX_CLEAN_REINGEST_WEEKS = 52
+
+/**
  * Run one user-initiated clean: pause ingestion, wipe, project, re-ingest,
  * resume. Resume runs in a `finally`; the only path that skips it is a pause
  * that itself failed, in which case nothing was wiped and there is nothing
@@ -66,8 +74,8 @@ export async function cleanDatabase(
   const historyWeeks = scope.reingestWeeks === undefined
     ? DEFAULT_CLEAN_REINGEST_WEEKS
     : scope.reingestWeeks
-  if (historyWeeks !== null && (!Number.isSafeInteger(historyWeeks) || historyWeeks < 1)) {
-    throw new Error(`cleanDatabase: reingestWeeks must be a positive integer or null`)
+  if (historyWeeks !== null && (!Number.isSafeInteger(historyWeeks) || historyWeeks < 1 || historyWeeks > MAX_CLEAN_REINGEST_WEEKS)) {
+    throw new Error(`cleanDatabase: reingestWeeks must be a positive integer between 1 and ${MAX_CLEAN_REINGEST_WEEKS}, or null`)
   }
 
   await ports.pauseIngestion()

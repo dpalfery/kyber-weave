@@ -162,4 +162,34 @@ describe('cleanDatabase (issue #312)', () => {
       store.close()
     }
   })
+
+  it.each([53, Number.MAX_SAFE_INTEGER])('rejects a reingest window of %p weeks without pausing (F6)', async (reingestWeeks) => {
+    const store = temporaryStore()
+    try {
+      const ports = fakePorts()
+
+      await expect(cleanDatabase(store, { harnesses: ['pi'], reingestWeeks }, ports)).rejects.toThrow(
+        /reingestWeeks/i,
+      )
+      expect(ports.pauseIngestion).not.toHaveBeenCalled()
+      expect(ports.resumeIngestion).not.toHaveBeenCalled()
+    } finally {
+      store.close()
+    }
+  })
+
+  it('accepts a reingest window of exactly one year', async () => {
+    const store = temporaryStore()
+    try {
+      const ports = fakePorts()
+
+      await cleanDatabase(store, { harnesses: ['pi'], reingestWeeks: 52 }, ports)
+
+      expect(ports.reingest).toHaveBeenCalledWith(
+        expect.objectContaining({ harnesses: ['pi'], historyWeeks: 52 }),
+      )
+    } finally {
+      store.close()
+    }
+  })
 })
