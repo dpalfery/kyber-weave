@@ -1,0 +1,26 @@
+{
+  "hook_event_name": "PostToolUse",
+  "session_id": "sess-post-1",
+  "transcript_path": "/repo/transcript.jsonl",
+  "cwd": "/repo",
+  "permission_mode": "default",
+  "agent_id": "agent-conductor-3",
+  "agent_type": "conductor",
+  "tool_name": "Agent",
+  "tool_input": {
+    "description": "Implement T3",
+    "prompt": "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/plan.md\nTASK: T3\n\nImplement the plan parser.",
+    "subagent_type": "csharp-dev"
+  },
+  "tool_use_id": "toolu-post-1",
+  "tool_response": {
+    "status": "completed",
+    "agentId": "agent-7",
+    "content": [
+      {
+        "type": "text",
+        "text": "Done."
+      }
+    ]
+  }
+}

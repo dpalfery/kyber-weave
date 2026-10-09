@@ -1,0 +1,16 @@
+{
+  "hook_event_name": "PreToolUse",
+  "session_id": "sess-edit-1",
+  "transcript_path": "/repo/transcript.jsonl",
+  "cwd": "/repo",
+  "permission_mode": "default",
+  "agent_id": "agent-worker-4",
+  "agent_type": "csharp-dev",
+  "tool_name": "Edit",
+  "tool_input": {
+    "file_path": "/repo/src/Foo.cs",
+    "old_string": "a",
+    "new_string": "b"
+  },
+  "tool_use_id": "toolu-edit-1"
+}
