@@ -14,6 +14,7 @@ decided-by:
   - adr/0024-squad-global-receipt-layout-marker
   - adr/0025-devin-native-agents-and-skill-lowering
   - adr/0028-kyber-arbiter-three-step-decision-gates
+  - adr/0029-squad-owned-blocks-in-shared-hook-files
 keywords:
   - multi-harness
   - deployment
@@ -37,6 +38,8 @@ code-refs:
   - FactoryRenderer
   - DevinRenderer
   - ArbiterHookWiring
+  - SquadHookJsonBlock
+  - SquadDeploymentPlan
 ---
 
 # Kyber-Squad architecture
@@ -256,6 +259,45 @@ Squad deployments maintain rigorous state and concurrency boundaries:
 - **Legacy v1 global receipts** (pre-#91): classified by examining paths in the receipt. If every entry is target-prefixed (e.g., `.codex/agents/x.toml`), it is treated as `single-root` layout. If no entry is prefixed, it is `per-target-roots`. A receipt mixing both patterns is invalid. A v2 receipt whose declared `layout` contradicts its paths is rejected the same way.
 - **Compatibility**: CLI versions before the v2 layout marker refuse a v2 global receipt with exit code 1 and do not modify any files. Upgrade the CLI to proceed.
 - **Legacy recovery**: for an rc.9/rc.10 single-root install, `status` and `uninstall` operate against the recorded deployment root; `update` and same-target `install` refuse with guidance to run `kyber-weave squad uninstall --global` followed by `kyber-weave squad install --global`.
+- **Blocks in shared hook files (`kyber-squad.receipt/v3`)**: a project-scope receipt
+  that owns entries inside a shared hook file serializes as `kyber-squad.receipt/v3` —
+  the v1 project field set plus `blocks`, each with `relativePath`, `target`,
+  `createdFile`, and `entries` of `container` (an RFC 6901 JSON pointer to the entry)
+  and `sha256` (over the entry's compact JSON). A v3 receipt is written only at
+  project scope and only when a block exists; receipts without blocks stay byte-identical
+  v1 or v2. An older CLI refuses a v3 receipt with exit code 1. See
+  [owned blocks](#owned-blocks-in-shared-hook-files) below and
+  [ADR 0029](../adr/0029-squad-owned-blocks-in-shared-hook-files.md).
+
+#### Owned blocks in shared hook files
+
+Some harnesses keep hooks in a file the user also owns, and JSON has no comments to
+mark a block with — so Squad owns marked *entries*, never the file
+([ADR 0029](../adr/0029-squad-owned-blocks-in-shared-hook-files.md), an exception to
+the rule that Squad does not own settings files). The deployment plan splices Squad's
+rendered entries into the file, replacing Squad's previous entries while the user's
+entries keep their order and values; a missing file starts from the format's minimal
+document, and an existing user file at a block path is not an unmanaged collision.
+
+| Target | File | Owned containers | An entry is Squad's when | Written fields |
+|---|---|---|---|---|
+| `cursor` | `.cursor/hooks.json` | `/hooks/preToolUse`, `/hooks/postToolUse` (a new file starts `{"version":1,"hooks":{}}`) | its `command` starts with `kyber-weave-arbiter hook --harness cursor` | `command`, `matcher`, `timeout`, `failClosed` |
+| `codex` | `.codex/hooks.json` | `/hooks/PreToolUse`, `/hooks/PostToolUse` | every `hooks[].command` in the matcher group starts with `kyber-weave-arbiter hook --harness codex` — a group mixing Squad and user hooks stays user content | `matcher`, `hooks:[{type, command, timeout}]` |
+
+The splice covers three further shapes for Phase 3 (`.factory/hooks.json`,
+`.devin/hooks.v1.json`, and the Antigravity `.agents/hooks.json`, where Squad owns
+the whole top-level `kyber-arbiter` group by key); Phase 2 renders only the Cursor
+and Codex blocks, plus Pi's owned extension file (a whole owned file, not a block).
+Only documented fields are written, never a sentinel key, and shared-file hook
+commands carry no `--caller` because they gate project-wide. The plan-side splice
+mirrors the file splice — same containers, same ownership test, same digests —
+rather than calling it, because planning must stay side-effect free for dry runs.
+
+A hand-edited or missing owned entry is drift, reported by `squad status` and
+`squad doctor` naming the file and the container. `squad update` rewrites the block
+but preserves a drifted entry, reporting it, unless `--replace-managed` is given.
+`squad uninstall` removes only the owned entries and deletes the file only when
+Squad created it and no hook remains.
 
 ---
 
@@ -486,18 +528,24 @@ and validates.
   `.kyber-weave/squad.receipt.json` are an intentional stale self-deployment, not inputs to source
   loading or packaging. They remain untouched until a human refreshes them after a fresh release
   candidate.
-- **Arbiter hook wiring ([ADR 0028](../adr/0028-kyber-arbiter-three-step-decision-gates.md))**:
+- **Arbiter hook wiring ([ADR 0028](../adr/0028-kyber-arbiter-three-step-decision-gates.md),
+  [ADR 0029](../adr/0029-squad-owned-blocks-in-shared-hook-files.md))**:
   `ArbiterHookWiring` renders decision-gate hooks for the
   [Kyber Arbiter](../kyber-arbiter/architecture.md) beside the agent deployment, in project
-  scope only and only when the project's `arbiter.enabled` is true. Phase 1 wires three
-  targets: per-agent frontmatter hooks on `claude` (each dispatching agent plus the
+  scope only and only when the project's `arbiter.enabled` is true. Six targets are
+  hooked: per-agent frontmatter hooks on `claude` (each dispatching agent plus the
   `/conductor` entry-point skill, with `--caller <agent>`), per-agent `.agent.md` hooks on
-  `copilot` plus the project-level `.github/hooks/kyber-arbiter.json`, and the
-  `.opencode/plugins/kyber-arbiter.ts` shim on `opencode`. Only agents with a non-empty
+  `copilot` plus the project-level `.github/hooks/kyber-arbiter.json`, the
+  `.opencode/plugins/kyber-arbiter.ts` shim on `opencode`, the owned extension file
+  `.pi/extensions/kyber-arbiter.ts` on `pi`, and owned blocks spliced into the shared
+  `.codex/hooks.json` and `.cursor/hooks.json` on `codex` and `cursor` (no `--caller`:
+  shared-file hooks gate project-wide). Only agents with a non-empty
   `delegates-to` roster get dispatch-gating hooks, so the caller is trusted without a new
   agent field; implementation specialists in the worker profiles get the planning-path Read
-  guard instead. Phase 1 outputs are whole owned files, so the receipt schema does not
-  change. A global install renders no hooks and records `arbiter-not-enforced`
+  guard instead. Whole-file outputs (frontmatter hooks, the Copilot CLI hook file, the
+  plugin shims, the Pi extension) need no receipt change; owned blocks are carried in
+  `kyber-squad.receipt/v3` (see [owned blocks](#owned-blocks-in-shared-hook-files)).
+  A global install renders no hooks and records `arbiter-not-enforced`
   (`global-scope`), as does any target the Arbiter does not hook yet.
 
 ---

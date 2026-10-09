@@ -12,6 +12,7 @@ decided-by:
   - adr/0022-antigravity-native-agents
   - adr/0025-devin-native-agents-and-skill-lowering
   - adr/0028-kyber-arbiter-three-step-decision-gates
+  - adr/0029-squad-owned-blocks-in-shared-hook-files
 code-refs:
   - SquadDeploymentPlan
 ---
@@ -490,9 +491,18 @@ Locally modified files are preserved during uninstallation unless explicitly cle
 
 `squad install` and `squad update` render [Kyber Arbiter](../kyber-arbiter/runbook.md)
 decision-gate hooks alongside the agents when the project's `arbiter.enabled` is true.
-Phase 1 wires `claude`, `copilot`, and `opencode`; any other target, and any global-scope
-install (which has no project configuration to read), renders no hooks and records
-`arbiter-not-enforced` in the receipt.
+Six targets are hooked: `claude`, `copilot`, `opencode`, `pi`, `codex`, and `cursor`.
+Any other target, and any global-scope install (which has no project configuration to
+read), renders no hooks and records `arbiter-not-enforced` in the receipt.
+
+On `codex` and `cursor` the hooks live in a shared file the user also owns —
+`.codex/hooks.json` and `.cursor/hooks.json`. Squad splices its own marked entries
+into those files ([ADR 0029](../adr/0029-squad-owned-blocks-in-shared-hook-files.md))
+and tracks each entry's location and digest in `kyber-squad.receipt/v3`; the user's
+entries are left in place. A hand edit inside Squad's entries is reported by
+`squad status` and `squad doctor` as drift, naming the file and the container. On
+`pi` the hook is the owned extension file `.pi/extensions/kyber-arbiter.ts`, which
+needs project trust to load (see below).
 
 A hook that never runs enforces nothing, so grant the trust gate at install time — the
 command prints the applicable step:
@@ -501,7 +511,9 @@ command prints the applicable step:
 |---|---|
 | Claude | Accept the workspace trust dialog. `claude -p` sessions never count and stay unenforced. |
 | Copilot in VS Code | Open a trusted workspace with `chat.useHooks` enabled. |
-| Copilot CLI, OpenCode | No documented trust gate. |
+| Codex | Trust the project's `.codex/` layer, then review and trust the new hook through `/hooks`. Every `squad update` that changes the hook needs that review again, or the changed hook is skipped. |
+| Pi | Trust the project so that `.pi/extensions/` loads. Until trust is granted the extension does not load and dispatches stay ungated. |
+| Cursor, Copilot CLI, OpenCode | No documented trust gate. |
 
 Configure the provider and key per user with `kyber-weave arbiter setup`, and diagnose the
 whole installation — including the `kyber-weave-arbiter --version` probe — with

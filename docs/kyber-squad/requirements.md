@@ -10,6 +10,7 @@ decided-by:
   - adr/0019-pi-native-subagents-and-primary-lowering
   - adr/0022-antigravity-native-agents
   - adr/0028-kyber-arbiter-three-step-decision-gates
+  - adr/0029-squad-owned-blocks-in-shared-hook-files
 ---
 
 # Kyber-Squad requirements and degradation contract
@@ -56,6 +57,26 @@ Every non-native translation emits a structured degradation record in `squad.rec
 | `permission-not-expressible` | A non-deny capability decision cannot be expressed in the target's native permission model without inventing an unverified mapping. | Factory records this for non-deny `network.publish` and `delegate` (no documented tool / `Task` withheld from subagents) and for `mcpServers: []` so parent MCP is not inherited. Claude records this for the unenforced entry-point skill and the nested-roster limitation. |
 | `arbiter-not-enforced` | The Arbiter gates no dispatch on this target. Recorded at render time, per target: never a runtime condition. | A global install renders no hooks (no project configuration to read); a target the Arbiter does not hook yet. A missing marker at runtime is instead an audit finding (`KW-ARB-AUDIT-002`). See the [Kyber Arbiter runbook](../kyber-arbiter/runbook.md). |
 | `capability-not-isolable` | A capability grant encompasses an unenforceable security boundary: when `process.execute: allow` and `filesystem.write` is `ask` or `deny` on a target whose shell tool can write files through redirection, the withheld write-tool names are unreachable but the underlying write capability remains accessible. The degradation record's Details names the target, the granted shell tool(s), and the withheld write-tool names. See [plan D11](../archive/plans/2026-09-21-pi-thinking-and-antigravity-native-agents.md#3-approved-decisions-owner-dpalfery-2026-09-21) for complete tool mappings. | Claude: `Bash`/`PowerShell` vs. `Edit`/`Write`/`NotebookEdit`; Pi: `bash` vs. `edit`/`write`; ZCode: `Bash` vs. `Edit`/`Write`; Devin: `exec` vs. `edit`/`write`/`apply_patch`/`notebook_edit`; Factory: `Execute` vs. `Create`/`Edit`/`ApplyPatch`; OpenCode: `bash` vs. `edit`; Antigravity: `run_command` vs. `write_to_file`/`replace_file_content`/`multi_replace_file_content`. On each target, the withheld write tools do not appear in the rendered agent's tool allow-list (the `tools:` frontmatter key, or `allowed-tools:` on Devin), while the degradation record's Details identifies both the granted shell tool(s) and the withheld write-tool names. |
+
+### Owned blocks in shared hook files
+
+Where a harness keeps hooks in a file the user also owns, Squad owns marked entries
+inside that file — the exception to the rule that Squad does not own settings files,
+recorded in [ADR 0029](../adr/0029-squad-owned-blocks-in-shared-hook-files.md):
+
+- **Identification.** A Cursor entry is Squad's when its `command` starts with
+  `kyber-weave-arbiter hook --harness cursor`; a Codex matcher group is Squad's when
+  every `hooks[].command` in the group carries the `codex` signature. Shared-file
+  hook commands carry no `--caller`. Only documented fields are written.
+- **Receipt.** Each owned entry is recorded in `kyber-squad.receipt/v3` with its
+  `container` (an RFC 6901 JSON pointer to the entry) and `sha256` (over the entry's
+  compact JSON), beside the block's `relativePath`, `target`, and `createdFile`.
+  Receipts without blocks stay byte-identical v1 or v2.
+- **Drift and lifecycle.** A hand-edited or missing owned entry is drift, reported by
+  `squad status` and `squad doctor` naming the file and the container. `squad update`
+  rewrites the block but preserves a drifted entry, reporting it, unless
+  `--replace-managed` is given. `squad uninstall` removes only the owned entries and
+  deletes the file only when Squad created it and no hook remains.
 
 ---
 

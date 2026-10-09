@@ -9,6 +9,7 @@ last-reviewed: 2026-10-09
 status: current
 decided-by:
   - adr/0028-kyber-arbiter-three-step-decision-gates
+  - adr/0029-squad-owned-blocks-in-shared-hook-files
 code-refs:
   - ArbiterEvaluator
   - RuleEngine
@@ -24,6 +25,9 @@ code-refs:
   - SystemOneClient
   - ArbiterKeyResolver
   - ArbiterEscalationEnvelope
+  - CodexHookAdapter
+  - CursorHookAdapter
+  - PluginHookAdapter
 ---
 
 # Kyber Arbiter architecture
@@ -134,7 +138,7 @@ in [configuration](../configuration.md).
 
 ## Phase 1 harness facts
 
-Phase 1 hooks three harnesses; every other harness follows in later phases:
+Phase 1 hooks four harnesses; Phase 2 adds three more (below):
 
 | Harness | What Squad renders | Dispatch tool | Caller identity |
 |---|---|---|---|
@@ -155,10 +159,48 @@ On the Copilot CLI target post-dispatch outcomes are advisory only: `Deny`,
 `PostBlock` and `PostAnnotation` all render as `additionalContext`, so a post-dispatch
 finding is surfaced as context rather than enforced. Pre-dispatch denies still block.
 
+## Phase 2 harness facts
+
+Phase 2 hooks Pi, Codex, and Cursor. All three are project-wide hooks with no caller
+identity, so they gate only dispatches carrying the `KYBER-ARBITER: true` marker and
+infer the caller from the headers; anything else passes and is logged with
+`caller: unidentified`:
+
+| Harness | What Squad renders | Dispatch tool | Target and prompt |
+|---|---|---|---|
+| Pi | Owned extension file `.pi/extensions/kyber-arbiter.ts` speaking the plugin envelope (`before`/`after`, tool `Agent`) | `Agent` | Target from `args.subagent_type`, prompt from `args.prompt` |
+| Codex | Owned block in the shared `.codex/hooks.json` (`PreToolUse`/`PostToolUse` matcher groups) | `spawn_agent` (also matched as `Agent`, under any namespace prefix) | Target from `tool_input.agent_type`, prompt from `tool_input.message`; returns pair by `tool_use_id` |
+| Cursor | Owned entries in the shared `.cursor/hooks.json` (`preToolUse`/`postToolUse`, `failClosed: true`) | `Task` | Prompt from `tool_input.prompt`; target from `tool_input.subagent_type`, which is undocumented — when it is absent the target fact is absent and the rules answer `undecidable`. Returns pair by `tool_use_id` |
+
+Delivery differs per harness. On Pi a `block` before the call returns
+`{block: true, reason}`, stripped arguments are assigned onto the event input, and a
+spawn error or non-zero status blocks; after the call a `block` appends the reason as
+text content. On Codex a deny writes the `hookSpecificOutput` deny shape with the
+envelope as the reason, and a strip writes `allow` with `updatedInput` carrying the
+complete arguments with the routing headers removed from `message`. On Cursor every
+invocation answers JSON — deny as `{permission: "deny", agent_message, user_message}`,
+pass as `{permission: "allow"}`, strip as `{permission: "allow", updated_input}`, and
+post-dispatch as `{additional_context}` (or `{}`) — because `failClosed` blocks when
+there is no output.
+
+On Codex and Copilot CLI, post-dispatch denials are advisory only
+(`additionalContext`): on Codex a `decision: block` would replace the sub-agent's
+result, so every post-dispatch outcome — deny, block, or annotation — is delivered
+as `hookSpecificOutput.additionalContext`. Pre-dispatch denies still block on both
+targets.
+
+Trust steps for the new targets are surfaced at install time: Codex needs a trusted
+`.codex/` layer plus per-hook review through `/hooks` (every `squad update` that
+changes the hook needs trust again, or the changed hook is skipped); Pi needs
+project trust so that `.pi/extensions/` loads. Cursor's hooks carry no trust gate
+today. See the [runbook](runbook.md) and
+[Squad onboarding](../kyber-squad/onboarding.md).
+
 ## Related
 
 - [Runbook](runbook.md) — operating the Arbiter day to day
 - [ADR 0028](../adr/0028-kyber-arbiter-three-step-decision-gates.md) — the decisions
+- [ADR 0029](../adr/0029-squad-owned-blocks-in-shared-hook-files.md) — owned entries in shared hook files
 - [Kyber-Squad architecture](../kyber-squad/architecture.md) — hook wiring per harness
 - [Review council architecture](../code-review/architecture.md) — review triggers
 - [Configuration](../configuration.md) — `arbiter:` and `applies-when`
