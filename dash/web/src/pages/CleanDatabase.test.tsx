@@ -6,6 +6,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { render as renderDom, screen, fireEvent, cleanup, waitFor } from '@testing-library/react'
+import { act } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { renderToStaticMarkup } from 'react-dom/server'
 import type * as React from 'react'
@@ -105,6 +106,39 @@ describe('Issue #312: Clean database control', () => {
     fireEvent.click(await screen.findByTestId('clean-database-confirm'))
 
     await waitFor(() => expect(screen.getByTestId('clean-database-confirm')).toBeDisabled())
+
+    resolveClean({
+      ok: true,
+      json: async () => ({
+        harnesses: ['*'],
+        wipe: { harnesses: ['*'], records: 0, provenance: 0, checkpoints: 0 },
+        reingested: true,
+        historyWeeks: 1,
+      }),
+    } as Response)
+    await waitFor(() => expect(screen.queryByTestId('clean-database-dialog')).toBeNull())
+  })
+
+  it('issues only one clean request on rapid double-confirm', async () => {
+    let resolveClean: (value: Response) => void = () => {}
+    const cleanPromise = new Promise<Response>((resolve) => {
+      resolveClean = resolve
+    })
+    const fetchMock = vi.fn(async () => cleanPromise)
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderWithQuery(<CleanDatabaseControl harnesses={HARNESSES} />)
+    fireEvent.click(await screen.findByTestId('clean-database-button'))
+    fireEvent.click(await screen.findByTestId('clean-database-wipe-all'))
+    const confirm = await screen.findByTestId('clean-database-confirm')
+    // Both clicks land before React re-renders, so the render-gated `disabled`
+    // cannot stop the second one — only an in-handler guard can.
+    await act(async () => {
+      fireEvent.click(confirm)
+      fireEvent.click(confirm)
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
 
     resolveClean({
       ok: true,

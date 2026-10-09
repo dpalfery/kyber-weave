@@ -6,7 +6,7 @@
 // no source logs to re-ingest from. Confirming POSTs the bounded
 // `cleanDatabase` client; the status line is built from counts and scope only,
 // never from a server error string (the `refreshModelWindows` convention).
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 
 import {
@@ -50,6 +50,9 @@ export function CleanDatabaseControl({ harnesses }: CleanDatabaseControlProps) {
   const [selected, setSelected] = useState<string[]>([])
   const [wipeAll, setWipeAll] = useState(false)
   const [status, setStatus] = useState<string | null>(null)
+  // A render-gated `disabled` cannot stop two clicks batched before re-render,
+  // so the in-flight mutex lives in a ref the handler checks synchronously.
+  const cleanInFlight = useRef(false)
 
   const observed = harnesses.filter((entry) => (entry.sampleCount ?? 0) > 0)
   const canConfirm = wipeAll || selected.length > 0
@@ -59,6 +62,8 @@ export function CleanDatabaseControl({ harnesses }: CleanDatabaseControlProps) {
   }
 
   function confirmClean() {
+    if (cleanInFlight.current) return
+    cleanInFlight.current = true
     setPhase('in-flight')
     void cleanDatabase(
       wipeAll ? { all: true, confirm: true } : { harnesses: selected, confirm: true },
@@ -83,6 +88,7 @@ export function CleanDatabaseControl({ harnesses }: CleanDatabaseControlProps) {
         onClick={() => {
           setSelected([])
           setWipeAll(false)
+          cleanInFlight.current = false
           setPhase('confirm')
         }}
       >
