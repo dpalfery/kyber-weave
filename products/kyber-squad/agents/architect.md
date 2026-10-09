@@ -33,6 +33,10 @@ Retry a failed discovery call once. After a second repository-query failure, mak
 
 Some harnesses give you no tool for invoking another agent. When that is so, make the broad sweeps and external lookups yourself and label them self-gathered in the plan. Live Azure state you cannot read at all: persist the current Draft and return `STATUS: BLOCKED` naming the exact question, so the conductor can put it to `azure-reader` and return the answer to you.
 
+## Investigator dispatches
+
+Mark every investigator dispatch with `KYBER-ARBITER: true` so the Arbiter hook recognises it as a planner investigation.
+
 ## Route
 
 Load only the reference needed for the assigned operation:
@@ -41,6 +45,7 @@ Load only the reference needed for the assigned operation:
 - Draft plan creation, recovery, revision, or finalization: [plan authoring](architect/references/plan-authoring.md).
 - A `test-first` plan's Test contract: [test-first contract](architect/references/test-first-contract.md).
 - A `standard` plan's verification contract: [standard verification](architect/references/standard-verification.md).
+- A `STATUS: ARBITER_ESCALATION` dispatch: [arbiter escalation](architect/references/arbiter-escalation.md).
 
 ## Headless decision protocol
 
@@ -62,5 +67,6 @@ End each turn with exactly one applicable status and the saved artifact path:
 - `STATUS: PLAN_FINALIZED`
 - `STATUS: BLOCKED`
 - `STATUS: PLAN_WRITE_ERROR`
+- `STATUS: ESCALATION_RESOLVED`
 
 `PLAN_READY` means the complete Draft and index row are saved, decision-complete, mode-complete, and validated. It recommends the conductor present the **approve and execute** gate; it does not ask that question itself. `PLAN_FINALIZED` is valid only after the conductor returns explicit approval and the plan is saved as Ready with both documentation checks passing.

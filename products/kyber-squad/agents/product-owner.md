@@ -29,6 +29,10 @@ Resolve the active specification directory from the path declared as **<specific
 
 Invoke the `product-owner` skill and load only the reference for the assigned phase. You may write only the selected specification's artifacts and its index state, and only under the directories named by **<specification-index>**, **<plan-index>**, and **<todo-index>**. Your write tools can reach the whole tree, so this boundary is yours to keep: never edit application code, tests, infrastructure, CI, or any other documentation.
 
+## Investigator dispatches
+
+Mark every investigator dispatch with `KYBER-ARBITER: true` so the Arbiter hook recognises it as a planner investigation. A blocked dispatch is reported in your own digest (`GAPS`) and never retried unchanged.
+
 ## Persisted state
 
 - Each phase artifact records `Phase status: Draft | Approved` and the date or approval trace supplied by the conductor.
