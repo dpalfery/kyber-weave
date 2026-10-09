@@ -17,6 +17,7 @@ import {
 import { createRequire } from 'node:module'
 import { harnessFamily, normalizeHarnessName } from '../canon/measurability.js'
 import type { SourceCheckpoint } from '../canon/source-state.js'
+import type { CleanRequest } from '../clean/clean.js'
 
 /** The build this server is, carried on `/meta` so a client can check it (R6.7). */
 const KYBERDASH_VERSION = String(
@@ -357,6 +358,46 @@ type SessionViewPayload = {
   context?: unknown
   schema?: unknown
   timeline?: unknown
+}
+
+/**
+ * Validate a `POST /api/kyber/clean` body: exactly one scope (`all` or a
+ * non-empty `harnesses` list), explicit `confirm: true`, and — when present —
+ * a positive-integer `reingestWeeks` or explicit null to skip re-ingestion.
+ * Anything else answers 400 with nothing wiped.
+ */
+function parseCleanBody(bodyText: string): CleanRequest | undefined {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(bodyText || '{}')
+  } catch {
+    return undefined
+  }
+  if (typeof parsed !== 'object' || parsed === null) return undefined
+  const body = parsed as Record<string, unknown>
+  if (body['confirm'] !== true) return undefined
+  const all = body['all']
+  const harnesses = body['harnesses']
+  const hasAll = all === true
+  const hasHarnesses =
+    Array.isArray(harnesses) &&
+    harnesses.length > 0 &&
+    harnesses.every((h) => typeof h === 'string' && h.trim() !== '')
+  if ((hasAll && hasHarnesses) || (!hasAll && !hasHarnesses)) return undefined
+  const request: CleanRequest = { confirm: true }
+  if (hasAll) request.all = true
+  else request.harnesses = (harnesses as string[]).map((h) => h.trim())
+  if ('reingestWeeks' in body) {
+    const weeks = body['reingestWeeks']
+    if (weeks === null) {
+      request.reingestWeeks = null
+    } else if (typeof weeks === 'number' && Number.isSafeInteger(weeks) && weeks >= 1) {
+      request.reingestWeeks = weeks
+    } else {
+      return undefined
+    }
+  }
+  return request
 }
 
 export function handleKyberRequest(
@@ -1092,6 +1133,39 @@ export function handleKyberRequest(
       return true
     }
     sendKyberJson(res, 200, bridge.getModelCatalog())
+    return true
+  }
+
+  // Database clean (issue #312). The web dash reaches the central
+  // `cleanDatabase` module over this route; the request body carries the
+  // scope, the confirmation, and the optional re-ingest window. Matched
+  // before the JSON-404 catch-all like every other /api/kyber/* route.
+  if (url.pathname === '/api/kyber/clean') {
+    if (req.method !== 'POST') {
+      sendKyberJson(res, 405, { error: 'Method Not Allowed' })
+      return true
+    }
+    let bodyText = ''
+    req.on('data', (chunk) => {
+      bodyText += chunk
+    })
+    req.on('end', async () => {
+      const parsed = parseCleanBody(bodyText)
+      if (parsed === undefined) {
+        sendKyberJson(res, 400, { error: 'Invalid clean request payload' })
+        return
+      }
+      try {
+        const report = await bridge.cleanDatabase(parsed)
+        sendKyberJson(res, 200, report)
+      } catch (err) {
+        if (err instanceof Error && (err as { code?: string }).code === 'CLEAN_BUSY') {
+          sendKyberJson(res, 409, { error: 'A refresh or clean is already running' })
+          return
+        }
+        sendKyberJson(res, 500, { error: 'Clean failed' })
+      }
+    })
     return true
   }
 

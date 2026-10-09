@@ -24,6 +24,15 @@ export type CleanScope = {
   reingestWeeks?: number | null
 }
 
+/**
+ * The HTTP body `POST /api/kyber/clean` accepts. `confirm` is the browser's
+ * explicit irreversible-action consent; without it the route answers 400 and
+ * nothing is wiped.
+ */
+export type CleanRequest = CleanScope & {
+  confirm?: boolean
+}
+
 /** Seams `cleanDatabase` drives; tests inject fakes, production uses `portsForClean`. */
 export type CleanPorts = {
   pauseIngestion: () => Promise<ReceiverPauseOutcome>
