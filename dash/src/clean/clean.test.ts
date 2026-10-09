@@ -66,9 +66,7 @@ describe('cleanDatabase (issue #312)', () => {
 
       expect(report.harnesses).toEqual(['*'])
       expect(store.count()).toBe(0)
-      expect(ports.reingest).toHaveBeenCalledWith(
-        expect.objectContaining({ harnesses: undefined, historyWeeks: 1 }),
-      )
+      expect(ports.reingest).toHaveBeenCalledWith({ historyWeeks: 1 })
     } finally {
       store.close()
     }
