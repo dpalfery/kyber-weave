@@ -11,7 +11,7 @@ development-mode: test-first
 
 # Clean the KyberDash database from the web dash and tray (#312)
 
-**Status: Draft — plan approved 2026-10-09 with orchestrator answers to Q-1…Q-10. Implementation not started.**
+**Status: Complete 2026-10-09.** Plan approved 2026-10-09 with orchestrator answers to Q-1…Q-10. Tasks T1–T10 complete, test-first. Decisions D1–D10 recorded below; new ADR 0032; harvested into `docs/dash/architecture.md` and `docs/dash/runbook.md`. Archived per KW-DOC-LIFECYCLE-003.
 
 This plan addresses GitHub issue [#312](https://github.com/dpalfery/kyber-weave/issues/312): KyberDash data is ephemeral point-in-time telemetry with no way to clear bad or stale data (double-counting, mis-attribution, test noise) short of manual database surgery. The deliverable is a "Clean database" capability reachable from both the web dash and the tray, backed by one central engine method, with confirmation, no backups, ingestion paused for the duration, and automatic re-ingestion defaulting to the last 7 days.
 
@@ -79,3 +79,18 @@ The production web-server bridge handle is read-only (`dash/src/server/bridge.ts
 ## 4. Closeout mapping
 
 Durable decisions D1–D10 above are harvested on completion: D1–D8 (clean semantics, pause protocol, wipe table map, confirm contract, checkpoint deletion, re-ingest window) into `docs/dash/architecture.md` and operator-facing usage into `docs/dash/runbook.md`; D9 is ADR 0032 itself plus this plan's Decisions table. D10 (tray scope) is recorded here and in the runbook. No documentation waiver: the clean is a new user-facing capability with surviving operational invariants.
+
+## 5. Completion evidence (closeout 2026-10-09)
+
+Test-first, one task per commit on `dp-kyber-bot.grokbot.commandcode/issue-312-clean-kyberdash-db`:
+
+- T1/T2: `CanonStore.wipeHarnesses`/`wipeAll` + rollback (`dash/src/canon/store.ts`, `store.test.ts` — 6 wipe tests).
+- T3/T4: `cleanDatabase` orchestration + receiver pause port (`dash/src/clean/clean.ts`, `pause.ts`, 12 tests).
+- T5: receiver pause admin routes + lease auto-resume (`dash/src/otel/receiver.ts`, 5 tests; pre-existing healthz expectation updated for the `paused` flag).
+- T6: `dash clean` CLI — scope/`--yes`/lock/exit codes (`dash/src/cli/register.ts`, 10 tests; `cli-commands.test.ts` command list).
+- T7: `POST /api/kyber/clean` + bridge short-lived writer (10 route tests, 2 bridge file-store tests).
+- T8: web clean control + dialog + panel wiring (`CleanDatabaseControl.tsx`, `CleanDatabase.test.tsx` 6 tests; `kyberApi.ts` bounded client).
+- T9: tray `clean_database` command + scope argv (7th command, capability/permission, `CleanScope::from_ipc`; popover two-step confirm in `CleanDatabase.tsx`; contract + UI tests).
+- T10: this plan's Decisions table, ADR 0032, architecture/runbook harvest, inventory updates.
+
+Gates at closeout: dash typecheck/lint/test/check:reachable, tray UI typecheck/test, `cargo fmt --check` / `clippy -D warnings` / `cargo test`, `docs validate . --merge-ready`, `docs drift .`, and the full `review gates` suite — see the PR body for the per-gate verdicts.

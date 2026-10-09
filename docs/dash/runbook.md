@@ -21,7 +21,7 @@ First-party code under `dash/` since a one-time fork of CodeBurn
 
 1. [KyberDash Tray (`dash/tray/`)](#6-the-kyberdash-tray-dashtray) — the macOS and Windows tray: a Tauri 2 shell whose popover renders the context report and which owns the refresh cadence and the optional OTLP receiver.
 2. [Web Dashboard (`dash/web/`)](#web-dashboard-dashweb) — Standalone React browser interface served by the CLI over HTTP.
-3. [CLI engine (`dash/src/`)](#telemetry-ingest-canonical-store-and-cli-operations) — `kyberdash report`, `web`, `dash refresh`, `kyber otel`, and the store operations documented below.
+3. [CLI engine (`dash/src/`)](#telemetry-ingest-canonical-store-and-cli-operations) — `kyberdash report`, `web`, `dash refresh`, `dash clean`, `kyber otel`, and the store operations documented below.
 
 This runbook covers the local prerequisites, build workflows, dev runners, CLI operations, and test suites
 for each surface.
@@ -211,6 +211,45 @@ The Context Doctor coverage panel lists sources discovered but not ingested, gro
 their persisted reason: `window_filtered` (all native records predate the refresh window;
 widen `--history-weeks` to ingest them) or `no_recordable_events` (the file holds no usage
 or model events, so there is nothing to ingest).
+
+### 2b. Database clean (`dash clean`)
+
+Wipe bad or stale telemetry — double-counting, mis-attribution, test noise — by harness
+scope or for all harnesses, then re-ingest from source logs
+([ADR 0032](../adr/0032-kyberdash-user-initiated-clean.md)):
+
+```bash
+node dash/dist/cli.js dash clean --all --yes
+node dash/dist/cli.js dash clean --harness pi --harness cursor --yes
+node dash/dist/cli.js dash clean --all --yes --reingest-weeks 4
+node dash/dist/cli.js dash clean --all --yes --no-reingest
+```
+
+`--all` or at least one `--harness <id>` is required, and so is `--yes`: without the
+flag the command exits **2** before the store opens (the CLI is non-interactive, so there
+is no prompt). `--reingest-weeks <n>` is a positive integer defaulting to **1** (the last
+7 days); `--no-reingest` skips re-ingestion. A held refresh lock exits **3** with nothing
+written; clean failure exits **1**; success exits **0**.
+
+One clean pauses the OTLP receiver (loopback admin routes; export paths answer 503 +
+Retry-After while paused, `/healthz` stays 200 with `paused`), holds the refresh lock,
+wipes the scope in one store transaction (records including `records.raw`, provenance,
+checkpoints, and harness-scoped derived caches), projects the derived tables, re-ingests
+the scope, and resumes ingestion. `ingest_log`, `refresh_run`, `metadata` (stamped
+`last_clean_at`/scope), `token_cache`, and the model-window catalog are never wiped.
+Wipe-all additionally clears `quarantine` and the log-enrichment tables; a per-harness
+wipe cannot scope quarantine rows (no harness column).
+
+There is no backup and no undo: the data is ephemeral point-in-time telemetry, and
+file-backed harnesses re-derive it from source logs. OTLP-collected records have no
+source logs and do not come back — the web dialog and the tray confirm both say so
+before anything is wiped. Prefer a temporary `--db` when validating a wipe.
+
+The web dashboard reaches the same operation at `POST /api/kyber/clean` (confirmed dialog
+in the Context Doctor ingest panel); the tray spawns `dash clean --all` or
+`dash clean --harness <id>` with `--yes` and `--no-reingest` behind its two-step confirm
+(the next scheduled refresh re-ingests on its own cadence, so a foreground clean returns
+promptly; the tray holds no clean logic).
 
 ### 3. Raw Content Backfill and Re-normalization
 
