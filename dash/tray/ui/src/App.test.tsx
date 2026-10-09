@@ -150,6 +150,48 @@ describe('App', () => {
     expect(invoked).toEqual([{ command: 'clean_database', args: { scope: 'all' } }])
   })
 
+  it('invokes clean_database with the harness object scope when a harness is selected', async () => {
+    const invoked: Array<{ command: string; args?: unknown }> = []
+    invokeMock.mockImplementation((command, args) => {
+      if (command === 'get_view_state')
+        return Promise.resolve(
+          viewState({
+            settings: {
+              harness: 'cursor',
+              windowDays: 7,
+              refreshMinutes: 5,
+              attentionThreshold: 0.7,
+              criticalThreshold: 0.9,
+              launchAtLogin: false,
+              hostReceiver: false,
+            },
+          }),
+        )
+      invoked.push({ command: command as string, args })
+      return Promise.resolve(null)
+    })
+
+    await mountApp()
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="clean-database-arm"]')?.click()
+      await Promise.resolve()
+    })
+
+    const confirm = container.querySelector<HTMLButtonElement>(
+      '[data-testid="clean-database-confirm"]',
+    )
+    expect(confirm?.textContent ?? '').toMatch(/cursor/)
+    await act(async () => {
+      confirm?.click()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(invoked).toEqual([
+      { command: 'clean_database', args: { scope: { harness: 'cursor' } } },
+    ])
+  })
+
   it('routes a rejected clean_database into the action error banner', async () => {
     invokeMock.mockImplementation((command) => {
       if (command === 'get_view_state') return Promise.resolve(viewState())
