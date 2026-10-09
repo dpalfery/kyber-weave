@@ -43,6 +43,7 @@ public sealed partial class HotshotGoldenContractTests
         "code-reviewer",      // in-process council when the harness gives subagents no agent tool (ADR 0025)
         "conductor",
         "product-owner",
+        "review-lens",        // Arbiter routing headers and refutation framing (packet 7.3)
         "task-reviewer"
     ];
 

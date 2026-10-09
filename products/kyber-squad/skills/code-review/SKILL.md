@@ -40,13 +40,18 @@ They are independent. Neither waits on the other.
 **Gates.** Two commands, and they are the only things this skill executes:
 
 ```bash
-kyber-weave review gates . --out artifacts/gates.json
+kyber-weave review gates . --base <ref> --out artifacts/gates.json
 kyber-weave review duplicates . --out artifacts/duplicates.json
 ```
 
 Write both under `artifacts/`. The CLI subprocess writes them via `process.execute`, so a
 denied write tool on the reviewer does not block the run. If the files cannot be persisted,
 keep the JSON from the command's response and pass it to `review verdict`.
+
+`--base <ref>` names the commit the change is reviewed against — the branch or head the run
+started from. The gate runner measures the paths that changed since it, and the report
+records the base, which the council's routing headers reuse. Without it every gate runs
+unfiltered and the report says so.
 
 The second is separate because it is not host-declared work: it reads the repository's
 CodeGraph index and clusters symbols whose bodies are identical, which nothing in a normal
@@ -124,8 +129,10 @@ draft standard is reported, never replaced with a built-in checklist.
 ### 3. Confirm before believing
 
 For every `major` or `critical` finding, spend one more `review-lens` invocation trying to
-**refute** it. Say so explicitly in the invocation: the confirming instance argues the
-finding is wrong and defaults to refuted when it cannot establish otherwise.
+**refute** it. Open the invocation with the routing header block — `KYBER-ARBITER: true`,
+then `REFUTE: <lens>/<slug>` with the finding's id — and give the finding's YAML after the
+header block unchanged. Say so explicitly in the invocation: the confirming instance argues
+the finding is wrong and defaults to refuted when it cannot establish otherwise.
 
 This is the adversarial pass the `security-review` skill already applies to vulnerability
 candidates, generalized to every lens and for the same reason — a confident wrong finding
@@ -149,8 +156,11 @@ The reviewer applies the checks no individual lens can, because no lens sees the
 
 ### 5. Compute the verdict
 
+Write the surviving findings to `artifacts/findings.json`, beside the gate report — the
+findings artifact the reviewer names, so a later audit reads what the verdict read.
+
 ```bash
-kyber-weave review verdict . --findings findings.json --gates artifacts/gates.json
+kyber-weave review verdict . --findings artifacts/findings.json --gates artifacts/gates.json
 ```
 
 Rules, in evaluation order. The first that fires decides:
@@ -231,13 +241,20 @@ Most severe first:
   - **Suggestion:** the specific fix.
 
 ### Council coverage
-Every lens, and its outcome: findings, `NO FINDINGS`, or `SKIPPED` with the reason. This
-section is not optional. It is the difference between a dimension that was reviewed and one
-that was quietly never looked at.
+Every lens, and its outcome: findings, `NO FINDINGS`, `SKIPPED` with the reason, or
+`NOT RUN` where an internal error blocked the spawn — a lens that could not run is never
+recorded as `SKIPPED`. This section is not optional. It is the difference between a
+dimension that was reviewed and one that was quietly never looked at.
 
 ### Dropped
 What was reported and removed, with the `KW-REVIEW-*` rule that removed it. A review that
 hides its own false positives cannot be tuned.
+
+### Audit
+Cite the Arbiter's audit for the run — `kyber-weave arbiter audit --plan <PLAN_FILE>` — by
+decision id for each review note the council acted on. The routing and escalation decisions
+it recorded are evidence about how this change was made, and the verdict cites them like
+any other.
 
 ## Configuration
 
