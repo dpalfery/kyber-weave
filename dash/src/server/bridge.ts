@@ -3723,8 +3723,8 @@ export class KyberBridge {
   /**
    * Catalog snapshot for `GET /api/kyber/model-catalog`.
    *
-   * An empty table is filled from the bundled registry once. The fill is not
-   * the user action: it does not rebuild derived rows. A later POST does.
+   * Read-only. An empty table stays empty until `POST /refresh` fills it;
+   * seeding here would make a GET rewrite the store.
    */
   getModelCatalog(): ModelCatalogSnapshot {
     const store = this.store
@@ -3739,13 +3739,6 @@ export class KyberBridge {
         }
       }
       return { rowCount: 0, lastRefreshAt: null, vendors }
-    }
-    const current = getModelCatalogSnapshot(store)
-    if (current.rowCount === 0) {
-      refreshModelWindowCatalog(store, {
-        readVendor: readBundledVendorCatalog,
-        now: () => new Date().toISOString(),
-      })
     }
     return getModelCatalogSnapshot(store)
   }

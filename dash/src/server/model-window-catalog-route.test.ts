@@ -37,7 +37,7 @@ describe('P2.8: /api/kyber/model-catalog', () => {
     store.close()
   })
 
-  it('GET reports row count, per-vendor status, source URLs, and last refresh', async () => {
+  it('GET reports an empty catalog without writing rows', async () => {
     const res = await fetch(`${base}/api/kyber/model-catalog`)
     expect(res.status).toBe(200)
 
@@ -56,17 +56,21 @@ describe('P2.8: /api/kyber/model-catalog', () => {
       >
     }
 
-    expect(body.rowCount).toBeGreaterThan(0)
-    expect(body.lastRefreshAt).toEqual(expect.any(String))
+    expect(body.rowCount).toBe(0)
+    expect(body.lastRefreshAt).toBeNull()
     expect(body.vendors['synth-vendor-a'].documentationUrl).toMatch(/^https:\/\//)
     expect(body.vendors['synth-vendor-b'].documentationUrl).toMatch(/^https:\/\//)
-    expect(body.vendors['synth-vendor-a'].status).toBe('ok')
-    expect(body.vendors['synth-vendor-b'].status).toBe('ok')
+    expect(body.vendors['synth-vendor-a'].status).toBe('unknown')
+    expect(body.vendors['synth-vendor-a'].rowCount).toBe(0)
+    expect(body.vendors['synth-vendor-b'].status).toBe('unknown')
+
+    const again = (await (await fetch(`${base}/api/kyber/model-catalog`)).json()) as { rowCount: number }
+    expect(again.rowCount).toBe(0)
   })
 
   it('POST /refresh updates vendors and performs exactly one derived rebuild after a success', async () => {
     const before = await (await fetch(`${base}/api/kyber/model-catalog`)).json()
-    expect((before as { rowCount: number }).rowCount).toBeGreaterThan(0)
+    expect((before as { rowCount: number }).rowCount).toBe(0)
 
     const res = await fetch(`${base}/api/kyber/model-catalog/refresh`, { method: 'POST' })
     expect(res.status).toBe(200)
