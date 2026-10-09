@@ -512,6 +512,20 @@ describe('Signal 6: compactionPressure (Task F1 / Context Window & Risk)', () =>
     const res = compactionPressure({ peakInputTokens: 1000, contextLimit: 0 })
     expect(res.status).toBe('not_measurable')
   })
+
+  it('emits not_measurable when contextLimit is NaN, including a catalog window', () => {
+    const unnamed = compactionPressure({ peakInputTokens: 1000, contextLimit: Number.NaN })
+    expect(unnamed.status).toBe('not_measurable')
+    expect((unnamed as { reason: string }).reason).toMatch(/positive finite/i)
+
+    const catalog = compactionPressure({
+      peakInputTokens: 1000,
+      contextLimit: Number.NaN,
+      contextLimitSource: 'catalog',
+    })
+    expect(catalog.status).toBe('not_measurable')
+    expect((catalog as { reason: string }).reason).toMatch(/positive finite/i)
+  })
 })
 
 describe('Signal 7: delegationOverhead (Task F1 / Subagent Workflow Ratio)', () => {

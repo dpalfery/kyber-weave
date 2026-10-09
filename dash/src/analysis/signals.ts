@@ -761,10 +761,11 @@ export function compactionPressure(input: CompactionPressureInput): SignalResult
   }
 
   const limit = input.contextLimit
-  if (limit <= 0) {
+  // NaN <= 0 is false, so a non-finite limit would otherwise become measured(NaN).
+  if (!Number.isFinite(limit) || limit <= 0) {
     return {
       status: 'not_measurable',
-      reason: `Context limit must be a positive integer, received: ${limit}.`,
+      reason: `Context limit must be a positive finite number, received: ${limit}.`,
     }
   }
 
