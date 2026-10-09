@@ -7,6 +7,7 @@
 # attaches, so `scripts/local-release-server.py` can serve it as a stand-in release:
 #
 #   kyber-weave-<rid>.tar.gz    kyber-weave-mcp-<rid>.tar.gz
+#   kyber-weave-arbiter-<rid>.tar.gz
 #   kyber-squad-<version>.zip   kyber-squad-plugin-<version>.zip
 #   kyberdash-<node-rid>.tar.gz SHA256SUMS.txt
 #
@@ -321,6 +322,7 @@ fi
 
 publish "src/KyberWeave.Cli/KyberWeave.Cli.csproj" "kyber-weave" "${STAGING}/cli"
 publish "src/KyberWeave.Mcp/KyberWeave.Mcp.csproj" "kyber-weave-mcp" "${STAGING}/mcp"
+publish "src/KyberWeave.Arbiter/KyberWeave.Arbiter.csproj" "kyber-weave-arbiter" "${STAGING}/arbiter"
 
 if [ -z "$NO_SQUAD" ]; then
     log "packing Squad ${VERSION}"

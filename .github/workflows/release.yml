@@ -201,6 +201,21 @@ jobs:
           -p:Version="${VERSION}"
           -o ./publish/mcp/${{ matrix.rid }}
 
+      - name: Publish Arbiter (self-contained single-file)
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: >
+          dotnet publish src/KyberWeave.Arbiter/KyberWeave.Arbiter.csproj
+          -c ${{ env.CONFIGURATION }}
+          -r ${{ matrix.rid }}
+          --self-contained true
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:DebugType=None
+          -p:DebugSymbols=false
+          -p:Version="${VERSION}"
+          -o ./publish/arbiter/${{ matrix.rid }}
+
       - name: Package archives
         env:
           RID: ${{ matrix.rid }}
@@ -213,9 +228,11 @@ jobs:
             # Paths are relative to the workspace root (same as the tar branch).
             zip -9 -j "dist/kyber-weave-${RID}.zip" "publish/cli/${RID}/kyber-weave.exe"
             zip -9 -j "dist/kyber-weave-mcp-${RID}.zip" "publish/mcp/${RID}/kyber-weave-mcp.exe"
+            zip -9 -j "dist/kyber-weave-arbiter-${RID}.zip" "publish/arbiter/${RID}/kyber-weave-arbiter.exe"
           else
             tar -C "publish/cli/${RID}" -czf "dist/kyber-weave-${RID}.tar.gz" kyber-weave
             tar -C "publish/mcp/${RID}" -czf "dist/kyber-weave-mcp-${RID}.tar.gz" kyber-weave-mcp
+            tar -C "publish/arbiter/${RID}" -czf "dist/kyber-weave-arbiter-${RID}.tar.gz" kyber-weave-arbiter
           fi
           ls -la dist/
 
@@ -751,6 +768,7 @@ jobs:
           | --- | --- |
           | CLI | \`kyber-weave-<rid>.tar.gz\` / \`.zip\` |
           | MCP | \`kyber-weave-mcp-<rid>.tar.gz\` / \`.zip\` |
+          | Arbiter | \`kyber-weave-arbiter-<rid>.tar.gz\` / \`.zip\` |
           | KyberDash | \`kyberdash-<rid>.tar.gz\` / \`.zip\` |
           | KyberDash tray | \`kyberdash-tray-darwin-<arch>.zip\` / \`kyberdash-tray-win-x64-setup.exe\` |
           | Squad APM | \`kyber-squad-<version>.zip\` |
@@ -770,7 +788,8 @@ jobs:
           > [!NOTE]
           > **Windows signing and verification**: the tray installer
           > (\`kyberdash-tray-win-x64-setup.exe\`) and every Windows .exe file inside
-          > the \`kyber-weave-win-x64.zip\`, \`kyber-weave-mcp-win-x64.zip\`, and
+          > the \`kyber-weave-win-x64.zip\`, \`kyber-weave-mcp-win-x64.zip\`,
+          > \`kyber-weave-arbiter-win-x64.zip\`, and
           > \`kyberdash-win-x64.zip\` archives are **not Authenticode-signed**. When you run them,
           > Windows SmartScreen displays "Windows protected your PC" — click **More info**,
           > then **Run anyway** to proceed.
@@ -823,7 +842,7 @@ jobs:
           done <<< "$ASSETS_JSON"
 
           # Compare expected vs. published as sorted sets: both must contain
-          # exactly the 20 expected assets plus SHA256SUMS.txt (21 total).
+          # exactly the 25 expected assets plus SHA256SUMS.txt (26 total).
           # Sort and compare to catch both missing and extra assets.
           echo "Performing asset inventory verification..."
           declare -a expected_with_manifest=("${expected_assets[@]}" "SHA256SUMS.txt")
