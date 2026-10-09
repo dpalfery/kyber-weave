@@ -17,7 +17,9 @@ A plan is open only while it is built. The pull request that finishes it archive
 
 ## Active Plans
 
-No active plans.
+| Plan | Status | Date | Goal |
+|---|---|---|---|
+| [2026-10-07-kyberdash-context-capture.md](2026-10-07-kyberdash-context-capture.md) | In progress | 2026-10-07 | Fill KyberDash's context data gap through harness capture and a vendor-documented model-window catalog. A4 records A4-Q1=(a), approve and execute the P2.W multi-file, typed-value and status declaration seam; P2.W may be dispatched. P2.1b, P2.3, P2.4a, P2.5, and P2.6 remain blocked until P2.W has task-reviewer PASS, then become dispatchable under their existing dependencies; P2.1b resumes only on the reviewed P2.W tip. A5 records A5-Q1=(a), approve and execute the P2.W2 ensure-if-absent declaration seam; P2.W2 may be dispatched. P2.2a retries only after P2.W2 has task-reviewer PASS, on the reviewed P2.W2 tip. T0–T10 retain PASS (T1 is read-only with no branch), and unaffected in-flight P2.R, P2.0, P2.4b, P2.T5 and P2.8 non-writer work may continue under A3. Development mode: test-first. |
 
 Prior harvest note: Pipeline T9 and spine S-docs harvested 2026-09-13 into [dash/architecture.md](../dash/architecture.md), [dash/runbook.md](../dash/runbook.md), [dash/telemetry-inventory.md](../dash/telemetry-inventory.md), [ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md), and [ADR 0018](../adr/0018-kyberdash-content-retention-purge.md). ADRs 0012–0015 remain the spine harvest (0014 notes that `kyber purge-content` was not shipped). Residual risks (T8 live-source coverage, findings client-side harness filter) live on the archived plans — they are not shipped claims.
 

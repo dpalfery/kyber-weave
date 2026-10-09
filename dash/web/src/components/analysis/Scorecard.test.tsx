@@ -416,6 +416,21 @@ describe('FindingList (Decision D6 Ranking & D8 Recommendations)', () => {
     const html = renderToStaticMarkup(<FindingList findings={[]} title="" />)
     expect(html).not.toContain('<h3')
   })
+
+  it('keeps every finding mounted inside a four-card scrollport', () => {
+    const many = Array.from({ length: 6 }, (_, index) => ({
+      ...sampleFindings[0]!,
+      id: `f-scroll-${index}`,
+      title: `Scroll finding ${index}`,
+    }))
+    const html = renderToStaticMarkup(<FindingList findings={many} />)
+    expect(html).toContain('data-testid="finding-list-scroll"')
+    expect(html).toContain('data-visible-cards="4"')
+    expect(html).toContain('overflow-y-auto')
+    for (let index = 0; index < many.length; index += 1) {
+      expect(html).toContain(`finding-card-f-scroll-${index}`)
+    }
+  })
 })
 
 describe('Pages Smoke Rendering: Context Doctor, HarnessDetail, RunDetail', () => {
