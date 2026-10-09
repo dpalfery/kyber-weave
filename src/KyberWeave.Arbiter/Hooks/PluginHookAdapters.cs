@@ -13,18 +13,30 @@ namespace KyberWeave.Arbiter.Hooks;
 /// </remarks>
 public static class PluginHookAdapters
 {
+    // One row per plugin harness: its token and the tool its shim dispatches on. Adding a
+    // harness here also gives it the plugin deny dialect in LastResortBlock.
+    private static readonly (string Token, string DispatchTool)[] Entries =
+    [
+        ("opencode", "task"),
+        ("pi", "Agent"),
+    ];
+
+    /// <summary>The harness tokens that take a plugin shim (and so read a <c>decision</c> document).</summary>
+    public static IReadOnlySet<string> Tokens { get; } =
+        Entries.Select(entry => entry.Token).ToHashSet(StringComparer.Ordinal);
+
     /// <summary>The plugin-hook adapters: OpenCode dispatches on <c>task</c>; Pi dispatches on <c>Agent</c>.</summary>
-    public static IReadOnlyList<IHarnessHookAdapter> All(IHookDecisionEngine? engine = null) =>
-        [new PluginHookAdapter(
-            "opencode",
-            "task",
-            "subagent_type",
-            "prompt",
-            engine ?? new ArbiterHookDecisionEngine()),
-        new PluginHookAdapter(
-            "pi",
-            "Agent",
-            "subagent_type",
-            "prompt",
-            engine ?? new ArbiterHookDecisionEngine())];
+    public static IReadOnlyList<IHarnessHookAdapter> All(IHookDecisionEngine? engine = null)
+    {
+        IHookDecisionEngine resolved = engine ?? new ArbiterHookDecisionEngine();
+        return
+        [
+            .. Entries.Select(entry => (IHarnessHookAdapter)new PluginHookAdapter(
+                entry.Token,
+                entry.DispatchTool,
+                "subagent_type",
+                "prompt",
+                resolved)),
+        ];
+    }
 }

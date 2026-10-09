@@ -138,6 +138,22 @@ public sealed class SquadHookBlockReviewFixTests
     }
 
     [Fact]
+    public void Update_WhenAReceiptOwnedFileWasBlanked_StillConflicts()
+    {
+        using TempDirectory fixture = new();
+        SquadStateStore store = Store(fixture.Path);
+        new SquadTransaction(store).Execute(Install(fixture.Path, CursorBlock("one")));
+        SquadReceipt previous = Assert.IsType<SquadReceipt>(
+            store.ReadReceipt(fixture.Path, SquadDeploymentScope.Project));
+        Write(fixture.Path, ".cursor/hooks.json", string.Empty);
+
+        // A blank file is fine for a first install, but Squad's recorded entries cannot
+        // vanish silently: the file needs hand repair, so update refuses.
+        Assert.Throws<SquadDeploymentConflictException>(
+            () => Update(fixture.Path, previous, CursorBlock("two")));
+    }
+
+    [Fact]
     public void Update_WhenTheUserEditsSquadsEntry_StillReportsDrift()
     {
         using TempDirectory fixture = new();

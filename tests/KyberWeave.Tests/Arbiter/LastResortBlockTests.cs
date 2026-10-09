@@ -14,8 +14,6 @@ public sealed class LastResortBlockTests
 {
     [Theory]
     [InlineData("cursor", "permission", "deny")]
-    [InlineData("opencode", "decision", "block")]
-    [InlineData("pi", "decision", "block")]
     [InlineData("copilot-cli", "permissionDecision", "deny")]
     public void For_KnownHarness_UsesItsOwnDenyDialect(string harness, string key, string expected)
     {
@@ -23,6 +21,19 @@ public sealed class LastResortBlockTests
 
         Assert.Equal(expected, doc.RootElement.GetProperty(key).GetString());
         Assert.Contains(HookCommand.FailClosedCode, doc.RootElement.GetRawText(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void For_EveryRegisteredPluginHarness_UsesThePluginDecisionDialect()
+    {
+        // A new plugin shim only blocks on `decision: "block"`; a Claude-shaped fallback
+        // would let a double fault through. The token list is the single source.
+        Assert.NotEmpty(PluginHookAdapters.Tokens);
+        foreach (string token in PluginHookAdapters.Tokens)
+        {
+            using JsonDocument doc = JsonDocument.Parse(LastResortBlock.For(token));
+            Assert.Equal("block", doc.RootElement.GetProperty("decision").GetString());
+        }
     }
 
     [Theory]

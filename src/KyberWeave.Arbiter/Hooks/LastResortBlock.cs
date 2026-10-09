@@ -19,6 +19,15 @@ internal static class LastResortBlock
         string reason = $"{HookCommand.FailClosedCode}: hook host failed" +
             (string.IsNullOrWhiteSpace(harness) ? "." : $" ({harness}).");
 
+        if (harness is not null && PluginHookAdapters.Tokens.Contains(harness))
+        {
+            return new JsonObject
+            {
+                ["decision"] = "block",
+                ["reason"] = reason,
+            }.ToJsonString();
+        }
+
         return harness switch
         {
             "cursor" => new JsonObject
@@ -26,11 +35,6 @@ internal static class LastResortBlock
                 ["permission"] = "deny",
                 ["agent_message"] = reason,
                 ["user_message"] = reason,
-            }.ToJsonString(),
-            "opencode" or "pi" => new JsonObject
-            {
-                ["decision"] = "block",
-                ["reason"] = reason,
             }.ToJsonString(),
             "copilot-cli" => new JsonObject
             {

@@ -53,7 +53,12 @@ public static class ArbiterPluginShim
                 proc.stdin.write(JSON.stringify(envelope));
                 proc.stdin.end();
                 const text = await new Response(proc.stdout).text();
-                await proc.exited;
+                const code = await proc.exited;
+                if (code !== 0) {
+                  // Exit 0 with empty stdout is the host's deliberate allow. A crash, a kill
+                  // or a missing runtime also leaves stdout empty, and must never read as one.
+                  throw new Error("kyber-arbiter: hook exited with status " + String(code));
+                }
                 if (text.trim() === "") {
                   return { decision: "allow" };
                 }
