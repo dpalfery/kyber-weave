@@ -11,6 +11,7 @@
 import { useState } from 'react'
 
 import { Actions } from './components/Actions'
+import { CleanDatabase } from './components/CleanDatabase'
 import { EmptyState } from './components/EmptyState'
 import { FindingsList } from './components/FindingsList'
 import { HarnessSelector } from './components/HarnessSelector'
@@ -98,6 +99,12 @@ export function Popover({ state, commands, actionError = null, now = new Date() 
         refresh={state.refresh}
         receiver={state.receiver}
         now={now}
+      />
+
+      <CleanDatabase
+        harness={state.settings.harness}
+        busy={busy}
+        onCleanDatabase={commands.cleanDatabase}
       />
 
       <Actions

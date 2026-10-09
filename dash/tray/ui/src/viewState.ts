@@ -55,10 +55,14 @@ export type ViewState = {
   settings: TraySettings
 }
 
+/** The scope a `clean_database` popover command may wipe (issue #312). */
+export type CleanDatabaseScope = 'all' | { harness: string }
+
 /** The commands the popover can invoke, as the design's IPC surface names them. */
 export type TrayCommands = {
   refreshNow: () => void
   openView: (view: string) => void
   setSettings: (patch: Partial<TraySettings>) => void
   quit: () => void
+  cleanDatabase: (scope: CleanDatabaseScope) => void
 }
