@@ -18,7 +18,7 @@ use anyhow::Result;
 use kyberdash_tray_lib::api::ReportFetcher;
 use kyberdash_tray_lib::ipc::{Phase, ViewState};
 use kyberdash_tray_lib::receiver::{HealthProbe, Probe, ReceiverSpawner};
-use kyberdash_tray_lib::runtime::{EventSink, Opener, Runtime, RuntimeConfig, RuntimeDependencies};
+use kyberdash_tray_lib::runtime::{EventSink, Opener, Runtime, RuntimeConfig, RuntimeDependencies, CleanScope};
 use kyberdash_tray_lib::scheduler::{RefreshRunner, REFRESH_ARGS};
 use kyberdash_tray_lib::supervisor::{Clock, ServerProcess, Spawner, SERVER_ARGS};
 use serde_json::{json, Value};
@@ -418,7 +418,7 @@ fn report_changes_publish_full_snapshots_and_reuse_the_supervised_server() {
 }
 
 #[test]
-fn authorized_commands_are_exactly_the_six_popover_commands() {
+fn authorized_commands_are_exactly_the_seven_popover_commands() {
     let commands = Runtime::authorized_commands();
 
     assert_eq!(
@@ -430,6 +430,7 @@ fn authorized_commands_are_exactly_the_six_popover_commands() {
             "set_settings",
             "quit",
             "hide_popover",
+            "clean_database",
         ]
     );
     assert!(!Runtime::is_authorized("run_arbitrary_process"));
@@ -597,6 +598,65 @@ fn receiver_hosting_is_opt_in_and_port_held_by_another_process_is_not_retried() 
     runtime.poll_receiver().expect("receiver probe");
     runtime.poll_receiver().expect("latched receiver probe");
     assert!(runtime.receiver_calls().is_empty());
+}
+
+#[test]
+fn clean_database_spawns_the_clean_child_with_scope_and_confirmation() {
+    let scratch = Scratch::new();
+    let mut runtime = runtime(
+        scratch.path(),
+        FakeSpawner::with_listening_server(),
+        FakeRefreshRunner::successful(),
+        FakeFetcher::with_reports([Ok(report(0.42))]),
+        RecordingEvents::default(),
+        RecordingOpener::default(),
+    );
+
+    runtime.start().expect("runtime startup");
+    runtime
+        .clean_database(CleanScope::All)
+        .expect("clean all spawns the child");
+    runtime
+        .clean_database(CleanScope::harness("cursor").expect("valid harness"))
+        .expect("clean harness spawns the child");
+
+    let calls = runtime.clean_calls();
+    assert_eq!(calls.len(), 2, "each clean spawns one child, synchronously");
+    assert_eq!(calls[0].0, CLI);
+    assert_eq!(
+        calls[0].1,
+        vec!["dash", "clean", "--all", "--yes", "--no-reingest"]
+            .iter()
+            .map(|arg| (*arg).to_string())
+            .collect::<Vec<String>>(),
+    );
+    assert_eq!(
+        calls[1].1,
+        vec!["dash", "clean", "--harness", "cursor", "--yes", "--no-reingest"]
+            .iter()
+            .map(|arg| (*arg).to_string())
+            .collect::<Vec<String>>(),
+    );
+}
+
+#[test]
+fn clean_database_rejects_an_unknown_harness_without_spawning() {
+    let scratch = Scratch::new();
+    let mut runtime = runtime(
+        scratch.path(),
+        FakeSpawner::with_listening_server(),
+        FakeRefreshRunner::successful(),
+        FakeFetcher::with_reports([Ok(report(0.42))]),
+        RecordingEvents::default(),
+        RecordingOpener::default(),
+    );
+
+    runtime.start().expect("runtime startup");
+    assert!(CleanScope::harness("../etc/passwd").is_err());
+    assert!(
+        runtime.clean_calls().is_empty(),
+        "a rejected scope spawns nothing"
+    );
 }
 
 #[test]

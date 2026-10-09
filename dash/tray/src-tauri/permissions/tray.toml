@@ -27,3 +27,8 @@ commands.allow = ["quit"]
 identifier = "allow-hide-popover"
 description = "Hide the popover window (Escape / 6.4)."
 commands.allow = ["hide_popover"]
+
+[[permission]]
+identifier = "allow-clean-database"
+description = "Wipe a harness scope (or all) via the validated dash clean child. The tray holds no clean logic."
+commands.allow = ["clean_database"]
