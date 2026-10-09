@@ -1,4 +1,18 @@
 using KyberWeave.Arbiter;
+using KyberWeave.Arbiter.Hooks;
+using KyberWeave.Arbiter.Mcp;
+using KyberWeave.Core.Arbiter;
+using KyberWeave.Core.Arbiter.Credentials;
+using KyberWeave.Core.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using ModelContextProtocol.Server;
+
+if (args.Length > 0 && string.Equals(args[0], "serve", StringComparison.Ordinal))
+{
+    return await ServeAsync(args).ConfigureAwait(false);
+}
 
 // The hook host is a separate executable rather than a `kyber-weave hook` subcommand.
 // Stdout carries the harness's decision document, and the CLI is built on
@@ -22,3 +36,68 @@ catch (Exception ex)
 }
 
 return exitCode;
+
+// The D4 fallback: the same decisions the hook makes, offered as MCP tools for a caller
+// that no harness hook will gate. Stdio JSON-RPC owns stdout, so nothing here writes there;
+// logging is pinned to stderr, as the docs server pins it.
+static async Task<int> ServeAsync(string[] args)
+{
+    string repoRoot;
+    try
+    {
+        repoRoot = ArbiterRootResolver.Resolve(
+            args,
+            Directory.GetCurrentDirectory(),
+            Environment.GetEnvironmentVariable(ArbiterRootResolver.EnvironmentVariable));
+    }
+    catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+    {
+        await Console.Error.WriteLineAsync($"kyber-weave-arbiter serve: {ex.Message}").ConfigureAwait(false);
+        return 1;
+    }
+
+    HostApplicationBuilder builder = Host.CreateApplicationBuilder(args);
+    builder.Logging.AddConsole(o => o.LogToStandardErrorThreshold = LogLevel.Trace);
+    builder.Services.AddSingleton(new ArbiterServeContext(
+        repoRoot,
+        new ArbiterHookDecisionEngine(),
+        Console.Error,
+        Composition.LoadHostConfig,
+        ServeKeyResolved));
+
+    builder.Services
+        .AddMcpServer()
+        .WithStdioServerTransport()
+        .WithTools<ArbiterTools>();
+
+    await builder.Build().RunAsync().ConfigureAwait(false);
+    return 0;
+}
+
+// Presence only: the key is read from the store or the environment and discarded here.
+// Status reports the answer, never the value.
+static bool ServeKeyResolved(KyberWeaveConfig config)
+{
+    try
+    {
+        ArbiterProviderConfig repository = config.Arbiter.Provider;
+        ArbiterProviderConfig effective = ArbiterUserSettings.ApplyTo(
+            repository,
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
+        string? userOverride = string.Equals(effective.Endpoint, repository.Endpoint, StringComparison.Ordinal)
+            ? null
+            : effective.Endpoint;
+        return ArbiterKeyResolver.Resolve(effective.Endpoint, CreateCredentialStore(), userOverride) is not null;
+    }
+    catch (Exception)
+    {
+        return false;
+    }
+}
+
+static ICredentialStore CreateCredentialStore() =>
+    OperatingSystem.IsWindows()
+        ? new WindowsCredentialStore()
+        : OperatingSystem.IsMacOS()
+            ? new MacKeychainCredentialStore(new ProcessRunnerCredentialProcessRunner())
+            : new SecretServiceCredentialStore(new ProcessRunnerCredentialProcessRunner());
