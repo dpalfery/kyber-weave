@@ -5,8 +5,8 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import { applyBlockEdits, findBlockConflict, revertBlockEdits } from './edit-block.js'
-import { applyJsonEdits, revertJsonEdits } from './edit-json.js'
-import { healthzUrlForEndpoint, probeReceiver, RECEIVER_DOWN_REMEDY } from './probe.js'
+import { applyJsonEdits, readJsonKeys, revertJsonEdits } from './edit-json.js'
+import { defaultFetchHealth, healthzUrlForEndpoint, MAX_HEALTH_BODY_BYTES, probeReceiver, RECEIVER_DOWN_REMEDY } from './probe.js'
 import { loadCaptureReceipt, saveCaptureReceipt, sha256Hex } from './receipt.js'
 
 const temporaryRoots: string[] = []
@@ -65,6 +65,30 @@ describe('edit-json (jsonc-parser)', () => {
         current: 'http://192.0.2.9:4318',
       },
     ])
+  })
+
+  it('refuses to rewrite a document that does not parse', () => {
+    const broken = '{ "otel": '
+    const applied = applyJsonEdits(broken, { 'otel.endpoint': 'http://127.0.0.1:4318' })
+    expect(applied.changed).toBe(false)
+    expect(applied.content).toBe(broken)
+    expect(applied.refused).toMatch(/did not parse/)
+
+    const reverted = revertJsonEdits(broken, {
+      'otel.endpoint': { written: 'http://127.0.0.1:4318', prior: { present: false } },
+    })
+    expect(reverted.changed).toBe(false)
+    expect(reverted.content).toBe(broken)
+    expect(reverted.refused).toMatch(/did not parse/)
+    expect(readJsonKeys(broken, ['otel.endpoint'])['otel.endpoint']).toEqual({ present: false })
+  })
+
+  it('still edits JSONC that only has a trailing comma', () => {
+    const initial = '{\n  "theme": "dark",\n}\n'
+    const applied = applyJsonEdits(initial, { 'otel.endpoint': 'http://127.0.0.1:4318' })
+    expect(applied.refused).toBeUndefined()
+    expect(applied.changed).toBe(true)
+    expect(applied.content).toContain('http://127.0.0.1:4318')
   })
 })
 
@@ -138,9 +162,27 @@ describe('receipt', () => {
 })
 
 describe('probe', () => {
-  it('derives the healthz URL from the OTLP endpoint', () => {
+  it('derives the healthz URL from the OTLP endpoint origin', () => {
     expect(healthzUrlForEndpoint('http://127.0.0.1:4318')).toBe('http://127.0.0.1:4318/healthz')
     expect(healthzUrlForEndpoint('http://127.0.0.1:4318/')).toBe('http://127.0.0.1:4318/healthz')
+    expect(healthzUrlForEndpoint('http://127.0.0.1:4318/v1/traces')).toBe('http://127.0.0.1:4318/healthz')
+    expect(healthzUrlForEndpoint('http://127.0.0.1:4318/v1/traces?timeout=1')).toBe(
+      'http://127.0.0.1:4318/healthz',
+    )
+  })
+
+  it('caps a foreign health body instead of reading it all', async () => {
+    const original = globalThis.fetch
+    const huge = 'x'.repeat(MAX_HEALTH_BODY_BYTES * 4)
+    globalThis.fetch = (async () => new Response(huge, { status: 200 })) as typeof fetch
+    try {
+      const result = await defaultFetchHealth('http://127.0.0.1:4318/healthz')
+      expect(result.status).toBe(200)
+      expect(Buffer.byteLength(result.body)).toBeLessThanOrEqual(MAX_HEALTH_BODY_BYTES)
+      expect(result.body.length).toBeGreaterThan(0)
+    } finally {
+      globalThis.fetch = original
+    }
   })
 
   it('classifies the KyberDash receiver, a foreign listener, and no listener', async () => {

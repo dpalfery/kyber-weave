@@ -18,7 +18,7 @@
 // tests) may inject managed writers;
 // `enable`/`disable`/`status` treat both kinds uniformly.
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname } from 'node:path'
 
@@ -89,9 +89,21 @@ function isOtlpHttpEndpoint(endpoint: string): boolean {
   }
 }
 
-function readTextIfPresent(path: string): { found: boolean; content: string } {
-  if (!existsSync(path)) return { found: false, content: '' }
-  return { found: true, content: readFileSync(path, 'utf8') }
+function readTextIfPresent(path: string): { found: boolean; content: string; error?: string } {
+  // One read, not exists-then-read: the check and the bytes are the same
+  // syscall, so a path that vanishes between them cannot throw a stack out
+  // of the command. Other failures become a message the caller prints.
+  try {
+    return { found: true, content: readFileSync(path, 'utf8') }
+  } catch (error) {
+    const code =
+      error !== null && typeof error === 'object' && 'code' in error
+        ? (error as { code?: unknown }).code
+        : undefined
+    if (code === 'ENOENT') return { found: false, content: '' }
+    const message = error instanceof Error ? error.message : String(error)
+    return { found: false, content: '', error: message }
+  }
 }
 
 function writeText(path: string, content: string): void {
@@ -264,8 +276,12 @@ function statusLines(
     lines.push(`harness ${writer.id} (${writer.displayName})`)
     if (writer.kind === 'pending') {
       const path = writer.resolvePath(home)
-      const { found } = readTextIfPresent(path)
-      lines.push(`  config: ${path} (${found ? 'found' : 'missing'})`)
+      const read = readTextIfPresent(path)
+      lines.push(
+        read.error !== undefined
+          ? `  config: ${path} (unreadable: ${read.error})`
+          : `  config: ${path} (${read.found ? 'found' : 'missing'})`,
+      )
       const described = writer.describeStatus?.(home)
       if (described !== undefined && described.length > 0) {
         // Replaces the static reason. Pi returns lines that are already
@@ -298,7 +314,11 @@ function appendFileStatus(
   receipt: CaptureReceipt | null,
 ): void {
   const path = file.path
-  const { found, content } = readTextIfPresent(path)
+  const { found, content, error } = readTextIfPresent(path)
+  if (error !== undefined) {
+    lines.push(`  config: ${path} (unreadable: ${error})`)
+    return
+  }
   lines.push(`  config: ${path} (${found ? 'found' : 'missing'})`)
   const desired = file.desiredKeys(endpoint)
   const keys = Object.keys(desired)
@@ -365,8 +385,8 @@ function statusWarningLines(writer: ManagedHarnessWriter, home: string): string[
   for (const warning of warnings) {
     const file = files.find((candidate) => candidate.fileId === warning.fileId)
     if (file === undefined) continue
-    const { found, content } = readTextIfPresent(file.resolvePath(home))
-    if (!found) continue
+    const { found, content, error } = readTextIfPresent(file.resolvePath(home))
+    if (error !== undefined || !found) continue
     const observed = observedConfigValue(file.format, content, warning.key)
     if (observed.present && observed.value === warning.whenValue) {
       lines.push(`  warn: ${warning.warnText}`)
@@ -425,9 +445,13 @@ function enableFile(
 ): EnableFileResult {
   const path = file.path
   const desired = file.desiredKeys(endpoint)
-  const { found, content } = readTextIfPresent(path)
+  const { found, content, error } = readTextIfPresent(path)
   const out: string[] = []
   const err: string[] = []
+  if (error !== undefined) {
+    err.push(`harness ${writer.id}: cannot read ${path}: ${error}`)
+    return { exitCode: REFUSAL_EXIT, out, err }
+  }
 
   if (file.format === 'json' || file.format === 'jsonc') {
     // Absence is decided from the bytes just read. Present ensure keys are
@@ -446,6 +470,10 @@ function enableFile(
       return { exitCode: 0, out, err }
     }
     const applied = applyJsonEdits(content, desiredWrites)
+    if (applied.refused !== undefined) {
+      err.push(`harness ${writer.id}: ${path}: ${applied.refused}`)
+      return { exitCode: REFUSAL_EXIT, out, err }
+    }
     if (dryRun) {
       out.push(...dryRunLines(path, desiredWrites, applied.prior))
       return { exitCode: 0, out, err }
@@ -634,12 +662,31 @@ function driftLinesFor(
   for (const file of files) {
     const record = receipt?.files.find((entry) => entry.path === file.path)
     if (record === undefined) continue
-    const { found, content } = readTextIfPresent(file.path)
-    if (!found) continue
-    const drift =
-      file.format === 'json' || file.format === 'jsonc'
-        ? revertJsonEdits(content, record.keys).drift
-        : revertBlockEdits(content, record.keys, file.format).drift
+    const read = readTextIfPresent(file.path)
+    if (read.error !== undefined) {
+      lines.push(
+        `harness ${writer.id}: cannot read ${file.path}: ${read.error}; leaving file unchanged`,
+      )
+      continue
+    }
+    if (!read.found) continue
+    const content = read.content
+    if (file.format === 'json' || file.format === 'jsonc') {
+      const reverted = revertJsonEdits(content, record.keys)
+      if (reverted.refused !== undefined) {
+        lines.push(
+          `harness ${writer.id}: ${file.path}: ${reverted.refused}; leaving file unchanged`,
+        )
+        continue
+      }
+      for (const entry of reverted.drift) {
+        lines.push(
+          `harness ${writer.id}: drift: ${file.path} key "${entry.key}": written "${String(entry.written)}", current "${entry.current === undefined ? '(absent)' : String(entry.current)}"; leaving file unchanged`,
+        )
+      }
+      continue
+    }
+    const drift = revertBlockEdits(content, record.keys, file.format).drift
     for (const entry of drift) {
       lines.push(
         `harness ${writer.id}: drift: ${file.path} key "${entry.key}": written "${String(entry.written)}", current "${entry.current === undefined ? '(absent)' : String(entry.current)}"; leaving file unchanged`,
@@ -683,7 +730,12 @@ async function runDisable(
         out.push(`harness ${writer.id}: no record for ${path}; nothing to do`)
         continue
       }
-      const { found, content } = readTextIfPresent(path)
+      const { found, content, error } = readTextIfPresent(path)
+      if (error !== undefined) {
+        exitCode = REFUSAL_EXIT
+        err.push(`harness ${writer.id}: cannot read ${path}: ${error}; leaving file unchanged`)
+        continue
+      }
       if (!found) {
         exitCode = REFUSAL_EXIT
         err.push(`harness ${writer.id}: drift: ${path} is missing since enable; leaving receipt unchanged`)
@@ -692,6 +744,11 @@ async function runDisable(
 
       if (file.format === 'json' || file.format === 'jsonc') {
         const reverted = revertJsonEdits(content, record.keys)
+        if (reverted.refused !== undefined) {
+          exitCode = REFUSAL_EXIT
+          err.push(`harness ${writer.id}: ${path}: ${reverted.refused}; leaving file unchanged`)
+          continue
+        }
         if (reverted.drift.length > 0) {
           exitCode = REFUSAL_EXIT
           for (const entry of reverted.drift) {

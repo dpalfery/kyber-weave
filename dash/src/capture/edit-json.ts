@@ -9,7 +9,7 @@
 // name contains dots stays one segment, so `vendor.tool.otel.enabled` updates
 // that object's `enabled` child instead of a parallel `vendor`/`tool`/`otel` tree.
 
-import { applyEdits, modify, parse } from 'jsonc-parser'
+import { applyEdits, modify, parse, type ParseError } from 'jsonc-parser'
 
 /**
  * A JSON/JSONC value `enable` may write. The JSON type is the value: a
@@ -91,6 +91,25 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
 }
 
+/**
+ * JSONC may carry a trailing comma. That is not a malformed document.
+ * Comments are already allowed by jsonc-parser's default.
+ */
+const JSONC_PARSE_OPTIONS = { allowTrailingComma: true }
+
+function parseDocument(content: string): { value: unknown; errors: ParseError[] } {
+  if (content.trim() === '') return { value: {}, errors: [] }
+  const errors: ParseError[] = []
+  const value: unknown = parse(content, errors, JSONC_PARSE_OPTIONS)
+  return { value, errors }
+}
+
+function parseRefusal(errors: readonly ParseError[]): string {
+  const first = errors[0]
+  const where = first === undefined ? '' : ` at offset ${first.offset}`
+  return `refusing to rewrite a JSON document that did not parse${where}`
+}
+
 /** Read one key out of already-parsed JSON. */
 export function getJsonValue(parsed: unknown, key: string): JsonPrior {
   return getByPath(parsed, resolveKeyPath(parsed, key))
@@ -98,9 +117,18 @@ export function getJsonValue(parsed: unknown, key: string): JsonPrior {
 
 /** Read the presence and value of each key in a JSON/JSONC document. */
 export function readJsonKeys(content: string, keys: readonly string[]): Record<string, JsonPrior> {
-  const parsed: unknown = content.trim() === '' ? {} : parse(content)
   const result: Record<string, JsonPrior> = {}
-  for (const key of keys) result[key] = getJsonValue(parsed, key)
+  if (content.trim() === '') {
+    for (const key of keys) result[key] = { present: false }
+    return result
+  }
+  const parsed = parseDocument(content)
+  if (parsed.errors.length > 0) {
+    // A fault-tolerant parse would invent structure from a broken file.
+    for (const key of keys) result[key] = { present: false }
+    return result
+  }
+  for (const key of keys) result[key] = getJsonValue(parsed.value, key)
   return result
 }
 
@@ -108,6 +136,8 @@ export type JsonApplyResult = {
   content: string
   prior: Record<string, JsonPrior>
   changed: boolean
+  /** Set when the document did not parse. `content` is the original text. */
+  refused?: string
 }
 
 /**
@@ -121,15 +151,22 @@ export function applyJsonEdits(
   desired: Record<string, JsonScalar>,
 ): JsonApplyResult {
   const base = content.trim() === '' ? '{}\n' : content
-  const parsed: unknown = parse(base)
+  const parsed = parseDocument(base)
+  if (parsed.errors.length > 0) {
+    return { content, prior: {}, changed: false, refused: parseRefusal(parsed.errors) }
+  }
   const prior: Record<string, JsonPrior> = {}
-  for (const key of Object.keys(desired)) prior[key] = getJsonValue(parsed, key)
+  for (const key of Object.keys(desired)) prior[key] = getJsonValue(parsed.value, key)
 
   let next = base
   for (const [key, value] of Object.entries(desired)) {
     // Resolved against the evolving document so a literal property keeps
     // its literal addressing from the prior read above.
-    const path = resolveKeyPath(parse(next), key)
+    const step = parseDocument(next)
+    if (step.errors.length > 0) {
+      return { content, prior, changed: false, refused: parseRefusal(step.errors) }
+    }
+    const path = resolveKeyPath(step.value, key)
     const edits = modify(next, path, value, {
       formattingOptions: { insertSpaces: true, tabSize: 2 },
     })
@@ -144,6 +181,8 @@ export type JsonRevertResult = {
   content: string
   drift: JsonDrift[]
   changed: boolean
+  /** Set when the document did not parse. `content` is the original text. */
+  refused?: string
 }
 
 /**
@@ -157,10 +196,13 @@ export function revertJsonEdits(
   content: string,
   records: Record<string, { written: unknown; prior: JsonPrior }>,
 ): JsonRevertResult {
-  const parsed: unknown = content.trim() === '' ? {} : parse(content)
+  const parsed = parseDocument(content)
+  if (parsed.errors.length > 0) {
+    return { content, drift: [], changed: false, refused: parseRefusal(parsed.errors) }
+  }
   const drift: JsonDrift[] = []
   for (const [key, record] of Object.entries(records)) {
-    const current = getJsonValue(parsed, key)
+    const current = getJsonValue(parsed.value, key)
     const same = JSON.stringify(current.present ? current.value : undefined) === JSON.stringify(record.written)
     if (!current.present || !same) {
       drift.push({
@@ -180,7 +222,11 @@ export function revertJsonEdits(
   const removedPaths: Array<Array<string | number>> = []
   for (const [key, record] of Object.entries(records)) {
     const value = record.prior.present ? record.prior.value : undefined
-    const path = resolveKeyPath(parse(next), key)
+    const step = parseDocument(next)
+    if (step.errors.length > 0) {
+      return { content, drift, changed: false, refused: parseRefusal(step.errors) }
+    }
+    const path = resolveKeyPath(step.value, key)
     const edits = modify(next, path, value, {
       formattingOptions: { insertSpaces: true, tabSize: 2 },
     })
@@ -203,7 +249,9 @@ function pruneEmptyAncestors(
   for (const path of paths) {
     for (let length = path.length - 1; length >= 1; length--) {
       const parentPath = path.slice(0, length)
-      const parent = getByPath(parse(next), parentPath)
+      const step = parseDocument(next)
+      if (step.errors.length > 0) return next
+      const parent = getByPath(step.value, parentPath)
       if (!parent.present || !isRecord(parent.value) || Object.keys(parent.value).length > 0) break
       const edits = modify(next, parentPath, undefined, {
         formattingOptions: { insertSpaces: true, tabSize: 2 },
