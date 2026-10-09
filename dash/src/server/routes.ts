@@ -361,6 +361,14 @@ type SessionViewPayload = {
 }
 
 /**
+ * Bound on a `POST /api/kyber/clean` body. The payload is a tiny
+ * scope/confirm/window document, so anything past 64KB is an oversized POST
+ * in front of a wipe endpoint — reject it before the accumulator can grow
+ * without bound (F2), matching the receiver's `readBody` discipline.
+ */
+const MAX_CLEAN_BODY_BYTES = 64 * 1024
+
+/**
  * Validate a `POST /api/kyber/clean` body: exactly one scope (`all` or a
  * non-empty `harnesses` list), explicit `confirm: true`, and — when present —
  * a positive-integer `reingestWeeks` or explicit null to skip re-ingestion.
@@ -1146,10 +1154,29 @@ export function handleKyberRequest(
       return true
     }
     let bodyText = ''
+    let received = 0
+    let settled = false
+    const rejectCleanBody = (status: number, error: string): void => {
+      if (settled) return
+      settled = true
+      sendKyberJson(res, status, { error })
+      req.destroy()
+    }
     req.on('data', (chunk) => {
+      if (settled) return
+      received += typeof chunk === 'string' ? Buffer.byteLength(chunk) : chunk.length
+      if (received > MAX_CLEAN_BODY_BYTES) {
+        rejectCleanBody(413, `Clean request body exceeds the ${MAX_CLEAN_BODY_BYTES}-byte limit`)
+        return
+      }
       bodyText += chunk
     })
+    req.on('error', () => {
+      rejectCleanBody(400, 'Invalid clean request payload')
+    })
     req.on('end', async () => {
+      if (settled) return
+      settled = true
       const parsed = parseCleanBody(bodyText)
       if (parsed === undefined) {
         sendKyberJson(res, 400, { error: 'Invalid clean request payload' })

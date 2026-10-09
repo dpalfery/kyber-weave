@@ -164,4 +164,71 @@ describe('POST /api/kyber/clean (issue #312)', () => {
     expect(status).toBe(500)
     expect(body).toEqual({ error: 'Clean failed' })
   })
+
+  it('rejects an oversized body with 413 and never wipes (F2)', async () => {
+    let calls = 0
+    const bridge = bridgeStub({
+      cleanDatabase: (async () => {
+        calls += 1
+        return {
+          harnesses: ['*'],
+          wipe: { harnesses: ['*'], records: 0, provenance: 0, checkpoints: 0 },
+          reingested: true,
+          historyWeeks: 1,
+        }
+      }) as never,
+    })
+    const req = new EventEmitter() as unknown as IncomingMessage
+    let destroyed = false
+    ;(req as unknown as { destroy(): void }).destroy = () => {
+      destroyed = true
+    }
+    req.method = 'POST'
+    const res = makeMockRes()
+    const handled = handleKyberRequest(
+      req,
+      res as unknown as ServerResponse,
+      new URL('http://localhost:4747/api/kyber/clean'),
+      bridge,
+    )
+    req.emit('data', 'x'.repeat(40_000))
+    req.emit('data', 'x'.repeat(40_000))
+    req.emit('end')
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(handled).toBe(true)
+    expect(res.statusCode).toBe(413)
+    expect(JSON.parse(res.body)).toHaveProperty('error')
+    expect(calls).toBe(0)
+    expect(destroyed).toBe(true)
+  })
+
+  it('answers 400 when the request stream errors without wiping (F2)', async () => {
+    let calls = 0
+    const bridge = bridgeStub({
+      cleanDatabase: (async () => {
+        calls += 1
+        return {
+          harnesses: ['*'],
+          wipe: { harnesses: ['*'], records: 0, provenance: 0, checkpoints: 0 },
+          reingested: true,
+          historyWeeks: 1,
+        }
+      }) as never,
+    })
+    const req = new EventEmitter() as unknown as IncomingMessage
+    req.method = 'POST'
+    ;(req as unknown as { destroy(): void }).destroy = () => {}
+    const res = makeMockRes()
+    const handled = handleKyberRequest(
+      req,
+      res as unknown as ServerResponse,
+      new URL('http://localhost:4747/api/kyber/clean'),
+      bridge,
+    )
+    req.emit('error', new Error('socket hang up'))
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(handled).toBe(true)
+    expect(res.statusCode).toBe(400)
+    expect(calls).toBe(0)
+  })
 })
