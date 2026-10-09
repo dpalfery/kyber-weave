@@ -18,6 +18,7 @@ public static class PluginHookAdapters
     private static readonly (string Token, string DispatchTool)[] Entries =
     [
         ("opencode", "task"),
+        ("kilo", "task"),
         ("pi", "Agent"),
     ];
 
@@ -25,7 +26,7 @@ public static class PluginHookAdapters
     public static IReadOnlySet<string> Tokens { get; } =
         Entries.Select(entry => entry.Token).ToHashSet(StringComparer.Ordinal);
 
-    /// <summary>The plugin-hook adapters: OpenCode dispatches on <c>task</c>; Pi dispatches on <c>Agent</c>.</summary>
+    /// <summary>The plugin-hook adapters: OpenCode and Kilo dispatch on <c>task</c>; Pi dispatches on <c>Agent</c>.</summary>
     public static IReadOnlyList<IHarnessHookAdapter> All(IHookDecisionEngine? engine = null)
     {
         IHookDecisionEngine resolved = engine ?? new ArbiterHookDecisionEngine();
