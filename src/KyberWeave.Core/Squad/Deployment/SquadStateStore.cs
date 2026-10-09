@@ -27,6 +27,14 @@ public sealed class SquadStateStore
     /// </summary>
     internal const string ReceiptSchemaV2 = "kyber-squad.receipt/v2";
 
+    /// <summary>
+    /// Written for project receipts that own at least one hook-file block, additive over the
+    /// v1 project field set with a required <c>blocks</c> field. Receipts without blocks
+    /// stay byte-identical v1 or v2, as ADR 0024 requires. An older CLI that predates this
+    /// schema refuses it outright rather than misreading it.
+    /// </summary>
+    internal const string ReceiptSchemaV3 = "kyber-squad.receipt/v3";
+
     private static readonly JsonWriterOptions ReceiptWriterOptions = new JsonWriterOptions
     {
         Indented = true,
@@ -150,11 +158,15 @@ public sealed class SquadStateStore
     /// Serializes a receipt as stable, indented JSON with portable relative paths. A Global
     /// receipt is always written on <see cref="ReceiptSchemaV2"/> — the v1 field set unchanged,
     /// plus its required <c>layout</c> — since v2 exists for Global receipts only (A3); a
-    /// project receipt is written byte-identical to every receipt this store has ever produced,
-    /// on <see cref="ReceiptSchemaV1"/> with no <c>layout</c> field. The write schema is derived
-    /// from <see cref="SquadReceipt.Scope"/> alone, never from the schema string already on
+    /// project receipt without blocks is written byte-identical to every receipt this store
+    /// has ever produced, on <see cref="ReceiptSchemaV1"/> with no <c>layout</c> field; a
+    /// project receipt that owns at least one block is written on
+    /// <see cref="ReceiptSchemaV3"/> — the v1 project field set plus its required
+    /// <c>blocks</c>. The write schema is derived from <see cref="SquadReceipt.Scope"/>
+    /// and <see cref="SquadReceipt.Blocks"/> alone, never from the schema string already on
     /// <paramref name="receipt"/> — so a receipt built directly through the record's
-    /// constructor upgrades to v2 the moment it is written for Global scope.
+    /// constructor upgrades to v2 or v3 the moment it is written for the scope and content
+    /// that requires it.
     /// </summary>
     public string SerializeReceipt(SquadReceipt receipt)
     {
@@ -162,12 +174,13 @@ public sealed class SquadStateStore
         ValidateReceipt(receipt);
 
         bool isGlobal = receipt.Scope == SquadDeploymentScope.Global;
+        bool isV3 = !isGlobal && receipt.Blocks.Count > 0;
 
         using MemoryStream stream = new MemoryStream();
         using (Utf8JsonWriter writer = new Utf8JsonWriter(stream, ReceiptWriterOptions))
         {
             writer.WriteStartObject();
-            writer.WriteString("schema", isGlobal ? ReceiptSchemaV2 : ReceiptSchemaV1);
+            writer.WriteString("schema", isGlobal ? ReceiptSchemaV2 : isV3 ? ReceiptSchemaV3 : ReceiptSchemaV1);
             writer.WriteString("scope", isGlobal ? "global" : "project");
             if (isGlobal)
             {
@@ -184,6 +197,24 @@ public sealed class SquadStateStore
             JsonSerializer.Serialize(writer, receipt.Degradations, JsonOptions);
             writer.WritePropertyName("files");
             JsonSerializer.Serialize(writer, receipt.Files, JsonOptions);
+            if (isV3)
+            {
+                writer.WritePropertyName("blocks");
+                writer.WriteStartArray();
+                foreach (SquadOwnedBlock block in receipt.Blocks)
+                {
+                    writer.WriteStartObject();
+                    writer.WriteString("relativePath", block.RelativePath);
+                    writer.WriteString("target", block.Target);
+                    writer.WriteBoolean("createdFile", block.CreatedFile);
+                    writer.WritePropertyName("entries");
+                    JsonSerializer.Serialize(writer, block.Entries, JsonOptions);
+                    writer.WriteEndObject();
+                }
+
+                writer.WriteEndArray();
+            }
+
             writer.WriteEndObject();
         }
 
@@ -227,17 +258,21 @@ public sealed class SquadStateStore
         string schema = root.GetProperty("schema").GetString()
             ?? throw new InvalidDataException("Squad receipt schema must be a string.");
         bool isV2 = string.Equals(schema, ReceiptSchemaV2, StringComparison.Ordinal);
+        bool isV3 = string.Equals(schema, ReceiptSchemaV3, StringComparison.Ordinal);
 
         string? scopeText = isV2 ? null : root.GetProperty("scope").GetString();
-        SquadDeploymentScope scope = isV2
-            ? SquadDeploymentScope.Global
-            : scopeText switch
-            {
-                "project" => SquadDeploymentScope.Project,
-                "global" => SquadDeploymentScope.Global,
-                _ => throw new InvalidDataException(
-                    $"Squad receipt scope '{scopeText}' is not a recognized canonical scope.")
-            };
+        SquadDeploymentScope scope = (isV2, isV3, scopeText) switch
+        {
+            (true, _, _) => SquadDeploymentScope.Global,
+            (_, true, "project") => SquadDeploymentScope.Project,
+            (_, true, _) => throw new InvalidDataException(
+                $"Squad receipt schema '{ReceiptSchemaV3}' is for project scope only, but found " +
+                $"scope '{scopeText ?? "null"}'."),
+            (_, _, "project") => SquadDeploymentScope.Project,
+            (_, _, "global") => SquadDeploymentScope.Global,
+            _ => throw new InvalidDataException(
+                $"Squad receipt scope '{scopeText}' is not a recognized canonical scope.")
+        };
 
         string targetRoot = root.GetProperty("targetRoot").GetString()
             ?? throw new InvalidDataException("Squad receipt targetRoot must be a string.");
@@ -294,9 +329,14 @@ public sealed class SquadStateStore
             layout = SquadReceiptLayout.PerTargetRoots;
         }
 
+        IReadOnlyList<SquadOwnedBlock> blocks = isV3
+            ? root.GetProperty("blocks").Deserialize<IReadOnlyList<SquadOwnedBlock>>(JsonOptions) ?? []
+            : [];
+
         return new SquadReceipt(schema, scope, targetRoot, installedAtUtc, degradations, files)
         {
-            Layout = layout
+            Layout = layout,
+            Blocks = blocks
         };
     }
 
@@ -533,11 +573,32 @@ public sealed class SquadStateStore
     {
         bool isKnownSchema =
             string.Equals(receipt.Schema, ReceiptSchemaV1, StringComparison.Ordinal) ||
-            string.Equals(receipt.Schema, ReceiptSchemaV2, StringComparison.Ordinal);
+            string.Equals(receipt.Schema, ReceiptSchemaV2, StringComparison.Ordinal) ||
+            string.Equals(receipt.Schema, ReceiptSchemaV3, StringComparison.Ordinal);
         if (!isKnownSchema)
         {
             throw new InvalidDataException(
-                $"Squad receipt schema must be '{ReceiptSchemaV1}' or '{ReceiptSchemaV2}'.");
+                $"Squad receipt schema must be '{ReceiptSchemaV1}', '{ReceiptSchemaV2}' or '{ReceiptSchemaV3}'.");
+        }
+
+        bool isV3 = string.Equals(receipt.Schema, ReceiptSchemaV3, StringComparison.Ordinal);
+        if (isV3 && receipt.Scope != SquadDeploymentScope.Project)
+        {
+            throw new InvalidDataException(
+                $"Squad receipt schema '{ReceiptSchemaV3}' is for project scope only.");
+        }
+
+        if (isV3 && receipt.Blocks.Count == 0)
+        {
+            throw new InvalidDataException(
+                $"Squad receipt schema '{ReceiptSchemaV3}' requires at least one owned block.");
+        }
+
+        if (!isV3 && receipt.Blocks.Count > 0)
+        {
+            throw new InvalidDataException(
+                "Squad receipt blocks are written on schema " +
+                $"'{ReceiptSchemaV3}' only; a '{receipt.Schema}' receipt must carry no blocks.");
         }
 
         if (!string.Equals(receipt.TargetRoot, ".", StringComparison.Ordinal))
@@ -609,6 +670,77 @@ public sealed class SquadStateStore
                 throw new InvalidDataException(
                     $"Squad receipt file path '{file.RelativePath}' for target '{file.Target}' " +
                     "is not a unique portable deployment path.");
+            }
+        }
+
+        ValidateReceiptBlocks(receipt);
+    }
+
+    /// <summary>
+    /// Validates the owned blocks the way owned files are validated: every block names a
+    /// portable canonical path for an exact canonical target, every entry carries a
+    /// JSON-pointer container and a digest, and both levels are unique. Project scope
+    /// writes every target beneath the one deployment root, so the path alone is the
+    /// block identity — blocks are project-only, so no per-target identity applies.
+    /// </summary>
+    private static void ValidateReceiptBlocks(SquadReceipt receipt)
+    {
+        if (receipt.Blocks is null)
+            throw new InvalidDataException("Squad receipt blocks are required.");
+
+        HashSet<string> blockIdentities = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (SquadOwnedBlock? block in receipt.Blocks)
+        {
+            if (block is null)
+                throw new InvalidDataException("Squad receipt contains an empty block entry.");
+
+            string normalizedPath;
+            string portableIdentity;
+            try
+            {
+                normalizedPath = SquadPathPolicy.NormalizeRelativePath(block.RelativePath);
+                portableIdentity = SquadPathPolicy.GetPortableIdentity(normalizedPath);
+            }
+            catch (Exception exception) when (
+                exception is SquadPathContainmentException or SquadDeploymentConflictException)
+            {
+                throw new InvalidDataException(
+                    $"Squad receipt block path '{block.RelativePath}' is not portable.",
+                    exception);
+            }
+
+            if (!string.Equals(normalizedPath, block.RelativePath, StringComparison.Ordinal) ||
+                !string.Equals(portableIdentity, normalizedPath, StringComparison.Ordinal))
+            {
+                throw new InvalidDataException(
+                    $"Squad receipt block path '{block.RelativePath}' is not a portable canonical path.");
+            }
+
+            ValidateCanonicalTarget(block.Target, "block target");
+
+            if (!blockIdentities.Add(portableIdentity))
+            {
+                throw new InvalidDataException(
+                    $"Squad receipt block path '{block.RelativePath}' for target '{block.Target}' " +
+                    "is not a unique portable deployment path.");
+            }
+
+            if (block.Entries is null)
+                throw new InvalidDataException("Squad receipt block entries are required.");
+
+            HashSet<string> containers = new HashSet<string>(StringComparer.Ordinal);
+            foreach (SquadOwnedBlockEntry? entry in block.Entries)
+            {
+                if (entry is null)
+                    throw new InvalidDataException("Squad receipt contains an empty block entry.");
+
+                ValidateRequiredReceiptValue(entry.Container, "block entry container");
+                ValidateDigest(entry.Sha256, "block entry digest");
+                if (!containers.Add(entry.Container))
+                {
+                    throw new InvalidDataException(
+                        $"Squad receipt block '{block.RelativePath}' contains duplicate entry '{entry.Container}'.");
+                }
             }
         }
     }
@@ -744,7 +876,10 @@ public sealed class SquadStateStore
     /// Validates the receipt's raw JSON field shape, before any object binding: schema v1 keeps
     /// today's exact field set; schema v2 is that same set with <c>scope</c> made optional
     /// (present only if the receipt was hand-authored to include it — always Global, per A3)
-    /// and a required <c>layout</c> added, restricted to its two canonical tokens.
+    /// and a required <c>layout</c> added, restricted to its two canonical tokens; schema v3
+    /// is the exact v1 project field set plus a required <c>blocks</c>, with <c>scope</c>
+    /// restricted to <c>project</c>. A reader that predates v3 falls into the v1 branch and
+    /// refuses the unknown <c>blocks</c> field outright rather than misreading it.
     /// </summary>
     private static void ValidateReceiptJsonShape(JsonElement root)
     {
@@ -759,6 +894,10 @@ public sealed class SquadStateStore
         if (string.Equals(schema, ReceiptSchemaV2, StringComparison.Ordinal))
         {
             ValidateReceiptJsonShapeV2(root);
+        }
+        else if (string.Equals(schema, ReceiptSchemaV3, StringComparison.Ordinal))
+        {
+            ValidateReceiptJsonShapeV3(root);
         }
         else
         {
@@ -786,6 +925,31 @@ public sealed class SquadStateStore
                 ["relativePath", "sha256", "target", "adopted"],
                 "receipt file");
         }
+
+        if (string.Equals(schema, ReceiptSchemaV3, StringComparison.Ordinal))
+        {
+            JsonElement blocks = root.GetProperty("blocks");
+            if (blocks.ValueKind != JsonValueKind.Array)
+                throw new InvalidDataException("Squad receipt blocks must be an array.");
+            foreach (JsonElement block in blocks.EnumerateArray())
+            {
+                RequireExactJsonFields(
+                    block,
+                    ["relativePath", "target", "createdFile", "entries"],
+                    "receipt block");
+
+                JsonElement entries = block.GetProperty("entries");
+                if (entries.ValueKind != JsonValueKind.Array)
+                    throw new InvalidDataException("Squad receipt block entries must be an array.");
+                foreach (JsonElement entry in entries.EnumerateArray())
+                {
+                    RequireExactJsonFields(
+                        entry,
+                        ["container", "sha256"],
+                        "receipt block entry");
+                }
+            }
+        }
     }
 
     private static void ValidateReceiptJsonShapeV1(JsonElement root)
@@ -795,6 +959,15 @@ public sealed class SquadStateStore
             ["schema", "scope", "targetRoot", "installedAtUtc", "degradations", "files"],
             "receipt");
         RequireCanonicalJsonEnum(root, "scope", ["project", "global"], "receipt");
+    }
+
+    private static void ValidateReceiptJsonShapeV3(JsonElement root)
+    {
+        RequireExactJsonFields(
+            root,
+            ["schema", "scope", "targetRoot", "installedAtUtc", "degradations", "files", "blocks"],
+            "receipt");
+        RequireCanonicalJsonEnum(root, "scope", ["project"], "receipt");
     }
 
     private static void ValidateReceiptJsonShapeV2(JsonElement root)

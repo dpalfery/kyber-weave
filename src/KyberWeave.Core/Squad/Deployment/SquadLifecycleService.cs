@@ -196,7 +196,8 @@ public sealed class SquadLifecycleService
                     adopt: request.Adopt,
                     timeProvider: _timeProvider,
                     globalRoots: _globalRoots,
-                    siblingGlobalReceipts: siblingReceipts);
+                    siblingGlobalReceipts: siblingReceipts,
+                    blocks: renderResult.Blocks);
             }
             else
             {
@@ -210,7 +211,8 @@ public sealed class SquadLifecycleService
                     replaceManaged: false,
                     timeProvider: _timeProvider,
                     globalRoots: _globalRoots,
-                    siblingGlobalReceipts: siblingReceipts);
+                    siblingGlobalReceipts: siblingReceipts,
+                    blocks: renderResult.Blocks);
             }
 
             if (request.DryRun)
@@ -345,7 +347,8 @@ public sealed class SquadLifecycleService
                 replaceManaged: request.ReplaceManaged,
                 timeProvider: _timeProvider,
                 globalRoots: _globalRoots,
-                siblingGlobalReceipts: SiblingGlobalReceipts(targetRoot, request.Scope));
+                siblingGlobalReceipts: SiblingGlobalReceipts(targetRoot, request.Scope),
+                blocks: renderResult.Blocks);
 
             if (request.DryRun)
             {

@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using JetBrains.Annotations;
 using KyberWeave.Core.Squad.Deployment;
 
@@ -51,7 +52,37 @@ public sealed record SquadRenderResult(
     IReadOnlyList<SquadDeploymentFile> Files,
     IReadOnlyList<SquadDegradationRecord> Degradations,
     IReadOnlyList<SquadRenderWarning> Warnings,
-    IReadOnlyList<string> Errors);
+    IReadOnlyList<string> Errors,
+    IReadOnlyList<SquadRenderedBlock>? Blocks = null);
+
+/// <summary>
+/// One managed entry a renderer wants spliced into a shared hook file: the hook
+/// container it belongs to and the entry payload.
+/// </summary>
+/// <remarks>
+/// <see cref="Container"/> names the hook container case-insensitively —
+/// <c>preToolUse</c>/<c>PreToolUse</c> for the pre container and
+/// <c>postToolUse</c>/<c>PostToolUse</c> for the post container — because Cursor's
+/// containers are camelCase while every other shared-file format's are PascalCase.
+/// Anything else is a renderer bug and the deployment plan refuses it.
+/// </remarks>
+public sealed record SquadRenderedBlockEntry(string Container, JsonNode Entry);
+
+/// <summary>
+/// A block fragment a renderer emits for a shared hook file the user also owns: the
+/// target, the portable path, the file's shape, and the managed entries to splice.
+/// </summary>
+/// <remarks>
+/// Unlike <see cref="SquadDeploymentFile"/>, a block never claims the whole file —
+/// <see cref="SquadDeploymentPlan"/> splices <see cref="Entries"/> into whatever the
+/// user already has at <see cref="RelativePath"/> at plan time, so an existing user
+/// file is content to merge with rather than an unmanaged collision.
+/// </remarks>
+public sealed record SquadRenderedBlock(
+    string Target,
+    string RelativePath,
+    SquadHookBlockFormat Format,
+    IReadOnlyList<SquadRenderedBlockEntry> Entries);
 
 /// <summary>A structured record of an agent-to-role lowering or capability degradation.</summary>
 public sealed record SquadDegradationRecord(

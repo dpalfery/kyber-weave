@@ -56,6 +56,33 @@ public sealed record SquadOwnedFile(
     string Target,
     bool Adopted);
 
+/// <summary>One managed hook entry owned inside a shared file: its JSON pointer and canonical digest.</summary>
+/// <remarks>
+/// The member is named <c>Container</c> rather than <c>Pointer</c> because the latter trips
+/// CA1720 (<c>System.Reflection.Pointer</c>); the value is still an RFC 6901 JSON pointer
+/// addressing the entry inside its file (for example <c>/hooks/preToolUse/0</c>).
+/// </remarks>
+public sealed record SquadOwnedBlockEntry(string Container, string Sha256);
+
+/// <summary>The ownership boundary for one block spliced into a shared hook file.</summary>
+/// <remarks>
+/// Squad owns only <see cref="Entries"/> inside the file, never the file itself:
+/// <see cref="CreatedFile"/> records whether Squad created the file so uninstall deletes
+/// it only when nothing else remains.
+/// </remarks>
+public sealed record SquadOwnedBlock(
+    string RelativePath,
+    string Target,
+    bool CreatedFile,
+    IReadOnlyList<SquadOwnedBlockEntry> Entries);
+
+/// <summary>One owned block entry whose current file content no longer matches its record.</summary>
+public sealed record SquadOwnedBlockDrift(
+    string RelativePath,
+    string Target,
+    string Location,
+    string Reason);
+
 /// <summary>How a Global receipt's owned files map onto physical roots.</summary>
 public enum SquadReceiptLayout
 {
@@ -84,6 +111,15 @@ public sealed record SquadReceipt(
     /// overwritten by classification in <see cref="SquadStateStore.DeserializeReceipt"/>.
     /// </summary>
     public SquadReceiptLayout Layout { get; init; } = SquadReceiptLayout.PerTargetRoots;
+
+    /// <summary>
+    /// The hook-file blocks owned inside shared files. Additive so every existing
+    /// positional construction of <see cref="SquadReceipt"/> keeps compiling: it defaults
+    /// to empty, and only a receipt that actually owns a block carries any — those
+    /// serialize on <c>kyber-squad.receipt/v3</c> while every receipt without blocks
+    /// stays byte-identical v1 or v2, as ADR 0024 requires.
+    /// </summary>
+    public IReadOnlyList<SquadOwnedBlock> Blocks { get; init; } = [];
 }
 
 /// <summary>A harness-native file produced by the upstream renderer.</summary>
