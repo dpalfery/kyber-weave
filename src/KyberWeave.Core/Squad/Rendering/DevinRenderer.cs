@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json.Nodes;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
@@ -139,12 +140,35 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// conductor. It is withheld until a real install shows the rules stay in the conductor's own
 /// turn, and the lowered agent's capability decisions are recorded as not enforced.
 /// </para>
+/// <para>
+/// <b>Arbiter block (Req 6.3, 8.1, 8.2, 22.2).</b> When the render request carries an
+/// enabled <see cref="SquadArbiterWiring"/> under <see cref="SquadDeploymentScope.Project"/>,
+/// the renderer returns a <c>devin</c> owned block for <c>.devin/hooks.v1.json</c> holding
+/// <c>PreToolUse</c> and <c>PostToolUse</c> matcher groups matching <c>run_subagent</c>, each
+/// carrying the shared project-wide hook <c>kyber-weave-arbiter hook --harness devin</c> with
+/// the wiring's timeout ([F12]; the whole file is the hooks object in the Claude Code format,
+/// so the matcher groups sit at the top level). No whole file is emitted; the deployment plan
+/// splices the block into whatever the user already has. Because Devin documents no
+/// <c>PostToolUse</c> output field, post-dispatch outcomes are logged and reported by
+/// <c>audit</c> but never delivered back to the harness, so the render records
+/// <c>arbiter-not-enforced</c> with details <c>no-post-dispatch-feedback</c> for every
+/// dispatcher agent (design §10.5). A null or disabled wiring, or Global scope (no project
+/// configuration to enforce from, Req 22.4), renders no block and leaves the owned files
+/// byte-identical.
+/// </para>
 /// </remarks>
 public sealed class DevinRenderer : ISquadRenderer
 {
     private const string TargetToken = "devin";
     private const string AgentsDirectory = ".devin/agents";
     private const string SkillsDirectory = ".devin/skills";
+
+    /// <summary>Matches Devin's subagent dispatch tool ([F12]). The vendor documents only
+    /// that <c>run_subagent</c> "takes a profile"; no namespaced spelling of the tool is
+    /// documented, so the matcher is the bare name exactly.</summary>
+    private const string ArbiterMatcher = "^run_subagent$";
+
+    private const string ArbiterCommandLine = "kyber-weave-arbiter hook --harness devin";
 
     /// <summary>
     /// The capability profile whose holder routes work rather than researching it, and which
@@ -327,7 +351,87 @@ public sealed class DevinRenderer : ISquadRenderer
             SquadResourceProjection.Append(files, principal, skill.Resources);
         }
 
-        return Task.FromResult(new SquadRenderResult(true, files, degradations, [], []));
+        // The Arbiter block and its degradation travel with the render only when the wiring
+        // is enabled at project scope; otherwise the render stays byte-identical to omitting
+        // the wiring entirely (Req 22.4). Under Global scope the receipt keeps the
+        // wiring-derived global-scope record instead.
+        List<SquadRenderedBlock> blocks = [];
+        if (request.Arbiter is not null && request.Arbiter.Enabled && request.Scope == SquadDeploymentScope.Project)
+        {
+            blocks.Add(BuildArbiterBlock(request.Arbiter.HookTimeoutSeconds));
+            degradations.AddRange(NoPostDispatchFeedbackDegradations(source));
+        }
+
+        return Task.FromResult(new SquadRenderResult(
+            true,
+            files,
+            degradations,
+            [],
+            [],
+            blocks.Count > 0 ? blocks : null));
+    }
+
+    /// <summary>Builds Squad's owned block for <c>.devin/hooks.v1.json</c>.</summary>
+    /// <remarks>
+    /// [F12]: the whole file is the hooks object in the Claude Code format, so the matcher
+    /// groups sit at the top level and each group carries one command hook with a timeout
+    /// in seconds. The command carries no <c>--caller</c> because every shared-file target
+    /// has project-wide hooks (design §10.4). Only documented fields are written, and no
+    /// sentinel key.
+    /// </remarks>
+    private static SquadRenderedBlock BuildArbiterBlock(int timeoutSeconds) =>
+        new(
+            TargetToken,
+            SquadHookJsonBlock.RelativePath(SquadHookBlockFormat.Devin),
+            SquadHookBlockFormat.Devin,
+            [
+                new SquadRenderedBlockEntry("PreToolUse", MatcherGroup(timeoutSeconds)),
+                new SquadRenderedBlockEntry("PostToolUse", MatcherGroup(timeoutSeconds)),
+            ]);
+
+    private static JsonObject MatcherGroup(int timeoutSeconds) =>
+        new()
+        {
+            ["matcher"] = ArbiterMatcher,
+            ["hooks"] = new JsonArray(
+                new JsonObject
+                {
+                    ["type"] = "command",
+                    ["command"] = ArbiterCommandLine,
+                    ["timeout"] = timeoutSeconds,
+                }),
+        };
+
+    /// <summary>
+    /// The render-time <c>arbiter-not-enforced</c> records accompanying Devin's block, one
+    /// per dispatcher agent.
+    /// </summary>
+    /// <remarks>
+    /// Devin's <c>PostToolUse</c> documents no output field ([F12]), so a dispatch that
+    /// slipped past <c>PreToolUse</c> is logged and reported by <c>audit</c> but never
+    /// delivered back — the design §10.5 "no hook support at a decision point" family,
+    /// recorded at render time per target and agent. The dispatchers own the loss: their
+    /// dispatches are the ones whose outcomes cannot reach a decision point, so the roster
+    /// comes from <see cref="ArbiterHookWiring.Dispatchers"/> rather than a renderer-local
+    /// copy of it. The records are agent-scoped, carrying the agent's real identity and
+    /// body digest, because a renderer-emitted degradation must reference a known agent to
+    /// pass render validation — the wiring's target-scoped <c>arbiter</c> records are a
+    /// receipt-level derivation appended after that validation. The reason goes in
+    /// <see cref="SquadDegradationRecord.Details"/> and the receipt keeps the code; it is
+    /// never a runtime condition.
+    /// </remarks>
+    private static IEnumerable<SquadDegradationRecord> NoPostDispatchFeedbackDegradations(SquadSource source)
+    {
+        IReadOnlySet<string> dispatchers = ArbiterHookWiring.Dispatchers(source);
+        return source.Agents
+            .Where(agent => dispatchers.Contains(agent.Name))
+            .Select(agent => new SquadDegradationRecord(
+                Target: TargetToken,
+                CanonicalIdentity: agent.Name,
+                OutputIdentity: agent.Name,
+                Code: "arbiter-not-enforced",
+                InstructionDigest: agent.BodyDigest,
+                Details: "no-post-dispatch-feedback"));
     }
 
     private static SquadDeploymentFile RenderSubagent(
