@@ -685,6 +685,33 @@ describe('compareRuns availability when a side has no comparable turns (issue #1
     expect(phase.reading).not.toMatch(/\b0 tokens\b/)
   })
 
+  it('reports unavailable totals when cacheCreation is absent without a not_measurable stamp', () => {
+    const summary = compareRuns(
+      {
+        runId: 'run-a',
+        harness: 'cursor',
+        outcome: successOutcome(),
+        turns: [
+          makeTurn('exploration', {
+            tokens: { freshInput: 10, cacheRead: 5, output: 2 },
+          }),
+        ],
+      },
+      {
+        runId: 'run-b',
+        harness: 'cursor',
+        outcome: successOutcome(),
+        turns: [makeTurn('exploration')],
+      },
+    )
+
+    expect(summary.totals.availability).toBe('unavailable')
+    expect(summary.runA.availability).toBe('unavailable')
+    if (summary.runA.availability === 'unavailable') {
+      expect('totalTokens' in summary.runA).toBe(false)
+    }
+  })
+
   it('reports the first coverage gap on both sides regardless of iteration order', () => {
     const gap = (reason: string) =>
       makeTurn('exploration', { measurability: { token_usage: notMeasurable(reason) } })
