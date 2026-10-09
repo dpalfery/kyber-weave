@@ -25,6 +25,7 @@ import { acquireStoreRefreshLock, readLockHolder, stateDir } from '../refresh/lo
  */
 export const REFRESH_BUSY_EXIT_CODE = 3
 import { formatRefreshDiagnostics, formatRefreshReport } from '../refresh/report.js'
+import { formatCleanReport } from '../clean/report.js'
 
 export type KyberCommandDependencies = {
   readStdin?: () => Promise<string>
@@ -34,6 +35,7 @@ export type KyberCommandDependencies = {
   recordAntigravityStatusLine?: typeof recordAntigravityStatusLinePayload
   createStore?: (path: string) => CanonStore
   refreshHarnessSources?: typeof refreshHarnessSources
+  cleanDatabase?: typeof import('../clean/clean.js').cleanDatabase
   acquireStoreRefreshLock?: typeof acquireStoreRefreshLock
 }
 
@@ -324,6 +326,84 @@ export function registerKyberCommands(program: Command, dependencies: KyberComma
       await lock.handle.release()
     }
   })
+
+  const clean = dash
+    .command('clean')
+    .description('Clean the KyberDash database: wipe a harness scope (or all) and re-ingest it')
+    .option('--db <path>', 'Custom path for canon.db SQLite database')
+    .option('--all', 'Wipe every harness')
+    .option('--harness <id...>', 'Wipe one or more harnesses (repeatable value)')
+    .option(
+      '--reingest-weeks <n>',
+      'Re-ingest window in whole weeks after the wipe (default: 1)',
+      createHistoryWeeksParser(),
+    )
+    .option('--no-reingest', 'Skip re-ingestion after the wipe')
+    .option('--yes', 'Confirm the irreversible wipe')
+  clean.exitOverride((error) => {
+    if (error.code === 'commander.invalidArgument') {
+      throw new CommanderError(2, error.code, error.message)
+    }
+    throw error
+  })
+  clean.action(
+    async (opts: {
+      db?: string
+      all?: boolean
+      harness?: string[]
+      reingestWeeks?: number
+      reingest?: boolean
+      yes?: boolean
+    }) => {
+      const createStore = dependencies.createStore ?? ((path: string) => new CanonStore(path))
+      const write = dependencies.write ?? ((line: string) => process.stdout.write(`${line}\n`))
+      const writeError = dependencies.writeError ?? ((line: string) => process.stderr.write(`${line}\n`))
+      const acquireLock = dependencies.acquireStoreRefreshLock ?? acquireStoreRefreshLock
+
+      // The CLI is non-interactive: confirmation is an explicit flag, and its
+      // absence is a usage error reported before the store opens.
+      if (opts.yes !== true) {
+        throw new CommanderError(2, 'commander.missingConfirmation', 'clean requires --yes to confirm the irreversible wipe')
+      }
+      const harnesses = opts.harness ?? []
+      if ((opts.all === true && harnesses.length > 0) || (opts.all !== true && harnesses.length === 0)) {
+        throw new CommanderError(2, 'commander.conflictingScope', 'clean requires exactly one of --all or --harness <id>')
+      }
+
+      // One writer at a time: a clean holds the same lock as a refresh, and
+      // the loser reports rather than queues — the tray already reads exit 3
+      // as "already running" (ADR 0023 D4).
+      const lock = await acquireLock()
+      if (lock.outcome !== 'acquired') {
+        const holder = readLockHolder(stateDir())
+        const who = holder === null ? 'another process' : `pid ${holder.pid} (since ${holder.since})`
+        writeError(`kyberdash: a refresh or clean is already running — held by ${who}; nothing was written`)
+        process.exitCode = REFRESH_BUSY_EXIT_CODE
+        return
+      }
+
+      const { cleanDatabase, portsForClean } = await import('../clean/clean.js')
+      const runClean = dependencies.cleanDatabase ?? cleanDatabase
+      const store = createStore(resolveDbPath(opts.db))
+      try {
+        const report = await runClean(
+          store,
+          opts.all === true
+            ? { all: true, ...(opts.reingest === false ? { reingestWeeks: null } : opts.reingestWeeks !== undefined ? { reingestWeeks: opts.reingestWeeks } : {}) }
+            : { harnesses, ...(opts.reingest === false ? { reingestWeeks: null } : opts.reingestWeeks !== undefined ? { reingestWeeks: opts.reingestWeeks } : {}) },
+          portsForClean(store),
+        )
+        write(formatCleanReport(report).trimEnd())
+        process.exitCode = 0
+      } catch (err) {
+        writeError(`kyberdash: clean failed: ${err instanceof Error ? err.message : String(err)}`)
+        process.exitCode = 1
+      } finally {
+        store.close()
+        await lock.handle.release()
+      }
+    },
+  )
 
   kyber
     .command('cursor-hook')
