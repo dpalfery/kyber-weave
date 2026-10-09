@@ -9,10 +9,12 @@
 
 import { createRequire } from 'node:module'
 
-import { afterAll, describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, it, vi } from 'vitest'
 
 import {
   DEFAULT_OTLP_PORT,
+  OTLP_ADMIN_PAUSE_PATH,
+  OTLP_ADMIN_RESUME_PATH,
   OTLP_LOGS_PATH,
   OTLP_TRACES_PATH,
   InMemoryLogStore,
@@ -771,3 +773,112 @@ describe('OtlpReceiver GET /healthz (R10.6, R10.8)', () => {
     expect(logs.status).toBe(405)
   })
 })
+
+// Issue #312, plan T5 RED: the receiver pauses ingestion on an explicit admin
+// call so a database clean can hold the store without racing the writer.
+// Traces and logs shed load with 503 + Retry-After (OTLP exporters retry, so
+// nothing is dropped); the liveness probe stays 200 so the tray still knows
+// the port is ours. A lease TTL auto-resumes a cleaner that crashed mid-wipe.
+// The admin routes do not exist yet — every test below fails until T5 lands.
+describe('OtlpReceiver pause for database clean (issue #312)', () => {
+  async function pause(url: string, body?: unknown): Promise<Response> {
+    return fetch(`${url}${OTLP_ADMIN_PAUSE_PATH}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    })
+  }
+
+  it('pauses and resumes: traces shed load with 503 while paused, then ingest again', async () => {
+    const { url } = await startReceiver()
+
+    const paused = await pause(url)
+    expect(paused.status).toBe(200)
+    expect((await paused.json()) as { paused: boolean }).toMatchObject({ paused: true })
+
+    const shed = await post(url, 'application/json', '{}')
+    expect(shed.status).toBe(503)
+    expect(shed.headers.get('retry-after')).not.toBeNull()
+
+    const resumed = await fetch(`${url}${OTLP_ADMIN_RESUME_PATH}`, { method: 'POST' })
+    expect(resumed.status).toBe(200)
+    expect((await resumed.json()) as { paused: boolean }).toMatchObject({ paused: false })
+
+    const accepted = await post(url, 'application/json', minimalTraceBody())
+    expect(accepted.status).toBe(200)
+  })
+
+  it('rejects non-POST admin calls with 405', async () => {
+    const { url } = await startReceiver()
+
+    expect((await fetch(`${url}${OTLP_ADMIN_PAUSE_PATH}`)).status).toBe(405)
+    expect((await fetch(`${url}${OTLP_ADMIN_RESUME_PATH}`)).status).toBe(405)
+  })
+
+  it('reports paused:true on healthz while paused, without breaking the tray probe', async () => {
+    const { url } = await startReceiver()
+    await pause(url)
+
+    const health = await fetch(`${url}/healthz`)
+    expect(health.status).toBe(200)
+    expect(await health.json()).toMatchObject({ service: 'kyberdash-otlp', paused: true })
+
+    await fetch(`${url}${OTLP_ADMIN_RESUME_PATH}`, { method: 'POST' })
+    expect(await (await fetch(`${url}/healthz`)).json()).toMatchObject({
+      service: 'kyberdash-otlp',
+      paused: false,
+    })
+  })
+
+  it('auto-resumes when the pause lease expires', async () => {
+    vi.useFakeTimers()
+    try {
+      const { url } = await startReceiver()
+      await pause(url, { leaseMs: 60_000 })
+
+      expect((await post(url, 'application/json', '{}')).status).toBe(503)
+      await vi.advanceTimersByTimeAsync(60_001)
+
+      const accepted = await post(url, 'application/json', minimalTraceBody())
+      expect(accepted.status).toBe(200)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('sheds logs with 503 while paused too', async () => {
+    const { url } = await startReceiver()
+    await pause(url)
+
+    const shed = await fetch(`${url}${OTLP_LOGS_PATH}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{}',
+    })
+    expect(shed.status).toBe(503)
+    expect(shed.headers.get('retry-after')).not.toBeNull()
+  })
+})
+
+/** Smallest body the JSON trace decoder accepts: one empty span. */
+function minimalTraceBody(): string {
+  return JSON.stringify({
+    resourceSpans: [
+      {
+        resource: {},
+        scopeSpans: [
+          {
+            scope: {},
+            spans: [
+              {
+                traceId: '0af7651916cd43dd8448eb211c80319c',
+                spanId: 'b7ad6b7169203331',
+                name: 'probe',
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  })
+}
