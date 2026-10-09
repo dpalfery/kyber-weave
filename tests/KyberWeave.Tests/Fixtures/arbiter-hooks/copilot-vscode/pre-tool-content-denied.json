@@ -1,0 +1,13 @@
+{
+  "timestamp": "2026-10-09T12:00:00.000Z",
+  "cwd": "/repo",
+  "session_id": "sess-copilot-vs-3",
+  "transcript_path": "/repo/transcript.jsonl",
+  "hook_event_name": "PreToolUse",
+  "tool_name": "editFile",
+  "tool_input": {
+    "path": "docs/plans/plan.md",
+    "content": "edit the plan"
+  },
+  "tool_use_id": "toolu-copilot-vs-tool-1"
+}

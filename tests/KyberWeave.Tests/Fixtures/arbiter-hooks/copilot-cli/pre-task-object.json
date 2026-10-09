@@ -1,0 +1,11 @@
+{
+  "sessionId": "sess-copilot-cli-1",
+  "timestamp": 1789345600,
+  "cwd": "/repo",
+  "toolName": "task",
+  "toolArgs": {
+    "description": "Implement T4.2",
+    "prompt": "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/x.md\nTASK: 4.2\n\nImplement the parser.",
+    "agent_type": "csharp-dev"
+  }
+}

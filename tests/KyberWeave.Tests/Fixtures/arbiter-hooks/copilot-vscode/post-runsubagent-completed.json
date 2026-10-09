@@ -1,0 +1,17 @@
+{
+  "timestamp": "2026-10-09T12:00:00.000Z",
+  "cwd": "/repo",
+  "session_id": "sess-copilot-vs-5",
+  "transcript_path": "/repo/transcript.jsonl",
+  "hook_event_name": "PostToolUse",
+  "tool_name": "runSubagent",
+  "tool_input": {
+    "description": "Implement T4.2",
+    "prompt": "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/x.md\nTASK: 4.2\n\nImplement the parser.",
+    "agentName": "csharp-dev"
+  },
+  "tool_use_id": "toolu-copilot-vs-post-1",
+  "tool_response": {
+    "text": "Done."
+  }
+}

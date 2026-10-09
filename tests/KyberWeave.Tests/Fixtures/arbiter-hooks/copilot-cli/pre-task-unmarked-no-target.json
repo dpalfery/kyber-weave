@@ -1,0 +1,10 @@
+{
+  "sessionId": "sess-copilot-cli-4",
+  "timestamp": 1789345603,
+  "cwd": "/repo",
+  "toolName": "task",
+  "toolArgs": {
+    "description": "Help me brainstorm",
+    "prompt": "Suggest names for the new widget."
+  }
+}
