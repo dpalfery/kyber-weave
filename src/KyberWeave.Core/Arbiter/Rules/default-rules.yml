@@ -1,0 +1,295 @@
+# The 18 shipped Arbiter rules. Ids are permanent: suppressions, baselines and
+# code-scanning alerts key on them, so a rule is never renumbered or reused.
+#
+#The step-0 predicate set is closed (all, any, not, exists, equals, in, matches,
+# subset-of, intersects, count). An operand that names a fact the rule's trigger
+# supplies is a reference; any other string is a literal.
+#
+# Two answers are decided outside step 0 and left for the runtime evaluator, which
+# joins evidence the closed predicates cannot express:
+# - KW-ARB-GATE-CORROBORATED-001 joins gate output to finding.file:line;
+# - KW-ARB-QUOTE-001 elsewhere/absent compare excerpt text beyond scalar equality.
+# Both still declare their answers and effects here, so validation covers them.
+rules:
+  - id: KW-ARB-PLAN-001
+    trigger: delegate
+    question: Does PLAN_FILE name an existing plan or spec task artifact with parseable tasks?
+    answers: [has-tasks, no-tasks, missing, invalid-path]
+    decide:
+      - when: { fact: delegation.plan-file, exists: false }
+        answer: missing
+      - when: { fact: plan.exists, equals: false }
+        answer: invalid-path
+      - when: { fact: plan.tasks.count, equals: 0 }
+        answer: no-tasks
+      - when: { fact: plan.tasks.count, exists: true }
+        answer: has-tasks
+    effects: { has-tasks: allow, no-tasks: escalate, missing: escalate, invalid-path: escalate }
+
+  - id: KW-ARB-SCOPE-001
+    trigger: delegate
+    question: Does TASK name a plan task, and do the paths the delegation names stay inside its files?
+    answers: [in-task-files, beyond-files, no-task-files, not-in-plan]
+    decide:
+      - when: { fact: plan.task, exists: false }
+        answer: not-in-plan
+      - when: { fact: plan.task.files, count: 0 }
+        answer: no-task-files
+      - when: { fact: delegation.paths, subset-of: plan.task.files }
+        answer: in-task-files
+      - when: { fact: delegation.paths, exists: true }
+        answer: beyond-files
+    effects: { in-task-files: allow, beyond-files: allow, no-task-files: allow, not-in-plan: escalate }
+
+  - id: KW-ARB-SCOPE-002
+    trigger: delegate
+    question: Does the delegation ask for work the plan task does not describe?
+    answers: [within-task, adds-work, unrelated]
+    ask:
+      type: choice
+      state: { task: plan.task.text, delegation: delegation.prompt }
+      criteria:
+        within-task: Every piece of work the delegation asks for is described by the task.
+        adds-work: The delegation asks for work the task does not describe.
+        unrelated: The delegation does not concern this task.
+      confidence-at-least: 0.8
+      tuned-for: [jev-1.13.0]
+    effects: { within-task: allow, adds-work: escalate, unrelated: escalate }
+
+  - id: KW-ARB-READY-001
+    trigger: delegate
+    question: Are the task's dependencies complete, and are its files clear of work in flight?
+    answers: [ready, waiting, overlaps-in-flight, unknown-dependency]
+    decide:
+      - when: { fact: plan.task.files, intersects: ledger.in-flight.paths }
+        answer: overlaps-in-flight
+      - when: { fact: plan.task.depends-on, exists: false }
+        answer: ready
+      - when: { fact: plan.task.depends-on, subset-of: ledger.completed-tasks }
+        answer: ready
+      - when: { fact: plan.task.depends-on, exists: true }
+        answer: waiting
+    # unknown-dependency (a dependency naming no task in the artifact) needs plan
+    # membership the delegate trigger does not supply; it stays declared so the
+    # runtime evaluator can answer it once plan parsing reports it.
+    effects: { ready: allow, waiting: escalate, overlaps-in-flight: escalate, unknown-dependency: escalate }
+
+  - id: KW-ARB-OWNER-001
+    trigger: delegate
+    question: Is the target the specialist the task names, or the owner its file kinds map to?
+    answers: [owner, not-owner, no-mapping]
+    decide:
+      - when: { fact: delegation.target, in: plan.task.skills }
+        answer: owner
+      - when: { all: [{ fact: delegation.target, equals: test-dev }, { fact: plan.development-mode, equals: test-first }] }
+        answer: owner
+      - when: { all: [{ not: { fact: plan.task.skills, count: 0 } }, { not: { fact: delegation.target, in: plan.task.skills } }] }
+        answer: not-owner
+      - when: { fact: plan.task, exists: true }
+        answer: no-mapping
+    # The file-kind map below refines no-mapping at runtime, first match wins.
+    effects: { owner: allow, not-owner: escalate, no-mapping: allow }
+
+  - id: KW-ARB-OWNER-002
+    trigger: delegate
+    question: Which specialist in the caller's implementation roster owns this task?
+    answers: [target, other]
+    ask:
+      type: choice
+      state: { task: plan.task.text, roster: roster.descriptions, target: delegation.target }
+      criteria:
+        target: The choice equals delegation.target.
+        other: Another specialist owns this task.
+      confidence-at-least: 0.8
+      tuned-for: [jev-1.13.0]
+      when: KW-ARB-OWNER-001=no-mapping
+    effects: { target: allow, other: escalate }
+
+  - id: KW-ARB-MODE-001
+    trigger: delegate
+    question: In test-first mode, does RED evidence exist before an implementation dispatch?
+    answers: [not-required, present, missing]
+    decide:
+      - when: { fact: plan.development-mode, equals: standard }
+        answer: not-required
+      - when: { fact: delegation.target, equals: test-dev }
+        answer: not-required
+      - when: { fact: delegation.target-profile, equals: documentation }
+        answer: not-required
+      - when: { fact: plan.test-contract.row, equals: Not applicable }
+        answer: not-required
+      - when: { fact: ledger.red-evidence, exists: true }
+        answer: present
+      - when: { fact: ledger.red-evidence, exists: false }
+        answer: missing
+    effects: { not-required: allow, present: allow, missing: escalate }
+
+  - id: KW-ARB-ROSTER-001
+    trigger: [delegate, investigate]
+    question: Is the target in the caller's delegates-to?
+    answers: [listed, not-listed]
+    decide:
+      - when: { fact: delegation.target, in: roster.caller.delegates-to }
+        answer: listed
+      - when: { fact: caller, exists: true }
+        answer: not-listed
+    effects: { listed: allow, not-listed: escalate }
+
+  - id: KW-ARB-DIFF-001
+    trigger: delegate.returned
+    question: Did the delegation change only paths inside its task's files?
+    answers: [out-of-scope, no-task-files, inside-task, outside-task]
+    decide:
+      - when: { fact: git.changed-paths.since-dispatch, intersects: plan.out-of-scope }
+        answer: out-of-scope
+      - when: { fact: plan.task.files, count: 0 }
+        answer: no-task-files
+      - when: { fact: git.changed-paths.since-dispatch, subset-of: plan.task.files }
+        answer: inside-task
+      - when: { fact: git.changed-paths.since-dispatch, exists: true }
+        answer: outside-task
+    effects: { out-of-scope: escalate, no-task-files: allow, inside-task: allow, outside-task: escalate }
+
+  - id: KW-ARB-PLANNER-001
+    trigger: delegate.planner
+    question: Is this a recognised planner invocation?
+    answers: [recognised, malformed]
+    decide:
+      - when: { fact: delegation.markers, exists: false }
+        answer: malformed
+      - when: { fact: delegation.plan-file, exists: false }
+        answer: malformed
+      - when: { fact: delegation.plan-file, matches: config.planning-dirs }
+        answer: recognised
+      - when: { fact: delegation.plan-file, exists: true }
+        answer: malformed
+    effects: { recognised: allow, malformed: escalate }
+
+  - id: KW-ARB-PLANNER-DIFF-001
+    trigger: delegate.planner.returned
+    question: Did the planner write only inside the plan, spec and todo directories?
+    answers: [inside, outside]
+    decide:
+      - when: { fact: git.changed-paths.since-dispatch, subset-of: config.planning-dirs }
+        answer: inside
+      - when: { fact: git.changed-paths.since-dispatch, exists: true }
+        answer: outside
+    effects: { inside: allow, outside: escalate }
+
+  - id: KW-ARB-READONLY-001
+    trigger: investigate.returned
+    question: Did the read-only dispatch leave the tree unchanged?
+    answers: [unchanged, changed]
+    decide:
+      - when: { fact: git.changed-paths.since-dispatch, exists: false }
+        answer: unchanged
+      - when: { fact: git.changed-paths.since-dispatch, count: 0 }
+        answer: unchanged
+      - when: { fact: git.changed-paths.since-dispatch, exists: true }
+        answer: changed
+    effects: { unchanged: allow, changed: escalate }
+
+  - id: KW-ARB-LENS-001
+    trigger: lens.spawn
+    question: Does the lens apply to this change?
+    answers: [applies, not-applicable]
+    decide:
+      - when: { all: [{ fact: lens.name, equals: correctness }, { fact: review.changed-paths, subset-of: ["**/*.md"] }] }
+        answer: not-applicable
+      - when: { all: [{ fact: lens.name, equals: test-adequacy }, { fact: review.changed-paths, subset-of: ["**/*.md"] }] }
+        answer: not-applicable
+    ask:
+      type: noul
+      state: { applicability: lens.applicability, diff: review.diff-summary }
+      question: Does the lens apply to this change?
+      instructions-from: "lens:"
+      probability-below: 0.1
+      tuned-for: [jev-1.13.0]
+    effects: { applies: allow, not-applicable: skip }
+
+  - id: KW-ARB-QUOTE-001
+    trigger: lens.returned
+    question: Is each finding's excerpt present at its file:line?
+    answers: [present, elsewhere, absent]
+    decide:
+      - when: { fact: finding.excerpt, equals: file.text-at-line }
+        answer: present
+    effects: { present: allow, elsewhere: annotate, absent: annotate }
+
+  - id: KW-ARB-PREEX-001
+    trigger: lens.returned
+    question: Is the excerpt inside a changed hunk?
+    answers: [in-hunk, outside-hunk]
+    decide:
+      - when: { all: [{ fact: review.changed-hunks, exists: true }, { fact: finding.line, in: review.changed-hunks }] }
+        answer: in-hunk
+      - when: { all: [{ fact: review.changed-hunks, exists: true }, { not: { fact: finding.line, in: review.changed-hunks } }] }
+        answer: outside-hunk
+    effects: { in-hunk: allow, outside-hunk: annotate }
+
+  - id: KW-ARB-CLAIM-001
+    trigger: refute.spawn
+    question: Do the quoted code and its surroundings support the finding's claim?
+    answers: [supports, contradicts, says_nothing]
+    ask:
+      type: choice
+      state: { claim: finding.claim, excerpt: finding.excerpt, surroundings: file.surroundings }
+      criteria:
+        supports: The quoted code and its surroundings support the finding's claim.
+        contradicts: The quoted code contradicts the finding's claim.
+        says_nothing: The quoted code says nothing about the finding's claim.
+      confidence-at-least: 0.9
+      tuned-for: [jev-1.13.0]
+    effects: { supports: verify, contradicts: allow, says_nothing: allow }
+
+  - id: KW-ARB-GATE-CORROBORATED-001
+    trigger: refute.spawn
+    question: Does a failed gate already corroborate the finding?
+    answers: [corroborated, not-corroborated]
+    effects: { corroborated: verify, not-corroborated: allow }
+
+  - id: KW-ARB-GATE-001
+    trigger: gate.select
+    question: Does any changed path match the gate's applies-when.paths?
+    answers: [applies, not-applicable]
+    decide:
+      - when: { fact: review.changed-paths, intersects: gate.applies-when.paths }
+        answer: applies
+      - when: { fact: review.changed-paths, exists: true }
+        answer: not-applicable
+    effects: { applies: applies, not-applicable: not-applicable }
+
+# The OWNER-001 file-kind map, evaluated first match wins. The order is the
+# decision: specific owners precede the documentation and C# catch-alls.
+owner-file-kind-map:
+  - patterns: ["**/*.tsx", "**/*.jsx"]
+    owner: react-dev
+  - patterns: ["**/src-tauri/**", "**/*.rs"]
+    owner: tauri-dev
+  - patterns: ["**/*.py", "**/pyproject.toml", "**/requirements*.txt"]
+    owner: python-dev
+  - patterns: [".github/workflows/**", "**/Dockerfile"]
+    owner: github-devops
+  - patterns: ["**/*.sql", "**/*.sqlproj"]
+    owner: sql-database-architect
+  - patterns: ["**/Migrations/**", "**/*Repository.cs"]
+    owner: dal-dev
+  - patterns: ["**/*.xaml"]
+    owner: maui-dev
+  - patterns: ["**/Pulumi.yaml", "**/Pulumi.*.yaml"]
+    owner: pulumi-dev
+  - patterns: ["tests/**", "**/*.test.*", "**/*.spec.*", "**/*Tests.cs"]
+    owner: test-dev
+  - patterns: ["**/*.md"]
+    owner: docs-dev
+  - patterns: ["**/*.cs"]
+    owner: csharp-dev
+
+# The LENS-001 step-0 per-lens path table. It holds only path conditions the
+# lens's own Applicability section states: documentation-only changes skip the
+# two lenses that say so. Every other lens defers to step 1.
+lens-paths:
+  - lens: correctness
+    not-applicable-when-all-match: ["**/*.md"]
+  - lens: test-adequacy
+    not-applicable-when-all-match: ["**/*.md"]

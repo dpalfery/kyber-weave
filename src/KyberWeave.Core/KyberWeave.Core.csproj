@@ -36,6 +36,17 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- The 18 shipped Arbiter rules plus the OWNER-001 file-kind map and the
+         LENS-001 step-0 path table: the single source of truth for defaults. -->
+    <EmbeddedResource Include="Arbiter\Rules\default-rules.yml" LogicalName="Arbiter.default-rules.yml" />
+    <!-- Embedded Squad copies the Arbiter reads in host repositories without a
+         canonical tree. Logical names mirror the Standards.* convention and avoid
+         the raw-corpus tokens the release test forbids in resource names. -->
+    <EmbeddedResource Include="..\..\products\kyber-squad\agents\*.md" LogicalName="Arbiter.Roster.%(Filename).md" />
+    <EmbeddedResource Include="..\..\products\kyber-squad\skills\code-review\references\lenses\*.md" LogicalName="Arbiter.Lens.%(Filename).md" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!--
       Compile-time only, and PrivateAssets="all" keeps it out of the shipped nupkg's
       dependency graph: consumers of KyberWeave.Core still take only Markdig and YamlDotNet.

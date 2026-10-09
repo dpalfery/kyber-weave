@@ -13,6 +13,8 @@ internal sealed class KyberWeaveYamlDocument
 
     public ReviewYamlSection? Review { get; set; }
 
+    public ArbiterYamlSection? Arbiter { get; set; }
+
     /// <summary>
     /// Host additions to the configuration registry, as property name to repository-relative
     /// path. Bound as a plain map because the property names are the host's vocabulary, not
