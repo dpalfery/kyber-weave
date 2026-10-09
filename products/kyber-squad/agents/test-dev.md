@@ -73,12 +73,17 @@ You do **not** own:
 
 ## Completion digest
 
+Every digest records RED evidence on one line the Arbiter can parse. The in-flight ledger reads the `RED_EVIDENCE:` value from your returned output as its `ledger.red-evidence` fact, and rule `KW-ARB-MODE-001` uses it to gate test-first plans: an implementation dispatch with no RED evidence on record escalates. Record the line even when your RED run already unblocked an earlier GREEN task — the ledger, not your memory of the run, is what a later task is judged on.
+
 When done, return:
 
 ```text
 STATUS: READY_FOR_REVIEW
 ARTIFACTS: <list of test file paths>
 SUMMARY: <2–4 sentences: what layers are covered, test count, any notable gaps>
+RED_EVIDENCE: <runner filter> — <failing tests> — <reason>
 DIAGNOSTICS: clean on <paths> | fix pass: <format, format analyzers, cleanupcode — all applied, or skipped (not C# / .NET)> | artifacts: <isolated artifacts path> | baseline: <scratchpad path> | remaining: <none, or list with baseline proof>
 COVERAGE_GAPS: <untested branches or scenarios, or "none">
 ```
+
+The `RED_EVIDENCE:` line names the filter you ran, the tests that failed, and why they failed — the assertion the RED run failed on, not a build error. Emit `RED_EVIDENCE: none` when the work recorded no RED run, such as a maintenance pass with no failing-first cycle. Anything but a literal `none` counts as evidence, so the fields must be the values you actually ran, never placeholders.

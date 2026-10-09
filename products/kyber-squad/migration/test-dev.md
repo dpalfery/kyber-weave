@@ -5,7 +5,7 @@ source-commit: 677c3a876ba9c62f1083608596b238c9deaff167
 selected-baseline: .github/agents/test-dev.agent.md
 sources:
   .github/agents/test-dev.agent.md: b461f218e0645748eb5beec7675c3d5908191d6facf2cb19ac0338fdc638e548
-final-body-sha256: ed1e4cffe3fce3a7b0270213279f0ddb5dd149c62da4d6c74411fba533287524
+final-body-sha256: d626e6e3503e5b28baa0bbb8126d71b0d28d403d40448b61a8b5db03be756168
 ---
 # test-dev migration
 
@@ -15,6 +15,10 @@ The canonical agent description and instruction body were synchronized from `.gi
 Hotshot commit `677c3a876ba9c62f1083608596b238c9deaff167`. The selected source file's SHA-256 is recorded in frontmatter,
 while `final-body-sha256` is the SHA-256 of the UTF-8, LF-normalized instruction body after
 YAML frontmatter is removed.
+
+The body has since evolved: the completion digest carries a machine-readable `RED_EVIDENCE:`
+line the in-flight ledger parses for the `KW-ARB-MODE-001` fact `ledger.red-evidence` (packet 7.4).
+`final-body-sha256` covers that evolved body.
 
 ## Canonical projection
 

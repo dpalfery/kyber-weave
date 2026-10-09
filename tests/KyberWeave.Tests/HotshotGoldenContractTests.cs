@@ -44,7 +44,8 @@ public sealed partial class HotshotGoldenContractTests
         "conductor",
         "product-owner",
         "review-lens",        // Arbiter routing headers and refutation framing (packet 7.3)
-        "task-reviewer"
+        "task-reviewer",
+        "test-dev"            // RED_EVIDENCE digest line the ledger reads for MODE-001 (packet 7.4)
     ];
 
     /// <summary>
