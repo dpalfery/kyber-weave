@@ -323,7 +323,7 @@ public sealed class GitHubSquadReleaseSourceAuthTests
         using MemoryStream stream = new();
         using (ZipArchive archive = new(stream, ZipArchiveMode.Create, leaveOpen: true))
         {
-            foreach ((string? name, string? content) in entries)
+            foreach ((string name, string content) in entries)
             {
                 ZipArchiveEntry entry = archive.CreateEntry(name);
                 using StreamWriter writer = new(entry.Open(), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
