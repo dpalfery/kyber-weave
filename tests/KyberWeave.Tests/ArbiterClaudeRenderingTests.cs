@@ -36,6 +36,7 @@ public sealed class ArbiterClaudeRenderingTests : IDisposable
 
     private const string DispatchMatcher = "^(Agent|Task)$";
     private const string ReadGuardMatcher = "^(Read|Grep|Glob|Bash)$";
+    private const string HandbackMatcher = "^SubagentHandback$";
 
     private readonly ArbiterSquadFixture _fixture = ArbiterSquadFixture.Create();
 
@@ -90,12 +91,16 @@ public sealed class ArbiterClaudeRenderingTests : IDisposable
     }
 
     [Fact]
-    public async Task RenderAsync_UnguardedAgents_CarryNoHooks()
+    public async Task RenderAsync_UnguardedDispatchTargets_CarryOnlyTheHandbackHook()
     {
+        // docs-dev and research-agent are neither dispatchers nor guarded, but both are named
+        // in some agent's delegates-to roster, so under the 6.6 contract their only hook is
+        // the hand-back PreToolUse entry: no dispatch, guard, or PostToolUse entry.
+        const int timeoutSeconds = 5;
         SquadRenderResult result = await RenderClaudeAsync(
             _fixture.Path,
             SquadDeploymentScope.Project,
-            new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: 5));
+            new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: timeoutSeconds));
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
@@ -108,9 +113,20 @@ public sealed class ArbiterClaudeRenderingTests : IDisposable
                 Encoding.UTF8.GetString(file.Content.Span),
                 agent);
 
-            Assert.False(
-                frontmatter.Children.ContainsKey(new YamlScalarNode("hooks")),
-                $"Agent '{agent}' must not carry Arbiter hooks.");
+            YamlMappingNode hooks = RequireMapping(frontmatter, "hooks", agent);
+            Assert.Single(hooks.Children);
+
+            YamlSequenceNode entries = RequireSequence(hooks, "PreToolUse", agent);
+            YamlMappingNode entry = Assert.Single(entries.Children.OfType<YamlMappingNode>());
+            Assert.Equal(HandbackMatcher, RequireScalar(entry, "matcher", agent));
+
+            YamlSequenceNode inner = RequireSequence(entry, "hooks", agent);
+            YamlMappingNode hook = Assert.Single(inner.Children.OfType<YamlMappingNode>());
+            Assert.Equal("command", RequireScalar(hook, "type", agent));
+            Assert.Equal(
+                $"kyber-weave-arbiter hook --harness claude --caller {agent}",
+                RequireScalar(hook, "command", agent));
+            Assert.Equal(timeoutSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture), RequireScalar(hook, "timeout", agent));
         }
     }
 
@@ -190,8 +206,15 @@ public sealed class ArbiterClaudeRenderingTests : IDisposable
         foreach (string phase in new[] { "PreToolUse", "PostToolUse" })
         {
             YamlSequenceNode entries = RequireSequence(hooks, phase, agent);
-            YamlMappingNode entry = Assert.Single(entries.Children.OfType<YamlMappingNode>());
+            YamlMappingNode entry = Assert.Single(
+                entries.Children.OfType<YamlMappingNode>(),
+                e => string.Equals(RequireScalar(e, "matcher", agent), DispatchMatcher, StringComparison.Ordinal));
             Assert.Equal(DispatchMatcher, RequireScalar(entry, "matcher", agent));
+
+            if (phase == "PreToolUse")
+            {
+                AssertOnlyHandbackBeside(entries, DispatchMatcher, agent);
+            }
 
             YamlSequenceNode inner = RequireSequence(entry, "hooks", agent);
             YamlMappingNode hook = Assert.Single(inner.Children.OfType<YamlMappingNode>());
@@ -212,8 +235,11 @@ public sealed class ArbiterClaudeRenderingTests : IDisposable
             $"Guarded agent '{agent}' must not carry a PostToolUse hook.");
 
         YamlSequenceNode entries = RequireSequence(hooks, "PreToolUse", agent);
-        YamlMappingNode entry = Assert.Single(entries.Children.OfType<YamlMappingNode>());
+        YamlMappingNode entry = Assert.Single(
+            entries.Children.OfType<YamlMappingNode>(),
+            e => string.Equals(RequireScalar(e, "matcher", agent), ReadGuardMatcher, StringComparison.Ordinal));
         Assert.Equal(ReadGuardMatcher, RequireScalar(entry, "matcher", agent));
+        AssertOnlyHandbackBeside(entries, ReadGuardMatcher, agent);
 
         YamlSequenceNode inner = RequireSequence(entry, "hooks", agent);
         YamlMappingNode hook = Assert.Single(inner.Children.OfType<YamlMappingNode>());
@@ -222,6 +248,26 @@ public sealed class ArbiterClaudeRenderingTests : IDisposable
             $"kyber-weave-arbiter hook --harness claude --caller {agent}",
             RequireScalar(hook, "command", agent));
         Assert.Equal(timeoutSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture), RequireScalar(hook, "timeout", agent));
+    }
+
+    /// <summary>
+    /// Under the 6.6 hand-back contract a dispatch target's PreToolUse list holds its primary
+    /// entry plus at most one <c>^SubagentHandback$</c> entry; no other matcher may appear.
+    /// </summary>
+    private static void AssertOnlyHandbackBeside(YamlSequenceNode entries, string primaryMatcher, string agent)
+    {
+        YamlMappingNode[] others = entries.Children.OfType<YamlMappingNode>()
+            .Where(e => !string.Equals(RequireScalar(e, "matcher", agent), primaryMatcher, StringComparison.Ordinal))
+            .ToArray();
+
+        Assert.True(
+            others.Length <= 1,
+            $"'{agent}' carries {others.Length} PreToolUse entries beside its primary entry; at most one hand-back entry is allowed.");
+
+        foreach (YamlMappingNode other in others)
+        {
+            Assert.Equal(HandbackMatcher, RequireScalar(other, "matcher", agent));
+        }
     }
 
     private static YamlMappingNode SplitFrontmatter(string text, string identity)
