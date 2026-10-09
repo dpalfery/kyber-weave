@@ -1,0 +1,10 @@
+{
+  "session_id": "session-devin-1",
+  "prompt_id": "prompt-devin-1",
+  "hook_event_name": "PreToolUse",
+  "tool_name": "run_subagent",
+  "tool_input": {
+    "profile": "csharp-dev",
+    "prompt": "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/x.md\nTASK: 16.7\n\nImplement the adapter."
+  }
+}
