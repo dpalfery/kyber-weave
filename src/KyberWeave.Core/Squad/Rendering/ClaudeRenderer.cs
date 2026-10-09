@@ -82,6 +82,18 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// rendered when the wiring is null or disabled, or the scope is Global (Req 22.2), so a
 /// render without Arbiter is byte-identical to before the field existed.
 /// </para>
+/// <para>
+/// <strong>Arbiter hand-back hooks (Req 21.3):</strong> Every agent named in any
+/// dispatcher's <c>delegates-to</c> roster additionally gains a frontmatter
+/// <c>PreToolUse</c> entry matched on <c>^SubagentHandback$</c>, running the same
+/// <c>kyber-weave-arbiter hook --harness claude --caller &lt;agent&gt;</c> command line
+/// with the wiring's timeout, where <c>&lt;agent&gt;</c> is the dispatch target carrying
+/// the hook. It sits alongside any dispatch or guard entry the target already has, so a
+/// dispatcher that is itself a target keeps both PreToolUse entries, and a guarded worker
+/// that is a target keeps its read guard plus the hand-back entry. The hook never denies
+/// a hand-back; on a non-allow outcome the Arbiter returns <c>allow</c> with
+/// <c>updatedInput</c> so the dispatcher receives the envelope inside the hand-back.
+/// </para>
 /// </remarks>
 public sealed class ClaudeRenderer : ISquadRenderer
 {
@@ -95,6 +107,7 @@ public sealed class ClaudeRenderer : ISquadRenderer
     /// </summary>
     private const string DispatchMatcher = "^(Agent|Task)$";
     private const string ReadGuardMatcher = "^(Read|Grep|Glob|Bash)$";
+    private const string HandbackMatcher = "^SubagentHandback$";
 
     private static readonly string[] BaseUngovernedTools = ["TodoWrite", "Skill"];
 
@@ -228,6 +241,9 @@ public sealed class ClaudeRenderer : ISquadRenderer
         IReadOnlySet<string> guardedAgents = arbiterEnabled
             ? ArbiterHookWiring.GuardedAgents(source)
             : new HashSet<string>(StringComparer.Ordinal);
+        IReadOnlySet<string> dispatchTargets = arbiterEnabled
+            ? DispatchTargets(source)
+            : new HashSet<string>(StringComparer.Ordinal);
 
         foreach (SquadAgent agent in source.Agents)
         {
@@ -238,7 +254,8 @@ public sealed class ClaudeRenderer : ISquadRenderer
                 request.Scope,
                 request.Arbiter,
                 dispatcherAgents,
-                guardedAgents);
+                guardedAgents,
+                dispatchTargets);
             files.Add(principal);
             SquadResourceProjection.Append(files, principal, agent.Resources);
 
@@ -265,7 +282,8 @@ public sealed class ClaudeRenderer : ISquadRenderer
                         request.Scope,
                         request.Arbiter,
                         dispatcherAgents,
-                        guardedAgents);
+                        guardedAgents,
+                        dispatchTargets);
                     files.Add(skillPrincipal);
                     SquadResourceProjection.Append(files, skillPrincipal, agent.Resources);
 
@@ -319,7 +337,8 @@ public sealed class ClaudeRenderer : ISquadRenderer
         SquadDeploymentScope scope,
         SquadArbiterWiring? arbiter,
         IReadOnlySet<string> dispatcherAgents,
-        IReadOnlySet<string> guardedAgents)
+        IReadOnlySet<string> guardedAgents,
+        IReadOnlySet<string> dispatchTargets)
     {
         Dictionary<string, object?> frontmatter = new(StringComparer.Ordinal)
         {
@@ -336,7 +355,7 @@ public sealed class ClaudeRenderer : ISquadRenderer
         // Always emit tools: omitting the key inherits every subagent tool (widening).
         frontmatter["tools"] = new ClaudeToolsFlowSequence(ResolveTools(agent, capabilityProfiles));
 
-        Dictionary<string, object?>? hooks = BuildArbiterHooks(agent, arbiter, dispatcherAgents, guardedAgents);
+        Dictionary<string, object?>? hooks = BuildArbiterHooks(agent, arbiter, dispatcherAgents, guardedAgents, dispatchTargets);
         if (hooks is not null)
         {
             frontmatter["hooks"] = hooks;
@@ -360,7 +379,8 @@ public sealed class ClaudeRenderer : ISquadRenderer
         SquadDeploymentScope scope,
         SquadArbiterWiring? arbiter,
         IReadOnlySet<string> dispatcherAgents,
-        IReadOnlySet<string> guardedAgents)
+        IReadOnlySet<string> guardedAgents,
+        IReadOnlySet<string> dispatchTargets)
     {
         string singleLineDescription = string.Join(" ", agent.Description.Split(
             ['\r', '\n'],
@@ -375,7 +395,7 @@ public sealed class ClaudeRenderer : ISquadRenderer
 
         // The entry-point skill stays registered for the session, so a dispatching primary
         // agent's skill carries the same dispatch hooks as its subagent file.
-        Dictionary<string, object?>? hooks = BuildArbiterHooks(agent, arbiter, dispatcherAgents, guardedAgents);
+        Dictionary<string, object?>? hooks = BuildArbiterHooks(agent, arbiter, dispatcherAgents, guardedAgents, dispatchTargets);
         if (hooks is not null)
         {
             frontmatter["hooks"] = hooks;
@@ -424,16 +444,20 @@ public sealed class ClaudeRenderer : ISquadRenderer
     /// Builds the Arbiter frontmatter <c>hooks</c> value for one agent, or null when no hook
     /// applies. Dispatchers (non-empty <c>delegates-to</c>) gate their <c>Agent</c>/<c>Task</c>
     /// dispatches pre- and post-call; guarded implementation specialists gate their
-    /// planning-path reads pre-call. A dispatcher that is also guarded keeps only the
-    /// dispatch hooks: the dispatch gate already observes every delegation, and a second
-    /// read gate on the same caller would double-report. Returns null when the wiring is
-    /// null or disabled so the render stays byte-identical to before the field existed.
+    /// planning-path reads pre-call; every agent named in any dispatcher's
+    /// <c>delegates-to</c> roster gates its hand-back pre-call on <c>SubagentHandback</c>.
+    /// A dispatcher that is also guarded keeps only the dispatch hooks: the dispatch gate
+    /// already observes every delegation, and a second read gate on the same caller would
+    /// double-report. The hand-back entry sits alongside whichever dispatch or guard entry
+    /// the target already has. Returns null when the wiring is null or disabled so the
+    /// render stays byte-identical to before the field existed.
     /// </summary>
     private static Dictionary<string, object?>? BuildArbiterHooks(
         SquadAgent agent,
         SquadArbiterWiring? arbiter,
         IReadOnlySet<string> dispatcherAgents,
-        IReadOnlySet<string> guardedAgents)
+        IReadOnlySet<string> guardedAgents,
+        IReadOnlySet<string> dispatchTargets)
     {
         if (arbiter is null || !arbiter.Enabled)
         {
@@ -442,8 +466,9 @@ public sealed class ClaudeRenderer : ISquadRenderer
 
         bool isDispatcher = dispatcherAgents.Contains(agent.Name);
         bool isGuarded = guardedAgents.Contains(agent.Name);
+        bool isDispatchTarget = dispatchTargets.Contains(agent.Name);
 
-        if (!isDispatcher && !isGuarded)
+        if (!isDispatcher && !isGuarded && !isDispatchTarget)
         {
             return null;
         }
@@ -464,19 +489,55 @@ public sealed class ClaudeRenderer : ISquadRenderer
             }
         };
 
+        List<object?> preToolUse = [];
+        if (isDispatcher)
+        {
+            preToolUse.Add(HookEntry(DispatchMatcher));
+        }
+        else if (isGuarded)
+        {
+            preToolUse.Add(HookEntry(ReadGuardMatcher));
+        }
+
+        if (isDispatchTarget)
+        {
+            preToolUse.Add(HookEntry(HandbackMatcher));
+        }
+
         if (isDispatcher)
         {
             return new Dictionary<string, object?>(StringComparer.Ordinal)
             {
-                ["PreToolUse"] = new List<object?> { HookEntry(DispatchMatcher) },
+                ["PreToolUse"] = preToolUse,
                 ["PostToolUse"] = new List<object?> { HookEntry(DispatchMatcher) }
             };
         }
 
         return new Dictionary<string, object?>(StringComparer.Ordinal)
         {
-            ["PreToolUse"] = new List<object?> { HookEntry(ReadGuardMatcher) }
+            ["PreToolUse"] = preToolUse
         };
+    }
+
+    /// <summary>
+    /// Names the dispatch targets: every agent named in any agent's non-empty
+    /// <c>delegates-to</c> roster. The renderer attaches a hand-back hook to each target
+    /// that exists as a source agent; roster names with no source agent simply never match.
+    /// </summary>
+    private static IReadOnlySet<string> DispatchTargets(SquadSource source)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+
+        HashSet<string> targets = new(StringComparer.Ordinal);
+        foreach (SquadAgent agent in source.Agents)
+        {
+            foreach (string target in agent.DelegatesTo)
+            {
+                targets.Add(target);
+            }
+        }
+
+        return targets;
     }
 
     private static string? ResolveClaudeModel(
