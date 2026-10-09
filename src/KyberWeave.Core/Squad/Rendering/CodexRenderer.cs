@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json.Nodes;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
@@ -31,11 +32,30 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// capability permission lattice. Non-deny profile decisions are recorded as structured
 /// degradations with code <c>permission-not-expressible</c> rather than inventing unenforceable fields.
 /// </para>
+/// <para>
+/// <b>Arbiter block (Req 6.2, 8.1, 8.2, 22.2).</b> When the render request carries an
+/// enabled <see cref="SquadArbiterWiring"/> under <see cref="SquadDeploymentScope.Project"/>,
+/// the renderer returns a <c>codex</c> owned block for <c>.codex/hooks.json</c> holding
+/// <c>PreToolUse</c> and <c>PostToolUse</c> matcher groups: the shared project-wide hook
+/// <c>kyber-weave-arbiter hook --harness codex</c> (no <c>--caller</c>, since every
+/// shared-file target carries project-wide hooks) matching <c>spawn_agent</c>, with the
+/// wiring's timeout. No whole file is emitted; the deployment plan splices the block into
+/// whatever the user already has. Under Global scope there is no project configuration to
+/// enforce from, so nothing renders.
+/// </para>
 /// </remarks>
 public sealed class CodexRenderer : ISquadRenderer
 {
     private const string AgentsDirectory = ".codex/agents";
     private const string SkillsDirectory = ".codex/skills";
+
+    /// <summary>
+    /// Matches Codex's subagent spawn tool under any harness namespace prefix, and the
+    /// bare <c>Agent</c> name for the same tool invoked without qualification.
+    /// </summary>
+    private const string ArbiterMatcher = "^(Agent|(.*[._:/])?spawn_agent)$";
+
+    private const string ArbiterCommandLine = "kyber-weave-arbiter hook --harness codex";
 
     private static readonly ISerializer YamlSerializer = new SerializerBuilder().Build();
 
@@ -128,8 +148,47 @@ public sealed class CodexRenderer : ISquadRenderer
             SquadResourceProjection.Append(files, principal, skill.Resources);
         }
 
-        return Task.FromResult(new SquadRenderResult(true, files, degradations, [], []));
+        return Task.FromResult(new SquadRenderResult(true, files, degradations, [], [], BuildArbiterBlocks(request)));
     }
+
+    /// <summary>
+    /// Builds Squad's owned <c>.codex/hooks.json</c> block, or nothing when the Arbiter is
+    /// not enforced at project scope. The render stays byte-identical without the wiring
+    /// because files are untouched either way: the block travels separately for the
+    /// deployment plan to splice.
+    /// </summary>
+    private static IReadOnlyList<SquadRenderedBlock> BuildArbiterBlocks(SquadRenderRequest request)
+    {
+        if (request.Arbiter is null || !request.Arbiter.Enabled || request.Scope != SquadDeploymentScope.Project)
+        {
+            return [];
+        }
+
+        return [BuildArbiterBlock(request.Arbiter.HookTimeoutSeconds)];
+    }
+
+    private static SquadRenderedBlock BuildArbiterBlock(int timeoutSeconds) =>
+        new(
+            SquadTargetCatalog.GetToken(SquadTarget.Codex),
+            SquadHookJsonBlock.RelativePath(SquadHookBlockFormat.Codex),
+            SquadHookBlockFormat.Codex,
+            [
+                new SquadRenderedBlockEntry("PreToolUse", MatcherGroup(timeoutSeconds)),
+                new SquadRenderedBlockEntry("PostToolUse", MatcherGroup(timeoutSeconds))
+            ]);
+
+    private static JsonObject MatcherGroup(int timeoutSeconds) =>
+        new()
+        {
+            ["matcher"] = ArbiterMatcher,
+            ["hooks"] = new JsonArray(
+                new JsonObject
+                {
+                    ["type"] = "command",
+                    ["command"] = ArbiterCommandLine,
+                    ["timeout"] = timeoutSeconds,
+                }),
+        };
 
     private static SquadDeploymentFile RenderAgent(
         SquadAgent agent,
