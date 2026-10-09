@@ -27,7 +27,9 @@ Closeout explicitly distinguishes between two waiver categories:
 
 ## Active Plans
 
-None. Pipeline T9 and spine S-docs harvested 2026-09-13 into [dash/architecture.md](../dash/architecture.md), [dash/runbook.md](../dash/runbook.md), [dash/telemetry-inventory.md](../dash/telemetry-inventory.md), [ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md), and [ADR 0018](../adr/0018-kyberdash-content-retention-purge.md). ADRs 0012–0015 remain the spine harvest (0014 notes that `kyber purge-content` was not shipped). Residual risks (T8 live-source coverage, findings client-side harness filter) live on the archived plans — they are not shipped claims.
+| Plan | Status | Goal |
+|---|---|---|
+| [2026-10-09-issue-312-clean-kyberdash-db.md](2026-10-09-issue-312-clean-kyberdash-db.md) | Draft — plan approved 2026-10-09, implementation not started | Deliver [issue #312](https://github.com/dpalfery/kyber-weave/issues/312): user-initiated clean of the KyberDash database (wipe by harness or all) from the web dash and the tray, via one central engine module, with receiver pause, checkpoint reset, and automatic 7-day re-ingest. |
 
 
 
