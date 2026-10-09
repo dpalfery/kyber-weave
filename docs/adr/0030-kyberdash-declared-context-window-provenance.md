@@ -82,7 +82,7 @@ KyberDash already keeps two vocabularies apart. Availability (`measured`, `deriv
 ## Related
 
 - [ADR 0013: Telemetry-Grounded Finding Contracts, Waste Ranking, and Relocation Discipline](0013-telemetry-grounded-finding-contracts-and-waste-ranking.md)
-  — the ranking rule decision 5 applies
+  — decision 2 (D6) is the ranking rule: an inferred finding cannot outrank a deterministic finding of comparable token volume
 - [ADR 0011: ASAD as the Only Context View and as the Canonical Session Contract](0011-asad-only-context-view-and-payload-contract.md)
   — `not_measurable` reasons rather than zeros
 - [ADR 0029: Per-Bucket, OTel-First Content Precedence](0029-kyberdash-per-bucket-otel-first-content-precedence.md)
