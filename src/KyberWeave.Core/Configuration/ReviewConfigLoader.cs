@@ -57,10 +57,34 @@ public static class ReviewConfigLoader
                     $"review.gates '{gate.Id}' timeout-seconds must be greater than zero.");
             }
 
-            parsed.Add(new ReviewGate(gate.Id!, [.. gate.Run], gate.Blocking ?? true, timeoutSeconds));
+            parsed.Add(new ReviewGate(
+                gate.Id!,
+                [.. gate.Run],
+                gate.Blocking ?? true,
+                timeoutSeconds,
+                ParseAppliesWhen(gate.Id!, gate.AppliesWhen)));
         }
 
         return parsed;
+    }
+
+    private static ReviewGateAppliesWhen? ParseAppliesWhen(string id, ReviewAppliesWhenYaml? yaml)
+    {
+        if (yaml is null)
+            return null;
+
+        // An applies-when that matches nothing would skip its gate on every change, which
+        // is a gate that never runs wearing the uniform of one that does.
+        if (yaml.Paths is null || yaml.Paths.Count == 0)
+        {
+            throw new YamlException(
+                $"review.gates '{id}' applies-when.paths must list at least one path pattern.");
+        }
+
+        if (yaml.Paths.Exists(string.IsNullOrWhiteSpace))
+            throw new YamlException($"review.gates '{id}' applies-when.paths has an empty path pattern.");
+
+        return new ReviewGateAppliesWhen([.. yaml.Paths]);
     }
 
     private static ReviewCoverage ParseCoverage(ReviewCoverageYaml? coverage, ReviewCoverage defaults)
