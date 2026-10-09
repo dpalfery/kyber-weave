@@ -18,7 +18,9 @@ use anyhow::Result;
 use kyberdash_tray_lib::api::ReportFetcher;
 use kyberdash_tray_lib::ipc::{Phase, ViewState};
 use kyberdash_tray_lib::receiver::{HealthProbe, Probe, ReceiverSpawner};
-use kyberdash_tray_lib::runtime::{EventSink, Opener, Runtime, RuntimeConfig, RuntimeDependencies, CleanScope};
+use kyberdash_tray_lib::runtime::{
+    CleanScope, EventSink, Opener, Runtime, RuntimeConfig, RuntimeDependencies,
+};
 use kyberdash_tray_lib::scheduler::{RefreshRunner, REFRESH_ARGS};
 use kyberdash_tray_lib::supervisor::{Clock, ServerProcess, Spawner, SERVER_ARGS};
 use serde_json::{json, Value};
@@ -632,10 +634,17 @@ fn clean_database_spawns_the_clean_child_with_scope_and_confirmation() {
     );
     assert_eq!(
         calls[1].1,
-        vec!["dash", "clean", "--harness", "cursor", "--yes", "--no-reingest"]
-            .iter()
-            .map(|arg| (*arg).to_string())
-            .collect::<Vec<String>>(),
+        vec![
+            "dash",
+            "clean",
+            "--harness",
+            "cursor",
+            "--yes",
+            "--no-reingest"
+        ]
+        .iter()
+        .map(|arg| (*arg).to_string())
+        .collect::<Vec<String>>(),
     );
 }
 

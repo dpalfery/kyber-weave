@@ -62,9 +62,13 @@ impl CleanScope {
             serde_json::Value::String(scope) if scope == "all" => Ok(CleanScope::All),
             serde_json::Value::Object(map) => match map.get("harness") {
                 Some(serde_json::Value::String(name)) => CleanScope::harness(name.clone()),
-                _ => Err(anyhow!("clean scope must be \"all\" or {{\"harness\": \"<id>\"}}")),
+                _ => Err(anyhow!(
+                    "clean scope must be \"all\" or {{\"harness\": \"<id>\"}}"
+                )),
             },
-            _ => Err(anyhow!("clean scope must be \"all\" or {{\"harness\": \"<id>\"}}")),
+            _ => Err(anyhow!(
+                "clean scope must be \"all\" or {{\"harness\": \"<id>\"}}"
+            )),
         }
     }
 
@@ -475,10 +479,7 @@ impl Runtime {
             program.clone(),
             argv.iter().map(|arg| (*arg).to_string()).collect(),
         ));
-        let (code, stderr) = self
-            .dependencies
-            .refresh_runner
-            .run(&program, &argv);
+        let (code, stderr) = self.dependencies.refresh_runner.run(&program, &argv);
         match RefreshOutcome::from_exit_code(code, &stderr) {
             RefreshOutcome::Succeeded => {
                 self.publish()?;
