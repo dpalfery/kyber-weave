@@ -113,12 +113,12 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
 
         if (string.Equals(eventName, "PreToolUse", StringComparison.Ordinal))
         {
-            return HandlePre(payload, tool, caller, config);
+            return HandlePre(payload, tool, caller, config, context);
         }
 
         if (string.Equals(eventName, "PostToolUse", StringComparison.Ordinal))
         {
-            return HandlePost(payload, tool, caller, config);
+            return HandlePost(payload, tool, caller, config, context);
         }
 
         throw new InvalidOperationException(
@@ -197,7 +197,7 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
         return string.IsNullOrWhiteSpace(renderedCaller) ? null : renderedCaller;
     }
 
-    private string HandlePre(JsonElement payload, string? tool, string caller, KyberWeaveConfig config)
+    private string HandlePre(JsonElement payload, string? tool, string caller, KyberWeaveConfig config, HookContext context)
     {
         if (IsDispatchTool(tool))
         {
@@ -212,7 +212,7 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
             string prompt = GetString(toolInput, "prompt")
                 ?? throw new InvalidOperationException(
                     "Malformed Claude hook event: Agent input carries no prompt.");
-            HookOutcome outcome = _engine.DecidePreDispatch(caller, target, prompt, config);
+            HookOutcome outcome = DecidePre(payload, caller, target, prompt, config, context);
             return outcome.Kind switch
             {
                 HookOutcomeKind.PassThrough => string.Empty,
@@ -243,13 +243,13 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
 
         if (IsHandbackTool(tool))
         {
-            return HandleHandback(payload, caller, config);
+            return HandleHandback(payload, caller, config, context);
         }
 
         return string.Empty;
     }
 
-    private string HandlePost(JsonElement payload, string? tool, string caller, KyberWeaveConfig config)
+    private string HandlePost(JsonElement payload, string? tool, string caller, KyberWeaveConfig config, HookContext context)
     {
         if (!IsDispatchTool(tool))
         {
@@ -283,10 +283,15 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
         }
 
         string? target = null;
+        string prompt = string.Empty;
         if (payload.TryGetProperty("tool_input", out JsonElement toolInput)
             && toolInput.ValueKind == JsonValueKind.Object)
         {
             target = GetString(toolInput, "subagent_type");
+            // The return classifies to its dispatch's trigger family, so the
+            // original prompt rides along best effort; without it the engine
+            // classifies from caller and target alone.
+            prompt = GetString(toolInput, "prompt") ?? string.Empty;
         }
 
         // No double recording: a hand-back already delivered this return.
@@ -297,7 +302,7 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
             return string.Empty;
         }
 
-        HookOutcome outcome = _engine.DecidePostDispatch(caller, target, response.GetRawText(), config);
+        HookOutcome outcome = DecidePost(payload, caller, target, prompt, response.GetRawText(), config, context);
         return outcome.Kind switch
         {
             HookOutcomeKind.PassThrough => string.Empty,
@@ -325,7 +330,14 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
     /// appended to <c>message</c> after one blank line). The hand-back is never
     /// denied: a return with no join is recorded unpaired and allowed.
     /// </summary>
-    private string HandleHandback(JsonElement payload, string caller, KyberWeaveConfig config)
+    /// <remarks>
+    /// The hand-back evaluates through the same contextual path as a foreground
+    /// return: the returning agent is both caller and target, and there is no
+    /// dispatch prompt to ride along, so the prompt is empty. A plain
+    /// <see cref="IHookDecisionEngine"/> falls back to the context-free overload,
+    /// which is the call task 4.4's tests script.
+    /// </remarks>
+    private string HandleHandback(JsonElement payload, string caller, KyberWeaveConfig config, HookContext context)
     {
         JsonElement toolInput = RequireToolInput(payload);
         string? agentId = GetString(payload, "agent_id");
@@ -342,7 +354,7 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
                 "Malformed Claude hook event: SubagentHandback input carries no message.");
         }
 
-        HookOutcome outcome = _engine.DecidePostDispatch(caller, caller, message, config);
+        HookOutcome outcome = DecidePost(payload, caller, caller, string.Empty, message, config, context);
         HandbackReturns[agentId] = JoinedToolUseId(agentId) ?? string.Empty;
         return outcome.Kind switch
         {
@@ -384,6 +396,43 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
         }
 
         return null;
+    }
+
+    private HookOutcome DecidePre(
+        JsonElement payload,
+        string caller,
+        string? target,
+        string prompt,
+        KyberWeaveConfig config,
+        HookContext context)
+    {
+        if (_engine is IContextualHookDecisionEngine contextual)
+        {
+            return contextual.DecidePreDispatch(
+                Token, caller, target, prompt, config, context,
+                GetString(payload, "tool_use_id"), GetString(payload, "session_id"));
+        }
+
+        return _engine.DecidePreDispatch(caller, target, prompt, config);
+    }
+
+    private HookOutcome DecidePost(
+        JsonElement payload,
+        string caller,
+        string? target,
+        string prompt,
+        string toolOutput,
+        KyberWeaveConfig config,
+        HookContext context)
+    {
+        if (_engine is IContextualHookDecisionEngine contextual)
+        {
+            return contextual.DecidePostDispatch(
+                Token, caller, target, prompt, toolOutput, config, context,
+                GetString(payload, "tool_use_id"), GetString(payload, "session_id"));
+        }
+
+        return _engine.DecidePostDispatch(caller, target, toolOutput, config);
     }
 
     private static string RepoRootOf(JsonElement payload)

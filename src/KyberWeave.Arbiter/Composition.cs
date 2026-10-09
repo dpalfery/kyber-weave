@@ -56,7 +56,7 @@ public static class Composition
     /// <summary>Builds the production hook host: default adapters, host configuration, stderr logging.</summary>
     internal static HookCommand CreateDefault(TextWriter log) =>
         new(
-            HarnessAdapterRegistry.CreateDefault(new AllowAllHookDecisionEngine()),
+            HarnessAdapterRegistry.CreateDefault(new ArbiterHookDecisionEngine()),
             LoadHostConfig,
             () => ArbiterRecordId.New(DateTimeOffset.UtcNow));
 
@@ -123,21 +123,4 @@ public static class Composition
 
         return "0.0.0";
     }
-}
-
-/// <summary>
-/// The task 4.1 dispatch-gating decision: allow. Full step-0/step-1 evaluation arrives
-/// with the <c>serve</c>/<c>eval</c> entry points; until then the adapter still strips
-/// routing headers for implementation specialists, while the Read guard and the
-/// fail-closed paths enforce.
-/// </summary>
-public sealed class AllowAllHookDecisionEngine : IHookDecisionEngine
-{
-    /// <inheritdoc/>
-    public HookOutcome DecidePreDispatch(string caller, string? target, string prompt, KyberWeaveConfig config) =>
-        new(HookOutcomeKind.Allow);
-
-    /// <inheritdoc/>
-    public HookOutcome DecidePostDispatch(string caller, string? target, string toolOutput, KyberWeaveConfig config) =>
-        new(HookOutcomeKind.Allow);
 }

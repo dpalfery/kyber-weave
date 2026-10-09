@@ -19,6 +19,15 @@ public sealed class ArbiterReadGuardTests
 {
     private static readonly IReadOnlyList<string> ProtectedDirs = ["docs/plans", "docs/specs", "docs/todo"];
 
+    private sealed class AllowEngine : IHookDecisionEngine
+    {
+        public HookOutcome DecidePreDispatch(string caller, string? target, string prompt, KyberWeaveConfig config) =>
+            new(HookOutcomeKind.Allow);
+
+        public HookOutcome DecidePostDispatch(string caller, string? target, string toolOutput, KyberWeaveConfig config) =>
+            new(HookOutcomeKind.Allow);
+    }
+
     private static JsonElement ToolInput(string json)
     {
         JsonDocument doc = JsonDocument.Parse(json);
@@ -234,7 +243,7 @@ public sealed class ArbiterReadGuardTests
         int loads = 0;
         KyberWeaveConfig config = new() { Arbiter = new ArbiterConfig { Enabled = true } };
         HookCommand command = new(
-            HarnessAdapterRegistry.CreateDefault(new AllowAllHookDecisionEngine()),
+            HarnessAdapterRegistry.CreateDefault(new AllowEngine()),
             root => { loads++; return config; },
             () => "decision-test-1");
         using StringWriter stdout = new();

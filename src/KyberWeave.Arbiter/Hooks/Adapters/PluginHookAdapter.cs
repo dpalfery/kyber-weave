@@ -106,8 +106,8 @@ public sealed class PluginHookAdapter : IHarnessHookAdapter
 
         string caller = string.IsNullOrWhiteSpace(renderedCaller) ? "unidentified" : renderedCaller;
         return envelope.Phase == PluginPhase.Before
-            ? HandleBefore(envelope, caller, target, config)
-            : HandleAfter(envelope, caller, target, config);
+            ? HandleBefore(envelope, caller, target, config, context)
+            : HandleAfter(envelope, caller, target, config, context);
     }
 
     /// <inheritdoc/>
@@ -167,7 +167,7 @@ public sealed class PluginHookAdapter : IHarnessHookAdapter
         }
     }
 
-    private string HandleBefore(PluginEnvelope envelope, string caller, string target, KyberWeaveConfig config)
+    private string HandleBefore(PluginEnvelope envelope, string caller, string target, KyberWeaveConfig config, HookContext context)
     {
         string? prompt = ArgString(envelope.Args, _promptArgument);
         if (prompt is null)
@@ -176,7 +176,7 @@ public sealed class PluginHookAdapter : IHarnessHookAdapter
                 $"Malformed plugin hook event: args carry no '{_promptArgument}'.");
         }
 
-        HookOutcome outcome = _engine.DecidePreDispatch(caller, target, prompt, config);
+        HookOutcome outcome = DecidePre(envelope, caller, target, prompt, config, context);
         return outcome.Kind switch
         {
             HookOutcomeKind.PassThrough => string.Empty,
@@ -195,7 +195,7 @@ public sealed class PluginHookAdapter : IHarnessHookAdapter
         };
     }
 
-    private string HandleAfter(PluginEnvelope envelope, string caller, string target, KyberWeaveConfig config)
+    private string HandleAfter(PluginEnvelope envelope, string caller, string target, KyberWeaveConfig config, HookContext context)
     {
         // Any non-allow outcome blocks with the envelope or note as reason: the shim
         // appends it to the tool's output. There is no annotation shape to preserve.
@@ -204,7 +204,8 @@ public sealed class PluginHookAdapter : IHarnessHookAdapter
             : envelope.Args.ValueKind == JsonValueKind.Object
                 ? envelope.Args.GetRawText()
                 : string.Empty;
-        HookOutcome outcome = _engine.DecidePostDispatch(caller, target, toolOutput, config);
+        string prompt = ArgString(envelope.Args, _promptArgument) ?? string.Empty;
+        HookOutcome outcome = DecidePost(envelope, caller, target, prompt, toolOutput, config, context);
         return outcome.Kind switch
         {
             HookOutcomeKind.PassThrough => string.Empty,
@@ -221,6 +222,36 @@ public sealed class PluginHookAdapter : IHarnessHookAdapter
             _ => throw new InvalidOperationException(
                 $"Hook engine returned pre-dispatch outcome '{outcome.Kind}' for a post-dispatch event."),
         };
+    }
+
+    private HookOutcome DecidePre(
+        PluginEnvelope envelope, string caller, string target, string prompt, KyberWeaveConfig config, HookContext context)
+    {
+        if (_engine is IContextualHookDecisionEngine contextual)
+        {
+            return contextual.DecidePreDispatch(
+                _harnessToken, caller, target, prompt, config, context, envelope.CallId, envelope.Session);
+        }
+
+        return _engine.DecidePreDispatch(caller, target, prompt, config);
+    }
+
+    private HookOutcome DecidePost(
+        PluginEnvelope envelope,
+        string caller,
+        string target,
+        string prompt,
+        string toolOutput,
+        KyberWeaveConfig config,
+        HookContext context)
+    {
+        if (_engine is IContextualHookDecisionEngine contextual)
+        {
+            return contextual.DecidePostDispatch(
+                _harnessToken, caller, target, prompt, toolOutput, config, context, envelope.CallId, envelope.Session);
+        }
+
+        return _engine.DecidePostDispatch(caller, target, toolOutput, config);
     }
 
     private string? TargetOf(PluginEnvelope envelope) => ArgString(envelope.Args, _targetArgument);
