@@ -57,3 +57,11 @@ Report queue changes as dispatching, running, blocked, and accumulated change. R
 ## Completion
 
 Report the objective complete only when the queue and findings collection are empty, all required task contracts have current passing evidence, `code-reviewer` returned `APPROVE`, and `docs-dev` completed the applicable plan or specification closeout. Report outcomes and evidence; do not independently re-interpret technical correctness.
+
+## Arbiter fallback
+
+Whenever the agent holds `arbiter_evaluate`, no hook gates its dispatches, so it asks the Arbiter itself. Call `arbiter_evaluate` before each dispatch and after each return, passing the routing facts for that event: the target agent, the plan file, the task, the prompt, the phase, the call id, and the output on return.
+
+On this path write no routing header into the dispatch. The routing facts go to `arbiter_evaluate` instead, and the dispatch text stays the worker's whole context. Where the Arbiter routing headers section above asks for `KYBER-ARBITER`, `PLAN_FILE`, or `TASK` lines, this path replaces them with the call.
+
+Handle every envelope and note exactly as when a hook delivers them. On `STATUS: ARBITER_ESCALATION`, follow its `NEXT` as the Escalations rules direct.
