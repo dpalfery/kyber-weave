@@ -50,11 +50,20 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// Profile-declared shared identities suppress their skill projections per the native
 /// single-projection rule.
 /// </para>
+/// <para>
+/// <strong>Arbiter plugin shim (Req 6.1, 25.1):</strong> When the render request carries an
+/// enabled <see cref="SquadArbiterWiring"/> under <see cref="SquadDeploymentScope.Project"/>
+/// scope, the renderer emits the owned file <c>.opencode/plugins/kyber-arbiter.ts</c> from
+/// <see cref="ArbiterPluginShim"/> for harness token <c>opencode</c>. Nothing is rendered
+/// when the wiring is null or disabled, or the scope is Global (Req 22.2), so a render
+/// without Arbiter is byte-identical to before the field existed.
+/// </para>
 /// </remarks>
 public sealed class OpenCodeRenderer : ISquadRenderer
 {
     private const string AgentsDirectory = ".opencode/agents";
     private const string SkillsDirectory = ".opencode/skills";
+    private const string ArbiterPluginFileRelativePath = ".opencode/plugins/kyber-arbiter.ts";
 
     private const string KyberWeaveMcpPermission = "kyber-weave_*";
 
@@ -189,6 +198,18 @@ public sealed class OpenCodeRenderer : ISquadRenderer
             SquadDeploymentFile principal = RenderSkill(skill, request.Scope);
             files.Add(principal);
             SquadResourceProjection.Append(files, principal, skill.Resources);
+        }
+
+        // A null Arbiter must render byte for byte as before the field existed, so the
+        // guard lives here: only an enabled wiring at Project scope emits the owned
+        // plugin shim. Under Global scope there is no project configuration to enforce
+        // from (Req 22.4).
+        if (request.Arbiter is not null && request.Arbiter.Enabled && request.Scope == SquadDeploymentScope.Project)
+        {
+            files.Add(new SquadDeploymentFile(
+                ArbiterPluginFileRelativePath,
+                Encoding.UTF8.GetBytes(ArbiterPluginShim.Render(SquadTargetCatalog.GetToken(SquadTarget.OpenCode))),
+                SquadTargetCatalog.GetToken(SquadTarget.OpenCode)));
         }
 
         return Task.FromResult(new SquadRenderResult(true, files, degradations, [], []));
