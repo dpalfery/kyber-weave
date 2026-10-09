@@ -1,0 +1,14 @@
+{
+  "hook_event_name": "PreToolUse",
+  "session_id": "sess-handback-1",
+  "transcript_path": "/repo/transcript.jsonl",
+  "cwd": "/repo",
+  "permission_mode": "default",
+  "agent_id": "agent-9",
+  "agent_type": "csharp-dev",
+  "tool_name": "SubagentHandback",
+  "tool_input": {
+    "message": "Implemented the plan parser with tests passing."
+  },
+  "tool_use_id": "toolu-handback-1"
+}
