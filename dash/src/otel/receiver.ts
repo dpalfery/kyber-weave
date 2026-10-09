@@ -51,6 +51,23 @@ export const OTLP_LOGS_PATH = '/v1/logs'
  */
 export const OTLP_HEALTHZ_PATH = '/healthz'
 
+/**
+ * Ingestion-pause controls for a user-initiated database clean (issue #312).
+ * POST-only, and gated on a loopback TCP peer plus a loopback-or-absent
+ * `Origin` header, so a cross-origin `no-cors` POST from a visited website
+ * cannot pause ingestion. While paused, the
+ * OTLP export paths shed load with 503 + Retry-After — exporters retry, so
+ * pausing never drops telemetry — and `/healthz` keeps answering 200 with a
+ * `paused` flag so the tray's hosting probe still recognizes the port as
+ * ours. Every pause carries a lease TTL that auto-resumes; a cleaner that
+ * crashes mid-wipe cannot wedge the collector shut.
+ */
+export const OTLP_ADMIN_PAUSE_PATH = '/v1/admin/pause'
+export const OTLP_ADMIN_RESUME_PATH = '/v1/admin/resume'
+
+/** Default pause lease: a crashed cleaner resumes ingestion after 10 minutes. */
+export const DEFAULT_PAUSE_LEASE_MS = 10 * 60 * 1000
+
 const KYBERDASH_VERSION = String(
   (createRequire(import.meta.url)('../../package.json') as { version?: string }).version ?? '0.0.0',
 )
@@ -1067,6 +1084,8 @@ export class OtlpReceiver {
   private readonly maxBodyBytes: number
   private readonly discoverOccupants: PortOccupantDiscovery
   private readonly server: Server
+  private pausedUntil: number | null = null
+  private pauseTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor(opts: OtlpReceiverOptions = {}) {
     this.listenPort = opts.port ?? DEFAULT_OTLP_PORT
@@ -1180,7 +1199,43 @@ export class OtlpReceiver {
         })
         return
       }
-      respondJson(res, 200, { service: 'kyberdash-otlp', version: KYBERDASH_VERSION })
+      respondJson(res, 200, {
+        service: 'kyberdash-otlp',
+        version: KYBERDASH_VERSION,
+        paused: this.isPaused(),
+      })
+      return
+    }
+    if (path === OTLP_ADMIN_PAUSE_PATH || path === OTLP_ADMIN_RESUME_PATH) {
+      if (req.method !== 'POST') {
+        res.setHeader('Allow', 'POST')
+        respondJson(res, 405, {
+          error: { code: 'OTLP_METHOD_NOT_ALLOWED', message: `${req.method} is not supported: use POST` },
+        })
+        return
+      }
+      if (!isLoopbackAdminRequest(req)) {
+        respondJson(res, 403, {
+          error: { code: 'OTLP_FORBIDDEN', message: 'admin routes accept loopback requests only' },
+        })
+        return
+      }
+      if (path === OTLP_ADMIN_PAUSE_PATH) {
+        const leaseMs = await this.readPauseLeaseMs(req)
+        this.pause(leaseMs)
+      } else {
+        this.resume()
+      }
+      respondJson(res, 200, { paused: this.isPaused() })
+      return
+    }
+    if ((path === OTLP_TRACES_PATH || path === OTLP_LOGS_PATH) && this.isPaused()) {
+      // Shed load, do not drop it: OTLP exporters retry on 503, so a paused
+      // collector tells the sender to hold rather than refusing the batch.
+      res.setHeader('Retry-After', '5')
+      respondJson(res, 503, {
+        error: { code: 'OTLP_PAUSED', message: 'receiver paused for a database clean; retry' },
+      })
       return
     }
     if (path !== OTLP_TRACES_PATH && path !== OTLP_LOGS_PATH) {
@@ -1259,11 +1314,80 @@ export class OtlpReceiver {
       req.on('error', fail)
     })
   }
+
+  /** Whether ingestion is currently paused for a database clean. */
+  isPaused(): boolean {
+    return this.pausedUntil !== null && this.pausedUntil > Date.now()
+  }
+
+  /**
+   * Pause ingestion for `leaseMs` (default `DEFAULT_PAUSE_LEASE_MS`). The
+   * lease is the crash guard: when it expires the receiver resumes on its
+   * own, so a cleaner that dies mid-wipe cannot wedge the collector shut.
+   * The timer is unref'd — a paused receiver must never keep the CLI alive.
+   */
+  pause(leaseMs: number = DEFAULT_PAUSE_LEASE_MS): void {
+    const lease = Number.isFinite(leaseMs) && leaseMs > 0 ? Math.floor(leaseMs) : DEFAULT_PAUSE_LEASE_MS
+    if (this.pauseTimer !== null) {
+      clearTimeout(this.pauseTimer)
+      this.pauseTimer = null
+    }
+    this.pausedUntil = Date.now() + lease
+    this.pauseTimer = setTimeout(() => {
+      this.pauseTimer = null
+      this.pausedUntil = null
+    }, lease)
+    this.pauseTimer.unref()
+  }
+
+  /** Resume ingestion now, cancelling any outstanding pause lease. */
+  resume(): void {
+    if (this.pauseTimer !== null) {
+      clearTimeout(this.pauseTimer)
+      this.pauseTimer = null
+    }
+    this.pausedUntil = null
+  }
+
+  /**
+   * Read an optional `{ leaseMs }` JSON body off a pause request. Absent or
+   * unreadable bodies mean the default lease; the pause itself never fails
+   * on body shape.
+   */
+  private async readPauseLeaseMs(req: IncomingMessage): Promise<number> {
+    try {
+      const text = (await this.readBody(req)).toString('utf8').trim()
+      if (text === '') return DEFAULT_PAUSE_LEASE_MS
+      const parsed = JSON.parse(text) as { leaseMs?: unknown }
+      return typeof parsed.leaseMs === 'number' ? parsed.leaseMs : DEFAULT_PAUSE_LEASE_MS
+    } catch {
+      return DEFAULT_PAUSE_LEASE_MS
+    }
+  }
 }
 
 function respondJson(res: ServerResponse, status: number, body: Record<string, unknown>): void {
   res.writeHead(status, { 'content-type': 'application/json' })
   res.end(JSON.stringify(body))
+}
+
+/**
+ * Gate for the ingestion-pause admin routes. Two checks, matching the web
+ * dashboard's loopback guard (`dash/src/cli/web.ts`): the TCP peer must be a
+ * loopback address (the server's bind interface is configurable, so the bind
+ * alone does not prove the caller is local), and a browser `Origin` header —
+ * always present on a page-initiated POST, never sent by the loopback pause
+ * client or OTLP exporters — must itself be loopback. A `no-cors` fetch from
+ * any website the user visits therefore cannot pause ingestion.
+ */
+function isLoopbackAdminRequest(req: IncomingMessage): boolean {
+  const peer = req.socket?.remoteAddress ?? ''
+  const loopbackPeer =
+    peer === '127.0.0.1' || peer === '::1' || peer === '::ffff:127.0.0.1' || peer === 'localhost'
+  if (!loopbackPeer) return false
+  const origin = req.headers.origin
+  if (origin === undefined) return true
+  return /^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/.test(origin)
 }
 
 function headerValue(value: string | string[] | undefined): string {

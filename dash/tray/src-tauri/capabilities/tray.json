@@ -9,6 +9,7 @@
     "allow-set-settings",
     "allow-quit",
     "allow-hide-popover",
+    "allow-clean-database",
     "core:event:allow-listen",
     "core:event:allow-unlisten"
   ]

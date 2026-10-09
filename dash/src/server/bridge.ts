@@ -49,6 +49,7 @@ import {
 } from '../analysis/compare.js'
 import type { Finding } from '../analysis/findings.js'
 import { DETECTOR_IDS } from '../analysis/findings.js'
+import type { CleanReport, CleanRequest } from '../clean/clean.js'
 import { COPILOT_CREDITS_SOURCE } from '../canon/copilot-rates.js'
 
 import {
@@ -3747,8 +3748,7 @@ export class KyberBridge {
    * User-facing refresh. One derived rebuild runs only after a vendor's rows
    * actually changed; the count is how many times that hook ran, which the
    * refresh itself caps at one.
-   */
-  async refreshModelCatalog(): Promise<
+   */  async refreshModelCatalog(): Promise<
     ModelCatalogSnapshot & ModelWindowCatalogRefreshResult & { derivedRebuildCount: number }
   > {
     const store = this.store
@@ -3767,6 +3767,45 @@ export class KyberBridge {
     })
     if (rebuild !== undefined) await rebuild
     return { ...getModelCatalogSnapshot(store), ...result, derivedRebuildCount }
+  }
+
+  /**
+   * User-initiated database clean (issue #312), behind `POST /api/kyber/clean`.
+   * The owned handle is read-only by design, so the clean runs on a
+   * short-lived read-write `CanonStore` at this bridge's `canonPath` — the
+   * same code the `dash clean` CLI runs — opened for the operation and closed
+   * in a `finally`. Tests inject a `store` instead, which keeps the file
+   * untouched. Both paths hold the store refresh lock for the operation, so
+   * concurrent cleans and refreshes serialize. A busy refresh lock surfaces
+   * as `CLEAN_BUSY` for the route's 409; anything else is a 500 with a
+   * bounded message.
+   */
+  async cleanDatabase(request: CleanRequest): Promise<CleanReport> {
+    if (this.store === undefined && this.canonPath === ':memory:') {
+      throw new Error('cleanDatabase: no store to clean')
+    }
+    const { cleanDatabase, portsForClean } = await import('../clean/clean.js')
+    const { acquireStoreRefreshLock } = await import('../refresh/lock.js')
+    const lock = await acquireStoreRefreshLock()
+    if (lock.outcome !== 'acquired') {
+      const busy = new Error('a refresh or clean is already running') as Error & { code: string }
+      busy.code = 'CLEAN_BUSY'
+      throw busy
+    }
+    try {
+      if (this.store !== undefined) {
+        return await cleanDatabase(this.store, request, portsForClean(this.store))
+      }
+      const { CanonStore } = await import('../canon/store.js')
+      const store = new CanonStore(this.canonPath)
+      try {
+        return await cleanDatabase(store, request, portsForClean(store))
+      } finally {
+        store.close()
+      }
+    } finally {
+      await lock.handle.release()
+    }
   }
 
   getQuarantineCountsByReason(): Array<{ reason: string; count: number }> {

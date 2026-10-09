@@ -21,8 +21,6 @@ const _require = createRequire(import.meta.url)
 const { DatabaseSync } = _require('node:sqlite') as {
   DatabaseSync: typeof import('node:sqlite').DatabaseSync
 }
-type StatementSync = import('node:sqlite').StatementSync
-type Database = import('node:sqlite').DatabaseSync
 import { deflateSync, inflateSync } from 'node:zlib'
 
 import type { TokenCacheStore } from './tokens.js'
@@ -44,6 +42,82 @@ import {
   type RefreshTrigger,
 } from './refresh-run.js'
 import { contentFromParts } from './types.js'
+
+/**
+ * What a user-initiated wipe removed (issue #312). Counts only — the rows
+ * are gone, so nothing more specific can be reported.
+ */
+export interface StoreWipeReport {
+  /** Canonical harness ids the wipe covered (`['*']` for wipe-all). */
+  harnesses: string[]
+  /** Canonical records deleted. */
+  records: number
+  /** Provenance rows deleted. */
+  provenance: number
+  /** Checkpoint rows deleted. */
+  checkpoints: number
+}
+
+/**
+ * Delete every row a set of raw stored harness names owns — the canonical
+ * harness's own spelling plus its folded front-end names (`claude-desktop`
+ * under `claude-code`, `cursor-agent` under `cursor`). Covers records,
+ * provenance, checkpoints, and the harness-scoped derived caches (`session`,
+ * `run`, `execution`, `harness_rollup`, `problems`, and predictions via their
+ * wiped run ids). `finding` has no harness column: the post-wipe projection
+ * clears it authoritatively, so this function leaves it. Quarantine rows
+ * likewise have no harness column and stay. Call inside the caller's
+ * transaction, like `commitSourceUnit`'s inverse: a failure rolls back
+ * everything, so records and checkpoints can never disagree about coverage.
+ *
+ * <remarks>
+ * Why a free function and not methods: only `wipeHarnesses` and `wipeAll`
+ * need these statements, and they are pure SQL over the handle the caller
+ * owns — the class keeps the public names, this function keeps the deletes.
+ * </remarks>
+ */
+function wipeHarnessRows(
+  db: Database,
+  rawNames: readonly string[],
+): { records: number; provenance: number; checkpoints: number } {
+  const placeholders = rawNames.map(() => '?').join(', ')
+  const countChange = (sql: string): number => {
+    const info = db.prepare(sql).run(...rawNames) as unknown as { changes?: unknown }
+    return typeof info.changes === 'number' ? info.changes : Number(info.changes) || 0
+  }
+  const report = {
+    records: countChange(`DELETE FROM records WHERE harness IN (${placeholders})`),
+    provenance: countChange(
+      `DELETE FROM record_provenance WHERE harness_id IN (${placeholders})`,
+    ),
+    checkpoints: countChange(
+      `DELETE FROM source_checkpoint WHERE harness_id IN (${placeholders})`,
+    ),
+  }
+  db.prepare(`DELETE FROM session WHERE harness IN (${placeholders})`).run(...rawNames)
+  db.prepare(`DELETE FROM harness_rollup WHERE harness IN (${placeholders})`).run(...rawNames)
+  db.prepare(`DELETE FROM problems WHERE harness IN (${placeholders})`).run(...rawNames)
+  // Predictions join their run, so their run ids are collected BEFORE the
+  // run rows go — after that the delete below would match nothing.
+  const wipedRunIds = (
+    db.prepare(`SELECT run_id FROM run WHERE harness IN (${placeholders})`).all(...rawNames) as {
+      run_id: unknown
+    }[]
+  )
+    .map((row) => row.run_id)
+    .filter((id): id is string => typeof id === 'string' && id !== '')
+  db.prepare(`DELETE FROM run WHERE harness IN (${placeholders})`).run(...rawNames)
+  db.prepare(`DELETE FROM execution WHERE harness IN (${placeholders})`).run(...rawNames)
+  if (wipedRunIds.length > 0) {
+    const runPlaceholders = wipedRunIds.map(() => '?').join(', ')
+    db.prepare(`DELETE FROM prediction WHERE run_id IN (${runPlaceholders})`).run(...wipedRunIds)
+  }
+  return report
+}
+
+type StatementSync = import('node:sqlite').StatementSync
+type Database = import('node:sqlite').DatabaseSync
+
 import type {
   CanonicalRecord,
   ContentPart,
@@ -1983,6 +2057,102 @@ export class CanonStore {
   /** Drop derived sessions for a harness. */
   deleteSessionsByHarness(harness: string): void {
     this.db.prepare('DELETE FROM session WHERE harness = ?').run(harness)
+  }
+
+  wipeHarnesses(harnesses: readonly string[]): StoreWipeReport {
+    const canonical = [...new Set(harnesses.map((h) => normalizeHarnessName(h)))]
+    const rawNames = this.rawHarnessNamesFor(canonical)
+    if (rawNames.length === 0) {
+      this.stampClean(canonical)
+      return { harnesses: canonical, records: 0, provenance: 0, checkpoints: 0 }
+    }
+    this.db.exec('BEGIN')
+    let report: StoreWipeReport
+    try {
+      report = { harnesses: canonical, ...wipeHarnessRows(this.db, rawNames) }
+      this.db.exec('COMMIT')
+    } catch (err) {
+      this.db.exec('ROLLBACK')
+      throw err
+    }
+    // The stamp must survive the case the wipe throws: it never participates
+    // in the wiped transaction.
+    this.stampClean(canonical)
+    return report
+  }
+
+  /**
+   * Delete the whole corpus: every wipe-by-harness row plus quarantine,
+   * problems, predictions, and the log-enrichment tables. The operational
+   * audit survives: `ingest_log`, `refresh_run`, `metadata` (stamped),
+   * `token_cache`, and the model-window catalog stay.
+   */
+  wipeAll(): StoreWipeReport {
+    this.db.exec('BEGIN')
+    let report: StoreWipeReport
+    try {
+      const countAll = (table: string): number => {
+        const info = this.db.prepare(`DELETE FROM ${table}`).run() as unknown as {
+          changes?: unknown
+        }
+        return typeof info.changes === 'number' ? info.changes : Number(info.changes) || 0
+      }
+      report = {
+        harnesses: ['*'],
+        records: countAll('records'),
+        provenance: countAll('record_provenance'),
+        checkpoints: countAll('source_checkpoint'),
+      }
+      this.db.exec('DELETE FROM session')
+      this.db.exec('DELETE FROM run')
+      this.db.exec('DELETE FROM execution')
+      this.db.exec('DELETE FROM harness_rollup')
+      this.db.exec('DELETE FROM finding')
+      this.db.exec('DELETE FROM prediction')
+      this.db.exec('DELETE FROM problems')
+      this.db.exec('DELETE FROM quarantine')
+      this.db.exec('DELETE FROM pending_logs')
+      this.db.exec('DELETE FROM quarantined_logs')
+      this.db.exec('DELETE FROM enriched_logs')
+      this.db.exec('COMMIT')
+    } catch (err) {
+      this.db.exec('ROLLBACK')
+      throw err
+    }
+    this.stampClean(['*'])
+    return report
+  }
+
+  /**
+   * Raw stored `records.harness` / provenance `harness_id` values whose
+   * canonical id is one of `canonical` — the fold expansion (`claude-desktop`
+   * rows belong to a `claude-code` wipe) over both spellings.
+   */
+  private rawHarnessNamesFor(canonical: readonly string[]): string[] {
+    if (canonical.length === 0) return []
+    const wanted = new Set(canonical)
+    const raw = new Set<string>()
+    for (const table of ['records', 'record_provenance', 'source_checkpoint'] as const) {
+      const column = table === 'records' ? 'harness' : 'harness_id'
+      const rows = this.db.prepare(`SELECT DISTINCT ${column} AS name FROM ${table}`).all() as {
+        name: unknown
+      }[]
+      for (const row of rows) {
+        if (typeof row.name !== 'string' || row.name === '') continue
+        if (wanted.has(row.name) || wanted.has(normalizeHarnessName(row.name))) raw.add(row.name)
+      }
+    }
+    return [...raw]
+  }
+
+  /** Record that a user-initiated clean ran, outside any wiped transaction. */
+  private stampClean(harnesses: readonly string[]): void {
+    this.db
+      .prepare('INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)')
+      .run('last_clean_at', new Date().toISOString())
+    this.db
+      .prepare('INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)')
+      .run('last_clean_scope', JSON.stringify(harnesses))
   }
 
   /** Number of derived sessions currently built. */

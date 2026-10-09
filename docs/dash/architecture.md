@@ -890,8 +890,13 @@ The web dashboard server wires HTTP requests directly to `KyberBridge`:
 | `/api/kyber/meta` | `GET` | `MetaResult` | Tokenizer configuration, rates, span counts, and sources. |
 | `/api/kyber/coverage` | `GET` | `{ refresh, ingest, quarantineByReason, checkpoints }` | Ingest coverage: persisted refresh window (`history_weeks`, null = unknown), per-source ingest activity (`records` counts joined with `ingest_log` sums and `lastReceivedAt`; `{ status: 'unknown' }` when nothing is recorded), per-reason quarantine counts, and `source_checkpoint` statuses including `partial` and the persisted zero-record reason (`lastErrorCode`). |
 | `/api/kyber/report` | `GET` | `ContextReport` | The versioned context report for the query scope (`harness`, `session`, `run`, `days`); the same document `kyberdash report` prints. |
+| `/api/kyber/clean` | `POST` | `CleanReport` | User-initiated database clean ([ADR 0032](../adr/0032-kyberdash-user-initiated-clean.md)). Body carries the scope (`all` or `harnesses`), explicit `confirm: true`, and the optional `reingestWeeks` window (null skips re-ingest). 200 with the wipe counts and re-ingest summary; 400 invalid body/scope; 405 non-POST; 409 lock busy; 500 bounded failure. |
 
 All `/api/kyber/*` responses return standard headers (`content-type: application/json; charset=utf-8`, `cache-control: no-store`). Unrecognized `/api/kyber/*` routes return HTTP 404 JSON (guaranteed never to fall through to SPA HTML), and non-GET requests return HTTP 405 Method Not Allowed.
+
+### User-initiated database clean (ADR 0032)
+
+`cleanDatabase` (`dash/src/clean/clean.ts`) is the single implementation behind `kyberdash dash clean` and `POST /api/kyber/clean`; the tray spawns the CLI child and holds no clean logic. One clean pauses the OTLP receiver (loopback admin routes on `dash/src/otel/receiver.ts`; 503 + Retry-After while paused, `/healthz` stays 200 with `paused`, lease TTL auto-resumes), holds the refresh lock (exit 3 / 409 when busy), wipes the scope in one store transaction — records (fold-expanded to raw front-end names), provenance, checkpoints, and harness-scoped derived caches — projects the derived tables, re-ingests the scope (default last 7 days, opt-in deeper, explicit skip), and resumes ingestion in a `finally`. Kept in all cases: `ingest_log`, `refresh_run`, `metadata` (stamped `last_clean_at`/scope), `token_cache`, and the model-window catalog. Wipe-all additionally clears `quarantine` and the log-enrichment tables; per-harness wipe cannot scope quarantine rows (no harness column). No backup is taken, by design: the data is ephemeral point-in-time telemetry, re-derivable from source logs except OTLP-collected records, which both confirm surfaces disclose as permanently gone. Automatic paths (refresh, retention purge, re-ingest) keep the ADR 0016/ADR 0018 no-delete contracts; only the confirmed clean deletes rows.
 
 ### The KyberDash Tray (dash/tray/)
 
@@ -900,9 +905,9 @@ The tray is a Tauri 2 app: a Rust shell (`dash/tray/src-tauri/`) plus a React po
 resolves the `kyberdash` CLI through a validated-path resolution, supervises exactly one
 `kyberdash web --no-open` child and — when settings allow — the embedded OTLP receiver child,
 polls the bounded loopback report URL on its 15/60-second cadence, and publishes `ViewState`
-snapshots to the popover through `get_view_state` and `view-state-changed`. Exactly six
+snapshots to the popover through `get_view_state` and `view-state-changed`. Exactly seven
 commands are registered and capability-granted (`get_view_state`, `refresh_now`, `open_view`,
-`set_settings`, `quit`, `hide_popover`) alongside the narrow
+`set_settings`, `quit`, `hide_popover`, `clean_database`) alongside the narrow
 `core:event:allow-listen`/`core:event:allow-unlisten` grants; the webview holds no network
 permission and no analysis logic. The macOS status item is the KyberDash lightsaber projected
 as a monochrome template image (`icons/tray-template.svg`/`.png`).
