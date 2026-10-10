@@ -7,8 +7,10 @@
  * survives switching between those two tabs, and a session picked under one
  * harness is dropped rather than shown under the next.
  *
- * It also owns the responsive header: one navigation row, scrolled sideways
- * below the wide breakpoint rather than pushed off the screen.
+ * It also owns the shape of the shell: one navigation row carrying every
+ * destination including Compare, scrolled sideways below the wide breakpoint,
+ * no left rail at any width, and a main column that takes the space the rail
+ * used to hold.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as React from 'react'
@@ -16,8 +18,8 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 import type { ContextDoctorProps } from '@/pages/ContextDoctor'
-import type { KyberHarnessSummary, KyberSessionSummary } from '@/lib/kyberApi'
-import { fetchHarnesses, fetchKyberSession, fetchKyberSessions } from '@/lib/kyberApi'
+import type { KyberHarnessSummary, KyberRunSummary, KyberSessionSummary } from '@/lib/kyberApi'
+import { fetchHarnesses, fetchKyberSession, fetchKyberSessions, fetchRuns } from '@/lib/kyberApi'
 
 // No DashboardTools mock: PI's header tools are mounted for real, because the
 // defect this suite guards is what a narrow row does to those two controls. A
@@ -27,7 +29,7 @@ import { fetchHarnesses, fetchKyberSession, fetchKyberSessions } from '@/lib/kyb
 
 vi.mock('@/lib/kyberApi', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/kyberApi')>()
-  return { ...actual, fetchHarnesses: vi.fn(), fetchKyberSessions: vi.fn(), fetchKyberSession: vi.fn() }
+  return { ...actual, fetchHarnesses: vi.fn(), fetchKyberSessions: vi.fn(), fetchKyberSession: vi.fn(), fetchRuns: vi.fn() }
 })
 
 /**
@@ -82,9 +84,24 @@ const session = (harness: string, suffix = ''): KyberSessionSummary => ({
 const harnesses = [harnessSummary('codex', 40), harnessSummary('claude-code', 12)]
 const sessions = [session('codex'), session('claude-code'), session('codex', '-second')]
 
+/**
+ * Two runs on two harnesses, so Compare has inventory to filter. The A/B
+ * harness filters are Compare's own and independent of each other: picking a
+ * harness on one side must not narrow the other.
+ */
+const runs = (['codex', 'claude-code'] as const).map((harness, idx): KyberRunSummary => ({
+  runId: `run-${harness}`,
+  harness,
+  label: `${harness} run`,
+  groupingBasis: 'explicit',
+  started: '2026-03-01T12:00:00.000Z',
+  turnCount: 2 + idx,
+}))
+
 const mockedHarnesses = vi.mocked(fetchHarnesses)
 const mockedSessions = vi.mocked(fetchKyberSessions)
 const mockedSession = vi.mocked(fetchKyberSession)
+const mockedRuns = vi.mocked(fetchRuns)
 
 function renderApp(props: Parameters<typeof App>[0] = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
@@ -107,6 +124,7 @@ function doctorProbe(): HTMLElement {
 beforeEach(() => {
   mockedHarnesses.mockResolvedValue(harnesses)
   mockedSessions.mockResolvedValue(sessions)
+  mockedRuns.mockResolvedValue(runs)
   mockedSession.mockResolvedValue({
     id: 'sess-detail',
     session_id: 'sess-detail',
@@ -247,39 +265,107 @@ describe('one harness selector scopes the shell', () => {
 })
 
 describe('navigation surface', () => {
-  it('keeps Context Doctor and Sessions in the top navigation and Compare in the rail', async () => {
+  it('carries every destination, Compare included, in the one top navigation', async () => {
+    const { container } = renderApp({ initialPage: 'sessions' })
+    await harnessTab('codex')
+
+    for (const key of ['context-doctor', 'sessions', 'compare', 'quarantine', 'problems']) {
+      expect(screen.getByTestId(`nav-tab-${key}`), `${key} is a top tab`).toBeDefined()
+    }
+    // Compare moved into this row rather than being copied into it: a second
+    // copy would put one destination on screen twice, once per surface.
+    expect(container.querySelectorAll('[data-testid="nav-tab-compare"]')).toHaveLength(1)
+    expect(screen.queryByTestId('nav-rail-compare')).toBeNull()
+  })
+
+  it('renders no rail, drawer toggle or backdrop at any width', async () => {
+    const { container } = renderApp({ initialPage: 'sessions' })
+    await harnessTab('codex')
+
+    // The rail is deleted whole rather than emptied. Below `md` it was an
+    // off-canvas drawer, so removing it means the hamburger that opened it, the
+    // close control inside it and the backdrop behind it are gone too — a rail
+    // that is merely off-screen is still in the DOM and still in the a11y tree.
+    expect(container.querySelector('aside')).toBeNull()
+    expect(container.querySelector('#dashboard-sidebar')).toBeNull()
+    expect(screen.queryByLabelText('Open menu')).toBeNull()
+    expect(screen.queryByLabelText('Close menu')).toBeNull()
+    expect(container.querySelectorAll('[data-testid^="nav-rail-"]')).toHaveLength(0)
+
+    // Narrow and wide share one DOM: nothing here is a media-query-only twin.
+    const classes = [...container.querySelectorAll('*')].map((el) => el.className).join(' ')
+    expect(classes).not.toContain('max-md:-translate-x-full')
+    expect(classes).not.toContain('max-md:inset-y-0')
+  })
+
+  it('gives the main column the space the rail used to take', async () => {
+    const { container } = renderApp({ initialPage: 'sessions' })
+    await harnessTab('codex')
+
+    // The content is the only thing below the header row now, and it takes the
+    // full remaining height of the column. A fixed-width sibling (the rail's
+    // `w-60`) would hold the content back again.
+    const main = screen.getByTestId('page-sessions').closest('main')
+    expect(main, 'the shell renders one main column').not.toBeNull()
+    expect(main!.className).toContain('flex-1')
+    expect(main!.parentElement!.className).toContain('flex-col')
+    // Header, harness scope, main — and nothing else. A fourth child is the
+    // wrapper (or the rail) the content used to sit inside.
+    expect(main!.parentElement!.children).toHaveLength(3)
+    expect(container.querySelectorAll('[class*="w-60"]')).toHaveLength(0)
+  })
+
+  it('reaches Compare from its top tab, and offers it exactly once', async () => {
     renderApp({ initialPage: 'sessions' })
     await harnessTab('codex')
 
-    expect(screen.getByTestId('nav-tab-context-doctor')).toBeDefined()
-    expect(screen.getByTestId('nav-tab-sessions')).toBeDefined()
-    expect(screen.queryByTestId('nav-rail-context-doctor')).toBeNull()
-    expect(screen.queryByTestId('nav-rail-sessions')).toBeNull()
-    expect(screen.getByTestId('nav-rail-compare')).toBeDefined()
-    expect(screen.getByTestId('nav-tab-quarantine')).toBeDefined()
-    expect(screen.getByTestId('nav-tab-problems')).toBeDefined()
+    fireEvent.click(screen.getByTestId('nav-tab-compare'))
+
+    expect(await screen.findByTestId('page-compare')).toBeDefined()
+    expect(screen.getByTestId('page-title').textContent).toBe('Compare')
+
+    // Exactly one control on screen says Compare: the tab, which is the active
+    // one. The rail's second copy is gone rather than left dormant.
+    const compareControls = screen.getAllByRole('button', { name: 'Compare' })
+    expect(compareControls).toHaveLength(1)
+    expect(compareControls[0].getAttribute('data-testid')).toBe('nav-tab-compare')
+    expect(screen.queryByTestId('nav-rail-compare')).toBeNull()
   })
 
-  it('reaches Sessions from the top navigation rather than the collapsed drawer', async () => {
+  it('keeps the harness scope through a Compare visit, and Compare keeps its own A/B filters', async () => {
+    renderApp({ initialPage: 'sessions' })
+    await harnessTab('codex')
+    fireEvent.click(await harnessTab('codex'))
+
+    fireEvent.click(screen.getByTestId('nav-tab-compare'))
+    await screen.findByTestId('page-compare')
+
+    // Compare narrows itself, per side: filtering A must leave B alone, because
+    // the two sides answer different questions about different runs.
+    const filterA = await screen.findByTestId('compare-run-a-harness-filter')
+    const filterB = screen.getByTestId('compare-run-b-harness-filter')
+    expect(filterB.querySelectorAll('option')).toHaveLength(3) // All harnesses + 2
+    fireEvent.change(filterA, { target: { value: 'codex' } })
+    expect((filterA as HTMLSelectElement).value).toBe('codex')
+    expect((filterB as HTMLSelectElement).value).toBe('')
+    expect(screen.getByTestId('compare-run-a').querySelectorAll('option')).toHaveLength(2) // Select a run + codex
+    expect(screen.getByTestId('compare-run-b').querySelectorAll('option')).toHaveLength(3) // unfiltered
+
+    // The shell's own harness scope is untouched by all of that, and still
+    // holding when the user comes back to a surface it scopes.
+    expect((await harnessTab('codex')).getAttribute('aria-pressed')).toBe('true')
+    fireEvent.click(screen.getByTestId('nav-tab-sessions'))
+    await screen.findByTestId('page-sessions')
+    expect((await harnessTab('codex')).getAttribute('aria-pressed')).toBe('true')
+    expect(screen.queryByTestId('agent-session-row-sess-claude-code')).toBeNull()
+  })
+
+  it('reaches Sessions from the top navigation rather than a collapsed drawer', async () => {
     renderApp()
     await harnessTab('codex')
     fireEvent.click(screen.getByTestId('nav-tab-sessions'))
     expect(await screen.findByTestId('page-sessions')).toBeDefined()
     expect(screen.queryByTestId('page-context-doctor')).toBeNull()
-  })
-
-  it('leaves the off-canvas drawer usable on a narrow viewport', async () => {
-    renderApp({ initialPage: 'sessions' })
-    await harnessTab('codex')
-
-    // The drawer is the mobile-only surface, so it must still open and still
-    // carry its one remaining destination.
-    const menu = screen.getByLabelText('Open menu')
-    expect(menu.getAttribute('aria-expanded')).toBe('false')
-    fireEvent.click(menu)
-    expect(screen.getByLabelText('Open menu').getAttribute('aria-expanded')).toBe('true')
-    fireEvent.click(screen.getByTestId('nav-rail-compare'))
-    expect(await screen.findByTestId('page-compare')).toBeDefined()
   })
 
   it('mounts both operator tools and the theme toggle in the header action group', async () => {
@@ -324,7 +410,7 @@ describe('navigation surface', () => {
 
     // Tabs keep their own width inside that row; a squeezed tab wraps onto two
     // lines, which is what the fixed 48px header could not show.
-    for (const key of ['context-doctor', 'sessions', 'quarantine', 'problems']) {
+    for (const key of ['context-doctor', 'sessions', 'compare', 'quarantine', 'problems']) {
       const tab = screen.getByTestId(`nav-tab-${key}`)
       expect(tab.className, `${key} tab keeps its width`).toContain('shrink-0')
       expect(tab.className, `${key} tab does not wrap`).toContain('whitespace-nowrap')

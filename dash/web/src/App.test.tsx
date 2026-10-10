@@ -109,14 +109,14 @@ describe('App: Top Navigation Refactoring', () => {
   })
 
   it('exports exactly the header navigation tabs in NAV_TABS (requirement 2.9)', () => {
-    expect(NAV_TABS).toHaveLength(4)
+    expect(NAV_TABS).toHaveLength(5)
     const keys = NAV_TABS.map((t) => t.key)
-    expect(keys).toEqual(['context-doctor', 'sessions', 'quarantine', 'problems'])
+    expect(keys).toEqual(['context-doctor', 'sessions', 'compare', 'quarantine', 'problems'])
     const labels = NAV_TABS.map((t) => t.label)
-    expect(labels).toEqual(['Context Doctor', 'Sessions', 'Quarantine', 'Problems'])
+    expect(labels).toEqual(['Context Doctor', 'Sessions', 'Compare', 'Quarantine', 'Problems'])
   })
 
-  it('renders the header tabs and the rail destination, with no duplicate rail entries', () => {
+  it('renders every destination as a header tab, with the rail gone rather than emptied', () => {
     const qc = createTestQueryClient()
     const html = renderHtml(
       <QueryClientProvider client={qc}>
@@ -127,9 +127,9 @@ describe('App: Top Navigation Refactoring', () => {
     expect(html).toContain('data-testid="nav-tab-context-doctor"')
     expect(html).not.toContain('data-testid="nav-tab-usage"')
     expect(html).toContain('data-testid="nav-tab-sessions"')
+    expect(html).toContain('data-testid="nav-tab-compare"')
     expect(html).toContain('data-testid="nav-tab-quarantine"')
     expect(html).toContain('data-testid="nav-tab-problems"')
-    expect(html).not.toContain('data-testid="nav-tab-compare"')
     expect(html).not.toContain('data-testid="nav-tab-context"')
     expect(html).not.toContain('data-testid="nav-tab-schema"')
     expect(html).not.toContain('data-testid="nav-tab-timeline"')
@@ -137,14 +137,16 @@ describe('App: Top Navigation Refactoring', () => {
     expect(html).not.toContain('data-testid="nav-tab-kyber-context"')
 
     const navTabsMatch = html.match(/data-testid="nav-tab-[^"]+"/g)
-    expect(navTabsMatch).toHaveLength(4)
+    expect(navTabsMatch).toHaveLength(5)
 
-    // Context Doctor and Sessions live in the header now: a second copy in the
-    // rail would put the same destination on screen twice, one per surface.
-    expect(html).not.toContain('data-testid="nav-rail-context-doctor"')
-    expect(html).not.toContain('data-testid="nav-rail-sessions"')
-    expect(html).toContain('data-testid="nav-rail-compare"')
-    expect((html.match(/data-testid="nav-rail-[^"]+"/g) ?? [])).toHaveLength(1)
+    // Compare moved up into the header rather than being copied into it, so the
+    // rail is deleted whole: no rail destination, no off-canvas drawer, no
+    // hamburger that opened one and no backdrop behind it. An empty rail is
+    // still a rail, and a second copy of a destination is a duplicate.
+    expect(html).not.toMatch(/data-testid="nav-rail-[^"]+"/)
+    expect(html).not.toContain('dashboard-sidebar')
+    expect(html).not.toContain('aria-label="Open menu"')
+    expect(html).not.toContain('aria-label="Close menu"')
     expect((html.match(/data-testid="harness-selector"/g) ?? [])).toHaveLength(1)
   })
 
@@ -217,7 +219,7 @@ describe('App: Top Navigation Refactoring', () => {
 
     // Every tab keeps its own width: a shrunken label wraps to two lines inside
     // a row with no height for them.
-    for (const tab of ['context-doctor', 'sessions', 'quarantine', 'problems']) {
+    for (const tab of ['context-doctor', 'sessions', 'compare', 'quarantine', 'problems']) {
       const button = html.match(new RegExp(`<button[^>]*data-testid="nav-tab-${tab}"[^>]*>`))?.[0]
       expect(button).toContain('shrink-0')
       expect(button).toContain('whitespace-nowrap')
@@ -353,9 +355,12 @@ describe('App: Page Switching & Title Rendering', () => {
     expect(html).toContain('data-testid="page-compare"')
     expect(html).toContain('Run Comparison Workspace')
     expect(html).toContain('data-testid="compare-empty"')
-    expect(html).not.toContain('data-testid="nav-tab-compare"')
-    const compareRail = html.match(/<button[^>]*data-testid="nav-rail-compare"[^>]*>/)?.[0]
-    expect(compareRail).toContain('bg-interactive-secondary')
+    // Compare is a header tab now, and this page marks that tab active — the one
+    // place its destination is offered, since the rail that used to carry it is gone.
+    expect(html).not.toContain('data-testid="nav-rail-compare"')
+    const compareTab = html.match(/<button[^>]*data-testid="nav-tab-compare"[^>]*>/)?.[0]
+    expect(compareTab).toBeDefined()
+    expect(compareTab).toContain('bg-active-primary')
   })
 
   it('renders the Sessions page from the header navigation', () => {
@@ -371,7 +376,8 @@ describe('App: Page Switching & Title Rendering', () => {
     expect(html).not.toContain('data-testid="nav-tab-context"')
     const sessionsTab = html.match(/<button[^>]*data-testid="nav-tab-sessions"[^>]*>/)?.[0]
     expect(sessionsTab).toContain('bg-active-primary')
-    // Moved to the header; the rail must not carry a second copy.
+    // One destination, one place: the rail that used to hold a second copy of
+    // Sessions is gone rather than emptied.
     expect(html).not.toContain('data-testid="nav-rail-sessions"')
   })
 

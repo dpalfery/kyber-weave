@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useReducer, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useReducer, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 
 import { cn } from '@/lib/utils'
@@ -112,23 +112,6 @@ function viewFromProps(initialPage: KyberPage, initialPath?: string): SpineLocat
   return { level: 'context-doctor' }
 }
 
-function SideLink({ active, onClick, children, testId }: { active: boolean; onClick: () => void; children: ReactNode; testId?: string }) {
-  return (
-    <button
-      type="button"
-      data-testid={testId}
-      onClick={onClick}
-      className={cn(
-        'flex items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13.5px] transition-colors max-md:min-h-9',
-        active ? 'bg-interactive-secondary font-medium text-foreground' : 'font-light text-muted-foreground hover:text-foreground',
-      )}
-    >
-      <span className={cn('h-1.5 w-1.5 shrink-0 rounded-full', active ? 'bg-primary' : 'bg-transparent')} />
-      <span className="truncate">{children}</span>
-    </button>
-  )
-}
-
 // Theme toggle: mirrors the .dark class set by the index.html pre-paint script
 // and persists the choice to the same localStorage key (`kyberdash-theme`,
 // falling back to the pre-severance key on read until a release ships past it).
@@ -172,20 +155,31 @@ function ThemeToggle() {
 }
 
 /**
- * The destinations in the header.
+ * The destinations in the header — the shell's one navigation.
  *
- * Context Doctor and Sessions live here because the harness scope under this
- * header reaches both: they are one decision, so they are one tab row. The
- * rail keeps what the scope does not cover.
+ * There was a second place to be: a left rail, empty on the desktop and an
+ * off-canvas drawer below `md`, holding Compare. It is gone, and Compare came
+ * up here rather than being copied. Two navigation surfaces for five
+ * destinations meant the same place was offered twice, and the rail's copy was
+ * the one hidden on a phone, so the one surface that changed with the viewport
+ * was the one carrying a destination. A rail wide enough to be worth keeping
+ * was not, and the content now uses the space it held.
+ *
+ * Context Doctor and Sessions sit here because the harness scope under this
+ * header reaches both: they are one decision, so they are one tab row. Compare
+ * joins them because the rail it lived in no longer exists, and a destination
+ * with nowhere to live is one with no route to its page. It keeps its own A/B
+ * harness filters — the shell scope does not reach it, and never did.
  */
 export const NAV_TABS = [
   { key: 'context-doctor', label: 'Context Doctor' },
   { key: 'sessions', label: 'Sessions' },
+  { key: 'compare', label: 'Compare' },
   { key: 'quarantine', label: 'Quarantine' },
   { key: 'problems', label: 'Problems' },
 ] as const
 
-export type KyberPage = (typeof NAV_TABS)[number]['key'] | 'compare'
+export type KyberPage = (typeof NAV_TABS)[number]['key']
 
 export function KyberQuarantinePanel() {
   const { data, isLoading, isError } = useQuery({
@@ -289,9 +283,6 @@ export function App({ initialPage = 'context-doctor', initialPath, initialNotFou
   ])
   const location = spine.at(-1)!
   const harnessTabs = useHarnessTabs()
-  // Mobile only: the sidebar collapses to an off-canvas drawer below md.
-  // On desktop this flag is inert (the max-md: transform classes don't apply).
-  const [sidebarOpen, setSidebarOpen] = useState(false)
   const [notFoundId, setNotFoundId] = useState<string | null>(initialNotFoundId ?? null)
   // The shell's one harness scope, shared by Context Doctor and Sessions. It
   // outlives a tab switch between the two, so the same choice is still in
@@ -435,32 +426,23 @@ export function App({ initialPage = 'context-doctor', initialPath, initialNotFou
           It is one header and one navigation in both layouts: only the placement
           changes, so nothing is duplicated to make room, and the header is padded
           rather than fixed-height so neither row can be clipped by the other.
+          Nothing is held back behind a hamburger for the narrow case either —
+          the rail that had to be opened is deleted, so every destination is in
+          this row at every width.
         */}
         <header
           data-testid="app-header"
           className="flex shrink-0 flex-wrap items-center gap-x-2 gap-y-2 rounded-md border border-border bg-card px-2 py-2 shadow-[0_2px_8px_rgba(0,0,0,0.03)] dark:shadow-[0_2px_8px_rgba(0,0,0,0.5)] sm:gap-x-4 sm:px-4 lg:h-12 lg:flex-nowrap lg:px-5 lg:py-0"
         >
           <div className="flex min-w-0 items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setSidebarOpen(true)}
-              aria-label="Open menu"
-              aria-expanded={sidebarOpen}
-              aria-controls="dashboard-sidebar"
-              className="-ml-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-foreground transition-colors hover:bg-interactive-secondary md:hidden"
-            >
-              <svg viewBox="0 0 16 16" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
-                <path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11" />
-              </svg>
-            </button>
             <div className="flex min-w-0 items-center gap-2">
               <LightsaberLogo className="h-6 w-6 shrink-0" />
               {/* Below the small breakpoint the mark carries the brand on its own.
-                  Both operator tools, the menu and the mark together need more
-                  width than a 375px viewport has, and the wordmark is the one
-                  piece of this row that may give way: it is the part that is
-                  decoration rather than a control. The logo keeps its
-                  accessible name, and from `sm` up there is room for the word. */}
+                  Both operator tools and the mark together need more width than
+                  a 375px viewport has, and the wordmark is the one piece of
+                  this row that may give way: it is the part that is decoration
+                  rather than a control. The logo keeps its accessible name,
+                  and from `sm` up there is room for the word. */}
               <span className="max-sm:hidden truncate text-lg font-semibold tracking-[-0.02em] text-foreground">
                 kyber<span className="text-primary">Dash</span>
               </span>
@@ -471,7 +453,10 @@ export function App({ initialPage = 'context-doctor', initialPath, initialNotFou
           {/* The navigation row: last on the wrapped layout, in place on the wide
               one. `basis-full` gives it a row of its own, `min-w-0` lets it
               scroll inside that row rather than widening the page, and each tab
-              keeps its own width rather than wrapping to a second line. */}
+              keeps its own width rather than wrapping to a second line. Every
+              destination is here: the row scrolls rather than shedding a
+              destination into a drawer, so nothing is reachable at one width
+              and unreachable at another. */}
           <div
             className="flex min-w-0 items-center overflow-x-auto rounded-md border border-border bg-interactive-secondary p-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden max-lg:order-last max-lg:basis-full lg:order-none lg:ml-6 lg:basis-auto"
             data-testid="nav-tabs"
@@ -482,12 +467,17 @@ export function App({ initialPage = 'context-doctor', initialPath, initialNotFou
                 type="button"
                 data-testid={`nav-tab-${pg.key}`}
                 onClick={() => {
-                  if (pg.key === 'context-doctor') goHeader({ level: 'context-doctor' })
-                  else if (pg.key === 'sessions') {
+                  // Sessions is the one tab that is not a spine location, so it
+                  // sets the section without a stack to reset. Compare is: it is
+                  // a spine level, and a bare one — `pathFromLocation` has no
+                  // URL for a comparison with no runs picked yet, so opening it
+                  // leaves the address bar alone exactly as the rail did.
+                  if (pg.key === 'sessions') {
                     setNotFoundId(null)
                     setSection('sessions')
-                  } else if (pg.key === 'quarantine') goHeader({ level: 'quarantine' })
-                  else goHeader({ level: 'problems' })
+                  } else {
+                    goHeader({ level: pg.key })
+                  }
                 }}
                 className={cn(
                   'shrink-0 whitespace-nowrap rounded-[5px] px-3 py-1 text-xs font-medium transition-colors',
@@ -538,134 +528,94 @@ export function App({ initialPage = 'context-doctor', initialPath, initialNotFou
           })}
         </nav>
 
-        <div className="flex min-h-0 flex-1 gap-2.5">
-          {sidebarOpen && (
-            <button
-              type="button"
-              aria-label="Close menu"
-              onClick={() => setSidebarOpen(false)}
-              className="fixed inset-0 z-30 bg-black/40 md:hidden"
-            />
-          )}
-          <aside
-            id="dashboard-sidebar"
-            className={cn(
-              'flex w-60 shrink-0 flex-col gap-5 overflow-y-auto rounded-md border border-border bg-card p-5',
-              'max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-40 max-md:rounded-none max-md:shadow-2xl max-md:transition-[transform,visibility] max-md:duration-200 max-md:ease-out',
-              // Closed below md: slide off-canvas AND go visibility:hidden so its
-              // links leave the tab order / a11y tree (not just visually hidden).
-              sidebarOpen ? 'max-md:visible max-md:translate-x-0' : 'max-md:invisible max-md:-translate-x-full',
-            )}
-          >
-            <button
-              type="button"
-              aria-label="Close menu"
-              onClick={() => setSidebarOpen(false)}
-              className="absolute right-3 top-3 flex h-9 w-9 items-center justify-center rounded-md text-tertiary-foreground transition-colors hover:bg-interactive-secondary hover:text-foreground md:hidden"
-            >
-              <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
-                <path d="M4 4l8 8M12 4l-8 8" />
-              </svg>
-            </button>
-            {/* Context Doctor and Sessions are in the header; repeating them here put
-                one destination on screen twice, once per surface. Compare stays:
-                the harness scope does not reach it, and it is the only
-                destination the rail still carries. */}
-            <div className="flex flex-col gap-1">
-              <SideLink
-                testId="nav-rail-compare"
-                active={section === 'compare'}
-                onClick={() => {
-                  setNotFoundId(null)
-                  setSection('compare')
-                  dispatchSpine({ type: 'reset', stack: [{ level: 'compare' }] })
-                  setSidebarOpen(false)
-                }}
-              >
-                Compare
-              </SideLink>
-            </div>
-          </aside>
+        {/*
+          The content column, directly under the harness scope.
 
-          <main className="min-w-0 flex-1 overflow-y-auto pr-0.5">
-            <div className="mb-3 flex items-baseline justify-between">
-              <h1 className="font-display text-xl tracking-tight text-foreground" data-testid="page-title">
-                {pageHeading(section, location)}
-              </h1>
-            </div>
+          This used to be a row: a fixed-width rail beside it, and a hamburger
+          that slid that rail off canvas below `md`. Both are gone, so this is
+          now the one child that takes the column's remaining height, and the
+          width the rail held is content width rather than chrome. There is no
+          wrapper left to collapse, so nothing here depends on the viewport to
+          be reachable.
+        */}
+        <main className="min-h-0 min-w-0 flex-1 overflow-y-auto pr-0.5">
+          <div className="mb-3 flex items-baseline justify-between">
+            <h1 className="font-display text-xl tracking-tight text-foreground" data-testid="page-title">
+              {pageHeading(section, location)}
+            </h1>
+          </div>
 
-            {notFoundId ? (
-              <NotFoundPanel id={notFoundId} onHome={() => goHeader({ level: 'context-doctor' })} />
-            ) : showSpine ? (
-              location.level === 'context-doctor' ? (
-                <ContextDoctor
-                  key="context-doctor"
-                  activeHarness={activeHarness}
-                  sessionId={sessionId}
-                  onSessionChange={setSessionId}
-                  onSelectRun={(runId, harnessId) => openSpine({ level: 'run', runId, harnessId })}
-                  onSelectFinding={(findingId) => openSpine({ level: 'finding', findingId })}
-                  onSelectTurn={(turnIndex, executionId, runId) => openSpine({ level: 'turn', turnIndex, executionId, runId })}
-                />
-              ) : location.level === 'harness' ? (
-                <HarnessDetail
-                  key={`harness:${location.harnessId}`}
-                  harnessId={location.harnessId!}
-                  onSelectAll={() => openSpine({ level: 'context-doctor' }, 'goTo')}
-                  onSelectRun={(runId) => openSpine({ level: 'run', harnessId: location.harnessId, runId })}
-                  onSelectFinding={(findingId) => openSpine({ level: 'finding', harnessId: location.harnessId, findingId })}
-                  onSelectTurn={(turnIndex, executionId, runId) => openSpine({ level: 'turn', harnessId: location.harnessId, runId, executionId, turnIndex })}
-                />
-              ) : location.level === 'run' || location.level === 'execution' ? (
-                <RunDetail
-                  key={`run:${location.runId}:${location.executionId ?? ''}`}
-                  runId={location.runId!}
-                  executionId={location.level === 'execution' ? location.executionId : undefined}
-                  onSelectAll={() => openSpine({ level: 'context-doctor' }, 'goTo')}
-                  onSelectHarness={(harnessId) => openSpine({ level: 'harness', harnessId }, 'goTo')}
-                  onSelectExecution={(executionId) => openSpine({ level: 'execution', harnessId: location.harnessId, runId: location.runId, executionId })}
-                  onSelectTurn={(turnIndex, executionId) => openSpine({ level: 'turn', harnessId: location.harnessId, runId: location.runId, executionId, turnIndex })}
-                  onSelectFinding={(findingId) => openSpine({ level: 'finding', harnessId: location.harnessId, runId: location.runId, findingId })}
-                />
-              ) : location.level === 'turn' ? (
-                <TurnDetail
-                  key={`turn:${location.runId}:${location.executionId ?? ''}:${location.turnIndex}`}
-                  runId={location.runId!}
-                  executionId={location.executionId}
-                  turnIndex={location.turnIndex!}
-                  onSelectAll={() => openSpine({ level: 'context-doctor' }, 'goTo')}
-                  onSelectHarness={(harnessId) => openSpine({ level: 'harness', harnessId }, 'goTo')}
-                  onSelectRun={(runId) => openSpine({ level: 'run', harnessId: location.harnessId, runId }, 'goTo')}
-                  onSelectExecution={(executionId) => openSpine({ level: 'execution', harnessId: location.harnessId, runId: location.runId, executionId }, 'goTo')}
-                />
-              ) : location.level === 'compare' ? (
-                <CompareRuns initialRunAId={location.compareA} initialRunBId={location.compareB} />
-              ) : (
-                <FindingDetail
-                  key={`finding:${location.findingId}`}
-                  findingId={location.findingId}
-                  onSelectAll={() => openSpine({ level: 'context-doctor' }, 'goTo')}
-                  onSelectHarness={(harnessId) => openSpine({ level: 'harness', harnessId }, 'goTo')}
-                  onSelectRun={(runId) => openSpine({ level: 'run', runId }, 'goTo')}
-                  onSelectExecution={(executionId) => openSpine({ level: 'execution', executionId })}
-                  onSelectTurn={(turnIndex, executionId, runId) => openSpine({ level: 'turn', harnessId: location.harnessId, runId: runId ?? location.runId, executionId, turnIndex })}
-                  onBack={() => {
-                    const nextStack = applySpineAction(spine, { type: 'pop' })
-                    dispatchSpine({ type: 'pop' })
-                    const path = pathFromLocation(nextStack.at(-1)!)
-                    if (path) pushView(path, nextStack)
-                  }}
-                />
-              )
-            ) : section === 'sessions' ? (
-              <Sessions activeHarness={activeHarness} onSelectSession={setSessionId} />
-            ) : section === 'quarantine' ? (
-              <KyberQuarantinePanel />
+          {notFoundId ? (
+            <NotFoundPanel id={notFoundId} onHome={() => goHeader({ level: 'context-doctor' })} />
+          ) : showSpine ? (
+            location.level === 'context-doctor' ? (
+              <ContextDoctor
+                key="context-doctor"
+                activeHarness={activeHarness}
+                sessionId={sessionId}
+                onSessionChange={setSessionId}
+                onSelectRun={(runId, harnessId) => openSpine({ level: 'run', runId, harnessId })}
+                onSelectFinding={(findingId) => openSpine({ level: 'finding', findingId })}
+                onSelectTurn={(turnIndex, executionId, runId) => openSpine({ level: 'turn', turnIndex, executionId, runId })}
+              />
+            ) : location.level === 'harness' ? (
+              <HarnessDetail
+                key={`harness:${location.harnessId}`}
+                harnessId={location.harnessId!}
+                onSelectAll={() => openSpine({ level: 'context-doctor' }, 'goTo')}
+                onSelectRun={(runId) => openSpine({ level: 'run', harnessId: location.harnessId, runId })}
+                onSelectFinding={(findingId) => openSpine({ level: 'finding', harnessId: location.harnessId, findingId })}
+                onSelectTurn={(turnIndex, executionId, runId) => openSpine({ level: 'turn', harnessId: location.harnessId, runId, executionId, turnIndex })}
+              />
+            ) : location.level === 'run' || location.level === 'execution' ? (
+              <RunDetail
+                key={`run:${location.runId}:${location.executionId ?? ''}`}
+                runId={location.runId!}
+                executionId={location.level === 'execution' ? location.executionId : undefined}
+                onSelectAll={() => openSpine({ level: 'context-doctor' }, 'goTo')}
+                onSelectHarness={(harnessId) => openSpine({ level: 'harness', harnessId }, 'goTo')}
+                onSelectExecution={(executionId) => openSpine({ level: 'execution', harnessId: location.harnessId, runId: location.runId, executionId })}
+                onSelectTurn={(turnIndex, executionId) => openSpine({ level: 'turn', harnessId: location.harnessId, runId: location.runId, executionId, turnIndex })}
+                onSelectFinding={(findingId) => openSpine({ level: 'finding', harnessId: location.harnessId, runId: location.runId, findingId })}
+              />
+            ) : location.level === 'turn' ? (
+              <TurnDetail
+                key={`turn:${location.runId}:${location.executionId ?? ''}:${location.turnIndex}`}
+                runId={location.runId!}
+                executionId={location.executionId}
+                turnIndex={location.turnIndex!}
+                onSelectAll={() => openSpine({ level: 'context-doctor' }, 'goTo')}
+                onSelectHarness={(harnessId) => openSpine({ level: 'harness', harnessId }, 'goTo')}
+                onSelectRun={(runId) => openSpine({ level: 'run', harnessId: location.harnessId, runId }, 'goTo')}
+                onSelectExecution={(executionId) => openSpine({ level: 'execution', harnessId: location.harnessId, runId: location.runId, executionId }, 'goTo')}
+              />
+            ) : location.level === 'compare' ? (
+              <CompareRuns initialRunAId={location.compareA} initialRunBId={location.compareB} />
             ) : (
-              <KyberProblemsPanel />
-            )}
-          </main>
-        </div>
+              <FindingDetail
+                key={`finding:${location.findingId}`}
+                findingId={location.findingId}
+                onSelectAll={() => openSpine({ level: 'context-doctor' }, 'goTo')}
+                onSelectHarness={(harnessId) => openSpine({ level: 'harness', harnessId }, 'goTo')}
+                onSelectRun={(runId) => openSpine({ level: 'run', runId }, 'goTo')}
+                onSelectExecution={(executionId) => openSpine({ level: 'execution', executionId })}
+                onSelectTurn={(turnIndex, executionId, runId) => openSpine({ level: 'turn', harnessId: location.harnessId, runId: runId ?? location.runId, executionId, turnIndex })}
+                onBack={() => {
+                  const nextStack = applySpineAction(spine, { type: 'pop' })
+                  dispatchSpine({ type: 'pop' })
+                  const path = pathFromLocation(nextStack.at(-1)!)
+                  if (path) pushView(path, nextStack)
+                }}
+              />
+            )
+          ) : section === 'sessions' ? (
+            <Sessions activeHarness={activeHarness} onSelectSession={setSessionId} />
+          ) : section === 'quarantine' ? (
+            <KyberQuarantinePanel />
+          ) : (
+            <KyberProblemsPanel />
+          )}
+        </main>
       </div>
 
     </div>
