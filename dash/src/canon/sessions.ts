@@ -15,7 +15,7 @@
 import { analyzeContext, type ContextPart, type ContextTurn } from '../analysis/context.js'
 import { rankSchemas, type ToolDefinition } from '../analysis/schema.js'
 import { auxiliarySpend, buildTimeline, subagentSessions } from '../analysis/timeline.js'
-import { measuredInput, sumCosts } from './cost.js'
+import { costBasisMismatchOf, measuredInput, sumCosts, type CostBasisMismatch } from './cost.js'
 import { isCopilotHarness, priceCopilotTurn } from './copilot-rates.js'
 import { isPublishedTableHarness, pricePublishedTurn } from './published-pricing.js'
 import { contextLimitOf, DEFAULT_CONTEXT_LIMIT } from './context-window.js'
@@ -302,6 +302,15 @@ export type AsadSessionPayload = {
   tools: AsadTool[]
   timeline: ReturnType<typeof buildTimeline>['children'] | NotMeasurable
   turns: Array<Record<string, unknown>>
+  /**
+   * The server's basis verdict: `null` when the session's cost blocks agree, or
+   * when nothing was priced. Decided here, where `sumCosts` already refuses to
+   * blend, so a display layer renders the answer instead of re-deriving it
+   * (rule R1). Always present once a store has been re-projected by a build
+   * that writes it — `undefined` only on a row stored before this field existed,
+   * which a display layer must read as "unknown", never as "no mismatch".
+   */
+  costBasisMismatch: CostBasisMismatch | null
   requests: Array<Record<string, unknown>>
   servers: AsadServer[]
   coverage: Record<string, number>
@@ -634,6 +643,9 @@ export function buildSessionRow(
 
   const timeline = buildTimeline([...records])
   const cost = sumCosts(turnRecords.map((record) => record.cost))
+  // The same refusal, as a verdict the payload carries: the panel renders this
+  // text, so the browser never re-runs the sum itself (rule R1).
+  const costBasisMismatch = costBasisMismatchOf(turnRecords.map((record) => record.cost), cost)
 
   const totals = turnRecords.reduce(
     (acc, record) => ({
@@ -790,6 +802,7 @@ export function buildSessionRow(
       context: context.measurable ? 1 : 0,
     },
     problems: cost.ok ? [] : [cost.problem],
+    costBasisMismatch,
     reconciliation: turnRecords.map((record) => ({
       request: record.spanId,
       root_input: record.tokens.reportedInput,

@@ -12,11 +12,11 @@
 // Tuesday" answerable.
 
 /** How a refresh was started. Recorded so a failing cadence is distinguishable from a failing person. */
-export type RefreshTrigger = 'cli' | 'tray' | 'scheduled'
+export type RefreshTrigger = 'cli' | 'tray' | 'scheduled' | 'web'
 
 export type RefreshRunStatus = 'running' | 'success' | 'failure'
 
-export const REFRESH_TRIGGERS: readonly RefreshTrigger[] = ['cli', 'tray', 'scheduled']
+export const REFRESH_TRIGGERS: readonly RefreshTrigger[] = ['cli', 'tray', 'scheduled', 'web']
 
 /** A running row older than this is reconciled as failed before the next refresh starts. */
 export const REFRESH_MAX_AGE_MS = 15 * 60 * 1000

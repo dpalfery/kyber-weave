@@ -42,6 +42,19 @@ const NOOP_COMMANDS: TrayCommands = {
   setSettings: () => {},
   quit: () => {},
   cleanDatabase: () => {},
+  importFolderHistory: () => {},
+  setSharedSettings: () => {},
+}
+
+const JOBS_IDLE: NonNullable<ViewState['jobs']> = {
+  refresh: {
+    state: 'idle',
+    lastSuccessAt: '2026-09-19T11:00:00.000Z',
+    lastFailure: null,
+    nextDueAt: '2026-09-19T12:05:00.000Z',
+  },
+  paused: false,
+  storeGeneration: 3,
 }
 
 function viewState(overrides: Partial<ViewState> = {}): ViewState {
@@ -52,14 +65,14 @@ function viewState(overrides: Partial<ViewState> = {}): ViewState {
     error: null,
     refresh: { state: 'idle', lastSuccessAt: '2026-09-19T11:00:00.000Z', lastFailure: null },
     receiver: 'reachable',
+    jobs: null,
+    sharedSettings: null,
     settings: {
       harness: 'all',
       windowDays: 7,
-      refreshMinutes: 5,
       attentionThreshold: 0.7,
       criticalThreshold: 0.9,
       launchAtLogin: false,
-      hostReceiver: false,
     },
     ...overrides,
   }
@@ -249,11 +262,42 @@ describe('Popover phases', () => {
     expect(html).toContain('canon.db is locked')
   })
 
+  it('derives the receiver line from sharedSettings when the core sends no receiver field', () => {
+    // The core stopped serializing `receiver`, so the footer used to say
+    // "receiver unknown" forever. `receiverHosted: false` is an answer, not an
+    // absence: the server said it does not host the receiver here.
+    const shared = {
+      folderImportScheduled: false,
+      jobsPaused: false,
+      refreshCadenceMinutes: 15,
+      receiverHosted: true,
+    }
+
+    expect(
+      render(viewState({ receiver: undefined, sharedSettings: shared })),
+    ).toContain('receiver hosted by KyberDash')
+    // Not hosting it is not a fault: the user turned the receiver off, so saying
+    // "not reachable" would report a broken network to someone who did exactly what
+    // they meant to.
+    expect(
+      render(viewState({ receiver: undefined, sharedSettings: { ...shared, receiverHosted: false } })),
+    ).toContain('receiver off')
+    expect(
+      render(viewState({ receiver: undefined, sharedSettings: { ...shared, receiverHosted: false } })),
+    ).not.toContain('receiver not reachable')
+    // Unknown stays unknown: no settings document means no claim either way.
+    expect(render(viewState({ receiver: undefined, sharedSettings: null }))).toContain(
+      'receiver unknown',
+    )
+    expect(render(viewState({ receiver: undefined }))).toContain('receiver unknown')
+  })
+
   it('names every receiver status (R10.6)', () => {
     const expected = {
       reachable: 'receiver reachable',
       'not-reachable': 'receiver not reachable',
       hosted: 'receiver hosted by KyberDash',
+      off: 'receiver off',
       'port-held-by-other': 'receiver port held by another process',
       unknown: 'receiver unknown',
     } as const
@@ -363,3 +407,88 @@ function escapeHtml(value: string): string {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
 }
+
+/** Matches an opening tag carrying the test id with no `disabled` attribute. */
+function enabled(testId: string): RegExp {
+  return new RegExp(`<button(?![^>]*\\bdisabled\\b)[^>]*data-testid="${testId}"`)
+}
+
+describe('Popover jobs and pause (architecture rule R1: display layer only)', () => {
+  it('renders without jobs when the core reports none (null is unknown, not paused)', () => {
+    const html = render(viewState({ jobs: null }))
+
+    expect(html).toContain('data-testid="popover"')
+    expect(html).not.toMatch(/data-testid="jobs-state"[^>]*>[^<]*\bpaused\b/i)
+  })
+
+  it('shows the paused state from ViewState.jobs and offers Resume', () => {
+    const html = render(viewState({ jobs: { ...JOBS_IDLE, paused: true } }))
+
+    expect(html).toContain('data-testid="pause-toggle"')
+    expect(html).toMatch(/data-testid="pause-toggle"[^>]*>\s*Resume/)
+    expect(html).toMatch(/data-testid="jobs-state"[^>]*data-paused="true"/)
+  })
+
+  it('shows the running state and offers Pause when jobs are not paused', () => {
+    const html = render(viewState({ jobs: JOBS_IDLE }))
+
+    expect(html).toMatch(/data-testid="pause-toggle"[^>]*>\s*Pause/)
+    expect(html).toMatch(/data-testid="jobs-state"[^>]*data-paused="false"/)
+  })
+
+  it('says only scheduled jobs stop while paused', () => {
+    const html = render(viewState({ jobs: { ...JOBS_IDLE, paused: true } }))
+    const state = /data-testid="jobs-paused-state"[^>]*>([\s\S]*?)<\/(?:p|div|span)>/.exec(html)
+
+    expect(state).not.toBeNull()
+    const text = state![1]!.toLowerCase()
+    expect(text).toContain('only scheduled jobs')
+    expect(text).toContain('manual')
+    expect(text).toContain('otlp')
+    expect(text).toContain('retention')
+  })
+
+  it('keeps Refresh now, Import folder history and Clean enabled while paused', () => {
+    const html = render(viewState({ jobs: { ...JOBS_IDLE, paused: true } }))
+
+    expect(html).toMatch(enabled('refresh-now'))
+    expect(html).toMatch(enabled('import-folder-history'))
+    expect(html).toMatch(enabled('clean-database-arm'))
+  })
+
+  it('reflects a running server job on Refresh now even if the local refresh is idle', () => {
+    const html = render(
+      viewState({
+        jobs: { ...JOBS_IDLE, refresh: { ...JOBS_IDLE.refresh, state: 'running' } },
+      }),
+    )
+
+    expect(html).toContain('Refreshing…')
+    expect(html).toMatch(/<button(?=[^>]*\bdisabled\b)[^>]*data-testid="refresh-now"/)
+  })
+
+  it('reflects a job running elsewhere on Refresh now', () => {
+    const html = render(
+      viewState({
+        jobs: { ...JOBS_IDLE, refresh: { ...JOBS_IDLE.refresh, state: 'running-elsewhere' } },
+      }),
+    )
+
+    expect(html).toContain('Refresh running elsewhere')
+    expect(html).toMatch(/<button(?=[^>]*\bdisabled\b)[^>]*data-testid="refresh-now"/)
+  })
+
+  it('leaves Refresh now enabled when the server job is idle', () => {
+    const html = render(viewState({ jobs: JOBS_IDLE }))
+
+    expect(html).toMatch(enabled('refresh-now'))
+  })
+
+  it('places the maintenance controls before the actions row', () => {
+    const html = render(viewState({ jobs: JOBS_IDLE }))
+    const maintenanceAt = html.indexOf('data-testid="maintenance"')
+
+    expect(maintenanceAt).toBeGreaterThanOrEqual(0)
+    expect(maintenanceAt).toBeLessThan(html.indexOf('data-testid="actions"'))
+  })
+})

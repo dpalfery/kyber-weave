@@ -4,7 +4,7 @@ title: Harness-Source Jobs, Client-Surface Identity, and Checkpointed Local Refr
 doc-type: adr
 status: current
 owner: dpalfery
-last-reviewed: 2026-09-13
+last-reviewed: 2026-10-10
 ---
 
 # ADR 0016: Harness-Source Jobs, Client-Surface Identity, and Checkpointed Local Refresh
@@ -12,6 +12,18 @@ last-reviewed: 2026-09-13
 ## Status
 
 Accepted, 2026-09-12; harvested as shipped 2026-09-13. Extends [ADR 0008](0008-kyberdash-single-canonical-store.md) and [ADR 0009](0009-multi-signal-ingestion-span-shaped-record.md). The command, schema-11 checkpoints, and split identities now match this decision. Verified behaviour lives in [KyberDash architecture](../dash/architecture.md#local-harness-source-refresh).
+
+Amended 2026-10-10 ([issue #319](https://github.com/dpalfery/kyber-weave/issues/319)):
+decision 1's refresh-trigger sentence is revised, and so is the rejected alternative it
+decided. A surface may now ask for a refresh — the web dashboard's **Refresh data** and the
+tray's refresh both go to `POST /api/kyber/refresh` on the engine — but the ask is a request
+to run the refresh lifecycle, never a way to choose what gets read: whether a run reads
+folder sources at all is the shared setting `settings.folder_import.scheduled`, off by
+default, and only a terminal `dash refresh` (trigger `cli`) always imports. The scheduling
+that drives those asks, the one-off import, and the hosts that own them are decided in
+[ADR 0033](0033-kyberdash-surfaces-are-display-layers.md) and stated as a standing boundary
+in [`rules/kyberdash-display-layer`](../rules/kyberdash-display-layer.md). Decisions 2–8
+are unchanged.
 
 ## Context
 
@@ -21,7 +33,7 @@ The [refresh pipeline plan](../archive/plans/2026-09-06-kyberdash-refresh-pipeli
 
 ## Decision
 
-1. **Public command.** Local-history ingest is `kyber-weave dash refresh` (`dash refresh` on the KyberDash CLI). It is not a top-level `refresh` command. `--history-weeks` is a positive integer; omission means two weeks (`DEFAULT_HISTORY_WEEKS = 2`). There is no public `--provider` / vendor selector. Usage errors (invalid `--history-weeks`) exit `2` before the store opens; any failed harness job or derivation failure exits `1`; complete success, including absent sources, exits `0`. A dashboard refresh button is not part of this lifecycle.
+1. **Public command.** Local-history ingest is `kyber-weave dash refresh` (`dash refresh` on the KyberDash CLI). It is not a top-level `refresh` command. `--history-weeks` is a positive integer; omission means two weeks (`DEFAULT_HISTORY_WEEKS = 2`). There is no public `--provider` / vendor selector. Usage errors (invalid `--history-weeks`) exit `2` before the store opens; any failed harness job or derivation failure exits `1`; complete success, including absent sources, exits `0`. A dashboard refresh button is not a decision about sources: it asks the engine to run a refresh (`POST /api/kyber/refresh`), and the run reads folder sources only when the shared setting `settings.folder_import.scheduled` is `on`. A terminal `dash refresh` (trigger `cli`) is the one run that always imports, because a person typing it asked for their own history back ([ADR 0033](0033-kyberdash-surfaces-are-display-layers.md) decisions 2 and 6).
 2. **One logical job per harness source type**, not per vendor, parent dot-folder, or file. Native files or database records are the units of work inside a job.
 3. **Client surfaces stay distinct** whenever the source supplies deterministic evidence (`antigravity` / `antigravity-cli` / `antigravity-ide`; Copilot CLI vs editor vs agent; Codex and Claude classified from native originator/entrypoint, with an explicit unclassified bucket when evidence is missing). VS Code distributions of one client remain one harness. A shared store with no client discriminator (today: Kilo's shared runtime DB) stays one honest identity rather than a guessed split.
 4. **Gemini is a model/provider identity, not a coding harness.** Canonical records must not use harness `gemini` merely because an Antigravity session used a Gemini model. Network sources such as Vercel Gateway stay off this local-history job set.
@@ -41,7 +53,12 @@ The [refresh pipeline plan](../archive/plans/2026-09-06-kyberdash-refresh-pipeli
 - **One job per upstream provider object.** Rejected. Antigravity's three roots and Copilot's source types would collapse in the scheduler even if the UI later tried to split them.
 - **Treat Gemini as a harness because Antigravity lives under `~/.gemini`.** Rejected. Path coincidence is not client identity; it already produced false rollups.
 - **Infer missing client splits from vendor or model.** Rejected. Unclassified or shared identities are honest; guessed filters are not.
-- **UI-triggered refresh before the CLI contract exists.** Rejected. A button without windowing, checkpoints, and per-harness isolation would hide the same full-corpus failure modes.
+- **A UI-triggered refresh that decides its own sources.** Rejected. The CLI contract —
+  windowing, checkpoints, per-harness isolation — is what makes a refresh safe to ask for
+  repeatedly, so a surface's **Refresh data** is an API request to that same engine rather
+  than a second implementation: it cannot widen the window, choose the sources, or import
+  folder history the setting has withheld. Before the CLI contract existed, a button would
+  have hidden the same full-corpus failure modes.
 
 ## Consequences
 
@@ -49,9 +66,16 @@ The [refresh pipeline plan](../archive/plans/2026-09-06-kyberdash-refresh-pipeli
 - `normalizeHarnessName` must not collapse those ids. Survey-family maps may still group split surfaces onto a shared E4 cache survey (telemetry vocabulary, not stored identity).
 - Schema 11 migrates in place; production stores still need the existing backup path before opening a new binary.
 - CLI output must stay free of chat content and raw local paths.
+- The surfaces' refresh is a request over `POST /api/kyber/refresh`; the schedule that
+  normally issues it is owned by `JobHost` (`dash/src/jobs/host.ts`) in the `kyberdash web`
+  server, and a run whose only question was "did a human ask" is answered by the trigger,
+  not by which surface pressed the button
+  ([ADR 0033](0033-kyberdash-surfaces-are-display-layers.md)).
 
 ## Related
 
+- [ADR 0033: The KyberDash Tray and Web Dashboard Are Display Layers](0033-kyberdash-surfaces-are-display-layers.md) — the engine hosts the jobs, and folder import is opt-in
+- [KyberDash display-layer rule](../rules/kyberdash-display-layer.md) — the surfaces hold no scheduler or job
 - [KyberDash architecture](../dash/architecture.md)
 - [ADR 0006](../archive/adrs/0006-kyberdash-soft-fork-merge-zone-and-embedded-receiver.md) — `dash/kyber/refresh/**` adapter seam
 - [ADR 0008](0008-kyberdash-single-canonical-store.md)

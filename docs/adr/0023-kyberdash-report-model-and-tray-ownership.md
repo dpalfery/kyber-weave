@@ -20,6 +20,9 @@ decision 1: "A dashboard refresh button is not part of this lifecycle." Everythi
 ADR 0016 stands, and ADR 0016 is not edited — the same shape as
 [ADR 0008](0008-kyberdash-single-canonical-store.md) superseding one decision of ADR 0007.
 
+Decision 3 and the server-sharing Consequence below are superseded by
+[ADR 0033](0033-kyberdash-surfaces-are-display-layers.md).
+
 ## Context
 
 KyberDash now has three surfaces: the `kyberdash report` CLI, the web dashboard, and a Tauri

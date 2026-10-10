@@ -452,6 +452,15 @@ select {
   font-variant-numeric: tabular-nums;
 }
 
+/* The cadence draft's validation message: a finding the operator can act on,
+   so it is coloured like the health footer's failure line rather than left to
+   look like ordinary body text. */
+.settings__error {
+  margin: 0;
+  font-size: 11px;
+  color: var(--chart-6);
+}
+
 /* The checkbox leads its label, so this row reads left-to-right rather than
    pushing the control to the far edge like the numeric rows above. */
 .settings__row--toggle {

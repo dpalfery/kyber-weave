@@ -16,12 +16,31 @@ import { EmptyState } from './components/EmptyState'
 import { FindingsList } from './components/FindingsList'
 import { HarnessSelector } from './components/HarnessSelector'
 import { HealthFooter } from './components/HealthFooter'
+import { Maintenance } from './components/Maintenance'
 import { SessionPanel } from './components/SessionPanel'
 import { SetupState } from './components/SetupState'
 import { SettingsView } from './components/SettingsView'
 import { StaleBanner } from './components/StaleBanner'
 import { formatAge } from './format'
-import type { TrayCommands, ViewState } from './viewState'
+import type { ReceiverStatus, RefreshInfo, SharedSettings, TrayCommands, ViewState } from './viewState'
+
+/**
+ * The footer's receiver line, derived from the server-owned settings document.
+ *
+ * The Rust core no longer serializes a `receiver` field (the server owns the
+ * receiver now), so reading only that field left the footer saying "receiver
+ * unknown" forever. `receiverHosted: false` is not unknown either: the server
+ * answered, and what it says is that it is not hosting the receiver here -
+ * because the user turned it off. That is a state, not a fault, so it gets its
+ * own label rather than borrowing 'not-reachable', which belongs to a probe
+ * that failed. Absent settings are still genuinely unknown.
+ */
+export function receiverStatus(sharedSettings: SharedSettings | null | undefined): ReceiverStatus {
+  if (sharedSettings == null) return 'unknown'
+  return sharedSettings.receiverHosted ? 'hosted' : 'off'
+}
+
+const IDLE_REFRESH: RefreshInfo = { state: 'idle', lastSuccessAt: null, lastFailure: null }
 
 type Props = {
   state: ViewState
@@ -57,7 +76,9 @@ export function Popover({ state, commands, actionError = null, now = new Date() 
         {actionErrorBanner}
         <SettingsView
           settings={state.settings}
+          sharedSettings={state.sharedSettings ?? null}
           onChange={commands.setSettings}
+          onSharedChange={commands.setSharedSettings}
           onBack={() => setShowSettings(false)}
         />
       </>
@@ -65,7 +86,12 @@ export function Popover({ state, commands, actionError = null, now = new Date() 
   }
 
   const { report } = state
-  const busy = state.refresh.state === 'running' || state.refresh.state === 'running-elsewhere'
+  // The server's job state is authoritative; the legacy field only fills in
+  // when the core sent none. Absent means unknown, shown as idle-and-clickable
+  // because a refresh the server rejects reports through the error banner.
+  const jobs = state.jobs ?? null
+  const refresh = jobs?.refresh ?? state.refresh ?? IDLE_REFRESH
+  const busy = refresh.state === 'running' || refresh.state === 'running-elsewhere'
   const hasSession = report !== null && report.latestSession != null
 
   return (
@@ -96,8 +122,8 @@ export function Popover({ state, commands, actionError = null, now = new Date() 
 
       <HealthFooter
         report={report}
-        refresh={state.refresh}
-        receiver={state.receiver}
+        refresh={jobs?.refresh ?? state.refresh ?? null}
+        receiver={state.receiver ?? receiverStatus(state.sharedSettings)}
         now={now}
       />
 
@@ -107,8 +133,15 @@ export function Popover({ state, commands, actionError = null, now = new Date() 
         onCleanDatabase={commands.cleanDatabase}
       />
 
+      <Maintenance
+        jobs={jobs}
+        harness={state.settings.harness}
+        onSetSharedSettings={commands.setSharedSettings}
+        onImportFolderHistory={commands.importFolderHistory}
+      />
+
       <Actions
-        refresh={state.refresh}
+        refresh={refresh}
         onRefreshNow={commands.refreshNow}
         onOpenDashboard={() => commands.openView('/')}
         onOpenSettings={() => setShowSettings(true)}

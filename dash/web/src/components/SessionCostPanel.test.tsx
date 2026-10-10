@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import * as React from 'react'
+import { readFileSync } from 'node:fs'
 import { renderToStaticMarkup } from 'react-dom/server'
 
 import {
@@ -259,8 +260,21 @@ describe('SessionCostPanel: bases are never blended (Rule 1)', () => {
       currency: 'USD',
     }
 
+    // T20 adaptation: the verdict now arrives on the payload rather than being
+    // re-derived in the browser. The two-basis scenario below is unchanged and
+    // the figures are still the ones the server would have summed; only the
+    // route the verdict travels is new. Every assertion is untouched.
     const element = React.createElement(SessionCostPanel, {
       costs: [publishedBlock, harnessBlock],
+      session: {
+        costBasisMismatch: {
+          code: 'COST_BASIS_MISMATCH',
+          message:
+            'cost bases differ across blocks (harness, published); refusing to blend them into one total',
+          bases: ['harness', 'published'],
+          totalsByBasis: { harness: 2.5, published: 1.25 },
+        },
+      },
     })
     const html = renderHtml(element)
 
@@ -278,7 +292,7 @@ describe('SessionCostPanel: bases are never blended (Rule 1)', () => {
     expect(html).not.toContain('$3.75')
     expect(html).not.toContain('3.75')
 
-    // Surfaces sumCosts refusal as a plain warning
+    // Surfaces the server's refusal as a plain warning
     const warning = findByTestId(element, 'cost-basis-mismatch-warning')
     expect(warning).toBeDefined()
     expect(html).toContain('cost bases differ across blocks')
@@ -431,6 +445,144 @@ describe('SessionCostPanel: token totals & honest cache hit ratio', () => {
     const html = renderHtml(element)
 
     expect(html).toContain('not measurable')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Architecture rule R1: the web dashboard is a display layer. The cost-basis
+// mismatch is decided on the server and arrives on the payload as
+// `costBasisMismatch` — `null`, or an object `{ code, message, bases,
+// totalsByBasis }` (pinned in src/server/session-cost-mismatch.test.ts). The
+// panel renders that message and must not import `sumCosts` to reach the same
+// answer itself.
+//
+// Resolved, not outstanding: the earlier "bases are never blended" test no longer
+// re-derives the verdict in the browser. It supplies `session.costBasisMismatch` on
+// the props path exactly as the payload path does below, and asserts against the
+// server's message — so no assertion had to weaken, and nothing in this file imports
+// `sumCosts`.
+// ---------------------------------------------------------------------------
+
+describe('SessionCostPanel: the mismatch comes from the payload, not from the browser (R1)', () => {
+  const pricedPublished = { basis: 'published', status: 'priced', value: 1.25, currency: 'USD' }
+  const pricedHarness = { basis: 'harness', status: 'priced', value: 2.5, currency: 'USD' }
+
+  it('renders the mismatch message carried by session.costBasisMismatch', () => {
+    const session = {
+      summary: {
+        turn_count: 2,
+        total_input: 1000,
+        total_output: 400,
+        cost: { basis: 'unknown', status: 'no_rate' },
+      },
+      costs: [pricedPublished],
+      // Exactly the field shape the server test pins. The panel must render
+      // this text — it is the server's verdict, not a browser re-derivation.
+      // The blocks below deliberately sit on ONE basis: if the fixture carried
+      // two, today's `sumCosts` call would print a warning and this assertion
+      // would pass for the wrong reason, proving nothing about the payload.
+      costBasisMismatch: {
+        code: 'COST_BASIS_MISMATCH',
+        message:
+          'cost bases differ across blocks (harness, published); refusing to blend them into one total',
+        bases: ['harness', 'published'],
+        totalsByBasis: { harness: 2.5, published: 1.25 },
+      },
+    }
+
+    const element = React.createElement(SessionCostPanel, { session })
+    const html = renderHtml(element)
+
+    const warning = findByTestId(element, 'cost-basis-mismatch-warning')
+    expect(warning).toBeDefined()
+    expect(html).toContain('refusing to blend them into one total')
+    expect(html).toContain('harness')
+    expect(html).toContain('published')
+  })
+
+  it('renders no warning when session.costBasisMismatch is null', () => {
+    const session = {
+      summary: {
+        turn_count: 2,
+        total_input: 1000,
+        total_output: 400,
+        cost: pricedPublished,
+      },
+      costs: [pricedPublished],
+      costBasisMismatch: null,
+    }
+
+    const element = React.createElement(SessionCostPanel, { session })
+    const html = renderHtml(element)
+
+    expect(html).not.toContain('data-testid="cost-basis-mismatch-warning"')
+    // The panel still renders its figures — a null mismatch is not a blank panel.
+    expect(html).toContain('$1.25')
+  })
+
+  it('does not re-derive a mismatch from the payload blocks when the server said null', () => {
+    // Two bases are visible in the payload, and the server has already ruled on
+    // them. If the panel still calls `sumCosts` it will print a warning the
+    // server never asserted — the browser inventing a cost verdict is exactly
+    // the defect R1 exists to prevent.
+    const session = {
+      summary: {
+        turn_count: 2,
+        cost: { basis: 'unknown', status: 'no_rate' },
+      },
+      costs: [pricedPublished, pricedHarness],
+      costBasisMismatch: null,
+    }
+
+    const element = React.createElement(SessionCostPanel, { session })
+    const html = renderHtml(element)
+
+    expect(html).not.toContain('data-testid="cost-basis-mismatch-warning"')
+  })
+
+  it('renders the figures and no warning when the server recorded nothing at all', () => {
+    // The `undefined` case: a payload stored before `costBasisMismatch` existed
+    // carries neither the field nor a `COST_BASIS_MISMATCH` problem entry. Two
+    // bases are visible in the blocks, which is tempting enough to warn from —
+    // but "we never asked" is not "they agree" and not "they differ". Pinned so
+    // that a future fallback cannot quietly promote silence into a claim in
+    // either direction: the cards still render, the warning does not.
+    const session = {
+      summary: {
+        turn_count: 2,
+        total_input: 1000,
+        total_output: 400,
+      },
+      costs: [pricedPublished, pricedHarness],
+    }
+
+    const element = React.createElement(SessionCostPanel, { session })
+    const html = renderHtml(element)
+
+    expect(html).not.toContain('data-testid="cost-basis-mismatch-warning"')
+    // Unknown is not a blank panel: every basis still shows its figure.
+    expect(findByTestId(element, 'cost-bases-container')).toBeDefined()
+    expect(findByTestId(element, 'cost-basis-card-published')).toBeDefined()
+    expect(findByTestId(element, 'cost-basis-card-harness')).toBeDefined()
+    expect(html).toContain('$1.25')
+    expect(html).toContain('$2.50')
+  })
+
+  it('imports no engine value code: no sumCosts value import at all', () => {
+    // Read as text because the rule is about the module graph, not about any
+    // one rendered outcome: a future edit could keep every assertion above
+    // green while re-importing the engine to compute the mismatch. Scoped to
+    // import declarations and to this one identifier on purpose — a `type`
+    // import, a comment, or `renderCost`/`COST_BASIS_MISMATCH` from
+    // canon/cost (both on the display-layer allowlist in
+    // src/architecture/display-layer.test.ts) are legitimate and stay allowed.
+    const source = readFileSync(new URL('./SessionCostPanel.tsx', import.meta.url), 'utf8')
+
+    const valueImports = source
+      .split('\n')
+      .filter((line) => /^\s*import\s/.test(line) && !/^\s*import\s+type\b/.test(line))
+
+    expect(valueImports.filter((line) => /\bsumCosts\b/.test(line))).toEqual([])
   })
 })
 

@@ -6,7 +6,7 @@ component: KyberDash
 source-root: dash
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-09
+last-reviewed: 2026-10-10
 decided-by:
   - adr/0020-kyberdash-one-time-fork
   - adr/0008-kyberdash-single-canonical-store
@@ -19,9 +19,12 @@ decided-by:
   - adr/0015-opt-in-llm-context-review-seam
   - adr/0016-kyberdash-harness-source-refresh
   - adr/0018-kyberdash-content-retention-purge
+  - adr/0033-kyberdash-surfaces-are-display-layers
 keywords:
   - dashboard
   - codeburn
+  - display layer
+  - jobhost
   - tauri
   - desktop
   - menubar
@@ -233,8 +236,11 @@ drain, `purgeExpiredContent` empties content older than 14 days without touching
 is projected through `projectCanonicalStore` — the same shared entry the live receiver uses
 (see [The shared canonical projection](#the-shared-canonical-projection)). Gemini is never a
 stored harness id; split client surfaces stay distinct. A Gemini **selector label** may still
-appear in the UI as usage / survey chrome; it is not `harness=gemini` in `canon.db`. There is
-no dashboard refresh button.
+appear in the UI as usage / survey chrome; it is not `harness=gemini` in `canon.db`. A
+surface's **Refresh data** asks the engine to run this lifecycle over
+`POST /api/kyber/refresh`; it does not choose what is read — folder sources come from
+`settings.folder_import.scheduled`, off by default, and a terminal `dash refresh` is the one
+run that always imports ([ADR 0033](../adr/0033-kyberdash-surfaces-are-display-layers.md)).
 
 The contract is [ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md).
 
@@ -789,6 +795,19 @@ an on-demand second opinion:
 
 ## Surface Layer
 
+> **THE TRAY AND THE WEB DASHBOARD ARE DISPLAY LAYERS. NEITHER CONTAINS ISOLATED FEATURE
+> LOGIC, SCHEDULERS OR JOBS. ALL LOGIC AND JOBS (REFRESH SCHEDULING, CLEAN, IMPORT, PAUSE)
+> LIVE IN THE SHARED KYBERDASH APPLICATION (THE CLI ENGINE AND THE `kyberdash web` SERVER
+> BUILT FROM IT) THAT BOTH SURFACES SHARE. BOTH SURFACES USE ONE DATASTORE (canon.db,
+> resolved by dash/src/canon/paths.ts resolveCanonDbPath) AND ONE API LAYER
+> (/api/kyber/*). NO AGENT OR DESIGN MAY VIOLATE THIS.**
+
+The governing rule document is
+[`rules/kyberdash-display-layer`](../rules/kyberdash-display-layer.md); the decision is
+[ADR 0033](../adr/0033-kyberdash-surfaces-are-display-layers.md); the guard that enforces it
+is `dash/src/architecture/display-layer.test.ts`, which runs in
+`npm --prefix dash run test`.
+
 Every reporting surface consumes one versioned `ContextReport` produced by `buildContextReport`
 (`dash/src/analysis/report/build.ts`). The CLI prints it (`kyberdash report`), the REST API
 serves it at `GET /api/kyber/report`, and the tray renders the same document fetched over
@@ -817,6 +836,35 @@ currently at its store path (`canonPath`) rather than the handle it first opened
 opens the new one when the file is replaced by a different one, and drops the handle —
 serving empty results rather than the removed file's data — when the file is removed. A
 handle injected by `kyberdash report`, and a `:memory:` store, are never probed or swapped.
+
+### Jobs and shared settings (ADR 0033)
+
+The `kyberdash web` server hosts the background work. `JobHost`
+(`dash/src/jobs/host.ts`) runs the scheduled refresh, the maintenance pass, and the
+manual/import/clean children; `ReceiverHost` (`dash/src/jobs/receiver-host.ts`) owns the
+OTLP receiver child. A job is `kyberdash dash refresh …` spawned by the server, so a crash
+or a long import cannot take the server down and the in-child refresh lock
+(`dash/src/refresh/lock.ts`, exit code 3) keeps arbitrating with a terminal-started
+command. Exactly one host schedules: `dash/src/jobs/lease.ts` takes `jobs.lock` in the
+state directory, and a host that cannot take it runs nothing and reports
+`running-elsewhere`.
+
+**Folder import is opt-in and shared.** `settings.folder_import.scheduled` — off by
+default — decides whether a *scheduled*, tray, or web run reads folder sources
+(`folderSourcesAllowed` in `dash/src/refresh/folder-import.ts`). With it off, such a tick
+runs the maintenance pass only (retention purge then projection), writes no `refresh_run`
+row, and prints a skip line naming the command that turns it on. A terminal `dash refresh`
+(trigger `cli`) always imports, because a person typing it asked for their own history back;
+so does `POST /api/kyber/import-history` / `dash import-history`, which never reads or
+changes the setting.
+
+The four shared settings live in `canon.db` metadata
+(`dash/src/settings/shared-settings.ts`), so all surfaces see one answer: reads fail closed
+to the default on an unrecognised stored value, writes refuse an unrecognised one, and a
+wipe-all leaves them alone because they describe how the operator wants the tool to behave,
+not the captured data. **Pause** (`settings.jobs.paused`) stops the host scheduling and
+nothing else: manual refresh, import and clean, the receiver's continued ingest, and the
+retention purge all continue.
 
 ### Web Dashboard (dash/web/)
 
@@ -890,27 +938,54 @@ The web dashboard server wires HTTP requests directly to `KyberBridge`:
 | `/api/kyber/meta` | `GET` | `MetaResult` | Tokenizer configuration, rates, span counts, and sources. |
 | `/api/kyber/coverage` | `GET` | `{ refresh, ingest, quarantineByReason, checkpoints }` | Ingest coverage: persisted refresh window (`history_weeks`, null = unknown), per-source ingest activity (`records` counts joined with `ingest_log` sums and `lastReceivedAt`; `{ status: 'unknown' }` when nothing is recorded), per-reason quarantine counts, and `source_checkpoint` statuses including `partial` and the persisted zero-record reason (`lastErrorCode`). |
 | `/api/kyber/report` | `GET` | `ContextReport` | The versioned context report for the query scope (`harness`, `session`, `run`, `days`); the same document `kyberdash report` prints. |
-| `/api/kyber/clean` | `POST` | `CleanReport` | User-initiated database clean ([ADR 0032](../adr/0032-kyberdash-user-initiated-clean.md)). Body carries the scope (`all` or `harnesses`), explicit `confirm: true`, and the optional `reingestWeeks` window (null skips re-ingest). 200 with the wipe counts and re-ingest summary; 400 invalid body/scope; 405 non-POST; 409 lock busy; 500 bounded failure. |
+| `/api/kyber/settings` | `GET`, `PUT` | `SettingsView` | The four shared switches as JSON booleans and a number: `folderImportScheduled`, `jobsPaused`, `refreshCadenceMinutes`, `receiverHosted` ([ADR 0033](../adr/0033-kyberdash-surfaces-are-display-layers.md)). A `PUT` is partial; an unknown key or a value of the wrong type is refused whole (400), leaving every switch as it was. |
+| `/api/kyber/jobs` | `GET` | `{ refresh, paused, storeGeneration, hostedElsewhere }` | What the job host is actually doing — state, last success, last failure, next due, whether it is paused, and whether another process holds `jobs.lock`. The flat host status is mapped here once, so both surfaces read the same shape. |
+| `/api/kyber/refresh` | `POST` | `202 { accepted: true }` · `409 { error }` · `500 { error }` | Ask the host to run a refresh; the body names the asking surface (`{ surface: 'tray' \| 'web' }`). `scheduled` and `cli` are not accepted from a client: the host owns the schedule, and a client-triggered run must name the surface that asked. Answers as soon as the job is taken, not when it finishes, so the outcome is read from `GET /api/kyber/jobs`. 400 invalid body; 409 `{ error }` when this server started nothing (job declined, busy, or hosted elsewhere); 500 `{ error }` when the spawn itself failed (a fixed string — no paths cross the wire). |
+| `/api/kyber/clean` | `POST` | `CleanReport` | User-initiated database clean ([ADR 0032](../adr/0032-kyberdash-user-initiated-clean.md)). Body carries exactly one scope (`all: true` or a non-empty `harnesses` list), explicit `confirm: true`, and the optional `reingestWeeks` window (1–52; absent or null means no re-ingest, which is the default). 200 with the wipe counts and re-ingest summary; 400 invalid body/scope; 405 non-POST; 409 lock busy; 413 body over 64KB; 500 bounded failure. |
+| `/api/kyber/import-history` | `POST` | `202 { accepted: true }` · `409 { error }` · `500 { error }` | One-off folder history import ([§2c](../dash/runbook.md#2c-import-folder-history-dash-import-history) of the runbook). The **request body** is `{ weeks?, harness? \| harnesses? }` — `weeks` defaults to 1 and is capped at 52, and the singular and plural harness keys are mutually exclusive (either may be omitted, meaning every readable harness). Never reads or changes `settings.folder_import.scheduled`. 400 invalid payload; 409 `{ error }` when a job is already running here; 500 `{ error }` when the spawn itself failed. Like refresh, it answers once the job is taken, so the outcome is read from `GET /api/kyber/jobs`. |
 
 All `/api/kyber/*` responses return standard headers (`content-type: application/json; charset=utf-8`, `cache-control: no-store`). Unrecognized `/api/kyber/*` routes return HTTP 404 JSON (guaranteed never to fall through to SPA HTML), and non-GET requests return HTTP 405 Method Not Allowed.
 
 ### User-initiated database clean (ADR 0032)
 
-`cleanDatabase` (`dash/src/clean/clean.ts`) is the single implementation behind `kyberdash dash clean` and `POST /api/kyber/clean`; the tray spawns the CLI child and holds no clean logic. One clean pauses the OTLP receiver (loopback admin routes on `dash/src/otel/receiver.ts`; 503 + Retry-After while paused, `/healthz` stays 200 with `paused`, lease TTL auto-resumes), holds the refresh lock (exit 3 / 409 when busy), wipes the scope in one store transaction — records (fold-expanded to raw front-end names), provenance, checkpoints, and harness-scoped derived caches — projects the derived tables, re-ingests the scope (default last 7 days, opt-in deeper, explicit skip), and resumes ingestion in a `finally`. Kept in all cases: `ingest_log`, `refresh_run`, `metadata` (stamped `last_clean_at`/scope), `token_cache`, and the model-window catalog. Wipe-all additionally clears `quarantine` and the log-enrichment tables; per-harness wipe cannot scope quarantine rows (no harness column). No backup is taken, by design: the data is ephemeral point-in-time telemetry, re-derivable from source logs except OTLP-collected records, which both confirm surfaces disclose as permanently gone. Automatic paths (refresh, retention purge, re-ingest) keep the ADR 0016/ADR 0018 no-delete contracts; only the confirmed clean deletes rows.
+`cleanDatabase` (`dash/src/clean/clean.ts`) is the single implementation behind `kyberdash dash clean` and `POST /api/kyber/clean`; a surface asks for it over the API and holds no clean logic of its own. One clean pauses the OTLP receiver (loopback admin routes on `dash/src/otel/receiver.ts`; 503 + Retry-After while paused, `/healthz` stays 200 with `paused`, lease TTL auto-resumes), holds the refresh lock (exit 3 / 409 when busy), wipes the scope in one store transaction — records (fold-expanded to raw front-end names), provenance, checkpoints, and harness-scoped derived caches — projects the derived tables, re-ingests the scope **only when the caller asked for a window** (`--reingest-weeks <n>`, 1–52; absent means none, which is the default), and resumes ingestion in a `finally`. Kept in all cases: `ingest_log`, `refresh_run`, `metadata` (stamped `last_clean_at`/scope), `token_cache`, and the model-window catalog. Wipe-all additionally clears `quarantine` and the log-enrichment tables; per-harness wipe cannot scope quarantine rows (no harness column). No backup is taken, by design: the data is ephemeral point-in-time telemetry, re-derivable from source logs except OTLP-collected records, which both confirm surfaces disclose as permanently gone. Nothing re-imports after the clean on its own either: the next scheduled refresh reads folder sources only while `settings.folder_import.scheduled` is `on` ([ADR 0033](../adr/0033-kyberdash-surfaces-are-display-layers.md) decision 6). Automatic paths (refresh, retention purge) keep the ADR 0016/ADR 0018 no-delete contracts; only the confirmed clean deletes rows, and only an explicitly requested re-ingest repopulates from source logs.
+
+Coverage after a wipe: `refresh_run` rows older than the last wipe are ignored when coverage is computed. They are audit history of runs whose records are gone, and counting them would claim coverage the store no longer has.
 
 ### The KyberDash Tray (dash/tray/)
 
+> **THE TRAY AND THE WEB DASHBOARD ARE DISPLAY LAYERS. NEITHER CONTAINS ISOLATED FEATURE
+> LOGIC, SCHEDULERS OR JOBS. ALL LOGIC AND JOBS (REFRESH SCHEDULING, CLEAN, IMPORT, PAUSE)
+> LIVE IN THE SHARED KYBERDASH APPLICATION (THE CLI ENGINE AND THE `kyberdash web` SERVER
+> BUILT FROM IT) THAT BOTH SURFACES SHARE. BOTH SURFACES USE ONE DATASTORE (canon.db,
+> resolved by dash/src/canon/paths.ts resolveCanonDbPath) AND ONE API LAYER
+> (/api/kyber/*). NO AGENT OR DESIGN MAY VIOLATE THIS.**
+
 The tray is a Tauri 2 app: a Rust shell (`dash/tray/src-tauri/`) plus a React popover UI
-(`dash/tray/ui/`). The Rust core owns processes and pixels, not analysis (design D3): it
-resolves the `kyberdash` CLI through a validated-path resolution, supervises exactly one
-`kyberdash web --no-open` child and — when settings allow — the embedded OTLP receiver child,
-polls the bounded loopback report URL on its 15/60-second cadence, and publishes `ViewState`
-snapshots to the popover through `get_view_state` and `view-state-changed`. Exactly seven
-commands are registered and capability-granted (`get_view_state`, `refresh_now`, `open_view`,
-`set_settings`, `quit`, `hide_popover`, `clean_database`) alongside the narrow
+(`dash/tray/ui/`). Like the web dashboard it is a display layer over the engine
+([ADR 0033](../adr/0033-kyberdash-surfaces-are-display-layers.md)); the Rust core owns
+pixels, lifecycle and loopback HTTP, and nothing else. It resolves the `kyberdash` binary
+through a validated-path resolution and either **attaches to** the `kyberdash web` server
+published in `~/.kyberdash/server.json` (`{ pid, url, apiVersion }`) or, when there is no
+compatible one, launches exactly one `kyberdash web --no-open` child of its own
+(`dash/tray/src-tauri/src/supervisor.rs`); only a server it launched is one it reaps. It
+polls the bounded loopback report and `/api/kyber/*` URLs to repaint the popover — a display
+poll, not a job cadence — and publishes `ViewState` snapshots through `get_view_state` and
+`view-state-changed`.
+
+It holds no scheduler, no refresh worker, no cadence setting, no receiver, and no CLI job
+argv: `JobHost` (`dash/src/jobs/host.ts`) and `ReceiverHost`
+(`dash/src/jobs/receiver-host.ts`) are hosted by the `kyberdash web` server, and at most one
+host schedules because at most one holds `jobs.lock`
+([`rules/kyberdash-display-layer`](../rules/kyberdash-display-layer.md)). Its registered
+commands are capability-granted and one-for-one with a user gesture or a render request
+(`get_view_state`, `refresh_now`, `open_view`, `set_settings`, `set_shared_settings`,
+`clean_database`, `import_folder_history`, `quit`, `hide_popover`) alongside the narrow
 `core:event:allow-listen`/`core:event:allow-unlisten` grants; the webview holds no network
-permission and no analysis logic. The macOS status item is the KyberDash lightsaber projected
-as a monochrome template image (`icons/tray-template.svg`/`.png`).
+permission and no analysis logic, and the popover's TypeScript takes no value import from
+`dash/src/**` beyond the commented allowlist in the guard test. The macOS status item is the
+KyberDash lightsaber projected as a monochrome template image
+(`icons/tray-template.svg`/`.png`).
 
 On macOS, tray click positions are converted from backing pixels using the status
 item window's scale before monitor lookup. Cursor fallback uses the primary display's
@@ -921,12 +996,15 @@ monitor's scale to the new position. Negative and zero coordinates remain valid.
 
 On macOS the tray runs as a per-user launchd agent (label `io.github.dpalfery.kyberdash`)
 that starts at login and restarts only after an unsuccessful exit
-(`KeepAlive { SuccessfulExit = false }`); an intentional **Quit** stops collection and is not
-restarted. On Windows the tray ships as an NSIS installer and starts at login through a
+(`KeepAlive { SuccessfulExit = false }`); an intentional **Quit** releases the server and is
+not restarted — and it stops collection only when the tray was the process that launched
+that server, since an attached server keeps running. On Windows the tray ships as an NSIS installer and starts at login through a
 per-user `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` value
 (`dash/tray/src-tauri/src/autostart.rs`). The [runbook](runbook.md) documents running and
-deploying it. [ADR 0023](../adr/0023-kyberdash-report-model-and-tray-ownership.md) records the
-report model, Rust-side HTTP, and the tray's ownership of the server, refresh and receiver.
+deploying it. [ADR 0023](../adr/0023-kyberdash-report-model-and-tray-ownership.md) records
+the report model and Rust-side HTTP; its decision 3 — the tray owning the server, the
+scheduled refresh and the receiver — is superseded by
+[ADR 0033](../adr/0033-kyberdash-surfaces-are-display-layers.md).
 
 ### Report parity
 
@@ -975,5 +1053,7 @@ project; the measured rationale the retirement would otherwise take with it is p
 - [Honest unobservability standard](../rules/honest-unobservability.md) — missing telemetry and coverage gaps are explicit and never coerced to zero.
 - [Secondary cost display standard](../rules/secondary-cost-display.md) — cost is strictly a derived secondary metric behind token and latency health (D9).
 - [Ban on composite efficiency scores](../rules/composite-efficiency-ban.md) — evaluation strictly preserves independent dimension vectors (D3).
+- [KyberDash display-layer rule](../rules/kyberdash-display-layer.md) — the tray and the web dashboard render and request; the engine holds every job.
+- [ADR 0033](../adr/0033-kyberdash-surfaces-are-display-layers.md) — the surfaces are display layers, `kyberdash web` hosts the jobs, folder import is opt-in.
 - [KyberDash index](README.md) — the product story.
 - [Component catalog](../catalog.md)

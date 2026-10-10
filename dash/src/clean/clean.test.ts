@@ -5,13 +5,43 @@
 // (the `dash clean` CLI and `POST /api/kyber/clean`) reach this module; no
 // clean logic lives in either surface. This module does not exist yet — the
 // test below fails to import it until T4 lands the implementation.
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+import { projectCanonicalStore } from '../canon/projection.js'
 import { CanonStore } from '../canon/store.js'
-import { cleanDatabase } from './clean.js'
+import { importFolderHistory } from '../refresh/folder-import.js'
+import { refreshHarnessSources } from '../refresh/orchestrator.js'
+import { SETTING_KEYS } from '../settings/shared-settings.js'
+import { cleanDatabase, portsForClean } from './clean.js'
+import { pauseReceiver, resumeReceiver } from './pause.js'
+
+vi.mock('./pause.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./pause.js')>()),
+  pauseReceiver: vi.fn(async () => ({ paused: true, resumed: false })),
+  resumeReceiver: vi.fn(async () => {}),
+}))
+
+vi.mock('../canon/projection.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../canon/projection.js')>()),
+  projectCanonicalStore: vi.fn(async () => {}),
+}))
+
+// Self-contained factory, no `importOriginal`: the real folder-import.ts imports
+// MAX_CLEAN_REINGEST_WEEKS from clean/clean.js, and clean.ts imports
+// importFolderHistory from folder-import — spreading the original module back in
+// would resolve that cycle through the mock. Only importFolderHistory is exercised
+// here; folder-import.test.ts covers the module itself.
+vi.mock('../refresh/folder-import.js', () => ({
+  importFolderHistory: vi.fn(async () => {}),
+}))
+
+vi.mock('../refresh/orchestrator.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../refresh/orchestrator.js')>()),
+  refreshHarnessSources: vi.fn(async () => ({})),
+}))
 
 const temporaryRoots: string[] = []
 
@@ -37,7 +67,7 @@ function fakePorts(overrides: Partial<Parameters<typeof cleanDatabase>[2]> = {})
 }
 
 describe('cleanDatabase (issue #312)', () => {
-  it('pauses, wipes, projects, re-ingests the default 7-day window, then resumes', async () => {
+  it('does not re-ingest when reingestWeeks is omitted', async () => {
     const store = temporaryStore()
     try {
       const ports = fakePorts()
@@ -46,9 +76,9 @@ describe('cleanDatabase (issue #312)', () => {
 
       expect(report.harnesses).toEqual(['pi'])
       expect(ports.pauseIngestion).toHaveBeenCalledTimes(1)
-      expect(ports.reingest).toHaveBeenCalledWith(
-        expect.objectContaining({ harnesses: ['pi'], historyWeeks: 1 }),
-      )
+      expect(ports.reingest).not.toHaveBeenCalled()
+      expect(report.reingested).toBe(false)
+      expect(report.historyWeeks).toBeNull()
       expect(ports.project).toHaveBeenCalledTimes(1)
       expect(ports.resumeIngestion).toHaveBeenCalledTimes(1)
       expect(store.getMetadata('last_clean_at')).toBeDefined()
@@ -57,7 +87,22 @@ describe('cleanDatabase (issue #312)', () => {
     }
   })
 
-  it('wipes all when asked, and passes no harness filter to re-ingest', async () => {
+  it('wipes all when asked, and passes no harness filter to re-ingest when a window is given', async () => {
+    const store = temporaryStore()
+    try {
+      const ports = fakePorts()
+
+      const report = await cleanDatabase(store, { all: true, reingestWeeks: 1 }, ports)
+
+      expect(report.harnesses).toEqual(['*'])
+      expect(store.count()).toBe(0)
+      expect(ports.reingest).toHaveBeenCalledWith({ historyWeeks: 1 })
+    } finally {
+      store.close()
+    }
+  })
+
+  it('wipes all without re-ingest when no window is given', async () => {
     const store = temporaryStore()
     try {
       const ports = fakePorts()
@@ -66,7 +111,7 @@ describe('cleanDatabase (issue #312)', () => {
 
       expect(report.harnesses).toEqual(['*'])
       expect(store.count()).toBe(0)
-      expect(ports.reingest).toHaveBeenCalledWith({ historyWeeks: 1 })
+      expect(ports.reingest).not.toHaveBeenCalled()
     } finally {
       store.close()
     }
@@ -188,6 +233,149 @@ describe('cleanDatabase (issue #312)', () => {
       expect(ports.reingest).toHaveBeenCalledWith(
         expect.objectContaining({ harnesses: ['pi'], historyWeeks: 52 }),
       )
+    } finally {
+      store.close()
+    }
+  })
+})
+
+describe('cleanDatabase folder-history import through the production ports (T5)', () => {
+  beforeEach(() => {
+    vi.mocked(pauseReceiver).mockClear()
+    vi.mocked(resumeReceiver).mockClear()
+    vi.mocked(projectCanonicalStore).mockClear()
+    vi.mocked(importFolderHistory).mockClear()
+    vi.mocked(refreshHarnessSources).mockClear()
+  })
+
+  it('does not import folder history when reingestWeeks is omitted', async () => {
+    const store = temporaryStore()
+    try {
+      const report = await cleanDatabase(store, { harnesses: ['pi'] }, portsForClean(store))
+
+      expect(report.reingested).toBe(false)
+      expect(report.historyWeeks).toBeNull()
+      expect(importFolderHistory).not.toHaveBeenCalled()
+    } finally {
+      store.close()
+    }
+  })
+
+  it('imports folder history for an explicit window narrowed to the cleaned harnesses', async () => {
+    const store = temporaryStore()
+    try {
+      const report = await cleanDatabase(store, { harnesses: ['pi'], reingestWeeks: 3 }, portsForClean(store))
+
+      expect(report.reingested).toBe(true)
+      expect(report.historyWeeks).toBe(3)
+      expect(importFolderHistory).toHaveBeenCalledTimes(1)
+      expect(vi.mocked(importFolderHistory).mock.calls[0]?.[0]).toBe(store)
+      expect(vi.mocked(importFolderHistory).mock.calls[0]?.[1]).toEqual(
+        expect.objectContaining({ weeks: 3, harnesses: ['pi'] }),
+      )
+    } finally {
+      store.close()
+    }
+  })
+
+  it('imports folder history for every harness, at the explicit window, when the clean wipes all', async () => {
+    const store = temporaryStore()
+    try {
+      await cleanDatabase(store, { all: true, reingestWeeks: 2 }, portsForClean(store))
+
+      expect(importFolderHistory).toHaveBeenCalledTimes(1)
+      const options = vi.mocked(importFolderHistory).mock.calls[0]?.[1]
+      expect(options?.weeks).toBe(2)
+      expect(options?.harnesses ?? []).toHaveLength(0)
+    } finally {
+      store.close()
+    }
+  })
+
+  it('drops harnesses with no descriptor before the wipe and import, so the clean resolves', async () => {
+    const store = temporaryStore()
+    try {
+      // The wipe is spied, not the import, so the harness list that reaches
+      // store.wipeHarnesses is observed directly: a descriptor-less harness must
+      // be dropped before the wipe rather than passed through to it.
+      const wipe = vi.spyOn(store, 'wipeHarnesses')
+
+      const pending = cleanDatabase(
+        store,
+        { harnesses: ['pi', 'no-such-harness'], reingestWeeks: 1 },
+        portsForClean(store),
+      )
+      await expect(pending).resolves.toBeDefined()
+
+      expect(wipe).toHaveBeenCalledTimes(1)
+      expect(wipe).toHaveBeenCalledWith(['pi'])
+      expect((await pending).harnesses).toEqual(['pi'])
+      expect(importFolderHistory).toHaveBeenCalledTimes(1)
+      expect(vi.mocked(importFolderHistory).mock.calls[0]?.[1]).toEqual(
+        expect.objectContaining({ harnesses: ['pi'] }),
+      )
+
+      // Narrowed scope, then the import — never the reverse.
+      const first = (order: readonly number[]) => order[0] ?? Number.POSITIVE_INFINITY
+      expect(first(wipe.mock.invocationCallOrder)).toBeLessThan(
+        first(vi.mocked(importFolderHistory).mock.invocationCallOrder),
+      )
+    } finally {
+      store.close()
+    }
+  })
+
+  // Why this lives here: it guards clean.ts only. importFolderHistory is mocked
+  // in this suite, so folder-import.test.ts is what covers the module's own
+  // read/write of the setting; what matters here is that a clean neither reads
+  // it into a decision nor writes it back.
+  it('leaves the shared folder-import setting unchanged across a scoped clean with re-import', async () => {
+    const store = temporaryStore()
+    try {
+      store.setMetadata(SETTING_KEYS.folderImportScheduled, 'on')
+
+      await cleanDatabase(store, { harnesses: ['pi'], reingestWeeks: 2 }, portsForClean(store))
+
+      expect(store.getMetadata(SETTING_KEYS.folderImportScheduled)).toBe('on')
+      expect(importFolderHistory).toHaveBeenCalledTimes(1)
+    } finally {
+      store.close()
+    }
+  })
+
+  it('leaves the shared folder-import setting unchanged after a scoped clean with no window', async () => {
+    const store = temporaryStore()
+    try {
+      store.setMetadata(SETTING_KEYS.folderImportScheduled, 'on')
+
+      await cleanDatabase(store, { harnesses: ['pi'] }, portsForClean(store))
+
+      // No window means no import, so the setting must survive untouched.
+      expect(store.getMetadata(SETTING_KEYS.folderImportScheduled)).toBe('on')
+      expect(importFolderHistory).not.toHaveBeenCalled()
+    } finally {
+      store.close()
+    }
+  })
+
+  it('pauses, wipes, projects, imports, then resumes, in that order', async () => {
+    const store = temporaryStore()
+    try {
+      const wipe = vi.spyOn(store, 'wipeHarnesses')
+
+      await cleanDatabase(store, { harnesses: ['pi'], reingestWeeks: 2 }, portsForClean(store))
+
+      const first = (order: readonly number[]) => order[0] ?? Number.POSITIVE_INFINITY
+      const pause = first(vi.mocked(pauseReceiver).mock.invocationCallOrder)
+      const wiped = first(wipe.mock.invocationCallOrder)
+      const projected = first(vi.mocked(projectCanonicalStore).mock.invocationCallOrder)
+      const imported = first(vi.mocked(importFolderHistory).mock.invocationCallOrder)
+      const resumed = first(vi.mocked(resumeReceiver).mock.invocationCallOrder)
+
+      expect(pause).toBeLessThan(wiped)
+      expect(wiped).toBeLessThan(projected)
+      expect(projected).toBeLessThan(imported)
+      expect(imported).toBeLessThan(resumed)
     } finally {
       store.close()
     }

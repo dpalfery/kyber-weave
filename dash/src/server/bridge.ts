@@ -3,9 +3,8 @@
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import type { BigIntStats } from 'node:fs'
 import { inflateSync } from 'node:zlib'
-import { homedir } from 'node:os'
-import { join } from 'node:path'
 import { createRequire } from 'node:module'
+import { resolveCanonDbPath } from '../canon/paths.js'
 import { APPROXIMATE_TOKENIZER, tokenizerName } from '../canon/tokens.js'
 import {
   SessionIdentities,
@@ -65,6 +64,7 @@ import {
   type ExecutionTreeNode,
   type HarnessRollupRow,
 } from '../canon/types.js'
+import type { CostBasisMismatch } from '../canon/cost.js'
 import {
   assembleRollup,
   digestSessionPayloads,
@@ -261,6 +261,17 @@ export type SessionPayload = Record<string, unknown> & {
   summary?: ParsedSummary
   turns?: unknown[]
   problems?: unknown[]
+  /**
+   * The server's cost-basis verdict for this session (rule R1 — the display
+   * layers render it, they never re-derive it). `null` when the cost blocks
+   * agree, or when nothing was priced; an object when they do not, carrying
+   * the problem text and the separate per-basis totals.
+   *
+   * Optional because a row stored before this field existed does not carry it.
+   * `undefined` means "this store has not been re-projected by a build that
+   * computes it" — unknown, which a consumer must not read as "no mismatch".
+   */
+  costBasisMismatch?: CostBasisMismatch | null
 }
 
 /** Measured session-summary figures behind one session, keyed by session id. */
@@ -999,10 +1010,9 @@ export class KyberBridge {
   private readonly warnedShareDrops = new Set<string>()
 
   constructor(options?: KyberBridgeOptions) {
-    this.canonPath =
-      options?.canonPath ??
-      process.env.KYBER_CANON_DB ??
-      join(homedir(), '.kyberdash', 'canon.db')
+    // The shared resolver, so the server can only ever read the store the CLI
+    // and the receiver write (src/canon/paths.ts).
+    this.canonPath = resolveCanonDbPath(options?.canonPath)
 
     this.ratesPath = options?.ratesPath
 
@@ -2393,6 +2403,36 @@ export class KyberBridge {
   }
 
   /**
+   * The store's last clean stamp (`last_clean_at`), or null when the store cannot say.
+   * Read through whichever handle this bridge owns: an injected store and its own
+   * read-only file handle must agree, or the coverage window would depend on which path
+   * the caller happened to take.
+   */
+  private lastCleanAt(): string | null {
+    try {
+      if (this.store) return this.store.getMetadata('last_clean_at') ?? null
+      const db = this.getDb()
+      if (!this.hasTable(db, 'metadata')) return null
+      const row = db!.prepare('SELECT value FROM metadata WHERE key = ?').get('last_clean_at') as
+        | { value?: unknown }
+        | undefined
+      return typeof row?.value === 'string' && row.value !== '' ? row.value : null
+    } catch {
+      // Unknown, not "never cleaned": an unreadable stamp must not retract a real window.
+      return null
+    }
+  }
+
+  /** True when `at` is strictly older than `since` (epoch compare, offset stamps included). */
+  private stampedBefore(at: string, since: string | null): boolean {
+    if (since === null) return false
+    const atMs = Date.parse(at)
+    const sinceMs = Date.parse(since)
+    if (!Number.isFinite(atMs) || !Number.isFinite(sinceMs)) return false
+    return atMs < sinceMs
+  }
+
+  /**
    * Refresh facts for the shared report. Each status is queried independently so
    * a later failure does not hide the last successful refresh.
    */
@@ -2467,8 +2507,16 @@ export class KyberBridge {
     const success = latest('success')
     const failure = latest('failure')
     const running = latest('running')
-    const historyWeeks = success?.historyWeeks ?? null
-    const { coveredFrom, coveredThrough } = refreshWindowBounds(success?.startedAt, historyWeeks)
+    // A clean deletes the data this window described, and it does NOT delete the
+    // refresh_run row that described it - that row is audit history. So after a wipe the
+    // newest success row describes data that no longer exists, and the report would claim
+    // coverage it does not have. `cleanDatabase` stamps `last_clean_at`; a success run that
+    // STARTED before that stamp describes the wiped store and is ignored, while a run
+    // that started after it describes the new data and counts again.
+    const superseded = success !== undefined && this.stampedBefore(success.startedAt, this.lastCleanAt())
+    const windowRun = superseded ? undefined : success
+    const historyWeeks = windowRun?.historyWeeks ?? null
+    const { coveredFrom, coveredThrough } = refreshWindowBounds(windowRun?.startedAt, historyWeeks)
     return {
       lastSuccessAt: success?.completedAt ?? success?.startedAt ?? null,
       lastFailure:
