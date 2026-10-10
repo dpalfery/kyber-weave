@@ -33,6 +33,8 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine
     private readonly Func<string, IArbiterGitFacts> _gitFactsFactory;
     private readonly Func<string, IArbiterPlanReader> _planReaderFactory;
     private readonly Func<string> _homeDirectory;
+    private readonly Func<ICredentialStore> _credentialStoreFactory;
+    private readonly Func<string, string?> _environment;
     private readonly TimeProvider _clock;
 
     /// <summary>
@@ -45,7 +47,9 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine
         Func<string, IArbiterGitFacts>? gitFactsFactory = null,
         Func<string, IArbiterPlanReader>? planReaderFactory = null,
         Func<string>? homeDirectory = null,
-        TimeProvider? clock = null)
+        TimeProvider? clock = null,
+        Func<ICredentialStore>? credentialStoreFactory = null,
+        Func<string, string?>? environment = null)
     {
         _homeDirectory = homeDirectory ?? (() => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
         Func<string> home = _homeDirectory;
@@ -53,6 +57,8 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine
         _gitFactsFactory = gitFactsFactory ?? (root => new HookGitFacts(root));
         _planReaderFactory = planReaderFactory ?? (root => new HookPlanReader(root));
         _clock = clock ?? TimeProvider.System;
+        _credentialStoreFactory = credentialStoreFactory ?? CreateCredentialStore;
+        _environment = environment ?? Environment.GetEnvironmentVariable;
     }
 
     /// <inheritdoc/>
@@ -386,9 +392,9 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine
 
     private Func<Uri, string?> KeyResolverFor(KyberWeaveConfig config)
     {
-        ICredentialStore store = CreateCredentialStore();
+        ICredentialStore store = _credentialStoreFactory();
         string? userOverrideEndpoint = UserOverrideEndpoint(config, _homeDirectory);
-        return uri => ArbiterKeyResolver.Resolve(uri.ToString(), store, Environment.GetEnvironmentVariable, userOverrideEndpoint);
+        return uri => ArbiterKeyResolver.Resolve(uri.ToString(), store, _environment, userOverrideEndpoint);
     }
 
     private static ICredentialStore CreateCredentialStore()
