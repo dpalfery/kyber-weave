@@ -1371,4 +1371,42 @@ describe('SessionInspectorDrawer: nested JSON readability', () => {
     expect(pretty!).toContain('DEEP_LINE_VALUE_77')
     expect(pretty!).toContain('"deep"')
   })
+
+  it('bounds deeply nested JSON-encoded strings while keeping data visible', () => {
+    const marker = 'BOUNDARY_LEAF_MARKER_5c1e'
+    let current = `{"leaf": "${marker}"}`
+    // One layer past the expansion cap (10): proves the bound stops recursion
+    // while the tail stays visible. Sizes double per JSON-string layer, so
+    // layers stay just over the cap to avoid a multi-MB fixture.
+    const layers = 11
+    for (let i = 0; i < layers; i++) {
+      current = JSON.stringify({ nested: current })
+    }
+    const pretty = prettyPrintJsonNested(current)
+    expect(pretty).not.toBeNull()
+    // Outer layers expand; the marker stays visible either decoded or as an
+    // escaped literal once the bound stops further expansion.
+    expect(pretty!).toContain('"nested"')
+    expect(pretty!).toContain(marker)
+    // The bound holds: the tail past the cap remains an escaped string
+    // instead of recursing without limit.
+    expect(pretty!).toContain('\\"')
+    // Shallow nesting still fully expands with no leftover escapes.
+    let shallow = `{"leaf": "${marker}"}`
+    for (let i = 0; i < 2; i++) {
+      shallow = JSON.stringify({ nested: shallow })
+    }
+    const shallowPretty = prettyPrintJsonNested(shallow)
+    expect(shallowPretty).not.toBeNull()
+    expect(shallowPretty!).toContain(marker)
+    expect(shallowPretty!).not.toContain('\\"')
+  })
+
+  it('falls back to visible text for hostile structural nesting', () => {
+    const deep = `${'['.repeat(500)}${']'.repeat(500)}`
+    const pretty = prettyPrintJsonNested(deep)
+    expect(pretty).not.toBeNull()
+    expect(pretty!).toContain('[')
+    expect(pretty!).toContain(']')
+  })
 })

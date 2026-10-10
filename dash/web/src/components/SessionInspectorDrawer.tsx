@@ -312,11 +312,30 @@ type JsonLosslessNode =
   | JsonLosslessNumberNode
   | JsonLosslessLiteralNode
 
-function parseJsonLosslessNode(text: string, pos: { index: number }): JsonLosslessNode {
+/**
+ * Structural recursion cap for the lossless JSON AST below. Parsing and
+ * printing recurse once per object/array level, so unbounded OTLP content
+ * could otherwise exhaust the stack; past this depth the nested printer
+ * throws and `prettyPrintJsonNested` falls back to the iterative
+ * whitespace-only formatter, which keeps every byte visible.
+ */
+const MAX_JSON_LOSSLESS_STRUCTURE_DEPTH = 100
+
+/**
+ * Cap on JSON-encoded string layers unwrapped along one root-to-leaf path
+ * (a string whose decoded text is itself a JSON object/array, repeatedly).
+ * The budget advances only when a string layer is actually unwrapped, so
+ * wide values keep a full budget per branch while a hostile nesting chain
+ * stops expanding and stays visible as an escaped string literal.
+ */
+const MAX_NESTED_JSON_STRING_EXPANSIONS = 10
+
+function parseJsonLosslessNode(text: string, pos: { index: number }, depth: number): JsonLosslessNode {
+  if (depth > MAX_JSON_LOSSLESS_STRUCTURE_DEPTH) throw new Error('Max JSON depth exceeded')
   skipJsonWs(text, pos)
   const ch = text.charAt(pos.index)
-  if (ch === '{') return parseJsonLosslessObject(text, pos)
-  if (ch === '[') return parseJsonLosslessArray(text, pos)
+  if (ch === '{') return parseJsonLosslessObject(text, pos, depth)
+  if (ch === '[') return parseJsonLosslessArray(text, pos, depth)
   if (ch === '"') return parseJsonLosslessString(text, pos)
   if (ch === '-' || (ch >= '0' && ch <= '9')) return parseJsonLosslessNumber(text, pos)
   return parseJsonLosslessLiteral(text, pos)
@@ -326,7 +345,7 @@ function skipJsonWs(text: string, pos: { index: number }): void {
   while (pos.index < text.length && /\s/.test(text.charAt(pos.index))) pos.index++
 }
 
-function parseJsonLosslessObject(text: string, pos: { index: number }): JsonLosslessObjectNode {
+function parseJsonLosslessObject(text: string, pos: { index: number }, depth: number): JsonLosslessObjectNode {
   pos.index++
   const entries: Array<{ keyRaw: string; value: JsonLosslessNode }> = []
   skipJsonWs(text, pos)
@@ -341,7 +360,7 @@ function parseJsonLosslessObject(text: string, pos: { index: number }): JsonLoss
     skipJsonWs(text, pos)
     if (text.charAt(pos.index) !== ':') throw new Error('Expected colon')
     pos.index++
-    const value = parseJsonLosslessNode(text, pos)
+    const value = parseJsonLosslessNode(text, pos, depth + 1)
     entries.push({ keyRaw: keyNode.raw, value })
     skipJsonWs(text, pos)
     const sep = text.charAt(pos.index)
@@ -357,7 +376,7 @@ function parseJsonLosslessObject(text: string, pos: { index: number }): JsonLoss
   }
 }
 
-function parseJsonLosslessArray(text: string, pos: { index: number }): JsonLosslessArrayNode {
+function parseJsonLosslessArray(text: string, pos: { index: number }, depth: number): JsonLosslessArrayNode {
   pos.index++
   const items: JsonLosslessNode[] = []
   skipJsonWs(text, pos)
@@ -366,7 +385,7 @@ function parseJsonLosslessArray(text: string, pos: { index: number }): JsonLossl
     return { kind: 'array', items }
   }
   for (;;) {
-    const value = parseJsonLosslessNode(text, pos)
+    const value = parseJsonLosslessNode(text, pos, depth + 1)
     items.push(value)
     skipJsonWs(text, pos)
     const sep = text.charAt(pos.index)
@@ -423,27 +442,32 @@ function parseJsonLosslessLiteral(text: string, pos: { index: number }): JsonLos
 
 function parseJsonLosslessDocument(trimmed: string): JsonLosslessNode | null {
   const pos = { index: 0 }
-  const node = parseJsonLosslessNode(trimmed, pos)
+  const node = parseJsonLosslessNode(trimmed, pos, 0)
   skipJsonWs(trimmed, pos)
   if (pos.index !== trimmed.length) return null
   return node
 }
 
-function printJsonLosslessNode(node: JsonLosslessNode, depth: number): string {
+function printJsonLosslessNode(node: JsonLosslessNode, depth: number, seen = 0): string {
+  if (depth > MAX_JSON_LOSSLESS_STRUCTURE_DEPTH) throw new Error('Max JSON depth exceeded')
   const pad = '  '.repeat(depth)
   const childPad = '  '.repeat(depth + 1)
   if (node.kind === 'object') {
     if (node.entries.length === 0) return '{}'
-    const parts = node.entries.map(
-      (entry) => `${childPad}${entry.keyRaw}: ${printJsonLosslessNode(expandJsonLosslessStrings(entry.value, 0), depth + 1)}`
-    )
+    const parts = node.entries.map((entry) => {
+      const expanded = expandJsonLosslessStrings(entry.value, seen)
+      const childSeen = expanded !== entry.value ? seen + 1 : seen
+      return `${childPad}${entry.keyRaw}: ${printJsonLosslessNode(expanded, depth + 1, childSeen)}`
+    })
     return `{\n${parts.join(',\n')}\n${pad}}`
   }
   if (node.kind === 'array') {
     if (node.items.length === 0) return '[]'
-    const parts = node.items.map(
-      (item) => `${childPad}${printJsonLosslessNode(expandJsonLosslessStrings(item, 0), depth + 1)}`
-    )
+    const parts = node.items.map((item) => {
+      const expanded = expandJsonLosslessStrings(item, seen)
+      const childSeen = expanded !== item ? seen + 1 : seen
+      return `${childPad}${printJsonLosslessNode(expanded, depth + 1, childSeen)}`
+    })
     return `[\n${parts.join(',\n')}\n${pad}]`
   }
   if (node.kind === 'string' || node.kind === 'number' || node.kind === 'literal') {
@@ -454,12 +478,14 @@ function printJsonLosslessNode(node: JsonLosslessNode, depth: number): string {
 
 /**
  * Resolves one string node whose decoded text is itself a JSON object or
- * array, recursively. Non-string nodes pass through untouched; strings that
- * are not JSON objects/arrays keep their exact raw literal. Depth-capped so
- * adversarial nesting cannot recurse without bound.
+ * array. Non-string nodes pass through untouched; strings that are not JSON
+ * objects/arrays keep their exact raw literal. Callers thread `seen` along
+ * each root-to-leaf path and step it only when a layer is actually
+ * unwrapped, so the cap bounds hostile nesting while the unexpanded tail
+ * stays visible as an escaped string literal.
  */
 function expandJsonLosslessStrings(node: JsonLosslessNode, seen: number): JsonLosslessNode {
-  if (node.kind !== 'string' || seen > 20) return node
+  if (node.kind !== 'string' || seen >= MAX_NESTED_JSON_STRING_EXPANSIONS) return node
   const inner = node.decoded.trim()
   if (!isJsonText(inner)) return node
   try {
