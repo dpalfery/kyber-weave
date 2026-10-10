@@ -574,15 +574,13 @@ The web app lands on Context Doctor (`App` default `initialPage` / `spineReducer
 **Sessions**, **Compare**, **Quarantine** and **Problems**, and it is the whole navigation:
 the entire left rail and the mobile hamburger/toggle that opened it are gone, so no second
 navigation surface can drift from the tabs and main content takes the full width of the shell.
-Usage is the CodeBurn spend grid; it does not open the app. There is no Context tab: session
-browsing is the **Sessions** top-navigation destination wrapping `ContextExplorer` /
-`AgentSessionDashboard` (D17). Compare is a top-navigation peer that mounts `CompareRuns`
-(D20); Share chrome is on Usage only (D21). Density tokens live in the dashboard `@theme`
-(D22). A single shell harness strip (`data-testid="harness-selector"`) is the harness level of
-the spine; selecting a
-canonical id pushes `{ level: 'harness', harnessId }` and loads `runs?harness=`. A second
-provider `<select>` exists only on the Usage tab. Gemini may appear as a selector **label**;
-canonical rows and rollups do not use harness id `gemini`.
+There is no Context tab: session browsing is the **Sessions** top-navigation destination
+wrapping `ContextExplorer` / `AgentSessionDashboard` (D17). Compare is a top-navigation peer
+that mounts `CompareRuns` (D20). Density tokens live in the dashboard `@theme` (D22). A
+single shell harness strip (`data-testid="harness-selector"`) is the harness level of
+the spine; selecting a canonical id pushes `{ level: 'harness', harnessId }` and loads
+`runs?harness=`. Gemini may appear as a selector **label**; canonical rows and rollups do
+not use harness id `gemini`.
 
 Live gates G1–G7 and G4a have passed on a local host against a real store: drill the six
 levels, one diagnostic harness selector, canonical ids (including Claude Code), no
