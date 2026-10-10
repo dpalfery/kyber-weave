@@ -24,12 +24,30 @@ internal static class ArbiterLogFiles
 
     /// <summary>Appends one line to <paramref name="fileName"/> under the exclusive lock.</summary>
     /// <exception cref="IOException">Thrown when the lock is not acquired within 500 ms of backoff.</exception>
-    internal static async Task AppendLineAsync(
+    internal static Task AppendLineAsync(
         string directory,
         string fileName,
         string line,
+        CancellationToken cancellationToken) =>
+        AppendLineAsync(directory, fileName, (Func<string>)(() => line), cancellationToken);
+
+    /// <summary>
+    /// Appends the line <paramref name="lineFactory"/> produces, computed while the
+    /// exclusive lock is held.
+    /// </summary>
+    /// <remarks>
+    /// The factory runs under the lock, so a line derived from what is already on disk
+    /// cannot be derived twice from the same state. A caller that resolved something
+    /// before taking the lock would race every other appender doing the same.
+    /// </remarks>
+    /// <exception cref="IOException">Thrown when the lock is not acquired within 500 ms of backoff.</exception>
+    internal static async Task AppendLineAsync(
+        string directory,
+        string fileName,
+        Func<string> lineFactory,
         CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(lineFactory);
         Directory.CreateDirectory(directory);
         string lockPath = Path.Combine(directory, LockFileName);
         Stopwatch elapsed = Stopwatch.StartNew();
@@ -60,6 +78,10 @@ internal static class ArbiterLogFiles
 
             try
             {
+                // Resolved under the lock, not before it: a post's pairing decision depends
+                // on which pre events are still unpaired, so deciding it outside the lock
+                // lets racing posts all claim the same pre and double-book a dispatch.
+                string line = lineFactory();
                 await using FileStream target = File.Open(
                     Path.Combine(directory, fileName), FileMode.Append, FileAccess.Write, FileShare.Read);
                 await using StreamWriter writer = new(target, Utf8NoBom);
@@ -140,14 +162,23 @@ public sealed class InFlightLedger
     /// <c>call-id</c>, else by <c>pair-digest</c>, oldest unpaired pre event
     /// first) and stored with the match.
     /// </summary>
+    /// <remarks>
+    /// Pairing happens inside the append lock. It reads the ledger, so resolving it
+    /// before taking the lock would let two concurrent posts both match the same
+    /// unpaired pre and both claim it.
+    /// </remarks>
     /// <exception cref="IOException">Thrown when the lock is not acquired within 500 ms (fail closed).</exception>
-    public async Task AppendAsync(ArbiterLedgerEvent record, CancellationToken cancellationToken = default)
+    public Task AppendAsync(ArbiterLedgerEvent record, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(record);
-        ArbiterLedgerEvent stored = record.Phase == ArbiterLedgerPhases.Post && record.PreId is null
-            ? record with { PreId = MatchPre(record) }
-            : record;
-        await ArbiterLogFiles.AppendLineAsync(_directory, FileName, ArbiterJson.Serialize(stored), cancellationToken);
+        bool needsMatch = record.Phase == ArbiterLedgerPhases.Post && record.PreId is null;
+        return ArbiterLogFiles.AppendLineAsync(
+            _directory,
+            FileName,
+            needsMatch
+                ? () => ArbiterJson.Serialize(record with { PreId = MatchPre(record) })
+                : () => ArbiterJson.Serialize(record),
+            cancellationToken);
     }
 
     /// <summary>Reads every complete event, in append order. Takes no lock.</summary>
