@@ -576,17 +576,18 @@ the entire left rail and the mobile hamburger/toggle that opened it are gone, so
 navigation surface can drift from the tabs and main content takes the full width of the shell.
 There is no Context tab: session browsing is the **Sessions** top-navigation destination
 wrapping `ContextExplorer` / `AgentSessionDashboard` (D17). Compare is a top-navigation peer
-that mounts `CompareRuns` (D20). Density tokens live in the dashboard `@theme` (D22). A
-single shell harness strip (`data-testid="harness-selector"`) is the harness level of
-the spine; selecting a canonical id pushes `{ level: 'harness', harnessId }` and loads
-`runs?harness=`. Gemini may appear as a selector **label**; canonical rows and rollups do
-not use harness id `gemini`.
+that mounts `CompareRuns` (D20). Density tokens live in the dashboard `@theme` (D22). The single shell harness strip
+(`data-testid="harness-selector"`) changes the shared scope of Context Doctor and Sessions in
+place and clears the selected session when the harness changes. It does not navigate to harness
+detail. Explicit harness drill-down routes remain separate: they push `{ level: 'harness',
+harnessId }` and load `runs?harness=`. Gemini may appear as a selector **label**; canonical rows
+and rollups do not use harness id `gemini`.
 
 Live gates G1–G7 and G4a have passed on a local host against a real store: drill the six
 levels, one diagnostic harness selector, canonical ids (including Claude Code), no
 decision-id copy, empty charts marked empty rather than plotted as zero, layout inside the
-shell. Findings-first Context Doctor, scorecard matrix, Turn inspector, and live Compare are on
-the spine. Derived runs show a labelled grouping basis (`derived run` / `explicit run`,
+shell. Findings-first Context Doctor, Turn inspector, and live Compare are
+reachable through the spine. Derived runs show a labelled grouping basis (`derived run` / `explicit run`,
 `data-testid="run-grouping-basis"`) and are never silent clusters (D19). Calibration is
 wired on Finding detail (`CalibrationSummary`). Content older than 14 days is purged after
 refresh ([ADR 0018](../adr/0018-kyberdash-content-retention-purge.md)). Scorecard cells use
