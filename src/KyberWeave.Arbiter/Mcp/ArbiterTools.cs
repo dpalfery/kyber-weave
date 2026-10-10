@@ -129,7 +129,7 @@ public sealed class ArbiterTools(ArbiterServeContext context)
 
         if (!TryPhase(facts.Phase, out bool post))
         {
-            return Failure(provenance, $"Unknown phase '{facts.Phase}'. Use pre, post or return.");
+            return Failure(provenance, $"Unknown phase '{OneLine(facts.Phase)}'. Use pre, post or return.");
         }
 
         // A refutation or lens fan-out call carries its routing in the structured
@@ -185,7 +185,7 @@ public sealed class ArbiterTools(ArbiterServeContext context)
             {
                 return Failure(
                     provenance,
-                    $"The facts classify as '{classification.Trigger ?? "no trigger"}', not '{trigger}'. " +
+                    $"The facts classify as '{OneLine(classification.Trigger) ?? "no trigger"}', not '{OneLine(trigger)}'. " +
                     "Pass the trigger the event classifies as.");
             }
 
@@ -336,8 +336,13 @@ public sealed class ArbiterTools(ArbiterServeContext context)
     private static string Failure(string provenance, string message) =>
         provenance + "\noutcome: error\n" + message;
 
+    /// <summary>
+    /// Names the triggers there are. The trigger is client-controlled and the response
+    /// is line-oriented, so it is flattened here rather than quoted: a newline in it
+    /// would otherwise forge an <c>outcome:</c> line the caller reads as the verdict.
+    /// </summary>
     private static string UnknownTrigger(string? trigger) =>
-        $"Unknown Arbiter trigger '{trigger}'. Known triggers: {string.Join(", ", ArbiterTriggerFamilies.KnownTriggers)}.";
+        $"Unknown Arbiter trigger '{OneLine(trigger)}'. Known triggers: {string.Join(", ", ArbiterTriggerFamilies.KnownTriggers)}.";
 
     private static bool KnownTrigger(string trigger) =>
         ArbiterTriggerFamilies.KnownTriggers.Contains(trigger, StringComparer.Ordinal);
