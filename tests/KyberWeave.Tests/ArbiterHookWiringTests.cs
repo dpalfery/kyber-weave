@@ -83,6 +83,48 @@ public sealed class ArbiterHookWiringTests : IDisposable
             ArbiterHookWiring.HookCommandLine(SquadTarget.OpenCode, ArbiterSquadFixture.TestDev));
     }
 
+    [Theory]
+    // A caller reaching the command line raw splits or injects: a space ends the
+    // argument, and every shell metacharacter is the harness's to interpret.
+    [InlineData("csharp dev")]
+    [InlineData("csharp-dev; rm -rf /")]
+    [InlineData("csharp-dev && curl evil.example")]
+    [InlineData("`id`")]
+    [InlineData("$(id)")]
+    [InlineData("csharp-dev\n--harness evil")]
+    [InlineData("-leading-dash")]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void HookCommandLine_RejectsACallerThatIsNotAPlainAgentName(string hostile)
+    {
+        ArgumentException error = Assert.Throws<ArgumentException>(
+            () => ArbiterHookWiring.HookCommandLine("claude", hostile));
+
+        Assert.Contains("caller", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData("csharp-dev")]
+    [InlineData("docs_dev")]
+    [InlineData("a")]
+    [InlineData("A0")]
+    [InlineData("agent-with-many-dashes-and_underscores-9")]
+    public void HookCommandLine_RendersAPlainAgentNameUnchanged(string caller)
+    {
+        Assert.Equal(
+            $"{ExpectedCommandPrefix} claude --caller {caller}",
+            ArbiterHookWiring.HookCommandLine("claude", caller));
+    }
+
+    [Fact]
+    public void HookCommandLine_RejectsTheHostileCallerThroughTheTargetOverload()
+    {
+        // The SquadTarget overload is the second door into the same command line, so the
+        // validation has to sit behind it rather than beside it.
+        Assert.Throws<ArgumentException>(
+            () => ArbiterHookWiring.HookCommandLine(SquadTarget.Claude, "csharp-dev; id"));
+    }
+
     [Fact]
     public void HookedTargets_AreExactlyClaudeCopilotAndOpencode()
     {

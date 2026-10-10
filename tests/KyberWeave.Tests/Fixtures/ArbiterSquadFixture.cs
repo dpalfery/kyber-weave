@@ -170,7 +170,7 @@ internal sealed class ArbiterSquadFixture : IDisposable
 
     public void Dispose() => _tempDirectory.Dispose();
 
-    private void WriteAgent(string name, string description, string capabilityProfile, string delegatesTo)
+    public void WriteAgent(string name, string description, string capabilityProfile, string delegatesTo)
     {
         Write($"agents/{name}.md", $"""
             ---
