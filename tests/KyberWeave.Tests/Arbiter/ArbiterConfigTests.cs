@@ -327,6 +327,11 @@ public sealed class ArbiterConfigTests
     }
 
     [Theory]
+    // The fully qualified form of the same name. `localhost.` is the absolute spelling of
+    // `localhost` and resolves to the loopback interface, so the validator must not call it
+    // a remote host -- the key resolver asks the same helper and reads it the other way.
+    [InlineData("http://localhost.:11434/v1")]
+    [InlineData("http://LOCALHOST.:11434/v1")]
     [InlineData("http://localhost:11434/v1")]
     [InlineData("http://LocalHost:11434/v1")]
     [InlineData("http://127.0.0.1:11434/v1")]
