@@ -526,12 +526,14 @@ describe('projectCanonicalStore: projection-time repricing (issue #186, U9)', ()
   const sessionCost = (store: CanonStore, id: string) =>
     (store.getSessionPayload(id) as { summary: { cost: CostBlock } }).summary.cost
 
-  // U9: the pricing change itself adds no migration. The merged tree is at 16
+  // U9: the pricing change itself adds no migration. The merged tree was at 16
   // via two parallel steps on the v14 base: the nullable finding waste
   // 14→15 step (PR #226, coverage-gap findings persist NULL) and the
-  // ingest-coverage history_weeks 15→16 step — not via pricing.
-  it('keeps SCHEMA_VERSION at 17 (U9: no schema bump beyond the nullable finding waste, coverage window, and quarantine/problems metadata)', () => {
-    expect(SCHEMA_VERSION).toBe(17)
+  // ingest-coverage history_weeks 15→16 step — not via pricing. The quarantine/
+  // problems metadata step (16→17) and the incoming-evidence step (17→18,
+  // quarantine.raw_payload + problems.stack) are the only bumps since.
+  it('keeps SCHEMA_VERSION at 18 (U9: no schema bump beyond the additive evidence columns)', () => {
+    expect(SCHEMA_VERSION).toBe(18)
   })
 
   it('reprices a stale {unknown,no_rate} claude-code turn, rewrites cost_json, and the session cost agrees', async () => {

@@ -17,6 +17,8 @@ import {
   CanonStore,
   decompressRaw,
   normalizeHistoryWeeks,
+  problemsHarnessWhere,
+  quarantineHarnessWhere,
   toFinding,
   toPrediction,
   toRecord,
@@ -204,9 +206,18 @@ export type IngestActivitySource = {
   display: string
   /** T7 origin kind for the stored name. */
   kind: SourceKind
-  /** Rows in `records` carrying this source. */
+  /**
+   * Rows in `records` carrying this source — canonical stored telemetry only.
+   * Quarantined spans are held out of the corpus and never counted here.
+   */
   recordCount: number
-  /** Summed `ingest_log.count` for this source; 0 when the log names it nowhere. */
+  /**
+   * Summed `ingest_log.count` for this source: received OTLP span/log volume as the
+   * collector tallied it on arrival — including spans later quarantined or rejected.
+   * `ingestedCount > 0` beside `recordCount === 0` therefore means transport is
+   * receiving while nothing is landing in the corpus (quarantine, not silence); 0 when
+   * the log names the source nowhere.
+   */
   ingestedCount: number
   /** Latest `ingest_log.timestamp` for this source; null when the log names it nowhere. */
   lastReceivedAt: string | null
@@ -231,6 +242,18 @@ export type QuarantineRow = {
   timestamp?: string | null
 }
 
+/**
+ * One quarantined span with its incoming evidence. `rawPayload` is the exact span JSON
+ * stored at quarantine time (v18+ rows), parsed; older rows carry null with
+ * `evidenceAvailable: false` — explicitly unavailable, never reconstructed from the
+ * records table (that row is the normalized record, not the incoming payload).
+ * List routes never serve this shape; it is metadata-only there (bounded).
+ */
+export type QuarantineDetail = QuarantineRow & {
+  rawPayload: unknown | null
+  evidenceAvailable: boolean
+}
+
 export type ProblemRow = {
   id: number | string
   session_id: string | null
@@ -241,6 +264,16 @@ export type ProblemRow = {
   at: number | string | null
   harness: string | null
   timestamp?: string | null
+}
+
+/**
+ * One recorded problem with its exception evidence. `message` is the exact stored
+ * message; `stack` is the exception stack when the problem came from a throw, null
+ * otherwise — a computed validation problem has no stack and must not claim one.
+ * List routes never serve the stack; it is metadata-only there (bounded).
+ */
+export type ProblemDetail = ProblemRow & {
+  stack: string | null
 }
 
 export type ParsedSummary = {
@@ -735,6 +768,21 @@ function logId(value: string): string {
 function logErr(value: unknown): string {
   const raw = value instanceof Error ? value.message : String(value)
   return raw.replace(/[^\x20-\x7e]/g, '?').slice(0, 500)
+}
+
+/**
+ * Read a stored raw-payload cell for a detail route. Stored text parses back to the exact
+ * incoming span object; unparseable text is served verbatim rather than dropped (it is
+ * still the closest thing to the original evidence); null stays null — unavailable,
+ * never invented.
+ */
+function parseStoredRawPayload(rawText: string | null): unknown | null {
+  if (rawText === null) return null
+  try {
+    return JSON.parse(rawText) as unknown
+  } catch {
+    return rawText
+  }
 }
 
 
@@ -2266,7 +2314,14 @@ export class KyberBridge {
     }
   }
 
-  getQuarantine(limit = 200, offset = 0): QuarantineRow[] {
+  /**
+   * Quarantine rows, metadata-only (bounded — never the stored raw payload).
+   * `harness` scopes the list: `undefined` is unfiltered (backwards-compatible),
+   * `'unknown'` keeps unattributed sources only, and a canonical id keeps the stored
+   * source spellings normalizing to it. The scope matches the stored source grouping,
+   * never attribution — quarantined spans have no harness by construction.
+   */
+  getQuarantine(limit = 200, offset = 0, harness?: string): QuarantineRow[] {
     const db = this.getDb()
     if (!this.hasTable(db, 'quarantine')) {
       return []
@@ -2279,6 +2334,9 @@ export class KyberBridge {
       const cols = new Set(
         (db!.prepare("PRAGMA table_info('quarantine')").all() as Array<{ name: string }>).map((c) => c.name),
       )
+      // A scope needs the column it matches on; without `source` no row can be scoped.
+      if (harness !== undefined && !cols.has('source')) return []
+      const { where, params } = quarantineHarnessWhere(harness)
 
       const selectCols = ['span_id', 'namespaces', 'reason']
       selectCols.push(cols.has('source') ? 'source' : 'NULL AS source')
@@ -2294,9 +2352,9 @@ export class KyberBridge {
             ? 'seen_at'
             : 'span_id'
 
-      const sql = `SELECT ${selectCols.join(', ')} FROM quarantine ORDER BY ${orderCol} DESC, span_id DESC LIMIT ? OFFSET ?`
+      const sql = `SELECT ${selectCols.join(', ')} FROM quarantine${where} ORDER BY ${orderCol} DESC, span_id DESC LIMIT ? OFFSET ?`
 
-      const rows = db!.prepare(sql).all(safeLimit, safeOffset) as unknown as QuarantineDbRow[]
+      const rows = db!.prepare(sql).all(...params, safeLimit, safeOffset) as unknown as QuarantineDbRow[]
       const results: QuarantineRow[] = []
       for (const r of rows) {
         results.push({
@@ -2316,24 +2374,76 @@ export class KyberBridge {
     }
   }
 
-  /** Count every quarantine row without applying the inspector's default page limit. */
-  getQuarantineCount(): number {
+  /** Count quarantine rows under one scope, without applying the page limit. */
+  getQuarantineCount(harness?: string): number {
     if (this.store) {
-      return this.store.countQuarantine()
+      // Unscoped keeps the legacy seam so older store fakes still throw their own
+      // errors through; a scope needs the filtered seam (unfiltered would mis-scope).
+      if (harness === undefined) return this.store.countQuarantine()
+      return this.store.countQuarantineFiltered(harness)
     }
     const db = this.getDb()
     if (!this.hasTable(db, 'quarantine')) return 0
-    const row = db!.prepare('SELECT COUNT(*) AS n FROM quarantine').get() as
+    if (harness !== undefined) {
+      const cols = new Set(
+        (db!.prepare("PRAGMA table_info('quarantine')").all() as Array<{ name: string }>).map((c) => c.name),
+      )
+      if (!cols.has('source')) return 0
+    }
+    const { where, params } = quarantineHarnessWhere(harness)
+    const row = db!.prepare(`SELECT COUNT(*) AS n FROM quarantine${where}`).get(...params) as
       | { n?: number }
       | undefined
     return Number(row?.n) || 0
   }
 
   /**
+   * One quarantined span with its incoming evidence. Rows stored before the evidence
+   * column read `rawPayload: null, evidenceAvailable: false` — explicitly unavailable,
+   * never reconstructed. Absent span id gives undefined (the route's 404).
+   */
+  getQuarantineEntry(spanId: string): QuarantineDetail | undefined {
+    const db = this.getDb()
+    if (!this.hasTable(db, 'quarantine')) return undefined
+    try {
+      const cols = new Set(
+        (db!.prepare("PRAGMA table_info('quarantine')").all() as Array<{ name: string }>).map((c) => c.name),
+      )
+      const selectCols = ['span_id', 'namespaces', 'reason']
+      selectCols.push(cols.has('source') ? 'source' : 'NULL AS source')
+      selectCols.push(cols.has('name') ? 'name' : 'NULL AS name')
+      selectCols.push(cols.has('seen_at') ? 'seen_at' : 'NULL AS seen_at')
+      selectCols.push(cols.has('timestamp') ? 'timestamp' : 'NULL AS timestamp')
+      selectCols.push(cols.has('raw_payload') ? 'raw_payload' : 'NULL AS raw_payload')
+      const row = db!.prepare(`SELECT ${selectCols.join(', ')} FROM quarantine WHERE span_id = ?`).get(spanId) as
+        | (QuarantineDbRow & { raw_payload?: unknown })
+        | undefined
+      if (row === undefined) return undefined
+      const rawText = typeof row.raw_payload === 'string' && row.raw_payload !== '' ? row.raw_payload : null
+      return {
+        span_id: row.span_id,
+        source: row.source ?? null,
+        name: row.name ?? null,
+        namespaces: row.namespaces ?? null,
+        reason: row.reason ?? null,
+        seen_at: row.seen_at ?? row.timestamp ?? null,
+        timestamp: row.timestamp ?? (typeof row.seen_at === 'number' ? new Date(row.seen_at * 1000).toISOString() : (row.seen_at ? String(row.seen_at) : null)),
+        rawPayload: parseStoredRawPayload(rawText),
+        evidenceAvailable: rawText !== null,
+      }
+    } catch (err) {
+      console.warn('[KyberBridge] Failed querying quarantine entry from canon.db:', err)
+      return undefined
+    }
+  }
+
+  /**
    * Return recorded validation errors, token reconciliation mismatches, and anomalies.
    * Reads canonical diagnostics, deduplicated by the store's problem identity.
+   * Metadata-only (bounded — never the exception stack); `harness` scopes like the
+   * quarantine list (`undefined` is unfiltered and backwards-compatible).
    */
-  getProblems(limit = 200, offset = 0): ProblemRow[] {
+  getProblems(limit = 200, offset = 0, harness?: string): ProblemRow[] {
     const db = this.getDb()
     const canonTable = this.hasTable(db, 'problems')
       ? 'problems'
@@ -2360,9 +2470,13 @@ export class KyberBridge {
       selectCols.push(cols.has('at') ? 'at' : 'NULL AS at')
       selectCols.push(cols.has('timestamp') ? 'timestamp' : 'NULL AS timestamp')
 
-      const sql = `SELECT ${selectCols.join(', ')} FROM ${canonTable} ORDER BY id DESC LIMIT ? OFFSET ?`
+      // A scope needs the column it matches on; without `harness` no row can be scoped.
+      if (harness !== undefined && !cols.has('harness')) return []
+      const { where, params } = problemsHarnessWhere(harness)
 
-      const rows = db!.prepare(sql).all(safeLimit, safeOffset) as unknown as ProblemDbRow[]
+      const sql = `SELECT ${selectCols.join(', ')} FROM ${canonTable}${where} ORDER BY id DESC LIMIT ? OFFSET ?`
+
+      const rows = db!.prepare(sql).all(...params, safeLimit, safeOffset) as unknown as ProblemDbRow[]
       const results: ProblemRow[] = []
       for (const r of rows) {
         results.push({
@@ -2384,10 +2498,13 @@ export class KyberBridge {
     }
   }
 
-  /** Count every problem row without applying the inspector's default page limit. */
-  getProblemCount(): number {
+  /** Count problem rows under one scope, without applying the page limit. */
+  getProblemCount(harness?: string): number {
     if (this.store) {
-      return this.store.countProblems()
+      // Unscoped keeps the legacy seam so older store fakes still throw their own
+      // errors through; a scope needs the filtered seam (unfiltered would mis-scope).
+      if (harness === undefined) return this.store.countProblems()
+      return this.store.countProblemsFiltered(harness)
     }
     const db = this.getDb()
     const table = this.hasTable(db, 'problems')
@@ -2396,10 +2513,65 @@ export class KyberBridge {
         ? 'problem'
         : null
     if (table === null) return 0
-    const row = db!.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as
+    if (harness !== undefined) {
+      const cols = new Set(
+        (db!.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map((c) => c.name),
+      )
+      if (!cols.has('harness')) return 0
+    }
+    const { where, params } = problemsHarnessWhere(harness)
+    const row = db!.prepare(`SELECT COUNT(*) AS n FROM ${table}${where}`).get(...params) as
       | { n?: number }
       | undefined
     return Number(row?.n) || 0
+  }
+
+  /**
+   * One recorded problem with its exception evidence. `message` is the exact stored
+   * message; `stack` is the exception stack when the problem came from a throw, null
+   * otherwise. Absent id gives undefined (the route's 404).
+   */
+  getProblemEntry(id: number | string): ProblemDetail | undefined {
+    const numeric = typeof id === 'number' ? id : /^\d+$/.test(id.trim()) ? Number(id.trim()) : NaN
+    if (!Number.isSafeInteger(numeric)) return undefined
+    const db = this.getDb()
+    const canonTable = this.hasTable(db, 'problems')
+      ? 'problems'
+      : this.hasTable(db, 'problem')
+        ? 'problem'
+        : null
+    if (!canonTable) return undefined
+    try {
+      const cols = new Set(
+        (db!.prepare(`PRAGMA table_info(${canonTable})`).all() as Array<{ name: string }>).map((c) => c.name),
+      )
+      const selectCols = ['id', 'severity', 'code', 'message']
+      selectCols.push(cols.has('session_id') ? 'session_id' : 'NULL AS session_id')
+      selectCols.push(cols.has('span_id') ? 'span_id' : 'NULL AS span_id')
+      selectCols.push(cols.has('harness') ? 'harness' : 'NULL AS harness')
+      selectCols.push(cols.has('at') ? 'at' : 'NULL AS at')
+      selectCols.push(cols.has('timestamp') ? 'timestamp' : 'NULL AS timestamp')
+      selectCols.push(cols.has('stack') ? 'stack' : 'NULL AS stack')
+      const row = db!.prepare(`SELECT ${selectCols.join(', ')} FROM ${canonTable} WHERE id = ?`).get(numeric) as
+        | (ProblemDbRow & { stack?: unknown })
+        | undefined
+      if (row === undefined) return undefined
+      return {
+        id: row.id,
+        session_id: row.session_id ?? null,
+        span_id: row.span_id ?? null,
+        severity: row.severity,
+        code: row.code,
+        message: row.message,
+        at: row.at ?? row.timestamp ?? null,
+        timestamp: row.timestamp ?? (typeof row.at === 'number' ? new Date(row.at * 1000).toISOString() : (row.at ? String(row.at) : null)),
+        harness: row.harness ?? null,
+        stack: typeof row.stack === 'string' && row.stack !== '' ? row.stack : null,
+      }
+    } catch (err) {
+      console.warn('[KyberBridge] Failed querying problem entry from canon.db:', err)
+      return undefined
+    }
   }
 
   /**

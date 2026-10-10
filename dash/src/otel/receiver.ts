@@ -1065,9 +1065,71 @@ export type OtlpReceiverOptions = {
   maxBodyBytes?: number
   /** Override port-occupant discovery; tests pin this to make the report deterministic. */
   discoverOccupants?: PortOccupantDiscovery
+  /** Clock for the error window and accepted-batch timestamps; tests pin this. Default `Date.now`. */
+  clock?: () => number
 }
 
 class BodyTooLargeError extends Error {}
+
+// ---------------------------------------------------------------------------
+// Receiver health and the five-minute error window
+// ---------------------------------------------------------------------------
+
+/** Rolling five-minute window for OTLP and persistence failures (the approved indicator rule). */
+export const RECEIVER_ERROR_WINDOW_MS = 5 * 60 * 1000
+
+/** Cap on retained failure samples; the window is time-bounded, this bounds a burst inside it. */
+export const MAX_RECEIVER_ERROR_SAMPLES = 100
+
+/** One failure inside the window: when, with what code, and why. */
+export type ReceiverErrorSample = {
+  /** Epoch milliseconds (the receiver's clock). */
+  at: number
+  /** The response or persistence code, e.g. `OTLP_MALFORMED_PAYLOAD`. */
+  code: string
+  /** The diagnostic message, bounded at the recording site. */
+  message: string
+}
+
+/**
+ * What `/healthz` reports beyond identity. The original `{ service, version, paused }`
+ * shape is preserved; everything else is additive so an older main process still reads it.
+ */
+export type ReceiverHealthSnapshot = {
+  service: 'kyberdash-otlp'
+  version: string
+  paused: boolean
+  /** Where the receiver listens, e.g. `http://127.0.0.1:4318` (actual port once bound). */
+  endpoint: string
+  /** Whether the server socket is bound right now. */
+  listening: boolean
+  /**
+   * ISO time of the most recent batch the store confirmed persisted, or null when no
+   * batch has been confirmed since start. A 200 to an exporter means "decoded and queued",
+   * not "stored" — the writer confirms later — so this moves only on persistence, never on receipt.
+   */
+  lastAcceptedAt: string | null
+  /** ISO time this snapshot was taken. */
+  checkedAt: string
+  /** Failures on the OTLP signal paths inside the rolling five-minute window. */
+  failures5m: number
+  /** Message of the most recent in-window failure, or null when the window is clean. */
+  lastError: string | null
+  /** Code of the most recent in-window failure, or null when the window is clean. */
+  lastCode: string | null
+  /** ISO time of the most recent in-window failure, or null when the window is clean. */
+  lastErrorAt: string | null
+}
+
+/** True for the two signal paths whose failures enter the error window. */
+function isOtlpSignalPath(path: string): boolean {
+  return path === OTLP_TRACES_PATH || path === OTLP_LOGS_PATH
+}
+
+/** Bound an error message before retaining it; a hostile batch must not grow the window. */
+function boundErrorMessage(text: string): string {
+  return text.length > 500 ? `${text.slice(0, 500)}…` : text
+}
 
 /**
  * Decodes OTLP trace payloads and writes the resulting spans to a store.
@@ -1084,8 +1146,11 @@ export class OtlpReceiver {
   private readonly maxBodyBytes: number
   private readonly discoverOccupants: PortOccupantDiscovery
   private readonly server: Server
+  private readonly clock: () => number
   private pausedUntil: number | null = null
   private pauseTimer: ReturnType<typeof setTimeout> | null = null
+  private lastAcceptedAt: string | null = null
+  private errorSamples: ReceiverErrorSample[] = []
 
   constructor(opts: OtlpReceiverOptions = {}) {
     this.listenPort = opts.port ?? DEFAULT_OTLP_PORT
@@ -1093,6 +1158,7 @@ export class OtlpReceiver {
     this.store = opts.store ?? new InMemorySpanStore()
     this.maxBodyBytes = opts.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES
     this.discoverOccupants = opts.discoverOccupants ?? discoverPortOccupants
+    this.clock = opts.clock ?? Date.now
     this.server = createServer((request, response) => {
       void this.handleRequest(request, response)
     })
@@ -1107,6 +1173,70 @@ export class OtlpReceiver {
   /** True while the server is bound; a failed `start()` leaves this false. */
   get listening(): boolean {
     return this.server.listening
+  }
+
+  /** Where this receiver listens, with the actual port once bound. */
+  get endpoint(): string {
+    return `http://${this.hostname}:${this.port}`
+  }
+
+  /**
+   * Record a rejected OTLP signal-path request inside the rolling window. Health probes
+   * (`/healthz`), admin routes, and unknown paths never reach this: only the two signal
+   * paths' failures are receiver-health evidence. Intentional paused-503 responses are
+   * also excluded — the paused state is reported separately (`paused`), so counting them
+   * would turn an explicit, operator-chosen state into failure noise.
+   */
+  recordOtlpFailure(code: string, message: string): void {
+    this.errorSamples.push({ at: this.clock(), code, message: boundErrorMessage(message) })
+    if (this.errorSamples.length > MAX_RECEIVER_ERROR_SAMPLES) {
+      this.errorSamples.splice(0, this.errorSamples.length - MAX_RECEIVER_ERROR_SAMPLES)
+    }
+  }
+
+  /**
+   * Record a persistence/write failure inside the rolling window: the writer's sink threw
+   * during a flush, so a batch the receiver already answered 200 for never landed. The
+   * message is the store's error text (bounded); the response to the exporter stays the
+   * generic code, since bind-interface detail must not travel to the caller.
+   */
+  recordPersistenceFailure(message: string): void {
+    this.recordOtlpFailure('OTLP_PERSISTENCE_FAILED', message)
+  }
+
+  /**
+   * Mark a batch persisted now. Called by the collector service after the sink commits —
+   * never by the request path, whose 200 only means decoded and queued. A queued batch
+   * that never flushes must not move `lastAcceptedAt`.
+   */
+  markPersisted(): void {
+    this.lastAcceptedAt = new Date(this.clock()).toISOString()
+  }
+
+  /** In-window failures, oldest first; also prunes samples that aged out. */
+  recentFailures(): ReceiverErrorSample[] {
+    const floor = this.clock() - RECEIVER_ERROR_WINDOW_MS
+    this.errorSamples = this.errorSamples.filter((sample) => sample.at >= floor)
+    return [...this.errorSamples]
+  }
+
+  /** The `/healthz` body: identity plus the freshness and window facts the indicator reads. */
+  getHealth(): ReceiverHealthSnapshot {
+    const recent = this.recentFailures()
+    const last = recent.length > 0 ? recent[recent.length - 1]! : undefined
+    return {
+      service: 'kyberdash-otlp',
+      version: KYBERDASH_VERSION,
+      paused: this.isPaused(),
+      endpoint: this.endpoint,
+      listening: this.listening,
+      lastAcceptedAt: this.lastAcceptedAt,
+      checkedAt: new Date(this.clock()).toISOString(),
+      failures5m: recent.length,
+      lastError: last?.message ?? null,
+      lastCode: last?.code ?? null,
+      lastErrorAt: last === undefined ? null : new Date(last.at).toISOString(),
+    }
   }
 
   async start(): Promise<void> {
@@ -1167,7 +1297,12 @@ export class OtlpReceiver {
     try {
       await this.dispatch(req, res)
     } catch (err) {
+      // The error window covers the two signal paths only: a throw while serving
+      // `/healthz`, an admin route, or an unknown path is not OTLP evidence.
+      const path = (req.url ?? '/').split('?')[0]
+      const inWindow = isOtlpSignalPath(path)
       if (err instanceof BodyTooLargeError) {
+        if (inWindow) this.recordOtlpFailure('OTLP_PAYLOAD_TOO_LARGE', `body exceeds the ${this.maxBodyBytes}-byte limit`)
         respondJson(res, 413, {
           error: {
             code: 'OTLP_PAYLOAD_TOO_LARGE',
@@ -1176,12 +1311,19 @@ export class OtlpReceiver {
         })
       } else if (err instanceof OtlpDecodeError) {
         // Malformed OTLP: reject with a diagnostic; nothing was written.
+        if (inWindow) this.recordOtlpFailure('OTLP_MALFORMED_PAYLOAD', err.message)
         respondJson(res, 400, { error: { code: 'OTLP_MALFORMED_PAYLOAD', message: err.message } })
       } else {
         // The bind interface is configurable (see `opts.host`), so an internal
         // error's text — paths, driver detail — must not travel to the caller.
         // It goes to the operator's console; the caller gets the code only.
+        // On a signal path this is a persistence/write failure until proven otherwise:
+        // decode already ran (a decode failure throws OtlpDecodeError above), so what
+        // remains is the store refusing the batch.
         console.error('[KyberOtel] Internal error handling OTLP request:', err)
+        if (inWindow) {
+          this.recordOtlpFailure('OTLP_PERSISTENCE_FAILED', err instanceof Error ? err.message : String(err))
+        }
         respondJson(res, 500, {
           error: { code: 'OTLP_INTERNAL', message: 'internal receiver error' },
         })
@@ -1199,11 +1341,9 @@ export class OtlpReceiver {
         })
         return
       }
-      respondJson(res, 200, {
-        service: 'kyberdash-otlp',
-        version: KYBERDASH_VERSION,
-        paused: this.isPaused(),
-      })
+      // Identity keys (`service`, `version`, `paused`) keep their names so the tray's
+      // hosting probe and older main processes keep reading this probe.
+      respondJson(res, 200, this.getHealth() as unknown as Record<string, unknown>)
       return
     }
     if (path === OTLP_ADMIN_PAUSE_PATH || path === OTLP_ADMIN_RESUME_PATH) {
@@ -1249,6 +1389,7 @@ export class OtlpReceiver {
     }
     if (req.method !== 'POST') {
       res.setHeader('Allow', 'POST')
+      this.recordOtlpFailure('OTLP_METHOD_NOT_ALLOWED', `${req.method} is not supported on ${path}: use POST`)
       respondJson(res, 405, {
         error: { code: 'OTLP_METHOD_NOT_ALLOWED', message: `${req.method} is not supported: use POST` },
       })
@@ -1256,6 +1397,10 @@ export class OtlpReceiver {
     }
     const encoding = encodingForContentType(req.headers['content-type'])
     if (encoding === undefined) {
+      this.recordOtlpFailure(
+        'OTLP_UNSUPPORTED_MEDIA_TYPE',
+        `content type ${headerValue(req.headers['content-type']) || '(none)'} is not supported on ${path}`,
+      )
       respondJson(res, 415, {
         error: {
           code: 'OTLP_UNSUPPORTED_MEDIA_TYPE',
