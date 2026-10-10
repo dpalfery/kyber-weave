@@ -406,6 +406,12 @@ public sealed class ArbiterTools(ArbiterServeContext context)
 
         if (facts.Prompt is not null)
         {
+            // A blank line ends the header block: HeaderBlock.Parse stops at the first
+            // line that is not a header, and HeaderBlock.Strip drops that one separator.
+            // Without it a client prompt opening with `PLAN_FILE: ...` or `LENS: ...`
+            // reads as a duplicate header and silently drops the fact the tool just
+            // wrote, so the caller's own routing is what classifies the event.
+            lines.Add(string.Empty);
             lines.Add(facts.Prompt);
         }
 
