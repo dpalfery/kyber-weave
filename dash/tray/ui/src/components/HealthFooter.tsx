@@ -25,10 +25,11 @@ export const COLLECTOR_STALE_AFTER_MS = 120_000
 export function collectorLive(coverage: CoverageDoc | null | undefined, now: Date): boolean {
   const receiver = coverage?.receiver ?? null
   if (receiver === null || receiver === undefined) return false
+  if (receiver.enabled !== true) return false
   if (receiver.healthy !== true) return false
-  if (receiver.paused === true) return false
+  if (receiver.paused !== false) return false
   if (receiver.listening !== true) return false
-  if ((receiver.errors5m?.total ?? null) !== 0) return false
+  if ((receiver.failures5m ?? null) !== 0) return false
   if (typeof receiver.checkedAt !== 'string') return false
   const checked = Date.parse(receiver.checkedAt)
   if (!Number.isFinite(checked)) return false

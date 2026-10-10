@@ -7,11 +7,12 @@
 // panel) are separate sections with separate labels, so 0 canonical records
 // never reads as "nothing is arriving".
 //
-// Colour rule (user-approved): green only when the engine says the receiver
-// is actively accepting, not paused, and has no failed OTLP requests or
-// persistence errors in the last 5 minutes. Red when off, paused, failing,
-// or when health is unavailable/stale. State is always named in text as
-// well as colour.
+// Colour rule (user-approved): green only when the receiver is enabled and
+// actively listening, unpaused, healthy, has exactly zero failures in the
+// last 5 minutes (`failures5m`), and the probe is fresh (120s). Red when
+// off, paused, failing, or when health is unavailable/stale. State is always
+// named in text as well as colour. The latest error reads from the flat
+// `lastErrorAt` / `lastCode` / `lastError` fields when available.
 
 import type { KyberCoverage, KyberReceiverHealth } from '../../lib/kyberApi.js'
 import { formatCoverageAgo } from './CoverageIngestPanel.js'
@@ -31,8 +32,9 @@ export const RECEIVER_STALE_AFTER_MS = 120_000
 
 /**
  * Pure verdict over the coverage payload. Green (`live`) only when the
- * engine reports `healthy === true`, the listener is up, the receiver is
- * not paused, and the 5-minute error total is exactly 0. Anything else —
+ * receiver is enabled, `healthy === true`, the listener is up, the receiver
+ * is explicitly unpaused (`paused === false`), and the 5-minute failure
+ * count (`failures5m`) is exactly 0 with a fresh `checkedAt`. Anything else —
  * including a missing `receiver` key (servers predating the probe) or a
  * stale/missing `checkedAt` — is `down` (red).
  */
@@ -48,6 +50,13 @@ export function collectorVerdict(
       reason: 'This server did not report live receiver health, so nothing about the collector is known from this page.',
     }
   }
+  if (receiver.enabled !== true) {
+    return {
+      state: 'down',
+      label: 'Collector down — receiver not enabled',
+      reason: 'The engine reports the receiver is not enabled, so it is not accepting batches.',
+    }
+  }
   if (receiver.healthy !== true) {
     return {
       state: 'down',
@@ -55,7 +64,7 @@ export function collectorVerdict(
       reason: describeDown(receiver),
     }
   }
-  if (receiver.paused === true) {
+  if (receiver.paused !== false) {
     return {
       state: 'down',
       label: 'Collector down — receiver paused',
@@ -69,7 +78,7 @@ export function collectorVerdict(
       reason: 'The engine reports the receiver is not listening.',
     }
   }
-  const errors = receiver.errors5m?.total ?? null
+  const errors = receiver.failures5m ?? null
   if (errors !== 0) {
     return {
       state: 'down',
@@ -110,9 +119,10 @@ export function collectorVerdict(
 }
 
 function describeDown(receiver: KyberReceiverHealth): string {
+  if (receiver.enabled === false) return 'The engine reports the receiver is not enabled, so it is not accepting batches.'
   if (receiver.paused === true) return 'The engine reports the receiver is paused: it is not accepting batches.'
   if (receiver.listening === false) return 'The engine reports the receiver is not listening.'
-  const errors = receiver.errors5m?.total ?? null
+  const errors = receiver.failures5m ?? null
   if (typeof errors === 'number' && errors > 0) {
     return `The engine reports ${errors} failed OTLP request(s) or persistence error(s) in the last 5 minutes.`
   }
@@ -131,11 +141,10 @@ export function ReceiverHealthPanel({ coverage, nowMs }: { coverage: KyberCovera
   const verdict = collectorVerdict(coverage, nowMs)
   const receiver = coverage.receiver ?? null
   const live = verdict.state === 'live'
-  const errorsTotal = receiver?.errors5m?.total ?? null
-  const lastError = receiver?.errors5m?.last ?? null
-  const lastCode = textOf(lastError?.code)
-  const lastMessage = textOf(lastError?.message)
-  const lastAt = textOf(lastError?.at)
+  const errorsTotal = receiver?.failures5m ?? null
+  const lastCode = textOf(receiver?.lastCode)
+  const lastMessage = textOf(receiver?.lastError)
+  const lastAt = textOf(receiver?.lastErrorAt)
   const endpoint = textOf(receiver?.endpoint) ?? 'endpoint unknown'
   const paused = receiver?.paused === true
   const listening = receiver?.listening === true ? 'listening' : receiver?.listening === false ? 'not listening' : 'listener state unknown'

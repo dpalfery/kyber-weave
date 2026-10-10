@@ -51,25 +51,29 @@ describe('the receiver line names the state rather than guessing at a fault', ()
 describe('the collector saber follows the shared coverage API, unknown is red', () => {
   const liveCoverage = {
     receiver: {
+      enabled: true,
       healthy: true,
       listening: true,
       paused: false,
       checkedAt: new Date(NOW.getTime() - 10_000).toISOString(),
-      errors5m: { total: 0, last: null },
+      failures5m: 0,
     },
   }
 
-  it('is live only for a healthy, listening, unpaused, error-free receiver', () => {
+  it('is live only for an enabled, healthy, listening, unpaused, error-free receiver', () => {
     expect(collectorLive(liveCoverage, NOW)).toBe(true)
   })
 
-  it('is down when coverage is missing, paused, failing, or stale', () => {
+  it('is down when coverage is missing, disabled, paused, failing, or stale', () => {
     expect(collectorLive(null, NOW)).toBe(false)
     expect(collectorLive(undefined, NOW)).toBe(false)
     expect(collectorLive({}, NOW)).toBe(false)
+    expect(collectorLive({ receiver: { ...liveCoverage.receiver, enabled: false } }, NOW)).toBe(false)
     expect(collectorLive({ receiver: { ...liveCoverage.receiver, paused: true } }, NOW)).toBe(false)
+    expect(collectorLive({ receiver: { ...liveCoverage.receiver, paused: null } }, NOW)).toBe(false)
     expect(collectorLive({ receiver: { ...liveCoverage.receiver, healthy: false } }, NOW)).toBe(false)
-    expect(collectorLive({ receiver: { ...liveCoverage.receiver, errors5m: { total: 1, last: null } } }, NOW)).toBe(false)
+    expect(collectorLive({ receiver: { ...liveCoverage.receiver, failures5m: 1 } }, NOW)).toBe(false)
+    expect(collectorLive({ receiver: { ...liveCoverage.receiver, failures5m: null } }, NOW)).toBe(false)
     expect(
       collectorLive(
         { receiver: { ...liveCoverage.receiver, checkedAt: new Date(NOW.getTime() - 300_000).toISOString() } },

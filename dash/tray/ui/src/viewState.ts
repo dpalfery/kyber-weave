@@ -54,6 +54,7 @@ export type SharedSettings = {
  * fetch) is unknown — and unknown renders red.
  */
 export type CoverageReceiver = {
+  enabled?: boolean | null
   status?: string | null
   listening?: boolean | null
   hostedByUs?: boolean | null
@@ -62,10 +63,10 @@ export type CoverageReceiver = {
   endpoint?: string | null
   checkedAt?: string | null
   lastAcceptedAt?: string | null
-  errors5m?: {
-    total?: number | null
-    last?: { at?: string | null; code?: string | null; message?: string | null } | null
-  } | null
+  failures5m?: number | null
+  lastError?: string | null
+  lastCode?: string | null
+  lastErrorAt?: string | null
 }
 
 export type CoverageDoc = {

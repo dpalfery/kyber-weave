@@ -1286,6 +1286,7 @@ export interface KyberCoverage {
  * something a surface recomputes.
  */
 export interface KyberReceiverHealth {
+  enabled?: boolean | null
   status?: string | null
   listening?: boolean | null
   hostedByUs?: boolean | null
@@ -1294,10 +1295,10 @@ export interface KyberReceiverHealth {
   endpoint?: string | null
   checkedAt?: string | null
   lastAcceptedAt?: string | null
-  errors5m?: {
-    total?: number | null
-    last?: { at?: string | null; code?: string | null; message?: string | null } | null
-  } | null
+  failures5m?: number | null
+  lastError?: string | null
+  lastCode?: string | null
+  lastErrorAt?: string | null
 }
 
 export async function fetchCoverage(): Promise<KyberCoverage> {

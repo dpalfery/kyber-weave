@@ -28,6 +28,7 @@ function coverageWith(receiver: unknown): KyberCoverage {
 }
 
 const LIVE_RECEIVER = {
+  enabled: true,
   status: 'hosted',
   listening: true,
   hostedByUs: true,
@@ -36,7 +37,10 @@ const LIVE_RECEIVER = {
   endpoint: 'http://127.0.0.1:4318',
   checkedAt: new Date(Date.now() - 5_000).toISOString(),
   lastAcceptedAt: new Date(Date.now() - 20_000).toISOString(),
-  errors5m: { total: 0, last: null },
+  failures5m: 0,
+  lastError: null,
+  lastCode: null,
+  lastErrorAt: null,
 }
 
 function stubCoverage(coverage: KyberCoverage, onCoverage?: () => void) {
@@ -114,7 +118,10 @@ describe('Status slideout collector indicator', () => {
         ...LIVE_RECEIVER,
         healthy: false,
         listening: false,
-        errors5m: { total: 3, last: { at: '2026-10-10T11:59:00.000Z', code: 'OTLP_500', message: 'connection refused' } },
+        failures5m: 3,
+        lastErrorAt: '2026-10-10T11:59:00.000Z',
+        lastCode: 'OTLP_500',
+        lastError: 'connection refused',
       }),
     )
     const panel = await openStatus()

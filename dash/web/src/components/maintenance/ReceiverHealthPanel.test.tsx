@@ -22,6 +22,7 @@ function coverageWith(receiver: unknown): KyberCoverage {
 }
 
 const LIVE = {
+  enabled: true,
   status: 'hosted',
   listening: true,
   hostedByUs: true,
@@ -30,7 +31,10 @@ const LIVE = {
   endpoint: 'http://127.0.0.1:4318',
   checkedAt: new Date(NOW - 10_000).toISOString(),
   lastAcceptedAt: new Date(NOW - 20_000).toISOString(),
-  errors5m: { total: 0, last: null },
+  failures5m: 0,
+  lastError: null,
+  lastCode: null,
+  lastErrorAt: null,
 }
 
 describe('collectorVerdict', () => {
@@ -50,18 +54,21 @@ describe('collectorVerdict', () => {
 
   it('is down when paused, not listening, unhealthy, or erroring', () => {
     expect(collectorVerdict(coverageWith({ ...LIVE, paused: true }), NOW).state).toBe('down')
+    expect(collectorVerdict(coverageWith({ ...LIVE, paused: null }), NOW).state).toBe('down')
     expect(collectorVerdict(coverageWith({ ...LIVE, listening: false }), NOW).state).toBe('down')
     expect(collectorVerdict(coverageWith({ ...LIVE, healthy: false }), NOW).state).toBe('down')
+    expect(collectorVerdict(coverageWith({ ...LIVE, enabled: false }), NOW).state).toBe('down')
+    expect(collectorVerdict(coverageWith({ ...LIVE, enabled: null }), NOW).state).toBe('down')
     expect(
       collectorVerdict(
-        coverageWith({ ...LIVE, errors5m: { total: 2, last: { at: 'x', code: 'OTLP_500', message: 'boom' } } }),
+        coverageWith({ ...LIVE, failures5m: 2, lastErrorAt: 'x', lastCode: 'OTLP_500', lastError: 'boom' }),
         NOW,
       ).state,
     ).toBe('down')
   })
 
-  it('is down when the error total is unknown or the probe is stale', () => {
-    expect(collectorVerdict(coverageWith({ ...LIVE, errors5m: { total: null, last: null } }), NOW).state).toBe('down')
+  it('is down when the failure count is unknown or the probe is stale', () => {
+    expect(collectorVerdict(coverageWith({ ...LIVE, failures5m: null }), NOW).state).toBe('down')
     expect(collectorVerdict(coverageWith({ ...LIVE, checkedAt: null }), NOW).state).toBe('down')
     const staleAt = new Date(NOW - RECEIVER_STALE_AFTER_MS - 1_000).toISOString()
     const verdict = collectorVerdict(coverageWith({ ...LIVE, checkedAt: staleAt }), NOW)

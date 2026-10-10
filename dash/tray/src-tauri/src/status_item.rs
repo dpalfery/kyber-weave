@@ -31,10 +31,11 @@ pub enum IconState {
 
 /// Live-collector saber state, derived only from the shared coverage API's
 /// `receiver` document (`GET /api/kyber/coverage`). Green (`Live`) only when
-/// the engine reports healthy, listening, unpaused and error-free; every
-/// other shape — including a missing `receiver` key (servers predating the
-/// probe) or a stale check — is `Down` (red). Unknown is red, never amber:
-/// the saber must not read as "maybe fine".
+/// the receiver is enabled, healthy, listening, explicitly unpaused, and
+/// error-free (`failures5m` exactly 0) with a fresh check; every other shape —
+/// including a missing `receiver` key (servers predating the probe) or a
+/// stale check — is `Down` (red). Unknown is red, never amber: the saber must
+/// not read as "maybe fine".
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum CollectorState {
@@ -60,20 +61,20 @@ pub fn collector_health(coverage: Option<&Value>, now: SystemTime) -> CollectorS
     if receiver.is_null() {
         return CollectorState::Down;
     }
+    if receiver.get("enabled").and_then(Value::as_bool) != Some(true) {
+        return CollectorState::Down;
+    }
     if receiver.get("healthy").and_then(Value::as_bool) != Some(true) {
         return CollectorState::Down;
     }
-    if receiver.get("paused").and_then(Value::as_bool) == Some(true) {
+    if receiver.get("paused").and_then(Value::as_bool) != Some(false) {
         return CollectorState::Down;
     }
     if receiver.get("listening").and_then(Value::as_bool) != Some(true) {
         return CollectorState::Down;
     }
-    let errors_total = receiver
-        .get("errors5m")
-        .and_then(|e| e.get("total"))
-        .and_then(Value::as_u64);
-    if errors_total != Some(0) {
+    let failures_5m = receiver.get("failures5m").and_then(Value::as_u64);
+    if failures_5m != Some(0) {
         return CollectorState::Down;
     }
     let Some(checked_at) = receiver.get("checkedAt").and_then(Value::as_str) else {
@@ -131,8 +132,10 @@ pub struct StatusItem {
 /// the distinction belongs in the footer, which has room to explain it.
 ///
 /// `coverage` is the shared `GET /api/kyber/coverage` document (only its
-/// `receiver` key is read). A `None` coverage, like a stale phase, forces the
-/// collector saber red: unavailable health is down, never "maybe".
+/// `receiver` key is read). A `None` coverage forces the collector saber red:
+/// unavailable health is down, never "maybe". Collector status is independent
+/// of session/report freshness: a stale report drives the pressure icon, never
+/// the collector saber.
 pub fn status_item(
     report: Option<&Value>,
     thresholds: &Thresholds,
@@ -175,13 +178,11 @@ pub fn status_item_with_coverage(
         _ => None,
     };
 
-    // The collector saber is red when health is unavailable or stale too:
-    // a stale phase means the coverage underneath is not current either.
-    let collector = if stale {
-        CollectorState::Down
-    } else {
-        collector_health(coverage, now)
-    };
+    // The collector saber reads only receiver health: a stale report affects
+    // the pressure icon above, never the collector. A stale report may mean
+    // the pressure indicator is not current, but the receiver's own health
+    // (freshness of `checkedAt` included) is judged on its own probe.
+    let collector = collector_health(coverage, now);
 
     StatusItem {
         icon,
@@ -597,6 +598,7 @@ mod tests {
 
     fn live_receiver() -> Value {
         json!({
+            "enabled": true,
             "status": "hosted",
             "listening": true,
             "hostedByUs": true,
@@ -605,7 +607,10 @@ mod tests {
             "endpoint": "http://127.0.0.1:4318",
             "checkedAt": "2023-11-14T22:13:20Z",
             "lastAcceptedAt": "2023-11-14T22:13:00Z",
-            "errors5m": { "total": 0, "last": null },
+            "failures5m": 0,
+            "lastError": Value::Null,
+            "lastCode": Value::Null,
+            "lastErrorAt": Value::Null,
         })
     }
 
@@ -633,9 +638,18 @@ mod tests {
             CollectorState::Down
         );
         let mut cases: Vec<Value> = Vec::new();
+        let mut disabled = live_receiver();
+        disabled["enabled"] = json!(false);
+        cases.push(disabled);
+        let mut unknown_enabled = live_receiver();
+        unknown_enabled["enabled"] = Value::Null;
+        cases.push(unknown_enabled);
         let mut paused = live_receiver();
         paused["paused"] = json!(true);
         cases.push(paused);
+        let mut unknown_paused = live_receiver();
+        unknown_paused["paused"] = Value::Null;
+        cases.push(unknown_paused);
         let mut not_listening = live_receiver();
         not_listening["listening"] = json!(false);
         cases.push(not_listening);
@@ -643,10 +657,13 @@ mod tests {
         unhealthy["healthy"] = json!(false);
         cases.push(unhealthy);
         let mut erroring = live_receiver();
-        erroring["errors5m"] = json!({ "total": 2, "last": null });
+        erroring["failures5m"] = json!(2);
+        erroring["lastCode"] = json!("OTLP_500");
+        erroring["lastError"] = json!("boom");
+        erroring["lastErrorAt"] = json!("2023-11-14T22:13:00Z");
         cases.push(erroring);
         let mut unknown_errors = live_receiver();
-        unknown_errors["errors5m"] = json!({ "total": null, "last": null });
+        unknown_errors["failures5m"] = Value::Null;
         cases.push(unknown_errors);
         let mut stale = live_receiver();
         stale["checkedAt"] = json!("2023-11-14T22:10:00Z");
@@ -663,10 +680,12 @@ mod tests {
         }
     }
 
-    /// Stale outranks everything, and the tooltip keeps the pressure detail
-    /// while naming the collector state in words.
+    /// Stale report freshness drives the pressure icon, never the collector
+    /// saber: a healthy fresh receiver stays live while the report reads
+    /// stale, and the tooltip still names both. Collector freshness is judged
+    /// only on the receiver's own `checkedAt`.
     #[test]
-    fn stale_forces_the_collector_red_and_the_tooltip_names_both() {
+    fn stale_report_leaves_a_healthy_fresh_collector_live() {
         let report = report_with_pressure(measured(0.42));
         let coverage = coverage_with(live_receiver());
         let item = status_item_with_coverage(
@@ -676,9 +695,11 @@ mod tests {
             true,
             at(GENERATED_EPOCH),
         );
-        assert_eq!(item.collector, CollectorState::Down);
-        assert!(item.tooltip.contains("collector down"), "{}", item.tooltip);
-        assert!(item.tooltip.contains("42%"), "{}", item.tooltip);
+        assert_eq!(item.icon, IconState::Stale);
+        assert_eq!(item.title, None);
+        assert_eq!(item.collector, CollectorState::Live);
+        assert!(item.tooltip.contains("collector live"), "{}", item.tooltip);
+        assert!(item.tooltip.contains("not current"), "{}", item.tooltip);
     }
 
     #[test]
