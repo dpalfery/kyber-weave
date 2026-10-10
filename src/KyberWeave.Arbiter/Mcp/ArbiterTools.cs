@@ -129,7 +129,7 @@ public sealed class ArbiterTools(ArbiterServeContext context)
 
         if (!TryPhase(facts.Phase, out bool post))
         {
-            return Failure(provenance, $"Unknown phase '{facts.Phase}'. Use pre, post or return.");
+            return Failure(provenance, $"Unknown phase '{OneLine(facts.Phase)}'. Use pre, post or return.");
         }
 
         // A refutation or lens fan-out call carries its routing in the structured
@@ -185,7 +185,7 @@ public sealed class ArbiterTools(ArbiterServeContext context)
             {
                 return Failure(
                     provenance,
-                    $"The facts classify as '{classification.Trigger ?? "no trigger"}', not '{trigger}'. " +
+                    $"The facts classify as '{OneLine(classification.Trigger) ?? "no trigger"}', not '{OneLine(trigger)}'. " +
                     "Pass the trigger the event classifies as.");
             }
 
@@ -296,11 +296,23 @@ public sealed class ArbiterTools(ArbiterServeContext context)
         bool remote = provider.Kind != ArbiterProviderKind.None
             && hasEndpoint
             && !ArbiterKeyResolver.IsLoopbackEndpoint(provider.Endpoint);
-        string key = !remote
-            ? "not needed (none or loopback provider)"
-            : context.KeyResolved(config)
-                ? "found"
-                : "missing (KW-ARB-KEY-001)";
+        string key;
+        try
+        {
+            // The resolver reaches the OS credential store, which fails for reasons the
+            // caller cannot act on. It is guarded like the user override above: the
+            // message only, never the stack, and never the key - it reports presence.
+            key = !remote
+                ? "not needed (none or loopback provider)"
+                : context.KeyResolved(config)
+                    ? "found"
+                    : "missing (KW-ARB-KEY-001)";
+        }
+        catch (Exception ex)
+        {
+            return Failure(provenance, $"The key presence check failed: {OneLine(ex.Message)}");
+        }
+
         string origin = hasEndpoint ? ArbiterKeyResolver.GetOrigin(provider.Endpoint) ?? "none" : "none";
 
         StringBuilder sb = new(provenance);
@@ -336,8 +348,13 @@ public sealed class ArbiterTools(ArbiterServeContext context)
     private static string Failure(string provenance, string message) =>
         provenance + "\noutcome: error\n" + message;
 
+    /// <summary>
+    /// Names the triggers there are. The trigger is client-controlled and the response
+    /// is line-oriented, so it is flattened here rather than quoted: a newline in it
+    /// would otherwise forge an <c>outcome:</c> line the caller reads as the verdict.
+    /// </summary>
     private static string UnknownTrigger(string? trigger) =>
-        $"Unknown Arbiter trigger '{trigger}'. Known triggers: {string.Join(", ", ArbiterTriggerFamilies.KnownTriggers)}.";
+        $"Unknown Arbiter trigger '{OneLine(trigger)}'. Known triggers: {string.Join(", ", ArbiterTriggerFamilies.KnownTriggers)}.";
 
     private static bool KnownTrigger(string trigger) =>
         ArbiterTriggerFamilies.KnownTriggers.Contains(trigger, StringComparer.Ordinal);
@@ -406,6 +423,12 @@ public sealed class ArbiterTools(ArbiterServeContext context)
 
         if (facts.Prompt is not null)
         {
+            // A blank line ends the header block: HeaderBlock.Parse stops at the first
+            // line that is not a header, and HeaderBlock.Strip drops that one separator.
+            // Without it a client prompt opening with `PLAN_FILE: ...` or `LENS: ...`
+            // reads as a duplicate header and silently drops the fact the tool just
+            // wrote, so the caller's own routing is what classifies the event.
+            lines.Add(string.Empty);
             lines.Add(facts.Prompt);
         }
 

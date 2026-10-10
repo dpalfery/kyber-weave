@@ -350,6 +350,46 @@ public sealed class AntigravityHookAdapterTests
     // [F10]: the only documented output is `{}`, so a non-dispatch event must be
     // answered with it before the host loads configuration — a misconfigured matcher
     // must not force a config load, and silence is not an Antigravity allow.
+    // A workspace path that names nothing is not a repository root. Returning it
+    // verbatim sends every ledger and log path to "" and reads the host
+    // configuration from the process directory, which is the one root the payload
+    // cwd exists to avoid. HookCommand already guards the payload cwd the same way.
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void Hook_BlankWorkspace_FallsBackToThePayloadCwd(string workspace)
+    {
+        using TempDirectory cwdDirectory = new();
+
+        List<string> roots = [];
+        (int exit, _, _) = RunWithLoader(
+            Payload("PreToolUse", "invoke_subagent", workspace, cwd: cwdDirectory.Path),
+            root =>
+            {
+                roots.Add(root);
+                return EnabledConfig();
+            });
+
+        Assert.Equal(0, exit);
+        Assert.Equal([cwdDirectory.Path], roots);
+    }
+
+    [Fact]
+    public void Hook_BlankWorkspaceAndNoCwd_FallsBackToTheProcessDirectory()
+    {
+        List<string> roots = [];
+        (int exit, _, _) = RunWithLoader(
+            Payload("PreToolUse", "invoke_subagent", "  "),
+            root =>
+            {
+                roots.Add(root);
+                return EnabledConfig();
+            });
+
+        Assert.Equal(0, exit);
+        Assert.Equal([Directory.GetCurrentDirectory()], roots);
+    }
+
     [Fact]
     public void Hook_NonDispatchEvent_AnswersEmptyDocumentBeforeConfigLoad()
     {

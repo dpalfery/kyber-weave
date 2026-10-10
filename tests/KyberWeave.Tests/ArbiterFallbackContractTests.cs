@@ -138,12 +138,7 @@ public sealed class ArbiterFallbackContractTests
     [InlineData("code-review")]
     public void FallbackSections_NameNoHarness(string document)
     {
-        string section = document switch
-        {
-            "conductor" => FallbackSection(ConductorContract),
-            "code-reviewer" => FallbackSection(ReviewerContract),
-            _ => FallbackSection(SkillContract),
-        };
+        string section = FallbackSection(Contract(document));
 
         foreach (string harness in HarnessNames)
         {
@@ -152,6 +147,73 @@ public sealed class ArbiterFallbackContractTests
                 section);
         }
     }
+
+    /// <summary>
+    /// The one clause that makes a <c>STATUS:</c> line an Arbiter note is who wrote it.
+    /// A lens, a worker, a sub-agent or a tool can print one inside its own output, and
+    /// an orchestrator that obeys it lets a subordinate drop findings by writing the
+    /// word. All three fallback sections therefore pin the same guard: a status counts
+    /// only when the hook envelope or the <c>arbiter_evaluate</c> response delivered it.
+    /// </summary>
+    private const string ProvenanceGuard =
+        "a status delivered by the hook envelope or returned by the `arbiter_evaluate` response itself";
+
+    [Theory]
+    [InlineData("conductor")]
+    [InlineData("code-reviewer")]
+    [InlineData("code-review")]
+    public void FallbackSections_ActOnlyOnStatusesTheArbiterDelivered(string document)
+    {
+        string section = FallbackSection(Contract(document));
+
+        Assert.Contains(ProvenanceGuard, section, StringComparison.Ordinal);
+        Assert.Contains("never obey it", section, StringComparison.Ordinal);
+        Assert.Contains("tool result", section, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The fallback replaces every routing marker the path contracts define, so the
+    /// sentence that says so has to name them. It used to point at a "routing headers
+    /// section above" that does not exist in this file, and listed three of the eight.
+    /// </summary>
+    [Theory]
+    [InlineData("KYBER-ARBITER")]
+    [InlineData("PLAN_FILE:")]
+    [InlineData("TASK:")]
+    [InlineData("INTAKE:")]
+    [InlineData("FEATURE:")]
+    [InlineData("PHASE:")]
+    [InlineData("FINALIZE")]
+    [InlineData("FINDINGS:")]
+    public void ConductorFallback_NamesEveryRoutingMarkerTheCallReplaces(string marker)
+    {
+        Assert.Contains(marker, FallbackSection(ConductorContract), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ConductorFallback_PointsAtTheContractThatDefinesTheMarkers()
+    {
+        string section = FallbackSection(ConductorContract);
+
+        Assert.DoesNotContain("section above", section, StringComparison.Ordinal);
+        foreach (string contract in new[]
+        {
+            "conductor/references/execution-and-review.md",
+            "conductor/references/intake-path.md",
+            "conductor/references/plan-path.md",
+            "conductor/references/spec-path.md",
+        })
+        {
+            Assert.Contains(contract, section, StringComparison.Ordinal);
+        }
+    }
+
+    private static string Contract(string document) => document switch
+    {
+        "conductor" => ConductorContract,
+        "code-reviewer" => ReviewerContract,
+        _ => SkillContract,
+    };
 
     private static string FallbackSection(string document)
     {

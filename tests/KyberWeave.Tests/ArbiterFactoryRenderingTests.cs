@@ -163,6 +163,50 @@ public sealed class ArbiterFactoryRenderingTests : IDisposable
         }
     }
 
+    /// <summary>
+    /// The absence of a block has to stay distinguishable from an empty one.
+    /// <c>FactoryHooksShadowing</c> reads null as "nothing was rendered" and an empty
+    /// list as "a block was rendered and it was empty", so the render that is byte
+    /// identical to omitting the wiring must also report null, as Antigravity and Devin
+    /// already do.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_WithoutArbiterWiring_CarriesNoBlockAndLeavesFilesUnchanged()
+    {
+        // The renderer is exercised directly: SquadRendererRegistry merges fragments and
+        // reports one list for the whole request, so the per-renderer distinction the
+        // shadowing check consumes only exists at this seam.
+        SquadRenderResult omitted = await RenderFromRendererAsync(null);
+        SquadRenderResult disabled = await RenderFromRendererAsync(
+            new SquadArbiterWiring(Enabled: false, HookTimeoutSeconds: HookTimeoutSeconds));
+
+        Assert.Null(omitted.Blocks);
+        Assert.Null(disabled.Blocks);
+
+        foreach ((SquadDeploymentFile expected, SquadDeploymentFile actual) in omitted.Files
+            .OrderBy(f => f.Target, StringComparer.Ordinal)
+            .ThenBy(f => f.RelativePath, StringComparer.Ordinal)
+            .Zip(disabled.Files
+                .OrderBy(f => f.Target, StringComparer.Ordinal)
+                .ThenBy(f => f.RelativePath, StringComparer.Ordinal)))
+        {
+            Assert.True(
+                expected.Content.Span.SequenceEqual(actual.Content.Span),
+                $"Rendered bytes differ for {actual.Target}/{actual.RelativePath} between no wiring and a disabled wiring.");
+        }
+    }
+
+    private async Task<SquadRenderResult> RenderFromRendererAsync(SquadArbiterWiring? arbiter)
+    {
+        SquadRenderResult result = await new FactoryRenderer().RenderAsync(new SquadRenderRequest(
+            SourceDirectory: _fixture.Path,
+            Targets: [SquadTarget.Factory],
+            Scope: SquadDeploymentScope.Project,
+            Arbiter: arbiter));
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+        return result;
+    }
+
     private async Task<SquadRenderResult> RenderAsync(SquadArbiterWiring? arbiter, SquadDeploymentScope scope)
     {
         SquadRendererRegistry registry = new([new FactoryRenderer()]);

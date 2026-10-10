@@ -168,6 +168,14 @@ public sealed class ArbiterAuditCommand : Command<ArbiterSettings>
         DiagnosticReport report,
         ref int reported)
     {
+        // An event that classified as no trigger is the pass-through shape: no rule was
+        // bound to it, the evaluator returned allow without evaluating, and it records
+        // no decision by design. Only a triggered event owes the log a decision, so the
+        // exemption keys on the trigger the classifier recorded rather than on the
+        // absence of one - a triggered event that died mid-evaluation still reports.
+        if (string.IsNullOrWhiteSpace(ev.Trigger))
+            return;
+
         if (decided.Contains(ev.Id))
             return;
 

@@ -337,7 +337,12 @@ public sealed class AntigravityHookAdapter : IHarnessHookAdapter
             && paths.GetArrayLength() > 0
             && paths[0].ValueKind == JsonValueKind.String)
         {
-            return paths[0].GetString();
+            // A blank workspace path names no repository. Returning it verbatim makes
+            // the root "" and reads the host configuration from the process directory,
+            // which is the one root the payload cwd exists to avoid, so a blank is
+            // reported as absent and the caller falls through to it.
+            string? workspace = paths[0].GetString();
+            return string.IsNullOrWhiteSpace(workspace) ? null : workspace;
         }
 
         return null;
