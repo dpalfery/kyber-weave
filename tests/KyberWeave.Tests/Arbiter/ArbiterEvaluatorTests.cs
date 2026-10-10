@@ -305,6 +305,27 @@ public sealed class ArbiterEvaluatorTests : IDisposable
     }
 
     [Fact]
+    public async Task Evaluator_ErrorResultCarriesTheLedgerIdOfTheAppendedEntry()
+    {
+        // The git facts throw after the ledger append. The id was allocated inside the
+        // try, so the error result returned string.Empty and the one record that can
+        // explain what happened could not be found.
+        const string Prompt = "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/plan.md\nTASK: T3\n\nImplement.";
+        ArbiterEvaluator evaluator = CreateEvaluator(new NoneProvider(), new FailingGitFacts());
+        KyberWeaveConfig config = ConfigWith([
+            AskRule("KW-ARB-ASK-001", "delegate", "within-task", RuleEffects.Allow),
+        ]);
+
+        ArbiterEvaluationResult result = await evaluator.EvaluateAsync(DelegateEvent(Prompt), config);
+
+        Assert.True(result.IsError);
+        Assert.NotEqual(string.Empty, result.LedgerId);
+        Assert.Contains(
+            new InFlightLedger(ArbiterDirectory).ReadAll(),
+            e => e.Id == result.LedgerId);
+    }
+
+    [Fact]
     public async Task Evaluator_LedgerBeforeDecisionAroundEvaluation()
     {
         const string Prompt = "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/plan.md\nTASK: T3\n\nImplement.";

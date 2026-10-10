@@ -102,12 +102,17 @@ public sealed class ArbiterEvaluator
         ArgumentNullException.ThrowIfNull(config);
         ArbiterEvaluatorOptions effective = options ?? new ArbiterEvaluatorOptions();
         Stopwatch elapsed = Stopwatch.StartNew();
+
+        // Allocated outside the try so the error result can name the ledger entry that
+        // was already appended. A fault after the append leaves exactly one record that
+        // explains the run, and returning an empty id here made it unfindable.
+        string ledgerId = string.Empty;
         try
         {
             DateTimeOffset now = _clock.GetUtcNow();
             IReadOnlyList<TriggerClassification> classifications = TriggerClassifier.Classify(ev);
             List<string> prompts = PromptsFor(ev);
-            string ledgerId = ArbiterRecordId.New(now);
+            ledgerId = ArbiterRecordId.New(now);
             TriggerClassification first = classifications.Count > 0
                 ? classifications[0]
                 : new TriggerClassification(
@@ -151,8 +156,9 @@ public sealed class ArbiterEvaluator
         catch (Exception ex)
         {
             // Fail closed: an evaluator exception is an error result, never allow.
+            // ledgerId is empty only when the fault landed before the id was allocated.
             return new ArbiterEvaluationResult(
-                RuleEffects.Escalate, true, HookErrorCode, ex.Message, [], string.Empty);
+                RuleEffects.Escalate, true, HookErrorCode, ex.Message, [], ledgerId);
         }
     }
 
