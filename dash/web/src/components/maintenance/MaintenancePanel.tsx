@@ -28,6 +28,17 @@ import {
   updateKyberSettings,
   type KyberHarnessSummary,
 } from '../../lib/kyberApi.js'
+import {
+  ACTION_BUTTON,
+  CHECKBOX,
+  FIELD_LABEL,
+  GROUP_HEADING,
+  HELPER_TEXT,
+  INSET_BLOCK,
+  INSET_FIELD,
+  NUMBER_FIELD,
+  PRIMARY_ACTION_BUTTON,
+} from './controls.js'
 
 export interface MaintenancePanelProps {
   /** Harnesses the store holds, used to narrow a one-off folder import. */
@@ -66,11 +77,23 @@ function parseCadence(raw: string): number | null {
   return minutes >= 1 && minutes <= 1440 ? minutes : null
 }
 
-/** One labelled server fact, or "unknown" when the read failed. */
+/**
+ * One labelled server fact, or "unknown" when the read failed.
+ *
+ * <remarks>
+ * The label is muted and the value is foreground on the same line, so the value
+ * can be scanned without the block reading as a wall of copy. A long value (the
+ * hosted-elsewhere sentence) wraps under its label rather than being clipped.
+ * </remarks>
+ */
 function Fact({ id, label, value }: { id: string; label: string; value: string }) {
   return (
-    <p data-testid={id} className="text-density-xs text-muted-foreground">
-      {label}: {value}
+    <p
+      data-testid={id}
+      className="flex flex-wrap items-baseline gap-x-density-inline text-density-xs"
+    >
+      <span className="text-muted-foreground">{label}:</span>
+      <span className="text-foreground">{value}</span>
     </p>
   )
 }
@@ -163,17 +186,18 @@ export function MaintenancePanel({ harnesses }: MaintenancePanelProps) {
 
   return (
     <section
-      className="rounded-lg border border-border bg-card p-chrome"
+      className="flex flex-col gap-density-cluster rounded-lg border border-border bg-card p-chrome"
       data-testid="maintenance-panel"
-      aria-label="Maintenance"
+      aria-label="Jobs"
     >
-      <h3 className="text-density-xs font-semibold uppercase tracking-density text-heading">
-        Maintenance
-      </h3>
+      {/* The panel is already titled "Maintenance" by the host that opens it;
+          repeating the word here told the operator nothing about what the block
+          below is for. It is the host's job state and settings. */}
+      <h3 className={GROUP_HEADING}>Jobs</h3>
 
       {/* Job state, verbatim from GET /api/kyber/jobs. A failed read says so
           rather than showing a healthy default. */}
-      <div className="mt-density-cluster">
+      <div className={INSET_BLOCK}>
         <Fact
           id="maintenance-jobs-refresh-state"
           label="Scheduled refresh"
@@ -219,9 +243,13 @@ export function MaintenancePanel({ harnesses }: MaintenancePanelProps) {
         />
       </div>
 
-      <div className="mt-density-cluster flex flex-wrap gap-density-cluster">
+      {/* Two separate, bounded buttons rather than one run of text: pausing the
+          scheduler and asking for a refresh are unrelated actions, and the gap
+          is what says so. */}
+      <div className="flex flex-wrap gap-density-cluster">
         <button
           type="button"
+          className={ACTION_BUTTON}
           data-testid="maintenance-pause-button"
           // Disabled ONLY while this write is in flight. Two clicks a moment apart would
           // otherwise queue two PUTs carrying opposite `jobsPaused` values, and the
@@ -236,35 +264,42 @@ export function MaintenancePanel({ harnesses }: MaintenancePanelProps) {
         </button>
         <button
           type="button"
+          className={PRIMARY_ACTION_BUTTON}
           data-testid="maintenance-refresh-button"
           onClick={() => refresh.mutate()}
         >
           Refresh data now
         </button>
       </div>
-      <p
-        data-testid="maintenance-pause-disclosure"
-        className="text-density-xs text-muted-foreground mt-density-hair"
-      >
-        Pausing stops only scheduled jobs. Manual refresh, OTLP collection and retention pruning
-        continue, and so does every control on this page.
-      </p>
-      <p
-        data-testid="maintenance-refresh-status"
-        className="text-density-xs text-muted-foreground mt-density-hair"
-        role={refreshError ? 'alert' : 'status'}
-      >
-        {refreshStatus ?? 'No refresh requested from this page yet.'}
-      </p>
+      {/* Status copy sits under the actions that produce it, in one block so it
+          reads as the consequence of the row above rather than as another
+          control. */}
+      <div className="flex flex-col gap-density-hair">
+        <p data-testid="maintenance-pause-disclosure" className={HELPER_TEXT}>
+          Pausing stops only scheduled jobs. Manual refresh, OTLP collection and retention pruning
+          continue, and so does every control on this page.
+        </p>
+        <p
+          data-testid="maintenance-refresh-status"
+          className={HELPER_TEXT}
+          role={refreshError ? 'alert' : 'status'}
+        >
+          {refreshStatus ?? 'No refresh requested from this page yet.'}
+        </p>
+      </div>
 
       {/* A one-off import. It is deliberately separate from the scheduled
           toggle below: "import this once" is not "keep importing". */}
-      <fieldset className="mt-density-cluster">
-        <legend className="text-density-xs font-semibold">Import folder history</legend>
-        <label className="flex items-center gap-density-hair text-density-xs mt-density-hair">
-          Weeks
+      <fieldset className={INSET_FIELD}>
+        <legend className="px-chrome-xs text-density-xs font-semibold text-heading">
+          Import folder history
+        </legend>
+        <label className={FIELD_LABEL} htmlFor="maintenance-import-weeks-field">
+          <span className="text-muted-foreground">Weeks</span>
           <input
+            id="maintenance-import-weeks-field"
             type="number"
+            className={NUMBER_FIELD}
             data-testid="maintenance-import-weeks"
             value={importWeeks}
             min={MIN_WEEKS}
@@ -272,14 +307,15 @@ export function MaintenancePanel({ harnesses }: MaintenancePanelProps) {
             onChange={(event) => setImportWeeks(event.target.value)}
           />
         </label>
-        <div className="mt-density-hair flex flex-col gap-density-hair">
+        <div className="flex flex-col gap-density-hair">
           {observedHarnesses.map((entry) => (
             <label
               key={entry.harness}
-              className="flex items-center gap-density-hair text-density-xs"
+              className="flex items-start gap-density-hair text-density-xs"
             >
               <input
                 type="checkbox"
+                className={CHECKBOX}
                 data-testid={`maintenance-import-harness-${entry.harness}`}
                 checked={importHarnesses.includes(entry.harness)}
                 onChange={(event) =>
@@ -290,13 +326,13 @@ export function MaintenancePanel({ harnesses }: MaintenancePanelProps) {
                   )
                 }
               />
-              {entry.name && entry.name.length > 0 ? entry.name : entry.harness}
+              <span>{entry.name && entry.name.length > 0 ? entry.name : entry.harness}</span>
             </label>
           ))}
         </div>
         <button
           type="button"
-          className="mt-density-hair"
+          className={`${ACTION_BUTTON} self-start`}
           data-testid="maintenance-import-button"
           disabled={weeks === null || runImport.isPending}
           onClick={() => {
@@ -308,7 +344,7 @@ export function MaintenancePanel({ harnesses }: MaintenancePanelProps) {
         </button>
         <p
           data-testid="maintenance-import-status"
-          className="text-density-xs text-muted-foreground mt-density-hair"
+          className={HELPER_TEXT}
           role={importError ? 'alert' : importStatus ? 'status' : undefined}
         >
           {importStatus ??
@@ -317,7 +353,7 @@ export function MaintenancePanel({ harnesses }: MaintenancePanelProps) {
       </fieldset>
 
       {/* The shared settings read back over the same API the tray uses. */}
-      <div className="mt-density-cluster">
+      <div className={INSET_BLOCK}>
         <Fact
           id="maintenance-settings-folder-import-scheduled"
           label="Scheduled folder import"
@@ -351,24 +387,27 @@ export function MaintenancePanel({ harnesses }: MaintenancePanelProps) {
         />
       </div>
 
-      <fieldset className="mt-density-cluster">
-        <legend className="text-density-xs font-semibold">Scheduled maintenance</legend>
-        <label className="flex items-center gap-density-hair text-density-xs mt-density-hair">
+      <fieldset className={INSET_FIELD}>
+        <legend className="px-chrome-xs text-density-xs font-semibold text-heading">
+          Scheduled maintenance
+        </legend>
+        <label className="flex items-start gap-density-hair text-density-xs">
           <input
             ref={scheduledToggle}
             type="checkbox"
+            className={`${CHECKBOX} mt-px`}
             data-testid="maintenance-folder-import-toggle"
             checked={settingsKnown ? settings.data.folderImportScheduled : false}
             disabled={!settingsKnown}
             aria-describedby="maintenance-folder-import-unknown-hint"
             onChange={(event) => writeSetting.mutate({ folderImportScheduled: event.target.checked })}
           />
-          Import folder history on a schedule
+          <span>Import folder history on a schedule</span>
         </label>
         <p
           id="maintenance-folder-import-unknown-hint"
           data-testid="maintenance-folder-import-unknown-hint"
-          className="text-density-xs text-muted-foreground mt-density-hair"
+          className={HELPER_TEXT}
         >
           {settingsKnown
             ? 'Reflects the scheduled folder-import setting read back from the host.'
@@ -376,15 +415,17 @@ export function MaintenancePanel({ harnesses }: MaintenancePanelProps) {
         </p>
         <p
           data-testid="maintenance-folder-import-disclosure"
-          className="text-density-xs text-muted-foreground mt-density-hair"
+          className={HELPER_TEXT}
         >
           Turning this on does not import the whole window now: the host catches up at its next
           scheduled run, which imports up to two weeks and keeps a rolling window.
         </p>
-        <label className="flex items-center gap-density-hair text-density-xs mt-density-hair">
-          Refresh cadence (minutes)
+        <label className={FIELD_LABEL} htmlFor="maintenance-cadence-input-field">
+          <span className="text-muted-foreground">Refresh cadence (minutes)</span>
           <input
+            id="maintenance-cadence-input-field"
             type="number"
+            className={NUMBER_FIELD}
             data-testid="maintenance-cadence-input"
             value={settingsKnown ? cadence : ''}
             placeholder={settingsKnown ? String(settings.data.refreshCadenceMinutes) : ''}
@@ -396,7 +437,7 @@ export function MaintenancePanel({ harnesses }: MaintenancePanelProps) {
         </label>
         <button
           type="button"
-          className="mt-density-hair"
+          className={`${ACTION_BUTTON} self-start`}
           data-testid="maintenance-cadence-apply"
           disabled={!settingsKnown || cadenceMinutes === null}
           onClick={() => {
@@ -409,7 +450,7 @@ export function MaintenancePanel({ harnesses }: MaintenancePanelProps) {
         </button>
         <p
           data-testid="maintenance-settings-status"
-          className="text-density-xs text-muted-foreground mt-density-hair"
+          className={HELPER_TEXT}
           role={settingsError ? 'alert' : settingsStatus ? 'status' : undefined}
         >
           {settingsStatus ?? 'No setting change requested from this page yet.'}

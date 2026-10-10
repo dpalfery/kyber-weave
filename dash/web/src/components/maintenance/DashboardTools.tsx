@@ -30,6 +30,7 @@ import { CoverageIngestPanel } from './CoverageIngestPanel.js'
 import { MaintenancePanel } from './MaintenancePanel.js'
 import { ModelCatalogRefreshControl } from './ModelCatalogRefreshControl.js'
 import { SlideInPanel } from './SlideInPanel.js'
+import { ACTION_BUTTON, GROUP_HEADING, HELPER_TEXT } from './controls.js'
 
 /** The panels this host opens. `null` is "neither". */
 type PanelId = 'status' | 'maintenance'
@@ -56,7 +57,7 @@ export function DashboardTools() {
         data-testid="dashboard-tools-status-button"
         aria-expanded={open === 'status'}
         aria-haspopup="dialog"
-        className="rounded-md border border-border px-chrome py-density-hair text-density-xs text-foreground hover:bg-interactive-secondary"
+        className={`${ACTION_BUTTON} hover:border-input`}
         onClick={(event) => show('status', event.currentTarget)}
       >
         Status
@@ -66,7 +67,7 @@ export function DashboardTools() {
         data-testid="dashboard-tools-maintenance-button"
         aria-expanded={open === 'maintenance'}
         aria-haspopup="dialog"
-        className="rounded-md border border-border px-chrome py-density-hair text-density-xs text-foreground hover:bg-interactive-secondary"
+        className={`${ACTION_BUTTON} hover:border-input`}
         onClick={(event) => show('maintenance', event.currentTarget)}
       >
         Maintenance
@@ -112,7 +113,12 @@ function StatusPanel() {
           Ingest coverage could not be read. Nothing about the receiver is known from this page —
           this is not a report of an empty store.
         </p>
-        <button type="button" data-testid="dashboard-tools-coverage-retry" onClick={() => void refetch()}>
+        <button
+          type="button"
+          className={`${ACTION_BUTTON} self-start`}
+          data-testid="dashboard-tools-coverage-retry"
+          onClick={() => void refetch()}
+        >
           Retry
         </button>
       </div>
@@ -147,31 +153,38 @@ function MaintenanceContent() {
     <>
       <MaintenancePanel harnesses={known} />
       <section
-        className="rounded-lg border border-border bg-card p-chrome"
+        className="flex flex-col gap-density-cluster rounded-lg border border-border bg-card p-chrome"
         data-testid="dashboard-tools-catalog-and-clean"
         aria-label="Catalog and store maintenance"
       >
-        <h3 className="text-density-xs font-semibold uppercase tracking-density text-heading">
-          Catalog and store
-        </h3>
-        <p className="text-density-xs text-muted-foreground mt-density-hair leading-density">
+        <h3 className={GROUP_HEADING}>Catalog and store</h3>
+        <p className={HELPER_TEXT}>
           The model-window catalog supplies the context windows findings are measured against.
           Wiping the store deletes telemetry and cannot be undone; the dialog states the scope and
           asks for confirmation first.
         </p>
         {loadingHarnesses && (
-          <p data-testid="dashboard-tools-harness-loading" className="text-density-xs text-muted-foreground mt-density-hair">
+          <p data-testid="dashboard-tools-harness-loading" className={HELPER_TEXT}>
             Reading the harness inventory… the per-harness clean scope is not known yet.
           </p>
         )}
         {harnessesError && (
-          <div data-testid="dashboard-tools-harness-error" role="alert" className="mt-density-hair flex flex-wrap items-center gap-density-cluster">
-            <p className="text-density-xs text-muted-foreground">
+          <div
+            data-testid="dashboard-tools-harness-error"
+            role="alert"
+            className="flex flex-col gap-density-cluster rounded-md border border-red-500/30 bg-red-500/5 p-chrome-sm dark:border-red-500/30 dark:bg-red-500/10"
+          >
+            <p className={HELPER_TEXT}>
               The harness inventory could not be read, so the per-harness clean scope is not
               available — that is not the same as a store holding no harnesses. Wipe all remains
               available.
             </p>
-            <button type="button" data-testid="dashboard-tools-harness-retry" onClick={() => void refetchHarnesses()}>
+            <button
+              type="button"
+              className={`${ACTION_BUTTON} self-start`}
+              data-testid="dashboard-tools-harness-retry"
+              onClick={() => void refetchHarnesses()}
+            >
               Retry
             </button>
           </div>

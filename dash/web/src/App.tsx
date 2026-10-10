@@ -565,7 +565,6 @@ export function App({ initialPage = 'context-doctor', initialPath, initialNotFou
                   activeHarness={activeHarness}
                   sessionId={sessionId}
                   onSessionChange={setSessionId}
-                  onSelectHarness={(harnessId) => openSpine({ level: 'harness', harnessId })}
                   onSelectRun={(runId, harnessId) => openSpine({ level: 'run', runId, harnessId })}
                   onSelectFinding={(findingId) => openSpine({ level: 'finding', findingId })}
                   onSelectTurn={(turnIndex, executionId, runId) => openSpine({ level: 'turn', turnIndex, executionId, runId })}

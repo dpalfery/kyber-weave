@@ -33,12 +33,6 @@ export interface ContextDoctorProps {
    * the owner's `sessionId` is then the whole scope, including its absence.
    */
   onSessionChange?: (sessionId: string | undefined) => void
-  /**
-   * Opening a harness from the scorecard matrix. The matrix was removed from
-   * this page, so nothing here calls this; the prop stays only because
-   * `App.tsx` still passes it, and it is removed with that call site.
-   */
-  onSelectHarness?: (harnessId: string) => void
   onSelectRun?: (runId: string, harnessId?: string) => void
   onSelectFinding?: (findingId: string) => void
   onSelectTurn?: (turnIndex: number, executionId?: string, runId?: string) => void

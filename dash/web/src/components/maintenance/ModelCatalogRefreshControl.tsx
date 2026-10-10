@@ -12,6 +12,7 @@
 import { useState } from 'react'
 
 import { refreshModelWindows, type ModelCatalogRefreshResult } from '../../lib/kyberApi.js'
+import { ACTION_BUTTON, HELPER_TEXT } from './controls.js'
 
 function formatModelCatalogRefreshStatus(result: ModelCatalogRefreshResult): string {
   const failed = result.vendorsFailed.map((entry) => entry.vendor)
@@ -33,6 +34,7 @@ export function ModelCatalogRefreshControl() {
     <div className="mt-density-cluster">
       <button
         type="button"
+        className={ACTION_BUTTON}
         data-testid="model-catalog-refresh-button"
         disabled={inFlight}
         onClick={() => {
@@ -52,7 +54,7 @@ export function ModelCatalogRefreshControl() {
         Refresh model windows
       </button>
       {status !== null && (
-        <p data-testid="model-catalog-refresh-status" className="text-density-xs text-muted-foreground mt-density-hair">
+        <p data-testid="model-catalog-refresh-status" className={`${HELPER_TEXT} mt-density-hair`}>
           {status}
         </p>
       )}
