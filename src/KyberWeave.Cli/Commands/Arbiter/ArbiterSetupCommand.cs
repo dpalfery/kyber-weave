@@ -77,6 +77,17 @@ public sealed class ArbiterSetupCommand : Command<ArbiterSettings>
                 Directory.CreateDirectory(directory);
             File.WriteAllText(overridePath, RenderOverride(kindName, endpoint, model));
         }
+        catch (ArgumentException exception)
+        {
+            report.Add(new Diagnostic(
+                RuleValidator.MalformedSection,
+                Severity.Error,
+                $"--model cannot be written to the user override: {exception.Message.Split('\n')[0]}",
+                "--model",
+                Hint: "Use a model name with no newline or control characters, for example jev-1.13.0 or nimble."));
+            CommandHelpers.Finish(report, settings, "arbiter setup", "Rule");
+            return 1;
+        }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
             report.Add(new Diagnostic(
@@ -182,8 +193,35 @@ public sealed class ArbiterSetupCommand : Command<ArbiterSettings>
         return true;
     }
 
+    /// <summary>
+    /// Renders the user override. Every value is written as a single-quoted YAML scalar
+    /// and every control character is rejected, so a value carrying YAML syntax is read
+    /// back as the value rather than as structure.
+    /// </summary>
+    /// <remarks>
+    /// The model, and the endpoint, come from the command line. Interpolated raw, a value
+    /// containing a colon, a quote or a <c>#</c> changed what the next read saw, and a
+    /// newline could append arbitrary keys to the operator's override. Single quotes are
+    /// the only YAML quoting with no escape sequences: the one character that cannot
+    /// appear inside them is the single quote itself, which is written doubled. A newline
+    /// is rejected rather than escaped, because no quoting carries one on a single line.
+    /// </remarks>
+    /// <exception cref="ArgumentException">Thrown when a value contains a control character.</exception>
     private static string RenderOverride(string kindName, string endpoint, string model) =>
-        $"provider:\n  kind: {kindName}\n  endpoint: {endpoint}\n  model: {model}\n";
+        $"provider:\n  kind: {YamlScalar(kindName)}\n  endpoint: {YamlScalar(endpoint)}\n  model: {YamlScalar(model)}\n";
+
+    private static string YamlScalar(string value)
+    {
+        if (value.Any(char.IsControl))
+        {
+            throw new ArgumentException(
+                "An arbiter setup value cannot contain newline or other control characters: " +
+                "it would not survive the YAML round trip.",
+                nameof(value));
+        }
+
+        return $"'{value.Replace("'", "''", StringComparison.Ordinal)}'";
+    }
 
     private static bool TryParseProvider(string? raw, out ArbiterProviderKind kind, out Diagnostic? error)
     {
