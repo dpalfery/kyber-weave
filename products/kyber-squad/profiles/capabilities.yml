@@ -74,6 +74,10 @@ profiles:
       network.read: allow
       network.publish: deny
       delegate: allow
+      # Devin's qualified generic grants deliberately exclude kyber-weave-arbiter, so the
+      # subagent envelope must not reach arbiter_evaluate: the D4 fallback is not available
+      # to this role. The loader requires an explicit decision for every declared capability.
+      decision.query: deny
   documentation:
     permissions:
       filesystem.read: allow
@@ -134,6 +138,9 @@ profiles:
       network.read: allow
       network.publish: deny
       delegate: allow
+      # Same reasoning as architect-devin: Devin grants no Arbiter tools here, so this
+      # envelope must not reach arbiter_evaluate either.
+      decision.query: deny
   publishing-worker:
     permissions:
       filesystem.read: allow
