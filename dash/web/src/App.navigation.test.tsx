@@ -34,27 +34,23 @@ vi.mock('@/lib/kyberApi', async (importOriginal) => {
 
 /**
  * The props the shell hands Context Doctor, echoed into the DOM.
- *
- * ContextDoctor itself is PI's to change; these tests pin the contract the
- * shell must satisfy — scope in, selected session in, session change out — so a
- * regression in App is caught without depending on the doctor's internals.
+ * Pins the shell's call site against the doctor's public props.
  */
-type ScopedDoctorProps = ContextDoctorProps & {
-  activeHarness?: string
-  sessionId?: string
-  onSessionChange?: (sessionId: string | undefined) => void
-}
+type ScopedDoctorProps = ContextDoctorProps
 
 vi.mock('@/pages/ContextDoctor', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/pages/ContextDoctor')>()
   return {
     ...actual,
-    ContextDoctor: ({ activeHarness, sessionId, onSessionChange, onSelectHarness }: ScopedDoctorProps) =>
+    ContextDoctor: ({ activeHarness, sessionId, onSessionChange, onSelectRun, onSelectFinding, onSelectTurn }: ScopedDoctorProps) =>
       React.createElement('div', {
         'data-testid': 'doctor-probe',
         'data-active-harness': activeHarness ?? '',
         'data-session-id': sessionId ?? '',
-        'data-select-harness': onSelectHarness === undefined ? 'absent' : 'present',
+        'data-session-change': onSessionChange === undefined ? 'absent' : 'present',
+        'data-select-run': onSelectRun === undefined ? 'absent' : 'present',
+        'data-select-finding': onSelectFinding === undefined ? 'absent' : 'present',
+        'data-select-turn': onSelectTurn === undefined ? 'absent' : 'present',
       }, React.createElement('button', {
         type: 'button',
         'data-testid': 'doctor-pick-session',
@@ -386,7 +382,8 @@ describe('navigation surface', () => {
     for (const tool of [status, maintenance]) {
       expect(tool!.closest('[hidden]')).toBeNull()
       expect(tool!.getAttribute('aria-hidden')).not.toBe('true')
-      expect(tool!.className).not.toContain('hidden')
+      // Token match: PI control classes contain `outline-hidden` (outline style).
+      expect(tool!.className.split(/\s+/)).not.toContain('hidden')
       expect(tool!.textContent?.trim()).toBe(tool === status ? 'Status' : 'Maintenance')
     }
   })
@@ -427,13 +424,15 @@ describe('navigation surface', () => {
     expect(actions.className).not.toContain('overflow')
   })
 
-  it('stops handing Context Doctor the scorecard matrix callback', async () => {
+  it('hands Context Doctor the scope and spine callbacks', async () => {
     renderApp()
     await harnessTab('codex')
 
-    // The matrix left the page with the operator panels, so nothing there calls
-    // this. The prop is ContextDoctor's to drop from its own type; what the
-    // shell owns is the call site.
-    expect(doctorProbe().dataset.selectHarness).toBe('absent')
+    // Shell owns the call site: controlled scope plus spine navigation.
+    const probe = doctorProbe()
+    expect(probe.dataset.sessionChange).toBe('present')
+    expect(probe.dataset.selectRun).toBe('present')
+    expect(probe.dataset.selectFinding).toBe('present')
+    expect(probe.dataset.selectTurn).toBe('present')
   })
 })
