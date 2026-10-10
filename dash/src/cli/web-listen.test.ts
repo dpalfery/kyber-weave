@@ -36,7 +36,7 @@ import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { CanonStore } from '../canon/store.js'
-import type { ChildResult, JobSpawner } from '../jobs/host.js'
+import type { ChildResult, JobHost, JobSpawner } from '../jobs/host.js'
 import type { ReceiverProbe } from '../jobs/receiver-host.js'
 import { JOBS_LOCK_FILE } from '../jobs/lease.js'
 import { KyberBridge } from '../server/bridge.js'
@@ -81,6 +81,12 @@ type Options = {
    * the smoke run. The store creates the parent itself, exactly as it does in production.
    */
   canonDb?: string
+  /**
+   * Replaces the jobs host's teardown, so a `close()` that REJECTS can be exercised. The
+   * release path cannot await the close, and nothing on the filesystem provokes a
+   * rejection from it, so the seam is what makes the floating-promise defect reachable.
+   */
+  closeJobHost?: (jobHost: JobHost) => Promise<void>
 }
 
 const cleanups: Array<() => Promise<void>> = []
@@ -186,6 +192,7 @@ function start(options: Options = {}): {
     jobSpawner,
     receiverSpawner,
     receiverProber: { probe: async (): Promise<ReceiverProbe> => 'refused' },
+    ...(options.closeJobHost === undefined ? {} : { closeJobHost: options.closeJobHost }),
     ...(options.maintenanceGate === undefined
       ? {}
       : { maintenance: async () => options.maintenanceGate!.blocked }),
@@ -463,6 +470,106 @@ describe('server.json: mode, symlinks, and a publish that fails', () => {
       await new Promise<void>((resolve) => server.close(() => resolve()))
       chmodSync(stateDir, 0o700)
     })
+
+    // The other half of the same guarantee, and the half `mkdir`'s `mode` cannot give:
+    // a state dir that ALREADY EXISTS keeps whatever mode it had. Skipped rather than
+    // faked - root ignores the mode bits, and Windows has no 0o755 to tighten.
+    const permissive = process.platform === 'win32' || process.getuid?.() === 0 ? it.skip : it
+    permissive('tightens a pre-existing state dir that a umask left group/other readable', async () => {
+      const stateDir = tempStateDir()
+      // 0o755 is what a plain `mkdir` under a 0o022 umask produces, which is exactly how
+      // a state dir left by an older version ends up world-readable: it holds the pid and
+      // loopback port of a running server plus the user's stored context.
+      chmodSync(stateDir, 0o755)
+      expect(modeOf(stateDir)).toBe(0o755)
+
+      const server = await start({ stateDir }).started
+      expect(server.listening).toBe(true)
+      expect(modeOf(stateDir)).toBe(0o700)
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    })
+
+    permissive('leaves a stricter state dir stricter, and a 0o700 one untouched', async () => {
+      const stateDir = tempStateDir()
+      chmodSync(stateDir, 0o500)
+      const first = await start({ stateDir }).started
+      // Narrowing further would be overwriting somebody's deliberate choice; this
+      // function exists to close a hole, not to replace a policy.
+      expect(modeOf(stateDir)).toBe(0o500)
+      await new Promise<void>((resolve) => first.close(() => resolve()))
+      cleanups.push(async () => {
+        chmodSync(stateDir, 0o700)
+      })
+    })
+  })
+})
+
+/**
+ * Collects unhandled rejections for the duration of `body`. Vitest installs a handler of
+ * its own, so one that reaches here is recorded rather than swallowed: the process
+ * surviving says nothing about it, and on Node's default policy it is a shutdown kill.
+ */
+async function withUnhandledRejectionWatch<T>(body: () => Promise<T>): Promise<{ result: T; rejections: unknown[] }> {
+  const rejections: unknown[] = []
+  const listener = (reason: unknown): void => {
+    rejections.push(reason)
+  }
+  process.on('unhandledRejection', listener)
+  try {
+    const result = await body()
+    // A rejection surfacing after the teardown settles, not during it.
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    return { result, rejections }
+  } finally {
+    process.off('unhandledRejection', listener)
+  }
+}
+
+describe('a background host that fails to stop is reported, not floated', () => {
+  it('logs one line and raises no unhandled rejection when the jobs host close rejects', async () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const closes: number[] = []
+
+    const { started } = start({
+      closeJobHost: () => {
+        closes.push(1)
+        // The real shape: teardown failed (a lease that could not be released, a child
+        // that would not die). The release path cannot await this and must not float it.
+        return Promise.reject(Object.assign(new Error('jobs.lock still held\n  at JobHost.close'), { code: 'EBUSY' }))
+      },
+    })
+    const server = await started
+
+    const { rejections } = await withUnhandledRejectionWatch(
+      () => new Promise<void>((resolve) => server.close(() => resolve())),
+    )
+
+    // The close was asked for exactly once, by the release that ended the last share.
+    expect(closes).toHaveLength(1)
+    expect(rejections).toEqual([])
+
+    const lines = errors.mock.calls.map((call) => String(call[0]))
+    const reported = lines.filter((line) => line.includes('background services did not stop cleanly'))
+    expect(reported).toHaveLength(1)
+    // The errno when there is one - a machine-readable fact beats a message; the first
+    // line of the message otherwise, because the rest is a stack.
+    expect(reported[0]).toMatch(/background services did not stop cleanly: EBUSY$/)
+  })
+
+  it('says the message instead when the failure carries no errno code', async () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const { started } = start({ closeJobHost: () => Promise.reject(new Error('child would not die')) })
+
+    const server = await started
+    await withUnhandledRejectionWatch(async () => {
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    })
+
+    const reported = errors.mock.calls
+      .map((call) => String(call[0]))
+      .filter((line) => line.includes('background services did not stop cleanly'))
+    expect(reported).toHaveLength(1)
+    expect(reported[0]).toMatch(/background services did not stop cleanly: child would not die$/)
   })
 })
 

@@ -274,6 +274,22 @@ describe('dash settings set', () => {
     }
     expect(jsonValueFor(entries, CADENCE.short)).toBe(DEFAULTS[CADENCE.short])
   })
+
+  // `05` is accepted because the cadence parser is digits-only and range-checked, and
+  // `Number('05')` is 5. The confirmation therefore has to report what was stored rather
+  // than what was typed: an echo of `05` would disagree with the very next `show` and read
+  // as a write that did not land.
+  it('echoes the canonical value when a non-canonical but accepted cadence is typed', async () => {
+    const harness = createHarness()
+
+    const result = await harness.run('set', CADENCE.short, '05')
+
+    expect(result.exitCode).toBe(0)
+    expect(readBack(harness.db, CADENCE.key)).toBe(5)
+    const echoed = result.stdout.split('\n').find(line => line.includes(CADENCE.short))
+    expect(echoed).toBe(`${CADENCE.short} 5`)
+    expect(echoed).not.toContain('05')
+  })
 })
 
 describe('dash settings: rejected input exits 2 and writes nothing', () => {

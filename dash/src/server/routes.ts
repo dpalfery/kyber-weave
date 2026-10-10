@@ -635,9 +635,18 @@ function serveJsonObjectBody(
  */
 function sendJobStarted(res: ServerResponse, started: Promise<JobOutcome>, failure: string): void {
   let answered = false
+  let grace: NodeJS.Timeout | undefined
   const answer = (status: number, body: unknown): void => {
     if (answered) return
     answered = true
+    // The grace timer exists to bound a request that settles late, so it belongs to this
+    // request and nothing longer: once the real answer is out, leaving it armed keeps a
+    // live handle per answered request for the rest of the process. `answered` already
+    // stops it writing; clearing it stops it existing.
+    if (grace !== undefined) {
+      clearTimeout(grace)
+      grace = undefined
+    }
     sendKyberJson(res, status, body)
   }
   // The rejection is answered with a fixed string: a spawn failure names real paths on
@@ -655,6 +664,7 @@ function sendJobStarted(res: ServerResponse, started: Promise<JobOutcome>, failu
   const timer = setTimeout(() => answer(202, { accepted: true }), JOB_OUTCOME_GRACE_MS)
   // Never hold the event loop open for an answer the client is waiting on.
   if (typeof timer.unref === 'function') timer.unref()
+  grace = timer
 }
 
 /**

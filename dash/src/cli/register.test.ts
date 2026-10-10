@@ -10,7 +10,7 @@ import { CanonStore } from '../canon/store.js'
 import { STORE_LOCK_FILE, readLockHolder } from '../refresh/lock.js'
 import { SETTING_KEYS, writeSetting } from '../settings/shared-settings.js'
 import type { KyberCommandDependencies } from './register.js'
-import { REFRESH_BUSY_EXIT_CODE, registerKyberCommands } from './register.js'
+import { REFRESH_BUSY_EXIT_CODE, alreadyPrinted, decodeStderrChunk, registerKyberCommands } from './register.js'
 
 const temporaryRoots: string[] = []
 
@@ -637,5 +637,52 @@ describe('dash clean: one clean at a time', () => {
 
     expect(result.options).toHaveProperty('reingestWeeks', null)
     expect(result.exitCode ?? 0).toBe(0)
+  })
+})
+
+describe('the stderr tail main.ts reads to decide whether to print a message', () => {
+  // main.ts cannot be imported to exercise this: it is the entry point and parses argv on
+  // import. The two halves of the decision are therefore pure and exported from here.
+  const MESSAGE = "unknown command 'nope'"
+
+  it('decodes a string chunk', () => {
+    expect(decodeStderrChunk(`${MESSAGE}\n`, undefined)).toBe(`${MESSAGE}\n`)
+  })
+
+  it('decodes a Buffer chunk to the same text a string chunk would give', () => {
+    expect(decodeStderrChunk(Buffer.from(`${MESSAGE}\n`, 'utf8'), undefined)).toBe(`${MESSAGE}\n`)
+  })
+
+  it('decodes a Uint8Array chunk', () => {
+    const bytes = new TextEncoder().encode(`${MESSAGE}\n`)
+    expect(decodeStderrChunk(bytes, undefined)).toBe(`${MESSAGE}\n`)
+  })
+
+  it('honours the encoding argument when one is given', () => {
+    expect(decodeStderrChunk(Buffer.from('café\n', 'latin1'), 'latin1')).toBe('café\n')
+  })
+
+  it('falls back to utf8 when the second argument is the write callback', () => {
+    // `write(chunk, cb)` puts a function in the encoding slot; reading it as an encoding
+    // would throw rather than decode, which is why the helper tests for a string.
+    expect(decodeStderrChunk(Buffer.from('ok\n', 'utf8'), () => undefined)).toBe('ok\n')
+  })
+
+  it('reports a Buffer-written message as already printed', () => {
+    // The regression this pins: only string chunks used to reach the tail, so a message
+    // commander wrote as bytes left the tail empty and printed a second time.
+    const tail = decodeStderrChunk(Buffer.from(`${MESSAGE}\n`, 'utf8'), undefined)
+    expect(alreadyPrinted(tail, MESSAGE)).toBe(true)
+  })
+
+  it('reports a message that merely appears earlier in the tail as not printed', () => {
+    // An earlier warning or log line that quotes the message must not suppress the real
+    // one, which is why the comparison is against the end of what was written.
+    const tail = `${MESSAGE}\n(node:1) ExperimentalWarning: something else\n`
+    expect(alreadyPrinted(tail, MESSAGE)).toBe(false)
+  })
+
+  it('reports an empty tail as not printed', () => {
+    expect(alreadyPrinted('', MESSAGE)).toBe(false)
   })
 })

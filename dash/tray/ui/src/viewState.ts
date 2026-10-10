@@ -51,6 +51,7 @@ export type ReceiverStatus =
   | 'reachable'
   | 'not-reachable'
   | 'hosted'
+  | 'off'
   | 'port-held-by-other'
   | 'unknown'
 

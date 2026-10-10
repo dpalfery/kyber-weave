@@ -223,6 +223,13 @@ export function MaintenancePanel({ harnesses }: MaintenancePanelProps) {
         <button
           type="button"
           data-testid="maintenance-pause-button"
+          // Disabled ONLY while this write is in flight. Two clicks a moment apart would
+          // otherwise queue two PUTs carrying opposite `jobsPaused` values, and the
+          // loser of the race is the answer the panel renders. It deliberately stays
+          // enabled while jobs or settings are unknown: pausing is the control an
+          // operator reaches for when the page looks stuck, and a disabled button
+          // cannot be the way they find out it is already paused.
+          disabled={writeSetting.isPending}
           onClick={() => writeSetting.mutate({ jobsPaused: !paused })}
         >
           {paused ? 'Resume scheduled jobs' : 'Pause scheduled jobs'}

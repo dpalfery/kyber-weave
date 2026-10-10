@@ -276,9 +276,15 @@ describe('Popover phases', () => {
     expect(
       render(viewState({ receiver: undefined, sharedSettings: shared })),
     ).toContain('receiver hosted by KyberDash')
+    // Not hosting it is not a fault: the user turned the receiver off, so saying
+    // "not reachable" would report a broken network to someone who did exactly what
+    // they meant to.
     expect(
       render(viewState({ receiver: undefined, sharedSettings: { ...shared, receiverHosted: false } })),
-    ).toContain('receiver not reachable')
+    ).toContain('receiver off')
+    expect(
+      render(viewState({ receiver: undefined, sharedSettings: { ...shared, receiverHosted: false } })),
+    ).not.toContain('receiver not reachable')
     // Unknown stays unknown: no settings document means no claim either way.
     expect(render(viewState({ receiver: undefined, sharedSettings: null }))).toContain(
       'receiver unknown',
@@ -291,6 +297,7 @@ describe('Popover phases', () => {
       reachable: 'receiver reachable',
       'not-reachable': 'receiver not reachable',
       hosted: 'receiver hosted by KyberDash',
+      off: 'receiver off',
       'port-held-by-other': 'receiver port held by another process',
       unknown: 'receiver unknown',
     } as const

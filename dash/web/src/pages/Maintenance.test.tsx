@@ -261,6 +261,56 @@ describe('Issue #319: pause only stops scheduled jobs', () => {
     })
   })
 
+  it('sends one PUT per pause click: a second click while the first is pending is refused', async () => {
+    // The double-write the disabled state exists to prevent: two PUTs a moment apart
+    // carrying opposite `jobsPaused` values, with the panel rendering whichever landed
+    // last - and nothing about the request tells the operator their click was dropped.
+    const puts: RecordedCall[] = []
+    let release!: () => void
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        const method = init?.method ?? 'GET'
+        const call: RecordedCall = {
+          url: String(url),
+          method,
+          body: init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : null,
+        }
+        const json = method === 'GET' && call.url.includes('/jobs')
+          ? JOBS
+          : method === 'GET' && call.url.includes('/settings')
+            ? SETTINGS
+            : (puts.push(call), await held, {})
+        return { ok: true, status: 200, json: async () => json } as Response
+      }),
+    )
+
+    await openPanel()
+    const button = screen.getByTestId('maintenance-pause-button') as HTMLButtonElement
+    expect(button.disabled).toBe(false)
+
+    fireEvent.click(button)
+    await waitFor(() => expect(puts).toHaveLength(1))
+
+    // In flight: the same `disabled` attribute every other disabled control in this panel
+    // uses, so it is disabled to the accessibility tree and not merely styled.
+    await waitFor(() => expect(button.disabled).toBe(true))
+    fireEvent.click(button)
+    fireEvent.click(button)
+    expect(puts).toHaveLength(1)
+    expect(puts[0].body).toEqual({ jobsPaused: true })
+
+    release()
+    await waitFor(() => expect(button.disabled).toBe(false))
+
+    // Still usable afterwards - it gates the write, not the control.
+    fireEvent.click(button)
+    await waitFor(() => expect(puts).toHaveLength(2))
+  })
+
   // Pausing is a pause of the scheduler, not a lock on the product: the
   // operator must still be able to clean, refresh, import, and un-pause.
   it('keeps Pause, Refresh, Import and Clean enabled while paused', async () => {

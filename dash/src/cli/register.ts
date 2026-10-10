@@ -76,6 +76,36 @@ function shortNameFor(key: SettingKey): string {
   return DISPLAY_SETTINGS.find((entry) => entry.key === key)?.short ?? key
 }
 
+/**
+ * Decode one stderr write into the text it carries. A stream write is either a string or
+ * bytes, and the bytes arrive as a Buffer or as a view over one. Node and commander write
+ * strings today, but an undecoded chunk would fall out of the tail that `alreadyPrinted`
+ * reads, and the error message would print a second time. The second argument is a write
+ * callback in the `write(chunk, cb)` and `write(chunk, encoding, cb)` forms and an encoding
+ * only in `write(chunk, encoding)`; a callback carries no string value, so reading it as an
+ * encoding is safe in every form and falls back to utf-8 when it is not one.
+ */
+export function decodeStderrChunk(chunk: unknown, encoding: unknown): string {
+  if (typeof chunk === 'string') return chunk
+  if (ArrayBuffer.isView(chunk)) {
+    const view = chunk as ArrayBufferView
+    const label = typeof encoding === 'string' ? encoding : 'utf8'
+    return Buffer.from(view.buffer, view.byteOffset, view.byteLength).toString(label as BufferEncoding)
+  }
+  return ''
+}
+
+/**
+ * Whether stderr already carried this exact message, judged against the *end* of what was
+ * written rather than anywhere within it. Commander writes the message itself before
+ * `exitOverride` fires, followed by a newline, so the tail ends with it; an earlier warning
+ * or log line that merely mentions the message must not suppress the real one, which is why
+ * a substring test over the whole tail is not good enough.
+ */
+export function alreadyPrinted(tail: string, message: string): boolean {
+  return tail.trimEnd().endsWith(message.trimEnd())
+}
+
 function invalidSettingValueMessage(name: string, key: SettingKey): string {
   const expected = key === SETTING_KEYS.refreshCadenceMinutes ? 'a whole number of minutes, 1 to 1440' : 'on or off'
   return `'${name}' expects ${expected}`
@@ -688,7 +718,9 @@ export function registerKyberCommands(program: Command, dependencies: KyberComma
       const store = createStore(resolveDbPath(opts.db))
       try {
         writeSetting(store, settingKey, parsed)
-        write(`${shortNameFor(settingKey)} ${value}`)
+        // The canonical value, not the raw argument: `05` and `5` store the same row, and an
+        // echo that disagreed with `show` on the next command would read as a failed write.
+        write(`${shortNameFor(settingKey)} ${parsed}`)
       } finally {
         store.close()
       }

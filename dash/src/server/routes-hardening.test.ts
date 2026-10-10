@@ -18,6 +18,7 @@ import { createServer, request as httpRequest, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import type { JobOutcome } from '../jobs/host.js'
 import type { KyberBridge } from './bridge.js'
 import { callRoute, makeDeps } from './testing.js'
 import { cleanBodyParser, handleKyberRequest, runGuardedBodyHandler } from './routes.js'
@@ -348,5 +349,107 @@ describe('a body handler that answers and then rejects does not write twice', ()
     expect(answer.status).toBe(500)
     expect(JSON.parse(answer.text)).toEqual({ error: 'Internal server error' })
     expect(rejections).toEqual([])
+  })
+})
+
+/**
+ * A POST with no timeout guard of its own. `requestJson` arms a 2s rejection timer, and
+ * under the fake clock below that timer is one of the handles being counted - the grace
+ * timer has to be the only thing on the clock for these assertions to mean anything.
+ */
+function postWithoutGuard(
+  base: string,
+  path: string,
+  payload: unknown,
+): Promise<{ status: number; text: string }> {
+  return new Promise((resolve, reject) => {
+    const req = httpRequest(
+      `${base}${path}`,
+      { method: 'POST', headers: { 'content-type': 'application/json' } },
+      (res) => {
+        let text = ''
+        res.setEncoding('utf8')
+        res.on('data', (chunk: string) => {
+          text += chunk
+        })
+        res.on('end', () => resolve({ status: res.statusCode ?? 0, text }))
+      },
+    )
+    req.on('error', reject)
+    req.end(JSON.stringify(payload))
+  })
+}
+
+/**
+ * Waits, on real event-loop turns and never on the faked clock, for `count` handles to be
+ * armed. `setImmediate` is not faked here, so the loop turns while `setTimeout` does not.
+ */
+async function untilArmed(count: number): Promise<void> {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    if (vi.getTimerCount() === count) return
+    await new Promise<void>((resolve) => setImmediate(resolve))
+  }
+  throw new Error(`never saw ${count} armed timer(s); saw ${vi.getTimerCount()}`)
+}
+
+/**
+ * The grace timer on a job trigger is a BOUND, not a second answer: it exists so a job
+ * that has not reported back within `JOB_OUTCOME_GRACE_MS` still gets the client its 202.
+ * When the real answer arrives first the timer has nothing left to do, and `answered`
+ * already stops it writing - but leaving it armed keeps a live handle per answered request
+ * for the rest of the process.
+ */
+describe('the job-trigger grace timer lives exactly as long as the request', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('is armed while the request is in flight and cleared once the host answers first', async () => {
+    const deps = makeDeps()
+    // Held open so the timer is observable while the request is still running; released
+    // once it is armed.
+    let settle!: (outcome: JobOutcome) => void
+    deps.jobHost.nextOutcome = new Promise<JobOutcome>((resolve) => {
+      settle = resolve
+    })
+    const base = await listeningServer(deps)
+
+    // Only these two faked: the socket, the server and this test's own waits are real
+    // timers elsewhere, and faking them would hang the request rather than the clock.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const answer = postWithoutGuard(base, '/api/kyber/refresh', { surface: 'web' })
+
+    await untilArmed(1) // the grace timer, and nothing else
+    // 'busy' is a fast decline: the host answers inside the grace window, which is the
+    // only ordering in which a stale timer can still be armed when the request is over.
+    settle({ outcome: 'busy' })
+
+    const settled = await answer
+    expect(settled.status).toBe(409)
+    expect(JSON.parse(settled.text)).toEqual({ error: 'A job is already running' })
+    // Cleared, not merely guarded: no handle outlives the request it bounded.
+    expect(vi.getTimerCount()).toBe(0)
+
+    // And nothing writes later: advancing past the grace window is silent.
+    vi.advanceTimersByTime(1_000)
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('still answers 202 from the timer when the host stays pending', async () => {
+    const deps = makeDeps() // runNow never settles: the job is still running
+    const base = await listeningServer(deps)
+
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const pending = postWithoutGuard(base, '/api/kyber/refresh', { surface: 'web' })
+    await untilArmed(1)
+    vi.advanceTimersByTime(25)
+    // The grace timer fired, and having answered it holds nothing further.
+    expect(vi.getTimerCount()).toBe(0)
+
+    // Back to real timers before awaiting the socket: the client needs a real event loop.
+    vi.useRealTimers()
+    const answer = await pending
+    expect(answer.status).toBe(202)
+    expect(JSON.parse(answer.text)).toEqual({ accepted: true })
   })
 })

@@ -29,12 +29,15 @@ import type { ReceiverStatus, RefreshInfo, SharedSettings, TrayCommands, ViewSta
  *
  * The Rust core no longer serializes a `receiver` field (the server owns the
  * receiver now), so reading only that field left the footer saying "receiver
- * unknown" forever. `receiverHosted: false` is not unknown: the server answered,
- * and what it says is that it does not host the receiver here.
+ * unknown" forever. `receiverHosted: false` is not unknown either: the server
+ * answered, and what it says is that it is not hosting the receiver here -
+ * because the user turned it off. That is a state, not a fault, so it gets its
+ * own label rather than borrowing 'not-reachable', which belongs to a probe
+ * that failed. Absent settings are still genuinely unknown.
  */
 export function receiverStatus(sharedSettings: SharedSettings | null | undefined): ReceiverStatus {
   if (sharedSettings == null) return 'unknown'
-  return sharedSettings.receiverHosted ? 'hosted' : 'not-reachable'
+  return sharedSettings.receiverHosted ? 'hosted' : 'off'
 }
 
 const IDLE_REFRESH: RefreshInfo = { state: 'idle', lastSuccessAt: null, lastFailure: null }

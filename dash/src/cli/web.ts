@@ -2,7 +2,7 @@ import { createServer, type Server } from 'http'
 import { randomBytes } from 'crypto'
 import { execFile } from 'child_process'
 import { readFile } from 'fs/promises'
-import { closeSync, existsSync, fchmodSync, lstatSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from 'fs'
+import { chmodSync, closeSync, existsSync, fchmodSync, lstatSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'fs'
 import { createRequire } from 'node:module'
 import { join, normalize, extname, dirname, sep, posix as posixPath } from 'path'
 import { homedir } from 'node:os'
@@ -278,9 +278,34 @@ function readServerRecord(path: string): ServerRecord | null {
 function ensureStateDir(dir: string): string | null {
   try {
     mkdirSync(dir, { recursive: true, mode: 0o700 })
-    return null
   } catch (err) {
     return (err as NodeJS.ErrnoException).code ?? 'EUNKNOWN'
+  }
+  tightenStateDir(dir)
+  return null
+}
+
+/**
+ * Drops group/other bits off a state dir that already existed. `mkdir`'s `mode` is a
+ * creation-time request subject to the umask and does nothing at all to a directory that
+ * was already there, so a dir left by an older version (or created by a `0o777` umask)
+ * keeps its permissions forever - and it holds the pid and loopback port of a running
+ * server plus the user's stored context.
+ *
+ * Tighten only: a stricter mode than 0o700 is left exactly as it is, because narrowing
+ * further is somebody's deliberate choice and this function exists to close a hole, not
+ * to overwrite a policy. Never throws - a dir owned by another user fails the chmod with
+ * EPERM, and the caller is already serving over it. Windows has no POSIX mode bits, so
+ * there is nothing to tighten and stat would report a synthetic 0o666 on every run.
+ */
+function tightenStateDir(dir: string): void {
+  if (process.platform === 'win32') return
+  try {
+    const mode = statSync(dir).mode & 0o777
+    if ((mode & 0o077) === 0) return
+    chmodSync(dir, mode & 0o700)
+  } catch {
+    /* not ours, or unreadable: the mode we could not tighten is reported by its owner */
   }
 }
 
@@ -378,6 +403,14 @@ export type WebDashboardServices = {
    * listening line does not wait for it.
    */
   maintenance?: () => Promise<void>
+  /**
+   * How the jobs host is closed when the last share of a pair goes back. Injectable so a
+   * teardown that REJECTS can be exercised: the release path cannot await the close (a
+   * caller closing a server is not a caller that can be made to fail), and a rejected
+   * close there is an unhandled rejection. Nothing on the filesystem provokes it - the
+   * lease release retries and then swallows - so the seam is what makes it testable.
+   */
+  closeJobHost?: (jobHost: JobHost) => Promise<void>
 }
 
 /**
@@ -410,6 +443,7 @@ type HostedSeams = {
   readonly receiverSpawner: JobSpawner | undefined
   readonly receiverProber: ReceiverProber | undefined
   readonly maintenance: (() => Promise<void>) | undefined
+  readonly closeJobHost: (jobHost: JobHost) => Promise<void>
 }
 
 function sameSeams(a: HostedSeams, b: HostedSeams): boolean {
@@ -421,6 +455,7 @@ function sameSeams(a: HostedSeams, b: HostedSeams): boolean {
     && a.receiverSpawner === b.receiverSpawner
     && a.receiverProber === b.receiverProber
     && a.maintenance === b.maintenance
+    && a.closeJobHost === b.closeJobHost
 }
 
 const hostedServices = new Map<string, HostedServices>()
@@ -493,6 +528,7 @@ async function acquireHostedServices(
     receiverSpawner: opts.receiverSpawner,
     receiverProber: opts.receiverProber,
     maintenance: opts.maintenance,
+    closeJobHost: opts.closeJobHost ?? closeTheJobHost,
   }
 
   for (;;) {
@@ -512,6 +548,32 @@ async function acquireHostedServices(
   }
 }
 
+/**
+ * A teardown close, observed rather than awaited, and never thrown out of.
+ *
+ * The release path cannot await these: closing a server is not something a caller may be
+ * made to fail on, and the process is on its way out. What it must not do is FLOAT the
+ * promise - a rejected close with nothing attached is an unhandled rejection, which on
+ * Node's default policy takes the process down during shutdown. One line of stderr says
+ * what did not stop, and the server keeps going.
+ */
+function closeQuietly(closing: Promise<unknown>): void {
+  void closing.catch((err: unknown) => {
+    const code = (err as NodeJS.ErrnoException | undefined)?.code
+    const detail = String(err instanceof Error ? err.message : err).split('\n')[0]
+    console.error(`${BRAND.cliName}: background services did not stop cleanly: ${code ?? detail}`)
+  })
+}
+
+/**
+ * The default teardown, one function for the process rather than one per server: seams
+ * are compared by identity to decide whether two servers over one state dir may share a
+ * host pair, so a default built fresh per call would hand every server its own pair.
+ */
+function closeTheJobHost(jobHost: JobHost): Promise<void> {
+  return jobHost.close()
+}
+
 /** Registers `services` as the shared pair for `stateDir` until the last server lets it go. */
 function share(stateDir: string, services: HostedServices): {
   services: HostedServices
@@ -529,8 +591,8 @@ function share(stateDir: string, services: HostedServices): {
       if (services.receiverTimer !== undefined) clearInterval(services.receiverTimer)
       if (services.receiverRetry !== undefined) clearTimeout(services.receiverRetry)
       if (hostedServices.get(stateDir) === services) hostedServices.delete(stateDir)
-      void services.jobHost.close()
-      void services.receiverHost.close()
+      closeQuietly(services.seams.closeJobHost(services.jobHost))
+      closeQuietly(services.receiverHost.close())
       // The process-singleton default store is closed with the last pair that used it.
       // It is not one caller's store: a second server in this process sharing the same
       // state dir still holds a reference, so this only fires when the final share goes

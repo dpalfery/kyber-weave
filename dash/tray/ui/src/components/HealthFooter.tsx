@@ -18,6 +18,10 @@ const RECEIVER_LABELS: Record<ReceiverStatus, string> = {
   reachable: 'receiver reachable',
   'not-reachable': 'receiver not reachable',
   hosted: 'receiver hosted by KyberDash',
+  // A receiver that was deliberately switched off is not a fault, and must not read as
+  // one: 'not-reachable' says the network or the process is broken, which is exactly the
+  // wrong thing to tell someone who turned it off on purpose.
+  off: 'receiver off',
   'port-held-by-other': 'receiver port held by another process',
   unknown: 'receiver unknown',
 }

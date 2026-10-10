@@ -2,6 +2,7 @@
 // the command tree without running it.
 import { CommanderError } from 'commander'
 import { buildProgram } from './program.js'
+import { alreadyPrinted, decodeStderrChunk } from './register.js'
 
 // A downstream reader that closes the pipe early (`| head`, quitting `less`, or
 // a missing command) makes stdout writes fail with EPIPE. Exit cleanly rather
@@ -27,7 +28,9 @@ const stderr = process.stderr
 const originalStderrWrite = stderr.write.bind(stderr)
 let stderrTail = ''
 stderr.write = ((chunk: unknown, ...rest: unknown[]): boolean => {
-  if (typeof chunk === 'string') stderrTail = `${stderrTail}${chunk}`.slice(-8192)
+  // `rest[0]` is the callback and `rest[1]` the encoding in the three-argument form, so the
+  // encoding is looked up by shape rather than by position.
+  stderrTail = `${stderrTail}${decodeStderrChunk(chunk, rest[1] ?? rest[0])}`.slice(-8192)
   return (originalStderrWrite as (...args: unknown[]) => boolean)(chunk, ...rest)
 }) as typeof stderr.write
 
@@ -38,7 +41,7 @@ try {
   // A help or version request exits 0 through the same path (commander has already printed
   // the help text) and must stay silent; anything else the user asked and did not get gets
   // its message exactly once.
-  if (error.exitCode !== 0 && !stderrTail.includes(error.message)) {
+  if (error.exitCode !== 0 && !alreadyPrinted(stderrTail, error.message)) {
     stderr.write(`${error.message}\n`)
   }
   process.exitCode = error.exitCode

@@ -128,8 +128,8 @@ contracts.
   command, route, pause protocol, and wipe table map; the plan's closeout
   mapping records the harvest.
 - The tray's seventh command (`clean_database`) asks the engine over
-  `POST /api/kyber/clean` with the scope and an explicit confirmation; it passes
-  `--reingest-weeks` only when the user asked for the history back. The next
+  `POST /api/kyber/clean` with the scope and an explicit confirmation; it sends
+  the `reingestWeeks` window only when the user asked for the history back. The next
   scheduled refresh does not re-ingest: folder import on a schedule is off until
   someone enables it.
 - Automatic paths (refresh, retention purge) remain under the ADR 0016/ADR 0018
