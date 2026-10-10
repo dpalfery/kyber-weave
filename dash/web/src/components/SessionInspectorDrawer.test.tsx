@@ -20,6 +20,8 @@ import {
   JsonStringView,
   ReadableContentText,
   TurnContentSections,
+  TurnLosslessText,
+  TurnLosslessValue,
 } from './SessionInspectorDrawer.js'
 
 import { renderToStaticMarkup } from 'react-dom/server'
@@ -1153,5 +1155,125 @@ describe('SessionInspectorDrawer: Copilot turn readability', () => {
 
     // Undefined is absent at this component boundary: nothing renders.
     expect(renderHtml(React.createElement(TurnContentSections, { content: undefined }))).toBe('')
+  })
+})
+
+describe('SessionInspectorDrawer: Copilot turn lossless rendering', () => {
+  it('shows a long nested string in full with no preview collapse', () => {
+    const tail = 'UNIQUE_NESTED_TAIL_7f3a1c'
+    const longNested = `HEAD_${'A'.repeat(5000)}_${tail}`
+    const content = {
+      system_prompt: { outer: { inner: longNested, sibling: 'second-field-stays' } },
+    }
+    const html = renderHtml(React.createElement(TurnContentSections, { content }))
+    const text = unescapeHtml(html)
+    // Every character survives, head through tail, with no preview gate.
+    expect(text).toContain(longNested)
+    expect(text).toContain(tail)
+    expect(text).toContain('second-field-stays')
+    expect(html).toContain('data-testid="turn-lossless-text"')
+    expect(html).toContain('data-testid="turn-lossless-object"')
+    // The generic collapsed preview is scoped out of turn content.
+    expect(html).not.toContain('data-testid="key-value-list"')
+  })
+
+  it('preserves XML content with leading/trailing whitespace byte-for-byte', () => {
+    const padded = '  \n  <context>  padded content with spaces  </context>  \n  '
+    const content = { system_prompt: padded }
+    const html = renderHtml(React.createElement(TurnContentSections, { content }))
+    const text = unescapeHtml(html)
+    // Whitespace and markup survive as literal content: nothing trimmed.
+    expect(text).toContain(padded)
+    expect(text).toContain('  padded content with spaces  ')
+    expect(text).toContain('<context>')
+    expect(html).toContain('data-testid="turn-lossless-text"')
+  })
+
+  it('shows complete long tool-definition fields without clipping', () => {
+    const longDescription = `LONG_DESC_HEAD_${'D'.repeat(3000)}_UNIQUE_TOOL_DESC_TAIL_4b9e`
+    const longName = `super_long_tool_name_${'N'.repeat(500)}_UNIQUE_TOOL_NAME_TAIL`
+    const content = {
+      tool_definitions: [
+        {
+          name: longName,
+          description: longDescription,
+          parameters: { type: 'object', properties: { path: { type: 'string' } } },
+          enabled: true,
+        },
+      ],
+    }
+    const html = renderHtml(React.createElement(TurnContentSections, { content }))
+    const text = unescapeHtml(html)
+    expect(text).toContain(longDescription)
+    expect(text).toContain('UNIQUE_TOOL_DESC_TAIL_4b9e')
+    expect(text).toContain(longName)
+    expect(text).toContain('UNIQUE_TOOL_NAME_TAIL')
+    expect(html).toContain('data-testid="tool-definition-0"')
+    expect(html).toContain('Tool 1 of 1')
+  })
+
+  it('distinguishes nested null/undefined/empty values with visible markers', () => {
+    const content = {
+      system_prompt: {
+        explicitNull: null,
+        explicitUndefined: undefined,
+        explicitEmpty: '',
+        explicitFalse: false,
+        explicitZero: 0,
+        explicitEmptyList: [] as unknown[],
+        explicitEmptyObject: {} as Record<string, unknown>,
+      },
+    }
+    const html = renderHtml(React.createElement(TurnContentSections, { content }))
+    expect(html).toContain('data-testid="explicit-null-value"')
+    expect(html).toContain('>null<')
+    expect(html).toContain('data-testid="explicit-undefined-value"')
+    expect(html).toContain('>undefined<')
+    expect(html).toContain('data-testid="empty-string-value"')
+    expect(html).toContain('empty string')
+    expect(html).toContain('false')
+    expect(html).toContain('>0<')
+    expect(html).toContain('empty list')
+    expect(html).toContain('empty object')
+  })
+
+  it('keeps nested array and object order without reordering', () => {
+    const content = {
+      conversation_history: ['zeta-first-1', 'alpha-second-2', 'mid-third-3'],
+      system_prompt: { zulu: 'z-value', alpha: 'a-value', mike: 'm-value' },
+    }
+    const html = renderHtml(React.createElement(TurnContentSections, { content }))
+    const zeta = html.indexOf('zeta-first-1')
+    const alpha = html.indexOf('alpha-second-2')
+    const mid = html.indexOf('mid-third-3')
+    expect(zeta).toBeGreaterThanOrEqual(0)
+    expect(alpha).toBeGreaterThan(zeta)
+    expect(mid).toBeGreaterThan(alpha)
+    const zulu = html.indexOf('z-value')
+    const aValue = html.indexOf('a-value')
+    const mValue = html.indexOf('m-value')
+    expect(zulu).toBeGreaterThanOrEqual(0)
+    expect(aValue).toBeGreaterThan(zulu)
+    expect(mValue).toBeGreaterThan(aValue)
+    expect(html).toContain('Item 1 of 3')
+    expect(html).toContain('Item 3 of 3')
+  })
+
+  it('renders lossless text without trimming or folding', () => {
+    const raw = '  leading and trailing spaces stay  '
+    const html = renderHtml(React.createElement(TurnLosslessText, { text: raw }))
+    expect(unescapeHtml(html)).toContain(raw)
+    expect(html).toContain('data-testid="turn-lossless-text"')
+  })
+
+  it('routes invalid JSON-shaped strings to lossless text instead of folding', () => {
+    const raw = '{"broken": json, <context>markup</context>}'
+    const element = React.createElement(TurnLosslessValue, { value: raw })
+    const html = renderHtml(element)
+    const text = unescapeHtml(html)
+    expect(text).toContain(raw)
+    expect(text).toContain('<context>')
+    expect(html).toContain('data-testid="turn-lossless-text"')
+    expect(html).not.toContain('data-testid="json-string-view"')
   })
 })

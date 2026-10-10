@@ -589,9 +589,135 @@ export function ReadableContentText({ text, label }: { text: string; label?: str
 }
 
 /**
+ * Lossless plain-text view scoped to turn-content sections. Unlike the
+ * generic `XmlFoldedText`, nothing is trimmed, folded into a preview, or
+ * dropped: the exact string renders as literal text (React escapes XML
+ * markup) with whitespace preserved, inside a scrollable container so long
+ * content stays reachable without expanding anything.
+ */
+export function TurnLosslessText({ text }: { text: string }) {
+  return (
+    <pre
+      className="text-xs font-mono p-2.5 overflow-auto whitespace-pre-wrap break-words rounded border border-border bg-muted/40 text-foreground max-h-[400px]"
+      data-testid="turn-lossless-text"
+    >
+      {text}
+    </pre>
+  )
+}
+
+/**
+ * Lossless recursive value renderer scoped to turn-content sections
+ * (including nested objects, arrays, and tool-definition cards). The
+ * generic `KeyValueList` collapses long strings behind a preview `<details>`
+ * and routes XML-bearing text through the trimming `XmlFoldedText`; this
+ * renderer instead shows every string in full and in order:
+ *
+ * - strings render byte-for-byte in a scrollable `<pre>` (whitespace and
+ *   XML markup preserved as literal content, no trimming, no preview);
+ * - JSON-shaped strings that parse keep the readable `JsonStringView`
+ *   (formatted view is a whitespace-only re-indent so large integer
+ *   literals, key order, and array order survive; raw/copy stay exact),
+ *   while JSON-shaped-but-invalid text falls back to the lossless `<pre>`
+ *   instead of the folding view so nothing is trimmed;
+ * - object key order (`Object.entries` insertion order) and array order
+ *   are never reordered;
+ * - null, undefined, empty string, empty object/list, false, and zero each
+ *   keep a visibly distinct rendering.
+ */
+export function TurnLosslessValue({ value, label }: { value: unknown; label?: string }) {
+  if (value === null) {
+    return (
+      <span className="text-xs font-mono text-foreground" data-testid="explicit-null-value">
+        null
+      </span>
+    )
+  }
+  if (value === undefined) {
+    return (
+      <span className="text-xs font-mono text-foreground" data-testid="explicit-undefined-value">
+        undefined
+      </span>
+    )
+  }
+  if (typeof value === 'string') {
+    if (value === '') {
+      return (
+        <p className="text-xs font-mono text-tertiary-foreground" data-testid="empty-string-value">
+          &quot;&quot; (empty string)
+        </p>
+      )
+    }
+    if (isJsonText(value)) {
+      const single = prettyPrintJson(value)
+      const lines = single === null ? prettyPrintJsonLines(value) : null
+      if (single !== null || lines !== null) {
+        return <JsonStringView text={value} label={label} />
+      }
+      // Shaped like JSON but invalid: stay lossless instead of routing
+      // through the folding view, which would trim.
+    }
+    return <TurnLosslessText text={value} />
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return (
+      <span className="text-xs font-mono text-foreground" data-testid="turn-lossless-scalar">
+        {String(value)}
+      </span>
+    )
+  }
+  if (Array.isArray(value)) {
+    if (value.length === 0) {
+      return <p className="text-xs text-tertiary-foreground italic">empty list</p>
+    }
+    return (
+      <div className="space-y-2" data-testid="turn-lossless-array">
+        {value.map((item, idx) => (
+          <div key={idx} className="rounded border border-border bg-card/60 overflow-hidden" data-testid={`turn-lossless-array-item-${idx}`}>
+            <div className="border-b border-border bg-interactive-secondary/60 px-3 py-1.5 font-mono text-[11px] text-muted-foreground">
+              Item {idx + 1} of {value.length}
+            </div>
+            <div className="p-2.5">
+              <TurnLosslessValue value={item} />
+            </div>
+          </div>
+        ))}
+      </div>
+    )
+  }
+  if (isRecord(value)) {
+    const entries = Object.entries(value)
+    if (entries.length === 0) {
+      return <p className="text-xs text-tertiary-foreground italic">empty object</p>
+    }
+    return (
+      <div className="divide-y divide-border/60 text-xs font-mono" data-testid="turn-lossless-object">
+        {entries.map(([key, val]) => (
+          <div key={key} className="flex flex-col sm:flex-row sm:items-start gap-1 sm:gap-3 py-1.5" data-testid={`turn-lossless-field-${key}`}>
+            <span className="shrink-0 font-medium text-muted-foreground w-28 sm:w-36 break-all">
+              {key}:
+            </span>
+            <div className="min-w-0 flex-1 text-foreground">
+              <TurnLosslessValue value={val} />
+            </div>
+          </div>
+        ))}
+      </div>
+    )
+  }
+  return (
+    <span className="text-xs font-mono text-foreground" data-testid="turn-lossless-scalar">
+      {String(value)}
+    </span>
+  )
+}
+
+/**
  * One labeled card per tool definition, in the order given. Names are read
  * from the already-parsed objects (plain strings, safe to read); every
- * remaining field renders through the key-value view so nothing is dropped.
+ * field renders through the lossless turn-content value view so long
+ * descriptions, parameters, and nested strings survive in full with no
+ * preview collapse or whitespace trimming.
  */
 function ToolDefinitionCards({ definitions }: { definitions: unknown[] }) {
   if (definitions.length === 0) {
@@ -615,10 +741,10 @@ function ToolDefinitionCards({ definitions }: { definitions: unknown[] }) {
               <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
                 Tool {idx + 1} of {definitions.length}
               </span>
-              <span className="font-mono text-xs font-semibold text-foreground truncate">{name}</span>
+              <span className="font-mono text-xs font-semibold text-foreground break-words whitespace-pre-wrap min-w-0 flex-1">{name}</span>
             </div>
             <div className="p-2.5">
-              <KeyValueList data={def} />
+              <TurnLosslessValue value={def} />
             </div>
           </div>
         )
@@ -632,9 +758,12 @@ function ToolDefinitionCards({ definitions }: { definitions: unknown[] }) {
  * flat canonical buckets here — system prompt, instruction context, tool
  * definitions, conversation history, tool results — which the message blocks
  * above do not read, so without this they stay invisible (or surface
- * elsewhere as one raw JSON wall). Every own bucket renders in full:
- * JSON strings get the structured view, long prose keeps XML folding, and
- * real objects keep the key-value view. Only absent keys render nothing —
+ * elsewhere as one raw JSON wall). Every own bucket renders losslessly in
+ * full: JSON strings get the structured view (formatted re-indent plus an
+ * exact raw/copy path), every other string renders byte-for-byte in a
+ * scrollable block with whitespace and XML markup preserved as literal
+ * content, and nested objects/arrays render through the lossless value view
+ * in key/array order with no preview collapse. Only absent keys render nothing —
  * an own key with null, an empty string, or undefined renders an explicit
  * marker so missing data is never confused with an explicit empty value —
  * and array order is never touched.
@@ -685,13 +814,13 @@ export function TurnContentSections({ content }: { content: unknown }) {
             Turn content
           </h4>
           <div className="rounded border border-border bg-card p-3 overflow-hidden">
-            <ReadableContentText text={content} />
+            <TurnLosslessValue value={content} />
           </div>
         </section>
       </div>
     )
   }
-  // Booleans, numbers, and arrays render through the key-value view so the
+  // Booleans, numbers, and arrays render through the lossless value view so the
   // full value survives: scalars via their string form, arrays in order,
   // and an empty array as the distinct "empty list" marker.
   if (typeof content === 'boolean' || typeof content === 'number' || Array.isArray(content)) {
@@ -702,7 +831,7 @@ export function TurnContentSections({ content }: { content: unknown }) {
             Turn content
           </h4>
           <div className="rounded border border-border bg-card p-3 overflow-hidden">
-            <KeyValueList data={content} />
+            <TurnLosslessValue value={content} />
           </div>
         </section>
       </div>
@@ -718,7 +847,7 @@ export function TurnContentSections({ content }: { content: unknown }) {
             Turn content
           </h4>
           <div className="rounded border border-border bg-card p-3 overflow-hidden">
-            <KeyValueList data={content} />
+            <TurnLosslessValue value={content} />
           </div>
         </section>
       </div>
@@ -750,7 +879,7 @@ export function TurnContentSections({ content }: { content: unknown }) {
                     &quot;&quot; (empty string)
                   </p>
                 ) : (
-                  <ReadableContentText text={value} label={label} />
+                  <TurnLosslessValue value={value} label={label} />
                 )
               ) : value === null ? (
                 <span className="text-xs font-mono text-foreground" data-testid="explicit-null-value">
@@ -763,7 +892,7 @@ export function TurnContentSections({ content }: { content: unknown }) {
               ) : key === 'tool_definitions' && Array.isArray(value) ? (
                 <ToolDefinitionCards definitions={value} />
               ) : (
-                <KeyValueList data={value} />
+                <TurnLosslessValue value={value} />
               )}
             </div>
           </section>
