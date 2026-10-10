@@ -12,7 +12,7 @@ This is architecture-level. If the task is writing or updating one component's a
 
 ## Two modes
 
-**Bootstrap** — the repo has little or no structured documentation. Scaffold the minimum viable version of the architecture below, adapted to this project's name and stack. Read `references/templates.md` for the file skeletons; don't write 300-line documents on day one — start minimal and let it grow.
+**Bootstrap** — the repo has little or no structured documentation. Scaffold the minimum viable version of the architecture below, adapted to this project's name and stack. Read [references/templates.md](references/templates.md) for the file skeletons; don't write 300-line documents on day one — start minimal and let it grow.
 
 **Audit** — the repo already has some of this. Walk the checklist below, report what's missing or drifted (a fact duplicated in two places, a skill hardcoding something the registry should own, a plan sitting `Completed` but never archived), and fix only what you're authorized to fix. Don't rewrite what's already correct.
 
@@ -39,7 +39,7 @@ Each layer answers a different question. An agent or human should be able to wal
 ## Bootstrap steps
 
 1. Confirm the repo's stack and existing conventions — don't impose an unrelated structure on top of what's already there.
-2. Create `<docs-root>/README.md` (index), `<docs-root>/system/architecture.md` (architecture), `<docs-root>/documentation-standard.md` (rules), and `<docs-root>/catalog.md` (one row for the first component) from `references/templates.md`.
+2. Create `<docs-root>/README.md` (index), `<docs-root>/system/architecture.md` (architecture), `<docs-root>/documentation-standard.md` (rules), and `<docs-root>/catalog.md` (one row for the first component) from [references/templates.md](references/templates.md).
 3. Add or extend root `AGENTS.md` with a short config-registry table, starting with **<docs-root>** — even 3-4 entries is a fine start. Put it in `AGENTS.md` even when the repo's root policy lives in `CLAUDE.md`: that is where Squad's skills resolve the registry, so a `CLAUDE.md` should point to it rather than hold it.
 4. Create `<docs-root>/adr/` and `<docs-root>/plans/` (with a `README.md` plan index) even if empty — the structure signals where things go.
 5. Report what you created and what the user should fill in next (owner names, first ADR, first cataloged component). Don't invent content you can't verify from the repo.
@@ -55,7 +55,7 @@ Each layer answers a different question. An agent or human should be able to wal
 
 ## Plan lifecycle (reference for both modes)
 
-`Draft → Ready → In progress → Blocked → Review required → Completed/Superseded → Archived`. Only `Ready`, `In progress`, and `Blocked` are implementation-actionable; `Draft` is planning-only; everything after `Review required` is historical. A plan does not archive itself — closing it out means verifying its acceptance criteria against what was actually built, promoting anything durable (a new convention, a registry entry, an ADR-worthy decision) into canonical docs, and only then moving it to `<docs-root>/archive/plans/` with status `Archived`. See `references/templates.md` for a minimal plan template if bootstrapping.
+`Draft → Ready → In progress → Blocked → Review required → Completed/Superseded → Archived`. Only `Ready`, `In progress`, and `Blocked` are implementation-actionable; `Draft` is planning-only; everything after `Review required` is historical. A plan does not archive itself — closing it out means verifying its acceptance criteria against what was actually built, promoting anything durable (a new convention, a registry entry, an ADR-worthy decision) into canonical docs, and only then moving it to `<docs-root>/archive/plans/` with status `Archived`. See [references/templates.md](references/templates.md) for a minimal plan template if bootstrapping.
 
 ## Where the agents fit (reference only — don't embed their instructions here)
 
@@ -69,4 +69,4 @@ If the project has no such agents yet, this skill still applies — a human just
 
 ## Extensibility note
 
-Future versions of this skill may source templates and conventions from a Palfery Agent Package Manager (APM) package instead of the local `references/templates.md`. Nothing to do about that yet — just don't build anything here that assumes a fixed local-only template path if it can reasonably be avoided.
+Future versions of this skill may source templates and conventions from a Palfery Agent Package Manager (APM) package instead of the local [references/templates.md](references/templates.md). Nothing to do about that yet — just don't build anything here that assumes a fixed local-only template path if it can reasonably be avoided.

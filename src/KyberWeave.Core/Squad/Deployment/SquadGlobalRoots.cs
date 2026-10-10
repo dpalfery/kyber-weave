@@ -26,6 +26,8 @@ public interface ISquadGlobalRootResolver
 /// Warp skills live under `~/.warp` (`~/.warp/skills/`, verified against docs.warp.dev/features/skills).
 /// ZCode agents, skills, and commands live under `$ZCODE_STORAGE_DIR` (default `~/.zcode`),
 /// verified against zai-org/ZCode 3.14.0 on 2026-09-21.
+/// Devin agents and skills live under its user configuration directory — `~/.config/devin`
+/// on macOS and Linux, `%APPDATA%\devin` on Windows — per Devin CLI v3000.x (2026-09-27).
 /// The home directory and every override environment value must be fully qualified:
 /// a relative root would be completed against the process working directory by
 /// <see cref="SquadPathPolicy.ResolveFile"/>.
@@ -57,12 +59,21 @@ public interface ISquadGlobalRootResolver
 ///   outranks the file. Project config files sit between the two and are deliberately not
 ///   read here: honouring them would make a `--global` root depend on the working directory,
 ///   which is the one thing `--global` exists not to do.
+/// - Devin: `agents/` and `skills/` under the Devin user configuration directory, the one
+///   target whose default differs by operating system. Devin CLI documents its user
+///   configuration at `~/.config/devin/config.json`, or `%APPDATA%\devin\config.json` on
+///   Windows, and loads custom subagents and skills from `agents/` and `skills/` beside it
+///   (Devin CLI v3000.6.7 and v3000.10.21, cross-checked 2026-09-27). On macOS and Linux the
+///   root follows the same XDG rule as Kilo; on Windows it is `%APPDATA%`, falling back to
+///   `AppData\Roaming` under the profile, and `XDG_CONFIG_HOME` is ignored. Devin documents
+///   no environment override of its own.
 /// </remarks>
 public sealed class SquadGlobalRoots : ISquadGlobalRootResolver
 {
     private readonly Func<string, string?> _getEnvironmentVariable;
     private readonly Func<string, string?> _readFileText;
     private readonly string _homeDirectory;
+    private readonly bool _isWindows;
 
     /// <param name="getEnvironmentVariable">Reads an override environment variable's value.</param>
     /// <param name="homeDirectory">The fully qualified per-user home directory.</param>
@@ -72,16 +83,23 @@ public sealed class SquadGlobalRoots : ISquadGlobalRootResolver
     /// parameter is optional so every existing two-argument construction keeps working, and a
     /// null reader simply means the one file-backed root falls through to its default.
     /// </param>
+    /// <param name="isWindows">
+    /// Whether to resolve Windows per-user locations. Null means the current operating
+    /// system. Only Devin's root depends on it; tests pass it explicitly so both branches run
+    /// on every CI leg.
+    /// </param>
     public SquadGlobalRoots(
         Func<string, string?> getEnvironmentVariable,
         string homeDirectory,
-        Func<string, string?>? readFileText = null)
+        Func<string, string?>? readFileText = null,
+        bool? isWindows = null)
     {
         ArgumentNullException.ThrowIfNull(getEnvironmentVariable);
         ArgumentException.ThrowIfNullOrWhiteSpace(homeDirectory);
         _getEnvironmentVariable = getEnvironmentVariable;
         _readFileText = readFileText ?? (_ => null);
         _homeDirectory = RequireFullyQualified(homeDirectory, nameof(homeDirectory));
+        _isWindows = isWindows ?? OperatingSystem.IsWindows();
     }
 
     public string ResolveGlobalRoot(SquadTarget target)
@@ -99,6 +117,7 @@ public sealed class SquadGlobalRoots : ISquadGlobalRootResolver
             SquadTarget.Factory => ResolveWithOverride(null, ".factory"),
             SquadTarget.Warp => ResolveWithOverride(null, ".warp"),
             SquadTarget.ZCode => ResolveZCodeRoot(),
+            SquadTarget.Devin => ResolveDevinRoot(),
             _ => throw new ArgumentOutOfRangeException(
                 nameof(target),
                 target,
@@ -203,6 +222,31 @@ public sealed class SquadGlobalRoots : ISquadGlobalRootResolver
         }
 
         return ResolveXdgConfigAppRoot("opencode");
+    }
+
+    /// <summary>
+    /// Resolves Devin's user configuration directory: <c>%APPDATA%\devin</c> on Windows and
+    /// the XDG config directory elsewhere, matching where Devin CLI documents
+    /// <c>config.json</c> on each platform.
+    /// </summary>
+    /// <remarks>
+    /// <c>APPDATA</c> is read rather than <see cref="Environment.SpecialFolder.ApplicationData"/>
+    /// so the value is injectable like every other root input, and a missing value falls back
+    /// to <c>AppData\Roaming</c> beneath the profile, which is where Windows puts it by
+    /// default. <c>XDG_CONFIG_HOME</c> is not a Windows convention and is ignored there.
+    /// </remarks>
+    private string ResolveDevinRoot()
+    {
+        if (!_isWindows)
+        {
+            return ResolveXdgConfigAppRoot("devin");
+        }
+
+        string? appData = _getEnvironmentVariable("APPDATA");
+        string roamingRoot = string.IsNullOrEmpty(appData)
+            ? Path.Combine(_homeDirectory, "AppData", "Roaming")
+            : RequireFullyQualified(appData, "APPDATA");
+        return Path.Combine(roamingRoot, "devin");
     }
 
     private string ResolveXdgConfigAppRoot(string applicationDirectoryName)

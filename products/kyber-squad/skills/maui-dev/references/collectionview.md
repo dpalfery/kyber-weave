@@ -22,7 +22,7 @@ source: https://github.com/dotnet/skills/tree/main/plugins/dotnet-maui/skills/ma
 </CollectionView>
 ```
 
-**Always set `x:DataType` on the `DataTemplate`** — enables compiled bindings and catches typos at build time.
+`x:DataType` usage on the `DataTemplate` follows **<maui-coding-standard>** § MVVM.
 
 ---
 
@@ -196,7 +196,7 @@ For state-dependent empty views (loading vs. empty) use `EmptyViewTemplate` with
 
 | Tip | Why |
 |---|---|
-| Always use `x:DataType` in `DataTemplate` | Compiled bindings skip reflection per-cell |
+| Always use `x:DataType` in `DataTemplate` | See **<maui-coding-standard>** § MVVM |
 | Avoid `ObservableCollection` bulk mutations in loop | Each `Add` fires UI update — use `AddRange` extension or reset |
 | Keep cell layouts flat (avoid deep nesting) | Measure/layout passes are per-cell and expensive |
 | Don't set `HasUnevenRows` unless cells vary | Uniform row heights skip the measure pass |

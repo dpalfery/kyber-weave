@@ -8,11 +8,14 @@
 // protobuf decoder rather than trusting it.
 
 import { createRequire } from 'node:module'
+import type { IncomingMessage, ServerResponse } from 'node:http'
 
-import { afterAll, describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, it, vi } from 'vitest'
 
 import {
   DEFAULT_OTLP_PORT,
+  OTLP_ADMIN_PAUSE_PATH,
+  OTLP_ADMIN_RESUME_PATH,
   OTLP_LOGS_PATH,
   OTLP_TRACES_PATH,
   InMemoryLogStore,
@@ -756,6 +759,7 @@ describe('OtlpReceiver GET /healthz (R10.6, R10.8)', () => {
     expect(await response.json()).toEqual({
       service: 'kyberdash-otlp',
       version: PACKAGE_VERSION,
+      paused: false,
     })
   })
 
@@ -771,3 +775,133 @@ describe('OtlpReceiver GET /healthz (R10.6, R10.8)', () => {
     expect(logs.status).toBe(405)
   })
 })
+
+// Issue #312, plan T5 RED: the receiver pauses ingestion on an explicit admin
+// call so a database clean can hold the store without racing the writer.
+// Traces and logs shed load with 503 + Retry-After (OTLP exporters retry, so
+// nothing is dropped); the liveness probe stays 200 so the tray still knows
+// the port is ours. A lease TTL auto-resumes a cleaner that crashed mid-wipe.
+// The admin routes do not exist yet — every test below fails until T5 lands.
+describe('OtlpReceiver pause for database clean (issue #312)', () => {
+  async function pause(url: string, body?: unknown): Promise<Response> {
+    return fetch(`${url}${OTLP_ADMIN_PAUSE_PATH}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    })
+  }
+
+  it('pauses and resumes: traces shed load with 503 while paused, then ingest again', async () => {
+    const { url } = await startReceiver()
+
+    const paused = await pause(url)
+    expect(paused.status).toBe(200)
+    expect((await paused.json()) as { paused: boolean }).toMatchObject({ paused: true })
+
+    const shed = await post(url, 'application/json', '{}')
+    expect(shed.status).toBe(503)
+    expect(shed.headers.get('retry-after')).not.toBeNull()
+
+    const resumed = await fetch(`${url}${OTLP_ADMIN_RESUME_PATH}`, { method: 'POST' })
+    expect(resumed.status).toBe(200)
+    expect((await resumed.json()) as { paused: boolean }).toMatchObject({ paused: false })
+
+    const accepted = await post(url, 'application/json', minimalTraceBody())
+    expect(accepted.status).toBe(200)
+  })
+
+  it('rejects non-POST admin calls with 405', async () => {
+    const { url } = await startReceiver()
+
+    expect((await fetch(`${url}${OTLP_ADMIN_PAUSE_PATH}`)).status).toBe(405)
+    expect((await fetch(`${url}${OTLP_ADMIN_RESUME_PATH}`)).status).toBe(405)
+  })
+
+  it('rejects a cross-origin admin POST with 403 and stays unpaused (F3)', async () => {
+    const { receiver, url } = await startReceiver()
+
+    for (const path of [OTLP_ADMIN_PAUSE_PATH, OTLP_ADMIN_RESUME_PATH]) {
+      const response = await fetch(`${url}${path}`, {
+        method: 'POST',
+        headers: { Origin: 'https://evil.example' },
+        body: '{}',
+      })
+      expect(response.status).toBe(403)
+      expect(await response.json()).toMatchObject({ error: { code: 'OTLP_FORBIDDEN' } })
+    }
+    expect(receiver.isPaused()).toBe(false)
+
+    const accepted = await post(url, 'application/json', '{}')
+    expect(accepted.status).toBe(200)
+  })
+
+  it('rejects an admin pause from a non-loopback peer with 403 (F3)', async () => {
+    const receiver = new OtlpReceiver({ port: 0 })
+    const req = {
+      url: OTLP_ADMIN_PAUSE_PATH,
+      method: 'POST',
+      headers: {},
+      socket: { remoteAddress: '203.0.113.7' },
+    } as unknown as IncomingMessage
+    let status = 0
+    const res = {
+      setHeader: () => {},
+      writeHead: (s: number) => {
+        status = s
+      },
+      end: () => {},
+    } as unknown as ServerResponse
+    await receiver.handleRequest(req, res)
+    expect(status).toBe(403)
+    expect(receiver.isPaused()).toBe(false)
+  })
+
+  it('reports paused:true on healthz while paused, without breaking the tray probe', async () => {
+    const { url } = await startReceiver()
+    await pause(url)
+
+    const health = await fetch(`${url}/healthz`)
+    expect(health.status).toBe(200)
+    expect(await health.json()).toMatchObject({ service: 'kyberdash-otlp', paused: true })
+
+    await fetch(`${url}${OTLP_ADMIN_RESUME_PATH}`, { method: 'POST' })
+    expect(await (await fetch(`${url}/healthz`)).json()).toMatchObject({
+      service: 'kyberdash-otlp',
+      paused: false,
+    })
+  })
+
+  it('auto-resumes when the pause lease expires', async () => {
+    vi.useFakeTimers()
+    try {
+      const { url } = await startReceiver()
+      await pause(url, { leaseMs: 60_000 })
+
+      expect((await post(url, 'application/json', '{}')).status).toBe(503)
+      await vi.advanceTimersByTimeAsync(60_001)
+
+      const accepted = await post(url, 'application/json', minimalTraceBody())
+      expect(accepted.status).toBe(200)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('sheds logs with 503 while paused too', async () => {
+    const { url } = await startReceiver()
+    await pause(url)
+
+    const shed = await fetch(`${url}${OTLP_LOGS_PATH}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{}',
+    })
+    expect(shed.status).toBe(503)
+    expect(shed.headers.get('retry-after')).not.toBeNull()
+  })
+})
+
+/** Smallest body the JSON trace decoder accepts: one fixture span. */
+function minimalTraceBody(): string {
+  return jsonFixture('hand-rolled')
+}

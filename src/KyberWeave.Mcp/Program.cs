@@ -5,8 +5,12 @@ using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Docs.Search;
 using KyberWeave.Mcp;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using ModelContextProtocol.Protocol;
+using ModelContextProtocol.Server;
 
 if (args.Contains("--version", StringComparer.OrdinalIgnoreCase) || args.Contains("-v", StringComparer.OrdinalIgnoreCase))
 {
@@ -24,19 +28,60 @@ HostApplicationBuilder builder = Host.CreateApplicationBuilder(args);
 // Every log line goes to stderr. One stray line on stdout breaks the transport.
 builder.Logging.AddConsole(o => o.LogToStandardErrorThreshold = LogLevel.Trace);
 
+string workingDirectory = Directory.GetCurrentDirectory();
+string? expectRootEnvironment = Environment.GetEnvironmentVariable(
+    RepositoryRootResolver.ExpectRootEnvironmentVariable);
+bool expectRootFromFlag = RepositoryRootResolver.HasExpectRootArgument(args);
+
 string repoRoot;
 try
 {
     repoRoot = RepositoryRootResolver.Resolve(
         args,
-        Directory.GetCurrentDirectory(),
+        workingDirectory,
         Environment.GetEnvironmentVariable(RepositoryRootResolver.EnvironmentVariable));
+}
+catch (ExpectedRootMismatchException ex)
+{
+    // A client-asserted root that does not match is a refuse-to-serve, distinct from an
+    // unbound root: KW-MCP-ROOT-002 says the binding was intentional but wrong.
+    await Console.Error.WriteLineAsync($"KW-MCP-ROOT-002: {ex.Message}").ConfigureAwait(false);
+    return 1;
 }
 catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
 {
     // stdout is the JSON-RPC transport; startup diagnostics belong on stderr.
     await Console.Error.WriteLineAsync($"KW-MCP-ROOT-001: {ex.Message}").ConfigureAwait(false);
     return 1;
+}
+
+// The environment assertion is honoured only when the flag is absent: an explicit CLI
+// expectation wins over the ambient one, so a shell export cannot override a project pin.
+if (!expectRootFromFlag && !string.IsNullOrWhiteSpace(expectRootEnvironment))
+{
+    string expectedRoot;
+    try
+    {
+        expectedRoot = Path.GetFullPath(expectRootEnvironment, workingDirectory);
+    }
+    catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+    {
+        await Console.Error.WriteLineAsync(
+            "KW-MCP-ROOT-002: The KYBER_WEAVE_EXPECT_ROOT value is not a valid path. " +
+            "Refusing to serve.")
+            .ConfigureAwait(false);
+        return 1;
+    }
+
+    if (!RepositoryRootResolver.PathsEqual(expectedRoot, repoRoot))
+    {
+        await Console.Error.WriteLineAsync(
+            $"KW-MCP-ROOT-002: The KYBER_WEAVE_EXPECT_ROOT value '{expectedRoot}' does not match " +
+            $"the resolved MCP root '{repoRoot}'. Refusing to serve because the client expects " +
+            "a different repository and answers would come from the wrong corpus.")
+            .ConfigureAwait(false);
+        return 1;
+    }
 }
 
 OntologyConfig ontology = ResolveOntology(repoRoot);
@@ -54,6 +99,17 @@ builder.Services
     .AddMcpServer()
     .WithStdioServerTransport()
     .WithToolsFromAssembly();
+
+// The SDK registers its single-session hosting only through its transport extensions, and
+// WithStreamServerTransport would construct a transport of its own on the spot. So the stdio
+// extension supplies the hosting, and its ITransport is swapped for one that still answers
+// requests read before stdin closed, which the SDK transport silently drops. See
+// DrainingStreamServerTransport for why. The SDK's factory is replaced before anything resolves
+// it, so its transport is never constructed and never starts reading stdin.
+builder.Services.Replace(ServiceDescriptor.Singleton<ITransport>(services =>
+    DrainingStreamServerTransport.ForStandardStreams(
+        services.GetRequiredService<IOptions<McpServerOptions>>().Value.ServerInfo?.Name ?? "kyber-weave-mcp",
+        services.GetService<ILoggerFactory>())));
 
 await builder.Build().RunAsync().ConfigureAwait(false);
 return 0;

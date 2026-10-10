@@ -11,6 +11,7 @@ import {
   rawSpan,
 } from './testing.js'
 import { geminiAdapter } from './gemini.js'
+import { antigravityAdapter } from './antigravity.js'
 
 describe('AdapterRegistry', () => {
   describe('register', () => {
@@ -33,6 +34,62 @@ describe('AdapterRegistry', () => {
         confidence: 0.6,
       })
       expect(registry.attribute(spans).get('gemini')).toBe('gemini')
+    })
+
+    it('votes Antigravity over Gemini on the agent identity, even with the vendor label', () => {
+      // The live agy shape: `gen_ai.agent.name` plus `gen_ai.system`.
+      // Antigravity scores the identity + usage (1.0); Gemini yields (0).
+      const registry = new AdapterRegistry([antigravityAdapter, geminiAdapter])
+      const spans = [
+        rawSpan({
+          spanId: 'agy',
+          source: 'agy',
+          traceId: 't1',
+          attributes: {
+            'gen_ai.agent.name': 'antigravity',
+            'gen_ai.system': 'gemini',
+            'gen_ai.usage.input_tokens': 1_200,
+          },
+        }),
+      ]
+
+      expect(registry.scoreGroup('agy', 't1', spans)).toEqual({
+        harness: 'antigravity',
+        confidence: 1,
+      })
+      expect(registry.attribute(spans).get('agy')).toBe('antigravity')
+    })
+
+    it('still votes Antigravity when a mixed trace carries an agent-name-less span', () => {
+      // One span carries the agent identity, one carries only the Gemini
+      // vendor label: without the Gemini yield this group averages 1.0 for
+      // Gemini and loses for Antigravity no matter the registration order.
+      const registry = new AdapterRegistry([antigravityAdapter, geminiAdapter])
+      const spans = [
+        rawSpan({
+          spanId: 'named',
+          source: 'agy',
+          traceId: 't1',
+          attributes: {
+            'gen_ai.agent.name': 'antigravity',
+            'gen_ai.system': 'gemini',
+            'gen_ai.usage.input_tokens': 1_200,
+          },
+        }),
+        rawSpan({
+          spanId: 'unnamed',
+          source: 'agy',
+          traceId: 't1',
+          attributes: { 'gen_ai.system': 'gemini', 'gen_ai.usage.input_tokens': 300 },
+        }),
+      ]
+
+      expect(registry.scoreGroup('agy', 't1', spans)).toEqual({
+        harness: 'antigravity',
+        confidence: 0.7,
+      })
+      expect(registry.attribute(spans).get('named')).toBe('antigravity')
+      expect(registry.attribute(spans).get('unnamed')).toBe('antigravity')
     })
 
     it('leaves shared GenAI usage counters below the attribution threshold', () => {

@@ -67,17 +67,18 @@ public class McpPackagingTests
     /// comes back and what an empty result means, which a skill description never carries.
     /// That pushes it past the scorer's 500-character length budget by design, so the total
     /// would penalise the very content that makes the tool callable. "Negative boundary" is
-    /// excluded for the same reason and asserted separately, since only one of the four
+    /// excluded for the same reason and asserted separately, since only one of the tools
     /// should own an exclusion.
     /// </remarks>
     [Theory]
-    [InlineData(nameof(DocsTools.Explore), "docs_explore")]
-    [InlineData(nameof(DocsTools.ForSymbol), "docs_for_symbol")]
-    [InlineData(nameof(DocsTools.AnalysisCandidates), "docs_analysis_candidates")]
-    [InlineData(nameof(DocsTools.Glossary), "docs_glossary")]
-    public void McpToolDescriptionsScoreAsRoutingMetadata(string method, string toolName)
+    [InlineData("docs_explore")]
+    [InlineData("docs_for_symbol")]
+    [InlineData("docs_analysis_candidates")]
+    [InlineData("docs_glossary")]
+    [InlineData("docs_status")]
+    public void McpToolDescriptionsScoreAsRoutingMetadata(string toolName)
     {
-        DescriptionScore score = ScoreDescription(method, toolName);
+        DescriptionScore score = ScoreDescription(toolName);
 
         Assert.Equal(35, score.Components.Single(c => c.Name == "Trigger clause").Points);
         Assert.Equal(15, score.Components.Single(c => c.Name == "Specific opening").Points);
@@ -88,18 +89,19 @@ public class McpPackagingTests
     /// Exclusions must be asymmetric: when two tools share a boundary the broader one
     /// yields and the narrower states its territory positively. If every description
     /// disclaimed the overlap, requests in the middle would match nothing — so only
-    /// <c>docs_explore</c>, the broadest of the four, carries a negative boundary.
+    /// <c>docs_explore</c>, the broadest of the tools, carries a negative boundary.
     /// </summary>
     [Fact]
     public void OnlyTheBroadestMcpToolCarriesANegativeBoundary()
     {
-        static int Boundary(string method, string toolName) =>
-            ScoreDescription(method, toolName).Components.Single(c => c.Name == "Negative boundary").Points;
+        static int Boundary(string toolName) =>
+            ScoreDescription(toolName).Components.Single(c => c.Name == "Negative boundary").Points;
 
-        Assert.Equal(20, Boundary(nameof(DocsTools.Explore), "docs_explore"));
-        Assert.Equal(0, Boundary(nameof(DocsTools.ForSymbol), "docs_for_symbol"));
-        Assert.Equal(0, Boundary(nameof(DocsTools.AnalysisCandidates), "docs_analysis_candidates"));
-        Assert.Equal(0, Boundary(nameof(DocsTools.Glossary), "docs_glossary"));
+        Assert.Equal(20, Boundary("docs_explore"));
+        Assert.Equal(0, Boundary("docs_for_symbol"));
+        Assert.Equal(0, Boundary("docs_analysis_candidates"));
+        Assert.Equal(0, Boundary("docs_glossary"));
+        Assert.Equal(0, Boundary("docs_status"));
     }
 
     /// <summary>
@@ -108,24 +110,36 @@ public class McpPackagingTests
     /// reaches an open world.
     /// </summary>
     [Theory]
-    [InlineData(nameof(DocsTools.Explore))]
-    [InlineData(nameof(DocsTools.ForSymbol))]
-    [InlineData(nameof(DocsTools.AnalysisCandidates))]
-    [InlineData(nameof(DocsTools.Glossary))]
-    public void McpToolsDeclareReadOnlyAndClosedWorldAnnotations(string method)
+    [InlineData("docs_explore")]
+    [InlineData("docs_for_symbol")]
+    [InlineData("docs_analysis_candidates")]
+    [InlineData("docs_glossary")]
+    [InlineData("docs_status")]
+    public void McpToolsDeclareReadOnlyAndClosedWorldAnnotations(string toolName)
     {
-        McpServerToolAttribute attribute = typeof(DocsTools).GetMethod(method)!.GetCustomAttribute<McpServerToolAttribute>()!;
+        McpServerToolAttribute attribute = McpToolMethod(toolName).GetCustomAttribute<McpServerToolAttribute>()!;
 
-        Assert.True(attribute.ReadOnly, $"{method} must declare ReadOnly so clients see readOnlyHint.");
-        Assert.False(attribute.OpenWorld, $"{method} queries a local corpus and must not claim an open world.");
+        Assert.True(attribute.ReadOnly, $"{toolName} must declare ReadOnly so clients see readOnlyHint.");
+        Assert.False(attribute.OpenWorld, $"{toolName} queries a local corpus and must not claim an open world.");
     }
 
-    private static DescriptionScore ScoreDescription(string method, string toolName)
+    private static MethodInfo McpToolMethod(string toolName)
     {
-        string description = typeof(DocsTools)
-            .GetMethod(method)!
-            .GetCustomAttribute<DescriptionAttribute>()!
-            .Description;
+        MethodInfo? method = typeof(DocsTools)
+            .GetMethods(BindingFlags.Public | BindingFlags.Instance)
+            .SingleOrDefault(candidate =>
+                candidate.GetCustomAttribute<McpServerToolAttribute>()?.Name == toolName);
+        Assert.True(method is not null, $"DocsTools must expose an MCP tool named '{toolName}'.");
+        return method!;
+    }
+
+    private static DescriptionScore ScoreDescription(string toolName)
+    {
+        DescriptionAttribute? description = McpToolMethod(toolName)
+            .GetCustomAttribute<DescriptionAttribute>();
+        Assert.True(
+            description is not null,
+            $"The '{toolName}' tool must carry a [Description] written as routing metadata.");
 
         return DescriptionScorer.Score(new Skill
         {
@@ -134,9 +148,9 @@ public class McpPackagingTests
             Frontmatter = new SkillFrontmatter
             {
                 Name = toolName,
-                Description = description
+                Description = description!.Description
             },
-            RawFrontmatter = $"name: {toolName}\ndescription: {description}",
+            RawFrontmatter = $"name: {toolName}\ndescription: {description!.Description}",
             InstructionsBody = "# Instructions\nQuery governed documentation."
         });
     }

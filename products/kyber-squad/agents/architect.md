@@ -3,9 +3,10 @@ schema: kyber-squad.agent/v1
 name: architect
 description: "Headless technical planner and intake assessor: recommends plan versus spec, investigates bounded changes, and persists mode-aware implementation plans. Plans only and never prompts the user directly."
 invocation: subagent
-model-profile: deep-planning
+model-profile: architect
 capability-profile: architect
 copilot-capability-profile: architect-copilot
+devin-capability-profile: architect-devin
 copilot-tools: [vscode, execute, read, agent, edit/createDirectory, edit/createFile, edit/editFiles, edit/rename, search, web, codegraph/*, kyber-weave/*, context7/*, vscodeGeneral/rename, todo]
 delegates-to: [azure-reader, research-agent]
 fallback: role-skill
@@ -30,6 +31,8 @@ Use the repository root `AGENTS.md` Config Reg to resolve **<docs-root>**, **<pl
 Use governed documentation queries before raw documentation search and CodeGraph before raw code search. Delegate broad sweeps or external sources to `research-agent`, and live Azure state to `azure-reader`. Every delegated request is self-contained.
 
 Retry a failed discovery call once. After a second repository-query failure, make only a narrow self-gathered lookup and label it in the plan. After a second live-state failure, persist the current Draft and return `STATUS: BLOCKED`; never guess.
+
+Some harnesses give you no tool for invoking another agent. When that is so, make the broad sweeps and external lookups yourself and label them self-gathered in the plan. Live Azure state you cannot read at all: persist the current Draft and return `STATUS: BLOCKED` naming the exact question, so the conductor can put it to `azure-reader` and return the answer to you.
 
 ## Route
 

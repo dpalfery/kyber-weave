@@ -3,6 +3,9 @@
 ###############################################################################
 * text=auto
 
+# Preserve the upstream crate's license bytes, including its trailing blank line.
+dash/tray/vendor/glib-0.18.5/LICENSE whitespace=-blank-at-eof
+
 ###############################################################################
 # Set default behavior for command prompt diff.
 #

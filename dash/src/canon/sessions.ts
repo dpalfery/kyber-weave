@@ -15,15 +15,19 @@
 import { analyzeContext, type ContextPart, type ContextTurn } from '../analysis/context.js'
 import { rankSchemas, type ToolDefinition } from '../analysis/schema.js'
 import { auxiliarySpend, buildTimeline, subagentSessions } from '../analysis/timeline.js'
-import { measuredInput, sumCosts } from './cost.js'
-import { contextLimitOf } from './context-window.js'
-import { groupByCanonicalHarness, normalizeHarnessName } from './measurability.js'
+import { costBasisMismatchOf, measuredInput, sumCosts, type CostBasisMismatch } from './cost.js'
+import { isCopilotHarness, priceCopilotTurn } from './copilot-rates.js'
+import { isPublishedTableHarness, pricePublishedTurn } from './published-pricing.js'
+import { contextLimitOf, DEFAULT_CONTEXT_LIMIT } from './context-window.js'
+import { catalogWindowForRecords } from './model-window-catalog.js'
+import { groupByCanonicalHarness, harnessExportsCacheCounter, normalizeHarnessName, surveyFamily } from './measurability.js'
+import { dedupeTwinTurns } from './twin-dedupe.js'
 import { buildFindings } from './findings.js'
 import { buildHarnessRollup } from './harnesses.js'
 import { buildRuns } from './runs.js'
 import { CanonStore, type SessionRow } from './store.js'
 import { activeTokenizer, createCachedCounter, loadO200kCounter } from './tokens.js'
-import { notMeasurable, type CanonicalRecord, type Measurability, type MetricAvailability, type NotMeasurable } from './types.js'
+import { notMeasurable, type CanonicalRecord, type CostBlock, type Measurability, type MetricAvailability, type NotMeasurable } from './types.js'
 
 // The default window and the reported-window rule moved to
 // `./context-window.js` so the finding detector can read the same derivation
@@ -128,6 +132,12 @@ function toolDefinitionsOf(
     for (const part of record.parts ?? []) {
       if (part.part !== 'tool_definitions') continue
       for (const tool of expandDefinitions(part.text)) {
+        // Unnamed definitions (unparseable blobs, schemaless entries) stay
+        // out of the name-keyed ranking: every one would collapse into a
+        // single blank-named row, silently dropping all but the first
+        // blob's cost. Their residence is already counted in the
+        // `tool_definitions` context bucket, so nothing is lost by skipping.
+        if (!tool.name) continue
         const existing = byName.get(tool.name)
         if (existing === undefined) {
           byName.set(tool.name, {
@@ -158,44 +168,67 @@ function toolDefinitionsOf(
  * array left unsplit ranks as one tool whose name is the entire blob, which
  * is how "[{\"name\": \"define_subagent\"}, ...]" ends up in a cost table.
  */
-function expandDefinitions(text: string): { name: string; text: string }[] {
+function extractToolDefinitionsFromText(text: string): { name: string; text: string }[] {
+  if (!text || !text.trim()) return []
   let parsed: unknown
   try {
     parsed = JSON.parse(text)
   } catch {
-    return [{ name: text, text }]
+    // Non-JSON content (plain text, YAML, truncated write):
+    // Preserved for token residence as a counted-but-unnamed entry without
+    // promoting the raw text to a tool name.
+    return [{ name: "", text }]
   }
 
-  const one = (value: unknown): { name: string; text: string } => {
-    const asText = typeof value === 'string' ? value : JSON.stringify(value)
-    if (value !== null && typeof value === 'object') {
-      const named = (value as { name?: unknown; function?: { name?: unknown } })
-      if (typeof named.name === 'string') return { name: named.name, text: asText }
-      // OpenAI-shaped definitions nest the name under `function`.
-      if (typeof named.function?.name === 'string') return { name: named.function.name, text: asText }
+  const items: unknown[] = Array.isArray(parsed)
+    ? parsed
+    : (parsed !== null && typeof parsed === "object" && Array.isArray((parsed as Record<string, unknown>).tools))
+      ? ((parsed as Record<string, unknown>).tools as unknown[])
+      : [parsed]
+
+  const results: { name: string; text: string }[] = []
+  for (const item of items) {
+    if (typeof item === "string" && item.trim()) {
+      results.push({ name: item.trim(), text: item })
+    } else if (item !== null && typeof item === "object") {
+      const obj = item as { name?: unknown; function?: { name?: unknown } }
+      const itemText = JSON.stringify(item)
+      if (typeof obj.name === "string" && obj.name.trim()) {
+        results.push({ name: obj.name.trim(), text: itemText })
+      } else if (typeof obj.function?.name === "string" && obj.function.name.trim()) {
+        results.push({ name: obj.function.name.trim(), text: itemText })
+      } else {
+        results.push({ name: "", text: itemText })
+      }
     }
-    return { name: asText, text: asText }
   }
+  return results
+}
 
-  return Array.isArray(parsed) ? parsed.map(one) : [one(parsed)]
+function expandDefinitions(text: string): { name: string; text: string }[] {
+  return extractToolDefinitionsFromText(text)
 }
 
 /** Tool names the session actually called, from its tool spans. */
 function invocationsOf(records: readonly CanonicalRecord[]): string[] {
   return records
-    .filter((record) => record.op === 'tool.invoke')
-    .map((record) => attributeOf(record, ['gen_ai.tool.name']) ?? record.name)
+    .filter((record) => record.op === "tool.invoke")
+    .map((record) => attributeOf(record, ["gen_ai.tool.name", "tool.name"]) ?? record.name)
 }
 
-/**
- * Whether a group of records says anything at all. The live collector stores
- * every span it receives, including ones that arrive with no attributes and
- * no counters -- 15,535 of them in the measured corpus, every one stamped
- * `op: llm.invoke` and `harness: unattributed` by a receiver that hard-codes
- * both. Building sessions out of those manufactures a session list of
- * near-empty rows. They are skipped here; the receiver should quarantine them
- * at ingest instead, which is a separate fix.
- */
+/** Offered tool names declared in tool-definition parts across the session. */
+function extractOfferedToolNames(parts: readonly { text: string }[]): string[] {
+  const names = new Set<string>()
+  for (const part of parts) {
+    for (const def of extractToolDefinitionsFromText(part.text)) {
+      if (def.name && def.name.trim()) {
+        names.add(def.name.trim())
+      }
+    }
+  }
+  return Array.from(names)
+}
+
 function hasEvidence(records: readonly CanonicalRecord[]): boolean {
   // A session is a conversation with a model. A trace carrying no model call
   // is not one, however many spans it holds: the receiver ingests everything
@@ -233,9 +266,13 @@ export type AsadContextBucket = {
 }
 
 export type AsadTool = {
+  name?: string
+  server?: string
   schema_tokens: number
   invocations: number
   turns_resident: number
+  errors?: number
+  total_schema_cost?: number
 }
 
 export type AsadServer = {
@@ -265,6 +302,15 @@ export type AsadSessionPayload = {
   tools: AsadTool[]
   timeline: ReturnType<typeof buildTimeline>['children'] | NotMeasurable
   turns: Array<Record<string, unknown>>
+  /**
+   * The server's basis verdict: `null` when the session's cost blocks agree, or
+   * when nothing was priced. Decided here, where `sumCosts` already refuses to
+   * blend, so a display layer renders the answer instead of re-deriving it
+   * (rule R1). Always present once a store has been re-projected by a build
+   * that writes it — `undefined` only on a row stored before this field existed,
+   * which a display layer must read as "unknown", never as "no mismatch".
+   */
+  costBasisMismatch: CostBasisMismatch | null
   requests: Array<Record<string, unknown>>
   servers: AsadServer[]
   coverage: Record<string, number>
@@ -272,6 +318,37 @@ export type AsadSessionPayload = {
   reconciliation: Array<Record<string, unknown>>
   summary: Record<string, unknown>
   [key: string]: unknown
+}
+
+/**
+ * Projection-time repricing (issue #186, U9). Turn records of API-billed harnesses are priced from
+ * the published table and Copilot-family turns from the credits table; a changed block is written
+ * back so the session summary, payload and cost contributions agree. Harness-reported costs (R5.2)
+ * and other harnesses are left alone, and an unchanged block causes no write.
+ *
+ * Design note: `records.cost_json` is the derived, re-derivable cost cache. The report path reads
+ * it, the next projection reprices it, and a re-ingest overwrite self-heals it. The changed blocks
+ * of one session are written back in a single transaction (`setCosts`), once per session.
+ */
+function repriceTurns(store: CanonStore, records: CanonicalRecord[]): CanonicalRecord[] {
+  const changes: Array<{ spanId: string; cost: CostBlock }> = []
+  const repriced = records.map((record) => {
+    if (record.op !== 'llm.invoke') return record
+    const model = attributeOf(record, MODEL_KEYS)
+    let next: CostBlock
+    if (isPublishedTableHarness(record.harness)) {
+      next = pricePublishedTurn(record.tokens, model, record.harness, record.cost)
+    } else if (isCopilotHarness(record.harness)) {
+      next = priceCopilotTurn(record.tokens, model, record.harness, record.cost)
+    } else {
+      return record
+    }
+    if (JSON.stringify(next) === JSON.stringify(record.cost)) return record
+    changes.push({ spanId: record.spanId, cost: next })
+    return { ...record, cost: next }
+  })
+  if (changes.length > 0) store.setCosts(changes)
+  return repriced
 }
 
 /**
@@ -292,7 +369,7 @@ export async function buildSessions(store: CanonStore): Promise<BuildSessionsRep
   const identities = store.sessionIdentities()
 
   for (const key of store.sessionKeys()) {
-    const grouped = groupByCanonicalHarness(store.recordsForSession(key.key))
+    const grouped = groupByCanonicalHarness(repriceTurns(store, store.recordsForSession(key.key)))
     if (grouped.size === 0) {
       report.skipped += 1
       continue
@@ -302,8 +379,16 @@ export async function buildSessions(store: CanonStore): Promise<BuildSessionsRep
         report.skipped += 1
         continue
       }
+      // Twin front-end collectors describe the same turns twice (issue #182,
+      // ADR 0009 D4): collapse same-turn observations before the row sums
+      // them, or the merged session double-counts one conversation.
+      const merged = dedupeTwinTurns(records, key.key)
+      if (merged.length === 0 || !hasEvidence(merged)) {
+        report.skipped += 1
+        continue
+      }
       const sessionId = identities.claim(key.key, harness)
-      store.upsertSession(buildSessionRow(sessionId, records, countTokens))
+      store.upsertSession(buildSessionRow(sessionId, merged, countTokens, store))
       built.add(sessionId)
       report.built += 1
     }
@@ -341,6 +426,7 @@ export function buildSessionRow(
   sessionId: string,
   records: readonly CanonicalRecord[],
   countTokens: (text: string) => number,
+  store?: CanonStore,
 ): SessionRow {
   const turnRecords = records.filter(isTurn)
   const first = records[0]!
@@ -370,11 +456,21 @@ export function buildSessionRow(
   // Same rule the finding detector uses (`contextLimitOf`): first turn record
   // to name a window wins, default otherwise, so a session row and a
   // compaction finding built from the same records can never disagree.
-  const window = contextLimitOf(records)
-  const contextLimit = window.contextLimit
+  // Catalog replaces only that default. A reported or declared window stays
+  // what the records said; the 200K constant is not relabelled as catalog.
+  const telemetryWindow = contextLimitOf(records)
+  const window =
+    telemetryWindow.contextLimitSource === 'default' && store !== undefined
+      ? (catalogWindowForRecords(records, store) ?? telemetryWindow)
+      : telemetryWindow
+  // `analyzeContext` rejects a non-positive limit. An absent bridge window
+  // has none: composition still buckets against the placeholder, and the
+  // published payload drops that placeholder so 200K is not stored as the
+  // window (G1-Q2 = (b)).
+  const analysisLimit = window.contextLimit > 0 ? window.contextLimit : DEFAULT_CONTEXT_LIMIT
   const measurability = mergeMeasurability(records)
   const context = analyzeContext(contextTurns, {
-    contextLimit,
+    contextLimit: analysisLimit,
     contextLimitSource: window.contextLimitSource,
     countTokens,
     ...(measurability !== undefined ? { measurability } : {}),
@@ -382,9 +478,27 @@ export function buildSessionRow(
 
   const definitions = toolDefinitionsOf(records, countTokens)
   const schema = rankSchemas(definitions, turnRecords.length, invocationsOf(records), undefined, measurability)
-  const invocations = invocationsOf(records)
+  const toolRecords = records.filter((r) => r.op === 'tool.invoke')
+
   const invocationCounts = new Map<string, number>()
-  for (const name of invocations) invocationCounts.set(name, (invocationCounts.get(name) ?? 0) + 1)
+  const errorCounts = new Map<string, number>()
+  for (const record of toolRecords) {
+    const name = attributeOf(record, ['gen_ai.tool.name', 'tool.name']) ?? record.name
+    if (!name) continue
+    invocationCounts.set(name, (invocationCounts.get(name) ?? 0) + 1)
+    const isError =
+      record.status === 'error' ||
+      attributeOf(record, ['gen_ai.tool.status', 'status']) === 'error' ||
+      (record.raw !== null &&
+        typeof record.raw === 'object' &&
+        ((record.raw as Record<string, unknown>)['gen_ai.tool.status'] === 'error' ||
+          (record.raw as Record<string, unknown>).is_error === true ||
+          (record.raw as Record<string, unknown>).isError === true))
+    if (isError) {
+      errorCounts.set(name, (errorCounts.get(name) ?? 0) + 1)
+    }
+  }
+
   const rankedTools = schema.measurable
     ? schema.ranked
     : definitions.map((definition) => ({
@@ -393,16 +507,44 @@ export function buildSessionRow(
         cost: definition.tokens * (definition.turnsResident ?? turnRecords.length),
       }))
   const definitionsByName = new Map(definitions.map((definition) => [definition.name, definition]))
+  const seenToolNames = new Set<string>()
   const tools: AsadTool[] = rankedTools.map((tool) => {
+    seenToolNames.add(tool.name)
     const definition = definitionsByName.get(tool.name)
     const schemaTokens = definition?.tokens ?? 0
     const turnsResident = definition?.turnsResident ?? turnRecords.length
+    const invocationsCount = invocationCounts.get(tool.name) ?? 0
+    const errorCount = errorCounts.get(tool.name) ?? 0
+    if (toolRecords.length > 0) {
+      return {
+        name: tool.name,
+        schema_tokens: schemaTokens,
+        invocations: invocationsCount,
+        turns_resident: turnsResident,
+        errors: errorCount,
+        ...(tool.cost !== undefined ? { total_schema_cost: tool.cost } : {}),
+        ...(definition?.server !== undefined ? { server: definition.server } : {}),
+      }
+    }
     return {
       schema_tokens: schemaTokens,
-      invocations: invocationCounts.get(tool.name) ?? 0,
+      invocations: invocationsCount,
       turns_resident: turnsResident,
     }
   })
+
+  for (const [name, invocationsCount] of invocationCounts) {
+    if (!seenToolNames.has(name)) {
+      seenToolNames.add(name)
+      tools.push({
+        name,
+        schema_tokens: 0,
+        invocations: invocationsCount,
+        turns_resident: 0,
+        errors: errorCounts.get(name) ?? 0,
+      })
+    }
+  }
   const servers: AsadServer[] = schema.measurable
     ? [...schema.byServer.entries()].map(([server]) => {
         const serverTools = rankedTools.filter((tool) => tool.server === server)
@@ -469,8 +611,27 @@ export function buildSessionRow(
         : {},
     reported_input: unavailableFor(measurability, 'token_usage') ?? reportedInput,
   })
+  const serialized = serializeContext(context)
+  // Drop the analysis placeholder. A stored 200K limit, or a pressure figure
+  // computed against it, would be the default window standing in for a bridge
+  // span that declared none.
+  const publishedContext =
+    window.contextLimitSource === 'absent'
+      ? {
+          ...serialized,
+          contextLimit: 0,
+          ...(serialized.measurable
+            ? {
+                turns: serialized.turns.map((turn) => {
+                  const { pressure: _pressure, headroom: _headroom, ...rest } = turn
+                  return rest
+                }),
+              }
+            : {}),
+        }
+      : serialized
   const contextShape = {
-    ...serializeContext(context),
+    ...publishedContext,
     contextLimitSource: window.contextLimitSource,
     first: contextBucket(analyzedTurns[0], measuredTurns[0]?.tokens.reportedInput ?? 0),
     last: contextBucket(
@@ -481,7 +642,10 @@ export function buildSessionRow(
   }
 
   const timeline = buildTimeline([...records])
-  const cost = sumCosts(records.map((record) => record.cost))
+  const cost = sumCosts(turnRecords.map((record) => record.cost))
+  // The same refusal, as a verdict the payload carries: the panel renders this
+  // text, so the browser never re-runs the sum itself (rule R1).
+  const costBasisMismatch = costBasisMismatchOf(turnRecords.map((record) => record.cost), cost)
 
   const totals = turnRecords.reduce(
     (acc, record) => ({
@@ -497,6 +661,73 @@ export function buildSessionRow(
   const started = records[0]!.timestamp
   const ended = records[records.length - 1]!.timestamp
 
+  let toolCalls: number | undefined = undefined
+  let toolsInvoked: string[] | undefined = undefined
+
+  if (toolRecords.length > 0) {
+    toolCalls = toolRecords.length
+    toolsInvoked = Array.from(new Set(invocationsOf(records)))
+  } else {
+    const isClaude = harness === 'claude' || harness === 'claude-code' || surveyFamily(harness) === 'claude-code'
+    const toolCallsAvailability = measurability?.tool_calls ?? (isClaude ? 'measured' : undefined)
+    if (toolCallsAvailability === 'measured' || toolCallsAvailability === 'derived') {
+      toolCalls = 0
+      toolsInvoked = []
+    }
+  }
+
+  const definitionParts: Array<{ text: string }> = []
+  for (const record of records) {
+    if (record.parts !== undefined && record.parts.length > 0) {
+      for (const p of record.parts) {
+        if (p.part === 'tool_definitions' || (p.part as string) === 'tool_definition') {
+          definitionParts.push(p)
+        }
+      }
+    } else if (record.content !== undefined) {
+      const content = record.content
+      if (typeof content['tool_definitions'] === 'string') {
+        definitionParts.push({ text: content['tool_definitions'] })
+      }
+      const rawContent = content as Record<string, unknown>
+      if (typeof rawContent['tool_definition'] === 'string') {
+        definitionParts.push({ text: rawContent['tool_definition'] as string })
+      }
+    }
+  }
+
+  let toolsOffered: string[] | undefined = undefined
+  if (definitionParts.length > 0) {
+    toolsOffered = extractOfferedToolNames(definitionParts)
+  }
+
+  // Issue #185: the session tiles read `cache_hit_ratio` and
+  // `cache_creation_coverage`, which no writer ever emitted — one derivation
+  // here, the same `cache_read ÷ input` formula the tile footnotes and the
+  // harness rollup uses. A figure that is not measured is omitted, never zero:
+  // without a measured input the ratio has no denominator, and without turn
+  // rows the coverage has nothing to count. Review follow-up (Kilo K1,
+  // Copilot C2/C3): turns existing is not a measured counter — when the input
+  // is undeclared, or the harness's vocabulary holds no such counter (Cursor
+  // exports totals but no cache counters), both keys stay absent so the tiles
+  // cannot print a 0% ratio or "on 0 turns" beside stored zeros.
+  const summaryTotalInput = unavailableFor(measurability, 'token_usage') ?? totals.input
+  const cacheHitRatio =
+    typeof summaryTotalInput === 'number' &&
+    summaryTotalInput > 0 &&
+    harnessExportsCacheCounter(harness, 'read')
+      ? totals.cacheRead / summaryTotalInput
+      : undefined
+  // Review re-review (Kilo 2): the ratio beside this already requires input
+  // > 0 — a measured zero input emits neither key.
+  const cacheCreationCoverage =
+    typeof summaryTotalInput === 'number' &&
+    summaryTotalInput > 0 &&
+    turnRecords.length > 0 &&
+    harnessExportsCacheCounter(harness, 'creation')
+      ? turnRecords.filter((record) => record.tokens.cacheCreation > 0).length
+      : undefined
+
   const payload: AsadSessionPayload = {
     id: sessionId,
     session_id: sessionId,
@@ -509,13 +740,20 @@ export function buildSessionRow(
     summary: {
       turn_count: turnRecords.length,
       request_count: records.filter((r) => r.parentSpanId === null).length,
-      total_input: unavailableFor(measurability, 'token_usage') ?? totals.input,
+      total_input: summaryTotalInput,
       total_output: totals.output,
       total_cache_read: totals.cacheRead,
       total_cache_creation: totals.cacheCreation,
+      ...(cacheHitRatio !== undefined ? { cache_hit_ratio: cacheHitRatio } : {}),
+      ...(cacheCreationCoverage !== undefined
+        ? { cache_creation_coverage: cacheCreationCoverage }
+        : {}),
       duration_ms: records.reduce((sum, record) => sum + record.durationMs, 0),
       models,
       cost: cost.ok ? cost.total : { basis: 'unknown' as const, status: 'no_rate' as const },
+      ...(toolCalls !== undefined ? { tool_calls: toolCalls } : {}),
+      ...(toolsInvoked !== undefined ? { tools_invoked: toolsInvoked } : {}),
+      ...(toolsOffered !== undefined ? { tools_offered: toolsOffered } : {}),
     },
     // The analysis output, verbatim. `toolDefinitionsByServer` is a Map, which
     // JSON.stringify would silently render as {} — convert it explicitly so a
@@ -563,7 +801,8 @@ export function buildSessionRow(
       schema: schema.measurable ? 1 : 0,
       context: context.measurable ? 1 : 0,
     },
-    problems: [],
+    problems: cost.ok ? [] : [cost.problem],
+    costBasisMismatch,
     reconciliation: turnRecords.map((record) => ({
       request: record.spanId,
       root_input: record.tokens.reportedInput,
@@ -595,6 +834,7 @@ export function buildSessionRow(
     branch: attributeOf(first, BRANCH_KEYS) ?? null,
     started: typeof started === 'string' ? started : started.toISOString(),
     ended: typeof ended === 'string' ? ended : ended.toISOString(),
+    summary: payload.summary,
     payload,
   }
 }
@@ -630,6 +870,10 @@ function serializeContext(context: ReturnType<typeof analyzeContext>) {
     turns: context.turns.map((turn) => ({
       ...turn,
       toolDefinitionsByServer: Object.fromEntries(turn.toolDefinitionsByServer),
+      // Issue #187: the measured per-turn input, under the key the web
+      // composition view already reads (`reported_input`). Without it the view
+      // reconciles buckets against `bucketedTokens` and reports residual 0.0%.
+      reported_input: turn.inputTokens,
     })),
   }
 }

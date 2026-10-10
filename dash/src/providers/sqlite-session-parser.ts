@@ -217,7 +217,7 @@ export function createSqliteSessionParser(
 
           if (data.role === 'user') {
             const textParts = (partsByMsg.get(msg.id) ?? [])
-              .filter((p) => p.type === 'text')
+              .filter((p) => p.type === 'text' || p.type === 'markdown')
               .map((p) => p.text ?? '')
               .filter(Boolean)
             if (textParts.length > 0) {

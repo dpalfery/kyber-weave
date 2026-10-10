@@ -1344,8 +1344,6 @@ dependencies = [
 [[package]]
 name = "glib"
 version = "0.18.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "233daaf6e83ae6a12a52055f568f9d7cf4671dabb78ff9560ab6da230ce00ee5"
 dependencies = [
  "bitflags 2.13.2",
  "futures-channel",
@@ -1989,6 +1987,8 @@ dependencies = [
  "chrono",
  "dirs",
  "fontdue",
+ "libc",
+ "objc2",
  "reqwest",
  "serde",
  "serde_json",
@@ -3865,7 +3865,6 @@ dependencies = [
  "libc",
  "mio",
  "pin-project-lite",
- "signal-hook-registry",
  "socket2",
  "tokio-macros",
  "windows-sys 0.61.2",

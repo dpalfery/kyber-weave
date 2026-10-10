@@ -1,4 +1,4 @@
-import { existsSync } from 'fs'
+import { existsSync, statSync } from 'fs'
 import { readFile } from 'fs/promises'
 import { dirname, join } from 'path'
 
@@ -16,6 +16,8 @@ import {
 } from '../ingest/session-cache.js'
 import { renderTable } from './text-table.js'
 import { collectLauncherNotes, type LauncherNote } from '../ingest/launcher-homes.js'
+import { isPositiveNumber } from '../ingest/numbers.js'
+import { readConfig } from '../config.js'
 import { BRAND } from '../brand-overlay.js'
 
 // ── Types ──────────────────────────────────────────────────────────────
@@ -24,6 +26,11 @@ export type DoctorProbePath = {
   path: string
   label: string
   exists: boolean
+  /// Set when the path does not exist per access() but the OS says the
+  /// parent/container exists yet refuses to let us stat it (macOS TCC EPERM on
+  /// Group Containers, or EACCES). Doctor-visible issue #197: this must not
+  /// collapse into "does not exist; tool likely not installed".
+  accessError?: 'permission-denied'
 }
 
 export type DoctorEnvOverride = {
@@ -102,6 +109,14 @@ export type DoctorReport = {
   cacheHealth?: DoctorCacheHealth
 }
 
+/** Testable FS seam for probe-root existence / access checks. */
+export type DoctorProbeFs = {
+  existsSync: (path: string) => boolean
+  statSync: (path: string) => unknown
+  /** When a path exists, throw EPERM/EACCES to mark it permission-denied. */
+  checkAccess?: (path: string) => void
+}
+
 export type CollectDoctorOptions = {
   /** Injectable provider list (defaults to the real registry). */
   providers?: Provider[]
@@ -113,6 +128,8 @@ export type CollectDoctorOptions = {
   sampleLimit?: number
   /** Injectable launcher notes (defaults to scanning the real home). */
   launchers?: LauncherNote[]
+  /** Injectable FS probe (defaults to real existsSync/statSync + Warp open check). */
+  probeFs?: DoctorProbeFs
 }
 
 // Bound the parse sample: at most this many discovered sources per provider,
@@ -175,10 +192,72 @@ function collectEnvOverrides(providerName: string): DoctorEnvOverride[] {
   return out
 }
 
-async function collectProbePaths(provider: Provider): Promise<DoctorProbePath[]> {
+function errnoCode(err: unknown): string | undefined {
+  return (err as NodeJS.ErrnoException | undefined)?.code
+}
+
+function isPermissionDeniedCode(code: string | undefined): boolean {
+  return code === 'EPERM' || code === 'EACCES'
+}
+
+async function collectProbePaths(
+  provider: Provider,
+  probeFs: DoctorProbeFs,
+): Promise<DoctorProbePath[]> {
   if (!provider.probeRoots) return []
   const roots = await provider.probeRoots()
-  return roots.map(r => ({ path: r.path, label: r.label, exists: existsSync(r.path) }))
+  return roots.map(r => {
+    const exists = probeFs.existsSync(r.path)
+    if (exists) {
+      // existsSync is not proof a Warp DB is usable — open/copy can still
+      // fail with EPERM under macOS TCC (issue #197). The injectable
+      // checkAccess seam covers that in tests; production folds denials from
+      // discoverFromDb via drainWarpDbAccessDenials after discovery.
+      if (provider.name === 'warp' && probeFs.checkAccess) {
+        try {
+          probeFs.checkAccess(r.path)
+        } catch (err) {
+          if (isPermissionDeniedCode(errnoCode(err))) {
+            return { path: r.path, label: r.label, exists, accessError: 'permission-denied' as const }
+          }
+          throw err
+        }
+      }
+      return { path: r.path, label: r.label, exists }
+    }
+    // access() said "not accessible" — distinguish a genuinely absent path
+    // from a TCC-guarded one (EPERM/EACCES at stat time, even though the
+    // parent dir listing works) so the verdict does not claim the tool was
+    // never installed (issue #197, Warp Group Containers EPERM).
+    try {
+      probeFs.statSync(r.path)
+      return { path: r.path, label: r.label, exists }
+    } catch (err) {
+      const code = errnoCode(err)
+      if (isPermissionDeniedCode(code)) {
+        return { path: r.path, label: r.label, exists, accessError: 'permission-denied' as const }
+      }
+      // Only definitive absence signals collapse to exists: false. Anything
+      // else (ELOOP, unexpected I/O) must surface as an ERROR row.
+      if (code === 'ENOENT' || code === 'ENOTDIR') {
+        return { path: r.path, label: r.label, exists }
+      }
+      throw err
+    }
+  })
+}
+
+function applyAccessDenials(
+  probePaths: DoctorProbePath[],
+  deniedPaths: readonly string[],
+): DoctorProbePath[] {
+  if (deniedPaths.length === 0) return probePaths
+  const denied = new Set(deniedPaths)
+  return probePaths.map(p =>
+    denied.has(p.path) && p.accessError === undefined
+      ? { ...p, accessError: 'permission-denied' as const }
+      : p,
+  )
 }
 
 // A discovered source path can carry a virtual suffix (`<db>#cursor-ws=...`,
@@ -218,6 +297,20 @@ function emptyVerdict(
   const missing = known.filter(p => !p.exists)
   const present = known.filter(p => p.exists)
 
+  // A TCC-guarded probe root must not be misreported as "tool likely not
+  // installed" (issue #197 — Warp's Group Containers sqlite copy fails EPERM).
+  const denied = known.filter(p => p.accessError === 'permission-denied')
+  if (denied.length > 0) {
+    const named = denied.length === 1
+      ? `${denied[0]!.path} is not readable — permission denied`
+      : `${denied[0]!.path} (and ${denied.length - 1} more) is not readable — permission denied`
+    const remedy = process.platform === 'darwin'
+      ? 'on macOS grant Full Disk Access'
+      : 'check owner/permissions'
+    const override = hasOverride ? `; override ${overrideNames} set` : ''
+    return `NOTHING FOUND (${named}; ${remedy}${override})`
+  }
+
   // No known probe roots to check: honest, override-aware fallback.
   if (known.length === 0) {
     return hasOverride
@@ -242,6 +335,7 @@ async function collectOneProvider(
   provider: Provider,
   cache: SessionCache,
   sampleLimit: number,
+  probeFs: DoctorProbeFs,
 ): Promise<DoctorProviderReport> {
   const base: DoctorProviderReport = {
     provider: provider.name,
@@ -270,12 +364,21 @@ async function collectOneProvider(
   // Any single provider throwing (probe, discovery, or a parser) must never
   // crash doctor or blank the other rows: catch and report it as an ERROR row.
   try {
-    base.probePaths = await collectProbePaths(provider)
+    base.probePaths = await collectProbePaths(provider, probeFs)
 
     const sources = await provider.discoverSessions()
     base.candidatesFound = sources.length
     if (base.probePaths.length === 0) {
       base.probePaths = derivePathsFromSources(sources.map(s => s.path))
+    }
+    // discoverFromDb exposes TCC denials that existsSync alone cannot see;
+    // fold them into the probe rows so emptyVerdict names permission denied.
+    // Dynamic like providers/index.ts:loadWarp — warp statically imports
+    // sqlite + pricing; report.ts pulls doctor into every CLI entry, so a
+    // static doctor→warp edge would load node:sqlite on every command.
+    if (provider.name === 'warp') {
+      const { drainWarpDbAccessDenials } = await import('../providers/warp.js')
+      base.probePaths = applyAccessDenials(base.probePaths, drainWarpDbAccessDenials())
     }
 
     // Network providers fetch on parse; doctor runs offline, so we never parse
@@ -323,6 +426,17 @@ async function collectOneProvider(
     } else {
       base.status = 'ok'
       base.verdict = `OK (${pluralSessions(base.candidatesFound)})`
+      // Issue #197: a missing Devin rate must not hide cost as measured $0 —
+      // name the gap in the verdict instead.
+      if (provider.name === 'devin') {
+        const rate = (await readConfig()).devin?.acuUsdRate
+        // isPositiveNumber (not a bare `> 0`): a config literal such as 1e400
+        // parses to positive Infinity, which the Devin parser rejects — the
+        // rate is effectively missing and must keep the unpriced warning.
+        if (!isPositiveNumber(rate)) {
+          base.verdict += '; costs unpriced — set devin.acuUsdRate in ~/.kyberdash/config.json'
+        }
+      }
     }
   } catch (err) {
     base.status = 'error'
@@ -343,6 +457,7 @@ export async function collectDoctorReport(
     : all
   const cache = opts.cache ?? await loadCache()
   const sampleLimit = opts.sampleLimit ?? DEFAULT_SAMPLE_LIMIT
+  const probeFs: DoctorProbeFs = opts.probeFs ?? { existsSync, statSync }
 
   // Doctor promises to be strictly read-only, but sample-parsing drives real
   // provider parsers, and cursor's writes its results cache to disk before its
@@ -354,7 +469,7 @@ export async function collectDoctorReport(
   try {
     const providers: DoctorProviderReport[] = []
     for (const provider of filtered) {
-      providers.push(await collectOneProvider(provider, cache, sampleLimit))
+      providers.push(await collectOneProvider(provider, cache, sampleLimit, probeFs))
     }
     providers.sort((a, b) => (a.displayName < b.displayName ? -1 : a.displayName > b.displayName ? 1 : 0))
 

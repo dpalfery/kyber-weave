@@ -8,7 +8,7 @@ source: https://github.com/dotnet/skills/tree/main/plugins/dotnet-maui/skills/ma
 
 ## Compiled Bindings (Preferred)
 
-Compiled bindings are 8–20× faster than reflection-based bindings. Always use `x:DataType` on the page root and inside `DataTemplate`.
+Compiled-bindings performance and the `x:DataType` requirement follow **<maui-coding-standard>** § MVVM.
 
 ```xml
 <!-- Page root -->

@@ -46,6 +46,13 @@ formatting complaint.
 delivered change against it. Silent divergence from an approved design is a finding; a
 deliberate, stated divergence is not.
 
+**Plan closeout and canonical documentation drift.** When a change archives a plan or
+specification, verify that claimed canonical documentation updates actually landed in the pull
+request diff. A completion summary claiming canonical documentation was updated when the diff
+contains no such change is a `critical` finding. Verify that the archived plan's durable decisions
+are mapped to canonical document sections or carry an explicit, valid documentation waiver. An
+archived plan stating "None" without a justified documentation waiver is a finding.
+
 ## What this lens must not report
 
 - Wording, grammar, tone, or formatting of the description. You are checking correspondence

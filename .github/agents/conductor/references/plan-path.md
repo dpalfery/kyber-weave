@@ -14,8 +14,8 @@ The conductor never edits a plan. Require `architect` to persist every decision 
 
 - `STATUS: NEEDS_DECISION` — relay all independent questions, with the specialist's recommended option first.
 - `STATUS: BLOCKED` or `STATUS: PLAN_WRITE_ERROR` — relay the evidence and stop.
-- `STATUS: PLAN_READY` — verify the saved plan and index agree on Draft, all decisions are resolved, the selected `development-mode` and its Test or verification contract are present, and documentation validation passed.
-- `STATUS: PLAN_FINALIZED` — accept only after the user explicitly chooses **approve and execute** and `architect` records the approval, changes the artifact to Ready, synchronizes the index, and revalidates it.
+- `STATUS: PLAN_READY` — verify the saved plan and index agree on Draft, all decisions are resolved in the permanent `## Decisions` table (with complete fields: ID, Question, Answer / decision, Mitigating and supporting information, Status / approval provenance), the selected `development-mode` and its Test or verification contract are present, and documentation validation passed.
+- `STATUS: PLAN_FINALIZED` — accept only after the user explicitly chooses **approve and execute** and `architect` records the approval in the permanent `## Decisions` table (preserving the section intact), changes the artifact to Ready, synchronizes the index, and revalidates it.
 
 An approval that says only “approve” is sufficient when it clearly answers the presented **approve and execute** gate. Once `PLAN_FINALIZED` is returned, enter the execution contract immediately.
 

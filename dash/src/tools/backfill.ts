@@ -39,6 +39,13 @@ export type BackfillOptions = {
   onProgress?: (done: number, total: number) => void
   /** Rows between progress callbacks. */
   progressEvery?: number
+  /**
+   * Restrict renormalization to traces containing records from these
+   * sources. File-sourced rows carry no OTLP fingerprint, so an unscoped
+   * pass would quarantine the whole file corpus as unclaimed (issue #195:
+   * the live repair must touch only `agy` traces). Unset means every trace.
+   */
+  sources?: readonly string[]
 }
 
 /**
@@ -155,18 +162,27 @@ export function renormalizeRecords(store: CanonStore, options: BackfillOptions =
   const report: RenormalizeReport = { traces: 0, reattributed: 0, unchanged: 0, unclaimed: 0 }
 
   for (const traceId of traceIds) {
+    const traceRecords = store.recordsForTrace(traceId)
+    // Scope filtering applies to the rows re-ingested, not just the trace
+    // selected: attribution groups by (source, trace), so a trace can carry
+    // foreign-source rows that a scoped run must leave byte-identical.
+    const wanted = options.sources
+    const records =
+      wanted === undefined
+        ? traceRecords
+        : traceRecords.filter((record) => wanted.includes(record.source))
+    if (records.length === 0) continue
     report.traces += 1
-    const records = store.recordsForTrace(traceId)
-    const withRaw = records.filter(
+    const recordsWithRaw = records.filter(
       (record): record is CanonicalRecord & { raw: Record<string, unknown> } =>
         record.raw !== undefined && record.raw !== null && typeof record.raw === 'object',
     )
-    if (withRaw.length === 0) continue
+    if (recordsWithRaw.length === 0) continue
 
-    const explicitGemini = withRaw.filter(
+    const explicitGemini = recordsWithRaw.filter(
       (record) => (record.raw as Record<string, unknown>)['gen_ai.system'] === 'gemini',
     )
-    const grouped = withRaw.filter(
+    const grouped = recordsWithRaw.filter(
       (record) => (record.raw as Record<string, unknown>)['gen_ai.system'] !== 'gemini',
     )
     for (const record of explicitGemini) ingestBatch([toOtlpSpan(record)], store)
@@ -187,7 +203,7 @@ export function renormalizeRecords(store: CanonStore, options: BackfillOptions =
         deleteDerivedSessions(store, record)
       }
     }
-    for (const before of withRaw) {
+    for (const before of recordsWithRaw) {
       const after = store.get(before.spanId)
       if (after === undefined) {
         if (store.getQuarantine(before.spanId)?.reason === 'unclaimed') report.unclaimed += 1
@@ -223,10 +239,15 @@ export function renormalizeRecords(store: CanonStore, options: BackfillOptions =
     if (report.traces % progressEvery === 0) options.onProgress?.(report.traces, traceIds.length)
   }
 
+  // The tail sweep catches excluded-harness rows the per-trace loop never
+  // visits (rows without raw evidence, rows with no trace id). On a scoped
+  // run it sees only the requested sources: quarantining another source's
+  // excluded rows — and deleting their sessions below — would break the
+  // `--source` contract the scoped test pins.
   const excludedHarnesses = [...EXCLUDED_HARNESS_IDENTITIES]
   const EXCLUSION_BATCH_SIZE = 500
   for (;;) {
-    const batch = store.listRecordsByHarness(excludedHarnesses, EXCLUSION_BATCH_SIZE)
+    const batch = store.listRecordsByHarness(excludedHarnesses, EXCLUSION_BATCH_SIZE, options.sources)
     if (batch.length === 0) break
     for (const record of batch) {
       const rawAttrs =
@@ -237,9 +258,14 @@ export function renormalizeRecords(store: CanonStore, options: BackfillOptions =
       deleteDerivedSessions(store, record)
     }
   }
-  for (const excluded of EXCLUDED_HARNESS_IDENTITIES) {
-    store.deleteSessionsByHarness(excluded)
+  if (options.sources === undefined) {
+    for (const excluded of EXCLUDED_HARNESS_IDENTITIES) {
+      store.deleteSessionsByHarness(excluded)
+    }
   }
+  // On a scoped run the per-trace loop already deleted the derived sessions
+  // of every row this run quarantined (deleteDerivedSessions above); sessions
+  // from unvisited traces are out of scope and stay.
 
   options.onProgress?.(report.traces, traceIds.length)
   return report

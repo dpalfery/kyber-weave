@@ -23,6 +23,7 @@
     "model-profile": { "type": "string", "minLength": 1 },
     "capability-profile": { "type": "string", "minLength": 1 },
     "copilot-capability-profile": { "type": "string", "minLength": 1 },
+    "devin-capability-profile": { "type": "string", "minLength": 1 },
     "copilot-tools": {
       "type": "array",
       "minItems": 1,

@@ -56,6 +56,16 @@ public sealed record SquadOwnedFile(
     string Target,
     bool Adopted);
 
+/// <summary>How a Global receipt's owned files map onto physical roots.</summary>
+public enum SquadReceiptLayout
+{
+    /// <summary>Every owned file lives beneath the one recorded deployment root (pre-#91).</summary>
+    SingleRoot,
+
+    /// <summary>Each owned file lives beneath its own target's global root (since #91).</summary>
+    PerTargetRoots
+}
+
 /// <summary>The ownership boundary for one Squad deployment.</summary>
 public sealed record SquadReceipt(
     string Schema,
@@ -63,7 +73,18 @@ public sealed record SquadReceipt(
     string TargetRoot,
     DateTimeOffset InstalledAtUtc,
     IReadOnlyList<SquadDegradation> Degradations,
-    IReadOnlyList<SquadOwnedFile> Files);
+    IReadOnlyList<SquadOwnedFile> Files)
+{
+    /// <summary>
+    /// How this receipt's owned files map onto physical roots. Meaningful only for
+    /// <see cref="SquadDeploymentScope.Global"/>; a project receipt never reads or writes it.
+    /// Additive so every existing positional construction of <see cref="SquadReceipt"/> keeps
+    /// compiling: it defaults to <see cref="SquadReceiptLayout.PerTargetRoots"/>, the layout
+    /// every deployment has used since #91, and a legacy receipt read from v1 JSON gets this
+    /// overwritten by classification in <see cref="SquadStateStore.DeserializeReceipt"/>.
+    /// </summary>
+    public SquadReceiptLayout Layout { get; init; } = SquadReceiptLayout.PerTargetRoots;
+}
 
 /// <summary>A harness-native file produced by the upstream renderer.</summary>
 public sealed record SquadDeploymentFile

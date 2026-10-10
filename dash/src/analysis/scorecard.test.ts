@@ -131,3 +131,31 @@ describe('buildScorecard', () => {
     expect(buildScorecard(input)).toEqual(buildScorecard(input))
   })
 })
+
+describe('buildScorecard rollup reasons (review follow-up: Copilot C8)', () => {
+  it('prefers the rollup\u2019s own reason over the static harness wording', () => {
+    const dims = buildScorecard(
+      row({
+        cacheHitRate: null,
+        measurability: {
+          cache_hit_rate: {
+            availability: 'not_measurable',
+            reason: 'No input tokens recorded in sessions in run "run-1".',
+          },
+        },
+      }),
+    )
+    expect(dims.cacheEfficiency).toEqual({
+      value: null,
+      reason: 'No input tokens recorded in sessions in run "run-1".',
+    })
+  })
+
+  it('keeps the static reason when the rollup names none', () => {
+    const dims = buildScorecard(row({ cacheHitRate: null }))
+    expect(dims.cacheEfficiency).toEqual({
+      value: null,
+      reason: UNMEASURED_REASONS.cacheEfficiency,
+    })
+  })
+})

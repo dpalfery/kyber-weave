@@ -123,7 +123,7 @@ function displayToolsOf(schema: SchemaCostAnalysis | null | undefined, tools: Sc
   if (schema?.measurable && !hasNamedToolRows && schema.neverInvoked.length > 0) {
     // B1 emits only the ranked tools it can establish. When every offered
     // tool was uninvoked, that means `neverInvoked` is the complete ranking.
-    // The content-free `tools` rows do not carry a name or server and must not
+    // Content-free legacy `tools` rows do not carry a name or server and must not
     // be treated as ranking input.
     return schema.neverInvoked.map((tool) => ({
       name: tool.name,

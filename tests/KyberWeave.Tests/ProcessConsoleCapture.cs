@@ -33,7 +33,11 @@ internal static class ProcessConsoleCapture
                     Ansi = AnsiSupport.No,
                     ColorSystem = ColorSystemSupport.NoColors,
                     Interactive = InteractionSupport.No,
-                    Out = new AnsiConsoleOutput(writer)
+                    Out = new AnsiConsoleOutput(writer),
+                    // Spectre's default CI enrichers (GitHub Actions among them) run after
+                    // these settings and turn ANSI back on, so a capture on a CI runner would
+                    // carry escape codes that a local run does not.
+                    Enrichment = new ProfileEnrichment { UseDefaultEnrichers = false }
                 });
                 // The capture's width is otherwise the host terminal's, which is -1 on a
                 // host that cannot report one; pin it the way the CLI entry point does.

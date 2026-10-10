@@ -55,6 +55,7 @@ function session(overrides: Partial<SessionSummary> = {}): SessionSummary {
     total_input: 182_000,
     total_output: 9_400,
     cost_usd: null,
+    cost: { basis: 'unknown', status: 'no_rate' },
     models: ['claude-sonnet-4-5'],
     problems: 0,
     ...overrides,

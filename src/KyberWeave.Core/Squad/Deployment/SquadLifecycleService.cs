@@ -119,6 +119,16 @@ public sealed class SquadLifecycleService
                     $"Kyber-Squad is already installed at '{targetRoot}' with targets ({string.Join(", ", existingTargets)}). " +
                     $"Requested targets ({string.Join(", ", requestedTargets)}) do not match. Use 'update' to modify targets.");
             }
+
+            // Same-target install routes through CreateUpdate below; refuse a legacy
+            // single-root receipt here, before any network round trip, rather than letting
+            // CreateUpdate's own refusal fire only after the release has already downloaded.
+            // Only meaningful once a per-target resolver is in play (see CreateUpdate's own
+            // guard): with none, legacy and modern resolution already agree.
+            if (_globalRoots is not null && SquadDeploymentPlan.IsLegacySingleRootReceipt(existingReceipt))
+            {
+                throw SquadDeploymentPlan.LegacySingleRootLayoutConflict();
+            }
         }
 
         string version = request.Version ?? ResolveDefaultVersion();
@@ -239,6 +249,16 @@ public sealed class SquadLifecycleService
         SquadReceipt previousReceipt = _stateStore.ReadReceipt(targetRoot, request.Scope)
             ?? throw new SquadDeploymentConflictException(
                 $"No Kyber-Squad deployment found at '{targetRoot}'. Run 'squad install' first.");
+
+        // Refused before any network round trip (real or dry-run alike, since the download
+        // happens unconditionally below) rather than letting CreateUpdate's own refusal fire
+        // only after the release has already downloaded. Only meaningful once a per-target
+        // resolver is in play (see CreateUpdate's own guard): with none, legacy and modern
+        // resolution already agree.
+        if (_globalRoots is not null && SquadDeploymentPlan.IsLegacySingleRootReceipt(previousReceipt))
+        {
+            throw SquadDeploymentPlan.LegacySingleRootLayoutConflict();
+        }
 
         IReadOnlyList<SquadTarget> targets;
         if (request.Targets is { Count: > 0 })

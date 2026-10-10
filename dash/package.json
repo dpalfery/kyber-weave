@@ -26,7 +26,7 @@
     "typecheck": "tsc --noEmit && tsc --noEmit -p web/tsconfig.json && tsc --noEmit -p tsconfig.tests.json",
     "lint": "eslint .",
     "verify:upgrade": "node scripts/upgrade-path/run.mjs",
-    "prepublishOnly": "npm run build",
+    "prepublishOnly": "npm run build:cli",
     "report:fixtures": "tsx src/tools/report-fixtures.ts"
   },
   "keywords": [
@@ -66,9 +66,10 @@
     "chalk": "^5.4.1",
     "commander": "^13.1.0",
     "js-tiktoken": "^1.0.21",
+    "jsonc-parser": "^3.3.1",
     "selfsigned": "^5.5.0",
     "strip-ansi": "^7.2.0",
-    "undici": "^7.27.2",
+    "undici": "^7.29.1",
     "zod": "^3.25.76"
   },
   "devDependencies": {
@@ -78,6 +79,7 @@
     "@types/selfsigned": "^2.0.4",
     "@vitest/coverage-v8": "^5.0.0",
     "eslint": "^9.18.0",
+    "happy-dom": "^20.14.5",
     "playwright": "^1.61.1",
     "tsup": "^8.4.0",
     "tsx": "^4.19.0",

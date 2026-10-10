@@ -30,6 +30,12 @@ export type SessionSource = {
 
 export type SessionParser = {
   parse(): AsyncGenerator<ParsedProviderCall>
+  /**
+   * When the parser applied a coverage window itself (Cursor): how many
+   * recordable calls it discarded solely for predating that window. Read after
+   * `parse()` completes. Absent when the parser does not pre-filter.
+   */
+  preWindowRecordableCount?: number
 }
 
 export type ParsedProviderCall = {
@@ -44,6 +50,9 @@ export type ParsedProviderCall = {
   webSearchRequests: number
   costUSD: number
   costIsEstimated?: boolean
+  // True only when `costUSD` is a figure the harness itself reported (e.g. Copilot CLI `cost_usd`),
+  // not one a parser derived from a rate table. Synthesis carries it verbatim on the harness basis.
+  costHarnessReported?: boolean
   tools: string[]
   bashCommands: string[]
   // Subagent types spawned in this call (e.g. 'general-purpose'). Feeds the
@@ -82,6 +91,19 @@ export type ParsedProviderCall = {
   nanoAiu?: number
   requestMultiplier?: number
   turnId?: string
+  // Claude transcript API request id (`req_…`), read from the line's top-level
+  // `requestId`. It is not `message.id` (`turnId`): OTel stamps the request id
+  // on `request_id` / `gen_ai.response.id`, and twin dedupe joins on this field.
+  requestId?: string
+  // Pairing-only key matching one parser call to its reader turn. Cursor's
+  // token-bearing bubbles share their request's id but must not reuse the
+  // identity-bearing `turnId`: span identity derives from the bubble's own
+  // deduplication key (synth.ts keeps the cursor pairing id out of it), so
+  // reusing `turnId` would collapse the prompt and reply spans onto one
+  // identity. `matchingTurns` pairs on `turnId ?? pairingId` and assigns
+  // each turn at most once, with the pairing claim winning so the
+  // usage-carrying span receives the reader parts and window.
+  pairingId?: string
   toolSequence?: ToolCall[][]
   userMessage: string
   sessionId: string

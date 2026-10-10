@@ -1,0 +1,15 @@
+{
+  "sessionId": "claude-req-id-session-synthetic",
+  "spanId": "otel-req-a-span",
+  "request_id": "req_A01Synthetic0001",
+  "gen_ai.response.id": "req_A01Synthetic0001",
+  "tokens": {
+    "freshInput": 4,
+    "cacheRead": 42000,
+    "cacheCreation": 1100,
+    "output": 320,
+    "reportedInput": 43104,
+    "reportedOutput": 320
+  },
+  "timestamp": "2026-10-02T14:00:00.000Z"
+}

@@ -107,7 +107,10 @@ internal static class SquadCommandComposition
     /// Derives the per-target global roots a <c>--global</c> uninstall will write from the
     /// deployment receipt: uninstall has no <c>--target</c> option, so the receipt's owned
     /// files are the authoritative target list, and the lifecycle resolves each through
-    /// <see cref="ISquadGlobalRootResolver.ResolveGlobalRoot"/> at plan time.
+    /// <see cref="ISquadGlobalRootResolver.ResolveGlobalRoot"/> at plan time — unless the
+    /// receipt is a legacy single-root receipt (#91), in which case every target actually
+    /// writes beneath the recorded <paramref name="targetRoot"/>, and naming the resolver's
+    /// per-target answer instead would confirm roots the uninstall will not touch.
     /// </summary>
     /// <remarks>
     /// Every failure mode degrades to "no per-target roots to name" rather than throwing:
@@ -142,6 +145,11 @@ internal static class SquadCommandComposition
         catch (ArgumentException)
         {
             return [];
+        }
+
+        if (SquadDeploymentPlan.IsLegacySingleRootReceipt(receipt))
+        {
+            return [.. targets.Select(target => (target, targetRoot))];
         }
 
         return ResolveGlobalTargetRoots(targets);
@@ -180,7 +188,9 @@ internal static class SquadCommandComposition
     /// <c>.agents/skills/{name}/SKILL.md</c> (the "Native Both" pattern). Pi is native through the
     /// third-party <c>@tintinweb/pi-subagents</c> extension's custom-agent format, with its one
     /// <c>invocation: primary</c> agent lowered to a top-level skill because Pi core has no
-    /// primary-agent primitive (see <see cref="PiRenderer"/> remarks).
+    /// primary-agent primitive (see <see cref="PiRenderer"/> remarks). Devin is native through
+    /// per-agent directories at <c>.devin/agents/{name}/AGENT.md</c>, with its primary agent
+    /// lowered to a skill for the same reason (see <see cref="DevinRenderer"/> remarks).
     /// Every other approved target fails closed with a pointer to its <c>docs/todo/</c>
     /// entry rather than being silently dropped from the roster.
     /// </summary>
@@ -198,6 +208,7 @@ internal static class SquadCommandComposition
             new FactoryRenderer(),
             new WarpRenderer(),
             new ZCodeRenderer(),
+            new DevinRenderer(),
         ]);
 
     /// <summary>Resolves a deployment transaction using the specified or default state store.</summary>

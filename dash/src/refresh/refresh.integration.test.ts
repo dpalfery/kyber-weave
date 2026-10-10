@@ -1,14 +1,19 @@
 // T7 — end-to-end refresh against sanitized file and virtual-DB fixtures.
 // Temp canon.db only (os.tmpdir). Never ~/.kyberdash/canon.db.
 
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Command, CommanderError } from 'commander'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { CanonStore } from '../canon/store.js'
 import { registerKyberCommands } from '../cli/register.js'
+import {
+  createAntigravityProvider,
+  getAntigravityStatusLineEventsPath,
+  recordAntigravityStatusLinePayload,
+} from '../providers/antigravity.js'
 import { refreshHarnessSources } from './orchestrator.js'
 import { descriptorFor } from './registry.js'
 import type { SourceCheckpoint } from '../canon/source-state.js'
@@ -56,8 +61,31 @@ const JOB_IDS = [...REQUIRED_SPLIT_IDS, 'droid'] as const
 
 const temporaryRoots: string[] = []
 
+// The attribution case redirects KYBERDASH_CACHE_DIR and the home directory at temp
+// locations. Capture all three before each test and put them back after, so the
+// redirection cannot leak past the case that made it (T11 audit; same pattern as
+// open-design.test.ts). USERPROFILE is captured alongside HOME because os.homedir()
+// reads HOME on POSIX and USERPROFILE on Windows — redirecting only HOME would leave
+// discovery walking the developer's real ~/.gemini on Windows
+// (see parser-antigravity-timestamp.test.ts for the sibling pattern).
+let previousCacheDir: string | undefined
+let previousHome: string | undefined
+let previousUserProfile: string | undefined
+
+beforeEach(() => {
+  previousCacheDir = process.env['KYBERDASH_CACHE_DIR']
+  previousHome = process.env['HOME']
+  previousUserProfile = process.env['USERPROFILE']
+})
+
 afterEach(() => {
   for (const root of temporaryRoots.splice(0)) rmSync(root, { recursive: true, force: true })
+  if (previousCacheDir === undefined) delete process.env['KYBERDASH_CACHE_DIR']
+  else process.env['KYBERDASH_CACHE_DIR'] = previousCacheDir
+  if (previousHome === undefined) delete process.env['HOME']
+  else process.env['HOME'] = previousHome
+  if (previousUserProfile === undefined) delete process.env['USERPROFILE']
+  else process.env['USERPROFILE'] = previousUserProfile
 })
 
 function tempRoot(): string {
@@ -505,6 +533,79 @@ describe('dash refresh deterministic CLI acceptance', () => {
       expect(world.store.spanIds()).toContain(seed)
     } finally {
       world.store.close()
+    }
+  })
+})
+
+// T11, D6 — the recorder path carries the attribution the plan asks for: the statusLine
+// JSONL is discovered as a source with project 'antigravity-cli', and the T1 registry
+// resolves that to harness 'antigravity-cli'. This case proves it end to end through
+// production discovery, so "relabel where needed" is an assertion here rather than
+// assumed code in T12.
+describe('antigravity status-line recorder attribution (T11)', () => {
+  it('yields harness antigravity-cli for a recorded agy payload, and never gemini', async () => {
+    const root = tempRoot()
+    // A temp home with no harness roots: production discovery's default ~/.gemini
+    // directories are absent, so the recorded line is the only source it can find.
+    // Pointing the home directory here (rather than leaving it at the process default)
+    // is what makes the case self-contained — it can never read this machine's
+    // ~/.gemini history (C3). Both variables are set because os.homedir() reads HOME
+    // on POSIX and USERPROFILE on Windows.
+    const home = join(root, 'home')
+    const cacheDir = join(root, 'cache')
+    mkdirSync(home)
+    process.env['HOME'] = home
+    process.env['USERPROFILE'] = home
+    process.env['KYBERDASH_CACHE_DIR'] = cacheDir
+
+    const statusLinePath = getAntigravityStatusLineEventsPath()
+    expect(statusLinePath.startsWith(cacheDir)).toBe(true)
+
+    // Synthetic agy statusLine payload (C3): no real conversation id, path, or account data.
+    expect(await recordAntigravityStatusLinePayload({
+      conversation_id: 'synthetic-conversation-0001',
+      session_id: 'synthetic-session-0001',
+      workspace: { current_dir: '/synthetic/workspace' },
+      model: { id: 'gemini-3.5-flash-high', display_name: 'Gemini 3.5 Flash (High)' },
+      context_window: {
+        current_usage: {
+          input_tokens: 1024,
+          output_tokens: 64,
+          cache_creation_input_tokens: 0,
+          cache_read_input_tokens: 0,
+        },
+      },
+    })).toBe(true)
+
+    const store = new CanonStore(join(root, 'canon.db'))
+    try {
+      // The production provider, unstubbed: discovery, the recorded file's format, its
+      // parser, and the registry's classification are all the shipped code path.
+      const provider = createAntigravityProvider()
+      const statusLineSource = (await provider.discoverSessions())
+        .find((source) => source.path === statusLinePath)
+      expect(statusLineSource).toMatchObject({
+        path: statusLinePath,
+        project: 'antigravity-cli',
+        provider: 'antigravity',
+      })
+
+      const report = await refreshHarnessSources(store, {
+        getAllProviders: async () => [provider],
+        descriptors: descriptorsFor(['antigravity', 'antigravity-cli']),
+        jobConcurrency: 1,
+        commandStartedAt: new Date(),
+        parseAllSessions: async () => undefined,
+      })
+
+      const records = store.listAll()
+      expect(records.length).toBeGreaterThan(0)
+      expect(harnessesOf(store)).toEqual(['antigravity-cli'])
+      expect(records.some((record) => record.harness === 'gemini')).toBe(false)
+      expect(row(report, 'antigravity-cli').created).toBeGreaterThan(0)
+      expect(row(report, 'antigravity').created).toBe(0)
+    } finally {
+      store.close()
     }
   })
 })

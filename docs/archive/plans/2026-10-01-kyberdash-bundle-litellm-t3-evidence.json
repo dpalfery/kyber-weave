@@ -1,0 +1,606 @@
+{
+  "description": "T3 key-diff counts and anomaly scan for the 2026-10-01 LiteLLM full re-snapshot (issue #229). Durable sidecar replacing /tmp citations in the archived plan.",
+  "generatedAtUtc": "2026-10-01T21:03:44.219Z",
+  "sources": {
+    "litellm": "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json",
+    "modelsDev": "https://models.dev/api.json",
+    "openrouter": "https://openrouter.ai/api/v1/models"
+  },
+  "artifactDigestsSha256": {
+    "litellm-snapshot.json": {
+      "head": "723c3dbd33a5ff7bd968a2c341d91cf525c3e1a00ce2efd1a9ccc74f8a8918df",
+      "post": "82bdc2f48efcad9e1a29cfac0732bf011f1d06f81ce6bb5390fd6ac5be54ee97",
+      "headKeys": 4671,
+      "postKeys": 5978
+    },
+    "pricing-fallback.json": {
+      "head": "b80279a8f04598a60974d61366b236dacb31c6d262918cfcd9bc4eaea587e91d",
+      "post": "387c51ffe27a61ee1b392859ba91e4c67160cf9b951884fde9e37095ad34bfcb",
+      "headKeys": 205,
+      "postKeys": 52
+    }
+  },
+  "keyDiff": {
+    "litellm": {
+      "preKeyCount": 4671,
+      "postKeyCount": 5978,
+      "addedCount": 1651,
+      "removedCount": 344,
+      "changedCount": 403
+    },
+    "fallback": {
+      "preKeyCount": 205,
+      "postKeyCount": 52,
+      "addedCount": 8,
+      "removedCount": 161,
+      "changedCount": 1
+    }
+  },
+  "anomalies": {
+    "litellm": {
+      "neg": [],
+      "nonFinite": [],
+      "zeroStubs": [
+        {
+          "key": "Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8",
+          "zeroIndices": [
+            3
+          ],
+          "old": [
+            2e-06,
+            2e-06,
+            null,
+            null,
+            null
+          ],
+          "new": [
+            4.5e-07,
+            1.8e-06,
+            null,
+            0,
+            null
+          ]
+        },
+        {
+          "key": "accounts/fireworks/models/qwen3-reranker-8b",
+          "zeroIndices": [
+            1
+          ],
+          "old": [
+            0,
+            0,
+            null,
+            null,
+            null
+          ],
+          "new": [
+            2e-07,
+            0,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "key": "deepseek-v4-flash-vision-exp",
+          "zeroIndices": [
+            2
+          ],
+          "old": [
+            4.4e-07,
+            1.32e-06,
+            0,
+            1.4e-08,
+            null
+          ],
+          "new": [
+            3e-07,
+            1.2e-06,
+            0,
+            6e-09,
+            null
+          ]
+        },
+        {
+          "key": "deepseek/deepseek-v4-flash",
+          "zeroIndices": [
+            2
+          ],
+          "old": [
+            4.4e-07,
+            1.32e-06,
+            0,
+            1.4e-08,
+            null
+          ],
+          "new": [
+            3e-07,
+            1.2e-06,
+            0,
+            6e-09,
+            null
+          ]
+        },
+        {
+          "key": "deepseek/deepseek-v4-flash-vision-exp",
+          "zeroIndices": [
+            2
+          ],
+          "old": [
+            4.4e-07,
+            1.32e-06,
+            0,
+            1.4e-08,
+            null
+          ],
+          "new": [
+            3e-07,
+            1.2e-06,
+            0,
+            6e-09,
+            null
+          ]
+        },
+        {
+          "key": "fireworks_ai/accounts/fireworks/models/qwen3-reranker-8b",
+          "zeroIndices": [
+            1
+          ],
+          "old": [
+            0,
+            0,
+            null,
+            null,
+            null
+          ],
+          "new": [
+            2e-07,
+            0,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "key": "jina-reranker-v2-base-multilingual",
+          "zeroIndices": [
+            1
+          ],
+          "old": [
+            1.8e-08,
+            1.8e-08,
+            null,
+            null,
+            null
+          ],
+          "new": [
+            5e-08,
+            0,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "key": "minimax/minimax-m2.1",
+          "zeroIndices": [
+            2
+          ],
+          "old": [
+            2.7e-07,
+            1.2e-06,
+            0,
+            0,
+            null
+          ],
+          "new": [
+            3e-07,
+            1.2e-06,
+            0,
+            3e-08,
+            null
+          ]
+        },
+        {
+          "key": "openrouter/minimax/minimax-m2.1",
+          "zeroIndices": [
+            2
+          ],
+          "old": [
+            2.7e-07,
+            1.2e-06,
+            0,
+            0,
+            null
+          ],
+          "new": [
+            3e-07,
+            1.2e-06,
+            0,
+            3e-08,
+            null
+          ]
+        },
+        {
+          "key": "openrouter/xiaomi/mimo-v2.5",
+          "zeroIndices": [
+            2
+          ],
+          "old": [
+            4e-07,
+            2e-06,
+            0,
+            8e-08,
+            null
+          ],
+          "new": [
+            1.4e-07,
+            2.8e-07,
+            0,
+            2.8e-09,
+            null
+          ]
+        },
+        {
+          "key": "openrouter/xiaomi/mimo-v2.5-pro",
+          "zeroIndices": [
+            2
+          ],
+          "old": [
+            1e-06,
+            3e-06,
+            0,
+            2e-07,
+            null
+          ],
+          "new": [
+            4.35e-07,
+            8.7e-07,
+            0,
+            3.6e-09,
+            null
+          ]
+        },
+        {
+          "key": "openrouter/z-ai/glm-4.7",
+          "zeroIndices": [
+            2
+          ],
+          "old": [
+            4e-07,
+            1.5e-06,
+            0,
+            0,
+            null
+          ],
+          "new": [
+            6e-07,
+            2.2e-06,
+            0,
+            1.1e-07,
+            null
+          ]
+        },
+        {
+          "key": "openrouter/z-ai/glm-4.7-flash",
+          "zeroIndices": [
+            2
+          ],
+          "old": [
+            7e-08,
+            4e-07,
+            0,
+            0,
+            null
+          ],
+          "new": [
+            6.05e-08,
+            4e-07,
+            0,
+            1e-08,
+            null
+          ]
+        },
+        {
+          "key": "openrouter/z-ai/glm-5.1",
+          "zeroIndices": [
+            2
+          ],
+          "old": [
+            1.05e-06,
+            3.5e-06,
+            0,
+            5.25e-07,
+            null
+          ],
+          "new": [
+            9.646e-07,
+            3.0316e-06,
+            0,
+            1.7914e-07,
+            null
+          ]
+        },
+        {
+          "key": "xiaomi/mimo-v2.5",
+          "zeroIndices": [
+            2
+          ],
+          "old": [
+            4e-07,
+            2e-06,
+            0,
+            8e-08,
+            null
+          ],
+          "new": [
+            1.4e-07,
+            2.8e-07,
+            0,
+            2.8e-09,
+            null
+          ]
+        },
+        {
+          "key": "xiaomi/mimo-v2.5-pro",
+          "zeroIndices": [
+            2
+          ],
+          "old": [
+            1e-06,
+            3e-06,
+            0,
+            2e-07,
+            null
+          ],
+          "new": [
+            4.35e-07,
+            8.7e-07,
+            0,
+            3.6e-09,
+            null
+          ]
+        },
+        {
+          "key": "z-ai/glm-4.7",
+          "zeroIndices": [
+            2
+          ],
+          "old": [
+            4e-07,
+            1.5e-06,
+            0,
+            0,
+            null
+          ],
+          "new": [
+            6e-07,
+            2.2e-06,
+            0,
+            1.1e-07,
+            null
+          ]
+        },
+        {
+          "key": "z-ai/glm-4.7-flash",
+          "zeroIndices": [
+            2
+          ],
+          "old": [
+            7e-08,
+            4e-07,
+            0,
+            0,
+            null
+          ],
+          "new": [
+            6.05e-08,
+            4e-07,
+            0,
+            1e-08,
+            null
+          ]
+        },
+        {
+          "key": "z-ai/glm-5.1",
+          "zeroIndices": [
+            2
+          ],
+          "old": [
+            1.05e-06,
+            3.5e-06,
+            0,
+            5.25e-07,
+            null
+          ],
+          "new": [
+            9.646e-07,
+            3.0316e-06,
+            0,
+            1.7914e-07,
+            null
+          ]
+        }
+      ],
+      "highMag": [
+        {
+          "key": "bigscience/mt0-xxl-13b",
+          "reason": "input>=10x",
+          "ratio": 0.0038160000000000004,
+          "old": [
+            0.0005,
+            0.002,
+            null,
+            null,
+            null
+          ],
+          "new": [
+            1.908e-06,
+            1.908e-06,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "key": "gryphe/mythomax-l2-13b",
+          "reason": "input>=10x",
+          "ratio": 0.042666666666666665,
+          "old": [
+            1.875e-06,
+            1.875e-06,
+            null,
+            null,
+            null
+          ],
+          "new": [
+            8e-08,
+            1.1e-07,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "key": "mancer/weaver",
+          "reason": "input>=10x",
+          "ratio": 0.0711111111111111,
+          "old": [
+            5.625e-06,
+            5.625e-06,
+            null,
+            null,
+            null
+          ],
+          "new": [
+            4e-07,
+            7.5e-07,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "key": "mistral-small-2503@001",
+          "reason": "input>=10x",
+          "ratio": 0.1,
+          "old": [
+            1e-06,
+            3e-06,
+            null,
+            null,
+            null
+          ],
+          "new": [
+            1e-07,
+            3e-07,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "key": "openrouter/gryphe/mythomax-l2-13b",
+          "reason": "input>=10x",
+          "ratio": 0.042666666666666665,
+          "old": [
+            1.875e-06,
+            1.875e-06,
+            null,
+            null,
+            null
+          ],
+          "new": [
+            8e-08,
+            1.1e-07,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "key": "openrouter/mancer/weaver",
+          "reason": "input>=10x",
+          "ratio": 0.0711111111111111,
+          "old": [
+            5.625e-06,
+            5.625e-06,
+            null,
+            null,
+            null
+          ],
+          "new": [
+            4e-07,
+            7.5e-07,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "key": "vertex_ai/mistral-small-2503",
+          "reason": "input>=10x",
+          "ratio": 0.1,
+          "old": [
+            1e-06,
+            3e-06,
+            null,
+            null,
+            null
+          ],
+          "new": [
+            1e-07,
+            3e-07,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "key": "vertex_ai/mistral-small-2503@001",
+          "reason": "input>=10x",
+          "ratio": 0.1,
+          "old": [
+            1e-06,
+            3e-06,
+            null,
+            null,
+            null
+          ],
+          "new": [
+            1e-07,
+            3e-07,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "key": "watsonx/bigscience/mt0-xxl-13b",
+          "reason": "input>=10x",
+          "ratio": 0.0038160000000000004,
+          "old": [
+            0.0005,
+            0.002,
+            null,
+            null,
+            null
+          ],
+          "new": [
+            1.908e-06,
+            1.908e-06,
+            null,
+            null,
+            null
+          ]
+        }
+      ]
+    },
+    "fallback": {
+      "neg": [],
+      "nonFinite": [],
+      "zeroStubs": [],
+      "highMag": []
+    }
+  }
+}

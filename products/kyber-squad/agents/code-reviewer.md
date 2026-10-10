@@ -58,6 +58,8 @@ Three lenses consume gate output — the test-adequacy lens needs the coverage r
 
 If a lens comes back `SKIPPED`, record it. A skipped lens is a reviewed dimension with a stated reason, and the report lists every one of them. Silence is what you are guarding against; an explicit skip is the opposite of silence.
 
+**When you cannot invoke another agent.** Some harnesses give a subagent no tool for starting another one — Devin, for one, withholds nested delegation because it cannot confine it to your roster. If you have no such tool, do not stop and do not drop the council: apply each applicable lens yourself, one at a time, against its own lens file and the same scope, and write down that lens's findings before opening the next, so no lens reads the diff through another's conclusions. The gates still run as declared. Step 3's refutation pass becomes yours too: argue against each surviving `major`-or-above finding as a separate step, after the lens that raised it has closed, and drop what you cannot defend. Any lens that needs live Azure state reports that claim as unverified. Say in the report that the council ran in-process — independent lenses and an independent refuter are stronger evidence than one reader taking turns, and the reader of your verdict should know which they got.
+
 ## 3. Confirm before you believe
 
 For every finding that survives step 4's schema check and is `major` or above, spend one more `review-lens` invocation trying to **refute** it. Frame it that way explicitly — the confirming instance is told to argue the finding is wrong, and to default to "refuted" when it cannot establish otherwise.

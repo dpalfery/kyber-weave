@@ -1045,8 +1045,12 @@ public sealed class AntigravityRendererContractTests : IDisposable
         }
     }
 
+    /// <summary>
+    /// Pins rendered Antigravity models by agent identity so planners and reviewers use
+    /// Pro while workers and orchestration remain on Flash, independently of models.yml.
+    /// </summary>
     [Fact]
-    public async Task RenderAsync_Antigravity_Native_ModelEnumInheritFlashProOnly()
+    public async Task AntigravityPlanningAndReviewAgentsRunOnProAndOtherAgentsOnFlash()
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
         SquadRendererRegistry registry = new([new AntigravityRenderer()]);
@@ -1059,7 +1063,12 @@ public sealed class AntigravityRendererContractTests : IDisposable
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
-        // D8: Only inherit, flash, pro spellings; never flash-lite or FLASH_LITE
+        SquadAgent architect = Assert.Single(source.Agents, agent => agent.Name == "architect");
+        Assert.Equal("architect", architect.ModelProfile);
+
+        SquadAgent productOwner = Assert.Single(source.Agents, agent => agent.Name == "product-owner");
+        Assert.Equal("architect", productOwner.ModelProfile);
+
         foreach (SquadAgent agent in source.Agents)
         {
             SquadDeploymentFile agentFile = Assert.Single(
@@ -1068,8 +1077,15 @@ public sealed class AntigravityRendererContractTests : IDisposable
 
             YamlMappingNode frontmatter = ReadFrontmatter(agentFile);
             string model = RequireScalar(frontmatter, "model");
+            string expectedModel = agent.Name is "architect" or "product-owner" or
+                "sql-database-architect" or "bug-crusher-investigator" or "code-reviewer" or
+                "review-lens" or "review-triage" or "task-reviewer"
+                ? "pro"
+                : "flash";
 
-            Assert.Matches("^(inherit|flash|pro)$", model);
+            Assert.True(
+                string.Equals(expectedModel, model, StringComparison.Ordinal),
+                $"Agent '{agent.Name}' (profile '{agent.ModelProfile}') model must be '{expectedModel}', got '{model}'.");
             Assert.False(
                 model.Contains("flash", StringComparison.OrdinalIgnoreCase) && model.Contains('-', StringComparison.Ordinal),
                 $"Agent '{agent.Name}' model must not use flash-lite or flash_lite spelling, got '{model}'");
@@ -1093,6 +1109,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
         // D9: reasoning_effort must match approved per-profile mapping
         Dictionary<string, string> expectedReasoningEffort = new(StringComparer.Ordinal)
         {
+            { "architect", "high" },
             { "deep-planning", "high" },
             { "reviewer", "high" },
             { "general", "medium" },

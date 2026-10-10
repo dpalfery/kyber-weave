@@ -12,11 +12,11 @@
 // Tuesday" answerable.
 
 /** How a refresh was started. Recorded so a failing cadence is distinguishable from a failing person. */
-export type RefreshTrigger = 'cli' | 'tray' | 'scheduled'
+export type RefreshTrigger = 'cli' | 'tray' | 'scheduled' | 'web'
 
 export type RefreshRunStatus = 'running' | 'success' | 'failure'
 
-export const REFRESH_TRIGGERS: readonly RefreshTrigger[] = ['cli', 'tray', 'scheduled']
+export const REFRESH_TRIGGERS: readonly RefreshTrigger[] = ['cli', 'tray', 'scheduled', 'web']
 
 /** A running row older than this is reconciled as failed before the next refresh starts. */
 export const REFRESH_MAX_AGE_MS = 15 * 60 * 1000
@@ -31,6 +31,12 @@ export type RefreshRunRow = {
   trigger: RefreshTrigger
   /** One line: what the run did, or why it failed. */
   summary: string | null
+  /**
+   * The ingest window, in weeks, this run covered. `null` means the run
+   * predates window tracking (migration 15→16) — window unknown, never 0
+   * and never the current default.
+   */
+  historyWeeks: number | null
 }
 
 /**
@@ -53,6 +59,8 @@ export function refreshProcessIsAlive(pid: number): boolean {
 
 export const REFRESH_RUN_SQL = `
 -- Refresh run log (spec: kyberdash-context-surfaces, R10.3-R10.5).
+-- history_weeks: The coverage window the run ingested (migration 15→16).
+-- NULL on rows written before window tracking: window unknown, never 0.
 CREATE TABLE IF NOT EXISTS refresh_run (
   id TEXT PRIMARY KEY,
   started_at TEXT NOT NULL,
@@ -60,7 +68,8 @@ CREATE TABLE IF NOT EXISTS refresh_run (
   status TEXT NOT NULL,
   pid INTEGER NOT NULL,
   trigger TEXT NOT NULL,
-  summary TEXT
+  summary TEXT,
+  history_weeks INTEGER
 );
 -- The three questions the footer asks are all "most recent X", so both indexes are
 -- descending on start time: one over everything, one narrowed by status.

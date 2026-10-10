@@ -46,7 +46,6 @@ public sealed class FakeSquadRenderer : ISquadRenderer
         "bug-crusher",
         "code-review",
         "create-pull-request",
-        "create-pull-request-github",
         "csharp-dev",
         "csp-security",
         "dal-dev",

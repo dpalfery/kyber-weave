@@ -1,12 +1,13 @@
-import { afterAll, describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, it, vi } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 
 import { CanonStore, SCHEMA_VERSION, compressRaw } from './store.js'
+import type { Finding } from '../analysis/findings.js'
 import type { RecordProvenance, SourceCheckpoint } from './source-state.js'
-import { TOKEN_SUM_MISMATCH, notMeasurable, type CanonicalRecord, type TokenUsage } from './types.js'
+import { TOKEN_SUM_MISMATCH, notMeasurable, type CanonicalRecord, type CostBlock, type TokenUsage } from './types.js'
 
 // The measured floor the store exists to break (R12.4): 2.9 GB across 37,623
 // spans is roughly 78 KB of raw payload per span, uncompressed. A record whose
@@ -159,6 +160,8 @@ describe('CanonStore round trip', () => {
 
     store.upsert(stored)
     expect(store.get('span-1')).toEqual(stored)
+    expect(store.has('span-1')).toBe(true)
+    expect(store.has('span-missing')).toBe(false)
   })
 
   it('round-trips a record with no raw payload and no measurability', () => {
@@ -184,6 +187,98 @@ describe('CanonStore round trip', () => {
     store.upsert(record({ raw }))
 
     expect(store.get('span-1')?.raw).toEqual(raw)
+  })
+})
+
+describe('CanonStore finding waste persistence (coverage-gap)', () => {
+  function measuredFinding(): Finding {
+    return {
+      id: 'finding-measured',
+      detectorId: 'duplicate-tool-call',
+      title: 'Duplicate',
+      mechanism: 'Repeated call',
+      evidenceLinks: [],
+      confidence: 'deterministic',
+      estimatedWasteTokens: 250,
+      recommendation: 'Cache it',
+      errorBar: { lower: 200, upper: 312 },
+      outcomeRiskCaveat: 'none',
+      rankScore: 200,
+      measurementClass: 'deterministic',
+    }
+  }
+
+  function unmeasuredFinding(): Finding {
+    return {
+      id: 'finding-unmeasured',
+      detectorId: 'duplicate-tool-call',
+      title: 'Duplicate',
+      mechanism: 'Repeated call of unmeasured size',
+      evidenceLinks: [],
+      confidence: 'deterministic',
+      recommendation: 'Cache it',
+      outcomeRiskCaveat: 'none',
+      rankScore: 0,
+      measurementClass: 'coverage-gap',
+    }
+  }
+
+  it('round-trips a measured finding unchanged', () => {
+    const store = new CanonStore(':memory:')
+    store.upsertFinding(measuredFinding())
+
+    const read = store.getFinding('finding-measured')
+    expect(read?.estimatedWasteTokens).toBe(250)
+    expect(read?.errorBar).toEqual({ lower: 200, upper: 312 })
+    store.close()
+  })
+
+  it('round-trips an unmeasured finding with absent waste and error bar, never zero', () => {
+    const store = new CanonStore(':memory:')
+    store.upsertFinding(unmeasuredFinding())
+
+    const read = store.getFinding('finding-unmeasured')
+    expect(read).toBeDefined()
+    expect(read?.estimatedWasteTokens).toBeUndefined()
+    expect(read?.errorBar).toBeUndefined()
+    expect(read?.measurementClass).toBe('coverage-gap')
+    expect(read?.rankScore).toBe(0)
+    store.close()
+  })
+
+  it('migrates a v14 store to nullable waste without losing measured rows', () => {
+    const path = tempStorePath()
+    const legacy = new DatabaseSync(path)
+    legacy.exec(`CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE finding (
+  id TEXT PRIMARY KEY,
+  detector_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  mechanism TEXT NOT NULL,
+  confidence TEXT NOT NULL,
+  estimated_waste_tokens INTEGER NOT NULL DEFAULT 0,
+  recommendation TEXT NOT NULL,
+  error_bar_json TEXT NOT NULL,
+  evidence_links_json TEXT NOT NULL,
+  outcome_risk_caveat TEXT NOT NULL,
+  run_id TEXT,
+  session_id TEXT,
+  rank_score REAL NOT NULL DEFAULT 0.0,
+  payload TEXT
+);
+INSERT INTO finding (id, detector_id, title, mechanism, confidence, estimated_waste_tokens, recommendation, error_bar_json, evidence_links_json, outcome_risk_caveat, rank_score)
+  VALUES ('legacy-measured', 'duplicate-tool-call', 'Duplicate', 'Repeated call', 'deterministic', 250, 'Cache it', '{"lower":200,"upper":312}', '[]', 'none', 200);
+INSERT INTO metadata (key, value) VALUES ('schema_version', '14'), ('detector_version', '1');`)
+    legacy.close()
+
+    const migrated = new CanonStore(path)
+    expect(migrated.getMetadata('schema_version')).toBe(String(SCHEMA_VERSION))
+    // The measured row survives the rebuild with its estimate intact.
+    expect(migrated.getFinding('legacy-measured')?.estimatedWasteTokens).toBe(250)
+    // And the rebuilt table now accepts an unmeasured finding.
+    migrated.upsertFinding(unmeasuredFinding())
+    expect(migrated.getFinding('finding-unmeasured')?.estimatedWasteTokens).toBeUndefined()
+    migrated.close()
   })
 })
 
@@ -307,6 +402,72 @@ describe('CanonStore refresh runs', () => {
       store.close()
     }
   })
+
+  it('round-trips the coverage window a refresh ran with', () => {
+    // T1 (issues #189/#198/#199 plan): the ingest window is what discards
+    // most history, so the run row must carry it — otherwise no surface can
+    // state what the last refresh actually covered.
+    const store = new CanonStore(':memory:')
+    try {
+      store.startRefreshRun({
+        id: 'windowed-refresh',
+        startedAt: new Date().toISOString(),
+        pid: process.pid,
+        trigger: 'cli',
+        historyWeeks: 6,
+      })
+
+      expect(store.latestRefreshRun('running')).toMatchObject({ id: 'windowed-refresh', historyWeeks: 6 })
+      expect(store.listRefreshRuns()[0]).toMatchObject({ id: 'windowed-refresh', historyWeeks: 6 })
+    } finally {
+      store.close()
+    }
+  })
+
+  it('reads a run recorded before window tracking as unknown, not zero', () => {
+    // Honest-unobservability: a run started without a window (every run
+    // before the history_weeks column existed) reads as null (unknown) —
+    // never 0, never the current default.
+    const store = new CanonStore(':memory:')
+    try {
+      store.startRefreshRun({
+        id: 'legacy-refresh',
+        startedAt: new Date().toISOString(),
+        pid: process.pid,
+        trigger: 'cli',
+      })
+
+      const running = store.latestRefreshRun('running')
+      expect(running?.id).toBe('legacy-refresh')
+      expect(running?.historyWeeks).toBeNull()
+      expect(store.listRefreshRuns()[0]?.historyWeeks).toBeNull()
+    } finally {
+      store.close()
+    }
+  })
+
+  it.each([0, -2, 1.5, Number.NaN, Number.POSITIVE_INFINITY])(
+    'stores a non-positive-safe-integer window (%p) as unknown, never verbatim',
+    (historyWeeks) => {
+      // Review PR #230 (kilo nux5h/nux5v): the persistence seam is what every
+      // surface reads, so `absent is not zero` must hold in the database —
+      // otherwise a hand-edited row renders `last 0 weeks`.
+      const store = new CanonStore(':memory:')
+      try {
+        store.startRefreshRun({
+          id: `bad-window-${String(historyWeeks)}`,
+          startedAt: new Date().toISOString(),
+          pid: process.pid,
+          trigger: 'cli',
+          historyWeeks,
+        })
+
+        expect(store.latestRefreshRun('running')?.historyWeeks).toBeNull()
+      } finally {
+        store.close()
+      }
+    },
+  )
 })
 
 describe('CanonStore quarantine, problems, and ingest log', () => {
@@ -417,6 +578,51 @@ describe('CanonStore quarantine, problems, and ingest log', () => {
     store.recordProblem(second)
 
     expect(store.getProblems('span-duplicate')).toEqual([first, second])
+    store.close()
+  })
+
+  it('reconciles source problems to exactly the keep-set, leaving neighbours alone (#243)', () => {
+    const store = new CanonStore(':memory:')
+    const sourceProblem = (spanId: string, code: string) => ({
+      spanId,
+      severity: 'error' as const,
+      code,
+      message: `${code} in source`,
+      harness: 'pi',
+    })
+    store.recordProblem(sourceProblem('harness:pi:pi:session:FUTURE_DATED', 'FUTURE_DATED'))
+    store.recordProblem(sourceProblem('harness:pi:pi:session:MALFORMED_TIMESTAMP', 'MALFORMED_TIMESTAMP'))
+    store.recordProblem(sourceProblem('harness:pi:pi:other:MALFORMED_TIMESTAMP', 'MALFORMED_TIMESTAMP'))
+    store.recordProblem(sourceProblem('harness:codex-cli:pi:session:FUTURE_DATED', 'FUTURE_DATED'))
+    store.recordProblem(sourceProblem('harness:pi:pi:session', 'PROVIDER_PARSE_ERROR'))
+    store.recordProblem(sourceProblem('harness:pi:job', 'PROVIDER_PARSE_ERROR'))
+    store.recordProblem({ ...sourceProblem('span-1', 'TOKEN_SUM_MISMATCH'), harness: 'pi' })
+
+    store.reconcileSourceProblems('pi', 'pi:session', ['MALFORMED_TIMESTAMP'])
+
+    expect(store.getProblems('harness:pi:pi:session:FUTURE_DATED')).toEqual([])
+    expect(store.getProblems('harness:pi:pi:session:MALFORMED_TIMESTAMP')).toHaveLength(1)
+    expect(store.getProblems('harness:pi:pi:other:MALFORMED_TIMESTAMP')).toHaveLength(1)
+    expect(store.getProblems('harness:codex-cli:pi:session:FUTURE_DATED')).toHaveLength(1)
+    expect(store.getProblems('harness:pi:pi:session')).toHaveLength(1)
+    expect(store.getProblems('harness:pi:job')).toHaveLength(1)
+    expect(store.getProblems('span-1')).toHaveLength(1)
+    store.close()
+  })
+
+  it('ignores a source-problem-shaped row whose trailing segment is not its code (#243)', () => {
+    const store = new CanonStore(':memory:')
+    store.recordProblem({
+      spanId: 'harness:pi:pi:session:STALE',
+      severity: 'error' as const,
+      code: 'FUTURE_DATED',
+      message: 'code and trailing segment disagree',
+      harness: 'pi',
+    })
+
+    store.reconcileSourceProblems('pi', 'pi:session', [])
+
+    expect(store.getProblems('harness:pi:pi:session:STALE')).toHaveLength(1)
     store.close()
   })
 
@@ -537,6 +743,58 @@ describe('CanonStore quarantine, problems, and ingest log', () => {
       expect(entry.source).toBe('pi:agent-7f3')
       expect(entry.count).toBe(30)
       expect(entry.timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T/)
+    }
+  })
+
+  it('normalizes a blank ingest source to the unnamed-receiver key', () => {
+    // Review PR #230 (kilo nux45): service.name arrives over the network, so
+    // the persistence seam normalizes it — blank becomes the shared unnamed
+    // key rather than a distinct empty-string cardinality entry.
+    const store = new CanonStore(':memory:')
+    try {
+      store.logIngest('   ', 5)
+
+      expect(store.getIngestLog()).toHaveLength(1)
+      expect(store.getIngestLog()[0]?.source).toBe('otlp')
+    } finally {
+      store.close()
+    }
+  })
+
+  it('tallies quarantine reasons in SQL without materializing rows', () => {
+    // Review PR #230 (copilot numrV / kilo nux5e): the coverage endpoint must
+    // not read every quarantine row to count reasons — the store aggregates
+    // with GROUP BY and folds a null reason into 'unknown', never dropping it.
+    const store = new CanonStore(':memory:')
+    try {
+      store.quarantine('span-1', ['pi'], 'unclaimed')
+      store.quarantine('span-2', ['pi'], 'unclaimed')
+      store.quarantine('span-3', ['copilot'], 'non-model span: health check')
+
+      expect(store.quarantineCountsByReason()).toEqual([
+        { reason: 'unclaimed', count: 2 },
+        { reason: 'non-model span: health check', count: 1 },
+      ])
+    } finally {
+      store.close()
+    }
+  })
+
+  it('sums ingest activity per source in SQL with recency', () => {
+    // Review PR #230 (kilo nux5E): the coverage path must not inflate every
+    // ingest_log row — sums and recency come from one GROUP BY query.
+    const store = new CanonStore(':memory:')
+    try {
+      store.logIngest('pi', 3)
+      store.logIngest('pi', 4)
+      store.logIngest('copilot', 1)
+
+      const sums = store.ingestLogSums()
+      expect(sums.get('pi')?.total).toBe(7)
+      expect(sums.get('pi')?.lastAt).toMatch(/^\d{4}-\d{2}-\d{2}T/)
+      expect(sums.get('copilot')?.total).toBe(1)
+    } finally {
+      store.close()
     }
   })
 })
@@ -701,7 +959,10 @@ describe('sessionTokenTotals', () => {
     store.close()
   })
 
-  it('treats a not_measurable total as zero rather than coercing the object', () => {
+  // Open thread harnesses.ts:416 — a not_measurable total is absence shaped
+  // as an object, not a zero. Coercing it feeds an invented 0 into the
+  // delegation denominator, so the accessor reports unknown instead.
+  it('reports unknown when either total is not_measurable', () => {
     const store = new CanonStore(':memory:')
     store.upsertSession({
       sessionId: 's1',
@@ -719,13 +980,37 @@ describe('sessionTokenTotals', () => {
       },
     })
 
-    expect(store.sessionTokenTotals('s1')).toEqual({ input: 0, output: 7 })
+    expect(store.sessionTokenTotals('s1')).toBeUndefined()
     store.close()
   })
 
   it('is undefined for a session that was never built', () => {
     const store = new CanonStore(':memory:')
     expect(store.sessionTokenTotals('missing')).toBeUndefined()
+    store.close()
+  })
+})
+
+describe('listSessionTimeColumns', () => {
+  it('reads only (harness, started, ended) without the payload', () => {
+    const store = new CanonStore(':memory:')
+    store.upsertSession({
+      sessionId: 's1',
+      harness: 'cursor',
+      label: null,
+      isSubagent: false,
+      parentSession: null,
+      agentName: null,
+      repo: null,
+      branch: null,
+      started: '2026-09-20T12:00:00.000Z',
+      ended: '2026-09-20T13:00:00.000Z',
+      payload: { summary: 'large-payload-that-must-not-cross' },
+    })
+
+    const cols = store.listSessionTimeColumns()
+    expect(cols).toEqual([{ harness: 'cursor', started: '2026-09-20T12:00:00.000Z', ended: '2026-09-20T13:00:00.000Z' }])
+    expect(JSON.stringify(cols)).not.toContain('large-payload')
     store.close()
   })
 })
@@ -871,6 +1156,22 @@ describe('source checkpoint and provenance', () => {
     store.close()
   })
 
+  it('counts live records for a source and excludes quarantined provenance ghosts', () => {
+    const store = new CanonStore(':memory:')
+    store.commitSourceUnit({
+      records: [record({ sessionId: 'agent-7f3' })],
+      provenance: [provenance()],
+      checkpoint: checkpoint(),
+    })
+
+    expect(store.countLiveRecordsForSource('pi', 'session:agent-7f3')).toBe(1)
+    store.quarantineAndDelete('span-1', ['gen_ai'], 'unclaimed')
+    expect(store.get('span-1')).toBeUndefined()
+    expect(store.listProvenanceForSource('pi', 'session:agent-7f3')).toHaveLength(1)
+    expect(store.countLiveRecordsForSource('pi', 'session:agent-7f3')).toBe(0)
+    store.close()
+  })
+
   it('invalidates a checkpoint on parser-contract change without deleting canonical rows', () => {
     const store = new CanonStore(':memory:')
     store.commitSourceUnit({
@@ -942,5 +1243,478 @@ describe('source checkpoint and provenance', () => {
     expect(empty).toHaveLength(0)
 
     store.close()
+  })
+
+  it('restricts the harness batch to the requested sources when given', () => {
+    const store = new CanonStore(':memory:')
+    store.upsert(record({ spanId: 'agy-1', source: 'agy', harness: 'gemini' }))
+    store.upsert(record({ spanId: 'cli-1', source: 'gemini-cli', harness: 'gemini' }))
+
+    expect(store.listRecordsByHarness(['gemini'], 10, ['agy']).map((r) => r.spanId)).toEqual([
+      'agy-1',
+    ])
+    expect(store.listRecordsByHarness(['gemini'], 10).map((r) => r.spanId).sort()).toEqual([
+      'agy-1',
+      'cli-1',
+    ])
+
+    store.close()
+  })
+})
+
+// Issue #312, plan T1 RED: user-initiated wipe by canonical harness (or all)
+// deletes records, provenance, checkpoints, and harness-scoped derived rows in
+// ONE transaction (`wipeHarnesses` / `wipeAll`), and never touches the home
+// store. The methods do not exist yet, so every test below fails to compile
+// until T2 lands them.
+describe('CanonStore wipe (issue #312)', () => {
+  function seedHarness(
+    store: InstanceType<typeof CanonStore>,
+    harness: string,
+    spanId: string,
+    sourceKey: string,
+  ): void {
+    store.commitSourceUnit({
+      records: [record({ spanId, harness, sessionId: `${harness}-session` })],
+      provenance: [
+        provenance({
+          spanId,
+          harnessId: harness,
+          sourceKey,
+          nativeSessionId: `${harness}-session`,
+          nativeRecordId: 'turn-1',
+        }),
+      ],
+      checkpoint: checkpoint({ harnessId: harness, sourceKey }),
+    })
+    store.recordProblem({
+      spanId,
+      severity: 'warning',
+      code: 'WIPED_SCOPE',
+      message: 'scoped problem',
+      harness,
+    })
+  }
+
+  it('wipes one harness and leaves the other harness intact', () => {
+    const store = new CanonStore(':memory:')
+    seedHarness(store, 'pi', 'span-pi', 'session:pi-1')
+    seedHarness(store, 'cursor', 'span-cursor', 'session:cursor-1')
+    store.logIngest('pi:agent-7f3', 2)
+
+    const report = store.wipeHarnesses(['pi'])
+
+    expect(report.harnesses).toEqual(['pi'])
+    expect(report.records).toBe(1)
+    expect(store.get('span-pi')).toBeUndefined()
+    expect(store.getRecordProvenance('span-pi')).toBeUndefined()
+    expect(store.getSourceCheckpoint('pi', 'session:pi-1')).toBeUndefined()
+    expect(store.get('span-cursor')?.spanId).toBe('span-cursor')
+    expect(store.getRecordProvenance('span-cursor')?.spanId).toBe('span-cursor')
+    expect(store.getSourceCheckpoint('cursor', 'session:cursor-1')?.harnessId).toBe('cursor')
+    expect(store.getIngestLog()).toHaveLength(1)
+    expect(store.getMetadata('last_clean_at')).toBeDefined()
+    store.close()
+  })
+
+  it('expands a canonical harness to its folded raw record names', () => {
+    const store = new CanonStore(':memory:')
+    // Raw records keep the front-end string as provenance; derived surfaces
+    // follow the canonical id (`measurability.ts`). A wipe for `claude-code`
+    // must reach the `claude-desktop` rows too.
+    store.upsert(record({ spanId: 'span-desktop', harness: 'claude-desktop' }))
+    store.upsert(record({ spanId: 'span-code', harness: 'claude-code' }))
+    store.upsert(record({ spanId: 'span-cursor', harness: 'cursor' }))
+
+    const report = store.wipeHarnesses(['claude-code'])
+
+    expect(report.records).toBe(2)
+    expect(store.get('span-desktop')).toBeUndefined()
+    expect(store.get('span-code')).toBeUndefined()
+    expect(store.get('span-cursor')?.spanId).toBe('span-cursor')
+    store.close()
+  })
+
+  it('drops harness-scoped derived rows and predictions for the wiped harness', () => {
+    const store = new CanonStore(':memory:')
+    seedHarness(store, 'pi', 'span-pi', 'session:pi-1')
+    seedHarness(store, 'cursor', 'span-cursor', 'session:cursor-1')
+    store.upsertRun({
+      runId: 'run-pi',
+      harness: 'pi',
+      groupingBasis: 'explicit',
+      executionCount: 0,
+      payload: null,
+    })
+    store.upsertRun({
+      runId: 'run-cursor',
+      harness: 'cursor',
+      groupingBasis: 'explicit',
+      executionCount: 0,
+      payload: null,
+    })
+    store.upsertPrediction({
+      id: 'pred-pi',
+      findingId: 'finding-pi',
+      runId: 'run-pi',
+      predictedWasteTokens: 10,
+      confidence: 0.5,
+      createdAt: '2026-09-12T00:00:00.000Z',
+    })
+    store.upsertPrediction({
+      id: 'pred-cursor',
+      findingId: 'finding-cursor',
+      runId: 'run-cursor',
+      predictedWasteTokens: 10,
+      confidence: 0.5,
+      createdAt: '2026-09-12T00:00:00.000Z',
+    })
+    store.quarantine('ghost-pi', ['gen_ai'], 'unclaimed')
+
+    store.wipeHarnesses(['pi'])
+
+    expect(store.listRuns('pi')).toHaveLength(0)
+    expect(store.listRuns('cursor')).toHaveLength(1)
+    expect(store.getPrediction('pred-pi')).toBeUndefined()
+    expect(store.getPrediction('pred-cursor')?.id).toBe('pred-cursor')
+    expect(store.getProblems().some((p) => p.harness === 'pi')).toBe(false)
+    expect(store.getProblems().some((p) => p.harness === 'cursor')).toBe(true)
+    // Per-harness wipe cannot scope quarantine rows (no harness column):
+    // they stay, and the confirm UI must disclose that.
+    expect(store.getQuarantine('ghost-pi')?.spanId).toBe('ghost-pi')
+    store.close()
+  })
+
+  it('wipeAll clears the corpus, quarantine, and log-enrichment tables but keeps audit rows', () => {
+    const store = new CanonStore(':memory:')
+    seedHarness(store, 'pi', 'span-pi', 'session:pi-1')
+    store.quarantine('ghost', ['gen_ai'], 'unclaimed')
+    store.logIngest('pi:agent-7f3', 2)
+    const runId = store.startRefreshRun({
+      id: 'run-1',
+      startedAt: '2026-09-12T00:00:00.000Z',
+      pid: 1,
+      trigger: 'cli',
+    })
+    expect(runId).toBe('run-1')
+
+    const report = store.wipeAll()
+
+    expect(report.records).toBe(1)
+    expect(store.count()).toBe(0)
+    expect(store.listProvenanceForSource('pi', 'session:pi-1')).toHaveLength(0)
+    expect(store.listSourceCheckpoints()).toHaveLength(0)
+    expect(store.countQuarantine()).toBe(0)
+    expect(store.getProblems()).toHaveLength(0)
+    // Operational audit survives a wipe-all.
+    expect(store.getIngestLog()).toHaveLength(1)
+    expect(store.getMetadata('schema_version')).toBe(String(SCHEMA_VERSION))
+    expect(store.getMetadata('last_clean_at')).toBeDefined()
+    store.close()
+  })
+
+  it('rolls back the whole wipe when a delete fails', () => {
+    const store = new CanonStore(':memory:')
+    seedHarness(store, 'pi', 'span-pi', 'session:pi-1')
+    // Corrupt the checkpoint table's contract out from under the wipe: the
+    // replacement table carries a trigger that rejects the wiped source key,
+    // so the checkpoint delete throws and the records must survive with it.
+    const db = store.getDatabase()
+    db.exec('DROP TABLE source_checkpoint')
+    db.exec(
+      `CREATE TABLE source_checkpoint (
+         harness_id TEXT PRIMARY KEY,
+         source_key TEXT NOT NULL
+       );
+       CREATE TRIGGER wipe_must_fail BEFORE DELETE ON source_checkpoint
+       BEGIN
+         SELECT RAISE(ABORT, 'injected wipe failure');
+       END;`,
+    )
+    db.prepare('INSERT INTO source_checkpoint (harness_id, source_key) VALUES (?, ?)').run(
+      'pi',
+      'session:pi-1',
+    )
+
+    expect(() => store.wipeHarnesses(['pi'])).toThrow()
+
+    expect(store.get('span-pi')?.spanId).toBe('span-pi')
+    expect(store.getRecordProvenance('span-pi')?.spanId).toBe('span-pi')
+    store.close()
+  })
+
+  it('wipeHarnesses with no matching rows is a no-op that still stamps the clean', () => {
+    const store = new CanonStore(':memory:')
+    seedHarness(store, 'pi', 'span-pi', 'session:pi-1')
+
+    const report = store.wipeHarnesses(['cursor'])
+
+    expect(report.records).toBe(0)
+    expect(store.get('span-pi')?.spanId).toBe('span-pi')
+    expect(store.getMetadata('last_clean_at')).toBeDefined()
+    store.close()
+  })
+})
+
+// PR #225 review follow-up (comment 4149313577), plan T1 RED -> T2 GREEN: projection-time repricing
+// writes a session's changed cost blocks back in ONE transaction (`setCosts`), not one autocommit
+// UPDATE per record. Same BEGIN/COMMIT/ROLLBACK pattern as `upsertMany`.
+describe('CanonStore.setCosts (batched cost write-back)', () => {
+  const STALE = { basis: 'unknown', status: 'no_rate' } as const
+  const priced = (value: number) => ({ basis: 'published', status: 'priced', value, currency: 'USD' }) as const
+
+  function seeded(): CanonStore {
+    const store = new CanonStore(':memory:')
+    store.upsertMany(['c-1', 'c-2', 'c-3'].map((spanId) => record({ spanId, cost: STALE })))
+    return store
+  }
+
+  it('writes every given block in a single transaction', () => {
+    const store = seeded()
+    const db = (store as unknown as { db: DatabaseSync }).db
+    const exec = db.exec.bind(db)
+    const statements: string[] = []
+    const spy = vi.spyOn(db, 'exec').mockImplementation((sql: string) => {
+      statements.push(sql)
+      return exec(sql)
+    })
+    try {
+      store.setCosts([
+        { spanId: 'c-1', cost: priced(1) },
+        { spanId: 'c-2', cost: priced(2) },
+        { spanId: 'c-3', cost: priced(3) },
+      ])
+    } finally {
+      spy.mockRestore()
+    }
+    expect(statements.filter((s) => s === 'BEGIN')).toHaveLength(1)
+    expect(statements.filter((s) => s === 'COMMIT')).toHaveLength(1)
+    expect(store.get('c-1')?.cost).toEqual(priced(1))
+    expect(store.get('c-2')?.cost).toEqual(priced(2))
+    expect(store.get('c-3')?.cost).toEqual(priced(3))
+    store.close()
+  })
+
+  it('changes nothing for an empty list', () => {
+    const store = seeded()
+    const db = (store as unknown as { db: DatabaseSync }).db
+    const before = (db.prepare('SELECT COUNT(*) AS n FROM records WHERE cost_json = ?').get(JSON.stringify(STALE)) as { n: number }).n
+    store.setCosts([])
+    const after = (db.prepare('SELECT COUNT(*) AS n FROM records WHERE cost_json = ?').get(JSON.stringify(STALE)) as { n: number }).n
+    expect(after).toBe(before)
+    expect(after).toBe(3)
+    store.close()
+  })
+
+  it('rolls back the whole batch when a later block cannot be serialized', () => {
+    const store = seeded()
+    const bad = { basis: 'published', status: 'priced', value: 1n } as unknown as CostBlock
+    expect(() =>
+      store.setCosts([
+        { spanId: 'c-1', cost: priced(1) },
+        { spanId: 'c-2', cost: priced(2) },
+        { spanId: 'c-3', cost: bad },
+      ]),
+    ).toThrow()
+    expect(store.get('c-1')?.cost).toEqual(STALE)
+    expect(store.get('c-2')?.cost).toEqual(STALE)
+    expect(store.get('c-3')?.cost).toEqual(STALE)
+    // The connection is usable afterwards: no transaction was left open.
+    store.setCosts([{ spanId: 'c-1', cost: priced(9) }])
+    expect(store.get('c-1')?.cost).toEqual(priced(9))
+    store.close()
+  })
+})
+
+describe('CanonStore finding indexes (council review)', () => {
+  it('indexes detector_id for the workspace browser filter', () => {
+    const store = new CanonStore(':memory:')
+    const db = (store as unknown as { db: DatabaseSync }).db
+    const rows = db
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'finding_by_detector'")
+      .all() as { name: string }[]
+    expect(rows.map((row) => row.name)).toEqual(['finding_by_detector'])
+    store.close()
+  })
+})
+
+
+describe('store migrations v17: quarantine and problems schema upgrade', () => {
+  it('bumps SCHEMA_VERSION to 17 and initializes fresh database with new quarantine and problems columns', () => {
+    expect(SCHEMA_VERSION).toBe(17)
+
+    const path = tempStorePath()
+    const store = new CanonStore(path)
+    expect(store.getMetadata('schema_version')).toBe('17')
+    store.close()
+
+    const verifyDb = new DatabaseSync(path)
+    const qCols = verifyDb.prepare('PRAGMA table_info(quarantine)').all() as Array<{ name: string }>
+    expect(qCols.some((col) => col.name === 'source')).toBe(true)
+    expect(qCols.some((col) => col.name === 'name')).toBe(true)
+    expect(qCols.some((col) => col.name === 'timestamp')).toBe(true)
+
+    const probCols = verifyDb.prepare('PRAGMA table_info(problems)').all() as Array<{ name: string }>
+    expect(probCols.some((col) => col.name === 'session_id')).toBe(true)
+    expect(probCols.some((col) => col.name === 'harness')).toBe(true)
+    expect(probCols.some((col) => col.name === 'timestamp')).toBe(true)
+    verifyDb.close()
+  })
+
+  it('accepts and records source, name, and timestamp metadata via positional arguments in store.quarantine()', () => {
+    const path = tempStorePath()
+    const store = new CanonStore(path)
+
+    const spanId = 'span-quarantine-meta-pos'
+    const namespaces = ['copilot', 'gen_ai']
+    const reason = 'unclaimed'
+    const source = 'copilot:chat-1'
+    const name = 'chat_turn'
+    const timestamp = '2026-09-30T12:00:00.000Z'
+
+    store.quarantine(spanId, namespaces, reason, source, name, timestamp)
+
+    const verifyDb = new DatabaseSync(path)
+    const row = verifyDb.prepare('SELECT * FROM quarantine WHERE span_id = ?').get(spanId) as Record<string, unknown>
+    expect(row).toBeDefined()
+    expect(row.source).toBe(source)
+    expect(row.name).toBe(name)
+    expect(row.timestamp).toBe(timestamp)
+    verifyDb.close()
+
+    const entry = store.getQuarantine(spanId)
+    expect(entry).toBeDefined()
+    expect(entry?.source).toBe(source)
+    expect(entry?.name).toBe(name)
+    expect(entry?.timestamp).toBe(timestamp)
+
+    store.close()
+  })
+
+  it('accepts and records source, name, and timestamp metadata via options object in store.quarantine()', () => {
+    const path = tempStorePath()
+    const store = new CanonStore(path)
+
+    const spanId = 'span-quarantine-meta-opt'
+    const namespaces = ['copilot', 'gen_ai']
+    const reason = 'unclaimed'
+    const source = 'copilot:chat-2'
+    const name = 'chat_turn_options'
+    const timestamp = '2026-09-30T12:05:00.000Z'
+
+    store.quarantine(spanId, namespaces, reason, { source, name, timestamp })
+
+    const verifyDb = new DatabaseSync(path)
+    const row = verifyDb.prepare('SELECT * FROM quarantine WHERE span_id = ?').get(spanId) as Record<string, unknown>
+    expect(row).toBeDefined()
+    expect(row.source).toBe(source)
+    expect(row.name).toBe(name)
+    expect(row.timestamp).toBe(timestamp)
+    verifyDb.close()
+
+    const entry = store.getQuarantine(spanId)
+    expect(entry).toBeDefined()
+    expect(entry?.source).toBe(source)
+    expect(entry?.name).toBe(name)
+    expect(entry?.timestamp).toBe(timestamp)
+
+    store.close()
+  })
+
+  it('migrates existing databases on schema version 14 to schema version 15 preserving rows', () => {
+    const path = tempStorePath()
+
+    // 1. Seed a schema version 14 database with existing rows in quarantine and problems
+    const v14Db = new DatabaseSync(path)
+    v14Db.exec(`
+      CREATE TABLE metadata (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+      INSERT INTO metadata (key, value) VALUES ('schema_version', '14');
+
+      CREATE TABLE quarantine (
+        span_id TEXT PRIMARY KEY,
+        namespaces TEXT NOT NULL,
+        reason TEXT NOT NULL
+      );
+      INSERT INTO quarantine (span_id, namespaces, reason)
+      VALUES ('span-v14-q', '["pi"]', 'legacy unclaimed');
+
+      CREATE TABLE problems (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        span_id TEXT,
+        problem_key TEXT NOT NULL DEFAULT '',
+        severity TEXT NOT NULL,
+        code TEXT NOT NULL,
+        message TEXT NOT NULL,
+        location TEXT
+      );
+      CREATE UNIQUE INDEX problems_by_identity ON problems (problem_key);
+      INSERT INTO problems (span_id, problem_key, severity, code, message, location)
+      VALUES ('span-v14-p', 'key-v14', 'warning', 'LEGACY_PARSE_ERROR', 'legacy problem message', 'turn-1');
+
+      CREATE TABLE records (
+        span_id TEXT PRIMARY KEY,
+        trace_id TEXT,
+        parent_span_id TEXT,
+        source TEXT NOT NULL,
+        harness TEXT NOT NULL,
+        session_id TEXT,
+        name TEXT NOT NULL,
+        op TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        timestamp TEXT NOT NULL,
+        duration_ms INTEGER NOT NULL,
+        status TEXT NOT NULL,
+        tokens_json TEXT NOT NULL,
+        content_json TEXT NOT NULL,
+        cost_json TEXT NOT NULL,
+        measurability_json TEXT,
+        parts_json BLOB,
+        raw BLOB
+      );
+    `)
+    v14Db.close()
+
+    // 2. Open with CanonStore: should run migrations up to 17
+    const migrated = new CanonStore(path)
+    expect(migrated.getMetadata('schema_version')).toBe('17')
+
+    // 3. Verify existing rows are preserved
+    const qRow = migrated.getQuarantine('span-v14-q')
+    expect(qRow).toBeDefined()
+    expect(qRow?.namespaces).toEqual(['pi'])
+    expect(qRow?.reason).toBe('legacy unclaimed')
+
+    const pRows = migrated.getProblems('span-v14-p')
+    expect(pRows).toHaveLength(1)
+    expect(pRows[0]?.code).toBe('LEGACY_PARSE_ERROR')
+    expect(pRows[0]?.message).toBe('legacy problem message')
+
+    // 4. Verify new columns exist in both tables after migration
+    const verifyDb = new DatabaseSync(path)
+    const qCols = verifyDb.prepare('PRAGMA table_info(quarantine)').all() as Array<{ name: string }>
+    expect(qCols.some((col) => col.name === 'source')).toBe(true)
+    expect(qCols.some((col) => col.name === 'name')).toBe(true)
+    expect(qCols.some((col) => col.name === 'timestamp')).toBe(true)
+
+    const probCols = verifyDb.prepare('PRAGMA table_info(problems)').all() as Array<{ name: string }>
+    expect(probCols.some((col) => col.name === 'session_id')).toBe(true)
+    expect(probCols.some((col) => col.name === 'harness')).toBe(true)
+    expect(probCols.some((col) => col.name === 'timestamp')).toBe(true)
+
+    // 5. Verify newly migrated database can insert new quarantine and problem metadata
+    verifyDb.prepare(
+      'INSERT INTO quarantine (span_id, namespaces, reason, source, name, timestamp) VALUES (?, ?, ?, ?, ?, ?)'
+    ).run('span-v15-q', '["copilot"]', 'new reason', 'source-1', 'name-1', '2026-09-30T12:00:00.000Z')
+
+    const newQRow = verifyDb.prepare('SELECT * FROM quarantine WHERE span_id = ?').get('span-v15-q') as Record<string, unknown>
+    expect(newQRow.source).toBe('source-1')
+    expect(newQRow.name).toBe('name-1')
+    expect(newQRow.timestamp).toBe('2026-09-30T12:00:00.000Z')
+
+    verifyDb.close()
+    migrated.close()
   })
 })

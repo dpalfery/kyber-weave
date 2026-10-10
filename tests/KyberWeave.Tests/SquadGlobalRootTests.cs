@@ -238,6 +238,107 @@ public sealed class SquadGlobalRootTests : IDisposable
     }
 
     // ---------------------------------------------------------------------------------------
+    // Devin is the only target whose default root differs by operating system: Devin CLI
+    // v3000.x documents its user configuration at ~/.config/devin on macOS and Linux and at
+    // %APPDATA%\devin on Windows, and custom subagents and skills load from agents/ and
+    // skills/ beneath that directory. The platform is injected so both branches run on every
+    // CI leg rather than only on the one whose OS happens to match.
+    // ---------------------------------------------------------------------------------------
+
+    [Fact]
+    public void ResolveGlobalRoot_DevinOnUnix_DefaultsToTheDotConfigDirectory()
+    {
+        string tempHome = Path.Combine(_temp.Path, "devin-unix-home");
+        Directory.CreateDirectory(tempHome);
+        SquadGlobalRoots resolver = new(_ => null, tempHome, isWindows: false);
+
+        Assert.Equal(
+            Path.Combine(tempHome, ".config", "devin"),
+            resolver.ResolveGlobalRoot(SquadTarget.Devin));
+    }
+
+    [Fact]
+    public void ResolveGlobalRoot_DevinOnUnix_HonoursXdgConfigHome()
+    {
+        string tempHome = Path.Combine(_temp.Path, "devin-xdg-home");
+        Directory.CreateDirectory(tempHome);
+        string xdgConfigHome = Path.Combine(_temp.Path, "devin-xdg-config");
+        SquadGlobalRoots resolver = new(
+            name => name == "XDG_CONFIG_HOME" ? xdgConfigHome : null,
+            tempHome,
+            isWindows: false);
+
+        Assert.Equal(
+            Path.Combine(xdgConfigHome, "devin"),
+            resolver.ResolveGlobalRoot(SquadTarget.Devin));
+    }
+
+    [Fact]
+    public void ResolveGlobalRoot_DevinOnWindows_UsesTheRoamingAppDataDirectory()
+    {
+        string tempHome = Path.Combine(_temp.Path, "devin-windows-home");
+        Directory.CreateDirectory(tempHome);
+        string appData = Path.Combine(_temp.Path, "devin-appdata-roaming");
+        SquadGlobalRoots resolver = new(
+            name => name == "APPDATA" ? appData : null,
+            tempHome,
+            isWindows: true);
+
+        Assert.Equal(
+            Path.Combine(appData, "devin"),
+            resolver.ResolveGlobalRoot(SquadTarget.Devin));
+    }
+
+    [Fact]
+    public void ResolveGlobalRoot_DevinOnWindowsWithoutAppData_FallsBackBeneathTheProfile()
+    {
+        string tempHome = Path.Combine(_temp.Path, "devin-windows-no-appdata");
+        Directory.CreateDirectory(tempHome);
+        SquadGlobalRoots resolver = new(_ => null, tempHome, isWindows: true);
+
+        Assert.Equal(
+            Path.Combine(tempHome, "AppData", "Roaming", "devin"),
+            resolver.ResolveGlobalRoot(SquadTarget.Devin));
+    }
+
+    [Fact]
+    public void ResolveGlobalRoot_DevinOnWindows_IgnoresXdgConfigHome()
+    {
+        string tempHome = Path.Combine(_temp.Path, "devin-windows-xdg");
+        Directory.CreateDirectory(tempHome);
+        string appData = Path.Combine(_temp.Path, "devin-windows-xdg-appdata");
+        string xdgConfigHome = Path.Combine(_temp.Path, "devin-windows-xdg-config");
+        SquadGlobalRoots resolver = new(
+            name => name switch
+            {
+                "APPDATA" => appData,
+                "XDG_CONFIG_HOME" => xdgConfigHome,
+                _ => null
+            },
+            tempHome,
+            isWindows: true);
+
+        Assert.Equal(
+            Path.Combine(appData, "devin"),
+            resolver.ResolveGlobalRoot(SquadTarget.Devin));
+    }
+
+    [Fact]
+    public void ResolveGlobalRoot_DevinOnWindows_RejectsARelativeAppData()
+    {
+        string tempHome = Path.Combine(_temp.Path, "devin-windows-relative");
+        Directory.CreateDirectory(tempHome);
+        SquadGlobalRoots resolver = new(
+            name => name == "APPDATA" ? Path.Combine("relative", "roaming") : null,
+            tempHome,
+            isWindows: true);
+
+        ArgumentException exception = Assert.Throws<ArgumentException>(
+            () => resolver.ResolveGlobalRoot(SquadTarget.Devin));
+        Assert.Equal("APPDATA", exception.ParamName);
+    }
+
+    // ---------------------------------------------------------------------------------------
     // Criterion 2: a global dry run per target plans bare relative paths under the resolved root.
     // ---------------------------------------------------------------------------------------
 
@@ -377,6 +478,7 @@ public sealed class SquadGlobalRootTests : IDisposable
     [InlineData(SquadTarget.Kilo)]
     [InlineData(SquadTarget.Warp)]
     [InlineData(SquadTarget.ZCode)]
+    [InlineData(SquadTarget.Devin)]
     public async Task InstallAsync_GlobalScopeDryRun_PlansEveryFileUnderTheResolvedTargetRootWithBareRelativePaths(
         SquadTarget target)
     {
@@ -413,18 +515,41 @@ public sealed class SquadGlobalRootTests : IDisposable
         Assert.NotEmpty(result.Receipt.Files);
         Assert.Equal(ExpectedRenderedFileCount(target), result.Receipt.Files.Count);
 
-        // Claude is the one target where a primary agent adds an entry-point skill.
-        if (target == SquadTarget.Claude)
+        // Claude keeps the subagent and adds an entry-point skill beside it; Cursor
+        // follows the Pi-renderer skill-only precedent (no agents/<name>.md principal),
+        // so its total is count-neutral and only the receipt paths differ.
+        if (target is SquadTarget.Claude or SquadTarget.Cursor)
         {
             string productRoot = Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
             SquadSource source = SquadSourceLoader.Load(productRoot);
-            string primaryAgentName = Assert.Single(source.Agents, a => a.Invocation == SquadInvocation.Primary).Name;
+            SquadAgent primaryAgent = Assert.Single(source.Agents, a => a.Invocation == SquadInvocation.Primary);
+            Assert.Equal("conductor", primaryAgent.Name);
+
+            // The conductor carries plan-path, spec-path, intake-path, and
+            // execution-and-review references; the entry-point skill projects all four.
+            Assert.Equal(4, primaryAgent.Resources.Count);
             Assert.Single(
                 result.Receipt.Files,
-                f => f.RelativePath == $"skills/{primaryAgentName}/SKILL.md");
-            Assert.Single(
-                result.Receipt.Files,
-                f => f.RelativePath == $"agents/{primaryAgentName}.md");
+                f => f.RelativePath == $"skills/{primaryAgent.Name}/SKILL.md");
+            foreach (SquadResource resource in primaryAgent.Resources)
+            {
+                Assert.Single(
+                    result.Receipt.Files,
+                    f => f.RelativePath == $"skills/{primaryAgent.Name}/{resource.RelativePath}");
+            }
+
+            if (target == SquadTarget.Claude)
+            {
+                Assert.Single(
+                    result.Receipt.Files,
+                    f => f.RelativePath == $"agents/{primaryAgent.Name}.md");
+            }
+            else
+            {
+                Assert.DoesNotContain(
+                    result.Receipt.Files,
+                    f => f.RelativePath == $"agents/{primaryAgent.Name}.md");
+            }
         }
 
         bool sawAgentFile = false;
@@ -724,6 +849,7 @@ public sealed class SquadGlobalRootTests : IDisposable
     [InlineData(SquadTarget.OpenCode, ".opencode/")]
     [InlineData(SquadTarget.Kilo, ".kilo/")]
     [InlineData(SquadTarget.ZCode, ".zcode/")]
+    [InlineData(SquadTarget.Devin, ".devin/")]
     public async Task InstallAsync_ProjectScopeDryRun_RelativePathsKeepTodaysHarnessPrefix(
         SquadTarget target,
         string expectedPrefix)
@@ -780,6 +906,7 @@ public sealed class SquadGlobalRootTests : IDisposable
     [InlineData(SquadTarget.Claude)]
     [InlineData(SquadTarget.Pi)]
     [InlineData(SquadTarget.ZCode)]
+    [InlineData(SquadTarget.Devin)]
     public async Task InstallAsync_RealInstallGlobalScope_WritesOnlyUnderTheResolvedHomeSubtree(SquadTarget target)
     {
         // Arrange
@@ -815,18 +942,40 @@ public sealed class SquadGlobalRootTests : IDisposable
         Assert.Equal(expectedFileCount, result.Receipt.Files.Count);
         Assert.All(result.Receipt.Files, file => Assert.Equal(expectedToken, file.Target));
 
-        // Claude is the one target where a primary agent adds an entry-point skill.
-        if (target == SquadTarget.Claude)
+        // Claude keeps the subagent and adds an entry-point skill beside it; Cursor
+        // follows the Pi-renderer skill-only precedent (no agents/<name>.md principal).
+        if (target is SquadTarget.Claude or SquadTarget.Cursor)
         {
             string productRoot = Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
             SquadSource source = SquadSourceLoader.Load(productRoot);
-            string primaryAgentName = Assert.Single(source.Agents, a => a.Invocation == SquadInvocation.Primary).Name;
+            SquadAgent primaryAgent = Assert.Single(source.Agents, a => a.Invocation == SquadInvocation.Primary);
+            Assert.Equal("conductor", primaryAgent.Name);
+
+            // The conductor carries plan-path, spec-path, intake-path, and
+            // execution-and-review references; the entry-point skill projects all four.
+            Assert.Equal(4, primaryAgent.Resources.Count);
             Assert.Single(
                 result.Receipt.Files,
-                f => f.RelativePath == $"skills/{primaryAgentName}/SKILL.md");
-            Assert.Single(
-                result.Receipt.Files,
-                f => f.RelativePath == $"agents/{primaryAgentName}.md");
+                f => f.RelativePath == $"skills/{primaryAgent.Name}/SKILL.md");
+            foreach (SquadResource resource in primaryAgent.Resources)
+            {
+                Assert.Single(
+                    result.Receipt.Files,
+                    f => f.RelativePath == $"skills/{primaryAgent.Name}/{resource.RelativePath}");
+            }
+
+            if (target == SquadTarget.Claude)
+            {
+                Assert.Single(
+                    result.Receipt.Files,
+                    f => f.RelativePath == $"agents/{primaryAgent.Name}.md");
+            }
+            else
+            {
+                Assert.DoesNotContain(
+                    result.Receipt.Files,
+                    f => f.RelativePath == $"agents/{primaryAgent.Name}.md");
+            }
         }
 
         Assert.True(
@@ -839,11 +988,64 @@ public sealed class SquadGlobalRootTests : IDisposable
         Assert.Empty(Directory.EnumerateFileSystemEntries(projectRoot, "*", SearchOption.AllDirectories));
     }
 
+    // ---------------------------------------------------------------------------------------
+    // Behavior (7): Guard test — every renderer's Global output contains no legacy prefix
+    // ---------------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task RenderReceiptLayout_GlobalRender_ContainsNoPrefixedPaths()
+    {
+        // Guard: verify that every registered renderer's global output contains no path starting with
+        // the target's legacy prefix. This ensures the layout classification cannot mistake per-target
+        // renders for legacy single-root paths.
+        string productRoot = Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+
+        // Map of target to its legacy prefix from the investigation findings.
+        Dictionary<SquadTarget, string> legacyPrefixes = new()
+        {
+            { SquadTarget.Claude, ".claude/" },
+            { SquadTarget.Codex, ".codex/" },
+            { SquadTarget.Cursor, ".cursor/" },
+            { SquadTarget.Copilot, ".github/" },
+            { SquadTarget.Antigravity, ".agents/" },
+            { SquadTarget.Pi, ".pi/" },
+            { SquadTarget.OpenCode, ".opencode/" },
+            { SquadTarget.Kilo, ".kilo/" },
+            { SquadTarget.Factory, ".factory/" },
+            { SquadTarget.Warp, ".warp/" },
+            { SquadTarget.ZCode, ".zcode/" },
+            { SquadTarget.Devin, ".devin/" }
+        };
+
+        ISquadRenderer renderer = SquadCommandComposition.ResolveRenderer();
+
+        foreach (SquadTarget target in SquadTargetCatalog.All)
+        {
+            SquadRenderResult result = await renderer.RenderAsync(
+                new SquadRenderRequest(
+                    SourceDirectory: productRoot,
+                    Targets: [target],
+                    Scope: SquadDeploymentScope.Global));
+
+            if (legacyPrefixes.TryGetValue(target, out string? prefix))
+            {
+                foreach (var file in result.Files)
+                {
+                    Assert.False(
+                        file.RelativePath.StartsWith(prefix, StringComparison.Ordinal),
+                        $"Renderer for {target} must not emit paths prefixed with '{prefix}' in global scope.");
+                }
+            }
+        }
+    }
+
     /// <summary>
     /// R17: <c>Agents.Count + Σ agent resources + Skills.Count − shared-identity skills +
     /// Σ non-suppressed skill resources</c>, read from the loaded corpus rather than a
-    /// hardcoded literal. Claude is the one target where a primary agent adds a principal
-    /// (an entry-point skill beside its subagent).
+    /// hardcoded literal. Claude adds a principal (an entry-point skill beside its
+    /// subagent); Cursor is count-neutral under the skill-only Pi precedent (the agent
+    /// principal plus its refs out, <c>SKILL.md</c> plus its refs in), so only the
+    /// receipt paths differ there.
     /// </summary>
     private static int ExpectedRenderedFileCount(SquadTarget target)
     {
@@ -859,9 +1061,16 @@ public sealed class SquadGlobalRootTests : IDisposable
             + source.Skills.Where(skill => !sharedIdentities.Contains(skill.Name))
                 .Sum(skill => skill.Resources.Count);
 
-        // Claude is the one target where a primary agent adds an entry-point skill beside its subagent.
-        if (target == SquadTarget.Claude)
+        // Claude keeps the subagent and adds an entry-point skill beside it; Cursor
+        // replaces the agent principal with the entry-point skill (Pi precedent), so
+        // its total is unchanged and only the receipt paths differ (asserted above).
+        if (target is SquadTarget.Claude or SquadTarget.Cursor)
         {
+            if (target == SquadTarget.Cursor)
+            {
+                return baseCount;
+            }
+
             int claudeAddition = 0;
             foreach (SquadAgent agent in source.Agents.Where(a => a.Invocation == SquadInvocation.Primary))
             {

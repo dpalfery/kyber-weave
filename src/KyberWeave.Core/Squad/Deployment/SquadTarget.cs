@@ -13,7 +13,8 @@ public enum SquadTarget
     Warp,
     Factory,
     Pi,
-    ZCode
+    ZCode,
+    Devin
 }
 
 /// <summary>Canonical target tokens, aliases, and parsing for Kyber-Squad.</summary>
@@ -32,7 +33,8 @@ public static class SquadTargetCatalog
             SquadTarget.Warp,
             SquadTarget.Factory,
             SquadTarget.Pi,
-            SquadTarget.ZCode
+            SquadTarget.ZCode,
+            SquadTarget.Devin
         ]);
 
     private static readonly IReadOnlyDictionary<string, SquadTarget> TargetsByToken =
@@ -50,7 +52,8 @@ public static class SquadTargetCatalog
             ["factory"] = SquadTarget.Factory,
             ["factory-droids"] = SquadTarget.Factory,
             ["pi"] = SquadTarget.Pi,
-            ["zcode"] = SquadTarget.ZCode
+            ["zcode"] = SquadTarget.ZCode,
+            ["devin"] = SquadTarget.Devin
         };
 
     /// <summary>The approved target roster in stable presentation order.</summary>
@@ -70,6 +73,7 @@ public static class SquadTargetCatalog
         SquadTarget.Factory => "factory",
         SquadTarget.Pi => "pi",
         SquadTarget.ZCode => "zcode",
+        SquadTarget.Devin => "devin",
         _ => throw new ArgumentOutOfRangeException(nameof(target), target, "Unknown Squad target.")
     };
 

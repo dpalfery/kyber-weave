@@ -60,7 +60,9 @@ describe('T6 split harness identity', () => {
     expect(normalizeHarnessName('copilot-jetbrains')).toBe('copilot-jetbrains')
     expect(normalizeHarnessName('copilot-agent')).toBe('copilot-agent')
     expect(normalizeHarnessName('cursor')).toBe('cursor')
-    expect(normalizeHarnessName('cursor-agent')).toBe('cursor-agent')
+    // Issue #182: Cursor Agent is Cursor's agent front-end, not a second
+    // harness — one session key under both names is one `cursor` session.
+    expect(normalizeHarnessName('cursor-agent')).toBe('cursor')
     expect(normalizeHarnessName('cline')).toBe('cline')
     expect(normalizeHarnessName('cline-cli')).toBe('cline-cli')
   })
@@ -85,11 +87,15 @@ describe('T6 split harness identity', () => {
     expect(normalizeHarnessName('codex-unclassified')).toBe('codex-unclassified')
     expect(normalizeHarnessName('codex-cli')).toBe('codex-cli')
     expect(normalizeHarnessName('claude-cli')).toBe('claude-cli')
+    // Issue #182: the desktop OTLP export is Claude Code under a second name.
+    expect(normalizeHarnessName('claude-desktop')).toBe('claude-code')
   })
 })
 
 describe('T6 derivation does not collapse or seed Gemini', () => {
-  it('keeps freshly split sessions when pruning their old unsplit id', async () => {
+  it('merges twin front-ends into one session instead of splitting', async () => {
+    // Issue #182: `cursor` and `cursor-agent` rows under one key are one
+    // harness reached through two front ends, so the bare key stays one row.
     const store = new CanonStore(':memory:')
     store.upsert(record('c1', 'cursor', 'native-shared'))
     await buildSessions(store)
@@ -100,14 +106,16 @@ describe('T6 derivation does not collapse or seed Gemini', () => {
     }))
     const report = await buildSessions(store)
 
-    expect(report.pruned).toBe(1)
-    expect(store.getSessionPayload('native-shared')).toBeUndefined()
-    expect(store.getSessionPayload('cursor:native-shared')).toBeDefined()
-    expect(store.getSessionPayload('cursor-agent:native-shared')).toBeDefined()
+    expect(report.pruned).toBe(0)
+    expect(store.getSessionPayload('native-shared')).toBeDefined()
+    expect(store.getSessionPayload('cursor:native-shared')).toBeUndefined()
+    expect(store.getSessionPayload('cursor-agent:native-shared')).toBeUndefined()
     store.close()
   })
 
-  it('builds separate sessions and rollups for Cursor and Cursor Agent', async () => {
+  it('merges Cursor and Cursor Agent shares into one session and rollup', async () => {
+    // Issue #182: twin front-end shares of one key build one session, one
+    // run, and one rollup sample — never a twin row per surface.
     const store = new CanonStore(':memory:')
     store.upsertMany([
       record('c1', 'cursor', 'native-shared'),
@@ -115,18 +123,13 @@ describe('T6 derivation does not collapse or seed Gemini', () => {
     ])
 
     const report = await buildSessions(store)
-    expect(report.built).toBe(2)
+    expect(report.built).toBe(1)
 
-    expect(store.listSessions('cursor').map((s) => s.sessionId).sort()).not.toEqual(
-      store.listSessions('cursor-agent').map((s) => s.sessionId).sort(),
-    )
     expect(store.listSessions('cursor')).toHaveLength(1)
-    expect(store.listSessions('cursor-agent')).toHaveLength(1)
+    expect(store.listSessions('cursor-agent')).toHaveLength(0)
 
     const cursorRollup = buildHarnessRollup(store, 'cursor')
-    const agentRollup = buildHarnessRollup(store, 'cursor-agent')
     expect((cursorRollup.payload as { sessionCount: number }).sessionCount).toBe(1)
-    expect((agentRollup.payload as { sessionCount: number }).sessionCount).toBe(1)
     store.close()
   })
 
@@ -163,6 +166,27 @@ describe('T6 derivation does not collapse or seed Gemini', () => {
     store.close()
   })
 
+  it('builds an antigravity session and rollup from live agy records while Gemini stays excluded', async () => {
+    // Issue #195: rows the fix re-attributes to `antigravity` must project
+    // into sessions and rollups; the `gemini` identity itself stays dropped.
+    const store = new CanonStore(':memory:')
+    store.upsertMany([
+      record('a1', 'antigravity', 'agy-1', { source: 'agy' }),
+      record('g1', 'gemini', 'gem-1', { source: 'agy' }),
+    ])
+    const report = await buildSessions(store)
+
+    expect(report.built).toBe(1)
+    expect(store.listSessions('antigravity')).toHaveLength(1)
+    expect(store.listSessions('gemini')).toHaveLength(0)
+
+    const rollups = buildHarnessRollup(store)
+    expect(rollups.map((r) => r.harness)).toContain('antigravity')
+    expect(rollups.map((r) => r.harness)).not.toContain('gemini')
+    expect(store.getHarnessRollup('antigravity')?.sampleCount).toBeGreaterThan(0)
+    store.close()
+  })
+
   it('seeds registered split harnesses, not Gemini, on an empty store', () => {
     const store = new CanonStore(':memory:')
     const rollups = buildHarnessRollup(store)
@@ -176,15 +200,21 @@ describe('T6 derivation does not collapse or seed Gemini', () => {
       'copilot-cli',
       'copilot-vscode',
       'cursor',
-      'cursor-agent',
       'kilo-shared-runtime',
       'kilo-vscode-legacy',
       'pi',
     ]) {
       expect(ids).toContain(required)
     }
+    // Issue #182: folded front-ends seed no rollup of their own — a row that
+    // can never gain a session is dead UI beside the harness it merged into.
+    expect(ids).not.toContain('cursor-agent')
+    expect(ids).not.toContain('claude-desktop')
     expect(ids).toEqual([...new Set(ids)].sort())
-    expect(ids.length).toBeGreaterThanOrEqual(HARNESS_DESCRIPTORS.length)
+    // Seeds are canonical harness ids: folded front-ends share their owner's
+    // seed, so the bound counts canonical ids, not raw descriptors.
+    const canonicalSeeds = new Set(HARNESS_DESCRIPTORS.map((d) => normalizeHarnessName(d.harnessId)))
+    expect(ids.length).toBeGreaterThanOrEqual(canonicalSeeds.size)
     store.close()
   })
 
@@ -235,16 +265,16 @@ describe('T6 unavailable is not a measured zero', () => {
     const cache = cacheAvailability('copilot-cli')
     expect(cache.harness).toBe('copilot-cli')
     expect(cache.status).toBe('supported')
-    expect(prefixAvailability('cursor-agent').harness).toBe('cursor-agent')
+    expect(prefixAvailability('cursor-agent').harness).toBe('cursor')
     expect(prefixAvailability('cursor-agent').status).toBe(prefixAvailability('cursor').status)
   })
 })
 
-describe('T6 session stamp uses the split canonical id', () => {
-  it('stamps cursor-agent on the derived session rather than cursor', () => {
+describe('T6 session stamp uses the folded canonical id', () => {
+  it('stamps cursor on the derived session rather than cursor-agent', () => {
     const row = buildSessionRow('s1', [record('a1', 'cursor-agent', 's1')], approximateO200kBase)
-    expect(row.harness).toBe('cursor-agent')
-    expect((row.payload as { harness: string }).harness).toBe('cursor-agent')
+    expect(row.harness).toBe('cursor')
+    expect((row.payload as { harness: string }).harness).toBe('cursor')
   })
 })
 

@@ -68,4 +68,68 @@ See scripts/run.py for details.
         Assert.Throws<SkillParseException>(() =>
             SkillParser.Parse("# Just a heading\nno frontmatter", "/tmp/x/SKILL.md", "/tmp/x"));
     }
+
+    [Fact]
+    public void ReferenceWithFragmentAnchorResolvesWhenTargetFileExists()
+    {
+        using TempDirectory tempDir = new TempDirectory();
+        string referencesDir = Path.Combine(tempDir.Path, "references");
+        Directory.CreateDirectory(referencesDir);
+        File.WriteAllText(Path.Combine(referencesDir, "guide.md"), "# Guide\n\n## Overview");
+
+        string content = """
+---
+name: fragment-skill
+description: Tests fragment anchor resolution.
+---
+
+# Fragment Skill
+
+See [Guide](references/guide.md#overview) for details.
+""";
+
+        Skill skill = SkillParser.Parse(content, Path.Combine(tempDir.Path, "SKILL.md"), tempDir.Path);
+        SkillReferenceLink link = Assert.Single(skill.ReferenceLinks);
+        Assert.Equal("references/guide.md", link.Target);
+        Assert.True(link.Resolves);
+    }
+
+    [Fact]
+    public void ConfigRegTokensAreSkippedAsNonFileReferences()
+    {
+        using TempDirectory tempDir = new TempDirectory();
+        string content = """
+---
+name: token-skill
+description: Tests config reg token skipping.
+---
+
+# Token Skill
+
+Consult [Docs Root](<docs-root>) and [Plan Index](<plan-index>).
+""";
+
+        Skill skill = SkillParser.Parse(content, Path.Combine(tempDir.Path, "SKILL.md"), tempDir.Path);
+        Assert.Empty(skill.ReferenceLinks);
+    }
+
+    [Fact]
+    public void ForeignAbsolutePathsAreSkipped()
+    {
+        using TempDirectory tempDir = new TempDirectory();
+        string content = """
+---
+name: absolute-skill
+description: Tests foreign absolute path skipping.
+---
+
+# Absolute Skill
+
+See [drive](C:/foo/bar.md), [posix](/etc/bar.md), [unc](\\share\path\file.md), and [unc-slash](//unc/path/file.md).
+""";
+
+        Skill skill = SkillParser.Parse(content, Path.Combine(tempDir.Path, "SKILL.md"), tempDir.Path);
+        Assert.Empty(skill.ReferenceLinks);
+    }
 }
+

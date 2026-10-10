@@ -25,7 +25,8 @@ internal static class CoverageCollector
 
         string? newest = roots
             .Where(Directory.Exists)
-            .SelectMany(root => Directory.EnumerateFiles(root, "coverage.cobertura.xml", SearchOption.AllDirectories))
+            .SelectMany(root => Directory.EnumerateFiles(root, "*.xml", SearchOption.AllDirectories))
+            .Where(IsReportName)
             .Select(path => new FileInfo(path))
             .Where(info => info.LastWriteTimeUtc >= notBeforeUtc.AddSeconds(-1))
             .OrderByDescending(info => info.LastWriteTimeUtc)
@@ -59,7 +60,7 @@ internal static class CoverageCollector
         foreach (FileInfo info in roots
             .Where(Directory.Exists)
             .SelectMany(root => Directory.EnumerateFiles(root, "*.xml", SearchOption.AllDirectories))
-            .Where(path => ReportNames.Contains(Path.GetFileName(path), StringComparer.Ordinal))
+            .Where(IsReportName)
             .Select(path => new FileInfo(path))
             .Where(info => info.LastWriteTimeUtc >= notBeforeUtc.AddSeconds(-1)))
         {
@@ -103,4 +104,23 @@ internal static class CoverageCollector
         double.TryParse(rate, NumberStyles.Float, CultureInfo.InvariantCulture, out double value)
             ? value * 100
             : 0;
+
+    private static bool IsReportName(string path)
+    {
+        string fileName = Path.GetFileName(path);
+        if (ReportNames.Contains(fileName, StringComparer.Ordinal))
+            return true;
+
+        // coverlet.MTP adds a run timestamp to avoid overwriting reports in the same output directory.
+        const string prefix = "coverage.cobertura.";
+        const string extension = ".xml";
+        if (!fileName.StartsWith(prefix, StringComparison.Ordinal) ||
+            !fileName.EndsWith(extension, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        string timestamp = fileName[prefix.Length..^extension.Length];
+        return timestamp.Length > 0 && timestamp.All(char.IsAsciiDigit);
+    }
 }

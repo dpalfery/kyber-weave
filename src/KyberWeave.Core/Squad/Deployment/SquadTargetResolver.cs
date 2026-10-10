@@ -81,7 +81,8 @@ public static class SquadTargetResolver
             [SquadTarget.Kilo] = [new(".kilo", true)],
             [SquadTarget.Warp] = [new(".warp", true)],
             [SquadTarget.Factory] = [new(".factory", true)],
-            [SquadTarget.ZCode] = [new(".zcode", true)]
+            [SquadTarget.ZCode] = [new(".zcode", true)],
+            [SquadTarget.Devin] = [new(".devin", true)]
         };
 
     /// <summary>Resolves targets according to the operation-specific precedence contract.</summary>

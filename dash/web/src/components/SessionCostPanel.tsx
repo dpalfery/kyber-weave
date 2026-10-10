@@ -1,7 +1,8 @@
 import { useMemo } from 'react'
 import { cn, fmtNum, fmtTokens } from '../lib/utils.js'
-import { renderCost, sumCosts, COST_BASIS_MISMATCH } from '../../../src/canon/cost.js'
+import { renderCost } from '../../../src/canon/cost.js'
 import type { CostBasis, CostBlock, CostStatus } from '../../../src/canon/types.js'
+import type { KyberCostBasisMismatch } from '../lib/kyberApi.js'
 
 export type { CostBasis, CostBlock, CostStatus }
 
@@ -18,7 +19,6 @@ export interface SessionCostSummary {
   total_cache_read?: number | null
   total_cache_creation?: number | null
   cache_hit_ratio?: number | null
-  cost_basis_mismatch?: unknown
 }
 
 export interface SessionCostProblem {
@@ -31,7 +31,17 @@ export interface SessionCostSource {
   costs?: unknown
   summary?: SessionCostSummary
   problems?: SessionCostProblem[]
-  cost_basis_mismatch?: unknown
+  /**
+   * The server's basis verdict (`null`, or `{ code, message, bases,
+   * totalsByBasis }`). This panel renders it; it never works the answer out
+   * itself — deciding whether a session's figures share a basis is engine work
+   * (rule R1, display layer).
+   *
+   * `undefined` is a stored payload written before the field existed. It means
+   * unknown, and unknown is not a claim: no warning is rendered and the
+   * per-basis figures are left exactly as they arrived, never blended.
+   */
+  costBasisMismatch?: KyberCostBasisMismatch | null
 }
 
 export interface SessionCostPanelProps {
@@ -194,34 +204,28 @@ export function SessionCostPanel({ session, cost, costs, className }: SessionCos
   const blocks = useMemo(() => extractCostBlocks({ session, cost, costs }), [session, cost, costs])
   const summary = session?.summary ?? {}
 
-  // Detect mismatch between cost bases:
-  // 1. If multiple blocks have differing bases, sumCosts will refuse to blend them.
-  // 2. Or if session records a problem with code COST_BASIS_MISMATCH.
+  // Detect a basis mismatch from what the server already decided:
+  // 1. `session.costBasisMismatch` is the verdict — an object renders its
+  //    message, an explicit `null` is "these agree" and ends the question.
+  // 2. A payload stored before that field existed carries `undefined` (unknown,
+  //    which is not a claim) and falls back to the recorded `problems` list —
+  //    itself server-computed — rather than to any figure this panel could
+  //    derive from the blocks it was handed.
   const mismatchMessage = useMemo(() => {
-    if (blocks.length > 1) {
-      const sumResult = sumCosts(blocks)
-      if (!sumResult.ok && sumResult.problem?.code === COST_BASIS_MISMATCH) {
-        return sumResult.problem.message
-      }
+    const verdict = session?.costBasisMismatch
+    if (verdict !== undefined) {
+      return typeof verdict?.message === 'string' ? verdict.message : null
     }
 
     if (session?.problems && Array.isArray(session.problems)) {
-      const problem = session.problems.find((p) => p.code === COST_BASIS_MISMATCH)
+      const problem = session.problems.find((p) => p.code === 'COST_BASIS_MISMATCH')
       if (problem) {
         return problem.message ?? null
       }
     }
 
-    if (session?.cost_basis_mismatch || summary?.cost_basis_mismatch) {
-      return typeof session?.cost_basis_mismatch === 'string'
-        ? session.cost_basis_mismatch
-        : typeof summary?.cost_basis_mismatch === 'string'
-          ? summary.cost_basis_mismatch
-          : 'Cost bases differ across session records; refusing to blend them into one total.'
-    }
-
     return null
-  }, [blocks, session, summary])
+  }, [session, summary])
 
   // Token totals from payload.summary
   const totalInput = typeof summary.total_input === 'number' ? summary.total_input : null

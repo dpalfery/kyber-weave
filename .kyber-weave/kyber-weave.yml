@@ -40,11 +40,11 @@ review:
     - id: build
       run: [dotnet, build, KyberWeave.sln, -c, Release]
       blocking: true
-    # Coverlet writes Cobertura under artifacts/coverage so GateRunner can populate
-    # the coverage floor. `--collect` takes "XPlat Code Coverage" as its own argv
-    # element — a quoted shell string would never reach ProcessRunner.
+    # coverlet.MTP writes Cobertura under artifacts/coverage so GateRunner can populate
+    # the coverage floor. xUnit 4 uses Microsoft Testing Platform, whose coverage
+    # extension uses `--coverlet` instead of VSTest's `--collect` data-collector option.
     - id: test
-      run: [dotnet, test, tests/KyberWeave.Tests/KyberWeave.Tests.csproj, -c, Release, --collect, "XPlat Code Coverage", --results-directory, artifacts/coverage]
+      run: [dotnet, test, tests/KyberWeave.Tests/KyberWeave.Tests.csproj, -c, Release, --coverlet, --coverlet-output-format, cobertura, --results-directory, artifacts/coverage]
       blocking: true
     - id: skill-validate
       run: [dotnet, run, --project, src/KyberWeave.Cli, --, skill, validate, .apm/skills/kyber-weave-docs]

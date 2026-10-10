@@ -22,10 +22,12 @@ import {
   DEFAULT_FINDING_LIMIT,
   DEFAULT_SECTIONS,
   REPORT_SCHEMA_VERSION,
+  derived,
   measured,
   unmeasurable,
   type BucketKey,
   type ContextReport,
+  type Measured,
   type ReportCost,
   type ReportCoverage,
   type ReportFinding,
@@ -240,6 +242,7 @@ function toReportMeasurability(
  */
 function buildCoverage(
   bridge: KyberBridge,
+  scope: ReportScope,
   scoped: readonly SessionSummary[],
   windowed: readonly SessionSummary[],
   storePath: string,
@@ -264,8 +267,25 @@ function buildCoverage(
     }))
 
   const hints: string[] = []
-  if (scoped.length === 0) {
-    hints.push('No session in the window. Run `kyberdash dash refresh` to read local harness history.')
+  // An empty narrowed set has two different causes with two different
+  // remedies: a filter that matches nothing (name the filter and the day
+  // window) versus a day window that holds nothing at all (name the ingest
+  // window). Suggesting `--history-weeks` for a filter emptiness prescribes
+  // rows nobody asked for; suggesting `--days` for an empty ingest window
+  // misses the refresh that would fill it.
+  const hasFilter =
+    scope.harness !== undefined || scope.sessionId !== undefined || scope.runId !== undefined
+  if (scoped.length === 0 && hasFilter && windowed.length > 0) {
+    const naming = [scope.harness, scope.sessionId, scope.runId].filter(
+      (part): part is string => part !== undefined,
+    )
+    hints.push(
+      `No session matches the filter (${naming.join(', ')}). Loosen the filter or widen the report window with --days ${scope.days}.`,
+    )
+  } else if (scoped.length === 0) {
+    hints.push(
+      'No session in the window. Run `kyberdash dash refresh --history-weeks <n>` to widen the coverage window.',
+    )
   }
   // An hour is the point past which a reader should be told the figures are old rather
   // than left to compare timestamps themselves (R11.4).
@@ -296,12 +316,32 @@ function buildCoverage(
  * Refresh state from the run log (R10.5). The last success and the last failure are read
  * independently on purpose: a failure must not hide the success before it, because "it
  * last worked on Tuesday" is what tells a reader how stale the data is.
+ *
+ * The coverage window rides along from the T4 bridge seam (`historyWeeks` plus the
+ * derived `coveredFrom`/`coveredThrough` of the last success). A bridge that predates
+ * window tracking omits those keys, and a pre-migration run carries them as null:
+ * both normalise to null here — unknown stays unknown, never the default, never 0.
  */
 function readRefreshState(bridge: KyberBridge): ReportCoverage['refresh'] {
-  return safely(
-    () => bridge.getRefreshState(),
-    { lastSuccessAt: null, lastFailure: null, inProgress: null },
-  )
+  const fallback: ReportCoverage['refresh'] = {
+    lastSuccessAt: null,
+    lastFailure: null,
+    inProgress: null,
+    historyWeeks: null,
+    coveredFrom: null,
+    coveredThrough: null,
+  }
+  return safely(() => {
+    const state = bridge.getRefreshState()
+    return {
+      lastSuccessAt: state.lastSuccessAt,
+      lastFailure: state.lastFailure,
+      inProgress: state.inProgress,
+      historyWeeks: state.historyWeeks ?? null,
+      coveredFrom: state.coveredFrom ?? null,
+      coveredThrough: state.coveredThrough ?? null,
+    }
+  }, fallback)
 }
 
 function buildHarnesses(bridge: KyberBridge, scope: ReportScope): ReportHarness[] {
@@ -345,7 +385,7 @@ function buildLatestSession(
       ? 'harness exported no message structure for this session'
       : context.contextLimit === undefined
         ? context.unavailableReason
-        : context.contextLimitSource === 'default'
+        : context.contextLimitSource === 'default' || context.contextLimitSource === 'absent'
           ? 'source reported no context window'
           : undefined
 
@@ -356,11 +396,11 @@ function buildLatestSession(
         ? unmeasurable<number>(windowUnavailableReason)
         : context.turn.pressure === undefined
           ? unmeasurable<number>(context.unavailableReason)
-          : measured(context.turn.pressure),
+          : windowFigure(context.turn.pressure, context.contextLimitSource),
     contextWindow:
       windowUnavailableReason !== undefined
         ? unmeasurable<number>(windowUnavailableReason)
-        : measured(context.contextLimit!, 'tokens'),
+        : windowFigure(context.contextLimit!, context.contextLimitSource, 'tokens'),
     buckets: Object.fromEntries(
       BUCKET_KEYS.map((key) => {
         const value = context.turn.buckets?.[key]
@@ -397,9 +437,27 @@ function buildLatestSession(
   }
 }
 
+/** Provenance the report can carry. `catalog` is D15; `absent` is a bridge span with no declared window. */
+type ReportWindowSource = 'reported' | 'declared' | 'catalog' | 'default' | 'absent'
+
+/**
+ * A declared or catalog window is not telemetry (D5, D15). Returning `measured`
+ * for either would make the report claim a harness reported a number it only
+ * configured or looked up.
+ */
+function windowFigure(
+  value: number,
+  source: ReportWindowSource | undefined,
+  unit?: string,
+): Measured<number> {
+  if (source === 'declared') return derived(value, 'declared window', unit)
+  if (source === 'catalog') return derived(value, 'vendor catalog', unit)
+  return measured(value, unit)
+}
+
 type LatestContext = {
   contextLimit?: number
-  contextLimitSource?: 'reported' | 'default'
+  contextLimitSource?: ReportWindowSource
   measurable: boolean
   unavailableReason: string
   bucketReasons: Partial<Record<BucketKey, string>>
@@ -426,13 +484,19 @@ function extractContext(payload: { context?: unknown; turns?: unknown[] } | unde
   const lastBuckets = asObject(last?.buckets)
   const rawLimitSource = context.contextLimitSource
   const contextLimitSource =
-    rawLimitSource === 'reported' || rawLimitSource === 'default' ? rawLimitSource : undefined
+    rawLimitSource === 'reported' ||
+    rawLimitSource === 'declared' ||
+    rawLimitSource === 'catalog' ||
+    rawLimitSource === 'default' ||
+    rawLimitSource === 'absent'
+      ? rawLimitSource
+      : undefined
   const contextLimit = finiteNumber(context.contextLimit)
   const reportedInput = finiteNumber(last?.reported_input)
   const turnIndex = finiteNumber(turn?.index) ?? finiteNumber(payloadTurn?.index) ?? 0
   const turnPressure = finiteNumber(turn?.pressure)
   const pressure =
-    contextLimitSource === 'default'
+    contextLimitSource === 'default' || contextLimitSource === 'absent'
       ? undefined
       : turnPressure ??
         (reportedInput !== undefined && contextLimit !== undefined && contextLimit > 0
@@ -548,6 +612,7 @@ export function buildContextReport(
     // session and run filters the inventory must ignore (R8.8).
     report.coverage = buildCoverage(
       bridge,
+      scope,
       scoped,
       sessionsInScope(allSessions, { days: scope.days }, now),
       options.storePath ?? 'canon.db',

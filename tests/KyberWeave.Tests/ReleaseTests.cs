@@ -1,26 +1,30 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Processes;
 using Xunit;
 using Xunit.Sdk;
+using YamlDotNet.Serialization;
 
 namespace KyberWeave.Tests;
 
 /// <summary>
-/// Pins the two halves of the release-pipeline contract that this side of the
-/// implementation owns:
+/// Pins the release-pipeline contract this test project owns:
 ///
-///   (a) the OS / architecture -> RID mapping the release workflow and the
-///       installer share, and
+///   (a) the OS / architecture -&gt; RID mapping the release workflow and the
+///       installer share,
 ///   (b) the SHA256SUMS.txt verification the installer runs before placing
-///       any binary on disk.
+///       any binary on disk, and
+///   (c) <c>KYBER_WEAVE_RELEASE_ORIGIN</c> — loopback <c>http</c>/<c>https</c>
+///       only, the curl and wget split, and a pinned install from
+///       <c>scripts/local-release-server.py</c>.
 ///
-/// <c>scripts/install.sh</c> is the single source of truth for both. The
-/// library-mode sourcing gated by <c>KYBER_WEAVE_INSTALL_LIB=1</c> exposes
-/// the helpers without running the installer, so what these tests exercise is
-/// the same shell code the user runs.
+/// <c>scripts/install.sh</c> is the single source of truth. Library-mode
+/// sourcing (<c>KYBER_WEAVE_INSTALL_LIB=1</c>) exposes helpers without running
+/// the installer. Full-install facts do not set that variable: library mode
+/// returns before download, checksum, and <c>install_binary</c>.
 ///
 /// Task 12.1 ("Add a test covering checksum verification and the
 /// platform-identifier resolution"). The installer tests are deliberately
@@ -29,6 +33,8 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class ReleaseTests
 {
+    private static readonly char[] OperandsSeparators = { ' ', '\t' };
+
     private static string InstallShPath => Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "install.sh");
 
     private static string ReleaseWorkflowPath =>
@@ -36,12 +42,12 @@ public sealed class ReleaseTests
 
     private static ProcessStartInfo CreateShellStartInfo(string script)
     {
-        ProcessStartInfo startInfo = new ProcessStartInfo("/bin/sh")
+        ProcessStartInfo startInfo = new("/bin/sh")
         {
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
-            UseShellExecute = false,
+            UseShellExecute = false
         };
         startInfo.ArgumentList.Add("-c");
         startInfo.ArgumentList.Add(script);
@@ -187,26 +193,26 @@ public sealed class ReleaseTests
         SkipOnWindows();
 
         const string stub = """
-            stub() {
-                case "$1" in
-                    *page=1)
-                        i=1
-                        printf '['
-                        while [ "$i" -le 100 ]; do
-                            printf '{"tag_name":"v0.1.%s-rc.1","draft":false,"prerelease":true}' "$i"
-                            if [ "$i" -lt 100 ]; then printf ','; fi
-                            i=$((i + 1))
-                        done
-                        printf ']' ;;
-                    *page=2)
-                        printf '[{"tag_name":"v9.0.0/preview","draft":false,"prerelease":true},'
-                        printf '{"tag_name":"v0.3.0-rc.1","draft":true,"prerelease":true},'
-                        printf '{"tag_name":"v0.3.0","draft":false,"prerelease":false},'
-                        printf '{"tag_name":"v0.2.0-rc.1","draft":false,"prerelease":true}]' ;;
-                    *) printf '[]' ;;
-                esac
-            }
-            """;
+                            stub() {
+                                case "$1" in
+                                    *page=1)
+                                        i=1
+                                        printf '['
+                                        while [ "$i" -le 100 ]; do
+                                            printf '{"tag_name":"v0.1.%s-rc.1","draft":false,"prerelease":true}' "$i"
+                                            if [ "$i" -lt 100 ]; then printf ','; fi
+                                            i=$((i + 1))
+                                        done
+                                        printf ']' ;;
+                                    *page=2)
+                                        printf '[{"tag_name":"v9.0.0/preview","draft":false,"prerelease":true},'
+                                        printf '{"tag_name":"v0.3.0-rc.1","draft":true,"prerelease":true},'
+                                        printf '{"tag_name":"v0.3.0","draft":false,"prerelease":false},'
+                                        printf '{"tag_name":"v0.2.0-rc.1","draft":false,"prerelease":true}]' ;;
+                                    *) printf '[]' ;;
+                                esac
+                            }
+                            """;
         ProcessStartInfo startInfo = CreateShellStartInfo(
             ". \"" + InstallShPath + "\"\n" + stub +
             "\nkyber_weave_newest_prerelease https://api.invalid/releases stub");
@@ -227,21 +233,21 @@ public sealed class ReleaseTests
         SkipOnWindows();
 
         const string stub = """
-            stub() {
-                case "$1" in
-                    *page=1)
-                        i=1
-                        printf '['
-                        while [ "$i" -le 100 ]; do
-                            printf '{"tag_name":"v0.1.%s-rc.1","draft":false,"prerelease":true}' "$i"
-                            if [ "$i" -lt 100 ]; then printf ','; fi
-                            i=$((i + 1))
-                        done
-                        printf ']' ;;
-                    *) return 22 ;;
-                esac
-            }
-            """;
+                            stub() {
+                                case "$1" in
+                                    *page=1)
+                                        i=1
+                                        printf '['
+                                        while [ "$i" -le 100 ]; do
+                                            printf '{"tag_name":"v0.1.%s-rc.1","draft":false,"prerelease":true}' "$i"
+                                            if [ "$i" -lt 100 ]; then printf ','; fi
+                                            i=$((i + 1))
+                                        done
+                                        printf ']' ;;
+                                    *) return 22 ;;
+                                esac
+                            }
+                            """;
         ProcessStartInfo startInfo = CreateShellStartInfo(
             ". \"" + InstallShPath + "\"\n" + stub +
             "\nkyber_weave_newest_prerelease https://api.invalid/releases stub");
@@ -359,11 +365,11 @@ public sealed class ReleaseTests
     {
         SkipOnWindows();
 
-        using Sandbox sandbox = new Sandbox();
+        using Sandbox sandbox = new();
         string archive = sandbox.WriteArchive(
             "kyberdash-linux-x64.tar.gz",
             "kyberdash binary content for the matcher");
-        sandbox.AppendSumsLine(archive, nameHint: "kyberdash-linux-x64.tar.gz");
+        sandbox.AppendSumsLine(archive, "kyberdash-linux-x64.tar.gz");
 
         ProcessStartInfo startInfo = CreateShellStartInfo(
             ". \"" + InstallShPath + "\"; " +
@@ -379,11 +385,11 @@ public sealed class ReleaseTests
     {
         SkipOnWindows();
 
-        using Sandbox sandbox = new Sandbox();
+        using Sandbox sandbox = new();
         string archive = sandbox.WriteArchive(
             "kyberdash-linux-x64.tar.gz",
             "kyberdash binary content for the matcher");
-        sandbox.AppendSumsLine(archive, nameHint: "kyberdash-linux-x64.tar.gz");
+        sandbox.AppendSumsLine(archive, "kyberdash-linux-x64.tar.gz");
         // Tamper after the sums line is written; the helper should detect the
         // divergence and return non-zero.
         File.AppendAllText(archive, "tampered");
@@ -405,13 +411,13 @@ public sealed class ReleaseTests
     {
         SkipOnWindows();
 
-        using Sandbox sandbox = new Sandbox();
+        using Sandbox sandbox = new();
         string archive = sandbox.WriteArchive(
             "kyberdash-linux-x64.tar.gz",
             "kyberdash binary content for the matcher");
         // Sums file lists a different asset; the basename of the archive
         // being verified is therefore absent.
-        sandbox.AppendSumsLine(archive, nameHint: "kyber-weave-linux-x64.tar.gz");
+        sandbox.AppendSumsLine(archive, "kyber-weave-linux-x64.tar.gz");
 
         ProcessStartInfo startInfo = CreateShellStartInfo(
             ". \"" + InstallShPath + "\"; " +
@@ -427,7 +433,7 @@ public sealed class ReleaseTests
     {
         SkipOnWindows();
 
-        using Sandbox sandbox = new Sandbox();
+        using Sandbox sandbox = new();
         string archive = sandbox.WriteArchive(
             "kyberdash-linux-x64.tar.gz",
             "kyberdash binary content for the matcher");
@@ -451,7 +457,7 @@ public sealed class ReleaseTests
     {
         SkipOnWindows();
 
-        using Sandbox sandbox = new Sandbox();
+        using Sandbox sandbox = new();
         string archive = sandbox.WriteArchive(
             "kyberdash-linux-x64.tar.gz",
             "kyberdash binary content for the matcher");
@@ -488,7 +494,7 @@ public sealed class ReleaseTests
     [
         "kyberdash-tray-darwin-arm64.zip",
         "kyberdash-tray-darwin-x64.zip",
-        "kyberdash-tray-win-x64-setup.exe",
+        "kyberdash-tray-win-x64-setup.exe"
     ];
 
     /// <summary>The macOS credentials the job requires before it builds anything.</summary>
@@ -499,7 +505,7 @@ public sealed class ReleaseTests
         "APPLE_SIGNING_IDENTITY",
         "APPLE_API_KEY",
         "APPLE_API_ISSUER",
-        "APPLE_API_KEY_P8",
+        "APPLE_API_KEY_P8"
     ];
 
     /// <summary>
@@ -512,7 +518,7 @@ public sealed class ReleaseTests
     private static readonly string[] RequiredSecretReferences =
     [
         "secrets.APPLE_DEVELOPER_ID_P12_BASE64",
-        "secrets.APPLE_DEVELOPER_ID_P12_PASSWORD",
+        "secrets.APPLE_DEVELOPER_ID_P12_PASSWORD"
     ];
 
     [Fact]
@@ -556,7 +562,7 @@ public sealed class ReleaseTests
             Assert.True(
                 workflow.Contains(reference, StringComparison.Ordinal),
                 $"release.yml does not read {reference}, the name the release environment "
-                    + "actually holds, so the certificate would be empty at signing time.");
+                + "actually holds, so the certificate would be empty at signing time.");
         }
 
         int presenceCheck = workflow.IndexOf("Require the signing secrets", StringComparison.Ordinal);
@@ -584,20 +590,14 @@ public sealed class ReleaseTests
     [Fact]
     public void LocalKyberDashBuildMatchesTheReleaseJob()
     {
-        // Normalized because the job is found by LF-delimited keys, and `* text=auto` gives a
-        // Windows checkout CRLF.
-        string workflow = File.ReadAllText(ReleaseWorkflowPath).ReplaceLineEndings("\n");
-        int start = workflow.IndexOf("\n  build-kyberdash:\n", StringComparison.Ordinal);
-        Assert.True(start >= 0, "release.yml has no build-kyberdash job.");
-        // The job runs to the next two-space-indented key, which is the next job.
-        Match next = Regex.Match(workflow[(start + 1)..], @"\n  [A-Za-z0-9_-]+:\n");
-        string job = next.Success ? workflow.Substring(start, next.Index + 1) : workflow[start..];
+        string job = ReadBuildKyberDashJob();
         string local = File.ReadAllText(Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "release-local.sh"));
 
         // release-local.sh reads its Node version from dash/.nvmrc rather than repeating it.
         Match nodeVersion = Regex.Match(job, "NODE_VERSION: \"([^\"]+)\"");
         Assert.True(nodeVersion.Success, "build-kyberdash no longer pins NODE_VERSION.");
-        string nvmrc = File.ReadAllText(Path.Combine(KyberWeaveTestPaths.ToolRoot, "dash", ".nvmrc")).Trim().TrimStart('v');
+        string nvmrc = File.ReadAllText(Path.Combine(KyberWeaveTestPaths.ToolRoot, "dash", ".nvmrc")).Trim()
+            .TrimStart('v');
         Assert.True(
             nodeVersion.Groups[1].Value == nvmrc,
             $"build-kyberdash builds on Node {nodeVersion.Groups[1].Value} but dash/.nvmrc, which the local build reads, says {nvmrc}.");
@@ -620,14 +620,367 @@ public sealed class ReleaseTests
             "\"package.json\":",
             "codesign --sign - --force",
             "THIRD_PARTY_NOTICES.md",
+            "npm --prefix web ci",
+            "npm --prefix web run build",
+            "scripts/pack-sea-web.mjs",
+            "\"web.json\":",
+            "scripts/sea-web-smoke.mjs"
         ];
         foreach (string value in shared)
         {
-            Assert.True(job.Contains(value, StringComparison.Ordinal), $"build-kyberdash no longer contains {value}; update this list with the job.");
+            Assert.True(job.Contains(value, StringComparison.Ordinal),
+                $"build-kyberdash no longer contains {value}; update this list with the job.");
             Assert.True(
                 local.Contains(value, StringComparison.Ordinal),
                 $"scripts/release-local.sh does not use {value}, which build-kyberdash does. Make the same change there.");
         }
+    }
+
+    /// <summary>
+    /// Issue #157, defect 1: the web dashboard is embedded in the released binary.
+    /// The release job and release-local.sh must build, embed, and smoke-test the dashboard
+    /// in the correct order: tsup comes first, then web build, then pack, then SEA config.
+    /// The smoke test runs after the blob is injected.
+    /// </summary>
+    [Fact]
+    public void BuildKyberDashEmbedsTheWebDashboard()
+    {
+        string job = ReadBuildKyberDashJob();
+        string local = ScopeBuildKyberDashFunction();
+
+        // Collect violations from both sources so one message reports both.
+        List<string> violations = [];
+
+        AssertEmbedsWebDashboard("release.yml", job, violations);
+        AssertEmbedsWebDashboard("release-local.sh", local, violations);
+
+        Assert.True(violations.Count == 0, string.Join("\n", violations));
+    }
+
+    /// <summary>
+    /// Reads the build-kyberdash job from release.yml, normalized to LF.
+    /// The job is the section from "\n  build-kyberdash:\n" to the next two-space-indented key.
+    /// </summary>
+    private static string ReadBuildKyberDashJob()
+    {
+        string workflow = File.ReadAllText(ReleaseWorkflowPath).ReplaceLineEndings("\n");
+        int start = workflow.IndexOf("\n  build-kyberdash:\n", StringComparison.Ordinal);
+        Assert.True(start >= 0, "release.yml has no build-kyberdash job.");
+        // The job runs to the next two-space-indented key, which is the next job.
+        Match next = Regex.Match(workflow[(start + 1)..], @"\n  [A-Za-z0-9_-]+:\n");
+        return next.Success ? workflow.Substring(start, next.Index + 1) : workflow[start..];
+    }
+
+    /// <summary>
+    /// Extracts the build_kyberdash() function from release-local.sh, then strips comments.
+    /// Scoped from "\nbuild_kyberdash() {\n" to the following "\nif [ -z \"$NO_KYBERDASH\" ]".
+    /// Both markers must exist.
+    /// </summary>
+    private static string ScopeBuildKyberDashFunction()
+    {
+        string local = File.ReadAllText(Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "release-local.sh"));
+        int start = local.IndexOf("\nbuild_kyberdash() {\n", StringComparison.Ordinal);
+        Assert.True(start >= 0, "release-local.sh has no build_kyberdash() function.");
+        int end = local.IndexOf("\nif [ -z \"$NO_KYBERDASH\" ]", start, StringComparison.Ordinal);
+        Assert.True(end >= 0, "release-local.sh build_kyberdash() function has no terminating marker.");
+
+        string scoped = local.Substring(start, end - start);
+        // Strip comments: lines whose trimmed text starts with #
+        string[] lines = scoped.Split('\n');
+        IEnumerable<string> filtered = lines.Where(line => !line.TrimStart().StartsWith('#'));
+        return string.Join("\n", filtered);
+    }
+
+    /// <summary>
+    /// Asserts that the given text (from release.yml job or release-local.sh) embeds the web dashboard
+    /// in the correct order, and that archive commands name only the expected operands.
+    /// Strips comments before checking, and collects violations into the list.
+    /// </summary>
+    private static void AssertEmbedsWebDashboard(string label, string text, List<string> violations)
+    {
+        // Strip comments before checking
+        string[] lines = text.Split('\n');
+        IEnumerable<string> filtered = lines.Where(line => !line.TrimStart().StartsWith('#'));
+        string textNoComments = string.Join("\n", filtered);
+
+        // Check ordering:
+        // tsup comes before web run build.
+        int tsupIndex = textNoComments.IndexOf("tsup --config tsup.sea.config.ts", StringComparison.Ordinal);
+        if (tsupIndex < 0)
+        {
+            violations.Add(
+                $"{label}: 'tsup --config tsup.sea.config.ts' not found; the dashboard embedding order starts there.");
+            return;
+        }
+
+        int webBuildIndex = textNoComments.IndexOf("npm --prefix web run build", StringComparison.Ordinal);
+        if (webBuildIndex < 0)
+        {
+            violations.Add(
+                $"{label}: 'npm --prefix web run build' not found; add it to the 'Bundle dash CLI' step after tsup.");
+            return;
+        }
+
+        if (tsupIndex >= webBuildIndex)
+        {
+            violations.Add(
+                $"{label}: 'tsup --config tsup.sea.config.ts' must come before 'npm --prefix web run build'. Make the same change there.");
+            return;
+        }
+
+        // web run build comes before pack-sea-web.mjs
+        int packIndex = textNoComments.IndexOf("scripts/pack-sea-web.mjs", StringComparison.Ordinal);
+        if (packIndex < 0)
+        {
+            violations.Add(
+                $"{label}: 'scripts/pack-sea-web.mjs' not found; add it after 'npm --prefix web run build'.");
+            return;
+        }
+
+        if (webBuildIndex >= packIndex)
+        {
+            violations.Add(
+                $"{label}: 'npm --prefix web run build' must come before 'scripts/pack-sea-web.mjs'. Make the same change there.");
+            return;
+        }
+
+        // pack-sea-web.mjs comes before --experimental-sea-config
+        int seaConfigIndex = textNoComments.IndexOf("--experimental-sea-config", StringComparison.Ordinal);
+        if (seaConfigIndex < 0)
+        {
+            violations.Add($"{label}: '--experimental-sea-config' not found.");
+            return;
+        }
+
+        if (packIndex >= seaConfigIndex)
+        {
+            violations.Add(
+                $"{label}: 'scripts/pack-sea-web.mjs' must come before '--experimental-sea-config'. Make the same change there.");
+            return;
+        }
+
+        // Check sea-web-smoke.mjs comes after NODE_SEA_BLOB injection
+        int blobIndex = textNoComments.IndexOf("NODE_SEA_BLOB", StringComparison.Ordinal);
+        if (blobIndex < 0)
+        {
+            violations.Add($"{label}: 'NODE_SEA_BLOB' not found.");
+            return;
+        }
+
+        int smokeIndex = textNoComments.IndexOf("scripts/sea-web-smoke.mjs", StringComparison.Ordinal);
+        if (smokeIndex < 0)
+        {
+            violations.Add($"{label}: 'scripts/sea-web-smoke.mjs' not found; add it after the blob injection.");
+            return;
+        }
+
+        if (blobIndex >= smokeIndex)
+        {
+            violations.Add(
+                $"{label}: 'scripts/sea-web-smoke.mjs' must come after 'NODE_SEA_BLOB' injection. Make the same change there.");
+            return;
+        }
+
+        // Check archive still names exactly the expected operands.
+        // Use line-anchored regex with Multiline to capture full lines.
+        AssertArchiveOperands(label, textNoComments, violations);
+    }
+
+    /// <summary>
+    /// Issue #157 regression: each archive command's destination path is quoted
+    /// (e.g. <c>"${BIN_DIR}/kyberdash-${RID}.tar.gz"</c>), so a closing <c>"</c> sits
+    /// between the destination-path token and the operand list that follows. The three
+    /// <c>AssertArchiveOperands</c> patterns required <c>\s+</c> to immediately follow that
+    /// token with no tolerance for the quote, so <c>Regex.Match</c> never succeeded against
+    /// the real files — meaning the operand-count/name check below it was silently
+    /// unreachable, regardless of what the real archive commands contained. This pins the
+    /// match, and the operands it extracts, against the real, unmodified release artifacts.
+    /// </summary>
+    [Fact]
+    public void ArchiveOperandRegexesMatchTheQuotedDestinationPathInTheRealReleaseArtifacts()
+    {
+        string job = StripCommentLines(ReadBuildKyberDashJob());
+        string local = ScopeBuildKyberDashFunction();
+
+        // Match through the exact same Regex fields AssertArchiveOperands uses — a copied
+        // literal here would pin a frozen pattern instead of the one production evaluates.
+        Match releaseTar = TarArchiveOperandsRegex.Match(job);
+        Assert.True(
+            releaseTar.Success,
+            "release.yml tar archive: the destination-path regex does not match the real, quoted command line.");
+        Assert.Equal("\"kyberdash${EXE}\" THIRD_PARTY_NOTICES.md", releaseTar.Groups[2].Value.Trim());
+
+        Match releaseZip = ZipArchiveOperandsRegex.Match(job);
+        Assert.True(
+            releaseZip.Success,
+            "release.yml zip archive: the destination-path regex does not match the real, quoted command line.");
+        Assert.Equal(
+            "\"${FINAL_BIN}\" \"${BIN_DIR}/THIRD_PARTY_NOTICES.md\"", releaseZip.Groups[2].Value.Trim());
+
+        Match localTar = TarArchiveOperandsRegex.Match(local);
+        Assert.True(
+            localTar.Success,
+            "release-local.sh tar archive: the destination-path regex does not match the real, quoted command line.");
+        Assert.Equal("kyberdash THIRD_PARTY_NOTICES.md", localTar.Groups[2].Value.Trim());
+    }
+
+    /// <summary>Strips comment lines the same way <see cref="AssertEmbedsWebDashboard"/> does.</summary>
+    private static string StripCommentLines(string text)
+    {
+        string[] lines = text.Split('\n');
+        IEnumerable<string> filtered = lines.Where(line => !line.TrimStart().StartsWith('#'));
+        return string.Join("\n", filtered);
+    }
+
+    /// <summary>
+    /// Matches a tar archive command's destination path and trailing operand list. A single
+    /// field so <see cref="AssertArchiveOperands"/> and
+    /// <see cref="ArchiveOperandRegexesMatchTheQuotedDestinationPathInTheRealReleaseArtifacts"/>
+    /// exercise the same compiled pattern rather than two independently-maintained copies that
+    /// could silently drift apart.
+    /// </summary>
+    private static readonly Regex TarArchiveOperandsRegex =
+        new(@"tar\s+.*?-czf\s+.*?/(kyberdash-[^/\s]+\.\w+)""?\s+(.+)$", RegexOptions.Multiline);
+
+    /// <summary>Same purpose as <see cref="TarArchiveOperandsRegex"/>, for the zip archive command.</summary>
+    private static readonly Regex ZipArchiveOperandsRegex =
+        new(@"zip\s+.*?/(kyberdash-[^/\s]+\.zip)""?\s+(.+)$", RegexOptions.Multiline);
+
+    /// <summary>
+    /// Asserts that archive commands in the text name only the expected operands.
+    /// For release.yml: tar → ["kyberdash${EXE}", "THIRD_PARTY_NOTICES.md"], zip → ["${FINAL_BIN}", "${BIN_DIR}/THIRD_PARTY_NOTICES.md"]
+    /// For release-local.sh: tar → ["kyberdash", "THIRD_PARTY_NOTICES.md"]
+    /// Collects violations into the list. A regex that fails to match is itself a violation —
+    /// not a silently-skipped block — so a future edit that breaks the pattern again cannot
+    /// leave this method dark while still reporting a clean result.
+    /// </summary>
+    private static void AssertArchiveOperands(string label, string text, List<string> violations)
+    {
+        if (label == "release.yml")
+        {
+            // Check tar command: tar -C "${BIN_DIR}" -czf "${BIN_DIR}/kyberdash-${RID}.tar.gz" "kyberdash${EXE}" THIRD_PARTY_NOTICES.md
+            // The destination path is quoted, so a closing " sits before the whitespace that
+            // separates it from the operand list; "? tolerates that quote without requiring it.
+            Match tarMatch = TarArchiveOperandsRegex.Match(text);
+            if (tarMatch.Success)
+            {
+                string operands = tarMatch.Groups[2].Value.Trim();
+                string[] parts = operands.Split(OperandsSeparators, StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length == 2)
+                {
+                    // Trim quotes from operands
+                    string op1 = parts[0].Trim('"');
+                    string op2 = parts[1].Trim('"');
+                    if (op1 != "kyberdash${EXE}" || op2 != "THIRD_PARTY_NOTICES.md")
+                    {
+                        violations.Add(
+                            $"{label} tar archive: expected operands [\"kyberdash${{EXE}}\", \"THIRD_PARTY_NOTICES.md\"] but got [\"{op1}\", \"{op2}\"]. Update this list with the job.");
+                    }
+                }
+                else
+                {
+                    // Exactly two operands are expected — the binary and THIRD_PARTY_NOTICES.md, nothing
+                    // more. A third operand (e.g. a stray debug-symbols file) must fail here rather than
+                    // silently widening the archive contract that install.sh and SelfUpdater.cs rely on.
+                    violations.Add(
+                        $"{label} tar archive: expected exactly 2 operands [\"kyberdash${{EXE}}\", \"THIRD_PARTY_NOTICES.md\"] but got {parts.Length} (\"{operands}\"). Update this list with the job.");
+                }
+            }
+            else
+            {
+                // A non-matching regex must not silently skip the operand check above: that is
+                // exactly the defect this test project already regressed on once (Issue #157).
+                violations.Add(
+                    $"{label} tar archive: destination-path regex did not match; the operand check below it did not run.");
+            }
+
+            // Check zip command: zip -9 -j "${BIN_DIR}/kyberdash-${RID}.zip" "${FINAL_BIN}" "${BIN_DIR}/THIRD_PARTY_NOTICES.md"
+            // The destination path is quoted; "? tolerates the closing quote the same way as tar above.
+            Match zipMatch = ZipArchiveOperandsRegex.Match(text);
+            if (zipMatch.Success)
+            {
+                string operands = zipMatch.Groups[2].Value.Trim();
+                string[] parts = operands.Split(OperandsSeparators, StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length == 2)
+                {
+                    // Trim quotes from operands
+                    string op1 = parts[0].Trim('"');
+                    string op2 = parts[1].Trim('"');
+                    if (op1 != "${FINAL_BIN}" || op2 != "${BIN_DIR}/THIRD_PARTY_NOTICES.md")
+                    {
+                        violations.Add(
+                            $"{label} zip archive: expected operands [\"${{FINAL_BIN}}\", \"${{BIN_DIR}}/THIRD_PARTY_NOTICES.md\"] but got [\"{op1}\", \"{op2}\"]. Update this list with the job.");
+                    }
+                }
+                else
+                {
+                    // Exactly two operands are expected — the binary and THIRD_PARTY_NOTICES.md, nothing
+                    // more. A third operand (e.g. a stray debug-symbols file) must fail here rather than
+                    // silently widening the archive contract that install.sh and SelfUpdater.cs rely on.
+                    violations.Add(
+                        $"{label} zip archive: expected exactly 2 operands [\"${{FINAL_BIN}}\", \"${{BIN_DIR}}/THIRD_PARTY_NOTICES.md\"] but got {parts.Length} (\"{operands}\"). Update this list with the job.");
+                }
+            }
+            else
+            {
+                violations.Add(
+                    $"{label} zip archive: destination-path regex did not match; the operand check below it did not run.");
+            }
+        }
+        else if (label == "release-local.sh")
+        {
+            // Check tar command: tar -C "${stage}/out" -czf "${DEST}/kyberdash-${kyberdash_rid}.tar.gz" kyberdash THIRD_PARTY_NOTICES.md
+            // The destination path is quoted; "? tolerates the closing quote the same way as above.
+            Match tarMatch = TarArchiveOperandsRegex.Match(text);
+            if (tarMatch.Success)
+            {
+                string operands = tarMatch.Groups[2].Value.Trim();
+                string[] parts = operands.Split(OperandsSeparators, StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length == 2)
+                {
+                    // Trim quotes from operands
+                    string op1 = parts[0].Trim('"');
+                    string op2 = parts[1].Trim('"');
+                    if (op1 != "kyberdash" || op2 != "THIRD_PARTY_NOTICES.md")
+                    {
+                        violations.Add(
+                            $"{label} tar archive: expected operands [\"kyberdash\", \"THIRD_PARTY_NOTICES.md\"] but got [\"{op1}\", \"{op2}\"]. Make the same change there.");
+                    }
+                }
+                else
+                {
+                    // Exactly two operands are expected — the binary and THIRD_PARTY_NOTICES.md, nothing
+                    // more. A third operand (e.g. a stray debug-symbols file) must fail here rather than
+                    // silently widening the archive contract that install.sh and SelfUpdater.cs rely on.
+                    violations.Add(
+                        $"{label} tar archive: expected exactly 2 operands [\"kyberdash\", \"THIRD_PARTY_NOTICES.md\"] but got {parts.Length} (\"{operands}\"). Make the same change there.");
+                }
+            }
+            else
+            {
+                violations.Add(
+                    $"{label} tar archive: destination-path regex did not match; the operand check below it did not run.");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Regression for the missing-<c>else</c> gap fixed alongside the regex above: when the
+    /// destination-path regex fails to match — the exact defect that was silently invisible
+    /// before this fix — <see cref="AssertArchiveOperands"/> must record a violation instead of
+    /// leaving <see cref="BuildKyberDashEmbedsTheWebDashboard"/> green with nothing to show for it.
+    /// </summary>
+    [Fact]
+    public void AssertArchiveOperandsReportsAViolationWhenTheDestinationPathRegexDoesNotMatch()
+    {
+        List<string> violations = [];
+
+        AssertArchiveOperands("release.yml", "tar --help\nzip --help\n", violations);
+
+        Assert.Equal(2, violations.Count);
+        Assert.All(
+            violations,
+            violation => Assert.Contains("destination-path regex did not match", violation, StringComparison.Ordinal));
     }
 
     /// <summary>
@@ -668,7 +1021,7 @@ public sealed class ReleaseTests
         Assert.True(
             unpinned.Count == 0,
             "Requirement 12.9: pin each of these to a 40-character commit SHA verified "
-                + $"against its repository:\n  {string.Join("\n  ", unpinned)}");
+            + $"against its repository:\n  {string.Join("\n  ", unpinned)}");
     }
 
     /// <summary>Requirement 12.4: the Windows SmartScreen warning is explained in the notes.</summary>
@@ -683,7 +1036,8 @@ public sealed class ReleaseTests
 
     /// <summary>
     /// The tray assets have to reach the checksum manifest, which they do by
-    /// being artifacts the release job downloads before it runs sha256sum.
+    /// being artifacts the release job downloads before it calls
+    /// verify-release-checksums.sh.
     /// </summary>
     [Fact]
     public void TrayAssetsJoinTheChecksumManifest()
@@ -691,13 +1045,848 @@ public sealed class ReleaseTests
         string workflow = File.ReadAllText(ReleaseWorkflowPath);
 
         Assert.Contains("name: tray-${{ matrix.rid }}", workflow, StringComparison.Ordinal);
-        Assert.Contains("sha256sum *", workflow, StringComparison.Ordinal);
+
+        // The verification step calls the script with the asset directory and version.
+        int verifyIndex = workflow.IndexOf("Verify and compute checksums", StringComparison.Ordinal);
+        Assert.True(verifyIndex >= 0, "release.yml has no 'Verify and compute checksums' step.");
+        string verifyStep = workflow[verifyIndex..];
+        Assert.Contains("bash scripts/verify-release-checksums.sh release-assets \"${VERSION}\"", verifyStep, StringComparison.Ordinal);
 
         // The release job cannot publish what has not been built.
         Assert.Contains(
             "needs: [version, build, build-kyberdash, build-tray, pack-squad]",
             workflow,
             StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The verify-release-checksums.sh step must run before gh release create,
+    /// so that a missing or wrong asset fails before anything is published.
+    /// </summary>
+    [Fact]
+    public void VerifyChecksumStepPrecedesReleaseCreation()
+    {
+        string workflow = File.ReadAllText(ReleaseWorkflowPath);
+
+        int verify = workflow.IndexOf("Verify and compute checksums", StringComparison.Ordinal);
+        int create = workflow.IndexOf("Create tag and GitHub Release", StringComparison.Ordinal);
+
+        Assert.True(verify >= 0, "release.yml has no 'Verify and compute checksums' step.");
+        Assert.True(create > verify, "verification step must run before release creation.");
+    }
+
+    /// <summary>
+    /// The post-publish verification step uses the script's --list mode to get
+    /// the expected asset list and compares sorted sets, avoiding duplication
+    /// and keeping the list authoritative in one place.
+    /// </summary>
+    [Fact]
+    public void PostPublishVerificationUsesScriptListMode()
+    {
+        string workflow = File.ReadAllText(ReleaseWorkflowPath);
+
+        // The post-publish step must come after release creation.
+        int create = workflow.IndexOf("Create tag and GitHub Release", StringComparison.Ordinal);
+        int verify = workflow.IndexOf("Verify published release assets", StringComparison.Ordinal);
+        Assert.True(create >= 0, "release.yml has no 'Create tag and GitHub Release' step.");
+        Assert.True(verify > create, "post-publish verification must run after release creation.");
+
+        // The post-publish step must call the script with --list flag.
+        int listIndex = workflow.IndexOf("verify-release-checksums.sh --list", StringComparison.Ordinal);
+        Assert.True(listIndex > verify, "post-publish step must call script with --list flag.");
+
+        // Must compare sorted sets to catch both missing and extra assets.
+        int publishIndex = workflow.IndexOf("Verify published release assets", StringComparison.Ordinal);
+        string publishStep = workflow[publishIndex..];
+        Assert.Contains("EXPECTED_SORTED", publishStep, StringComparison.Ordinal);
+        Assert.Contains("PUBLISHED_SORTED", publishStep, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The release notes must accurately describe the signing state: the Windows
+    /// tray and Windows CLI executables are not Authenticode-signed. The notes
+    /// must not contain "EV certificate" (even if split across lines by blockquote markers)
+    /// and must explain the SmartScreen flow with links to the documentation.
+    /// </summary>
+    [Fact]
+    public void ReleaseNotesAccuratelyDescribeWindowsSigningState()
+    {
+        string workflow = File.ReadAllText(ReleaseWorkflowPath);
+
+        // Pattern that matches "EV" followed by any whitespace (including newlines and blockquote
+        // markers like "> ") and then "certificate". This catches the old phrasing even if a
+        // markdown blockquote indentation sits between the two words.
+        const string evPattern = @"\bEV\s+(?:>\s*)*certificate";
+
+        // Must say "not Authenticode-signed", not "EV certificate" (even with blockquote breaks).
+        Assert.Contains("not Authenticode-signed", workflow, StringComparison.Ordinal);
+        Assert.DoesNotMatch(evPattern, workflow);
+
+        // Positive control: the pattern must match the old blockquote-split text so the
+        // negative assertion above is not vacuous.
+        string evBlockquote = "not signed with an EV\n          > certificate";
+        Assert.Matches(evPattern, evBlockquote);
+
+        // SmartScreen guidance must be present.
+        Assert.Contains("SmartScreen", workflow, StringComparison.Ordinal);
+        Assert.Contains("More info", workflow, StringComparison.Ordinal);
+        Assert.Contains("Run anyway", workflow, StringComparison.Ordinal);
+
+        // Must mention all three Windows .exe archives.
+        Assert.Contains("kyber-weave-win-x64.zip", workflow, StringComparison.Ordinal);
+        Assert.Contains("kyber-weave-mcp-win-x64.zip", workflow, StringComparison.Ordinal);
+        Assert.Contains("kyberdash-win-x64.zip", workflow, StringComparison.Ordinal);
+        Assert.Contains("kyberdash-tray-win-x64-setup.exe", workflow, StringComparison.Ordinal);
+
+        // Documentation anchors must be linked as absolute GitHub URLs.
+        Assert.Contains("verifying-a-download", workflow, StringComparison.Ordinal);
+        Assert.Contains("windows-unsigned-binaries-and-smartscreen", workflow, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The release.yml file must parse as valid YAML.
+    /// </summary>
+    [Fact]
+    public void ReleaseWorkflowIsValidYaml()
+    {
+        string workflow = File.ReadAllText(ReleaseWorkflowPath);
+
+        try
+        {
+            Deserializer deserializer = new();
+            object? parsed = deserializer.Deserialize(workflow);
+            Assert.NotNull(parsed);
+        }
+        catch (Exception ex)
+        {
+            Assert.Fail($"release.yml is not valid YAML: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// The script lists all expected assets when run with --list mode.
+    /// The list must include the three tray assets: both darwin variants
+    /// (arm64 and x64) and the Windows setup exe.
+    /// </summary>
+    [Fact]
+    public void VerifyReleaseChecksumsListModeOutputsAssetNames()
+    {
+        SkipOnWindows();
+
+        using Sandbox sandbox = new();
+        string version = "0.1.0";
+
+        ProcessStartInfo startInfo = new("/bin/bash")
+        {
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        startInfo.ArgumentList.Add(
+            Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "verify-release-checksums.sh"));
+        startInfo.ArgumentList.Add("--list");
+        startInfo.ArgumentList.Add(sandbox.Root);
+        startInfo.ArgumentList.Add(version);
+
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+
+        Assert.Equal(0, result.ExitCode);
+
+        // Must output exactly 20 lines (one per asset).
+        string[] lines = result.StandardOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        Assert.Equal(20, lines.Length);
+
+        // The three tray assets must be in the list: both darwin architectures and Windows setup.
+        Assert.Contains("kyberdash-tray-darwin-arm64.zip", lines);
+        Assert.Contains("kyberdash-tray-darwin-x64.zip", lines);
+        Assert.Contains("kyberdash-tray-win-x64-setup.exe", lines);
+
+        // --list mode does not write a manifest.
+        Assert.False(File.Exists(Path.Combine(sandbox.Root, "SHA256SUMS.txt")));
+    }
+
+    /// <summary>
+    /// The script's argument guard rejects incomplete --list calls (missing version)
+    /// and no-argument calls with the usage error, not an unbound variable error.
+    /// </summary>
+    [Fact]
+    public void VerifyReleaseChecksumsRejectsShortArgumentCalls()
+    {
+        SkipOnWindows();
+
+        using Sandbox sandbox = new();
+
+        // Test 1: --list with only directory (missing version) exits 1 with usage error.
+        ProcessStartInfo startInfo = new("/bin/bash")
+        {
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        startInfo.ArgumentList.Add(
+            Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "verify-release-checksums.sh"));
+        startInfo.ArgumentList.Add("--list");
+        startInfo.ArgumentList.Add(sandbox.Root);
+
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("usage:", result.StandardError, StringComparison.Ordinal);
+        Assert.DoesNotContain("unbound variable", result.StandardError, StringComparison.Ordinal);
+
+        // Test 2: no arguments exits 1 with usage error.
+        ProcessStartInfo startInfo2 = new("/bin/bash")
+        {
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        startInfo2.ArgumentList.Add(
+            Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "verify-release-checksums.sh"));
+
+        ProcessResult result2 = ProcessRunner.Run(startInfo2, string.Empty);
+
+        Assert.NotEqual(0, result2.ExitCode);
+        Assert.Contains("usage:", result2.StandardError, StringComparison.Ordinal);
+        Assert.DoesNotContain("unbound variable", result2.StandardError, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Helper array of all 20 expected release assets for fixture tests.
+    /// </summary>
+    private static readonly string[] ReleaseAssets =
+    [
+        "kyber-weave-linux-x64.tar.gz",
+        "kyber-weave-linux-arm64.tar.gz",
+        "kyber-weave-osx-x64.tar.gz",
+        "kyber-weave-osx-arm64.tar.gz",
+        "kyber-weave-win-x64.zip",
+        "kyber-weave-mcp-linux-x64.tar.gz",
+        "kyber-weave-mcp-linux-arm64.tar.gz",
+        "kyber-weave-mcp-osx-x64.tar.gz",
+        "kyber-weave-mcp-osx-arm64.tar.gz",
+        "kyber-weave-mcp-win-x64.zip",
+        "kyberdash-darwin-arm64.tar.gz",
+        "kyberdash-darwin-x64.tar.gz",
+        "kyberdash-linux-arm64.tar.gz",
+        "kyberdash-linux-x64.tar.gz",
+        "kyberdash-win-x64.zip",
+        "kyberdash-tray-darwin-arm64.zip",
+        "kyberdash-tray-darwin-x64.zip",
+        "kyberdash-tray-win-x64-setup.exe",
+        "kyber-squad-{0}.zip",
+        "kyber-squad-plugin-{0}.zip"
+    ];
+
+    /// <summary>
+    /// The complete fixture with all 20 expected assets present and no extras.
+    /// The script must exit 0 and create a valid SHA256SUMS.txt.
+    /// </summary>
+    [Fact]
+    public void VerifyReleaseChecksumsAcceptsCompleteFixture()
+    {
+        SkipOnWindows();
+
+        using Sandbox sandbox = new();
+        string version = "0.1.0";
+
+        // Create all 20 expected assets.
+        foreach (string assetTemplate in ReleaseAssets)
+        {
+            string asset = string.Format(System.Globalization.CultureInfo.InvariantCulture, assetTemplate, version);
+            sandbox.WriteArchive(asset, "dummy content for " + asset);
+        }
+
+        ProcessStartInfo startInfo = new("/bin/bash")
+        {
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        startInfo.ArgumentList.Add(
+            Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "verify-release-checksums.sh"));
+        startInfo.ArgumentList.Add(sandbox.Root);
+        startInfo.ArgumentList.Add(version);
+
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.True(File.Exists(Path.Combine(sandbox.Root, "SHA256SUMS.txt")));
+
+        // The manifest must have 20 lines (one per asset).
+        string manifest = File.ReadAllText(Path.Combine(sandbox.Root, "SHA256SUMS.txt"));
+        string[] manifestLines = manifest.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        Assert.Equal(20, manifestLines.Length);
+
+        // Each line must match the format: 64 hex characters, two spaces, filename.
+        foreach (string line in manifestLines)
+        {
+            Match match = Regex.Match(line, @"^[0-9a-f]{64}  .+$");
+            Assert.True(match.Success, $"Line does not match format: {line}");
+        }
+    }
+
+    /// <summary>
+    /// When an expected asset is missing, the script exits non-zero with an
+    /// error diagnostic naming the missing file.
+    /// </summary>
+    [Fact]
+    public void VerifyReleaseChecksumsRejectsMissingAsset()
+    {
+        SkipOnWindows();
+
+        using Sandbox sandbox = new();
+        string version = "0.1.0";
+
+        // Create all assets except one (the last: kyber-squad-plugin-{version}.zip).
+        string missingAsset = string.Format(System.Globalization.CultureInfo.InvariantCulture, ReleaseAssets[ReleaseAssets.Length - 1], version);
+        for (int i = 0; i < ReleaseAssets.Length - 1; i++)
+        {
+            string assetTemplate = ReleaseAssets[i];
+            string asset = string.Format(System.Globalization.CultureInfo.InvariantCulture, assetTemplate, version);
+            sandbox.WriteArchive(asset, "dummy content for " + asset);
+        }
+
+        ProcessStartInfo startInfo = new("/bin/bash")
+        {
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        startInfo.ArgumentList.Add(
+            Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "verify-release-checksums.sh"));
+        startInfo.ArgumentList.Add(sandbox.Root);
+        startInfo.ArgumentList.Add(version);
+
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("missing release asset", result.StandardError, StringComparison.Ordinal);
+        Assert.Contains(missingAsset, result.StandardError, StringComparison.Ordinal);
+        Assert.False(File.Exists(Path.Combine(sandbox.Root, "SHA256SUMS.txt")));
+    }
+
+    /// <summary>
+    /// When an unexpected asset is present, the script exits non-zero with an
+    /// error diagnostic naming the extra file.
+    /// </summary>
+    [Fact]
+    public void VerifyReleaseChecksumsRejectsExtraAsset()
+    {
+        SkipOnWindows();
+
+        using Sandbox sandbox = new();
+        string version = "0.1.0";
+
+        // Create all expected assets.
+        foreach (string assetTemplate in ReleaseAssets)
+        {
+            string asset = string.Format(System.Globalization.CultureInfo.InvariantCulture, assetTemplate, version);
+            sandbox.WriteArchive(asset, "dummy content for " + asset);
+        }
+
+        // Add an extra asset.
+        sandbox.WriteArchive("EXTRA_FILE.txt", "this should not be here");
+
+        ProcessStartInfo startInfo = new("/bin/bash")
+        {
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        startInfo.ArgumentList.Add(
+            Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "verify-release-checksums.sh"));
+        startInfo.ArgumentList.Add(sandbox.Root);
+        startInfo.ArgumentList.Add(version);
+
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("unexpected release asset", result.StandardError, StringComparison.Ordinal);
+        Assert.Contains("EXTRA_FILE.txt", result.StandardError, StringComparison.Ordinal);
+        Assert.False(File.Exists(Path.Combine(sandbox.Root, "SHA256SUMS.txt")));
+    }
+
+    /// <summary>
+    /// A stale SHA256SUMS.txt from a prior download is deleted before the
+    /// script computes the manifest and emits a warning. The final manifest
+    /// must not contain a line for itself, and the warning must be in stderr.
+    /// </summary>
+    [Fact]
+    public void VerifyReleaseChecksumsDeletesStaleManifestWithWarning()
+    {
+        SkipOnWindows();
+
+        using Sandbox sandbox = new();
+        string version = "0.1.0";
+
+        // Create all 20 expected assets.
+        foreach (string assetTemplate in ReleaseAssets)
+        {
+            string asset = string.Format(System.Globalization.CultureInfo.InvariantCulture, assetTemplate, version);
+            sandbox.WriteArchive(asset, "dummy content for " + asset);
+        }
+
+        // Write a stale SHA256SUMS.txt.
+        File.WriteAllText(
+            Path.Combine(sandbox.Root, "SHA256SUMS.txt"),
+            "0000000000000000000000000000000000000000000000000000000000000000  kyber-weave-linux-x64.tar.gz\n");
+
+        ProcessStartInfo startInfo = new("/bin/bash")
+        {
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        startInfo.ArgumentList.Add(
+            Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "verify-release-checksums.sh"));
+        startInfo.ArgumentList.Add(sandbox.Root);
+        startInfo.ArgumentList.Add(version);
+
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+
+        Assert.Equal(0, result.ExitCode);
+
+        // Must emit a warning about discarding stale manifest.
+        Assert.Contains("::warning::discarding stale inbound SHA256SUMS.txt", result.StandardError, StringComparison.Ordinal);
+
+        // The manifest must have been recomputed.
+        string manifest = File.ReadAllText(Path.Combine(sandbox.Root, "SHA256SUMS.txt"));
+
+        // Must not contain the stale hash.
+        Assert.DoesNotContain("0000000000000000000000000000000000000000000000000000000000000000", manifest, StringComparison.Ordinal);
+
+        // Must not name itself.
+        Assert.DoesNotContain("SHA256SUMS.txt", manifest, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A hidden file (dotglob) in the asset directory causes the script to reject
+    /// it as an unexpected asset.
+    /// </summary>
+    [Fact]
+    public void VerifyReleaseChecksumsRejectsHiddenFiles()
+    {
+        SkipOnWindows();
+
+        using Sandbox sandbox = new();
+        string version = "0.1.0";
+
+        // Create all 20 expected assets.
+        foreach (string assetTemplate in ReleaseAssets)
+        {
+            string asset = string.Format(System.Globalization.CultureInfo.InvariantCulture, assetTemplate, version);
+            sandbox.WriteArchive(asset, "dummy content for " + asset);
+        }
+
+        // Add a hidden file.
+        sandbox.WriteArchive(".hidden-file", "this should not be here");
+
+        ProcessStartInfo startInfo = new("/bin/bash")
+        {
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        startInfo.ArgumentList.Add(
+            Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "verify-release-checksums.sh"));
+        startInfo.ArgumentList.Add(sandbox.Root);
+        startInfo.ArgumentList.Add(version);
+
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains(".hidden-file", result.StandardError, StringComparison.Ordinal);
+        Assert.False(File.Exists(Path.Combine(sandbox.Root, "SHA256SUMS.txt")));
+    }
+
+    /// <summary>
+    /// Against an empty asset directory the script exits non-zero, reports all 20
+    /// expected assets as missing, names the first and last, writes no SHA256SUMS.txt,
+    /// and does not print "unbound variable". The last assertion guards the
+    /// empty-array expansion under set -u on bash older than 4.4 (for example macOS
+    /// /bin/bash 3.2). Newer bash passes regardless.
+    /// </summary>
+    [Fact]
+    public void VerifyReleaseChecksumsReportsEveryAssetForEmptyDirectory()
+    {
+        SkipOnWindows();
+
+        using Sandbox sandbox = new();
+        string version = "0.1.0";
+
+        ProcessStartInfo startInfo = new("/bin/bash")
+        {
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        startInfo.ArgumentList.Add(
+            Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "verify-release-checksums.sh"));
+        startInfo.ArgumentList.Add(sandbox.Root);
+        startInfo.ArgumentList.Add(version);
+
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+
+        // Script must exit non-zero when all assets are missing.
+        Assert.NotEqual(0, result.ExitCode);
+
+        // On bash < 4.4 this fails if an empty-array expansion is unguarded under set -u.
+        Assert.DoesNotContain("unbound variable", result.StandardError, StringComparison.Ordinal);
+
+        // Stderr must report all 20 missing assets.
+        int missingCount = Regex.Count(result.StandardError, "::error::missing release asset:");
+        Assert.Equal(20, missingCount);
+
+        // Must name the first and last expected assets.
+        Assert.Contains("kyber-weave-linux-x64.tar.gz", result.StandardError, StringComparison.Ordinal);
+        Assert.Contains("kyber-squad-plugin-" + version + ".zip", result.StandardError, StringComparison.Ordinal);
+
+        // Must not write a manifest when all assets are missing.
+        Assert.False(File.Exists(Path.Combine(sandbox.Root, "SHA256SUMS.txt")));
+    }
+
+    /// <summary>
+    /// The script must work with relative asset directory paths (e.g. "release-assets").
+    /// This is how release.yml invokes it. The script does cd "$ASSET_DIR" then creates
+    /// a temp file relative to the current directory, ensuring atomic rename and no
+    /// temp files left behind. This test runs the script from a subdirectory with a
+    /// relative path, mirroring the release.yml invocation form.
+    /// </summary>
+    [Fact]
+    public void VerifyReleaseChecksumsWorksWithRelativeAssetDirectoryPath()
+    {
+        SkipOnWindows();
+
+        using Sandbox sandbox = new();
+        string version = "0.1.0";
+
+        // Create a subdirectory to simulate the release workflow's directory structure.
+        string releaseDirPath = Path.Combine(sandbox.Root, "release-assets");
+        Directory.CreateDirectory(releaseDirPath);
+
+        // Create all expected assets in the release-assets subdirectory.
+        foreach (string assetTemplate in ReleaseAssets)
+        {
+            string asset = string.Format(System.Globalization.CultureInfo.InvariantCulture, assetTemplate, version);
+            sandbox.WriteArchive(Path.Combine(releaseDirPath, asset), "dummy content for " + asset);
+        }
+
+        // Change to sandbox root and invoke script with relative path "release-assets".
+        // This reproduces the release.yml invocation: cd release-repo && bash scripts/verify-release-checksums.sh release-assets "$VERSION"
+        ProcessStartInfo startInfo = new("/bin/bash")
+        {
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            WorkingDirectory = sandbox.Root  // Set working directory to sandbox root.
+        };
+        startInfo.ArgumentList.Add(
+            Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "verify-release-checksums.sh"));
+        startInfo.ArgumentList.Add("release-assets");  // Relative path, as release.yml does.
+        startInfo.ArgumentList.Add(version);
+
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.True(File.Exists(Path.Combine(releaseDirPath, "SHA256SUMS.txt")));
+
+        // Verify that no temp files are left behind in the release-assets directory.
+        string[] tempFiles = Directory.GetFiles(releaseDirPath, ".SHA256SUMS.*");
+        Assert.Empty(tempFiles);
+    }
+
+    /// <summary>
+    /// The published SHA256SUMS.txt manifest must have mode 644 (rw-r--r--).
+    /// Asserts that the chmod 644 step in the script runs and produces the correct permissions.
+    /// </summary>
+    [Fact]
+    public void VerifyReleaseChecksumsCreatesManifestWithCorrectPermissions()
+    {
+        SkipOnWindows();
+
+        using Sandbox sandbox = new();
+        string version = "0.1.0";
+
+        // Create all expected assets.
+        foreach (string assetTemplate in ReleaseAssets)
+        {
+            string asset = string.Format(System.Globalization.CultureInfo.InvariantCulture, assetTemplate, version);
+            sandbox.WriteArchive(asset, "dummy content for " + asset);
+        }
+
+        ProcessStartInfo startInfo = new("/bin/bash")
+        {
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        startInfo.ArgumentList.Add(
+            Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "verify-release-checksums.sh"));
+        startInfo.ArgumentList.Add(sandbox.Root);
+        startInfo.ArgumentList.Add(version);
+
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+
+        Assert.Equal(0, result.ExitCode);
+
+        // Verify file exists and has mode 644 (rw-r--r--).
+        string manifestPath = Path.Combine(sandbox.Root, "SHA256SUMS.txt");
+        Assert.True(File.Exists(manifestPath));
+
+        // On Unix platforms, assert exact mode: owner read+write, group read, other read.
+        if (!OperatingSystem.IsWindows())
+        {
+            UnixFileMode mode = File.GetUnixFileMode(manifestPath);
+            UnixFileMode expected = UnixFileMode.UserRead | UnixFileMode.UserWrite |
+                                   UnixFileMode.GroupRead | UnixFileMode.OtherRead;
+            Assert.Equal(expected, mode);
+        }
+    }
+
+    /// <summary>
+    /// The trap must clean up temp .SHA256SUMS.* files even when the script fails
+    /// after mktemp (e.g., during hash computation). This test uses a shim that
+    /// fails during hashing to verify the trap runs on all exit paths.
+    /// </summary>
+    [Fact]
+    public void VerifyReleaseChecksumsTrapCleansUpTempFileOnFailureAfterMktemp()
+    {
+        SkipOnWindows();
+
+        using Sandbox sandbox = new();
+        string version = "0.1.0";
+
+        // Create all expected assets so the script reaches mktemp.
+        foreach (string assetTemplate in ReleaseAssets)
+        {
+            string asset = string.Format(System.Globalization.CultureInfo.InvariantCulture, assetTemplate, version);
+            sandbox.WriteArchive(asset, "dummy content for " + asset);
+        }
+
+        // Create a shim directory OUTSIDE the asset dir with a sha256sum shim that exits 3.
+        // This forces failure after mktemp but before mv, triggering the trap.
+        string shimDir = Directory.CreateTempSubdirectory("kyber-weave-trap-test-shim-").FullName;
+        try
+        {
+            string sha256sumShim = Path.Combine(shimDir, "sha256sum");
+            File.WriteAllText(sha256sumShim, "#!/bin/sh\nexit 3\n");
+            if (!OperatingSystem.IsWindows())
+            {
+                File.SetUnixFileMode(sha256sumShim, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            }
+
+            // Run the script with PATH containing the shim dir and standard system paths.
+            // This ensures mktemp and rm resolve, and the failing sha256sum shim takes precedence.
+            ProcessStartInfo startInfo = new("/bin/bash")
+            {
+                RedirectStandardInput = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false
+            };
+            startInfo.EnvironmentVariables["PATH"] = shimDir + Path.PathSeparator + "/usr/bin:/bin";
+            startInfo.ArgumentList.Add(
+                Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "verify-release-checksums.sh"));
+            startInfo.ArgumentList.Add(sandbox.Root);
+            startInfo.ArgumentList.Add(version);
+
+            ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+
+            // Script must exit non-zero when the hash command fails.
+            Assert.NotEqual(0, result.ExitCode);
+
+            // Verify that the failure occurred during hashing (not due to missing tools).
+            Assert.DoesNotContain("unexpected release asset", result.StandardError, StringComparison.Ordinal);
+            Assert.DoesNotContain("command not found", result.StandardError, StringComparison.Ordinal);
+
+            // Trap must have cleaned up any temp files despite the hash failure.
+            string[] tempFiles = Directory.GetFiles(sandbox.Root, ".SHA256SUMS.*");
+            Assert.Empty(tempFiles);
+
+            // No manifest must be created when hashing fails.
+            Assert.False(File.Exists(Path.Combine(sandbox.Root, "SHA256SUMS.txt")));
+        }
+        finally
+        {
+            try
+            {
+                Directory.Delete(shimDir, true);
+            }
+            catch
+            {
+                // best-effort cleanup
+            }
+        }
+    }
+
+    /// <summary>
+    /// When sha256sum is not available, the script must fall back to shasum -a 256
+    /// and produce an identical manifest. This test builds a hermetic bin directory
+    /// OUTSIDE the asset dir, containing symlinks only to the tools the script needs,
+    /// excluding sha256sum to force the fallback on all platforms. Skipped if shasum
+    /// or required tools are unavailable.
+    /// </summary>
+    [Fact]
+    public void VerifyReleaseChecksumsUsesShaSumFallbackWhenSha256sumUnavailable()
+    {
+        SkipOnWindows();
+
+        // Resolve absolute paths for tools under the ambient PATH.
+        // These are external commands the script runs on the shasum-fallback success path (usage-error paths, which call basename, are not exercised).
+        var toolsToResolve = new[] { "rm", "mktemp", "chmod", "mv", "shasum" };
+        var toolPaths = new Dictionary<string, string>();
+
+        foreach (string tool in toolsToResolve)
+        {
+            ProcessStartInfo resolveInfo = new("/bin/bash")
+            {
+                RedirectStandardInput = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false
+            };
+            resolveInfo.ArgumentList.Add("-c");
+            resolveInfo.ArgumentList.Add("command -v " + tool);
+            ProcessResult resolveResult = ProcessRunner.Run(resolveInfo, string.Empty);
+
+            if (resolveResult.ExitCode != 0)
+            {
+                throw SkipException.ForSkip($"Required tool '{tool}' not found in PATH; fallback test skipped.");
+            }
+
+            toolPaths[tool] = resolveResult.StandardOutput.Trim();
+        }
+
+        using Sandbox sandbox = new();
+        string version = "0.1.0";
+
+        // Create all expected assets.
+        foreach (string assetTemplate in ReleaseAssets)
+        {
+            string asset = string.Format(System.Globalization.CultureInfo.InvariantCulture, assetTemplate, version);
+            sandbox.WriteArchive(asset, "dummy content for " + asset);
+        }
+
+        // Run with full PATH to get baseline manifest using sha256sum (if available) or shasum.
+        ProcessStartInfo normalInfo = new("/bin/bash")
+        {
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        normalInfo.ArgumentList.Add(
+            Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "verify-release-checksums.sh"));
+        normalInfo.ArgumentList.Add(sandbox.Root);
+        normalInfo.ArgumentList.Add(version);
+        ProcessResult normalResult = ProcessRunner.Run(normalInfo, string.Empty);
+        Assert.Equal(0, normalResult.ExitCode);
+
+        string manifestPath = Path.Combine(sandbox.Root, "SHA256SUMS.txt");
+        string baselineManifest = File.ReadAllText(manifestPath);
+
+        // Create a hermetic bin directory with symlinks only to required tools (no sha256sum).
+        string hermBinDir = Directory.CreateTempSubdirectory("kyber-weave-fallback-test-bin-").FullName;
+        try
+        {
+            foreach (var kvp in toolPaths)
+            {
+                string tool = kvp.Key;
+                string toolPath = kvp.Value;
+
+                // Confirm the resolved path exists, is absolute, and is executable.
+                if (string.IsNullOrWhiteSpace(toolPath) || !File.Exists(toolPath) || !Path.IsPathRooted(toolPath))
+                {
+                    throw SkipException.ForSkip($"Tool '{tool}' resolved to invalid path '{toolPath}'; fallback test skipped.");
+                }
+
+                // Create symlink in hermetic dir.
+                string symLinkPath = Path.Combine(hermBinDir, tool);
+                try
+                {
+                    File.CreateSymbolicLink(symLinkPath, toolPath);
+                }
+                catch (Exception ex)
+                {
+                    throw SkipException.ForSkip($"Failed to create symlink for '{tool}': {ex.Message}; fallback test skipped.");
+                }
+            }
+
+            // Clean up baseline manifest and re-run with hermetic PATH that has shasum but not sha256sum.
+            File.Delete(manifestPath);
+
+            ProcessStartInfo fallbackInfo = new("/bin/bash")
+            {
+                RedirectStandardInput = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false
+            };
+            fallbackInfo.EnvironmentVariables["PATH"] = hermBinDir;
+            fallbackInfo.ArgumentList.Add(
+                Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "verify-release-checksums.sh"));
+            fallbackInfo.ArgumentList.Add(sandbox.Root);
+            fallbackInfo.ArgumentList.Add(version);
+            ProcessResult fallbackResult = ProcessRunner.Run(fallbackInfo, string.Empty);
+
+            // Verify sha256sum is not available in the hermetic PATH.
+            ProcessStartInfo verifySha256sumAbsent = new("/bin/bash")
+            {
+                RedirectStandardInput = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false
+            };
+            verifySha256sumAbsent.EnvironmentVariables["PATH"] = hermBinDir;
+            verifySha256sumAbsent.ArgumentList.Add("-c");
+            verifySha256sumAbsent.ArgumentList.Add("command -v sha256sum >/dev/null 2>&1");
+            ProcessResult verifySha256Result = ProcessRunner.Run(verifySha256sumAbsent, string.Empty);
+            Assert.NotEqual(0, verifySha256Result.ExitCode);
+
+            // Verify shasum IS available in the hermetic PATH.
+            ProcessStartInfo verifyShasumPresent = new("/bin/bash")
+            {
+                RedirectStandardInput = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false
+            };
+            verifyShasumPresent.EnvironmentVariables["PATH"] = hermBinDir;
+            verifyShasumPresent.ArgumentList.Add("-c");
+            verifyShasumPresent.ArgumentList.Add("command -v shasum >/dev/null 2>&1");
+            ProcessResult verifyShasumResult = ProcessRunner.Run(verifyShasumPresent, string.Empty);
+            Assert.Equal(0, verifyShasumResult.ExitCode);
+
+            Assert.Equal(0, fallbackResult.ExitCode);
+
+            string fallbackManifest = File.ReadAllText(manifestPath);
+
+            // Manifest bytes must be identical (both paths produce the same hash output in the same format).
+            Assert.Equal(baselineManifest, fallbackManifest);
+        }
+        finally
+        {
+            try
+            {
+                Directory.Delete(hermBinDir, true);
+            }
+            catch
+            {
+                // best-effort cleanup
+            }
+        }
     }
 
     // ---- --with-menubar (task 9.2, Requirement 12.7) ----
@@ -791,12 +1980,631 @@ public sealed class ReleaseTests
         }
     }
 
+    // ------------------------------------------------- loopback release origin
+    //
+    // KYBER_WEAVE_RELEASE_ORIGIN is http or https, with no userinfo, and host
+    // 127.0.0.1, localhost, or [::1], plus an optional port. Anything else,
+    // including other 127.* addresses, is refused. These facts call fetch the
+    // way the installer does. That function is defined only after the
+    // KYBER_WEAVE_INSTALL_LIB return, so on an unchanged script the call fails
+    // with "fetch: not found" before a checksum comparison and before the
+    // installer body can contact GitHub. Full-install invocations below do not
+    // set the library variable; they run only after that helper call has
+    // returned.
+
+    private const string PinnedVersion = "0.1.0";
+
+    private const string ReleaseOwner = "dpalfery";
+
+    private const string ReleaseRepo = "kyber-weave";
+
+    /// <summary>Below <c>KYBERDASH_MIN_VERSION</c>, so <c>--no-mcp</c> is the only archive the contract's command line skips.</summary>
+    private const string InstallPayload = "kyber-weave-local-origin";
+
+    private static readonly string[] ProxyVariables =
+    [
+        "http_proxy",
+        "https_proxy",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "all_proxy"
+    ];
+
+    private const string RedirectServerScript = """
+                                                from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+                                                class Handler(BaseHTTPRequestHandler):
+                                                    protocol_version = "HTTP/1.1"
+
+                                                    def do_GET(self):
+                                                        self.send_response(302)
+                                                        self.send_header("Location", "http://example.com/not-loopback")
+                                                        self.send_header("Content-Length", "0")
+                                                        self.end_headers()
+
+                                                    def log_message(self, fmt, *args):
+                                                        return
+
+                                                server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+                                                print(server.server_address[1], flush=True)
+                                                server.serve_forever()
+                                                """;
+
+    /// <summary>
+    /// An unset origin still refuses plain HTTP. The dest file is the download
+    /// <c>fetch</c> would have written; a refusal leaves it absent.
+    /// </summary>
+    [Fact]
+    public void ReleaseOriginUnsetRefusesPlainHttpAndWritesNoFile()
+    {
+        SkipOnWindows();
+
+        using Sandbox sandbox = new();
+        string destination = Path.Combine(sandbox.Root, "download");
+        string log = Path.Combine(sandbox.Root, "curl-args");
+        ProcessResult result = InvokeFetch(
+            null,
+            "http://127.0.0.1/dpalfery/kyber-weave/releases/download/v0.1.0/SHA256SUMS.txt",
+            destination,
+            PrependDownloader(sandbox, "curl", log),
+            false,
+            false);
+
+        Assert.Contains("refusing non-HTTPS URL", result.StandardError, StringComparison.Ordinal);
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.False(File.Exists(destination), Describe(result));
+        Assert.False(DownloaderWasInvoked(log), Describe(result));
+    }
+
+    /// <summary>
+    /// A legal origin is only <c>http</c> or <c>https</c>, with no userinfo, and
+    /// host <c>127.0.0.1</c>, <c>localhost</c>, or <c>[::1]</c>, with an optional
+    /// port. While that override is active, curl uses <c>--proto '=http,https'</c>
+    /// for <c>http</c> and keeps <c>--proto '=https'</c> for <c>https</c>. Both
+    /// keep <c>--proto-redir '=https'</c>. <c>fetch_stdout</c> takes the same flags.
+    /// </summary>
+    [Theory]
+    [InlineData("http://127.0.0.1", "=http,https")]
+    [InlineData("http://127.0.0.1:9", "=http,https")]
+    [InlineData("http://127.0.0.1/", "=http,https")]
+    [InlineData("http://localhost", "=http,https")]
+    [InlineData("http://localhost:80", "=http,https")]
+    [InlineData("http://[::1]", "=http,https")]
+    [InlineData("http://[::1]:9", "=http,https")]
+    [InlineData("https://127.0.0.1", "=https")]
+    [InlineData("https://127.0.0.1:443", "=https")]
+    [InlineData("https://localhost", "=https")]
+    [InlineData("https://localhost:9", "=https")]
+    [InlineData("https://[::1]", "=https")]
+    [InlineData("https://[::1]:443", "=https")]
+    public void ReleaseOriginAcceptsLoopbackHttpOrHttps(string origin, string proto)
+    {
+        SkipOnWindows();
+
+        using Sandbox sandbox = new();
+        string destination = Path.Combine(sandbox.Root, "download");
+        string log = Path.Combine(sandbox.Root, "curl-args");
+        string url = SumsUrl(origin);
+        ProcessResult result = InvokeFetch(
+            origin,
+            url,
+            destination,
+            PrependDownloader(sandbox, "curl", log),
+            false,
+            true);
+
+        Assert.True(result.ExitCode == 0, Describe(result));
+        List<string[]> invocations = ReadDownloaderInvocations(log);
+        Assert.Equal(2, invocations.Count);
+        foreach (string[] args in invocations)
+        {
+            AssertArgSequence(args, "--proto", proto, "--proto-redir", "=https");
+            Assert.Contains("-fsSL", args);
+            Assert.Contains(url, args);
+            if (proto == "=https")
+            {
+                Assert.DoesNotContain("=http,https", args);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Any other host, including other <c>127.*</c> addresses, userinfo, and a
+    /// scheme other than <c>http</c> or <c>https</c>, is refused. A legal origin
+    /// does not unlock an <c>http</c> URL whose host is not loopback. Nothing is
+    /// written and the downloader is not started.
+    /// </summary>
+    [Theory]
+    [InlineData("http://127.0.0.2", "")]
+    [InlineData("http://127.0.0.2:8080", "")]
+    [InlineData("http://127.1.0.1", "")]
+    [InlineData("http://127.0.0.10", "")]
+    [InlineData("https://127.0.0.2", "")]
+    [InlineData("http://example.com", "")]
+    [InlineData("https://example.com", "")]
+    [InlineData("https://github.com", "")]
+    [InlineData("http://user:pass@127.0.0.1:9", "")]
+    [InlineData("https://user:pass@127.0.0.1", "")]
+    [InlineData("http://user@localhost", "")]
+    [InlineData("ftp://127.0.0.1", "")]
+    [InlineData("http://[::2]", "")]
+    [InlineData("http://[::2]:9", "")]
+    [InlineData("http://0.0.0.0", "")]
+    [InlineData("http://127.0.0.1.example.com", "")]
+    [InlineData("http://localhost.localdomain", "")]
+    [InlineData("http://2130706433", "")]
+    [InlineData("http://[::ffff:127.0.0.1]", "")]
+    [InlineData("http://::1", "")]
+    [InlineData("http://127.0.0.1:abc", "")]
+    [InlineData("http://127.0.0.1:", "")]
+    [InlineData("http://127.0.0.1:9", "http://example.com/outside")]
+    [InlineData("https://example.com", "http://127.0.0.1/dpalfery/kyber-weave/releases/download/v0.1.0/SHA256SUMS.txt")]
+    public void ReleaseOriginRefusesNonLoopbackUserinfoAndForeignHosts(string origin, string explicitTarget)
+    {
+        SkipOnWindows();
+
+        using Sandbox sandbox = new();
+        string destination = Path.Combine(sandbox.Root, "download");
+        string log = Path.Combine(sandbox.Root, "curl-args");
+        string url = explicitTarget.Length == 0 ? SumsUrl(origin) : explicitTarget;
+        ProcessResult result = InvokeFetch(
+            origin,
+            url,
+            destination,
+            PrependDownloader(sandbox, "curl", log),
+            false,
+            false);
+
+        Assert.Contains("kyber-weave: error:", result.StandardError, StringComparison.Ordinal);
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.False(File.Exists(destination), Describe(result));
+        Assert.False(DownloaderWasInvoked(log), Describe(result));
+    }
+
+    /// <summary>
+    /// An <c>http</c> origin refuses wget. Curl is absent on purpose, so the
+    /// installer would otherwise select wget and then must stop before it runs.
+    /// </summary>
+    [Fact]
+    public void ReleaseOriginHttpRefusesWget()
+    {
+        SkipOnWindows();
+
+        using Sandbox sandbox = new();
+        string destination = Path.Combine(sandbox.Root, "download");
+        string log = Path.Combine(sandbox.Root, "wget-args");
+        const string origin = "http://127.0.0.1:9";
+        ProcessResult result = InvokeFetch(
+            origin,
+            SumsUrl(origin),
+            destination,
+            IsolatedWgetDirectory(sandbox, log),
+            true,
+            false);
+
+        Assert.Contains("wget", result.StandardError, StringComparison.Ordinal);
+        Assert.Contains("refusing", result.StandardError, StringComparison.Ordinal);
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.False(File.Exists(destination), Describe(result));
+        Assert.False(DownloaderWasInvoked(log), Describe(result));
+    }
+
+    /// <summary>
+    /// An <c>https</c> loopback origin keeps today's wget flags (<c>--https-only</c>).
+    /// </summary>
+    [Fact]
+    public void ReleaseOriginHttpsKeepsWgetHttpsOnly()
+    {
+        SkipOnWindows();
+
+        using Sandbox sandbox = new();
+        string destination = Path.Combine(sandbox.Root, "download");
+        string log = Path.Combine(sandbox.Root, "wget-args");
+        const string origin = "https://127.0.0.1:9";
+        string url = SumsUrl(origin);
+        ProcessResult result = InvokeFetch(
+            origin,
+            url,
+            destination,
+            IsolatedWgetDirectory(sandbox, log),
+            true,
+            false);
+
+        Assert.True(result.ExitCode == 0, Describe(result));
+        List<string[]> invocations = ReadDownloaderInvocations(log);
+        string[] wgetArgs = Assert.Single(invocations);
+        AssertArgSequence(wgetArgs, "--https-only");
+        Assert.Contains(url, wgetArgs);
+    }
+
+    /// <summary>
+    /// With a legal loopback origin, <c>install.sh --install-dir --version --no-mcp</c>
+    /// downloads from <c>scripts/local-release-server.py</c> and installs.
+    /// <c>KYBER_WEAVE_INSTALL_LIB</c> is not set on that invocation.
+    /// </summary>
+    [Fact]
+    public void ReleaseOriginInstallsPinnedVersionFromTheLocalReleaseServer()
+    {
+        SkipOnWindows();
+
+        using PublishedRelease release = PublishedRelease.Create(false);
+        string fetchDest = Path.Combine(release.Sandbox.Root, "fetched-sums.txt");
+        ProcessResult fetch = InvokeFetch(
+            release.Origin,
+            SumsUrl(release.Origin),
+            fetchDest,
+            null,
+            false,
+            false);
+
+        // The helper has to accept the loopback URL before the installer body
+        // runs. Until it is defined, this fails closed and the body — which
+        // would otherwise ignore the origin and contact GitHub — does not start.
+        Assert.True(fetch.ExitCode == 0, Describe(fetch));
+        Assert.Contains(release.AssetName, File.ReadAllText(fetchDest), StringComparison.Ordinal);
+
+        ProcessResult install = RunFullInstall(release.InstallDirectory, release.Origin);
+        Assert.True(install.ExitCode == 0, Describe(install));
+        string installed = Path.Combine(release.InstallDirectory, "kyber-weave");
+        Assert.Equal(InstallPayload, File.ReadAllText(installed));
+        Assert.False(File.Exists(Path.Combine(release.InstallDirectory, "kyber-weave-mcp")));
+    }
+
+    /// <summary>
+    /// A byte flipped in the asset after <c>SHA256SUMS.txt</c> is written exits
+    /// non-zero, reports a SHA-256 mismatch, and leaves the install directory
+    /// without <c>kyber-weave</c>. The live install path must be the thing that
+    /// fails: a green helper-only checksum test would hide a second parser in
+    /// <c>verify_and_extract</c>.
+    /// </summary>
+    [Fact]
+    public void ReleaseOriginRejectsByteFlippedAfterTheChecksumIsWritten()
+    {
+        SkipOnWindows();
+
+        using PublishedRelease release = PublishedRelease.Create(true);
+        string fetchDest = Path.Combine(release.Sandbox.Root, "fetched-sums.txt");
+        ProcessResult fetch = InvokeFetch(
+            release.Origin,
+            SumsUrl(release.Origin),
+            fetchDest,
+            null,
+            false,
+            false);
+        Assert.True(fetch.ExitCode == 0, Describe(fetch));
+
+        ProcessResult install = RunFullInstall(release.InstallDirectory, release.Origin);
+        Assert.Contains("SHA256 mismatch", install.StandardError, StringComparison.Ordinal);
+        Assert.NotEqual(0, install.ExitCode);
+        Assert.False(
+            File.Exists(Path.Combine(release.InstallDirectory, "kyber-weave")),
+            Describe(install));
+    }
+
+    /// <summary>
+    /// An HTTP redirect away from loopback is not installed. The loopback URL
+    /// itself must have been accepted; a scheme refusal of that URL is not this
+    /// outcome. The logging curl records the URL the installer actually requested.
+    /// </summary>
+    [Fact]
+    public void ReleaseOriginHttpRedirectAwayFromLoopbackIsNotInstalled()
+    {
+        SkipOnWindows();
+
+        using Sandbox sandbox = new();
+        string script = Path.Combine(sandbox.Root, "redirect.py");
+        File.WriteAllText(script, RedirectServerScript);
+        using ListeningServer server = ListeningServer.Start(script);
+        string origin = "http://127.0.0.1:" + server.Port.ToString(CultureInfo.InvariantCulture);
+        string fetchDest = Path.Combine(sandbox.Root, "fetched");
+        ProcessResult fetch = InvokeFetch(
+            origin,
+            SumsUrl(origin),
+            fetchDest,
+            null,
+            false,
+            false);
+
+        Assert.True(
+            fetch.ExitCode != 127
+            && !fetch.StandardError.Contains("fetch: not found", StringComparison.Ordinal),
+            Describe(fetch));
+
+        string log = Path.Combine(sandbox.Root, "curl-args");
+        string installDir = Path.Combine(sandbox.Root, "install");
+        Directory.CreateDirectory(installDir);
+        ProcessResult install = RunFullInstall(
+            installDir,
+            origin,
+            PrependRecordingCurl(sandbox, log));
+
+        Assert.NotEqual(0, install.ExitCode);
+        Assert.False(File.Exists(Path.Combine(installDir, "kyber-weave")), Describe(install));
+        string recorded = File.Exists(log) ? File.ReadAllText(log) : string.Empty;
+        Assert.Contains(origin, recorded, StringComparison.Ordinal);
+        Assert.DoesNotContain("github.com", recorded, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "refusing non-HTTPS URL: " + origin,
+            install.StandardError,
+            StringComparison.Ordinal);
+    }
+
+    private static string SumsUrl(string origin)
+    {
+        string prefix = origin.EndsWith('/') ? origin[..^1] : origin;
+        return prefix
+               + "/"
+               + ReleaseOwner
+               + "/"
+               + ReleaseRepo
+               + "/releases/download/v"
+               + PinnedVersion
+               + "/SHA256SUMS.txt";
+    }
+
+    private static string Describe(ProcessResult result)
+    {
+        return "exit "
+               + result.ExitCode.ToString(CultureInfo.InvariantCulture)
+               + "\nstderr:\n"
+               + result.StandardError
+               + "\nstdout:\n"
+               + result.StandardOutput;
+    }
+
+    private static void AssertArgSequence(IReadOnlyList<string> args, params string[] expected)
+    {
+        int from = 0;
+        foreach (string token in expected)
+        {
+            int index = -1;
+            for (int i = from; i < args.Count; i++)
+            {
+                if (string.Equals(args[i], token, StringComparison.Ordinal))
+                {
+                    index = i;
+                    break;
+                }
+            }
+
+            Assert.True(
+                index >= 0,
+                "missing '" + token + "' in [" + string.Join(' ', args) + "]");
+            from = index + 1;
+        }
+    }
+
+    /// <summary>
+    /// Sources <c>install.sh</c> in library mode and calls <c>fetch</c>.
+    /// <paramref name="origin"/> null removes <c>KYBER_WEAVE_RELEASE_ORIGIN</c>.
+    /// </summary>
+    private static ProcessResult InvokeFetch(
+        string? origin,
+        string url,
+        string destination,
+        string? toolDirectory,
+        bool replacePath,
+        bool includeStdout)
+    {
+        string body = "fetch \"$KYBER_WEAVE_TEST_URL\" \"$KYBER_WEAVE_TEST_DEST\"\n";
+        if (includeStdout)
+        {
+            body += "fetch_stdout \"$KYBER_WEAVE_TEST_URL\"\n";
+        }
+
+        ProcessStartInfo startInfo = CreateShellStartInfo(". \"" + InstallShPath + "\"\n" + body);
+        if (origin is null)
+        {
+            startInfo.Environment.Remove("KYBER_WEAVE_RELEASE_ORIGIN");
+        }
+        else
+        {
+            startInfo.Environment["KYBER_WEAVE_RELEASE_ORIGIN"] = origin;
+        }
+
+        startInfo.Environment["KYBER_WEAVE_TEST_URL"] = url;
+        startInfo.Environment["KYBER_WEAVE_TEST_DEST"] = destination;
+        if (toolDirectory is not null)
+        {
+            startInfo.Environment["PATH"] = replacePath
+                ? toolDirectory
+                : toolDirectory + ":" + startInfo.Environment["PATH"];
+        }
+
+        ClearProxies(startInfo);
+        return ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(30));
+    }
+
+    /// <summary>
+    /// Runs the installer the way a user would. Does not set
+    /// <c>KYBER_WEAVE_INSTALL_LIB</c>: that gate returns before any download.
+    /// </summary>
+    private static ProcessResult RunFullInstall(string installDir, string origin, string? prependPath = null)
+    {
+        ProcessStartInfo startInfo = new("/bin/sh")
+        {
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        startInfo.ArgumentList.Add(InstallShPath);
+        startInfo.ArgumentList.Add("--install-dir");
+        startInfo.ArgumentList.Add(installDir);
+        startInfo.ArgumentList.Add("--version");
+        startInfo.ArgumentList.Add(PinnedVersion);
+        startInfo.ArgumentList.Add("--no-mcp");
+        startInfo.Environment["KYBER_WEAVE_RELEASE_ORIGIN"] = origin;
+        startInfo.Environment.Remove("KYBER_WEAVE_INSTALL_LIB");
+        if (prependPath is not null)
+        {
+            startInfo.Environment["PATH"] = prependPath + ":" + startInfo.Environment["PATH"];
+        }
+
+        ClearProxies(startInfo);
+        if (startInfo.Environment.TryGetValue("KYBER_WEAVE_INSTALL_LIB", out string? library) && library == "1")
+        {
+            throw new InvalidOperationException(
+                "Full-install facts must not set KYBER_WEAVE_INSTALL_LIB; library mode returns before download.");
+        }
+
+        return ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+    }
+
+    private static void ClearProxies(ProcessStartInfo startInfo)
+    {
+        foreach (string name in ProxyVariables)
+        {
+            startInfo.Environment.Remove(name);
+        }
+    }
+
+    private static string CurrentInstallRid()
+    {
+        ProcessStartInfo startInfo = CreateShellStartInfo(
+            ". \"" + InstallShPath + "\"; kyber_weave_resolve_rid \"$(uname -s)\" \"$(uname -m)\"");
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(30));
+        Assert.Equal(0, result.ExitCode);
+        return result.StandardOutput.Trim();
+    }
+
+    private static string PrependDownloader(Sandbox sandbox, string toolName, string logPath)
+    {
+        string directory = Path.Combine(sandbox.Root, toolName + "-bin");
+        Directory.CreateDirectory(directory);
+        WriteDownloader(Path.Combine(directory, toolName), logPath, null);
+        return directory;
+    }
+
+    private static string PrependRecordingCurl(Sandbox sandbox, string logPath)
+    {
+        string directory = Path.Combine(sandbox.Root, "curl-bin");
+        Directory.CreateDirectory(directory);
+        WriteDownloader(Path.Combine(directory, "curl"), logPath, ResolveExecutable("curl"));
+        return directory;
+    }
+
+    /// <summary>
+    /// PATH that contains wget, tar, and a checksum tool, and not curl, so the
+    /// installer selects wget before the library return. <c>install.sh</c> accepts
+    /// <c>sha256sum</c> or <c>shasum</c>. macOS ships the latter, and this directory
+    /// replaces PATH, so the host tool is invisible unless it is linked here.
+    /// </summary>
+    private static string IsolatedWgetDirectory(Sandbox sandbox, string logPath)
+    {
+        string directory = Path.Combine(sandbox.Root, "wget-only");
+        Directory.CreateDirectory(directory);
+        WriteDownloader(Path.Combine(directory, "wget"), logPath, null);
+        if (!OperatingSystem.IsWindows())
+        {
+            File.CreateSymbolicLink(Path.Combine(directory, "tar"), ResolveExecutable("tar"));
+            string? checksum = TryResolveExecutable("sha256sum") ?? TryResolveExecutable("shasum");
+            if (checksum is null)
+            {
+                throw SkipException.ForSkip(
+                    "wget origin facts need sha256sum or shasum on PATH.");
+            }
+
+            File.CreateSymbolicLink(Path.Combine(directory, Path.GetFileName(checksum)), checksum);
+        }
+
+        return directory;
+    }
+
+    private static void WriteDownloader(string path, string logPath, string? execRealTool)
+    {
+        string body = "#!/bin/sh\nprintf '%s\\n' \"$@\" >> '"
+                      + logPath
+                      + "'\nprintf '\\n' >> '"
+                      + logPath
+                      + "'\n";
+        if (execRealTool is null)
+        {
+            body += "exit 0\n";
+        }
+        else
+        {
+            body += "exec '" + execRealTool + "' \"$@\"\n";
+        }
+
+        File.WriteAllText(path, body);
+        if (!OperatingSystem.IsWindows())
+        {
+            File.SetUnixFileMode(
+                path,
+                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+    }
+
+    private static bool DownloaderWasInvoked(string logPath)
+    {
+        return File.Exists(logPath) && File.ReadAllText(logPath).Trim().Length > 0;
+    }
+
+    private static List<string[]> ReadDownloaderInvocations(string logPath)
+    {
+        List<string[]> invocations = [];
+        if (!File.Exists(logPath))
+        {
+            return invocations;
+        }
+
+        string[] blocks = File.ReadAllText(logPath).Split("\n\n", StringSplitOptions.RemoveEmptyEntries);
+        foreach (string block in blocks)
+        {
+            string[] args = block.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+            if (args.Length > 0)
+            {
+                invocations.Add(args);
+            }
+        }
+
+        return invocations;
+    }
+
+    private static string ResolveExecutable(string name)
+    {
+        string? path = TryResolveExecutable(name);
+        Assert.True(path is not null, "command -v " + name + " failed");
+        return path;
+    }
+
+    /// <summary>
+    /// Absolute path of <paramref name="name"/>, or null when it is not on PATH.
+    /// Does not add interpreters such as perl; <c>shasum</c> on macOS uses a fixed
+    /// <c>/usr/bin/perl</c> shebang.
+    /// </summary>
+    private static string? TryResolveExecutable(string name)
+    {
+        ProcessStartInfo startInfo = new("/bin/sh")
+        {
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        startInfo.ArgumentList.Add("-c");
+        startInfo.ArgumentList.Add("command -v " + name);
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(10));
+        if (result.ExitCode != 0)
+        {
+            return null;
+        }
+
+        string path = result.StandardOutput.Trim();
+        return path.Length == 0 ? null : path;
+    }
+
     // ------------------------------------------------------------- Sandbox
 
     /// <summary>Per-test scratch directory for sums files and dummy archives.</summary>
     private sealed class Sandbox : IDisposable
     {
         private readonly string _dir;
+
+        public string Root => _dir;
+
         public string SumsPath => Path.Combine(_dir, "SHA256SUMS.txt");
 
         public Sandbox(string suffix = "")
@@ -818,6 +2626,7 @@ public sealed class ReleaseTests
                     path,
                     UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             }
+
             return path;
         }
 
@@ -838,7 +2647,7 @@ public sealed class ReleaseTests
         {
             try
             {
-                Directory.Delete(_dir, recursive: true);
+                Directory.Delete(_dir, true);
             }
             catch
             {
@@ -856,8 +2665,176 @@ public sealed class ReleaseTests
         StringBuilder sb = new(bytes.Length * 2);
         foreach (byte b in bytes)
         {
-            sb.Append(b.ToString("x2", System.Globalization.CultureInfo.InvariantCulture));
+            sb.Append(b.ToString("x2", CultureInfo.InvariantCulture));
         }
+
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// A <c>v0.1.0</c> tree served by <c>scripts/local-release-server.py</c>.
+    /// The checksum file is written before a corrupt archive is flipped, which
+    /// is the order the mismatch fact has to observe.
+    /// </summary>
+    private sealed class PublishedRelease : IDisposable
+    {
+        private readonly Sandbox _sandbox;
+        private readonly ListeningServer _server;
+
+        private PublishedRelease(Sandbox sandbox, ListeningServer server, string assetName)
+        {
+            _sandbox = sandbox;
+            _server = server;
+            AssetName = assetName;
+            InstallDirectory = Path.Combine(sandbox.Root, "install");
+            Directory.CreateDirectory(InstallDirectory);
+            Origin = "http://127.0.0.1:" + server.Port.ToString(CultureInfo.InvariantCulture);
+        }
+
+        public Sandbox Sandbox => _sandbox;
+
+        public string Origin { get; }
+
+        public string InstallDirectory { get; }
+
+        public string AssetName { get; }
+
+        public static PublishedRelease Create(bool corruptArchive)
+        {
+            Sandbox sandbox = new();
+            ListeningServer? server = null;
+            try
+            {
+                string rid = CurrentInstallRid();
+                string assetName = "kyber-weave-" + rid + ".tar.gz";
+                string tagDir = Path.Combine(sandbox.Root, "v" + PinnedVersion);
+                Directory.CreateDirectory(tagDir);
+                string stage = Path.Combine(sandbox.Root, "stage");
+                Directory.CreateDirectory(stage);
+                File.WriteAllText(Path.Combine(stage, "kyber-weave"), InstallPayload);
+                string archive = Path.Combine(tagDir, assetName);
+
+                ProcessStartInfo tar = new(ResolveExecutable("tar"))
+                {
+                    RedirectStandardInput = true,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false
+                };
+                tar.ArgumentList.Add("-czf");
+                tar.ArgumentList.Add(archive);
+                tar.ArgumentList.Add("-C");
+                tar.ArgumentList.Add(stage);
+                tar.ArgumentList.Add("kyber-weave");
+                ProcessResult tarResult = ProcessRunner.Run(tar, string.Empty, TimeSpan.FromSeconds(30));
+                Assert.True(tarResult.ExitCode == 0, tarResult.StandardError);
+
+                string hash = Sha256(archive);
+                File.WriteAllText(Path.Combine(tagDir, "SHA256SUMS.txt"), hash + "  " + assetName + "\n");
+                if (corruptArchive)
+                {
+                    byte[] bytes = File.ReadAllBytes(archive);
+                    bytes[0] ^= 0xFF;
+                    File.WriteAllBytes(archive, bytes);
+                }
+
+                server = ListeningServer.Start(
+                    Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "local-release-server.py"),
+                    "--root",
+                    sandbox.Root,
+                    "--port",
+                    "0");
+                return new PublishedRelease(sandbox, server, assetName);
+            }
+            catch
+            {
+                server?.Dispose();
+                sandbox.Dispose();
+                throw;
+            }
+        }
+
+        public void Dispose()
+        {
+            _server.Dispose();
+            _sandbox.Dispose();
+        }
+    }
+
+    /// <summary>A Python HTTP server that prints its ephemeral port and then serves until disposed.</summary>
+    private sealed class ListeningServer : IDisposable
+    {
+        private readonly Process _process;
+        private readonly Task<string> _stderr;
+
+        private ListeningServer(Process process, Task<string> stderr, int port)
+        {
+            _process = process;
+            _stderr = stderr;
+            Port = port;
+        }
+
+        public int Port { get; }
+
+        public static ListeningServer Start(string scriptPath, params string[] arguments)
+        {
+            ProcessStartInfo startInfo = new(ResolveExecutable("python3"))
+            {
+                RedirectStandardInput = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false
+            };
+            startInfo.ArgumentList.Add(scriptPath);
+            foreach (string argument in arguments)
+            {
+                startInfo.ArgumentList.Add(argument);
+            }
+
+            Process process = new() { StartInfo = startInfo };
+            process.Start();
+            process.StandardInput.Close();
+            Task<string> stderr = process.StandardError.ReadToEndAsync();
+            Task<string?> readLine = process.StandardOutput.ReadLineAsync();
+            if (!readLine.Wait(TimeSpan.FromSeconds(10)))
+            {
+                string err = KillAndRead(process, stderr);
+                throw new InvalidOperationException("server did not print a port. " + err);
+            }
+
+            string? line = readLine.Result;
+            if (line is null
+                || !int.TryParse(line.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out int port))
+            {
+                string err = KillAndRead(process, stderr);
+                throw new InvalidOperationException("server port line was '" + line + "'. " + err);
+            }
+
+            return new ListeningServer(process, stderr, port);
+        }
+
+        public void Dispose()
+        {
+            KillAndRead(_process, _stderr);
+        }
+
+        private static string KillAndRead(Process process, Task<string> stderr)
+        {
+            try
+            {
+                if (!process.HasExited)
+                {
+                    process.Kill(true);
+                }
+            }
+            catch (InvalidOperationException)
+            {
+                // Already exited. The stderr read still has to finish so the pipe closes.
+            }
+
+            string error = stderr.Wait(TimeSpan.FromSeconds(5)) ? stderr.Result : string.Empty;
+            process.Dispose();
+            return error;
+        }
     }
 }

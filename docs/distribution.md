@@ -5,7 +5,7 @@ doc-type: reference
 status: current
 component: Distribution
 owner: dpalfery
-last-reviewed: 2026-09-24
+last-reviewed: 2026-10-04
 ---
 
 # Distribution and release flow
@@ -25,7 +25,9 @@ curl -fsSL https://raw.githubusercontent.com/dpalfery/kyber-weave/main/scripts/i
 `scripts/install.sh` is the one first-install channel Kyber-Weave documents. It resolves the
 latest release tag (or pre-release tags when `--prerelease` / `KYBER_WEAVE_PRERELEASE=1`
 is set, or a specific release via `--version`), verifies SHA-256 against `SHA256SUMS.txt`,
-follows HTTPS-only redirects, and installs to `~/.local/bin` without sudo.
+follows HTTPS-only redirects, and installs to `~/.local/bin` without sudo. Unset, it refuses
+any URL that is not HTTPS. The loopback exception is
+[`KYBER_WEAVE_RELEASE_ORIGIN`](#verifying-a-release-locally).
 
 It installs `kyber-weave`, `kyber-weave-mcp`, and — from releases that publish it —
 `kyberdash`. `--no-mcp` and `--no-kyberdash` narrow that set.
@@ -95,8 +97,8 @@ In addition to binary executables, each GitHub Release publishes two version-mat
 
 | Asset Name | Format | Contents |
 |---|---|---|
-| `kyber-squad-<version>.zip` | APM bundle | All 21 canonical agents with their 10 owned references, 24 skills with 64 supplemental resources, profiles, schemas, and `mcp.json` |
-| `kyber-squad-plugin-<version>.zip` | Agent Plugins v1 | All 24 portable skills, their 64 supplemental resources, and MCP server configuration; never agents or agent-owned resources |
+| `kyber-squad-<version>.zip` | APM bundle | All 21 canonical agents with their 10 owned references, 24 skills with 68 supplemental resources, profiles, schemas, and `mcp.json` |
+| `kyber-squad-plugin-<version>.zip` | Agent Plugins v1 | All 24 portable skills, their 68 supplemental resources, and MCP server configuration; never agents or agent-owned resources |
 
 ### Packaging via `squad pack`
 
@@ -115,10 +117,13 @@ kyber-weave squad pack --format all --out ./artifacts
 
 `squad pack` requires the current working directory to be the repository root containing `KyberWeave.sln` and `products/kyber-squad/squad.yml`. It does not fall back to embedded binaries or network sources.
 
-Both formats package `skills/` recursively: 24 `SKILL.md` files plus 64 retained resources, for
-88 skill-tree files. The resources stay in release packages until the
-[content-preserving migration (#128)](https://github.com/dpalfery/kyber-weave/issues/128) is accepted;
-their omission from the exact 24-file Copilot golden skill surface is not a package contract.
+Both formats package `skills/` recursively: 24 `SKILL.md` files plus 68 retained resources, for
+92 skill-tree files. Every retained resource has a reviewed disposition in the
+[skill-resource dispositions audit](kyber-squad/skill-resource-dispositions.md): non-policy
+content stays in its skill directory as its durable home, portable policy lives in the
+`products/kyber-squad/standards/` templates, and nothing was deleted; their omission from the
+exact 24-file Copilot golden skill surface of the pinned Hotshot fixture is not a package
+contract.
 
 `products/kyber-squad/` is canonical and package authority. The root `.github/agents/`,
 `.github/skills/`, `.kyber-weave/squad.lock.yml`, and `.kyber-weave/squad.receipt.json` are an
@@ -167,11 +172,14 @@ git tag v0.2.0 && git push origin v0.2.0
 ```
 
 Then `.github/workflows/release.yml` stamps that version onto the binaries, publishes
-each RID, builds the Squad archives via `squad pack`, and creates a GitHub Release with
-all archives and `SHA256SUMS.txt` (passing `--prerelease` for hyphenated pre-releases and
-`--generate-notes` for changelogs).
-Pushes `PackAsTool` nupkgs (including pre-release versions) to GitHub Packages
-(`https://nuget.pkg.github.com/dpalfery`) — never to nuget.org.
+each RID, builds the Squad archives via `squad pack`, and runs a pre-publish manifest check
+before creating a GitHub Release. This check verifies that `SHA256SUMS.txt` names exactly
+the expected 20 assets (see [Manifest completeness and the pre-publish check](#manifest-completeness-and-the-pre-publish-check))
+and that each hash is correct; if any asset is missing or unexpected, the release fails before `gh release create` runs (fail-closed, prevents publication).
+
+On success, the workflow creates a GitHub Release with the 20 assets, the manifest, and changelogs (passing `--prerelease` for hyphenated pre-releases), then runs a post-publish verification step that checks the published assets against the expected set and byte-compares the manifest. If the post-publish check detects a mismatch, it fails the job (the release is already public, so this check is detective only).
+
+The workflow also pushes `PackAsTool` nupkgs (including pre-release versions) to GitHub Packages (`https://nuget.pkg.github.com/dpalfery`) — never to nuget.org.
 
 The `refs/tags/v*` ruleset still blocks rewriting or deleting a published tag
 except for repository admins. Creating a tag is allowed so the workflow can mint
@@ -191,7 +199,7 @@ Kyber-Weave uses standard semantic versioning tags:
 
 When a version containing a hyphen (`-`) is processed:
 
-- `.github/workflows/release.yml` passes `--prerelease=auto` to `gh release create`. GitHub Releases marks the release as a pre-release, keeping it off `/releases/latest` so standard `install.sh` users stay on stable releases.
+- `.github/workflows/release.yml` passes `--prerelease` to `gh release create`. GitHub Releases marks the release as a pre-release, keeping it off `/releases/latest` so standard `install.sh` users stay on stable releases.
 - Release notes automatically include a pre-release callout banner highlighting the candidate version.
 - Nuget tool packages (`.nupkg`) carrying pre-release versions are published to GitHub Packages, allowing testing via `dotnet tool update --prerelease`.
 
@@ -214,6 +222,61 @@ kyber-weave-mcp -v
 ```
 
 Output format: `kyber-weave <version>` (e.g. `kyber-weave 0.1.0+714f187ab97d66e1199c33d5aaa0c9ab76ffae0f` or `kyber-weave 0.2.0-rc.1`).
+
+## Code signing status
+
+Release integrity rests on HTTPS transport security plus a complete `SHA256SUMS.txt` manifest that covers all 20 archives and installers. A pre-publish check verifies manifest completeness and correctness before `gh release create` runs, failing the job and preventing publication if assets are missing or unexpected (fail-closed). A post-publish check verifies the published assets after the release is live; on mismatch it fails the job but the release is already public (detective, not preventive). Authenticode, GPG, and other code signatures are deferred per [issue #132](https://github.com/dpalfery/kyber-weave/issues/132);
+Azure signing was ruled out on cost; GPG-signed manifests are not implemented; SignPath
+Foundation is a possible but unverified future option. See [ADR 0027](adr/0027-release-integrity-checksums-signing-deferred.md)
+for the complete decision record.
+
+| Artifact | Signing Status | Notes |
+|---|---|---|
+| Windows tray installer (`kyberdash-tray-win-x64-setup.exe`) | **Not signed** | Deferred per [issue #132](https://github.com/dpalfery/kyber-weave/issues/132). Users typically see SmartScreen warning. |
+| Windows `.exe` files (`kyber-weave`, `kyber-weave-mcp`, `kyberdash` in `win-x64` archives) | **Not signed** | Deferred per [issue #132](https://github.com/dpalfery/kyber-weave/issues/132). Users typically see SmartScreen warning. |
+| macOS tray (`kyberdash-tray-darwin-*.zip`) | Developer ID-signed and notarized | Team ID `J2UNNQ466J`. Verified by `.github/workflows/release.yml` signature and notarization checks. |
+| macOS CLI and MCP binaries | Not Developer ID-signed | `install.sh` clears the macOS quarantine attribute at install time ([scripts/install.sh:735–742](../scripts/install.sh)). |
+| macOS KyberDash binary | Ad-hoc signed | Signed after the Node SEA injection in the `build-kyberdash` job, `Build Node SEA for ${{ matrix.rid }}` step ([.github/workflows/release.yml](../.github/workflows/release.yml)). |
+| Linux binaries | Unsigned | Standard for Linux. HTTPS transport and hash verification provide integrity. |
+
+### Manifest completeness and the pre-publish check
+
+The release workflow enforces that `SHA256SUMS.txt` lists exactly the 20 expected assets and
+never itself. The published release contains those 20 assets plus `SHA256SUMS.txt` (21 files total).
+
+The pre-publish check runs before `gh release create` and fails the job if the manifest is incomplete or incorrect, preventing publication. A post-publish check runs after the release is created and compares the published asset names against the 20 expected assets plus `SHA256SUMS.txt` and byte-compares the published manifest; on mismatch it fails the job (the release is already public, so this check is detective only).
+
+- **5** CLI: `kyber-weave-linux-x64.tar.gz`, `kyber-weave-linux-arm64.tar.gz`,
+  `kyber-weave-osx-x64.tar.gz`, `kyber-weave-osx-arm64.tar.gz`, `kyber-weave-win-x64.zip`
+- **5** MCP: `kyber-weave-mcp-linux-x64.tar.gz`, `kyber-weave-mcp-linux-arm64.tar.gz`,
+  `kyber-weave-mcp-osx-x64.tar.gz`, `kyber-weave-mcp-osx-arm64.tar.gz`, `kyber-weave-mcp-win-x64.zip`
+- **5** KyberDash: `kyberdash-darwin-arm64.tar.gz`, `kyberdash-darwin-x64.tar.gz`,
+  `kyberdash-linux-arm64.tar.gz`, `kyberdash-linux-x64.tar.gz`, `kyberdash-win-x64.zip`
+- **3** Tray: `kyberdash-tray-darwin-arm64.zip`, `kyberdash-tray-darwin-x64.zip`, `kyberdash-tray-win-x64-setup.exe`
+- **2** Squad: `kyber-squad-<version>.zip`, `kyber-squad-plugin-<version>.zip`
+
+If an expected asset is missing or an unexpected file is present, the release fails before
+publish with a diagnostic naming the cause. Each new asset requires updating the `EXPECTED_ASSETS` array in `scripts/verify-release-checksums.sh`; the matching build job and the count test must also be updated. Adding a supported platform or distribution format is a
+deliberate step that must be coordinated with the release automation.
+
+### Verification paths
+
+Users and maintainers can verify asset integrity by:
+
+1. **During download**: compare the SHA-256 hash of the downloaded file with the line in
+   `SHA256SUMS.txt` ([Windows PowerShell](install.md#verifying-a-download),
+   [macOS/Linux](install.md#verifying-a-download)).
+2. **Before installation**: `install.sh` and `kyber-weave update` verify all binaries
+   against `SHA256SUMS.txt` before installing.
+3. **Whole-release download verification**: `shasum -a 256 --ignore-missing -c SHA256SUMS.txt`
+   (macOS) or `sha256sum --ignore-missing -c SHA256SUMS.txt` (Linux) verifies the entire
+   downloaded release. The `--ignore-missing` flag allows verification of a partial download
+   if you have only a subset of the 20 assets.
+
+SmartScreen reputation is tracked per file, so binaries from a new release will typically warn
+again. The documented hash-verification and **More info → Run anyway** flow in
+[install.md](install.md#windows-unsigned-binaries-and-smartscreen) is the supported
+path for Windows users until signing is implemented.
 
 ## Verifying a release locally
 
@@ -243,11 +306,26 @@ Three pieces are usable separately:
 | [`scripts/local-release-server.py`](../scripts/local-release-server.py) | Serves that tree as the GitHub Releases endpoints the CLI reads. Loopback only. |
 | [`scripts/update-loop.sh`](../scripts/update-loop.sh) | Drives the two together and asserts the outcome. |
 
-The redirect is `KYBER_WEAVE_RELEASE_ORIGIN`, resolved by
+The self-updater reaches that server through `KYBER_WEAVE_RELEASE_ORIGIN`, resolved by
 [`ReleaseOrigin`](../src/KyberWeave.Cli/Update/ReleaseOrigin.cs). It accepts **loopback
 authorities only**, and permits plain HTTP only for a loopback URL under an active override —
 a redirect off the local server still has to be HTTPS. Those restrictions are the point of
 the type; `ReleaseOriginTests` pins them, and widening them needs a reason you can state.
+
+`scripts/install.sh` reads the same variable. A legal origin is only `http` or `https`,
+with no userinfo, and host `127.0.0.1`, `localhost`, or `[::1]`, with an optional port.
+Every other value is rejected, including other `127.*` addresses. While an `http` override
+is active, curl uses `--proto '=http,https'` and keeps `--proto-redir '=https'`. An `http`
+origin refuses wget. An `https` loopback origin keeps `curl --proto '=https'
+--proto-redir '=https'` and `wget --https-only`. Unset or non-loopback configuration still
+refuses non-HTTPS URLs: an unset origin rejects them in the downloader, and a non-loopback
+origin is rejected before any download.
+
+The loop exports `KYBER_WEAVE_RELEASE_ORIGIN` after the loopback server is listening.
+`--from working` and a git ref then stage by
+`install.sh --install-dir "$BIN" --version <from>`. `--from installed` keeps the copy,
+because it means the binaries already on this machine. The loop serves
+`http://127.0.0.1` with the port the server printed, so that staging needs curl.
 
 Run against a **published single-file binary**, never `dotnet run`. The failure this exists
 to catch — a running image replacing itself and then failing to load an assembly it had not
@@ -257,10 +335,20 @@ yet touched — does not exist in any other shape.
 
 `release-local.sh` builds `kyberdash-<node-rid>.tar.gz` for this machine the way the
 `build-kyberdash` job does: an ESM bundle behind the CommonJS shim, injected into a prebuilt
-Node from nodejs.org, and ad-hoc signed on macOS. The job is the authority.
-`ReleaseTests.LocalKyberDashBuildMatchesTheReleaseJob` fails when the fuse, the postject
-version, or Node's version in `dash/.nvmrc` disagrees with it. The build needs `node` and
-`npm` on `PATH`. A failed build fails the loop; `--no-kyberdash` is the explicit opt-out.
+Node from nodejs.org, and ad-hoc signed on macOS. Both also build the web dashboard
+(`npm --prefix web ci` and `npm --prefix web run build`), pack it as the `web.json` SEA asset
+with `scripts/pack-sea-web.mjs`, add that asset to the SEA blob alongside the CLI, and
+smoke-test the result with `scripts/sea-web-smoke.mjs` — confirming that the built binary's
+`kyberdash web` serves the SPA rather than the "not built" page. The job is the authority.
+`ReleaseTests.LocalKyberDashBuildMatchesTheReleaseJob` pins those web-build, packing, and
+smoke-test commands too, alongside the fuse, the postject version, and Node's version in
+`dash/.nvmrc`. `BuildKyberDashEmbedsTheWebDashboard` pins the order — tsup, then the web
+build, then the packer, then the SEA blob injection, then the smoke test — and confirms the
+archive still contains exactly `kyberdash` and `THIRD_PARTY_NOTICES.md`, unchanged by the
+embedded dashboard. (`dash/tsup.sea.config.ts` also now sets `removeNodeProtocol: false`, so
+the SEA bundle keeps the `node:` prefix on builtins such as `node:sea` that have no bare
+alias, rather than tsup's default of stripping it.) The build needs `node` and `npm` on
+`PATH`. A failed build fails the loop; `--no-kyberdash` is the explicit opt-out.
 
 Each case starts from a fresh copy of a staged build, with its own `HOME`, so the tray
 record the updater reads is a fixture and never this machine's:
@@ -283,9 +371,7 @@ that a tray was installed. Its first run found the tray step had never run at al
 `--version` swallowed the updater's `menubar --update --version <v>`, so `kyberdash`
 printed its version and exited 0.
 
-Two things stay out of reach. The `install.sh` side waits on the script gaining an origin
-override; the [install.sh origin override issue (#125)](https://github.com/dpalfery/kyber-weave/issues/125) tracks both.
-Cross-RID builds are the other: the Node that makes the blob has to run here.
+Cross-RID builds stay out of reach. The Node that makes the blob has to run here.
 
 ## Continuous integration security
 

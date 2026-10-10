@@ -13,7 +13,10 @@
         "at": "2026-09-19T10:00:00.000Z",
         "summary": "2 of 6 source job(s) failed"
       },
-      "inProgress": null
+      "inProgress": null,
+      "historyWeeks": null,
+      "coveredFrom": null,
+      "coveredThrough": null
     },
     "harnesses": [
       {

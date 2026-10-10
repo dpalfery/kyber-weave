@@ -9,6 +9,9 @@
     "allow-set-settings",
     "allow-quit",
     "allow-hide-popover",
+    "allow-clean-database",
+    "allow-import-folder-history",
+    "allow-set-shared-settings",
     "core:event:allow-listen",
     "core:event:allow-unlisten"
   ]

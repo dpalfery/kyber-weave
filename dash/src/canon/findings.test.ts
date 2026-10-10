@@ -64,10 +64,11 @@ describe('buildFindings', () => {
     store.close()
   })
 
-  it('keeps the default window for records that report none, and marks it as default', async () => {
-    // No attribute names a window, so the 200,000 default still governs — but
-    // a reader of the finding must be able to tell that the denominator is an
-    // assumption rather than a measurement (honest unobservability).
+  it('emits no compaction hazard for records that report no window (issue #181)', async () => {
+    // No attribute names a window, so the 200,000 default would govern — but
+    // a ratio against a guessed denominator is not a measurement. The honest
+    // state ("context window unreported — pressure unmeasurable") is
+    // surfaced where pressure is shown, not as a deterministic 95% finding.
     const store = new CanonStore(':memory:')
     store.upsertMany([
       turn('d-1', [], {
@@ -84,14 +85,7 @@ describe('buildFindings', () => {
 
     buildFindings(store)
 
-    const hazards = persistedCompactionHazards(store)
-    expect(hazards).toHaveLength(1)
-    const hazard = hazards[0]!
-    expect(hazard.estimatedWasteTokens).toBe(20_000)
-    expect(hazard.mechanism).toMatch(/of 200000 token window/)
-    const provenance = hazard as ContextWindowProvenance
-    expect(provenance.contextLimit).toBe(200_000)
-    expect(provenance.contextLimitSource).toBe('default')
+    expect(persistedCompactionHazards(store)).toHaveLength(0)
     store.close()
   })
 
@@ -308,6 +302,70 @@ describe('buildFindings over a session key that spans several harnesses', () => 
     buildFindings(store)
 
     expect(persistedCompactionHazards(store).map((hazard) => hazard.sessionId)).toEqual(['workspace:sess-colon'])
+    store.close()
+  })
+})
+
+describe('Issue #182 — twin front-ends persist one finding', () => {
+  it('emits the shared peak once when claude-code and claude-desktop describe one session', async () => {
+    // Same 790,615-token peak under both surfaces (issue #182's top-5
+    // duplicate). Disjoint counters per surface so the ADR 0009 same-turn
+    // dedupe stays out of it: the identity fold alone must end the double.
+    const peak = (span: string, source: string, harness: string, timestamp: string, reported: number) =>
+      turn(span, [], {
+        source,
+        harness,
+        sessionId: 'twin-peak',
+        timestamp,
+        tokens: tokens({ freshInput: reported, reportedInput: reported }),
+        raw: { 'gen_ai.request.max_context_tokens': 1_000_000 },
+      })
+    const store = new CanonStore(':memory:')
+    store.upsertMany([
+      peak('cc-1', 'claude-code-desktop', 'claude-code', '2026-09-23T22:43:53.540Z', 900_000),
+      peak('cd-1', 'codeburn/claude-desktop', 'claude-desktop', '2026-09-23T22:43:58.783Z', 800_000),
+    ])
+    await buildRuns(store)
+
+    buildFindings(store)
+
+    const peaks = store
+      .listFindings()
+      .filter((finding) => finding.detectorId === 'compaction-hazard')
+    expect(peaks).toHaveLength(1)
+    expect(peaks[0]!.sessionId).toBe('twin-peak')
+    store.close()
+  })
+})
+
+describe('Issue #182 review — dedupe never crosses sessions', () => {
+  it('keeps identical turns from two sessions of one run', async () => {
+    // One explicit run joining two sessions: session A holds the OTLP row,
+    // session B the file row, same counters seconds apart. They are two
+    // genuine turns in two conversations — collapsing them would delete a
+    // real turn before the detector regroups by session.
+    const peak = (span: string, session: string, source: string, harness: string, timestamp: string) =>
+      turn(span, [], {
+        source,
+        harness,
+        sessionId: session,
+        timestamp,
+        tokens: tokens({ freshInput: 900_000, reportedInput: 900_000 }),
+        raw: { 'gen_ai.request.max_context_tokens': 1_000_000, 'gen_ai.run.id': 'run-shared' },
+      })
+    const store = new CanonStore(':memory:')
+    store.upsertMany([
+      peak('a-1', 'sess-a', 'claude-code-desktop', 'claude-code', '2026-09-23T10:00:00.000Z'),
+      peak('b-1', 'sess-b', 'codeburn/claude-desktop', 'claude-desktop', '2026-09-23T10:00:05.000Z'),
+    ])
+    await buildRuns(store)
+    expect(store.listRuns()).toHaveLength(1)
+
+    buildFindings(store)
+
+    // One compaction hazard per session: both turns survived the merge.
+    const hazards = persistedCompactionHazards(store)
+    expect(hazards.map((h) => h.sessionId).sort()).toEqual(['sess-a', 'sess-b'])
     store.close()
   })
 })

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import * as React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -44,17 +44,22 @@ function createQueryClient() {
 
 const claudeSession: KyberSessionSummary = {
   session_id: 'sess-claude-canonical',
-  harness: 'claude',
+  harness: 'claude-code',
   label: 'Canonical Claude session',
   started: '2026-03-01T12:00:00.000Z',
   turn_count: 3,
   cost_usd: 0.185,
 }
 
-describe('ContextExplorer Claude canonical-session integration', () => {
-  it('renders Claude from fetchKyberSessions data and expands AgentSessionDashboard', () => {
+describe('ContextExplorer Claude Code canonical-session integration', () => {
+  beforeEach(() => {
+    hookStates.length = 0
+    hookIndex = 0
+  })
+
+  it.each(['agent-all', 'claude-code'])('renders Claude Code in %s and expands AgentSessionDashboard', (activeHarness) => {
     const queryClient = createQueryClient()
-    queryClient.setQueryData(['kyber-sessions', 'claude'], [claudeSession])
+    queryClient.setQueryData(['kyber-sessions'], [claudeSession])
     queryClient.setQueryData(['kyber-session', claudeSession.session_id], {
       id: claudeSession.session_id,
       session_id: claudeSession.session_id,
@@ -68,11 +73,14 @@ describe('ContextExplorer Claude canonical-session integration', () => {
 
     const explorerHtml = renderHtml(
       <QueryClientProvider client={queryClient}>
-        <ContextExplorer activeHarness="claude" />
+        <ContextExplorer activeHarness={activeHarness} />
       </QueryClientProvider>,
     )
     expect(explorerHtml).toContain('data-testid="agent-session-row-sess-claude-canonical"')
     expect(explorerHtml).toContain('Canonical Claude session')
+    // The tab is derived from the single unfiltered ['kyber-sessions'] cache seeded
+    // above, so assert it rather than seeding a second key nothing reads.
+    expect(explorerHtml).toContain('data-testid="provider-tab-claude-code"')
 
     const expandedHtml = renderHtml(
       <QueryClientProvider client={queryClient}>

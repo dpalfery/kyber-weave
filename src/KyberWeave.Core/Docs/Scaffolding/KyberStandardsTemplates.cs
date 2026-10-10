@@ -40,6 +40,7 @@ public static class KyberStandardsTemplates
         "python",
         "react",
         "sql",
+        "tauri",
         "test"
     ];
 

@@ -301,6 +301,9 @@ function readFromSqlite(dbPath: string, timeFloor: string, timeCeiling?: string)
 }
 
 export const cursorReader: ContentReader = {
+  // Yielded list is a filtered subset of requests; positional pairing steals.
+  positionalPairingUnsafe: true,
+
   async *read(filePath: string, dateRange?: DateRange): AsyncGenerator<ReaderTurn> {
     if (filePath.endsWith('.json')) {
       for (const turn of readFromJsonFile(filePath)) {

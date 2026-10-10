@@ -37,6 +37,17 @@ const MEASUREMENT_CLASS_TIER: Record<string, number> = {
   'coverage-gap': 1,
 }
 
+/**
+ * How many finding cards stay on screen. A run can carry hundreds of
+ * duplicate-call findings; without a viewport the list pushes the scorecard
+ * off the page. The height is four cards that each include the
+ * recommendation, the outcome caveat, and the two evidence rows shown before
+ * "show all", plus the gaps between cards. Further findings stay mounted and
+ * scroll inside the region.
+ */
+const FINDING_LIST_VISIBLE_CARDS = 4
+const FINDING_CARD_BLOCK = '16.5rem'
+
 export function measurementClassOf(finding: KyberFinding): string {
   if (finding.measurementClass) return finding.measurementClass
   return finding.confidence === 'deterministic' ? 'deterministic' : 'inferred'
@@ -338,9 +349,11 @@ export function FindingList({
       <div className="flex flex-wrap items-baseline justify-between gap-density-cluster border-b border-border/60 pb-chrome-sm">
         <div>
           <div className="flex items-center gap-density-cluster">
-            <h3 className="text-density-xs font-semibold uppercase tracking-density text-heading">
-              {title}
-            </h3>
+            {title !== '' && (
+              <h3 className="text-density-xs font-semibold uppercase tracking-density text-heading">
+                {title}
+              </h3>
+            )}
             <span className="rounded-chrome bg-interactive-secondary px-chrome-sm py-chrome-xs text-density-2xs font-mono text-tertiary-foreground">
               {sortedFindings.length} finding{sortedFindings.length === 1 ? '' : 's'}
             </span>
@@ -361,7 +374,17 @@ export function FindingList({
           No findings detected
         </p>
       ) : (
-        <div className="mt-density-stack flex flex-col gap-density-cluster">
+        <div
+          role="region"
+          tabIndex={0}
+          aria-label={title !== '' ? title : 'Findings'}
+          className="mt-density-stack flex flex-col gap-density-cluster overflow-y-auto overscroll-contain pr-1"
+          data-testid="finding-list-scroll"
+          data-visible-cards={FINDING_LIST_VISIBLE_CARDS}
+          style={{
+            maxHeight: `calc(${FINDING_LIST_VISIBLE_CARDS} * ${FINDING_CARD_BLOCK} + ${FINDING_LIST_VISIBLE_CARDS - 1} * var(--spacing-density-cluster))`,
+          }}
+        >
           {sortedFindings.map((f) => (
             <FindingCard
               key={f.id}

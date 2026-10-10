@@ -4,6 +4,7 @@ import { ingestBatch } from './ingest.js'
 import { CanonStore } from './store.js'
 import { otlpSpanToRecord } from '../otel/service.js'
 import type { OtlpSpan } from '../otel/receiver.js'
+import antigravitySpan from './adapters/__fixtures__/antigravity-span.json' with { type: 'json' }
 
 // The live collector had its own normalization that never went through the
 // adapter vote. These tests pin the difference, because the failure it caused
@@ -63,6 +64,29 @@ describe('ingestBatch — per-harness token conventions (R4.2)', () => {
     expect(record?.tokens.freshInput).toBe(251_976 - 243_910)
     expect(record?.tokens.reportedInput).toBe(251_976)
     expect(record?.harness).toBe('copilot')
+    store.close()
+  })
+
+  it('attributes the live agy shape to antigravity, not the excluded gemini identity', () => {
+    // Issue #195: the live Antigravity exporter sets `service.name: 'agy'`
+    // and carries both `gen_ai.agent.name: 'antigravity'` and
+    // `gen_ai.system: 'gemini'`. The agent identity wins the vote, so the
+    // rows land on the surveyed `antigravity` harness the projection keeps.
+    const store = new CanonStore(':memory:')
+    ingestBatch(
+      [
+        span(antigravitySpan as Record<string, unknown>, {
+          resource: { 'service.name': 'agy' },
+        } as Partial<OtlpSpan>),
+      ],
+      store,
+    )
+    const record = store.get('span-1')
+
+    expect(record?.harness).toBe('antigravity')
+    expect(record?.source).toBe('agy')
+    expect(record?.tokens.freshInput).toBe(251_976 - 243_910)
+    expect(record?.tokens.reportedInput).toBe(251_976)
     store.close()
   })
 
@@ -133,8 +157,8 @@ describe('ingestBatch — attribution and structure', () => {
   })
 
   it('quarantines claimed health and HTTP-server noise while retaining the model call', () => {
-    // Trace inheritance establishes the harness, not that every span is a
-    // model call. These are the two high-volume ambient shapes that inflated
+    // Trace inheritance establishes the harness, not that every span in its trace
+    // is a model call. These are the two high-volume ambient shapes that inflated
     // the corpus into sessions which never happened.
     const store = new CanonStore(':memory:')
     const outcome = ingestBatch(
@@ -202,6 +226,85 @@ describe('ingestBatch — attribution and structure', () => {
     expect(outcome.accepted).toBe(0)
     expect(outcome.quarantined).toBe(1)
     expect(store.get('orphan-1')).toBeUndefined()
+    store.close()
+  })
+})
+
+describe('ingest copilot — attribution and quarantine forwarding (Task T2)', () => {
+  it('correctly attributes copilot_chat/gen_ai spans and does not quarantine as excluded_harness', () => {
+    const store = new CanonStore(':memory:')
+    const copilotChatSpan = span(
+      {
+        'copilot_chat.chat_session_id': '08551cf5-b064-4095-9552-8a9a0a0f78d2',
+        'copilot_chat.turn.id': 'turn-1',
+        'gen_ai.system': 'gemini',
+        'gen_ai.usage.input_tokens': 1200,
+        'gen_ai.usage.output_tokens': 150,
+      },
+      {
+        spanId: 'copilot-chat-span-1',
+        name: 'copilot_chat/gen_ai',
+        timestamp: '2026-09-30T10:00:00.000Z',
+        resource: { 'service.name': 'copilot-service' },
+      },
+    )
+
+    const outcome = ingestBatch([copilotChatSpan], store)
+    expect(outcome.accepted).toBe(1)
+    expect(outcome.quarantined).toBe(0)
+
+    const record = store.get('copilot-chat-span-1')
+    expect(record).toBeDefined()
+    expect(record?.harness).toBe('copilot')
+    expect(store.getQuarantine('copilot-chat-span-1')).toBeUndefined()
+    store.close()
+  })
+
+  it('forwards source, name, and timestamp metadata to quarantine store when spans are quarantined as unclaimed', () => {
+    const store = new CanonStore(':memory:')
+    const orphanSpan = span(
+      { 'unknown.vendor': 'val' },
+      {
+        spanId: 'quarantine-orphan-1',
+        name: 'unattributed_operation',
+        timestamp: '2026-09-30T11:00:00.000Z',
+        resource: { 'service.name': 'orphan-service' },
+      },
+    )
+
+    const outcome = ingestBatch([orphanSpan], store)
+    expect(outcome.quarantined).toBe(1)
+
+    const entry = store.getQuarantine('quarantine-orphan-1')
+    expect(entry).toBeDefined()
+    expect(entry?.reason).toBe('unclaimed')
+    expect(entry?.source).toBe('orphan-service')
+    expect(entry?.name).toBe('unattributed_operation')
+    expect(entry?.timestamp).toBe('2026-09-30T11:00:00.000Z')
+    store.close()
+  })
+
+  it('forwards source, name, and timestamp metadata when non-model spans are quarantined', () => {
+    const store = new CanonStore(':memory:')
+    const nonModelSpan = span(
+      { 'copilot_chat.turn.id': 'turn-2' },
+      {
+        spanId: 'quarantine-nonmodel-1',
+        name: 'copilot_chat/healthcheck',
+        timestamp: '2026-09-30T11:30:00.000Z',
+        resource: { 'service.name': 'copilot-service' },
+      },
+    )
+
+    const outcome = ingestBatch([nonModelSpan], store)
+    expect(outcome.quarantined).toBe(1)
+
+    const entry = store.getQuarantine('quarantine-nonmodel-1')
+    expect(entry).toBeDefined()
+    expect(entry?.reason).toBe('non-model span')
+    expect(entry?.source).toBe('copilot-service')
+    expect(entry?.name).toBe('copilot_chat/healthcheck')
+    expect(entry?.timestamp).toBe('2026-09-30T11:30:00.000Z')
     store.close()
   })
 })

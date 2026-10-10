@@ -155,14 +155,28 @@ function callsAndTurns(
 }
 
 /**
- * Pair parser calls with turns from their shared session file. A reader turn
- * names the same session when available; an unnamed turn remains positionally
- * attributable to that file. Extra calls or turns are left unpaired rather
- * than borrowing content from an adjacent invocation.
+ * Pair parser calls with turns from their shared session file. The pairing
+ * key is `call.turnId ?? call.pairingId`, looked up in the id map and
+ * re-validated on hit; otherwise fall back to `turns[index]` unless the
+ * reader declares positional pairing unsafe (Cursor — filtered turn list).
+ * An id-map miss still takes the positional arm for readers that have not
+ * declared `positionalPairingUnsafe` so Codex/Pi keep parts when the reader
+ * never emits `nativeRecordId`.
+ *
+ * Each reader turn pairs with at most one call: pairing-only claims
+ * (`pairingId` without `turnId` — Cursor's token-bearing bubbles) are
+ * assigned first and mark the turn used, then `turnId` claims skip an
+ * already-claimed turn. The pairing claim therefore wins over the prompt
+ * bubble's `turnId` for the same request, so the usage-carrying span — not
+ * the prompt span — receives the reader parts and context window, and no
+ * request fans its parts out to two spans. Calls without any pairing key
+ * keep the previous behaviour exactly (id lookup, then the positional arm),
+ * so Claude, Codex and Pi pairing is unchanged.
  */
 function matchingTurns(
   calls: readonly ParsedProviderCall[],
   turns: readonly ReaderTurn[],
+  positionalPairingUnsafe: boolean,
 ): Array<ReaderTurn | undefined> {
   const turnsById = new Map<string, ReaderTurn>()
   for (const turn of turns) {
@@ -170,16 +184,66 @@ function matchingTurns(
       turnsById.set(turn.nativeRecordId, turn)
     }
   }
-  const hasNativeIds = turnsById.size > 0
 
+  const claimed = new Set<ReaderTurn>()
+  const paired = new Array<ReaderTurn | undefined>(calls.length)
+  // Calls whose id lookup hit a turn already claimed through `pairingId`.
+  // They stay unpaired rather than falling back to the positional arm, which
+  // would re-attach the same request's parts to a second span.
+  const blocked = new Set<number>()
+  // Calls whose id lookup hit but failed re-validation. As before, a failed
+  // hit stays unpaired rather than falling back to the positional arm.
+  const invalidHit = new Set<number>()
+
+  const isValid = (call: ParsedProviderCall, turn: ReaderTurn, key: string): boolean => {
+    if (turn.sessionId !== undefined && turn.sessionId !== call.sessionId) return false
+    if (turn.nativeRecordId !== undefined && turn.nativeRecordId !== key) return false
+    return true
+  }
+
+  // Pairing-only claims first (Cursor token-bearing bubbles): each turn once.
+  calls.forEach((call, index) => {
+    if (call.turnId !== undefined || call.pairingId === undefined) return
+    const key = call.pairingId
+    const turn = turnsById.get(key)
+    if (turn === undefined || claimed.has(turn) || !isValid(call, turn, key)) return
+    claimed.add(turn)
+    paired[index] = turn
+  })
+
+  // Identity-bearing claims: same lookup as before, except a turn already
+  // claimed through `pairingId` is left to its usage-carrying span. Turns
+  // claimed here are deliberately not marked: duplicate `turnId` claims keep
+  // pairing to the same turn exactly as they did before this change.
+  calls.forEach((call, index) => {
+    if (paired[index] !== undefined || call.turnId === undefined) return
+    const key = call.turnId
+    const turn = turnsById.get(key)
+    if (turn === undefined) return
+    if (!isValid(call, turn, key)) {
+      invalidHit.add(index)
+      return
+    }
+    if (claimed.has(turn)) {
+      blocked.add(index)
+      return
+    }
+    paired[index] = turn
+  })
+
+  // Whatever is still unpaired keeps the previous behaviour exactly: an
+  // id-map miss still takes the positional arm for readers that have not
+  // declared `positionalPairingUnsafe` (Codex/Pi), and id-less calls pair
+  // positionally unless the reader declared that unsafe (Cursor). A pairing
+  // miss behaves like the key-less call it used to be.
   return calls.map((call, index) => {
-    const positional = turns[index]
-    const turn = call.turnId === undefined
-      ? (hasNativeIds ? undefined : positional)
-      : turnsById.get(call.turnId) ?? (hasNativeIds ? undefined : positional)
+    if (paired[index] !== undefined) return paired[index]
+    if (blocked.has(index) || invalidHit.has(index)) return undefined
+    const key = call.turnId ?? call.pairingId
+    const turn = positionalPairingUnsafe ? undefined : turns[index]
     if (turn === undefined) return undefined
     if (turn.sessionId !== undefined && turn.sessionId !== call.sessionId) return undefined
-    if (turn.nativeRecordId !== undefined && call.turnId !== undefined && turn.nativeRecordId !== call.turnId) {
+    if (turn.nativeRecordId !== undefined && key !== undefined && turn.nativeRecordId !== key) {
       return undefined
     }
     return turn
@@ -299,7 +363,9 @@ export async function ingestProviders(
 
       const reader = readerFor(identity) ?? readerFor(provider)
       const [calls, turns] = await callsAndTurns(identity, loaded, reader)
-      const paired = turns === undefined ? undefined : matchingTurns(calls, turns)
+      const paired = turns === undefined
+        ? undefined
+        : matchingTurns(calls, turns, reader?.positionalPairingUnsafe === true)
       if (loaded.harnessId !== undefined) {
         records.push(...synthesizer.synthesizeEnvelopes(envelopesFor(identity, loaded, calls, paired)))
       } else {

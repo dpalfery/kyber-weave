@@ -8,7 +8,7 @@ source: https://github.com/dotnet/skills/tree/main/plugins/aspnetcore/skills/dot
 
 ## DTOs — Sealed Records
 
-Always use `sealed record` for request/response DTOs. The compiler generates `Equals`, `GetHashCode`, and `ToString`; `sealed` prevents unintentional inheritance.
+DTO shape — `sealed record`, compiler-generated equality — follows **<csharp-coding-standard>** § Types.
 
 ```csharp
 public sealed record CreateManualRequest(
@@ -30,7 +30,7 @@ public sealed record ManualResponse(
 
 ## TypedResults (Preferred over `Ok()` / `NotFound()`)
 
-`TypedResults` produces strongly-typed return values that are reflected in the OpenAPI schema:
+`TypedResults` usage follows **<csharp-coding-standard>** § Stack:
 
 ```csharp
 [HttpGet("{id:guid}")]
@@ -51,7 +51,7 @@ public async Task<Results<Ok<ManualResponse>, NotFound>> GetAsync(Guid id)
 
 ## RFC 7807 Problem Details
 
-Reject invalid input with structured `ProblemDetails`, not bare strings:
+Structured-error handling follows **<csharp-coding-standard>** § Errors:
 
 ```csharp
 [HttpPost]
@@ -84,7 +84,7 @@ app.UseExceptionHandler();  // produces RFC 7807 JSON automatically
 
 ## OpenAPI and Swashbuckle
 
-Emit the OpenAPI document with `Microsoft.AspNetCore.OpenApi`. Serve the UI with Swashbuckle. Do not add Scalar as a second UI.
+Emit the OpenAPI document with `Microsoft.AspNetCore.OpenApi`. Serve the UI with Swashbuckle.
 
 ```csharp
 builder.Services.AddOpenApi();
@@ -115,14 +115,10 @@ builder.Services.AddOpenApi(options =>
 
 Before shipping a controller action, verify:
 
-- [ ] Request DTO is `sealed record` with required properties non-nullable
-- [ ] Response DTO is `sealed record` — never return domain entities directly
-- [ ] All `[HttpGet]` returning a collection handle the empty-list case (return `200 []`, not `404`)
+- [ ] DTO shape, collection/empty-list handling, cancellation-token propagation, `HttpContext`
+      access, and error-response format follow **<csharp-coding-standard>**
 - [ ] `[ProducesResponseType]` attributes match the actual `TypedResults` return types
-- [ ] Cancellation token accepted and forwarded to service/repository calls
 - [ ] No business logic in controller — delegate to Application service
-- [ ] No `HttpContext` accessed directly — use action method parameters instead
-- [ ] Error responses use `ProblemDetails` not bare strings
 
 ---
 
@@ -141,13 +137,13 @@ public class ManualsController : ControllerBase
 }
 ```
 
-Use route constraints (`:guid`, `:int`, `:alpha`) to prevent wrong-type requests from reaching action logic.
+Route-constraint usage (`:guid`, `:int`, `:alpha`) follows **<csharp-coding-standard>** § HTTP pipeline.
 
 ---
 
 ## Cancellation Token
 
-Always accept and forward `CancellationToken` on async actions:
+Cancellation-token propagation on async actions follows **<csharp-coding-standard>** § Async:
 
 ```csharp
 [HttpGet]

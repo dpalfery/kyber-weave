@@ -10,6 +10,7 @@ describe('CLI report help', () => {
     })
 
     expect(result.status, result.stderr).toBe(0)
+    expect(result.stderr).not.toMatch(/CommanderError|at Command/)
     expect(result.stdout).toMatch(/--format/)
     expect(result.stdout).toMatch(/--harness/)
     expect(result.stdout).toMatch(/--days/)

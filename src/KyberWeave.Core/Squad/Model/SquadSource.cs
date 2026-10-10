@@ -48,6 +48,7 @@ public sealed record SquadAgent(
     string CapabilityProfile,
     string? CopilotCapabilityProfile,
     IReadOnlyList<string> CopilotTools,
+    string? DevinCapabilityProfile,
     IReadOnlyList<string> DelegatesTo,
     string Fallback,
     IReadOnlyList<string> Aliases,

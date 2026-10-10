@@ -5,17 +5,24 @@ doc-type: architecture
 component: KyberSquad
 source-root: src/KyberWeave.Core/Squad
 owner: dpalfery
-last-reviewed: 2026-09-25
+last-reviewed: 2026-10-04
 status: current
 decided-by:
   - adr/0017-copilot-deterministic-tool-order
   - adr/0019-pi-native-subagents-and-primary-lowering
   - adr/0022-antigravity-native-agents
+  - adr/0024-squad-global-receipt-layout-marker
+  - adr/0025-devin-native-agents-and-skill-lowering
+  - adr/0028-devin-target-scoped-authoring-capability-profiles
 keywords:
   - multi-harness
   - deployment
   - agent
   - skill
+  - circuit-breaker
+  - JEV
+  - oscillation
+  - failure-cluster
 code-refs:
   - SquadTransaction
   - SquadStateStore
@@ -32,6 +39,7 @@ code-refs:
   - KiloRenderer
   - PiRenderer
   - FactoryRenderer
+  - DevinRenderer
 ---
 
 # Kyber-Squad architecture
@@ -39,7 +47,7 @@ code-refs:
 Kyber-Squad is the multi-harness governance and deployment engine within Kyber-Weave.
 It normalizes canonical agent and skill definitions into an intermediate representation (**AgentIR**),
 evaluates capability and permission lattices, applies deterministic role-skill lowering, and executes
-atomic, recoverable deployments. Its catalog declares eleven target coding harnesses; all eleven have
+atomic, recoverable deployments. Its catalog declares twelve target coding harnesses; all twelve have
 implemented and registered renderers today.
 
 ---
@@ -61,7 +69,7 @@ flowchart TD
     end
 
     subgraph Compiler["Target Resolution & Lowering"]
-        SquadTargetResolver["SquadTargetResolver\n(11 Harness Targets)"]
+        SquadTargetResolver["SquadTargetResolver\n(12 Harness Targets)"]
         Lattice["Semantic Permission Lattice\n(deny < ask < allow)"]
         Lowering["Role-Skill Lowering\n(Unoccupied vs Collision role-*)"]
     end
@@ -74,7 +82,7 @@ flowchart TD
     end
 
     subgraph TargetHarnesses["Declared Target Harnesses"]
-        RegisteredTargets["Registered Renderers\n(Copilot, Cursor, Claude, Codex, Antigravity, OpenCode, Kilo, Pi, Factory, Warp, ZCode)"]
+        RegisteredTargets["Registered Renderers\n(Copilot, Cursor, Claude, Codex, Antigravity, OpenCode, Kilo, Pi, Factory, Warp, ZCode, Devin)"]
         UnsupportedTargets["Coverage Preflight Failure\n(Future / Undeclared Targets)"]
     end
 
@@ -97,7 +105,7 @@ Kyber-Squad treats agent and skill definitions as strictly typed, immutable sour
 - **Normalization Pipeline**: `SquadSourceLoader` parses frontmatter against `schemas/agent.schema.json`, validates capability bindings, computes an immutable SHA-256 instruction digest over the normalized body, and emits a structured `AgentIR` model.
 - **Strict Invariants**: Loaders reject undeclared profiles, missing capabilities, invalid invocation modes, path traversal attempts, or unrecognized frontmatter keys.
 - **Canonical Skills and Resources**: `SquadSourceLoader` loads the 24 top-level `SKILL.md`
-  identities. The canonical tree separately retains 64 supplemental files, giving 88 recursive
+  identities. The canonical tree separately retains 68 supplemental files, giving 92 recursive
   skill-tree files; `SquadPacker` carries that complete recursive tree into both package formats.
 
 ---
@@ -245,6 +253,13 @@ Squad deployments maintain rigorous state and concurrency boundaries:
 - **`squad.lock.yml`**: Contains bundle metadata, versions, target lists, exclusions, translation mode, and bundle digests. Also carries a vestigial upstream-toolchain identity field, kept for schema stability now that rendering no longer depends on an external toolchain; it reads `unverified` on every install.
 - **`squad.receipt.json`**: Records scope, installation timestamp, structured degradation records, and an ordered manifest of owned files with relative paths and SHA-256 digests.
 
+#### Receipt version and layout contract
+
+- **Global scope**: receipts serialize as `kyber-squad.receipt/v2` and carry a required `layout` field specifying `single-root` (all paths target-prefixed, legacy rc.9/rc.10 format) or `per-target-roots` (bare paths, rc.11+). Project-scope receipts remain v1 with no layout field.
+- **Legacy v1 global receipts** (pre-#91): classified by examining paths in the receipt. If every entry is target-prefixed (e.g., `.codex/agents/x.toml`), it is treated as `single-root` layout. If no entry is prefixed, it is `per-target-roots`. A receipt mixing both patterns is invalid. A v2 receipt whose declared `layout` contradicts its paths is rejected the same way.
+- **Compatibility**: CLI versions before the v2 layout marker refuse a v2 global receipt with exit code 1 and do not modify any files. Upgrade the CLI to proceed.
+- **Legacy recovery**: for an rc.9/rc.10 single-root install, `status` and `uninstall` operate against the recorded deployment root; `update` and same-target `install` refuse with guidance to run `kyber-weave squad uninstall --global` followed by `kyber-weave squad install --global`.
+
 ---
 
 ## 5. Write-Ahead Journal and Transaction Engine
@@ -340,7 +355,8 @@ and validates.
   `PiRenderer` for native subagent projection to `.pi/agents/*.md` and `.pi/skills/*/SKILL.md` with primary-agent lowering ([ADR 0019](../adr/0019-pi-native-subagents-and-primary-lowering.md)),
   `FactoryRenderer` for `.factory/droids/*.md` and `.factory/skills/*/SKILL.md`,
   `WarpRenderer` for fallback role-skill lowering to `.warp/skills/*/SKILL.md`,
-  and `ZCodeRenderer` for `.zcode/agents/*.md` and `.zcode/skills/*/SKILL.md` with the primary agent lowered to a slash command at `.zcode/commands/*.md` ([ADR 0021](../adr/0021-zcode-command-lowering-and-resource-relocation.md)).
+  `ZCodeRenderer` for `.zcode/agents/*.md` and `.zcode/skills/*/SKILL.md` with the primary agent lowered to a slash command at `.zcode/commands/*.md` ([ADR 0021](../adr/0021-zcode-command-lowering-and-resource-relocation.md)),
+  and `DevinRenderer` for Devin Desktop's local agent: per-agent directories at `.devin/agents/*/AGENT.md` and skills at `.devin/skills/*/SKILL.md`, with the primary agent lowered to a skill ([ADR 0025](../adr/0025-devin-native-agents-and-skill-lowering.md)).
 
 | Target | Renderer | Agent Output | Skill Output | Kind |
 |---|---|---|---|---|
@@ -355,12 +371,21 @@ and validates.
 | `factory` | `FactoryRenderer` | `.factory/droids/<name>.md` | `.factory/skills/<name>/SKILL.md` | Native |
 | `warp` | `WarpRenderer` | `.warp/skills/role-<name>/SKILL.md` (lowered; see [§3](#3-role-skill-lowering-and-namespace-resolution)) | `.warp/skills/<name>/SKILL.md` | Fallback |
 | `zcode` | `ZCodeRenderer` | `.zcode/agents/<name>.md`; the primary agent lowers to `.zcode/commands/<name>.md` | `.zcode/skills/<name>/SKILL.md` | Native |
+| `devin` | `DevinRenderer` | `.devin/agents/<name>/AGENT.md` | `.devin/skills/<name>/SKILL.md` (conductor lowered here) | Native |
 
-- **Copilot-only projection inputs**: each canonical agent declares exact `copilot-tools`, and
-  may name a target-scoped `copilot-capability-profile`. These fields validate and render the
-  Copilot allow-list and safety degradation only. They do not replace or widen the shared
-  `capability-profile`, fallback metadata, description, or instruction body consumed by other
-  renderers.
+- **Target-scoped projection inputs**: each canonical agent declares exact `copilot-tools`, and may
+  name a target-scoped `copilot-capability-profile` or `devin-capability-profile`. These fields
+  validate and render that one target's allow-list and safety degradation only. They do not replace
+  or widen the shared `capability-profile`, fallback metadata, description, or instruction body
+  consumed by other renderers. `DevinRenderer` resolves `agent.DevinCapabilityProfile ??
+  agent.CapabilityProfile` for every permission lookup it performs — granted tools, degradation
+  records, MCP entitlement, and the pure-orchestrator exclusion — so an agent that names none
+  renders exactly as before. Validation is what keeps the envelope scoped: a profile marked
+  `target: devin` is rejected as an agent's shared `capability-profile`, a
+  `devin-capability-profile` naming a profile without that marker is rejected,
+  and a primary agent naming one is rejected because Devin lowers primaries to
+  skills with no tool allow-list
+  ([ADR 0028](../adr/0028-devin-target-scoped-authoring-capability-profiles.md)).
 - **Copilot tool order ([ADR 0017](../adr/0017-copilot-deterministic-tool-order.md))**:
   `CopilotRenderer` emits `CopilotToolCatalog.Normalize(agent.CopilotTools)` — membership from
   the agent, order from one global catalog sequence (`vscode`, `read`, `todo`, MCP wildcards,
@@ -381,7 +406,7 @@ and validates.
   consequently pins every key in the taxonomy, writing `deny` wherever the lattice does not
   grant. A target whose permission model is an allow-list — Claude, ZCode, Pi — needs no such
   treatment, because omitting a name there withholds it.
-- **MCP grants differ per target, and `zcode` is the one that enumerates.** `ClaudeRenderer`
+- **MCP grants differ per target, and `zcode` and `devin` enumerate.** `ClaudeRenderer`
   grants three MCP server wildcards (`mcp__codegraph__*`, `mcp__kyber-weave__*`,
   `mcp__context7__*`) to any agent allowed to read the filesystem except the pure orchestrator.
   The pure-orchestrator MCP withholding applies to the subagent file only; an entry-point skill
@@ -390,8 +415,62 @@ and validates.
   qualified `mcp__<server>__<tool>` names declared by `toolchain.yml`'s `required-mcp-tools`.
   Those names are hard requirements in ZCode, so `squad doctor` fails a ZCode install that does
   not declare the servers — see [ADR 0021](../adr/0021-zcode-command-lowering-and-resource-relocation.md).
+  `DevinRenderer` appends the same fully qualified names to each subagent's `allowed-tools`,
+  because that is the form Devin's permission rules name MCP tools in, and never grants Devin's
+  generic MCP tools (`mcp_list_tools`, `mcp_call_tool`), which would reach every configured
+  server; the servers themselves stay the operator's to configure in Devin's `mcp_config.json`.
   The roster lives in canonical source because it is an external contract that drifts, and because
   the renderer and the doctor check must read the same list.
+- **`devin` withholds delegation from subagents.** Devin Local dispatches a named profile
+  through `run_subagent`, and a profile reaches further subagents only through its
+  `max-nesting` setting. Devin has no `allowed_subagents` equivalent, so granting nested
+  delegation would reach every profile rather than the canonical `delegates-to` roster.
+  `DevinRenderer` emits neither and records `permission-not-expressible` naming the roster.
+  The lowered conductor is unaffected, because it runs in the main session. The delegating roles
+  carry their own fallback: `code-reviewer` applies each lens itself, in turn, and says in its
+  report that the council ran in-process; `architect` gathers its own sweeps and returns a live
+  Azure question as `STATUS: BLOCKED`, which the conductor puts to `azure-reader` and answers.
+  Agents use Devin's directory layout so each resource closure stays inside its own agent's
+  directory and authored links resolve verbatim; see the `DevinRenderer` class remarks for the
+  full evidence.
+- **`devin` grants every tool that performs a capability.**
+  Devin chooses tools per model — a GPT model edits through `apply_patch` when
+  `agent.codex_tools` is on — so `filesystem.write` lowers to `edit`, `write`, `apply_patch`,
+  and `notebook_edit`, and `process.execute` to `exec` with `get_output`, `write_to_process`,
+  and `kill_shell`. `todo_write` and `skill` are the ungoverned base. A subagent without
+  `model` runs on Devin's router-chosen default subagent model rather than the parent's, so
+  every non-orchestration model profile pins an exact Devin model id. On a Devin skill,
+  `allowed-tools` and `permissions.allow` pre-approve rather than restrict, so no skill carries
+  either. `permissions.deny` could narrow the lowered conductor, but Devin does not document
+  whether it reaches the subagents the conductor dispatches — which need exactly the tools the
+  conductor is denied — so it is withheld pending a real-install check. The lowered conductor
+  does carry `triggers: [user]`: Devin Cloud discovers the same skills but loads no custom
+  subagents, so it must never start the conductor by description match. Devin also loads
+  `.agents/` natively and imports `.claude/`, `.github/skills/`, and `.windsurf/skills/` by
+  default, so `squad doctor` warns when a workspace would load a Squad identity twice.
+- **`devin` cannot create a file with its write tools, so the authoring roles are granted a
+  target-scoped shell** ([ADR 0028](../adr/0028-devin-target-scoped-authoring-capability-profiles.md)).
+  The grant above is an upper bound on `allowed-tools`, not a statement about the tools the harness
+  hands the model: on the Devin CLI the tool exposed for file changes is `edit`, `apply_patch`
+  requires `agent.codex_tools`, and `edit` fails when the destination does not exist. A role whose
+  only write path is that tool can edit an artifact but not create one, so `architect` stopped at
+  `STATUS: PLAN_WRITE_ERROR` on a plan it had already drafted. Two grants produce that failure
+  together — `ask` narrows to withheld on subagents, and the shared profiles hold `process.execute:
+  ask` (`architect`) or `deny` (`product-planning`). `architect-devin` and
+  `product-planning-devin` mirror their shared profiles with `process.execute: allow`. Both roles
+  carry the matching initialise-before-edit instruction: `architect` in its plan-authoring
+  reference, and `product-owner` in its agent body and the skill's spec-authoring reference
+  (it cannot own an agent sidecar: a same-named skill already occupies the ZCode skills
+  directory that sidecar would need). Each tells the role to initialise a destination that
+  does not exist before editing. `architect`'s `PLAN_READY`
+  contract and `product-owner`'s `SPEC_FINALIZED` contract require `docs validate` and
+  `docs drift` to pass. `docs-dev` and `task-reviewer` deliberately name no
+  Devin profile and keep narrowing: neither has an execution-dependent completion contract, and a
+  grant with no reader is not made. With `filesystem.write: allow` beside the shell, these two roles
+  also no longer raise `capability-not-isolable` on Devin. The conductor's `intake-path`, `plan-path`,
+  and `spec-path` references pre-create an empty destination before dispatching, and again before
+  redispatching a role that reported a write error on a nonexistent file — the harness-neutral
+  fallback for any harness that withholds file creation from subagents.
 - **The one target-local exception to verbatim links is `zcode`**: ZCode scans both
   `.zcode/agents/` and `.zcode/commands/` recursively, so a closure beside its principal would
   register as phantom agents and commands rather than as resources. `ZCodeRenderer` therefore
@@ -412,22 +491,29 @@ and validates.
   what the deployed agent can actually do.
 - **Copilot emit today**: `CopilotRenderer` writes each agent's
   `.github/agents/<name>.agent.md` and each skill's `.github/skills/<name>/SKILL.md`, then
-  `SquadResourceProjection.Append` places that owner's validated resource closure beside the
-  principal. A fresh Copilot render is 113 files — 21 agents, 24 skills, plus projected
-  closures — with authored relative links resolving in the output. That count is the current
+  `SquadResourceProjection.Append` places every file that owner's Markdown links reach beside
+  the principal. A fresh Copilot render is 122 files — 21 agents, 24 skills, plus projected
+  closures — with authored relative links resolving in the output; every skill resource
+  reaches this render except `skills/setup-dev-environment/agents/openai.yaml`, which stays
+  packaged-only Codex skill-UI metadata. That count is the current
   contract in [requirements](requirements.md) (KS-001 and the golden-render requirement). The
   Hotshot-era 48-file Copilot tree that omitted resources is historical, not current
   behaviour.
-- **Skill golden bytes and retained resources**: every canonical raw `SKILL.md` except the
-  two explicitly evolved skills (`product-owner`, `bug-crusher`) still matches Hotshot golden
-  bytes. Canonical source and both recursive package formats retain all 64 skill resources
-  (88 files under `products/kyber-squad/skills/`) and resolve the retained references. They
-  remain until the
-  [content-preserving migration (#128)](https://github.com/dpalfery/kyber-weave/issues/128) passes.
+- **Skill golden bytes and retained resources**: `code-review-loop` is authored in Kyber-Squad
+  and has no Hotshot baseline. Every imported canonical raw `SKILL.md` except the
+  six explicitly evolved skills (`bug-crusher`, `code-review`, `product-owner`, `second-brain`,
+  `create-pull-request`, and `pr-review-fix-comments`) still matches Hotshot golden bytes;
+  `create-pull-request-github` is retired into `create-pull-request`. Canonical source and both
+  recursive package formats retain all 68 skill resources (92 files under
+  `products/kyber-squad/skills/`) and resolve the retained references. Every retained resource
+  now has a reviewed disposition in the
+  [skill-resource dispositions audit](skill-resource-dispositions.md): non-policy content stays
+  in its skill directory as its durable home, portable policy lives in the
+  `products/kyber-squad/standards/` templates, and nothing was deleted.
 - **Generated-output boundary**: target-rendered `.github` files are deployment output, not
   canonical product or package source, and this synchronization does not add a generated target
   tree to `products/kyber-squad/`.
-- **Coverage today**: `claude` (native subagents with primary-agent entry-point skill), `copilot` (native), `cursor` (native), `codex` (native: `.codex/agents/*.toml` + `.codex/skills/*/SKILL.md`), `antigravity` (native: `.agents/agents/*/agent.md` + `.agents/skills/*/SKILL.md`, [ADR 0022](../adr/0022-antigravity-native-agents.md)), `opencode` (native: `.opencode/agents/*.md` + `.opencode/skills/*/SKILL.md`), `kilo` (native: `.kilo/agents/*.md` + `.kilo/skills/*/SKILL.md`), `pi` (native subagents with primary-agent lowering to `.pi/agents/*.md` and `.pi/skills/*/SKILL.md`), `factory` (native: `.factory/droids/*.md` + `.factory/skills/*/SKILL.md`), `warp` (fallback role-skill lowering to `.warp/skills/`), and `zcode` (native: `.zcode/agents/*.md` + `.zcode/skills/*/SKILL.md`, with the primary agent lowered to `.zcode/commands/*.md`) are implemented and registered. All eleven declared targets are covered. `kyber-weave squad doctor` reports which
+- **Coverage today**: `claude` (native subagents with primary-agent entry-point skill), `copilot` (native), `cursor` (native), `codex` (native: `.codex/agents/*.toml` + `.codex/skills/*/SKILL.md`), `antigravity` (native: `.agents/agents/*/agent.md` + `.agents/skills/*/SKILL.md`, [ADR 0022](../adr/0022-antigravity-native-agents.md)), `opencode` (native: `.opencode/agents/*.md` + `.opencode/skills/*/SKILL.md`), `kilo` (native: `.kilo/agents/*.md` + `.kilo/skills/*/SKILL.md`), `pi` (native subagents with primary-agent lowering to `.pi/agents/*.md` and `.pi/skills/*/SKILL.md`), `factory` (native: `.factory/droids/*.md` + `.factory/skills/*/SKILL.md`), `warp` (fallback role-skill lowering to `.warp/skills/`), `zcode` (native: `.zcode/agents/*.md` + `.zcode/skills/*/SKILL.md`, with the primary agent lowered to `.zcode/commands/*.md`), and `devin` (native: `.devin/agents/*/AGENT.md` + `.devin/skills/*/SKILL.md`, with the primary agent lowered to a skill) are implemented and registered. All twelve declared targets are covered. `kyber-weave squad doctor` reports which
   targets are covered.
 - **Authority and self-deployment boundary**: `products/kyber-squad/` is canonical and package
   authority. Root `.github/agents/`, `.github/skills/`, `.kyber-weave/squad.lock.yml`, and
@@ -437,12 +523,125 @@ and validates.
 
 ---
 
+## 9. Conductor execution circuit-breaker
+
+The deployment engine in §1–§8 ships canonical agent bodies. Those bodies include a
+two-level iteration circuit-breaker that stops thrashing test-fix loops during delivery.
+The contract lives in `conductor`, `csharp-dev`, `test-dev`, and `github-devops`. No ADR
+records it: the caps, tripwires, and escalation key constrain those four instruction
+bodies, not the C# render or transaction engine, and they remain cheap to revise in the
+agent specs. The durable product claim is here.
+
+```mermaid
+flowchart TD
+    Cluster["Failure cluster\n(first-observed test ID)"]
+    Worker["Worker invocation\n3 incremental fixes"]
+    Conductor["Conductor run\n2 rework dispatches"]
+    JEV["JEV tripwire or cap"]
+    Escalation["STATUS: ESCALATION"]
+    Finding["ESCALATION: circuit-breaker"]
+    Architect["architect at queue drain"]
+
+    Cluster --> Worker
+    Cluster --> Conductor
+    Worker --> JEV
+    Conductor --> JEV
+    JEV --> Escalation
+    Escalation --> Finding
+    Finding --> Architect
+```
+
+### Failure-cluster identity and dispatch tally
+
+A **failure cluster** is keyed by the failing test ID first observed for that cluster,
+recorded on the execution artifact when the cluster is created (when no test IDs exist,
+the failing subsystem, job, or step label). A newly failing test joins the recorded
+cluster whose key it most recently co-failed with; if it co-fails with none, or with more
+than one, it forms a new cluster keyed by itself. A cold invocation reads the recorded
+key; it does not re-derive one from whatever is failing now. Distinct keys remain
+distinct clusters for A/B oscillation detection.
+
+Every worker invocation is cold. The per-cluster **dispatch tally** therefore lives on
+the run's persisted execution artifact (or the task artifact until the run writes one).
+The conductor increments that tally only when it dispatches a rework worker for the
+cluster. Re-evaluating the queue reads the tally and never increments it. A tally at or
+above the cluster limit trips the breaker before the dispatch. The worker's inner
+3-iteration cap is per invocation and does not persist.
+
+### Two-level caps (Q1)
+
+| Level | Cap | Scope |
+|---|---|---|
+| Worker inner loop | 3 incremental test-fix-verify attempts | Same failing fixture or cluster, one invocation |
+| Conductor rework | 2 rework dispatches | Same cluster, entire delivery run |
+
+A third unresolved worker attempt, or a third conductor dispatch of the same cluster,
+trips `CIRCUIT_BREAKER_TRIGGER: ITERATION_CAP_EXCEEDED`.
+
+### Oscillation (Q2)
+
+The shipped rule is A→B→A, not a first one-way regression. A first one-way change
+(fixing Failure Cluster A causes Failure Cluster B to fail) consumes one of the worker's
+3 incremental iterations. The worker trips `THRASH_OSCILLATION_DETECTED` only when a
+subsequent fix for B re-breaks A, or a failure signature repeats. The conductor trips
+the same token when rework alternates between two cluster signatures. The original plan
+wording ("A causes B to fail, **or** A → B → A") is historical; it would have burned the
+breaker on the first one-way regression.
+
+### Invariant contradiction (Q3)
+
+Workers must not twist production code or weaken tests to satisfy contradictory
+invariants. When a fixture asserts obsolete implementation details that conflict with
+the approved task design, the worker halts production-code churn and trips
+`INVARIANT_CONTRADICTION`.
+
+### JEV checkpoints (Q4)
+
+Every developer subagent (`csharp-dev`, `test-dev`, `github-devops`) runs these checks
+before and after each fix attempt:
+
+1. **Blast radius** — touched files stay inside authorized task scope. Out-of-scope work
+   trips `BLAST_RADIUS_EXCEEDED`.
+2. **Oscillation** — see Q2. Trips `THRASH_OSCILLATION_DETECTED`.
+3. **Invariant consistency** — see Q3. Trips `INVARIANT_CONTRADICTION`.
+4. **Iteration cap** — three attempts on this cluster in this invocation. Trips
+   `ITERATION_CAP_EXCEEDED`.
+
+Any tripwire emits `STATUS: ESCALATION` with the trigger, failure cluster, contradictory
+invariants, blast radius, and `RECOMMENDED_ACTION`.
+
+The closed trigger set is `ITERATION_CAP_EXCEEDED`, `THRASH_OSCILLATION_DETECTED`,
+`INVARIANT_CONTRADICTION`, and `BLAST_RADIUS_EXCEEDED`. Reject any other token; do not
+invent a reason. `KS-001`–`KS-008` are unchanged; this contract does not add a `KS-009`.
+
+### Escalation (Q5)
+
+When the breaker trips — or a worker returns `STATUS: ESCALATION` — the conductor
+immediately halts rework for that task, does not dispatch further workers for that
+cluster, and records the finding with `ESCALATION: circuit-breaker` (same `ESCALATION:`
+prefix as `ESCALATION: end-of-run`). Non-dependent queue tasks may continue. The run
+cannot complete while an unresolved circuit-breaker finding exists. At queue drain,
+`architect` investigates the cluster and authors an intake recommendation or Draft plan.
+
+Operational contracts remain in
+`products/kyber-squad/agents/conductor.md`,
+`products/kyber-squad/agents/conductor/references/execution-and-review.md`,
+`products/kyber-squad/agents/csharp-dev.md`,
+`products/kyber-squad/agents/test-dev.md`, and
+`products/kyber-squad/agents/github-devops.md`.
+Regression pins live in `tests/KyberWeave.Tests/SquadCanonicalContentTests.cs` and
+`HotshotGoldenContractTests.cs`.
+
+---
+
 ## Related
 
 - [ADR 0017](../adr/0017-copilot-deterministic-tool-order.md) — Copilot tool membership and global emission order
 - [ADR 0021](../adr/0021-zcode-command-lowering-and-resource-relocation.md) — ZCode command lowering and resource relocation
 - [ADR 0022](../adr/0022-antigravity-native-agents.md) — Native per-agent Antigravity rendering and cross-target capability-not-isolable degradation
+- [ADR 0028](../adr/0028-devin-target-scoped-authoring-capability-profiles.md) — Devin target-scoped authoring profiles and the conductor pre-creation fallback
 - [Kyber-Squad adoption guide](onboarding.md) — CLI commands, flags, and workflows
-- [Requirements and degradation contract](requirements.md) — KS-001 through KS-008 specifications
+- [Requirements and degradation contract](requirements.md) — KS-001 through KS-008 specifications and the conductor execution circuit-breaker
 - [Configuration](../configuration.md) — repository configuration options
 - [The documentation ontology](../documentation-ontology.md) — governance framework
+- [Issue #249 plan](../archive/plans/2026-10-02-issue-249-subagent-iteration-circuit-breaker.md) — archived harvest source; Q1–Q5 resolved; no ADR

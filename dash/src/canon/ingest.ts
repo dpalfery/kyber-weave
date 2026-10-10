@@ -23,8 +23,11 @@
 
 import type { HarnessAdapter, RawSpan } from './adapters/base.js'
 import { claudeCodeAdapter } from './adapters/claude-code.js'
+import { codexAdapter } from './adapters/codex.js'
 import { copilotAdapter } from './adapters/copilot.js'
 import { geminiAdapter } from './adapters/gemini.js'
+import { antigravityAdapter } from './adapters/antigravity.js'
+import { opencodeAdapter } from './adapters/opencode.js'
 import { piAdapter } from './adapters/pi.js'
 import { AdapterRegistry } from './adapters/registry.js'
 import {
@@ -40,8 +43,17 @@ import { ingestLogBatch } from './log-ingest.js'
 export const ADAPTERS: readonly HarnessAdapter[] = [
   piAdapter,
   copilotAdapter,
+  // Antigravity stays after Copilot (the abbreviated Antigravity shape
+  // pinned at ingest.test.ts:56-67 ties Copilot and resolves to it) and
+  // before Gemini (ties on the full agent-identity shape resolve here).
+  antigravityAdapter,
   geminiAdapter,
   claudeCodeAdapter,
+  codexAdapter,
+  // OpenCode placeholder last: it detects nothing and claims no span, so
+  // every existing vote resolves above it. The Phase 2 OpenCode task fills in
+  // adapters/opencode.ts without moving this tie-break.
+  opencodeAdapter,
 ]
 
 /** Resource attribute the OTLP convention names the emitting process with. */
@@ -70,6 +82,7 @@ export function toRawSpan(span: OtlpSpan): RawSpan {
     attributes: span.attributes,
     name: span.name,
     kind: span.kind,
+    timestamp: span.timestamp,
   }
 }
 
@@ -122,13 +135,18 @@ export function ingestBatch(spans: readonly OtlpSpan[], store: CanonStore): Inge
   const attributed = registry.attribute(rawSpans)
 
   const unclaimed: string[] = []
-  for (const raw of rawSpans) {
+  for (const [index, raw] of rawSpans.entries()) {
     if (attributed.has(raw.spanId)) continue
     unclaimed.push(raw.spanId)
     store.quarantineAndDelete(
       raw.spanId,
       observedNamespaces(raw.attributes),
       isStructuralSpan(raw) ? 'non-model span' : 'unclaimed',
+      {
+        source: raw.source,
+        name: raw.name,
+        timestamp: spans[index]?.timestamp ?? raw.timestamp,
+      },
     )
   }
   let quarantined = unclaimed.length
@@ -142,16 +160,27 @@ export function ingestBatch(spans: readonly OtlpSpan[], store: CanonStore): Inge
       // Unreachable: the registry only names adapters it was built with.
       throw new Error(`attribution named unregistered harness "${harness}"`)
     }
+
     const record = adapter.normalize(raw)
     growWithReceiverTiming(record, spans[index]!)
     if (record.op === 'unspecified') {
       // Attribution establishes the harness, not that every span in its trace
       // is a model call. Keep structural and ambient spans out of both records
       // and derived sessions while retaining an auditable quarantine row.
-      store.quarantineAndDelete(raw.spanId, observedNamespaces(raw.attributes), 'non-model span')
+      store.quarantineAndDelete(
+        raw.spanId,
+        observedNamespaces(raw.attributes),
+        'non-model span',
+        {
+          source: raw.source,
+          name: raw.name,
+          timestamp: spans[index]?.timestamp ?? raw.timestamp,
+        },
+      )
       quarantined += 1
       continue
     }
+
     const group = byHarness.get(harness)
     if (group === undefined) byHarness.set(harness, { adapter, records: [record] })
     else group.records.push(record)

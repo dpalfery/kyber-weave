@@ -31,11 +31,93 @@
 import { existsSync, readFileSync } from 'fs'
 import { basename, extname } from 'path'
 
-import type { ParsedProviderCall } from '../../providers/types.js'
-
+import { claudeCount, claudeText, claudeUsageOf } from '../../providers/claude.js'
 import { detectUserCorrection } from '../../canon/outcome.js'
 import type { ContentPart } from '../../canon/types.js'
-import type { ContentReader, ReaderTurn } from './types.js'
+import type { DateRange } from '../../types.js'
+import type { ContentReader, ReaderToolCall, ReaderToolResult, ReaderTurn } from './types.js'
+
+export {
+  claudeCount,
+  claudeText,
+  claudeUsageOf,
+  loadClaudeCalls,
+} from '../../providers/claude.js'
+
+function parseLineUsageInfo(rawLine: string, fileStem: string): {
+  messageId?: string
+  sessionId: string
+  model: string
+  inputTokens: number
+  outputTokens: number
+  cacheReadTokens: number
+  cacheCreationTokens: number
+  timestamp?: string
+} | undefined {
+  const usage = claudeUsageOf(rawLine)
+  if (usage === undefined) return undefined
+  let record: Record<string, unknown>
+  try {
+    record = JSON.parse(rawLine) as Record<string, unknown>
+  } catch {
+    return undefined
+  }
+  const message = record['message'] as Record<string, unknown> | undefined
+  return {
+    messageId: message ? claudeText(message['id']) : undefined,
+    // Same stem substitution as loadClaudeCalls — a missing sessionId must
+    // not let the reader fuse a pair the parser would split on file stem.
+    sessionId: claudeText(record['sessionId']) ?? fileStem,
+    // Same default as loadClaudeCalls — a missing model must not let the
+    // reader fuse a pair the parser would split as 'unknown' vs a real name.
+    model: message ? (claudeText(message['model']) ?? 'unknown') : 'unknown',
+    inputTokens: claudeCount(usage['input_tokens']),
+    outputTokens: claudeCount(usage['output_tokens']),
+    cacheReadTokens: claudeCount(usage['cache_read_input_tokens']),
+    cacheCreationTokens: claudeCount(usage['cache_creation_input_tokens']),
+    timestamp: claudeText(record['timestamp']),
+  }
+}
+
+function isMatchingTurnUsage(
+  prev: ReturnType<typeof parseLineUsageInfo>,
+  next: ReturnType<typeof parseLineUsageInfo>,
+): boolean {
+  if (!prev || !next) return false
+  if (prev.messageId !== undefined && next.messageId !== undefined && prev.messageId !== next.messageId) {
+    return false
+  }
+  // Strict compare after stem substitution — mirrors isContiguousPair.
+  if (prev.sessionId !== next.sessionId) {
+    return false
+  }
+  if (prev.model !== next.model) {
+    return false
+  }
+  if (
+    prev.inputTokens !== next.inputTokens ||
+    prev.outputTokens !== next.outputTokens ||
+    prev.cacheReadTokens !== next.cacheReadTokens ||
+    prev.cacheCreationTokens !== next.cacheCreationTokens
+  ) {
+    return false
+  }
+  const isZero =
+    prev.inputTokens === 0 &&
+    prev.outputTokens === 0 &&
+    prev.cacheReadTokens === 0 &&
+    prev.cacheCreationTokens === 0
+  if (isZero) return false
+
+  // Same epoch default as loadClaudeCalls — a missing timestamp must not
+  // skip the ≤60s gate and fuse a pair the parser would split.
+  const prevTime = new Date(prev.timestamp ?? new Date(0).toISOString()).getTime()
+  const nextTime = new Date(next.timestamp ?? new Date(0).toISOString()).getTime()
+  if (Number.isFinite(prevTime) && Number.isFinite(nextTime)) {
+    if (Math.abs(nextTime - prevTime) > 60_000) return false
+  }
+  return true
+}
 
 /**
  * The assistant records in a Claude Code transcript each carry the `usage`
@@ -44,122 +126,132 @@ import type { ContentReader, ReaderTurn } from './types.js'
  * every line since the previous turn belongs to the turn it precedes, which is
  * how a user prompt and its tool results stay attached to the request they fed.
  *
+ * Contiguous assistant records sharing identical usage counters within the turn
+ * window are grouped into a single turn to fuse paired request/response halves (#232).
+ * A defined `message.id` learned earlier in the group still conflicts with a
+ * later different defined id — matching `loadClaudeCalls`' contiguous-pair rule
+ * — so an id-less middle record cannot bridge A and B into one turn. A missing
+ * `sessionId` resolves to the transcript file stem on both sides, exactly as
+ * `loadClaudeCalls` does, so a mixed-presence pair splits instead of fusing.
+ * A missing `message.model` resolves to `'unknown'`, exactly as `loadClaudeCalls`
+ * does, so an unknown/real-model pair splits instead of fusing. A missing
+ * timestamp resolves to epoch, exactly as `loadClaudeCalls` does, so the ≤60s
+ * merge-gap gate always evaluates and a missing/real-time pair past 60s splits
+ * instead of fusing.
+ *
  * Lines after the last assistant record are emitted as a trailing group so a
  * transcript that never reported usage still reads as a single turn.
  */
-export function splitClaudeTurns(lines: readonly string[]): string[][] {
-  const groups: string[][] = []
+export function splitClaudeTurns(lines: readonly string[], fileStem: string): string[][] {
+  const rawGroups: string[][] = []
   let current: string[] = []
 
   for (const rawLine of lines) {
     if (rawLine.trim() === '') continue
     current.push(rawLine)
     if (claudeUsageOf(rawLine) === undefined) continue
-    groups.push(current)
+    rawGroups.push(current)
     current = []
   }
 
-  if (current.length > 0) groups.push(current)
-  return groups
-}
+  if (current.length > 0) rawGroups.push(current)
+  if (rawGroups.length <= 1) return rawGroups
 
-/** The `message.usage` block of one transcript line, when it is an assistant turn. */
-function claudeUsageOf(rawLine: string): Record<string, unknown> | undefined {
-  let record: Record<string, unknown>
-  try {
-    const parsed: unknown = JSON.parse(rawLine)
-    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined
-    record = parsed as Record<string, unknown>
-  } catch {
-    return undefined
+  const mergedGroups: string[][] = []
+  // Parallel to loadClaudeCalls: the defined message.id and the first usage
+  // line of each merged group. prevCall.timestamp / counters / model are
+  // never rewritten on merge, so the gap must be measured from that first
+  // line — walking the last usage line fuses a t=0,+40s,+80s chain that
+  // the parser splits (0→80 > 60s).
+  const mergedMessageIds: Array<string | undefined> = []
+  const mergedFirstUsage: Array<ReturnType<typeof parseLineUsageInfo>> = []
+  for (let i = 0; i < rawGroups.length; i++) {
+    const group = rawGroups[i]!
+    const lastLine = group[group.length - 1]!
+    const usageInfo = parseLineUsageInfo(lastLine, fileStem)
+
+    if (mergedGroups.length > 0) {
+      const prevMerged = mergedGroups[mergedGroups.length - 1]!
+      const prevMessageId = mergedMessageIds[mergedMessageIds.length - 1]
+      const prevFirstUsage = mergedFirstUsage[mergedFirstUsage.length - 1]
+      const prevForMatch =
+        prevFirstUsage === undefined
+          ? undefined
+          : { ...prevFirstUsage, messageId: prevMessageId ?? prevFirstUsage.messageId }
+      if (prevForMatch !== undefined && isMatchingTurnUsage(prevForMatch, usageInfo)) {
+        prevMerged.push(...group)
+        if (prevMessageId === undefined && usageInfo?.messageId !== undefined) {
+          mergedMessageIds[mergedMessageIds.length - 1] = usageInfo.messageId
+        }
+        continue
+      }
+    }
+    mergedGroups.push([...group])
+    mergedMessageIds.push(usageInfo?.messageId)
+    mergedFirstUsage.push(usageInfo)
   }
-  if (record['type'] !== 'assistant') return undefined
-  const message = record['message']
-  if (message === null || typeof message !== 'object' || Array.isArray(message)) return undefined
-  const usage = (message as Record<string, unknown>)['usage']
-  if (usage === null || usage === undefined || typeof usage !== 'object' || Array.isArray(usage)) {
-    return undefined
-  }
-  return usage as Record<string, unknown>
-}
 
-/** A finite non-negative counter, or 0 — never a fabricated estimate. */
-function claudeCount(value: unknown): number {
-  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0
-}
-
-function claudeText(value: unknown): string | undefined {
-  return typeof value === 'string' && value.trim() !== '' ? value.trim() : undefined
+  return mergedGroups
 }
 
 /**
- * Read one Claude Code transcript as provider calls — one per assistant turn.
- *
- * Claude Code's provider entry exposes discovery but no streaming session
- * parser (`createSessionParser` yields nothing), so synthesis had no calls to
- * build records from and every Claude transcript ingested as zero records.
- * This is the same seam Copilot CLI uses for its SQLite store: the transcript
- * is the collectable source, so the counters are read straight off it.
- *
- * Anthropic's `input_tokens` excludes both cache classes, which is the
- * `exclusive` convention already registered for this provider. Counters are
- * copied verbatim; nothing is inferred when a field is absent.
+ * Pairing identity for one turn group. Uses `message.id` only — that is what
+ * `loadClaudeCalls` stamps as `turnId`. Emitting the transcript `uuid` here
+ * would invent ids the parser never stamps as `turnId`, so those calls could
+ * not join through the id map.
  */
-export function loadClaudeCalls(filePath: string): ParsedProviderCall[] {
-  let lines: string[]
-  try {
-    lines = readFileSync(filePath, 'utf-8').split(/\r?\n/)
-  } catch {
-    return []
+function nativeRecordIdOfGroup(group: readonly string[]): string | undefined {
+  for (let i = 0; i < group.length; i++) {
+    if (claudeUsageOf(group[i]!) === undefined) continue
+    let record: Record<string, unknown>
+    try {
+      record = JSON.parse(group[i]!) as Record<string, unknown>
+    } catch {
+      continue
+    }
+    const message = record['message'] as Record<string, unknown> | undefined
+    const messageId = message ? claudeText(message['id']) : undefined
+    if (messageId !== undefined) return messageId
   }
+  return undefined
+}
 
-  const calls: ParsedProviderCall[] = []
-  const fileStem = basename(filePath, extname(filePath))
-  let index = 0
-
-  for (const rawLine of lines) {
-    const usage = claudeUsageOf(rawLine)
-    if (usage === undefined) continue
-
-    const record = JSON.parse(rawLine) as Record<string, unknown>
-    const message = record['message'] as Record<string, unknown>
-    const sessionId = claudeText(record['sessionId']) ?? fileStem
-    // `uuid` is the transcript's own per-record identity; the index keeps the
-    // key unique for a transcript that omits it.
-    const messageId = claudeText(record['uuid']) ?? claudeText(message['id']) ?? `turn-${index}`
-    index += 1
-
-    const serverToolUse = usage['server_tool_use']
-    const webSearchRequests =
-      serverToolUse !== null && typeof serverToolUse === 'object' && !Array.isArray(serverToolUse)
-        ? claudeCount((serverToolUse as Record<string, unknown>)['web_search_requests'])
-        : 0
-
-    calls.push({
-      provider: 'claude',
-      model: claudeText(message['model']) ?? 'unknown',
-      inputTokens: claudeCount(usage['input_tokens']),
-      outputTokens: claudeCount(usage['output_tokens']),
-      cacheCreationInputTokens: claudeCount(usage['cache_creation_input_tokens']),
-      cacheReadInputTokens: claudeCount(usage['cache_read_input_tokens']),
-      cachedInputTokens: claudeCount(usage['cache_read_input_tokens']),
-      reasoningTokens: 0,
-      webSearchRequests,
-      // Cost is derived downstream from the counters and the rate table; the
-      // transcript states no price, and stating 0 here would be a fabrication.
-      costUSD: 0,
-      costIsEstimated: true,
-      tools: [],
-      bashCommands: [],
-      timestamp: claudeText(record['timestamp']) ?? new Date(0).toISOString(),
-      speed: claudeText(usage['speed']) === 'fast' ? 'fast' : 'standard',
-      deduplicationKey: `claude:${sessionId}:${messageId}`,
-      sessionId,
-      userMessage: '',
-    })
+/**
+ * Usage-line timestamp for a turn group, matching the instant `loadClaudeCalls`
+ * keeps on a collapsed contiguous pair (the first usage line) and that
+ * `sliceCallsToWindow` therefore sees. Walking from the last usage line would
+ * disagree when a window boundary falls inside the ≤60s merge gap. Missing or
+ * malformed timestamps are unusable instants — the same rows
+ * `sliceCallsToWindow` drops when a refresh window is set — so a date-ranged
+ * read must exclude them too.
+ */
+function timestampOfGroup(group: readonly string[]): Date | undefined {
+  for (let i = 0; i < group.length; i++) {
+    if (claudeUsageOf(group[i]!) === undefined) continue
+    let record: Record<string, unknown>
+    try {
+      record = JSON.parse(group[i]!) as Record<string, unknown>
+    } catch {
+      continue
+    }
+    const raw = claudeText(record['timestamp'])
+    if (raw === undefined) return undefined
+    const instant = new Date(raw)
+    return Number.isNaN(instant.getTime()) ? undefined : instant
   }
+  return undefined
+}
 
-  return calls
+function groupInDateRange(group: readonly string[], dateRange?: DateRange): boolean {
+  if (dateRange === undefined) return true
+  const timestamp = timestampOfGroup(group)
+  // Align with sliceCallsToWindow: no usable instant → not in the window.
+  // Keeping these rows would leave the reader ahead of window-sliced calls and
+  // let positional pairing attach their text to a later in-window call.
+  if (timestamp === undefined) return false
+  if (timestamp < dateRange.start) return false
+  if (timestamp > dateRange.end) return false
+  return true
 }
 
 /** Result of reading a full session transcript, including its identifier. */
@@ -176,6 +268,12 @@ export type ClaudeSessionReadResult = {
   isCorrection?: boolean
   /** The rule that identified the user correction. */
   correctionRule?: string
+  /** Tool calls invoked in this turn/session. */
+  toolCalls?: ReaderToolCall[]
+  /** Tool execution results received in this turn/session. */
+  toolResults?: ReaderToolResult[]
+  /** Tool schemas explicitly offered to the model, if observed in telemetry. */
+  toolsOffered?: string[]
 }
 
 /**
@@ -208,6 +306,8 @@ export function readClaudeSession(source: string | readonly string[]): ClaudeSes
   let hasCorrection = false
   let detectedCorrectionRule: string | undefined
   const parts: ContentPart[] = []
+  const toolCalls: ReaderToolCall[] = []
+  const toolResults: ReaderToolResult[] = []
   let order = 0
   const nextOrder = () => order++
 
@@ -343,6 +443,21 @@ export function readClaudeSession(source: string | readonly string[]): ClaudeSes
           text = JSON.stringify(blockObj)
         }
 
+        const toolCallId = typeof blockObj['tool_use_id'] === 'string'
+          ? blockObj['tool_use_id']
+          : (typeof blockObj['id'] === 'string' ? blockObj['id'] : '')
+
+        if (toolCallId !== '') {
+          const isError = blockObj['is_error'] === true ||
+            (typeof blockObj['exit_code'] === 'number' && blockObj['exit_code'] !== 0) ||
+            (typeof blockObj['exitCode'] === 'number' && blockObj['exitCode'] !== 0)
+          toolResults.push({
+            toolCallId,
+            content: text,
+            isError,
+          })
+        }
+
         if (text === '') continue
         parts.push({
           part: 'tool_result_content',
@@ -350,9 +465,24 @@ export function readClaudeSession(source: string | readonly string[]): ClaudeSes
           ...(server !== undefined ? { server } : {}),
           order: nextOrder(),
         })
+      } else if (type === 'tool_use') {
+        const id = typeof blockObj['id'] === 'string' ? blockObj['id'] : ''
+        const name = typeof blockObj['name'] === 'string' ? blockObj['name'] : ''
+        const rawInput = blockObj['input']
+        const input: Record<string, unknown> | string =
+          typeof rawInput === 'string'
+            ? rawInput
+            : (rawInput !== null && typeof rawInput === 'object' && !Array.isArray(rawInput))
+              ? (rawInput as Record<string, unknown>)
+              : {}
+        if (id !== '' || name !== '') {
+          toolCalls.push({
+            id,
+            name,
+            arguments: input,
+          })
+        }
       }
-      // 'tool_use' blocks represent tool invocations rather than tool definitions (schemas),
-      // and system prompts are never written to disk by Claude Code. Neither is emitted.
     }
   }
 
@@ -362,6 +492,8 @@ export function readClaudeSession(source: string | readonly string[]): ClaudeSes
     ...(observedTerminationReason !== undefined ? { terminationReason: observedTerminationReason } : {}),
     ...(observedExitCode !== undefined ? { exitCode: observedExitCode } : {}),
     ...(hasCorrection ? { isCorrection: true, correctionRule: detectedCorrectionRule } : {}),
+    ...(toolCalls.length > 0 ? { toolCalls } : {}),
+    ...(toolResults.length > 0 ? { toolResults } : {}),
   }
 }
 
@@ -393,7 +525,7 @@ export class ClaudeContentReader implements ContentReader {
    * it is joined to the canonical session only after the file reader has
    * established the session identity, rather than inventing turns from roles.
    */
-  async *read(filePath: string): AsyncGenerator<ReaderTurn> {
+  async *read(filePath: string, dateRange?: DateRange): AsyncGenerator<ReaderTurn> {
     // One turn per assistant request, so a turn pairs with the call
     // `loadClaudeCalls` emitted for the same request. Reading the whole
     // transcript as a single turn would put every part on the first record and
@@ -405,15 +537,32 @@ export class ClaudeContentReader implements ContentReader {
       return
     }
 
-    for (const group of splitClaudeTurns(lines)) {
+    for (const group of splitClaudeTurns(lines, basename(filePath, extname(filePath)))) {
+      // Refresh window-slices counter calls; emit the same window here so
+      // positional pairing cannot attach an out-of-window turn's text. Id maps
+      // (`nativeRecordId` ↔ `turnId`) remain the durable pairing key.
+      if (!groupInDateRange(group, dateRange)) continue
+
       const session = readClaudeSession(group)
-      if (session.parts.length === 0 && session.sessionId === undefined) continue
+      if (
+        session.parts.length === 0 &&
+        session.sessionId === undefined &&
+        (!session.toolCalls || session.toolCalls.length === 0) &&
+        (!session.toolResults || session.toolResults.length === 0)
+      ) {
+        continue
+      }
+      const nativeRecordId = nativeRecordIdOfGroup(group)
       yield {
         parts: session.parts,
         ...(session.sessionId !== undefined ? { sessionId: session.sessionId } : {}),
+        ...(nativeRecordId !== undefined ? { nativeRecordId } : {}),
         ...(session.terminationReason !== undefined ? { terminationReason: session.terminationReason } : {}),
         ...(session.exitCode !== undefined ? { exitCode: session.exitCode } : {}),
         ...(session.isCorrection !== undefined ? { isCorrection: session.isCorrection, correctionRule: session.correctionRule } : {}),
+        ...(session.toolCalls !== undefined ? { toolCalls: session.toolCalls } : {}),
+        ...(session.toolResults !== undefined ? { toolResults: session.toolResults } : {}),
+        ...(session.toolsOffered !== undefined ? { toolsOffered: session.toolsOffered } : {}),
       }
     }
   }

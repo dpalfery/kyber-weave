@@ -43,16 +43,43 @@
 // and the adapters follow the same split — `normalize` emits, `validate`
 // rejects. Re-validating here would be a second mechanism for one job.
 
+import { Buffer } from 'node:buffer'
 import { createHash } from 'node:crypto'
 
 import type { ParsedProviderCall } from '../providers/types.js'
 export type { ParsedProviderCall } from '../providers/types.js'
-import { contentFromParts, type CanonicalRecord, type CostBlock, type TokenUsage } from '../canon/types.js'
-import { exclusiveConvention, inclusiveConvention } from '../canon/adapters/copilot.js'
+import {
+  contentFromParts,
+  notMeasurable,
+  type CanonicalRecord,
+  type ContentPart,
+  type CostBlock,
+  type MetricAvailability,
+  type TokenUsage,
+} from '../canon/types.js'
+import { convertInclusiveCounts, exclusiveConvention } from '../canon/adapters/copilot.js'
+import { billableOutputTokens } from '../pricing/models.js'
+// The detector keys duplicates on serializeToolArgs; the producer reuses the
+// same canonical form so both identities agree by construction. Acyclic:
+// analysis/findings.ts never imports synth (it reads canonical records).
+import { serializeToolArgs } from '../analysis/findings.js'
+import { DECLARED_CONTEXT_LIMIT_KEY } from '../canon/context-window.js'
 import { FILE_SOURCE_PREFIX, measurabilityFor } from '../canon/measurability.js'
-import type { ReaderTurn, SourceRecordEnvelope, SourceRecordProvenance } from './readers/types.js'
+import { TWIN_TURN_MAX_SKEW_MS } from '../canon/twin-dedupe.js'
+import type {
+  ReaderToolCall,
+  ReaderToolResult,
+  ReaderTurn,
+  SourceRecordEnvelope,
+  SourceRecordProvenance,
+} from './readers/types.js'
 
-export type { SourceRecordEnvelope, SourceRecordProvenance } from './readers/types.js'
+export type {
+  ReaderToolCall,
+  ReaderToolResult,
+  SourceRecordEnvelope,
+  SourceRecordProvenance,
+} from './readers/types.js'
 
 // ---------------------------------------------------------------------------
 // Identity scheme (R3.2: extend upstream's key, don't add a mechanism)
@@ -102,9 +129,9 @@ export function nativeRecordIdentity(
     return { nativeRecordId: call.deduplicationKey.slice(prefix.length) }
   }
   const digest = createHash('sha256')
-    .update(`${nativeSessionIdFor(call, envelope)}\0${call.timestamp}\0llm.invoke\0${ordinal}`, 'utf8')
-    .digest('hex')
-    .slice(0, 16)
+      .update(`${nativeSessionIdFor(call, envelope)}\0${call.timestamp}\0llm.invoke\0${ordinal}`, 'utf8')
+      .digest('hex')
+      .slice(0, 16)
   return { nativeRecordId: digest, recordDigest: digest }
 }
 
@@ -269,6 +296,24 @@ export function conventionFor(
   return conventions.get(provider) ?? DEFAULT_CONVENTION
 }
 
+/**
+ * Fold exclusive reasoning into `output` so the canonical subset invariant
+ * holds (issue #193).
+ *
+ * `ParsedProviderCall.reasoningTokens` is exclusive of `outputTokens` except
+ * for the providers `billableOutputTokens` already names (claude, codex,
+ * copilot). TokenUsage.reasoning is a subset of output, never an addition,
+ * so exclusive reasoning has to be added on the way in. Copilot store and
+ * shutdown rows that carry reasoning with output 0 stay unfolder — folding
+ * would manufacture output from reasoning alone (#240, #241).
+ */
+function foldExclusiveReasoning(tokens: TokenUsage, provider: string): TokenUsage {
+  if (tokens.reasoning === undefined) return tokens
+  const billed = billableOutputTokens(provider, tokens.output, tokens.reasoning)
+  if (billed === tokens.output) return tokens
+  return { ...tokens, output: billed, reportedOutput: billed }
+}
+
 // ---------------------------------------------------------------------------
 // Measurability declarations for the file-sourced path (R7.6, R8.5, R10.2)
 // ---------------------------------------------------------------------------
@@ -306,13 +351,24 @@ export {
 export function costBlockFor(call: ParsedProviderCall): CostBlock {
   if (call.costUSD !== 0 && Number.isFinite(call.costUSD)) {
     return {
-      basis: call.costIsEstimated === true ? 'published' : 'harness',
+      // Every Copilot figure from a parser is LiteLLM-derived (API list rates) whatever its
+      // costIsEstimated flag, so it is never harness-reported (R5.2/R5.3): it is re-priced from
+      // the credits table. Only the genuine reader marks `costHarnessReported` and stays harness,
+      // and it sets the marker only when the row has a real cost_usd. Copilot without the marker
+      // defaults to published so a forgotten flag never leaves a LiteLLM-derived figure at API
+      // list rates presented as harness-reported (R5.3).
+      basis:
+        call.costIsEstimated === true || (call.provider === 'copilot' && call.costHarnessReported !== true)
+          ? 'published'
+          : 'harness',
       status: 'priced',
       value: call.costUSD,
       currency: 'USD',
       byModel: { [call.model]: call.costUSD },
     }
   }
+  // A published-rate provider's zero figure is a rate gap, not a missing basis.
+  if (call.costIsEstimated === true) return { basis: 'published', status: 'no_rate' }
   return { basis: 'unknown', status: 'no_rate' }
 }
 
@@ -328,6 +384,63 @@ export function costBlockFor(call: ParsedProviderCall): CostBlock {
  * session trace — a parsed call carries no parent evidence, and no parent is
  * invented (R4.3's rule, applied on the way in rather than at the end).
  */
+/**
+ * True when the call is a Copilot shutdown rollup leg (dash/src/providers/copilot.ts:
+ * dedup key `copilot:<sid>:shutdown:<model>:<n>`).
+ *
+ * Output tokens are intentionally excluded (0) from shutdown rollups to avoid
+ * double-counting with per-turn assistant.message events. Honest unobservability
+ * declares output as not measurable rather than a measured zero so reasoning
+ * can be surfaced without violating the subset invariant (issue #241).
+ */
+export function isCopilotShutdownRollup(call: ParsedProviderCall): boolean {
+  return (
+    call.provider === 'copilot' &&
+    call.outputTokens === 0 &&
+    call.deduplicationKey.includes(':shutdown:')
+  )
+}
+
+/**
+ * True when the call is a Copilot row whose output is absent by design rather
+ * than a measured zero: the shutdown rollup legs above, plus `copilot-store:`
+ * rows whose initiator is anything but 'compaction', which omit output
+ * because per-turn assistant messages already own it. A compaction store row
+ * is the CLI summarizing its own context with no assistant.message to pair
+ * with, so its output 0 stays a measured zero. Both absent cases keep output
+ * at 0 (folding reasoning would manufacture output) and declare it not
+ * measurable so the subset invariant still validates (issue #240).
+ */
+const COPILOT_SHUTDOWN_OUTPUT_ABSENT_REASON =
+  'Output tokens are excluded from Copilot shutdown rollups to avoid double-counting per-turn requests.'
+
+const COPILOT_STORE_OUTPUT_ABSENT_REASON =
+  'Non-compaction Copilot store rows omit output because per-turn assistant messages already own it, so output is absent rather than a measured zero.'
+
+function copilotStoreOutputOmitted(call: ParsedProviderCall): boolean {
+  return (
+    call.provider === 'copilot' &&
+    call.outputTokens === 0 &&
+    call.deduplicationKey.startsWith('copilot-store:') &&
+    call.initiator !== 'compaction'
+  )
+}
+
+/**
+ * The not-measurable reason when Copilot left output off the row on purpose.
+ * Shutdown rollups and non-compaction store rows share this predicate with
+ * the reason text so the two cannot drift apart.
+ */
+export function copilotAbsentOutputReason(call: ParsedProviderCall): string | undefined {
+  if (isCopilotShutdownRollup(call)) return COPILOT_SHUTDOWN_OUTPUT_ABSENT_REASON
+  if (copilotStoreOutputOmitted(call)) return COPILOT_STORE_OUTPUT_ABSENT_REASON
+  return undefined
+}
+
+export function isCopilotOutputAbsent(call: ParsedProviderCall): boolean {
+  return copilotAbsentOutputReason(call) !== undefined
+}
+
 export function synthesizeCall(
   call: ParsedProviderCall,
   conventions: ReadonlyMap<string, TokenConvention> = PROVIDER_CONVENTIONS,
@@ -348,10 +461,11 @@ export function synthesizeCall(
     cacheCreation: call.cacheCreationInputTokens,
     ...(call.reasoningTokens !== 0 ? { reasoning: call.reasoningTokens } : {}),
   }
-  const tokens: TokenUsage =
+  const converted: TokenUsage =
     conventionFor(call.provider, conventions) === 'inclusive'
-      ? inclusiveConvention(counts)
+      ? convertInclusiveCounts(counts)
       : exclusiveConvention(counts)
+  const tokens = foldExclusiveReasoning(converted, call.provider)
 
   const harness = harnessIdFor(call, envelope)
   const sessionId = nativeSessionIdFor(call, envelope)
@@ -361,10 +475,23 @@ export function synthesizeCall(
     : {
         ...call,
         ...(readerTurn.contextWindow !== undefined ? { contextWindow: readerTurn.contextWindow } : {}),
+        // A declared window rides under the dedicated declared key alone:
+        // filing it under `contextWindow` would promote configured
+        // provenance to reported, and `contextLimitOf` reads the declared
+        // key only when no record reports one.
+        ...(readerTurn.declaredContextWindow !== undefined
+          ? { [DECLARED_CONTEXT_LIMIT_KEY]: readerTurn.declaredContextWindow }
+          : {}),
         ...(readerTurn.terminationReason !== undefined ? { terminationReason: readerTurn.terminationReason } : {}),
         ...(readerTurn.exitCode !== undefined ? { exitCode: readerTurn.exitCode } : {}),
         ...(readerTurn.isCorrection !== undefined ? { isCorrection: readerTurn.isCorrection, correctionRule: readerTurn.correctionRule } : {}),
       }
+
+  const absentOutputReason = copilotAbsentOutputReason(call)
+  const measurability = {
+    ...measurabilityFor(call.provider),
+    ...(absentOutputReason !== undefined ? { output: notMeasurable(absentOutputReason) } : {}),
+  }
 
   return {
     spanId: spanIdFor(call, envelope, ordinal),
@@ -392,9 +519,287 @@ export function synthesizeCall(
     content: readerTurn === undefined ? {} : contentFromParts(readerTurn.parts),
     ...(readerTurn !== undefined ? { parts: readerTurn.parts } : {}),
     cost: costBlockFor(call),
-    measurability: measurabilityFor(call.provider),
+    measurability,
     raw: { ...rawCall, provenance },
   }
+}
+
+// ---------------------------------------------------------------------------
+// Tool invocation synthesis (Issue #180, Task 5)
+// ---------------------------------------------------------------------------
+
+/** Maximum bytes of tool result content stored in content parts before truncation (64KB). */
+export const MAX_TOOL_RESULT_BYTES = 65_536
+
+/** Maximum bytes of tool arguments stored in raw before truncation (64KB). */
+export const MAX_TOOL_ARGUMENTS_BYTES = 65_536
+
+/**
+ * Truncate a UTF-8 string to at most \`maxBytes\`, cutting strictly at a valid UTF-8 code point boundary.
+ */
+export function truncateUtf8(text: string, maxBytes: number): string {
+  const buf = Buffer.from(text, "utf8")
+  if (buf.byteLength <= maxBytes) return text
+
+  let end = maxBytes
+  while (end > 0 && (buf[end] & 0xc0) === 0x80) {
+    end--
+  }
+  return buf.subarray(0, end).toString("utf8")
+}
+
+export type CanonicalToolRecord = CanonicalRecord & {
+  attributes?: Record<string, unknown>
+  provider?: string
+  model?: string
+}
+
+/** A live reference to one string leaf inside a cloned arguments object. */
+type StringLeaf = {
+  get: () => string
+  set: (value: string) => void
+}
+
+/**
+ * Bound an object-shaped tool-arguments payload to `maxBytes` of serialized
+ * JSON without changing its shape: string leaves are shortened longest-first
+ * until the serialization fits, so small fields (paths, flags) survive intact
+ * and the stored value stays an object. Truncating the serialization itself
+ * would swap the type mid-flight (object to string, and not even valid JSON)
+ * and make duplicate detection compare 64KB prefixes instead of arguments.
+ *
+ * The last-resort empty object only triggers when no string leaf exists to
+ * shorten — a >64KB payload of pure numbers, which transcript input cannot
+ * produce — and is still flagged truncated with the full size and hash kept.
+ */
+export function truncateObjectArguments(
+  args: Record<string, unknown>,
+  maxBytes: number,
+): { bounded: Record<string, unknown>; truncated: boolean } {
+  let clone: Record<string, unknown>
+  try {
+    clone = JSON.parse(JSON.stringify(args)) as Record<string, unknown>
+  } catch {
+    return { bounded: {}, truncated: true }
+  }
+  const serializedSize = (): number => Buffer.byteLength(JSON.stringify(clone) ?? '{}', 'utf8')
+  if (serializedSize() <= maxBytes) return { bounded: clone, truncated: false }
+
+  const leaves: StringLeaf[] = []
+  const seen = new Set<unknown>()
+  const walk = (node: unknown, set: (value: string) => void): void => {
+    if (typeof node === 'string') {
+      let current = node
+      leaves.push({
+        get: () => current,
+        set: (value: string) => {
+          current = value
+          set(value)
+        },
+      })
+    } else if (node !== null && typeof node === 'object' && !seen.has(node)) {
+      seen.add(node)
+      if (Array.isArray(node)) {
+        node.forEach((item, i) => walk(item, (value) => {
+          node[i] = value
+        }))
+      } else {
+        for (const [key, value] of Object.entries(node)) {
+          walk(value, (next) => {
+            (node as Record<string, unknown>)[key] = next
+          })
+        }
+      }
+    }
+  }
+  walk(clone, () => {})
+
+  for (let pass = 0; pass <= leaves.length; pass++) {
+    const overage = serializedSize() - maxBytes
+    if (overage <= 0) return { bounded: clone, truncated: true }
+    let longest: StringLeaf | undefined
+    let longestBytes = 0
+    for (const leaf of leaves) {
+      const size = Buffer.byteLength(leaf.get(), 'utf8')
+      if (size > longestBytes) {
+        longestBytes = size
+        longest = leaf
+      }
+    }
+    if (longest === undefined || longestBytes === 0) break
+    longest.set(truncateUtf8(longest.get(), Math.max(0, longestBytes - overage)))
+  }
+  return serializedSize() <= maxBytes
+    ? { bounded: clone, truncated: true }
+    : { bounded: {}, truncated: true }
+}
+
+/**
+ * Synthesize one child `tool.invoke` canonical record from a reader tool call
+ * and its paired execution result.
+ */
+export function synthesizeToolCall(
+  parentRecord: CanonicalRecord,
+  toolCall: ReaderToolCall,
+  toolResult: ReaderToolResult | undefined,
+  index = 0,
+  call?: ParsedProviderCall,
+): CanonicalToolRecord {
+  const isError = toolResult?.isError === true
+  const status = toolResult === undefined ? 'unset' : (isError ? 'error' : 'ok')
+  const resultBytes = toolResult?.content !== undefined
+    ? Buffer.byteLength(toolResult.content, 'utf8')
+    : undefined
+
+  const serializedArgs = typeof toolCall.arguments === 'string'
+    ? toolCall.arguments
+    : JSON.stringify(toolCall.arguments ?? {})
+  const argsBytes = Buffer.byteLength(serializedArgs, 'utf8')
+
+  let boundedArguments: string | Record<string, unknown> = toolCall.arguments
+  let argsTruncated = false
+  if (typeof toolCall.arguments === 'string') {
+    if (argsBytes > MAX_TOOL_ARGUMENTS_BYTES) {
+      boundedArguments = truncateUtf8(toolCall.arguments, MAX_TOOL_ARGUMENTS_BYTES)
+      argsTruncated = true
+    }
+  } else if (toolCall.arguments !== null && typeof toolCall.arguments === 'object') {
+    if (argsBytes > MAX_TOOL_ARGUMENTS_BYTES) {
+      boundedArguments = truncateObjectArguments(toolCall.arguments, MAX_TOOL_ARGUMENTS_BYTES).bounded
+      argsTruncated = true
+    }
+  }
+
+  let durationMs = 0
+  let durationAvailability: MetricAvailability = notMeasurable('Tool duration was not reported in telemetry.')
+  if (toolCall.durationMs !== undefined && Number.isFinite(toolCall.durationMs)) {
+    durationMs = Math.max(0, toolCall.durationMs)
+    durationAvailability = 'measured'
+  } else if (toolCall.timestamp && toolResult?.timestamp) {
+    const callTime = new Date(toolCall.timestamp).getTime()
+    const resTime = new Date(toolResult.timestamp).getTime()
+    const diff = resTime - callTime
+    if (Number.isFinite(diff) && diff >= 0) {
+      durationMs = diff
+      durationAvailability = 'derived'
+    }
+  }
+
+  const attributes: Record<string, unknown> = {
+    'gen_ai.tool.name': toolCall.name,
+    'gen_ai.tool.call_id': toolCall.id,
+    'gen_ai.tool.status': status,
+    ...(resultBytes !== undefined
+      ? { 'gen_ai.tool.result_bytes': resultBytes }
+      : {}),
+    ...(toolCall.arguments !== undefined
+      ? { 'gen_ai.tool.arguments_bytes': argsBytes }
+      : {}),
+    // Identity of the FULL pre-truncation arguments in canonical form, so
+    // whitespace variants (`{"a":1}` vs `{ "a": 1 }`) share an identity.
+    // Emitted only when truncated: complete arguments are compared by the
+    // detector in normalised form already. It rides into `raw` with the
+    // rest of the attributes, which is what survives the store.
+    ...(argsTruncated
+      ? { 'gen_ai.tool.arguments_hash': createHash('sha256').update(serializeToolArgs(toolCall.arguments), 'utf8').digest('hex') }
+      : {}),
+    ...(argsTruncated ? { 'gen_ai.tool.arguments_truncated': true } : {}),
+    ...(durationAvailability === 'measured' || durationAvailability === 'derived'
+      ? { 'gen_ai.tool.duration_ms': durationMs }
+      : {}),
+  }
+
+  let parts: (ContentPart & { truncated?: boolean })[] = []
+  if (toolResult?.content !== undefined) {
+    const text = toolResult.content
+    const textBytes = resultBytes ?? Buffer.byteLength(text, 'utf8')
+    if (textBytes > MAX_TOOL_RESULT_BYTES) {
+      parts = [
+        {
+          part: 'tool_result_content',
+          text: truncateUtf8(text, MAX_TOOL_RESULT_BYTES),
+          truncated: true,
+          order: 0,
+        },
+      ]
+    } else {
+      parts = [
+        {
+          part: 'tool_result_content',
+          text,
+          order: 0,
+        },
+      ]
+    }
+  }
+
+  const nameParts = parentRecord.name.split(':')
+  const provider = call?.provider ?? (nameParts.length > 1 ? nameParts[0] : parentRecord.harness)
+  const model = call?.model ?? (nameParts.length > 1 ? nameParts.slice(1).join(':') : undefined)
+
+  const toolHash = createHash('sha256')
+    .update(`${toolCall.id || index}:${toolCall.name}:${serializedArgs}`)
+    .digest('hex')
+    .slice(0, 12)
+
+  return {
+    spanId: `${parentRecord.spanId}-t${toolHash}`,
+    traceId: parentRecord.traceId,
+    parentSpanId: parentRecord.spanId,
+    source: parentRecord.source,
+    harness: parentRecord.harness,
+    ...(parentRecord.sessionId !== undefined && parentRecord.sessionId !== null
+      ? { sessionId: parentRecord.sessionId }
+      : {}),
+    ...(provider ? { provider } : {}),
+    ...(model ? { model } : {}),
+    name: toolCall.name,
+    op: 'tool.invoke',
+    kind: 'internal',
+    timestamp: toolCall.timestamp ?? parentRecord.timestamp,
+    durationMs,
+    status,
+    tokens: {
+      freshInput: 0,
+      cacheRead: 0,
+      cacheCreation: 0,
+      output: 0,
+      reportedInput: 0,
+      reportedOutput: 0,
+    },
+    content: {},
+    parts,
+    cost: { basis: 'unknown', status: 'no_rate' },
+    measurability: {
+      ...parentRecord.measurability,
+      duration: durationAvailability,
+    },
+    attributes,
+    raw: {
+      ...attributes,
+      arguments: boundedArguments,
+      result: parts[0]?.text,
+    },
+  }
+}
+
+export function synthesizeToolCalls(
+  parentRecord: CanonicalRecord,
+  call: ParsedProviderCall,
+  readerTurn?: ReaderTurn,
+  sessionToolResults?: ReadonlyMap<string, ReaderToolResult>,
+): CanonicalToolRecord[] {
+  if (!readerTurn?.toolCalls || readerTurn.toolCalls.length === 0) {
+    return []
+  }
+
+  const toolResults = readerTurn.toolResults ?? []
+  return readerTurn.toolCalls.map((toolCall, i) => {
+    const toolResult =
+      sessionToolResults?.get(toolCall.id) ??
+      toolResults.find((r) => r.toolCallId === toolCall.id)
+    return synthesizeToolCall(parentRecord, toolCall, toolResult, i, call)
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -425,6 +830,226 @@ function chunk<T>(items: readonly T[], size: number): T[][] {
   return chunks
 }
 
+function isZeroCounters(call: ParsedProviderCall): boolean {
+  return (
+    call.inputTokens === 0 &&
+    call.outputTokens === 0 &&
+    call.cacheReadInputTokens === 0 &&
+    call.cacheCreationInputTokens === 0 &&
+    (call.cachedInputTokens ?? 0) === 0 &&
+    (call.reasoningTokens ?? 0) === 0
+  )
+}
+
+function isCandidateCollapse(call: ParsedProviderCall, harnessId?: string): boolean {
+  if (isZeroCounters(call)) return false
+  const harness = harnessId ?? call.provider
+  return (
+    harness === 'claude-desktop' ||
+    harness === 'kyberdash/claude-desktop' ||
+    call.provider === 'claude-desktop'
+  )
+}
+
+function callCounterKey(call: ParsedProviderCall): string {
+  return [
+    call.sessionId ?? '',
+    call.provider,
+    call.model,
+    call.inputTokens,
+    call.outputTokens,
+    call.cacheReadInputTokens,
+    call.cacheCreationInputTokens,
+    call.reasoningTokens ?? 0,
+  ].join(':')
+}
+
+function mergeReaderTurns(keeper?: ReaderTurn, donor?: ReaderTurn): ReaderTurn | undefined {
+  if (!keeper && !donor) return undefined
+  if (!keeper) return donor
+  if (!donor) return keeper
+
+  const seenParts = new Set((keeper.parts ?? []).map((p) => `${p.part}\0${p.text}`))
+  const extraParts = (donor.parts ?? []).filter((p) => {
+    const k = `${p.part}\0${p.text}`
+    if (seenParts.has(k)) return false
+    seenParts.add(k)
+    return true
+  })
+  const parts = [...(keeper.parts ?? []), ...extraParts]
+
+  const toolCalls = [
+    ...(keeper.toolCalls ?? []),
+    ...(donor.toolCalls ?? []).filter((dt) => !keeper.toolCalls?.some((kt) => kt.id === dt.id)),
+  ]
+
+  const toolResults = [
+    ...(keeper.toolResults ?? []),
+    ...(donor.toolResults ?? []).filter((dr) => !keeper.toolResults?.some((kr) => kr.toolCallId === dr.toolCallId)),
+  ]
+
+  const toolsOffered = Array.from(new Set([...(keeper.toolsOffered ?? []), ...(donor.toolsOffered ?? [])]))
+
+  return {
+    ...keeper,
+    parts,
+    // Collapse must keep a pairing id when only the donor carried one (#216 / #232).
+    ...(keeper.nativeRecordId !== undefined || donor.nativeRecordId !== undefined
+      ? { nativeRecordId: keeper.nativeRecordId ?? donor.nativeRecordId }
+      : {}),
+    ...(toolCalls.length > 0 ? { toolCalls } : {}),
+    ...(toolResults.length > 0 ? { toolResults } : {}),
+    ...(toolsOffered.length > 0 ? { toolsOffered } : {}),
+    terminationReason: keeper.terminationReason ?? donor.terminationReason,
+    exitCode: keeper.exitCode ?? donor.exitCode,
+    isCorrection: keeper.isCorrection ?? donor.isCorrection,
+    correctionRule: keeper.correctionRule ?? donor.correctionRule,
+  }
+}
+
+function mergeParsedCalls(keeper: ParsedProviderCall, donor: ParsedProviderCall): ParsedProviderCall {
+  const tools = Array.from(new Set([...(keeper.tools ?? []), ...(donor.tools ?? [])]))
+  const bashCommands = Array.from(new Set([...(keeper.bashCommands ?? []), ...(donor.bashCommands ?? [])]))
+  const toolSequence = [...(keeper.toolSequence ?? []), ...(donor.toolSequence ?? [])]
+
+  return {
+    ...keeper,
+    tools,
+    bashCommands,
+    ...(toolSequence.length > 0 ? { toolSequence } : {}),
+    webSearchRequests: Math.max(keeper.webSearchRequests ?? 0, donor.webSearchRequests ?? 0),
+    activeDurationMs: Math.max(keeper.activeDurationMs ?? 0, donor.activeDurationMs ?? 0),
+  }
+}
+
+function mergeEnvelopes(keeper: SourceRecordEnvelope, donor: SourceRecordEnvelope): SourceRecordEnvelope {
+  const mergedCall = mergeParsedCalls(keeper.call, donor.call)
+  const mergedReaderTurn = mergeReaderTurns(keeper.readerTurn, donor.readerTurn)
+  return {
+    ...keeper,
+    call: mergedCall,
+    ...(mergedReaderTurn !== undefined ? { readerTurn: mergedReaderTurn } : {}),
+  }
+}
+
+function collapseKey(counterKey: string, nativeId: string | undefined): string {
+  return nativeId === undefined ? counterKey : `${counterKey}\0${nativeId}`
+}
+
+export function collapseEnvelopeTurns(envelopes: readonly SourceRecordEnvelope[]): SourceRecordEnvelope[] {
+  if (envelopes.length <= 1) return [...envelopes]
+
+  const byKey = new Map<string, SourceRecordEnvelope[]>()
+  for (const env of envelopes) {
+    if (!isCandidateCollapse(env.call, env.harnessId)) continue
+    const key = collapseKey(callCounterKey(env.call), env.nativeRecordId)
+    const list = byKey.get(key) ?? []
+    list.push(env)
+    byKey.set(key, list)
+  }
+
+  const dropped = new Set<SourceRecordEnvelope>()
+  const mergedInto = new Map<SourceRecordEnvelope, SourceRecordEnvelope>()
+
+  for (const group of byKey.values()) {
+    if (group.length <= 1) continue
+    const sorted = [...group].sort(
+      (a, b) => new Date(a.call.timestamp).getTime() - new Date(b.call.timestamp).getTime(),
+    )
+    let cluster: SourceRecordEnvelope[] = []
+    const closeCluster = () => {
+      if (cluster.length > 1) {
+        const keeper = cluster[0]!
+        let current = keeper
+        for (let i = 1; i < cluster.length; i++) {
+          const donor = cluster[i]!
+          dropped.add(donor)
+          current = mergeEnvelopes(current, donor)
+        }
+        mergedInto.set(keeper, current)
+      }
+      cluster = []
+    }
+    for (const env of sorted) {
+      const first = cluster[0]
+      const exceedsSpan =
+        first !== undefined &&
+        Math.abs(new Date(env.call.timestamp).getTime() - new Date(first.call.timestamp).getTime()) >
+          TWIN_TURN_MAX_SKEW_MS
+      if (exceedsSpan) closeCluster()
+      cluster.push(env)
+    }
+    closeCluster()
+  }
+
+  return envelopes.flatMap((env) => {
+    if (dropped.has(env)) return []
+    const merged = mergedInto.get(env)
+    return [merged ?? env]
+  })
+}
+
+type CallAndTurn = {
+  call: ParsedProviderCall
+  readerTurn?: ReaderTurn
+}
+
+export function collapseCallAndTurns(items: readonly CallAndTurn[]): CallAndTurn[] {
+  if (items.length <= 1) return [...items]
+
+  const byKey = new Map<string, CallAndTurn[]>()
+  for (const item of items) {
+    if (!isCandidateCollapse(item.call)) continue
+    const key = collapseKey(callCounterKey(item.call), item.call.turnId)
+    const list = byKey.get(key) ?? []
+    list.push(item)
+    byKey.set(key, list)
+  }
+
+  const dropped = new Set<CallAndTurn>()
+  const mergedInto = new Map<CallAndTurn, CallAndTurn>()
+
+  for (const group of byKey.values()) {
+    if (group.length <= 1) continue
+    const sorted = [...group].sort(
+      (a, b) => new Date(a.call.timestamp).getTime() - new Date(b.call.timestamp).getTime(),
+    )
+    let cluster: CallAndTurn[] = []
+    const closeCluster = () => {
+      if (cluster.length > 1) {
+        const keeper = cluster[0]!
+        let current = keeper
+        for (let i = 1; i < cluster.length; i++) {
+          const donor = cluster[i]!
+          dropped.add(donor)
+          current = {
+            call: mergeParsedCalls(current.call, donor.call),
+            readerTurn: mergeReaderTurns(current.readerTurn, donor.readerTurn),
+          }
+        }
+        mergedInto.set(keeper, current)
+      }
+      cluster = []
+    }
+    for (const item of sorted) {
+      const first = cluster[0]
+      const exceedsSpan =
+        first !== undefined &&
+        Math.abs(new Date(item.call.timestamp).getTime() - new Date(first.call.timestamp).getTime()) >
+          TWIN_TURN_MAX_SKEW_MS
+      if (exceedsSpan) closeCluster()
+      cluster.push(item)
+    }
+    closeCluster()
+  }
+
+  return items.flatMap((item) => {
+    if (dropped.has(item)) return []
+    const merged = mergedInto.get(item)
+    return [merged ?? item]
+  })
+}
+
 /**
  * The span synthesizer (task 9.1). `synthesize` is the serial reference
  * path; `synthesizeSerial` names it explicitly so the parity test reads as
@@ -453,9 +1078,28 @@ export class Synthesizer {
     parsedCalls: readonly ParsedProviderCall[],
     readerTurns?: readonly (ReaderTurn | undefined)[],
   ): CanonicalRecord[] {
-    return parsedCalls.flatMap((call, index) => {
-      if (isExcludedHarness(call.provider)) return []
-      return [synthesizeCall(call, this.conventions, readerTurns?.[index], undefined, index)]
+    const rawItems: CallAndTurn[] = parsedCalls.map((call, index) => ({
+      call,
+      readerTurn: readerTurns?.[index],
+    }))
+    const collapsed = collapseCallAndTurns(rawItems)
+
+    const sessionToolResults = new Map<string, ReaderToolResult>()
+    for (const item of collapsed) {
+      if (item.readerTurn?.toolResults) {
+        for (const res of item.readerTurn.toolResults) {
+          if (res.toolCallId) {
+            sessionToolResults.set(res.toolCallId, res)
+          }
+        }
+      }
+    }
+
+    return collapsed.flatMap((item, index) => {
+      if (isExcludedHarness(item.call.provider)) return []
+      const parent = synthesizeCall(item.call, this.conventions, item.readerTurn, undefined, index)
+      const toolRecords = synthesizeToolCalls(parent, item.call, item.readerTurn, sessionToolResults)
+      return [parent, ...toolRecords]
     })
   }
 
@@ -465,15 +1109,32 @@ export class Synthesizer {
    * persisted as harnesses. Token validation remains the quarantine seam.
    */
   synthesizeEnvelopes(envelopes: readonly SourceRecordEnvelope[]): CanonicalRecord[] {
-    return envelopes.flatMap((envelope, index) => {
+    const collapsed = collapseEnvelopeTurns(envelopes)
+    const sessionToolResults = new Map<string, ReaderToolResult>()
+    for (const envelope of collapsed) {
+      if (envelope.readerTurn?.toolResults) {
+        for (const res of envelope.readerTurn.toolResults) {
+          if (res.toolCallId) {
+            sessionToolResults.set(res.toolCallId, res)
+          }
+        }
+      }
+    }
+
+    return collapsed.flatMap((envelope, index) => {
       if (isExcludedHarness(envelope.harnessId) || isExcludedHarness(envelope.call.provider)) return []
-      return [synthesizeCall(envelope.call, this.conventions, envelope.readerTurn, envelope, index)]
+      const parent = synthesizeCall(envelope.call, this.conventions, envelope.readerTurn, envelope, index)
+      const toolRecords = synthesizeToolCalls(parent, envelope.call, envelope.readerTurn, sessionToolResults)
+      return [parent, ...toolRecords]
     })
   }
 
   /** The serial path's explicit name; identical to {@link synthesize}. */
-  synthesizeSerial(parsedCalls: readonly ParsedProviderCall[]): CanonicalRecord[] {
-    return this.synthesize(parsedCalls)
+  synthesizeSerial(
+    parsedCalls: readonly ParsedProviderCall[],
+    readerTurns?: readonly (ReaderTurn | undefined)[],
+  ): CanonicalRecord[] {
+    return this.synthesize(parsedCalls, readerTurns)
   }
 
   /**

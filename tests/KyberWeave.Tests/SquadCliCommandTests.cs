@@ -3,6 +3,7 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json.Nodes;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Squad.Deployment;
@@ -411,11 +412,82 @@ public sealed class SquadCliCommandTests : IDisposable
         Assert.Contains("factory", availableSection, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("warp", availableSection, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("codex", availableSection, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("zcode", availableSection, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("devin", availableSection, StringComparison.OrdinalIgnoreCase);
 
         // A plain substring check would false-positive here: "copilot" contains "pi" at
         // index 2-3, so the pi renderer's presence has to be asserted as a whole word.
         Assert.Matches(@"\bpi\b", availableSection);
         Assert.DoesNotContain("Not yet implemented:", normalizedOutput, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// A workspace holding a Squad skill under both <c>.devin/skills/</c> and
+    /// <c>.claude/skills/</c> loads it twice in Devin, which imports Claude's skills by default.
+    /// Doctor warns with the remedy but does not fail: both copies work.
+    /// </summary>
+    [Fact]
+    public void Doctor_DevinWorkspace_WarnsOnSkillsDevinWouldLoadTwice()
+    {
+        string workingDir = Path.Combine(_temp.Path, "doctor-devin-overlap");
+        foreach (string root in new[] { ".devin", ".claude" })
+        {
+            string skillDirectory = Path.Combine(workingDir, root, "skills", "code-review");
+            Directory.CreateDirectory(skillDirectory);
+            File.WriteAllText(Path.Combine(skillDirectory, "SKILL.md"), "---\nname: code-review\n---\n");
+        }
+
+        FakeProcessExecutor executor = new FakeProcessExecutor()
+            .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
+        FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "user-home"));
+        SquadGlobalRoots globalRoots = new(_ => null, Path.Combine(_temp.Path, "doctor-devin-home"), isWindows: false);
+        SquadDoctorCommand command = new SquadDoctorCommand(
+            executor,
+            userPaths,
+            workingDirectory: workingDir,
+            globalRoots: globalRoots);
+
+        CommandExecution execution = Capture(() => command.Execute(
+            null!,
+            new SquadDoctorSettings
+            {
+                Path = workingDir,
+                Global = false
+            }));
+
+        string normalizedOutput = string.Join(
+            ' ',
+            execution.Output.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        Assert.Equal(0, execution.ExitCode);
+        Assert.Contains("warn", normalizedOutput, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(".claude/skills/", normalizedOutput, StringComparison.Ordinal);
+        Assert.Contains("code-review", normalizedOutput, StringComparison.Ordinal);
+        Assert.Contains("\"claude\": false", normalizedOutput, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Doctor_WorkspaceWithoutDevin_SkipsTheDuplicateImportCheck()
+    {
+        string workingDir = Path.Combine(_temp.Path, "doctor-no-devin");
+        Directory.CreateDirectory(workingDir);
+
+        FakeProcessExecutor executor = new FakeProcessExecutor()
+            .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
+        FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "user-home"));
+        SquadDoctorCommand command = new SquadDoctorCommand(executor, userPaths, workingDirectory: workingDir);
+
+        CommandExecution execution = Capture(() => command.Execute(
+            null!,
+            new SquadDoctorSettings
+            {
+                Path = workingDir,
+                Global = false
+            }));
+
+        string normalizedOutput = string.Join(
+            ' ',
+            execution.Output.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        Assert.Contains("Devin duplicate imports: not checked", normalizedOutput, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -587,6 +659,204 @@ public sealed class SquadCliCommandTests : IDisposable
     }
 
     [Fact]
+    public async Task Doctor_GlobalScope_CleanInstall_ReportsNoUnmanagedCollisions()
+    {
+        string tempHome = Path.Combine(_temp.Path, "doctor-clean-install-home");
+        Directory.CreateDirectory(tempHome);
+        string userHome = Path.Combine(_temp.Path, "doctor-clean-install-user");
+        FakeUserPaths userPaths = new(userHome);
+        SquadGlobalRoots globalRoots = new(_ => null, tempHome);
+        SquadStateStore stateStore = new(userPaths);
+        using CorpusSquadReleaseSource releaseSource = new();
+        SquadLifecycleService service = new(
+            releaseSource,
+            SquadCommandComposition.ResolveRenderer(),
+            stateStore,
+            globalRoots: globalRoots);
+
+        SquadLifecycleResult installResult = await service.InstallAsync(new SquadInstallRequest(
+            TargetRoot: KyberWeaveTestPaths.ToolRoot,
+            Scope: SquadDeploymentScope.Global,
+            Targets: [SquadTarget.Cursor],
+            Version: "1.2.3"));
+
+        Assert.True(installResult.Success);
+
+        // Simulate a file recorded in the receipt whose bytes differ from the local source render
+        // (the authoritative repro in issue #283: receipt-managed file flagged as unmanaged by doctor)
+        string csharpDevFile = Path.Combine(tempHome, ".cursor", "agents", "csharp-dev.md");
+        string priorBytes = "prior-release-csharp-dev-content";
+        await File.WriteAllTextAsync(csharpDevFile, priorBytes);
+        string priorDigest = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(priorBytes)));
+        SquadReceipt? receipt = stateStore.ReadReceipt(KyberWeaveTestPaths.ToolRoot, SquadDeploymentScope.Global);
+        Assert.NotNull(receipt);
+        List<SquadOwnedFile> updatedFiles = receipt.Files.Select(f =>
+            f.RelativePath == "agents/csharp-dev.md" && f.Target == "cursor"
+                ? f with { Sha256 = priorDigest }
+                : f).ToList();
+        string receiptPath = stateStore.ResolveReceiptPath(KyberWeaveTestPaths.ToolRoot, SquadDeploymentScope.Global);
+        await File.WriteAllTextAsync(receiptPath, stateStore.SerializeReceipt(receipt with { Files = updatedFiles }));
+
+        FakeProcessExecutor executor = new FakeProcessExecutor()
+            .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
+        SquadDoctorCommand command = new(
+            executor,
+            userPaths,
+            workingDirectory: KyberWeaveTestPaths.ToolRoot,
+            globalRoots: globalRoots);
+
+        CommandExecution execution = Capture(() => command.Execute(
+            null!,
+            new SquadDoctorSettings
+            {
+                Path = KyberWeaveTestPaths.ToolRoot,
+                Global = true
+            }));
+
+        string normalizedOutput = string.Join(
+            ' ',
+            execution.Output.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        Assert.Equal(0, execution.ExitCode);
+        Assert.Contains("Global unmanaged collisions: none", normalizedOutput, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("warn Unmanaged global file", execution.Output, StringComparison.Ordinal);
+
+        // A genuine unmanaged colliding file (not recorded in receipt) is warned
+        string unmanagedFile = Path.Combine(tempHome, ".pi", "agent", "agents", "architect.md");
+        Directory.CreateDirectory(Path.GetDirectoryName(unmanagedFile)!);
+        await File.WriteAllTextAsync(unmanagedFile, "unmanaged-architect-content");
+
+        CommandExecution unmanagedExecution = Capture(() => command.Execute(
+            null!,
+            new SquadDoctorSettings
+            {
+                Path = KyberWeaveTestPaths.ToolRoot,
+                Global = true
+            }));
+
+        string unmanagedOutput = string.Join(
+            ' ',
+            unmanagedExecution.Output.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        Assert.Contains("warn", unmanagedOutput, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("agents/architect.md", unmanagedOutput.Replace('\\', '/'), StringComparison.Ordinal);
+        Assert.DoesNotContain("csharp-dev", unmanagedOutput, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Doctor_GlobalScope_CorruptSiblingReceipt_DoesNotCrash()
+    {
+        string tempHome = Path.Combine(_temp.Path, "doctor-corrupt-sibling-home");
+        Directory.CreateDirectory(tempHome);
+        string userHome = Path.Combine(_temp.Path, "doctor-corrupt-sibling-user");
+        FakeUserPaths userPaths = new(userHome);
+        SquadGlobalRoots globalRoots = new(_ => null, tempHome);
+        SquadStateStore stateStore = new(userPaths);
+
+        string siblingRepo = Path.Combine(_temp.Path, "doctor-corrupt-sibling-repo");
+        Directory.CreateDirectory(siblingRepo);
+        string siblingReceiptPath = stateStore.ResolveReceiptPath(siblingRepo, SquadDeploymentScope.Global);
+        Directory.CreateDirectory(Path.GetDirectoryName(siblingReceiptPath)!);
+        File.WriteAllText(siblingReceiptPath, "{ this is corrupt json \n");
+
+        FakeProcessExecutor executor = new FakeProcessExecutor()
+            .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
+        SquadDoctorCommand command = new(
+            executor,
+            userPaths,
+            workingDirectory: KyberWeaveTestPaths.ToolRoot,
+            globalRoots: globalRoots,
+            stateStore: stateStore);
+
+        CommandExecution execution = Capture(() => command.Execute(
+            null!,
+            new SquadDoctorSettings
+            {
+                Path = KyberWeaveTestPaths.ToolRoot,
+                Global = true
+            }));
+
+        Assert.Equal(1, execution.ExitCode);
+        Assert.Contains("Global unmanaged-collision scan failed", execution.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Doctor found issues", execution.Output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   \n\t ")]
+    public void Doctor_GlobalScope_BlankSiblingReceipt_DoesNotCrash(string blankReceipt)
+    {
+        string tempHome = Path.Combine(_temp.Path, $"doctor-blank-sibling-home-{blankReceipt.Length}");
+        Directory.CreateDirectory(tempHome);
+        string userHome = Path.Combine(_temp.Path, $"doctor-blank-sibling-user-{blankReceipt.Length}");
+        FakeUserPaths userPaths = new(userHome);
+        SquadGlobalRoots globalRoots = new(_ => null, tempHome);
+        SquadStateStore stateStore = new(userPaths);
+
+        string siblingRepo = Path.Combine(_temp.Path, $"doctor-blank-sibling-repo-{blankReceipt.Length}");
+        Directory.CreateDirectory(siblingRepo);
+        string siblingReceiptPath = stateStore.ResolveReceiptPath(siblingRepo, SquadDeploymentScope.Global);
+        Directory.CreateDirectory(Path.GetDirectoryName(siblingReceiptPath)!);
+        File.WriteAllText(siblingReceiptPath, blankReceipt);
+
+        FakeProcessExecutor executor = new FakeProcessExecutor()
+            .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
+        SquadDoctorCommand command = new(
+            executor,
+            userPaths,
+            workingDirectory: KyberWeaveTestPaths.ToolRoot,
+            globalRoots: globalRoots,
+            stateStore: stateStore);
+
+        CommandExecution execution = Capture(() => command.Execute(
+            null!,
+            new SquadDoctorSettings
+            {
+                Path = KyberWeaveTestPaths.ToolRoot,
+                Global = true
+            }));
+
+        Assert.Equal(1, execution.ExitCode);
+        Assert.Contains("Global unmanaged-collision scan failed", execution.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Doctor found issues", execution.Output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Doctor_GlobalScope_CorruptLocalReceipt_DoesNotCrash()
+    {
+        string tempHome = Path.Combine(_temp.Path, "doctor-corrupt-local-home");
+        Directory.CreateDirectory(tempHome);
+        string userHome = Path.Combine(_temp.Path, "doctor-corrupt-local-user");
+        FakeUserPaths userPaths = new(userHome);
+        SquadGlobalRoots globalRoots = new(_ => null, tempHome);
+        SquadStateStore stateStore = new(userPaths);
+
+        string receiptPath = stateStore.ResolveReceiptPath(KyberWeaveTestPaths.ToolRoot, SquadDeploymentScope.Global);
+        Directory.CreateDirectory(Path.GetDirectoryName(receiptPath)!);
+        File.WriteAllText(receiptPath, "{ corrupt local json \n");
+
+        FakeProcessExecutor executor = new FakeProcessExecutor()
+            .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
+        SquadDoctorCommand command = new(
+            executor,
+            userPaths,
+            workingDirectory: KyberWeaveTestPaths.ToolRoot,
+            globalRoots: globalRoots,
+            stateStore: stateStore);
+
+        CommandExecution execution = Capture(() => command.Execute(
+            null!,
+            new SquadDoctorSettings
+            {
+                Path = KyberWeaveTestPaths.ToolRoot,
+                Global = true
+            }));
+
+        Assert.Equal(1, execution.ExitCode);
+        Assert.Contains("Global unmanaged-collision scan failed", execution.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Doctor found issues", execution.Output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+
     public async Task Install_GlobalScope_StillRefusesUnmanagedCollision()
     {
         string tempHome = Path.Combine(_temp.Path, "install-global-collision-home");
@@ -1289,6 +1559,134 @@ public sealed class SquadCliCommandTests : IDisposable
 
     #endregion
 
+    #region Receipt Layout Tests — Behavior (6): CLI Status and Uninstall with Legacy Receipts
+
+    [Fact]
+    public void StatusReceiptLayout_CleanLegacyGlobalReceipt_PrintsOkAndExitsZero()
+    {
+        using TempDirectory fixture = new TempDirectory();
+        string targetRoot = fixture.Path;
+        string appDataDir = Path.Combine(fixture.Path, "app-data");
+        string fakeCodexRoot = Path.Combine(fixture.Path, "fake-codex");
+        Directory.CreateDirectory(appDataDir);
+        Directory.CreateDirectory(fakeCodexRoot);
+        FakeUserPaths userPaths = new(appDataDir);
+        SquadStateStore stateStore = new(userPaths);
+
+        Directory.CreateDirectory(Path.Combine(targetRoot, ".codex", "agents"));
+        File.WriteAllText(
+            Path.Combine(targetRoot, ".codex", "agents", "conductor.toml"),
+            "conductor content",
+            Encoding.UTF8);
+
+        SeedLegacyGlobalDeployment(targetRoot, stateStore,
+            (".codex/agents/conductor.toml", "conductor content"));
+
+        SquadGlobalRoots globalRoots = new(_ => null, Path.Combine(fixture.Path, "fake-home"));
+        SquadStatusCommand command = new(userPaths: userPaths, globalRoots: globalRoots);
+        CommandExecution execution = Capture(() => command.Execute(
+            null!,
+            new SquadStatusSettings
+            {
+                Path = targetRoot,
+                Global = true
+            }));
+
+        Assert.Equal(0, execution.ExitCode);
+        Assert.Contains("ok", execution.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("legacy", execution.Output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void StatusReceiptLayout_DriftEditedFileLegacyReceipt_PrintsDriftAndExitsOne()
+    {
+        using TempDirectory fixture = new TempDirectory();
+        string targetRoot = fixture.Path;
+        string appDataDir = Path.Combine(fixture.Path, "app-data");
+        Directory.CreateDirectory(appDataDir);
+        FakeUserPaths userPaths = new(appDataDir);
+        SquadStateStore stateStore = new(userPaths);
+
+        Directory.CreateDirectory(Path.Combine(targetRoot, ".codex", "agents"));
+        File.WriteAllText(
+            Path.Combine(targetRoot, ".codex", "agents", "conductor.toml"),
+            "conductor content",
+            Encoding.UTF8);
+
+        SeedLegacyGlobalDeployment(targetRoot, stateStore,
+            (".codex/agents/conductor.toml", "conductor content"));
+
+        File.WriteAllText(
+            Path.Combine(targetRoot, ".codex", "agents", "conductor.toml"),
+            "edited conductor content",
+            Encoding.UTF8);
+
+        SquadGlobalRoots globalRoots = new(_ => null, Path.Combine(fixture.Path, "fake-home"));
+        SquadStatusCommand command = new(userPaths: userPaths, globalRoots: globalRoots);
+        CommandExecution execution = Capture(() => command.Execute(
+            null!,
+            new SquadStatusSettings
+            {
+                Path = targetRoot,
+                Global = true
+            }));
+
+        Assert.Equal(1, execution.ExitCode);
+        Assert.Contains("drift", execution.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(".codex/agents/conductor.toml", execution.Output, StringComparison.Ordinal);
+        Assert.Contains("(modified)", execution.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain("missing", execution.Output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void UninstallReceiptLayout_LegacyGlobalReceipt_ConfirmationNamesRecordedRoot()
+    {
+        using TempDirectory fixture = new TempDirectory();
+        string targetRoot = fixture.Path;
+        string appDataDir = Path.Combine(fixture.Path, "app-data");
+        string fakeCodexRoot = Path.Combine(fixture.Path, "fake-codex");
+        Directory.CreateDirectory(appDataDir);
+        Directory.CreateDirectory(fakeCodexRoot);
+        FakeUserPaths userPaths = new(appDataDir);
+        SquadStateStore stateStore = new(userPaths);
+
+        Directory.CreateDirectory(Path.Combine(targetRoot, ".codex", "agents"));
+        File.WriteAllText(
+            Path.Combine(targetRoot, ".codex", "agents", "conductor.toml"),
+            "conductor content",
+            Encoding.UTF8);
+
+        SeedLegacyGlobalDeployment(targetRoot, stateStore,
+            (".codex/agents/conductor.toml", "conductor content"));
+
+        string? originalCodexHome = Environment.GetEnvironmentVariable("CODEX_HOME");
+        try
+        {
+            Environment.SetEnvironmentVariable("CODEX_HOME", fakeCodexRoot);
+
+            SquadGlobalRoots globalRoots = new(_ => null, Path.Combine(fixture.Path, "fake-home"));
+            using CorpusSquadReleaseSource releaseSource = new();
+            SquadLifecycleService lifecycleService = new(releaseSource, SquadCommandComposition.ResolveRenderer(), stateStore, globalRoots: globalRoots);
+            SquadUninstallCommand command = new(userPaths: userPaths, lifecycleService: lifecycleService);
+            CommandExecution execution = Capture(() => command.Execute(
+                null!,
+                new SquadUninstallSettings
+                {
+                    Path = targetRoot,
+                    Global = true,
+                    Yes = true
+                }));
+
+            Assert.Contains($"codex writes beneath {targetRoot}.", execution.Output, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("CODEX_HOME", originalCodexHome);
+        }
+    }
+
+    #endregion
+
     private static string ExtractDoctorSection(string output, string header, params string[] otherHeaders)
     {
         int start = output.IndexOf(header, StringComparison.OrdinalIgnoreCase);
@@ -1392,6 +1790,68 @@ public sealed class SquadCliCommandTests : IDisposable
             Apm: new SquadApmIdentity("0.28.0", "c".PadRight(40, '0'), "d".PadRight(64, '0')));
 
         File.WriteAllText(receiptPath, stateStore.SerializeReceipt(receipt), Encoding.UTF8);
+        File.WriteAllText(lockPath, stateStore.SerializeLock(squadLock), Encoding.UTF8);
+    }
+
+    /// <summary>
+    /// Seeds a Global deployment whose receipt is persisted as authentic legacy v1 JSON — the
+    /// shape a genuine pre-#91 CLI wrote, with no explicit <c>layout</c> field — rather than
+    /// through <see cref="SquadStateStore.SerializeReceipt"/>, which always upgrades a Global
+    /// receipt to v2 regardless of the schema string already on the in-memory object. A
+    /// directly constructed receipt with prefixed paths but an unset (default)
+    /// <see cref="SquadReceipt.Layout"/> would otherwise round-trip through the v2 writer as a
+    /// self-contradicting payload — exactly what the v2 read-side cross-check (#91) now refuses.
+    /// </summary>
+    private static void SeedLegacyGlobalDeployment(
+        string targetRoot,
+        SquadStateStore stateStore,
+        params (string RelativePath, string Content)[] files)
+    {
+        string receiptPath = stateStore.ResolveReceiptPath(targetRoot, SquadDeploymentScope.Global);
+        string lockPath = stateStore.ResolveLockPath(targetRoot, SquadDeploymentScope.Global);
+        Directory.CreateDirectory(Path.GetDirectoryName(receiptPath)!);
+
+        JsonArray filesJson = [];
+        foreach ((string relPath, string content) in files)
+        {
+            string fullPath = Path.Combine(targetRoot, relPath);
+            Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+            byte[] bytes = Encoding.UTF8.GetBytes(content);
+            File.WriteAllBytes(fullPath, bytes);
+            string sha256 = Convert.ToHexStringLower(SHA256.HashData(bytes));
+            filesJson.Add(new JsonObject
+            {
+                ["relativePath"] = relPath,
+                ["sha256"] = sha256,
+                ["target"] = "codex",
+                ["adopted"] = false
+            });
+        }
+
+        JsonObject receiptJson = new JsonObject
+        {
+            ["schema"] = "kyber-squad.receipt/v1",
+            ["scope"] = "global",
+            ["targetRoot"] = ".",
+            ["installedAtUtc"] = DateTimeOffset.UtcNow.UtcDateTime.ToString("O", CultureInfo.InvariantCulture),
+            ["degradations"] = new JsonArray(),
+            ["files"] = filesJson
+        };
+
+        SquadLock squadLock = new SquadLock(
+            Schema: "kyber-squad.lock/v1",
+            SquadVersion: "1.2.3",
+            CliVersion: "1.2.3",
+            McpVersion: "1.2.3",
+            Bundle: "full",
+            Targets: ["codex"],
+            Exclusions: [],
+            Translation: "best-effort",
+            BundleDigest: "a".PadRight(64, '0'),
+            AssetDigest: "b".PadRight(64, '0'),
+            Apm: new SquadApmIdentity("0.28.0", "c".PadRight(40, '0'), "d".PadRight(64, '0')));
+
+        File.WriteAllText(receiptPath, receiptJson.ToJsonString() + "\n", Encoding.UTF8);
         File.WriteAllText(lockPath, stateStore.SerializeLock(squadLock), Encoding.UTF8);
     }
 
@@ -1565,3 +2025,4 @@ public sealed class SquadCliCommandTests : IDisposable
 
     #endregion
 }
+

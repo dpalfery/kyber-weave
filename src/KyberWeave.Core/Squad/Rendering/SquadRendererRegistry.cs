@@ -164,7 +164,7 @@ public sealed class SquadRendererRegistry : ISquadRenderer
             bool isNative = target is SquadTarget.Codex or SquadTarget.Cursor or SquadTarget.Claude or
                             SquadTarget.Copilot or SquadTarget.OpenCode or SquadTarget.Kilo or
                             SquadTarget.Factory or SquadTarget.Pi or SquadTarget.ZCode or
-                            SquadTarget.Antigravity;
+                            SquadTarget.Antigravity or SquadTarget.Devin;
 
             List<SquadDeploymentFile> targetFiles = files
                 .Where(f => string.Equals(f.Target, token, StringComparison.Ordinal))
@@ -361,8 +361,15 @@ public sealed class SquadRendererRegistry : ISquadRenderer
     /// Claude adds an entry-point skill at <c>.claude/skills/&lt;name&gt;/SKILL.md</c> alongside
     /// the kept subagent <c>.claude/agents/&lt;name&gt;.md</c>, so a primary agent is the one
     /// target with two principals (subagent enforced, skill the unenforced main-thread entry).
-    /// ZCode and the other native targets render every agent uniformly without a hard-coded
-    /// special case.
+    /// Cursor joins Pi, ZCode, and Devin as a native target whose output path depends on
+    /// <see cref="SquadAgent.Invocation"/> (Claude instead keeps both principals for a primary
+    /// agent): a primary-invocation agent lowers to <c>.cursor/skills/&lt;name&gt;/SKILL.md</c>
+    /// when its fallback profile's <c>no-primary-agent</c> value is <c>skill</c> (the Pi-renderer
+    /// skill-only precedent — no agent file is emitted), and claims nothing under
+    /// <c>omit</c>. The remaining native targets render every agent uniformly without a
+    /// hard-coded special case here. The <c>Cursor</c> switch arm above is intentionally
+    /// unchanged: resource-principal collision validation keys on source paths, so the
+    /// lowered skill identity needs no arm change.
     /// </remarks>
     private static string? AgentOutputPath(
         SquadTarget target,
@@ -383,6 +390,7 @@ public sealed class SquadRendererRegistry : ISquadRenderer
                 $".warp/skills/{ResolveFallbackOutputIdentity(agent.Name, skillNames, sharedIdentities)}/SKILL.md",
             SquadTarget.Pi => ResolvePiAgentOutputPath(agent, fallbackProfiles),
             SquadTarget.ZCode => ResolveZCodeAgentOutputPath(agent, fallbackProfiles),
+            SquadTarget.Devin => ResolveDevinAgentOutputPath(agent, fallbackProfiles),
             _ => null
         };
 
@@ -430,6 +438,28 @@ public sealed class SquadRendererRegistry : ISquadRenderer
                 : null;
     }
 
+    /// <remarks>
+    /// Devin reads a custom subagent from either <c>agents/&lt;name&gt;.md</c> or
+    /// <c>agents/&lt;name&gt;/AGENT.md</c>; <see cref="DevinRenderer"/> uses the directory form
+    /// only, so a subagent claims <c>.devin/agents/&lt;name&gt;/AGENT.md</c>. A primary-invocation
+    /// agent claims <c>.devin/skills/&lt;name&gt;/SKILL.md</c> when its fallback profile lowers
+    /// to a skill, because Devin Local is the only top-level agent; <c>omit</c> claims nothing.
+    /// </remarks>
+    private static string? ResolveDevinAgentOutputPath(
+        SquadAgent agent,
+        IReadOnlyDictionary<string, SquadFallbackProfile> fallbackProfiles)
+    {
+        if (agent.Invocation == SquadInvocation.Subagent)
+        {
+            return $".devin/agents/{agent.Name}/AGENT.md";
+        }
+
+        return fallbackProfiles.TryGetValue(agent.Fallback, out SquadFallbackProfile? profile) &&
+            string.Equals(profile.NoPrimaryAgent, "skill", StringComparison.Ordinal)
+                ? $".devin/skills/{agent.Name}/SKILL.md"
+                : null;
+    }
+
     private static string? SkillOutputPath(
         SquadTarget target,
         string name,
@@ -446,6 +476,7 @@ public sealed class SquadRendererRegistry : ISquadRenderer
             SquadTarget.Warp => $".warp/skills/{name}/SKILL.md",
             SquadTarget.Pi when !sharedIdentities.Contains(name) => $".pi/skills/{name}/SKILL.md",
             SquadTarget.ZCode when !sharedIdentities.Contains(name) => $".zcode/skills/{name}/SKILL.md",
+            SquadTarget.Devin when !sharedIdentities.Contains(name) => $".devin/skills/{name}/SKILL.md",
             _ => null
         };
 

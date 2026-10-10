@@ -78,6 +78,12 @@ public sealed class DocumentIndexHost
     public string DocsRelativeRoot =>
         _docsRelativeRoots.Count > 0 ? _docsRelativeRoots[0] : OntologyConfig.DefaultDocsRoot;
 
+    /// <summary>
+    /// The absolute repository root this host serves, as resolved and normalised at
+    /// construction. Exposed so a host can disclose which corpus it answered from.
+    /// </summary>
+    public string RepositoryRoot => _repoRoot;
+
     /// <summary>How many times the document corpus has been parsed. For diagnostics and tests.</summary>
     public int CorpusBuilds { get; private set; }
 

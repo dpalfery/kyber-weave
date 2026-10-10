@@ -14,6 +14,7 @@ import {
   auditProviderRegistry,
   classifySessionSource,
   descriptorFor,
+  parserContractVersionFor,
   sourceKeyFor,
 } from './registry.js'
 
@@ -248,9 +249,41 @@ describe('HarnessSourceRegistry', () => {
     expect(descriptorFor('antigravity-cli')?.label).toBe('Antigravity CLI')
     expect(descriptorFor('antigravity-ide')?.label).toBe('Antigravity IDE')
     expect(descriptorFor('kilo-shared-runtime')?.label).toBe('Kilo shared runtime')
+    expect(descriptorFor('kilo-shared-runtime')?.parserContractVersion).toBe('2')
     expect(descriptorFor('kilo-vscode-legacy')?.label).toBe('Kilo for VS Code (legacy)')
+    expect(descriptorFor('kilo-vscode-legacy')?.parserContractVersion).toBe('2')
     expect(descriptorFor('kimi-code')?.providerName).toBe('kimicode')
     expect(PROVIDER_DISPOSITIONS.kimicode).toEqual({ kind: 'alias-of', harnessId: 'kimi-code' })
+  })
+
+  it('assigns kilo contract version 2 by named harness or kilo-code provider, not a kilo- prefix', () => {
+    expect(parserContractVersionFor({
+      providerName: 'kilo-code',
+      harnessId: 'kilo-shared-runtime',
+    })).toBe('2')
+    expect(parserContractVersionFor({
+      providerName: 'other',
+      harnessId: 'kilo-vscode-legacy',
+    })).toBe('2')
+    expect(parserContractVersionFor({
+      providerName: 'kilo-experimental',
+      harnessId: 'kilo-experimental-ide',
+    })).toBe('1')
+  })
+
+  it('assigns claude contract version 5 by named harness or claude provider, not a claude- prefix', () => {
+    expect(parserContractVersionFor({
+      providerName: 'claude',
+      harnessId: 'claude-cli',
+    })).toBe('5')
+    expect(parserContractVersionFor({
+      providerName: 'other',
+      harnessId: 'claude-desktop',
+    })).toBe('5')
+    expect(parserContractVersionFor({
+      providerName: 'claude-experimental',
+      harnessId: 'claude-something-else',
+    })).toBe('1')
   })
 
   it('classifies Antigravity roots into three jobs and never Gemini', () => {

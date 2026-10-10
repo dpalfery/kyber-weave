@@ -6,7 +6,7 @@ import { readSessionLines } from '../ingest/fs-utils.js'
 import { calculateCost, getShortModelName } from '../pricing/models.js'
 import { extractBashCommands } from '../ingest/bash-utils.js'
 import type { Provider, SessionSource, SessionParser, ParsedProviderCall } from './types.js'
-import { safeNumber } from '../ingest/parser.js'
+import { safeNumber } from '../ingest/numbers.js'
 
 const toolNameMap: Record<string, string> = {
   bash: 'Bash',

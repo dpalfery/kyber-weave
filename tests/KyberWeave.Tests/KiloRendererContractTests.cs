@@ -203,7 +203,7 @@ public sealed class KiloRendererContractTests : IDisposable
             Encoding.UTF8.GetString(architectFile.Content.Span),
             "architect");
         Assert.Equal(
-            "glm5.3",
+            "kilo/deepseek/deepseek-v4-pro-0813",
             RequireScalar(architectFrontmatter, "model", "architect"));
 
         // Shared identities suppression verification

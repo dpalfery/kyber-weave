@@ -15,7 +15,7 @@ The `dal-dev` agent authors FluentMigrator scripts. The `sql-database-architect`
 
 ```powershell
 fluentmigrator migrate    # apply pending migrations
-fluentmigrator rollback   # rollback last migration
+fluentmigrator rollback   # rollback last migration — only where the host implements Down()
 ```
 
 ---
@@ -36,6 +36,7 @@ public class AddIngestionJobsTable : Migration
             .WithColumn("CreatedAt").AsDateTime2().NotNullable().WithDefaultValue(SystemMethods.CurrentUTCDateTime);
     }
 
+    // Optional — Down() is a host decision; see Idempotency Rules below.
     public override void Down()
     {
         Delete.Table("IngestionJobs");
@@ -47,19 +48,20 @@ public class AddIngestionJobsTable : Migration
 
 ## Idempotency Rules
 
-- Every `Up()` must be safe to re-run: check for existence before creating (`IfTableDoesNotExist`, `IfIndexDoesNotExist`).
-- Every migration **must** implement `Down()` for rollback capability.
+- Re-run safety for `Up()` follows **<sql-coding-standard>** § Migrations; FluentMigrator
+  provides `IfTableDoesNotExist` / `IfIndexDoesNotExist` for the existence check.
+- `Down()` is a host decision, per **<data-access-layer-coding-standard>** § Migrations.
 - Schema changes approved by `sql-database-architect` (DDL) must match exactly what FluentMigrator applies — column names, data types, constraints, and index declarations must align.
 
 ---
 
 ## Migration Rules
 
-- **One migration per schema change** — don't bundle unrelated changes.
-- Never modify an already-applied migration. Create a new one to amend.
+- One-migration-per-change and never-edit-an-applied-migration follow
+  **<data-access-layer-coding-standard>** § Migrations.
 - Use `WithDefaultValue(SystemMethods.CurrentUTCDateTime)` for audit timestamp columns, not hardcoded values.
-- For non-nullable column additions to existing tables: add with a default first, then remove the default in a separate migration if required.
-- Schema-qualify all table references (`dbo.TableName`).
+- The non-nullable-column-addition pattern follows **<data-access-layer-coding-standard>** § Migrations.
+- Table-reference qualification follows **<sql-coding-standard>** § T-SQL authoring.
 - After applying, verify with the SQL database project dacpac that schema state matches expectations.
 
 ---

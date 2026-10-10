@@ -23,7 +23,7 @@ import { resolveRootByParentage, traceGroup } from './base.js'
 import {
   baseRecord,
   hasNamespace,
-  inclusiveConvention,
+  convertInclusiveCounts,
   readCounter,
   readUsageCounters,
   reconcileRequest,
@@ -42,7 +42,7 @@ const GEMINI_VENDOR_NAMESPACES = ['gemini']
 const GEMINI_SYSTEM_KEY = 'gen_ai.system'
 
 /** Where Gemini's thought tokens come from, beyond the shared reasoning key. */
-const THOUGHT_KEYS = ['gemini.usage.thoughts_tokens'] as const
+export const THOUGHT_KEYS = ['gemini.usage.thoughts_tokens'] as const
 
 /**
  * The Gemini adapter. Detection uses Gemini's vendor namespace or its exact
@@ -54,6 +54,20 @@ export const geminiAdapter: HarnessAdapter = {
   namespaces: ['gen_ai', ...GEMINI_VENDOR_NAMESPACES],
 
   detect(span) {
+    if (
+      hasNamespace(span.attributes, ['copilot_chat', 'github.copilot', 'copilot']) ||
+      span.name.startsWith('copilot_chat') ||
+      span.name.startsWith('copilot')
+    ) {
+      return 0
+    }
+    // An explicit Antigravity agent identity outranks the generic
+    // `gen_ai.system` vendor label its Gemini-vocabulary exporter emits
+    // (issue #195) — the same yield Copilot declares for an explicit
+    // Gemini system identity. Registration order alone cannot carry this:
+    // pass 1 averages per group, so any trace with an agent-name-less span
+    // is won outright by the unyielding adapter.
+    if (span.attributes['gen_ai.agent.name'] === 'antigravity') return 0
     let score = 0
     if (
       hasNamespace(span.attributes, GEMINI_VENDOR_NAMESPACES) ||
@@ -84,20 +98,21 @@ export const geminiAdapter: HarnessAdapter = {
   /**
    * Convert Gemini's cached-inclusive counters into the disjoint classes
    * (R4.2): fresh = input − cacheRead (no creation term — there is no
-   * counter for it), unclamped, so an inverted reading of the convention
-   * surfaces as negative fresh input in validation rather than a silent
-   * undercount.
+   * counter for it). When cache exceeds input the counters cannot be
+   * inclusive and convert exclusively rather than going negative or
+   * clamping to zero (issue #193).
    */
   normalize(raw) {
     const record = baseRecord(this, raw)
     const counters = readUsageCounters(raw.attributes)
     const thoughts =
       counters.reasoning !== 0 ? counters.reasoning : readCounter(raw.attributes, THOUGHT_KEYS)
-    record.tokens = inclusiveConvention({
+    record.tokens = convertInclusiveCounts({
       input: counters.input,
       cacheRead: counters.cacheRead,
       cacheCreation: 0,
       output: counters.output,
+      inputPresent: counters.inputPresent,
       ...(thoughts !== 0 ? { reasoning: thoughts } : {}),
     })
     return record

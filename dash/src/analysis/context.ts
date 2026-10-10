@@ -184,6 +184,12 @@ export type ResidualAttribution = 'tokenizer_drift' | 'unattributed'
 export type TurnPressure = {
   /** 1-based position of the turn in the session. */
   index: number
+  /**
+   * The turn's measured total input (issue #187). `serializeContext` serves it
+   * as `reported_input` so views reconcile buckets against the measured basis
+   * instead of falling back to `bucketedTokens` and reporting a zero residual.
+   */
+  inputTokens: number
   /** Token totals per part type; all five buckets, zero included (R7.1). */
   buckets: Record<CanonicalContentKey, number>
   /**
@@ -442,6 +448,10 @@ export function analyzeContext(turns: readonly ContextTurn[], options: ContextCo
 
     perTurn.push({
       index: position + 1,
+      // The measured per-turn input, carried so the wire can reconcile buckets
+      // against it (issue #187). Without this the served turn has buckets but
+      // no basis, and the view reads the gap as a measured zero residual.
+      inputTokens: turn.inputTokens,
       buckets,
       toolDefinitionsByServer,
       builtinToolDefinitionTokens,

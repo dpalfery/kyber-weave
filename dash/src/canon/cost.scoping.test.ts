@@ -321,3 +321,50 @@ describe('regression (R5.3): two harnesses, one model, one table', () => {
     expect(actual.total.value).toBeCloseTo(1.57, 2)
   })
 })
+
+// Issue #186 (T7 RED): per-class rates on the engine's Rate type. A Rate may carry
+// cacheReadRate / cacheWriteRate (per 1M), and optional per-model `tiers` chosen by measured
+// input (R5.6). An absent cache rate falls back to the input rate: today's arithmetic.
+describe('priceWithTable: per-class rates (issue #186)', () => {
+  const M = 1_000_000
+  const table = (rate: object): RateTable => ({
+    name: 'per-class',
+    currency: 'USD',
+    applicability: ['copilot'],
+    tiers: [],
+    publishedRates: new Map([['m', rate as never]]),
+  })
+  const four = usage({ freshInput: M, cacheRead: M, cacheCreation: M, output: M, reportedInput: 3 * M, reportedOutput: M })
+
+  it('prices each disjoint class at its own rate', () => {
+    const block = priceWithTable(four, 'm', 'copilot', table({ inputRate: 5, outputRate: 25, cacheReadRate: 0.5, cacheWriteRate: 6.25 }))
+    expect(block.status).toBe('priced')
+    expect(block.value).toBeCloseTo(36.75, 10)
+  })
+
+  it('a Rate with no cache rates reproduces the full-input-rate result', () => {
+    const block = priceWithTable(four, 'm', 'copilot', table({ inputRate: 5, outputRate: 25 }))
+    // (3M measured input * 5 + 1M output * 25) / 1M
+    expect(block.value).toBeCloseTo(40, 10)
+  })
+
+  it('an absent cacheWriteRate falls back to the input rate while cacheReadRate still applies', () => {
+    const block = priceWithTable(four, 'm', 'copilot', table({ inputRate: 5, outputRate: 25, cacheReadRate: 0.5 }))
+    expect(block.value).toBeCloseTo(5 + 0.5 + 5 + 25, 10)
+  })
+
+  it('a per-model tier is chosen by measured input, cache included (R5.6)', () => {
+    const rate = {
+      inputRate: 1,
+      outputRate: 1,
+      tiers: [
+        { upTo: 1000, inputRate: 1, outputRate: 2, cacheReadRate: 0.1 },
+        { upTo: Infinity, inputRate: 10, outputRate: 20, cacheReadRate: 1 },
+      ],
+    }
+    const small = priceWithTable(usage({ freshInput: 500, cacheRead: 500, reportedInput: 1000 }), 'm', 'copilot', table(rate))
+    expect(small.value).toBeCloseTo((500 * 1 + 500 * 0.1) / M, 12)
+    const large = priceWithTable(usage({ freshInput: 500, cacheRead: 501, reportedInput: 1001 }), 'm', 'copilot', table(rate))
+    expect(large.value).toBeCloseTo((500 * 10 + 501 * 1) / M, 12)
+  })
+})

@@ -65,6 +65,7 @@ describe('Signal 1: contextReuse / contextReuseRatio (Task F1 / ADR 0009 / ADR 0
     const res = contextReuseRatio({
       freshInput: 50,
       cacheRead: 50,
+      cacheCreation: 0,
     })
     expect(isSignalMeasurable(res)).toBe(true)
     if (isSignalMeasurable(res)) {
@@ -73,20 +74,62 @@ describe('Signal 1: contextReuse / contextReuseRatio (Task F1 / ADR 0009 / ADR 0
   })
 
   it('handles 100% cache hit and 0% cache hit edge cases cleanly', () => {
-    const fullHit = contextReuse({ freshInput: 0, cacheRead: 500 })
+    const fullHit = contextReuse({ freshInput: 0, cacheRead: 500, cacheCreation: 0 })
     expect(isSignalMeasurable(fullHit)).toBe(true)
     if (isSignalMeasurable(fullHit)) expect(fullHit.value).toBe(1.0)
 
-    const zeroHit = contextReuse({ freshInput: 500, cacheRead: 0 })
+    const zeroHit = contextReuse({ freshInput: 500, cacheRead: 0, cacheCreation: 0 })
     expect(isSignalMeasurable(zeroHit)).toBe(true)
     if (isSignalMeasurable(zeroHit)) expect(zeroHit.value).toBe(0.0)
+  })
+
+  it('emits not_measurable when cacheRead is absent (undefined is not a measured zero)', () => {
+    const res = contextReuse({ freshInput: 100 })
+    expect(res.status).toBe('not_measurable')
+    expect((res as { reason: string }).reason).toMatch(/absent/i)
+  })
+
+  it('emits not_measurable when any turn cacheRead is absent', () => {
+    const res = contextReuse({
+      freshInput: 100,
+      cacheRead: 50,
+      turns: [{ freshInput: 100, cacheRead: 50 }, { freshInput: 20 }],
+    })
+    expect(res.status).toBe('not_measurable')
+    expect((res as { reason: string }).reason).toMatch(/absent/i)
+  })
+
+  it('emits not_measurable when cacheCreation is absent (undefined is not a measured zero)', () => {
+    const res = contextReuse({ freshInput: 100, cacheRead: 50 })
+    expect(res.status).toBe('not_measurable')
+    expect((res as { reason: string }).reason).toMatch(/cache creation/i)
+  })
+
+  it('emits not_measurable when any turn cacheCreation is absent', () => {
+    const res = contextReuse({
+      turns: [
+        { freshInput: 100, cacheRead: 50, cacheCreation: 0 },
+        { freshInput: 20, cacheRead: 10 },
+      ],
+    })
+    expect(res.status).toBe('not_measurable')
+    expect((res as { reason: string }).reason).toMatch(/cache creation/i)
+  })
+
+  it('treats numeric cacheRead 0 as a measured zero ratio with positive fresh input', () => {
+    const res = contextReuse({ freshInput: 500, cacheRead: 0, cacheCreation: 0 })
+    expect(isSignalMeasurable(res)).toBe(true)
+    if (isSignalMeasurable(res)) {
+      expect(res.status).toBe('measured')
+      expect(res.value).toBe(0)
+    }
   })
 
   it('aggregates across turns when turns are provided', () => {
     const res = contextReuse({
       turns: [
-        { freshInput: 100, cacheRead: 100 },
-        { freshInput: 20, cacheRead: 180 },
+        { freshInput: 100, cacheRead: 100, cacheCreation: 0 },
+        { freshInput: 20, cacheRead: 180, cacheCreation: 0 },
       ],
     })
     expect(isSignalMeasurable(res)).toBe(true)
@@ -469,6 +512,20 @@ describe('Signal 6: compactionPressure (Task F1 / Context Window & Risk)', () =>
     const res = compactionPressure({ peakInputTokens: 1000, contextLimit: 0 })
     expect(res.status).toBe('not_measurable')
   })
+
+  it('emits not_measurable when contextLimit is NaN, including a catalog window', () => {
+    const unnamed = compactionPressure({ peakInputTokens: 1000, contextLimit: Number.NaN })
+    expect(unnamed.status).toBe('not_measurable')
+    expect((unnamed as { reason: string }).reason).toMatch(/positive finite/i)
+
+    const catalog = compactionPressure({
+      peakInputTokens: 1000,
+      contextLimit: Number.NaN,
+      contextLimitSource: 'catalog',
+    })
+    expect(catalog.status).toBe('not_measurable')
+    expect((catalog as { reason: string }).reason).toMatch(/positive finite/i)
+  })
 })
 
 describe('Signal 7: delegationOverhead (Task F1 / Subagent Workflow Ratio)', () => {
@@ -696,8 +753,30 @@ describe('CanonStore detector_version stamp & Decision D17 compliance', () => {
     expect(store.getMetadata('schema_version')).toBe(String(SCHEMA_VERSION))
     expect(store.getMetadata('detector_version')).toBe(String(DETECTOR_VERSION))
     expect(store.getDetectorVersion()).toBe(DETECTOR_VERSION)
+    // Issues #181/#182/#191 changed detector semantics (honest compaction
+    // windows, folded harness identity, rebuilt findings). The stamp is
+    // informational — rebuilds are authoritative — so the suite pins the
+    // round-trip, not a literal: the bump itself is recorded in the PR.
     expect(store.hasCurrentDetectorVersion()).toBe(true)
     expect(store.isDetectorOutdated()).toBe(false)
+    store.close()
+  })
+
+  it('stamps DETECTOR_VERSION 3 so stale generations report outdated', () => {
+    // Generation 2 removed the duplicate-tool-call 250-token fallback;
+    // Generation 3 (issues #181/#182/#191) added honest compaction windows
+    // and folded twin-harness identity. The literal below pins the current
+    // generation so an accidental bump or revert fails loudly; the
+    // behavioral contract is the lines after it: a store stamped below
+    // current reports outdated. (The stamp itself is informational —
+    // rebuilds are authoritative — see the DETECTOR_VERSION comment.)
+    expect(DETECTOR_VERSION).toBe(3)
+    const path = tempStorePath()
+    const store = new CanonStore(path)
+    store.setDetectorVersion(1)
+    expect(store.getDetectorVersion()).toBe(1)
+    expect(store.hasCurrentDetectorVersion()).toBe(false)
+    expect(store.isDetectorOutdated()).toBe(true)
     store.close()
   })
 

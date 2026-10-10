@@ -1,0 +1,14 @@
+{
+  "mode": "tui",
+  "cwd": "/synthetic/kyber-pi-workspace",
+  "model": "Kyber Synthetic Pi Model",
+  "branch": "kyber/synthetic-branch",
+  "tokens": {
+    "input": 700,
+    "output": 30,
+    "cache": 12,
+    "total": 742
+  },
+  "costUsd": 1.23,
+  "turns": 7
+}

@@ -21,8 +21,6 @@ const _require = createRequire(import.meta.url)
 const { DatabaseSync } = _require('node:sqlite') as {
   DatabaseSync: typeof import('node:sqlite').DatabaseSync
 }
-type StatementSync = import('node:sqlite').StatementSync
-type Database = import('node:sqlite').DatabaseSync
 import { deflateSync, inflateSync } from 'node:zlib'
 
 import type { TokenCacheStore } from './tokens.js'
@@ -44,6 +42,82 @@ import {
   type RefreshTrigger,
 } from './refresh-run.js'
 import { contentFromParts } from './types.js'
+
+/**
+ * What a user-initiated wipe removed (issue #312). Counts only — the rows
+ * are gone, so nothing more specific can be reported.
+ */
+export interface StoreWipeReport {
+  /** Canonical harness ids the wipe covered (`['*']` for wipe-all). */
+  harnesses: string[]
+  /** Canonical records deleted. */
+  records: number
+  /** Provenance rows deleted. */
+  provenance: number
+  /** Checkpoint rows deleted. */
+  checkpoints: number
+}
+
+/**
+ * Delete every row a set of raw stored harness names owns — the canonical
+ * harness's own spelling plus its folded front-end names (`claude-desktop`
+ * under `claude-code`, `cursor-agent` under `cursor`). Covers records,
+ * provenance, checkpoints, and the harness-scoped derived caches (`session`,
+ * `run`, `execution`, `harness_rollup`, `problems`, and predictions via their
+ * wiped run ids). `finding` has no harness column: the post-wipe projection
+ * clears it authoritatively, so this function leaves it. Quarantine rows
+ * likewise have no harness column and stay. Call inside the caller's
+ * transaction, like `commitSourceUnit`'s inverse: a failure rolls back
+ * everything, so records and checkpoints can never disagree about coverage.
+ *
+ * <remarks>
+ * Why a free function and not methods: only `wipeHarnesses` and `wipeAll`
+ * need these statements, and they are pure SQL over the handle the caller
+ * owns — the class keeps the public names, this function keeps the deletes.
+ * </remarks>
+ */
+function wipeHarnessRows(
+  db: Database,
+  rawNames: readonly string[],
+): { records: number; provenance: number; checkpoints: number } {
+  const placeholders = rawNames.map(() => '?').join(', ')
+  const countChange = (sql: string): number => {
+    const info = db.prepare(sql).run(...rawNames) as unknown as { changes?: unknown }
+    return typeof info.changes === 'number' ? info.changes : Number(info.changes) || 0
+  }
+  const report = {
+    records: countChange(`DELETE FROM records WHERE harness IN (${placeholders})`),
+    provenance: countChange(
+      `DELETE FROM record_provenance WHERE harness_id IN (${placeholders})`,
+    ),
+    checkpoints: countChange(
+      `DELETE FROM source_checkpoint WHERE harness_id IN (${placeholders})`,
+    ),
+  }
+  db.prepare(`DELETE FROM session WHERE harness IN (${placeholders})`).run(...rawNames)
+  db.prepare(`DELETE FROM harness_rollup WHERE harness IN (${placeholders})`).run(...rawNames)
+  db.prepare(`DELETE FROM problems WHERE harness IN (${placeholders})`).run(...rawNames)
+  // Predictions join their run, so their run ids are collected BEFORE the
+  // run rows go — after that the delete below would match nothing.
+  const wipedRunIds = (
+    db.prepare(`SELECT run_id FROM run WHERE harness IN (${placeholders})`).all(...rawNames) as {
+      run_id: unknown
+    }[]
+  )
+    .map((row) => row.run_id)
+    .filter((id): id is string => typeof id === 'string' && id !== '')
+  db.prepare(`DELETE FROM run WHERE harness IN (${placeholders})`).run(...rawNames)
+  db.prepare(`DELETE FROM execution WHERE harness IN (${placeholders})`).run(...rawNames)
+  if (wipedRunIds.length > 0) {
+    const runPlaceholders = wipedRunIds.map(() => '?').join(', ')
+    db.prepare(`DELETE FROM prediction WHERE run_id IN (${runPlaceholders})`).run(...wipedRunIds)
+  }
+  return report
+}
+
+type StatementSync = import('node:sqlite').StatementSync
+type Database = import('node:sqlite').DatabaseSync
+
 import type {
   CanonicalRecord,
   ContentPart,
@@ -78,14 +152,27 @@ import {
  * corpus is the expensive thing here and re-collecting it is not always
  * possible.
  */
-export const SCHEMA_VERSION = 14
+export const SCHEMA_VERSION = 17
 
 /**
  * Version of the diagnostic signal and finding detector suite (Decision D17).
- * When detectors change, this version stamp is bumped to force automatic
- * recomputation of derived findings and signals over stored canonical records.
+ * An informational stamp identifying which detector semantics built a store's
+ * derived rows, so tooling and operators can tell a stale finding table from
+ * a fresh one. It does not itself trigger recomputation: every build
+ * (`buildSessions`, `buildRuns`, `buildFindings`, `buildHarnessRollup`) is
+ * authoritative and rewrites its derived rows, pruning what detectors no
+ * longer emit.
+ *
+ * Generations: 2 stopped fabricating duplicate-tool-call waste for
+ * underivable sizes (coverage-gap findings carry no estimate); 3 adds honest
+ * compaction windows, folded twin-harness identity, and rebuilt findings
+ * (issues #181/#182/#191). The stamp is written when the store is created;
+ * a store file that predates a generation keeps its old stamp until its
+ * derived tables are rebuilt. Bump it whenever detector semantics change
+ * and say so in the PR, so the stamp stays a truthful witness instead of a
+ * forgotten counter.
  */
-export const DETECTOR_VERSION = 1
+export const DETECTOR_VERSION = 3
 
 /**
  * The whole schema, as code. `CREATE ... IF NOT EXISTS` throughout so
@@ -198,7 +285,10 @@ CREATE TABLE IF NOT EXISTS token_cache (
 CREATE TABLE IF NOT EXISTS quarantine (
   span_id TEXT PRIMARY KEY,
   namespaces TEXT NOT NULL,
-  reason TEXT NOT NULL
+  reason TEXT NOT NULL,
+  source TEXT,
+  name TEXT,
+  timestamp TEXT
 );
 CREATE TABLE IF NOT EXISTS pending_logs (
   log_id TEXT PRIMARY KEY,
@@ -219,7 +309,10 @@ CREATE TABLE IF NOT EXISTS problems (
   severity TEXT NOT NULL,
   code TEXT NOT NULL,
   message TEXT NOT NULL,
-  location TEXT
+  location TEXT,
+  session_id TEXT,
+  harness TEXT,
+  timestamp TEXT
 );
 CREATE UNIQUE INDEX IF NOT EXISTS problems_by_identity ON problems (problem_key);
 CREATE TABLE IF NOT EXISTS ingest_log (
@@ -228,6 +321,11 @@ CREATE TABLE IF NOT EXISTS ingest_log (
   count INTEGER NOT NULL,
   timestamp TEXT NOT NULL
 );
+-- The coverage and meta seams read this table only through GROUP BY source
+-- (sums plus MAX(timestamp)); the index keeps those scans off a full sort as
+-- the audit log grows without a retention policy.
+CREATE INDEX IF NOT EXISTS ingest_log_by_source ON ingest_log (source);
+CREATE INDEX IF NOT EXISTS ingest_log_by_timestamp ON ingest_log (timestamp);
 CREATE TABLE IF NOT EXISTS metadata (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
@@ -250,7 +348,9 @@ CREATE TABLE IF NOT EXISTS finding (
   title TEXT NOT NULL,
   mechanism TEXT NOT NULL,
   confidence TEXT NOT NULL,
-  estimated_waste_tokens INTEGER NOT NULL DEFAULT 0,
+  -- Nullable since v15: an unmeasured (coverage-gap) finding persists NULL,
+  -- which reads back as an absent estimate rather than zero waste.
+  estimated_waste_tokens INTEGER,
   recommendation TEXT NOT NULL,
   error_bar_json TEXT NOT NULL,
   evidence_links_json TEXT NOT NULL,
@@ -263,6 +363,7 @@ CREATE TABLE IF NOT EXISTS finding (
 CREATE INDEX IF NOT EXISTS finding_by_run ON finding (run_id);
 CREATE INDEX IF NOT EXISTS finding_by_session ON finding (session_id);
 CREATE INDEX IF NOT EXISTS finding_by_rank_score ON finding (rank_score DESC);
+CREATE INDEX IF NOT EXISTS finding_by_detector ON finding (detector_id);
 -- Prediction table for logging and scoring finding waste predictions (Task F4 / Decision D11).
 CREATE TABLE IF NOT EXISTS prediction (
   id TEXT PRIMARY KEY,
@@ -281,14 +382,32 @@ CREATE TABLE IF NOT EXISTS prediction (
 CREATE INDEX IF NOT EXISTS prediction_by_finding ON prediction (finding_id);
 CREATE INDEX IF NOT EXISTS prediction_by_run ON prediction (run_id);
 CREATE INDEX IF NOT EXISTS prediction_by_created_at ON prediction (created_at);
+-- Vendor-documented model windows (D15). A new table, not a new column on
+-- an existing one, so CREATE IF NOT EXISTS on every open covers a store
+-- already stamped at SCHEMA_VERSION. The version stays at 17: the projection
+-- contract still requires that stamp, and an IF NOT EXISTS table does not
+-- need a migration step to appear.
+CREATE TABLE IF NOT EXISTS model_context_window_catalog (
+  lookup_id TEXT PRIMARY KEY,
+  canonical_model_id TEXT NOT NULL,
+  context_window INTEGER NOT NULL CHECK (context_window > 0),
+  vendor TEXT NOT NULL,
+  documentation_url TEXT NOT NULL,
+  retrieved_at TEXT NOT NULL,
+  source_revision TEXT
+);
+CREATE INDEX IF NOT EXISTS model_context_window_catalog_by_vendor
+  ON model_context_window_catalog (vendor);
+-- Per-vendor refresh outcome, separate from the rows so a failed refresh can
+-- record its error without deleting the last rows that validated.
+CREATE TABLE IF NOT EXISTS model_context_window_catalog_vendor (
+  vendor TEXT PRIMARY KEY,
+  status TEXT NOT NULL,
+  last_refresh_at TEXT,
+  last_error TEXT
+);
 ` + SOURCE_STATE_SQL + REFRESH_RUN_SQL
 
-/**
- * In-place upgrades, keyed by the version they upgrade FROM. Each runs inside
- * one transaction and leaves the store at `key + 1`. `SCHEMA_SQL` cannot do
- * this work: every statement in it is `IF NOT EXISTS`, so an existing table
- * never gains a column.
- */
 /** Map a `refresh_run` row out of SQLite's column names. */
 function toRefreshRunRow(row: Record<string, unknown>): RefreshRunRow {
   return {
@@ -299,9 +418,46 @@ function toRefreshRunRow(row: Record<string, unknown>): RefreshRunRow {
     pid: Number(row['pid']),
     trigger: String(row['trigger']) as RefreshTrigger,
     summary: row['summary'] === null ? null : String(row['summary']),
+    // Rows written before migration 15→16 carry NULL (or no column at all
+    // on a store that has not migrated): the window is unknown, never 0.
+    historyWeeks: normalizeHistoryWeeks(row['history_weeks']),
   }
 }
 
+/**
+ * Coerce a persisted coverage window to the contract every surface reads
+ * (`historyWeeks?: number | null` — null means unknown, never 0).
+ *
+ * The persistence seam is what every surface reads, so `absent is not zero`
+ * holds here, not just at the CLI parser: only a positive safe integer
+ * survives; 0, negatives, fractions, NaN, Infinity, and non-numeric junk all
+ * read as unknown. Shared by the store mapper and the file-backed bridge
+ * mapper so both halves of the seam agree.
+ */
+export function normalizeHistoryWeeks(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0) return null
+  return value
+}
+
+/**
+ * Normalize an ingest audit-log key at the persistence seam. `service.name`
+ * arrives over the network, so blank values fold into the shared unnamed
+ * key and over-long values are capped — one more bound on a table with no
+ * retention policy. Never a liveness claim: callers still decide what an
+ * empty log means.
+ */
+export function normalizeIngestSource(source: string): string {
+  const trimmed = source.trim()
+  if (trimmed === '') return 'otlp'
+  return trimmed.length > 256 ? trimmed.slice(0, 256) : trimmed
+}
+
+/**
+ * In-place upgrades, keyed by the version they upgrade FROM. Each runs inside
+ * one transaction and leaves the store at `key + 1`. `SCHEMA_SQL` cannot do
+ * this work: every statement in it is `IF NOT EXISTS`, so an existing table
+ * never gains a column.
+ */
 export const MIGRATIONS: Record<number, (db: Database) => void> = {
   // v1 -> v2: structured content parts. v1 stored content as a flat string
   // per bucket, which has nowhere to put the ground-truth MCP server a tool
@@ -478,6 +634,99 @@ export const MIGRATIONS: Record<number, (db: Database) => void> = {
   // v13 -> v14: existing stores used a span/code key, so rekey their surviving
   // rows before a new diagnostic at a different location can be recorded.
   13: (db) => rekeyProblems(db),
+  // v14 -> v15: unmeasured (coverage-gap) findings persist NULL waste instead
+  // of a fabricated number. SQLite cannot drop NOT NULL in place, so rebuild
+  // the table; every row (including its 0-valued measured estimates) copies
+  // across unchanged, and fresh stores take the nullable shape from SCHEMA_SQL.
+  14: (db) => {
+    const table = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='finding'").get()
+    if (!table) return
+
+    db.exec(`CREATE TABLE finding_new (
+      id TEXT PRIMARY KEY,
+      detector_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      mechanism TEXT NOT NULL,
+      confidence TEXT NOT NULL,
+      estimated_waste_tokens INTEGER,
+      recommendation TEXT NOT NULL,
+      error_bar_json TEXT NOT NULL,
+      evidence_links_json TEXT NOT NULL,
+      outcome_risk_caveat TEXT NOT NULL,
+      run_id TEXT,
+      session_id TEXT,
+      rank_score REAL NOT NULL DEFAULT 0.0,
+      payload TEXT
+    );
+    INSERT INTO finding_new
+      (id, detector_id, title, mechanism, confidence, estimated_waste_tokens,
+       recommendation, error_bar_json, evidence_links_json, outcome_risk_caveat,
+       run_id, session_id, rank_score, payload)
+      SELECT id, detector_id, title, mechanism, confidence, estimated_waste_tokens,
+       recommendation, error_bar_json, evidence_links_json, outcome_risk_caveat,
+       run_id, session_id, rank_score, payload FROM finding;
+    DROP TABLE finding;
+    ALTER TABLE finding_new RENAME TO finding;
+    CREATE INDEX IF NOT EXISTS finding_by_run ON finding (run_id);
+    CREATE INDEX IF NOT EXISTS finding_by_session ON finding (session_id);
+    CREATE INDEX IF NOT EXISTS finding_by_rank_score ON finding (rank_score DESC);`)
+  },
+  // v15 -> v16: persist the ingest coverage window per refresh run
+  // (issues #189/#198/#199 plan, T1). The window is what discards most
+  // history, and no surface can state it while `refresh_run` carries no
+  // column for it. Existing rows gain a NULL column — window unknown, which
+  // readers state as such rather than as 0 or the current default.
+  // Renumbered from 14 after main landed the nullable-finding-waste 14→15
+  // step on the same base; main's step stays 14 so a v14 store migrates
+  // through both in order.
+  15: (db) => {
+    // Like migration 12's problems guard: a v15-stamped store with no
+    // refresh_run table (partial install, hand-built fixture) skips the
+    // ALTER rather than throwing a raw driver error.
+    const table = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='refresh_run'").get()
+    if (!table) return
+    const columns = db.prepare('PRAGMA table_info(refresh_run)').all() as { name: string }[]
+    if (!columns.some((column) => column.name === 'history_weeks')) {
+      db.exec('ALTER TABLE refresh_run ADD COLUMN history_weeks INTEGER')
+    }
+  },
+  // v16 -> v17: quarantine and problems metadata columns.
+  // quarantine gains source, name, timestamp.
+  // problems gains session_id, harness, timestamp.
+  16: (db) => {
+    const hasQuarantine = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='quarantine'").get()
+    if (hasQuarantine) {
+      const qCols = (db.prepare('PRAGMA table_info(quarantine)').all() as { name: string }[]).map((c) => c.name)
+      if (!qCols.includes('source')) {
+        db.exec('ALTER TABLE quarantine ADD COLUMN source TEXT')
+      }
+      if (!qCols.includes('name')) {
+        db.exec('ALTER TABLE quarantine ADD COLUMN name TEXT')
+      }
+      if (!qCols.includes('timestamp')) {
+        db.exec('ALTER TABLE quarantine ADD COLUMN timestamp TEXT')
+      }
+    }
+
+    const hasProblems = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='problems'").get()
+    if (hasProblems) {
+      const pCols = (db.prepare('PRAGMA table_info(problems)').all() as { name: string }[]).map((c) => c.name)
+      if (!pCols.includes('session_id')) {
+        db.exec('ALTER TABLE problems ADD COLUMN session_id TEXT')
+      }
+      if (!pCols.includes('harness')) {
+        db.exec('ALTER TABLE problems ADD COLUMN harness TEXT')
+      }
+      if (!pCols.includes('timestamp')) {
+        db.exec('ALTER TABLE problems ADD COLUMN timestamp TEXT')
+      }
+    }
+  },
+}
+
+/** Escape a literal for a LIKE pattern: backslash, percent, and underscore match themselves. */
+function escapeLike(literal: string): string {
+  return literal.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_')
 }
 
 /** Stable per-span/code/location key; rows without a span keep their independent legacy identity. */
@@ -521,7 +770,12 @@ export type {
 }
 
 /** A problem pinned to the record it belongs to (the `problems` table row). */
-export type SpanProblem = Problem & { spanId: string }
+export type SpanProblem = Problem & {
+  spanId: string
+  sessionId?: string | null
+  harness?: string | null
+  timestamp?: string | null
+}
 
 /** One entry of the ingest audit log. */
 export type IngestLogEntry = {
@@ -535,6 +789,9 @@ export type QuarantineEntry = {
   spanId: string
   namespaces: string[]
   reason: string
+  source?: string
+  name?: string
+  timestamp?: string
 }
 
 export type QuarantinedLog = {
@@ -704,6 +961,10 @@ export function toSessionRow(row: SessionDbRow): SessionRow {
     branch: nullableText(row.branch),
     started: nullableText(row.started),
     ended: nullableText(row.ended),
+    summary:
+      payload !== null && typeof payload === "object" && "summary" in (payload as Record<string, unknown>)
+        ? ((payload as Record<string, unknown>).summary as Record<string, unknown>)
+        : undefined,
     payload,
   }
 }
@@ -824,7 +1085,7 @@ export type FindingDbRow = {
 }
 
 export function toFinding(row: FindingDbRow): Finding {
-  const errorBar = JSON.parse(text(row.error_bar_json)) as { lower: number; upper: number }
+  const parsedErrorBar = JSON.parse(text(row.error_bar_json)) as { lower: number; upper: number } | null
   const evidenceLinks = JSON.parse(text(row.evidence_links_json)) as FindingEvidenceLink[]
   const finding: Finding = {
     id: text(row.id),
@@ -833,9 +1094,13 @@ export function toFinding(row: FindingDbRow): Finding {
     mechanism: text(row.mechanism),
     evidenceLinks,
     confidence: text(row.confidence) as FindingConfidence,
-    estimatedWasteTokens: Number(row.estimated_waste_tokens ?? 0),
+    // A NULL waste column is an unmeasured (coverage-gap) finding: it
+    // round-trips as absent, never as zero waste.
+    ...(row.estimated_waste_tokens === null || row.estimated_waste_tokens === undefined
+      ? {}
+      : { estimatedWasteTokens: Number(row.estimated_waste_tokens) }),
     recommendation: text(row.recommendation),
-    errorBar,
+    ...(parsedErrorBar === null || parsedErrorBar === undefined ? {} : { errorBar: parsedErrorBar }),
     outcomeRiskCaveat: text(row.outcome_risk_caveat),
     runId: nullableText(row.run_id) ?? undefined,
     sessionId: nullableText(row.session_id) ?? undefined,
@@ -910,6 +1175,14 @@ INSERT OR REPLACE INTO records (
   measurability_json, parts_json, raw
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
+
+/** Server-side finding filters (issue #191): detector and harness narrow the
+ * set. Paging lives in the bridge (`listFindingsPage`), which slices the
+ * narrowed set once `total` is known — one owner, not two (review). */
+export type FindingsListOptions = {
+  detector?: string
+  harness?: string
+}
 
 export class CanonStore {
   private readonly db: Database
@@ -1132,13 +1405,22 @@ export class CanonStore {
     startedAt: string
     pid: number
     trigger: RefreshTrigger
+    /**
+     * The ingest window, in weeks, this run will cover. Optional so callers
+     * that predate window tracking (and the orchestrator until T2) keep
+     * compiling; an omitted window persists as NULL = unknown.
+     */
+    historyWeeks?: number | null
   }): string {
     this.db
       .prepare(
-        `INSERT INTO refresh_run (id, started_at, completed_at, status, pid, trigger, summary)
-         VALUES (?, ?, NULL, 'running', ?, ?, NULL)`,
+        `INSERT INTO refresh_run (id, started_at, completed_at, status, pid, trigger, summary, history_weeks)
+         VALUES (?, ?, NULL, 'running', ?, ?, NULL, ?)`,
       )
-      .run(input.id, input.startedAt, input.pid, input.trigger)
+      // The persistence seam validates: only a positive safe integer is a
+      // window — 0, negatives, fractions, and non-finite values persist as
+      // NULL (unknown), so no surface can render `last 0 weeks`.
+      .run(input.id, input.startedAt, input.pid, input.trigger, normalizeHistoryWeeks(input.historyWeeks))
     return input.id
   }
 
@@ -1266,6 +1548,24 @@ export class CanonStore {
     return rows.map(toRecordProvenance)
   }
 
+  /**
+   * Live canonical rows attributed to a source unit. Provenance outlives
+   * quarantine (the audit row stays; the record does not), so a contract-bump
+   * reconciliation that counted provenance would bake deleted spans into
+   * `recordCount`. This join is the population the checkpoint actually means.
+   */
+  countLiveRecordsForSource(harnessId: string, sourceKey: string): number {
+    const row = this.db
+      .prepare(
+        `SELECT COUNT(*) AS n
+         FROM record_provenance p
+         INNER JOIN records r ON r.span_id = p.span_id
+         WHERE p.harness_id = ? AND p.source_key = ?`,
+      )
+      .get(harnessId, sourceKey) as { n: unknown }
+    return typeof row.n === 'number' ? row.n : Number(row.n) || 0
+  }
+
   spanIdsForSource(harnessId: string, sourceKey: string): string[] {
     return (
       this.db
@@ -1319,6 +1619,11 @@ export class CanonStore {
     return row === undefined ? undefined : toRecord(row)
   }
 
+  /** Membership only — no payload decompression or JSON parse. */
+  has(spanId: string): boolean {
+    return this.db.prepare('SELECT 1 FROM records WHERE span_id = ? LIMIT 1').get(spanId) !== undefined
+  }
+
   /**
    * Span ids in storage order. Exposed for passes that must walk the whole
    * corpus without holding it in memory — `listAll` decompresses every raw
@@ -1345,6 +1650,24 @@ export class CanonStore {
         hasParts ? compressRaw(parts) : null,
         spanId,
       )
+  }
+
+  /**
+   * Rewrite the cost blocks of several records in ONE transaction (projection-time repricing,
+   * issue #186 U9). `cost_json` is the derived, re-derivable cost cache: a failure rolls every row
+   * back and rethrows, and an empty list is a no-op.
+   */
+  setCosts(changes: ReadonlyArray<{ spanId: string; cost: CostBlock }>): void {
+    if (changes.length === 0) return
+    this.db.exec('BEGIN')
+    try {
+      const update = this.db.prepare('UPDATE records SET cost_json = ? WHERE span_id = ?')
+      for (const change of changes) update.run(JSON.stringify(change.cost), change.spanId)
+      this.db.exec('COMMIT')
+    } catch (err) {
+      this.db.exec('ROLLBACK')
+      throw err
+    }
   }
 
   /** Distinct trace ids, the unit attribution votes over. */
@@ -1379,16 +1702,53 @@ export class CanonStore {
    * Reclassification uses this for rows retained by an older ingest pass:
    * the audit entry and the removal cannot disagree after a partial write.
    */
-  quarantineAndDelete(spanId: string, namespaces: readonly string[], reason: string): void {
-    this.db.exec('BEGIN')
+  quarantineAndDelete(
+    spanId: string,
+    namespaces: readonly string[],
+    reason: string,
+    metadata?: { source?: string; name?: string; timestamp?: string },
+  ): void
+  quarantineAndDelete(
+    spanId: string,
+    namespaces: readonly string[],
+    reason: string,
+    source?: string,
+    name?: string,
+    timestamp?: string,
+  ): void
+  quarantineAndDelete(
+    spanId: string,
+    namespaces: readonly string[],
+    reason: string,
+    sourceOrOptions?: string | { source?: string; name?: string; timestamp?: string },
+    name?: string,
+    timestamp?: string,
+  ): void {
+    let sourceVal: string | null = null
+    let nameVal: string | null = null
+    let timestampVal: string | null = null
+
+    if (typeof sourceOrOptions === "object" && sourceOrOptions !== null) {
+      sourceVal = sourceOrOptions.source ?? null
+      nameVal = sourceOrOptions.name ?? null
+      timestampVal = sourceOrOptions.timestamp ?? null
+    } else if (typeof sourceOrOptions === "string") {
+      sourceVal = sourceOrOptions
+      nameVal = name ?? null
+      timestampVal = timestamp ?? null
+    }
+
+    this.db.exec("BEGIN")
     try {
       this.db
-        .prepare('INSERT OR REPLACE INTO quarantine (span_id, namespaces, reason) VALUES (?, ?, ?)')
-        .run(spanId, JSON.stringify(namespaces), reason)
-      this.db.prepare('DELETE FROM records WHERE span_id = ?').run(spanId)
-      this.db.exec('COMMIT')
+        .prepare(
+          "INSERT OR REPLACE INTO quarantine (span_id, namespaces, reason, source, name, timestamp) VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .run(spanId, JSON.stringify(namespaces), reason, sourceVal, nameVal, timestampVal)
+      this.db.prepare("DELETE FROM records WHERE span_id = ?").run(spanId)
+      this.db.exec("COMMIT")
     } catch (err) {
-      this.db.exec('ROLLBACK')
+      this.db.exec("ROLLBACK")
       throw err
     }
   }
@@ -1569,9 +1929,13 @@ export class CanonStore {
       )
       .get(sessionId) as { input: unknown; output: unknown } | undefined
     if (row === undefined) return undefined
+    // Open thread harnesses.ts:416 — a total the session recorded as
+    // not_measurable is an object, not a number. Coercing it to 0 invents a
+    // measured zero for the delegation denominator; unknown stays unknown.
+    if (typeof row.input !== 'number' || typeof row.output !== 'number') return undefined
     return {
-      input: typeof row.input === 'number' ? row.input : 0,
-      output: typeof row.output === 'number' ? row.output : 0,
+      input: row.input,
+      output: row.output,
     }
   }
 
@@ -1695,6 +2059,102 @@ export class CanonStore {
     this.db.prepare('DELETE FROM session WHERE harness = ?').run(harness)
   }
 
+  wipeHarnesses(harnesses: readonly string[]): StoreWipeReport {
+    const canonical = [...new Set(harnesses.map((h) => normalizeHarnessName(h)))]
+    const rawNames = this.rawHarnessNamesFor(canonical)
+    if (rawNames.length === 0) {
+      this.stampClean(canonical)
+      return { harnesses: canonical, records: 0, provenance: 0, checkpoints: 0 }
+    }
+    this.db.exec('BEGIN')
+    let report: StoreWipeReport
+    try {
+      report = { harnesses: canonical, ...wipeHarnessRows(this.db, rawNames) }
+      this.db.exec('COMMIT')
+    } catch (err) {
+      this.db.exec('ROLLBACK')
+      throw err
+    }
+    // The stamp must survive the case the wipe throws: it never participates
+    // in the wiped transaction.
+    this.stampClean(canonical)
+    return report
+  }
+
+  /**
+   * Delete the whole corpus: every wipe-by-harness row plus quarantine,
+   * problems, predictions, and the log-enrichment tables. The operational
+   * audit survives: `ingest_log`, `refresh_run`, `metadata` (stamped),
+   * `token_cache`, and the model-window catalog stay.
+   */
+  wipeAll(): StoreWipeReport {
+    this.db.exec('BEGIN')
+    let report: StoreWipeReport
+    try {
+      const countAll = (table: string): number => {
+        const info = this.db.prepare(`DELETE FROM ${table}`).run() as unknown as {
+          changes?: unknown
+        }
+        return typeof info.changes === 'number' ? info.changes : Number(info.changes) || 0
+      }
+      report = {
+        harnesses: ['*'],
+        records: countAll('records'),
+        provenance: countAll('record_provenance'),
+        checkpoints: countAll('source_checkpoint'),
+      }
+      this.db.exec('DELETE FROM session')
+      this.db.exec('DELETE FROM run')
+      this.db.exec('DELETE FROM execution')
+      this.db.exec('DELETE FROM harness_rollup')
+      this.db.exec('DELETE FROM finding')
+      this.db.exec('DELETE FROM prediction')
+      this.db.exec('DELETE FROM problems')
+      this.db.exec('DELETE FROM quarantine')
+      this.db.exec('DELETE FROM pending_logs')
+      this.db.exec('DELETE FROM quarantined_logs')
+      this.db.exec('DELETE FROM enriched_logs')
+      this.db.exec('COMMIT')
+    } catch (err) {
+      this.db.exec('ROLLBACK')
+      throw err
+    }
+    this.stampClean(['*'])
+    return report
+  }
+
+  /**
+   * Raw stored `records.harness` / provenance `harness_id` values whose
+   * canonical id is one of `canonical` — the fold expansion (`claude-desktop`
+   * rows belong to a `claude-code` wipe) over both spellings.
+   */
+  private rawHarnessNamesFor(canonical: readonly string[]): string[] {
+    if (canonical.length === 0) return []
+    const wanted = new Set(canonical)
+    const raw = new Set<string>()
+    for (const table of ['records', 'record_provenance', 'source_checkpoint'] as const) {
+      const column = table === 'records' ? 'harness' : 'harness_id'
+      const rows = this.db.prepare(`SELECT DISTINCT ${column} AS name FROM ${table}`).all() as {
+        name: unknown
+      }[]
+      for (const row of rows) {
+        if (typeof row.name !== 'string' || row.name === '') continue
+        if (wanted.has(row.name) || wanted.has(normalizeHarnessName(row.name))) raw.add(row.name)
+      }
+    }
+    return [...raw]
+  }
+
+  /** Record that a user-initiated clean ran, outside any wiped transaction. */
+  private stampClean(harnesses: readonly string[]): void {
+    this.db
+      .prepare('INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)')
+      .run('last_clean_at', new Date().toISOString())
+    this.db
+      .prepare('INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)')
+      .run('last_clean_scope', JSON.stringify(harnesses))
+  }
+
   /** Number of derived sessions currently built. */
   sessionCount(): number {
     return (this.db.prepare('SELECT COUNT(*) AS n FROM session').get() as { n: number }).n
@@ -1716,6 +2176,22 @@ export class CanonStore {
         : this.db.prepare('SELECT * FROM session WHERE harness = ? ORDER BY started DESC').all(harnessId)
     ) as SessionDbRow[]
     return rows.map(toSessionRow)
+  }
+
+  /**
+   * Narrow session-time columns for the coverage-window seam. Only
+   * `(harness, started, ended)` cross the bridge — payload blobs are never
+   * selected and never parsed — so the per-harness latest-time fold stays
+   * cheap no matter how large session payloads grow. Uncapped by design:
+   * every row participates and the maximum folds in JS epoch ms (a SQL MAX
+   * over ISO strings mis-sorts `+02:00`-offset stamps).
+   */
+  listSessionTimeColumns(): Array<{ harness: unknown; started: unknown; ended: unknown }> {
+    return this.db.prepare('SELECT harness, started, ended FROM session').all() as Array<{
+      harness: unknown
+      started: unknown
+      ended: unknown
+    }>
   }
 
   /**
@@ -2002,9 +2478,9 @@ export class CanonStore {
         finding.title,
         finding.mechanism,
         finding.confidence,
-        finding.estimatedWasteTokens,
+        finding.estimatedWasteTokens ?? null,
         finding.recommendation,
-        JSON.stringify(finding.errorBar),
+        JSON.stringify(finding.errorBar ?? null),
         JSON.stringify(finding.evidenceLinks),
         finding.outcomeRiskCaveat,
         finding.runId ?? null,
@@ -2036,7 +2512,7 @@ export class CanonStore {
   }
 
   /** List findings, optionally filtered by runId or sessionId; ordered by rank_score DESC. */
-  listFindings(runId?: string, sessionId?: string): Finding[] {
+  listFindings(runId?: string, sessionId?: string, options?: FindingsListOptions): Finding[] {
     let query = 'SELECT * FROM finding'
     const params: string[] = []
     const conditions: string[] = []
@@ -2049,6 +2525,14 @@ export class CanonStore {
       conditions.push('session_id = ?')
       params.push(sessionId)
     }
+    // `detector_id` is a real column, so it filters in SQL. `harness` rides
+    // in the finding payload (canon/findings.ts stamps it) and filters after
+    // the round-trip below — no migration, and legacy rows without a harness
+    // simply match no harness filter rather than every one.
+    if (options?.detector !== undefined && options.detector !== '') {
+      conditions.push('detector_id = ?')
+      params.push(options.detector)
+    }
 
     if (conditions.length > 0) {
       query += ` WHERE ${conditions.join(' AND ')}`
@@ -2056,7 +2540,58 @@ export class CanonStore {
     query += ' ORDER BY rank_score DESC, id ASC'
 
     const rows = this.db.prepare(query).all(...params) as FindingDbRow[]
-    return rows.map(toFinding)
+    let findings = rows.map(toFinding)
+    if (options?.harness !== undefined && options.harness !== '') {
+      // One rule in both halves of the envelope (review): the request folds
+      // the way derived values are stamped (`cursor-agent` is `cursor`).
+      const want = normalizeHarnessName(options.harness)
+      findings = findings.filter((finding) => {
+        const have = (finding as { harness?: unknown }).harness
+        return typeof have === 'string' && normalizeHarnessName(have) === want
+      })
+    }
+    return findings
+  }
+
+  /** Sessions recorded per canonical harness (issue #191 review M2). Narrow
+   * columns only — no payload touch — so coverage checks stay cheap. */
+  countSessionsByHarness(): Record<string, number> {
+    const rows = this.db
+      .prepare('SELECT harness, COUNT(*) AS n FROM session GROUP BY harness')
+      .all() as { harness: string; n: number }[]
+    const counts: Record<string, number> = {}
+    for (const row of rows) counts[row.harness] = row.n
+    return counts
+  }
+
+  /** Canonical harness of one stored session, or undefined when absent. */
+  sessionHarness(sessionId: string): string | undefined {
+    const row = this.db
+      .prepare('SELECT harness FROM session WHERE session_id = ?')
+      .get(sessionId) as { harness: string } | undefined
+    return row?.harness
+  }
+
+  /**
+   * Sessions whose context window no source reported (issue #191, condition
+   * 3): the count that keeps a suppressed-default findings list from reading
+   * as "all clear". Reads the provenance the session builder persists
+   * (`payload.context.contextLimitSource`); legacy payloads without it are
+   * not counted either way.
+   */
+  countUnknownWindowSessions(harness?: string): number {
+    const conditions = [
+      `json_extract(payload, '$.context.contextLimitSource') IN ('default', 'absent')`,
+    ]
+    const params: string[] = []
+    if (harness !== undefined && harness !== '') {
+      conditions.push('harness = ?')
+      params.push(normalizeHarnessName(harness))
+    }
+    const row = this.db
+      .prepare(`SELECT COUNT(*) AS n FROM session WHERE ${conditions.join(' AND ')}`)
+      .get(...params) as { n: number } | undefined
+    return row?.n ?? 0
   }
 
   /** Delete one finding by id. */
@@ -2203,13 +2738,136 @@ export class CanonStore {
    * Bounded batch of records matching the given harness names (case-insensitive).
    * Used for exclusion remediation sweeps without loading the full history into memory.
    */
-  listRecordsByHarness(harnesses: readonly string[], limit = 500): import('./types.js').CanonicalRecord[] {
+  listRecordsByHarness(
+    harnesses: readonly string[],
+    limit = 500,
+    sources?: readonly string[],
+  ): import('./types.js').CanonicalRecord[] {
     if (harnesses.length === 0 || limit <= 0) return []
     const placeholders = harnesses.map(() => 'LOWER(harness) = ?').join(' OR ')
+    const args: string[] = harnesses.map((h) => h.trim().toLowerCase())
+    // A scoped remediation (renormalize --source) must not see rows from
+    // sources it was not asked to touch; without the filter the sweep
+    // quarantines every excluded-harness row in the database.
+    let sourceClause = ''
+    if (sources !== undefined && sources.length > 0) {
+      sourceClause = ` AND (${sources.map(() => 'source = ?').join(' OR ')})`
+      args.push(...sources)
+    }
     const rows = this.db
-      .prepare(`SELECT * FROM records WHERE ${placeholders} ORDER BY span_id LIMIT ?`)
-      .all(...harnesses.map((h) => h.trim().toLowerCase()), limit) as RecordRow[]
+      .prepare(`SELECT * FROM records WHERE (${placeholders})${sourceClause} ORDER BY span_id LIMIT ?`)
+      .all(...args, limit) as RecordRow[]
     return rows.map(toRecord)
+  }
+
+  /**
+   * Cost blocks for selected spans without inflating parts or raw payloads.
+   * The run detail turn table (issue #183) needs each turn's priced figure;
+   * selecting full records would decompress every record's raw span.
+   */
+  spanCosts(spanIds: readonly string[]): Array<{ spanId: string; cost: CostBlock }> {
+    const uniqueIds = [...new Set(spanIds)].filter((id) => id.length > 0)
+    const out: Array<{ spanId: string; cost: CostBlock }> = []
+    const chunkSize = 900
+
+    for (let offset = 0; offset < uniqueIds.length; offset += chunkSize) {
+      const chunk = uniqueIds.slice(offset, offset + chunkSize)
+      const placeholders = chunk.map(() => '?').join(', ')
+      const rows = this.db
+        .prepare(`SELECT span_id, cost_json FROM records WHERE span_id IN (${placeholders})`)
+        .all(...chunk) as Array<{ span_id: unknown; cost_json: unknown }>
+
+      for (const row of rows) {
+        if (typeof row.span_id !== 'string') continue
+        let cost: unknown
+        try {
+          cost = JSON.parse(String(row.cost_json))
+        } catch {
+          continue
+        }
+        if (typeof cost !== 'object' || cost === null) continue
+        out.push({ spanId: row.span_id, cost: cost as CostBlock })
+      }
+    }
+
+    return out
+  }
+
+  /**
+   * Summary figures for selected sessions without parsing whole payloads.
+   * The runs list (issue #183) needs every run's turn count, token totals and
+   * priced cost; parsing each session payload would inflate megabytes per
+   * row, so only the summary fields are extracted.
+   */
+  sessionSummaryFigures(
+    sessionIds: readonly string[],
+  ): Array<{
+    sessionId: string
+    turnCount?: number
+    totalInput?: number
+    totalOutput?: number
+    costStatus?: string
+    costValue?: number
+    costCurrency?: string
+    costUsdLegacy?: number
+  }> {
+    const uniqueIds = [...new Set(sessionIds)].filter((id) => id.length > 0)
+    const out: Array<{
+      sessionId: string
+      turnCount?: number
+      totalInput?: number
+      totalOutput?: number
+      costStatus?: string
+      costValue?: number
+      costCurrency?: string
+      costUsdLegacy?: number
+    }> = []
+    const chunkSize = 900
+
+    for (let offset = 0; offset < uniqueIds.length; offset += chunkSize) {
+      const chunk = uniqueIds.slice(offset, offset + chunkSize)
+      const placeholders = chunk.map(() => '?').join(', ')
+      const rows = this.db
+        .prepare(
+          `SELECT session_id,
+                  json_extract(payload, '$.summary.turn_count') AS turn_count,
+                  json_extract(payload, '$.summary.total_input') AS total_input,
+                  json_extract(payload, '$.summary.total_output') AS total_output,
+                  json_extract(payload, '$.summary.cost.status') AS cost_status,
+                  json_extract(payload, '$.summary.cost.value') AS cost_value,
+                  json_extract(payload, '$.summary.cost.currency') AS cost_currency,
+                  json_extract(payload, '$.summary.cost.usd') AS cost_usd
+           FROM session WHERE session_id IN (${placeholders})`,
+        )
+        .all(...chunk) as Array<{
+        session_id: unknown
+        turn_count: unknown
+        total_input: unknown
+        total_output: unknown
+        cost_status: unknown
+        cost_value: unknown
+        cost_currency: unknown
+        cost_usd: unknown
+      }>
+
+      for (const row of rows) {
+        if (typeof row.session_id !== 'string') continue
+        const figure = (value: unknown): number | undefined =>
+          typeof value === 'number' && Number.isFinite(value) ? value : undefined
+        out.push({
+          sessionId: row.session_id,
+          ...(figure(row.turn_count) !== undefined ? { turnCount: figure(row.turn_count)! } : {}),
+          ...(figure(row.total_input) !== undefined ? { totalInput: figure(row.total_input)! } : {}),
+          ...(figure(row.total_output) !== undefined ? { totalOutput: figure(row.total_output)! } : {}),
+          ...(typeof row.cost_status === 'string' ? { costStatus: row.cost_status } : {}),
+          ...(figure(row.cost_value) !== undefined ? { costValue: figure(row.cost_value)! } : {}),
+          ...(typeof row.cost_currency === 'string' ? { costCurrency: row.cost_currency } : {}),
+          ...(figure(row.cost_usd) !== undefined ? { costUsdLegacy: figure(row.cost_usd)! } : {}),
+        })
+      }
+    }
+
+    return out
   }
 
   /**
@@ -2317,35 +2975,114 @@ export class CanonStore {
   }
 
   /** Hold a span out of the corpus; re-quarantining the same span replaces the entry. */
-  quarantine(spanId: string, namespaces: readonly string[], reason: string): void {
+  quarantine(
+    spanId: string,
+    namespaces: readonly string[],
+    reason: string,
+    metadata?: { source?: string; name?: string; timestamp?: string },
+  ): void
+  quarantine(
+    spanId: string,
+    namespaces: readonly string[],
+    reason: string,
+    source?: string,
+    name?: string,
+    timestamp?: string,
+  ): void
+  quarantine(
+    spanId: string,
+    namespaces: readonly string[],
+    reason: string,
+    sourceOrOptions?: string | { source?: string; name?: string; timestamp?: string },
+    name?: string,
+    timestamp?: string,
+  ): void {
+    let sourceVal: string | null = null
+    let nameVal: string | null = null
+    let timestampVal: string | null = null
+
+    if (typeof sourceOrOptions === 'object' && sourceOrOptions !== null) {
+      sourceVal = sourceOrOptions.source ?? null
+      nameVal = sourceOrOptions.name ?? null
+      timestampVal = sourceOrOptions.timestamp ?? null
+    } else if (typeof sourceOrOptions === 'string') {
+      sourceVal = sourceOrOptions
+      nameVal = name ?? null
+      timestampVal = timestamp ?? null
+    }
+
     this.db
-      .prepare('INSERT OR REPLACE INTO quarantine (span_id, namespaces, reason) VALUES (?, ?, ?)')
-      .run(spanId, JSON.stringify(namespaces), reason)
+      .prepare(
+        'INSERT OR REPLACE INTO quarantine (span_id, namespaces, reason, source, name, timestamp) VALUES (?, ?, ?, ?, ?, ?)',
+      )
+      .run(spanId, JSON.stringify(namespaces), reason, sourceVal, nameVal, timestampVal)
   }
 
   /** The quarantine entry for a span, with its parsed namespaces; absent id gives undefined. */
   getQuarantine(spanId: string): QuarantineEntry | undefined {
     const row = this.db
-      .prepare('SELECT span_id, namespaces, reason FROM quarantine WHERE span_id = ?')
-      .get(spanId) as { span_id: unknown; namespaces: unknown; reason: unknown } | undefined
+      .prepare(
+        'SELECT span_id, namespaces, reason, source, name, timestamp FROM quarantine WHERE span_id = ?',
+      )
+      .get(spanId) as
+      | {
+          span_id: unknown
+          namespaces: unknown
+          reason: unknown
+          source: unknown
+          name: unknown
+          timestamp: unknown
+        }
+      | undefined
     if (row === undefined) return undefined
-    return {
+    const entry: QuarantineEntry = {
       spanId: text(row.span_id),
       namespaces: JSON.parse(text(row.namespaces)) as string[],
       reason: text(row.reason),
     }
+    if (row.source !== null && row.source !== undefined) {
+      entry.source = text(row.source)
+    }
+    if (row.name !== null && row.name !== undefined) {
+      entry.name = text(row.name)
+    }
+    if (row.timestamp !== null && row.timestamp !== undefined) {
+      entry.timestamp = text(row.timestamp)
+    }
+    return entry
   }
 
   /** Every quarantined span ordered by span id — the R6.3 view's row list. */
   listQuarantine(): QuarantineEntry[] {
     const rows = this.db
-      .prepare('SELECT span_id, namespaces, reason FROM quarantine ORDER BY span_id')
-      .all() as { span_id: unknown; namespaces: unknown; reason: unknown }[]
-    return rows.map((row) => ({
-      spanId: text(row.span_id),
-      namespaces: JSON.parse(text(row.namespaces)) as string[],
-      reason: text(row.reason),
-    }))
+      .prepare(
+        'SELECT span_id, namespaces, reason, source, name, timestamp FROM quarantine ORDER BY span_id',
+      )
+      .all() as {
+      span_id: unknown
+      namespaces: unknown
+      reason: unknown
+      source: unknown
+      name: unknown
+      timestamp: unknown
+    }[]
+    return rows.map((row) => {
+      const entry: QuarantineEntry = {
+        spanId: text(row.span_id),
+        namespaces: JSON.parse(text(row.namespaces)) as string[],
+        reason: text(row.reason),
+      }
+      if (row.source !== null && row.source !== undefined) {
+        entry.source = text(row.source)
+      }
+      if (row.name !== null && row.name !== undefined) {
+        entry.name = text(row.name)
+      }
+      if (row.timestamp !== null && row.timestamp !== undefined) {
+        entry.timestamp = text(row.timestamp)
+      }
+      return entry
+    })
   }
 
   /** Total quarantined span count, without materializing the row list. */
@@ -2353,19 +3090,56 @@ export class CanonStore {
     return (this.db.prepare('SELECT COUNT(*) AS n FROM quarantine').get() as { n: number }).n
   }
 
+  /**
+   * Quarantined-span counts by reason, aggregated in SQL (GROUP BY) so the
+   * coverage seam never materializes the table to tally it. A null reason
+   * groups as `'unknown'` — folded, never dropped.
+   */
+  quarantineCountsByReason(): Array<{ reason: string; count: number }> {
+    const rows = this.db
+      .prepare(
+        `SELECT COALESCE(reason, 'unknown') AS reason, COUNT(*) AS n
+         FROM quarantine GROUP BY reason ORDER BY n DESC, reason ASC`,
+      )
+      .all() as Array<{ reason: unknown; n: unknown }>
+    return rows.map((row) => ({
+      reason: typeof row.reason === 'string' && row.reason !== '' ? row.reason : 'unknown',
+      count: typeof row.n === 'number' ? row.n : Number(row.n) || 0,
+    }))
+  }
+
+  /**
+   * Per-source record counts, aggregated in SQL (GROUP BY) so activity seams
+   * never inflate the corpus through `listAll()` to tally it.
+   */
+  countBySource(): Map<string, number> {
+    const rows = this.db
+      .prepare('SELECT source, COUNT(*) AS n FROM records GROUP BY source')
+      .all() as Array<{ source: unknown; n: unknown }>
+    const counts = new Map<string, number>()
+    for (const row of rows) {
+      if (typeof row.source !== 'string') continue
+      counts.set(row.source, typeof row.n === 'number' ? row.n : Number(row.n) || 0)
+    }
+    return counts
+  }
+
   /** Record a surfaced failure the system declines to guess about. */
   recordProblem(problem: SpanProblem): void {
     const problemKey = problemIdentity(problem.spanId, problem.code, problem.location ?? null)
     this.db
       .prepare(
-        `INSERT INTO problems (span_id, problem_key, severity, code, message, location)
-         VALUES (?, ?, ?, ?, ?, ?)
+        `INSERT INTO problems (span_id, problem_key, severity, code, message, location, session_id, harness, timestamp)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(problem_key) DO UPDATE SET
            span_id = excluded.span_id,
            severity = excluded.severity,
            code = excluded.code,
            message = excluded.message,
-           location = excluded.location`,
+           location = excluded.location,
+           session_id = excluded.session_id,
+           harness = excluded.harness,
+           timestamp = excluded.timestamp`,
       )
       .run(
         problem.spanId,
@@ -2374,6 +3148,9 @@ export class CanonStore {
         problem.code,
         problem.message,
         problem.location ?? null,
+        problem.sessionId ?? null,
+        problem.harness ?? null,
+        problem.timestamp ?? null,
       )
   }
 
@@ -2381,19 +3158,47 @@ export class CanonStore {
   getProblems(spanId?: string): SpanProblem[] {
     const rows = (
       spanId === undefined
-        ? this.db.prepare('SELECT span_id, severity, code, message, location FROM problems').all()
-        : this
-            .db
-            .prepare('SELECT span_id, severity, code, message, location FROM problems WHERE span_id = ?')
+        ? this.db
+            .prepare(
+              'SELECT span_id, severity, code, message, location, session_id, harness, timestamp FROM problems',
+            )
+            .all()
+        : this.db
+            .prepare(
+              'SELECT span_id, severity, code, message, location, session_id, harness, timestamp FROM problems WHERE span_id = ?',
+            )
             .all(spanId)
-    ) as { span_id: unknown; severity: unknown; code: unknown; message: unknown; location: unknown }[]
-    return rows.map((row) => ({
-      spanId: text(row.span_id),
-      severity: text(row.severity) as Problem['severity'],
-      code: text(row.code),
-      message: text(row.message),
-      location: row.location === null ? undefined : text(row.location),
-    }))
+    ) as {
+      span_id: unknown
+      severity: unknown
+      code: unknown
+      message: unknown
+      location: unknown
+      session_id: unknown
+      harness: unknown
+      timestamp: unknown
+    }[]
+    return rows.map((row) => {
+      const p: SpanProblem = {
+        spanId: text(row.span_id),
+        severity: text(row.severity) as Problem['severity'],
+        code: text(row.code),
+        message: text(row.message),
+      }
+      if (row.location !== null && row.location !== undefined) {
+        p.location = text(row.location)
+      }
+      if (row.session_id !== null && row.session_id !== undefined) {
+        p.sessionId = text(row.session_id)
+      }
+      if (row.harness !== null && row.harness !== undefined) {
+        p.harness = text(row.harness)
+      }
+      if (row.timestamp !== null && row.timestamp !== undefined) {
+        p.timestamp = text(row.timestamp)
+      }
+      return p
+    })
   }
 
   /** Total recorded problem count, without loading problem details. */
@@ -2401,11 +3206,61 @@ export class CanonStore {
     return (this.db.prepare('SELECT COUNT(*) AS n FROM problems').get() as { n: number }).n
   }
 
+  /**
+   * Reconcile source problems for one re-read source unit (#243): the set of
+   * source-problem rows for `harness` + `sourceKey` becomes exactly the codes
+   * in `keepCodes`, so a warning the reader no longer reports (a fixed
+   * FUTURE_DATED timestamp, a repaired MALFORMED_TIMESTAMP) does not stay
+   * forever after a clean re-import. Only rows whose span id is
+   * `harness:${harness}:${sourceKey}:${code}` are in scope: ingest problems on
+   * the bare `harness:id:sourceKey` span, the job row, TOKEN_* rows on real
+   * spans, and any other harness or source key are left alone. Call only for a
+   * unit the reader actually re-parsed — an unchanged unit skips the commit
+   * path entirely, and its standing warnings with it.
+   */
+  reconcileSourceProblems(harness: string, sourceKey: string, keepCodes: readonly string[]): void {
+    const prefix = `harness:${harness}:${sourceKey}:`
+    const rows = this.db
+      .prepare("SELECT span_id, code FROM problems WHERE span_id LIKE ? ESCAPE '\\'")
+      .all(`${escapeLike(prefix)}%`) as Array<{ span_id: unknown; code: unknown }>
+    const keep = new Set(keepCodes)
+    const remove = this.db.prepare('DELETE FROM problems WHERE span_id = ? AND code = ?')
+    for (const row of rows) {
+      if (typeof row.span_id !== 'string' || typeof row.code !== 'string') continue
+      if (!row.span_id.startsWith(prefix)) continue
+      const rest = row.span_id.slice(prefix.length)
+      if (rest.length === 0 || rest !== row.code) continue
+      if (!keep.has(row.code)) remove.run(row.span_id, row.code)
+    }
+  }
+
   /** Append one ingest run to the audit log. */
   logIngest(source: string, count: number): void {
     this.db
       .prepare('INSERT INTO ingest_log (source, count, timestamp) VALUES (?, ?, ?)')
-      .run(source, count, new Date().toISOString())
+      .run(normalizeIngestSource(source), count, new Date().toISOString())
+  }
+
+  /**
+   * Per-source ingest sums with recency, aggregated in SQL (GROUP BY) so the
+   * coverage and meta seams never page the unbounded audit log to tally it.
+   */
+  ingestLogSums(): Map<string, { total: number; lastAt: string | null }> {
+    const rows = this.db
+      .prepare(
+        `SELECT source, SUM(count) AS total, MAX(timestamp) AS last_at
+         FROM ingest_log GROUP BY source`,
+      )
+      .all() as Array<{ source: unknown; total: unknown; last_at: unknown }>
+    const sums = new Map<string, { total: number; lastAt: string | null }>()
+    for (const row of rows) {
+      if (typeof row.source !== 'string') continue
+      sums.set(row.source, {
+        total: typeof row.total === 'number' ? row.total : Number(row.total) || 0,
+        lastAt: typeof row.last_at === 'string' ? row.last_at : null,
+      })
+    }
+    return sums
   }
 
   /** The ingest audit log, oldest first. */
@@ -2460,7 +3315,16 @@ export class CanonStore {
     return this.getDetectorVersion() === DETECTOR_VERSION
   }
 
+  /**
+   * Underlying SQLite database handle for bridge/server consumers that query
+   * the canonical store directly without reopening the file.
+   */
+  getDatabase(): Database {
+    return this.db
+  }
+
   close(): void {
     this.db.close()
   }
 }
+

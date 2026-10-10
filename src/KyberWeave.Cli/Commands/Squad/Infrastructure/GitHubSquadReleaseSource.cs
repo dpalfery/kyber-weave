@@ -1,5 +1,6 @@
 using System.IO.Compression;
 using System.Net;
+using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -27,6 +28,7 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
     private readonly HttpMessageHandler _handler;
     private readonly HttpClient _httpClient;
     private readonly Uri _apiRoot;
+    private readonly string? _token;
     private readonly Action? _onStagingCreated;
 
     // Derived from the root rather than passed separately: a caller can only reach the
@@ -42,6 +44,7 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
         _handler = new SocketsHttpHandler { AllowAutoRedirect = false };
         _httpClient = new HttpClient(_handler, disposeHandler: false);
         _apiRoot = apiRoot;
+        _token = ReadToken(Environment.GetEnvironmentVariable);
         _onStagingCreated = null;
         _allowLoopbackHttp = ReleaseOrigin.IsLoopbackAuthority(apiRoot);
     }
@@ -50,7 +53,8 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
     internal GitHubSquadReleaseSource(
         HttpMessageHandler handler,
         Uri apiRoot,
-        Action? onStagingCreated = null)
+        Action? onStagingCreated = null,
+        Func<string, string?>? readEnvironment = null)
     {
         ArgumentNullException.ThrowIfNull(handler);
         ArgumentNullException.ThrowIfNull(apiRoot);
@@ -66,8 +70,29 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
         _handler = handler;
         _httpClient = new HttpClient(_handler, disposeHandler: false);
         _apiRoot = apiRoot;
+        _token = ReadToken(readEnvironment ?? Environment.GetEnvironmentVariable);
         _onStagingCreated = onStagingCreated;
         _allowLoopbackHttp = ReleaseOrigin.IsLoopbackAuthority(apiRoot);
+    }
+
+    /// <summary>
+    /// Reads the GitHub token from the environment, matching
+    /// <see cref="Update.GitHubReleaseClient"/>'s lookup so both release paths
+    /// authenticate the same anonymous-limit callers out of.
+    /// </summary>
+    /// <remarks>
+    /// Resolved once per source: the token is read at construction, never logged, and
+    /// never included in an exception message. It is sent only to the API-root host
+    /// (see <see cref="SendHttpsAsync"/>), never to asset redirect hosts.
+    /// </remarks>
+    private static string? ReadToken(Func<string, string?> readEnvironment)
+    {
+        string? githubToken = readEnvironment("GITHUB_TOKEN");
+        if (!string.IsNullOrWhiteSpace(githubToken))
+            return githubToken.Trim();
+
+        string? ghToken = readEnvironment("GH_TOKEN");
+        return string.IsNullOrWhiteSpace(ghToken) ? null : ghToken.Trim();
     }
 
     /// <inheritdoc />
@@ -243,6 +268,17 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
             ValidateTransport(currentUri, "HTTP request or redirect");
             using HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Get, currentUri);
             request.Headers.UserAgent.ParseAdd("kyber-weave");
+
+            // The token authenticates only the API-root host. Asset downloads redirect
+            // to release asset hosts (objects.githubusercontent.com,
+            // release-assets.githubusercontent.com, github.com); those requests carry no
+            // Authorization header, and the per-request header is rebuilt each hop so a
+            // redirect off the API host never inherits it.
+            if (_token is not null && IsApiHost(currentUri))
+            {
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _token);
+            }
+
             HttpResponseMessage response = await _httpClient.SendAsync(
                 request,
                 HttpCompletionOption.ResponseHeadersRead,
@@ -254,7 +290,7 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
                 {
                     try
                     {
-                        response.EnsureSuccessStatusCode();
+                        ThrowForStatus(response);
                     }
                     finally
                     {
@@ -276,6 +312,30 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
 
         throw new InvalidOperationException(
             $"The release request exceeded the {MaximumRedirects} redirect limit.");
+    }
+
+    private bool IsApiHost(Uri uri) =>
+        string.Equals(uri.Host, _apiRoot.Host, StringComparison.OrdinalIgnoreCase) &&
+        uri.Port == _apiRoot.Port;
+
+    /// <summary>
+    /// Surfaces the anonymous-rate-limit remedy on 403 only when no token was sent, so
+    /// an authenticated caller never gets told to set a token they already set. The
+    /// token value itself never appears in the message.
+    /// </summary>
+    private void ThrowForStatus(HttpResponseMessage response)
+    {
+        if (response.StatusCode == HttpStatusCode.Forbidden && _token is null)
+        {
+            throw new HttpRequestException(
+                $"GitHub refused the release request (HTTP 403). Anonymous requests are rate-limited; " +
+                $"set GITHUB_TOKEN (or GH_TOKEN) to authenticate and avoid the anonymous rate limit. " +
+                $"Request: {response.RequestMessage?.RequestUri?.GetLeftPart(UriPartial.Authority)}",
+                inner: null,
+                statusCode: HttpStatusCode.Forbidden);
+        }
+
+        response.EnsureSuccessStatusCode();
     }
 
     private static bool IsRedirect(HttpStatusCode statusCode) => statusCode is

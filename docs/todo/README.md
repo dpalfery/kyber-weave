@@ -4,7 +4,7 @@ title: Todos
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-09-25
+last-reviewed: 2026-09-29
 ---
 
 # Todos
@@ -43,6 +43,7 @@ last-reviewed: YYYY-MM-DD
 
 | Todo | Component | Status | Description |
 |---|---|---|---|
+| [tauri-glib-upstream-removal.md](tauri-glib-upstream-removal.md) | KyberDash | draft | Remove the patched GLib 0.18.5 source after a released Tauri GTK migration resolves the Linux tray graph to `glib >= 0.20.0` and the Linux gates pass. |
 | [claude-conductor-live-verification.md](claude-conductor-live-verification.md) | KyberSquad | draft | Verify PR #136's `/conductor` skill and retained subagent in a live Claude Code session; the renderer and CI checks do not establish runtime behaviour. |
 
 Nine earlier open todos moved to GitHub issues #125–#133. The four that those issues

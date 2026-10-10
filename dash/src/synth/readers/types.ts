@@ -43,6 +43,28 @@ export type SourceRecordEnvelope = Omit<SourceRecordProvenance, 'nativeRecordId'
 }
 
 /**
+ * Structured tool call invoked by the model during a turn.
+ */
+export interface ReaderToolCall {
+  id: string
+  name: string
+  arguments: Record<string, unknown> | string
+  timestamp?: string
+  durationMs?: number
+}
+
+/**
+ * Structured execution result of a tool call returned to the model.
+ */
+export interface ReaderToolResult {
+  toolCallId: string
+  name?: string
+  content: string
+  isError?: boolean
+  timestamp?: string
+}
+
+/**
  * One model turn's content as the file recorded it. Optional fields are
  * omitted when the file did not carry them; callers must not treat absence
  * as zero.
@@ -53,6 +75,13 @@ export type ReaderTurn = {
   sessionId?: string
   /** Model context window in tokens, when an `event_msg` reported one. */
   contextWindow?: number
+  /**
+   * Model context window in tokens, as the harness declared (configured) it
+   * rather than measured it. Kept apart from `contextWindow` because a
+   * declared window is weaker provenance: synthesis files it under the
+   * dedicated declared raw key, never under a reported key.
+   */
+  declaredContextWindow?: number
   /** Termination or exit indicator, when the transcript reported one. */
   terminationReason?: string
   /** Process or command exit code observed in transcript. */
@@ -63,6 +92,12 @@ export type ReaderTurn = {
   correctionRule?: string
   /** Native turn/message id when the transcript named one. */
   nativeRecordId?: string
+  /** Tool calls invoked in this turn. */
+  toolCalls?: ReaderToolCall[]
+  /** Tool execution results received in this turn. */
+  toolResults?: ReaderToolResult[]
+  /** Tool schemas explicitly offered to the model in this turn, if observed in telemetry. */
+  toolsOffered?: string[]
 }
 
 /**
@@ -71,4 +106,11 @@ export type ReaderTurn = {
  */
 export interface ContentReader {
   read(filePath: string, dateRange?: DateRange): AsyncIterable<ReaderTurn>
+  /**
+   * When true, `matchingTurns` must not fall back to `turns[index]`. Cursor
+   * yields a filtered turn list (a subset of requests), so positional pairing
+   * would steal another turn's parts. Readers that omit this keep main's
+   * index-pairing behaviour for id-less calls and id-map misses.
+   */
+  readonly positionalPairingUnsafe?: boolean
 }

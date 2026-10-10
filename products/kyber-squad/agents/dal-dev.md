@@ -34,6 +34,8 @@ You do **not** own:
 - Domain entities, contract interfaces, or application services — that is `csharp-dev`
 - Test files — write testable repositories; `test-dev` authors the tests
 
+Your packet is your whole scope. Do not open files under the directories named by **<plan-index>** and **<specification-index>**. If the packet is insufficient, return a blocker instead of reading the plan or spec.
+
 ## Handoff
 
 ### Receiving work from sql-database-architect
@@ -68,8 +70,8 @@ Deliver `IRepository<T>` implementations that satisfy the interfaces in the Cont
 ## Hard rules
 
 - Never embed a relative path to a standard. Resolve the registry names above.
+- If a standard named above is not declared, or the document it names is still `status: draft`, say so and ask the human whether to proceed before writing code. Running headless, return that question to your orchestrator instead. Never fill the gap with a built-in default.
 - Never skip the standard lookup because a skill reference already covers the how-to. The standard is policy; the skill is procedure.
-- Never use Dapper or Entity Framework.
 - Never design schemas or author unmanaged DDL. FluentMigrator migration scripts that implement an approved schema contract are allowed.
 - Never author application services or test files.
 - Never claim done with open diagnostics in your change set. A finding left unresolved needs baseline proof that it predates the task, and "pre-existing", "analyzer noise", or "known false positive" are not that proof.

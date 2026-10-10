@@ -5,6 +5,7 @@ import { homedir, tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
 import { CanonStore } from '../src/canon/store.js'
+import { normalizeHarnessName } from '../src/canon/measurability.js'
 import { refreshHarnessSources } from '../src/refresh/orchestrator.js'
 import { descriptorFor } from '../src/refresh/registry.js'
 import {
@@ -59,6 +60,11 @@ export const POPULATED_HARNESSES = [
   'pi',
   'opencode',
 ] as const
+
+/** Canonical derived ids the populated jobs project to (issue #182 fold:
+ * `cursor-agent` refresh records still arrive under their front-end name,
+ * but sessions, runs and rollups carry the folded owner `cursor`). */
+export const DERIVED_HARNESSES = [...new Set(POPULATED_HARNESSES.map((h) => normalizeHarnessName(h)))]
 
 export type RefreshedWorld = {
   root: string

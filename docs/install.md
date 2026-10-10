@@ -5,7 +5,7 @@ doc-type: runbook
 status: current
 component: Distribution
 owner: dpalfery
-last-reviewed: 2026-09-10
+last-reviewed: 2026-09-29
 ---
 
 # Installing Kyber-Weave
@@ -45,6 +45,16 @@ export PATH="$HOME/.local/bin:$PATH"
 | `--no-mcp` | `KYBER_WEAVE_NO_MCP=1` | CLI only; skip the MCP server |
 | `--no-kyberdash` | `KYBER_WEAVE_NO_KYBERDASH=1` | CLI + MCP; skip the KyberDash binary |
 | `--with-menubar` | `KYBER_WEAVE_WITH_MENUBAR=1` | macOS only; also install the signed menubar app to `~/Applications` after verifying its SHA-256 and code signature |
+| — | `KYBER_WEAVE_RELEASE_ORIGIN` | Install from a loopback stand-in instead of GitHub. Unset keeps the GitHub release roots |
+
+`KYBER_WEAVE_RELEASE_ORIGIN` has no flag. `scripts/install.sh` reads it. A legal origin is only `http` or
+`https`, with no userinfo, and host `127.0.0.1`, `localhost`, or `[::1]`, with an optional
+port. Every other value is rejected, including other `127.*` addresses. While an `http`
+override is active, curl uses `--proto '=http,https'` and keeps `--proto-redir '=https'`.
+An `http` origin refuses wget. An `https` loopback origin keeps
+`curl --proto '=https' --proto-redir '=https'` and `wget --https-only`. Unset configuration
+still refuses any URL that is not HTTPS. A non-loopback value is rejected before a
+download, so it installs nothing and does not fetch a non-HTTPS URL.
 
 Pinning a specific version or install directory:
 
@@ -69,7 +79,7 @@ curl -fsSL https://raw.githubusercontent.com/dpalfery/kyber-weave/main/scripts/i
 
 1. Detects your OS and architecture and picks the matching RID
 2. Resolves the latest stable release tag (or newest pre-release tag when `--prerelease` is active), unless `--version` pinned an explicit version
-3. Downloads `SHA256SUMS.txt` and each binary archive over HTTPS, following HTTPS-only redirects
+3. Downloads `SHA256SUMS.txt` and each binary archive over HTTPS, following HTTPS-only redirects. A legal `KYBER_WEAVE_RELEASE_ORIGIN` is the only case that may start on plain HTTP, and redirects stay HTTPS-only
 4. **Verifies every binary against its published checksum** before installing
 5. Extracts into the install directory
 
@@ -115,6 +125,97 @@ Windows binaries (`win-x64`) are published on the release, but the install scrip
 handle `.zip` extraction — download the asset from
 [Releases](https://github.com/dpalfery/kyber-weave/releases) and place it on your PATH
 manually. After that, `kyber-weave update` replaces the Windows binaries in place.
+
+## Verifying a download
+
+Every release publishes `SHA256SUMS.txt`, a manifest of SHA-256 hashes for all assets.
+Verify any downloaded archive or installer before extracting or running it.
+
+**Windows PowerShell:**
+
+Run from the directory containing your downloaded files and `SHA256SUMS.txt`. To verify a single file:
+
+```powershell
+$name = "kyber-weave-win-x64.zip"
+$expected = (Get-Content SHA256SUMS.txt | Select-String -SimpleMatch $name) -split '  ' | Select-Object -First 1
+$hash = (Get-FileHash $name -Algorithm SHA256).Hash
+if ($hash -eq $expected) { Write-Host "OK: $name" } else { Write-Host "FAILED: $name" }
+```
+
+To verify all downloaded files at once (skipping missing ones, like `--ignore-missing` in bash):
+
+```powershell
+(Get-Content SHA256SUMS.txt) | foreach {
+    $parts = $_ -split '  '
+    $name = $parts[1]
+    if (Test-Path $name) {
+        $hash = (Get-FileHash $name -Algorithm SHA256).Hash
+        if ($hash -eq $parts[0]) { Write-Host "OK: $name" } else { Write-Host "FAILED: $name" }
+    }
+}
+```
+
+**macOS and Linux:**
+
+Run from the directory containing your downloaded files and `SHA256SUMS.txt`. On macOS, use `shasum`:
+
+```bash
+shasum -a 256 --ignore-missing -c SHA256SUMS.txt
+```
+
+On Linux, use `sha256sum`:
+
+```bash
+sha256sum --ignore-missing -c SHA256SUMS.txt
+```
+
+The `--ignore-missing` flag allows you to verify a subset of files if you downloaded
+only some of the release assets. A mismatch causes the command to exit with a non-zero
+status and print a `FAILED` line.
+
+## Windows: unsigned binaries and SmartScreen
+
+The Windows tray installer (`kyberdash-tray-win-x64-setup.exe`) and all Windows `.exe`
+files inside release archives (`kyber-weave`, `kyber-weave-mcp`, and `kyberdash` in
+`win-x64` archives) are **not Authenticode-signed**. Signing has been deferred
+([issue #132](https://github.com/dpalfery/kyber-weave/issues/132)); see
+[Code signing status](distribution.md#code-signing-status) for the rationale and integrity
+model.
+
+### SmartScreen warning and **More info -> Run anyway**
+
+When you run an unsigned Windows `.exe`, SmartScreen typically displays **"Windows protected
+your PC"**. To proceed:
+
+1. Click **More info** to expand the prompt.
+2. Click **Run anyway** at the bottom of the expanded panel.
+
+This is normal for unsigned binaries downloaded from the internet. SmartScreen reputation is
+tracked per file, so binaries from a new release will typically warn again. Verifying the
+SHA-256 hash first (see [Verifying a download](#verifying-a-download) above) confirms the
+binary is intact and matches the published manifest.
+
+### Mark-of-the-Web and extracted `.exe` files
+
+When you extract a `.zip` file containing Windows binaries on NTFS, Windows marks the
+extracted files with the "Mark-of-the-Web" (MOTW) attribute to indicate they came from
+an untrusted source. This causes SmartScreen to show the warning above on first run.
+
+To remove the MOTW attribute:
+
+- **In File Explorer**: Right-click the `.exe` file, select **Properties**, check
+  **Unblock** at the bottom of the **General** tab, and click **Apply**.
+- **In PowerShell**:
+  ```powershell
+  Unblock-File -Path "path\to\kyber-weave.exe"
+  ```
+
+### Automated verification
+
+If you use `kyberdash menubar` to install the tray, it verifies the SHA-256 hash of the
+installer and confirms its code signature on macOS before running it. Manual downloads
+from [Releases](https://github.com/dpalfery/kyber-weave/releases) have no built-in
+verification; hash verification is your responsibility.
 
 ## Verify
 
@@ -185,7 +286,7 @@ kyber-weave docs init .
 This scaffolds host config, the catalog, and the ontology reference; safely merges the
 narrow `.kyber-weave/.gitignore` entry for local analysis cache state; and deploys the
 `kyber-weave-docs` authoring skill via APM. Pass `--kyber-standards` to seed the full suite
-of 10 Kyber Squad coding standards templates. It does not create an empty glossary. See
+of 11 Kyber Squad coding standards templates. It does not create an empty glossary. See
 [Adopting DocGraph](docgraph/onboarding.md) for the whole path.
 
 ## External dependencies

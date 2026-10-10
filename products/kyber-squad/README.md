@@ -5,10 +5,9 @@ It maintains a target-neutral, declarative catalog of **21 canonical agents** an
 governed by explicit schemas, model profiles, semantic capability profiles, and fallback lowering rules.
 
 `products/kyber-squad/` is the canonical and package authority from which target-native agent and
-skill deployments and release packages are built. The target catalog declares ten harnesses.
-Eight renderers are implemented and registered today: `copilot`, `cursor`, `claude`, `codex`,
-`antigravity`, `opencode`, `kilo`, and `pi`. The other two declared targets—`warp` and
-`factory`—fail renderer-coverage preflight.
+skill deployments and release packages are built. The target catalog declares twelve harnesses,
+and all twelve renderers are implemented and registered today: `copilot`, `cursor`, `claude`,
+`codex`, `antigravity`, `opencode`, `kilo`, `pi`, `factory`, `warp`, `zcode`, and `devin`.
 
 ---
 
@@ -58,15 +57,15 @@ products/kyber-squad/
 │   ├── task-reviewer/                  # Progressive-disclosure references (Markdown)
 │   ├── tauri-dev.md
 │   └── test-dev.md
-├── skills/                             # 24 canonical skill directories; 88 recursive files
+├── skills/                             # 24 canonical skill directories; 92 recursive files
 │   ├── app-docs-standard/
 │   ├── architecture-decision-record/
 │   ├── azure-cli/
 │   ├── azure-naming/
 │   ├── bug-crusher/
 │   ├── code-review/
+│   ├── code-review-loop/
 │   ├── create-pull-request/
-│   ├── create-pull-request-github/
 │   ├── csharp-dev/
 │   ├── csp-security/
 │   ├── dal-dev/
@@ -104,6 +103,7 @@ invocation: subagent             # primary | subagent
 model-profile: deep-planning
 capability-profile: architect
 copilot-capability-profile: architect-copilot
+devin-capability-profile: architect-devin
 copilot-tools: [vscode, execute, read, agent, edit, search, web, todo]
 delegates-to: [azure-reader, research-agent]
 fallback: role-skill
@@ -119,27 +119,37 @@ target (see [Resource Closures](#6-resource-closures-and-progressive-disclosure)
 ### 2. Skills (24 Canonical Skills)
 
 The 24 canonical skill directories under `skills/` adhere to the Agent Skills open standard
-(`SKILL.md`, optional `scripts/`, `references/`, and asset files). Every raw `SKILL.md` except the
-two explicitly evolved skills (`product-owner`, `bug-crusher`) is byte-identical to the designated
-Hotshot golden copy. The canonical tree also retains 64 supplemental resources, for 88 skill-tree
-files in total; recursive APM and Agent Plugins packages preserve those resources and their local
-references.
+(`SKILL.md`, optional `scripts/`, `references/`, and asset files). `code-review-loop` is authored
+in Kyber-Squad. Every imported raw `SKILL.md` except the six explicitly evolved skills
+(`bug-crusher`, `code-review`, `product-owner`, `second-brain`,
+`create-pull-request`, and `pr-review-fix-comments`) is byte-identical to the designated
+Hotshot golden copy; `create-pull-request-github` is retired into `create-pull-request`. The canonical
+tree also retains 68 supplemental resources, for 92 skill-tree files in total; recursive APM and
+Agent Plugins packages preserve those resources and their local references.
 
-Renderers project every validated resource beside its principal output with authored relative
-links preserved, so the former dangling-reference defect is closed at every target: a fresh
-Copilot render now emits the 45 principal files plus each owner's resources (113 files total).
+`code-review-loop` completes an authorized code review feedback cycle: validated fixes,
+pushed commit links in replies, resolved threads, and a requested re-review. Its linked
+`code-review-loop.md` workflow ships beside `SKILL.md`. `pr-review-fix-comments` remains the
+workflow for step-by-step approvals.
+
+Renderers project every file an owner's Markdown links reach beside its principal output, with
+authored relative links preserved, so the former dangling-reference defect is closed for every
+linked resource: a fresh Copilot render now emits the 45 principal files plus each owner's linked
+resources (122 files total). Every skill resource reaches every render except
+`skills/setup-dev-environment/agents/openai.yaml`, which is packaged-only Codex skill-UI metadata.
 The tracked root `.github/` self-deployment predates resource delivery and remains a stale
 snapshot until a human refreshes it after a release candidate; packages and fresh renders carry
-resources today. Surplus skill content remains packaged until the
-[content-preserving migration (#128)](https://github.com/dpalfery/kyber-weave/issues/128)
-meets its acceptance criteria.
+resources today. Every retained resource now has a reviewed disposition in the
+[skill-resource dispositions audit](../../docs/kyber-squad/skill-resource-dispositions.md):
+non-policy content stays in its skill directory as its durable home, portable policy lives in the
+`products/kyber-squad/standards/` templates, and nothing was deleted.
 
 `kyber-weave-docs` is intentionally managed separately under
 `.apm/skills/kyber-weave-docs/` for Kyber-Docs distribution and is not part of Kyber-Squad.
 
 ### 3. Profiles
 
-- **Model Profiles (`profiles/models.yml`)**: Defines the abstract `deep-planning`, `fast`, `general`, `mai-code-flash`, and `orchestration` tiers and maps them to target model identifiers where an override is required.
+- **Model Profiles (`profiles/models.yml`)**: Defines the `architect`, `deep-planning`, `fast`, `general`, `orchestration`, and `reviewer` tiers and maps them to target model identifiers where an override is required.
 - **Capability Profiles (`profiles/capabilities.yml`)**: Declares a closed capability lattice and assigns permissions (`deny`, `ask`, `allow`) to each agent role. A target-scoped internal profile may validate an exact Copilot tool allow-list without replacing or widening the agent's shared capability profile.
 - **Fallback Profiles (`profiles/fallbacks.yml`)**: Governs role-skill lowering on harnesses lacking native agent support.
 

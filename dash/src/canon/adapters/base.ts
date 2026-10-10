@@ -32,6 +32,8 @@ export type RawSpan = {
   name: string
   /** Span kind as emitted, e.g. `internal`. */
   kind: string
+  /** Span timestamp as emitted, if present. */
+  timestamp?: string
 }
 
 /**

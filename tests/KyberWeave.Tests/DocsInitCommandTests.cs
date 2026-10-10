@@ -17,7 +17,7 @@ public sealed class DocsInitCommandTests : IDisposable
 
     /// <summary>
     /// Verifies that DocsInitSettings binds the --kyber-standards command option, defaults to false,
-    /// and that passing the option triggers scaffolding of all 10 Kyber Squad rich standards.
+    /// and that passing the option triggers scaffolding of all 11 Kyber Squad rich standards.
     /// </summary>
     [Fact]
     public void ExecuteWithKyberStandardsOptionPassesKyberStandardsFlagToScaffolder()
@@ -57,7 +57,7 @@ public sealed class DocsInitCommandTests : IDisposable
             .Result;
         Assert.Equal(0, exitCode);
 
-        // 3. Verifies that all 10 rich standards were created
+        // 3. Verifies that all 11 rich standards were created
         foreach (string tech in KyberStandardsTemplates.All)
         {
             string standardPath = Path.Combine(_temp.Path, "docs", "standards", tech, "README.md");

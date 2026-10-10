@@ -4,7 +4,7 @@ title: KyberDash measurable rationale
 doc-type: reference
 status: current
 owner: dpalfery
-last-reviewed: 2026-08-29
+last-reviewed: 2026-10-03
 ---
 
 # KyberDash measurable rationale
@@ -30,9 +30,11 @@ OpenTelemetry specification distinguishes its meanings:
 
 Applying Copilot's convention to pi produced **negative fresh input on 293 of 307 measured
 spans** (the input figure counted as inclusive while the cache classes were added separately,
-so the decomposition no longer summed). Applying pi's convention to Copilot **double-counts
-input by up to 2×** (inclusive input already contains the cache classes; counting them again
-adds them a second time).
+so the decomposition no longer summed). Those counters cannot be inclusive — cache is not a
+subset of a smaller total — and now convert exclusively rather than being stored as
+negative fresh or clamped to zero (issue #193). Applying pi's convention to Copilot
+**double-counts input by up to 2×** (inclusive input already contains the cache classes;
+counting them again adds them a second time).
 
 The consequence is architectural: adapters must convert each harness's convention **on the way
 in**, and `TokenUsage` must store `freshInput + cacheRead + cacheCreation` disjointly so the
@@ -55,6 +57,10 @@ unattributed residual measured **2.8–4.4% on one model against 35–41% on ano
 difference is the tokenizer, not missing content, and the figure must not read as a true
 count. Regression coverage: `dash/kyber/canon/tokens.test.ts`.
 
+### R4.7 — Flat token validation and finite checks (Issue #227)
+
+When parsers read token counters from nested `tokens`/`usage` objects or flat fallbacks (e.g. KiloCode SQLite stores emitting `tokens_input`, `tokens_output`, etc.), unvalidated values can inject `NaN`, `Infinity`, or string types into token accounting. Nested and flat sources each pass through `finiteOrUndefined`, so a non-finite or string winner is rejected as absent and the next candidate (then 0) applies, rather than corrupting cost calculations. Nested `tokens` and `usage` still win when they are finite numbers.
+
 ## Cost attribution (Requirement 5)
 
 ### R5.3 — Rate-table scoping failure
@@ -68,8 +74,35 @@ understated, plausible total is accepted where a suspicious one would be questio
 The consequence is that a cost figure travels with its **basis** — a published table or the
 harness's own arithmetic (R5.1) — and a harness the table does not name is priced as
 `out_of_scope`, never from that table. Regression coverage:
-`dash/kyber/canon/cost.scoping.test.ts` (the regression test reproduces the $0.27 fabrication
+`dash/src/canon/cost.scoping.test.ts` (the regression test reproduces the $0.27 fabrication
 when the guard is removed).
+
+Issue #186 was the same hazard in latent form: the Copilot parser priced through LiteLLM and was
+labelled `harness`. Copilot is now priced only from its own credits table, and only the genuine
+reader's `cost_usd` keeps the `harness` basis.
+
+**Known follow-ups (issue #186, non-blocking).**
+
+- The `ratesPath` override branch of `getMeta().rates` is untested.
+- The `published` table's source and date are hardcoded in `bridge.ts` `getMeta` rather than
+  derived from `pricing-provenance.json`.
+- The legacy `cost_usd` fallback in the session row is untested.
+- The Run and Harness cost cells (`RunDetail.tsx:459`, `HarnessDetail.tsx:395`) still use the bare
+  `—` pattern.
+
+**PR #225 review items declined, with reasons.**
+
+- *Tier miss stays `no_rate`.* An input beyond every tier is priced at a rate the vendor does not
+  publish if it falls back to the base tier, an under-pricing risk (R5.4, R5.6). A table-shape test
+  requires every tiered Copilot entry to end in an `Infinity` tier.
+- *`partial` lists `cost_usd: null`.* This is the approved contract (U10): an incomplete total is
+  never shown as a figure. `cost.value` still carries it.
+- *The bridge default `{unknown, no_rate}` stays.* It is what the cost tile renders for an absent
+  block, so list and tile agree.
+- *An absent model stays `published`, not `unknown`.* `unknown` beside `published` turns makes
+  `sumCosts` refuse with `COST_BASIS_MISMATCH`.
+- *The Copilot relabel default is not inverted.* A parser that forgot `costHarnessReported` would
+  keep a LiteLLM figure at API list rates as `harness` and never be repriced (R5.3).
 
 ### R5.4, R5.5 — No published rate is not zero
 

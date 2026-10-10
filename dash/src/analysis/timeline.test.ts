@@ -290,4 +290,14 @@ describe('orphans and cycles group by attribute, not invented ancestry (design.m
     expect(find(mixed, 's-priced')?.cost.value).toBe(0.4)
     expect(find(mixed, 's-unpriced')?.cost.value).toBeUndefined()
   })
+
+  it('populates status on TimelineNode from record.status', () => {
+    const records = [
+      span('s-root', 'agent.chat', { status: 'ok' }),
+      span('s-child', 'tool.run', { parentSpanId: 's-root', status: 'error' }),
+    ]
+    const tree = buildTimeline(records)
+    expect(find(tree, 's-root')?.status).toBe('ok')
+    expect(find(tree, 's-child')?.status).toBe('error')
+  })
 })

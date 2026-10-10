@@ -26,9 +26,17 @@ set -eu
 
 OWNER="dpalfery"
 REPO="kyber-weave"
+# GitHub unless KYBER_WEAVE_RELEASE_ORIGIN names a loopback stand-in. The
+# three stay in lockstep: a pinned install fetches sums and archives from
+# RELEASE_BASE, and an unpinned one resolves the tag from the API pair. One
+# origin has to feed all three or the installer still reaches github.com.
 RELEASE_BASE="https://github.com/${OWNER}/${REPO}/releases/download"
 LATEST_API="https://api.github.com/repos/${OWNER}/${REPO}/releases/latest"
 RELEASES_API="https://api.github.com/repos/${OWNER}/${REPO}/releases"
+# Set by kyber_weave_apply_release_origin. An http loopback origin is the only
+# case that may fetch plain HTTP, and the only case that widens curl --proto.
+KYBER_WEAVE_ORIGIN_HTTP=""
+KYBER_WEAVE_CURL_PROTO="=https"
 
 # First release whose build-kyberdash job succeeded and published
 # kyberdash-<rid> assets. Every earlier tag carries no KyberDash archive at
@@ -126,11 +134,14 @@ fi
 
 # ----------------------------------------------------------- library helpers
 #
-# Pure helpers exposed for the test harness (tests/KyberWeave.Tests/ReleaseTests.cs).
-# Sourcing install.sh with KYBER_WEAVE_INSTALL_LIB=1 returns here after these
-# are defined, leaving the functions reachable from the surrounding shell
-# without running the installer. The same helpers are called by the main body,
-# so the installer and the tests share a single source of truth.
+# Helpers exposed for the test harness (tests/KyberWeave.Tests/ReleaseTests.cs).
+# Sourcing install.sh with KYBER_WEAVE_INSTALL_LIB=1 returns after these are
+# defined, leaving the functions reachable from the surrounding shell without
+# running the installer. fetch and fetch_stdout sit above that return on
+# purpose: the harness sources the script and calls them, and a definition
+# below the return is invisible, so the call fails as "fetch: not found"
+# before any scheme check. The same helpers are called by the main body, so
+# the installer and the tests share a single source of truth.
 
 # kyber_weave_resolve_rid <os-uname> <arch-uname> -> prints "<os>-<arch>" on
 # stdout; returns 0 for supported combinations, 2 for unsupported ones. The
@@ -371,6 +382,196 @@ kyber_weave_run_menubar() {
     "${1%/}/kyberdash" menubar --force
 }
 
+# kyber_weave_port_in_range <port>
+#   exit 0 — digits, no leading zero, 1..65535
+#   exit 1 — anything else
+# A leading zero is rejected so :09 is not a second spelling of port 9 and so
+# the value cannot be read as octal by a later arithmetic test.
+kyber_weave_port_in_range() {
+    kw_p="$1"
+    case "$kw_p" in
+        ''|*[!0-9]*|0*) return 1 ;;
+    esac
+    kw_len=${#kw_p}
+    if [ "$kw_len" -gt 5 ]; then
+        return 1
+    fi
+    if [ "$kw_len" -le 4 ]; then
+        return 0
+    fi
+    [ "$kw_p" -le 65535 ]
+}
+
+# kyber_weave_parse_loopback_url <url>
+#   exit 0 — http or https, no userinfo, host exactly 127.0.0.1, localhost,
+#            or [::1], optional port. Sets KW_URL_SCHEME, KW_URL_HOST, KW_URL_PORT.
+#   exit 1 — any other shape, including other 127.* addresses.
+# A path, query, or fragment is ignored. The origin names an authority; asset
+# URLs hang off that same authority, and a trailing slash must not change the
+# roots the installer builds. Userinfo is rejected before the host is read:
+# a prefix test on 127.0.0.1 would accept user:pass@127.0.0.1 while the host
+# that is contacted sits after '@'.
+kyber_weave_parse_loopback_url() {
+    KW_URL_SCHEME=""
+    KW_URL_HOST=""
+    KW_URL_PORT=""
+    # No tr/sed: the wget facts replace PATH with a directory that has neither,
+    # and this parser runs while the script is being sourced.
+    kw_url="$1"
+    case "$kw_url" in
+        *[[:space:]]*|*'@'*|*'\'*) return 1 ;;
+        [hH][tT][tT][pP][sS]://*)
+            KW_URL_SCHEME=https
+            kw_rest="${kw_url#????????}"
+            ;;
+        [hH][tT][tT][pP]://*)
+            KW_URL_SCHEME=http
+            kw_rest="${kw_url#???????}"
+            ;;
+        *) return 1 ;;
+    esac
+    [ -n "$kw_rest" ] || return 1
+    kw_authority="${kw_rest%%/*}"
+    kw_authority="${kw_authority%%\?*}"
+    kw_authority="${kw_authority%%\#*}"
+    [ -n "$kw_authority" ] || return 1
+    case "$kw_authority" in
+        *'%'*) return 1 ;;
+        \[::1\])
+            KW_URL_HOST="::1"
+            ;;
+        \[::1\]:*)
+            KW_URL_HOST="::1"
+            KW_URL_PORT="${kw_authority#\[::1\]:}"
+            [ -n "$KW_URL_PORT" ] || return 1
+            kyber_weave_port_in_range "$KW_URL_PORT" || return 1
+            ;;
+        \[*)
+            return 1
+            ;;
+        *:*)
+            KW_URL_HOST="${kw_authority%%:*}"
+            KW_URL_PORT="${kw_authority#*:}"
+            [ -n "$KW_URL_PORT" ] || return 1
+            kyber_weave_port_in_range "$KW_URL_PORT" || return 1
+            ;;
+        *)
+            KW_URL_HOST="$kw_authority"
+            ;;
+    esac
+    case "$KW_URL_HOST" in
+        127.0.0.1|::1) return 0 ;;
+        [lL][oO][cC][aA][lL][hH][oO][sS][tT])
+            KW_URL_HOST=localhost
+            return 0
+            ;;
+        *) return 1 ;;
+    esac
+}
+
+# Rewrites RELEASE_BASE, LATEST_API, and RELEASES_API from
+# KYBER_WEAVE_RELEASE_ORIGIN. Unset (or whitespace) keeps GitHub. Anything
+# that is not an http(s) loopback authority is a hard error: a non-loopback
+# value would aim the installer at an arbitrary host.
+kyber_weave_apply_release_origin() {
+    KYBER_WEAVE_ORIGIN_HTTP=""
+    KYBER_WEAVE_CURL_PROTO="=https"
+    kw_configured="${KYBER_WEAVE_RELEASE_ORIGIN:-}"
+    # Trim with parameter expansion. sed is not on PATH for the wget facts,
+    # and those facts still have to reject or accept the origin while sourcing.
+    while :; do
+        case "$kw_configured" in
+            [[:space:]]*) kw_configured="${kw_configured#?}" ;;
+            *) break ;;
+        esac
+    done
+    while :; do
+        case "$kw_configured" in
+            *[[:space:]]) kw_configured="${kw_configured%?}" ;;
+            *) break ;;
+        esac
+    done
+    [ -n "$kw_configured" ] || return 0
+    if ! kyber_weave_parse_loopback_url "$kw_configured"; then
+        die "KYBER_WEAVE_RELEASE_ORIGIN must be http or https, with no userinfo, and host 127.0.0.1, localhost, or [::1]. Got '${kw_configured}'."
+    fi
+    if [ "$KW_URL_HOST" = "::1" ]; then
+        kw_auth="[::1]"
+    else
+        kw_auth="$KW_URL_HOST"
+    fi
+    if [ -n "$KW_URL_PORT" ]; then
+        kw_auth="${kw_auth}:${KW_URL_PORT}"
+    fi
+    kw_base="${KW_URL_SCHEME}://${kw_auth}"
+    RELEASE_BASE="${kw_base}/${OWNER}/${REPO}/releases/download"
+    LATEST_API="${kw_base}/repos/${OWNER}/${REPO}/releases/latest"
+    RELEASES_API="${kw_base}/repos/${OWNER}/${REPO}/releases"
+    if [ "$KW_URL_SCHEME" = "http" ]; then
+        # wget cannot say "this request may be http, but a redirect may not".
+        # Allowing it for an http origin is how a 302 leaves loopback.
+        KYBER_WEAVE_ORIGIN_HTTP=1
+        KYBER_WEAVE_CURL_PROTO="=http,https"
+    fi
+}
+
+# Plain HTTP is tolerated only for a loopback authority while the override
+# itself is http. An https URL is always allowed. Everything else keeps the
+# historical refusal, including an http URL once the override is unset.
+kyber_weave_require_fetch_url() {
+    case "$1" in
+        https://*)
+            return 0
+            ;;
+        http://*)
+            if [ -n "$KYBER_WEAVE_ORIGIN_HTTP" ] && kyber_weave_parse_loopback_url "$1"; then
+                return 0
+            fi
+            die "refusing non-HTTPS URL: $1"
+            ;;
+        *)
+            die "refusing non-HTTPS URL: $1"
+            ;;
+    esac
+}
+
+# kyber_weave_run_downloader <url> <dest|->
+# dest "-" writes the body to stdout (fetch_stdout). --proto-redir stays
+# https-only for every origin: a redirect away from the local server is the
+# request that must not be installed.
+kyber_weave_run_downloader() {
+    kyber_weave_require_fetch_url "$1"
+    if [ "$DOWNLOADER" = curl ]; then
+        # Transport errors are silenced; callers report them with context.
+        if [ "$2" = "-" ]; then
+            curl -fsSL --proto "$KYBER_WEAVE_CURL_PROTO" --proto-redir '=https' "$1" 2>/dev/null
+        else
+            curl -fsSL --proto "$KYBER_WEAVE_CURL_PROTO" --proto-redir '=https' -o "$2" "$1" 2>/dev/null
+        fi
+        return
+    fi
+    if [ -n "$KYBER_WEAVE_ORIGIN_HTTP" ]; then
+        die "refusing wget for an http release origin; curl is required"
+    fi
+    if [ "$2" = "-" ]; then
+        wget -q --https-only -O - "$1" 2>/dev/null
+    else
+        wget -q --https-only -O "$2" "$1" 2>/dev/null
+    fi
+}
+
+# fetch <url> <dest-file>
+fetch() {
+    kyber_weave_run_downloader "$1" "$2"
+}
+
+# fetch_stdout <url>
+fetch_stdout() {
+    kyber_weave_run_downloader "$1" "-"
+}
+
+kyber_weave_apply_release_origin
+
 # Skip the installer body when sourced as a library by the test harness.
 # `return 0 2>/dev/null || exit 0`: in sourced mode `return 0` cleanly exits
 # the dotted file; in script mode `return` raises but is swallowed by stderr
@@ -416,34 +617,10 @@ esac
 KYBERDASH_RID="$(kyber_weave_kyberdash_rid "$RID")"
 
 # ------------------------------------------------------------------- download
-
-# fetch <url> <dest-file>
-fetch() {
-    case "$1" in
-        https://*) ;;
-        *) die "refusing non-HTTPS URL: $1" ;;
-    esac
-    if [ "$DOWNLOADER" = curl ]; then
-        # --proto '=https' / --proto-redir keeps redirects on HTTPS only.
-        # Transport errors are silenced; callers report them with context.
-        curl -fsSL --proto '=https' --proto-redir '=https' -o "$2" "$1" 2>/dev/null
-    else
-        wget -q --https-only -O "$2" "$1" 2>/dev/null
-    fi
-}
-
-# fetch_stdout <url>
-fetch_stdout() {
-    case "$1" in
-        https://*) ;;
-        *) die "refusing non-HTTPS URL: $1" ;;
-    esac
-    if [ "$DOWNLOADER" = curl ]; then
-        curl -fsSL --proto '=https' --proto-redir '=https' "$1" 2>/dev/null
-    else
-        wget -q --https-only -O - "$1" 2>/dev/null
-    fi
-}
+#
+# fetch and fetch_stdout are defined above the library return. Redefining
+# them here would put the https-only copies back in front of a full install
+# and drop the loopback override.
 
 # resolve_latest_version -> prints the version to install when none was pinned: the
 # highest pre-release under --prerelease, otherwise GitHub's latest stable release.
@@ -507,24 +684,17 @@ verify_and_extract() {
     log "downloading ${archive}…"
     fetch "$url" "$dest" || die "download failed: ${url}"
 
-    # Exact filename match against `sha256sum` output (`<hex>  <name>` or
-    # `<hex> *<name>`). A regex over the name would let `.` match anything and
-    # let one asset's line satisfy a different asset.
-    expected="$(awk -v want="$archive" '
-        {
-            name = $2
-            sub(/^\*/, "", name)
-            sub(/^.*\//, "", name)
-            if (name == want && length($1) == 64 && $1 ~ /^[0-9a-fA-F]+$/) {
-                print tolower($1)
-                exit
-            }
-        }' "$SUMS")"
-    [ -n "$expected" ] || die "SHA256SUMS.txt has no entry for ${archive}; refusing to install an unverified asset"
-
-    actual="$($SHA_CMD "$dest" | cut -d' ' -f1)"
-    [ "$actual" = "$expected" ] \
-        || die "SHA256 mismatch for ${archive}: expected ${expected}, got ${actual}"
+    # The helper is the only checksum parser. A second awk copy here is how a
+    # passing helper test used to hide a live install that compared differently.
+    if kyber_weave_verify_checksum "$SUMS" "$dest"; then
+        :
+    else
+        kw_status=$?
+        if [ "$kw_status" -eq 2 ]; then
+            die "SHA256SUMS.txt has no entry for ${archive}; refusing to install an unverified asset"
+        fi
+        die "refusing to install ${archive} after a checksum mismatch"
+    fi
 
     tar -xzf "$dest" -C "$TMPDIR_KW"
 }

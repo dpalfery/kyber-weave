@@ -4,13 +4,13 @@ import { resolveRootByParentage, traceGroup } from './base.js'
 import { rawSpan } from './testing.js'
 import { copilotAdapter, reconcileRequest } from './copilot.js'
 import { piAdapter } from './pi.js'
-import { TOKEN_NEGATIVE_FRESH } from '../types.js'
 
 // Tested the way the Python pipeline's adapter test established (design.md,
 // "Testing Strategy"): each table proves the exclusive convention applied
-// correctly AND the failure shape when the opposite (Copilot's inclusive)
-// convention is applied to the same keys. pi and Copilot share the attribute
-// key `gen_ai.usage.input_tokens` with opposite meanings — the tables exist
+// correctly AND that exclusive-shaped counters fed through the inclusive
+// adapter recover exclusively rather than going negative or clamping
+// (issue #193). pi and Copilot share the attribute key
+// `gen_ai.usage.input_tokens` with opposite meanings — the tables exist
 // so neither meaning can silently win (R4.2).
 
 /** pi-shaped counters: input EXCLUDES the cache classes (R4.2). */
@@ -110,25 +110,27 @@ describe('piAdapter.normalize — the exclusive convention (R4.2)', () => {
   })
 })
 
-describe('piAdapter — the inverted convention must fail loudly (R4.2)', () => {
-  it('rejects pi counters fed through the inclusive conversion with TOKEN_NEGATIVE_FRESH', () => {
-    // The measured failure, in the direction that goes negative: Copilot's
-    // conversion subtracts cache the pi input never contained (negative
-    // fresh on 293 of 307 measured spans). The wrong adapter is applied
-    // deliberately, and validation must be the alarm.
-    const record = copilotAdapter.normalize(rawSpan({ spanId: 's1', traceId: 't1', attributes: piCounts() }))
+describe('piAdapter — exclusive-shaped counters stay coherent (issue #193)', () => {
+  it('recovers pi counters fed through the inclusive adapter without going negative', () => {
+    // Cache cannot be a subset of a smaller input. The inclusive adapter
+    // falls back to exclusive conversion: the same decomposition the pi
+    // adapter produces for these counters. Clamping to 0 would drop the
+    // claimed 500; leaving it negative would reject a coherent record.
+    const throughCopilot = copilotAdapter.normalize(
+      rawSpan({ spanId: 's1', traceId: 't1', attributes: piCounts() }),
+    )
+    const throughPi = piAdapter.normalize(rawSpan({ spanId: 's1', attributes: piCounts() }))
 
-    expect(record.tokens.freshInput).toBe(500 - 40_000 - 400)
-    expect(record.tokens.freshInput).toBeLessThan(0)
-    expect(copilotAdapter.validate(record)).toMatchObject({
-      severity: 'error',
-      code: TOKEN_NEGATIVE_FRESH,
-      location: 's1',
+    expect(throughCopilot.tokens.freshInput).toBe(500)
+    expect(throughCopilot.tokens.reportedInput).toBe(500 + 40_000 + 400)
+    expect(copilotAdapter.validate(throughCopilot)).toBeUndefined()
+    expect(throughPi.tokens).toMatchObject({
+      freshInput: 500,
+      cacheRead: 40_000,
+      cacheCreation: 400,
+      reportedInput: 40_900,
     })
-    // The record the system would have stored under the right convention —
-    // the two adapters disagree loudly on the same attribute key, which is
-    // the point of the check.
-    expect(piAdapter.validate(piAdapter.normalize(rawSpan({ spanId: 's1', attributes: piCounts() })))).toBeUndefined()
+    expect(piAdapter.validate(throughPi)).toBeUndefined()
   })
 
   it('exposes the 2× double-count through the per-request indicator (R4.5)', () => {

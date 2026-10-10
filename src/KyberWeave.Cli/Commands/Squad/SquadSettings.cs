@@ -17,9 +17,9 @@ public sealed class SquadInstallSettings : CommandSettings
     [Description("The deployment root directory, overriding the positional path when supplied.")]
     public string? PathOption { get; set; }
 
-    /// <summary>Harness target(s) to deploy: codex, cursor, claude, copilot, opencode, kilo, antigravity, warp, factory, pi, zcode, all.</summary>
+    /// <summary>Harness target(s) to deploy: codex, cursor, claude, copilot, opencode, kilo, antigravity, warp, factory, pi, zcode, devin, all.</summary>
     [CommandOption("-t|--target <TARGETS>")]
-    [Description("Harness target(s) to deploy: codex, cursor, claude, copilot, opencode, kilo, antigravity, warp, factory, pi, zcode, all.")]
+    [Description("Harness target(s) to deploy: codex, cursor, claude, copilot, opencode, kilo, antigravity, warp, factory, pi, zcode, devin, all.")]
     [SuppressMessage(
         "Performance", "CA1819:Properties should not return arrays",
         Justification = "Spectre.Console.Cli binds repeated options to arrays.")]
@@ -79,7 +79,7 @@ public sealed class SquadUpdateSettings : CommandSettings
 
     /// <summary>The complete desired harness target set for update.</summary>
     [CommandOption("-t|--target <TARGETS>")]
-    [Description("The complete desired update target set: codex, cursor, claude, copilot, opencode, kilo, antigravity, warp, factory, pi, zcode, all.")]
+    [Description("The complete desired update target set: codex, cursor, claude, copilot, opencode, kilo, antigravity, warp, factory, pi, zcode, devin, all.")]
     [SuppressMessage(
         "Performance", "CA1819:Properties should not return arrays",
         Justification = "Spectre.Console.Cli binds repeated options to arrays.")]

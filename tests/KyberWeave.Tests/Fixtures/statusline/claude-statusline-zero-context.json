@@ -1,0 +1,21 @@
+{
+  "hook_event_name": "Status",
+  "session_id": "synthetic-session-claude-0001",
+  "transcript_path": "/synthetic/transcripts/claude-0001.jsonl",
+  "cwd": "/synthetic/kyber-claude-workspace",
+  "model": {
+    "id": "kyber-synthetic-claude-model-id",
+    "display_name": "Kyber Synthetic Claude Model"
+  },
+  "workspace": {
+    "current_dir": "/synthetic/kyber-claude-workspace",
+    "project_dir": "/synthetic/kyber-claude-workspace"
+  },
+  "output_style": {
+    "name": "kyber-synthetic-style"
+  },
+  "context_window": {
+    "used_percentage": 0,
+    "context_window_size": 200000
+  }
+}

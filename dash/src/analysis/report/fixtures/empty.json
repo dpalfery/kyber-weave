@@ -10,13 +10,16 @@
     "refresh": {
       "lastSuccessAt": null,
       "lastFailure": null,
-      "inProgress": null
+      "inProgress": null,
+      "historyWeeks": null,
+      "coveredFrom": null,
+      "coveredThrough": null
     },
     "harnesses": [],
     "quarantineCount": 0,
     "problemCount": 0,
     "hints": [
-      "No session in the window. Run `kyberdash dash refresh` to read local harness history.",
+      "No session in the window. Run `kyberdash dash refresh --history-weeks <n>` to widen the coverage window.",
       "No successful refresh recorded. Run `kyberdash dash refresh`."
     ]
   },

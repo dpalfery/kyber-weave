@@ -14,55 +14,40 @@ Before asserting a best practice, version-specific behavior, or syntax, verify a
 ## Hard Rules: Security
 
 - **Never** build T-SQL by concatenating unvalidated input. Use parameterized commands and `sp_executesql` with typed parameters.
-- **Never** use `xp_cmdshell`. Use SQLCLR or an external process instead.
-- Apply **least privilege**: grant minimum permissions; map Entra groups → SQL Server roles → minimal object permissions.
-- Prefer **Microsoft Entra ID / Kerberos authentication** over SQL authentication.
+- Privilege boundaries, `xp_cmdshell` avoidance, and authentication method follow
+  **<sql-coding-standard>** § Least privilege.
 - Never hardcode credentials, connection strings, or secrets — use managed identities and encrypted configuration.
 
 ---
 
 ## T-SQL Authoring Rules
 
-- **Schema-qualify every object reference** (`dbo.Customer`, `Sales.uspGetOrder`).
-- Put **`SET NOCOUNT ON;`** as the first statement in stored-procedure bodies.
-- **Never `SELECT *`** in stored procedures, views, or table-valued functions. List columns explicitly.
-- **Do not prefix user stored procedures with `sp_`** — use `usp_` or no prefix.
-- Use **`SCOPE_IDENTITY()`**, not `@@IDENTITY`.
-- Make scripts **idempotent**: use `CREATE OR ALTER` for modules and `DROP ... IF EXISTS` patterns.
+- Object naming, module idempotency, and identity-retrieval conventions follow
+  **<sql-coding-standard>** § T-SQL authoring.
 - Keep transactions **explicit and short** to minimize lock duration.
-- Write **sargable predicates**: don't wrap functions around columns in `WHERE` / `JOIN` — defeats indexes.
+- Column selection and sargable-predicate rules follow **<sql-coding-standard>** § Queries.
 
 ---
 
 ## Schema & Data Type Decisions
 
-- Normalize to **3NF** by default. Denormalize only as a documented performance decision.
-- Choose the **narrowest correct data type**: `int`/`bigint` for keys, `decimal`/`numeric` for money, `datetime2` over `datetime`, `bit` for booleans.
-- Use `nvarchar` for Unicode text. Avoid deprecated `text`, `ntext`, `image`.
-- **Every table must have a clustered index — avoid heaps.**
-- Ideal clustered key: **narrow, unique, ever-increasing, immutable, non-nullable, fixed-width** — typically `int`/`bigint` IDENTITY or SEQUENCE-backed.
-- Avoid `uniqueidentifier` as clustered key (16 bytes, not ever-increasing) unless sequentially generated.
-- Enforce integrity with constraints (`PRIMARY KEY`, `FOREIGN KEY`, `UNIQUE`, `CHECK`, `NOT NULL`, `DEFAULT`) rather than application logic.
+Normalization, data-type width, clustered-key shape, and constraint-based integrity all
+follow **<sql-coding-standard>** § Schema and types.
 
 ---
 
 ## Indexing Rules
 
-- Order multi-column index keys: equality/join columns first, then remaining columns from most distinct to least.
-- Use **`INCLUDE`** clause to cover queries with non-key columns. Don't include `nvarchar(max)` / `xml`.
-- Before adding an index, check for overlapping indexes. Extend one over creating near-duplicates.
-- For large tables, build/rebuild with **`ONLINE`** option and consider row/page data compression.
+- Index key ordering, `INCLUDE` usage, overlap checks, and large-table rebuilds follow
+  **<sql-coding-standard>** § Indexes.
 - Avoid over-indexing — every index has write and storage cost.
 
 ---
 
 ## Source Control & Deployment
 
-- Treat **schema as code**. Single source of truth: **SDK-style SQL database project** (`Microsoft.Build.Sql`), not live database state.
-- Build with `dotnet build` → produces **`.dacpac`** artifact. Run SQL code analysis during build.
-- Deploy with **SqlPackage `Publish`** (or `azure/sql-action`). Deployment is diff-based and idempotent.
-- Before production deployment, generate a change preview with SqlPackage **`Script`** or **`DeployReport`** and require human approval.
-- Pass connection strings via secrets; prefer Entra/managed identity.
+- Schema-as-code source of truth, build/dacpac analysis, deployment, and preview-before-
+  production conventions follow **<sql-coding-standard>** § Delivery.
 - Never run un-reviewed DDL by hand against production.
 
 ---

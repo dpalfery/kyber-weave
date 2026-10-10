@@ -158,7 +158,9 @@ export function recordPrediction(
 
   const findingId = isFinding ? input.id : input.findingId
   const runId = (isFinding ? input.runId : input.runId) ?? options?.runId ?? 'unknown-run'
-  const predictedWasteTokens = isFinding ? input.estimatedWasteTokens : input.predictedWasteTokens
+  // An unmeasured (coverage-gap) finding carries no estimate: the logged
+  // prediction records zero predicted waste rather than inventing a size.
+  const predictedWasteTokens = isFinding ? (input.estimatedWasteTokens ?? 0) : input.predictedWasteTokens
   const rawConfidence = isFinding ? input.confidence : input.confidence
   const confidence = confidenceToNumeric(rawConfidence)
   const confidenceTier = isFinding

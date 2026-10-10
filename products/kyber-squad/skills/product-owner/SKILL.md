@@ -8,7 +8,7 @@ license: MIT
 
 Resolve **<specification-index>** and **<docs-root>** through the repository root `AGENTS.md` Config Reg. The active specification directory is the directory containing **<specification-index>**; its archive location and inventory rules are declared by that index. Never assume a fixed documentation root.
 
-Read the specification index before opening a feature artifact. Then identify the assigned phase and read only its reference:
+Read the specification index before opening a feature artifact. Load [spec authoring](./references/spec-authoring.md) before creating or resuming a phase file. Then identify the assigned phase and read only its reference:
 
 | Phase | Use | Reference |
 |---|---|---|

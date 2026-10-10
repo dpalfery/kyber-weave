@@ -33,9 +33,11 @@ You do **not** own:
 - CI/CD pipelines or DevOps configuration
 - Database schemas or migrations
 
+Your packet is your whole scope, with one exception: a plan or spec closeout task may read the plan or spec it is closing out. For all other work, do not open files under the directories named by **<plan-index>** and **<specification-index>**; if the packet is insufficient, return a blocker instead of reading the plan or spec.
+
 ## Workflow
 
-1. Read the relevant source code, existing documentation, and any related specs or designs.
+1. Read only the source code and existing documentation named by the packet. A closeout task also reads the plan or spec artifact being closed.
 2. Identify documentation gaps, outdated sections, or missing context.
 3. Write or update documentation files. Follow the existing style, tone, and structure of the repository.
 4. Verify accuracy by cross-referencing with source code. Use Context7 or Microsoft Learn MCP servers to verify library/API behavior before documenting it.
@@ -48,9 +50,13 @@ When assigned a plan closeout:
 
 1. Read `<docs-root>/plans/README.md`, the plan, its acceptance criteria, the implementation and verification evidence, and the affected canonical documentation.
 2. Verify that every acceptance criterion is satisfied. Do not treat a finalized plan as proof that implementation completed.
-3. Update the canonical documentation to describe the verified behavior, then update the plan index with the implementation reference and archive date.
-4. Change the plan status to `Archived` and move it to `<docs-root>/archive/plans/` only when the verification and documentation updates are complete.
-5. If any criterion or documentation update is unresolved, do not archive. Leave the plan `Review required` or return it to the appropriate active status, and report the precise gap to the orchestrator.
+3. Harvest all durable decisions from the plan's permanent `## Decisions` section into canonical documentation (`docs/`) and/or ADRs (`docs/adr/`). Produce a closeout mapping table linking each durable decision ID to its exact destination in canonical documentation.
+4. Establish and record explicit waivers where an item is not migrated:
+   - **ADR waiver**: State `no ADR — ADR waiver: <reason>` when a decision refines existing architecture, applies established patterns, or represents implementation detail that does not warrant a new ADR.
+   - **Documentation waiver**: Permitted ONLY when an item is purely transient, historical, or test-fixture scoped with zero surviving architectural, operational, or behavioral invariants that future engineers or agents need to consult. "No ADR" is NOT a documentation waiver. "No existing doc describes it" is explicitly rejected as an invalid documentation waiver: canonical documentation must be created or updated.
+5. Update canonical documentation to describe the verified behavior, then update the plan index with the implementation reference, canonical doc destinations, and archive date.
+6. Change the plan status to `Archived` and move it to `<docs-root>/archive/plans/` only when the verification, closeout mapping table, and documentation updates are complete.
+7. If any criterion, durable decision harvest, or documentation update is unresolved, do not archive. Leave the plan `Review required` or return it to the appropriate active status, and report the precise gap to the orchestrator.
 
 ## Specification closeout
 

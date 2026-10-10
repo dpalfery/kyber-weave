@@ -4,7 +4,7 @@ title: Kyber-Weave documentation
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-09-14
+last-reviewed: 2026-10-03
 ---
 
 # Kyber-Weave documentation
@@ -36,7 +36,7 @@ correct in a repository that arranges its documentation differently.
 
 - [Context Hygiene](context-hygiene/README.md) — Why and how to govern agent prompts and skills across coding harnesses
 - [DocGraph](docgraph/README.md) — Why and how to turn markdown docs into a queryable in-memory graph joined to live code
-- [Kyber-Squad](kyber-squad/README.md) — Why and how to govern a ten-target harness catalog; ten targets render today with rollback
+- [Kyber-Squad](kyber-squad/README.md) — Why and how to govern a twelve-target harness catalog; twelve targets render today with rollback
 - [KyberDash](dash/README.md) — Why and how to observe and tune agent context with local .NET Aspire OTEL telemetry
 
 ---
@@ -118,16 +118,16 @@ Start at the [DocGraph Overview](docgraph/README.md) for value proposition and a
 
 Unified multi-harness deployment and lifecycle control plane for 21 canonical agents and
 24 skills, each owner projecting a validated resource closure beside its rendered principal.
-The product declares eleven harness targets; all eleven are implemented and registered today
-(`copilot`, `cursor`, `claude`, `codex`, `antigravity`, `opencode`, `kilo`, `pi`, `factory`, `warp`, and `zcode`).
+The product declares twelve harness targets; all twelve are implemented and registered today
+(`copilot`, `cursor`, `claude`, `codex`, `antigravity`, `opencode`, `kilo`, `pi`, `factory`, `warp`, `zcode`, and `devin`).
 Start at the [Kyber-Squad Overview](kyber-squad/README.md) for value proposition and adoption rationale.
 
 | Page | Covers |
 |---|---|
 | [Overview & Why Kyber-Squad](kyber-squad/README.md) | Value proposition, solving multi-harness fragmentation, capability lattices |
 | [Adoption & usage guide](kyber-squad/onboarding.md) | `squad install`, `update`, `uninstall`, `status`, `doctor`, `pack`, scopes, target resolution |
-| [Architecture](kyber-squad/architecture.md) | AgentIR, permission lattice, role-skill lowering, state store, mutex lease, transaction engine |
-| [Requirements & degradation](kyber-squad/requirements.md) | KS-001–KS-008 specifications, structured degradation taxonomy, capability matrix |
+| [Architecture](kyber-squad/architecture.md) | AgentIR, permission lattice, role-skill lowering, state store, mutex lease, transaction engine, conductor execution circuit-breaker |
+| [Requirements & degradation](kyber-squad/requirements.md) | KS-001–KS-008 specifications, structured degradation taxonomy, capability matrix, conductor circuit-breaker harvest |
 
 ## Feature 4 — Review council
 
@@ -143,18 +143,31 @@ Start at the [Review council overview](code-review/README.md) for the idea and t
 ## Feature 5 — KyberDash
 
 Local telemetry observability and context tuning for agentic workflows: an OTLP receiver and a
-single canonical store feeding four execution surfaces, none of which sends anything off the
+single canonical store feeding three local surfaces, none of which sends anything off the
 machine. Start at the [KyberDash Overview](dash/README.md) for the value proposition.
 
 | Page | Covers |
 |---|---|
-| [Overview & Why KyberDash](dash/README.md) | Value proposition, the four surfaces, capabilities |
+| [Overview & Why KyberDash](dash/README.md) | Value proposition, the three surfaces, capabilities |
 | [Architecture](dash/architecture.md) | Ingest pipeline, canonical store, analyses and surfaces |
 | [Runbook](dash/runbook.md) | Installing the released binary; building, running, and testing each surface locally |
 | [Telemetry inventory](dash/telemetry-inventory.md) | Which signals and content each harness actually makes available |
 
 The `kyberdash` binary installs alongside the CLI — see
 [the version floor](install.md#kyberdash-and-the-version-floor) for which releases publish it.
+
+## Feature 6 — Kyber Utilities
+
+Kyber-owned deployment of per-harness utility artifacts, starting with status lines: files
+staged at per-user locations, recorded in a Kyber Utilities receipt, and activated by hand. It
+never creates, edits, merges, or reads a shared harness settings file. Start at the
+[Kyber Utilities Overview](kyber-utilities/README.md) for the value proposition and the
+ownership boundary.
+
+| Page | Covers |
+|---|---|
+| [Overview & Why Kyber Utilities](kyber-utilities/README.md) | Value proposition, the owned-files-not-settings boundary, the four commands |
+| [Adoption & activation guide](kyber-utilities/onboarding.md) | `utilities statusline deploy\|status\|doctor\|remove`, per-harness activation snippets, the import and privacy-review process |
 
 ---
 

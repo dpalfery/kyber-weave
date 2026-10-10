@@ -74,15 +74,29 @@ Do not start with grep, find, or arbitrary file browsing when a semantic index c
 question. MCP tool names may be namespace-qualified by the active harness.
 
 <!-- CODEGRAPH_START -->
-**Code:** When `.codegraph/` exists, use `codegraph_explore` before text search to understand
-or locate code:
+**Code:** When `.codegraph/` exists, use `codegraph_explore` before text search to
+understand or locate code:
 
-- The MCP tool returns relevant symbol definitions and call paths. Name a file or symbol when
-  current line-numbered source is required.
+- The MCP tool returns relevant symbol definitions and call paths. Name a file or symbol
+  when current line-numbered source is required.
 - The shell fallback is `codegraph explore "<symbol names or question>"`.
-
-If there is no `.codegraph/` directory, skip CodeGraph entirely — indexing is the user's decision.
 <!-- CODEGRAPH_END -->
+
+**Missing index.** If there is no `.codegraph/` directory, this repository authorizes
+`codegraph init .` from the repository root without further approval. This approval
+covers only repository-local initialization; installing CodeGraph or other system-wide
+tools remains the user's decision.
+
+- Before initialization, record `git status --short` and both staged and unstaged
+  tracked-file diffs. Initialization can rewrite the marked CodeGraph block above.
+  Afterwards, inspect `git status --short` and undo only tracked-file edits introduced
+  by initialization, preserving all pre-existing edits. The index itself is gitignored.
+- If initialization is blocked (no `codegraph` on `PATH`, no write access, a read-only
+  role) or leaves the index unusable, report the blocker under GAPS and fall back to
+  text search, stating in the result that CodeGraph was unavailable. The conductor
+  relays the blocker and stops that path.
+- If `docs drift` cannot run because no usable index is available, report it as skipped
+  rather than passed.
 
 **Documentation:** Before grepping or reading under `docs/`, use the Kyber-Weave MCP
 `docs_explore` tool. Before renaming, moving, or changing a code symbol's contract, use
@@ -90,6 +104,12 @@ If there is no `.codegraph/` directory, skip CodeGraph entirely — indexing is 
 `docs_analysis_candidates` for taxonomy and review queries. These MCP operations have no CLI
 equivalent; if the server is unavailable, start at the [documentation index](docs/README.md)
 and state that the fallback was necessary. Never retrieve `docs/archive/` as current guidance.
+
+Every docs tool response leads with a `provenance:` line naming the absolute `root=` it
+answered from. Before trusting an answer, confirm that root is this checkout: call
+`docs_status` (it takes no arguments) or read `root=` from the response, and compare it to
+`git rev-parse --show-toplevel`. A mismatch means a same-named server is bound to a different
+repository — do not treat those results as this checkout, and stop using that server.
 
 ## Non-negotiables
 
@@ -119,6 +139,8 @@ merits, under the same gates as the rest of the repository. AgentSeal's MIT noti
 `dash/LICENSE` and `dash/THIRD_PARTY_NOTICES.md`; outside those two files, no upstream
 reference belongs anywhere in the tree.
 
+**KyberDash surfaces are display layers.** **THE TRAY AND THE WEB DASHBOARD ARE DISPLAY LAYERS. NEITHER CONTAINS ISOLATED FEATURE LOGIC, SCHEDULERS OR JOBS. ALL LOGIC AND JOBS (REFRESH SCHEDULING, CLEAN, IMPORT, PAUSE) LIVE IN THE SHARED KYBERDASH APPLICATION (THE CLI ENGINE AND THE `kyberdash web` SERVER BUILT FROM IT) THAT BOTH SURFACES SHARE. BOTH SURFACES USE ONE DATASTORE (canon.db, resolved by dash/src/canon/paths.ts resolveCanonDbPath) AND ONE API LAYER (/api/kyber/*). NO AGENT OR DESIGN MAY VIOLATE THIS.** See [`docs/rules/kyberdash-display-layer.md`](docs/rules/kyberdash-display-layer.md), enforced by `dash/src/architecture/display-layer.test.ts`.
+
 **New dependencies need justification.** Core takes only Markdig and YamlDotNet. The
 CodeGraph index is read through the `sqlite3` CLI rather than `Microsoft.Data.Sqlite`
 because that package's native dependency carries an unresolved advisory — a deliberate
@@ -138,7 +160,7 @@ when the user accepts or explicitly asks to retain it. See the todo index for me
 | The engine — parsing, validation, search, export | [`src/KyberWeave.Core/AGENTS.md`](src/KyberWeave.Core/AGENTS.md) |
 | CLI commands and output | [`src/KyberWeave.Cli/AGENTS.md`](src/KyberWeave.Cli/AGENTS.md) |
 | The MCP server | [`src/KyberWeave.Mcp/AGENTS.md`](src/KyberWeave.Mcp/AGENTS.md) |
-| KyberDash — telemetry ingest, the canonical store, any of the four surfaces | [`docs/dash/architecture.md`](docs/dash/architecture.md) for the boundaries, then [`docs/dash/runbook.md`](docs/dash/runbook.md) to run it |
+| KyberDash — telemetry ingest, the canonical store, any of the three surfaces | [`docs/dash/architecture.md`](docs/dash/architecture.md) for the boundaries, then [`docs/dash/runbook.md`](docs/dash/runbook.md) to run it. Editing `dash/tray` or `dash/web` — a display layer — also read [`docs/rules/kyberdash-display-layer.md`](docs/rules/kyberdash-display-layer.md) |
 | Tests | The path declared as **<test-coding-standard>** below, then [`tests/KyberWeave.Tests/AGENTS.md`](tests/KyberWeave.Tests/AGENTS.md) for fixtures |
 | Authoring documentation | [`docs/documentation-ontology.md`](docs/documentation-ontology.md), and the `kyber-weave-docs` skill in [`.apm/skills/`](.apm/skills/kyber-weave-docs/SKILL.md) |
 

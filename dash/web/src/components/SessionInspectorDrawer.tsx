@@ -1,6 +1,7 @@
 import * as React from 'react'
 import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { formatDuration } from '../lib/labels.js'
 import { cn, usd, fmtTokens } from '../lib/utils.js'
 import { fetchKyberSessionContent, fetchSpanAttributes } from '../lib/kyberApi.js'
 import type { KyberMessageLike, KyberTurnContentShadow } from '../lib/kyberApi.js'
@@ -144,15 +145,6 @@ function tryParseJson(value: unknown): unknown {
     }
   }
   return value
-}
-
-function formatDuration(ms?: number | null): string {
-  if (ms == null || !isFinite(ms)) return '—'
-  if (ms < 1000) return `${Math.round(ms)}ms`
-  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`
-  const minutes = Math.floor(ms / 60000)
-  const seconds = Math.round((ms % 60000) / 1000)
-  return `${minutes}m ${seconds}s`
 }
 
 function formatCredits(c?: number | null): string {

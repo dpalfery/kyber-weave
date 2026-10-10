@@ -50,7 +50,9 @@ public sealed class CoverageCollectorTests : IDisposable
     public void ReadAllListsEveryReportTheRunWroteWithoutDisplacingTheFloorsReport()
     {
         DateTime started = DateTime.UtcNow;
-        string dotnet = WriteReport(Path.Combine("artifacts", "coverage", "run", "coverage.cobertura.xml"), "0.8");
+        string dotnet = WriteReport(
+            Path.Combine("artifacts", "coverage", "run", "coverage.cobertura.290926173725831.xml"),
+            "0.8");
         string vitest = WriteReport(Path.Combine("artifacts", "coverage-dash", "cobertura-coverage.xml"), "0.6");
         string stale = WriteReport(Path.Combine("TestResults", "old", "coverage.cobertura.xml"), "0.1");
         File.SetLastWriteTimeUtc(stale, started.AddHours(-1));
@@ -64,7 +66,7 @@ public sealed class CoverageCollectorTests : IDisposable
         string[] expected =
         [
             "artifacts/coverage-dash/cobertura-coverage.xml",
-            "artifacts/coverage/run/coverage.cobertura.xml",
+            "artifacts/coverage/run/coverage.cobertura.290926173725831.xml",
         ];
         Assert.Equal(expected, reports.Select(report => report.Path));
         Assert.Equal(60, reports[0].Coverage.FileLinePercent, precision: 6);

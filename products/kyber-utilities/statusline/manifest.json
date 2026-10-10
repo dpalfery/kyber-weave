@@ -1,0 +1,27 @@
+{
+  "utility": "statusline",
+  "slice": "docs/archive/plans/2026-09-28-kyber-utilities-status-line-slice.md",
+  "artifacts": [
+    {
+      "file": "claude/statusline.sh",
+      "harness": "claude",
+      "runtime": "bash (jq, git, awk)",
+      "origin": "self-written by the repository owner",
+      "notes": "Near-literal import; ctx% prefers context_window.used_percentage with the original usage-ratio fallback."
+    },
+    {
+      "file": "antigravity/statusline.py",
+      "harness": "agy",
+      "runtime": "python3 (stdlib only), git",
+      "origin": "adapted by the repository owner from collectors/gemini/statusline.py in the agent-session-analysis-dashboard project (same author)",
+      "notes": "OTLP POST replaced by the kyberdash kyber antigravity-statusline stdin hand-off (D10); debug-file write, hardcoded home path, and identity-prompt fallback removed (C6)."
+    },
+    {
+      "file": "pi/statusbar.ts",
+      "harness": "pi",
+      "runtime": "pi extension API (node >= 22.18 type-stripping)",
+      "origin": "adapted by the repository owner from collectors/pi/src/statusbar.ts in the agent-session-analysis-dashboard project (same author)",
+      "notes": "Standalone extension extracted from the collector package; zero imports, no OTLP, adapted to the T4-pinned ctx shape."
+    }
+  ]
+}

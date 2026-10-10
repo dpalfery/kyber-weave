@@ -1,6 +1,14 @@
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { fetchRun, fetchTurnContent } from '../lib/kyberApi.js'
+import {
+  fetchKyberSessionTurns,
+  fetchRun,
+  fetchTurnContent,
+  findTurnByTransport,
+  isNotFoundError,
+  type KyberSessionTurnRow,
+  type TurnTokenFigures,
+} from '../lib/kyberApi.js'
 import { cn } from '../lib/utils.js'
 import { Card } from '../components/ui/card.js'
 import { Skeleton } from '../components/ui/skeleton.js'
@@ -15,6 +23,42 @@ export interface TurnDetailProps {
   onSelectHarness?: (harnessId: string) => void
   onSelectRun?: (runId: string) => void
   onSelectExecution?: (executionId: string) => void
+}
+
+/**
+ * The session turn row whose measured counters describe a 0-based `turnIndex`
+ * (issue #184): the shared strict lookup — explicit identity first, position
+ * only for rows carrying neither. Anything else is no row, never a neighbor.
+ */
+export function findSessionTurnRow(
+  turns: readonly KyberSessionTurnRow[] | undefined,
+  turnIndex: number,
+): KyberSessionTurnRow | undefined {
+  return findTurnByTransport(turns, turnIndex)
+}
+
+/**
+ * Which failure the turn page reports (issue #184 review): the "no such turn"
+ * state is for 404s only — network failures and 5xx responses render the
+ * generic load error instead.
+ */
+export function turnContentErrorKind(error: unknown): 'not-found' | 'load-failed' {
+  return isNotFoundError(error) ? 'not-found' : 'load-failed'
+}
+
+/** Coerce a served turn-row counter to a measured figure or null (issue #184, Q3). */
+export function asMeasuredFigure(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+export function turnRowFigures(row: KyberSessionTurnRow | undefined): TurnTokenFigures | undefined {
+  if (!row) return undefined
+  return {
+    input: asMeasuredFigure(row.input),
+    output: asMeasuredFigure(row.output),
+    fresh: asMeasuredFigure(row.fresh),
+    cacheRead: asMeasuredFigure(row.cache_read),
+  }
 }
 
 /**
@@ -59,11 +103,19 @@ export function TurnDetail({
     queryFn: () => fetchRun(runId),
   })
   const sessionId = resolveTurnSessionId(run, executionId)
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error } = useQuery({
     queryKey: ['kyber-turn-content', sessionId, turnIndex],
     queryFn: () => fetchTurnContent(sessionId!, turnIndex),
     enabled: !!sessionId,
+    retry: false,
   })
+  // Measured per-turn counters for the inspector header (issue #184, Q3).
+  const { data: sessionTurns } = useQuery({
+    queryKey: ['kyber-session-turns', sessionId],
+    queryFn: () => fetchKyberSessionTurns(sessionId!),
+    enabled: !!sessionId,
+  })
+  const turnTokens = turnRowFigures(findSessionTurnRow(sessionTurns, turnIndex))
 
   const recordedBlocks = useMemo(
     () => data?.blocks.filter((block) =>
@@ -85,11 +137,20 @@ export function TurnDetail({
       />
 
       <Card className="p-chrome">
-        <h2 className="font-display text-density-display font-bold tracking-density text-foreground">Turn {turnIndex}</h2>
+        {/* Issue #184: transport is 0-based `turnIndex`; humans see 1-based. */}
+        <h2 className="font-display text-density-display font-bold tracking-density text-foreground">Turn {turnIndex + 1}</h2>
         <p className="mt-density-hair text-density-xs text-muted-foreground leading-density">Select a context band to inspect its recorded content.</p>
 
         {isLoading ? (
           <Skeleton className="mt-density-stack h-20 w-full" />
+        ) : isError && turnContentErrorKind(error) === 'not-found' ? (
+          <p className="mt-density-stack text-density-xs text-tertiary-foreground" data-testid="turn-not-found">
+            No such turn in this session (session {sessionId ?? 'unknown'} · turn {turnIndex}).
+          </p>
+        ) : isError ? (
+          <p className="mt-density-stack text-density-xs text-tertiary-foreground" data-testid="turn-load-error">
+            Could not load this turn&apos;s content — the request failed. Try again once the dashboard is reachable.
+          </p>
         ) : recordedBlocks.length ? (
           <div className="mt-density-stack flex flex-wrap gap-density-cluster">
             {recordedBlocks.map((block) => (
@@ -119,6 +180,7 @@ export function TurnDetail({
           sessionId={sessionId}
           turnIndex={turnIndex}
           data={data}
+          turnTokens={turnTokens}
           initialBlockKey={selectedBlockKey}
         />
       </Card>

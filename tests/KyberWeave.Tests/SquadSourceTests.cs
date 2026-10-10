@@ -35,6 +35,7 @@ public sealed class SquadSourceTests
             first.Agents,
             agent => Assert.Equal(["vscode", "read"], agent.CopilotTools));
         Assert.All(first.Agents, agent => Assert.Null(agent.CopilotCapabilityProfile));
+        Assert.All(first.Agents, agent => Assert.Null(agent.DevinCapabilityProfile));
         Assert.Equal(["test-dev"], first.Skills.Select(skill => skill.Name));
         Assert.Equal(
             first.Agents.Select(agent => (agent.Name, agent.SourcePath, agent.BodyDigest)),
@@ -74,45 +75,55 @@ public sealed class SquadSourceTests
     }
 
     /// <summary>
-    /// Asserts every changed cell in models.yml per plan section 6b (the profile × harness table,
-    /// final state). Data-driven over (profileName, harbessName, expectedValue) tuples covering:
-    /// - All six harness columns (claude, codex, copilot, cursor, opencode, pi)
-    /// - Every profile; the `mai-code-flash` key (a model name, not a profile) must be absent from models.yml
-    /// - Both changed values and unchanged values, to catch regressions
+    /// Pins the operator-selected model assignments across planning, coding, review, and
+    /// orchestration profiles, including unchanged harness values that must remain stable.
     /// </summary>
     [Theory]
+    [InlineData("architect", "claude", "opus")]
+    [InlineData("architect", "codex", "gpt-6.1-sol")]
+    [InlineData("architect", "copilot", "GPT-6.1 Sol (copilot)")]
+    [InlineData("architect", "cursor", "claude-sonnet-5-5[effort=high]")]
+    [InlineData("architect", "kilo", "kilo/deepseek/deepseek-v4-pro-0813")]
+    [InlineData("architect", "opencode", "zai-coding-plan/glm-5.3")]
+    [InlineData("architect", "pi", "zai/glm-5.3[thinking=high]")]
+    [InlineData("architect", "devin", "claude-opus-5-5-high")]
     [InlineData("deep-planning", "claude", "opus")]
-    [InlineData("deep-planning", "codex", "gpt-5.6-sol")]
-    [InlineData("deep-planning", "copilot", "GPT-5.6 Sol (copilot)")]
-    [InlineData("deep-planning", "cursor", "gpt-5.6-sol[context=272k,reasoning=high,fast=false]")]
-    [InlineData("deep-planning", "kilo", "glm5.3")]
+    [InlineData("deep-planning", "codex", "gpt-6.1-sol")]
+    [InlineData("deep-planning", "copilot", "GPT-6.1 Sol (copilot)")]
+    [InlineData("deep-planning", "cursor", "claude-sonnet-5-5[effort=high]")]
+    [InlineData("deep-planning", "kilo", "kilo/deepseek/deepseek-v4-pro-0813")]
     [InlineData("deep-planning", "opencode", "zai-coding-plan/glm-5.3")]
     [InlineData("deep-planning", "pi", "zai/glm-5.3[thinking=high]")]
-    [InlineData("fast", "claude", "haiku")]
-    [InlineData("fast", "codex", "gpt-5.6-luna")]
+    [InlineData("deep-planning", "devin", "claude-opus-5-5-high")]
+    [InlineData("fast", "claude", "claude-haiku-5-5")]
+    [InlineData("fast", "codex", "gpt-6-luna")]
     [InlineData("fast", "copilot", "MAI-Code-1.1-Flash (copilot)")]
     [InlineData("fast", "cursor", "composer-2.5[]")]
     [InlineData("fast", "kilo", "spark1.3 contributor")]
     [InlineData("fast", "opencode", "opencode/muse-spark-1.3-contributor-free")]
     [InlineData("fast", "pi", "opencode/muse-spark-1.3-contributor-free[thinking=low]")]
-    [InlineData("general", "claude", "haiku")]
+    [InlineData("fast", "devin", "deepseek-v4-1-flash-high")]
+    [InlineData("general", "claude", "claude-sonnet-5-5")]
     [InlineData("general", "codex", "gpt-5.6-terra")]
-    [InlineData("general", "copilot", "Grok 4.6 (copilot)")]
-    [InlineData("general", "cursor", "grok-4.6[]")]
+    [InlineData("general", "copilot", "Claude Haiku 5.5 (copilot)")]
+    [InlineData("general", "cursor", "grok-4.7[]")]
     [InlineData("general", "kilo", "muse-spark1.3 contributor")]
     [InlineData("general", "opencode", "opencode/muse-spark-1.3-contributor-free")]
     [InlineData("general", "pi", "opencode/muse-spark-1.3-contributor-free[thinking=medium]")]
+    [InlineData("general", "devin", "swe-2-high")]
     [InlineData("reviewer", "claude", "sonnet")]
     [InlineData("reviewer", "codex", "gpt-5.6-terra")]
-    [InlineData("reviewer", "copilot", "Kimi K2.7 Code (copilot)")]
+    [InlineData("reviewer", "copilot", "Grok 4.7 (copilot)")]
     [InlineData("reviewer", "cursor", "kimi-k2.7-code[]")]
     [InlineData("reviewer", "kilo", "kimi k2.7 code")]
     [InlineData("reviewer", "opencode", "opencode-go/kimi-k2.7-code")]
     [InlineData("reviewer", "pi", "opencode-go/kimi-k2.7-code[thinking=high]")]
+    [InlineData("reviewer", "devin", "grok-4-7-high")]
     [InlineData("orchestration", "claude", "sonnet")]
     [InlineData("orchestration", "kilo", "inherit")]
     [InlineData("orchestration", "opencode", "opencode/big-pickle")]
     [InlineData("orchestration", "pi", "inherit")]
+    [InlineData("orchestration", "devin", "inherit")]
     public void ModelsYmlDeclaresExactHarnessValuesPerProfilePerPlan(string profileName, string harbessName, string expectedValue)
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
@@ -145,6 +156,83 @@ public sealed class SquadSourceTests
                 actualValue == expectedValue,
                 $"Profile '{profileName}' harness '{harbessName}' is '{actualValue}' but should be '{expectedValue}'.");
         }
+    }
+
+    [Fact]
+    public void ModelsYmlUsesHaiku55OnlyForClaudeFastAndCopilotGeneralProfiles()
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+
+        foreach ((string profileName, SquadModelProfile profile) in source.ModelProfiles.Profiles)
+        {
+            Assert.DoesNotContain("haiku", profile.Default, StringComparison.OrdinalIgnoreCase);
+            foreach ((string harness, string model) in profile.HarnessModels)
+            {
+                if (model.Contains("haiku", StringComparison.OrdinalIgnoreCase))
+                {
+                    Assert.True(
+                        (profileName == "fast" && harness == "claude" && model == "claude-haiku-5-5") ||
+                        (profileName == "general" && harness == "copilot" && model == "Claude Haiku 5.5 (copilot)"),
+                        $"Profile '{profileName}' on harness '{harness}' unexpectedly resolves to '{model}'.");
+                }
+            }
+        }
+    }
+
+
+    /// <summary>
+    /// Pins Antigravity planning and review to Pro while routine work stays on Flash.
+    /// This catches unintended model changes independently of the renderer's YAML echo.
+    /// </summary>
+    [Theory]
+    [InlineData("architect", "pro")]
+    [InlineData("deep-planning", "pro")]
+    [InlineData("fast", "flash")]
+    [InlineData("general", "flash")]
+    [InlineData("orchestration", "flash")]
+    [InlineData("reviewer", "pro")]
+    public void ModelsYmlAntigravityColumnPinsPlanningAndReviewOnProAndOtherProfilesOnFlash(
+        string profileName,
+        string expectedAntigravityModel)
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+
+        Assert.True(
+            source.ModelProfiles.Profiles.ContainsKey(profileName),
+            $"models.yml does not declare the '{profileName}' profile.");
+        SquadModelProfile profile = source.ModelProfiles.Profiles[profileName];
+        Assert.True(
+            profile.HarnessModels.TryGetValue("antigravity", out string? actualValue),
+            $"Profile '{profileName}' is missing its antigravity column in models.yml.");
+        Assert.True(
+            actualValue == expectedAntigravityModel,
+            $"Profile '{profileName}' antigravity is '{actualValue}' but should be '{expectedAntigravityModel}'.");
+    }
+
+    /// <summary>
+    /// Keeps the architect/product-owner profile distinct from the other planning roles even
+    /// when both profiles currently select the same planning models.
+    /// </summary>
+    [Fact]
+    public void ArchitectAndProductOwnerOwnArchitectModelProfileAndDeepPlanningPeersStayOnDeepPlanning()
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+
+        SquadAgent architect = Assert.Single(source.Agents, agent => agent.Name == "architect");
+        Assert.Equal("architect", architect.ModelProfile);
+
+        SquadAgent productOwner = Assert.Single(source.Agents, agent => agent.Name == "product-owner");
+        Assert.Equal("architect", productOwner.ModelProfile);
+
+        foreach (string peerName in new[] { "sql-database-architect", "bug-crusher-investigator" })
+        {
+            SquadAgent peer = Assert.Single(source.Agents, agent => agent.Name == peerName);
+            Assert.Equal("deep-planning", peer.ModelProfile);
+        }
+
+        Assert.DoesNotContain(
+            source.Agents.Where(agent => agent.Name != "architect" && agent.Name != "product-owner"),
+            agent => string.Equals(agent.ModelProfile, "architect", StringComparison.Ordinal));
     }
 
     /// <summary>
@@ -441,6 +529,160 @@ public sealed class SquadSourceTests
         Diagnostic diagnostic = AssertInvalid(fixture, "agents/architect.md", "not marked as Copilot-only");
 
         Assert.Contains("target: copilot", diagnostic.Hint!, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void LoadAgentWithDevinSpecificCapabilityProfileSucceeds()
+    {
+        using SquadFixture fixture = SquadFixture.CreateValid();
+        fixture.Replace(
+            "profiles/capabilities.yml",
+            "profiles:\n",
+            "profiles:\n" +
+            "  architect-devin:\n" +
+            "    target: devin\n" +
+            "    permissions:\n" +
+            "      filesystem.read: allow\n" +
+            "      filesystem.write: allow\n" +
+            "      delegate: ask\n");
+        fixture.Replace(
+            "agents/architect.md",
+            "capability-profile: architect\n",
+            "capability-profile: architect\n" +
+            "devin-capability-profile: architect-devin\n");
+
+        SquadSource source = SquadSourceLoader.Load(fixture.Path);
+        SquadAgent architect = Assert.Single(source.Agents, agent => agent.Name == "architect");
+
+        Assert.Equal("architect", architect.CapabilityProfile);
+        Assert.Equal("architect-devin", architect.DevinCapabilityProfile);
+        Assert.Equal("devin", source.CapabilityProfiles.Profiles["architect-devin"].Target);
+        Assert.Equal(SquadPermissionDecision.Deny, source.CapabilityProfiles.Profiles["architect"].Permissions["filesystem.write"]);
+        Assert.Equal(SquadPermissionDecision.Allow, source.CapabilityProfiles.Profiles["architect-devin"].Permissions["filesystem.write"]);
+    }
+
+    [Fact]
+    public void LoadDevinSpecificProfileAsSharedProfileFailsClosed()
+    {
+        using SquadFixture fixture = SquadFixture.CreateValid();
+        fixture.Replace(
+            "profiles/capabilities.yml",
+            "profiles:\n",
+            "profiles:\n" +
+            "  architect-devin:\n" +
+            "    target: devin\n" +
+            "    permissions:\n" +
+            "      filesystem.read: allow\n" +
+            "      filesystem.write: allow\n" +
+            "      delegate: ask\n");
+        fixture.Replace(
+            "agents/architect.md",
+            "capability-profile: architect\n",
+            "capability-profile: architect\n" +
+            "devin-capability-profile: architect-devin\n");
+        fixture.Replace(
+            "agents/csharp-dev.md",
+            "capability-profile: worker",
+            "capability-profile: architect-devin");
+
+        Diagnostic diagnostic = AssertInvalid(fixture, "agents/csharp-dev.md", "Devin-only");
+
+        Assert.Contains("shared capability profile", diagnostic.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("devin-capability-profile", diagnostic.Hint!, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void LoadAgentReferencesUnknownDevinCapabilityProfileFailsClosed()
+    {
+        using SquadFixture fixture = SquadFixture.CreateValid();
+        fixture.Replace(
+            "agents/architect.md",
+            "capability-profile: architect\n",
+            "capability-profile: architect\n" +
+            "devin-capability-profile: missing-devin\n");
+
+        Diagnostic diagnostic = AssertInvalid(fixture, "agents/architect.md", "missing-devin");
+
+        Assert.Contains("unknown Devin capability profile", diagnostic.Message, StringComparison.Ordinal);
+        Assert.Contains("profiles/capabilities.yml", diagnostic.Hint!, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void LoadDevinOverrideReferencesSharedProfileFailsClosed()
+    {
+        using SquadFixture fixture = SquadFixture.CreateValid();
+        fixture.Replace(
+            "agents/architect.md",
+            "capability-profile: architect\n",
+            "capability-profile: architect\n" +
+            "devin-capability-profile: architect\n");
+
+        Diagnostic diagnostic = AssertInvalid(fixture, "agents/architect.md", "not marked as Devin-only");
+
+        Assert.Contains("target: devin", diagnostic.Hint!, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A typo in <c>target:</c> on a capability profile must fail at load, not
+    /// become an unmarked shared profile that later evaporates at render.
+    /// </summary>
+    [Fact]
+    public void LoadCapabilityProfileWithUnknownTargetFailsClosed()
+    {
+        using SquadFixture fixture = SquadFixture.CreateValid();
+        fixture.Replace(
+            "profiles/capabilities.yml",
+            "profiles:\n",
+            "profiles:\n" +
+            "  mistyped-devin:\n" +
+            "    target: devni\n" +
+            "    permissions:\n" +
+            "      filesystem.read: allow\n" +
+            "      filesystem.write: allow\n" +
+            "      delegate: ask\n");
+
+        Diagnostic diagnostic = AssertInvalid(fixture, "profiles/capabilities.yml", "devni");
+
+        Assert.Contains("unsupported target", diagnostic.Message, StringComparison.Ordinal);
+        Assert.Contains("copilot", diagnostic.Hint!, StringComparison.Ordinal);
+        Assert.Contains("devin", diagnostic.Hint!, StringComparison.Ordinal);
+        Assert.Contains("profiles.mistyped-devin.target", diagnostic.Subject, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Devin lowers primary identities to skills and never consults
+    /// <c>devin-capability-profile</c> for their tools, so a named override on a
+    /// primary agent would validate and then evaporate.
+    /// </summary>
+    [Fact]
+    public void LoadDevinOverrideOnPrimaryAgentFailsClosed()
+    {
+        using SquadFixture fixture = SquadFixture.CreateValid();
+        fixture.Replace(
+            "profiles/capabilities.yml",
+            "profiles:\n",
+            "profiles:\n" +
+            "  architect-devin:\n" +
+            "    target: devin\n" +
+            "    permissions:\n" +
+            "      filesystem.read: allow\n" +
+            "      filesystem.write: allow\n" +
+            "      delegate: ask\n");
+        fixture.Replace(
+            "agents/csharp-dev.md",
+            "invocation: subagent\n",
+            "invocation: primary\n");
+        fixture.Replace(
+            "agents/csharp-dev.md",
+            "capability-profile: worker\n",
+            "capability-profile: worker\n" +
+            "devin-capability-profile: architect-devin\n");
+
+        Diagnostic diagnostic = AssertInvalid(fixture, "agents/csharp-dev.md", "primary agent");
+
+        Assert.Contains("primary agent", diagnostic.Message, StringComparison.Ordinal);
+        Assert.Contains("skill", diagnostic.Hint!, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("devin-capability-profile", diagnostic.Hint!, StringComparison.Ordinal);
     }
 
     [Fact]

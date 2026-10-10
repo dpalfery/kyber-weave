@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 import { App } from './App.js'
+import { useStoreGeneration } from './lib/storeGeneration.js'
 import './index.css'
 
 // Last-resort guard: a render error (e.g. an unexpected payload from a peer on
@@ -36,10 +37,21 @@ const queryClient = new QueryClient({
   defaultOptions: { queries: { refetchOnWindowFocus: false, staleTime: 30_000, retry: 1 } },
 })
 
+/**
+ * Mounted here, once, rather than inside `App`: it polls the store generation
+ * for the whole dashboard, so a second mount (or a per-page one) would read the
+ * same endpoint twice and could invalidate the cache from a stale baseline.
+ */
+function StoreGenerationWatch() {
+  useStoreGeneration()
+  return null
+}
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
+        <StoreGenerationWatch />
         <App />
       </QueryClientProvider>
     </ErrorBoundary>

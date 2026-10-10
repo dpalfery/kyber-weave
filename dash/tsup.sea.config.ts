@@ -20,6 +20,16 @@ export default defineConfig({
   // builtins must be inlined or the binary dies on first require.
   external: [/^node:/],
   noExternal: [/.*/],
+  // tsup 8's nodeProtocolPlugin strips the `node:` prefix by default (it flips
+  // to false upstream in tsup's next major). `node:sea` (dash/src/sea.ts) and
+  // `node:sqlite` are prefix-only builtins with no legacy bare alias, so a
+  // stripped `import … from "sea"` cannot resolve and crashes every SEA
+  // invocation at module-link time. Every other `node:`-prefixed import
+  // reachable from this entry (node:fs, node:path, node:os, node:crypto,
+  // node:module, node:zlib, node:child_process, node:util, node:readline,
+  // node:perf_hooks, node:string_decoder, node:async_hooks, node:http) has
+  // always accepted the bare form too, so keeping the prefix is safe here.
+  removeNodeProtocol: false,
   // Bundled CommonJS dependencies call require() for builtins, which esbuild
   // leaves as a shim that throws in ESM scope — and several modules derive
   // paths from import.meta.url, which here is the shim's data: URL and is

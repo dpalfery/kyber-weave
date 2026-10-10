@@ -118,6 +118,157 @@ describe('App', () => {
     expect(error?.textContent ?? '').toContain('Refresh unavailable')
   })
 
+  it('arms the clean control, then invokes clean_database with the harness scope', async () => {
+    const invoked: Array<{ command: string; args?: unknown }> = []
+    invokeMock.mockImplementation((command, args) => {
+      if (command === 'get_view_state') return Promise.resolve(viewState())
+      invoked.push({ command: command as string, args })
+      return Promise.resolve(null)
+    })
+
+    await mountApp()
+    const arm = container.querySelector<HTMLButtonElement>('[data-testid="clean-database-arm"]')
+    expect(arm).not.toBeNull()
+
+    await act(async () => {
+      arm?.click()
+      await Promise.resolve()
+    })
+
+    const disclosure = container.querySelector('[data-testid="clean-database-disclosure"]')
+    expect(disclosure).not.toBeNull()
+    expect(disclosure?.textContent ?? '').toMatch(/cannot be undone/i)
+    const confirm = container.querySelector<HTMLButtonElement>('[data-testid="clean-database-confirm"]')
+    expect(confirm).not.toBeNull()
+
+    await act(async () => {
+      confirm?.click()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(invoked).toEqual([{ command: 'clean_database', args: { scope: 'all' } }])
+  })
+
+  it('invokes clean_database with the harness object scope when a harness is selected', async () => {
+    const invoked: Array<{ command: string; args?: unknown }> = []
+    invokeMock.mockImplementation((command, args) => {
+      if (command === 'get_view_state')
+        return Promise.resolve(
+          viewState({
+            settings: {
+              harness: 'cursor',
+              windowDays: 7,
+              attentionThreshold: 0.7,
+              criticalThreshold: 0.9,
+              launchAtLogin: false,
+            },
+          }),
+        )
+      invoked.push({ command: command as string, args })
+      return Promise.resolve(null)
+    })
+
+    await mountApp()
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="clean-database-arm"]')?.click()
+      await Promise.resolve()
+    })
+
+    const confirm = container.querySelector<HTMLButtonElement>(
+      '[data-testid="clean-database-confirm"]',
+    )
+    expect(confirm?.textContent ?? '').toMatch(/cursor/)
+    await act(async () => {
+      confirm?.click()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(invoked).toEqual([
+      { command: 'clean_database', args: { scope: { harness: 'cursor' } } },
+    ])
+  })
+
+  it('routes a rejected clean_database into the action error banner', async () => {
+    invokeMock.mockImplementation((command) => {
+      if (command === 'get_view_state') return Promise.resolve(viewState())
+      return rejectedInvoke(new Error('a refresh or clean is already running'))
+    })
+
+    await mountApp()
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="clean-database-arm"]')?.click()
+      await Promise.resolve()
+    })
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="clean-database-confirm"]')?.click()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    const error = container.querySelector('[data-testid="ipc-action-error"]')
+    expect(error).not.toBeNull()
+    expect(error?.textContent ?? '').toContain('a refresh or clean is already running')
+  })
+
+  it('arms the clean control, confirms, and invokes clean_database with the scope', async () => {
+    const calls: Array<{ command: string; args: unknown }> = []
+    invokeMock.mockImplementation((command, args) => {
+      if (command === 'get_view_state') return Promise.resolve(viewState())
+      calls.push({ command, args })
+      return Promise.resolve(null)
+    })
+
+    await mountApp()
+    const arm = container.querySelector<HTMLButtonElement>('[data-testid="clean-database-arm"]')
+    expect(arm).not.toBeNull()
+
+    await act(async () => {
+      arm?.click()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    const disclosure = container.querySelector('[data-testid="clean-database-disclosure"]')
+    expect(disclosure).not.toBeNull()
+    expect(disclosure?.textContent ?? '').toContain('cannot be undone')
+
+    const confirm = container.querySelector<HTMLButtonElement>('[data-testid="clean-database-confirm"]')
+    expect(confirm).not.toBeNull()
+    await act(async () => {
+      confirm?.click()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(calls).toEqual([{ command: 'clean_database', args: { scope: 'all' } }])
+  })
+
+  it('makes a rejected clean command visible in the open popover', async () => {
+    invokeMock.mockImplementation((command) => {
+      if (command === 'get_view_state') return Promise.resolve(viewState())
+      if (command === 'clean_database') return rejectedInvoke(new Error('Clean unavailable'))
+      return Promise.resolve(null)
+    })
+
+    await mountApp()
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="clean-database-arm"]')?.click()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="clean-database-confirm"]')?.click()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    const error = container.querySelector('[data-testid="ipc-action-error"]')
+    expect(error).not.toBeNull()
+    expect(error?.textContent ?? '').toContain('Clean unavailable')
+  })
+
   it('updates an open popover when the tray emits a new ViewState', async () => {
     invokeMock.mockResolvedValue(viewState())
 
@@ -166,11 +317,9 @@ function viewState(overrides: Partial<ViewState> = {}): ViewState {
     settings: {
       harness: 'all',
       windowDays: 7,
-      refreshMinutes: 5,
       attentionThreshold: 0.7,
       criticalThreshold: 0.9,
       launchAtLogin: false,
-      hostReceiver: false,
     },
     ...overrides,
   }

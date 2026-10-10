@@ -29,7 +29,9 @@ React WebUI (SPA) → BFF (YARP + Auth) → Backend API
                          OIDC auth            Token forwarding
 ```
 
-**Key Principle**: The browser never sees or stores access tokens. The BFF handles OIDC authentication, stores tokens server-side in encrypted cookies, and forwards Bearer tokens to the API on each proxied request.
+**Key Principle**: The BFF handles OIDC authentication and forwards Bearer tokens to the API
+on each proxied request. The token-handling rule itself is set out in
+**<csharp-coding-standard>** § Backend-for-frontend.
 
 ---
 
@@ -95,8 +97,8 @@ React WebUI (SPA) → BFF (YARP + Auth) → Backend API
 ### OIDC Setup (Program.cs)
 - **Scheme**: Cookie authentication + OpenID Connect (Azure AD / Entra External ID)
 - **Scopes**: See the scope convention declared as **Auth Design** in the root `AGENTS.md` registry — do not restate the exact scope URIs here, they evolve independently of this skill.
-- **Client Secret**: Retrieved via the standard `IConfiguration` / Azure App Configuration + Key Vault process — never via environment variables. See **Configuration Policy**.
-- **Token Storage**: Server-side in encrypted cookies (never exposed to browser)
+- **Client Secret**: Secrets sourcing follows **<csharp-coding-standard>** § Safety.
+- **Token Storage**: Token-storage location follows **<csharp-coding-standard>** § Backend-for-frontend.
 
 ### Auth Endpoints (`AuthController.cs`)
 | Endpoint | Method | Purpose |
@@ -118,27 +120,27 @@ GetTokenAsync("access_token") → Authorization: Bearer <token>
 
 ### CSP Headers
 - **Development**: Allows `unsafe-inline` for React HMR
-- **Production**: Strict CSP — no `unsafe-inline` (Pigment CSS is CSP-compliant)
+- **Production**: Strict CSP — no `unsafe-inline`
 
 ### Host Header Validation
-`HostHeaderValidationMiddleware` validates incoming `Host` headers against an allowlist to prevent injection attacks.
+Host-header allowlist validation follows **<csharp-coding-standard>** § Backend-for-frontend.
 
 ### CORS
 - Configured with specific frontend origins from `appsettings`
 - `AllowCredentials()` enabled for cookie-based auth
-- No wildcard origins
+- Wildcard-origin avoidance follows **<csharp-coding-standard>** § Backend-for-frontend
 
 ### SPA Fallback
 - `app.UseStaticFiles()` serves React build output from `wwwroot/`
-- Fallback route serves `index.html` for client-side routing
+- SPA fallback-route conventions follow **<csharp-coding-standard>** § Backend-for-frontend
 - Static assets include cache headers for production optimization
 
 ---
 
-## Dependencies (`MotorcycleRag.WebUI.BFF.csproj`)
-- `Yarp.ReverseProxy` 2.3.0
+## Dependencies
+
+- The YARP reverse-proxy package (see YARP Configuration above)
 - ASP.NET Core Authentication (Cookies + OpenIdConnect)
-- .NET 10.0
 
 ---
 
@@ -175,11 +177,11 @@ To add a new backend route through the BFF:
 - Store client secrets in appsettings, code, or environment variables — use the Azure App Configuration + Key Vault process (see **Configuration Policy**)
 - Add `unsafe-inline` to production CSP
 - Use wildcard CORS origins
-- Bypass YARP for direct API calls from the BFF (defeats the proxy pattern)
+- See **<csharp-coding-standard>** § Backend-for-frontend for the proxy-bypass rule (defeats the proxy pattern)
 - Serve API responses directly from BFF controllers (except auth endpoints)
 
 ## MUST DO
-- Forward Bearer tokens via YARP transforms on all proxied API requests
+- See **<csharp-coding-standard>** § Backend-for-frontend for the Bearer-token-forwarding rule
 - Use cookie-based authentication for browser sessions
 - Validate host headers on all incoming requests
 - Serve React SPA from `wwwroot/` with proper fallback routing

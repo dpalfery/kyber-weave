@@ -24,7 +24,7 @@ const testRoot = vi.hoisted(() => {
 const CODEX_HOME = join(testRoot, 'codex')
 const CACHE_DIR = join(testRoot, 'cache')
 
-// gpt-5.5: input 5e-6, output 30e-6, cacheRead 5e-7 (src/data/litellm-snapshot.json).
+// gpt-5.5: input 5e-6, output 30e-6, cacheRead 5e-7 (src/pricing/data/litellm-snapshot.json).
 // 800 uncached input + 200 cached + 1000 output, of which 400 are reasoning.
 const EXPECTED = 800 * 5e-6 + 200 * 5e-7 + 1000 * 30e-6
 

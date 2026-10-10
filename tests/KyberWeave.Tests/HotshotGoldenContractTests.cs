@@ -33,48 +33,74 @@ public sealed partial class HotshotGoldenContractTests
     private const int ExpectedCopilotRenderFileCount = 48;
     private const string ExpectedSchema = "kyber-squad.hotshot-golden/v1";
     private const string ExpectedSourceCommit = "677c3a876ba9c62f1083608596b238c9deaff167";
-    private const string ExpectedManifestSha256 = "27a4ce4886c5d6a6b7c9829f77a6f5f468b765970c5e4bb8173f29b2850c1d20";
+    private const string ExpectedManifestSha256 = "6e927ded6de8b86f151d474e84c68056236752c122e164eeb4278b4977a6dda1";
     private const string ExternalGoldenRootVariable = "KYBER_SQUAD_HOTSHOT_GOLDEN_ROOT";
     private const string MaiCodeCopilotModel = "MAI-Code-1.1-Flash (copilot)";
 
     private static readonly string[] EvolvedAgentIdentities =
     [
         "architect",
+        "code-reviewer",      // in-process council when the harness gives subagents no agent tool (ADR 0025)
         "conductor",
+        "csharp-dev",         // JEV checkpoints and iteration circuit-breaker (issue #249)
+        "dal-dev",            // Worker-packet scope rule: packet is whole scope (issue #278)
+        "docs-dev",           // Plan closeout decision mapping table and waiver conventions (issue #279)
+        "github-devops",      // JEV checkpoints and iteration circuit-breaker (issue #249)
+        "maui-dev",           // Worker-packet scope rule: packet is whole scope (issue #278)
         "product-owner",
-        "task-reviewer"
+        "pulumi-dev",         // Worker-packet scope rule: packet is whole scope (issue #278)
+        "python-dev",         // Worker-packet scope rule: packet is whole scope (issue #278)
+        "react-dev",          // Worker-packet scope rule: packet is whole scope (issue #278)
+        "sql-database-architect", // Worker-packet scope rule: packet is whole scope (issue #278)
+        "task-reviewer",
+        "tauri-dev",          // Worker-packet scope rule: packet is whole scope (issue #278)
+        "test-dev"            // JEV checkpoints and iteration circuit-breaker (issue #249)
     ];
 
     /// <summary>
-    /// Agents whose Copilot model values diverged from the Hotshot golden snapshot on 2026-09-14
-    /// per plan <c>docs/archive/plans/2026-09-14-pi-harness-target.md</c> §6b, decisions U10–U12 (owner-approved
-    /// model profile changes). Only the model field is allowed to diverge; all other fields
+    /// Agents whose Copilot model values diverge from the Hotshot golden snapshot through
+    /// operator-approved model profile changes. Only the model field is allowed to diverge; all other fields
     /// (description, body, tools, capability, delegation, aliases, invocation) must match the golden.
     /// </summary>
     private static readonly string[] ModelEvolvedAgentIdentities =
     [
         "azure-reader",       // fast: GPT-5.6 Luna → MAI-Code-1.1-Flash (copilot)
-        "code-reviewer",      // reviewer: Grok 4.5 → Kimi K2.7 Code (copilot)
+        "bug-crusher-investigator", // deep-planning: GPT-5.6 Sol → GPT-6.1 Sol (copilot)
+        "code-reviewer",      // reviewer: Grok 4.5 → Grok 4.7 (copilot)
         "csharp-dev",         // fast: GPT-5.6 Luna → MAI-Code-1.1-Flash (copilot)
-        "dal-dev",            // general: Grok 4.5 → Grok 4.6 (copilot)
+        "dal-dev",            // general: Grok 4.5 → Claude Haiku 5.5 (copilot)
         "docs-dev",           // fast: GPT-5.6 Luna → MAI-Code-1.1-Flash (copilot)
-        "github-devops",      // general: Grok 4.5 → Grok 4.6 (copilot)
+        "github-devops",      // general: Grok 4.5 → Claude Haiku 5.5 (copilot)
         "maui-dev",           // fast: GPT-5.6 Luna → MAI-Code-1.1-Flash (copilot)
-        "pulumi-dev",         // general: Grok 4.5 → Grok 4.6 (copilot)
+        "pulumi-dev",         // general: Grok 4.5 → Claude Haiku 5.5 (copilot)
         "python-dev",         // fast: GPT-5.6 Luna → MAI-Code-1.1-Flash (copilot)
         "react-dev",          // fast: GPT-5.6 Luna → MAI-Code-1.1-Flash (copilot)
         "research-agent",     // fast: GPT-5.6 Luna → MAI-Code-1.1-Flash (copilot)
-        "review-lens",        // reviewer: Grok 4.5 → Kimi K2.7 Code (copilot)
-        "review-triage",      // reviewer: GPT-5.6 Luna → Kimi K2.7 Code (copilot)
-        "tauri-dev"           // general: Grok 4.5 → Grok 4.6 (copilot)
+        "review-lens",        // reviewer: Grok 4.5 → Grok 4.7 (copilot)
+        "review-triage",      // reviewer: GPT-5.6 Luna → Grok 4.7 (copilot)
+        "tauri-dev"           // general: Grok 4.5 → Claude Haiku 5.5 (copilot)
     ];
 
     private static readonly string[] EvolvedSkillIdentities =
     [
         "bug-crusher",
+        "code-review", // pre-push self-review gate added; exempts the whole skill directory, pinned by CodeReviewSkillRetainsSelfReviewTriggerAndGate
+        "create-pull-request", // combined with create-pull-request-github; provider selection and neutral layer
+        "pr-review-fix-comments", // provider files now rendered (plan 2026-09-28)
         "product-owner",
         "second-brain"        // hardcoded 6-Docs replaced with <docs-root> (todo squad-hardcoded-docs-root)
     ];
+
+    private static readonly string[] RetiredSkillIdentities =
+    [
+        "create-pull-request-github" // consolidated into create-pull-request (plan 2026-09-28)
+    ];
+
+    /// <summary>
+    /// Skills authored in Kyber-Squad have no Hotshot baseline; the canonical inventory
+    /// and resource-delivery contracts cover them without altering historical golden bytes.
+    /// </summary>
+    private static readonly string[] CanonicalOnlySkillIdentities = ["code-review-loop"];
 
     private static readonly string[] RetiredAgentIdentities =
     [
@@ -223,6 +249,23 @@ public sealed partial class HotshotGoldenContractTests
         Assert.Empty(mismatches);
     }
 
+    /// <summary>
+    /// <c>code-review</c> is listed in <c>EvolvedSkillIdentities</c>, which exempts its whole directory from the
+    /// golden byte comparison and the file-inventory check, so nothing else pins the pre-push self-review
+    /// trigger and gate. Deleting this test returns that section to no coverage.
+    /// </summary>
+    [Fact]
+    public void CodeReviewSkillRetainsSelfReviewTriggerAndGate()
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSkill? skill = source.Skills.FirstOrDefault(candidate => candidate.Name == "code-review");
+
+        Assert.NotNull(skill);
+        Assert.Contains("self-review gate before pushing", skill.Description, StringComparison.Ordinal);
+        Assert.Contains("## Pre-push self-review gate", skill.InstructionBody, StringComparison.Ordinal);
+        Assert.Contains("major-or-worse", skill.InstructionBody, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void CanonicalSourcePreservesGoldenContractOutsideReviewedEvolution()
     {
@@ -235,7 +278,12 @@ public sealed partial class HotshotGoldenContractTests
             .Except(RetiredAgentIdentities, StringComparer.Ordinal)
             .Order(StringComparer.Ordinal)
             .ToArray();
-        string[] expectedSkills = manifest.Skills.Select(entry => SkillName(entry.Path)).Order(StringComparer.Ordinal).ToArray();
+        string[] expectedSkills = manifest.Skills
+            .Select(entry => SkillName(entry.Path))
+            .Except(RetiredSkillIdentities, StringComparer.Ordinal)
+            .Concat(CanonicalOnlySkillIdentities)
+            .Order(StringComparer.Ordinal)
+            .ToArray();
         AddSequenceMismatch(mismatches, "canonical agents", expectedAgents, source.Agents.Select(agent => agent.Name));
         AddSequenceMismatch(mismatches, "bundle agents", expectedAgents, source.Bundle.AgentNames.Order(StringComparer.Ordinal));
         AddSequenceMismatch(mismatches, "canonical skills", expectedSkills, source.Skills.Select(skill => skill.Name));
@@ -291,13 +339,16 @@ public sealed partial class HotshotGoldenContractTests
         string skillRoot = Path.Combine(ProductRoot, "skills");
         string[] actualSkillFiles = Directory.EnumerateFiles(skillRoot, "*", SearchOption.AllDirectories)
             .Select(path => Path.GetRelativePath(ProductRoot, path).Replace(Path.DirectorySeparatorChar, '/'))
-            .Where(path => !EvolvedSkillIdentities.Contains(CanonicalSkillName(path), StringComparer.Ordinal))
+            .Where(path => !EvolvedSkillIdentities.Contains(CanonicalSkillName(path), StringComparer.Ordinal) &&
+                          !CanonicalOnlySkillIdentities.Contains(CanonicalSkillName(path), StringComparer.Ordinal) &&
+                          !RetiredSkillIdentities.Contains(CanonicalSkillName(path), StringComparer.Ordinal))
             .Order(StringComparer.Ordinal)
             .ToArray();
         string[] expectedSkillFiles = manifest.Skills
             .Select(entry => entry.Path.Replace(".github/", string.Empty, StringComparison.Ordinal))
             .Concat(manifest.CanonicalResources)
-            .Where(path => !EvolvedSkillIdentities.Contains(CanonicalSkillName(path), StringComparer.Ordinal))
+            .Where(path => !EvolvedSkillIdentities.Contains(CanonicalSkillName(path), StringComparer.Ordinal) &&
+                          !RetiredSkillIdentities.Contains(CanonicalSkillName(path), StringComparer.Ordinal))
             .Order(StringComparer.Ordinal)
             .ToArray();
         AddSequenceMismatch(mismatches, "non-evolved recursive canonical skill files", expectedSkillFiles, actualSkillFiles);
@@ -305,7 +356,8 @@ public sealed partial class HotshotGoldenContractTests
         foreach (GoldenSkillEntry expected in manifest.Skills)
         {
             string name = SkillName(expected.Path);
-            if (EvolvedSkillIdentities.Contains(name, StringComparer.Ordinal))
+            if (EvolvedSkillIdentities.Contains(name, StringComparer.Ordinal) ||
+                RetiredSkillIdentities.Contains(name, StringComparer.Ordinal))
             {
                 continue;
             }
@@ -443,16 +495,22 @@ public sealed partial class HotshotGoldenContractTests
         Dictionary<string, SquadDeploymentFile> files = result.Files.ToDictionary(file => file.RelativePath, StringComparer.Ordinal);
         string[] expectedPaths = manifest.Agents.Select(entry => entry.Path)
             .Where(path => !RetiredAgentIdentities.Contains(AgentName(path), StringComparer.Ordinal))
-            .Concat(manifest.Skills.Select(entry => entry.Path))
+            .Concat(manifest.Skills
+                .Select(entry => entry.Path)
+                .Where(path => !RetiredSkillIdentities.Contains(SkillName(path), StringComparer.Ordinal)))
             .Order(StringComparer.Ordinal)
             .ToArray();
         string[] missingPaths = expectedPaths.Where(path => !files.ContainsKey(path)).ToArray();
         AddSequenceMismatch(mismatches, "missing required rendered paths", [], missingPaths);
-        string[] retiredPaths = RetiredAgentIdentities
+        string[] retiredAgentPaths = RetiredAgentIdentities
             .Select(name => $".github/agents/{name}.agent.md")
             .Where(files.ContainsKey)
             .ToArray();
-        AddSequenceMismatch(mismatches, "retired rendered paths", [], retiredPaths);
+        string[] retiredSkillPaths = RetiredSkillIdentities
+            .Select(name => $".github/skills/{name}/SKILL.md")
+            .Where(files.ContainsKey)
+            .ToArray();
+        AddSequenceMismatch(mismatches, "retired rendered paths", [], retiredAgentPaths.Concat(retiredSkillPaths).ToArray());
 
         foreach (GoldenAgentEntry expected in manifest.Agents)
         {
@@ -494,9 +552,27 @@ public sealed partial class HotshotGoldenContractTests
             }
         }
 
+        // Guard: an EvolvedAgentIdentities entry that still matches golden silently
+        // disables every field comparison. Fail so a stale name is removed rather than rotting.
+        foreach (string evolvedName in EvolvedAgentIdentities)
+        {
+            GoldenAgentEntry goldenEntry = manifest.Agents.FirstOrDefault(entry => AgentName(entry.Path) == evolvedName);
+            if (string.IsNullOrEmpty(goldenEntry.Path) || !sourceAgents.TryGetValue(evolvedName, out SquadAgent? sourceAgent))
+            {
+                continue;
+            }
+
+            if (string.Equals(goldenEntry.BodySha256, sourceAgent.BodyDigest, StringComparison.Ordinal))
+            {
+                mismatches.Add($"evolved agent '{evolvedName}' matches golden; remove it from the list");
+            }
+        }
+
         foreach (GoldenSkillEntry expected in manifest.Skills)
         {
-            if (EvolvedSkillIdentities.Contains(SkillName(expected.Path), StringComparer.Ordinal))
+            string skillName = SkillName(expected.Path);
+            if (EvolvedSkillIdentities.Contains(skillName, StringComparer.Ordinal) ||
+                RetiredSkillIdentities.Contains(skillName, StringComparer.Ordinal))
             {
                 continue;
             }
@@ -523,10 +599,24 @@ public sealed partial class HotshotGoldenContractTests
         HashSet<string> entryNames = archive.Entries.Select(entry => entry.FullName).ToHashSet(StringComparer.Ordinal);
         foreach (string resource in manifest.CanonicalResources)
         {
+            if (RetiredSkillIdentities.Contains(CanonicalSkillName(resource), StringComparer.Ordinal))
+            {
+                continue;
+            }
+
             if (!entryNames.Contains(resource))
             {
                 mismatches.Add($"{Path.GetFileName(archivePath)} omits '{resource}'");
             }
+        }
+
+        foreach (string retired in RetiredSkillIdentities)
+        {
+            string[] retiredEntries = entryNames
+                .Where(name => name.StartsWith($"skills/{retired}/", StringComparison.Ordinal))
+                .Order(StringComparer.Ordinal)
+                .ToArray();
+            AddSequenceMismatch(mismatches, $"{Path.GetFileName(archivePath)} retired skill entries", [], retiredEntries);
         }
     }
 
@@ -538,6 +628,12 @@ public sealed partial class HotshotGoldenContractTests
     {
         foreach (GoldenSkillEntry skillEntry in manifest.Skills)
         {
+            string skillName = SkillName(skillEntry.Path);
+            if (RetiredSkillIdentities.Contains(skillName, StringComparer.Ordinal))
+            {
+                continue;
+            }
+
             string relativeSkillPath = skillEntry.Path.Replace(".github/", string.Empty, StringComparison.Ordinal);
             string skillPath = Path.Combine(root, relativeSkillPath.Replace('/', Path.DirectorySeparatorChar));
             if (!File.Exists(skillPath))

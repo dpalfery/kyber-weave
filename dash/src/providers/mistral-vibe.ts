@@ -6,7 +6,7 @@ import { readSessionFile, readSessionLines } from '../ingest/fs-utils.js'
 import { calculateCost } from '../pricing/models.js'
 import { extractBashCommands } from '../ingest/bash-utils.js'
 import type { ProbeRoot, Provider, SessionSource, SessionParser, ParsedProviderCall } from './types.js'
-import { safeNumber } from '../ingest/parser.js'
+import { safeNumber } from '../ingest/numbers.js'
 
 const METADATA_FILENAME = 'meta.json'
 const MESSAGES_FILENAME = 'messages.jsonl'
