@@ -220,6 +220,467 @@ export function KeyValueList({ data, className }: { data: unknown; className?: s
 }
 
 /**
+ * Canonical turn-content buckets every harness shares (see
+ * `CANONICAL_CONTENT_KEYS` in dash/src/canon/types.ts), in stable display
+ * order. Copilot-shaped rows carry these flat strings on `turn.content`
+ * rather than in input/output messages, which is why the system prompt and
+ * its associated data previously stayed invisible in the turn view or
+ * surfaced elsewhere as one raw JSON wall.
+ */
+export const TURN_CONTENT_SECTION_ORDER = [
+  'system_prompt',
+  'instruction_context',
+  'tool_definitions',
+  'conversation_history',
+  'tool_result_content',
+] as const
+
+const TURN_CONTENT_SECTION_LABELS: Record<string, string> = {
+  system_prompt: 'System prompt',
+  instruction_context: 'Instruction context',
+  tool_definitions: 'Tool definitions',
+  conversation_history: 'Conversation history',
+  tool_result_content: 'Tool results',
+}
+
+const KNOWN_CONTENT_KEYS = new Set<string>(TURN_CONTENT_SECTION_ORDER)
+
+/** Message-shaped content keys TurnInspector already renders elsewhere. */
+const MESSAGE_CONTENT_KEYS = new Set([
+  'input_messages',
+  'output_messages',
+  'prompt_text',
+  'response_text',
+  'reasoning_text',
+  'thinking_text',
+])
+
+function humanizeContentKey(key: string): string {
+  const words = key.replace(/[-_]+/g, ' ').trim()
+  if (!words) return key
+  return words.charAt(0).toUpperCase() + words.slice(1)
+}
+
+/**
+ * True for strings shaped like a JSON object or array. Only the cheap shape
+ * check — the parse gate in the formatters below decides validity.
+ */
+export function isJsonText(value: string): boolean {
+  const trimmed = value.trim()
+  if (trimmed.length < 2) return false
+  const first = trimmed.charAt(0)
+  const last = trimmed.charAt(trimmed.length - 1)
+  return (first === '{' && last === '}') || (first === '[' && last === ']')
+}
+
+/**
+ * Pretty-prints raw JSON text with a whitespace-only transformation: the
+ * scan copies every string, number, and literal byte-for-byte and only adds
+ * newlines and indentation outside strings. Values are never parsed for
+ * display, so large-number precision, key order, and array order survive
+ * exactly as the harness sent them — `JSON.parse` here is only the validity
+ * gate and its result is discarded.
+ *
+ * Returns null when the text is not valid JSON; callers fall back to plain
+ * text rendering, which still shows everything.
+ */
+export function prettyPrintJson(raw: string): string | null {
+  try {
+    JSON.parse(raw)
+  } catch {
+    return null
+  }
+  const trimmed = raw.trim()
+  if (trimmed === '') return null
+  let out = ''
+  let depth = 0
+  let inString = false
+  let escaped = false
+  for (let i = 0; i < trimmed.length; i++) {
+    const ch = trimmed.charAt(i)
+    if (inString) {
+      out += ch
+      if (escaped) {
+        escaped = false
+      } else if (ch === '\\') {
+        escaped = true
+      } else if (ch === '"') {
+        inString = false
+      }
+      continue
+    }
+    if (ch === '"') {
+      inString = true
+      out += ch
+      continue
+    }
+    if (ch === '{' || ch === '[') {
+      let j = i + 1
+      while (j < trimmed.length && /\s/.test(trimmed.charAt(j))) j++
+      const close = ch === '{' ? '}' : ']'
+      if (trimmed.charAt(j) === close) {
+        out += ch + close
+        i = j
+        continue
+      }
+      depth++
+      out += ch + '\n' + '  '.repeat(depth)
+      continue
+    }
+    if (ch === '}' || ch === ']') {
+      depth--
+      if (depth < 0) return null
+      out += '\n' + '  '.repeat(depth) + ch
+      continue
+    }
+    if (ch === ',') {
+      out += ',\n' + '  '.repeat(depth)
+      continue
+    }
+    if (ch === ':') {
+      out += ': '
+      continue
+    }
+    if (/\s/.test(ch)) continue
+    out += ch
+  }
+  if (inString || depth !== 0) return null
+  return out
+}
+
+/**
+ * Pretty-prints newline-delimited JSON (one value per line, as a flattened
+ * conversation history arrives) by formatting each line on its own.
+ * Returns null unless at least two non-blank lines are present and every one
+ * is valid JSON — a single JSON line is the prettyPrintJson case, and mixed
+ * text stays plain text.
+ */
+export function prettyPrintJsonLines(raw: string): string | null {
+  const lines = raw.split('\n').map((line) => line.trim()).filter((line) => line !== '')
+  if (lines.length < 2) return null
+  const formatted: string[] = []
+  for (const line of lines) {
+    if (!isJsonText(line)) return null
+    const pretty = prettyPrintJson(line)
+    if (pretty === null) return null
+    formatted.push(pretty)
+  }
+  return formatted.join('\n')
+}
+
+/**
+ * Splits a top-level JSON array into its exact item source slices, in order.
+ * Returns null when the text is not a top-level array, so callers can fall
+ * back to the single pretty block. Slices are trimmed source text — no value
+ * is parsed, so nothing is reordered or re-serialized.
+ */
+export function splitTopLevelArrayItems(raw: string): string[] | null {
+  const trimmed = raw.trim()
+  if (!trimmed.startsWith('[') || !trimmed.endsWith(']')) return null
+  try {
+    JSON.parse(trimmed)
+  } catch {
+    return null
+  }
+  const items: string[] = []
+  let depth = 0
+  let inString = false
+  let escaped = false
+  let itemStart = -1
+  for (let i = 0; i < trimmed.length; i++) {
+    const ch = trimmed.charAt(i)
+    if (inString) {
+      if (escaped) {
+        escaped = false
+      } else if (ch === '\\') {
+        escaped = true
+      } else if (ch === '"') {
+        inString = false
+      }
+      continue
+    }
+    if (ch === '"') {
+      if (depth === 1 && itemStart === -1) itemStart = i
+      inString = true
+      continue
+    }
+    if (ch === '[' || ch === '{') {
+      if (depth === 1 && itemStart === -1) itemStart = i
+      depth++
+      continue
+    }
+    if (ch === ']' || ch === '}') {
+      depth--
+      if (depth < 0) return null
+      if (depth === 0 && itemStart !== -1) {
+        const slice = trimmed.slice(itemStart, i).trim()
+        if (slice !== '') items.push(slice)
+        itemStart = -1
+      }
+      continue
+    }
+    if (depth === 1) {
+      if (ch === ',') {
+        if (itemStart === -1) return null
+        const slice = trimmed.slice(itemStart, i).trim()
+        if (slice === '') return null
+        items.push(slice)
+        itemStart = -1
+        continue
+      }
+      if (itemStart === -1 && !/\s/.test(ch)) itemStart = i
+    }
+  }
+  if (inString || depth !== 0 || itemStart !== -1) return null
+  return items
+}
+
+/**
+ * Readable view for a string whose content is JSON (a tool-definitions blob,
+ * a JSON-encoded system prompt, JSON-lines history). The formatted view only
+ * re-indents the exact source text, so every literal — including integers
+ * outside JavaScript's safe range — renders byte-for-byte; the raw view shows
+ * the untouched original and the copy button copies it exactly. Nothing is
+ * parsed into values for display, summarized, or truncated: long blocks
+ * scroll instead of clipping.
+ */
+export function JsonStringView({
+  text,
+  label,
+  defaultView = 'formatted',
+}: {
+  text: string
+  label?: string
+  defaultView?: 'formatted' | 'raw'
+}) {
+  const [viewMode, setViewMode] = useState<'formatted' | 'raw'>(defaultView)
+  const [copied, setCopied] = useState(false)
+
+  const single = prettyPrintJson(text)
+  const lines = single === null ? prettyPrintJsonLines(text) : null
+  if (single === null && lines === null) {
+    // Shaped like JSON but not valid JSON — show the text as-is so nothing
+    // is dropped; the structured view simply has nothing to add.
+    return <XmlFoldedText text={text} />
+  }
+
+  const split = single !== null ? splitTopLevelArrayItems(text) : null
+  const multiItems = split !== null && split.length > 1 ? split : null
+  const multiPretty = multiItems !== null ? multiItems.map((item) => prettyPrintJson(item)) : null
+  const showItems = multiPretty !== null && multiPretty.every((part): part is string => part !== null)
+
+  const nonBlankLines = text.split('\n').filter((line) => line.trim() !== '').length
+  const descriptor = multiItems !== null
+    ? `Array · ${multiItems.length} items`
+    : lines !== null
+      ? `JSON lines · ${nonBlankLines} lines`
+      : text.trim().startsWith('{') ? 'Object' : 'Value'
+
+  const copyExact = () => {
+    try {
+      void navigator.clipboard.writeText(text)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      // ignore
+    }
+  }
+
+  return (
+    <div className="space-y-2" data-testid="json-string-view">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div className="flex items-center gap-2 min-w-0">
+          {label ? (
+            <span className="text-xs font-semibold text-foreground">{label}</span>
+          ) : null}
+          <span className="rounded bg-muted border border-border px-1.5 py-0.5 font-mono text-[10px] text-tertiary-foreground">
+            {descriptor}
+          </span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <div className="flex rounded border border-border bg-interactive-secondary p-0.5 text-xs">
+            <button
+              type="button"
+              onClick={() => setViewMode('formatted')}
+              className={cn(
+                'px-2.5 py-1 rounded-[4px] font-medium transition-colors',
+                viewMode === 'formatted' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
+              )}
+            >
+              Formatted
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode('raw')}
+              className={cn(
+                'px-2.5 py-1 rounded-[4px] font-medium transition-colors',
+                viewMode === 'raw' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
+              )}
+            >
+              Raw
+            </button>
+          </div>
+          <button
+            type="button"
+            onClick={copyExact}
+            className="rounded border border-border px-2 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-interactive-secondary transition-colors"
+          >
+            {copied ? 'Copied!' : 'Copy'}
+          </button>
+        </div>
+      </div>
+      {viewMode === 'formatted' ? (
+        showItems && multiItems !== null && multiPretty !== null ? (
+          <div className="space-y-2">
+            {multiPretty.map((pretty, idx) => (
+              <div key={idx} className="rounded border border-border bg-card/60 overflow-hidden">
+                <div className="border-b border-border bg-interactive-secondary/60 px-3 py-1.5 font-mono text-[11px] text-muted-foreground">
+                  Item {idx + 1} of {multiItems.length}
+                </div>
+                <pre
+                  className="text-xs font-mono p-2.5 overflow-auto whitespace-pre text-foreground max-h-[400px]"
+                  data-testid={`json-item-${idx}`}
+                >
+                  {pretty}
+                </pre>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <pre
+            className="text-xs font-mono p-2.5 overflow-auto whitespace-pre rounded border border-border bg-muted/40 text-foreground max-h-[400px]"
+            data-testid="json-formatted"
+          >
+            {single ?? lines ?? text}
+          </pre>
+        )
+      ) : (
+        <pre
+          className="text-xs font-mono p-2.5 overflow-auto whitespace-pre rounded border border-border bg-muted/40 text-foreground max-h-[400px]"
+          data-testid="json-raw"
+        >
+          {text}
+        </pre>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Readable rendering for a content string of unknown shape: JSON text gets
+ * the structured view (with its exact-raw toggle), everything else keeps the
+ * XML-folding text view. Either way the complete text stays visible.
+ */
+export function ReadableContentText({ text, label }: { text: string; label?: string }) {
+  if (!text) return null
+  if (isJsonText(text)) {
+    return <JsonStringView text={text} label={label} />
+  }
+  return <XmlFoldedText text={text} />
+}
+
+/**
+ * One labeled card per tool definition, in the order given. Names are read
+ * from the already-parsed objects (plain strings, safe to read); every
+ * remaining field renders through the key-value view so nothing is dropped.
+ */
+function ToolDefinitionCards({ definitions }: { definitions: unknown[] }) {
+  if (definitions.length === 0) {
+    return <p className="text-xs text-tertiary-foreground italic">empty list</p>
+  }
+  return (
+    <div className="space-y-2">
+      {definitions.map((def, idx) => {
+        const record = isRecord(def) ? def : null
+        let name = `Tool ${idx + 1}`
+        if (record) {
+          if (typeof record.name === 'string' && record.name !== '') {
+            name = record.name
+          } else if (isRecord(record.function) && typeof record.function.name === 'string' && record.function.name !== '') {
+            name = record.function.name
+          }
+        }
+        return (
+          <div key={idx} className="rounded border border-border bg-card/60 overflow-hidden" data-testid={`tool-definition-${idx}`}>
+            <div className="border-b border-border bg-interactive-secondary/60 px-3 py-1.5 flex items-center gap-2 min-w-0">
+              <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
+                Tool {idx + 1} of {definitions.length}
+              </span>
+              <span className="font-mono text-xs font-semibold text-foreground truncate">{name}</span>
+            </div>
+            <div className="p-2.5">
+              <KeyValueList data={def} />
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+/**
+ * Labeled sections for a turn's content object. Copilot-shaped rows carry the
+ * flat canonical buckets here — system prompt, instruction context, tool
+ * definitions, conversation history, tool results — which the message blocks
+ * above do not read, so without this they stay invisible (or surface
+ * elsewhere as one raw JSON wall). Every present bucket renders in full:
+ * JSON strings get the structured view, long prose keeps XML folding, and
+ * real objects keep the key-value view. Absent buckets render nothing — no
+ * placeholder stands in for missing data — and array order is never touched.
+ */
+export function TurnContentSections({ content }: { content: unknown }) {
+  if (typeof content === 'string') {
+    if (content === '') return null
+    return (
+      <div className="space-y-2" data-testid="turn-content-sections">
+        <section data-testid="turn-content-section-content">
+          <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
+            Turn content
+          </h4>
+          <div className="rounded border border-border bg-card p-3 overflow-hidden">
+            <ReadableContentText text={content} />
+          </div>
+        </section>
+      </div>
+    )
+  }
+  if (!isRecord(content)) return null
+  const isPresent = (key: string): boolean => {
+    const value = content[key]
+    return value !== undefined && value !== null && value !== ''
+  }
+  const ordered = [
+    ...TURN_CONTENT_SECTION_ORDER.filter(isPresent),
+    ...Object.keys(content).filter((key) => !KNOWN_CONTENT_KEYS.has(key) && !MESSAGE_CONTENT_KEYS.has(key) && isPresent(key)),
+  ]
+  if (ordered.length === 0) return null
+  return (
+    <div className="space-y-3" data-testid="turn-content-sections">
+      {ordered.map((key) => {
+        const value = content[key]
+        const label = TURN_CONTENT_SECTION_LABELS[key] ?? humanizeContentKey(key)
+        return (
+          <section key={key} data-testid={`turn-content-section-${key}`}>
+            <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
+              {label}
+            </h4>
+            <div className="rounded border border-border bg-card p-3 overflow-hidden">
+              {typeof value === 'string' ? (
+                <ReadableContentText text={value} label={label} />
+              ) : key === 'tool_definitions' && Array.isArray(value) ? (
+                <ToolDefinitionCards definitions={value} />
+              ) : (
+                <KeyValueList data={value} />
+              )}
+            </div>
+          </section>
+        )
+      })}
+    </div>
+  )
+}
+
+/**
  * Tool call component: displays wrench icon, tool name, and parameters.
  */
 export function ToolCallView({ call, className }: { call: KyberMessageLike | null; className?: string }) {
@@ -572,6 +1033,12 @@ function TurnInspector({
         </div>
       ) : null}
 
+      {/* Canonical content buckets. Copilot-shaped rows carry system_prompt,
+          tool_definitions, conversation_history, and friends here rather than
+          in input/output messages, which the blocks above would otherwise
+          drop without a trace. */}
+      <TurnContentSections content={turn.content} />
+
       {/* Output Messages */}
       {Array.isArray(outMsgs) && outMsgs.length > 0 && (
         <div>
@@ -844,9 +1311,12 @@ export function InspectorContent({
     return <div className="text-xs text-tertiary-foreground italic py-4 text-center">No data to display.</div>
   }
 
-  // String handling
+  // String handling: Copilot-shaped rows carry whole buckets (system prompt,
+  // tool definitions, conversation history) as single strings, and JSON
+  // blobs render as an undifferentiated wall through plain text. Route them
+  // through the structured view; the exact original stays one toggle away.
   if (typeof data === 'string') {
-    return <XmlFoldedText text={data} />
+    return <ReadableContentText text={data} />
   }
 
   const record = isRecord(data) ? data : null

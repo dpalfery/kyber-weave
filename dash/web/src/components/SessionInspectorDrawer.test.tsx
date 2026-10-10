@@ -12,6 +12,14 @@ import {
   InspectorContent,
   SessionInspectorDrawer,
   MessagePartView,
+  TURN_CONTENT_SECTION_ORDER,
+  isJsonText,
+  prettyPrintJson,
+  prettyPrintJsonLines,
+  splitTopLevelArrayItems,
+  JsonStringView,
+  ReadableContentText,
+  TurnContentSections,
 } from './SessionInspectorDrawer.js'
 
 import { renderToStaticMarkup } from 'react-dom/server'
@@ -848,5 +856,213 @@ describe('SessionInspectorDrawer: Full-content endpoint', () => {
     expect(html).not.toContain('UNIQUE_FULL_ENDING')
     expect(html).not.toContain('data-testid="drawer-content-loading"')
     expect(html).toContain('data-testid="context-bucket-inspector"')
+  })
+})
+
+function unescapeHtml(html: string): string {
+  return html
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#x27;/g, "'")
+    .replace(/&#39;/g, "'")
+}
+
+// A Copilot-shaped turn row: the content object carries the flat canonical
+// buckets as strings (never input/output messages), including a JSON-encoded
+// tool-definitions blob. The raw tool JSON is hand-written so the
+// out-of-safe-range integer literal below reaches the renderer byte-for-byte
+// instead of being mangled by an intermediate JS number.
+const COPILOT_PROMPT_HEAD =
+  'You are a diagnostic coding agent operating inside the kyber-weave repository.'
+const COPILOT_PROMPT_TAIL = 'UNIQUE_PROMPT_TAIL_9c4e2b'
+const COPILOT_LONG_SYSTEM_PROMPT = [
+  COPILOT_PROMPT_HEAD,
+  'Follow the repository rules exactly; never invent tooling or paths.',
+  ...Array.from(
+    { length: 60 },
+    (_, i) => `Guideline ${String(i + 1).padStart(2, '0')}: preserve every user-visible byte of content.`,
+  ),
+  '<context>Repository checkout: kyber-weave integration worktree.</context>',
+  `Final reminder before the tail marker: ${'restate-the-task '.repeat(120)}`,
+  COPILOT_PROMPT_TAIL,
+].join('\n')
+
+const COPILOT_BIG_REQUEST_ID = '9007199254740993'
+const COPILOT_TOOL_DEFINITIONS_RAW =
+  '[{"name": "zeta_tool", "description": "Reads a file from disk.", "request_id": 9007199254740993, "parameters": {"type": "object", "properties": {"path": {"type": "string", "description": "Absolute file path."}, "offset": {"type": "integer", "minimum": 0}}, "required": ["path"]}, "enabled": true, "timeout_ms": null}, {"name": "alpha_tool", "description": "Runs a shell command.", "parameters": {"type": "object", "properties": {"command": {"type": "string"}}}, "enabled": false}]'
+
+const COPILOT_HISTORY_RAW = [
+  '{"role": "user", "content": "Investigate the failing refresh gate.", "attachments": []}',
+  '{"role": "assistant", "content": "I will start by reading the session row.", "tool_calls": [{"name": "zeta_tool", "arguments": {"path": "/tmp/session.json"}}]}',
+].join('\n')
+
+const copilotTurn = {
+  index: 2,
+  model: 'gpt-5',
+  fresh: 9500,
+  cache_read: 40000,
+  cache_creation: 500,
+  output: 700,
+  durationMs: 2310,
+  content: {
+    system_prompt: COPILOT_LONG_SYSTEM_PROMPT,
+    instruction_context: 'Org policy: do not exfiltrate secrets.\nSecond line of policy.',
+    tool_definitions: COPILOT_TOOL_DEFINITIONS_RAW,
+    conversation_history: COPILOT_HISTORY_RAW,
+    tool_result_content: 'read_file /tmp/session.json produced 42 lines',
+    custom_telemetry_note: 'retained verbatim',
+  },
+}
+
+describe('SessionInspectorDrawer: Copilot turn readability', () => {
+  it('keeps the canonical bucket order with the system prompt first', () => {
+    expect([...TURN_CONTENT_SECTION_ORDER]).toEqual([
+      'system_prompt',
+      'instruction_context',
+      'tool_definitions',
+      'conversation_history',
+      'tool_result_content',
+    ])
+  })
+
+  it('pretty-prints nested JSON with a whitespace-only transformation', () => {
+    expect(prettyPrintJson('{"b":2,"a":[1,{"c":null}]}')).toBe(
+      '{\n  "b": 2,\n  "a": [\n    1,\n    {\n      "c": null\n    }\n  ]\n}'
+    )
+    const once = prettyPrintJson(COPILOT_TOOL_DEFINITIONS_RAW)
+    expect(once).not.toBeNull()
+    expect(once).toContain(COPILOT_BIG_REQUEST_ID)
+    // Formatting twice changes nothing: the first pass is already canonical.
+    expect(prettyPrintJson(once!)).toBe(once)
+    // Invalid JSON falls back to null so callers keep plain text rendering.
+    expect(prettyPrintJson('{oops')).toBeNull()
+    expect(prettyPrintJson('just text')).toBeNull()
+    expect(prettyPrintJson('')).toBeNull()
+  })
+
+  it('splits top-level array items without reordering or re-serializing', () => {
+    const items = splitTopLevelArrayItems(COPILOT_TOOL_DEFINITIONS_RAW)
+    expect(items).not.toBeNull()
+    expect(items!.length).toBe(2)
+    expect(items![0]).toContain('"zeta_tool"')
+    expect(items![1]).toContain('"alpha_tool"')
+    expect(items![0]).toContain(COPILOT_BIG_REQUEST_ID)
+    expect(splitTopLevelArrayItems('[]')).toEqual([])
+    expect(splitTopLevelArrayItems('{"a":1}')).toBeNull()
+    expect(splitTopLevelArrayItems('[1,]')).toBeNull()
+  })
+
+  it('detects JSON-shaped text', () => {
+    expect(isJsonText('  {"a": 1}  ')).toBe(true)
+    expect(isJsonText('[1,2]')).toBe(true)
+    expect(isJsonText('plain text')).toBe(false)
+    expect(isJsonText('{oops')).toBe(false)
+    expect(isJsonText('')).toBe(false)
+  })
+
+  it('formats JSON-lines history without losing any line', () => {
+    const pretty = prettyPrintJsonLines(COPILOT_HISTORY_RAW)
+    expect(pretty).not.toBeNull()
+    expect(pretty).toContain('Investigate the failing refresh gate.')
+    expect(pretty).toContain('I will start by reading the session row.')
+    expect(prettyPrintJsonLines('{"a":1}')).toBeNull()
+    expect(prettyPrintJsonLines('{"a":1}\nnot json')).toBeNull()
+  })
+
+  it('renders every Copilot content bucket as a labeled section with full content', () => {
+    const element = React.createElement(InspectorContent, { data: copilotTurn })
+    const html = renderHtml(element)
+
+    // Clear labels and sections for the system prompt and associated data.
+    expect(html).toContain('data-testid="turn-content-sections"')
+    expect(html).toContain('data-testid="turn-content-section-system_prompt"')
+    expect(html).toContain('System prompt')
+    expect(html).toContain('Tool definitions')
+    expect(html).toContain('Conversation history')
+    expect(html).toContain('Instruction context')
+    expect(html).toContain('Tool results')
+    expect(html).toContain('Custom telemetry note')
+
+    // The long multiline system prompt survives in full, head and tail.
+    expect(html).toContain(COPILOT_PROMPT_HEAD)
+    expect(html).toContain(COPILOT_PROMPT_TAIL)
+    expect(html).toContain('Guideline 01:')
+    expect(html).toContain('Guideline 60:')
+    expect(html).toContain('Repository checkout: kyber-weave integration worktree.')
+
+    // Structured tool definitions survive with nesting, edge values, order.
+    expect(html).toContain('zeta_tool')
+    expect(html).toContain('alpha_tool')
+    expect(html.indexOf('zeta_tool')).toBeLessThan(html.indexOf('alpha_tool'))
+    expect(html).toContain('Absolute file path.')
+    expect(html).toContain(COPILOT_BIG_REQUEST_ID)
+    expect(html).not.toContain('9007199254740992')
+
+    // History lines, policy text, tool output, and the unknown extra key.
+    expect(html).toContain('Investigate the failing refresh gate.')
+    expect(html).toContain('I will start by reading the session row.')
+    expect(html).toContain('Org policy: do not exfiltrate secrets.')
+    expect(html).toContain('produced 42 lines')
+    expect(html).toContain('retained verbatim')
+
+    // Structured blocks keep item sections and the exact-raw affordance.
+    expect(html).toContain('data-testid="json-string-view"')
+    expect(html).toContain('data-testid="json-item-0"')
+    expect(html).toContain('data-testid="json-item-1"')
+  })
+
+  it('keeps the raw view of a JSON bucket byte-exact', () => {
+    const element = React.createElement(JsonStringView, {
+      text: COPILOT_TOOL_DEFINITIONS_RAW,
+      defaultView: 'raw',
+    })
+    const html = renderHtml(element)
+    expect(unescapeHtml(html)).toContain(COPILOT_TOOL_DEFINITIONS_RAW)
+
+    // The formatted default shows the same literals, only re-indented.
+    const formatted = renderHtml(React.createElement(JsonStringView, { text: COPILOT_TOOL_DEFINITIONS_RAW }))
+    expect(formatted).toContain(COPILOT_BIG_REQUEST_ID)
+    expect(formatted).not.toContain('9007199254740992')
+    expect(formatted).toContain('data-testid="json-item-0"')
+    expect(formatted).toContain('data-testid="json-item-1"')
+  })
+
+  it('routes JSON strings to the structured view and prose to folded text', () => {
+    const jsonHtml = renderHtml(
+      React.createElement(InspectorContent, { data: '{"role":"system","content":"hello"}' })
+    )
+    expect(jsonHtml).toContain('data-testid="json-string-view"')
+    expect(jsonHtml).toContain('hello')
+
+    const proseHtml = renderHtml(React.createElement(InspectorContent, { data: 'plain prose prompt' }))
+    expect(proseHtml).toContain('plain prose prompt')
+    expect(proseHtml).not.toContain('data-testid="json-string-view"')
+  })
+
+  it('renders real-object tool definitions as named cards and skips message keys', () => {
+    const content = {
+      prompt_text: 'already rendered above',
+      tool_definitions: [
+        { name: 'read_file', description: 'Reads a file.' },
+        { function: { name: 'wrapped_tool' }, extra: 7 },
+      ],
+    }
+    const html = renderHtml(React.createElement(TurnContentSections, { content }))
+    expect(html).toContain('data-testid="turn-content-section-tool_definitions"')
+    expect(html).toContain('read_file')
+    expect(html).toContain('wrapped_tool')
+    expect(html).toContain('Tool 1 of 2')
+    expect(html).toContain('Tool 2 of 2')
+    expect(html).not.toContain('already rendered above')
+    expect(html).not.toContain('turn-content-section-prompt_text')
+  })
+
+  it('renders nothing for absent buckets and empty content', () => {
+    expect(renderHtml(React.createElement(TurnContentSections, { content: { prompt_text: 'x' } }))).toBe('')
+    expect(renderHtml(React.createElement(TurnContentSections, { content: null }))).toBe('')
+    expect(renderHtml(React.createElement(TurnContentSections, { content: '' }))).toBe('')
+    expect(renderHtml(React.createElement(ReadableContentText, { text: '' }))).toBe('')
   })
 })
