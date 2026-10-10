@@ -2,6 +2,7 @@ using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Validation;
+using KyberWeave.Core.Networking;
 
 namespace KyberWeave.Core.Arbiter.Rules;
 
@@ -482,7 +483,7 @@ public static class RuleValidator
                 "Use https://api.typesafe.ai/v1, or an http(s) Ollama URL.");
         }
 
-        if (string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.Ordinal) && !IsLoopback(uri.Host))
+        if (string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.Ordinal) && !LoopbackAddress.IsLoopbackHost(uri.Host))
         {
             return new Diagnostic(
                 PlainHttpEndpoint,
@@ -495,10 +496,4 @@ public static class RuleValidator
 
         return null;
     }
-
-    private static bool IsLoopback(string host) =>
-        string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(host, "::1", StringComparison.Ordinal) ||
-        (host.StartsWith("127.", StringComparison.Ordinal) &&
-            byte.TryParse(host.Split('.')[1..].FirstOrDefault(), out _));
 }

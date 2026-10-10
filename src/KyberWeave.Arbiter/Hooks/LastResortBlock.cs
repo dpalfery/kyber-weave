@@ -14,6 +14,13 @@ namespace KyberWeave.Arbiter.Hooks;
 /// token silently inheriting the fallback. Unknown tokens — null, or one the registry
 /// does not serve — keep the Claude-shaped document, which is what the host used before
 /// the harness was known.
+/// <para>
+/// Tokens are matched case-insensitively because
+/// <see cref="HarnessAdapterRegistry"/> resolves them that way. Matching here with
+/// Ordinal made <c>--harness OpenCode</c> find its adapter yet fall through to the
+/// Claude shape, and a plugin shim reads that as no block: a double fault that failed
+/// open. Trimming keeps the same property for a token that arrived padded.
+/// </para>
 /// </remarks>
 internal static class LastResortBlock
 {
@@ -26,10 +33,14 @@ internal static class LastResortBlock
     /// <summary>Builds the harness's deny document carrying <c>KW-ARB-HOOK-001</c>.</summary>
     public static string For(string? harness)
     {
+        string token = harness?.Trim() ?? string.Empty;
         string reason = $"{HookCommand.FailClosedCode}: hook host failed" +
-            (string.IsNullOrWhiteSpace(harness) ? "." : $" ({harness}).");
+            (token.Length == 0 ? "." : $" ({harness}).");
 
-        return harness is not null && Dialects.TryGetValue(harness, out Func<string, string>? render)
+// The key is the trimmed token, not the raw argument: the table's comparer is
+        // OrdinalIgnoreCase and the registry resolves --harness the same way, so the two
+        // must not disagree. The reason text still echoes `harness` as the caller wrote it.
+        return Dialects.TryGetValue(token, out Func<string, string>? render)
             ? render!(reason)
             : HookSpecificDeny(reason);
     }

@@ -40,6 +40,14 @@ public sealed class ArbiterShimBehaviourTests : IDisposable
         { string.Empty, "2", Blocked },
         { "{\"decision\":\"allow\"}", "1", Blocked },
         { "this is not json", "0", Blocked },
+        // Well-formed JSON that is not a decision. `JSON.parse` accepts all of these
+        // and the shim believed whatever came back: a non-block decision is an allow,
+        // so a document the host never meant as an allow was read as one.
+        { "null", "0", Blocked },
+        { "\"x\"", "0", Blocked },
+        { "[]", "0", Blocked },
+        { "{}", "0", Blocked },
+        { "{\"decision\":\"maybe\"}", "0", Blocked },
     };
 
     [Theory]
@@ -135,7 +143,76 @@ public sealed class ArbiterShimBehaviourTests : IDisposable
         Assert.StartsWith(Blocked, output, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task PiExtension_IgnoresPrototypePollutingKeysInADecisionArgument()
+    {
+        // A decision carrying `__proto__` is copied field by field onto the host's
+        // tool input, and a bracket assignment on `__proto__` runs the inherited
+        // setter rather than creating an own key. The host's input object adopted the
+        // decision's object as its prototype and inherited its properties from it.
+        // These keys are skipped instead. Object.prototype itself is never the write
+        // target either way; the assertion pins that too.
+        string bun = RequireBun();
+        WriteFakeBinary(
+            "{\"decision\":\"allow\",\"args\":{\"__proto__\":{\"polluted\":true},\"constructor\":{\"polluted\":true}," +
+            "\"prototype\":{\"polluted\":true},\"subagent_type\":\"kept\"}}",
+            "0");
+        await File.WriteAllTextAsync(Path.Combine(_temp.Path, "ext.ts"), await RenderPiExtensionAsync(timeoutSeconds: 5));
+        await File.WriteAllTextAsync(Path.Combine(_temp.Path, "drive.ts"), """
+            import ext from "./ext.ts";
+            const handlers: Record<string, (event: any) => Promise<any>> = {};
+            (ext as any)({ on: (name: string, handler: (event: any) => Promise<any>) => { handlers[name] = handler; } });
+            const input: any = { subagent_type: "x", prompt: "p" };
+            await handlers["tool_call"]({ toolName: "Agent", toolCallId: "c1", input });
+            console.log("globalPolluted=" + String(({} as any).polluted));
+            console.log("inputPolluted=" + String(input.polluted));
+            console.log("prototypeSwapped=" + String(Object.getPrototypeOf(input) !== Object.prototype));
+            console.log("ownConstructor=" + String(Object.prototype.hasOwnProperty.call(input, "constructor")));
+            console.log("ownPrototype=" + String(Object.prototype.hasOwnProperty.call(input, "prototype")));
+            console.log("safeKeyApplied=" + String(input.subagent_type));
+            """);
+
+        string output = await RunBunAsync(bun, "drive.ts");
+
+        Assert.Contains("globalPolluted=undefined", output, StringComparison.Ordinal);
+        Assert.Contains("inputPolluted=undefined", output, StringComparison.Ordinal);
+        Assert.Contains("prototypeSwapped=false", output, StringComparison.Ordinal);
+        Assert.Contains("ownConstructor=false", output, StringComparison.Ordinal);
+        Assert.Contains("ownPrototype=false", output, StringComparison.Ordinal);
+        Assert.Contains("safeKeyApplied=kept", output, StringComparison.Ordinal);
+    }
+
     // ----------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task PiExtension_AfterABlockOnACallWithNoContent_StillBlocks()
+    {
+        // A call that produced no content carries `content: undefined`, and spreading
+        // that threw a TypeError out of the handler. Failing to build the block is not
+        // a block: the host saw a crashed hook rather than a refusal.
+        string bun = RequireBun();
+        WriteFakeBinary("{\"decision\":\"block\",\"reason\":\"nope\"}", "0");
+        await File.WriteAllTextAsync(Path.Combine(_temp.Path, "ext.ts"), await RenderPiExtensionAsync(timeoutSeconds: 5));
+        await File.WriteAllTextAsync(Path.Combine(_temp.Path, "drive.ts"), """
+            import ext from "./ext.ts";
+            const handlers: Record<string, (event: any) => Promise<any>> = {};
+            (ext as any)({ on: (name: string, handler: (event: any) => Promise<any>) => { handlers[name] = handler; } });
+            const event: any = { toolName: "Agent", toolCallId: "c1", input: {}, isError: false };
+            console.log("contentPresent=" + String("content" in event));
+            try {
+              const result = await handlers["tool_result"](event);
+              console.log("RESULT=" + JSON.stringify(result));
+            } catch (e) {
+              console.log("THREW=" + String(e));
+            }
+            """);
+
+        string output = await RunBunAsync(bun, "drive.ts");
+
+        Assert.Contains("contentPresent=false", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("THREW=", output, StringComparison.Ordinal);
+        Assert.Contains("RESULT={\"content\":[{\"type\":\"text\",\"text\":\"nope\"}]}", output, StringComparison.Ordinal);
+    }
 
     private const string PiDriver = """
         import ext from "./ext.ts";

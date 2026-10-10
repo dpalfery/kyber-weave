@@ -305,6 +305,64 @@ public sealed class ArbiterEvaluatorTests : IDisposable
     }
 
     [Fact]
+    public async Task Evaluator_ErrorResultCarriesTheLedgerIdOfTheAppendedEntry()
+    {
+        // The git facts throw after the ledger append. The id was allocated inside the
+        // try, so the error result returned string.Empty and the one record that can
+        // explain what happened could not be found.
+        const string Prompt = "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/plan.md\nTASK: T3\n\nImplement.";
+        ArbiterEvaluator evaluator = CreateEvaluator(new NoneProvider(), new FailingGitFacts());
+        KyberWeaveConfig config = ConfigWith([
+            AskRule("KW-ARB-ASK-001", "delegate", "within-task", RuleEffects.Allow),
+        ]);
+
+        ArbiterEvaluationResult result = await evaluator.EvaluateAsync(DelegateEvent(Prompt), config);
+
+        Assert.True(result.IsError);
+        Assert.NotEqual(string.Empty, result.LedgerId);
+        Assert.Contains(
+            new InFlightLedger(ArbiterDirectory).ReadAll(),
+            e => e.Id == result.LedgerId);
+    }
+
+    private sealed class DigestPlanReader(string digest) : IArbiterPlanReader
+    {
+        public ArbiterFactSet Enrich(ArbiterFactSet facts, TriggerClassification classification) =>
+            facts.With("plan.digest", digest, ArbiterFactLabel.Derived);
+    }
+
+    [Fact]
+    public async Task Evaluator_RepeatRestartsWhenThePlanDigestChanges()
+    {
+        // Design 1.10: REPEAT counts earlier escalations sharing plan file, plan digest
+        // and task, and "A Draft amendment changes the digest and so resets the count".
+        // With the digest hard-coded to null the reset could never fire, so an amended
+        // plan kept escalating forever with no stop at 2.
+        const string Prompt = "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/plan.md\nTASK: T3\n\nImplement.";
+        KyberWeaveConfig config = ConfigWith([
+            Step0Rule("KW-ARB-PLAN-001", "delegate", "no-tasks", RuleEffects.Escalate),
+        ]);
+
+        ArbiterEvaluator first = CreateEvaluator(new NoneProvider(), planReader: new DigestPlanReader("digest-1"));
+        await first.EvaluateAsync(DelegateEvent(Prompt), config);
+        ArbiterEvaluator second = CreateEvaluator(new NoneProvider(), planReader: new DigestPlanReader("digest-1"));
+        await second.EvaluateAsync(DelegateEvent(Prompt), config);
+
+        DecisionLog log = new(ArbiterDirectory);
+        ArbiterDecisionRecord unchanged = log.ReadAll()[^1];
+        Assert.Equal(2, unchanged.Repeat);
+
+        // Same plan file and task, amended content: the count restarts at 1.
+        ArbiterEvaluator amended = CreateEvaluator(new NoneProvider(), planReader: new DigestPlanReader("digest-2"));
+        await amended.EvaluateAsync(DelegateEvent(Prompt), config);
+
+        ArbiterDecisionRecord afterAmendment = log.ReadAll()[^1];
+        Assert.Equal(1, afterAmendment.Repeat);
+        Assert.Equal("digest-2", afterAmendment.PlanDigest);
+        Assert.Equal("digest-1", unchanged.PlanDigest);
+    }
+
+    [Fact]
     public async Task Evaluator_LedgerBeforeDecisionAroundEvaluation()
     {
         const string Prompt = "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/plan.md\nTASK: T3\n\nImplement.";

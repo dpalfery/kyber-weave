@@ -1,3 +1,6 @@
+using System.Text.Json;
+using System.Text.RegularExpressions;
+
 namespace KyberWeave.Core.Squad.Rendering;
 
 /// <summary>
@@ -24,11 +27,32 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// </remarks>
 public static class ArbiterPluginShim
 {
+    /// <summary>The shape every harness token has: lowercase, digits and hyphens.</summary>
+    private const string TokenPatternText = "^[a-z0-9-]+$";
+
+    private static readonly Regex TokenPattern = new(TokenPatternText, RegexOptions.CultureInvariant);
     /// <summary>Renders the plugin shim for the given harness token (for example <c>opencode</c>).</summary>
+    /// <remarks>
+    /// The token reaches the generated source twice, so it is both constrained and
+    /// encoded. <c>^[a-z0-9-]+$</c> is the shape every harness token already has, and it
+    /// excludes the quote that would otherwise close the surrounding TypeScript string
+    /// literal. The value is then written as a JSON string, so even a token that slipped
+    /// through could not break out of the literal it lands in.
+    /// </remarks>
+    /// <exception cref="ArgumentException">Thrown when the token is not a plain lowercase token.</exception>
     public static string Render(string harnessToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(harnessToken);
+        if (!TokenPattern.IsMatch(harnessToken))
+        {
+            throw new ArgumentException(
+                $"Arbiter plugin harness token '{harnessToken}' is not a plain lowercase " +
+                $"token: it must match {TokenPatternText}.",
+                nameof(harnessToken));
+        }
 
+        // JSON string encoding, so the token lands inside the TypeScript literal as data.
+        string literal = JsonSerializer.Serialize(harnessToken);
         return $$"""
             import type { Plugin } from "@opencode-ai/plugin";
 
@@ -38,10 +62,34 @@ public static class ArbiterPluginShim
               args?: Record<string, unknown>;
             };
 
+            // JSON.parse accepts null, a bare string, an array and an object with no
+            // decision field, and the shim believed whatever came back: a document whose
+            // decision is not "block" is read as an allow. Only a plain object whose
+            // decision is exactly "allow" or "block" is a decision at all; anything else
+            // throws here and the caller turns it into a block.
+            function parseDecision(text: string): ArbiterDecision {
+              const parsed: unknown = JSON.parse(text);
+              if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+                throw new Error("kyber-arbiter: malformed arbiter decision");
+              }
+              const candidate = parsed as { decision?: unknown; reason?: unknown; args?: unknown };
+              if (candidate.decision !== "allow" && candidate.decision !== "block") {
+                throw new Error("kyber-arbiter: malformed arbiter decision");
+              }
+              const decision: ArbiterDecision = { decision: candidate.decision };
+              if (typeof candidate.reason === "string") {
+                decision.reason = candidate.reason;
+              }
+              if (typeof candidate.args === "object" && candidate.args !== null && !Array.isArray(candidate.args)) {
+                decision.args = candidate.args as Record<string, unknown>;
+              }
+              return decision;
+            }
+
             async function runArbiterHook(envelope: unknown, cwd: string): Promise<ArbiterDecision> {
               let proc: ReturnType<typeof Bun.spawn>;
               try {
-                proc = Bun.spawn(["kyber-weave-arbiter", "hook", "--harness", "{{harnessToken}}"], {
+                proc = Bun.spawn(["kyber-weave-arbiter", "hook", "--harness", {{literal}}], {
                   stdin: "pipe",
                   stdout: "pipe",
                   cwd,
@@ -62,7 +110,7 @@ public static class ArbiterPluginShim
                 if (text.trim() === "") {
                   return { decision: "allow" };
                 }
-                return JSON.parse(text) as ArbiterDecision;
+                return parseDecision(text);
               } catch (err) {
                 throw new Error("kyber-arbiter: failed to read arbiter decision: " + String(err));
               }
@@ -72,7 +120,7 @@ public static class ArbiterPluginShim
               "tool.execute.before": async (input, output) => {
                 const envelope = {
                   schema: "kyber-arbiter.plugin-event/v1",
-                  harness: "{{harnessToken}}",
+                  harness: {{literal}},
                   phase: "before",
                   tool: input.tool,
                   "call-id": input.callID,
@@ -91,7 +139,7 @@ public static class ArbiterPluginShim
               "tool.execute.after": async (input, output) => {
                 const envelope = {
                   schema: "kyber-arbiter.plugin-event/v1",
-                  harness: "{{harnessToken}}",
+                  harness: {{literal}},
                   phase: "after",
                   tool: input.tool,
                   "call-id": input.callID,

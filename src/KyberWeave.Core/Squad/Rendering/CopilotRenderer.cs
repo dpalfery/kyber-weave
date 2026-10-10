@@ -391,7 +391,9 @@ public sealed class CopilotRenderer : ISquadRenderer
     private static Dictionary<string, object?> HookEntry(SquadArbiterHook hook) => new(StringComparer.Ordinal)
     {
         ["type"] = "command",
-        ["command"] = $"{ArbiterCommandName} hook --harness {VsCodeHarnessToken} --caller {hook.Caller}",
+        // The shared helper, not a second interpolation: Copilot runs this through a shell,
+        // so the caller has to pass the same validation every other hook surface applies.
+        ["command"] = ArbiterHookWiring.HookCommandLine(VsCodeHarnessToken, hook.Caller),
         ["timeout"] = hook.TimeoutSeconds
     };
 

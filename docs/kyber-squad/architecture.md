@@ -296,13 +296,15 @@ All five blocks render when the Arbiter is enabled at project scope: the Cursor 
 blocks landed in Phase 2, and the Factory, Devin, and Antigravity shapes in Phase 3. Pi's
 owned extension file is a whole owned file, not a block. Only documented fields are
 written, never a sentinel key, and shared-file hook commands carry no `--caller` because
-they gate project-wide. The plan-side splice mirrors the file splice — same containers,
-same ownership test, same digests — rather than calling it, because planning must stay
-side-effect free for dry runs. On `factory` the lifecycle first runs the shadowing check:
-when `.factory/settings.json` has a `hooks` key and `.factory/hooks.json` is absent, the
-Factory block is dropped and `arbiter-not-enforced` (`settings-hooks-shadowed`) is
-recorded instead, because Factory reads that `hooks` key only while `hooks.json` is absent
-and rendering the file would silently disable the user's hooks.
+they gate project-wide. The plan-side splice is the file splice: it calls the content-level
+`SquadHookJsonBlock.SpliceContent` that the file-level splice also uses — same containers,
+same ownership test, same digests — so a dry run and an install cannot diverge. Planning
+stays side-effect free because it never calls the file-level `SpliceFile`, which is what
+writes. On `factory` the lifecycle first runs the shadowing check: when
+`.factory/settings.json` has a `hooks` key and `.factory/hooks.json` is absent, the Factory
+block is dropped and `arbiter-not-enforced` (`settings-hooks-shadowed`) is recorded
+instead, because Factory reads that `hooks` key only while `hooks.json` is absent and
+rendering the file would silently disable the user's hooks.
 
 A hand-edited or missing owned entry is drift, reported by `squad status` and
 `squad doctor` naming the file and the container. `squad update` rewrites the block

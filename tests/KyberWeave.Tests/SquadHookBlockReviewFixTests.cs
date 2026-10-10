@@ -154,6 +154,83 @@ public sealed class SquadHookBlockReviewFixTests
     }
 
     [Fact]
+    public void Update_WhenOneOfTwoIdenticalSquadEntriesIsEdited_StillReportsDrift()
+    {
+        using TempDirectory fixture = new();
+        SquadStateStore store = Store(fixture.Path);
+        new SquadTransaction(store).Execute(Install(fixture.Path, TwoIdenticalCursorEntries()));
+        SquadReceipt previous = Assert.IsType<SquadReceipt>(
+            store.ReadReceipt(fixture.Path, SquadDeploymentScope.Project));
+
+        // Two byte-identical owned entries, recorded at index 0 and 1 with one digest.
+        // Editing the first left its twin intact, and the twin then satisfied the edited
+        // entry's digest: the edit read as "Squad's entry, merely moved", so no drift was
+        // reported and the update overwrote the user's edit without a word.
+        string path = Path.Combine(fixture.Path, ".cursor", "hooks.json");
+        JsonNode file = JsonNode.Parse(File.ReadAllText(path))!;
+        JsonArray entries = file["hooks"]!["preToolUse"]!.AsArray();
+        Assert.Equal(2, entries.Count);
+        ((JsonObject)entries[0]!)["command"] = "kyber-weave-arbiter hook --harness cursor --probe edited";
+        File.WriteAllText(path, file.ToJsonString());
+
+        IReadOnlyList<SquadOwnedBlockDrift> drifts = Update(fixture.Path, previous, TwoIdenticalCursorEntries()).BlockDrifts;
+
+        Assert.Single(drifts);
+        Assert.EndsWith("/0", drifts[0].Location, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Uninstall_WhenAReceiptOwnedFileWasBlanked_RetainsTheBlockForRepair()
+    {
+        using TempDirectory fixture = new();
+        SquadStateStore store = Store(fixture.Path);
+        new SquadTransaction(store).Execute(Install(fixture.Path, CursorBlock("one")));
+        SquadReceipt previous = Assert.IsType<SquadReceipt>(
+            store.ReadReceipt(fixture.Path, SquadDeploymentScope.Project));
+        Write(fixture.Path, ".cursor/hooks.json", string.Empty);
+
+        // Update already refuses here: Squad's recorded entries cannot vanish silently.
+        // Uninstall disagreed, reporting the block removed and dropping it from the
+        // receipt, so the file was left blank with nothing recorded to repair it from.
+        // The two sides must make the same call.
+        SquadDeploymentPlan uninstall = SquadDeploymentPlan.CreateUninstall(
+            fixture.Path, SquadDeploymentScope.Project, previous);
+
+        // The retained receipt is rewritten, not deleted: it still owns a block, so it stays
+        // on the schema that records blocks and the entries survive for hand repair.
+        Assert.NotEqual(SquadStateMutation.Delete, uninstall.ReceiptMutation);
+        Assert.NotEmpty(uninstall.Receipt!.Blocks);
+
+        new SquadTransaction(store).Execute(uninstall);
+
+        SquadReceipt after = Assert.IsType<SquadReceipt>(
+            store.ReadReceipt(fixture.Path, SquadDeploymentScope.Project));
+        Assert.NotEmpty(after.Blocks);
+    }
+
+    [Fact]
+    public void Uninstall_WhenABlankedFileHasNoReceiptOwnedEntries_IsANoOp()
+    {
+        using TempDirectory fixture = new();
+        SquadStateStore store = Store(fixture.Path);
+        new SquadTransaction(store).Execute(Install(fixture.Path, CursorBlock("one")));
+        SquadReceipt previous = Assert.IsType<SquadReceipt>(
+            store.ReadReceipt(fixture.Path, SquadDeploymentScope.Project));
+
+        // A file the receipt owns no entries in has nothing to lose, so a blank one is
+        // still just a minimal document and the block is genuinely gone.
+        SquadReceipt withoutEntries =
+            previous with { Blocks = [.. previous.Blocks.Select(block => block with { Entries = [] })] };
+        Write(fixture.Path, ".cursor/hooks.json", string.Empty);
+
+        SquadDeploymentPlan uninstall = SquadDeploymentPlan.CreateUninstall(
+            fixture.Path, SquadDeploymentScope.Project, withoutEntries);
+
+        Assert.Equal(SquadStateMutation.Delete, uninstall.ReceiptMutation);
+        Assert.Empty(uninstall.Receipt!.Blocks);
+    }
+
+    [Fact]
     public void Update_WhenTheUserEditsSquadsEntry_StillReportsDrift()
     {
         using TempDirectory fixture = new();
@@ -237,6 +314,17 @@ public sealed class SquadHookBlockReviewFixTests
             ".cursor/hooks.json",
             SquadHookBlockFormat.Cursor,
             [new SquadRenderedBlockEntry("preToolUse", CursorEntry($"kyber-weave-arbiter hook --harness cursor --probe {marker}"))]);
+
+    /// <summary>Two owned entries with identical content, so both record the same digest.</summary>
+    private static SquadRenderedBlock TwoIdenticalCursorEntries() =>
+        new(
+            "cursor",
+            ".cursor/hooks.json",
+            SquadHookBlockFormat.Cursor,
+            [
+                new SquadRenderedBlockEntry("preToolUse", CursorEntry("kyber-weave-arbiter hook --harness cursor --probe one")),
+                new SquadRenderedBlockEntry("preToolUse", CursorEntry("kyber-weave-arbiter hook --harness cursor --probe one")),
+            ]);
 
     private static SquadRenderedBlock CodexBlock(string marker) =>
         new(

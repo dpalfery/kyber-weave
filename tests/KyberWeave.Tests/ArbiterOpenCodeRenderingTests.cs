@@ -24,6 +24,34 @@ public sealed class ArbiterOpenCodeRenderingTests : IDisposable
 
     public void Dispose() => _fixture.Dispose();
 
+    [Theory]
+    [InlineData("opencode")]
+    [InlineData("kilo")]
+    public void Render_AcceptsALowercaseTokenAndRendersItUnchanged(string token)
+    {
+        string content = ArbiterPluginShim.Render(token);
+
+        Assert.Contains($"\"--harness\", \"{token}\"", content, StringComparison.Ordinal);
+        Assert.Contains($"harness: \"{token}\"", content, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    // The token is interpolated into TypeScript source twice. Whitespace was the only
+    // check, so a quote could close the string literal and append code to the shim.
+    [InlineData("opencode\", evil: \"x")]
+    [InlineData("opencode\"; console.log('pwned'); const x=\"")]
+    [InlineData("open code")]
+    [InlineData("OpenCode")]
+    [InlineData("open_code")]
+    [InlineData("opencode\nconst x = 1;")]
+    [InlineData("opencode\\")]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void Render_RejectsATokenThatIsNotAPlainLowercaseToken(string hostile)
+    {
+        Assert.Throws<ArgumentException>(() => ArbiterPluginShim.Render(hostile));
+    }
+
     [Fact]
     public async Task RenderAsync_EnabledAtProjectScope_EmitsOwnedShimFromGenerator()
     {
@@ -111,11 +139,12 @@ public sealed class ArbiterOpenCodeRenderingTests : IDisposable
         string content = await ShimContentAsync();
 
         // Exit 0 with empty stdout is the host's allow (arbiter.enabled: false, or a
-        // dispatch with no target). JSON.parse("") would throw and wrongly block.
+        // dispatch with no target). Parsing "" would throw and wrongly block. The parse
+        // is the parseDecision call, which validates the shape before returning.
         int emptyCheck = content.IndexOf("trim() === \"\"", StringComparison.Ordinal);
-        int parse = content.IndexOf("JSON.parse(", StringComparison.Ordinal);
+        int parse = content.IndexOf("parseDecision(text)", StringComparison.Ordinal);
         Assert.True(emptyCheck >= 0, "shim must test for empty stdout");
-        Assert.True(parse > emptyCheck, "the empty-stdout check must precede JSON.parse");
+        Assert.True(parse > emptyCheck, "the empty-stdout check must precede parsing the decision");
         Assert.Contains("{ decision: \"allow\" }", content, StringComparison.Ordinal);
     }
 

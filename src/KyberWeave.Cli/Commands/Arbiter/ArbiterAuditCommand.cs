@@ -77,14 +77,22 @@ public sealed class ArbiterAuditCommand : Command<ArbiterSettings>
             events = ledger.ReadAll();
             records = decisions.ReadAll();
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        // A truncated, hand-edited or foreign line is malformed JSON, which throws
+        // JsonException rather than an IOException. Reading the log must fail closed the
+        // same way either way, or the audit crashes on the corrupt file it exists to
+        // report on.
+        catch (Exception exception) when (exception is IOException
+            or UnauthorizedAccessException
+            or System.Text.Json.JsonException
+            or NotSupportedException
+            or System.IO.InvalidDataException)
         {
             report.Add(new Diagnostic(
                 ArbiterEvaluator.HookErrorCode,
                 Severity.Error,
                 $"The arbiter log under '{arbiterDirectory}' could not be read: {exception.Message}",
                 arbiterDirectory,
-                "Confirm the directory is readable; the audit fails closed rather than reporting an empty log."));
+                "The ledger or the decision log holds a line that is not a complete record; the audit fails closed rather than reporting a partial log."));
             CommandHelpers.Finish(report, settings, "arbiter audit", "Event");
             return 1;
         }

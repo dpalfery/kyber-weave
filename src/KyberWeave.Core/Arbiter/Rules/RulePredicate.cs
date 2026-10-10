@@ -78,8 +78,8 @@ public sealed record RuleOperand
 /// <remarks>
 /// Path-sensitive operators (<c>matches</c>, <c>subset-of</c>, <c>intersects</c>)
 /// cover list items through <see cref="PathGlob.IsMatch"/> so a task file entry
-/// such as <c>src/auth/**</c> covers <c>src/auth/a.cs</c>. An absent fact
-/// satisfies <c>exists: false</c> and fails every other operator.
+/// such as <c>src/auth/**</c> covers <c>src/auth/a.cs</c>. A fact with no value
+/// is absent: it satisfies <c>exists: false</c> and fails every other operator.
 /// </remarks>
 public sealed record RulePredicate
 {
@@ -212,14 +212,25 @@ public sealed record RulePredicate
 
     private bool EvaluateExists(ArbiterFactSet facts)
     {
-        bool present = Fact is not null && facts.Contains(Fact);
+        bool present = Fact is not null && facts.IsPresent(Fact);
         bool expected = Operand?.LiteralValue is bool b && b;
         return present == expected;
     }
 
+    /// <summary>
+    /// Resolves the fact this predicate names, treating a null-valued fact as absent so
+    /// that every leaf operator fails it, exactly as the contract on
+    /// <see cref="ArbiterFactSet"/> states.
+    /// </summary>
+    private static ArbiterFact? ResolveFact(ArbiterFactSet facts, string? name) =>
+        name is not null && facts.TryGet(name, out ArbiterFact? fact) && fact.Value is not null
+            ? fact
+            : null;
+
     private bool EvaluateEquals(ArbiterFactSet facts)
     {
-        if (Fact is null || !facts.TryGet(Fact, out ArbiterFact? fact))
+        ArbiterFact? fact = ResolveFact(facts, Fact);
+        if (fact is null)
         {
             return false;
         }
@@ -234,7 +245,8 @@ public sealed record RulePredicate
 
     private bool EvaluateIn(ArbiterFactSet facts)
     {
-        if (Fact is null || !facts.TryGet(Fact, out ArbiterFact? fact))
+        ArbiterFact? fact = ResolveFact(facts, Fact);
+        if (fact is null)
         {
             return false;
         }
@@ -257,7 +269,8 @@ public sealed record RulePredicate
 
     private bool EvaluateMatches(ArbiterFactSet facts)
     {
-        if (Fact is null || !facts.TryGet(Fact, out ArbiterFact? fact))
+        ArbiterFact? fact = ResolveFact(facts, Fact);
+        if (fact is null)
         {
             return false;
         }
@@ -292,7 +305,8 @@ public sealed record RulePredicate
 
     private bool EvaluateSubsetOf(ArbiterFactSet facts)
     {
-        if (Fact is null || !facts.TryGet(Fact, out ArbiterFact? fact))
+        ArbiterFact? fact = ResolveFact(facts, Fact);
+        if (fact is null)
         {
             return false;
         }
@@ -317,7 +331,8 @@ public sealed record RulePredicate
 
     private bool EvaluateIntersects(ArbiterFactSet facts)
     {
-        if (Fact is null || !facts.TryGet(Fact, out ArbiterFact? fact))
+        ArbiterFact? fact = ResolveFact(facts, Fact);
+        if (fact is null)
         {
             return false;
         }
@@ -342,7 +357,8 @@ public sealed record RulePredicate
 
     private bool EvaluateCount(ArbiterFactSet facts)
     {
-        if (Fact is null || !facts.TryGet(Fact, out ArbiterFact? fact))
+        ArbiterFact? fact = ResolveFact(facts, Fact);
+        if (fact is null)
         {
             return false;
         }
@@ -393,9 +409,9 @@ public sealed record RulePredicate
             return true;
         }
 
-        if (Operand.FactName is not null && facts.TryGet(Operand.FactName, out ArbiterFact? fact))
+        if (Operand.FactName is not null && ResolveFact(facts, Operand.FactName) is { } referenced)
         {
-            value = fact.Value;
+            value = referenced.Value;
             return true;
         }
 

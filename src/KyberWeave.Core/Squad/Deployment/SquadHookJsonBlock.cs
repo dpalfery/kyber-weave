@@ -233,6 +233,13 @@ public static class SquadHookJsonBlock
         JsonObject root = ParseObject(currentJson);
         List<SquadHookDrift> drift = [];
         Dictionary<string, HashSet<int>> claimed = new(StringComparer.Ordinal);
+        List<UnanchoredEntry> unanchored = [];
+
+        // Pass one claims every recorded index whose digest still matches where it was
+        // recorded. Anchoring all of them before any re-anchor is what keeps two
+        // identical twins from covering for each other: interleaved, the surviving twin
+        // claimed the slot its edited sibling was recorded at, and the edit read as a
+        // move rather than as damage.
         foreach ((string pointer, string digest) in expectedDigests)
         {
             JsonNode? node = ResolvePointer(root, pointer);
@@ -248,25 +255,43 @@ public static class SquadHookJsonBlock
                 continue;
             }
 
-            // The recorded index is only a hint. A user who inserts a hook ahead of
-            // Squad's shifts it, and reading that as drift would also stop `squad update`
-            // from ever refreshing the entry. Look for the untouched entry in its container.
-            if (hasContainer && ResolvePointer(root, containerPointer) is JsonArray container)
+            if (hasContainer)
             {
-                HashSet<int> taken = ClaimedIn(claimed, containerPointer);
-                int found = IndexOfUnclaimedDigest(container, digest, taken);
-                if (found >= 0)
-                {
-                    taken.Add(found);
-                    continue;
-                }
+                unanchored.Add(new UnanchoredEntry(pointer, containerPointer, digest, node is null));
+                continue;
             }
 
             drift.Add(new SquadHookDrift(pointer, node is null ? MissingReason : ModifiedReason));
         }
 
+        // Pass two re-anchors only what pass one left unaccounted for, and only against
+        // indices no pass-one claim took. A user who inserts a hook ahead of Squad's
+        // shifts every entry, and reading that as drift would also stop `squad update`
+        // from ever refreshing them.
+        foreach (UnanchoredEntry entry in unanchored)
+        {
+            HashSet<int> taken = ClaimedIn(claimed, entry.ContainerPointer);
+            int found = ResolvePointer(root, entry.ContainerPointer) is JsonArray container
+                ? IndexOfUnclaimedDigest(container, entry.Digest, taken)
+                : -1;
+            if (found >= 0)
+            {
+                taken.Add(found);
+                continue;
+            }
+
+            drift.Add(new SquadHookDrift(entry.Pointer, entry.WasMissing ? MissingReason : ModifiedReason));
+        }
+
         return drift;
     }
+
+    /// <summary>A recorded entry whose digest did not match the index it was recorded at.</summary>
+    private readonly record struct UnanchoredEntry(
+        string Pointer,
+        string ContainerPointer,
+        string Digest,
+        bool WasMissing);
 
     private static HashSet<int> ClaimedIn(Dictionary<string, HashSet<int>> claimed, string containerPointer)
     {

@@ -31,6 +31,8 @@ public sealed class CursorHookAdapterTests
 
         public bool ThrowOnPre;
 
+        public string? SeenPostToolOutput;
+
         public HookOutcome PreResult { get; set; } = new(HookOutcomeKind.Allow);
 
         public HookOutcome PostResult { get; set; } = new(HookOutcomeKind.Allow);
@@ -47,8 +49,11 @@ public sealed class CursorHookAdapterTests
             return PreResult;
         }
 
-        public HookOutcome DecidePostDispatch(string caller, string? target, string toolOutput, KyberWeaveConfig config) =>
-            PostResult;
+        public HookOutcome DecidePostDispatch(string caller, string? target, string toolOutput, KyberWeaveConfig config)
+        {
+            SeenPostToolOutput = toolOutput;
+            return PostResult;
+        }
     }
 
     private sealed class ContextualEngine : IContextualHookDecisionEngine
@@ -320,6 +325,33 @@ public sealed class CursorHookAdapterTests
 
         Assert.Equal(0, exit);
         Assert.Equal("{}", stdout);
+    }
+
+    [Fact]
+    public void PostDispatch_AnExplicitNullToolOutput_FailsClosedRatherThanScanningTheWordNull()
+    {
+        // An explicit `"tool_output": null` is not the four-letter string "null". Reading
+        // it through GetRawText() handed the engine that literal and nothing else, so the
+        // post-dispatch scan judged an absent result by its own spelling.
+        ScriptedEngine engine = new();
+
+        (int exit, string stdout, _) = Run(
+            """
+            {"hook_event_name":"postToolUse","tool_name":"Task","tool_use_id":"toolu-cursor-post-1",
+             "tool_input":{"prompt":"Implement the adapter.","subagent_type":"csharp-dev"},
+             "tool_output":null}
+            """,
+            null,
+            engine);
+
+        Assert.Equal(0, exit);
+        Assert.NotEqual("null", engine.SeenPostToolOutput);
+        using JsonDocument doc = JsonDocument.Parse(stdout);
+        Assert.Equal("deny", doc.RootElement.GetProperty("permission").GetString());
+        Assert.Contains(
+            "carries a null tool_output",
+            doc.RootElement.GetProperty("agent_message").GetString(),
+            StringComparison.Ordinal);
     }
 
     [Fact]

@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Diagnostics;
@@ -115,6 +116,22 @@ public static partial class PlanDocumentParser
 
     /// <summary>Parses plan or spec task artifact text into a <see cref="PlanDocument"/>.</summary>
     /// <param name="markdown">The file text as authored. The parser writes nothing.</param>
+    /// <summary>
+    /// The SHA-256 of a plan's content, lowercase hex. The identity a decision log entry
+    /// carries so a later decision can tell an unchanged plan from an amended one.
+    /// </summary>
+    /// <remarks>
+    /// Computed here, next to the parse, so the digest a decision records is the digest
+    /// of the exact text it parsed. Re-deriving it from the parsed document would hash
+    /// something the file never contained, and two hosts would then disagree on whether
+    /// a plan had been amended.
+    /// </remarks>
+    public static string Digest(string markdown)
+    {
+        ArgumentNullException.ThrowIfNull(markdown);
+        return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(markdown)));
+    }
+
     public static PlanDocument Parse(string markdown)
     {
         ArgumentNullException.ThrowIfNull(markdown);

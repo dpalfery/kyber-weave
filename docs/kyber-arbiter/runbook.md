@@ -35,7 +35,10 @@ kyber-weave-arbiter hook --harness <claude|copilot-vscode|copilot-cli|opencode|p
 ```
 
 Every target except `claude` and `copilot-vscode` is project-wide: it gates only dispatches
-carrying the `KYBER-ARBITER: true` marker and carries no `--caller`.
+carrying the `KYBER-ARBITER: true` marker and carries no `--caller`. `codex`, `cursor`,
+`factory`, `devin` and `antigravity` are owned entries spliced into a shared hook file;
+`pi` and `kilo` are whole owned files, `.pi/extensions/kyber-arbiter.ts` and
+`.kilo/plugin/kyber-arbiter.ts`.
 It reads the harness event on stdin and writes only the harness's decision document on
 stdout — logging goes to stderr. The exit code is 0.
 

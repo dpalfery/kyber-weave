@@ -405,11 +405,37 @@ public sealed class PiRenderer : ISquadRenderer
         return $$"""
             import { spawnSync } from "node:child_process";
 
+            // Keys that mutate an object's linkage rather than adding a property to it.
+            const POLLUTING_ARG_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
             type ArbiterDecision = {
               decision: "allow" | "block";
               reason?: string;
               args?: Record<string, unknown>;
             };
+
+            // JSON.parse accepts null, a bare string, an array and an object with no
+            // decision field, and the extension believed whatever came back: a document
+            // whose decision is not "block" is read as an allow. Only a plain object whose
+            // decision is exactly "allow" or "block" is a decision at all; anything else
+            // blocks, because a dispatch the host never approved must not pass.
+            function asDecision(parsed: unknown): ArbiterDecision {
+              if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+                return { decision: "block", reason: "kyber-arbiter: malformed arbiter decision" };
+              }
+              const candidate = parsed as { decision?: unknown; reason?: unknown; args?: unknown };
+              if (candidate.decision !== "allow" && candidate.decision !== "block") {
+                return { decision: "block", reason: "kyber-arbiter: malformed arbiter decision" };
+              }
+              const decision: ArbiterDecision = { decision: candidate.decision };
+              if (typeof candidate.reason === "string") {
+                decision.reason = candidate.reason;
+              }
+              if (typeof candidate.args === "object" && candidate.args !== null && !Array.isArray(candidate.args)) {
+                decision.args = candidate.args as Record<string, unknown>;
+              }
+              return decision;
+            }
 
             function runArbiterHook(envelope: unknown): ArbiterDecision {
               try {
@@ -428,7 +454,7 @@ public sealed class PiRenderer : ISquadRenderer
                 if (out.trim() === "") {
                   return { decision: "allow" };
                 }
-                return JSON.parse(out) as ArbiterDecision;
+                return asDecision(JSON.parse(out));
               } catch (err) {
                 return { decision: "block", reason: "kyber-arbiter: failed to run arbiter hook: " + String(err) };
               }
@@ -456,6 +482,14 @@ public sealed class PiRenderer : ISquadRenderer
                 }
                 if (decision.args !== undefined) {
                   for (const key of Object.keys(decision.args)) {
+                    // These three keys run an inherited setter rather than creating an own
+                    // property: assigning to `__proto__` rebinds the target object's
+                    // prototype, so a decision could hand the host's tool input an object
+                    // it then inherits properties from. Skip them; a decision has no
+                    // legitimate reason to name them.
+                    if (POLLUTING_ARG_KEYS.has(key)) {
+                      continue;
+                    }
                     event.input[key] = decision.args[key];
                   }
                 }
@@ -481,7 +515,9 @@ public sealed class PiRenderer : ISquadRenderer
                 const decision = runArbiterHook(envelope);
                 if (decision.decision === "block") {
                   const reason = decision.reason ?? "blocked by kyber-arbiter";
-                  return { content: [...event.content, { type: "text", text: reason }] };
+                  // A call that produced no output carries `content: undefined`, and
+                  // spreading that threw before the block could be built.
+                  return { content: [...(event.content ?? []), { type: "text", text: reason }] };
                 }
               });
             }

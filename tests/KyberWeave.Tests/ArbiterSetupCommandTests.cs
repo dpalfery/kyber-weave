@@ -3,6 +3,7 @@ using System.Net;
 using System.Text;
 using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
+using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Credentials;
 using KyberWeave.Core.Processes;
 using KyberWeave.Tests.Arbiter;
@@ -111,6 +112,64 @@ public sealed class ArbiterSetupCommandTests : IDisposable
         Assert.Contains("systemone", execution.Output, StringComparison.Ordinal);
     }
 
+    [Theory]
+    // The model string went into the YAML verbatim, so a value carrying YAML syntax
+    // either corrupted the file or wrote something the reader did not see. What matters
+    // is the round trip: what setup accepts must be what the next run reads back.
+    [InlineData("jev-1.13.0")]
+    [InlineData("model:with:colons")]
+    [InlineData("model \"quoted\"")]
+    [InlineData("model #hash")]
+    [InlineData("model # not-a-comment")]
+    [InlineData("model 'single'")]
+    [InlineData("model\\backslash")]
+    [InlineData("  padded  ")]
+    public void Setup_WritesAModelThatRoundTripsThroughTheUserSettings(string model)
+    {
+        string host = NewDir("setup-model");
+        ArbiterSetupCommand command = new();
+
+        CommandExecution execution = Capture(() => command.Execute(
+            null!,
+            new ArbiterSettings
+            {
+                Path = host,
+                Provider = "none",
+                Endpoint = "https://api.typesafe.ai/v1",
+                Model = model,
+            }));
+
+        Assert.Equal(0, execution.ExitCode);
+        ArbiterProviderConfig applied = ArbiterUserSettings.ApplyTo(
+            ArbiterConfig.ProductDefaults.Provider,
+            _home.Path);
+        Assert.Equal(model.Trim(), applied.Model);
+    }
+
+    [Theory]
+    // A newline cannot be quoted in a YAML scalar, so it is rejected rather than
+    // written as a value that silently swallows the rest of the document.
+    [InlineData("model\nendpoint: https://evil.example/v1")]
+    [InlineData("model\r\nother: value")]
+    [InlineData("model\ttab")]
+    public void Setup_RejectsAModelCarryingControlCharacters(string model)
+    {
+        string host = NewDir("setup-control");
+
+        CommandExecution execution = Capture(() => new ArbiterSetupCommand().Execute(
+            null!,
+            new ArbiterSettings
+            {
+                Path = host,
+                Provider = "none",
+                Endpoint = "https://api.typesafe.ai/v1",
+                Model = model,
+            }));
+
+        Assert.Equal(1, execution.ExitCode);
+        Assert.DoesNotContain("evil.example", execution.Output, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void Setup_MaskedPrompt_StoresKeyWithoutEchoing()
     {
@@ -186,7 +245,9 @@ public sealed class ArbiterSetupCommandTests : IDisposable
             new ArbiterSettings { Path = host, Provider = "none" }));
 
         Assert.Equal(0, execution.ExitCode);
-        Assert.Contains("kind: none", File.ReadAllText(OverridePath()), StringComparison.Ordinal);
+
+        // Quoted: every value setup writes is a single-quoted YAML scalar.
+        Assert.Contains("kind: 'none'", File.ReadAllText(OverridePath()), StringComparison.Ordinal);
         Assert.Empty(_store.Writes);
     }
 

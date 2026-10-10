@@ -197,6 +197,26 @@ public sealed class ArbiterReadGuardTests
         Assert.Contains("Req 25", result.Reason ?? string.Empty, StringComparison.Ordinal);
     }
 
+    [Theory]
+    // The substring match ran against the raw text, so an equivalent path spelled with a
+    // repeated separator or a "." segment never contained "docs/plans" and passed.
+    [InlineData("cat docs//plans/plan.md")]
+    [InlineData("cat docs/./plans/plan.md")]
+    [InlineData("cat ./docs/plans/plan.md")]
+    [InlineData("cat docs/specs/../plans/plan.md")]
+    [InlineData("cat docs/plans\\plan.md")]
+    public void Check_BashNamingAPlanningPathThroughAnEquivalentSpelling_Denies(string command)
+    {
+        ReadGuardResult result = ReadGuard.Check(
+            "Bash",
+            ToolInput(JsonSerializer.Serialize(new { command })),
+            "/repo",
+            ProtectedDirs);
+
+        Assert.False(result.Allowed);
+        Assert.Contains("Req 25", result.Reason ?? string.Empty, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void Check_BashWithoutPlanningPath_Allows()
     {
@@ -205,6 +225,32 @@ public sealed class ArbiterReadGuardTests
             ToolInput("""{"command": "dotnet build KyberWeave.sln -c Release"}"""),
             "/repo",
             ProtectedDirs);
+
+        Assert.True(result.Allowed);
+    }
+
+    [Theory]
+    // A search rooted above a protected directory covers it, so searching "." or "docs"
+    // reaches the planning paths just as surely as naming one. Only the inward direction
+    // was checked, so those searches were allowed.
+    [InlineData("Grep", """{"path": ".", "pattern": "KW-ARB"}""")]
+    [InlineData("Grep", """{"path": "docs", "pattern": "KW-ARB"}""")]
+    [InlineData("Grep", """{"path": "./", "pattern": "KW-ARB"}""")]
+    [InlineData("Glob", """{"path": "docs", "pattern": "plans/**"}""")]
+    public void Check_SearchRootedAboveAProtectedDirectory_Denies(string tool, string input)
+    {
+        ReadGuardResult result = ReadGuard.Check(tool, ToolInput(input), "/repo", ProtectedDirs);
+
+        Assert.False(result.Allowed);
+        Assert.Contains("Req 25", result.Reason ?? string.Empty, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("Grep", """{"path": "src", "pattern": "KW-ARB"}""")]
+    [InlineData("Glob", """{"path": "src/KyberWeave.Core", "pattern": "*.cs"}""")]
+    public void Check_SearchOutsideEveryProtectedDirectory_Allows(string tool, string input)
+    {
+        ReadGuardResult result = ReadGuard.Check(tool, ToolInput(input), "/repo", ProtectedDirs);
 
         Assert.True(result.Allowed);
     }

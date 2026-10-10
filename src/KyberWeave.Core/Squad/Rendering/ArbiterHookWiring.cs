@@ -45,6 +45,12 @@ public static class ArbiterHookWiring
     private const string GlobalScopeReason = "global-scope";
     private const string CommandName = "kyber-weave-arbiter";
 
+    /// <summary>The shape every agent name and harness token written into a hook command takes.</summary>
+    private const string CallerPatternText = "^[A-Za-z0-9][A-Za-z0-9_-]*$";
+
+    private static readonly System.Text.RegularExpressions.Regex CallerPattern =
+        new(CallerPatternText, System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
     /// <summary>The hooked targets in stable derivation order for <see cref="BuildHooks"/>.</summary>
     private static readonly IReadOnlyList<SquadTarget> HookedSquadTargets =
         [SquadTarget.Claude, SquadTarget.Codex, SquadTarget.Copilot, SquadTarget.Cursor, SquadTarget.OpenCode, SquadTarget.Pi,
@@ -162,11 +168,49 @@ public static class ArbiterHookWiring
     }
 
     /// <summary>Builds the hook command line that gates one agent's dispatches on one target.</summary>
-    public static string HookCommandLine(SquadTarget target, string caller)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(caller);
+    public static string HookCommandLine(SquadTarget target, string caller) =>
+        HookCommandLine(SquadTargetCatalog.GetToken(target), caller);
 
-        return $"{CommandName} hook --harness {SquadTargetCatalog.GetToken(target)} --caller {caller}";
+    /// <summary>
+    /// Builds the hook command line for one harness token and one caller.
+    /// </summary>
+    /// <remarks>
+    /// The one place an Arbiter hook command is composed, so every renderer that emits a
+    /// shell command line shares its validation. The command runs through the harness's
+    /// shell, so the caller is checked against a plain agent name before it is written:
+    /// a space or a metacharacter would otherwise end the argument and be the shell's to
+    /// interpret. Agent names are not attacker-controlled in the normal path — they come
+    /// from the canonical Squad data — but a name that cannot be written safely must fail
+    /// the render rather than be lowered into something a shell executes.
+    /// </remarks>
+    /// <param name="harnessToken">The harness token passed to <c>--harness</c>.</param>
+    /// <param name="caller">The agent name passed to <c>--caller</c>.</param>
+    /// <exception cref="ArgumentException">
+    /// Thrown when <paramref name="caller"/> is not <c>^[A-Za-z0-9][A-Za-z0-9_-]*$</c>, or when
+    /// <paramref name="harnessToken"/> is not a plain token.
+    /// </exception>
+    public static string HookCommandLine(string harnessToken, string caller)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(harnessToken);
+        ArgumentException.ThrowIfNullOrWhiteSpace(caller);
+        if (!CallerPattern.IsMatch(caller))
+        {
+            throw new ArgumentException(
+                $"Arbiter hook caller '{caller}' is not a plain agent name: it must match " +
+                $"{CallerPatternText} so it cannot end the argument or reach the shell as a " +
+                "metacharacter.",
+                nameof(caller));
+        }
+
+        if (!CallerPattern.IsMatch(harnessToken))
+        {
+            throw new ArgumentException(
+                $"Arbiter hook harness token '{harnessToken}' is not a plain token: it must " +
+                $"match {CallerPatternText}.",
+                nameof(harnessToken));
+        }
+
+        return $"{CommandName} hook --harness {harnessToken} --caller {caller}";
     }
 
     /// <summary>Produces the hook decisions for a render, gated on Enabled and Project scope.</summary>
