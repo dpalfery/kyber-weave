@@ -6,7 +6,7 @@ status: current
 component: KyberDash
 source-root: dash
 owner: dpalfery
-last-reviewed: 2026-10-01
+last-reviewed: 2026-10-10
 code-refs:
   - registerKyberCommands
   - refreshHarnessSources
@@ -17,11 +17,21 @@ code-refs:
 
 KyberDash provides multi-surface observability and context tuning for agentic coding workflows.
 First-party code under `dash/` since a one-time fork of CodeBurn
-([ADR 0020](../adr/0020-kyberdash-one-time-fork.md)), it runs as **three local surfaces** today:
+([ADR 0020](../adr/0020-kyberdash-one-time-fork.md)), it runs as **three local surfaces**
+today:
 
-1. [KyberDash Tray (`dash/tray/`)](#6-the-kyberdash-tray-dashtray) — the macOS and Windows tray: a Tauri 2 shell whose popover renders the context report and which owns the refresh cadence and the optional OTLP receiver.
+> **THE TRAY AND THE WEB DASHBOARD ARE DISPLAY LAYERS. NEITHER CONTAINS ISOLATED FEATURE
+> LOGIC, SCHEDULERS OR JOBS. ALL LOGIC AND JOBS (REFRESH SCHEDULING, CLEAN, IMPORT, PAUSE)
+> LIVE IN THE SHARED KYBERDASH APPLICATION (THE CLI ENGINE AND THE `kyberdash web` SERVER
+> BUILT FROM IT) THAT BOTH SURFACES SHARE. BOTH SURFACES USE ONE DATASTORE (canon.db,
+> resolved by dash/src/canon/paths.ts resolveCanonDbPath) AND ONE API LAYER
+> (/api/kyber/*). NO AGENT OR DESIGN MAY VIOLATE THIS.** See
+> [`rules/kyberdash-display-layer`](../rules/kyberdash-display-layer.md) and
+> [ADR 0033](../adr/0033-kyberdash-surfaces-are-display-layers.md).
+
+1. [KyberDash Tray (`dash/tray/`)](#6-the-kyberdash-tray-dashtray) — the macOS and Windows tray: a Tauri 2 shell whose popover renders the context report. It attaches to a live `kyberdash web` server, launching one with `--no-open` only when there is none to attach to, and it reaches the engine over `/api/kyber/*`.
 2. [Web Dashboard (`dash/web/`)](#web-dashboard-dashweb) — Standalone React browser interface served by the CLI over HTTP.
-3. [CLI engine (`dash/src/`)](#telemetry-ingest-canonical-store-and-cli-operations) — `kyberdash report`, `web`, `dash refresh`, `kyber otel`, and the store operations documented below.
+3. [CLI engine (`dash/src/`)](#telemetry-ingest-canonical-store-and-cli-operations) — `kyberdash report`, `web`, `dash refresh`, `dash import-history`, `dash clean`, `dash settings`, `kyber otel`, and the store operations documented below. This is where the jobs, the settings, and the receiver live.
 
 This runbook covers the local prerequisites, build workflows, dev runners, CLI operations, and test suites
 for each surface.
@@ -70,7 +80,8 @@ flowchart TD
 
     CLI_SRC --> BUILD --> CLI_DIST
 
-    CLI_DIST -->|"spawns: web --no-open + kyber otel"| TRAY["Surface 1: KyberDash Tray<br/>(dash/tray/)"]
+    CLI_DIST -->|"spawns or attaches: web --no-open only"| TRAY["Surface 1: KyberDash Tray<br/>(dash/tray/)"]
+    CLI_DIST -->|"hosts"| SERVER["kyberdash web server<br/>JobHost (scheduled jobs) +<br/>ReceiverHost (OTLP receiver)"]
     CLI_DIST -->|"Embedded HTTP / web"| WEB["Surface 2: Web Dashboard<br/>(dash/web/)"]
     CLI_SRC -->|"tsx launcher"| DEV["Local dev runners<br/>(npm --prefix dash run dev)"]
 ```
@@ -79,6 +90,10 @@ flowchart TD
   KyberDash by executing the compiled CLI. Building this file is a mandatory prerequisite for
   running the tray from source; the deployed tray instead points `kyberdashPath` in
   `~/.kyberdash/tray.json` at a staged self-contained binary (see the tray section below).
+- **Who hosts what**: the tray spawns (or attaches to) `web --no-open` and nothing else — it
+  never starts `kyber otel`. The OTLP receiver is a `ReceiverHost` child of the
+  `kyberdash web` server, run only while `settings.receiverHosted` is on, and the scheduled
+  refresh/import jobs run in that server's `JobHost`.
 - **One shared projection**: whichever entry fills the store — `dash refresh`, live OTLP
   ingest, or a manual `kyber build` — the derived data every surface reads is produced by the
   same `projectCanonicalStore()` projection over `buildSessions()`. There is no second
@@ -128,6 +143,11 @@ node dash/dist/cli.js kyber otel --port 4318 --host 127.0.0.1
 node dash/dist/cli.js otel --port 4318
 ```
 
+Run that command when you want a standalone collector. When a `kyberdash web` server is
+running, `ReceiverHost` (`dash/src/jobs/receiver-host.ts`) hosts the same receiver as a child
+of that server instead, and `settings.receiver.hosted` ([§2d](#2d-shared-settings-and-pause))
+records which of the two the current setup uses.
+
 ### 2. Derived Projection Rebuilding (`kyber build`)
 
 The `session`, `run`, `execution`, and `finding` tables are derived projections over raw canonical
@@ -171,8 +191,30 @@ commits with `commitSourceUnit`, then runs `purgeExpiredContent` (14-day content
 `records.raw` kept) and projects the store through `projectCanonicalStore` — the shared full
 projection over `buildSessions` that the live OTLP receiver also drives. Output is a
 per-harness table plus a derived summary; diagnostics for `failed`/`partial` rows go to
-stderr without chat content or raw paths. Use a temporary `--db` when experimenting. There is
-no dashboard refresh button.
+stderr without chat content or raw paths. Use a temporary `--db` when experimenting.
+
+A terminal `dash refresh` always reads folder sources. The scheduled, tray, and web runs do
+not: they honour the shared setting `settings.folder_import.scheduled`, which is **off** by
+default ([§2d](#2d-shared-settings-and-pause)); with it off, a scheduled tick runs only the
+maintenance pass — the retention purge plus the projection — writes no `refresh_run` row
+(so the audit trail never claims a source read that did not happen), and prints the skip line
+`Folder sources skipped (scheduled folder import is off)`. A dashboard or tray refresh asks
+the engine over `POST /api/kyber/refresh`; it runs the same refresh and is gated by the same
+setting ([ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md) decision 1,
+[ADR 0033](../adr/0033-kyberdash-surfaces-are-display-layers.md)).
+
+Parser-contract bumps: each harness-source descriptor carries a
+`parserContractVersion`. When Claude family parsing output changes — for example
+attaching conversation/tool-result parts on Desktop/CLI file-synth records
+([issue #216](https://github.com/dpalfery/kyber-weave/issues/216)) — that version
+advances and the next `dash refresh` treats prior `source_checkpoint` rows as
+stale, re-reads transcript files, and re-synthesizes affected units still
+inside the 14-day content-retention window. Rows older than that floor are
+not rewritten — the same refresh would empty their parts via
+`purgeExpiredContent`. No separate repair command is required; prefer a
+temporary `--db` when validating a bump.
+Capturable versus inherent-empty Claude buckets are recorded in the
+[telemetry inventory](telemetry-inventory.md#claude-desktop-and-cli-file-synth-parts-issue-216).
 
 Coverage window persistence: every refresh run records its window in
 `refresh_run.history_weeks` (schema 15). The value is the `--history-weeks` argument of
@@ -199,6 +241,131 @@ their persisted reason: `window_filtered` (all native records predate the refres
 widen `--history-weeks` to ingest them) or `no_recordable_events` (the file holds no usage
 or model events, so there is nothing to ingest).
 
+### 2b. Database clean (`dash clean`)
+
+Wipe bad or stale telemetry — double-counting, mis-attribution, test noise — by harness
+scope or for all harnesses
+([ADR 0032](../adr/0032-kyberdash-user-initiated-clean.md)):
+
+```bash
+node dash/dist/cli.js dash clean --all --yes
+node dash/dist/cli.js dash clean --harness pi --harness cursor --yes
+node dash/dist/cli.js dash clean --all --yes --reingest-weeks 4
+node dash/dist/cli.js dash clean --all --yes --no-reingest
+```
+
+`--all` or at least one `--harness <id>` is required, and so is `--yes`: without the
+flag the command exits **2** before the store opens (the CLI is non-interactive, so there
+is no prompt). A held refresh lock exits **3** with nothing written; clean failure exits
+**1**; success exits **0**.
+
+**A clean does not re-import folder history.** The window is opt-in: pass
+`--reingest-weeks <n>` (a whole number of weeks, 1 to 52) to get the source logs back in
+the same run, or leave it off and run [`dash import-history`](#2c-import-folder-history-dash-import-history)
+afterwards. `--no-reingest` is still accepted and is now just the stated default, so a
+script written against it keeps working. Nothing re-imports on its own later either: the
+next scheduled refresh reads folder sources only while
+`settings.folder_import.scheduled` is `on`.
+
+One clean pauses the OTLP receiver (loopback admin routes; export paths answer 503 +
+Retry-After while paused, `/healthz` stays 200 with `paused`), holds the refresh lock,
+wipes the scope in one store transaction (records including `records.raw`, provenance,
+checkpoints, and harness-scoped derived caches), projects the derived tables, re-ingests
+the scope **only if a window was requested**, and resumes ingestion. `ingest_log`,
+`refresh_run`, `metadata` (stamped `last_clean_at`/scope), `token_cache`, and the
+model-window catalog are never wiped. Wipe-all additionally clears `quarantine` and the
+log-enrichment tables; a per-harness wipe cannot scope quarantine rows (no harness column).
+
+There is no backup and no undo: the data is ephemeral point-in-time telemetry, and
+file-backed harnesses re-derive it from source logs. OTLP-collected records have no
+source logs and do not come back — the web dialog and the tray confirm both say so
+before anything is wiped. Prefer a temporary `--db` when validating a wipe.
+
+Both surfaces reach the same operation at `POST /api/kyber/clean` (confirmed dialog in the
+dashboard's Maintenance panel and in the tray's two-step confirm), passing the scope, the
+explicit confirmation, and a `reingestWeeks` window or its absence. Neither spawns a clean
+child, and neither holds clean logic.
+
+### 2c. Import folder history (`dash import-history`)
+
+The one-off backfill, kept as its own command so "import this once" stays visibly a
+different decision from "keep importing":
+
+```bash
+node dash/dist/cli.js dash import-history
+node dash/dist/cli.js dash import-history --weeks 4
+node dash/dist/cli.js dash import-history --harness pi --harness cursor
+node dash/dist/cli.js dash import        # alias
+```
+
+`--weeks <n>` is a whole number of weeks, 1 to 52; omission means **1** (the last 7 days).
+`--harness <id>` narrows the import, repeatably. The command never reads or changes
+`settings.folder_import.scheduled` and is always allowed: whatever the setting says, an
+explicit import imports. Usage errors exit **2** before the store opens; a held refresh
+lock exits **3**; a failed import exits **1**; success exits **0**.
+
+The dashboard reaches it at `POST /api/kyber/import-history` with a body carrying
+`{weeks?, harness | harnesses}`, from the Maintenance panel's **Import folder history**
+control; the tray reaches the same route from its popover.
+
+### 2d. Shared settings and Pause
+
+Four settings, stored in `canon.db` metadata (`dash/src/settings/shared-settings.ts`), so a
+change made in one place is the change every other surface sees. Reads fail closed: an
+unrecognised stored value reads as the default rather than being coerced, and an
+unrecognised value is refused before anything is written.
+
+```bash
+node dash/dist/cli.js dash settings show
+node dash/dist/cli.js dash settings show --json
+node dash/dist/cli.js dash settings set folder_import.scheduled on
+node dash/dist/cli.js dash settings set jobs.paused off
+node dash/dist/cli.js dash settings set jobs.refresh_cadence_minutes 10
+```
+
+| Setting (short form) | Metadata key | Default | Effect |
+|---|---|---|---|
+| `folder_import.scheduled` | `settings.folder_import.scheduled` | `off` | Whether **scheduled**, tray, and web refreshes read folder sources. A terminal `dash refresh` and `dash import-history` are never gated by it. |
+| `jobs.paused` | `settings.jobs.paused` | `off` | Pauses the scheduled jobs — see below. |
+| `jobs.refresh_cadence_minutes` | `settings.jobs.refresh_cadence_minutes` | `5` | How often the job host looks for work; a whole number of minutes, 1 to 1440. |
+| `receiver.hosted` | `settings.receiver.hosted` | `off` | Whether the `kyberdash web` server runs the OTLP receiver child. |
+
+Both spellings are accepted on input — the short name and the `settings.`-prefixed key — and
+`show` reports the short name. A usage error on either leaf exits **2** before the store is
+opened, so a refused value leaves the filesystem as it found it.
+
+Over HTTP the same four switches are `GET /api/kyber/settings` and `PUT /api/kyber/settings`,
+with the JSON keys `folderImportScheduled`, `jobsPaused`, `refreshCadenceMinutes`, and
+`receiverHosted`. A `PUT` is partial — a body naming one switch leaves the other three
+untouched — and a body with an unknown key or a value of the wrong type is refused whole.
+
+**Pause covers scheduled jobs only.** `jobs.paused` stops the job host from scheduling: no
+scheduled refresh and no maintenance pass runs while it is set. Manual **Refresh**,
+**Import folder history**, and **Clean**, the OTLP receiver's continued ingest, and the
+retention purge all carry on — pausing must not silently stop collection. The dashboard's
+Maintenance panel offers Pause/Resume and reads the *host's* answer from `GET /api/kyber/jobs`,
+not the echo of the setting it just wrote.
+
+### 2e. Upgrading from an earlier tray
+
+Two things change on the first launch after an upgrade, both of them deliberate
+([issue #319](https://github.com/dpalfery/kyber-weave/issues/319),
+[ADR 0033](../adr/0033-kyberdash-surfaces-are-display-layers.md)):
+
+- **Scheduled folder import is off until you turn it on.** Turn it on from the dashboard's
+  Maintenance panel, the tray's settings view, or
+  `dash settings set folder_import.scheduled on`. Until then, scheduled refreshes still run
+  the maintenance pass and collect OTLP telemetry — they just do not read your harness
+  folders.
+- **The refresh cadence resets to 5 minutes.** It moves from tray-local state into the
+  shared settings, and the old tray value is not migrated. The tray's own refresh-cadence
+  and receiver settings are no longer read; both now answer from the shared settings, which
+  every surface sees.
+
+The tray now attaches to a running `kyberdash web` server rather than owning one, so if the
+dashboard was already running before the upgrade, the tray joins that server and collection
+continues even after you quit the menu bar.
+
 ### 3. Raw Content Backfill and Re-normalization
 
 ```bash
@@ -218,6 +385,12 @@ from other sources — and their derived sessions — are left untouched.
 Prefer it whenever the repair is scoped to one source (for example,
 re-attributing live Antigravity rows after an adapter change).
 
+#### Tool Result Truncation and Parser Checkpoint Re-synthesis (issues #180, #232)
+
+Tool execution outputs captured during file or OTLP ingest are bounded to 64KiB (`MAX_TOOL_RESULT_BYTES = 65_536`) in stored parts (`part: 'tool_result_content'`). Truncated records carry `truncated: true`, with pre-truncation byte length stored in `attributes['gen_ai.tool.result_bytes']`.
+
+When reader extraction or normalization contracts change (such as tool extraction in #180 or request/response turn deduplication in #232), the source's `PARSER_CONTRACT_VERSION` in `dash/src/refresh/registry.ts` is incremented. Running `kyber-weave dash refresh` detects that existing `source_checkpoint` entries carry an older contract version, marks them stale, and automatically re-reads and re-synthesizes historical sessions without requiring manual database deletion.
+
 > **Warning:** unscoped `kyber renormalize` quarantines every row the
 > fingerprint vote cannot claim, including file-sourced rows (`codeburn/*`),
 > which carry no OTLP attributes to vote on. Never run it unscoped on a
@@ -233,8 +406,10 @@ standing privacy and storage liability ([ADR 0014](../adr/0014-unclipped-turn-in
 - **Default 14-day rolling retention**: Full plaintext in `content_json` / `parts_json` is
   retained for 14 days to support the Context Inspector.
 - **Automatic purge on refresh**: `dash refresh` calls `purgeExpiredContent` after source
-  jobs drain. Rows older than 14 days have content emptied in place (`'{}'` / NULL parts).
-  Token metrics, timestamps, findings, and `records.raw` stay.
+  jobs drain, and the maintenance pass calls it too, so the window still advances on a
+  schedule that is not reading folder sources. Rows older than 14 days have content emptied
+  in place (`'{}'` / NULL parts). Token metrics, timestamps, findings, and `records.raw`
+  stay.
 - There is no shipped `kyber purge-content` CLI. Re-run `dash refresh` to apply the window.
 
 ### 5. LLM Review Provider Configuration & Privacy Guardrails
@@ -252,12 +427,57 @@ to request subjective analysis of prompt quality from an LLM.
 
 ### 6. The KyberDash Tray (`dash/tray/`)
 
-The tray is a Tauri 2 Rust shell plus a React popover UI. It resolves the `kyberdash` CLI,
-spawns exactly one `web --no-open` child (default loopback port **4747**) and, when settings
-allow, the OTLP receiver child (port **4318**), polls the report over loopback, and renders
-it. The webview holds no network permission and no analysis logic of its own.
+The tray is a Tauri 2 Rust shell plus a React popover UI. It resolves the `kyberdash`
+binary, attaches to the `kyberdash web` server published in `~/.kyberdash/server.json`
+(`{ pid, url, apiVersion }`) when one is live, launches exactly one `web --no-open` child
+(default loopback port **4747**) when there is none, and polls `/api/kyber/*` over loopback
+to render the popover. It holds no scheduler, no cadence setting, no receiver, and no job
+argv; `JobHost` and `ReceiverHost` live in the engine and are hosted by that server. The
+webview holds no network permission and no analysis logic of its own
+([`rules/kyberdash-display-layer`](../rules/kyberdash-display-layer.md)).
 
-Local gates (after a one-time `npm --prefix dash/tray/ui ci`):
+#### Native development prerequisites
+
+The released tray needs no Rust installation. To build or test `dash/tray/`, install
+the stable Rust toolchain, Cargo, rustfmt, and Clippy. Use current stable Rust: the
+crate's `rust-version` is a minimum for its own source, not a pin for all locked
+dependencies. Node.js and npm are also required for the React UI.
+
+On macOS, install the Xcode Command Line Tools if `xcode-select -p` fails, then use
+Homebrew to install rustup, the Rust toolchain manager:
+
+```bash
+xcode-select -p || xcode-select --install
+brew install rustup
+export PATH="$(brew --prefix rustup)/bin:$PATH"
+rustup default stable
+rustup component add rustfmt clippy
+rustc --version
+cargo --version
+```
+
+Homebrew's rustup is keg-only. Add that `export PATH=...` line to `~/.zprofile`
+and `~/.zshrc` so both login shells and interactive terminals can find Cargo.
+It does not provide `rustup-init`; use `rustup default stable` to install the toolchain.
+If Xcode opens an installation dialog, finish it before building.
+
+On Windows, follow the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/)
+to install Microsoft C++ Build Tools with the **Desktop development with C++** workload
+and WebView2, then install Rust through [rustup](https://rustup.rs/) using the MSVC
+toolchain. In a fresh terminal, run `rustup default stable`,
+`rustup component add rustfmt clippy`, `rustc --version`, and `cargo --version`.
+
+From the repository root, prepare the frontend before a direct Cargo build or test:
+
+```bash
+npm --prefix dash/tray/ui ci
+npm --prefix dash/tray/ui run build
+```
+
+The frontend build creates the `ui/dist` assets embedded by `tauri.conf.json`.
+Build the native shell with `cargo build --locked --manifest-path dash/tray/src-tauri/Cargo.toml`.
+
+#### Local gates
 
 ```bash
 npm --prefix dash/tray/ui run typecheck
@@ -268,6 +488,11 @@ cd dash/tray/src-tauri && cargo fmt --check && cargo clippy -- -D warnings && ca
 `npm --prefix dash run lint` also covers the tray UI. To run the shell against a locally
 built CLI, build `dash/dist/cli.js` first (`npm --prefix dash run build:cli`) and point
 `KYBERDASH_BIN` at it.
+
+For a multi-monitor smoke check, open the card from each monitor's menu bar, including
+displays above or left of the primary and displays with different scaling. The card
+should open on the clicked display. Repeat after moving between 1× and 2× displays.
+The card closes when another app gains focus, so inspect its placement before switching apps.
 
 Deployed shape (per-user, no administrator rights). The Windows installer is unsigned; see
 [Windows: unsigned binaries and SmartScreen](../install.md#windows-unsigned-binaries-and-smartscreen)
@@ -299,8 +524,9 @@ the tray at login (`dash/tray/src-tauri/src/autostart.rs`). On macOS:
   the next `kyber-weave update` (which hands off to `kyberdash menubar --update`) and
   `kyberdash menubar --force` both rewrite it, but a plain `kyberdash menubar` run against an
   already-installed tray leaves an existing record alone.
-- **Quit** through the tray stops it and both children; an abnormal tray exit produces a
-  fresh launchd-started tray whose children rebind the same loopback ports.
+- **Quit** through the tray stops it; it also stops a `web` child it launched itself, and
+  leaves an attached server running. An abnormal tray exit produces a fresh
+  launchd-started tray that rebinds the same loopback ports.
 
 Automatic reconciliation: `refresh_run` rows left in `running` after their refresh process dies or times out (older than 15 minutes) are automatically reconciled to `failure` with an audit summary before subsequent refreshes start — see
 [the closed todo](../archive/todo/stale-refresh-run-rows.md).
@@ -379,9 +605,54 @@ controls appear on Usage only.
   - *Execution Timeline / Call Tree*: Hierarchical span call tree with duration, status badges, and auxiliary flags.
   - *Inspector Drawer (`SessionInspectorDrawer`)*: Slide-out drawer with XML tag folding (`<instructions>`, `<environment_info>`, `<context>`) and formatted tool call/result trees.
 - **Compare** (rail): Phase-aligned run comparison (`page-compare`), not a fifth header tab.
+  Open it from the sidebar or navigate directly to `/compare?a=:runId&b=:runId` to pre-select
+  two runs; without explicit `a`/`b` query ids, **Run A** and **Run B** both start at
+  **Select a run** and kyberdash issues no comparison request until two distinct run ids are
+  chosen. Each selector has its own harness filter (**All harnesses** plus every harness id
+  observed in the inventory); filters are independent so cross-harness A/B comparisons remain
+  possible and narrowing one side does not affect the other. Harness filters use measured
+  canonical ids only — kyberdash does not infer ZCode (or any harness) subagent vs parent role
+  from id, label, or run size. The run inventory stays newest-first (`started DESC` from
+  `/api/kyber/runs`); within each filtered list, options read
+  `YYYY-MM-DD · <harness> · <n> turns · <label or id>` (`date unknown` / `turns unknown` when
+  the server omits those fields). Same-run selection does not fetch. When turns, token delta, or
+  recommendation history are unavailable, the UI shows `—` and the API reason — never fabricated
+  `0` turns, a zero token delta, or `0 / 5` completed pairs; promotion stays disabled
+  (`canPromote: false`) until history is explicitly measured. See
+  [Run Comparison and Phase Alignment](architecture.md#run-comparison-and-phase-alignment-decision-d11).
 - **Usage**: Device spend overview, multi-provider cost rollups, top projects, daily spend, Share.
 - **Quarantine**: Quarantined spans holding unrecognized namespaces or malformed attributes.
 - **Problems**: Recorded token reconciliation mismatches, validation anomalies, and parser errors.
+
+#### Maintenance panel
+
+The Maintenance panel is where the dashboard asks the engine to do things. Every control
+here is an `/api/kyber/*` call; the panel holds no scheduler of its own
+([`rules/kyberdash-display-layer`](../rules/kyberdash-display-layer.md)):
+
+- **Scheduled jobs**: Pause/Resume (writes `jobsPaused` over `PUT /api/kyber/settings`) and
+  **Refresh data** (`POST /api/kyber/refresh`, which returns as soon as the host has taken
+  the job, not when it finishes). The button label and the paused state read from
+  `GET /api/kyber/jobs` — what the host is actually doing — not from the setting echo.
+  Nothing is disabled while paused: manual refresh, import, and clean still work
+  ([§2d](#2d-shared-settings-and-pause)).
+- **Import folder history**: `POST /api/kyber/import-history` with a week window and optional
+  harness scope ([§2c](#2c-import-folder-history-dash-import-history)). It never changes the
+  scheduled-import setting.
+- **Shared settings**: **Import folder history on a schedule**
+  (`folderImportScheduled`), **Refresh cadence** (`refreshCadenceMinutes`), and the
+  **OTLP receiver** (`receiverHosted`), alongside the job host's status — scheduled state,
+  last success, last failure, next due.
+- **Clean**: wipe all or per harness, confirmed, with the **Import folder history** checkbox
+  carrying the post-wipe window (`reingestWeeks`); unchecked means no re-ingest
+  ([§2b](#2b-database-clean-dash-clean)).
+
+Open tabs follow the store: the browser polls `storeGeneration` (the store's identity plus
+wipe marker) every ~10 seconds and refetches when it changes, so a wipe or an import started
+from the tray or a terminal shows up without a manual reload. Coverage likewise ignores
+`refresh_run` rows older than the last wipe — those describe runs whose rows are gone, and
+keeping them would claim coverage the store no longer has
+([ADR 0032](../adr/0032-kyberdash-user-initiated-clean.md)).
 
 #### Sessions harness tabs
 
@@ -390,9 +661,15 @@ sessions across all available harnesses. The other tabs come from the canonical 
 inventory: each distinct nonempty harness ID with sessions gets one tab, regardless of how
 many sessions share that ID. A harness without sessions has no tab.
 
-Select a harness tab to show only sessions with that exact harness ID. Client variants stay
-separate: Claude Code, Claude Desktop and Claude CLI; Codex Desktop and Codex CLI;
-Antigravity CLI and Antigravity IDE; and each Copilot client. Labels describe the tabs;
+Select a harness tab to show only sessions with that exact harness ID. Under the
+harvested #182 twin fold, client front-ends fold onto their primary harness: Claude Desktop
+folds onto Claude Code (and Cursor Agent onto Cursor) for derived rows, rollups, and API
+filters, so Claude Desktop turns appear under the Claude Code tab rather than a duplicate
+surface. The two evidenced exceptions where variants stay separate are: (1) file-side
+standalone sessions that lack OTLP twins remain directly retrievable by session ID, and
+(2) unclipped content inspection preserves the raw origin. Other client variants stay
+separate: Codex Desktop and Codex CLI; Antigravity CLI and Antigravity IDE; and each
+Copilot client. Labels describe the tabs;
 future or unknown harness IDs use their stored ID as the label and remain selectable.
 **Agent Sessions (All)** restores sessions across harnesses.
 
@@ -420,7 +697,7 @@ curl -s http://127.0.0.1:3000/api/kyber/run/run-copilot-001 | jq .
 curl -s http://127.0.0.1:3000/api/kyber/sessions | jq .
 curl -s http://127.0.0.1:3000/api/kyber/session/sess-copilot-001 | jq .
 
-# Inspect unclipped assembled turn context (Task G1 / Decision D14)
+# Inspect unclipped assembled turn context (ADR 0014, issue #184; 0-based turn index)
 curl -s "http://127.0.0.1:3000/api/kyber/session/sess-copilot-001/turn/0/content" | jq .
 
 # Query ranked telemetry findings (Task F3 / Decision D5 / D6)
@@ -436,12 +713,23 @@ curl -s http://127.0.0.1:3000/api/kyber/review/status | jq .
 # Cross-harness comparison matrix
 curl -s http://127.0.0.1:3000/api/kyber/compare | jq .
 
-# Quarantine entries and problems
-curl -s http://127.0.0.1:3000/api/kyber/quarantine | jq .
-curl -s http://127.0.0.1:3000/api/kyber/problems | jq .
+# Phase-aligned run comparison (requires two run ids; no caller-supplied history count)
+curl -s "http://127.0.0.1:3000/api/kyber/compare/runs?runA=run-a&runB=run-b" | jq .
+
+# Quarantine entries and problems with pagination (issue #192; supports ?limit= with ?offset= or ?page=; offset takes precedence when both are supplied)
+curl -s "http://127.0.0.1:3000/api/kyber/quarantine?limit=50&offset=0" | jq .
+curl -s "http://127.0.0.1:3000/api/kyber/problems?limit=50&page=1" | jq .
 
 # Coverage route (refresh window, ingest activity, checkpoints)
 curl -s http://127.0.0.1:3000/api/kyber/coverage | jq .
+
+# Shared settings (read all, or change one)
+curl -s http://127.0.0.1:3000/api/kyber/settings | jq .
+curl -s -X PUT http://127.0.0.1:3000/api/kyber/settings \
+  -H 'Content-Type: application/json' -d '{"folderImportScheduled": true}' | jq .
+
+# Job host status: scheduled state, last success/failure, next due, paused
+curl -s http://127.0.0.1:3000/api/kyber/jobs | jq .
 
 # Telemetry metadata and rate definitions
 curl -s http://127.0.0.1:3000/api/kyber/meta | jq .
@@ -529,7 +817,9 @@ here.
 
 ### 2. Port Collisions (`5173`, `4747`, `4318`)
 - **Port 5173**: Used by default for the web dashboard's Vite development server. If occupied, pass `--port <number>` to Vite or kill the stale process.
-- **Port 4747**: The `kyberdash web` server and the tray's supervised child. Ensure no stale server holds it (`lsof -i :4747`).
+- **Port 4747**: The `kyberdash web` server. The tray attaches to whatever server
+  `~/.kyberdash/server.json` names and starts its own only when none is live. Ensure no
+  stale server holds it (`lsof -i :4747`).
 - **Port 4318**: Standard OTLP HTTP receiver port. Ensure no conflicting OpenTelemetry collectors or Aspire instances hold this port exclusively.
 
 ### 3. Tauri / Rust Build Errors on Windows or macOS
@@ -568,7 +858,31 @@ here.
   `canon.db-wal` or `canon.db-shm` from the old file. A replacement that leaves those sidecars
   behind can make SQLite misread the new file; the server has no way to detect that case.
 
-### 7. A model shows "no published rate"
+### 7. Devin doctor says costs unpriced, or cost shows $0
+
+- **Cause**: `~/.kyberdash/config.json` has no finite positive `devin.acuUsdRate` (absent,
+  non-numeric, `<= 0`, or a JSON literal such as `1e400` that parses as `Infinity`).
+- **Behavior**: transcripts still ingest. Token fields parse. Cost is unknown (`costUSD: 0`
+  with `costIsEstimated: true`), never a measured zero. Doctor's Devin verdict names the
+  missing rate instead of "holds no sessions".
+- **Fix**: set `devin.acuUsdRate` to the USD-per-ACU rate. Do not invent a figure to make
+  the tile look priced.
+
+### 8. Warp doctor says permission denied, or Warp checkpoints stay at 0 records
+
+- **Cause**: the Warp sqlite path exists but the process cannot read it (typically macOS
+  TCC on Group Containers), *or* kyberdash could not write its own sqlite cache copy.
+- **Behavior**: a readable database that only failed `copyfile(2)` is copied via read/write
+  and produces records. A true source-unreadable `EPERM`/`EACCES` is surfaced as
+  `<path> is not readable — permission denied` (Full Disk Access on macOS; owner/permissions
+  otherwise). Discovery returns no sessions; the 0-record checkpoint is the parsed count.
+  An unwritable `KYBERDASH_CACHE_DIR` is kyberdash's cache, not a Warp TCC denial — doctor
+  must not prescribe Full Disk Access for that case.
+- **Fix**: on macOS grant Full Disk Access to the process reading Warp. There is no TCC
+  workaround and no retry as another user. Check cache-directory ownership if the denial
+  is kyberdash's own write.
+
+### 9. A model shows "no published rate"
 
 - **Cause**: Claude Code and Codex turns are priced from the bundled published table, and Copilot
   turns from the Copilot credits table. A model in neither table is honestly unpriced; rates are
@@ -587,6 +901,7 @@ here.
 ## Related Documentation
 
 - [KyberDash Architecture](architecture.md) — Telemetry ingest pipeline, canonical store, analyses, and surfaces.
+- [KyberDash display-layer rule](../rules/kyberdash-display-layer.md) — why the tray and the dashboard hold no jobs.
 - [KyberDash Overview](README.md) — Product vision, motivation, and capabilities.
 - [Feature Local Run and Test Standard](../rules/feature-runbooks.md) — Standards governing local execution runbooks across all features.
 - [Component Catalog](../catalog.md) — Canonical inventory of components and owners.

@@ -1,21 +1,14 @@
+//! Finds the `kyberdash` binary the tray launches `web` from.
+//!
+//! Resolution only: the tray runs no other CLI command (rule R1), so there is
+//! no version probe, terminal launcher or job runner here. A hostile
+//! `KYBERDASH_BIN` is rejected before any shell-resembling path is taken.
+
 use std::env;
 use std::path::PathBuf;
-use std::process::Stdio;
 
-use anyhow::{anyhow, bail, Context, Result};
 use serde::Serialize;
 use serde_json::Value;
-use tauri::AppHandle;
-use tokio::io::AsyncReadExt;
-use tokio::process::Command;
-use tokio::time::{timeout, Duration};
-
-/// Hard bounds mirror the macOS CLI / DataClient design. A malicious or stuck CLI
-/// cannot pin the Tauri process: stdout is capped, stderr is bounded, total wall time is
-/// 60s. A hostile KYBERDASH_BIN is rejected before any shell-resembling path is taken.
-const MAX_PAYLOAD_BYTES: usize = 20 * 1024 * 1024;
-const MAX_STDERR_BYTES: usize = 256 * 1024;
-const VERSION_TIMEOUT_SECS: u64 = 20;
 
 /// Oldest CLI this app can talk to, by semver. Informational only: the gate
 /// Requirement 6.7 describes is [`MIN_API_VERSION`], because a release number
@@ -53,11 +46,6 @@ pub fn setup_state_for(resolution: &Resolution, api_version: Option<u32>) -> Opt
 #[cfg(windows)]
 const WINDOWS_CLI_NAMES: [&str; 2] = ["kyberdash.cmd", "kyberdash.exe"];
 
-#[cfg(windows)]
-const CLAUDE_NAMES: [&str; 2] = ["claude.cmd", "claude.exe"];
-#[cfg(not(windows))]
-const CLAUDE_NAMES: [&str; 1] = ["claude"];
-
 /// Alphanumerics plus `._/-~` and space, with `\`, `:`, `(`, `)` also allowed on Windows
 /// so a user-supplied `KYBERDASH_BIN` path like `C:\Users\...\kyberdash.cmd` is accepted.
 ///
@@ -80,17 +68,6 @@ fn is_safe_arg(value: &str) -> bool {
 pub struct KyberdashCli {
     program: String,
     extra_args: Vec<String>,
-}
-
-/// What the setup screen needs to know about the CLI on this machine.
-#[derive(Clone, Debug, Serialize)]
-pub struct CliStatus {
-    pub found: bool,
-    pub program: String,
-    pub version: Option<String>,
-    pub min_version: String,
-    pub compatible: bool,
-    pub error: Option<String>,
 }
 
 /// Why the tray is showing setup instead of a report (R6.7).
@@ -278,95 +255,6 @@ impl KyberdashCli {
     pub fn extra_args(&self) -> &[String] {
         &self.extra_args
     }
-
-    /// Runs `kyberdash --version` and reports whether the CLI is present and new enough.
-    pub async fn status(&self) -> CliStatus {
-        let min_version = format!(
-            "{}.{}.{}",
-            MIN_CLI_VERSION.0, MIN_CLI_VERSION.1, MIN_CLI_VERSION.2
-        );
-        let mut status = CliStatus {
-            found: false,
-            program: self.program.clone(),
-            version: None,
-            min_version,
-            compatible: false,
-            error: None,
-        };
-        match self.run_capture(&["--version"], VERSION_TIMEOUT_SECS).await {
-            Ok(out) => {
-                let version = out.trim().to_string();
-                status.found = true;
-                status.compatible = parse_version(&version)
-                    .map(|v| v >= MIN_CLI_VERSION)
-                    .unwrap_or(false);
-                status.version = Some(version);
-            }
-            Err(err) => {
-                status.error = Some(err.to_string());
-            }
-        }
-        status
-    }
-
-    async fn run_capture(&self, args: &[&str], timeout_secs: u64) -> Result<String> {
-        let mut full_args = self.extra_args.clone();
-        full_args.extend(args.iter().map(|s| s.to_string()));
-
-        let mut cmd = Command::new(&self.program);
-        cmd.args(&full_args)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .kill_on_drop(true);
-        #[cfg(windows)]
-        {
-            const CREATE_NO_WINDOW: u32 = 0x08000000;
-            cmd.creation_flags(CREATE_NO_WINDOW);
-        }
-        let mut child = cmd.spawn().map_err(|err| {
-            anyhow!(
-                "KyberDash CLI not found ({}). Install it with the kyber-weave installer.",
-                spawn_error_summary(&self.program, &err)
-            )
-        })?;
-
-        let mut stdout = child.stdout.take().ok_or_else(|| anyhow!("no stdout"))?;
-        let mut stderr = child.stderr.take().ok_or_else(|| anyhow!("no stderr"))?;
-
-        let stdout_task = tokio::spawn(async move {
-            let mut buf = Vec::with_capacity(64 * 1024);
-            let mut limited = (&mut stdout).take(MAX_PAYLOAD_BYTES as u64);
-            limited.read_to_end(&mut buf).await.ok();
-            buf
-        });
-        let stderr_task = tokio::spawn(async move {
-            let mut buf = Vec::with_capacity(4 * 1024);
-            let mut limited = (&mut stderr).take(MAX_STDERR_BYTES as u64);
-            limited.read_to_end(&mut buf).await.ok();
-            buf
-        });
-
-        let status = timeout(Duration::from_secs(timeout_secs), child.wait())
-            .await
-            .map_err(|_| anyhow!("kyberdash CLI timed out after {}s", timeout_secs))??;
-
-        let stdout_bytes = stdout_task.await.unwrap_or_default();
-        let stderr_bytes = stderr_task.await.unwrap_or_default();
-
-        if !status.success() {
-            let msg = String::from_utf8_lossy(&stderr_bytes);
-            bail!("kyberdash CLI exited {}: {}", status, msg.trim());
-        }
-        Ok(String::from_utf8_lossy(&stdout_bytes).into_owned())
-    }
-}
-
-fn spawn_error_summary(program: &str, err: &std::io::Error) -> String {
-    match err.kind() {
-        std::io::ErrorKind::NotFound => format!("{} is not on PATH", program),
-        _ => format!("{}: {}", program, err),
-    }
 }
 
 fn default_program_name() -> String {
@@ -446,29 +334,6 @@ fn recorded_cli_path(config: &std::path::Path) -> Option<PathBuf> {
     Some(PathBuf::from(recorded))
 }
 
-/// Second lookup for the Windows terminal spawn, which runs with whatever
-/// `cli.program` was resolved to at startup and re-checks the default name
-/// against the live PATH. `resolve_from` is the startup path; this is not.
-#[cfg(target_os = "windows")]
-fn locate_cli() -> Option<String> {
-    find_in_search_dirs(&candidate_names())
-}
-
-/// Same search for Claude Code's own binary, so "Connect Claude" spawns an absolute path
-/// instead of letting the console shell resolve a bare `claude`.
-fn locate_claude() -> Option<String> {
-    find_in_search_dirs(&CLAUDE_NAMES)
-}
-
-fn find_in_search_dirs(names: &[&str]) -> Option<String> {
-    let mut dirs: Vec<PathBuf> = Vec::new();
-    if let Some(path) = env::var_os("PATH") {
-        dirs.extend(env::split_paths(&path));
-    }
-    dirs.extend(extra_search_dirs());
-    find_in_dirs(&dirs, names)
-}
-
 /// The absolute-only filter is the security boundary, so it lives here where every search
 /// goes through it. `env::split_paths` yields an empty `PathBuf` for `;;` or a trailing `;`,
 /// and the registry PATH can hold relative entries too; `PathBuf::from("").join("kyberdash.cmd")`
@@ -540,30 +405,6 @@ fn extra_search_dirs() -> Vec<PathBuf> {
     out
 }
 
-/// Windows' `CreateProcess` searches the current directory before `PATH`, so spawning
-/// `reg` or `cmd` by bare name lets anything dropped next to the app impersonate a system
-/// tool -- and the tray badge re-runs `reg query` every refresh. Always spawn the real one
-/// out of `%SystemRoot%\System32`, falling back to the documented default when the
-/// environment variable is missing or relative.
-#[cfg(windows)]
-pub fn system32_path(exe: &str) -> PathBuf {
-    let root = env::var_os("SystemRoot")
-        .map(PathBuf::from)
-        .filter(|p| p.is_absolute())
-        .unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
-    root.join("System32").join(exe)
-}
-
-/// `system32_path` plus the CREATE_NO_WINDOW flag every one of these callers wants.
-#[cfg(windows)]
-pub fn system_command(exe: &str) -> std::process::Command {
-    use std::os::windows::process::CommandExt;
-    const CREATE_NO_WINDOW: u32 = 0x08000000;
-    let mut cmd = std::process::Command::new(system32_path(exe));
-    cmd.creation_flags(CREATE_NO_WINDOW);
-    cmd
-}
-
 /// Reads the user and machine PATH values from the registry via `reg.exe` so a PATH edit
 /// made after this process started (npm install adds `%APPDATA%\npm`) is still honoured.
 #[cfg(windows)]
@@ -574,7 +415,7 @@ fn registry_path_dirs() -> Vec<PathBuf> {
         r"HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment",
     ];
     for key in keys {
-        let output = system_command("reg.exe")
+        let output = crate::supervisor::system_command("reg.exe")
             .args(["query", key, "/v", "Path"])
             .output();
         let Ok(output) = output else { continue };
@@ -631,140 +472,6 @@ fn expand_env(value: &str) -> String {
     }
     result.push_str(rest);
     result
-}
-
-/// Runs a kyberdash subcommand in the user's terminal emulator so they can see the output.
-/// Linux: tries `x-terminal-emulator`, `gnome-terminal`, `konsole`, then falls back to a
-/// detached headless spawn. Windows: opens a console via `cmd /C start`. Never
-/// interpolates through a shell -- argv throughout.
-pub fn spawn_in_terminal(app: &AppHandle, subcommand: &[&str]) -> Result<()> {
-    let cli = KyberdashCli::resolve();
-    spawn_program_in_terminal(app, &cli, subcommand)
-}
-
-/// The Plan view's "Connect Claude" runs Claude Code's own login flow, not kyberdash. The
-/// binary is located up front rather than handed to the console shell as a bare name, so
-/// the same absolute-directory rule that protects the kyberdash lookup applies here too.
-pub fn spawn_claude_login(app: &AppHandle) -> Result<()> {
-    let program = locate_claude().ok_or_else(|| {
-        anyhow!("Claude Code was not found on this machine. Install it, then try again.")
-    })?;
-    let cli = KyberdashCli {
-        program,
-        extra_args: vec![],
-    };
-    spawn_program_in_terminal(app, &cli, &["login"])
-}
-
-fn spawn_program_in_terminal(
-    _app: &AppHandle,
-    cli: &KyberdashCli,
-    subcommand: &[&str],
-) -> Result<()> {
-    if !subcommand.iter().all(|s| is_safe_arg(s)) {
-        bail!("unsafe subcommand argument");
-    }
-
-    #[cfg(target_os = "linux")]
-    {
-        let mut command_parts: Vec<String> = vec![cli.program.clone()];
-        command_parts.extend(cli.extra_args.clone());
-        command_parts.extend(subcommand.iter().map(|s| s.to_string()));
-        // Terminal emulators take the command as one string that a shell then parses
-        // (gnome-terminal explicitly hands it to `bash -lc`). `cli.program` reaches here
-        // from PATH resolution, not only from the allowlisted KYBERDASH_BIN, so re-check
-        // every part before joining; anything a shell could reinterpret skips the terminal
-        // and goes through the argv-only detached spawn below.
-        if command_parts.iter().all(|p| is_safe_arg(p)) {
-            let composite = command_parts.join(" ");
-            let terminals: [&[&str]; 4] = [
-                &["x-terminal-emulator", "-e"],
-                &["gnome-terminal", "--", "bash", "-lc"],
-                &["konsole", "-e"],
-                &["xterm", "-e"],
-            ];
-            for term in &terminals {
-                let program = term[0];
-                let extras = &term[1..];
-                if which::which(program).is_ok() {
-                    let mut cmd = std::process::Command::new(program);
-                    cmd.args(extras);
-                    cmd.arg(&composite);
-                    cmd.spawn()
-                        .with_context(|| format!("failed to launch {}", program))?;
-                    return Ok(());
-                }
-            }
-        }
-        // Fallback: run detached, output lost -- better than silently doing nothing.
-        std::process::Command::new(&cli.program)
-            .args(&cli.extra_args)
-            .args(subcommand)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .with_context(|| "no terminal emulator found, detached spawn also failed")?;
-    }
-
-    #[cfg(target_os = "windows")]
-    {
-        // `start` treats the first quoted argument as the window title, so we pass an
-        // explicit empty title. `/K` keeps the console open for non-interactive commands
-        // (export) so the user can read where the file went; the TUI (report/optimize)
-        // owns the window until the user quits it either way.
-        // Only the unresolved default name is worth a second lookup; anything else is
-        // either already absolute or a KYBERDASH_BIN the user chose.
-        let program = if cli.program == default_program_name() {
-            locate_cli().unwrap_or_else(|| cli.program.clone())
-        } else {
-            cli.program.clone()
-        };
-        let cmd_exe = system32_path("cmd.exe");
-        let mut cmd = system_command("cmd.exe");
-        cmd.arg("/C")
-            .arg("start")
-            .arg("")
-            .arg(&cmd_exe)
-            .arg("/K")
-            .arg(&program);
-        for a in &cli.extra_args {
-            cmd.arg(a);
-        }
-        for a in subcommand {
-            cmd.arg(a);
-        }
-        cmd.spawn().with_context(|| "failed to open cmd.exe")?;
-    }
-
-    #[cfg(target_os = "macos")]
-    {
-        // The tray is an accessory app, so there is no console to attach; spawn the CLI directly.
-        std::process::Command::new(&cli.program)
-            .args(&cli.extra_args)
-            .args(subcommand)
-            .spawn()
-            .with_context(|| format!("failed to spawn {}", cli.program))?;
-    }
-
-    Ok(())
-}
-
-/// Minimal dependency: we only use `which` inside spawn_in_terminal on Linux. Vendored here
-/// so the crate graph stays tiny. Gated so the unused-function warning doesn't fire on Mac
-/// or Windows builds.
-#[cfg(target_os = "linux")]
-mod which {
-    use std::env;
-    use std::path::PathBuf;
-
-    pub fn which(program: &str) -> Result<PathBuf, ()> {
-        let path = env::var_os("PATH").ok_or(())?;
-        let dirs: Vec<PathBuf> = env::split_paths(&path).collect();
-        super::find_in_dirs(&dirs, &[program])
-            .map(PathBuf::from)
-            .ok_or(())
-    }
 }
 
 #[cfg(test)]

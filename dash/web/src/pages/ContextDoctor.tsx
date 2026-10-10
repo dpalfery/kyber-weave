@@ -6,6 +6,8 @@ import {
   fetchHarnesses,
   fetchRuns,
   fetchFindings,
+  refreshModelWindows,
+  type ModelCatalogRefreshResult,
   type FindingsPage,
   type KyberCoverage,
   type KyberCoverageCheckpoint,
@@ -21,6 +23,8 @@ import {
   formatCoverageWindow,
 } from '../components/analysis/index.js'
 import type { ScorecardMatrixRow, ScorecardCoverageWindow } from '../components/analysis/ScorecardMatrix.js'
+import { CleanDatabaseControl } from '../components/maintenance/CleanDatabaseControl.js'
+import { MaintenancePanel } from '../components/maintenance/MaintenancePanel.js'
 
 export interface ContextDoctorProps {
   initialHarnesses?: KyberHarnessSummary[]
@@ -185,15 +189,16 @@ export function FindingsBrowserView({
       measurable, which is the opposite of what the failure means (F2). */}
       {unknownWindowSessions !== undefined && unknownWindowSessions > 0 && (
         <p data-testid="unknown-window-banner" className="text-density-xs text-muted-foreground mt-density-hair">
-          {unknownWindowSessions} session{unknownWindowSessions === 1 ? '' : 's'} with unknown context
-          window — pressure unmeasurable, not zero. Findings are suppressed for these sessions until a
-          source reports a window.
+          {unknownWindowSessions} session{unknownWindowSessions === 1 ? '' : 's'} with unknown context window
+          {' '}— pressure unmeasurable, not zero. Findings are suppressed for these sessions until a reported,
+          declared, or catalog window covers the model.
         </p>
       )}
       {unknownWindowSessions === undefined && error !== null && (
         <p data-testid="unknown-window-banner" className="text-density-xs text-muted-foreground mt-density-hair">
           Sessions with unknown context window — pressure unmeasurable, not zero. How many are
-          suppressed is unknown: the findings request failed, so this is not a measured zero.
+          suppressed is unknown: the findings request failed, so this is not a measured zero. A window
+          can be reported, declared, or taken from the catalog.
         </p>
       )}
 
@@ -464,6 +469,58 @@ export function formatCoverageAgo(iso: string, nowMs: number = Date.now()): stri
   return `${Math.floor(hours / 24)}d ago`
 }
 
+function formatModelCatalogRefreshStatus(result: ModelCatalogRefreshResult): string {
+  const failed = result.vendorsFailed.map((entry) => entry.vendor)
+  const when = result.lastRefreshAt ?? ''
+  if (failed.length > 0 && result.vendorsUpdated.length > 0) {
+    return `Partial refresh. Failed vendors: ${failed.join(', ')}. ${result.rowCount} rows at ${when}`
+  }
+  if (failed.length > 0) {
+    return `Refresh failed for ${failed.join(', ')}.`
+  }
+  return `${result.rowCount} rows at ${when}`
+}
+
+/**
+ * Coverage-panel control for the vendor-window catalog. The status line is
+ * built from row count, timestamp, and vendor names — never from a refresh
+ * error string, which can carry a remote body.
+ */
+function ModelCatalogRefreshControl() {
+  const [inFlight, setInFlight] = useState(false)
+  const [status, setStatus] = useState<string | null>(null)
+
+  return (
+    <div className="mt-density-cluster">
+      <button
+        type="button"
+        data-testid="model-catalog-refresh-button"
+        disabled={inFlight}
+        onClick={() => {
+          setInFlight(true)
+          void refreshModelWindows()
+            .then((result) => {
+              setStatus(formatModelCatalogRefreshStatus(result))
+            })
+            .catch(() => {
+              setStatus('Refresh failed. The model-window catalog was left unchanged.')
+            })
+            .finally(() => {
+              setInFlight(false)
+            })
+        }}
+      >
+        Refresh model windows
+      </button>
+      {status !== null && (
+        <p data-testid="model-catalog-refresh-status" className="text-density-xs text-muted-foreground mt-density-hair">
+          {status}
+        </p>
+      )}
+    </div>
+  )
+}
+
 /**
  * Ingest coverage panel (T9: issues #189/#198/#199). Reads the single
  * `GET /api/kyber/coverage` payload: per-source counts under T7 display
@@ -474,7 +531,13 @@ export function formatCoverageAgo(iso: string, nowMs: number = Date.now()): stri
  * owns ingest activity only — the matrix banner and row grouping below
  * belong to T10.
  */
-export function CoverageIngestPanel({ coverage }: { coverage: KyberCoverage }) {
+export function CoverageIngestPanel({
+  coverage,
+  harnesses = [],
+}: {
+  coverage: KyberCoverage
+  harnesses?: KyberHarnessSummary[]
+}) {
   const { refresh, ingest, quarantineByReason, checkpoints } = coverage
   const partialUnits =
     checkpoints === null ? [] : checkpoints.filter((unit) => unit.lastStatus === 'partial')
@@ -496,6 +559,8 @@ export function CoverageIngestPanel({ coverage }: { coverage: KyberCoverage }) {
       <h3 className="text-density-xs font-semibold uppercase tracking-density text-heading">
         Ingest coverage
       </h3>
+      <ModelCatalogRefreshControl />
+      <CleanDatabaseControl harnesses={harnesses} />
       <p className="text-density-xs text-muted-foreground mt-density-hair leading-density" data-testid="coverage-window">
         {formatCoverageWindow(refresh)}
       </p>
@@ -716,8 +781,8 @@ export function ContextDoctor({
     queryFn: () => fetchRuns(),
   })
 
-  // Headline findings across the entire workspace (top-5 card below). The
-  // query fetches a full page; the card renders five via `maxItems`.
+  // Headline findings across the entire workspace. The query fetches a full
+  // page; the card keeps four on screen and scrolls the rest.
   const { data: headlineData, isLoading: loadingFindings } = useQuery({
     queryKey: ['kyber-findings-workspace'],
     queryFn: () => fetchFindings({ limit: FINDINGS_PAGE_SIZE }),
@@ -864,14 +929,20 @@ export function ContextDoctor({
         </div>
       </div>
 
-      {coverageData && <CoverageIngestPanel coverage={coverageData} />}
+      {coverageData && (
+        <CoverageIngestPanel coverage={coverageData} harnesses={harnessesData ?? []} />
+      )}
+
+      {/* The maintenance surface sits beside the ingest panel: pause, manual
+          refresh, folder import and cadence are the same operator decisions as
+          the clean control, read from the host's own status. */}
+      <MaintenancePanel harnesses={harnessesData ?? []} />
 
       {loadingFindings ? (
         <Skeleton className="h-44 w-full" />
       ) : (
         <FindingList
           findings={headline}
-          maxItems={5}
           title="Highest-Leverage Workspace Findings"
           description="Ranked by estimated waste, outcome risk, and confidence. Deterministic evidence beats inferred claims."
           onSelectFinding={onSelectFinding}

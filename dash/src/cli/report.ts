@@ -8,8 +8,6 @@
 // the REST path can skip it.
 
 import { existsSync } from 'node:fs'
-import { homedir } from 'node:os'
-import { join } from 'node:path'
 import { createRequire } from 'node:module'
 
 const requireForSqlite = createRequire(import.meta.url)
@@ -29,6 +27,7 @@ import {
 } from '../analysis/report/types.js'
 import { renderMarkdown } from '../analysis/report/render-markdown.js'
 import { renderText, shouldColorText } from '../analysis/report/render-text.js'
+import { resolveCanonDbPath } from '../canon/paths.js'
 import { collectDoctorReport } from './doctor.js'
 import { HARNESS_DESCRIPTORS, PROVIDER_DISPOSITIONS } from '../refresh/registry.js'
 import type { ProviderDisposition } from '../refresh/types.js'
@@ -62,8 +61,13 @@ export type ReportCliOptions = {
   db?: string
 }
 
+/**
+ * Delegates to the shared resolver so `report` diagnoses the same canon.db
+ * the refresh, the receiver and the dashboard server use — a report of a
+ * different file would be a report of nothing. See src/canon/paths.ts.
+ */
 function resolveDbPath(dbPath?: string): string {
-  return dbPath ?? join(homedir(), '.kyberdash', 'canon.db')
+  return resolveCanonDbPath(dbPath)
 }
 
 function parsePositiveInteger(flag: string): (value: string) => number {

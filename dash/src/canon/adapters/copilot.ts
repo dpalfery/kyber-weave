@@ -543,7 +543,7 @@ export function convertInclusiveCounts(counts: {
  * caller stores instead of the record.
  */
 export function validateRecordTokens(record: CanonicalRecord) {
-  return validateTokens(record.tokens, record.spanId).problem
+  return validateTokens(record.tokens, record.spanId, record.measurability).problem
 }
 
 /** Read the raw counters every GenAI-emitting harness shares. */

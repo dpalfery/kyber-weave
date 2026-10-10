@@ -4,7 +4,7 @@ title: Rules
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-09-06
+last-reviewed: 2026-10-10
 ---
 
 # Rules
@@ -20,6 +20,7 @@ here.
 - [`rules/honest-unobservability`](honest-unobservability.md) — Mandates that missing telemetry and unmeasured dimensions are represented transparently as unobserved/not-measurable and never coerced to zero.
 - [`rules/secondary-cost-display`](secondary-cost-display.md) — Mandates that financial spend is strictly a derived secondary figure, never a primary sort, top-level navigation item, or landing metric.
 - [`rules/composite-efficiency-ban`](composite-efficiency-ban.md) — Prohibits computing or rendering single-scalar composite efficiency scores or letter grades across multidimensional agent telemetry.
+- [`rules/kyberdash-display-layer`](kyberdash-display-layer.md) — Mandates that the KyberDash tray and web dashboard are display layers over one engine, one datastore and one API layer, holding no feature logic, scheduler or job.
 
 The repository's non-negotiables currently live in the root [`AGENTS.md`](../../AGENTS.md),
 which is where a contributor and an agent both look first. A rule earns its own document when

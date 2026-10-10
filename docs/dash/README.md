@@ -4,7 +4,7 @@ title: KyberDash — Interactive Telemetry & Context Tuning for Agentic Workflow
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-09-22
+last-reviewed: 2026-10-10
 ---
 
 # KyberDash — Interactive Telemetry & Context Tuning for Agentic Workflows
@@ -32,8 +32,10 @@ Refining agent instructions and skill definitions has historically been guesswor
 
 ### 4. Surfaces Where the Developer Already Works
 Observability belongs where the developer already works:
-- **KyberDash Tray (`dash/tray/`)**: The macOS menu-bar and Windows system-tray app — a live popover over the canonical report, the refresh cadence, and the optional OTLP receiver. A per-user launchd agent starts it on macOS; a per-user `Run` registry value starts it on Windows.
+- **KyberDash Tray (`dash/tray/`)**: The macOS menu-bar and Windows system-tray app — a live popover over the canonical report. It attaches to the running `kyberdash web` server (launching one with `--no-open` only when there is none) and reaches the engine over `/api/kyber/*`. A per-user launchd agent starts it on macOS; a per-user `Run` registry value starts it on Windows.
 - **Web Dashboard (`dash/web/`)**: Standalone browser application for progressive-disclosure diagnostics, run comparison, and context inspection.
+
+Both surfaces are display layers: they hold no feature logic, no scheduler, and no jobs. Refresh scheduling, clean, import, pause, the shared settings, and the OTLP receiver all live in the engine the surfaces share, over one `canon.db` and one API ([`rules/kyberdash-display-layer`](../rules/kyberdash-display-layer.md)). Folder import is opt-in and off by default; a scheduled run reads your harness folders only when `settings.folder_import.scheduled` is on, and a one-off **Import folder history** imports on demand whatever the setting says.
 
 ---
 

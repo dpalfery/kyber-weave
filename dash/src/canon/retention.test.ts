@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 
 import { CanonStore, decompressRaw } from './store.js'
-import { CONTENT_RETENTION_DAYS, purgeExpiredContent } from './retention.js'
+import { CONTENT_RETENTION_DAYS, contentRetentionFloorMs, purgeExpiredContent } from './retention.js'
 import type { CanonicalRecord, TokenUsage } from './types.js'
 
 const tempRoots: string[] = []
@@ -78,6 +78,7 @@ describe('purgeExpiredContent', () => {
     const path = tempStorePath()
     const store = new CanonStore(path)
     const now = new Date('2026-09-12T12:00:00.000Z')
+    expect(contentRetentionFloorMs(now)).toBe(now.getTime() - CONTENT_RETENTION_DAYS * 24 * 60 * 60 * 1000)
 
     store.upsertMany([
       record({

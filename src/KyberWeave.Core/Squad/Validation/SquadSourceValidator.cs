@@ -64,7 +64,7 @@ public static class SquadSourceValidator
                     agent.Name,
                     agent.SourcePath,
                     "Use a target-neutral capability-profile for shared permissions and reference " +
-                    "the target-specific profile only through copilot-capability-profile.");
+                    $"the target-specific profile only through {sharedProfile.Target}-capability-profile.");
             }
 
             string copilotCapabilityProfile = agent.CopilotCapabilityProfile ?? agent.CapabilityProfile;
@@ -90,6 +90,39 @@ public static class SquadSourceValidator
             }
 
             ValidateCopilotToolCapabilities(agent, copilotCapabilityProfile, copilotProfile);
+
+            string devinCapabilityProfile = agent.DevinCapabilityProfile ?? agent.CapabilityProfile;
+            if (!capabilities.Profiles.TryGetValue(devinCapabilityProfile, out SquadCapabilityProfile? devinProfile))
+            {
+                Throw(
+                    $"Agent '{agent.Name}' references unknown Devin capability profile '{devinCapabilityProfile}'.",
+                    agent.Name,
+                    agent.SourcePath,
+                    "Use a devin-capability-profile declared in profiles/capabilities.yml.");
+            }
+
+            if (agent.DevinCapabilityProfile is not null &&
+                !string.Equals(devinProfile.Target, "devin", StringComparison.Ordinal))
+            {
+                Throw(
+                    $"Agent '{agent.Name}' references capability profile '{devinCapabilityProfile}', " +
+                    "but it is not marked as Devin-only.",
+                    agent.Name,
+                    agent.SourcePath,
+                    $"Set target: devin on capability profile '{devinCapabilityProfile}' or remove " +
+                    "devin-capability-profile to use the shared profile.");
+            }
+
+            if (agent.DevinCapabilityProfile is not null &&
+                agent.Invocation != SquadInvocation.Subagent)
+            {
+                Throw(
+                    $"Agent '{agent.Name}' declares a Devin capability profile, but it is a primary agent.",
+                    agent.Name,
+                    agent.SourcePath,
+                    "Devin renders primary identities as skills and carries no tool allow-list. " +
+                    "Remove devin-capability-profile or change invocation to subagent.");
+            }
 
             if (!fallbacks.Profiles.ContainsKey(agent.Fallback))
             {

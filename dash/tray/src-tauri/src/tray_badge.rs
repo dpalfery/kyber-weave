@@ -244,7 +244,7 @@ pub fn small_icon_size() -> u32 {
 pub fn taskbar_is_dark() -> bool {
     // Absolute `reg.exe` out of System32 -- this runs on every badge refresh, so a bare
     // name here would be the single most reliably triggered planted-binary path.
-    let output = crate::cli::system_command("reg.exe")
+    let output = crate::supervisor::system_command("reg.exe")
         .args([
             "query",
             r"HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize",

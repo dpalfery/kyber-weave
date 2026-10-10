@@ -75,6 +75,13 @@ export type ReaderTurn = {
   sessionId?: string
   /** Model context window in tokens, when an `event_msg` reported one. */
   contextWindow?: number
+  /**
+   * Model context window in tokens, as the harness declared (configured) it
+   * rather than measured it. Kept apart from `contextWindow` because a
+   * declared window is weaker provenance: synthesis files it under the
+   * dedicated declared raw key, never under a reported key.
+   */
+  declaredContextWindow?: number
   /** Termination or exit indicator, when the transcript reported one. */
   terminationReason?: string
   /** Process or command exit code observed in transcript. */
@@ -99,4 +106,11 @@ export type ReaderTurn = {
  */
 export interface ContentReader {
   read(filePath: string, dateRange?: DateRange): AsyncIterable<ReaderTurn>
+  /**
+   * When true, `matchingTurns` must not fall back to `turns[index]`. Cursor
+   * yields a filtered turn list (a subset of requests), so positional pairing
+   * would steal another turn's parts. Readers that omit this keep main's
+   * index-pairing behaviour for id-less calls and id-map misses.
+   */
+  readonly positionalPairingUnsafe?: boolean
 }

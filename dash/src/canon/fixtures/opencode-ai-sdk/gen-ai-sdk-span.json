@@ -1,0 +1,9 @@
+{
+  "gen_ai.operation.name": "chat",
+  "gen_ai.request.model": "synthetic-opencode/gen-ai-sdk-model",
+  "gen_ai.system_instructions": "Synthetic OpenCode system instructions for gen_ai.* fixture.",
+  "gen_ai.input.messages": "[{\"role\":\"user\",\"parts\":[{\"type\":\"text\",\"text\":\"Synthetic user message for gen_ai OpenCode fixture.\"}]}]",
+  "gen_ai.tool.definitions": "[{\"name\":\"write_file\"},{\"name\":\"glob_search\"}]",
+  "gen_ai.usage.input_tokens": 640,
+  "gen_ai.usage.output_tokens": 112
+}

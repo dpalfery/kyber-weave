@@ -285,6 +285,24 @@ export type CostTotal =
   | { ok: false; problem: Problem }
 
 /**
+ * The verdict on a session's cost bases, decided here and carried on the
+ * session payload as `costBasisMismatch` so a display layer renders it instead
+ * of re-deriving it (rule R1: the web dashboard is a display layer).
+ *
+ * `bases` is sorted so the field is stable across runs rather than dependent
+ * on record arrival order, and `totalsByBasis` holds one figure per basis —
+ * the separate totals that must never be blended into one number. A basis with
+ * nothing priced under it is `null`, not `0`: an absent rate is not a $0.00
+ * (R5.4).
+ */
+export type CostBasisMismatch = {
+  code: typeof COST_BASIS_MISMATCH
+  message: string
+  bases: string[]
+  totalsByBasis: Record<string, number | null>
+}
+
+/**
  * Total a collection of cost blocks under one basis (R5.1). Figures of
  * different bases are never blended: the bases (and, within them, the
  * currencies) must agree or the sum is refused with a problem naming what
@@ -360,5 +378,39 @@ export function sumCosts(blocks: CostBlock[]): CostTotal {
       ...(currencies.size === 1 ? { currency: [...currencies][0] } : {}),
       ...(Object.keys(byModel).length > 0 ? { byModel } : {}),
     },
+  }
+}
+
+/**
+ * The basis-mismatch verdict for a session's turn costs, derived from the sum
+ * `sumCosts` already refused to make.
+ *
+ * `null` in every case where there is nothing to warn about: the blocks agree,
+ * the refusal was about currencies rather than bases, or nothing under any
+ * basis was priced. That last case matters — an unpriced session carries no
+ * figures to blend, so a basis disagreement between two absent rates is not
+ * the problem a reader of the dashboard needs told about.
+ */
+export function costBasisMismatchOf(blocks: CostBlock[], total: CostTotal): CostBasisMismatch | null {
+  if (total.ok || total.problem.code !== COST_BASIS_MISMATCH) return null
+
+  const valued = blocks.filter(
+    (block) => typeof block.value === 'number' && Number.isFinite(block.value),
+  )
+  if (valued.length === 0) return null
+
+  const bases = [...new Set(blocks.map((block) => block.basis))].sort()
+  const totalsByBasis: Record<string, number | null> = {}
+  for (const basis of bases) {
+    const onBasis = valued.filter((block) => block.basis === basis)
+    totalsByBasis[basis] =
+      onBasis.length === 0 ? null : onBasis.reduce((sum, block) => sum + (block.value as number), 0)
+  }
+
+  return {
+    code: COST_BASIS_MISMATCH,
+    message: total.problem.message,
+    bases,
+    totalsByBasis,
   }
 }

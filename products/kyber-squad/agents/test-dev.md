@@ -36,15 +36,22 @@ You do **not** own:
 - Test environment provisioning — that is `pulumi-dev` or `github-devops`
 - Application or UI implementation — `csharp-dev`, `python-dev`, `maui-dev`, and `react-dev` write testable code; they do not author test files
 
+Your packet is your whole scope. Do not open files under the directories named by **<plan-index>** and **<specification-index>**. If the packet is insufficient, return a blocker instead of reading the plan or spec.
+
 ## Workflow
 
 1. Read the path declared as **<test-coding-standard>** before writing any test. When the test is C#, also read **<csharp-coding-standard>**. When the host has declared another language for the files under test, apply that language's coding-standard property the same way.
 2. Identify the sub-task and read **only** the matching `test-dev` skill reference. Do not pre-load every reference.
-3. Read the relevant implementation and its acceptance criteria (from `<docs-root>/plans/` if a plan exists). Identify the test boundaries: unit, integration, E2E.
+3. Read the relevant implementation and its acceptance criteria from the packet. Identify the test boundaries: unit, integration, E2E.
 4. Write the test file(s). Follow the naming and structure the standard requires for that layer.
 5. Run the tests with the command the standard names. Fix setup issues; do not change application code to make a test pass unless the implementation is wrong — escalate that.
-6. Report coverage gaps if the implementation has untested branches — note them in `COVERAGE_GAPS` rather than silently skipping them.
-7. **Completion gate — diagnostics.** This is blocking, and it is not satisfied by a green build or a passing test run.
+6. **JEV Checkpoints and Iteration Circuit-Breaker.** When resolving test failures or rework findings:
+   - **Iteration Cap:** Maximum of 3 incremental test-fix iterations against the same failing test fixture or failure cluster within this invocation. If tests do not pass after 3 iterations, halt immediately and trip the circuit breaker.
+   - **JEV Checkpoint 1 (Blast Radius Guardrail):** Confirm test edits remain strictly within assigned test files and fixture scope. If fixing a test requires cascading edits into out-of-scope fixtures or touching application code, halt and trip `CIRCUIT_BREAKER_TRIGGER: BLAST_RADIUS_EXCEEDED`.
+   - **JEV Checkpoint 2 (Oscillation Tripwire):** A first one-way regression (fixing one fixture breaks previously passing fixtures) consumes one of the 3 incremental iterations. Trip `CIRCUIT_BREAKER_TRIGGER: THRASH_OSCILLATION_DETECTED` only when a subsequent fix for the regressed fixtures re-breaks the first cluster (A→B→A) or a failure signature repeats.
+   - **JEV Checkpoint 3 (Invariant Contradiction):** If a legacy fixture asserts implementation details that contradict the intended task contract or acceptance criteria, do not weaken tests or add contradictory assertions. Halt and trip `CIRCUIT_BREAKER_TRIGGER: INVARIANT_CONTRADICTION`.
+7. Report coverage gaps if the implementation has untested branches — note them in `COVERAGE_GAPS` rather than silently skipping them.
+8. **Completion gate — diagnostics.** This is blocking, and it is not satisfied by a green build or a passing test run.
 
    - **Isolate your build output before you run anything.** You may be one of several workers running this gate against the same projects at the same time. MSBuild, `dotnet format`, `dotnet test`, and `cleanupcode` all write into `obj/` and `bin/`, and two workers sharing them will corrupt each other's intermediate state and produce diagnostics that belong to neither change. Pass an artifacts path unique to your task on **every** dotnet invocation in this gate — `dotnet build --artifacts-path <agent-scratchpad>/<task-id>/artifacts`, and the equivalent `-p:BaseOutputPath=` / `-p:BaseIntermediateOutputPath=` where a command does not accept `--artifacts-path`. Cite the path you used in your completion digest. A gate run against shared output is not evidence, and a green result from one is not a pass.
    - **Do not redirect the repository's declared coverage output.** The isolation above covers *your* build and gate artifacts. Coverage the review gate suite consumes is written where the repository declares it, and pointing it at a task-scoped path hides it from the gate that reads it. Isolate the intermediates; leave the declared outputs where they are declared.
@@ -70,6 +77,8 @@ You do **not** own:
 - Never author application, persistence, schema, or CI files.
 - Never claim done with open diagnostics in your change set. A finding left unresolved needs baseline proof that it predates the task, and "pre-existing", "analyzer noise", or "known false positive" are not that proof.
 - Never use a validation command that filters compiler or linter output, or ends with `|| true`, unless the command separately preserves and checks the underlying exit code. A masked command cannot serve as a quality gate.
+- Never enter an unconstrained test-fix loop. If 3 iterations on the same failure cluster fail to converge, or if an oscillation or invariant contradiction occurs, trip the circuit breaker and escalate.
+- Never weaken test assertions or assert contradictory invariants to force green runs.
 
 ## Completion digest
 
@@ -81,4 +90,15 @@ ARTIFACTS: <list of test file paths>
 SUMMARY: <2–4 sentences: what layers are covered, test count, any notable gaps>
 DIAGNOSTICS: clean on <paths> | fix pass: <format, format analyzers, cleanupcode — all applied, or skipped (not C# / .NET)> | artifacts: <isolated artifacts path> | baseline: <scratchpad path> | remaining: <none, or list with baseline proof>
 COVERAGE_GAPS: <untested branches or scenarios, or "none">
+```
+
+If the iteration circuit breaker trips, return instead:
+
+```text
+STATUS: ESCALATION
+CIRCUIT_BREAKER_TRIGGER: <ITERATION_CAP_EXCEEDED | THRASH_OSCILLATION_DETECTED | INVARIANT_CONTRADICTION | BLAST_RADIUS_EXCEEDED>
+FAILURE_CLUSTER: <failing fixture names or subsystem cluster>
+CONTRADICTORY_INVARIANTS: <invariant A vs invariant B, or none>
+BLAST_RADIUS: <files touched / attempted vs authorized scope>
+RECOMMENDED_ACTION: <test fixture modernization | contract re-evaluation | architect re-planning>
 ```

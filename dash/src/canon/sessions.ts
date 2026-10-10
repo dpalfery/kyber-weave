@@ -15,10 +15,11 @@
 import { analyzeContext, type ContextPart, type ContextTurn } from '../analysis/context.js'
 import { rankSchemas, type ToolDefinition } from '../analysis/schema.js'
 import { auxiliarySpend, buildTimeline, subagentSessions } from '../analysis/timeline.js'
-import { measuredInput, sumCosts } from './cost.js'
+import { costBasisMismatchOf, measuredInput, sumCosts, type CostBasisMismatch } from './cost.js'
 import { isCopilotHarness, priceCopilotTurn } from './copilot-rates.js'
 import { isPublishedTableHarness, pricePublishedTurn } from './published-pricing.js'
-import { contextLimitOf } from './context-window.js'
+import { contextLimitOf, DEFAULT_CONTEXT_LIMIT } from './context-window.js'
+import { catalogWindowForRecords } from './model-window-catalog.js'
 import { groupByCanonicalHarness, harnessExportsCacheCounter, normalizeHarnessName, surveyFamily } from './measurability.js'
 import { dedupeTwinTurns } from './twin-dedupe.js'
 import { buildFindings } from './findings.js'
@@ -301,6 +302,15 @@ export type AsadSessionPayload = {
   tools: AsadTool[]
   timeline: ReturnType<typeof buildTimeline>['children'] | NotMeasurable
   turns: Array<Record<string, unknown>>
+  /**
+   * The server's basis verdict: `null` when the session's cost blocks agree, or
+   * when nothing was priced. Decided here, where `sumCosts` already refuses to
+   * blend, so a display layer renders the answer instead of re-deriving it
+   * (rule R1). Always present once a store has been re-projected by a build
+   * that writes it — `undefined` only on a row stored before this field existed,
+   * which a display layer must read as "unknown", never as "no mismatch".
+   */
+  costBasisMismatch: CostBasisMismatch | null
   requests: Array<Record<string, unknown>>
   servers: AsadServer[]
   coverage: Record<string, number>
@@ -378,7 +388,7 @@ export async function buildSessions(store: CanonStore): Promise<BuildSessionsRep
         continue
       }
       const sessionId = identities.claim(key.key, harness)
-      store.upsertSession(buildSessionRow(sessionId, merged, countTokens))
+      store.upsertSession(buildSessionRow(sessionId, merged, countTokens, store))
       built.add(sessionId)
       report.built += 1
     }
@@ -416,6 +426,7 @@ export function buildSessionRow(
   sessionId: string,
   records: readonly CanonicalRecord[],
   countTokens: (text: string) => number,
+  store?: CanonStore,
 ): SessionRow {
   const turnRecords = records.filter(isTurn)
   const first = records[0]!
@@ -445,11 +456,21 @@ export function buildSessionRow(
   // Same rule the finding detector uses (`contextLimitOf`): first turn record
   // to name a window wins, default otherwise, so a session row and a
   // compaction finding built from the same records can never disagree.
-  const window = contextLimitOf(records)
-  const contextLimit = window.contextLimit
+  // Catalog replaces only that default. A reported or declared window stays
+  // what the records said; the 200K constant is not relabelled as catalog.
+  const telemetryWindow = contextLimitOf(records)
+  const window =
+    telemetryWindow.contextLimitSource === 'default' && store !== undefined
+      ? (catalogWindowForRecords(records, store) ?? telemetryWindow)
+      : telemetryWindow
+  // `analyzeContext` rejects a non-positive limit. An absent bridge window
+  // has none: composition still buckets against the placeholder, and the
+  // published payload drops that placeholder so 200K is not stored as the
+  // window (G1-Q2 = (b)).
+  const analysisLimit = window.contextLimit > 0 ? window.contextLimit : DEFAULT_CONTEXT_LIMIT
   const measurability = mergeMeasurability(records)
   const context = analyzeContext(contextTurns, {
-    contextLimit,
+    contextLimit: analysisLimit,
     contextLimitSource: window.contextLimitSource,
     countTokens,
     ...(measurability !== undefined ? { measurability } : {}),
@@ -590,8 +611,27 @@ export function buildSessionRow(
         : {},
     reported_input: unavailableFor(measurability, 'token_usage') ?? reportedInput,
   })
+  const serialized = serializeContext(context)
+  // Drop the analysis placeholder. A stored 200K limit, or a pressure figure
+  // computed against it, would be the default window standing in for a bridge
+  // span that declared none.
+  const publishedContext =
+    window.contextLimitSource === 'absent'
+      ? {
+          ...serialized,
+          contextLimit: 0,
+          ...(serialized.measurable
+            ? {
+                turns: serialized.turns.map((turn) => {
+                  const { pressure: _pressure, headroom: _headroom, ...rest } = turn
+                  return rest
+                }),
+              }
+            : {}),
+        }
+      : serialized
   const contextShape = {
-    ...serializeContext(context),
+    ...publishedContext,
     contextLimitSource: window.contextLimitSource,
     first: contextBucket(analyzedTurns[0], measuredTurns[0]?.tokens.reportedInput ?? 0),
     last: contextBucket(
@@ -603,6 +643,9 @@ export function buildSessionRow(
 
   const timeline = buildTimeline([...records])
   const cost = sumCosts(turnRecords.map((record) => record.cost))
+  // The same refusal, as a verdict the payload carries: the panel renders this
+  // text, so the browser never re-runs the sum itself (rule R1).
+  const costBasisMismatch = costBasisMismatchOf(turnRecords.map((record) => record.cost), cost)
 
   const totals = turnRecords.reduce(
     (acc, record) => ({
@@ -759,6 +802,7 @@ export function buildSessionRow(
       context: context.measurable ? 1 : 0,
     },
     problems: cost.ok ? [] : [cost.problem],
+    costBasisMismatch,
     reconciliation: turnRecords.map((record) => ({
       request: record.spanId,
       root_input: record.tokens.reportedInput,

@@ -1,29 +1,122 @@
 //! Composition root for the tray's long-lived runtime.
 //!
-//! The helper modules own individual policies.  This module owns the one
-//! instance of each policy, joining them into the state the popover reads.  It
-//! remains synchronous on purpose: the real Tauri bridge runs it through
-//! `spawn_blocking`, while tests can substitute every system effect without a
-//! network connection or a child process.
+//! The tray is a display layer (architecture rule R1): it owns no scheduler, no
+//! refresh worker, no receiver and spawns no CLI job. It reads state and relays
+//! the operator's actions through the loopback HTTP API of the `kyberdash web`
+//! server, and its only process duty is launching or attaching to that server
+//! (see [`crate::supervisor`]).
+//!
+//! The runtime remains synchronous on purpose: the real Tauri bridge runs it
+//! through `spawn_blocking`, while tests can substitute every system effect
+//! without a network connection or a child process.
 
 use std::path::PathBuf;
-use std::sync::mpsc::{self, Receiver as MpscReceiver, RecvTimeoutError, TryRecvError};
-use std::time::{Duration, SystemTime};
+use std::time::SystemTime;
 
-use anyhow::{anyhow, Result};
-use serde_json::Value;
+use anyhow::{anyhow, bail, Result};
+use serde_json::{json, Value};
 
-use crate::api::{self, ReportCache, ReportFetcher};
+use crate::api::{
+    self, LoopbackClient, Method, CLEAN_PATH, IMPORT_HISTORY_PATH, JOBS_PATH, REFRESH_PATH,
+    SETTINGS_PATH,
+};
 use crate::cli::{self, Resolution, SetupReason, SetupState};
 use crate::ipc::{self, ViewState};
-use crate::receiver::{HealthProbe, Probe, Receiver, ReceiverSpawner, ReceiverStatus};
-use crate::scheduler::{RefreshCancellation, RefreshRunner, Scheduler};
 use crate::settings::{self, TraySettings};
-use crate::supervisor::{Attempt, Clock, Spawner, Supervisor};
+use crate::supervisor::{self, Attempt, Clock, Spawner, Supervisor};
 
 /// The only event the runtime publishes.  Events carry complete snapshots so a
 /// late-opening popover never has to reconstruct state from deltas.
 pub const VIEW_STATE_CHANGED: &str = "view-state-changed";
+
+/// What the popover sees when the server answers 409 to a refresh.
+const BUSY_REFRESH: &str = "a refresh is already in progress";
+/// What it sees when any other job (clean, import) is refused for the same reason.
+const BUSY_JOB: &str = "a refresh or clean is already running — try again when it finishes";
+
+/// One year, the same ceiling the server enforces on a history window. Checked
+/// here too so an absurd value never leaves the process.
+const MAX_HISTORY_WEEKS: u32 = 52;
+
+/// What the `clean_database` popover command may wipe (issue #312).
+///
+/// The tray holds no clean logic: the scope only chooses the body of
+/// `POST /api/kyber/clean`. The popover asked twice, so the request is always
+/// confirmed. Multi-harness selection stays web-only.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CleanScope {
+    /// Wipe every harness.
+    All,
+    /// Wipe the currently selected harness.
+    Harness(String),
+}
+
+/// A harness id the server could plausibly know. Rejecting anything else here
+/// keeps webview input out of the request entirely.
+fn validated_harness(name: &str) -> Result<String> {
+    let trimmed = name.trim();
+    if trimmed.is_empty()
+        || trimmed.len() > 128
+        || trimmed.contains(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '_'))
+    {
+        return Err(anyhow!("unknown harness scope"));
+    }
+    Ok(trimmed.to_string())
+}
+
+fn validated_weeks(weeks: u32) -> Result<u32> {
+    if (1..=MAX_HISTORY_WEEKS).contains(&weeks) {
+        Ok(weeks)
+    } else {
+        Err(anyhow!(
+            "history window must be between 1 and {MAX_HISTORY_WEEKS} weeks"
+        ))
+    }
+}
+
+impl CleanScope {
+    /// The validated harness scope, or `All`.
+    pub fn harness(name: impl Into<String>) -> Result<Self> {
+        Ok(CleanScope::Harness(validated_harness(&name.into())?))
+    }
+
+    /// Parse the popover's `{ scope }` payload: `"all"`, or
+    /// `{ "harness": "<id>" }` for the currently selected harness.
+    /// Anything else is rejected before any request is made.
+    pub fn from_ipc(value: &serde_json::Value) -> Result<Self> {
+        match value {
+            serde_json::Value::String(scope) if scope == "all" => Ok(CleanScope::All),
+            serde_json::Value::Object(map) => match map.get("harness") {
+                Some(serde_json::Value::String(name)) => CleanScope::harness(name.clone()),
+                _ => Err(anyhow!(
+                    "clean scope must be \"all\" or {{\"harness\": \"<id>\"}}"
+                )),
+            },
+            _ => Err(anyhow!(
+                "clean scope must be \"all\" or {{\"harness\": \"<id>\"}}"
+            )),
+        }
+    }
+
+    /// The request body. `scope` is the tray's own statement of intent; `all`,
+    /// `harnesses` and `confirm` are the fields the server's clean route
+    /// validates, so the same body satisfies both. `reingestWeeks` is present
+    /// only when the operator asked to re-import, because its absence is what
+    /// lets the server apply its own default.
+    fn request_body(&self, import_weeks: Option<u32>) -> Value {
+        let mut body = match self {
+            CleanScope::All => json!({ "scope": "all", "all": true }),
+            CleanScope::Harness(harness) => {
+                json!({ "scope": { "harness": harness }, "harnesses": [harness] })
+            }
+        };
+        body["confirm"] = json!(true);
+        if let Some(weeks) = import_weeks {
+            body["reingestWeeks"] = json!(weeks);
+        }
+        body
+    }
+}
 
 /// Effects the production event bridge performs after a state transition.
 pub trait EventSink: Send {
@@ -42,8 +135,9 @@ pub trait Opener: Send {
 /// production uses [`Runtime::from_resolution`] to retain the probed paths.
 pub struct RuntimeConfig {
     pub cli_program: Option<String>,
+    /// Holds the tray's `settings.json`. Unless [`Runtime::from_resolution`]
+    /// names a different directory, it also holds the server's `server.json`.
     pub settings_dir: PathBuf,
-    pub cadence: Duration,
     pub now: SystemTime,
 }
 
@@ -52,58 +146,41 @@ pub struct RuntimeConfig {
 /// explicit.
 pub struct RuntimeDependencies {
     pub server_spawner: Box<dyn Spawner + Send>,
-    pub refresh_runner: Box<dyn RefreshRunner + Send>,
-    pub fetcher: Box<dyn ReportFetcher + Send>,
+    pub fetcher: Box<dyn LoopbackClient + Send>,
     pub clock: Box<dyn Clock + Send>,
-    pub receiver_probe: Box<dyn HealthProbe + Send>,
-    pub receiver_spawner: Box<dyn ReceiverSpawner + Send>,
     pub event_sink: Box<dyn EventSink + Send>,
     pub opener: Box<dyn Opener + Send>,
 }
 
-/// The managed service behind the six popover commands.
+/// The managed service behind the popover commands.
 pub struct Runtime {
     cli_program: Option<String>,
     probed: Vec<String>,
     setup: Option<SetupState>,
     settings_dir: PathBuf,
+    /// Where `server.json` lives; the server's state, not the tray's.
+    server_dir: PathBuf,
     settings: TraySettings,
     supervisor: Option<Supervisor>,
-    scheduler: Option<Scheduler>,
-    receiver: Option<Receiver>,
-    cache: ReportCache,
+    cache: ReportCacheState,
     dependencies: RuntimeDependencies,
     started: bool,
-    refresh_task: Option<PendingRefresh>,
-    receiver_retry_at: Option<SystemTime>,
     quitting: bool,
-    server_calls: Vec<(String, Vec<String>)>,
-    refresh_calls: Vec<(String, Vec<String>)>,
-    receiver_calls: Vec<(String, Vec<String>)>,
-    receiver_probe_override: Option<Probe>,
 }
 
-/// The runner moves to a dedicated thread for an explicit or cadenced refresh
-/// and comes back through this channel with its result.  That gives the
-/// scheduler one in-flight owner without holding the runtime mutex during a
-/// potentially slow subprocess wait.
-type RefreshCompletion = (
-    Box<dyn RefreshRunner + Send>,
-    Option<i32>,
-    String,
-    SystemTime,
-);
-
-struct PendingRefresh {
-    completion: MpscReceiver<RefreshCompletion>,
-    cancellation: RefreshCancellation,
-    worker: Option<std::thread::JoinHandle<()>>,
+/// The report cache plus the two server documents polled with it. They share a
+/// lifetime: every poll replaces all three, and none is ever defaulted.
+#[derive(Default)]
+struct ReportCacheState {
+    report: api::ReportCache,
+    jobs: Option<Value>,
+    shared_settings: Option<Value>,
 }
 
 impl Runtime {
     /// The complete command allowlist.  Keep this alongside the capability
     /// declaration so review can compare both sides of the IPC boundary.
-    pub const fn authorized_commands() -> [&'static str; 6] {
+    pub const fn authorized_commands() -> [&'static str; 9] {
         [
             "get_view_state",
             "refresh_now",
@@ -111,6 +188,9 @@ impl Runtime {
             "set_settings",
             "quit",
             "hide_popover",
+            "clean_database",
+            "import_folder_history",
+            "set_shared_settings",
         ]
     }
 
@@ -119,18 +199,15 @@ impl Runtime {
     }
 
     pub fn new(config: RuntimeConfig, dependencies: RuntimeDependencies) -> Self {
-        Self::new_inner(config, dependencies, Vec::new(), None)
-    }
-
-    /// Alias used by the contract to make it explicit that no real system
-    /// adapters are involved.
-    pub fn new_for_test(config: RuntimeConfig, dependencies: RuntimeDependencies) -> Self {
-        Self::new(config, dependencies)
+        let server_dir = config.settings_dir.clone();
+        Self::new_inner(config, server_dir, dependencies, Vec::new(), None)
     }
 
     /// Builds a production runtime from the hardened CLI resolution result.
+    /// `server_dir` is where the web server records itself (`server.json`).
     pub fn from_resolution(
         settings_dir: PathBuf,
+        server_dir: PathBuf,
         resolution: Resolution,
         dependencies: RuntimeDependencies,
     ) -> Self {
@@ -140,12 +217,9 @@ impl Runtime {
             RuntimeConfig {
                 cli_program,
                 settings_dir,
-                // Settings own the persisted cadence. Zero is the constructor's
-                // explicit "use persisted setting" sentinel; direct tests pass
-                // their own non-zero cadence.
-                cadence: Duration::ZERO,
                 now: SystemTime::now(),
             },
+            server_dir,
             dependencies,
             resolution.probed,
             setup,
@@ -154,51 +228,32 @@ impl Runtime {
 
     fn new_inner(
         config: RuntimeConfig,
+        server_dir: PathBuf,
         dependencies: RuntimeDependencies,
         probed: Vec<String>,
         setup: Option<SetupState>,
     ) -> Self {
         let settings = settings::load(&config.settings_dir);
-        let cadence = if config.cadence.is_zero() {
-            settings.refresh_cadence()
-        } else {
-            config.cadence
-        };
         let cli_program = config.cli_program;
-        let mut receiver = cli_program
-            .as_ref()
-            .map(|program| Receiver::new(program.clone()));
-        if let Some(receiver) = receiver.as_mut() {
-            receiver.set_hosting_enabled(settings.host_receiver);
-        }
 
         Runtime {
             supervisor: cli_program
                 .as_ref()
                 .map(|program| Supervisor::new(program.clone())),
-            scheduler: cli_program
-                .as_ref()
-                .map(|program| Scheduler::new(program.clone(), cadence)),
             cli_program,
             probed,
             setup,
             settings_dir: config.settings_dir,
+            server_dir,
             settings,
-            receiver,
-            cache: ReportCache::default(),
+            cache: ReportCacheState::default(),
             dependencies,
             started: false,
-            refresh_task: None,
-            receiver_retry_at: None,
             quitting: false,
-            server_calls: Vec::new(),
-            refresh_calls: Vec::new(),
-            receiver_calls: Vec::new(),
-            receiver_probe_override: None,
         }
     }
 
-    /// Starts the one server, startup refresh, and first report read.
+    /// Attaches to or launches the one server, then reads the first report.
     ///
     /// This does no work for a missing CLI.  The caller still gets a fully
     /// populated `setup` snapshot rather than an invoke rejection.
@@ -215,17 +270,18 @@ impl Runtime {
 
         self.ensure_server()?;
         if self.setup.is_none() {
-            self.refresh_startup()?;
             self.poll_report_inner(SystemTime::now());
-            self.poll_receiver_inner(SystemTime::now());
         }
         self.publish()
     }
 
-    /// Performs the low-frequency maintenance work.  Tauri calls this from a
-    /// blocking worker; the method itself never assumes it owns an async
-    /// runtime.
-    pub fn tick(&mut self, now: SystemTime) -> Result<()> {
+    /// Keeps the server connection alive.  Tauri calls this from a blocking
+    /// worker; the method itself never assumes it owns an async runtime.
+    ///
+    /// There is deliberately no work to schedule here: refreshing is the
+    /// server's job, so the clock reading has no use and is accepted only so
+    /// the maintenance loop's call shape stays stable.
+    pub fn tick(&mut self, _now: SystemTime) -> Result<()> {
         if !self.started || self.setup.is_some() || self.quitting {
             return Ok(());
         }
@@ -233,21 +289,6 @@ impl Runtime {
         if self.setup.is_some() {
             return self.publish();
         }
-
-        let completed = self.finish_pending_refresh(None)?;
-        let due = self
-            .scheduler
-            .as_ref()
-            .is_some_and(|scheduler| scheduler.is_due(now));
-        let started = if due {
-            self.start_background_refresh(now)?
-        } else {
-            false
-        };
-        if completed || started {
-            self.publish()?;
-        }
-        self.poll_receiver_inner(now);
         Ok(())
     }
 
@@ -256,24 +297,13 @@ impl Runtime {
             .supervisor
             .as_ref()
             .map(Supervisor::phase)
-            .unwrap_or(crate::supervisor::ServerPhase::Starting);
-        let refresh = self
-            .scheduler
-            .as_ref()
-            .map(Scheduler::status)
-            .cloned()
-            .unwrap_or_default();
-        let receiver = self
-            .receiver
-            .as_ref()
-            .map(Receiver::status)
-            .unwrap_or(ReceiverStatus::Unknown);
+            .unwrap_or(supervisor::ServerPhase::Starting);
         ipc::view_state(
             self.setup.clone(),
             server,
-            &self.cache,
-            &refresh,
-            receiver,
+            &self.cache.report,
+            self.cache.jobs.clone(),
+            self.cache.shared_settings.clone(),
             &self.settings,
         )
     }
@@ -289,27 +319,21 @@ impl Runtime {
         self.publish()
     }
 
+    /// Asks the server to refresh, as the tray surface.
     pub fn refresh_now(&mut self, now: SystemTime) -> Result<()> {
-        if self.quitting {
-            return Err(anyhow!("the tray runtime is shutting down"));
-        }
-        // Give a just-completed process a short chance to return its runner.
-        // This is not a UI-thread wait: Tauri invokes this runtime method from
-        // `spawn_blocking`, and it prevents a completion/second-click race.
-        let _ = self.finish_pending_refresh(Some(Duration::from_millis(50)))?;
-        if self.refresh_task.is_some() {
-            return Err(anyhow!("a refresh is already in progress"));
-        }
-        if !self.start_background_refresh(now)? {
-            return Err(anyhow!("a refresh is already in progress"));
-        }
-        self.publish()
+        self.ensure_running()?;
+        self.request(
+            Method::Post,
+            REFRESH_PATH,
+            &json!({ "surface": "tray" }),
+            BUSY_REFRESH,
+            "refresh request",
+        )?;
+        self.after_action(now)
     }
 
     pub fn open_view(&mut self, view: &str) -> Result<()> {
-        if self.quitting {
-            return Err(anyhow!("the tray runtime is shutting down"));
-        }
+        self.ensure_running()?;
         let server_url = self
             .supervisor
             .as_ref()
@@ -319,11 +343,10 @@ impl Runtime {
         self.dependencies.opener.open(&url)
     }
 
-    /// Validates, persists, and applies a partial settings document.
+    /// Validates, persists, and applies a partial settings document.  These are
+    /// display preferences only: nothing here is sent to the server.
     pub fn set_settings(&mut self, patch: Value) -> Result<()> {
-        if self.quitting {
-            return Err(anyhow!("the tray runtime is shutting down"));
-        }
+        self.ensure_running()?;
         if !patch.is_object() {
             return Err(anyhow!("settings patch must be an object"));
         }
@@ -331,17 +354,11 @@ impl Runtime {
         let previous_window_days = self.settings.window_days;
         self.settings.apply_partial(&patch);
         settings::save(&self.settings_dir, &self.settings)?;
-        if let Some(scheduler) = self.scheduler.as_mut() {
-            scheduler.set_cadence(self.settings.refresh_cadence());
-        }
-        if let Some(receiver) = self.receiver.as_mut() {
-            receiver.set_hosting_enabled(self.settings.host_receiver);
-        }
         if self.settings.harness != previous_harness
             || self.settings.window_days != previous_window_days
         {
             // Scope controls take effect immediately; waiting for the next
-            // cadence would leave the selector and report describing different
+            // poll would leave the selector and report describing different
             // datasets for a visible interval.
             self.poll_report_inner(SystemTime::now());
         }
@@ -352,60 +369,98 @@ impl Runtime {
         self.settings.clone()
     }
 
-    /// Stops every owned child.  `Supervisor` also performs this on drop, but
-    /// command and application-exit paths call it explicitly so shutdown does
-    /// not depend on process teardown ordering.
+    /// Patches the server-owned settings (`PUT /api/kyber/settings`).  The tray
+    /// never stores them: the server validates and persists, and the next poll
+    /// reads the result back.
+    pub fn set_shared_settings(&mut self, patch: Value) -> Result<()> {
+        self.ensure_running()?;
+        if !patch.is_object() {
+            return Err(anyhow!("shared settings patch must be an object"));
+        }
+        self.request(
+            Method::Put,
+            SETTINGS_PATH,
+            &patch,
+            BUSY_JOB,
+            "settings update",
+        )?;
+        self.after_action(SystemTime::now())
+    }
+
+    /// Stops the server only if this runtime launched it.  `Supervisor` also
+    /// does this on drop, but command and application-exit paths call it
+    /// explicitly so shutdown does not depend on process teardown ordering.
     pub fn quit(&mut self) {
         if self.quitting {
             return;
         }
         self.quitting = true;
-        self.cancel_pending_refresh();
         if let Some(supervisor) = self.supervisor.as_mut() {
             supervisor.stop();
         }
-        self.dependencies.receiver_spawner.stop_all();
     }
 
-    pub fn server_calls(&self) -> Vec<(String, Vec<String>)> {
-        self.server_calls.clone()
+    /// Asks the server to wipe a scope, optionally re-importing `import_weeks`
+    /// of history afterwards.
+    ///
+    /// A clean is a foreground, user-confirmed action.  The server does the
+    /// pausing, wiping and re-importing itself; the tray only chooses the scope
+    /// and relays the answer.  409 (busy) and other failures surface as the
+    /// command error the popover already renders.
+    pub fn clean_database(&mut self, scope: CleanScope, import_weeks: Option<u32>) -> Result<()> {
+        self.ensure_running()?;
+        let import_weeks = import_weeks.map(validated_weeks).transpose()?;
+        self.request(
+            Method::Post,
+            CLEAN_PATH,
+            &scope.request_body(import_weeks),
+            BUSY_JOB,
+            "database clean",
+        )?;
+        self.after_action(SystemTime::now())
     }
 
-    pub fn refresh_calls(&self) -> Vec<(String, Vec<String>)> {
-        self.refresh_calls.clone()
-    }
-
-    pub fn receiver_calls(&self) -> Vec<(String, Vec<String>)> {
-        self.receiver_calls.clone()
+    /// Asks the server to import `weeks` of folder history, for one harness or
+    /// all of them.
+    pub fn import_folder_history(&mut self, weeks: u32, harness: Option<&str>) -> Result<()> {
+        self.ensure_running()?;
+        let weeks = validated_weeks(weeks)?;
+        let mut body = json!({ "weeks": weeks });
+        if let Some(harness) = harness {
+            body["harness"] = json!(validated_harness(harness)?);
+        }
+        self.request(
+            Method::Post,
+            IMPORT_HISTORY_PATH,
+            &body,
+            BUSY_JOB,
+            "history import",
+        )?;
+        self.after_action(SystemTime::now())
     }
 
     pub fn clear_cli_for_test(&mut self) {
         self.cli_program = None;
         self.supervisor = None;
-        self.scheduler = None;
-        self.receiver = None;
         self.setup = None;
     }
 
-    pub fn set_receiver_probe(&mut self, probe: Probe) {
-        self.receiver_probe_override = Some(probe);
-    }
-
-    pub fn poll_receiver(&mut self) -> Result<()> {
+    fn ensure_running(&self) -> Result<()> {
         if self.quitting {
-            return Ok(());
+            bail!("the tray runtime is shutting down");
         }
-        self.poll_receiver_inner(SystemTime::now());
-        self.publish()
+        Ok(())
     }
 
     fn ensure_missing_cli_setup(&mut self) {
         if self.setup.is_none() {
             self.setup = Some(SetupState::new(SetupReason::NotFound, self.probed.clone()));
         }
-        self.cache = ReportCache::default();
+        self.cache = ReportCacheState::default();
     }
 
+    /// Reuses a healthy server, attaches to one another process runs, and only
+    /// launches as a last resort.
     fn ensure_server(&mut self) -> Result<()> {
         let Some(supervisor) = self.supervisor.as_mut() else {
             self.ensure_missing_cli_setup();
@@ -414,182 +469,113 @@ impl Runtime {
         if supervisor.url().is_some() && supervisor.is_running() {
             return Ok(());
         }
-        let program = self
-            .cli_program
-            .as_ref()
-            .ok_or_else(|| anyhow!("KyberDash CLI is unavailable"))?
-            .clone();
-        self.server_calls.push((
-            program,
-            crate::supervisor::SERVER_ARGS
-                .iter()
-                .map(|argument| (*argument).to_string())
-                .collect(),
-        ));
+        if let Some(listening) = supervisor::discover(&self.server_dir) {
+            supervisor.attach(listening);
+            if self.server_url().is_ok() && !self.server_serves_tray_routes() {
+                self.enter_too_old_setup();
+            }
+            return Ok(());
+        }
         let attempt = supervisor.attempt(
             &mut *self.dependencies.server_spawner,
             &mut *self.dependencies.clock,
         );
         match attempt {
             Attempt::Listening(_) => {
-                if let Some(api_version) = supervisor.api_version() {
-                    let resolution = Resolution {
-                        cli: None,
-                        probed: self.probed.clone(),
-                    };
-                    // A direct test config does not carry a Resolution.  It is
-                    // nevertheless already known to have a CLI, so only the
-                    // API-version half is relevant here.
-                    if api_version < crate::cli::MIN_API_VERSION {
-                        self.setup = Some(SetupState::new(SetupReason::TooOld, resolution.probed));
-                        supervisor.stop();
-                    }
+                // An API older than this tray understands is setup, not data —
+                // and so is an API new enough on paper but missing the routes.
+                let too_old = supervisor
+                    .api_version()
+                    .is_some_and(|version| version < cli::MIN_API_VERSION);
+                if too_old || !self.server_serves_tray_routes() {
+                    self.enter_too_old_setup();
                 }
             }
-            Attempt::Failed { reason, .. } => self.cache.record_error(reason),
+            Attempt::Failed { reason, .. } => self.cache.report.record_error(reason),
         }
         Ok(())
     }
 
-    fn refresh_startup(&mut self) -> Result<()> {
-        let program = self
-            .cli_program
-            .as_ref()
-            .ok_or_else(|| anyhow!("KyberDash CLI is unavailable"))?
-            .clone();
-        let scheduler = self
-            .scheduler
-            .as_mut()
-            .ok_or_else(|| anyhow!("refresh scheduler is unavailable"))?;
-        self.refresh_calls.push((
-            program,
-            crate::scheduler::REFRESH_ARGS
-                .iter()
-                .map(|argument| (*argument).to_string())
-                .collect(),
-        ));
-        let _ = scheduler.tick(&mut *self.dependencies.refresh_runner, SystemTime::now());
-        Ok(())
+    /// A server the tray cannot drive is setup, exactly as an API version below
+    /// [`cli::MIN_API_VERSION`] is: nothing is presented as working.
+    fn enter_too_old_setup(&mut self) {
+        self.setup = Some(SetupState::new(SetupReason::TooOld, self.probed.clone()));
+        if let Some(supervisor) = self.supervisor.as_mut() {
+            // A launched server is stopped; an attached one is only let go of,
+            // because the user may be using it through the browser.
+            supervisor.stop();
+        }
+        self.cache = ReportCacheState::default();
     }
 
-    /// Starts an owned refresh without blocking the caller.  The scheduler is
-    /// transitioned before spawning, so a second command sees `Running` even
-    /// if the worker has not reached the process launcher yet.
-    fn start_background_refresh(&mut self, now: SystemTime) -> Result<bool> {
-        if self.quitting || self.refresh_task.is_some() {
-            return Ok(false);
-        }
-        let program = self
-            .cli_program
-            .as_ref()
-            .ok_or_else(|| anyhow!("KyberDash CLI is unavailable"))?
-            .clone();
-        let scheduler = self
-            .scheduler
-            .as_mut()
-            .ok_or_else(|| anyhow!("refresh scheduler is unavailable"))?;
-        if !scheduler.begin_refresh() {
-            return Ok(false);
-        }
-        self.refresh_calls.push((
-            program.clone(),
-            crate::scheduler::REFRESH_ARGS
-                .iter()
-                .map(|argument| (*argument).to_string())
-                .collect(),
-        ));
-        let mut runner = std::mem::replace(
-            &mut self.dependencies.refresh_runner,
-            Box::new(UnavailableRefreshRunner),
-        );
-        let cancellation = RefreshCancellation::default();
-        let worker_cancellation = cancellation.clone();
-        let (sender, completion) = mpsc::channel();
-        let worker = std::thread::spawn(move || {
-            let (code, stderr) = runner.run_cancellable(
-                &program,
-                &crate::scheduler::REFRESH_ARGS,
-                &worker_cancellation,
-            );
-            let _ = sender.send((runner, code, stderr, now));
-        });
-        self.refresh_task = Some(PendingRefresh {
-            completion,
-            cancellation,
-            worker: Some(worker),
-        });
-        Ok(true)
-    }
-
-    /// Restores the runner and reports its outcome when an owned refresh has
-    /// completed.  A caller can wait briefly only to bridge a worker-complete
-    /// race; normal maintenance uses the non-blocking form.
-    fn finish_pending_refresh(&mut self, wait_for: Option<Duration>) -> Result<bool> {
-        let Some(mut task) = self.refresh_task.take() else {
-            return Ok(false);
+    /// Whether the server serves the routes the tray needs, probed once per
+    /// server by asking for the read-only jobs document.
+    ///
+    /// The `apiVersion` gate is not enough on its own: it has not moved, so a
+    /// server that predates `/api/kyber/jobs`, `/settings`, `/refresh` and
+    /// `/import-history` passes it, and then every action 404s while jobs and
+    /// settings stay silently null. A 404 is that answer. Anything else — a
+    /// 500, a refused connection, a server still warming up — is inconclusive
+    /// and leaves the tray running rather than declaring a good server too old.
+    fn server_serves_tray_routes(&mut self) -> bool {
+        let Ok(server_url) = self.server_url() else {
+            return true;
         };
-        let completed = match wait_for {
-            Some(timeout) => match task.completion.recv_timeout(timeout) {
-                Ok(result) => Some(result),
-                Err(RecvTimeoutError::Timeout) => None,
-                Err(RecvTimeoutError::Disconnected) => {
-                    return Err(anyhow!(
-                        "refresh worker stopped without returning its runner"
-                    ));
-                }
-            },
-            None => match task.completion.try_recv() {
-                Ok(result) => Some(result),
-                Err(TryRecvError::Empty) => None,
-                Err(TryRecvError::Disconnected) => {
-                    return Err(anyhow!(
-                        "refresh worker stopped without returning its runner"
-                    ));
-                }
-            },
+        let Ok(url) = api::endpoint_url(&server_url, JOBS_PATH) else {
+            return true;
         };
-        let Some((runner, code, stderr, finished_at)) = completed else {
-            self.refresh_task = Some(task);
-            return Ok(false);
-        };
-        if let Some(worker) = task.worker.take() {
-            let _ = worker.join();
-        }
-        self.dependencies.refresh_runner = runner;
-        let scheduler = self
-            .scheduler
-            .as_mut()
-            .ok_or_else(|| anyhow!("refresh scheduler is unavailable"))?;
-        let _ = scheduler.finish_refresh(code, &stderr, finished_at);
-        Ok(true)
-    }
-
-    /// Cancels and joins the one worker that owns the refresh runner.  Joining
-    /// is intentional: dropping the receiver alone would let a refresh child
-    /// continue writing canon.db after the tray has exited.
-    fn cancel_pending_refresh(&mut self) {
-        let Some(mut task) = self.refresh_task.take() else {
-            return;
-        };
-        task.cancellation.cancel();
-        if let Ok((runner, _, _, _)) = task.completion.recv() {
-            self.dependencies.refresh_runner = runner;
-        }
-        if let Some(worker) = task.worker.take() {
-            let _ = worker.join();
-        }
-        if let Some(scheduler) = self.scheduler.as_mut() {
-            scheduler.cancel_refresh();
+        match self.dependencies.fetcher.get_with_status(&url) {
+            Ok(response) => !response.is_not_found(),
+            // Unreachable is not "too old": the popover shows a stale banner.
+            Err(_) => true,
         }
     }
 
-    fn poll_report_inner(&mut self, now: SystemTime) {
-        let Some(server_url) = self
-            .supervisor
+    fn server_url(&self) -> Result<String> {
+        self.supervisor
             .as_ref()
             .and_then(|supervisor| supervisor.url())
             .map(str::to_string)
-        else {
+            .ok_or_else(|| anyhow!("the KyberDash server is not ready"))
+    }
+
+    /// Sends one action to the server and maps its answer.  `busy` is the
+    /// message for 409, the server's "a job is already running".
+    fn request(
+        &mut self,
+        method: Method,
+        path: &str,
+        body: &Value,
+        busy: &str,
+        what: &str,
+    ) -> Result<()> {
+        let url = api::endpoint_url(&self.server_url()?, path)?;
+        let response = self
+            .dependencies
+            .fetcher
+            .send(method, &url, body)
+            .map_err(|error| anyhow!("could not reach the KyberDash server: {error}"))?;
+        if response.is_success() {
+            return Ok(());
+        }
+        if response.status == 409 {
+            bail!("{busy}");
+        }
+        match response.error_message() {
+            Some(message) => bail!("{what} failed: {message}"),
+            None => bail!("{what} failed: server returned {}", response.status),
+        }
+    }
+
+    /// An action changes what the server would report, so read it back now
+    /// rather than showing the pre-action state until the next poll.
+    fn after_action(&mut self, now: SystemTime) -> Result<()> {
+        self.poll_report_inner(now);
+        self.publish()
+    }
+
+    fn poll_report_inner(&mut self, now: SystemTime) {
+        let Ok(server_url) = self.server_url() else {
             return;
         };
         let report_url = match api::report_url_for_scope(
@@ -599,42 +585,23 @@ impl Runtime {
         ) {
             Ok(url) => url,
             Err(error) => {
-                self.cache.record_error(error.to_string());
+                self.cache.report.record_error(error.to_string());
                 return;
             }
         };
-        match self.dependencies.fetcher.fetch(&report_url) {
-            Ok(report) => self.cache.record_success(report, now),
-            Err(error) => self.cache.record_error(error.to_string()),
+        match self.dependencies.fetcher.get(&report_url) {
+            Ok(report) => self.cache.report.record_success(report, now),
+            Err(error) => self.cache.report.record_error(error.to_string()),
         }
-        if let Some(scheduler) = self.scheduler.as_mut() {
-            scheduler.observe_report(self.cache.report.as_ref());
-        }
+        // Unknown stays unknown: a failed fetch clears the value instead of
+        // leaving old (or inventing default) job and settings state on screen.
+        self.cache.jobs = self.fetch_document(&server_url, JOBS_PATH);
+        self.cache.shared_settings = self.fetch_document(&server_url, SETTINGS_PATH);
     }
 
-    fn poll_receiver_inner(&mut self, now: SystemTime) {
-        let Some(receiver) = self.receiver.as_mut() else {
-            return;
-        };
-        if self
-            .receiver_retry_at
-            .is_some_and(|retry_at| now < retry_at)
-        {
-            return;
-        }
-        self.receiver_retry_at = None;
-        let delay = if let Some(probe) = self.receiver_probe_override.clone() {
-            let mut probe = StaticProbe(probe);
-            receiver.poll(&mut probe, &mut *self.dependencies.receiver_spawner)
-        } else {
-            receiver.poll(
-                &mut *self.dependencies.receiver_probe,
-                &mut *self.dependencies.receiver_spawner,
-            )
-        };
-        if let Some(delay) = delay {
-            self.receiver_retry_at = Some(now.checked_add(delay).unwrap_or(now));
-        }
+    fn fetch_document(&mut self, server_url: &str, path: &str) -> Option<Value> {
+        let url = api::endpoint_url(server_url, path).ok()?;
+        self.dependencies.fetcher.get(&url).ok()
     }
 
     fn publish(&mut self) -> Result<()> {
@@ -645,29 +612,42 @@ impl Runtime {
     }
 }
 
-struct StaticProbe(Probe);
-
-impl HealthProbe for StaticProbe {
-    fn probe(&mut self, _url: &str) -> Probe {
-        self.0.clone()
-    }
-}
-
-/// Placeholder while a worker owns the real runner.  It is never called: the
-/// pending-task guard prevents a second spawn until the worker returns it.
-struct UnavailableRefreshRunner;
-
-impl RefreshRunner for UnavailableRefreshRunner {
-    fn run(&mut self, _program: &str, _args: &[&str]) -> (Option<i32>, String) {
-        (
-            None,
-            "refresh runner is already owned by a worker".to_string(),
-        )
-    }
-}
-
 impl Drop for Runtime {
     fn drop(&mut self) {
         self.quit();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_clean_body_omits_reingest_weeks_unless_asked() {
+        let all = CleanScope::All.request_body(None);
+        assert_eq!(all["scope"], "all");
+        assert_eq!(all["confirm"], true);
+        assert!(all.get("reingestWeeks").is_none());
+
+        let harness = CleanScope::harness("cursor").unwrap().request_body(Some(4));
+        assert_eq!(harness["scope"], json!({ "harness": "cursor" }));
+        assert_eq!(harness["harnesses"], json!(["cursor"]));
+        assert_eq!(harness["reingestWeeks"], 4);
+    }
+
+    #[test]
+    fn history_weeks_are_bounded_to_one_year() {
+        assert!(validated_weeks(0).is_err());
+        assert!(validated_weeks(1).is_ok());
+        assert!(validated_weeks(52).is_ok());
+        assert!(validated_weeks(53).is_err());
+    }
+
+    #[test]
+    fn webview_harness_ids_cannot_carry_path_or_markup() {
+        for bad in ["", "   ", "../etc", "a b", "a/b", "<x>", &"x".repeat(129)] {
+            assert!(validated_harness(bad).is_err(), "{bad:?} must be refused");
+        }
+        assert_eq!(validated_harness(" claude-code ").unwrap(), "claude-code");
     }
 }

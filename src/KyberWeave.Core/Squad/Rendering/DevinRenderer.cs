@@ -434,8 +434,9 @@ public sealed class DevinRenderer : ISquadRenderer
         IReadOnlyList<string> qualifiedMcpToolNames)
     {
         HashSet<string> granted = new(UngovernedTools, StringComparer.Ordinal);
+        string profileName = agent.DevinCapabilityProfile ?? agent.CapabilityProfile;
 
-        if (capabilityProfiles.TryGetValue(agent.CapabilityProfile, out SquadCapabilityProfile? profile))
+        if (capabilityProfiles.TryGetValue(profileName, out SquadCapabilityProfile? profile))
         {
             foreach ((string capability, string[] tools) in CapabilityTools)
             {
@@ -472,7 +473,8 @@ public sealed class DevinRenderer : ISquadRenderer
         IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
         IReadOnlyList<string> mcpServerNames)
     {
-        if (!capabilityProfiles.TryGetValue(agent.CapabilityProfile, out SquadCapabilityProfile? profile))
+        string profileName = agent.DevinCapabilityProfile ?? agent.CapabilityProfile;
+        if (!capabilityProfiles.TryGetValue(profileName, out SquadCapabilityProfile? profile))
         {
             yield break;
         }
@@ -492,7 +494,7 @@ public sealed class DevinRenderer : ISquadRenderer
                 OutputIdentity: agent.Name,
                 Code: "safety-narrowed",
                 InstructionDigest: agent.BodyDigest,
-                Details: $"Capability profile '{agent.CapabilityProfile}' requires 'ask' for " +
+                Details: $"Capability profile '{profileName}' requires 'ask' for " +
                     $"{string.Join(", ", narrowed)}. Devin prompts for a subagent's tool call " +
                     "only in the foreground and only when the session's permission mode has not " +
                     "already approved it, a background subagent never prompts, and a subagent " +
@@ -617,10 +619,13 @@ public sealed class DevinRenderer : ISquadRenderer
 
     private static string DescribeWithheldMcp(
         SquadAgent agent,
-        IReadOnlyList<string> mcpServerNames) =>
-        $"Declared MCP server(s) {string.Join(", ", mcpServerNames)} are withheld: capability " +
-        $"profile '{agent.CapabilityProfile}' does not allow 'filesystem.read', or is the pure " +
-        "orchestrator profile that routes work rather than researching it.";
+        IReadOnlyList<string> mcpServerNames)
+    {
+        string profileName = agent.DevinCapabilityProfile ?? agent.CapabilityProfile;
+        return $"Declared MCP server(s) {string.Join(", ", mcpServerNames)} are withheld: capability " +
+            $"profile '{profileName}' does not allow 'filesystem.read', or is the pure " +
+            "orchestrator profile that routes work rather than researching it.";
+    }
 
     /// <summary>
     /// Whether a subagent is entitled to the declared MCP tools: any role allowed to read the
@@ -628,11 +633,14 @@ public sealed class DevinRenderer : ISquadRenderer
     /// </summary>
     private static bool GrantsMcp(
         SquadAgent agent,
-        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles) =>
-        !string.Equals(agent.CapabilityProfile, PureOrchestratorProfile, StringComparison.Ordinal) &&
-        capabilityProfiles.TryGetValue(agent.CapabilityProfile, out SquadCapabilityProfile? profile) &&
-        profile.Permissions.TryGetValue("filesystem.read", out SquadPermissionDecision decision) &&
-        decision == SquadPermissionDecision.Allow;
+        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles)
+    {
+        string profileName = agent.DevinCapabilityProfile ?? agent.CapabilityProfile;
+        return !string.Equals(profileName, PureOrchestratorProfile, StringComparison.Ordinal) &&
+            capabilityProfiles.TryGetValue(profileName, out SquadCapabilityProfile? profile) &&
+            profile.Permissions.TryGetValue("filesystem.read", out SquadPermissionDecision decision) &&
+            decision == SquadPermissionDecision.Allow;
+    }
 
     private static string CollapseToSingleLine(string value) =>
         string.Join(

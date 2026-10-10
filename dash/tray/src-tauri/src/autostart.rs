@@ -10,10 +10,10 @@ const APP_NAME: &str = "KyberDash";
 #[cfg(target_os = "windows")]
 const RUN_KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
 
-/// Absolute `reg.exe` out of System32 -- see `cli::system_command`.
+/// Absolute `reg.exe` out of System32 -- see `supervisor::system_command`.
 #[cfg(target_os = "windows")]
 fn reg(args: &[&str]) -> Result<std::process::Output> {
-    crate::cli::system_command("reg.exe")
+    crate::supervisor::system_command("reg.exe")
         .args(args)
         .output()
         .with_context(|| "failed to run reg.exe")

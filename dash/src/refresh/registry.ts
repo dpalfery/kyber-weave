@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 
 import { getAllProviders } from '../providers/index.js'
 import type { SessionSource } from '../providers/types.js'
-import { READER_UNMEASURABLE } from '../canon/measurability.js'
+import { harnessFamily, normalizeHarnessName, READER_UNMEASURABLE } from '../canon/measurability.js'
 import { PROVIDER_READERS } from '../synth/provider.js'
 
 import type {
@@ -17,7 +17,32 @@ export { getAllProviders }
 export type { SessionSource }
 
 const DEFAULT_PARSER_CONTRACT_VERSION = '1'
-const CLAUDE_PARSER_CONTRACT_VERSION = '3'
+// v4: issue #216 / PR #276 — capture conversation/tool_result parts onto Claude
+// synth records. Repair contract (option a): a version mismatch must upsert
+// corrected same-span rows over stale counters-only payloads (see
+// recordsForUncoveredCommit); the bump is not merely a checkpoint watermark.
+// v5: P2.0 — stamp the transcript's top-level requestId so twin dedupe can
+// join OTel `request_id` to the file row. Same repair contract: stale
+// checkpoints must be re-read, or file rows stay without the join key.
+const CLAUDE_PARSER_CONTRACT_VERSION = '5'
+// v2: issue #189 / PR #264 — Codex camelCase token usage and Kilo flat
+// tokens_input/tokens_output fallbacks. Old zero-record checkpoints under v1
+// must not be reused or previously dropped sessions stay missing after upgrade.
+const CODEX_PARSER_CONTRACT_VERSION = '2'
+const KILO_PARSER_CONTRACT_VERSION = '2'
+// v2: token-bubble pairing via pairingId — usage spans now carry the model
+// context of the request they belong to. Stale counters-only checkpoints
+// under v1 must re-synthesize on installs that do not reset the owner's
+// store: the bump is the ADR 0016 repair contract (same-span upsert over
+// stale rows), not a migration.
+const CURSOR_PARSER_CONTRACT_VERSION = '2'
+// v2: declared context window read from models-store.json, scoped to the
+// turn's provider. Version-invalidated checkpoints re-open the unit so the
+// declared-window payload upserts over stale rows (ADR 0016 repair contract).
+const PI_PARSER_CONTRACT_VERSION = '2'
+
+const CLAUDE_HARNESS_IDS = ['claude-cli', 'claude-desktop', 'claude-unclassified'] as const
+const KILO_HARNESS_IDS = ['kilo-shared-runtime', 'kilo-vscode-legacy'] as const
 
 const GEMINI_EXCLUSION_REASON =
   'Gemini represents chat history and model usage, not a coding harness. It must not be a harness id or rollup filter.'
@@ -33,17 +58,39 @@ function excluded(reason: string): ProviderDisposition {
   return { kind: 'excluded', reason }
 }
 
+export function parserContractVersionFor(partial: { providerName: string; harnessId: string }): string {
+  if (partial.providerName === 'claude' || CLAUDE_HARNESS_IDS.some((id) => id === partial.harnessId)) {
+    return CLAUDE_PARSER_CONTRACT_VERSION
+  }
+  if (partial.providerName === 'codex') {
+    return CODEX_PARSER_CONTRACT_VERSION
+  }
+  // Opt in by named harness or the kilo-code provider — not a `kilo` prefix —
+  // so a future kilo-shaped harness does not inherit contract 2 by accident.
+  if (partial.providerName === 'kilo-code' || KILO_HARNESS_IDS.some((id) => id === partial.harnessId)) {
+    return KILO_PARSER_CONTRACT_VERSION
+  }
+  // Exact identity, not a cursor- prefix: the cursor-agent transcript parser
+  // did not change, so it keeps the default contract until its own repair.
+  if (partial.providerName === 'cursor' || partial.harnessId === 'cursor') {
+    return CURSOR_PARSER_CONTRACT_VERSION
+  }
+  if (partial.providerName === 'pi' || partial.harnessId === 'pi') {
+    return PI_PARSER_CONTRACT_VERSION
+  }
+  return DEFAULT_PARSER_CONTRACT_VERSION
+}
+
 function descriptor(partial: Omit<HarnessSourceDescriptor, 'parserContractVersion'>): HarnessSourceDescriptor {
-  const isClaude = partial.providerName === 'claude' || partial.harnessId.startsWith('claude')
   return {
     ...partial,
-    parserContractVersion: isClaude ? CLAUDE_PARSER_CONTRACT_VERSION : DEFAULT_PARSER_CONTRACT_VERSION,
+    parserContractVersion: parserContractVersionFor(partial),
   }
 }
 
 export const PROVIDER_DISPOSITIONS: Record<string, ProviderDisposition> = {
   antigravity: job(['antigravity', 'antigravity-cli', 'antigravity-ide']),
-  claude: job(['claude-cli', 'claude-desktop', 'claude-unclassified']),
+  claude: job(CLAUDE_HARNESS_IDS),
   cline: job(['cline']),
   'cline-cli': job(['cline-cli']),
   codewhale: job(['codewhale']),
@@ -56,7 +103,7 @@ export const PROVIDER_DISPOSITIONS: Record<string, ProviderDisposition> = {
   gemini: excluded(GEMINI_EXCLUSION_REASON),
   hermes: job(['hermes']),
   'ibm-bob': job(['ibm-bob']),
-  'kilo-code': job(['kilo-shared-runtime', 'kilo-vscode-legacy']),
+  'kilo-code': job(KILO_HARNESS_IDS),
   kiro: job(['kiro-cli', 'kiro-ide']),
   kimi: job(['kimi']),
   kimicode: { kind: 'alias-of', harnessId: 'kimi-code' },
@@ -502,9 +549,7 @@ export type HarnessContentCapability = {
 }
 
 const READER_HARNESS_IDS = new Set([
-  'claude-cli',
-  'claude-desktop',
-  'claude-unclassified',
+  ...CLAUDE_HARNESS_IDS,
   'codex-cli',
   'codex-desktop',
   'codex-unclassified',
@@ -512,8 +557,7 @@ const READER_HARNESS_IDS = new Set([
   'copilot-vscode',
   'cursor',
   'cursor-agent',
-  'kilo-shared-runtime',
-  'kilo-vscode-legacy',
+  ...KILO_HARNESS_IDS,
   'opencode',
   'pi',
 ])
@@ -530,6 +574,82 @@ export const HARNESS_CONTENT_CAPABILITIES: ReadonlyMap<string, HarnessContentCap
 
 export function descriptorFor(harnessId: string): HarnessSourceDescriptor | undefined {
   return DESCRIPTORS_BY_ID.get(harnessId)
+}
+
+/**
+ * One resolution of a caller-supplied harness scope, shared by every consumer that takes
+ * harness names from a user: the folder-history import, the clean wipe scope, and the
+ * route validation that guards both.
+ *
+ * <remarks>
+ * Two vocabularies meet here. The registry stores per-front-end ids (`codex-cli`,
+ * `codex-desktop`, `codex-unclassified`) and `normalizeHarnessName` deliberately does
+ * NOT fold them onto `codex` — the split is what tells two clients apart in stored data
+ * (issue #182). Surfaces, however, show and accept the FAMILY label: the tray's harness
+ * preference is `codex`, and the web dashboard's clean control shows rollup rows beside a
+ * `family` field. So a family label resolves to every member descriptor, while a direct
+ * descriptor id resolves to itself.
+ *
+ * `known` is the expanded id list, not the labels, and that matters: `CanonStore.
+ * wipeHarnesses` matches stored raw names against the requested set and their normalized
+ * forms, and `normalizeHarnessName('codex-cli')` is still `codex-cli`. Handing the wipe
+ * `codex` would therefore delete nothing at all while reporting a successful clean.
+ *
+ * `descriptors` is what the folder reader can actually open, so an id the wipe understands
+ * but no folder exists for is visible rather than silently dropped. `unknown` is the
+ * caller's own spelling, kept for the error message.
+ * </remarks>
+ */
+export type HarnessScopeResolution = {
+  /** Canonical ids the store wipe understands, family labels expanded, in first-seen order. */
+  readonly known: string[]
+  /** Folder source descriptors, a family label expanded to all of its members. */
+  readonly descriptors: HarnessSourceDescriptor[]
+  /** The requested names this registry cannot place at all. */
+  readonly unknown: string[]
+}
+
+export function resolveHarnessScope(ids: readonly string[]): HarnessScopeResolution {
+  const known: string[] = []
+  const descriptors: HarnessSourceDescriptor[] = []
+  const unknown: string[] = []
+  const seenKnown = new Set<string>()
+  const seenDescriptors = new Set<string>()
+  const addKnown = (id: string): void => {
+    if (seenKnown.has(id)) return
+    seenKnown.add(id)
+    known.push(id)
+  }
+  const addDescriptor = (entry: HarnessSourceDescriptor): void => {
+    if (seenDescriptors.has(entry.harnessId)) return
+    seenDescriptors.add(entry.harnessId)
+    descriptors.push(entry)
+  }
+  for (const requested of ids) {
+    const name = requested.trim()
+    if (name === '') {
+      unknown.push(requested)
+      continue
+    }
+    const id = normalizeHarnessName(name)
+    const direct = descriptorFor(id)
+    if (direct !== undefined) {
+      addKnown(id)
+      addDescriptor(direct)
+      continue
+    }
+    // Not a descriptor id: it is either a family label or a name nothing knows.
+    const members = HARNESS_DESCRIPTORS.filter((entry) => harnessFamily(entry.harnessId) === id)
+    if (members.length === 0) {
+      unknown.push(requested)
+      continue
+    }
+    for (const member of members) {
+      addKnown(member.harnessId)
+      addDescriptor(member)
+    }
+  }
+  return { known, descriptors, unknown }
 }
 
 export function auditProviderRegistry(providers: readonly { name: string }[]): void {

@@ -3,11 +3,15 @@
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import type { BigIntStats } from 'node:fs'
 import { inflateSync } from 'node:zlib'
-import { homedir } from 'node:os'
-import { join } from 'node:path'
 import { createRequire } from 'node:module'
+import { resolveCanonDbPath } from '../canon/paths.js'
 import { APPROXIMATE_TOKENIZER, tokenizerName } from '../canon/tokens.js'
-import { normalizeHarnessName } from '../canon/measurability.js'
+import {
+  SessionIdentities,
+  canonicalHarnessId,
+  normalizeHarnessName,
+} from '../canon/measurability.js'
+import { dedupeTwinTurns } from '../canon/twin-dedupe.js'
 import { refreshProcessIsAlive } from '../canon/refresh-run.js'
 import {
   CanonStore,
@@ -44,6 +48,7 @@ import {
 } from '../analysis/compare.js'
 import type { Finding } from '../analysis/findings.js'
 import { DETECTOR_IDS } from '../analysis/findings.js'
+import type { CleanReport, CleanRequest } from '../clean/clean.js'
 import { COPILOT_CREDITS_SOURCE } from '../canon/copilot-rates.js'
 
 import {
@@ -59,6 +64,7 @@ import {
   type ExecutionTreeNode,
   type HarnessRollupRow,
 } from '../canon/types.js'
+import type { CostBasisMismatch } from '../canon/cost.js'
 import {
   assembleRollup,
   digestSessionPayloads,
@@ -66,6 +72,16 @@ import {
 import { harnessExportsCacheCounter } from '../canon/measurability.js'
 import { buildScorecard, type Scorecard } from '../analysis/scorecard.js'
 import type { AsadSessionPayload } from '../canon/sessions.js'
+import { projectCanonicalStore } from '../canon/projection.js'
+import {
+  MODEL_WINDOW_CATALOG_SOURCES,
+  getModelCatalogSnapshot,
+  readBundledVendorCatalog,
+  refreshModelWindowCatalog,
+  type ModelCatalogSnapshot,
+  type ModelWindowCatalogRefreshResult,
+  type ModelWindowCatalogVendor,
+} from '../canon/model-window-catalog.js'
 
 const _require = createRequire(import.meta.url)
 const { DatabaseSync } = _require('node:sqlite') as {
@@ -245,6 +261,17 @@ export type SessionPayload = Record<string, unknown> & {
   summary?: ParsedSummary
   turns?: unknown[]
   problems?: unknown[]
+  /**
+   * The server's cost-basis verdict for this session (rule R1 — the display
+   * layers render it, they never re-derive it). `null` when the cost blocks
+   * agree, or when nothing was priced; an object when they do not, carrying
+   * the problem text and the separate per-basis totals.
+   *
+   * Optional because a row stored before this field existed does not carry it.
+   * `undefined` means "this store has not been re-projected by a build that
+   * computes it" — unknown, which a consumer must not read as "no mismatch".
+   */
+  costBasisMismatch?: CostBasisMismatch | null
 }
 
 /** Measured session-summary figures behind one session, keyed by session id. */
@@ -473,6 +500,9 @@ const DEFAULT_REOPEN_CHECK_INTERVAL_MS = 1000
  * injected `now`, so it is deterministic under test.
  */
 const STAT_FAILURE_WARN_INTERVAL_MS = 60_000
+
+/** Max distinct key+harness share-drop warnings remembered before the oldest entry is evicted. */
+export const SHARE_DROP_WARN_LIMIT = 1024
 
 /**
  * Unclipped inspector payload. `_clip` stays on the session list and the
@@ -964,12 +994,25 @@ export class KyberBridge {
    * note on {@link reconcile}.
    */
   private lastStatFailureWarnAt?: number
+  /**
+   * Memoized session-identity map for compare. Keyed by a cheap records
+   * generation fingerprint (`COUNT`/`MAX(rowid)` plus file identity) so the
+   * full-table `SELECT DISTINCT` is not paid on every compare click; invalidated
+   * when records change or the owned handle is replaced.
+   */
+  private identitiesMemo?: { db: DatabaseSync; generation: string; value: SessionIdentities }
+  /**
+   * `key\0harness` pairs whose share-drop warning was already logged, so a
+   * Compare click on the same empty share does not re-warn forever. Bounded
+   * by {@link SHARE_DROP_WARN_LIMIT} (oldest entry evicted on overflow);
+   * cleared when the owned handle closes.
+   */
+  private readonly warnedShareDrops = new Set<string>()
 
   constructor(options?: KyberBridgeOptions) {
-    this.canonPath =
-      options?.canonPath ??
-      process.env.KYBER_CANON_DB ??
-      join(homedir(), '.kyberdash', 'canon.db')
+    // The shared resolver, so the server can only ever read the store the CLI
+    // and the receiver write (src/canon/paths.ts).
+    this.canonPath = resolveCanonDbPath(options?.canonPath)
 
     this.ratesPath = options?.ratesPath
 
@@ -1138,6 +1181,8 @@ export class KyberBridge {
       }
     }
     this.canonDb = undefined
+    this.identitiesMemo = undefined
+    this.warnedShareDrops.clear()
   }
 
   /**
@@ -1181,6 +1226,7 @@ export class KyberBridge {
    */
   close(): void {
     this.closed = true
+    this.identitiesMemo = undefined
     if (this.store && typeof this.store.getDatabase === 'function' && this.canonDb === this.store.getDatabase()) {
       this.canonDb = undefined
     } else {
@@ -1945,30 +1991,156 @@ export class KyberBridge {
   }
 
   /**
-   * Records belonging to a run via its executions' session keys.
-   * Thin load for `compareRuns` — does not re-derive run boundaries (D16).
+   * Cheap generation fingerprint for the identities memo: file identity (when
+   * owned) plus `PRAGMA data_version` (moves when another connection commits
+   * — ingest, backfill) and `total_changes()` (moves on any INSERT, UPDATE or
+   * DELETE through this connection, e.g. `CanonStore.setSessionId`). Both
+   * survive in-place updates and delete-then-reinsert, which a row count or
+   * max rowid would not, and neither scans `records`.
    */
-  private recordsForRun(runId: string): CanonicalRecord[] {
-    const executions = this.listExecutions(runId)
-    const keys = [
-      ...new Set(
-        executions.map((execution) => execution.sessionId ?? execution.executionId).filter((key) => key.length > 0),
-      ),
-    ]
-    if (keys.length === 0) {
-      return this.recordsForSessionKey(runId)
+  private identitiesGeneration(db: DatabaseSync): string | undefined {
+    const fileKey = this.identity
+      ? `${this.identity.dev}:${this.identity.ino}`
+      : this.canonPath
+    try {
+      const version = db.prepare('PRAGMA data_version').get() as { data_version: number } | undefined
+      const changes = db.prepare('SELECT total_changes() AS n').get() as { n: number } | undefined
+      if (version === undefined || changes === undefined) return undefined
+      return `${fileKey}:${version.data_version}:${changes.n}`
+    } catch {
+      // Unknown generation: never serve or store a memo (see sessionIdentities).
+      return undefined
     }
+  }
+
+  /** Persisted share ids for the current store — same table `buildRuns` reads. */
+  private sessionIdentities(): SessionIdentities {
+    const db =
+      this.store && typeof this.store.getDatabase === 'function'
+        ? this.store.getDatabase()
+        : this.getDb()
+    if (!db) return new SessionIdentities([])
+    if (!this.store && !this.hasTable(db, 'records')) return new SessionIdentities([])
+
+    const generation = this.identitiesGeneration(db)
+    if (
+      generation !== undefined &&
+      this.identitiesMemo?.db === db &&
+      this.identitiesMemo.generation === generation
+    ) {
+      return this.identitiesMemo.value
+    }
+
+    let value: SessionIdentities
+    if (this.store) {
+      value = this.store.sessionIdentities()
+    } else {
+      try {
+        const pairs = db
+          .prepare(
+            `SELECT DISTINCT COALESCE(session_id, trace_id) AS key, harness
+             FROM records
+             WHERE COALESCE(session_id, trace_id) IS NOT NULL`,
+          )
+          .all() as { key: string; harness: string }[]
+        value = new SessionIdentities(pairs)
+      } catch (err) {
+        console.warn('[KyberBridge] Failed reading session identities from canon.db:', err)
+        // A failed read is not a generation's answer — do not memoize it.
+        return new SessionIdentities([])
+      }
+    }
+    this.identitiesMemo = generation === undefined ? undefined : { db, generation, value }
+    return value
+  }
+
+  /**
+   * One harness share of a session key — mirrors `CanonStore.recordsForShare`.
+   * When records exist under the key but the harness filter (including
+   * excluded identities where `canonicalHarnessId` is null) drops them all,
+   * returns a `dropNote` for the side's `metricsReason` and warns once per
+   * key+harness (not once per Compare click).
+   */
+  private recordsForShare(
+    key: string,
+    harness: string,
+  ): { records: CanonicalRecord[]; dropNote?: string } {
+    const all = this.recordsForSessionKey(key)
+    const canonical = normalizeHarnessName(harness)
+    const records = all.filter(
+      (record) => canonicalHarnessId(record.harness) === canonical,
+    )
+    if (all.length === 0 || records.length > 0) return { records }
+    const excluded = canonicalHarnessId(harness) === null
+    const dropNote = excluded
+      ? `harness ${JSON.stringify(harness)} is an excluded identity; dropped ${all.length} record(s) under session key ${JSON.stringify(key)}`
+      : `no records matched harness ${JSON.stringify(harness)}; dropped ${all.length} record(s) under session key ${JSON.stringify(key)}`
+    const warnKey = `${canonical}\0${key}`
+    if (!this.warnedShareDrops.has(warnKey)) {
+      if (this.warnedShareDrops.size >= SHARE_DROP_WARN_LIMIT) {
+        const oldest = this.warnedShareDrops.values().next()
+        if (!oldest.done) this.warnedShareDrops.delete(oldest.value)
+      }
+      this.warnedShareDrops.add(warnKey)
+      console.warn(`[KyberBridge] Compare share: ${dropNote}`)
+    }
+    return { records, dropNote }
+  }
+
+  /**
+   * Records belonging to a run via its executions' session keys.
+   * Resolves qualified ids through `SessionIdentities.shareOf`, dedupes twin
+   * collectors per harness-scoped share, and returns only `llm.invoke` model
+   * turns (issue #190). `identities` is computed once per compare request.
+   */
+  private recordsForRun(
+    runId: string,
+    identities: SessionIdentities,
+  ): { records: CanonicalRecord[]; dropNotes: string[] } {
+    const executions = this.listExecutions(runId)
+    type Lookup = { key: string; harness: string }
+    const lookups: Lookup[] = []
     const seen = new Set<string>()
+    for (const execution of executions) {
+      // Empty string is a present but unusable session id — fall through
+      // to executionId (?? would keep "" and drop the execution's key).
+      const key = execution.sessionId || execution.executionId
+      if (!key || key.length === 0) continue
+      const harness = execution.harness
+      const dedupeId = `${normalizeHarnessName(harness)}\0${key}`
+      if (seen.has(dedupeId)) continue
+      seen.add(dedupeId)
+      lookups.push({ key, harness })
+    }
+    // Executions can exist without selecting any session key (empty ids);
+    // the run id itself stays the lookup key in that case.
+    if (lookups.length === 0) {
+      const harness =
+        executions[0]?.harness ?? this.getRun(runId)?.harness ?? 'unknown'
+      lookups.push({ key: runId, harness })
+    }
+    const seenSpanIds = new Set<string>()
     const records: CanonicalRecord[] = []
-    for (const key of keys) {
-      for (const record of this.recordsForSessionKey(key)) {
-        if (seen.has(record.spanId)) continue
-        seen.add(record.spanId)
+    const dropNotes: string[] = []
+    for (const { key: sessionId, harness } of lookups) {
+      const share = identities.shareOf(sessionId)
+      // One predicate for both the share hit and the share-miss fallback —
+      // recordsForShare scopes by harness and surfaces excluded-identity drops.
+      const { records: shareRecords, dropNote } = this.recordsForShare(
+        share?.key ?? sessionId,
+        share?.harness ?? harness,
+      )
+      if (dropNote !== undefined) dropNotes.push(dropNote)
+      const deduped = dedupeTwinTurns(shareRecords, share?.key ?? sessionId)
+      for (const record of deduped) {
+        if (record.op !== 'llm.invoke') continue
+        if (seenSpanIds.has(record.spanId)) continue
+        seenSpanIds.add(record.spanId)
         records.push(record)
       }
     }
     records.sort((a, b) => String(a.timestamp).localeCompare(String(b.timestamp)))
-    return records
+    return { records, dropNotes }
   }
 
   /**
@@ -1980,6 +2152,11 @@ export class KyberBridge {
     const runB = this.getRun(runBId)
     if (runA === undefined || runB === undefined) return null
 
+    // Identities are memoized per store generation — the DISTINCT scan reruns
+    // only after `records` changes, not on every compare request.
+    const identities = this.sessionIdentities()
+    const loadedA = this.recordsForRun(runA.runId, identities)
+    const loadedB = this.recordsForRun(runB.runId, identities)
     const summary = compareStoredRuns(
       {
         runId: runA.runId,
@@ -1987,7 +2164,7 @@ export class KyberBridge {
         ...(runA.label ? { label: runA.label } : {}),
         ...(runA.workingDirectory !== undefined ? { workingDirectory: runA.workingDirectory } : {}),
         ...(runA.outcome !== undefined ? { outcome: runA.outcome } : {}),
-        turns: this.recordsForRun(runA.runId),
+        turns: loadedA.records,
       },
       {
         runId: runB.runId,
@@ -1995,13 +2172,22 @@ export class KyberBridge {
         ...(runB.label ? { label: runB.label } : {}),
         ...(runB.workingDirectory !== undefined ? { workingDirectory: runB.workingDirectory } : {}),
         ...(runB.outcome !== undefined ? { outcome: runB.outcome } : {}),
-        turns: this.recordsForRun(runB.runId),
+        turns: loadedB.records,
       },
       options,
     )
 
+    // Tell the person staring at an empty side why its records were dropped,
+    // not just the log file (only when the side resolved no turns at all).
+    const withDropNotes = (side: ComparisonSummary['runA'], notes: string[]): ComparisonSummary['runA'] =>
+      side.availability === 'unavailable' && side.turnCount === undefined && notes.length > 0
+        ? { ...side, metricsReason: `${side.metricsReason} (${notes.join('; ')})` }
+        : side
+
     return {
       ...summary,
+      runA: withDropNotes(summary.runA, loadedA.dropNotes),
+      runB: withDropNotes(summary.runB, loadedB.dropNotes),
       pairs: summary.pairs.map((pair) => {
         const stripRaw = (turn: (typeof pair)['runATurn']) => {
           if (turn === null) return null
@@ -2217,6 +2403,36 @@ export class KyberBridge {
   }
 
   /**
+   * The store's last clean stamp (`last_clean_at`), or null when the store cannot say.
+   * Read through whichever handle this bridge owns: an injected store and its own
+   * read-only file handle must agree, or the coverage window would depend on which path
+   * the caller happened to take.
+   */
+  private lastCleanAt(): string | null {
+    try {
+      if (this.store) return this.store.getMetadata('last_clean_at') ?? null
+      const db = this.getDb()
+      if (!this.hasTable(db, 'metadata')) return null
+      const row = db!.prepare('SELECT value FROM metadata WHERE key = ?').get('last_clean_at') as
+        | { value?: unknown }
+        | undefined
+      return typeof row?.value === 'string' && row.value !== '' ? row.value : null
+    } catch {
+      // Unknown, not "never cleaned": an unreadable stamp must not retract a real window.
+      return null
+    }
+  }
+
+  /** True when `at` is strictly older than `since` (epoch compare, offset stamps included). */
+  private stampedBefore(at: string, since: string | null): boolean {
+    if (since === null) return false
+    const atMs = Date.parse(at)
+    const sinceMs = Date.parse(since)
+    if (!Number.isFinite(atMs) || !Number.isFinite(sinceMs)) return false
+    return atMs < sinceMs
+  }
+
+  /**
    * Refresh facts for the shared report. Each status is queried independently so
    * a later failure does not hide the last successful refresh.
    */
@@ -2291,8 +2507,16 @@ export class KyberBridge {
     const success = latest('success')
     const failure = latest('failure')
     const running = latest('running')
-    const historyWeeks = success?.historyWeeks ?? null
-    const { coveredFrom, coveredThrough } = refreshWindowBounds(success?.startedAt, historyWeeks)
+    // A clean deletes the data this window described, and it does NOT delete the
+    // refresh_run row that described it - that row is audit history. So after a wipe the
+    // newest success row describes data that no longer exists, and the report would claim
+    // coverage it does not have. `cleanDatabase` stamps `last_clean_at`; a success run that
+    // STARTED before that stamp describes the wiped store and is ignored, while a run
+    // that started after it describes the new data and counts again.
+    const superseded = success !== undefined && this.stampedBefore(success.startedAt, this.lastCleanAt())
+    const windowRun = superseded ? undefined : success
+    const historyWeeks = windowRun?.historyWeeks ?? null
+    const { coveredFrom, coveredThrough } = refreshWindowBounds(windowRun?.startedAt, historyWeeks)
     return {
       lastSuccessAt: success?.completedAt ?? success?.startedAt ?? null,
       lastFailure:
@@ -2519,12 +2743,18 @@ export class KyberBridge {
         }
         if (owner === null) {
           const payload = this.getSessionPayload<{ context?: { contextLimitSource?: string } }>(sessionId)
-          return payload?.context?.contextLimitSource === 'default' ? 1 : 0
+          return payload?.context?.contextLimitSource === 'default' ||
+            payload?.context?.contextLimitSource === 'absent'
+            ? 1
+            : 0
         }
         if (owner === undefined || normalizeHarnessName(owner) !== normalizeHarnessName(harness)) return 0
       }
       const payload = this.getSessionPayload<{ context?: { contextLimitSource?: string } }>(sessionId)
-      return payload?.context?.contextLimitSource === 'default' ? 1 : 0
+      return payload?.context?.contextLimitSource === 'default' ||
+        payload?.context?.contextLimitSource === 'absent'
+        ? 1
+        : 0
     }
     if (runId !== undefined && runId !== '') {
       // Same fold rule as everywhere else (review): a run scoped to a legacy
@@ -2543,8 +2773,10 @@ export class KyberBridge {
       ]
       return ids.filter(
         (id) =>
-          this.getSessionPayload<{ context?: { contextLimitSource?: string } }>(id)?.context?.contextLimitSource ===
-          'default',
+          ['default', 'absent'].includes(
+            this.getSessionPayload<{ context?: { contextLimitSource?: string } }>(id)?.context
+              ?.contextLimitSource ?? '',
+          ),
       ).length
     }
     // Harness and workspace scopes read the persisted rollups (review): the
@@ -2627,7 +2859,7 @@ export class KyberBridge {
     }
     if (!this.hasTable(db, 'session')) return 0
     try {
-      const conds = [`json_extract(payload, '$.context.contextLimitSource') = 'default'`]
+      const conds = [`json_extract(payload, '$.context.contextLimitSource') IN ('default', 'absent')`]
       const params: (string | number)[] = []
       if (harness !== undefined && harness !== '') {
         conds.push('LOWER(harness) = LOWER(?)')
@@ -3537,6 +3769,93 @@ export class KyberBridge {
    * unreadable table reads as no rows, matching `getQuarantineCount`'s
    * zero-on-absent contract for this seam.
    */
+  /**
+   * Catalog snapshot for `GET /api/kyber/model-catalog`.
+   *
+   * Read-only. An empty table stays empty until `POST /refresh` fills it;
+   * seeding here would make a GET rewrite the store.
+   */
+  getModelCatalog(): ModelCatalogSnapshot {
+    const store = this.store
+    if (store === undefined) {
+      const vendors = {} as ModelCatalogSnapshot['vendors']
+      for (const vendor of Object.keys(MODEL_WINDOW_CATALOG_SOURCES) as ModelWindowCatalogVendor[]) {
+        vendors[vendor] = {
+          documentationUrl: MODEL_WINDOW_CATALOG_SOURCES[vendor].documentationUrl,
+          status: 'unknown',
+          rowCount: 0,
+          lastRefreshAt: null,
+        }
+      }
+      return { rowCount: 0, lastRefreshAt: null, vendors }
+    }
+    return getModelCatalogSnapshot(store)
+  }
+
+  /**
+   * User-facing refresh. One derived rebuild runs only after a vendor's rows
+   * actually changed; the count is how many times that hook ran, which the
+   * refresh itself caps at one.
+   */  async refreshModelCatalog(): Promise<
+    ModelCatalogSnapshot & ModelWindowCatalogRefreshResult & { derivedRebuildCount: number }
+  > {
+    const store = this.store
+    if (store === undefined) {
+      return { ...this.getModelCatalog(), vendorsUpdated: [], vendorsFailed: [], derivedRebuildCount: 0 }
+    }
+    let derivedRebuildCount = 0
+    let rebuild: Promise<unknown> | undefined
+    const result = refreshModelWindowCatalog(store, {
+      readVendor: readBundledVendorCatalog,
+      now: () => new Date().toISOString(),
+      rebuildDerived: () => {
+        derivedRebuildCount += 1
+        rebuild = projectCanonicalStore(store)
+      },
+    })
+    if (rebuild !== undefined) await rebuild
+    return { ...getModelCatalogSnapshot(store), ...result, derivedRebuildCount }
+  }
+
+  /**
+   * User-initiated database clean (issue #312), behind `POST /api/kyber/clean`.
+   * The owned handle is read-only by design, so the clean runs on a
+   * short-lived read-write `CanonStore` at this bridge's `canonPath` — the
+   * same code the `dash clean` CLI runs — opened for the operation and closed
+   * in a `finally`. Tests inject a `store` instead, which keeps the file
+   * untouched. Both paths hold the store refresh lock for the operation, so
+   * concurrent cleans and refreshes serialize. A busy refresh lock surfaces
+   * as `CLEAN_BUSY` for the route's 409; anything else is a 500 with a
+   * bounded message.
+   */
+  async cleanDatabase(request: CleanRequest): Promise<CleanReport> {
+    if (this.store === undefined && this.canonPath === ':memory:') {
+      throw new Error('cleanDatabase: no store to clean')
+    }
+    const { cleanDatabase, portsForClean } = await import('../clean/clean.js')
+    const { acquireStoreRefreshLock } = await import('../refresh/lock.js')
+    const lock = await acquireStoreRefreshLock()
+    if (lock.outcome !== 'acquired') {
+      const busy = new Error('a refresh or clean is already running') as Error & { code: string }
+      busy.code = 'CLEAN_BUSY'
+      throw busy
+    }
+    try {
+      if (this.store !== undefined) {
+        return await cleanDatabase(this.store, request, portsForClean(this.store))
+      }
+      const { CanonStore } = await import('../canon/store.js')
+      const store = new CanonStore(this.canonPath)
+      try {
+        return await cleanDatabase(store, request, portsForClean(store))
+      } finally {
+        store.close()
+      }
+    } finally {
+      await lock.handle.release()
+    }
+  }
+
   getQuarantineCountsByReason(): Array<{ reason: string; count: number }> {
     if (this.store) {
       try {

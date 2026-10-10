@@ -17,6 +17,8 @@ namespace KyberWeave.Cli.Commands.Squad;
 public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
 {
     private readonly IProcessExecutor? _executor;
+    private readonly ISquadUserPaths? _userPaths;
+    private readonly SquadStateStore? _stateStore;
     private readonly string? _workingDirectory;
     private readonly ISquadGlobalRootResolver? _globalRoots;
     private readonly ISquadRenderer? _renderer;
@@ -32,9 +34,11 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         ISquadUserPaths? userPaths = null,
         string? workingDirectory = null,
         ISquadGlobalRootResolver? globalRoots = null,
-        ISquadRenderer? renderer = null)
+        ISquadRenderer? renderer = null,
+        SquadStateStore? stateStore = null)
     {
-        _ = userPaths;
+        _userPaths = userPaths;
+        _stateStore = stateStore;
         _executor = executor;
         _workingDirectory = workingDirectory;
         _globalRoots = globalRoots;
@@ -321,11 +325,15 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
 
         ISquadRenderer renderer = _renderer ?? SquadCommandComposition.ResolveRenderer();
         ISquadGlobalRootResolver globalRoots = _globalRoots ?? SquadCommandComposition.ResolveGlobalRoots();
+        SquadStateStore stateStore = _stateStore ?? SquadCommandComposition.ResolveStateStore(_userPaths);
 
         List<SquadUnmanagedPathCollision> collisions = [];
         bool invalidGlobalRoot = false;
         try
         {
+            SquadReceipt? receipt = stateStore.ReadReceipt(workingDirectory, SquadDeploymentScope.Global);
+            IReadOnlyList<SquadReceipt> siblingReceipts = stateStore.ListOtherGlobalReceipts(workingDirectory);
+
             foreach (SquadTarget target in renderer.SupportedTargets)
             {
                 // A future native renderer whose per-user directory is not yet verified
@@ -363,10 +371,16 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
                     workingDirectory,
                     SquadDeploymentScope.Global,
                     render.Files,
-                    globalRoots));
+                    globalRoots,
+                    receipt,
+                    siblingReceipts));
             }
         }
-        catch (SquadRenderValidationException ex)
+        catch (Exception ex) when (
+            ex is SquadRenderValidationException
+                or InvalidDataException
+                or IOException
+                or UnauthorizedAccessException or ArgumentException)
         {
             AnsiConsole.MarkupLine(
                 $"  [red]fail[/] Global unmanaged-collision scan failed: {Markup.Escape(ex.Message)}");

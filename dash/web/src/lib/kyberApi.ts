@@ -300,6 +300,26 @@ export interface KyberSessionTurnRow {
   [key: string]: unknown
 }
 
+/**
+ * The server's verdict on a session's cost bases, decided in the engine where
+ * `sumCosts` already refuses to blend (rule R1 — the web dashboard renders this
+ * field, it never re-derives it).
+ *
+ * `null` when the cost blocks agree, or when nothing was priced at all; the
+ * object when they do not, carrying the problem text, every basis found, and
+ * the per-basis totals a display layer must keep apart.
+ *
+ * Optional on the served payload because a session row stored before this
+ * field existed does not carry it. `undefined` means the store has not been
+ * re-projected since — unknown, not "no mismatch".
+ */
+export interface KyberCostBasisMismatch {
+  code: string
+  message: string
+  bases: string[]
+  totalsByBasis: Record<string, number | null>
+}
+
 /** The tool-definition rows legacy turn content carried under `tool_definitions`. */
 export interface KyberToolDefinitionShadow {
   name?: string
@@ -809,16 +829,22 @@ export async function fetchCalibration(opts?: { runId?: string }): Promise<Kyber
 /** Task phase used by phase-aligned run comparison. */
 export type KyberTaskPhase = 'exploration' | 'implementation' | 'verification' | 'resolution'
 
+/** Whether a comparison figure was measured or is explicitly unavailable (issue #190). */
+export type KyberComparisonAvailability = 'measured' | 'unavailable' | 'not_measurable'
+
 export interface KyberComparisonVerdict {
   status: 'promoted' | 'candidate_only' | 'insufficient_history' | 'outcome_regression' | 'neutral'
-  pairCount: number
-  completedPairCount: number
-  meetsSufficiencyThreshold: boolean
-  outcomeRegression: boolean
+  pairCount?: number
+  /** Omitted when recommendation history is not measured — never treat absence as zero. */
+  completedPairCount?: number
+  meetsSufficiencyThreshold?: boolean
+  outcomeRegression?: boolean
   canPromote: boolean
-  recommendation: string
+  recommendation?: string
   refusalReason?: string
-  summary: string
+  summary?: string
+  /** When history is not store-backed, the pair stays manual-only with no n / 5 display. */
+  historyAvailability?: KyberComparisonAvailability | 'not_measured'
 }
 
 export interface KyberPhaseAlignedTurnPair {
@@ -830,30 +856,75 @@ export interface KyberPhaseAlignedTurnPair {
   reading: string
 }
 
+/** Measured run side of `GET /api/kyber/compare/runs`. */
+export type KyberComparisonRunSideMeasured = {
+  runId: string
+  harness: string
+  label?: string
+  outcome?: unknown
+  availability: 'measured'
+  totalTokens: number
+  totalCost?: number
+  turnCount: number
+}
+
+/** Unavailable run side — token totals withheld; never a fabricated zero. */
+export type KyberComparisonRunSideUnavailable = {
+  runId: string
+  harness: string
+  label?: string
+  outcome?: unknown
+  availability: 'unavailable'
+  reason: string
+  /** Per-run metrics unavailability reason (issue #190). */
+  metricsReason: string
+  totalCost?: number
+  turnCount?: number
+  totalTokens?: never
+}
+
+export type KyberComparisonRunSide =
+  | KyberComparisonRunSideMeasured
+  | KyberComparisonRunSideUnavailable
+
+/** Aggregate totals for a run pair — mirrors the server `ComparisonTotals` union. */
+export type KyberComparisonTotalsMeasured = {
+  availability: 'measured'
+  tokensA: number
+  tokensB: number
+  tokenDelta: number
+  turnCountA: number
+  turnCountB: number
+  turnDelta: number
+  costA?: number
+  costB?: number
+  costDelta?: number
+  costComparable: boolean
+  costRefusalReason?: string
+}
+
+export type KyberComparisonTotalsUnavailable = {
+  availability: 'unavailable'
+  reason: string
+  turnCountA: number
+  turnCountB: number
+  turnDelta: number
+  costComparable: boolean
+  costRefusalReason?: string
+}
+
+export type KyberComparisonTotals =
+  | KyberComparisonTotalsMeasured
+  | KyberComparisonTotalsUnavailable
+
 /** `GET /api/kyber/compare/runs` body — engine `ComparisonSummary` without turn `raw`. */
 export interface KyberRunComparison {
-  runA: {
-    runId: string
-    harness: string
-    label?: string
-    outcome?: unknown
-    totalTokens: number
-    totalCost?: number
-    turnCount: number
-  }
-  runB: {
-    runId: string
-    harness: string
-    label?: string
-    outcome?: unknown
-    totalTokens: number
-    totalCost?: number
-    turnCount: number
-  }
+  runA: KyberComparisonRunSide
+  runB: KyberComparisonRunSide
   taskFamily?: string
   pairs: KyberPhaseAlignedTurnPair[]
   phaseSummaries: Record<KyberTaskPhase, Record<string, unknown>>
-  totals: Record<string, unknown>
+  totals: KyberComparisonTotals
   verdict: KyberComparisonVerdict
 }
 
@@ -864,14 +935,13 @@ export interface KyberRunComparison {
 export async function fetchRunComparison(
   runAId: string,
   runBId: string,
-  opts?: { completedPairCount?: number },
 ): Promise<KyberRunComparison> {
+  // Public compare does not accept a caller-supplied completedPairCount: that
+  // would invent recommendation-history sufficiency. History is unavailable
+  // until a store-backed measurement exists (issue #190).
   const params = new URLSearchParams()
   params.set('runA', runAId)
   params.set('runB', runBId)
-  if (opts?.completedPairCount !== undefined) {
-    params.set('completedPairCount', String(opts.completedPairCount))
-  }
   return fetchJson<KyberRunComparison>(`/api/kyber/compare/runs?${params.toString()}`)
 }
 
@@ -930,8 +1000,106 @@ export async function requestContextReview(
   return res.json() as Promise<KyberReviewResult>
 }
 
+/**
+ * Bounded catalog refresh. Vendor names and counts only — `error` strings
+ * from the server are dropped here so a remote body cannot reach the page.
+ */
+export interface ModelCatalogRefreshResult {
+  rowCount: number
+  lastRefreshAt: string | null
+  vendorsUpdated: string[]
+  vendorsFailed: { vendor: string }[]
+  derivedRebuildCount: number
+}
+
+function stringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return value.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0)
+}
+
+export async function refreshModelWindows(): Promise<ModelCatalogRefreshResult> {
+  const path = '/api/kyber/model-catalog/refresh'
+  const res = await fetch(path, { method: 'POST' })
+  if (!res.ok) throw new KyberApiError(res.status, path)
+  const json: unknown = await res.json()
+  const body = json !== null && typeof json === 'object' ? (json as Record<string, unknown>) : {}
+  const failed = Array.isArray(body.vendorsFailed) ? body.vendorsFailed : []
+  return {
+    rowCount: typeof body.rowCount === 'number' ? body.rowCount : 0,
+    lastRefreshAt: typeof body.lastRefreshAt === 'string' ? body.lastRefreshAt : null,
+    vendorsUpdated: stringList(body.vendorsUpdated),
+    vendorsFailed: failed.flatMap((entry) => {
+      if (entry === null || typeof entry !== 'object') return []
+      const vendor = (entry as { vendor?: unknown }).vendor
+      return typeof vendor === 'string' && vendor.length > 0 ? [{ vendor }] : []
+    }),
+    derivedRebuildCount: typeof body.derivedRebuildCount === 'number' ? body.derivedRebuildCount : 0,
+  }
+}
+
 export async function fetchReviewStatus(): Promise<{ provider: string; isConfigured: boolean }> {
   return fetchJson<{ provider: string; isConfigured: boolean }>('/api/kyber/review/status')
+}
+
+/**
+ * Database clean request. `confirm` is the browser's explicit consent to the
+ * irreversible wipe. `reingestWeeks` is OPT-IN (issue #319): omit the key
+ * entirely and no folder history is imported at all — the dashboard no longer
+ * promises an automatic 7-day re-ingest the operator never asked for.
+ */
+export interface CleanDatabaseRequest {
+  all?: boolean
+  harnesses?: string[]
+  /** Sent only when the operator ticked "import folder history"; 1..52. */
+  reingestWeeks?: number
+  confirm: true
+}
+
+/** Bounded clean summary. Counts only — never a remote error string. */
+export interface CleanDatabaseResult {
+  harnesses: string[]
+  records: number
+  reingested: boolean
+  historyWeeks: number | null
+}
+
+function cleanCount(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0
+}
+
+/**
+ * Bounded database clean. The scope and counts are echoed from the server;
+ * `error` strings are dropped here so a remote body cannot reach the page —
+ * callers distinguish outcomes by `KyberApiError.status` (400 usage, 409
+ * busy) instead.
+ */
+export async function cleanDatabase(request: CleanDatabaseRequest): Promise<CleanDatabaseResult> {
+  const path = '/api/kyber/clean'
+  // WHY the key is spread conditionally: `reingestWeeks: undefined` still
+  // serialises as a JSON key, and a key the server cannot distinguish from a
+  // decision would turn "no import" back into an implicit one.
+  const { reingestWeeks, ...scope } = request
+  const res = await fetch(path, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(
+      reingestWeeks === undefined ? scope : { ...scope, reingestWeeks },
+    ),
+  })
+  if (!res.ok) throw new KyberApiError(res.status, path)
+  const json: unknown = await res.json()
+  const body = json !== null && typeof json === 'object' ? (json as Record<string, unknown>) : {}
+  const wipe = body.wipe !== null && typeof body.wipe === 'object'
+    ? (body.wipe as Record<string, unknown>)
+    : {}
+  return {
+    harnesses: stringList(body.harnesses),
+    records: cleanCount(wipe.records),
+    reingested: body.reingested === true,
+    historyWeeks: typeof body.historyWeeks === 'number' && Number.isFinite(body.historyWeeks)
+      ? body.historyWeeks
+      : null,
+  }
 }
 
 // ===========================================================================
@@ -1013,3 +1181,113 @@ export async function fetchCoverage(): Promise<KyberCoverage> {
   return fetchJson<KyberCoverage>('/api/kyber/coverage')
 }
 
+
+// ===========================================================================
+// Maintenance surface (issue #319, architecture rule R1): the web dashboard
+// schedules nothing and imports nothing. It reads the host's status, reads the
+// shared settings, and asks the server to run a bounded job. Every type below
+// mirrors a route the `kyberdash web` server serves; none is computed here.
+// ===========================================================================
+
+/** The refresh job's own state as the host reports it (`JobState` server-side). */
+export type KyberJobState = 'idle' | 'running' | 'running-elsewhere' | 'failed'
+
+/** `GET /api/kyber/jobs`: the flat host status mapped to the nested wire shape. */
+export interface KyberJobStatus {
+  refresh: {
+    state: KyberJobState
+    lastSuccessAt: string | null
+    lastFailure: string | null
+    nextDueAt: string | null
+  }
+  /** Whether SCHEDULED jobs are paused. The pause button and label read this. */
+  paused: boolean
+  /**
+   * Monotonic marker for the store's contents. It moves when a clean or a
+   * rebuild rewrites the data underneath an open tab, which is what the
+   * dashboard polls for (see `lib/storeGeneration.ts`).
+   */
+  storeGeneration: number
+  /** Another process holds the jobs lease, so this host runs nothing. */
+  hostedElsewhere: boolean
+}
+
+/** The shared settings both display layers read and write over one API. */
+export interface KyberSettings {
+  folderImportScheduled: boolean
+  jobsPaused: boolean
+  refreshCadenceMinutes: number
+  receiverHosted: boolean
+}
+
+/** A partial `PUT /api/kyber/settings` body — every key is optional. */
+export type KyberSettingsUpdate = Partial<KyberSettings>
+
+export function fetchKyberJobs(): Promise<KyberJobStatus> {
+  return fetchJson<KyberJobStatus>('/api/kyber/jobs')
+}
+
+export function fetchKyberSettings(): Promise<KyberSettings> {
+  return fetchJson<KyberSettings>('/api/kyber/settings')
+}
+
+/**
+ * Applies a partial settings change and returns the full settings as the server
+ * now holds them, so the panel renders what was persisted rather than what was
+ * asked for.
+ */
+export async function updateKyberSettings(update: KyberSettingsUpdate): Promise<KyberSettings> {
+  const path = '/api/kyber/settings'
+  const res = await fetch(path, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(update),
+  })
+  if (!res.ok) throw new KyberApiError(res.status, path)
+  return res.json() as Promise<KyberSettings>
+}
+
+/** Which surface asked for a refresh; `scheduled` is reserved for the host. */
+export type KyberRefreshSurface = 'web' | 'tray'
+
+/**
+ * Requests a manual refresh. WHY `surface`: the host records which surface
+ * triggered the run, and the dashboard must never ask for the scheduled one —
+ * that decision belongs to the host's own cadence. A 409 arrives as a
+ * `KyberApiError` for the caller to render as "already running".
+ */
+export async function requestKyberRefresh(surface: KyberRefreshSurface = 'web'): Promise<void> {
+  const path = '/api/kyber/refresh'
+  const res = await fetch(path, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ surface }),
+  })
+  if (!res.ok) throw new KyberApiError(res.status, path)
+}
+
+/**
+ * One-off folder-history import (issue #319). It NEVER touches the scheduled
+ * folder-import setting: "import this once" and "keep importing" are different
+ * decisions, and conflating them made a single import look like a standing
+ * preference.
+ */
+export async function importKyberHistory(request: {
+  weeks: number
+  harnesses?: readonly string[]
+}): Promise<void> {
+  const path = '/api/kyber/import-history'
+  const res = await fetch(path, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      weeks: request.weeks,
+      // Omitted rather than sent empty: an empty array is a claim about scope
+      // the operator never made, and the server's "all harnesses" is its own.
+      ...(request.harnesses && request.harnesses.length > 0
+        ? { harnesses: [...request.harnesses] }
+        : {}),
+    }),
+  })
+  if (!res.ok) throw new KyberApiError(res.status, path)
+}

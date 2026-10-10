@@ -1,0 +1,9 @@
+{
+  "ai.operationId": "synthetic-opencode-op-legacy-001",
+  "ai.model.id": "synthetic-provider/synthetic-model-legacy",
+  "ai.prompt.messages": "[{\"role\":\"system\",\"content\":\"Synthetic OpenCode system directive for legacy ai.* fixture.\"},{\"role\":\"user\",\"content\":\"Synthetic user turn for legacy OpenCode fixture.\"},{\"role\":\"assistant\",\"content\":\"Synthetic assistant reply in legacy fixture.\"}]",
+  "ai.prompt.tools": "[{\"name\":\"read_file\",\"description\":\"Read a workspace file\"},{\"name\":\"grep_search\",\"description\":\"Search file contents\"}]",
+  "ai.toolCall.result": "Synthetic tool output from legacy ai.toolCall.result fixture.",
+  "ai.usage.promptTokens": 512,
+  "ai.usage.completionTokens": 96
+}
