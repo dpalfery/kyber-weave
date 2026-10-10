@@ -298,7 +298,7 @@ conductor calls `arbiter_evaluate` before each dispatch and after each return, a
 code-reviewer calls it once before the lens fan-out and once before the refutation
 fan-out. Holding `arbiter_evaluate` is the agent's signal to use the fallback: the
 `decision.query` capability is allowed only for the `orchestrator` and `reviewer` profiles
-and denied for the other eight, and on Warp and ZCode an `allow` lowers to the
+and denied for the other ten, and on Warp and ZCode an `allow` lowers to the
 `kyber-weave-arbiter` server alone. The setup step — Squad writes no MCP configuration for
 either target — is in the [runbook](runbook.md#the-mcp-fallback-warp-and-zcode).
 
