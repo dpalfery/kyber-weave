@@ -340,9 +340,8 @@ with the JSON keys `folderImportScheduled`, `jobsPaused`, `refreshCadenceMinutes
 untouched — and a body with an unknown key or a value of the wrong type is refused whole.
 
 **Pause covers scheduled jobs only.** `jobs.paused` stops the job host from scheduling: no
-scheduled refresh and no maintenance pass runs while it is set. Manual **Refresh**,
-**Import folder history**, and **Clean**, the OTLP receiver's continued ingest, and the
-retention purge all carry on — pausing must not silently stop collection. The dashboard's
+scheduled refresh runs while it is set. Manual **Refresh**, **Import folder history**, and
+**Clean**, the OTLP receiver's continued ingest, and the retention purge all carry on — pausing must not silently stop collection. The dashboard's
 Maintenance panel offers Pause/Resume and reads the *host's* answer from `GET /api/kyber/jobs`,
 not the echo of the setting it just wrote.
 
@@ -590,11 +589,11 @@ Every view has its own URL, so a view can be bookmarked, shared, or opened direc
 (`dash/web/src/lib/router.ts`), `kyberdash web --view`, and the tray's open actions all read
 that one list. Browser back and forward restore the spine.
 
-Top navigation (`nav-tabs`) offers four: **Context Doctor**, **Sessions**, **Quarantine**,
-**Problems**. The sidebar rail carries **Compare** and no longer duplicates the primary
-**Context Doctor** and **Sessions** entries; Compare is the one view the top navigation does
-not offer. Views reached by drilling — a run, an execution, a turn, a finding — stay reachable
-from the pages that lead to them.
+Top navigation (`nav-tabs`) offers five: **Context Doctor**, **Sessions**, **Compare**,
+**Quarantine**, **Problems**. It is the whole navigation — the entire left rail and the
+mobile hamburger/toggle that opened it were removed, so there is no second surface to keep in
+step and the main content takes the full width of the shell. Views reached by drilling — a
+run, an execution, a turn, a finding — stay reachable from the pages that lead to them.
 
 There is **one main harness selector** — the **Harness:** strip under the header — and it
 scopes **Sessions** and **Context Doctor** together. Choosing a harness narrows whichever of
@@ -617,8 +616,8 @@ filters, so narrowing one page's scope never touches the A/B selectors.
   - *Tool & Schema Cost Table*: Ranked tool schema sizes, resident turns, invocations, and unused schema waste range.
   - *Execution Timeline / Call Tree*: Hierarchical span call tree with duration, status badges, and auxiliary flags.
   - *Inspector Drawer (`SessionInspectorDrawer`)*: Slide-out drawer with XML tag folding (`<instructions>`, `<environment_info>`, `<context>`) and formatted tool call/result trees.
-- **Compare** (rail): Phase-aligned run comparison (`page-compare`), reached from the
-  sidebar or its own URL rather than the top navigation. Navigate directly to
+- **Compare**: Phase-aligned run comparison (`page-compare`), reached from the top
+  navigation or its own URL. Navigate directly to
   `/compare?a=:runId&b=:runId` to pre-select
   two runs; without explicit `a`/`b` query ids, **Run A** and **Run B** both start at
   **Select a run** and kyberdash issues no comparison request until two distinct run ids are

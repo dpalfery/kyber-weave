@@ -570,14 +570,16 @@ Level 1: All Harnesses (Context Doctor)
 ```
 
 The web app lands on Context Doctor (`App` default `initialPage` / `spineReducer` stack
-`{ level: 'context-doctor' }`). Header tabs are `Context Doctor · Usage · Quarantine · Problems`
-(`NAV_TABS`). Usage is the CodeBurn spend grid; it does not open the app. There is no
-Context tab: session browsing is the **Sessions** rail destination wrapping
-`ContextExplorer` / `AgentSessionDashboard` (D17). Compare is not a header peer; it is a
-spine-rail destination that mounts `CompareRuns` (D20). The sidebar is the spine rail
-(`nav-rail-context-doctor`, `nav-rail-sessions`, `nav-rail-compare`); Share chrome is on Usage
-only (D21). Density tokens live in the dashboard `@theme` (D22). A single shell harness
-strip (`data-testid="harness-selector"`) is the harness level of the spine; selecting a
+`{ level: 'context-doctor' }`). Top navigation (`NAV_TABS`) carries **Context Doctor**,
+**Sessions**, **Compare**, **Quarantine** and **Problems**, and it is the whole navigation:
+the entire left rail and the mobile hamburger/toggle that opened it are gone, so no second
+navigation surface can drift from the tabs and main content takes the full width of the shell.
+Usage is the CodeBurn spend grid; it does not open the app. There is no Context tab: session
+browsing is the **Sessions** top-navigation destination wrapping `ContextExplorer` /
+`AgentSessionDashboard` (D17). Compare is a top-navigation peer that mounts `CompareRuns`
+(D20); Share chrome is on Usage only (D21). Density tokens live in the dashboard `@theme`
+(D22). A single shell harness strip (`data-testid="harness-selector"`) is the harness level of
+the spine; selecting a
 canonical id pushes `{ level: 'harness', harnessId }` and loads `runs?harness=`. A second
 provider `<select>` exists only on the Usage tab. Gemini may appear as a selector **label**;
 canonical rows and rollups do not use harness id `gemini`.
@@ -869,9 +871,10 @@ retention purge all continue.
 ### Web Dashboard (dash/web/)
 
 The React web dashboard provides progressive-disclosure views matching the 6-level spine.
-Top navigation carries **Context Doctor**, **Sessions**, **Quarantine** and **Problems**; the
-sidebar rail carries **Compare** and no longer duplicates the primary Context Doctor and
-Sessions entries.
+Top navigation carries **Context Doctor**, **Sessions**, **Compare**, **Quarantine** and
+**Problems**. It is the only navigation surface: the whole left rail and the mobile
+hamburger/toggle that opened it were removed, so nothing duplicates a tab and the main
+content column takes the full width of the shell.
 
 The header's **Harness:** strip is the single main harness selector. It scopes **Sessions**
 and **Context Doctor** together and narrows whichever of those two pages is open in place,
@@ -900,13 +903,13 @@ The individual views:
   the full workspace findings browser. Scoped by the shared harness selector with optional
   session narrowing; drilling harness → run → execution → turn →
   context item, and into a finding, is unchanged.
-- **`Sessions.tsx`**: Sessions rail wrapping `ContextExplorer` (ASAD + timeline); not a
-  Context tab, and scoped by the same harness selector as Context Doctor.
+- **`Sessions.tsx`**: Top-navigation destination wrapping `ContextExplorer` (ASAD +
+  timeline); not a Context tab, and scoped by the same harness selector as Context Doctor.
 - **`HarnessDetail.tsx`**: Per-harness rollups, coverage indicators, labelled grouping basis, and run browser.
 - **`RunDetail.tsx`**: Multi-agent run topology, execution tree, run scorecard, and grouping label.
 - **`FindingDetail.tsx`**: In-depth finding view with evidence table, confidence basis, risk caveats, and calibration summary.
-- **`CompareRuns.tsx`**: Phase-aligned run diffing with outcome regression guards, reached from
-  the sidebar rail rather than the top navigation. Run A and Run B both begin at
+- **`CompareRuns.tsx`**: Phase-aligned run diffing with outcome regression guards, reached
+  from the top navigation. Run A and Run B both begin at
   **Select a run** unless the route supplies explicit `a`/`b` deep-link ids; kyberdash fetches
   comparison data only after two distinct ids are chosen. Each selector carries an independent
   harness filter (`All harnesses` plus observed canonical ids), unaffected by the shared
