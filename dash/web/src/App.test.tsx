@@ -1,7 +1,13 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import * as React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+
+// PI owns the maintenance panels; the shell only decides where they mount.
+// Mocked here so this suite asserts the shell, not the panels' data fetching.
+vi.mock('./components/maintenance/DashboardTools', () => ({
+  DashboardTools: () => <div data-testid="dashboard-tools" />,
+}))
 
 import {
   App,
@@ -102,15 +108,15 @@ describe('App: Top Navigation Refactoring', () => {
     clearHooks()
   })
 
-  it('exports exactly the 3 header navigation tabs in NAV_TABS (requirement 2.9)', () => {
-    expect(NAV_TABS).toHaveLength(3)
+  it('exports exactly the header navigation tabs in NAV_TABS (requirement 2.9)', () => {
+    expect(NAV_TABS).toHaveLength(4)
     const keys = NAV_TABS.map((t) => t.key)
-    expect(keys).toEqual(['context-doctor', 'quarantine', 'problems'])
+    expect(keys).toEqual(['context-doctor', 'sessions', 'quarantine', 'problems'])
     const labels = NAV_TABS.map((t) => t.label)
-    expect(labels).toEqual(['Context Doctor', 'Quarantine', 'Problems'])
+    expect(labels).toEqual(['Context Doctor', 'Sessions', 'Quarantine', 'Problems'])
   })
 
-  it('renders exactly the 3 header tabs and spine rail destinations, excluding Compare as a peer tab', () => {
+  it('renders the header tabs and the rail destination, with no duplicate rail entries', () => {
     const qc = createTestQueryClient()
     const html = renderHtml(
       <QueryClientProvider client={qc}>
@@ -120,6 +126,7 @@ describe('App: Top Navigation Refactoring', () => {
 
     expect(html).toContain('data-testid="nav-tab-context-doctor"')
     expect(html).not.toContain('data-testid="nav-tab-usage"')
+    expect(html).toContain('data-testid="nav-tab-sessions"')
     expect(html).toContain('data-testid="nav-tab-quarantine"')
     expect(html).toContain('data-testid="nav-tab-problems"')
     expect(html).not.toContain('data-testid="nav-tab-compare"')
@@ -130,12 +137,28 @@ describe('App: Top Navigation Refactoring', () => {
     expect(html).not.toContain('data-testid="nav-tab-kyber-context"')
 
     const navTabsMatch = html.match(/data-testid="nav-tab-[^"]+"/g)
-    expect(navTabsMatch).toHaveLength(3)
+    expect(navTabsMatch).toHaveLength(4)
 
-    expect(html).toContain('data-testid="nav-rail-context-doctor"')
-    expect(html).toContain('data-testid="nav-rail-sessions"')
+    // Context Doctor and Sessions live in the header now: a second copy in the
+    // rail would put the same destination on screen twice, one per surface.
+    expect(html).not.toContain('data-testid="nav-rail-context-doctor"')
+    expect(html).not.toContain('data-testid="nav-rail-sessions"')
     expect(html).toContain('data-testid="nav-rail-compare"')
+    expect((html.match(/data-testid="nav-rail-[^"]+"/g) ?? [])).toHaveLength(1)
     expect((html.match(/data-testid="harness-selector"/g) ?? [])).toHaveLength(1)
+  })
+
+  it('mounts the dashboard tools beside the theme toggle in the header action group', () => {
+    const qc = createTestQueryClient()
+    const html = renderHtml(
+      <QueryClientProvider client={qc}>
+        <App initialPage="context-doctor" />
+      </QueryClientProvider>
+    )
+    const actions = html.match(/<div[^>]*data-testid="header-actions"[^>]*>([\s\S]*?)<\/div>\s*<\/header>/)?.[1]
+    expect(actions, 'header must render a right-aligned action group').toBeDefined()
+    expect(actions).toContain('data-testid="dashboard-tools"')
+    expect(actions).toContain('aria-label="Switch to')
   })
 
   it('applies active styling to the currently active page tab and inactive to others', () => {
@@ -154,9 +177,9 @@ describe('App: Top Navigation Refactoring', () => {
     expect(doctorBtnFromQuarantine).not.toContain('bg-active-primary')
   })
 
-  it('updates active page styling for Context Doctor, quarantine, and problems tabs', () => {
+  it('updates active page styling for Context Doctor, sessions, quarantine, and problems tabs', () => {
     const qc = createTestQueryClient()
-    const pages: KyberPage[] = ['context-doctor', 'quarantine', 'problems']
+    const pages: KyberPage[] = ['context-doctor', 'sessions', 'quarantine', 'problems']
 
     for (const page of pages) {
       clearHooks()
@@ -255,7 +278,7 @@ describe('App: Page Switching & Title Rendering', () => {
     expect(compareRail).toContain('bg-interactive-secondary')
   })
 
-  it('renders the Sessions page from the spine rail destination', () => {
+  it('renders the Sessions page from the header navigation', () => {
     const qc = createTestQueryClient()
     const html = renderHtml(
       <QueryClientProvider client={qc}>
@@ -266,8 +289,10 @@ describe('App: Page Switching & Title Rendering', () => {
     expect(html).toContain('Sessions')
     expect(html).toContain('data-testid="page-sessions"')
     expect(html).not.toContain('data-testid="nav-tab-context"')
-    const sessionsRail = html.match(/<button[^>]*data-testid="nav-rail-sessions"[^>]*>/)?.[0]
-    expect(sessionsRail).toContain('bg-interactive-secondary')
+    const sessionsTab = html.match(/<button[^>]*data-testid="nav-tab-sessions"[^>]*>/)?.[0]
+    expect(sessionsTab).toContain('bg-active-primary')
+    // Moved to the header; the rail must not carry a second copy.
+    expect(html).not.toContain('data-testid="nav-rail-sessions"')
   })
 
   it('shows no Share or device controls on any page (requirement 2.9)', () => {

@@ -7,6 +7,7 @@ import { QuarantineView, type QuarantineEntry } from '@/components/analysis/Quar
 import { ProblemsView, type ProblemEntry } from '@/components/analysis/ProblemsView'
 import { LightsaberLogo } from '@/components/LightsaberLogo'
 import { NotFoundPanel } from '@/components/analysis/NotFoundPanel'
+import { DashboardTools } from './components/maintenance/DashboardTools'
 import { fetchHarnesses, type KyberHarnessSummary } from '@/lib/kyberApi'
 import {
   applySpineAction,
@@ -170,13 +171,21 @@ function ThemeToggle() {
   )
 }
 
+/**
+ * The destinations in the header.
+ *
+ * Context Doctor and Sessions live here because the harness scope under this
+ * header reaches both: they are one decision, so they are one tab row. The
+ * rail keeps what the scope does not cover.
+ */
 export const NAV_TABS = [
   { key: 'context-doctor', label: 'Context Doctor' },
+  { key: 'sessions', label: 'Sessions' },
   { key: 'quarantine', label: 'Quarantine' },
   { key: 'problems', label: 'Problems' },
 ] as const
 
-export type KyberPage = (typeof NAV_TABS)[number]['key'] | 'compare' | 'sessions'
+export type KyberPage = (typeof NAV_TABS)[number]['key'] | 'compare'
 
 export function KyberQuarantinePanel() {
   const { data, isLoading, isError } = useQuery({
@@ -284,6 +293,13 @@ export function App({ initialPage = 'context-doctor', initialPath, initialNotFou
   // On desktop this flag is inert (the max-md: transform classes don't apply).
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [notFoundId, setNotFoundId] = useState<string | null>(initialNotFoundId ?? null)
+  // The shell's one harness scope, shared by Context Doctor and Sessions. It
+  // outlives a tab switch between the two, so the same choice is still in
+  // force when the user comes back.
+  const [activeHarness, setActiveHarness] = useState<string>('all')
+  // The session those two surfaces agree on: opened in Sessions, or chosen in
+  // Context Doctor's own selector.
+  const [sessionId, setSessionId] = useState<string | undefined>(undefined)
 
   // Follow the OS theme live while the user has no explicit preference, so
   // flipping the system theme updates the dashboard without a reload.
@@ -384,6 +400,22 @@ export function App({ initialPage = 'context-doctor', initialPath, initialNotFou
     if (path) pushView(path, [next])
   }
 
+  /**
+   * Narrow the shell to one harness.
+   *
+   * The strip is a scope, not a link: it filters whichever of Context Doctor
+   * and Sessions is on screen and leaves the page there, so the drill-down
+   * routes stay where the findings put them rather than under a selector. The
+   * session selected so far is dropped with the old scope — it was collected
+   * from the harness being left behind, and showing it under the new one would
+   * attribute another harness's session to this one.
+   */
+  const selectHarnessScope = (harness: string) => {
+    if (harness === activeHarness) return
+    setActiveHarness(harness)
+    setSessionId(undefined)
+  }
+
   return (
     <div className="min-h-screen bg-outer-background p-2.5 max-md:min-h-[100dvh]">
       <div className="flex h-[calc(100vh-20px)] flex-col gap-2.5 max-md:h-[calc(100dvh-20px)]">
@@ -416,7 +448,10 @@ export function App({ initialPage = 'context-doctor', initialPath, initialNotFou
                 data-testid={`nav-tab-${pg.key}`}
                 onClick={() => {
                   if (pg.key === 'context-doctor') goHeader({ level: 'context-doctor' })
-                  else if (pg.key === 'quarantine') goHeader({ level: 'quarantine' })
+                  else if (pg.key === 'sessions') {
+                    setNotFoundId(null)
+                    setSection('sessions')
+                  } else if (pg.key === 'quarantine') goHeader({ level: 'quarantine' })
                   else goHeader({ level: 'problems' })
                 }}
                 className={cn(
@@ -429,7 +464,10 @@ export function App({ initialPage = 'context-doctor', initialPath, initialNotFou
             ))}
           </div>
 
-          <div className="ml-auto flex items-center gap-2 max-md:min-w-0 max-md:overflow-x-auto max-md:[-ms-overflow-style:none] max-md:[scrollbar-width:none] max-md:[&::-webkit-scrollbar]:hidden">
+          <div className="ml-auto flex items-center gap-2 max-md:min-w-0 max-md:overflow-x-auto max-md:[-ms-overflow-style:none] max-md:[scrollbar-width:none] max-md:[&::-webkit-scrollbar]:hidden" data-testid="header-actions">
+            {/* Right-aligned action group: the status/maintenance panels, then the
+                theme toggle, so the panels never displace the navigation. */}
+            <DashboardTools />
             <ThemeToggle />
           </div>
         </header>
@@ -441,18 +479,14 @@ export function App({ initialPage = 'context-doctor', initialPath, initialNotFou
         >
           <span className="mr-1 text-[11px] font-semibold uppercase tracking-wider text-tertiary-foreground">Harness:</span>
           {harnessTabs.map((tab) => {
-            const active = location.level === 'harness' && location.harnessId === tab.harness
+            const active = activeHarness === tab.harness
             return (
               <button
                 key={tab.harness}
                 type="button"
-                onClick={() => {
-                  if (tab.harness === 'all') {
-                    openSpine({ level: 'context-doctor' }, 'goTo')
-                  } else {
-                    openSpine({ level: 'harness', harnessId: tab.harness })
-                  }
-                }}
+                data-testid={`harness-tab-${tab.harness}`}
+                aria-pressed={active}
+                onClick={() => selectHarnessScope(tab.harness)}
                 className={cn(
                   'flex items-center gap-1.5 whitespace-nowrap rounded-md px-2.5 py-1 text-xs font-medium transition-all',
                   active
@@ -495,28 +529,11 @@ export function App({ initialPage = 'context-doctor', initialPath, initialNotFou
                 <path d="M4 4l8 8M12 4l-8 8" />
               </svg>
             </button>
+            {/* Context Doctor and Sessions are in the header; repeating them here put
+                one destination on screen twice, once per surface. Compare stays:
+                the harness scope does not reach it, and it is the only
+                destination the rail still carries. */}
             <div className="flex flex-col gap-1">
-              <SideLink
-                testId="nav-rail-context-doctor"
-                active={section === 'context-doctor'}
-                onClick={() => {
-                  goHeader({ level: 'context-doctor' })
-                  setSidebarOpen(false)
-                }}
-              >
-                Context Doctor
-              </SideLink>
-              <SideLink
-                testId="nav-rail-sessions"
-                active={section === 'sessions'}
-                onClick={() => {
-                  setNotFoundId(null)
-                  setSection('sessions')
-                  setSidebarOpen(false)
-                }}
-              >
-                Sessions
-              </SideLink>
               <SideLink
                 testId="nav-rail-compare"
                 active={section === 'compare'}
@@ -545,6 +562,9 @@ export function App({ initialPage = 'context-doctor', initialPath, initialNotFou
               location.level === 'context-doctor' ? (
                 <ContextDoctor
                   key="context-doctor"
+                  activeHarness={activeHarness}
+                  sessionId={sessionId}
+                  onSessionChange={setSessionId}
                   onSelectHarness={(harnessId) => openSpine({ level: 'harness', harnessId })}
                   onSelectRun={(runId, harnessId) => openSpine({ level: 'run', runId, harnessId })}
                   onSelectFinding={(findingId) => openSpine({ level: 'finding', findingId })}
@@ -601,7 +621,7 @@ export function App({ initialPage = 'context-doctor', initialPath, initialNotFou
                 />
               )
             ) : section === 'sessions' ? (
-              <Sessions />
+              <Sessions activeHarness={activeHarness} onSelectSession={setSessionId} />
             ) : section === 'quarantine' ? (
               <KyberQuarantinePanel />
             ) : (
