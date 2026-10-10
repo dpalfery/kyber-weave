@@ -196,7 +196,7 @@ public sealed class DevinRendererContractTests : IDisposable
                 ExpectedDevinModels[agent.ModelProfile],
                 RequireScalar(frontmatter, "model", agent.Name));
 
-            SquadCapabilityProfile profile = source.CapabilityProfiles.Profiles[agent.CapabilityProfile];
+            SquadCapabilityProfile profile = source.CapabilityProfiles.Profiles[agent.DevinCapabilityProfile ?? agent.CapabilityProfile];
             IReadOnlyList<string> expectedTools =
             [
                 .. ComputeExpectedBuiltInTools(profile),
@@ -206,6 +206,92 @@ public sealed class DevinRendererContractTests : IDisposable
 
             Assert.Equal(NormalizeBody(agent.InstructionBody), body);
         }
+    }
+
+    [Theory]
+    [InlineData("architect")]
+    [InlineData("product-owner")]
+    public async Task RenderAsync_Devin_AuthoringRolesReceiveExecutionTools(string agentName)
+    {
+        SquadRenderResult result = await RenderDevinAsync(ProductRoot);
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        SquadDeploymentFile file = Assert.Single(
+            result.Files,
+            f => f.RelativePath == $".devin/agents/{agentName}/AGENT.md");
+
+        (YamlMappingNode frontmatter, _) = SplitFrontmatter(
+            Encoding.UTF8.GetString(file.Content.Span),
+            agentName);
+
+        string[] allowedTools = RequireSequence(frontmatter, "allowed-tools", agentName);
+        Assert.Contains("exec", allowedTools);
+        Assert.Contains("get_output", allowedTools);
+        Assert.Contains("write_to_process", allowedTools);
+        Assert.Contains("kill_shell", allowedTools);
+
+        Assert.DoesNotContain(
+            result.Degradations,
+            d => d.CanonicalIdentity == agentName && d.Code == "safety-narrowed");
+    }
+
+    /// <summary>
+    /// Both Devin authoring roles hold <c>process.execute: allow</c> and must carry the
+    /// harness-neutral initialise-before-edit sentence. <c>architect</c> owns it in
+    /// <c>plan-authoring</c>; <c>product-owner</c> carries it in the agent body and the
+    /// skill's <c>spec-authoring</c> reference, because a same-named skill already occupies
+    /// the ZCode skills directory an agent sidecar would need. The conductor pre-creates a
+    /// missing destination only as fallback.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_Devin_AuthoringRolesCarryInitialiseBeforeEditInstruction()
+    {
+        const string initialiseInstruction =
+            "On harnesses where file editing requires an existing destination file (such as Devin), initialize the file via shell (for example, `touch <file>`) before editing.";
+
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadAgent architect = Assert.Single(source.Agents, a => a.Name == "architect");
+        SquadResource planAuthoring = Assert.Single(
+            architect.Resources,
+            r => r.RelativePath == "architect/references/plan-authoring.md");
+        Assert.Contains(initialiseInstruction, planAuthoring.Content, StringComparison.Ordinal);
+
+        SquadAgent productOwner = Assert.Single(source.Agents, a => a.Name == "product-owner");
+        Assert.Empty(productOwner.Resources);
+        Assert.Contains(initialiseInstruction, productOwner.InstructionBody, StringComparison.Ordinal);
+
+        SquadSkill productOwnerSkill = Assert.Single(source.Skills, s => s.Name == "product-owner");
+        SquadResource specAuthoring = Assert.Single(
+            productOwnerSkill.Resources,
+            r => r.RelativePath == "references/spec-authoring.md");
+        Assert.Contains(initialiseInstruction, specAuthoring.Content, StringComparison.Ordinal);
+
+        SquadRenderResult result = await RenderDevinAsync(ProductRoot);
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        SquadDeploymentFile architectFile = Assert.Single(
+            result.Files,
+            f => f.RelativePath == ".devin/agents/architect/architect/references/plan-authoring.md");
+        Assert.Contains(
+            initialiseInstruction,
+            Encoding.UTF8.GetString(architectFile.Content.Span),
+            StringComparison.Ordinal);
+
+        SquadDeploymentFile productOwnerAgent = Assert.Single(
+            result.Files,
+            f => f.RelativePath == ".devin/agents/product-owner/AGENT.md");
+        Assert.Contains(
+            initialiseInstruction,
+            Encoding.UTF8.GetString(productOwnerAgent.Content.Span),
+            StringComparison.Ordinal);
+
+        SquadDeploymentFile productOwnerSkillFile = Assert.Single(
+            result.Files,
+            f => f.RelativePath == ".devin/skills/product-owner/references/spec-authoring.md");
+        Assert.Contains(
+            initialiseInstruction,
+            Encoding.UTF8.GetString(productOwnerSkillFile.Content.Span),
+            StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -312,7 +398,7 @@ public sealed class DevinRendererContractTests : IDisposable
 
         foreach (SquadAgent agent in source.Agents)
         {
-            SquadCapabilityProfile profile = source.CapabilityProfiles.Profiles[agent.CapabilityProfile];
+            SquadCapabilityProfile profile = source.CapabilityProfiles.Profiles[agent.DevinCapabilityProfile ?? agent.CapabilityProfile];
             string[] actualCodes = result.Degradations
                 .Where(d => d.CanonicalIdentity == agent.Name && d.Code != "capability-not-isolable")
                 .Select(d => d.Code)
@@ -369,7 +455,7 @@ public sealed class DevinRendererContractTests : IDisposable
             .Where(a => a.Invocation == SquadInvocation.Subagent)
             .Where(a =>
             {
-                SquadCapabilityProfile profile = source.CapabilityProfiles.Profiles[a.CapabilityProfile];
+                SquadCapabilityProfile profile = source.CapabilityProfiles.Profiles[a.DevinCapabilityProfile ?? a.CapabilityProfile];
                 return IsAllowed(profile, "process.execute") && !IsAllowed(profile, "filesystem.write");
             })
             .ToArray();
@@ -566,7 +652,7 @@ public sealed class DevinRendererContractTests : IDisposable
     /// filesystem receives the declared servers' tools, except the pure orchestrator.
     /// </summary>
     private static bool ExpectsMcp(SquadAgent agent, SquadCapabilityProfile profile) =>
-        !string.Equals(agent.CapabilityProfile, "orchestrator", StringComparison.Ordinal) &&
+        !string.Equals(agent.DevinCapabilityProfile ?? agent.CapabilityProfile, "orchestrator", StringComparison.Ordinal) &&
         IsAllowed(profile, "filesystem.read");
 
     private static IReadOnlyList<string> QualifiedMcpTools(SquadSource source) =>

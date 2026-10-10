@@ -142,6 +142,30 @@ describe('iterateNativeUnits', () => {
     ])
   })
 
+  it('uses dateRangeFor when a source needs a wider slice than the job window', async () => {
+    const source: SessionSource = {
+      path: '/native/pi/repair-wide.jsonl',
+      project: 'kyber',
+      provider: 'pi',
+    }
+    const units = await readHarness('pi', [
+      provider('pi', [source], new Map([
+        [source.path, [
+          call({ provider: 'pi', sessionId: 'chat-1', timestamp: '2026-08-30T12:00:00.000Z', turnId: 'older' }),
+          call({ provider: 'pi', sessionId: 'chat-1', timestamp: '2026-09-05T12:00:00.000Z', turnId: 'in-window' }),
+        ]],
+      ])),
+    ], {
+      dateRangeFor: () => ({
+        start: new Date('2026-08-29T00:00:00.000Z'),
+        end: new Date('2026-09-12T23:59:59.999Z'),
+      }),
+    })
+
+    expect(units).toHaveLength(1)
+    expect(units[0]!.envelopes.map(envelope => envelope.nativeRecordId)).toEqual(['older', 'in-window'])
+  })
+
   it('recovers Claude through the special parse seam and directory expansion, not the empty parser', async () => {
     const root = tempRoot()
     const projectDir = join(root, '.claude', 'projects', 'app')
@@ -289,12 +313,15 @@ describe('iterateNativeUnits', () => {
     const previous = fingerprint({ mtimeMs: 100, sizeBytes: 40 })
     const previousFingerprints = new Map([['pi:pi-1', previous]])
 
+    const dateRangeFor = vi.fn(() => range())
     const unchanged = await readHarness('pi', providers, {
       previousFingerprints,
       fingerprintFile: async () => previous,
+      dateRangeFor,
     })
     expect(unchanged[0]!.status).toBe('unchanged')
     expect(unchanged[0]!.envelopes).toEqual([])
+    expect(dateRangeFor).not.toHaveBeenCalled()
 
     const changed = await readHarness('pi', providers, {
       previousFingerprints,

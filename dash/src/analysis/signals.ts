@@ -20,6 +20,7 @@ import {
   harnessDimensionAvailability,
   prefixAvailability,
 } from '../canon/measurability.js'
+import type { ContextLimitSource } from '../canon/context-window.js'
 import { isNotMeasurable } from '../canon/types.js'
 import type {
   CanonicalRecord,
@@ -138,20 +139,49 @@ export function contextReuse(input: ContextReuseInput): SignalResult<number> {
     }
   }
 
-  // Accumulate token classes
-  let fresh = input.freshInput ?? 0
-  let cacheRead = input.cacheRead ?? 0
-  let cacheCreation = input.cacheCreation ?? 0
+  // Accumulate token classes. Absence is checked where the value is read so
+  // TypeScript narrows to number; a missing counter is never coerced to 0.
+  let fresh: number
+  let cacheRead: number
+  let cacheCreation: number
 
   if (input.turns && input.turns.length > 0) {
     fresh = 0
     cacheRead = 0
     cacheCreation = 0
     for (const turn of input.turns) {
-      fresh += turn.freshInput ?? (turn.input !== undefined && turn.cacheRead !== undefined ? Math.max(0, turn.input - turn.cacheRead) : 0)
-      cacheRead += turn.cacheRead ?? 0
-      cacheCreation += turn.cacheCreation ?? 0
+      if (turn.cacheRead === undefined) {
+        return {
+          status: 'not_measurable',
+          reason: 'Cache read counter is absent; absence is not a measured zero.',
+        }
+      }
+      if (turn.cacheCreation === undefined) {
+        return {
+          status: 'not_measurable',
+          reason: 'Cache creation counter is absent; absence is not a measured zero.',
+        }
+      }
+      fresh += turn.freshInput ?? (turn.input !== undefined ? Math.max(0, turn.input - turn.cacheRead) : 0)
+      cacheRead += turn.cacheRead
+      cacheCreation += turn.cacheCreation
     }
+  } else {
+    if (input.cacheRead === undefined) {
+      return {
+        status: 'not_measurable',
+        reason: 'Cache read counter is absent; absence is not a measured zero.',
+      }
+    }
+    if (input.cacheCreation === undefined) {
+      return {
+        status: 'not_measurable',
+        reason: 'Cache creation counter is absent; absence is not a measured zero.',
+      }
+    }
+    fresh = input.freshInput ?? 0
+    cacheRead = input.cacheRead
+    cacheCreation = input.cacheCreation
   }
 
   let totalInput = fresh + cacheRead + cacheCreation
@@ -299,18 +329,21 @@ export function prefixStability(input: PrefixStabilityInput): SignalResult<numbe
 
   // Calculate counter fallback if totalInput and cacheRead are accessible
   let totalInput = input.totalInput ?? 0
-  let cacheRead = input.cacheRead ?? 0
-
+  let cacheRead: number | undefined = input.cacheRead
   if (input.turns && input.turns.length > 0 && totalInput === 0) {
     for (const t of input.turns) {
-      if (t.tokens) {
-        totalInput += t.tokens.reportedInput || (t.tokens.freshInput + t.tokens.cacheRead + t.tokens.cacheCreation)
-        cacheRead += t.tokens.cacheRead
+      if (!t.tokens || t.tokens.cacheRead === undefined) {
+        return { status: 'not_measurable', reason: 'Cache read counter is absent; absence is not a measured zero.' }
       }
+      totalInput += t.tokens.reportedInput || (t.tokens.freshInput + t.tokens.cacheRead + t.tokens.cacheCreation)
+      cacheRead = (cacheRead ?? 0) + t.tokens.cacheRead
     }
   }
+  if (cacheRead === undefined && totalInput > 0) {
+    return { status: 'not_measurable', reason: 'Cache read counter is absent; absence is not a measured zero.' }
+  }
 
-  if (fallbackPermitted && totalInput > 0) {
+  if (fallbackPermitted && totalInput > 0 && cacheRead !== undefined) {
     const fallbackRatio = cacheRead / totalInput
     return {
       status: 'derived',
@@ -378,7 +411,9 @@ export function toolYield(input: ToolYieldInput): SignalResult<number> {
   }
 
   if (harness) {
-    const dimAvail = harnessDimensionAvailability(harness, 'tool_yield')
+    // Supplied definitions are the evidence the harness's static refusal assumes is absent.
+    const bucketParts = input.definedTools && input.definedTools.length > 0 ? ['tool_definitions'] : []
+    const dimAvail = harnessDimensionAvailability(harness, 'tool_yield', { bucketParts })
     if (isNotMeasurable(dimAvail)) {
       return { status: 'not_measurable', reason: dimAvail.reason }
     }
@@ -642,6 +677,8 @@ export type CompactionPressureInput = {
   harness?: string
   peakInputTokens?: number
   contextLimit?: number
+  /** Where `contextLimit` came from; omitted by callers that predate window provenance. */
+  contextLimitSource?: ContextLimitSource
   turns?: readonly { inputTokens?: number; reportedInput?: number }[]
   measurability?: Measurability
 }
@@ -650,9 +687,16 @@ export const DEFAULT_CONTEXT_WINDOW_LIMIT = 200_000
 
 /**
  * Measures context window consumption and compaction risk: `peakInputTokens / contextLimit`.
+ *
+ * A `default` window is the named guess, so pressure against it is refused (#181). A
+ * `declared` window is harness configuration rather than telemetry, so pressure
+ * against it is `derived` and `inferred`, never `measured` (D5). A missing limit is
+ * not filled from `DEFAULT_CONTEXT_WINDOW_LIMIT`: that guess would report a ratio
+ * against a window nobody named.
  */
 export function compactionPressure(input: CompactionPressureInput): SignalResult<number> {
   const harness = input.harness
+  const source = input.contextLimitSource
 
   if (input.measurability) {
     const tokenAvail = input.measurability['token_usage']
@@ -661,8 +705,32 @@ export function compactionPressure(input: CompactionPressureInput): SignalResult
     }
   }
 
+  if (source === 'default' || source === 'absent') {
+    return {
+      status: 'not_measurable',
+      reason:
+        source === 'absent'
+          ? 'The Antigravity bridge declared no context window; pressure is unmeasurable, not a ratio against a default window.'
+          : 'No source reported a context window; pressure against the default window is unmeasurable, not zero.',
+    }
+  }
+
+  // A window claim without a window is not evidence; checked before the evidence lift so it
+  // cannot clear a static refusal, and before the missing-limit refusal so the reason names
+  // the source that claimed a window (#181).
+  if (
+    (source === 'reported' || source === 'declared') &&
+    !(typeof input.contextLimit === 'number' && Number.isFinite(input.contextLimit) && input.contextLimit > 0)
+  ) {
+    return {
+      status: 'not_measurable',
+      reason: `The ${source} context window source named a window but supplied no limit; pressure is unmeasurable, not zero.`,
+    }
+  }
+
   if (harness) {
-    const dimAvail = harnessDimensionAvailability(harness, 'context_pressure')
+    const windowSources = source === undefined ? [] : [source]
+    const dimAvail = harnessDimensionAvailability(harness, 'context_pressure', { windowSources })
     if (isNotMeasurable(dimAvail)) {
       return { status: 'not_measurable', reason: dimAvail.reason }
     }
@@ -683,29 +751,43 @@ export function compactionPressure(input: CompactionPressureInput): SignalResult
     }
   }
 
-  const limit = input.contextLimit ?? DEFAULT_CONTEXT_WINDOW_LIMIT
-  if (limit <= 0) {
+  // An explicit limit, even one equal to the 200K constant, is the caller's
+  // window. Filling a missing one from that constant is the #181 guess.
+  if (input.contextLimit === undefined) {
     return {
       status: 'not_measurable',
-      reason: `Context limit must be a positive integer, received: ${limit}.`,
+      reason: 'No source named a context window; pressure is unmeasurable, not a ratio against the default window.',
+    }
+  }
+
+  const limit = input.contextLimit
+  // NaN <= 0 is false, so a non-finite limit would otherwise become measured(NaN).
+  if (!Number.isFinite(limit) || limit <= 0) {
+    return {
+      status: 'not_measurable',
+      reason: `Context limit must be a positive finite number, received: ${limit}.`,
     }
   }
 
   const ratio = peak / limit
   const risk: 'low' | 'moderate' | 'high' | 'critical' =
     ratio >= 0.9 ? 'critical' : ratio >= 0.75 ? 'high' : ratio >= 0.5 ? 'moderate' : 'low'
+  const declared = source === 'declared'
 
   return {
-    status: 'measured',
+    status: declared ? 'derived' : 'measured',
     value: ratio,
-    measurementClass: 'deterministic',
-    confidence: 'high',
-    confidenceBasis: 'Computed from peak turn input tokens relative to the declared context window limit.',
+    measurementClass: declared ? 'inferred' : 'deterministic',
+    confidence: declared ? 'medium' : 'high',
+    confidenceBasis: declared
+      ? 'Computed from peak turn input tokens relative to a context window the harness declares in its configuration, not one its telemetry reported.'
+      : 'Computed from peak turn input tokens relative to the declared context window limit.',
     numerator: peak,
     denominator: limit,
     metadata: {
       peakInputTokens: peak,
       contextLimit: limit,
+      ...(source !== undefined ? { contextLimitSource: source } : {}),
       remainingTokens: Math.max(0, limit - peak),
       compactionRisk: risk,
     },

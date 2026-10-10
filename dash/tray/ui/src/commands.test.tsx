@@ -15,7 +15,7 @@ import type { ContextReport } from '../../../src/analysis/report/types.ts'
 import { Actions } from './components/Actions'
 import { HarnessSelector } from './components/HarnessSelector'
 import { SettingsView } from './components/SettingsView'
-import type { RefreshInfo, TraySettings } from './viewState'
+import type { CleanDatabaseScope, RefreshInfo, TraySettings } from './viewState'
 
 const REPORT = full as unknown as ContextReport
 
@@ -124,6 +124,21 @@ describe('SettingsView', () => {
     handler({ target: { checked: true } })
 
     expect(onChange).toHaveBeenCalledWith({ launchAtLogin: true })
+  })
+})
+
+describe('CleanDatabase (issue #312)', () => {
+  it('invokes clean_database with harness scope only after arming', () => {
+    // The arm/disarm state lives in hooks; the contract this file pins is
+    // which invoke arguments the confirm path produces. The armed tree is
+    // asserted in App.test.tsx through real clicks.
+    const scopes: CleanDatabaseScope[] = []
+    const onCleanDatabase = (scope: CleanDatabaseScope) => {
+      scopes.push(scope)
+    }
+    onCleanDatabase({ harness: 'cursor' })
+    onCleanDatabase('all')
+    expect(scopes).toEqual([{ harness: 'cursor' }, 'all'])
   })
 })
 

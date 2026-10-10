@@ -160,6 +160,8 @@ describe('CanonStore round trip', () => {
 
     store.upsert(stored)
     expect(store.get('span-1')).toEqual(stored)
+    expect(store.has('span-1')).toBe(true)
+    expect(store.has('span-missing')).toBe(false)
   })
 
   it('round-trips a record with no raw payload and no measurability', () => {
@@ -576,6 +578,51 @@ describe('CanonStore quarantine, problems, and ingest log', () => {
     store.recordProblem(second)
 
     expect(store.getProblems('span-duplicate')).toEqual([first, second])
+    store.close()
+  })
+
+  it('reconciles source problems to exactly the keep-set, leaving neighbours alone (#243)', () => {
+    const store = new CanonStore(':memory:')
+    const sourceProblem = (spanId: string, code: string) => ({
+      spanId,
+      severity: 'error' as const,
+      code,
+      message: `${code} in source`,
+      harness: 'pi',
+    })
+    store.recordProblem(sourceProblem('harness:pi:pi:session:FUTURE_DATED', 'FUTURE_DATED'))
+    store.recordProblem(sourceProblem('harness:pi:pi:session:MALFORMED_TIMESTAMP', 'MALFORMED_TIMESTAMP'))
+    store.recordProblem(sourceProblem('harness:pi:pi:other:MALFORMED_TIMESTAMP', 'MALFORMED_TIMESTAMP'))
+    store.recordProblem(sourceProblem('harness:codex-cli:pi:session:FUTURE_DATED', 'FUTURE_DATED'))
+    store.recordProblem(sourceProblem('harness:pi:pi:session', 'PROVIDER_PARSE_ERROR'))
+    store.recordProblem(sourceProblem('harness:pi:job', 'PROVIDER_PARSE_ERROR'))
+    store.recordProblem({ ...sourceProblem('span-1', 'TOKEN_SUM_MISMATCH'), harness: 'pi' })
+
+    store.reconcileSourceProblems('pi', 'pi:session', ['MALFORMED_TIMESTAMP'])
+
+    expect(store.getProblems('harness:pi:pi:session:FUTURE_DATED')).toEqual([])
+    expect(store.getProblems('harness:pi:pi:session:MALFORMED_TIMESTAMP')).toHaveLength(1)
+    expect(store.getProblems('harness:pi:pi:other:MALFORMED_TIMESTAMP')).toHaveLength(1)
+    expect(store.getProblems('harness:codex-cli:pi:session:FUTURE_DATED')).toHaveLength(1)
+    expect(store.getProblems('harness:pi:pi:session')).toHaveLength(1)
+    expect(store.getProblems('harness:pi:job')).toHaveLength(1)
+    expect(store.getProblems('span-1')).toHaveLength(1)
+    store.close()
+  })
+
+  it('ignores a source-problem-shaped row whose trailing segment is not its code (#243)', () => {
+    const store = new CanonStore(':memory:')
+    store.recordProblem({
+      spanId: 'harness:pi:pi:session:STALE',
+      severity: 'error' as const,
+      code: 'FUTURE_DATED',
+      message: 'code and trailing segment disagree',
+      harness: 'pi',
+    })
+
+    store.reconcileSourceProblems('pi', 'pi:session', [])
+
+    expect(store.getProblems('harness:pi:pi:session:STALE')).toHaveLength(1)
     store.close()
   })
 
@@ -1109,6 +1156,22 @@ describe('source checkpoint and provenance', () => {
     store.close()
   })
 
+  it('counts live records for a source and excludes quarantined provenance ghosts', () => {
+    const store = new CanonStore(':memory:')
+    store.commitSourceUnit({
+      records: [record({ sessionId: 'agent-7f3' })],
+      provenance: [provenance()],
+      checkpoint: checkpoint(),
+    })
+
+    expect(store.countLiveRecordsForSource('pi', 'session:agent-7f3')).toBe(1)
+    store.quarantineAndDelete('span-1', ['gen_ai'], 'unclaimed')
+    expect(store.get('span-1')).toBeUndefined()
+    expect(store.listProvenanceForSource('pi', 'session:agent-7f3')).toHaveLength(1)
+    expect(store.countLiveRecordsForSource('pi', 'session:agent-7f3')).toBe(0)
+    store.close()
+  })
+
   it('invalidates a checkpoint on parser-contract change without deleting canonical rows', () => {
     const store = new CanonStore(':memory:')
     store.commitSourceUnit({
@@ -1195,6 +1258,200 @@ describe('source checkpoint and provenance', () => {
       'cli-1',
     ])
 
+    store.close()
+  })
+})
+
+// Issue #312, plan T1 RED: user-initiated wipe by canonical harness (or all)
+// deletes records, provenance, checkpoints, and harness-scoped derived rows in
+// ONE transaction (`wipeHarnesses` / `wipeAll`), and never touches the home
+// store. The methods do not exist yet, so every test below fails to compile
+// until T2 lands them.
+describe('CanonStore wipe (issue #312)', () => {
+  function seedHarness(
+    store: InstanceType<typeof CanonStore>,
+    harness: string,
+    spanId: string,
+    sourceKey: string,
+  ): void {
+    store.commitSourceUnit({
+      records: [record({ spanId, harness, sessionId: `${harness}-session` })],
+      provenance: [
+        provenance({
+          spanId,
+          harnessId: harness,
+          sourceKey,
+          nativeSessionId: `${harness}-session`,
+          nativeRecordId: 'turn-1',
+        }),
+      ],
+      checkpoint: checkpoint({ harnessId: harness, sourceKey }),
+    })
+    store.recordProblem({
+      spanId,
+      severity: 'warning',
+      code: 'WIPED_SCOPE',
+      message: 'scoped problem',
+      harness,
+    })
+  }
+
+  it('wipes one harness and leaves the other harness intact', () => {
+    const store = new CanonStore(':memory:')
+    seedHarness(store, 'pi', 'span-pi', 'session:pi-1')
+    seedHarness(store, 'cursor', 'span-cursor', 'session:cursor-1')
+    store.logIngest('pi:agent-7f3', 2)
+
+    const report = store.wipeHarnesses(['pi'])
+
+    expect(report.harnesses).toEqual(['pi'])
+    expect(report.records).toBe(1)
+    expect(store.get('span-pi')).toBeUndefined()
+    expect(store.getRecordProvenance('span-pi')).toBeUndefined()
+    expect(store.getSourceCheckpoint('pi', 'session:pi-1')).toBeUndefined()
+    expect(store.get('span-cursor')?.spanId).toBe('span-cursor')
+    expect(store.getRecordProvenance('span-cursor')?.spanId).toBe('span-cursor')
+    expect(store.getSourceCheckpoint('cursor', 'session:cursor-1')?.harnessId).toBe('cursor')
+    expect(store.getIngestLog()).toHaveLength(1)
+    expect(store.getMetadata('last_clean_at')).toBeDefined()
+    store.close()
+  })
+
+  it('expands a canonical harness to its folded raw record names', () => {
+    const store = new CanonStore(':memory:')
+    // Raw records keep the front-end string as provenance; derived surfaces
+    // follow the canonical id (`measurability.ts`). A wipe for `claude-code`
+    // must reach the `claude-desktop` rows too.
+    store.upsert(record({ spanId: 'span-desktop', harness: 'claude-desktop' }))
+    store.upsert(record({ spanId: 'span-code', harness: 'claude-code' }))
+    store.upsert(record({ spanId: 'span-cursor', harness: 'cursor' }))
+
+    const report = store.wipeHarnesses(['claude-code'])
+
+    expect(report.records).toBe(2)
+    expect(store.get('span-desktop')).toBeUndefined()
+    expect(store.get('span-code')).toBeUndefined()
+    expect(store.get('span-cursor')?.spanId).toBe('span-cursor')
+    store.close()
+  })
+
+  it('drops harness-scoped derived rows and predictions for the wiped harness', () => {
+    const store = new CanonStore(':memory:')
+    seedHarness(store, 'pi', 'span-pi', 'session:pi-1')
+    seedHarness(store, 'cursor', 'span-cursor', 'session:cursor-1')
+    store.upsertRun({
+      runId: 'run-pi',
+      harness: 'pi',
+      groupingBasis: 'explicit',
+      executionCount: 0,
+      payload: null,
+    })
+    store.upsertRun({
+      runId: 'run-cursor',
+      harness: 'cursor',
+      groupingBasis: 'explicit',
+      executionCount: 0,
+      payload: null,
+    })
+    store.upsertPrediction({
+      id: 'pred-pi',
+      findingId: 'finding-pi',
+      runId: 'run-pi',
+      predictedWasteTokens: 10,
+      confidence: 0.5,
+      createdAt: '2026-09-12T00:00:00.000Z',
+    })
+    store.upsertPrediction({
+      id: 'pred-cursor',
+      findingId: 'finding-cursor',
+      runId: 'run-cursor',
+      predictedWasteTokens: 10,
+      confidence: 0.5,
+      createdAt: '2026-09-12T00:00:00.000Z',
+    })
+    store.quarantine('ghost-pi', ['gen_ai'], 'unclaimed')
+
+    store.wipeHarnesses(['pi'])
+
+    expect(store.listRuns('pi')).toHaveLength(0)
+    expect(store.listRuns('cursor')).toHaveLength(1)
+    expect(store.getPrediction('pred-pi')).toBeUndefined()
+    expect(store.getPrediction('pred-cursor')?.id).toBe('pred-cursor')
+    expect(store.getProblems().some((p) => p.harness === 'pi')).toBe(false)
+    expect(store.getProblems().some((p) => p.harness === 'cursor')).toBe(true)
+    // Per-harness wipe cannot scope quarantine rows (no harness column):
+    // they stay, and the confirm UI must disclose that.
+    expect(store.getQuarantine('ghost-pi')?.spanId).toBe('ghost-pi')
+    store.close()
+  })
+
+  it('wipeAll clears the corpus, quarantine, and log-enrichment tables but keeps audit rows', () => {
+    const store = new CanonStore(':memory:')
+    seedHarness(store, 'pi', 'span-pi', 'session:pi-1')
+    store.quarantine('ghost', ['gen_ai'], 'unclaimed')
+    store.logIngest('pi:agent-7f3', 2)
+    const runId = store.startRefreshRun({
+      id: 'run-1',
+      startedAt: '2026-09-12T00:00:00.000Z',
+      pid: 1,
+      trigger: 'cli',
+    })
+    expect(runId).toBe('run-1')
+
+    const report = store.wipeAll()
+
+    expect(report.records).toBe(1)
+    expect(store.count()).toBe(0)
+    expect(store.listProvenanceForSource('pi', 'session:pi-1')).toHaveLength(0)
+    expect(store.listSourceCheckpoints()).toHaveLength(0)
+    expect(store.countQuarantine()).toBe(0)
+    expect(store.getProblems()).toHaveLength(0)
+    // Operational audit survives a wipe-all.
+    expect(store.getIngestLog()).toHaveLength(1)
+    expect(store.getMetadata('schema_version')).toBe(String(SCHEMA_VERSION))
+    expect(store.getMetadata('last_clean_at')).toBeDefined()
+    store.close()
+  })
+
+  it('rolls back the whole wipe when a delete fails', () => {
+    const store = new CanonStore(':memory:')
+    seedHarness(store, 'pi', 'span-pi', 'session:pi-1')
+    // Corrupt the checkpoint table's contract out from under the wipe: the
+    // replacement table carries a trigger that rejects the wiped source key,
+    // so the checkpoint delete throws and the records must survive with it.
+    const db = store.getDatabase()
+    db.exec('DROP TABLE source_checkpoint')
+    db.exec(
+      `CREATE TABLE source_checkpoint (
+         harness_id TEXT PRIMARY KEY,
+         source_key TEXT NOT NULL
+       );
+       CREATE TRIGGER wipe_must_fail BEFORE DELETE ON source_checkpoint
+       BEGIN
+         SELECT RAISE(ABORT, 'injected wipe failure');
+       END;`,
+    )
+    db.prepare('INSERT INTO source_checkpoint (harness_id, source_key) VALUES (?, ?)').run(
+      'pi',
+      'session:pi-1',
+    )
+
+    expect(() => store.wipeHarnesses(['pi'])).toThrow()
+
+    expect(store.get('span-pi')?.spanId).toBe('span-pi')
+    expect(store.getRecordProvenance('span-pi')?.spanId).toBe('span-pi')
+    store.close()
+  })
+
+  it('wipeHarnesses with no matching rows is a no-op that still stamps the clean', () => {
+    const store = new CanonStore(':memory:')
+    seedHarness(store, 'pi', 'span-pi', 'session:pi-1')
+
+    const report = store.wipeHarnesses(['cursor'])
+
+    expect(report.records).toBe(0)
+    expect(store.get('span-pi')?.spanId).toBe('span-pi')
+    expect(store.getMetadata('last_clean_at')).toBeDefined()
     store.close()
   })
 })

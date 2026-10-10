@@ -32,6 +32,8 @@ You do **not** own:
 - CI/CD workflows, Dockerfiles, or environment secrets — that is `github-devops`. Provide build, test, and run commands; do not write workflows or images
 - Infrastructure — that is `pulumi-dev`
 
+Your packet is your whole scope. Do not open files under the directories named by **<plan-index>** and **<specification-index>**. If the packet is insufficient, return a blocker instead of reading the plan or spec.
+
 ## Workflow
 
 1. Read the path declared as **<python-coding-standard>** before writing any Python.

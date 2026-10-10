@@ -473,7 +473,7 @@ The Squad's in-flight decisions are made by the model being governed. Delegation
 **D28 constraints:**
 
 - **Phase 1:** Claude, Copilot in VS Code, Copilot CLI, OpenCode. These harnesses use agent frontmatter or own hook files; no shared JSON files are involved.
-- **Phase 2:** Pi, Codex, Cursor. These harnesses use owned blocks in shared JSON hook files, so Phase 2 includes the owned-block work (D8, D25, receipt changes, ADR 0029).
+- **Phase 2:** Pi, Codex, Cursor. These harnesses use owned blocks in shared JSON hook files, so Phase 2 includes the owned-block work (D8, D25, receipt changes, ADR 0034).
 - **Phase 3:** Kilo, Antigravity, Factory, Devin, Warp, ZCode. The MCP fallback server is needed for Warp and ZCode (Phase 3), and for review on any harness whose hooks do not fire inside sub-agents.
 
 *Provenance: Owner, conversation 2026-10-03, answer to Q9: "let's split the work into 3 phases by harnesses. phase 1, claude, github copilot extension and cli and opencode, phase 2: PI, codex, cursor, phase 3: all the rest".*
@@ -567,6 +567,6 @@ The Squad's in-flight decisions are made by the model being governed. Delegation
 
 ## Design inputs
 
-**Phase 1 harness work.** No Phase 1 harness needs a shared hook file. Claude and Copilot in VS Code use agent frontmatter; Copilot CLI uses its own `.github/hooks/kyber-arbiter.json`; OpenCode uses its own plugin file. Therefore, the owned-block work for shared JSON files (D8, D25, receipt changes for blocks, ADR 0029) can land in Phase 2 with Cursor and Codex.
+**Phase 1 harness work.** No Phase 1 harness needs a shared hook file. Claude and Copilot in VS Code use agent frontmatter; Copilot CLI uses its own `.github/hooks/kyber-arbiter.json`; OpenCode uses its own plugin file. Therefore, the owned-block work for shared JSON files (D8, D25, receipt changes for blocks, ADR 0034) can land in Phase 2 with Cursor and Codex.
 
 **Phase 3 fallback and review.** The MCP fallback server is needed for Warp and ZCode (Phase 3). The server is also needed for review on any harness whose hooks do not fire inside sub-agents (e.g., on harnesses without sub-agent hook support, code-reviewer calls `arbiter_evaluate` before lens fan-out).

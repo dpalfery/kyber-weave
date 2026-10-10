@@ -1,0 +1,51 @@
+{
+  "sessionId": "cursor-pairing-session",
+  "requestId": "cursor-pairing-req-1",
+  "rows": [
+    {
+      "key": "bubbleId:cursor-pairing-session:prompt",
+      "value": {
+        "type": 1,
+        "text": "synthetic pairing prompt about workspace wiring",
+        "createdAt": "2026-09-22T10:03:00.000Z",
+        "requestId": "cursor-pairing-req-1",
+        "tokenCount": { "inputTokens": 120, "outputTokens": 0 },
+        "modelInfo": { "modelName": "gpt-5" }
+      }
+    },
+    {
+      "key": "bubbleId:cursor-pairing-session:reply",
+      "value": {
+        "type": 2,
+        "text": "synthetic pairing reply carrying token usage",
+        "createdAt": "2026-09-22T10:03:01.000Z",
+        "requestId": "cursor-pairing-req-1",
+        "tokenCount": { "inputTokens": 240, "outputTokens": 60 },
+        "modelInfo": { "modelName": "gpt-5" },
+        "contextWindow": 128000
+      }
+    },
+    {
+      "key": "agentKv:blob:cursor-pairing-req-1-system",
+      "value": {
+        "role": "system",
+        "content": [{ "type": "text", "text": "synthetic pairing instruction alpha" }]
+      }
+    },
+    {
+      "key": "agentKv:blob:cursor-pairing-req-1-user",
+      "value": {
+        "role": "user",
+        "content": [{ "type": "text", "text": "synthetic pairing prompt about workspace wiring" }],
+        "providerOptions": { "cursor": { "requestId": "cursor-pairing-req-1", "modelName": "gpt-5" } }
+      }
+    },
+    {
+      "key": "agentKv:blob:cursor-pairing-req-1-tool",
+      "value": {
+        "role": "tool",
+        "content": [{ "type": "text", "text": "synthetic pairing tool context beta" }]
+      }
+    }
+  ]
+}

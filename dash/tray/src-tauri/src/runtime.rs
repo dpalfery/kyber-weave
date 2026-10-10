@@ -17,13 +17,81 @@ use crate::api::{self, ReportCache, ReportFetcher};
 use crate::cli::{self, Resolution, SetupReason, SetupState};
 use crate::ipc::{self, ViewState};
 use crate::receiver::{HealthProbe, Probe, Receiver, ReceiverSpawner, ReceiverStatus};
-use crate::scheduler::{RefreshCancellation, RefreshRunner, Scheduler};
+use crate::scheduler::{RefreshCancellation, RefreshOutcome, RefreshRunner, Scheduler};
 use crate::settings::{self, TraySettings};
 use crate::supervisor::{Attempt, Clock, Spawner, Supervisor};
 
 /// The only event the runtime publishes.  Events carry complete snapshots so a
 /// late-opening popover never has to reconstruct state from deltas.
 pub const VIEW_STATE_CHANGED: &str = "view-state-changed";
+
+/// What the `clean_database` popover command may wipe (issue #312).
+///
+/// The tray holds no clean logic: the scope only chooses the child's argv —
+/// `dash clean --all` or `dash clean --harness <id>` — with the confirmation
+/// flag always set (the popover asked twice) and re-ingest skipped (the next
+/// scheduled refresh re-ingests on its own cadence, so a foreground clean
+/// returns promptly). Multi-harness selection stays web-only.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CleanScope {
+    /// Wipe every harness.
+    All,
+    /// Wipe the currently selected harness.
+    Harness(String),
+}
+
+impl CleanScope {
+    /// The validated harness scope, or `All`.
+    pub fn harness(name: impl Into<String>) -> Result<Self> {
+        let name = name.into();
+        let trimmed = name.trim();
+        if trimmed.is_empty()
+            || trimmed.len() > 128
+            || trimmed.contains(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '_'))
+        {
+            return Err(anyhow!("unknown harness scope"));
+        }
+        Ok(CleanScope::Harness(trimmed.to_string()))
+    }
+
+    /// Parse the popover's `{ scope }` payload: `"all"`, or
+    /// `{ "harness": "<id>" }` for the currently selected harness.
+    /// Anything else is rejected before any child spawns.
+    pub fn from_ipc(value: &serde_json::Value) -> Result<Self> {
+        match value {
+            serde_json::Value::String(scope) if scope == "all" => Ok(CleanScope::All),
+            serde_json::Value::Object(map) => match map.get("harness") {
+                Some(serde_json::Value::String(name)) => CleanScope::harness(name.clone()),
+                _ => Err(anyhow!(
+                    "clean scope must be \"all\" or {{\"harness\": \"<id>\"}}"
+                )),
+            },
+            _ => Err(anyhow!(
+                "clean scope must be \"all\" or {{\"harness\": \"<id>\"}}"
+            )),
+        }
+    }
+
+    /// The child's argv shape (`--harness` takes the validated value).
+    /// Returned as owned strings because the harness id is a value, not a
+    /// literal.
+    pub fn clean_argv(&self) -> Vec<String> {
+        match self {
+            CleanScope::All => ["dash", "clean", "--all", "--yes", "--no-reingest"]
+                .iter()
+                .map(|arg| (*arg).to_string())
+                .collect(),
+            CleanScope::Harness(harness) => vec![
+                "dash".to_string(),
+                "clean".to_string(),
+                "--harness".to_string(),
+                harness.clone(),
+                "--yes".to_string(),
+                "--no-reingest".to_string(),
+            ],
+        }
+    }
+}
 
 /// Effects the production event bridge performs after a state transition.
 pub trait EventSink: Send {
@@ -61,7 +129,7 @@ pub struct RuntimeDependencies {
     pub opener: Box<dyn Opener + Send>,
 }
 
-/// The managed service behind the six popover commands.
+/// The managed service behind the seven popover commands.
 pub struct Runtime {
     cli_program: Option<String>,
     probed: Vec<String>,
@@ -80,6 +148,7 @@ pub struct Runtime {
     server_calls: Vec<(String, Vec<String>)>,
     refresh_calls: Vec<(String, Vec<String>)>,
     receiver_calls: Vec<(String, Vec<String>)>,
+    clean_calls: Vec<(String, Vec<String>)>,
     receiver_probe_override: Option<Probe>,
 }
 
@@ -103,7 +172,7 @@ struct PendingRefresh {
 impl Runtime {
     /// The complete command allowlist.  Keep this alongside the capability
     /// declaration so review can compare both sides of the IPC boundary.
-    pub const fn authorized_commands() -> [&'static str; 6] {
+    pub const fn authorized_commands() -> [&'static str; 7] {
         [
             "get_view_state",
             "refresh_now",
@@ -111,6 +180,7 @@ impl Runtime {
             "set_settings",
             "quit",
             "hide_popover",
+            "clean_database",
         ]
     }
 
@@ -194,6 +264,7 @@ impl Runtime {
             server_calls: Vec::new(),
             refresh_calls: Vec::new(),
             receiver_calls: Vec::new(),
+            clean_calls: Vec::new(),
             receiver_probe_override: None,
         }
     }
@@ -377,6 +448,48 @@ impl Runtime {
 
     pub fn receiver_calls(&self) -> Vec<(String, Vec<String>)> {
         self.receiver_calls.clone()
+    }
+
+    pub fn clean_calls(&self) -> Vec<(String, Vec<String>)> {
+        self.clean_calls.clone()
+    }
+
+    /// Runs `kyberdash dash clean` synchronously through the refresh runner.
+    ///
+    /// A clean is a foreground, user-confirmed action — not a background task
+    /// the scheduler owns — so it blocks the popover command until the child
+    /// exits rather than joining the refresh worker machinery. The child does
+    /// the pausing, wiping, re-ingesting, and resuming itself; the tray only
+    /// chooses the scope and the confirmation flag. Exit 3 (busy) and other
+    /// failures surface as the command error the popover already renders.
+    pub fn clean_database(&mut self, scope: CleanScope) -> Result<()> {
+        if self.quitting {
+            return Err(anyhow!("the tray runtime is shutting down"));
+        }
+        let program = self
+            .cli_program
+            .as_ref()
+            .ok_or_else(|| anyhow!("KyberDash CLI is unavailable"))?
+            .clone();
+        // The harness id is a validated value, not a literal: `clean_argv`
+        // owns the strings so their borrows outlive the runner call below.
+        let owned_argv = scope.clean_argv();
+        let argv: Vec<&str> = owned_argv.iter().map(String::as_str).collect();
+        self.clean_calls.push((
+            program.clone(),
+            argv.iter().map(|arg| (*arg).to_string()).collect(),
+        ));
+        let (code, stderr) = self.dependencies.refresh_runner.run(&program, &argv);
+        match RefreshOutcome::from_exit_code(code, &stderr) {
+            RefreshOutcome::Succeeded => {
+                self.publish()?;
+                Ok(())
+            }
+            RefreshOutcome::Busy => Err(anyhow!(
+                "a refresh or clean is already running — try again when it finishes"
+            )),
+            RefreshOutcome::Failed(detail) => Err(anyhow!("database clean failed: {detail}")),
+        }
     }
 
     pub fn clear_cli_for_test(&mut self) {

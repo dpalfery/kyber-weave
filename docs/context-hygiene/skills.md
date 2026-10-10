@@ -6,7 +6,7 @@ status: current
 component: ContextHygiene
 source-root: src/KyberWeave.Core/Skills
 owner: dpalfery
-last-reviewed: 2026-09-28
+last-reviewed: 2026-10-04
 code-refs:
   - SkillLoader
   - RoutingLinter
@@ -156,7 +156,7 @@ harness targets. All twelve renderers are implemented and registered (`copilot`,
 Every raw `SKILL.md` except the six explicitly evolved skills (`bug-crusher`, `code-review`, `product-owner`,
 `second-brain`, `create-pull-request`, and `pr-review-fix-comments`) matches the Hotshot golden
 bytes; the golden `create-pull-request-github` skill is retired into `create-pull-request`.
-Canonical storage and recursive Squad packages preserve 67 supplemental resources, for 91
+Canonical storage and recursive Squad packages preserve 68 supplemental resources, for 92
 skill-tree files. Renderers project every file a Markdown link reaches beside the rendered
 principal, so those references resolve when deployed; every skill resource reaches its render
 except `skills/setup-dev-environment/agents/openai.yaml`, which stays packaged-only Codex

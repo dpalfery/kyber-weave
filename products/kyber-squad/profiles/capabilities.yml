@@ -58,6 +58,22 @@ profiles:
       network.publish: deny
       delegate: allow
       decision.query: deny
+  # Devin authoring envelope: Devin subagents run non-interactively without prompt
+  # capabilities, so process.execute: ask narrows to withheld. Devin CLI also has no
+  # standalone file creation tool (edit fails when the file does not exist, and apply_patch
+  # requires agent.codex_tools). Granting process.execute: allow lets architect initialize
+  # nonexistent plan files (via exec/touch) before editing and run docs validate/drift checks.
+  # Validation rejects assigning it as a shared capability-profile.
+  architect-devin:
+    target: devin
+    permissions:
+      filesystem.read: allow
+      filesystem.search: allow
+      filesystem.write: allow
+      process.execute: allow
+      network.read: allow
+      network.publish: deny
+      delegate: allow
   documentation:
     permissions:
       filesystem.read: allow
@@ -105,6 +121,19 @@ profiles:
       network.publish: deny
       delegate: allow
       decision.query: deny
+  # Devin specification envelope: same reasoning as architect-devin, granting process.execute:
+  # allow so product-owner can initialize nonexistent spec phase files before editing and
+  # run documentation checks. Validation rejects assigning it as a shared profile.
+  product-planning-devin:
+    target: devin
+    permissions:
+      filesystem.read: allow
+      filesystem.search: allow
+      filesystem.write: allow
+      process.execute: allow
+      network.read: allow
+      network.publish: deny
+      delegate: allow
   publishing-worker:
     permissions:
       filesystem.read: allow

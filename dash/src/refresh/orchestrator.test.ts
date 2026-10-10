@@ -2,13 +2,13 @@
 // failures, no Gemini harness, and writes proportional to changed units.
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import type { ParsedProviderCall, Provider, SessionSource } from '../synth/provider.js'
-import { PROVIDER_PARSE_ERROR } from '../synth/provider.js'
+import { ingestProviders as productionIngestProviders, PROVIDER_PARSE_ERROR } from '../synth/provider.js'
 import { CanonStore } from '../canon/store.js'
 import { descriptorFor } from './registry.js'
 import type { NativeUnit } from './source-reader.js'
@@ -405,6 +405,27 @@ describe('refreshHarnessSources', () => {
     }
   })
 
+  it('does not rewind recordCount when iterate yields the same sourceKey twice', async () => {
+    const store = temporaryStore()
+    try {
+      const first = unit('pi', 'session', [call('pi', 'pi-session')])
+      const duplicate = unit('pi', 'session', [call('pi', 'pi-session')])
+      await refreshHarnessSources(store, {
+        getAllProviders: async () => [],
+        descriptors: descriptors('pi'),
+        jobConcurrency: 1,
+        writerCapacity: 1,
+        commandStartedAt: new Date('2026-09-12T00:00:00.000Z'),
+        parseAllSessions: async () => undefined,
+        iterateNativeUnits: async (): Promise<NativeUnit[]> => [first, duplicate],
+      })
+      expect(store.listAll()).toHaveLength(1)
+      expect(store.getSourceCheckpoint('pi', first.sourceKey)?.recordCount).toBe(1)
+    } finally {
+      store.close()
+    }
+  })
+
   it('does not grow diagnostic rows when the same invalid source is processed again', async () => {
     const store = temporaryStore()
     try {
@@ -433,6 +454,72 @@ describe('refreshHarnessSources', () => {
       expect(second.rows[0]?.status).toBe('partial')
       expect(second.rows[0]?.problems).toBe(first.rows[0]?.problems)
       expect(store.getProblems()).toEqual(problemsAfterFirst)
+    } finally {
+      store.close()
+    }
+  })
+
+  it('clears a resolved source problem on a clean re-read, keeping neighbours and unchanged units (#243)', async () => {
+    const store = temporaryStore()
+    const sourceKeyA = 'pi:session-a'
+    const sourceKeyB = 'pi:session-b'
+    const spanA = `harness:pi:${sourceKeyA}:FUTURE_DATED`
+    const spanB = `harness:pi:${sourceKeyB}:FUTURE_DATED`
+    const codeB = `harness:pi:${sourceKeyB}:MALFORMED_TIMESTAMP`
+    const token = 'span-token'
+    const importedAt = '2026-09-12T00:00:00.000Z'
+    const problem = (spanId: string, code: string) => ({
+      spanId,
+      severity: 'error' as const,
+      code,
+      message: `${code} in source`,
+      harness: 'pi',
+      timestamp: importedAt,
+    })
+    try {
+      let passes = 0
+      const dependencies = {
+        getAllProviders: async () => [],
+        descriptors: descriptors('pi'),
+        jobConcurrency: 1,
+        commandStartedAt: new Date(importedAt),
+        parseAllSessions: async () => undefined,
+        ingestProviders: async () => ({ records: [], problems: [] }),
+        iterateNativeUnits: async (): Promise<NativeUnit[]> => {
+          passes += 1
+          if (passes === 1) {
+            return [
+              { ...unit('pi', 'session-a', []), sourceKey: sourceKeyA, problems: [{ code: 'FUTURE_DATED', message: 'record is dated in the future' }] },
+              { ...unit('pi', 'session-b', []), sourceKey: sourceKeyB, problems: [{ code: 'FUTURE_DATED', message: 'record is dated in the future' }] },
+            ]
+          }
+          return [
+            { ...unit('pi', 'session-a', []), sourceKey: sourceKeyA, problems: [] },
+            {
+              ...unit('pi', 'session-b', []),
+              sourceKey: sourceKeyB,
+              status: 'unchanged' as const,
+              envelopes: [],
+              problems: [],
+            },
+          ]
+        },
+      }
+
+      await refreshHarnessSources(store, dependencies)
+      expect(store.getProblems(spanA)).toHaveLength(1)
+      expect(store.getProblems(spanB)).toHaveLength(1)
+
+      // A sibling code on B and a TOKEN_* row on a real span must survive the clean re-read of A.
+      store.recordProblem(problem(codeB, 'MALFORMED_TIMESTAMP'))
+      store.recordProblem(problem(token, 'TOKEN_SUM_MISMATCH'))
+
+      await refreshHarnessSources(store, dependencies)
+
+      expect(store.getProblems(spanA)).toEqual([])
+      expect(store.getProblems(spanB)).toHaveLength(1)
+      expect(store.getProblems(codeB)).toHaveLength(1)
+      expect(store.getProblems(token)).toHaveLength(1)
     } finally {
       store.close()
     }
@@ -485,6 +572,184 @@ describe('refreshHarnessSources', () => {
       const checkpoint = store.listSourceCheckpoints('pi')[0]
       expect(checkpoint?.revisionToken).toBe(revision)
       expect(checkpoint?.coveredFromUtc).toBe(new Date(started.getTime() - 6 * 7 * 24 * 60 * 60 * 1000).toISOString())
+    } finally {
+      store.close()
+    }
+  })
+
+  it('keeps recordCount cumulative across revisions when unit has records older than dateRange.start', async () => {
+    const store = temporaryStore()
+    const piSource = source('pi', 'growing-session')
+    const olderCall = {
+      ...call('pi', 'pi-grow'),
+      timestamp: '2026-08-15T12:00:00.000Z',
+      deduplicationKey: 'pi:pi-grow:turn-1',
+      userMessage: 'older turn before current window',
+    }
+    const newerCall = {
+      ...call('pi', 'pi-grow'),
+      timestamp: '2026-09-08T12:00:00.000Z',
+      deduplicationKey: 'pi:pi-grow:turn-2',
+      userMessage: 'appended turn in current window',
+    }
+
+    let currentCalls = [olderCall]
+    let currentMtime = 1_000
+
+    const dependencies = {
+      getAllProviders: async () => [
+        nativeProvider('pi', [piSource], new Map([[piSource.path, currentCalls]])),
+      ],
+      descriptors: descriptors('pi'),
+      jobConcurrency: 1,
+      commandStartedAt: new Date('2026-08-20T18:00:00.000Z'),
+      parseAllSessions: async () => undefined,
+      fingerprintFile: async () => ({ dev: 1, ino: 1, mtimeMs: currentMtime, sizeBytes: currentMtime }),
+    }
+
+    try {
+      // First refresh: window is [2026-08-06, 2026-08-20]. olderCall is inside window.
+      const first = await refreshHarnessSources(store, dependencies)
+      expect(first.rows[0]).toMatchObject({ status: 'ok', created: 1 })
+      const initialCheckpoint = store.listSourceCheckpoints('pi')[0]
+      expect(initialCheckpoint?.recordCount).toBe(1)
+
+      // Append new turn and advance commandStartedAt to 2026-09-12.
+      // Window is now [2026-08-29, 2026-09-12].
+      // olderCall (2026-08-15) is now older than dateRange.start (aged out).
+      // newerCall (2026-09-08) is inside window.
+      currentCalls = [olderCall, newerCall]
+      currentMtime = 2_000
+
+      const second = await refreshHarnessSources(store, {
+        ...dependencies,
+        commandStartedAt: new Date('2026-09-12T18:00:00.000Z'),
+      })
+      expect(second.rows[0]).toMatchObject({ status: 'ok', created: 1 })
+
+      const updatedCheckpoint = store.listSourceCheckpoints('pi')[0]
+      expect(updatedCheckpoint?.revisionToken).not.toBe(initialCheckpoint?.revisionToken)
+      expect(updatedCheckpoint?.recordCount).toBe(2)
+    } finally {
+      store.close()
+    }
+  })
+
+  it('keeps recordCount cumulative across parser contract bumps when unit has records older than dateRange.start', async () => {
+    const store = temporaryStore()
+    const piSource = source('pi', 'contract-bump-session')
+    const olderCall = {
+      ...call('pi', 'pi-bump'),
+      timestamp: '2026-08-15T12:00:00.000Z',
+      deduplicationKey: 'pi:pi-bump:turn-1',
+      userMessage: 'older turn before current window',
+    }
+    const newerCall = {
+      ...call('pi', 'pi-bump'),
+      timestamp: '2026-09-08T12:00:00.000Z',
+      deduplicationKey: 'pi:pi-bump:turn-2',
+      userMessage: 'appended turn in current window',
+    }
+
+    let currentCalls = [olderCall]
+    let currentMtime = 1_000
+    const [baseDescriptor] = descriptors('pi')
+
+    const dependencies = {
+      getAllProviders: async () => [
+        nativeProvider('pi', [piSource], new Map([[piSource.path, currentCalls]])),
+      ],
+      descriptors: [{ ...baseDescriptor, parserContractVersion: '1' }],
+      jobConcurrency: 1,
+      commandStartedAt: new Date('2026-08-20T18:00:00.000Z'),
+      parseAllSessions: async () => undefined,
+      fingerprintFile: async () => ({ dev: 1, ino: 1, mtimeMs: currentMtime, sizeBytes: currentMtime }),
+    }
+
+    try {
+      // First refresh: window is [2026-08-06, 2026-08-20]. olderCall is inside window.
+      const first = await refreshHarnessSources(store, dependencies)
+      expect(first.rows[0]).toMatchObject({ status: 'ok', created: 1 })
+      const initialCheckpoint = store.listSourceCheckpoints('pi')[0]
+      expect(initialCheckpoint?.parserContractVersion).toBe('1')
+      expect(initialCheckpoint?.recordCount).toBe(1)
+
+      // Bump parserContractVersion to '2' and advance commandStartedAt to 2026-09-12.
+      // Window is now [2026-08-29, 2026-09-12].
+      // olderCall (2026-08-15) is now older than dateRange.start (aged out).
+      // newerCall (2026-09-08) is inside window.
+      currentCalls = [olderCall, newerCall]
+      currentMtime = 2_000
+
+      const second = await refreshHarnessSources(store, {
+        ...dependencies,
+        descriptors: [{ ...baseDescriptor, parserContractVersion: '2' }],
+        commandStartedAt: new Date('2026-09-12T18:00:00.000Z'),
+      })
+      expect(second.rows[0]).toMatchObject({ status: 'ok', created: 1 })
+
+      const updatedCheckpoint = store.listSourceCheckpoints('pi')[0]
+      expect(updatedCheckpoint?.parserContractVersion).toBe('2')
+      expect(updatedCheckpoint?.recordCount).toBe(2)
+    } finally {
+      store.close()
+    }
+  })
+
+  it('reconciles contract-bump recordCount to live records after a quarantine', async () => {
+    const store = temporaryStore()
+    const piSource = source('pi', 'quarantine-bump-session')
+    const olderCall = {
+      ...call('pi', 'pi-quarantine'),
+      timestamp: '2026-08-15T12:00:00.000Z',
+      deduplicationKey: 'pi:pi-quarantine:turn-1',
+      userMessage: 'older turn before current window',
+    }
+    const newerCall = {
+      ...call('pi', 'pi-quarantine'),
+      timestamp: '2026-09-08T12:00:00.000Z',
+      deduplicationKey: 'pi:pi-quarantine:turn-2',
+      userMessage: 'appended turn in current window',
+    }
+
+    let currentCalls = [olderCall]
+    let currentMtime = 1_000
+    const [baseDescriptor] = descriptors('pi')
+
+    const dependencies = {
+      getAllProviders: async () => [
+        nativeProvider('pi', [piSource], new Map([[piSource.path, currentCalls]])),
+      ],
+      descriptors: [{ ...baseDescriptor, parserContractVersion: '1' }],
+      jobConcurrency: 1,
+      commandStartedAt: new Date('2026-08-20T18:00:00.000Z'),
+      parseAllSessions: async () => undefined,
+      fingerprintFile: async () => ({ dev: 1, ino: 1, mtimeMs: currentMtime, sizeBytes: currentMtime }),
+    }
+
+    try {
+      const first = await refreshHarnessSources(store, dependencies)
+      expect(first.rows[0]).toMatchObject({ status: 'ok', created: 1 })
+      const initialRecords = store.listAll()
+      expect(initialRecords).toHaveLength(1)
+      const quarantined = initialRecords[0]!
+      store.quarantineAndDelete(quarantined.spanId, ['gen_ai'], 'unclaimed')
+      expect(store.get(quarantined.spanId)).toBeUndefined()
+
+      currentCalls = [olderCall, newerCall]
+      currentMtime = 2_000
+
+      const second = await refreshHarnessSources(store, {
+        ...dependencies,
+        descriptors: [{ ...baseDescriptor, parserContractVersion: '2' }],
+        commandStartedAt: new Date('2026-09-12T18:00:00.000Z'),
+      })
+      expect(second.rows[0]).toMatchObject({ status: 'ok', created: 1 })
+
+      const updatedCheckpoint = store.listSourceCheckpoints('pi')[0]
+      expect(updatedCheckpoint?.parserContractVersion).toBe('2')
+      expect(store.listAll()).toHaveLength(1)
+      expect(updatedCheckpoint?.recordCount).toBe(1)
     } finally {
       store.close()
     }
@@ -721,6 +986,237 @@ describe('refreshHarnessSources — shared projection entry point', () => {
       // the writer drained before the projection ran. A projection racing
       // the writer would have seen zero records here.
       expect(projectionProbe.calls[0]?.recordsAtCall).toBe(1)
+    } finally {
+      store.close()
+    }
+  })
+
+  // Issue #216 / plan T2: when the first ingest returns zero records, the
+  // fallback must keep filePath (and thus the Claude reader). A bare call
+  // array strips the reader and persists counters-only spans.
+  it('preserves filePath on ingest fallback so claude-desktop parts survive (#216 T2)', async () => {
+    const store = temporaryStore()
+    const root = mkdtempSync(join(tmpdir(), 'kyber-desktop-fallback-216-'))
+    temporaryRoots.push(root)
+    const filePath = join(root, 'session.jsonl')
+    const usage = {
+      input_tokens: 150,
+      output_tokens: 45,
+      cache_read_input_tokens: 0,
+      cache_creation_input_tokens: 0,
+    }
+    writeFileSync(
+      filePath,
+      [
+        JSON.stringify({
+          type: 'user',
+          sessionId: 'desk-fallback-216',
+          message: { role: 'user', content: [{ type: 'text', text: 'fallback question' }] },
+        }),
+        JSON.stringify({
+          type: 'assistant',
+          sessionId: 'desk-fallback-216',
+          uuid: 'desk-fallback-asst',
+          timestamp: '2026-09-10T12:00:00.000Z',
+          message: {
+            id: 'msg-desk-fallback',
+            model: 'claude-sonnet-4-5',
+            usage,
+            content: [{ type: 'text', text: 'fallback answer' }],
+          },
+        }),
+      ].join('\n') + '\n',
+    )
+
+    const parsedCall: ParsedProviderCall = {
+      provider: 'claude',
+      model: 'claude-sonnet-4-5',
+      inputTokens: 150,
+      outputTokens: 45,
+      cacheCreationInputTokens: 0,
+      cacheReadInputTokens: 0,
+      cachedInputTokens: 0,
+      reasoningTokens: 0,
+      webSearchRequests: 0,
+      costUSD: 0,
+      tools: [],
+      bashCommands: [],
+      timestamp: '2026-09-10T12:00:00.000Z',
+      speed: 'standard',
+      deduplicationKey: 'claude:desk-fallback-216:desk-fallback-asst',
+      userMessage: '',
+      sessionId: 'desk-fallback-216',
+      turnId: 'msg-desk-fallback',
+    }
+
+    const loaderShapes: unknown[] = []
+    let ingestPasses = 0
+
+    try {
+      const report = await refreshHarnessSources(store, {
+        getAllProviders: async () => [],
+        descriptors: descriptors('claude-desktop'),
+        jobConcurrency: 1,
+        commandStartedAt: new Date('2026-09-12T00:00:00.000Z'),
+        parseAllSessions: async () => undefined,
+        iterateNativeUnits: async (): Promise<NativeUnit[]> => {
+          const session: SessionSource = {
+            path: filePath,
+            project: 'fixture-project',
+            provider: 'claude',
+          }
+          return [{
+            harnessId: 'claude-desktop',
+            sourceKey: 'claude-desktop:desk-fallback-216',
+            source: session,
+            status: 'new',
+            revision: {
+              fingerprint: { dev: 1, ino: 1, mtimeMs: 1, sizeBytes: 1 },
+              token: '1:1:1:1',
+            },
+            envelopes: [{
+              harnessId: 'claude-desktop',
+              sourceKey: 'claude-desktop:desk-fallback-216',
+              source: session,
+              nativeSessionId: parsedCall.sessionId,
+              timestamp: parsedCall.timestamp,
+              call: parsedCall,
+              revisionToken: '1:1:1:1',
+            }],
+            problems: [],
+          }]
+        },
+        ingestProviders: async (providers, loader) => {
+          ingestPasses += 1
+          const loaded = loader(providers[0]!)
+          loaderShapes.push(loaded)
+          // Force the zero-record path that triggers ingestUnit's fallback.
+          if (ingestPasses === 1) return { records: [], problems: [] }
+          return productionIngestProviders(providers, () => loaded)
+        },
+      })
+
+      expect(report.rows[0]?.status).toBe('ok')
+      // Second parse is intentional (#216): ProviderLoad.filePath is what
+      // attaches reader turns; a bare remapped array strips parts.
+      expect(ingestPasses).toBe(2)
+      // On-disk source: both passes share one ProviderLoad shape — only
+      // calls.provider is remapped on the zero-record retry. Drift on any
+      // other field (filePath/harnessId/sourceKey/dateRange) is the bug the
+      // #276 hoist fixes.
+      expect(Array.isArray(loaderShapes[0])).toBe(false)
+      expect(Array.isArray(loaderShapes[1])).toBe(false)
+      const firstLoad = loaderShapes[0] as {
+        filePath?: string
+        harnessId?: string
+        sourceKey?: string
+        dateRange?: unknown
+        calls: ParsedProviderCall[]
+      }
+      const retryLoad = loaderShapes[1] as typeof firstLoad
+      expect(retryLoad).toMatchObject({
+        filePath: firstLoad.filePath,
+        harnessId: firstLoad.harnessId,
+        sourceKey: firstLoad.sourceKey,
+        dateRange: firstLoad.dateRange,
+      })
+      expect(retryLoad).toMatchObject({
+        filePath,
+        harnessId: 'claude-desktop',
+        sourceKey: 'claude-desktop:desk-fallback-216',
+      })
+      expect(firstLoad.calls[0]?.provider).toBe('claude')
+      expect(retryLoad.calls[0]?.provider).toBe('claude-desktop')
+
+      const records = store.listAll().filter((r) => r.op === 'llm.invoke')
+      expect(records).toHaveLength(1)
+      expect(records[0]?.parts?.length).toBeGreaterThan(0)
+      expect(records[0]?.content.conversation_history).toContain('fallback question')
+      expect(records[0]?.content.conversation_history).toContain('fallback answer')
+    } finally {
+      store.close()
+    }
+  })
+
+  it('retries a missing on-disk path as a remapped bare call array (#276)', async () => {
+    const store = new CanonStore(':memory:')
+    const root = mkdtempSync(join(tmpdir(), 'kyber-desktop-missing-216-'))
+    temporaryRoots.push(root)
+    const filePath = join(root, 'does-not-exist.jsonl')
+
+    const parsedCall: ParsedProviderCall = {
+      provider: 'claude',
+      model: 'claude-sonnet-4-5',
+      inputTokens: 150,
+      outputTokens: 45,
+      cacheCreationInputTokens: 0,
+      cacheReadInputTokens: 0,
+      cachedInputTokens: 0,
+      reasoningTokens: 0,
+      webSearchRequests: 0,
+      costUSD: 0,
+      tools: [],
+      bashCommands: [],
+      timestamp: '2026-09-10T12:00:00.000Z',
+      speed: 'standard',
+      deduplicationKey: 'claude:desk-missing-216:desk-missing-asst',
+      userMessage: '',
+      sessionId: 'desk-missing-216',
+      turnId: 'msg-desk-missing',
+    }
+
+    const loaderShapes: unknown[] = []
+    let ingestPasses = 0
+
+    try {
+      const report = await refreshHarnessSources(store, {
+        getAllProviders: async () => [],
+        descriptors: descriptors('claude-desktop'),
+        jobConcurrency: 1,
+        commandStartedAt: new Date('2026-09-12T00:00:00.000Z'),
+        parseAllSessions: async () => undefined,
+        iterateNativeUnits: async (): Promise<NativeUnit[]> => {
+          const session: SessionSource = {
+            path: filePath,
+            project: 'fixture-project',
+            provider: 'claude',
+          }
+          return [{
+            harnessId: 'claude-desktop',
+            sourceKey: 'claude-desktop:desk-missing-216',
+            source: session,
+            status: 'new',
+            revision: {
+              fingerprint: { dev: 1, ino: 1, mtimeMs: 1, sizeBytes: 1 },
+              token: '1:1:1:1',
+            },
+            envelopes: [{
+              harnessId: 'claude-desktop',
+              sourceKey: 'claude-desktop:desk-missing-216',
+              source: session,
+              nativeSessionId: parsedCall.sessionId,
+              timestamp: parsedCall.timestamp,
+              call: parsedCall,
+              revisionToken: '1:1:1:1',
+            }],
+            problems: [],
+          }]
+        },
+        ingestProviders: async (providers, loader) => {
+          ingestPasses += 1
+          const loaded = loader(providers[0]!)
+          loaderShapes.push(loaded)
+          if (ingestPasses === 1) return { records: [], problems: [] }
+          return productionIngestProviders(providers, () => loaded)
+        },
+      })
+
+      expect(report.rows[0]?.status).toBe('ok')
+      expect(ingestPasses).toBe(2)
+      expect(Array.isArray(loaderShapes[0])).toBe(false)
+      expect(Array.isArray(loaderShapes[1])).toBe(true)
+      const retryLoad = loaderShapes[1] as ParsedProviderCall[]
+      expect(retryLoad[0]?.provider).toBe('claude-desktop')
     } finally {
       store.close()
     }

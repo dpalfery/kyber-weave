@@ -33,6 +33,8 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { createRequire } from 'node:module'
 import { promisify } from 'node:util'
 
+import { stripIdentityAttributes } from './identity.js'
+
 const execFileAsync = promisify(execFile)
 
 /** The OTLP/HTTP standard port (R2.1). */
@@ -48,6 +50,23 @@ export const OTLP_LOGS_PATH = '/v1/logs'
  * rule so a GET here is not 405'd as an OTLP method error.
  */
 export const OTLP_HEALTHZ_PATH = '/healthz'
+
+/**
+ * Ingestion-pause controls for a user-initiated database clean (issue #312).
+ * POST-only, and gated on a loopback TCP peer plus a loopback-or-absent
+ * `Origin` header, so a cross-origin `no-cors` POST from a visited website
+ * cannot pause ingestion. While paused, the
+ * OTLP export paths shed load with 503 + Retry-After — exporters retry, so
+ * pausing never drops telemetry — and `/healthz` keeps answering 200 with a
+ * `paused` flag so the tray's hosting probe still recognizes the port as
+ * ours. Every pause carries a lease TTL that auto-resumes; a cleaner that
+ * crashes mid-wipe cannot wedge the collector shut.
+ */
+export const OTLP_ADMIN_PAUSE_PATH = '/v1/admin/pause'
+export const OTLP_ADMIN_RESUME_PATH = '/v1/admin/resume'
+
+/** Default pause lease: a crashed cleaner resumes ingestion after 10 minutes. */
+export const DEFAULT_PAUSE_LEASE_MS = 10 * 60 * 1000
 
 const KYBERDASH_VERSION = String(
   (createRequire(import.meta.url)('../../package.json') as { version?: string }).version ?? '0.0.0',
@@ -489,9 +508,11 @@ export function decodeOtlpJson(body: string): OtlpSpan[] {
     const resource =
       resourceRaw === undefined || resourceRaw === null
         ? {}
-        : attributesFromJson(
-            expectObject(resourceRaw, `${rsWhere}.resource`).attributes,
-            `${rsWhere}.resource.attributes`,
+        : stripIdentityAttributes(
+            attributesFromJson(
+              expectObject(resourceRaw, `${rsWhere}.resource`).attributes,
+              `${rsWhere}.resource.attributes`,
+            ),
           )
 
     const scopeSpansRaw = resourceSpan.scopeSpans
@@ -537,7 +558,7 @@ export function decodeOtlpLogJson(body: string): OtlpLog[] {
     const resource =
       resourceRaw === undefined || resourceRaw === null
         ? {}
-        : attributesFromJson(expectObject(resourceRaw, `${where}.resource`).attributes, `${where}.resource.attributes`)
+        : stripIdentityAttributes(attributesFromJson(expectObject(resourceRaw, `${where}.resource`).attributes, `${where}.resource.attributes`))
     const scopes = resourceLog.scopeLogs
     if (scopes === undefined || scopes === null) continue
     if (!Array.isArray(scopes)) throw new OtlpDecodeError(`${where}.scopeLogs must be an array`)
@@ -552,7 +573,7 @@ export function decodeOtlpLogJson(body: string): OtlpLog[] {
         const recordWhere = `${scopeWhere}.logRecords[${li}]`
         const record = expectObject(recordRaw, recordWhere)
         const time = nanosToBigInt(record.timeUnixNano, `${recordWhere}.timeUnixNano`)
-        const attributes = attributesFromJson(record.attributes, `${recordWhere}.attributes`)
+        const attributes = stripIdentityAttributes(attributesFromJson(record.attributes, `${recordWhere}.attributes`))
         const session = attributes.session_id
         const sessionId = typeof session === 'string' ? session : null
         const traceId = record.traceId === undefined || record.traceId === null || record.traceId === ''
@@ -577,7 +598,7 @@ export function decodeOtlpLogJson(body: string): OtlpLog[] {
           timestamp: nanosToIsoTimestamp(time),
           body,
           attributes,
-          resource,
+          resource: stripIdentityAttributes(resource),
           scope,
         })
       }
@@ -623,8 +644,8 @@ function spanFromJson(
     timestamp: nanosToIsoTimestamp(start),
     durationMs: nanosDeltaToMs(start, end),
     status: statusFromJson(span.status, `${where}.status`),
-    attributes: attributesFromJson(span.attributes, `${where}.attributes`),
-    resource,
+    attributes: stripIdentityAttributes(attributesFromJson(span.attributes, `${where}.attributes`)),
+    resource: stripIdentityAttributes(resource),
     scope,
   }
 }
@@ -910,7 +931,8 @@ export function decodeOtlpProtobuf(body: Uint8Array): OtlpSpan[] {
   for (const [rsIndex, resourceSpan] of pbMessages(request, 1, 'resource_spans').entries()) {
     const rsWhere = `resource_spans[${rsIndex}]`
     const resourceMessage = pbMessage(resourceSpan, 1)
-    const resource = resourceMessage === undefined ? {} : pbKeyValues(resourceMessage, 1)
+    const resource =
+      resourceMessage === undefined ? {} : stripIdentityAttributes(pbKeyValues(resourceMessage, 1))
 
     for (const [ssIndex, scopeSpans] of pbMessages(resourceSpan, 2, `${rsWhere}.scope_spans`).entries()) {
       const ssWhere = `${rsWhere}.scope_spans[${ssIndex}]`
@@ -937,7 +959,8 @@ export function decodeOtlpLogProtobuf(body: Uint8Array): OtlpLog[] {
   for (const [ri, resourceLogs] of pbMessages(request, 1, 'resource_logs').entries()) {
     const where = `resource_logs[${ri}]`
     const resourceMessage = pbMessage(resourceLogs, 1)
-    const resource = resourceMessage === undefined ? {} : pbKeyValues(resourceMessage, 1)
+    const resource =
+      resourceMessage === undefined ? {} : stripIdentityAttributes(pbKeyValues(resourceMessage, 1))
     for (const [, scopeLogs] of pbMessages(resourceLogs, 2, `${where}.scope_logs`).entries()) {
       const scopeMessage = pbMessage(scopeLogs, 1)
       const scope: OtlpScope = {}
@@ -950,7 +973,7 @@ export function decodeOtlpLogProtobuf(body: Uint8Array): OtlpLog[] {
         if (time === undefined) throw new OtlpDecodeError(`${where}.time_unix_nano is required`)
         const trace = pbBytes(logMessage, 9)
         const span = pbBytes(logMessage, 10)
-        const attributes = pbKeyValues(logMessage, 6)
+        const attributes = stripIdentityAttributes(pbKeyValues(logMessage, 6))
         const session = attributes.session_id
         const sessionId = typeof session === 'string' ? session : null
         const bodyMessage = pbMessage(logMessage, 5)
@@ -974,7 +997,7 @@ export function decodeOtlpLogProtobuf(body: Uint8Array): OtlpLog[] {
           timestamp: nanosToIsoTimestamp(time),
           body,
           attributes,
-          resource,
+          resource: stripIdentityAttributes(resource),
           scope,
         })
       }
@@ -1020,8 +1043,8 @@ function spanFromProtobuf(
     timestamp: nanosToIsoTimestamp(start),
     durationMs: nanosDeltaToMs(start, end),
     status,
-    attributes: pbKeyValues(message, 9),
-    resource,
+    attributes: stripIdentityAttributes(pbKeyValues(message, 9)),
+    resource: stripIdentityAttributes(resource),
     scope,
   }
 }
@@ -1061,6 +1084,8 @@ export class OtlpReceiver {
   private readonly maxBodyBytes: number
   private readonly discoverOccupants: PortOccupantDiscovery
   private readonly server: Server
+  private pausedUntil: number | null = null
+  private pauseTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor(opts: OtlpReceiverOptions = {}) {
     this.listenPort = opts.port ?? DEFAULT_OTLP_PORT
@@ -1174,7 +1199,43 @@ export class OtlpReceiver {
         })
         return
       }
-      respondJson(res, 200, { service: 'kyberdash-otlp', version: KYBERDASH_VERSION })
+      respondJson(res, 200, {
+        service: 'kyberdash-otlp',
+        version: KYBERDASH_VERSION,
+        paused: this.isPaused(),
+      })
+      return
+    }
+    if (path === OTLP_ADMIN_PAUSE_PATH || path === OTLP_ADMIN_RESUME_PATH) {
+      if (req.method !== 'POST') {
+        res.setHeader('Allow', 'POST')
+        respondJson(res, 405, {
+          error: { code: 'OTLP_METHOD_NOT_ALLOWED', message: `${req.method} is not supported: use POST` },
+        })
+        return
+      }
+      if (!isLoopbackAdminRequest(req)) {
+        respondJson(res, 403, {
+          error: { code: 'OTLP_FORBIDDEN', message: 'admin routes accept loopback requests only' },
+        })
+        return
+      }
+      if (path === OTLP_ADMIN_PAUSE_PATH) {
+        const leaseMs = await this.readPauseLeaseMs(req)
+        this.pause(leaseMs)
+      } else {
+        this.resume()
+      }
+      respondJson(res, 200, { paused: this.isPaused() })
+      return
+    }
+    if ((path === OTLP_TRACES_PATH || path === OTLP_LOGS_PATH) && this.isPaused()) {
+      // Shed load, do not drop it: OTLP exporters retry on 503, so a paused
+      // collector tells the sender to hold rather than refusing the batch.
+      res.setHeader('Retry-After', '5')
+      respondJson(res, 503, {
+        error: { code: 'OTLP_PAUSED', message: 'receiver paused for a database clean; retry' },
+      })
       return
     }
     if (path !== OTLP_TRACES_PATH && path !== OTLP_LOGS_PATH) {
@@ -1253,11 +1314,80 @@ export class OtlpReceiver {
       req.on('error', fail)
     })
   }
+
+  /** Whether ingestion is currently paused for a database clean. */
+  isPaused(): boolean {
+    return this.pausedUntil !== null && this.pausedUntil > Date.now()
+  }
+
+  /**
+   * Pause ingestion for `leaseMs` (default `DEFAULT_PAUSE_LEASE_MS`). The
+   * lease is the crash guard: when it expires the receiver resumes on its
+   * own, so a cleaner that dies mid-wipe cannot wedge the collector shut.
+   * The timer is unref'd — a paused receiver must never keep the CLI alive.
+   */
+  pause(leaseMs: number = DEFAULT_PAUSE_LEASE_MS): void {
+    const lease = Number.isFinite(leaseMs) && leaseMs > 0 ? Math.floor(leaseMs) : DEFAULT_PAUSE_LEASE_MS
+    if (this.pauseTimer !== null) {
+      clearTimeout(this.pauseTimer)
+      this.pauseTimer = null
+    }
+    this.pausedUntil = Date.now() + lease
+    this.pauseTimer = setTimeout(() => {
+      this.pauseTimer = null
+      this.pausedUntil = null
+    }, lease)
+    this.pauseTimer.unref()
+  }
+
+  /** Resume ingestion now, cancelling any outstanding pause lease. */
+  resume(): void {
+    if (this.pauseTimer !== null) {
+      clearTimeout(this.pauseTimer)
+      this.pauseTimer = null
+    }
+    this.pausedUntil = null
+  }
+
+  /**
+   * Read an optional `{ leaseMs }` JSON body off a pause request. Absent or
+   * unreadable bodies mean the default lease; the pause itself never fails
+   * on body shape.
+   */
+  private async readPauseLeaseMs(req: IncomingMessage): Promise<number> {
+    try {
+      const text = (await this.readBody(req)).toString('utf8').trim()
+      if (text === '') return DEFAULT_PAUSE_LEASE_MS
+      const parsed = JSON.parse(text) as { leaseMs?: unknown }
+      return typeof parsed.leaseMs === 'number' ? parsed.leaseMs : DEFAULT_PAUSE_LEASE_MS
+    } catch {
+      return DEFAULT_PAUSE_LEASE_MS
+    }
+  }
 }
 
 function respondJson(res: ServerResponse, status: number, body: Record<string, unknown>): void {
   res.writeHead(status, { 'content-type': 'application/json' })
   res.end(JSON.stringify(body))
+}
+
+/**
+ * Gate for the ingestion-pause admin routes. Two checks, matching the web
+ * dashboard's loopback guard (`dash/src/cli/web.ts`): the TCP peer must be a
+ * loopback address (the server's bind interface is configurable, so the bind
+ * alone does not prove the caller is local), and a browser `Origin` header —
+ * always present on a page-initiated POST, never sent by the loopback pause
+ * client or OTLP exporters — must itself be loopback. A `no-cors` fetch from
+ * any website the user visits therefore cannot pause ingestion.
+ */
+function isLoopbackAdminRequest(req: IncomingMessage): boolean {
+  const peer = req.socket?.remoteAddress ?? ''
+  const loopbackPeer =
+    peer === '127.0.0.1' || peer === '::1' || peer === '::ffff:127.0.0.1' || peer === 'localhost'
+  if (!loopbackPeer) return false
+  const origin = req.headers.origin
+  if (origin === undefined) return true
+  return /^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/.test(origin)
 }
 
 function headerValue(value: string | string[] | undefined): string {

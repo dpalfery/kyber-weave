@@ -852,7 +852,7 @@ Hooks are rendered only when the project's `arbiter.enabled` is `true` (Req 22.2
   - Update rewrites the block.
   - An owned entry edited by hand is drift. `squad status` and `squad doctor` report it (Req 8.4), and update preserves it unless `--replace-managed` is given.
   - Uninstall removes only the owned entries. It deletes the file only if Squad created it and no hook remains.
-- **ADR 0029** records the exception to the rule that Squad does not own settings files ([ADR 0026](../../adr/0026-kyber-utilities-owned-files-not-settings.md)) (Req 8.3).
+- **ADR 0034** records the exception to the rule that Squad does not own settings files ([ADR 0026](../../adr/0026-kyber-utilities-owned-files-not-settings.md)) (Req 8.3).
 
 ### 10.5 Degradations
 
@@ -997,8 +997,8 @@ The packet is a worker's whole context (Req 25.1). There are two mechanisms (Req
 | Distribution of the third binary (§1.11) | 1 | Phase 1 hooks call it |
 | Squad wiring for Claude, Copilot and OpenCode; `squad` CLI plumbing; the `global-scope` degradation | 1 | These targets use frontmatter or their own files only, so the receipt schema does not change |
 | Agent and skill contracts (§10.9, Phase 1 rows) | 1 | Every hooked harness depends on the headers, markers and envelope handling |
-| ADR 0028 and the Arbiter documentation (`docs/kyber-arbiter/`, the rule reference, configuration) | 1 | Record D1–D34 and the identifiers as shipped. Later phases extend these documents with what they deliver |
-| Owned blocks, receipt v3, block drift, ADR 0029 | 2 | Codex and Cursor are the first targets whose hook file is shared (D28) |
+| ADR 0033 and the Arbiter documentation (`docs/kyber-arbiter/`, the rule reference, configuration) | 1 | Record D1–D34 and the identifiers as shipped. Later phases extend these documents with what they deliver |
+| Owned blocks, receipt v3, block drift, ADR 0034 | 2 | Codex and Cursor are the first targets whose hook file is shared (D28) |
 | Cursor and Codex adapters and renderers; the Pi renderer, reusing the plugin envelope | 2 | D28 |
 | Kilo, Antigravity, Factory and Devin adapters and renderers; the Factory shadowing check | 3 | D28 |
 | `serve`, `decision.query` in all ten profiles, MCP grants and renderer filters, the fallback contract text | 3 | Only Warp and ZCode need the fallback, and they are Phase 3. No Phase 1 harness needs it (see below) |
@@ -1047,7 +1047,7 @@ The Tests area of Req 24 is the sum of the test columns: 6,750, 1,650 and 1,710,
 | Review | Four existing types gain a not-applicable state (§11) |
 | Agent text | Contract lines in eleven canonical files, plus one new `architect` reference (§10.9) |
 | Distribution | A third binary in every release list: five archives, and 20 → 25 checksummed assets. Also the installer, the self-updater, Homebrew and npm (§1.11) |
-| Documentation | Phase 1: ADR 0028, the Arbiter README, architecture and runbook, the rule reference and the configuration page. Phase 2: ADR 0029 and the Squad architecture amendment. Phase 3: the fallback runbook and the remaining harness rows |
+| Documentation | Phase 1: ADR 0033, the Arbiter README, architecture and runbook, the rule reference and the configuration page. Phase 2: ADR 0034 and the Squad architecture amendment. Phase 3: the fallback runbook and the remaining harness rows |
 | Tests | Every row of the test-first contract. Archived plans are read in place from `docs/archive/plans/` rather than copied as fixtures (4,065 lines for the eight named in §15). The reason is correctness: Req 9.3 names the archive itself as the conformance set, so a later edit that breaks parsing should fail the test |
 
 - **Phase 1 exceeds the review ceiling.** At about 17,900 lines it is over `review.policy.max-reviewable-lines: 10000`, so `review verdict` returns `NEEDS_HUMAN` on size (`KW-REVIEW-009`) as well as on reserved paths (`KW-REVIEW-008`, D13).

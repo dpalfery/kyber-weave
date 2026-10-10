@@ -42,8 +42,9 @@ Do not infer plan versus spec for intake. Have `architect` return a recommendati
 - Persist the selected mode in the plan or specification task artifact before approval. A mode change after approval reopens approval of the affected Test contract or verification contract.
 - Ready input begins execution immediately. Draft or partial input resumes from its persisted state and never executes until its final **approve and execute** gate is recorded.
 - Never execute a Draft artifact. Never archive a promoted todo until its successor is Ready.
-- Every worker invocation is cold and self-contained: objective, exact scope, acceptance criteria, dependencies, selected development mode, required contract, and required skills.
+- Every worker invocation is cold and self-contained. The worker packet — objective, exact files or symbols, acceptance criteria, dependencies, selected development mode, required contract, and required skills — is the worker's whole context. A plan or spec path may appear only as routing metadata marked not for reading; never tell a worker to open the plan or spec to learn its task. Deterministic denial of plan/spec reads is Arbiter work (#284).
 - Every implementation task receives up to three passes from `task-reviewer`. `code-reviewer` is the single end-of-run council, never a per-task reviewer.
+- Iteration circuit-breaker and loop detection: bounded retries apply to every failing fixture and failure cluster (maximum 2 rework dispatches per cluster). The per-cluster dispatch tally lives on the run's persisted execution artifact, or the task artifact until the run writes one, so each cold invocation can read it. If a worker reports regression thrash, invariant contradiction, or exceeded iteration caps, trip the circuit-breaker and escalate rather than thrashing.
 - Every completed plan or specification receives a distinct `docs-dev` closeout task before the objective is reported complete.
 
 For task sequencing, evidence rules, findings, final review, and closeout, read [the execution-and-review contract](conductor/references/execution-and-review.md).

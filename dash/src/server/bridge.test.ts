@@ -1,11 +1,16 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 
 import { CanonStore } from '../canon/store.js'
-import { KyberBridge, type ProblemRow, type QuarantineRow } from './bridge.js'
+import {
+  KyberBridge,
+  SHARE_DROP_WARN_LIMIT,
+  type ProblemRow,
+  type QuarantineRow,
+} from './bridge.js'
 
 type QuarantineRowWithTimestamp = QuarantineRow & { timestamp?: string | null }
 
@@ -179,6 +184,518 @@ describe('bridge quarantine problems: pagination and metadata contract (Task T3)
         storeBridge.close()
       }
     })
+  })
+})
+
+describe('bridge compareRuns: empty execution keys fall back to the run id (issue #190)', () => {
+  let tempDir: string
+  let dbPath: string
+  let store: CanonStore
+  let db: DatabaseSync
+  let bridge: KyberBridge
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), 'kyber-bridge-compare-'))
+    dbPath = join(tempDir, 'canon.db')
+    store = new CanonStore(dbPath)
+    db = new DatabaseSync(dbPath)
+    bridge = new KyberBridge({ canonDb: db })
+  })
+
+  afterEach(() => {
+    // Spies die with the test whatever its verdict — a failed assertion must
+    // not leave console.warn or db.prepare mocked for later tests.
+    vi.restoreAllMocks()
+    bridge.close()
+    store.close()
+    rmSync(tempDir, { recursive: true, force: true })
+  })
+
+  it('compares records keyed by the run id when every execution key is empty', () => {
+    // Run A's only execution selects no session key: both its session id
+    // and its execution id are empty. Run B's execution resolves normally.
+    db.prepare(
+      'INSERT INTO run (run_id, harness, grouping_basis) VALUES (?, ?, ?)',
+    ).run('run-empty-keys-a', 'cursor', 'derived')
+    db.prepare(
+      'INSERT INTO run (run_id, harness, grouping_basis) VALUES (?, ?, ?)',
+    ).run('run-empty-keys-b', 'cursor', 'derived')
+    db.prepare(
+      `INSERT INTO execution
+       (execution_id, run_id, session_id, harness, is_root, parent_linkage_json)
+       VALUES ('', ?, NULL, ?, 1, ?)`,
+    ).run('run-empty-keys-a', 'cursor', JSON.stringify('measured'))
+    db.prepare(
+      `INSERT INTO execution
+       (execution_id, run_id, session_id, harness, is_root, parent_linkage_json)
+       VALUES (?, ?, ?, ?, 1, ?)`,
+    ).run('exec-b', 'run-empty-keys-b', 'run-empty-keys-b', 'cursor', JSON.stringify('measured'))
+    for (const runId of ['run-empty-keys-a', 'run-empty-keys-b']) {
+      db.prepare(
+        `INSERT INTO records
+         (span_id, source, harness, session_id, name, op, kind, timestamp,
+          duration_ms, status, tokens_json, content_json, cost_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        `span-${runId}`,
+        'otel',
+        'cursor',
+        runId,
+        'llm',
+        'llm.invoke',
+        'model',
+        '2026-10-01T00:00:00.000Z',
+        10,
+        'success',
+        JSON.stringify({
+          freshInput: 100,
+          cacheRead: 0,
+          cacheCreation: 0,
+          output: 10,
+          reportedInput: 100,
+          reportedOutput: 10,
+        }),
+        JSON.stringify({}),
+        JSON.stringify({}),
+      )
+    }
+
+    const summary = bridge.compareRuns('run-empty-keys-a', 'run-empty-keys-b')
+
+    expect(summary).not.toBeNull()
+    // The run id is the only session key Run A's execution offers; the
+    // records stored under it must reach the comparison, not be omitted.
+    expect(summary!.runA.turnCount).toBe(1)
+    expect(summary!.runB.turnCount).toBe(1)
+  })
+
+  it('uses executionId when sessionId is an empty string', () => {
+    // sessionId ?? executionId keeps "", so the filter drops that key and
+    // the run falls back to runId — omitting records keyed by executionId.
+    db.prepare(
+      'INSERT INTO run (run_id, harness, grouping_basis) VALUES (?, ?, ?)',
+    ).run('run-blank-session-a', 'cursor', 'derived')
+    db.prepare(
+      'INSERT INTO run (run_id, harness, grouping_basis) VALUES (?, ?, ?)',
+    ).run('run-blank-session-b', 'cursor', 'derived')
+    db.prepare(
+      `INSERT INTO execution
+       (execution_id, run_id, session_id, harness, is_root, parent_linkage_json)
+       VALUES (?, ?, ?, ?, 1, ?)`,
+    ).run(
+      'exec-blank-session-a',
+      'run-blank-session-a',
+      '',
+      'cursor',
+      JSON.stringify('measured'),
+    )
+    db.prepare(
+      `INSERT INTO execution
+       (execution_id, run_id, session_id, harness, is_root, parent_linkage_json)
+       VALUES (?, ?, ?, ?, 1, ?)`,
+    ).run(
+      'exec-blank-session-b',
+      'run-blank-session-b',
+      'exec-blank-session-b',
+      'cursor',
+      JSON.stringify('measured'),
+    )
+    for (const [runId, sessionId] of [
+      ['run-blank-session-a', 'exec-blank-session-a'],
+      ['run-blank-session-b', 'exec-blank-session-b'],
+    ] as const) {
+      db.prepare(
+        `INSERT INTO records
+         (span_id, source, harness, session_id, name, op, kind, timestamp,
+          duration_ms, status, tokens_json, content_json, cost_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        `span-${runId}`,
+        'otel',
+        'cursor',
+        sessionId,
+        'llm',
+        'llm.invoke',
+        'model',
+        '2026-10-01T00:00:00.000Z',
+        10,
+        'success',
+        JSON.stringify({
+          freshInput: 100,
+          cacheRead: 0,
+          cacheCreation: 0,
+          output: 10,
+          reportedInput: 100,
+          reportedOutput: 10,
+        }),
+        JSON.stringify({}),
+        JSON.stringify({}),
+      )
+    }
+
+    const summary = bridge.compareRuns('run-blank-session-a', 'run-blank-session-b')
+
+    expect(summary).not.toBeNull()
+    expect(summary!.runA.turnCount).toBe(1)
+    expect(summary!.runB.turnCount).toBe(1)
+  })
+
+  it('scopes twin-dedupe to the execution harness when share resolution misses', () => {
+    // Bare session key with two harnesses sharing near-identical counters —
+    // unscoped dedupeTwinTurns would collapse them; harness scoping keeps both
+    // runs' own turns.
+    const sessionKey = 'shared-bare-session'
+    db.prepare(
+      'INSERT INTO run (run_id, harness, grouping_basis) VALUES (?, ?, ?)',
+    ).run('run-cursor-share', 'cursor', 'derived')
+    db.prepare(
+      'INSERT INTO run (run_id, harness, grouping_basis) VALUES (?, ?, ?)',
+    ).run('run-copilot-share', 'copilot-cli', 'derived')
+    db.prepare(
+      `INSERT INTO execution
+       (execution_id, run_id, session_id, harness, is_root, parent_linkage_json)
+       VALUES (?, ?, ?, ?, 1, ?)`,
+    ).run('exec-cursor-share', 'run-cursor-share', sessionKey, 'cursor', JSON.stringify('measured'))
+    db.prepare(
+      `INSERT INTO execution
+       (execution_id, run_id, session_id, harness, is_root, parent_linkage_json)
+       VALUES (?, ?, ?, ?, 1, ?)`,
+    ).run(
+      'exec-copilot-share',
+      'run-copilot-share',
+      sessionKey,
+      'copilot-cli',
+      JSON.stringify('measured'),
+    )
+    for (const [spanId, harness] of [
+      ['span-cursor-share', 'cursor'],
+      ['span-copilot-share', 'copilot-cli'],
+    ] as const) {
+      db.prepare(
+        `INSERT INTO records
+         (span_id, source, harness, session_id, name, op, kind, timestamp,
+          duration_ms, status, tokens_json, content_json, cost_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        spanId,
+        'otel',
+        harness,
+        sessionKey,
+        'llm',
+        'llm.invoke',
+        'model',
+        '2026-10-01T00:00:00.000Z',
+        10,
+        'success',
+        JSON.stringify({
+          freshInput: 100,
+          cacheRead: 0,
+          cacheCreation: 0,
+          output: 10,
+          reportedInput: 100,
+          reportedOutput: 10,
+        }),
+        JSON.stringify({}),
+        JSON.stringify({}),
+      )
+    }
+
+    const summary = bridge.compareRuns('run-cursor-share', 'run-copilot-share')
+
+    expect(summary).not.toBeNull()
+    expect(summary!.runA.turnCount).toBe(1)
+    expect(summary!.runB.turnCount).toBe(1)
+  })
+
+  it('warns when an excluded harness identity drops all share records', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const sessionKey = 'gemini-excluded-session'
+    db.prepare(
+      'INSERT INTO run (run_id, harness, grouping_basis) VALUES (?, ?, ?)',
+    ).run('run-gemini-excl', 'gemini', 'derived')
+    db.prepare(
+      'INSERT INTO run (run_id, harness, grouping_basis) VALUES (?, ?, ?)',
+    ).run('run-cursor-peer', 'cursor', 'derived')
+    db.prepare(
+      `INSERT INTO execution
+       (execution_id, run_id, session_id, harness, is_root, parent_linkage_json)
+       VALUES (?, ?, ?, ?, 1, ?)`,
+    ).run('exec-gemini-excl', 'run-gemini-excl', sessionKey, 'gemini', JSON.stringify('measured'))
+    db.prepare(
+      `INSERT INTO execution
+       (execution_id, run_id, session_id, harness, is_root, parent_linkage_json)
+       VALUES (?, ?, ?, ?, 1, ?)`,
+    ).run('exec-cursor-peer', 'run-cursor-peer', 'cursor-peer-session', 'cursor', JSON.stringify('measured'))
+    db.prepare(
+      `INSERT INTO records
+       (span_id, source, harness, session_id, name, op, kind, timestamp,
+        duration_ms, status, tokens_json, content_json, cost_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      'span-gemini-excl',
+      'otel',
+      'gemini',
+      sessionKey,
+      'llm',
+      'llm.invoke',
+      'model',
+      '2026-10-01T00:00:00.000Z',
+      10,
+      'success',
+      JSON.stringify({
+        freshInput: 100,
+        cacheRead: 0,
+        cacheCreation: 0,
+        output: 10,
+        reportedInput: 100,
+        reportedOutput: 10,
+      }),
+      JSON.stringify({}),
+      JSON.stringify({}),
+    )
+    db.prepare(
+      `INSERT INTO records
+       (span_id, source, harness, session_id, name, op, kind, timestamp,
+        duration_ms, status, tokens_json, content_json, cost_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      'span-cursor-peer',
+      'otel',
+      'cursor',
+      'cursor-peer-session',
+      'llm',
+      'llm.invoke',
+      'model',
+      '2026-10-01T00:00:00.000Z',
+      10,
+      'success',
+      JSON.stringify({
+        freshInput: 100,
+        cacheRead: 0,
+        cacheCreation: 0,
+        output: 10,
+        reportedInput: 100,
+        reportedOutput: 10,
+      }),
+      JSON.stringify({}),
+      JSON.stringify({}),
+    )
+
+    const summary = bridge.compareRuns('run-gemini-excl', 'run-cursor-peer')
+
+    expect(summary).not.toBeNull()
+    expect(summary!.runA.availability).toBe('unavailable')
+    const shareDropWarnings = () =>
+      warn.mock.calls.filter(
+        (args) =>
+          typeof args[0] === 'string' &&
+          args[0].includes('[KyberBridge]') &&
+          args[0].includes('excluded') &&
+          args[0].includes('gemini'),
+      ).length
+    expect(shareDropWarnings()).toBe(1)
+    // The empty side explains the drop in its own reason, not only the log.
+    if (summary!.runA.availability === 'unavailable') {
+      expect(summary!.runA.metricsReason).toContain('excluded identity')
+      expect(summary!.runA.metricsReason).toContain('dropped 1 record(s)')
+    }
+
+    // A second Compare click on the same empty share does not re-warn.
+    expect(bridge.compareRuns('run-gemini-excl', 'run-cursor-peer')).not.toBeNull()
+    expect(shareDropWarnings()).toBe(1)
+  })
+
+  it('evicts the oldest share-drop warn key at the bound instead of clearing all', () => {
+    // Pre-fill the private dedupe set to the module bound, then drive one more
+    // distinct drop through recordsForShare so overflow is exercised without
+    // inserting SHARE_DROP_WARN_LIMIT + 1 full compare fixtures.
+    type ShareDropInternals = {
+      warnedShareDrops: Set<string>
+      recordsForShare(
+        key: string,
+        harness: string,
+      ): { records: unknown[]; dropNote?: string }
+    }
+    const internals = bridge as unknown as ShareDropInternals
+    const limit = SHARE_DROP_WARN_LIMIT
+    const oldestKey = 'cursor\0sess-oldest'
+    const newestSession = 'sess-newest'
+    const newestKey = `cursor\0${newestSession}`
+
+    const insertDropRecord = (sessionId: string, spanId: string) => {
+      db.prepare(
+        `INSERT INTO records
+         (span_id, source, harness, session_id, name, op, kind, timestamp,
+          duration_ms, status, tokens_json, content_json, cost_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        spanId,
+        'otel',
+        'copilot-cli',
+        sessionId,
+        'llm',
+        'llm.invoke',
+        'model',
+        '2026-10-01T00:00:00.000Z',
+        10,
+        'success',
+        JSON.stringify({
+          freshInput: 100,
+          cacheRead: 0,
+          cacheCreation: 0,
+          output: 10,
+          reportedInput: 100,
+          reportedOutput: 10,
+        }),
+        JSON.stringify({}),
+        JSON.stringify({}),
+      )
+    }
+    insertDropRecord('sess-oldest', 'span-drop-oldest')
+    insertDropRecord(newestSession, 'span-drop-newest')
+
+    internals.warnedShareDrops.add(oldestKey)
+    for (let i = 0; i < limit - 1; i++) {
+      internals.warnedShareDrops.add(`cursor\0fill-${i}`)
+    }
+    expect(internals.warnedShareDrops.size).toBe(limit)
+
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const shareDropWarnings = () =>
+      warn.mock.calls.filter(
+        (args) => typeof args[0] === 'string' && args[0].includes('[KyberBridge] Compare share:'),
+      ).length
+
+    expect(internals.recordsForShare(newestSession, 'cursor').dropNote).toBeDefined()
+    expect(shareDropWarnings()).toBe(1)
+    // Bound held; only the oldest entry was removed — not a mass clear.
+    expect(internals.warnedShareDrops.size).toBe(limit)
+    expect(internals.warnedShareDrops.has(newestKey)).toBe(true)
+    expect(internals.warnedShareDrops.has(oldestKey)).toBe(false)
+    expect(internals.warnedShareDrops.has('cursor\0fill-0')).toBe(true)
+
+    // The evicted oldest key may warn again; the newest key stays silenced.
+    expect(internals.recordsForShare('sess-oldest', 'cursor').dropNote).toBeDefined()
+    expect(shareDropWarnings()).toBe(2)
+    expect(internals.recordsForShare(newestSession, 'cursor').dropNote).toBeDefined()
+    expect(shareDropWarnings()).toBe(2)
+    expect(internals.warnedShareDrops.size).toBe(limit)
+
+    warn.mockRestore()
+  })
+
+  it('memoizes session identities across compareRuns until records change', () => {
+    db.prepare(
+      'INSERT INTO run (run_id, harness, grouping_basis) VALUES (?, ?, ?)',
+    ).run('run-memo-a', 'cursor', 'derived')
+    db.prepare(
+      'INSERT INTO run (run_id, harness, grouping_basis) VALUES (?, ?, ?)',
+    ).run('run-memo-b', 'cursor', 'derived')
+    for (const [runId, sessionId] of [
+      ['run-memo-a', 'sess-memo-a'],
+      ['run-memo-b', 'sess-memo-b'],
+    ] as const) {
+      db.prepare(
+        `INSERT INTO execution
+         (execution_id, run_id, session_id, harness, is_root, parent_linkage_json)
+         VALUES (?, ?, ?, ?, 1, ?)`,
+      ).run(`exec-${runId}`, runId, sessionId, 'cursor', JSON.stringify('measured'))
+      db.prepare(
+        `INSERT INTO records
+         (span_id, source, harness, session_id, name, op, kind, timestamp,
+          duration_ms, status, tokens_json, content_json, cost_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        `span-${runId}`,
+        'otel',
+        'cursor',
+        sessionId,
+        'llm',
+        'llm.invoke',
+        'model',
+        '2026-10-01T00:00:00.000Z',
+        10,
+        'success',
+        JSON.stringify({
+          freshInput: 100,
+          cacheRead: 0,
+          cacheCreation: 0,
+          output: 10,
+          reportedInput: 100,
+          reportedOutput: 10,
+        }),
+        JSON.stringify({}),
+        JSON.stringify({}),
+      )
+    }
+
+    const prepareSpy = vi.spyOn(db, 'prepare')
+    expect(bridge.compareRuns('run-memo-a', 'run-memo-b')).not.toBeNull()
+    const firstDistinctCalls = prepareSpy.mock.calls.filter(
+      (args) => typeof args[0] === 'string' && args[0].includes('SELECT DISTINCT COALESCE(session_id'),
+    ).length
+    expect(firstDistinctCalls).toBe(1)
+
+    expect(bridge.compareRuns('run-memo-a', 'run-memo-b')).not.toBeNull()
+    const secondDistinctCalls = prepareSpy.mock.calls.filter(
+      (args) => typeof args[0] === 'string' && args[0].includes('SELECT DISTINCT COALESCE(session_id'),
+    ).length
+    // Memoized: second compare must not re-issue the full-table DISTINCT.
+    expect(secondDistinctCalls).toBe(1)
+
+    // Inserting a record changes the generation fingerprint — cache must miss.
+    db.prepare(
+      `INSERT INTO records
+       (span_id, source, harness, session_id, name, op, kind, timestamp,
+        duration_ms, status, tokens_json, content_json, cost_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      'span-memo-extra',
+      'otel',
+      'cursor',
+      'sess-memo-a',
+      'llm',
+      'llm.invoke',
+      'model',
+      '2026-10-01T00:00:01.000Z',
+      10,
+      'success',
+      JSON.stringify({
+        freshInput: 50,
+        cacheRead: 0,
+        cacheCreation: 0,
+        output: 5,
+        reportedInput: 50,
+        reportedOutput: 5,
+      }),
+      JSON.stringify({}),
+      JSON.stringify({}),
+    )
+    expect(bridge.compareRuns('run-memo-a', 'run-memo-b')).not.toBeNull()
+    const afterChangeCalls = prepareSpy.mock.calls.filter(
+      (args) => typeof args[0] === 'string' && args[0].includes('SELECT DISTINCT COALESCE(session_id'),
+    ).length
+    expect(afterChangeCalls).toBe(2)
+
+    const distinctCalls = () =>
+      prepareSpy.mock.calls.filter(
+        (args) => typeof args[0] === 'string' && args[0].includes('SELECT DISTINCT COALESCE(session_id'),
+      ).length
+
+    // In-place UPDATE from another connection (backfill's setSessionId): row
+    // count and max rowid are unchanged, but data_version moves — must miss.
+    store.setSessionId('span-memo-extra', 'sess-memo-moved')
+    expect(bridge.compareRuns('run-memo-a', 'run-memo-b')).not.toBeNull()
+    expect(distinctCalls()).toBe(3)
+
+    // In-place UPDATE on the bridge's own connection: total_changes() moves.
+    db.prepare('UPDATE records SET session_id = ? WHERE span_id = ?').run('sess-memo-a', 'span-memo-extra')
+    expect(bridge.compareRuns('run-memo-a', 'run-memo-b')).not.toBeNull()
+    expect(distinctCalls()).toBe(4)
+
+    // No writes since: warm memo again.
+    expect(bridge.compareRuns('run-memo-a', 'run-memo-b')).not.toBeNull()
+    expect(distinctCalls()).toBe(4)
   })
 })
 

@@ -1,0 +1,9 @@
+{
+  "models": [
+    {
+      "lookupId": "zz-synth-beta-9",
+      "canonicalModelId": "zz-synth-beta-9",
+      "contextWindow": 256000
+    }
+  ]
+}

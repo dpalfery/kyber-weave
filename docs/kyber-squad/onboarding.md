@@ -5,14 +5,15 @@ doc-type: onboarding
 component: KyberSquad
 source-root: src/KyberWeave.Core/Squad
 owner: dpalfery
-last-reviewed: 2026-09-30
+last-reviewed: 2026-10-09
 status: current
 decided-by:
   - adr/0019-pi-native-subagents-and-primary-lowering
   - adr/0022-antigravity-native-agents
   - adr/0025-devin-native-agents-and-skill-lowering
-  - adr/0028-kyber-arbiter-three-step-decision-gates
-  - adr/0029-squad-owned-blocks-in-shared-hook-files
+  - adr/0028-devin-target-scoped-authoring-capability-profiles
+  - adr/0033-kyber-arbiter-three-step-decision-gates
+  - adr/0034-squad-owned-blocks-in-shared-hook-files
 code-refs:
   - SquadDeploymentPlan
 ---
@@ -306,6 +307,20 @@ the two targets per repository.
 keep loading after installing `devin`. Squad never writes or removes anything under
 `.windsurf/`; a skill there that shares a Squad skill's name is one of the duplicates above.
 
+**Authoring roles on Devin**: Devin's file-change tools cannot create a file that does not exist,
+so a role that only edits could not start a new plan or specification. `architect` and
+`product-owner` therefore render on Devin from the `architect-devin` and `product-planning-devin`
+capability profiles, which grant `exec` alongside the write tools. Both roles carry the same
+harness-neutral initialise-before-edit instruction: `architect`'s plan-authoring reference, and
+`product-owner`'s agent body plus the skill's spec-authoring reference, tell each role to
+initialise the destination via shell (e.g. `touch <file>`) before editing.
+`architect`'s `PLAN_READY` contract and `product-owner`'s
+`SPEC_FINALIZED` contract still require `docs validate` and `docs drift` to pass. Every other role
+renders from its shared profile and keeps `ask` narrowing to withheld. If a plan or spec write still
+fails on a missing file, create the empty file and re-run the request — the conductor does this as
+fallback when the harness withholds file creation from subagents. See
+[ADR 0033](../adr/0028-devin-target-scoped-authoring-capability-profiles.md).
+
 **Conductor and delegation**: Devin has no primary-agent primitive, so the conductor is
 deployed as the skill `conductor` — invoke it as `/conductor` — and runs in the main Devin Local
 session, which dispatches the specialists as subagents. Its orchestrator boundary — no searching, editing, running commands,
@@ -385,6 +400,14 @@ hand-authored file, or adopt it only when the bytes already match.
 **Model pins.** Per-harness model tokens in `models.yml` are user-provider specific. An
 unresolvable pin inherits silently (the renderer omits `model`) rather than failing the
 install; confirm the resolved model in the harness itself after a first deploy.
+
+The bundled assignments live in
+[`profiles/models.yml`](../../products/kyber-squad/profiles/models.yml). Both `architect`
+(architect and product-owner) and `deep-planning` (SQL architect and bug investigator)
+are planning profiles. Antigravity uses `pro` for both planning profiles and `reviewer`,
+and `flash` for the remaining profiles. Versioned model ids such as Claude's
+`claude-haiku-5-5` and `claude-sonnet-5-5` pin that generation; aliases such as `opus`
+follow the harness's alias resolution. Cursor's planning pin carries `effort=high`.
 
 **Legacy rc.9/rc.10 global recovery.** See [Receipt version and layout contract](architecture.md#receipt-version-and-layout-contract) in the architecture section for layout semantics. If you have a global install from rc.9 or rc.10, `kyber-weave squad status --global` will inspect and flag the legacy layout. To complete migration, run `kyber-weave squad uninstall --global` followed by `kyber-weave squad install --global` with the current CLI.
 
@@ -512,7 +535,7 @@ renders no hooks either — and record `arbiter-not-enforced` in the receipt.
 On `codex`, `cursor`, `antigravity`, `factory`, and `devin` the hooks live in a file the
 user also owns — or, on Antigravity, beside groups the user owns. Squad splices its own
 marked entries into those files
-([ADR 0029](../adr/0029-squad-owned-blocks-in-shared-hook-files.md)) and tracks each
+([ADR 0034](../adr/0034-squad-owned-blocks-in-shared-hook-files.md)) and tracks each
 entry's location and digest in `kyber-squad.receipt/v3`; the user's entries are left in
 place. A hand edit inside Squad's entries is reported by `squad status` and `squad doctor`
 as drift, naming the file and the container. On `pi` and `kilo` the hook is an owned
@@ -549,6 +572,19 @@ Use `pr-review-fix-comments` when you prefer step-by-step approval for each fix.
 
 ---
 
+## Delivery circuit-breaker
+
+Deployed `conductor`, `csharp-dev`, `test-dev`, and `github-devops` agents stop
+unbounded test-fix loops: 3 incremental fixes per worker invocation, 2 conductor
+rework dispatches per failure cluster per run, A→B→A oscillation detection, and
+escalation through `STATUS: ESCALATION` / `ESCALATION: circuit-breaker`. Caps,
+cluster identity, JEV checkpoints, and the closed trigger set are in
+[architecture §9](architecture.md#9-conductor-execution-circuit-breaker) and the
+[requirements harvest](requirements.md#conductor-execution-circuit-breaker).
+Kyber-Squad has no separate runbook; this onboarding page is the operator pointer.
+
+---
+
 ## Packaging (`squad pack`)
 
 `kyber-weave squad pack` is a maintainer-only command for building release archives. It requires execution from the root of the Kyber-Weave repository containing `KyberWeave.sln` and `products/kyber-squad/squad.yml`:
@@ -567,11 +603,11 @@ kyber-weave squad pack --format all --out ./artifacts
 Running `squad pack` outside the repository root fails immediately with a diagnostic directing the operator to rerun the command from the Kyber-Weave repository root (or run `squad install` if deploying agents and skills to a project).
 
 Both archive formats recurse through each skill directory. They contain all 24 canonical
-`SKILL.md` files plus the 67 retained supplemental resources, and retained local skill references
+`SKILL.md` files plus the 68 retained supplemental resources, and retained local skill references
 must resolve in the extracted package. The APM archive additionally contains the 21 canonical
 agents with their 11 owned reference files; the Agent Plugins archive never contains agents or
 agent-owned resources. A fresh deployment renders every file an owner's Markdown links reach
-beside its principal — 121 files on Copilot today — with authored relative links resolving inside
+beside its principal — 122 files on Copilot today — with authored relative links resolving inside
 the target output; every skill resource reaches this render except
 `skills/setup-dev-environment/agents/openai.yaml`, which stays packaged-only Codex skill-UI
 metadata. The tracked root `.github/` self-deployment predates resource delivery and is refreshed
@@ -602,7 +638,7 @@ leaves them untouched; a human will refresh them after a fresh Kyber-Weave relea
 
 ## Related
 
-- [Kyber-Squad architecture](architecture.md) — transaction engine, AgentIR, lowering, and state model
-- [Requirements and degradation contract](requirements.md) — KS-001 through KS-008 specifications
+- [Kyber-Squad architecture](architecture.md) — transaction engine, AgentIR, lowering, state model, and conductor execution circuit-breaker
+- [Requirements and degradation contract](requirements.md) — KS-001 through KS-008 specifications and the circuit-breaker harvest
 - [Configuration](../configuration.md) — configuring squad settings in `.kyber-weave/kyber-weave.yml`
 - [Distribution and release flow](../distribution.md) — release packaging and artifact verification

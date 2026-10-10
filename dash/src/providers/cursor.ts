@@ -965,7 +965,14 @@ function parseBubbles(
         sessionId: conversationId,
         // One request has several bubbles. Only its prompt bubble names the
         // request so later bubbles keep distinct synthesized record identities.
+        // Token-bearing (non-prompt) bubbles carry the same request id as a
+        // pairing-only key instead: their usage belongs to this request, but
+        // reusing `turnId` would collapse their span identity onto the prompt
+        // span's. `matchingTurns` pairs on `turnId ?? pairingId` with the
+        // pairing claim winning, so the usage-carrying span — not the prompt
+        // span — receives the reader parts and context window.
         ...(row.request_id && row.bubble_type === 1 ? { turnId: row.request_id } : {}),
+        ...(row.request_id && row.bubble_type !== 1 ? { pairingId: row.request_id } : {}),
       })
     } catch {
       skipped++

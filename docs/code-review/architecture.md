@@ -11,7 +11,7 @@ decided-by:
   - adr/0002-three-layer-review-council-verdict-engine
   - adr/0003-cross-file-duplication-and-prior-art-lenses
   - adr/0005-task-level-fast-review
-  - adr/0028-kyber-arbiter-three-step-decision-gates
+  - adr/0033-kyber-arbiter-three-step-decision-gates
 code-refs:
   - VerdictEngine
   - GateRunner

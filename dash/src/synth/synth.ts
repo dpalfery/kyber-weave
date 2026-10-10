@@ -63,6 +63,7 @@ import { billableOutputTokens } from '../pricing/models.js'
 // same canonical form so both identities agree by construction. Acyclic:
 // analysis/findings.ts never imports synth (it reads canonical records).
 import { serializeToolArgs } from '../analysis/findings.js'
+import { DECLARED_CONTEXT_LIMIT_KEY } from '../canon/context-window.js'
 import { FILE_SOURCE_PREFIX, measurabilityFor } from '../canon/measurability.js'
 import { TWIN_TURN_MAX_SKEW_MS } from '../canon/twin-dedupe.js'
 import type {
@@ -383,6 +384,63 @@ export function costBlockFor(call: ParsedProviderCall): CostBlock {
  * session trace — a parsed call carries no parent evidence, and no parent is
  * invented (R4.3's rule, applied on the way in rather than at the end).
  */
+/**
+ * True when the call is a Copilot shutdown rollup leg (dash/src/providers/copilot.ts:
+ * dedup key `copilot:<sid>:shutdown:<model>:<n>`).
+ *
+ * Output tokens are intentionally excluded (0) from shutdown rollups to avoid
+ * double-counting with per-turn assistant.message events. Honest unobservability
+ * declares output as not measurable rather than a measured zero so reasoning
+ * can be surfaced without violating the subset invariant (issue #241).
+ */
+export function isCopilotShutdownRollup(call: ParsedProviderCall): boolean {
+  return (
+    call.provider === 'copilot' &&
+    call.outputTokens === 0 &&
+    call.deduplicationKey.includes(':shutdown:')
+  )
+}
+
+/**
+ * True when the call is a Copilot row whose output is absent by design rather
+ * than a measured zero: the shutdown rollup legs above, plus `copilot-store:`
+ * rows whose initiator is anything but 'compaction', which omit output
+ * because per-turn assistant messages already own it. A compaction store row
+ * is the CLI summarizing its own context with no assistant.message to pair
+ * with, so its output 0 stays a measured zero. Both absent cases keep output
+ * at 0 (folding reasoning would manufacture output) and declare it not
+ * measurable so the subset invariant still validates (issue #240).
+ */
+const COPILOT_SHUTDOWN_OUTPUT_ABSENT_REASON =
+  'Output tokens are excluded from Copilot shutdown rollups to avoid double-counting per-turn requests.'
+
+const COPILOT_STORE_OUTPUT_ABSENT_REASON =
+  'Non-compaction Copilot store rows omit output because per-turn assistant messages already own it, so output is absent rather than a measured zero.'
+
+function copilotStoreOutputOmitted(call: ParsedProviderCall): boolean {
+  return (
+    call.provider === 'copilot' &&
+    call.outputTokens === 0 &&
+    call.deduplicationKey.startsWith('copilot-store:') &&
+    call.initiator !== 'compaction'
+  )
+}
+
+/**
+ * The not-measurable reason when Copilot left output off the row on purpose.
+ * Shutdown rollups and non-compaction store rows share this predicate with
+ * the reason text so the two cannot drift apart.
+ */
+export function copilotAbsentOutputReason(call: ParsedProviderCall): string | undefined {
+  if (isCopilotShutdownRollup(call)) return COPILOT_SHUTDOWN_OUTPUT_ABSENT_REASON
+  if (copilotStoreOutputOmitted(call)) return COPILOT_STORE_OUTPUT_ABSENT_REASON
+  return undefined
+}
+
+export function isCopilotOutputAbsent(call: ParsedProviderCall): boolean {
+  return copilotAbsentOutputReason(call) !== undefined
+}
+
 export function synthesizeCall(
   call: ParsedProviderCall,
   conventions: ReadonlyMap<string, TokenConvention> = PROVIDER_CONVENTIONS,
@@ -417,10 +475,23 @@ export function synthesizeCall(
     : {
         ...call,
         ...(readerTurn.contextWindow !== undefined ? { contextWindow: readerTurn.contextWindow } : {}),
+        // A declared window rides under the dedicated declared key alone:
+        // filing it under `contextWindow` would promote configured
+        // provenance to reported, and `contextLimitOf` reads the declared
+        // key only when no record reports one.
+        ...(readerTurn.declaredContextWindow !== undefined
+          ? { [DECLARED_CONTEXT_LIMIT_KEY]: readerTurn.declaredContextWindow }
+          : {}),
         ...(readerTurn.terminationReason !== undefined ? { terminationReason: readerTurn.terminationReason } : {}),
         ...(readerTurn.exitCode !== undefined ? { exitCode: readerTurn.exitCode } : {}),
         ...(readerTurn.isCorrection !== undefined ? { isCorrection: readerTurn.isCorrection, correctionRule: readerTurn.correctionRule } : {}),
       }
+
+  const absentOutputReason = copilotAbsentOutputReason(call)
+  const measurability = {
+    ...measurabilityFor(call.provider),
+    ...(absentOutputReason !== undefined ? { output: notMeasurable(absentOutputReason) } : {}),
+  }
 
   return {
     spanId: spanIdFor(call, envelope, ordinal),
@@ -448,7 +519,7 @@ export function synthesizeCall(
     content: readerTurn === undefined ? {} : contentFromParts(readerTurn.parts),
     ...(readerTurn !== undefined ? { parts: readerTurn.parts } : {}),
     cost: costBlockFor(call),
-    measurability: measurabilityFor(call.provider),
+    measurability,
     raw: { ...rawCall, provenance },
   }
 }
@@ -822,6 +893,10 @@ function mergeReaderTurns(keeper?: ReaderTurn, donor?: ReaderTurn): ReaderTurn |
   return {
     ...keeper,
     parts,
+    // Collapse must keep a pairing id when only the donor carried one (#216 / #232).
+    ...(keeper.nativeRecordId !== undefined || donor.nativeRecordId !== undefined
+      ? { nativeRecordId: keeper.nativeRecordId ?? donor.nativeRecordId }
+      : {}),
     ...(toolCalls.length > 0 ? { toolCalls } : {}),
     ...(toolResults.length > 0 ? { toolResults } : {}),
     ...(toolsOffered.length > 0 ? { toolsOffered } : {}),

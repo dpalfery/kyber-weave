@@ -547,15 +547,12 @@ public sealed class ClaudeRendererContractTests : IDisposable
     }
 
     /// <summary>
-    /// Pins the Claude model of the <c>fast</c>-profile authoring workers by value. On
-    /// <c>haiku</c>, <c>test-dev</c> twice returned a red contract whose tests passed vacuously
-    /// or failed for the wrong reason, and <c>docs-dev</c> described <c>squad update</c> as
-    /// comparing against canonical bytes rather than the receipt.
+    /// Pins the operator-selected Haiku 5.5 model for Claude's fast authoring workers.
     /// </summary>
     [Theory]
     [InlineData("test-dev")]
     [InlineData("docs-dev")]
-    public async Task RenderAsync_Claude_FastProfileWorkersRunOnSonnet(string agent)
+    public async Task RenderAsync_Claude_FastProfileWorkersRunOnHaiku55(string agent)
     {
         SquadRendererRegistry registry = new([new ClaudeRenderer()]);
         SquadRenderRequest request = new(
@@ -572,18 +569,15 @@ public sealed class ClaudeRendererContractTests : IDisposable
         (YamlMappingNode frontmatter, _) = SplitFrontmatter(
             Encoding.UTF8.GetString(file.Content.Span),
             agent);
-        Assert.Equal("sonnet", RequireScalar(frontmatter, "model", agent));
+        Assert.Equal("claude-haiku-5-5", RequireScalar(frontmatter, "model", agent));
     }
 
     /// <summary>
-    /// Pins the Claude model of the specification author by value. On <c>haiku</c>,
-    /// <c>product-owner</c> restated approved decisions inaccurately, pre-decided an open
-    /// question, contradicted its own phase mapping, and misreported its own output across
-    /// three revision rounds of one design phase. Authoring requirements and design is
-    /// planning work, so it runs on the same tier as <c>architect</c>.
+    /// Pins the Claude model of the <c>product-owner</c> planning specialist by value (issue #286).
+    /// Resolves to <c>opus</c> on Claude, providing exact parity with <c>architect</c>.
     /// </summary>
     [Fact]
-    public async Task RenderAsync_Claude_ProductOwnerRunsOnOpus()
+    public async Task RenderAsync_Claude_ProductOwnerRunsOnArchitectModel()
     {
         SquadRendererRegistry registry = new([new ClaudeRenderer()]);
         SquadRenderRequest request = new(
@@ -602,6 +596,85 @@ public sealed class ClaudeRendererContractTests : IDisposable
             "product-owner");
         Assert.Equal("opus", RequireScalar(frontmatter, "model", "product-owner"));
     }
+
+    /// <summary>
+    /// Pins Sonnet 5.5 for Claude's general workers without changing planning membership.
+    /// </summary>
+    [Theory]
+    [InlineData("dal-dev")]
+    [InlineData("github-devops")]
+    [InlineData("pulumi-dev")]
+    [InlineData("tauri-dev")]
+    public async Task RenderAsync_Claude_GeneralProfileWorkersRunOnSonnet55(string agent)
+    {
+        SquadRendererRegistry registry = new([new ClaudeRenderer()]);
+        SquadRenderRequest request = new(
+            SourceDirectory: ProductRoot,
+            Targets: [SquadTarget.Claude],
+            Scope: SquadDeploymentScope.Project);
+
+        SquadRenderResult result = await registry.RenderAsync(request);
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+        SquadDeploymentFile file = Assert.Single(
+            result.Files,
+            f => f.RelativePath == $".claude/agents/{agent}.md");
+        (YamlMappingNode frontmatter, _) = SplitFrontmatter(
+            Encoding.UTF8.GetString(file.Content.Span),
+            agent);
+        Assert.Equal("claude-sonnet-5-5", RequireScalar(frontmatter, "model", agent));
+    }
+
+    /// <summary>
+    /// Confines Haiku 5.5 to Claude's fast workers and verifies every fast worker gets that pin.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_Claude_OnlyFastWorkersRunOnHaiku55()
+    {
+        SquadRendererRegistry registry = new([new ClaudeRenderer()]);
+        SquadRenderRequest request = new(
+            SourceDirectory: ProductRoot,
+            Targets: [SquadTarget.Claude],
+            Scope: SquadDeploymentScope.Project);
+
+        SquadRenderResult result = await registry.RenderAsync(request);
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+        HashSet<string> fastAgentPaths = new(StringComparer.Ordinal)
+        {
+            ".claude/agents/azure-reader.md",
+            ".claude/agents/csharp-dev.md",
+            ".claude/agents/docs-dev.md",
+            ".claude/agents/maui-dev.md",
+            ".claude/agents/python-dev.md",
+            ".claude/agents/react-dev.md",
+            ".claude/agents/research-agent.md",
+            ".claude/agents/test-dev.md"
+        };
+        SquadDeploymentFile[] agentFiles = result.Files
+            .Where(f => f.RelativePath.StartsWith(".claude/agents/", StringComparison.Ordinal)
+                && f.RelativePath.EndsWith(".md", StringComparison.Ordinal)
+                && f.RelativePath.Count(c => c == '/') == 2)
+            .ToArray();
+        Assert.Equal(fastAgentPaths.Count, agentFiles.Count(file => fastAgentPaths.Contains(file.RelativePath)));
+
+        foreach (SquadDeploymentFile file in agentFiles)
+        {
+            (YamlMappingNode frontmatter, _) = SplitFrontmatter(
+                Encoding.UTF8.GetString(file.Content.Span),
+                file.RelativePath);
+            string model = RequireScalar(frontmatter, "model", file.RelativePath);
+            if (fastAgentPaths.Contains(file.RelativePath))
+            {
+                Assert.Equal("claude-haiku-5-5", model);
+            }
+            else
+            {
+                Assert.DoesNotContain("haiku", model, StringComparison.OrdinalIgnoreCase);
+            }
+        }
+    }
+
 
     /// <summary>
     /// Row (b): Project scope renders the primary agent as both a subagent and an entry-point

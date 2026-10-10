@@ -1,5 +1,5 @@
 ---
-id: adr/0028-kyber-arbiter-three-step-decision-gates
+id: adr/0033-kyber-arbiter-three-step-decision-gates
 title: Kyber Arbiter three-step decision gates
 doc-type: adr
 status: current
@@ -7,7 +7,7 @@ owner: dpalfery
 last-reviewed: 2026-10-09
 ---
 
-# ADR 0028: Kyber Arbiter three-step decision gates
+# ADR 0033: Kyber Arbiter three-step decision gates
 
 ## Status
 
@@ -55,7 +55,7 @@ judgement about meaning is made without a confidence attached.
 6. **Owned blocks are the one settings-file exception (D8, D25).** Squad writes
    receipt-tracked blocks into shared hook files, identified by the hook command signature
    (`kyber-weave-arbiter hook --harness <harness> --caller <agent>`).
-   [ADR 0029](0029-squad-owned-blocks-in-shared-hook-files.md) records the exception to the
+   [ADR 0034](0034-squad-owned-blocks-in-shared-hook-files.md) records the exception to the
    owned-files-not-settings boundary.
 7. **Plans are parsed at evaluation time (D9, D30).** The parser reads plan and spec-task
    artifacts with C#, Markdig, and regex, writes nothing, and resolves `TASK:` ids against
@@ -156,7 +156,7 @@ receipts, and logs keyed on it.
 
 ## Related
 
-- [ADR 0029](0029-squad-owned-blocks-in-shared-hook-files.md) — owned entries in shared hook files, the exception to decision 6
+- [ADR 0034](0034-squad-owned-blocks-in-shared-hook-files.md) — owned entries in shared hook files, the exception to decision 6
 - [Kyber Arbiter architecture](../kyber-arbiter/architecture.md) — engine, rules, configuration
 - [Kyber Arbiter runbook](../kyber-arbiter/runbook.md) — hooks, trust, fail-closed operation
 - [Kyber-Squad architecture](../kyber-squad/architecture.md) — hook wiring per harness

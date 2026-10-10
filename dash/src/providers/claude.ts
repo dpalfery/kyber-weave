@@ -323,6 +323,8 @@ export function loadClaudeCalls(filePath: string): ParsedProviderCall[] {
     if (!message) continue
     const sessionId = claudeText(record['sessionId']) ?? fileStem
     const nativeMessageId = claudeText(message['id'])
+    // Top-level API request id. Distinct from `message.id`, which stays `turnId`.
+    const requestId = claudeText(record['requestId'])
     // `uuid` is the transcript's own per-record identity; the index keeps the
     // key unique for a transcript that omits it.
     const messageId = claudeText(record['uuid']) ?? nativeMessageId ?? `turn-${index}`
@@ -375,6 +377,7 @@ export function loadClaudeCalls(filePath: string): ParsedProviderCall[] {
 
     const newCall: ParsedProviderCall = {
       provider: 'claude',
+      ...(requestId !== undefined ? { requestId } : {}),
       ...(nativeMessageId !== undefined ? { turnId: nativeMessageId } : {}),
       model: claudeText(message['model']) ?? 'unknown',
       inputTokens: claudeCount(usage['input_tokens']),
@@ -404,6 +407,11 @@ export function loadClaudeCalls(filePath: string): ParsedProviderCall[] {
       if (nativeMessageIds[nativeMessageIds.length - 1] === undefined && nativeMessageId !== undefined) {
         nativeMessageIds[nativeMessageIds.length - 1] = nativeMessageId
         prevCall.turnId = nativeMessageId
+      }
+      // A collapsed pair keeps one call. Stamp the request id when only the
+      // later line carried it, so the join key is not dropped with that line.
+      if (prevCall.requestId === undefined && newCall.requestId !== undefined) {
+        prevCall.requestId = newCall.requestId
       }
       prevCall.tools = Array.from(new Set([...prevCall.tools, ...newCall.tools]))
       prevCall.bashCommands = Array.from(new Set([...prevCall.bashCommands, ...newCall.bashCommands]))

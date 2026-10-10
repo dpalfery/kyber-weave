@@ -91,6 +91,19 @@ export type ParsedProviderCall = {
   nanoAiu?: number
   requestMultiplier?: number
   turnId?: string
+  // Claude transcript API request id (`req_…`), read from the line's top-level
+  // `requestId`. It is not `message.id` (`turnId`): OTel stamps the request id
+  // on `request_id` / `gen_ai.response.id`, and twin dedupe joins on this field.
+  requestId?: string
+  // Pairing-only key matching one parser call to its reader turn. Cursor's
+  // token-bearing bubbles share their request's id but must not reuse the
+  // identity-bearing `turnId`: span identity derives from the bubble's own
+  // deduplication key (synth.ts keeps the cursor pairing id out of it), so
+  // reusing `turnId` would collapse the prompt and reply spans onto one
+  // identity. `matchingTurns` pairs on `turnId ?? pairingId` and assigns
+  // each turn at most once, with the pairing claim winning so the
+  // usage-carrying span receives the reader parts and window.
+  pairingId?: string
   toolSequence?: ToolCall[][]
   userMessage: string
   sessionId: string

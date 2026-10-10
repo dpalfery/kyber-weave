@@ -34,6 +34,7 @@ import { basename, extname } from 'path'
 import { claudeCount, claudeText, claudeUsageOf } from '../../providers/claude.js'
 import { detectUserCorrection } from '../../canon/outcome.js'
 import type { ContentPart } from '../../canon/types.js'
+import type { DateRange } from '../../types.js'
 import type { ContentReader, ReaderToolCall, ReaderToolResult, ReaderTurn } from './types.js'
 
 export {
@@ -43,10 +44,10 @@ export {
   loadClaudeCalls,
 } from '../../providers/claude.js'
 
-function parseLineUsageInfo(rawLine: string): {
+function parseLineUsageInfo(rawLine: string, fileStem: string): {
   messageId?: string
-  sessionId?: string
-  model?: string
+  sessionId: string
+  model: string
   inputTokens: number
   outputTokens: number
   cacheReadTokens: number
@@ -64,8 +65,12 @@ function parseLineUsageInfo(rawLine: string): {
   const message = record['message'] as Record<string, unknown> | undefined
   return {
     messageId: message ? claudeText(message['id']) : undefined,
-    sessionId: claudeText(record['sessionId']),
-    model: message ? claudeText(message['model']) : undefined,
+    // Same stem substitution as loadClaudeCalls — a missing sessionId must
+    // not let the reader fuse a pair the parser would split on file stem.
+    sessionId: claudeText(record['sessionId']) ?? fileStem,
+    // Same default as loadClaudeCalls — a missing model must not let the
+    // reader fuse a pair the parser would split as 'unknown' vs a real name.
+    model: message ? (claudeText(message['model']) ?? 'unknown') : 'unknown',
     inputTokens: claudeCount(usage['input_tokens']),
     outputTokens: claudeCount(usage['output_tokens']),
     cacheReadTokens: claudeCount(usage['cache_read_input_tokens']),
@@ -82,10 +87,11 @@ function isMatchingTurnUsage(
   if (prev.messageId !== undefined && next.messageId !== undefined && prev.messageId !== next.messageId) {
     return false
   }
-  if (prev.sessionId !== undefined && next.sessionId !== undefined && prev.sessionId !== next.sessionId) {
+  // Strict compare after stem substitution — mirrors isContiguousPair.
+  if (prev.sessionId !== next.sessionId) {
     return false
   }
-  if (prev.model !== undefined && next.model !== undefined && prev.model !== next.model) {
+  if (prev.model !== next.model) {
     return false
   }
   if (
@@ -103,12 +109,12 @@ function isMatchingTurnUsage(
     prev.cacheCreationTokens === 0
   if (isZero) return false
 
-  if (prev.timestamp && next.timestamp) {
-    const prevTime = new Date(prev.timestamp).getTime()
-    const nextTime = new Date(next.timestamp).getTime()
-    if (Number.isFinite(prevTime) && Number.isFinite(nextTime)) {
-      if (Math.abs(nextTime - prevTime) > 60_000) return false
-    }
+  // Same epoch default as loadClaudeCalls — a missing timestamp must not
+  // skip the ≤60s gate and fuse a pair the parser would split.
+  const prevTime = new Date(prev.timestamp ?? new Date(0).toISOString()).getTime()
+  const nextTime = new Date(next.timestamp ?? new Date(0).toISOString()).getTime()
+  if (Number.isFinite(prevTime) && Number.isFinite(nextTime)) {
+    if (Math.abs(nextTime - prevTime) > 60_000) return false
   }
   return true
 }
@@ -122,11 +128,21 @@ function isMatchingTurnUsage(
  *
  * Contiguous assistant records sharing identical usage counters within the turn
  * window are grouped into a single turn to fuse paired request/response halves (#232).
+ * A defined `message.id` learned earlier in the group still conflicts with a
+ * later different defined id — matching `loadClaudeCalls`' contiguous-pair rule
+ * — so an id-less middle record cannot bridge A and B into one turn. A missing
+ * `sessionId` resolves to the transcript file stem on both sides, exactly as
+ * `loadClaudeCalls` does, so a mixed-presence pair splits instead of fusing.
+ * A missing `message.model` resolves to `'unknown'`, exactly as `loadClaudeCalls`
+ * does, so an unknown/real-model pair splits instead of fusing. A missing
+ * timestamp resolves to epoch, exactly as `loadClaudeCalls` does, so the ≤60s
+ * merge-gap gate always evaluates and a missing/real-time pair past 60s splits
+ * instead of fusing.
  *
  * Lines after the last assistant record are emitted as a trailing group so a
  * transcript that never reported usage still reads as a single turn.
  */
-export function splitClaudeTurns(lines: readonly string[]): string[][] {
+export function splitClaudeTurns(lines: readonly string[], fileStem: string): string[][] {
   const rawGroups: string[][] = []
   let current: string[] = []
 
@@ -142,27 +158,100 @@ export function splitClaudeTurns(lines: readonly string[]): string[][] {
   if (rawGroups.length <= 1) return rawGroups
 
   const mergedGroups: string[][] = []
+  // Parallel to loadClaudeCalls: the defined message.id and the first usage
+  // line of each merged group. prevCall.timestamp / counters / model are
+  // never rewritten on merge, so the gap must be measured from that first
+  // line — walking the last usage line fuses a t=0,+40s,+80s chain that
+  // the parser splits (0→80 > 60s).
+  const mergedMessageIds: Array<string | undefined> = []
+  const mergedFirstUsage: Array<ReturnType<typeof parseLineUsageInfo>> = []
   for (let i = 0; i < rawGroups.length; i++) {
     const group = rawGroups[i]!
     const lastLine = group[group.length - 1]!
-    const usageInfo = parseLineUsageInfo(lastLine)
+    const usageInfo = parseLineUsageInfo(lastLine, fileStem)
 
     if (mergedGroups.length > 0) {
       const prevMerged = mergedGroups[mergedGroups.length - 1]!
-      let prevUsageInfo: ReturnType<typeof parseLineUsageInfo>
-      for (let j = prevMerged.length - 1; j >= 0; j--) {
-        prevUsageInfo = parseLineUsageInfo(prevMerged[j]!)
-        if (prevUsageInfo !== undefined) break
-      }
-      if (prevUsageInfo !== undefined && isMatchingTurnUsage(prevUsageInfo, usageInfo)) {
+      const prevMessageId = mergedMessageIds[mergedMessageIds.length - 1]
+      const prevFirstUsage = mergedFirstUsage[mergedFirstUsage.length - 1]
+      const prevForMatch =
+        prevFirstUsage === undefined
+          ? undefined
+          : { ...prevFirstUsage, messageId: prevMessageId ?? prevFirstUsage.messageId }
+      if (prevForMatch !== undefined && isMatchingTurnUsage(prevForMatch, usageInfo)) {
         prevMerged.push(...group)
+        if (prevMessageId === undefined && usageInfo?.messageId !== undefined) {
+          mergedMessageIds[mergedMessageIds.length - 1] = usageInfo.messageId
+        }
         continue
       }
     }
     mergedGroups.push([...group])
+    mergedMessageIds.push(usageInfo?.messageId)
+    mergedFirstUsage.push(usageInfo)
   }
 
   return mergedGroups
+}
+
+/**
+ * Pairing identity for one turn group. Uses `message.id` only — that is what
+ * `loadClaudeCalls` stamps as `turnId`. Emitting the transcript `uuid` here
+ * would invent ids the parser never stamps as `turnId`, so those calls could
+ * not join through the id map.
+ */
+function nativeRecordIdOfGroup(group: readonly string[]): string | undefined {
+  for (let i = 0; i < group.length; i++) {
+    if (claudeUsageOf(group[i]!) === undefined) continue
+    let record: Record<string, unknown>
+    try {
+      record = JSON.parse(group[i]!) as Record<string, unknown>
+    } catch {
+      continue
+    }
+    const message = record['message'] as Record<string, unknown> | undefined
+    const messageId = message ? claudeText(message['id']) : undefined
+    if (messageId !== undefined) return messageId
+  }
+  return undefined
+}
+
+/**
+ * Usage-line timestamp for a turn group, matching the instant `loadClaudeCalls`
+ * keeps on a collapsed contiguous pair (the first usage line) and that
+ * `sliceCallsToWindow` therefore sees. Walking from the last usage line would
+ * disagree when a window boundary falls inside the ≤60s merge gap. Missing or
+ * malformed timestamps are unusable instants — the same rows
+ * `sliceCallsToWindow` drops when a refresh window is set — so a date-ranged
+ * read must exclude them too.
+ */
+function timestampOfGroup(group: readonly string[]): Date | undefined {
+  for (let i = 0; i < group.length; i++) {
+    if (claudeUsageOf(group[i]!) === undefined) continue
+    let record: Record<string, unknown>
+    try {
+      record = JSON.parse(group[i]!) as Record<string, unknown>
+    } catch {
+      continue
+    }
+    const raw = claudeText(record['timestamp'])
+    if (raw === undefined) return undefined
+    const instant = new Date(raw)
+    return Number.isNaN(instant.getTime()) ? undefined : instant
+  }
+  return undefined
+}
+
+function groupInDateRange(group: readonly string[], dateRange?: DateRange): boolean {
+  if (dateRange === undefined) return true
+  const timestamp = timestampOfGroup(group)
+  // Align with sliceCallsToWindow: no usable instant → not in the window.
+  // Keeping these rows would leave the reader ahead of window-sliced calls and
+  // let positional pairing attach their text to a later in-window call.
+  if (timestamp === undefined) return false
+  if (timestamp < dateRange.start) return false
+  if (timestamp > dateRange.end) return false
+  return true
 }
 
 /** Result of reading a full session transcript, including its identifier. */
@@ -436,7 +525,7 @@ export class ClaudeContentReader implements ContentReader {
    * it is joined to the canonical session only after the file reader has
    * established the session identity, rather than inventing turns from roles.
    */
-  async *read(filePath: string): AsyncGenerator<ReaderTurn> {
+  async *read(filePath: string, dateRange?: DateRange): AsyncGenerator<ReaderTurn> {
     // One turn per assistant request, so a turn pairs with the call
     // `loadClaudeCalls` emitted for the same request. Reading the whole
     // transcript as a single turn would put every part on the first record and
@@ -448,7 +537,12 @@ export class ClaudeContentReader implements ContentReader {
       return
     }
 
-    for (const group of splitClaudeTurns(lines)) {
+    for (const group of splitClaudeTurns(lines, basename(filePath, extname(filePath)))) {
+      // Refresh window-slices counter calls; emit the same window here so
+      // positional pairing cannot attach an out-of-window turn's text. Id maps
+      // (`nativeRecordId` ↔ `turnId`) remain the durable pairing key.
+      if (!groupInDateRange(group, dateRange)) continue
+
       const session = readClaudeSession(group)
       if (
         session.parts.length === 0 &&
@@ -458,9 +552,11 @@ export class ClaudeContentReader implements ContentReader {
       ) {
         continue
       }
+      const nativeRecordId = nativeRecordIdOfGroup(group)
       yield {
         parts: session.parts,
         ...(session.sessionId !== undefined ? { sessionId: session.sessionId } : {}),
+        ...(nativeRecordId !== undefined ? { nativeRecordId } : {}),
         ...(session.terminationReason !== undefined ? { terminationReason: session.terminationReason } : {}),
         ...(session.exitCode !== undefined ? { exitCode: session.exitCode } : {}),
         ...(session.isCorrection !== undefined ? { isCorrection: session.isCorrection, correctionRule: session.correctionRule } : {}),

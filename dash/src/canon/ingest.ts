@@ -27,6 +27,7 @@ import { codexAdapter } from './adapters/codex.js'
 import { copilotAdapter } from './adapters/copilot.js'
 import { geminiAdapter } from './adapters/gemini.js'
 import { antigravityAdapter } from './adapters/antigravity.js'
+import { opencodeAdapter } from './adapters/opencode.js'
 import { piAdapter } from './adapters/pi.js'
 import { AdapterRegistry } from './adapters/registry.js'
 import {
@@ -49,6 +50,10 @@ export const ADAPTERS: readonly HarnessAdapter[] = [
   geminiAdapter,
   claudeCodeAdapter,
   codexAdapter,
+  // OpenCode placeholder last: it detects nothing and claims no span, so
+  // every existing vote resolves above it. The Phase 2 OpenCode task fills in
+  // adapters/opencode.ts without moving this tie-break.
+  opencodeAdapter,
 ]
 
 /** Resource attribute the OTLP convention names the emitting process with. */

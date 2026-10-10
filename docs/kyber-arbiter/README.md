@@ -31,6 +31,6 @@ hooks and use the MCP fallback, `kyber-weave-arbiter serve`.
 - [Architecture](architecture.md) — engine, rules, configuration, and the harness table
 - [Runbook](runbook.md) — hooks, trust steps, fail-closed behaviour, `setup`, `doctor`,
   `audit`, and recording harness defects
-- [ADR 0028](../adr/0028-kyber-arbiter-three-step-decision-gates.md) — the decisions behind it
+- [ADR 0033](../adr/0033-kyber-arbiter-three-step-decision-gates.md) — the decisions behind it
 - [Rule reference](../ci-pipelines/rule-reference.md) — every `KW-ARB-*` id and `KW-REVIEW-026`
 - [Configuration](../configuration.md) — the `arbiter:` section and gate `applies-when`
