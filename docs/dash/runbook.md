@@ -591,8 +591,10 @@ Every view has its own URL, so a view can be bookmarked, shared, or opened direc
 that one list. Browser back and forward restore the spine.
 
 Top navigation (`nav-tabs`) offers four: **Context Doctor**, **Sessions**, **Quarantine**,
-**Problems**. The sidebar rail does not repeat Context Doctor or Sessions — it carries
-**Compare**, the one view the top navigation does not offer.
+**Problems**. The sidebar rail carries **Compare** and no longer duplicates the primary
+**Context Doctor** and **Sessions** entries; Compare is the one view the top navigation does
+not offer. Views reached by drilling — a run, an execution, a turn, a finding — stay reachable
+from the pages that lead to them.
 
 There is **one main harness selector** — the **Harness:** strip under the header — and it
 scopes **Sessions** and **Context Doctor** together. Choosing a harness narrows whichever of
@@ -603,9 +605,9 @@ filters, so narrowing one page's scope never touches the A/B selectors.
 - **Context Doctor**: findings and recommendations. It opens scoped to all sessions for the
   selected harness, with session selection available when you want to narrow further; the
   drilldowns are unchanged — harness → run → execution → turn → context item, plus the
-  finding detail view, the ranked findings lists, and the cross-harness scorecard matrix.
-  Neither ingest coverage nor maintenance is embedded here any more: coverage is read-only in
-  the **Status** panel, and every operator action lives in the **Maintenance** panel
+  finding detail view and the ranked findings lists. Neither ingest coverage nor maintenance
+  is embedded here any more: coverage is read-only in the **Status** panel, and every
+  operator action lives in the **Maintenance** panel
   ([below](#status-and-maintenance-panels)).
 - **Sessions**: Session explorer (`page-sessions`) wrapping the Agent Session Analysis
   Dashboard from `canon.db` — not a restored Context tab:
@@ -647,9 +649,9 @@ neither holds a scheduler or an engine rule of its own
 `GET /api/kyber/coverage` ([§2a](#2a-local-harness-source-refresh-dash-refresh)): the
 persisted refresh window and last successful run, per-source ingest activity with
 last-received, per-reason quarantine counts, `source_checkpoint` statuses including `partial`,
-and the zero-record reasons grouped by their persisted cause. It writes nothing, starts
-nothing, and holds no control of any kind — an operator action that changes the store belongs
-in **Maintenance**, not here.
+and the zero-record reasons grouped by their persisted cause. It starts no job and writes
+nothing: its close and retry controls dismiss the panel and read the same route again. Any
+action that changes the store belongs in **Maintenance**, not here.
 
 **Maintenance is where the dashboard asks the engine to do things.** Every control here is
 an `/api/kyber/*` call; the panel holds no scheduler of its own
@@ -668,11 +670,11 @@ an `/api/kyber/*` call; the panel holds no scheduler of its own
   (`folderImportScheduled`), **Refresh cadence** (`refreshCadenceMinutes`), and the
   **OTLP receiver** (`receiverHosted`), alongside the job host's status — scheduled state,
   last success, last failure, next due.
-- **Model catalog refresh**: `POST /api/kyber/model-catalog/refresh` re-reads the vendor
-  pricing-window catalog. Its status line is built from the row count, the refresh timestamp
-  and the vendor names, including which vendors failed on a partial refresh — never from a
-  raw refresh error string, which can carry a remote body. A failed refresh leaves the catalog
-  as it was and says so.
+- **Model catalog refresh**: `POST /api/kyber/model-catalog/refresh` re-reads the model
+  context-window catalog (declared context windows per model, not prices). Its status line is
+  built from the row count, the refresh timestamp and the vendor names, including which
+  vendors failed on a partial refresh — never from a raw refresh error string, which can carry
+  a remote body. A failed refresh leaves the catalog as it was and says so.
 - **Clean (database wipe)**: wipe all or per harness, confirmed, with the **Import folder
   history** checkbox carrying the post-wipe window (`reingestWeeks`); unchecked means no
   re-ingest ([§2b](#2b-database-clean-dash-clean)). The confirmation and its scope are
@@ -694,16 +696,20 @@ those two pages is open without leaving it — it is never a navigation away fro
 are reading. **Compare** is deliberately outside this scope: its Run A and Run B selectors
 keep their own independent harness filters.
 
-**Sessions** opens on **Agent Sessions (All)**, showing sessions across every harness; with a
-harness selected it shows only sessions with that exact harness ID. The harness list is the
-canonical session inventory: each distinct nonempty harness ID with sessions gets one entry,
-regardless of how many sessions share that ID, and a harness without sessions gets none.
-Labels describe the entries; future or unknown harness IDs use their stored ID as the label
-and remain selectable. The All sentinel is reserved — a stored harness ID of `agent-all` never
-gets an entry of its own. Entries are ordered by harness ID and do not move when a new session
-lands.
+**All Harnesses** is the selector's all-scope entry: the first entry in the strip, and the
+label for every session in the store. Selecting it restores the unscoped view on both pages.
+The remaining entries come from the harness summaries the store reports
+(`GET /api/kyber/harnesses`): a harness the store holds records for gets an entry labelled by
+its metadata name, and a harness with none gets no entry. The all-scope entry is the selector's
+own `all` scope, not a stored harness id — `agent-all` is the sentinel of the older Sessions
+explorer's own tabs, not a header entry.
 
-**Context Doctor** opens scoped to all sessions for the selected harness, and session
+**Sessions** shows sessions across every harness with **All Harnesses** selected, and only
+sessions with that exact harness ID when a harness is selected. Open a session row to inspect
+its dashboard, or use a child session's parent link to open its parent. Changing the harness
+collapses the expanded session.
+
+**Context Doctor** opens scoped to all sessions of the selected harness, and session
 selection is optional: choose one to narrow the page further. Its drilldowns are unchanged —
 harness → run → execution → turn → context item — so a harness chosen in the strip and a
 harness reached by drilling into one are the same scope.
@@ -716,13 +722,11 @@ are: (1) file-side
 standalone sessions that lack OTLP twins remain directly retrievable by session ID, and
 (2) unclipped content inspection preserves the raw origin. Other client variants stay
 separate: Codex Desktop and Codex CLI; Antigravity CLI and Antigravity IDE; and each
-Copilot client. **Agent Sessions (All)** restores sessions across harnesses.
+Copilot client.
 
-If the selected harness is unavailable or disappears when the inventory refreshes, the
-selection falls back to All. An empty inventory keeps the All entry and displays
-**No sessions found.** Open a session row to inspect its dashboard, or use
-a child session's parent link to open its parent. Changing the harness collapses the
-expanded session.
+A scope with no sessions shows the scoped empty state (**No sessions found.**) and **keeps
+the selected harness** — it does not fall back to All. Selecting **All Harnesses** is how you
+widen the scope again.
 
 #### Querying REST Endpoints Directly
 

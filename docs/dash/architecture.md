@@ -870,30 +870,35 @@ retention purge all continue.
 
 The React web dashboard provides progressive-disclosure views matching the 6-level spine.
 Top navigation carries **Context Doctor**, **Sessions**, **Quarantine** and **Problems**; the
-sidebar rail carries **Compare** only, so no view is reachable from two places.
+sidebar rail carries **Compare** and no longer duplicates the primary Context Doctor and
+Sessions entries.
 
 The header's **Harness:** strip is the single main harness selector. It scopes **Sessions**
 and **Context Doctor** together and narrows whichever of those two pages is open in place,
-rather than navigating away from the page you are reading. Context Doctor opens on all
-sessions for the selected harness and can be narrowed further to a single session; its
-drilldowns are unchanged. **Compare** deliberately sits outside that scope and keeps its own
-per-side harness filters, so narrowing a page's scope never touches the A/B selectors.
+rather than navigating away from the page you are reading. Its entries are the harness
+summaries the store reports (`GET /api/kyber/harnesses`) plus an **All Harnesses** all-scope
+entry; a selected harness with no sessions keeps its selection and shows the scoped empty
+state rather than falling back to All. **Compare** deliberately sits outside that scope and
+keeps its own per-side harness filters, so narrowing a page's scope never touches the A/B
+selectors.
 
 The top-right **Status** and **Maintenance** buttons open mutually exclusive right-side
 panels — opening one closes the other, so only one is on screen at a time. **Status** is
 read-only: it renders the ingest coverage payload from `GET /api/kyber/coverage` (refresh
-window, per-source ingest activity, per-reason quarantine counts, checkpoint statuses) and
-writes nothing. **Maintenance** holds every operator action, each an `/api/kyber/*` call:
-pause/resume, manual refresh, folder import, the shared settings, the model catalog refresh,
-and the confirmed wipe with its optional import window. Neither coverage nor maintenance is
-embedded in Context Doctor any more, and neither panel adds engine behaviour — both ask the
-same routes the tray already asks ([ADR 0033](../adr/0033-kyberdash-surfaces-are-display-layers.md)).
+window, per-source ingest activity, per-reason quarantine counts, checkpoint statuses), with
+close and retry controls that re-read the same route; it starts no job and writes nothing.
+**Maintenance** holds every operator action, each an `/api/kyber/*` call: pause/resume,
+manual refresh, folder import, the shared settings, the model context-window catalog
+refresh, and the confirmed wipe with its optional import window. Neither coverage nor
+maintenance is embedded in Context Doctor any more, and neither panel adds engine behaviour —
+both ask the same routes the tray already asks
+([ADR 0033](../adr/0033-kyberdash-surfaces-are-display-layers.md)).
 
 The individual views:
 
-- **`ContextDoctor.tsx`**: Findings and recommendations — the ranked headline findings, the
-  full workspace findings browser, and the cross-harness scorecard matrix. Scoped by the shared
-  harness selector with optional session narrowing; drilling harness → run → execution → turn →
+- **`ContextDoctor.tsx`**: Findings and recommendations — the ranked headline findings and
+  the full workspace findings browser. Scoped by the shared harness selector with optional
+  session narrowing; drilling harness → run → execution → turn →
   context item, and into a finding, is unchanged.
 - **`Sessions.tsx`**: Sessions rail wrapping `ContextExplorer` (ASAD + timeline); not a
   Context tab, and scoped by the same harness selector as Context Doctor.
