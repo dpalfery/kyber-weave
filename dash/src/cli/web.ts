@@ -1,7 +1,8 @@
 import { createServer, type Server } from 'http'
+import { randomBytes } from 'crypto'
 import { execFile } from 'child_process'
 import { readFile } from 'fs/promises'
-import { chmodSync, existsSync, lstatSync, readFileSync, rmSync, writeFileSync } from 'fs'
+import { closeSync, existsSync, fchmodSync, lstatSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from 'fs'
 import { createRequire } from 'node:module'
 import { join, normalize, extname, dirname, sep, posix as posixPath } from 'path'
 import { homedir } from 'node:os'
@@ -263,6 +264,75 @@ function readServerRecord(path: string): ServerRecord | null {
     return { pid: parsed.pid, ...(typeof parsed.url === 'string' ? { url: parsed.url } : {}) }
   } catch {
     return null
+  }
+}
+
+/**
+ * The state dir, created if it is missing. `null` on success, the failing errno code on
+ * failure - a caller reports the code and carries on rather than refusing to serve.
+ *
+ * `recursive` because the parent may be missing too (`--state-dir` under a home that has
+ * no `.kyberdash`), and 0o700 because this directory holds the pid and loopback port of a
+ * running server plus the user's stored context.
+ */
+function ensureStateDir(dir: string): string | null {
+  try {
+    mkdirSync(dir, { recursive: true, mode: 0o700 })
+    return null
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code ?? 'EUNKNOWN'
+  }
+}
+
+/** The one line an operator sees when the attach point could not be published. */
+function publishWarning(code: string): string {
+  return `${BRAND.cliName}: could not publish ${SERVER_FILE} (${code}): the tray cannot attach to this server`
+}
+
+/**
+ * Publishes `server.json`, and NEVER throws.
+ *
+ * A missing attach point is worth one line of stderr; it is not worth a dead dashboard.
+ * The dashboard itself is reachable over the loopback URL the listening line carries - the
+ * tray launches a server by that line and can attach to a running one by it too - so an
+ * unwritable state dir degrades tray attach and nothing else. The earlier contract closed
+ * the socket on a publish failure, which turned "the tray cannot find me" into "the server
+ * is gone", and broke the self-update smoke run outright: its temp HOME has no
+ * `~/.kyberdash` until something creates it.
+ *
+ * Race-free by construction: the body goes to a fresh temp file in the SAME directory
+ * (so the swap is atomic and cannot cross a filesystem), and `rename` replaces the
+ * directory entry - it never follows a symlink, so even a link planted between the check
+ * below and the rename cannot redirect the write somewhere else. The `lstat` is therefore
+ * a courtesy, not the safety argument: it only decides whether to warn about a link.
+ *
+ * 0o600 at exclusive creation, and chmod'd on the handle rather than the path, so a
+ * leftover left world-readable is tightened and no path is re-resolved to do it.
+ */
+function publishServerRecord(path: string, body: string): void {
+  let linked = false
+  try {
+    linked = lstatSync(path).isSymbolicLink()
+  } catch {
+    /* absent, or unreadable - the write below is what decides */
+  }
+  if (linked) {
+    console.error(`${BRAND.cliName}: ${path} is a symbolic link; not publishing server.json through it`)
+    return
+  }
+  const temp = join(dirname(path), `.${SERVER_FILE}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`)
+  try {
+    const fd = openSync(temp, 'wx', 0o600)
+    try {
+      writeFileSync(fd, body)
+      fchmodSync(fd, 0o600)
+    } finally {
+      closeSync(fd)
+    }
+    renameSync(temp, path)
+  } catch (err) {
+    rmSync(temp, { force: true })
+    console.error(publishWarning((err as NodeJS.ErrnoException).code ?? 'EUNKNOWN'))
   }
 }
 
@@ -563,6 +633,15 @@ export async function runWebDashboard(opts: WebDashboardServices & {
   let hosted: HostedServices | null = null
   let releaseHosted = (): void => {}
   const stateDir = opts.stateDir ?? join(homedir(), '.kyberdash')
+  // The state dir is created here, not left to whichever writer gets there first. It is
+  // routinely absent on a fresh account - a test HOME, a CI smoke run, or a machine where
+  // the store lives elsewhere (KYBER_CANON_DB) - and every writer in this process then
+  // fails on ENOENT for a directory that should simply exist. 0o700: this directory holds
+  // the pid and port of a loopback server and the user's stored context.
+  //
+  // Best-effort: a directory we cannot create is reported once, and the server still runs
+  // (the lease takes the same directory and degrades to hosting no jobs if it cannot).
+  const stateDirProblem = ensureStateDir(stateDir)
   // Read-write: the hosts write settings, and the maintenance pass purges and reprojects.
   // The store is resolved up front (it is one handle per process, shared by every server),
   // so the settings routes work from the first accepted connection.
@@ -706,43 +785,10 @@ export async function runWebDashboard(opts: WebDashboardServices & {
   // Deliberately no log on the skip below: a second server over one state dir is a
   // supported configuration, and a warning there would be noise on a normal day.
   if (!ownedByLiveOtherProcess) {
-    // 0o600, and only ever over a regular file. server.json names a pid and a loopback
-    // port on the user's machine inside their home directory, so it is written for the
-    // owner alone - and `lstat` rather than `stat`, because a symlink there would make
-    // this write land somewhere else entirely. A symlink is refused rather than followed;
-    // the listening line below still carries the URL, so the tray is not left without an
-    // attach point.
-    const target = (() => {
-      try {
-        return lstatSync(serverFilePath)
-      } catch {
-        return null
-      }
-    })()
-    if (target?.isSymbolicLink()) {
-      console.error(`${BRAND.cliName}: ${serverFilePath} is a symbolic link; not publishing server.json through it`)
+    if (stateDirProblem === null) {
+      publishServerRecord(serverFilePath, JSON.stringify({ pid: process.pid, url, apiVersion: REPORT_SCHEMA_VERSION }))
     } else {
-      try {
-        writeFileSync(serverFilePath, JSON.stringify({ pid: process.pid, url, apiVersion: REPORT_SCHEMA_VERSION }), {
-          mode: 0o600,
-        })
-      } catch (err) {
-        // A server nobody can attach to is not a server: the socket closes (the close
-        // handler above removes any partial file and gives back this server's share of the
-        // hosted pair), and the caller sees the failure rather than a process that serves
-        // traffic no tray will ever reach.
-        console.error(`${BRAND.cliName}: could not publish ${serverFilePath}:`, err)
-        await new Promise<void>((resolve) => server.close(() => resolve()))
-        throw err
-      }
-      // `mode` only applies when the file is created, and an existing leftover keeps the
-      // permissions it was left with - so the mode is set explicitly on the file we just
-      // wrote, and only ours (the pid check above is what makes it ours).
-      try {
-        chmodSync(serverFilePath, 0o600)
-      } catch {
-        /* a filesystem that refuses chmod still has the file; not worth failing start for */
-      }
+      console.error(publishWarning(stateDirProblem))
     }
   }
 

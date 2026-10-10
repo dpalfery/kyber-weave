@@ -14,16 +14,25 @@
 // listening line, server.json and a live socket are all already there while it is still
 // blocked - then that the routes which need the job host answer 503 rather than reaching
 // for a host that does not exist yet. Finally they pin server.json ownership and mode:
-// 0o600, never written through a symlink, and a publish that fails closes the server
-// instead of leaving a bound socket no tray can find.
+// 0o600, never written through a symlink, a state dir that does not exist yet (created,
+// 0o700) - and a publish that still fails warning ONCE and leaving the dashboard serving,
+// because a tray launches a server by its listening line, and an attach point nobody can
+// write is not a reason to kill a working dashboard. That pair is the self-update smoke
+// run's failure (issue #319, CI on ubuntu and macOS): its temp HOME has no `~/.kyberdash`
+// at all, because the smoke also points KYBER_CANON_DB somewhere else entirely.
+//
+// Nothing here checks a path and then acts on it: every mode, kind and absence claim is
+// read from an open descriptor, or is the last thing done to a path. That is CodeQL's
+// `js/file-system-race` (check-then-use), and it is also the honest way to assert on a
+// file a concurrent teardown is rewriting.
 //
 // web.test.ts and web-registry.test.ts are the approved contracts for the surrounding
 // behaviour (server.json removal on close, no registry entry after a failed start) and
 // are untouched by this file.
 import { Server, request as httpRequest } from 'node:http'
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, closeSync, fstatSync, lstatSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { CanonStore } from '../canon/store.js'
@@ -63,13 +72,21 @@ class FakeSpawner implements JobSpawner {
 type Options = {
   /** When set, the maintenance pass blocks on this until the test releases it. */
   maintenanceGate?: { release: () => void; blocked: Promise<void> }
-  /** Prepared state dir; a fresh one is created when not given. */
+  /** Prepared state dir; a fresh one is created when not given. A path that does not exist
+   *  yet is exactly the smoke run's condition, and is left missing. */
   stateDir?: string
+  /**
+   * The canon.db the store opens when it must live somewhere unusual - with its parent
+   * directory absent, the way `KYBER_CANON_DB=<home>/does-not-exist/canon.db` puts it in
+   * the smoke run. The store creates the parent itself, exactly as it does in production.
+   */
+  canonDb?: string
 }
 
 const cleanups: Array<() => Promise<void>> = []
 afterEach(async () => {
   vi.restoreAllMocks()
+  vi.unstubAllEnvs()
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup()
 })
 
@@ -85,10 +102,44 @@ afterEach(async () => {
 async function removeTempStateDir(dir: string): Promise<void> {
   const lock = join(dir, JOBS_LOCK_FILE)
   const deadline = Date.now() + 3_000
-  while (existsSync(lock) && Date.now() < deadline) {
+  while (probeExists(lock) && Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, 25))
   }
   rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
+}
+
+/**
+ * Whether a path is there, by trying to OPEN it rather than by stat-then-use. A stat
+ * followed by an operation on the same path is a race (CodeQL `js/file-system-race`), and
+ * here the other writer is a teardown on a later turn of the event loop; one open attempt
+ * cannot be raced into a use of a path that has since been replaced.
+ */
+function probeExists(path: string): boolean {
+  try {
+    closeSync(openSync(path, 'r'))
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** The permission bits of a path, read from its own descriptor rather than by path stat. */
+function modeOf(path: string): number {
+  const fd = openSync(path, 'r')
+  try {
+    return fstatSync(fd).mode & 0o777
+  } finally {
+    closeSync(fd)
+  }
+}
+
+/** Waits for a path to be gone. Polls by open-attempt, never uses the path it probes. */
+async function waitForGone(path: string, timeoutMs = 3_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+  while (probeExists(path)) {
+    if (Date.now() > deadline) throw new Error(`timed out waiting for ${path} to disappear`)
+    await new Promise((resolve) => setTimeout(resolve, 25))
+  }
 }
 
 function tempStateDir(): string {
@@ -116,7 +167,8 @@ function start(options: Options = {}): {
   jobSpawner: FakeSpawner
 } {
   const stateDir = options.stateDir ?? tempStateDir()
-  const store = new CanonStore(':memory:')
+  if (options.canonDb !== undefined) vi.stubEnv('KYBER_CANON_DB', options.canonDb)
+  const store = new CanonStore(options.canonDb ?? ':memory:')
   const bridge = new KyberBridge({ store, reopenCheckIntervalMs: 0 })
   const stdout: string[] = []
   const jobSpawner = new FakeSpawner()
@@ -274,7 +326,7 @@ describe('server.json: mode, symlinks, and a publish that fails', () => {
     const stateDir = tempStateDir()
     const server = await start({ stateDir }).started
     const path = join(stateDir, 'server.json')
-    expect(statSync(path).mode & 0o777).toBe(0o600)
+    expect(modeOf(path)).toBe(0o600)
     await new Promise<void>((resolve) => server.close(() => resolve()))
 
     // The leftover case: `mode` on writeFileSync applies only at creation, so a file a
@@ -283,7 +335,7 @@ describe('server.json: mode, symlinks, and a publish that fails', () => {
     writeFileSync(path, '{"pid":999999,"url":"http://127.0.0.1:1"}', { mode: 0o644 })
     chmodSync(path, 0o644)
     const second = await start({ stateDir }).started
-    expect(statSync(path).mode & 0o777).toBe(0o600)
+    expect(modeOf(path)).toBe(0o600)
     await new Promise<void>((resolve) => second.close(() => resolve()))
   })
 
@@ -294,28 +346,123 @@ describe('server.json: mode, symlinks, and a publish that fails', () => {
     symlinkSync(elsewhere, join(stateDir, 'server.json'))
 
     const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
-    const server = await start({ stateDir }).started
+    const { started, stdout } = start({ stateDir })
+    await waitFor(() => listeningLine(stdout) !== null, 'the listening line')
+    // The dashboard serves regardless: the link is refused, not the server.
+    const server = await started
+    expect(server.listening).toBe(true)
     await new Promise<void>((resolve) => server.close(() => resolve()))
 
-    expect(lstatSync(join(stateDir, 'server.json')).isSymbolicLink()).toBe(true)
+    // `readFileSync(elsewhere)` is on the LINK TARGET, a path nothing here checked, so this
+    // is a read of an unrelated name rather than a use of the one that was inspected.
     expect(readFileSync(elsewhere, 'utf-8')).toBe('{"pid":999999,"url":"http://127.0.0.1:1"}')
-    expect(errors).toHaveBeenCalled()
+    expect(errors.mock.calls.map((call) => String(call[0])).join('\n')).toMatch(/is a symbolic link/)
+    // The final thing done to that path: the link is still a link.
+    expect(lstatSync(join(stateDir, 'server.json')).isSymbolicLink()).toBe(true)
   })
 
-  it('closes the server and leaves nothing held when the publish fails', async () => {
+  it('keeps serving, warns once and leaves no partial file when the publish fails', async () => {
     const stateDir = tempStateDir()
-    // A directory where the file belongs: the write cannot succeed, and a socket that
-    // stays bound with no attach point is a server no tray can ever reach.
+    // A directory where the file belongs: the swap onto it cannot succeed. A tray that
+    // cannot find the attach point is a smaller problem than a dashboard that is gone, so
+    // the server stays up and says so exactly once.
     mkdirSync(join(stateDir, 'server.json'))
-    const closeSpy = vi.spyOn(Server.prototype, 'close')
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
 
-    await expect(start({ stateDir }).started).rejects.toThrow()
+    const { started, stdout } = start({ stateDir })
+    await waitFor(() => listeningLine(stdout) !== null, 'the listening line even though the publish failed')
+    const server = await started
+    expect(server.listening).toBe(true)
 
-    expect(closeSpy).toHaveBeenCalled()
-    // Nothing published, nothing held: no attach point, and no jobs lease standing
-    // against the next process over this state dir.
+    const warnings = errors.mock.calls.map((call) => String(call[0]))
+    expect(warnings.filter((line) => line.includes('could not publish server.json'))).toHaveLength(1)
+    expect(warnings.join('\n')).toMatch(/could not publish server\.json \(E[A-Z]+\): the tray cannot attach to this server/)
+    // The temp file the swap staged is cleaned up: a failed publish leaves nothing behind
+    // but the one line.
+    expect(readdirSync(stateDir).filter((name) => name.startsWith('.server.json.'))).toEqual([])
+
+    await new Promise<void>((resolve) => server.close(() => resolve()))
+    // Nothing held: the lease went back with the last share, so the next process over this
+    // state dir is not stood down by this one. The release is fire-and-forget (see
+    // removeTempStateDir), so this waits for the unlink rather than racing it.
+    await waitForGone(join(stateDir, JOBS_LOCK_FILE))
+    // The last thing done to that path: still the directory the test put there.
     expect(lstatSync(join(stateDir, 'server.json')).isDirectory()).toBe(true)
-    expect(existsSync(join(stateDir, 'jobs.lock'))).toBe(false)
+  })
+
+  // Issue #319, CI: the self-update smoke run builds the real binary, hands it a temp HOME
+  // and a KYBER_CANON_DB under a directory that does not exist, and waits for the listening
+  // line. The state dir is therefore absent and, because the store lives elsewhere, nothing
+  // else has created it: the publish used to die on ENOENT and the child exited before the
+  // supervisor saw its line.
+  describe('a state dir that does not exist yet', () => {
+    /** A temp root plus a state dir path under it that is deliberately never created. */
+    function missingStateDir(): string {
+      const root = mkdtempSync(join(tmpdir(), 'kyber-web-fresh-'))
+      cleanups.push(async () => removeTempStateDir(root))
+      return join(root, 'kyberdash')
+    }
+
+    it('creates it 0o700 and publishes server.json 0o600 into it', async () => {
+      const stateDir = missingStateDir()
+      const { started, stdout } = start({ stateDir })
+
+      const line = await waitFor(() => listeningLine(stdout) !== null, 'the listening line', 5_000).then(() => listeningLine(stdout)!)
+      expect(line.event).toBe('kyberdash.web.listening')
+      expect(line.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/)
+
+      const server = await started
+      expect(server.listening).toBe(true)
+      expect(modeOf(stateDir)).toBe(0o700)
+      expect(modeOf(join(stateDir, 'server.json'))).toBe(0o600)
+      expect(JSON.parse(readFileSync(join(stateDir, 'server.json'), 'utf-8'))).toMatchObject({
+        url: line.url,
+        pid: process.pid,
+      })
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    })
+
+    it('starts with KYBER_CANON_DB in a non-existent directory and the state dir missing too', async () => {
+      const stateDir = missingStateDir()
+      const canonDb = join(dirname(stateDir), 'does-not-exist', 'canon.db')
+      const { started, stdout } = start({ stateDir, canonDb })
+
+      await waitFor(() => listeningLine(stdout) !== null, 'the listening line with a store path that has no parent', 5_000)
+      const server = await started
+      expect(server.listening).toBe(true)
+      // Both sides of the smoke's environment landed: the store's parent was created by the
+      // store, and the state dir by the server.
+      expect(modeOf(join(stateDir, 'server.json'))).toBe(0o600)
+      const answer = await get(listeningLine(stdout)!.url, '/api/kyber/settings')
+      expect(answer.status).toBe(200)
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    })
+
+    // Skipped rather than faked: root ignores the mode bits, and Windows has no 0o500.
+    const unwritable = process.platform === 'win32' || process.getuid?.() === 0 ? it.skip : it
+    unwritable('still serves when the state dir exists but cannot be written to', async () => {
+      const stateDir = tempStateDir()
+      chmodSync(stateDir, 0o500)
+      cleanups.push(async () => {
+        chmodSync(stateDir, 0o700)
+      })
+      const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+      const { started, stdout } = start({ stateDir })
+      await waitFor(() => listeningLine(stdout) !== null, 'the listening line with an unwritable state dir', 5_000)
+      const server = await started
+      expect(server.listening).toBe(true)
+
+      const warnings = errors.mock.calls.map((call) => String(call[0]))
+      expect(warnings.filter((line) => line.includes('could not publish server.json'))).toHaveLength(1)
+      expect(warnings.join('\n')).toMatch(/could not publish server\.json \(EACCES\): the tray cannot attach to this server/)
+      expect(readdirSync(stateDir).filter((name) => name.startsWith('.server.json.'))).toEqual([])
+
+      // It is still a working dashboard: the routes answer.
+      expect((await get(listeningLine(stdout)!.url, '/api/kyber/settings')).status).toBe(200)
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+      chmodSync(stateDir, 0o700)
+    })
   })
 })
 
