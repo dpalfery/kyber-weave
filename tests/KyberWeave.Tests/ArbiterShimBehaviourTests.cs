@@ -157,6 +157,36 @@ public sealed class ArbiterShimBehaviourTests : IDisposable
 
     // ----------------------------------------------------------------------------------
 
+    [Fact]
+    public async Task PiExtension_AfterABlockOnACallWithNoContent_StillBlocks()
+    {
+        // A call that produced no content carries `content: undefined`, and spreading
+        // that threw a TypeError out of the handler. Failing to build the block is not
+        // a block: the host saw a crashed hook rather than a refusal.
+        string bun = RequireBun();
+        WriteFakeBinary("{\"decision\":\"block\",\"reason\":\"nope\"}", "0");
+        await File.WriteAllTextAsync(Path.Combine(_temp.Path, "ext.ts"), await RenderPiExtensionAsync(timeoutSeconds: 5));
+        await File.WriteAllTextAsync(Path.Combine(_temp.Path, "drive.ts"), """
+            import ext from "./ext.ts";
+            const handlers: Record<string, (event: any) => Promise<any>> = {};
+            (ext as any)({ on: (name: string, handler: (event: any) => Promise<any>) => { handlers[name] = handler; } });
+            const event: any = { toolName: "Agent", toolCallId: "c1", input: {}, isError: false };
+            console.log("contentPresent=" + String("content" in event));
+            try {
+              const result = await handlers["tool_result"](event);
+              console.log("RESULT=" + JSON.stringify(result));
+            } catch (e) {
+              console.log("THREW=" + String(e));
+            }
+            """);
+
+        string output = await RunBunAsync(bun, "drive.ts");
+
+        Assert.Contains("contentPresent=false", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("THREW=", output, StringComparison.Ordinal);
+        Assert.Contains("RESULT={\"content\":[{\"type\":\"text\",\"text\":\"nope\"}]}", output, StringComparison.Ordinal);
+    }
+
     private const string PiDriver = """
         import ext from "./ext.ts";
         const handlers: Record<string, (event: any) => Promise<any>> = {};

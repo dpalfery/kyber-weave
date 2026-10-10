@@ -515,7 +515,9 @@ public sealed class PiRenderer : ISquadRenderer
                 const decision = runArbiterHook(envelope);
                 if (decision.decision === "block") {
                   const reason = decision.reason ?? "blocked by kyber-arbiter";
-                  return { content: [...event.content, { type: "text", text: reason }] };
+                  // A call that produced no output carries `content: undefined`, and
+                  // spreading that threw before the block could be built.
+                  return { content: [...(event.content ?? []), { type: "text", text: reason }] };
                 }
               });
             }

@@ -108,7 +108,9 @@ public sealed class ArbiterPiRenderingTests : IDisposable
 
         Assert.Contains("tool_result", content, StringComparison.Ordinal);
         Assert.Contains("\"after\"", content, StringComparison.Ordinal);
-        Assert.Contains("...event.content", content, StringComparison.Ordinal);
+        // The spread defaults to an empty array: a call that produced no output carries
+        // `content: undefined`, and spreading that threw before the block could be built.
+        Assert.Contains("...(event.content ?? [])", content, StringComparison.Ordinal);
         Assert.Contains("content", content, StringComparison.Ordinal);
         Assert.Contains("\"text\"", content, StringComparison.Ordinal);
     }
