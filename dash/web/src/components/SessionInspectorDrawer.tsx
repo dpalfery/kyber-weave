@@ -274,6 +274,237 @@ export function isJsonText(value: string): boolean {
 }
 
 /**
+ * Lossless JSON AST scoped to the nested-string expansion below. Numbers and
+ * literals keep their exact source slices so large integers, key order, and
+ * array order survive; strings keep both the raw literal and its decoded
+ * value so JSON-encoded strings can be detected without re-escaping.
+ */
+interface JsonLosslessObjectNode {
+  kind: 'object'
+  entries: Array<{ keyRaw: string; value: JsonLosslessNode }>
+}
+
+interface JsonLosslessArrayNode {
+  kind: 'array'
+  items: JsonLosslessNode[]
+}
+
+interface JsonLosslessStringNode {
+  kind: 'string'
+  raw: string
+  decoded: string
+}
+
+interface JsonLosslessNumberNode {
+  kind: 'number'
+  raw: string
+}
+
+interface JsonLosslessLiteralNode {
+  kind: 'literal'
+  raw: string
+}
+
+type JsonLosslessNode =
+  | JsonLosslessObjectNode
+  | JsonLosslessArrayNode
+  | JsonLosslessStringNode
+  | JsonLosslessNumberNode
+  | JsonLosslessLiteralNode
+
+function parseJsonLosslessNode(text: string, pos: { index: number }): JsonLosslessNode {
+  skipJsonWs(text, pos)
+  const ch = text.charAt(pos.index)
+  if (ch === '{') return parseJsonLosslessObject(text, pos)
+  if (ch === '[') return parseJsonLosslessArray(text, pos)
+  if (ch === '"') return parseJsonLosslessString(text, pos)
+  if (ch === '-' || (ch >= '0' && ch <= '9')) return parseJsonLosslessNumber(text, pos)
+  return parseJsonLosslessLiteral(text, pos)
+}
+
+function skipJsonWs(text: string, pos: { index: number }): void {
+  while (pos.index < text.length && /\s/.test(text.charAt(pos.index))) pos.index++
+}
+
+function parseJsonLosslessObject(text: string, pos: { index: number }): JsonLosslessObjectNode {
+  pos.index++
+  const entries: Array<{ keyRaw: string; value: JsonLosslessNode }> = []
+  skipJsonWs(text, pos)
+  if (text.charAt(pos.index) === '}') {
+    pos.index++
+    return { kind: 'object', entries }
+  }
+  for (;;) {
+    skipJsonWs(text, pos)
+    if (text.charAt(pos.index) !== '"') throw new Error('Expected object key')
+    const keyNode = parseJsonLosslessString(text, pos)
+    skipJsonWs(text, pos)
+    if (text.charAt(pos.index) !== ':') throw new Error('Expected colon')
+    pos.index++
+    const value = parseJsonLosslessNode(text, pos)
+    entries.push({ keyRaw: keyNode.raw, value })
+    skipJsonWs(text, pos)
+    const sep = text.charAt(pos.index)
+    if (sep === ',') {
+      pos.index++
+      continue
+    }
+    if (sep === '}') {
+      pos.index++
+      return { kind: 'object', entries }
+    }
+    throw new Error('Expected comma or closing brace')
+  }
+}
+
+function parseJsonLosslessArray(text: string, pos: { index: number }): JsonLosslessArrayNode {
+  pos.index++
+  const items: JsonLosslessNode[] = []
+  skipJsonWs(text, pos)
+  if (text.charAt(pos.index) === ']') {
+    pos.index++
+    return { kind: 'array', items }
+  }
+  for (;;) {
+    const value = parseJsonLosslessNode(text, pos)
+    items.push(value)
+    skipJsonWs(text, pos)
+    const sep = text.charAt(pos.index)
+    if (sep === ',') {
+      pos.index++
+      continue
+    }
+    if (sep === ']') {
+      pos.index++
+      return { kind: 'array', items }
+    }
+    throw new Error('Expected comma or closing bracket')
+  }
+}
+
+function parseJsonLosslessString(text: string, pos: { index: number }): JsonLosslessStringNode {
+  const start = pos.index
+  pos.index++
+  let escaped = false
+  while (pos.index < text.length) {
+    const ch = text.charAt(pos.index)
+    pos.index++
+    if (escaped) {
+      escaped = false
+      continue
+    }
+    if (ch === '\\') {
+      escaped = true
+      continue
+    }
+    if (ch === '"') {
+      const raw = text.slice(start, pos.index)
+      return { kind: 'string', raw, decoded: JSON.parse(raw) as string }
+    }
+  }
+  throw new Error('Unterminated string')
+}
+
+function parseJsonLosslessNumber(text: string, pos: { index: number }): JsonLosslessNumberNode {
+  const rest = text.slice(pos.index)
+  const match = /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/.exec(rest)
+  if (!match) throw new Error('Invalid number')
+  pos.index += match[0].length
+  return { kind: 'number', raw: match[0] }
+}
+
+function parseJsonLosslessLiteral(text: string, pos: { index: number }): JsonLosslessLiteralNode {
+  const rest = text.slice(pos.index)
+  const match = /^(?:true|false|null)/.exec(rest)
+  if (!match) throw new Error('Invalid literal')
+  pos.index += match[0].length
+  return { kind: 'literal', raw: match[0] }
+}
+
+function parseJsonLosslessDocument(trimmed: string): JsonLosslessNode | null {
+  const pos = { index: 0 }
+  const node = parseJsonLosslessNode(trimmed, pos)
+  skipJsonWs(trimmed, pos)
+  if (pos.index !== trimmed.length) return null
+  return node
+}
+
+function printJsonLosslessNode(node: JsonLosslessNode, depth: number): string {
+  const pad = '  '.repeat(depth)
+  const childPad = '  '.repeat(depth + 1)
+  if (node.kind === 'object') {
+    if (node.entries.length === 0) return '{}'
+    const parts = node.entries.map(
+      (entry) => `${childPad}${entry.keyRaw}: ${printJsonLosslessNode(expandJsonLosslessStrings(entry.value, 0), depth + 1)}`
+    )
+    return `{\n${parts.join(',\n')}\n${pad}}`
+  }
+  if (node.kind === 'array') {
+    if (node.items.length === 0) return '[]'
+    const parts = node.items.map(
+      (item) => `${childPad}${printJsonLosslessNode(expandJsonLosslessStrings(item, 0), depth + 1)}`
+    )
+    return `[\n${parts.join(',\n')}\n${pad}]`
+  }
+  if (node.kind === 'string' || node.kind === 'number' || node.kind === 'literal') {
+    return node.raw
+  }
+  return ''
+}
+
+/**
+ * Resolves one string node whose decoded text is itself a JSON object or
+ * array, recursively. Non-string nodes pass through untouched; strings that
+ * are not JSON objects/arrays keep their exact raw literal. Depth-capped so
+ * adversarial nesting cannot recurse without bound.
+ */
+function expandJsonLosslessStrings(node: JsonLosslessNode, seen: number): JsonLosslessNode {
+  if (node.kind !== 'string' || seen > 20) return node
+  const inner = node.decoded.trim()
+  if (!isJsonText(inner)) return node
+  try {
+    JSON.parse(inner)
+  } catch {
+    return node
+  }
+  const parsed = (() => {
+    try {
+      return parseJsonLosslessDocument(inner)
+    } catch {
+      return null
+    }
+  })()
+  if (!parsed || parsed.kind === 'string' || parsed.kind === 'number' || parsed.kind === 'literal') return node
+  return parsed
+}
+
+/**
+ * Pretty-prints valid JSON while recursing into JSON-encoded string values
+ * (an object/array serialized as a string inside another JSON value). Outer
+ * and inner numbers, literals, key order, and array order are copied from
+ * exact source slices — nothing is parsed into JS numbers for display — so
+ * large integers survive; only whitespace/indentation changes and nested
+ * strings render as their decoded structure. Returns null when the text is
+ * not valid JSON; callers fall back to plain text rendering.
+ */
+export function prettyPrintJsonNested(raw: string): string | null {
+  const trimmed = raw.trim()
+  if (trimmed === '') return null
+  try {
+    JSON.parse(trimmed)
+  } catch {
+    return null
+  }
+  try {
+    const node = parseJsonLosslessDocument(trimmed)
+    if (!node) return prettyPrintJson(raw)
+    return printJsonLosslessNode(node, 0)
+  } catch {
+    return prettyPrintJson(raw)
+  }
+}
+
+/**
  * Pretty-prints raw JSON text with a whitespace-only transformation: the
  * scan copies every string, number, and literal byte-for-byte and only adds
  * newlines and indentation outside strings. Values are never parsed for
@@ -369,6 +600,25 @@ export function prettyPrintJsonLines(raw: string): string | null {
 }
 
 /**
+ * Nested-aware JSON-lines formatter: each line recurses into JSON-encoded
+ * strings via prettyPrintJsonNested. Same shape contract as
+ * prettyPrintJsonLines — null unless at least two non-blank lines are all
+ * valid JSON.
+ */
+export function prettyPrintJsonLinesNested(raw: string): string | null {
+  const lines = raw.split('\n').map((line) => line.trim()).filter((line) => line !== '')
+  if (lines.length < 2) return null
+  const formatted: string[] = []
+  for (const line of lines) {
+    if (!isJsonText(line)) return null
+    const pretty = prettyPrintJsonNested(line) ?? prettyPrintJson(line)
+    if (pretty === null) return null
+    formatted.push(pretty)
+  }
+  return formatted.join('\n')
+}
+
+/**
  * Splits a top-level JSON array into its exact item source slices, in order.
  * Returns null when the text is not a top-level array, so callers can fall
  * back to the single pretty block. Slices are trimmed source text — no value
@@ -456,8 +706,13 @@ export function JsonStringView({
   const [viewMode, setViewMode] = useState<'formatted' | 'raw'>(defaultView)
   const [copied, setCopied] = useState(false)
 
-  const single = prettyPrintJson(text)
-  const lines = single === null ? prettyPrintJsonLines(text) : null
+  // Recurse into JSON-encoded string values so nested Copilot context stays
+  // readable; the nested printer copies every literal byte-for-byte and only
+  // changes indentation plus string expansion. Raw and copy below still use
+  // the exact original `text`.
+  const singleNested = prettyPrintJsonNested(text)
+  const single = singleNested ?? prettyPrintJson(text)
+  const lines = single === null ? prettyPrintJsonLinesNested(text) ?? prettyPrintJsonLines(text) : null
   if (single === null && lines === null) {
     // Shaped like JSON but not valid JSON — show the text as-is so nothing
     // is dropped; the structured view simply has nothing to add.
@@ -466,7 +721,7 @@ export function JsonStringView({
 
   const split = single !== null ? splitTopLevelArrayItems(text) : null
   const multiItems = split !== null && split.length > 1 ? split : null
-  const multiPretty = multiItems !== null ? multiItems.map((item) => prettyPrintJson(item)) : null
+  const multiPretty = multiItems !== null ? multiItems.map((item) => prettyPrintJsonNested(item) ?? prettyPrintJson(item)) : null
   const showItems = multiPretty !== null && multiPretty.every((part): part is string => part !== null)
 
   const nonBlankLines = text.split('\n').filter((line) => line.trim() !== '').length

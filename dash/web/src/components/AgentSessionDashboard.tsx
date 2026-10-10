@@ -666,6 +666,16 @@ export function AgentSessionContent({
       typeof (drawerContent as { bucket?: unknown }).bucket === 'string'
     ) {
       const bucketItem = drawerContent as { bucket: string; turn?: { spanId?: string } }
+      // The session-level system prompt lives on the session content route,
+      // not on any single turn span (the first turn span carries none, so a
+      // span-scoped request 404s). Omit the span so the request reads
+      // `/content?part=system_prompt`; every other bucket keeps its turn span.
+      if (bucketItem.bucket === 'system_prompt') {
+        return {
+          sessionId: String(sessionId),
+          part: bucketItem.bucket,
+        }
+      }
       return {
         sessionId: String(sessionId),
         span: bucketItem.turn?.spanId,

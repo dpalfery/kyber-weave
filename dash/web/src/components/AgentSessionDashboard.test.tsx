@@ -1592,3 +1592,83 @@ describe('AgentSessionDashboard cache tiles (issue #185)', () => {
     expect(html).toContain('Cache Hit Ratio')
   })
 })
+
+describe('AgentSessionDashboard: session-level system_prompt request', () => {
+  it('omits the turn span for system_prompt but keeps it for other buckets', () => {
+    const internals = internalsOf()
+    const originalUseState = internals?.H?.useState
+    const state: unknown[] = []
+    let stateCursor = 0
+
+    const renderWithState = (initialTimelineTab?: 'tree' | 'bars') => {
+      stateCursor = 0
+      return AgentSessionContent({ session: sampleSession, initialTimelineTab })
+    }
+
+    const drawerFrom = (node: unknown): React.ReactElement | null => {
+      if (node == null) return null
+      if (Array.isArray(node)) {
+        for (const child of node) {
+          const found = drawerFrom(child)
+          if (found) return found
+        }
+        return null
+      }
+      if (!React.isValidElement(node)) return null
+      if (node.type === SessionInspectorDrawer) return node
+      return drawerFrom((node.props as { children?: unknown }).children)
+    }
+
+    if (internals?.H) {
+      internals.H.useState = (initial: unknown) => {
+        const index = stateCursor++
+        if (!(index in state)) {
+          state[index] = typeof initial === 'function' ? (initial as () => unknown)() : initial
+        }
+        return [
+          state[index],
+          (next: unknown) => {
+            state[index] = typeof next === 'function' ? (next as (s: unknown) => unknown)(state[index]) : next
+          },
+        ]
+      }
+    }
+
+    try {
+      const turnTree = renderWithState()
+      let spendCharts: React.ReactElement | null = null
+      const findSpendCharts = (node: unknown): void => {
+        if (!React.isValidElement(node) || spendCharts) return
+        const props = node.props as Record<string, unknown> | undefined
+        if (props?.onSelectTurn && props?.session) {
+          spendCharts = node
+          return
+        }
+        if (props?.children) {
+          React.Children.forEach(props.children, findSpendCharts)
+        }
+      }
+      findSpendCharts(turnTree)
+      expect(spendCharts).not.toBeNull()
+
+      // The session-level system prompt must not carry the turn span: the
+      // first turn span holds no prompt, so a span-scoped request 404s.
+      ;(spendCharts!.props as { onSelectTurn: (i: number, b?: string) => void }).onSelectTurn(0, 'system_prompt')
+      const systemRequest = (drawerFrom(renderWithState())!.props as { contentRequest?: Record<string, unknown> }).contentRequest
+      expect(systemRequest).toEqual({ sessionId: 'sess-abc-123', part: 'system_prompt' })
+      expect(systemRequest).not.toHaveProperty('span')
+
+      // Normal per-turn buckets keep their prior span behavior.
+      ;(spendCharts!.props as { onSelectTurn: (i: number, b?: string) => void }).onSelectTurn(0, 'tool_definitions')
+      expect((drawerFrom(renderWithState())!.props as { contentRequest?: unknown }).contentRequest).toEqual({
+        sessionId: 'sess-abc-123',
+        span: 'turn-span-1',
+        part: 'tool_definitions',
+      })
+    } finally {
+      if (internals?.H) {
+        internals.H.useState = originalUseState
+      }
+    }
+  })
+})

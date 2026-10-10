@@ -22,6 +22,8 @@ import {
   TurnContentSections,
   TurnLosslessText,
   TurnLosslessValue,
+  prettyPrintJsonNested,
+  prettyPrintJsonLinesNested,
 } from './SessionInspectorDrawer.js'
 
 import { renderToStaticMarkup } from 'react-dom/server'
@@ -1275,5 +1277,98 @@ describe('SessionInspectorDrawer: Copilot turn lossless rendering', () => {
     expect(text).toContain('<context>')
     expect(html).toContain('data-testid="turn-lossless-text"')
     expect(html).not.toContain('data-testid="json-string-view"')
+  })
+})
+
+describe('SessionInspectorDrawer: nested JSON readability', () => {
+  // Hand-written so the out-of-safe-range literal reaches the renderer
+  // byte-for-byte instead of being mangled by an intermediate JS number.
+  const NESTED_INNER_RAW =
+    '{"inner_key": "INNER_STRUCTURE_9f2", "count": 42, "request_id": 9007199254740993, "list": [1, 2]}'
+  const NESTED_OUTER_RAW = `{"context_blob": ${JSON.stringify(NESTED_INNER_RAW)}, "plain": "  hello with spaces  ", "items": [${JSON.stringify(NESTED_INNER_RAW)}, "plain-item"]}`
+
+  it('recurses into JSON-encoded string values in formatted mode', () => {
+    const pretty = prettyPrintJsonNested(NESTED_OUTER_RAW)
+    expect(pretty).not.toBeNull()
+    // The nested structure is exposed, not left as one escaped line.
+    expect(pretty!).toContain('"inner_key"')
+    expect(pretty!).toContain('INNER_STRUCTURE_9f2')
+    expect(pretty!).toContain('"request_id"')
+    expect(pretty!).toContain('9007199254740993')
+    expect(pretty!).not.toContain('9007199254740992')
+    // Formatting stays stable: a second pass changes nothing.
+    expect(prettyPrintJsonNested(pretty!)).toBe(pretty)
+    // Invalid input still falls back to null.
+    expect(prettyPrintJsonNested('{oops')).toBeNull()
+    expect(prettyPrintJsonNested('just text')).toBeNull()
+  })
+
+  it('exposes nested structure inside objects and arrays via JsonStringView', () => {
+    const element = React.createElement(JsonStringView, { text: NESTED_OUTER_RAW })
+    const html = renderHtml(element)
+    const text = unescapeHtml(html)
+    expect(html).toContain('data-testid="json-string-view"')
+    expect(text).toContain('INNER_STRUCTURE_9f2')
+    expect(text).toContain('inner_key')
+    expect(text).toContain('9007199254740993')
+    expect(text).not.toContain('9007199254740992')
+    expect(text).toContain('hello with spaces')
+    expect(text).toContain('plain-item')
+  })
+
+  it('keeps the original input string exact in Raw mode and Copy', () => {
+    const padded = `  ${NESTED_OUTER_RAW}  \n`
+    const rawHtml = renderHtml(React.createElement(JsonStringView, { text: padded, defaultView: 'raw' }))
+    // Raw view exposes the exact original bytes, including significant
+    // surrounding whitespace and nested escaped values.
+    expect(unescapeHtml(rawHtml)).toContain(padded)
+    expect(rawHtml).toContain('data-testid="json-raw"')
+
+    // Copy writes the exact original string, not the formatted expansion.
+    const written: string[] = []
+    const nav = (globalThis as { navigator?: unknown }).navigator
+    const hadNavigator = nav !== undefined
+    Object.defineProperty(globalThis, 'navigator', {
+      value: { clipboard: { writeText: (s: string) => { written.push(s); return Promise.resolve() } } },
+      configurable: true,
+    })
+    try {
+      const tree = React.createElement(JsonStringView, { text: padded, defaultView: 'raw' })
+      const rendered = (JsonStringView as (p: unknown) => unknown)({ text: padded, defaultView: 'raw' })
+      void tree
+      const buttons: React.ReactElement[] = []
+      const walk = (node: unknown): void => {
+        if (node == null) return
+        if (Array.isArray(node)) {
+          node.forEach(walk)
+          return
+        }
+        if (React.isValidElement(node)) {
+          const props = node.props as Record<string, unknown>
+          if (node.type === 'button' && props['children'] === 'Copy') buttons.push(node as React.ReactElement)
+          walk(props['children'])
+        }
+      }
+      walk(rendered)
+      expect(buttons.length).toBeGreaterThan(0)
+      ;(buttons[0]!.props as { onClick: () => void }).onClick()
+      expect(written).toEqual([padded])
+    } finally {
+      if (hadNavigator) {
+        Object.defineProperty(globalThis, 'navigator', { value: nav, configurable: true })
+      } else {
+        const g = globalThis as { navigator?: unknown }
+        delete g.navigator
+      }
+    }
+  })
+
+  it('formats nested JSON-lines without losing any line', () => {
+    const lineInner = '{"deep": "DEEP_LINE_VALUE_77"}'
+    const rawLines = `{"role": "user", "blob": ${JSON.stringify(lineInner)}}\n{"role": "assistant", "blob": ${JSON.stringify(lineInner)}}`
+    const pretty = prettyPrintJsonLinesNested(rawLines) ?? prettyPrintJsonLines(rawLines)
+    expect(pretty).not.toBeNull()
+    expect(pretty!).toContain('DEEP_LINE_VALUE_77')
+    expect(pretty!).toContain('"deep"')
   })
 })
