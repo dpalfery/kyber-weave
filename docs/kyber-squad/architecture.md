@@ -290,8 +290,10 @@ the whole top-level `kyber-arbiter` group by key); Phase 2 renders only the Curs
 and Codex blocks, plus Pi's owned extension file (a whole owned file, not a block).
 Only documented fields are written, never a sentinel key, and shared-file hook
 commands carry no `--caller` because they gate project-wide. The plan-side splice
-mirrors the file splice — same containers, same ownership test, same digests —
-rather than calling it, because planning must stay side-effect free for dry runs.
+is the file splice: it calls the content-level `SquadHookJsonBlock.SpliceContent`
+that the file-level splice also uses — same containers, same ownership test, same
+digests — so a dry run and an install cannot diverge. Planning stays side-effect
+free because it never calls the file-level `SpliceFile`, which is what writes.
 
 A hand-edited or missing owned entry is drift, reported by `squad status` and
 `squad doctor` naming the file and the container. `squad update` rewrites the block

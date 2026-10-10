@@ -62,9 +62,10 @@ shapes — `.factory/hooks.json`, `.devin/hooks.v1.json`, and the Antigravity
    `container` (an RFC 6901 JSON pointer to the entry, e.g. `/hooks/preToolUse/0`)
    and `sha256` (over the entry's compact JSON). Receipts without blocks stay
    byte-identical v1 or v2, and an older reader refuses v3 with exit code 1.
-5. **The plan-side splice mirrors the file splice.** `SquadDeploymentPlan` replays
-   the same container layout, ownership test, and digests rather than calling the
-   file-level splice, because planning must stay side-effect free for dry runs.
+5. **The plan-side splice is the file splice.** `SquadDeploymentPlan` calls the
+   content-level `SquadHookJsonBlock.SpliceContent` that the file-level splice also
+   uses, so a dry run and an install cannot diverge. Planning stays side-effect free
+   because it never calls the file-level `SpliceFile`, which is what writes.
 6. **Drift is reported, not silently repaired (Req 8.4).** A hand-edited or missing
    owned entry is reported by `squad status` and `squad doctor` as drift, naming the
    file and the container. `squad update` rewrites the block but preserves a drifted
