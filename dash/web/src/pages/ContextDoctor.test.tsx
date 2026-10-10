@@ -1244,14 +1244,23 @@ describe('ContextDoctor scope: harness and session', () => {
     isScoped?: (url: URL) => boolean
     release?: () => Promise<void>
     sessionsStatus?: number
+    /** Fail the first N session reads, then serve the list (the retry path). */
+    sessionsFailures?: number
   } = {}): string[] {
     const requested: string[] = []
+    let sessionFailures = opts.sessionsFailures ?? 0
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: string) => {
         const url = new URL(input, 'http://localhost')
         const json = (payload: unknown) => ({ ok: true, json: async () => payload }) as unknown as Response
         if (url.pathname === '/api/kyber/sessions') {
+          // A failure budget, so a retry is driven deterministically against
+          // one stub: the endpoint fails, then recovers.
+          if (sessionFailures > 0) {
+            sessionFailures -= 1
+            return { ok: false, status: 500, json: async () => ({ error: 'sessions failed' }) } as unknown as Response
+          }
           const status = opts.sessionsStatus ?? 200
           return status === 200
             ? json({ sessions: SCOPE_SESSIONS })
@@ -1390,6 +1399,137 @@ describe('ContextDoctor scope: harness and session', () => {
     // An unreadable session list is not a session choice: the scope stays
     // where it was rather than silently narrowing to nothing.
     expect(Array.from(select.options).map((option) => option.value)).toEqual([''])
+    // Nothing was selected, so nothing is claimed beyond it: the failure is
+    // reported, and the scope it leaves behind really is all sessions.
+    await waitFor(() => expect(note.textContent).toMatch(/could not be read/i))
+    expect(note.textContent).toMatch(/all sessions/i)
+  })
+
+  it('keeps a selected session queried when the session list cannot be read', async () => {
+    // A controlled owner holding a session, and an inventory that failed to
+    // load. The page believes the inventory only once it has landed, so the
+    // session stands: clearing it here would widen the findings queries to
+    // the whole harness on the strength of a metadata failure.
+    const requested = stubScoped({ sessionsStatus: 500 })
+    const changes: (string | undefined)[] = []
+    renderScoped({ activeHarness: 'pi', sessionId: 'sess-pi-2', onSessionChange: (id) => changes.push(id) })
+
+    await screen.findByTestId('context-doctor-session-scope-note')
+    await waitFor(() => expect(requested.length).toBeGreaterThanOrEqual(2))
+    // Scope retained on both queries, and never widened to hide the failure.
+    expect(requested.every((qs) => qs.includes('sessionId=sess-pi-2'))).toBe(true)
+    // And the owner is not told to drop it: the scope belongs to the owner.
+    expect(changes).toEqual([])
+  })
+
+  it('never claims all sessions when a selected session survived a session-list failure', async () => {
+    stubScoped({ sessionsStatus: 500 })
+    renderScoped({ activeHarness: 'pi', sessionId: 'sess-pi-2', onSessionChange: () => {} })
+
+    const note = await screen.findByTestId('context-doctor-session-scope-note')
+    // The failure is stated...
+    await waitFor(() => expect(note.textContent).toMatch(/could not be read/i))
+    // ...and the scope on screen matches the scope in the query. "All sessions"
+    // here would describe a list this page never asked for.
+    expect(note.textContent).not.toMatch(/all sessions/i)
+    expect(note.textContent).toMatch(/selected session/i)
+  })
+
+  it('shows the selected session in the selector while the session list cannot be read', async () => {
+    // The select's value is the effective session, so without a matching
+    // option the native control renders blank/none while the findings still
+    // query the session. The fallback carries the current value truthfully
+    // (id plus unavailable metadata, never invented session metadata) and is
+    // disabled because it is the current value, not a new choice — All
+    // sessions stays explicitly choosable.
+    const requested = stubScoped({ sessionsStatus: 500 })
+    renderScoped({ activeHarness: 'pi', sessionId: 'sess-pi-2', onSessionChange: () => {} })
+
+    const select = (await screen.findByTestId('context-doctor-session-select')) as HTMLSelectElement
+    const note = screen.getByTestId('context-doctor-session-scope-note')
+    await waitFor(() => expect(note.textContent).toMatch(/could not be read/i))
+    expect(select.value).toBe('sess-pi-2')
+    expect(Array.from(select.options).map((option) => option.value)).toEqual(['', 'sess-pi-2'])
+    const fallback = Array.from(select.options).find((option) => option.value === 'sess-pi-2')!
+    expect(fallback.disabled).toBe(true)
+    expect(fallback.textContent).toContain('sess-pi-2')
+    expect(fallback.textContent).toMatch(/unavailable/i)
+    expect(Array.from(select.options).find((option) => option.value === '')!.disabled).toBe(false)
+    expect(note.textContent).toMatch(/selected session/i)
+    expect(note.textContent).not.toMatch(/all sessions/i)
+    await waitFor(() => expect(requested.length).toBeGreaterThanOrEqual(2))
+    expect(requested.every((qs) => qs.includes('sessionId=sess-pi-2'))).toBe(true)
+  })
+
+  it('shows the selected session in the selector while the session list is loading', async () => {
+    // Same blank-control facet while the inventory is in flight: the
+    // selection stands and the findings query it, so the visible selection
+    // must match the effective query rather than reading as All sessions.
+    let releaseSessions!: () => void
+    const gate = new Promise<void>((resolve) => {
+      releaseSessions = resolve
+    })
+    const requested: string[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string) => {
+        const url = new URL(input, 'http://localhost')
+        const json = (payload: unknown) => ({ ok: true, json: async () => payload }) as unknown as Response
+        if (url.pathname === '/api/kyber/sessions') {
+          await gate
+          return json({ sessions: SCOPE_SESSIONS })
+        }
+        if (url.pathname === '/api/kyber/findings') {
+          requested.push(url.search)
+          return json(browserPage([], {}))
+        }
+        throw new Error(`unstubbed fetch: ${input}`)
+      }),
+    )
+    renderScoped({ activeHarness: 'pi', sessionId: 'sess-pi-2', onSessionChange: () => {} })
+
+    const select = (await screen.findByTestId('context-doctor-session-select')) as HTMLSelectElement
+    expect(select.value).toBe('sess-pi-2')
+    expect(Array.from(select.options).map((option) => option.value)).toEqual(['', 'sess-pi-2'])
+    const fallback = Array.from(select.options).find((option) => option.value === 'sess-pi-2')!
+    expect(fallback.disabled).toBe(true)
+    expect(fallback.textContent).toContain('sess-pi-2')
+    expect(fallback.textContent).toMatch(/loading|reading/i)
+    expect(screen.getByTestId('context-doctor-session-scope-note').textContent).toMatch(/reading sessions/i)
+    await waitFor(() => expect(requested.length).toBeGreaterThanOrEqual(2))
+    expect(requested.every((qs) => qs.includes('sessionId=sess-pi-2'))).toBe(true)
+
+    // The inventory lands: the real option replaces the fallback, still selected.
+    releaseSessions()
+    await waitFor(() =>
+      expect(
+        Array.from((screen.getByTestId('context-doctor-session-select') as HTMLSelectElement).options).map(
+          (option) => option.value,
+        ),
+      ).toEqual(['', 'sess-pi-1', 'sess-pi-2']),
+    )
+    expect((screen.getByTestId('context-doctor-session-select') as HTMLSelectElement).value).toBe('sess-pi-2')
+  })
+
+  it('recovers the session scope on retry after a failed session read', async () => {
+    const requested = stubScoped({ sessionsFailures: 1 })
+    renderScoped({ activeHarness: 'pi', sessionId: 'sess-pi-2', onSessionChange: () => {} })
+
+    fireEvent.click(await screen.findByTestId('context-doctor-session-retry'))
+
+    // The list lands, and the session the owner was holding is still the one
+    // in force: a failed read never became a scope change.
+    await waitFor(() =>
+      expect(
+        Array.from((screen.getByTestId('context-doctor-session-select') as HTMLSelectElement).options).map(
+          (option) => option.value,
+        ),
+      ).toEqual(['', 'sess-pi-1', 'sess-pi-2']),
+    )
+    expect((screen.getByTestId('context-doctor-session-select') as HTMLSelectElement).value).toBe('sess-pi-2')
+    await waitFor(() => expect(screen.getByTestId('context-doctor-session-scope-note').textContent).toMatch(/one session/i))
+    expect(screen.queryByTestId('context-doctor-session-retry')).toBeNull()
+    expect(requested.every((qs) => qs.includes('sessionId=sess-pi-2'))).toBe(true)
   })
 
   it('refetches under the chosen session and tells the owner', async () => {

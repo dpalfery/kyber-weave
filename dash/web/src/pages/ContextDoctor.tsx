@@ -609,6 +609,26 @@ export function ContextDoctor({
     sessions.some((session) => sessionIdOf(session) === sessionId)
   const effectiveSessionId = sessionInScope ? sessionId : undefined
 
+  // The select's value is the effective session, so the effective id needs a
+  // matching option or the native control renders blank/none while the
+  // findings still query it. While the inventory cannot be read (loading or
+  // error) the selection still stands, but no fetched option carries it —
+  // the fallback below represents the current value truthfully (id plus
+  // loading/unavailable metadata, never invented session metadata) and is
+  // disabled because it is the current value, not a new choice. A loaded
+  // inventory that lacks the session is handled above by clearing the scope.
+  const sessionFallbackNeeded =
+    effectiveSessionId !== undefined &&
+    !sessions.some((session) => sessionIdOf(session) === effectiveSessionId)
+  const sessionFallbackLabel =
+    effectiveSessionId === undefined
+      ? ''
+      : loadingSessions
+        ? `${effectiveSessionId} — reading sessions…`
+        : sessionsError
+          ? `${effectiveSessionId} — sessions unavailable`
+          : effectiveSessionId
+
   // Reported, not applied: the scope belongs to the owner, which has to be
   // told its session left the harness rather than left querying it.
   useEffect(() => {
@@ -781,6 +801,11 @@ export function ContextDoctor({
           onChange={(event) => chooseSession(event.target.value === '' ? undefined : event.target.value)}
         >
           <option value="">All sessions</option>
+          {sessionFallbackNeeded && effectiveSessionId !== undefined && (
+            <option value={effectiveSessionId} disabled>
+              {sessionFallbackLabel}
+            </option>
+          )}
           {sessions.map((session) => (
             <option key={sessionIdOf(session)} value={sessionIdOf(session)}>
               {sessionOptionLabel(session)}
@@ -792,7 +817,13 @@ export function ContextDoctor({
           className="text-density-xs text-muted-foreground"
         >
           {sessionsError
-            ? 'Sessions could not be read, so the scope stays at all sessions.'
+            ? // Two situations, and only one of them is unscoped. While the
+              // inventory is unreadable the selection still stands (see
+              // `sessionInScope`), so claiming "all sessions" here would
+              // describe a list these queries never asked for.
+              effectiveSessionId === undefined
+              ? 'Sessions could not be read, so the scope stays at all sessions.'
+              : 'Sessions could not be read, so findings stay scoped to the selected session.'
             : loadingSessions
               ? 'Reading sessions…'
               : effectiveSessionId === undefined
