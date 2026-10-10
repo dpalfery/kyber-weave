@@ -179,7 +179,7 @@ public sealed class ArbiterEvaluator
         }
 
         ArbiterTriggerFamily family = ArbiterTriggerFamilies.ForTrigger(trigger);
-        ArbiterFactSet facts = TriggerFactBuilder.Build(classification, prompt, config);
+        ArbiterFactSet facts = TriggerFactBuilder.Build(classification, prompt, config, ev.ObservesReturns);
         facts = _gitFacts.Enrich(facts, classification, ev);
         facts = _planReader.Enrich(facts, classification);
 

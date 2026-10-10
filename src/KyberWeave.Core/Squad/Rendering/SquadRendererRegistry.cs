@@ -77,6 +77,7 @@ public sealed class SquadRendererRegistry : ISquadRenderer
         List<SquadDegradationRecord> degradations = [];
         List<SquadRenderWarning> warnings = [];
         List<string> errors = [];
+        List<SquadRenderedBlock> blocks = [];
 
         foreach (IGrouping<ISquadRenderer, SquadTarget> group in request.Targets.GroupBy(target => _byTarget[target]))
         {
@@ -88,11 +89,15 @@ public sealed class SquadRendererRegistry : ISquadRenderer
             degradations.AddRange(partial.Degradations);
             warnings.AddRange(partial.Warnings);
             errors.AddRange(partial.Errors);
+            if (partial.Blocks is not null)
+            {
+                blocks.AddRange(partial.Blocks);
+            }
         }
 
         if (errors.Count > 0)
         {
-            return new SquadRenderResult(false, files, degradations, warnings, errors);
+            return new SquadRenderResult(false, files, degradations, warnings, errors, blocks);
         }
 
         // The source is reloaded here, separately from whatever each renderer parsed
@@ -104,8 +109,49 @@ public sealed class SquadRendererRegistry : ISquadRenderer
         // test fake that never touches disk at all.
         SquadSource source = SquadSourceLoader.Load(request.SourceDirectory);
         ValidateRenderResult(source, request.Targets, files, degradations);
+        ValidateRenderedBlocks(request.Targets, blocks);
 
-        return new SquadRenderResult(true, files, degradations, warnings, []);
+        return new SquadRenderResult(true, files, degradations, warnings, [], blocks);
+    }
+
+    /// <summary>
+    /// Validates merged block fragments the way files are validated: every block names a
+    /// portable canonical path for a target in the requested set. Entry payloads stay the
+    /// producing renderer's responsibility; the deployment plan refuses unknown containers.
+    /// </summary>
+    private static void ValidateRenderedBlocks(
+        IReadOnlyList<SquadTarget> targets,
+        IReadOnlyList<SquadRenderedBlock> blocks)
+    {
+        HashSet<string> targetTokens = targets.Select(SquadTargetCatalog.GetToken).ToHashSet(StringComparer.Ordinal);
+        foreach (SquadRenderedBlock block in blocks)
+        {
+            ArgumentNullException.ThrowIfNull(block);
+
+            try
+            {
+                string normalized = SquadPathPolicy.NormalizeRelativePath(block.RelativePath);
+                if (!string.Equals(normalized, block.RelativePath, StringComparison.Ordinal))
+                {
+                    throw new SquadRenderValidationException(
+                        $"Deployment block path '{block.RelativePath}' is not a canonical portable path.");
+                }
+            }
+            catch (Exception ex) when (ex is not SquadRenderValidationException)
+            {
+                throw new SquadRenderValidationException(
+                    $"Deployment block path '{block.RelativePath}' violates portable path constraints: {ex.Message}",
+                    ex);
+            }
+
+            if (!targetTokens.Contains(block.Target))
+            {
+                throw new SquadRenderValidationException(
+                    $"Deployment block '{block.RelativePath}' specifies target '{block.Target}' which was not in the requested target set.");
+            }
+
+            ArgumentNullException.ThrowIfNull(block.Entries);
+        }
     }
 
     private static void ValidateRenderResult(

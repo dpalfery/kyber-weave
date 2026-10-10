@@ -71,6 +71,19 @@ public sealed class ArbiterConductorContractTests
     }
 
     [Fact]
+    public void ReferenceHeaderRules_QualifyEveryDispatchWithTheFallbackOverride()
+    {
+        // Review 20.1, item a: the references stated the header unconditionally while
+        // conductor.md allows the arbiter_evaluate fallback to replace it.
+        string referencesRoot = Path.Combine(ProductRoot, "agents", "conductor", "references");
+        foreach (string file in new[] { "execution-and-review.md", "plan-path.md", "spec-path.md", "intake-path.md" })
+        {
+            string text = File.ReadAllText(Path.Combine(referencesRoot, file));
+            Assert.Contains("Unless you hold `arbiter_evaluate`", text, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
     public void Contract_NamesNoHarness()
     {
         string contract = ConductorContract;

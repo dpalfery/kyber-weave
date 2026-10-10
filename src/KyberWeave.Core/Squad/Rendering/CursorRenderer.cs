@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using System.Text.Json.Nodes;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
@@ -47,11 +48,23 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// if the lowered identity is already occupied by a canonical skill, rendering fails closed
 /// with <see cref="SquadRenderValidationException"/> naming it.
 /// </para>
+/// <para>
+/// <b>Arbiter block (Req 6.2, 8.2, 22.2).</b> When the render request carries an
+/// enabled <see cref="SquadArbiterWiring"/> under
+/// <see cref="SquadDeploymentScope.Project"/>, the renderer returns a <c>cursor</c>
+/// <see cref="SquadRenderedBlock"/> for <c>.cursor/hooks.json</c> holding
+/// <c>preToolUse</c> and <c>postToolUse</c> entries matching <c>Task</c> with
+/// <c>failClosed: true</c> and the wiring timeout ([F6]). The command carries no
+/// <c>--caller</c>: a shared hook file gates project-wide, not per agent. A null or
+/// disabled wiring, or Global scope (no project configuration to enforce from,
+/// Req 22.4), renders no block and leaves the owned files byte-identical.
+/// </para>
 /// </remarks>
 public sealed class CursorRenderer : ISquadRenderer
 {
     private const string AgentsDirectory = ".cursor/agents";
     private const string SkillsDirectory = ".cursor/skills";
+    private const string ArbiterCommand = "kyber-weave-arbiter hook --harness cursor";
 
     private static readonly string[] GovernedCapabilities =
     [
@@ -209,7 +222,23 @@ public sealed class CursorRenderer : ISquadRenderer
             SquadResourceProjection.Append(files, principal, skill.Resources);
         }
 
-        return Task.FromResult(new SquadRenderResult(true, files, degradations, [], []));
+        // A null Arbiter must render byte for byte as before the field existed, so the
+        // guard lives here: only an enabled wiring at Project scope emits the owned
+        // hook block. Under Global scope there is no project configuration to enforce
+        // from (Req 22.4).
+        List<SquadRenderedBlock> blocks = [];
+        if (request.Arbiter is not null && request.Arbiter.Enabled && request.Scope == SquadDeploymentScope.Project)
+        {
+            blocks.Add(BuildArbiterBlock(request.Arbiter.HookTimeoutSeconds));
+        }
+
+        return Task.FromResult(new SquadRenderResult(
+            true,
+            files,
+            degradations,
+            [],
+            [],
+            blocks.Count > 0 ? blocks : null));
     }
 
     private static SquadDeploymentFile RenderAgent(
@@ -266,6 +295,31 @@ public sealed class CursorRenderer : ISquadRenderer
             Encoding.UTF8.GetBytes(content),
             "cursor");
     }
+
+    /// <summary>Builds Squad's owned block for <c>.cursor/hooks.json</c>.</summary>
+    /// <remarks>
+    /// [F6]: flat entries matching <c>Task</c> with <c>failClosed: true</c> and a
+    /// timeout in seconds. The command carries no <c>--caller</c> because every
+    /// shared-file target has project-wide hooks (design §10.4). Only documented
+    /// fields are written, and no sentinel key.
+    /// </remarks>
+    private static SquadRenderedBlock BuildArbiterBlock(int timeoutSeconds) =>
+        new(
+            SquadTargetCatalog.GetToken(SquadTarget.Cursor),
+            SquadHookJsonBlock.RelativePath(SquadHookBlockFormat.Cursor),
+            SquadHookBlockFormat.Cursor,
+            [
+                new SquadRenderedBlockEntry("preToolUse", ArbiterHookEntry(timeoutSeconds)),
+                new SquadRenderedBlockEntry("postToolUse", ArbiterHookEntry(timeoutSeconds)),
+            ]);
+
+    private static JsonObject ArbiterHookEntry(int timeoutSeconds) => new()
+    {
+        ["command"] = ArbiterCommand,
+        ["matcher"] = "Task",
+        ["timeout"] = timeoutSeconds,
+        ["failClosed"] = true,
+    };
 
     private static string? ResolveCursorModel(
         SquadAgent agent,

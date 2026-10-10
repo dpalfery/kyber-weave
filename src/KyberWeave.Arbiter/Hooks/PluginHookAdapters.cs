@@ -13,12 +13,38 @@ namespace KyberWeave.Arbiter.Hooks;
 /// </remarks>
 public static class PluginHookAdapters
 {
-    /// <summary>The plugin-hook adapters: OpenCode dispatches on <c>task</c>.</summary>
-    public static IReadOnlyList<IHarnessHookAdapter> All(IHookDecisionEngine? engine = null) =>
-        [new PluginHookAdapter(
-            "opencode",
-            "task",
-            "subagent_type",
-            "prompt",
-            engine ?? new ArbiterHookDecisionEngine())];
+    // One row per plugin harness: its token and the tool its shim dispatches on. Adding a
+    // harness here also gives it the plugin deny dialect in LastResortBlock.
+    private static readonly (string Token, string DispatchTool)[] Entries =
+    [
+        ("opencode", "task"),
+        ("kilo", "task"),
+        ("pi", "Agent"),
+    ];
+
+    /// <summary>
+    /// The harness tokens that take a plugin shim (and so read a <c>decision</c> document).
+    /// </summary>
+    /// <remarks>
+    /// Ordinal-ignore-case because the registry resolves harness tokens that way; a
+    /// token set that did not would let a capitalised <c>--harness OpenCode</c> miss
+    /// its dialect in <see cref="LastResortBlock"/>.
+    /// </remarks>
+    public static IReadOnlySet<string> Tokens { get; } =
+        Entries.Select(entry => entry.Token).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>The plugin-hook adapters: OpenCode and Kilo dispatch on <c>task</c>; Pi dispatches on <c>Agent</c>.</summary>
+    public static IReadOnlyList<IHarnessHookAdapter> All(IHookDecisionEngine? engine = null)
+    {
+        IHookDecisionEngine resolved = engine ?? new ArbiterHookDecisionEngine();
+        return
+        [
+            .. Entries.Select(entry => (IHarnessHookAdapter)new PluginHookAdapter(
+                entry.Token,
+                entry.DispatchTool,
+                "subagent_type",
+                "prompt",
+                resolved)),
+        ];
+    }
 }

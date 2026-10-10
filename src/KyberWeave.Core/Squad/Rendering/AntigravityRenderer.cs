@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json.Nodes;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
@@ -34,11 +35,34 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// recorded as <c>permission-not-expressible</c>. Declared skills carry no frontmatter capability
 /// keys, only identity and license.
 /// </para>
+/// <para>
+/// <b>Arbiter block (Req 6.3, 8.1, 8.2, 22.2).</b> When the render request carries an
+/// enabled <see cref="SquadArbiterWiring"/> under
+/// <see cref="SquadDeploymentScope.Project"/>, the renderer returns an
+/// <c>antigravity</c> <see cref="SquadRenderedBlock"/> for <c>.agents/hooks.json</c>.
+/// Antigravity's top-level hook-file keys are group names, so Squad owns the whole
+/// top-level group <c>kyber-arbiter</c> — an unknown key there would be read as another
+/// group — holding <c>PreToolUse</c> and <c>PostToolUse</c> matcher groups matching
+/// <c>^invoke_subagent$</c> with one command hook and the wiring timeout ([F10], D25).
+/// The command carries no <c>--caller</c>: a shared hook file gates project-wide, not
+/// per agent. Antigravity documents no post-dispatch result, so the render also records
+/// <c>arbiter-not-enforced</c> with details <c>no-post-dispatch-feedback</c>, one record
+/// per rendered agent (design §10.5 records per target and agent): post-dispatch outcomes
+/// are logged and reported by <c>audit</c>, but not delivered back to the harness. A null
+/// or disabled wiring, or Global scope (no project configuration to enforce from, Req
+/// 22.4), renders no block and no arbiter degradation, leaving the owned files
+/// byte-identical.
+/// </para>
 /// </remarks>
 public sealed class AntigravityRenderer : ISquadRenderer
 {
     private const string AgentsDirectory = ".agents/agents";
     private const string SkillsDirectory = ".agents/skills";
+
+    private const string ArbiterMatcher = "^invoke_subagent$";
+    private const string ArbiterCommandLine = "kyber-weave-arbiter hook --harness antigravity";
+    private const string ArbiterNotEnforcedCode = "arbiter-not-enforced";
+    private const string NoPostDispatchFeedbackReason = "no-post-dispatch-feedback";
 
     private static readonly ISerializer YamlSerializer = new SerializerBuilder().Build();
 
@@ -165,8 +189,83 @@ public sealed class AntigravityRenderer : ISquadRenderer
                 "antigravity");
         }
 
-        return Task.FromResult(new SquadRenderResult(true, files, degradations, [], []));
+        // A null Arbiter must render byte for byte as before the field existed, so the
+        // guard lives here: only an enabled wiring at Project scope emits the owned
+        // hook group. Under Global scope there is no project configuration to enforce
+        // from (Req 22.4).
+        List<SquadRenderedBlock> blocks = [];
+        if (request.Arbiter is not null && request.Arbiter.Enabled && request.Scope == SquadDeploymentScope.Project)
+        {
+            blocks.Add(BuildArbiterBlock(request.Arbiter.HookTimeoutSeconds));
+
+            // §10.5: the hook gates a dispatch pre-tool only — Antigravity documents no
+            // post-dispatch result, so outcomes are logged and reported by audit but
+            // never delivered back. One record per rendered agent, recorded beside the
+            // block and never without it.
+            foreach (SquadAgent agent in source.Agents)
+            {
+                degradations.Add(BuildArbiterDegradation(agent));
+            }
+        }
+
+        return Task.FromResult(new SquadRenderResult(
+            true,
+            files,
+            degradations,
+            [],
+            [],
+            blocks.Count > 0 ? blocks : null));
     }
+
+    /// <summary>
+    /// Builds Squad's owned <c>kyber-arbiter</c> group for <c>.agents/hooks.json</c>.
+    /// </summary>
+    /// <remarks>
+    /// [F10]: the block entries are the group's <c>PreToolUse</c>/<c>PostToolUse</c>
+    /// event arrays, each holding one matcher group for <c>^invoke_subagent$</c> with one
+    /// command hook and the timeout in seconds. The splice sets the group key itself
+    /// (design §10.4: top-level keys are group names, so Squad owns the whole group).
+    /// Only documented fields are written — no <c>enabled</c> flag and no sentinel key,
+    /// because JSON hook files carry no comments (D25).
+    /// </remarks>
+    private static SquadRenderedBlock BuildArbiterBlock(int timeoutSeconds) =>
+        new(
+            SquadTargetCatalog.GetToken(SquadTarget.Antigravity),
+            SquadHookJsonBlock.RelativePath(SquadHookBlockFormat.Antigravity),
+            SquadHookBlockFormat.Antigravity,
+            [
+                new SquadRenderedBlockEntry("PreToolUse", ArbiterMatcherGroup(timeoutSeconds)),
+                new SquadRenderedBlockEntry("PostToolUse", ArbiterMatcherGroup(timeoutSeconds)),
+            ]);
+
+    private static JsonObject ArbiterMatcherGroup(int timeoutSeconds) =>
+        new()
+        {
+            ["matcher"] = ArbiterMatcher,
+            ["hooks"] = new JsonArray(
+                new JsonObject
+                {
+                    ["type"] = "command",
+                    ["command"] = ArbiterCommandLine,
+                    ["timeout"] = timeoutSeconds,
+                }),
+        };
+
+    /// <summary>
+    /// Records <c>arbiter-not-enforced</c> for one rendered agent with §10.5's
+    /// <c>no-post-dispatch-feedback</c> reason: the hook gates a dispatch before it runs,
+    /// but post-dispatch outcomes are only logged and reported by <c>audit</c>, never
+    /// delivered back. §10.5 records per target and agent, which is also what the
+    /// registry's degradation validation requires — every renderer-emitted record names a
+    /// rendered agent and carries its instruction digest.
+    /// </summary>
+    private static SquadDegradationRecord BuildArbiterDegradation(SquadAgent agent) => new(
+        Target: SquadTargetCatalog.GetToken(SquadTarget.Antigravity),
+        CanonicalIdentity: agent.Name,
+        OutputIdentity: agent.Name,
+        Code: ArbiterNotEnforcedCode,
+        InstructionDigest: agent.BodyDigest,
+        Details: NoPostDispatchFeedbackReason);
 
     /// <summary>
     /// Canonical names become directory names in the rendered tree, so a name carrying

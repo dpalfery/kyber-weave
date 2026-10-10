@@ -1,10 +1,10 @@
 ---
-id: specs/kyber-arbiter/requirements
+id: archive/specs/kyber-arbiter/requirements
 title: Kyber Arbiter requirements
 doc-type: requirements
-status: draft
+status: archived
 owner: dpalfery
-last-reviewed: 2026-10-03
+last-reviewed: 2026-10-10
 component: KyberSquad
 keywords:
   - arbiter

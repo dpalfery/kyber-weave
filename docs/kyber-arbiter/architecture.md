@@ -9,6 +9,7 @@ last-reviewed: 2026-10-09
 status: current
 decided-by:
   - adr/0033-kyber-arbiter-three-step-decision-gates
+  - adr/0034-squad-owned-blocks-in-shared-hook-files
 code-refs:
   - ArbiterEvaluator
   - RuleEngine
@@ -24,6 +25,11 @@ code-refs:
   - SystemOneClient
   - ArbiterKeyResolver
   - ArbiterEscalationEnvelope
+  - CodexHookAdapter
+  - CursorHookAdapter
+  - PluginHookAdapter
+  - FactoryHooksShadowing
+  - ArbiterTools
 ---
 
 # Kyber Arbiter architecture
@@ -114,6 +120,11 @@ thresholds, and per-answer `effects`. Host rules use the same shape under non-`K
 | `KW-ARB-GATE-CORROBORATED-001` | `refute.spawn` | 0 | Does a failed gate already corroborate the finding? |
 | `KW-ARB-GATE-001` | `gate.select` | 0 | Does any changed path match the gate's `applies-when.paths`? |
 
+Two answers are return-dependent: on a harness whose adapter declares returns unobservable
+(today only Antigravity), `READY-001`'s completion check and `MODE-001`'s RED check answer
+`returns-unobservable`, which allows and is logged; the in-flight overlap check still
+runs.
+
 Diagnostics are permanent too: `KW-ARB-CONFIG-001`…`-010` for configuration and rules,
 `KW-ARB-KEY-001` for a missing key, `KW-ARB-LOG-001` for an un-ignored log directory,
 `KW-ARB-BIN-001` for a missing binary, `KW-ARB-GUARD-001` for undeclared planning indexes,
@@ -132,16 +143,47 @@ never appears in any configuration file: `ArbiterKeyResolver` reads `TYPESAFE_AP
 then the OS credential-store entry for the endpoint origin. Full shape and merge rules are
 in [configuration](../configuration.md).
 
-## Phase 1 harness facts
+## Provider and models
 
-Phase 1 hooks three harnesses; every other harness follows in later phases:
+`SystemOneClient` speaks the same `/v1/systemone` API to TypeSafe's cloud and to a local
+Ollama 0.35 or later. Provider `none` is the default, and step 1 is then not evaluated.
 
-| Harness | What Squad renders | Dispatch tool | Caller identity |
-|---|---|---|---|
-| Claude | `hooks` in each dispatching agent's `.claude/agents/<agent>.md` frontmatter and the `/conductor` entry-point skill | `Agent`, matched exactly so task-list tools do not match | `agent_type` inside sub-agents, rendered `--caller` otherwise |
-| Copilot in VS Code | `hooks` in each `.github/agents/<agent>.agent.md` (Preview, Local harness) | `runSubagent` | Rendered `--caller`; the payload carries no caller field |
-| Copilot CLI | `.github/hooks/kyber-arbiter.json`, its own file | `task` | Header inference from the marker |
-| OpenCode | `.opencode/plugins/kyber-arbiter.ts` shim speaking the plugin envelope | `task` | Header inference from the marker |
+| Model | Endpoint | Key | Usable input | Accuracy on Ollama's 3,880-decision comparison |
+|---|---|---|---|---|
+| `jev-1.13.0` (TypeSafe) | `https://api.typesafe.ai/v1` | Required (`TYPESAFE_API_KEY` or the credential store) | 32,000 tokens for the state plus the longest question | 76.0% |
+| `nimble` (Ollama, 9B) | `http://localhost:11434/v1` | None | About 8,000 tokens per question | 74.8% |
+| `tev1` (Ollama, 4B) | `http://localhost:11434/v1` | None | About 2,000 tokens | 73.3% |
+
+`setup` suggests `nimble` when Ollama is detected and warns against `tev1`, whose input is
+too small for most shipped rules. The figures are from Ollama's own benchmark, as cited in
+[Ollama's Jev-style decision models post](https://ollama.com/blog/ollama-now-supports-jev-style-decision-models).
+Each request is budgeted before it is sent. An over-budget state makes no call, and every
+step-1 rule on the trigger answers `undecidable`.
+
+## Harness facts
+
+One table covers every harness. Phase 1 hooks Claude, Copilot in VS Code, Copilot CLI and
+OpenCode; Phase 2 adds Pi, Codex and Cursor; Phase 3 adds Kilo, Antigravity, Factory and
+Devin, and leaves Warp and ZCode fallback-only, served by [`serve`](#the-mcp-fallback-serve).
+The degradation records these outcomes produce are listed once, in the
+[degradation taxonomy](../kyber-squad/requirements.md#degradation-taxonomy).
+
+| Harness | Phase | What Squad renders | Dispatch tool | Caller identity | Target and prompt |
+|---|---|---|---|---|---|
+| Claude | 1 | `hooks` in each dispatching agent's `.claude/agents/<agent>.md` frontmatter and the `/conductor` entry-point skill | `Agent`, matched exactly so task-list tools do not match | `agent_type` inside sub-agents, rendered `--caller` otherwise | `subagent_type`, `prompt` |
+| Copilot in VS Code | 1 | `hooks` in each `.github/agents/<agent>.agent.md` (Preview, Local harness) | `runSubagent` | Rendered `--caller`; the payload carries no caller field | `agentName` (absent means the calling agent), `prompt` |
+| Copilot CLI | 1 | `.github/hooks/kyber-arbiter.json`, its own file | `task` | Header inference from the marker | `agent_type`, `prompt` |
+| OpenCode | 1 | `.opencode/plugins/kyber-arbiter.ts` shim speaking the plugin envelope | `task` | Header inference from the marker | `args.subagent_type`, `args.prompt` |
+| Pi | 2 | Owned extension file `.pi/extensions/kyber-arbiter.ts` speaking the plugin envelope (`before`/`after`, tool `Agent`) | `Agent` | Header inference from the marker | `args.subagent_type`, `args.prompt` |
+| Codex | 2 | Owned block in the shared `.codex/hooks.json` (`PreToolUse`/`PostToolUse` matcher groups) | `spawn_agent` (also matched as `Agent`, under any namespace prefix) | Header inference from the marker | `tool_input.agent_type`, `tool_input.message`; returns pair by `tool_use_id` |
+| Cursor | 2 | Owned entries in the shared `.cursor/hooks.json` (`preToolUse`/`postToolUse`, `failClosed: true`) | `Task` | Header inference from the marker | `tool_input.prompt`; `tool_input.subagent_type` is undocumented, so when absent the rules answer `undecidable`. Returns pair by `tool_use_id` |
+| Kilo | 3 | The `.kilo/plugin/kyber-arbiter.ts` shim speaking the plugin envelope | `task` | Header inference from the marker | `args.subagent_type`, `args.prompt`; returns pair by `callID` |
+| Antigravity | 3 | An owned top-level group `kyber-arbiter` in `.agents/hooks.json`, matching `^invoke_subagent$` | `invoke_subagent`; each element of `Subagents` is one dispatch | Header inference from the marker | `TypeName`, `Prompt`. Deny writes `{decision: "deny", reason}`; pass-through writes `{}`, since an explicit allow would bypass the user's approval prompts |
+| Factory | 3 | An owned block in `.factory/hooks.json`, matcher groups at the top level with no `hooks` wrapper, unless shadowed (below) | `Task` | Header inference from the marker | `tool_input.subagent_type`, `tool_input.prompt`; returns pair by `pair-digest` |
+| Devin | 3 | An owned block in `.devin/hooks.v1.json` (the Claude Code format), matching `^run_subagent$` | `run_subagent` | Header inference from the marker | `tool_input.profile`, `tool_input.prompt`; returns pair by `pair-digest` |
+| Warp, ZCode | 3 | No hooks: the MCP fallback | — | Asserted by the caller in `arbiter_evaluate` | — |
+
+Notes on the table:
 
 On Claude and Copilot in VS Code the caller is trusted, so gating does not depend on the
 marker — though Squad agents still write `KYBER-ARBITER: true` on every hooked dispatch,
@@ -155,10 +197,116 @@ On the Copilot CLI target post-dispatch outcomes are advisory only: `Deny`,
 `PostBlock` and `PostAnnotation` all render as `additionalContext`, so a post-dispatch
 finding is surfaced as context rather than enforced. Pre-dispatch denies still block.
 
+### Delivery and caller notes
+
+Phase 2 and Phase 3 targets are project-wide hooks with no caller identity. They gate only
+dispatches carrying the `KYBER-ARBITER: true` marker, infer the caller from the headers, and
+pass anything else through, logged with `caller: unidentified`.
+
+Delivery differs per harness. On Pi a `block` before the call returns
+`{block: true, reason}`, stripped arguments are assigned onto the event input, and a
+spawn error or non-zero status blocks; after the call a `block` appends the reason as
+text content. On Codex a deny writes the `hookSpecificOutput` deny shape with the
+envelope as the reason, and a strip writes `allow` with `updatedInput` carrying the
+complete arguments with the routing headers removed from `message`. On Cursor every
+invocation answers JSON — deny as `{permission: "deny", agent_message, user_message}`,
+pass as `{permission: "allow"}`, strip as `{permission: "allow", updated_input}`, and
+post-dispatch as `{additional_context}` (or `{}`) — because `failClosed` blocks when
+there is no output.
+
+On Codex, Copilot CLI and Cursor, post-dispatch denials are advisory only
+(`additionalContext` on the first two, `additional_context` on Cursor): on Codex a `decision: block` would replace the sub-agent's
+result, so every post-dispatch outcome — deny, block, or annotation — is delivered
+as `hookSpecificOutput.additionalContext`. Pre-dispatch denies still block on all
+three targets, and `arbiter doctor` prints an informational line for each.
+
+Trust steps for the new targets are surfaced at install time: Codex needs a trusted
+`.codex/` layer plus per-hook review through `/hooks` (every `squad update` that
+changes the hook needs trust again, or the changed hook is skipped); Pi needs
+project trust so that `.pi/extensions/` loads. Cursor's hooks carry no trust gate
+today. See the [runbook](runbook.md) and
+[Squad onboarding](../kyber-squad/onboarding.md).
+
+Claude observes background dispatches through a hand-back hook. Every agent a governed
+dispatcher can target gets a frontmatter `PreToolUse` hook on `^SubagentHandback$`: it
+records the return under the payload's `agent_id`, joined to the dispatch through the
+`agentId` the dispatcher's `PostToolUse(Agent)` reports at the background launch, and then
+runs the post-dispatch rules. A non-allow outcome never denies the hand-back — it returns
+`allow` with `updatedInput`, the complete input with the envelope or note appended to
+`message`, so the dispatcher receives the outcome inside the hand-back. Foreground calls
+keep the `PostToolUse` path, and a return observed by neither is reported by `audit` as an
+unpaired event (`KW-ARB-AUDIT-003`).
+
+### Phase 3 notes
+
+Per-harness notes:
+
+- **Kilo** is a plugin harness like OpenCode: the rendered shim spawns the binary by argv,
+  writes a `kyber-arbiter.plugin-event/v1` envelope, blocks by throwing, and strips the
+  routing headers by assigning `output.args`. The target comes from `args.subagent_type`
+  and the prompt from `args.prompt`; returns pair by `callID`. No trust gate is documented.
+- **Antigravity** can dispatch several subagents in one call (`toolCall.args.Subagents`,
+  each element with its own target and prompt); the call is denied when any element
+  escalates. It documents no input-rewrite field for `hooks.json`, so routing headers are
+  not stripped — only documented fields are written. Because `PostToolUse` output is `{}`,
+  the adapter declares returns unobservable (`harness.observes-returns` is false):
+  `READY-001`'s completion check and `MODE-001`'s RED check answer `returns-unobservable`,
+  which allows and is logged, while the dependency's in-flight overlap check still runs —
+  pre-dispatch gating (plan, scope, intent, ownership, overlap) is unaffected, and
+  completion order is advisory there. The render records `arbiter-not-enforced` with
+  `no-post-dispatch-feedback` for every rendered agent: post-dispatch outcomes are logged
+  and reported by `audit`, never delivered back to the harness.
+- **Factory** reads the `hooks` key of `.factory/settings.json` only while
+  `.factory/hooks.json` is absent, so creating `hooks.json` would silently disable any
+  hooks the user keeps in `settings.json`. When that shape is found the renderer drops its
+  block and records `arbiter-not-enforced` with `settings-hooks-shadowed`, naming the fix:
+  move the user's hooks into `.factory/hooks.json`, then run `squad update`. A strip writes
+  `allow` with the complete `updatedInput` (every `tool_input` field copied, only `prompt`
+  rewritten); no call id is documented, so returns pair by `pair-digest`.
+- **Devin** takes the target from `tool_input.profile` and the prompt from
+  `tool_input.prompt`; when either is absent the dispatch is treated as unmarked and
+  logged, so `audit` reports it. A strip writes `hookSpecificOutput.updatedInput:
+  {prompt: …}`, which Devin merges into the arguments. Post-dispatch outcomes are logged
+  and reported by `audit`, never delivered, so the render records `arbiter-not-enforced`
+  with `no-post-dispatch-feedback` for every dispatcher agent.
+
+On Factory, as on Codex, Copilot CLI and Cursor, post-dispatch denials are advisory only:
+every post-dispatch outcome renders as `hookSpecificOutput.additionalContext`, so a
+post-dispatch finding is surfaced as context rather than enforced. Pre-dispatch denies
+still block. On Antigravity and Devin, post-dispatch outcomes are not delivered at all —
+they are recorded and reported by `audit`. No trust gate is documented for any Phase 3
+harness.
+
+## The MCP fallback (`serve`)
+
+`kyber-weave-arbiter serve --repo-root <root>` is a stdio MCP server carrying the fallback
+for the harnesses without hooks — Warp and ZCode. Three tools:
+
+- **`arbiter_evaluate(trigger, facts)`** — evaluates one event exactly as the hook would:
+  the same facts, rules, ledger append and decision record, and the same allow, envelope or
+  review note. The caller asserts the routing facts (`target`, `plan-file`, `task`,
+  `prompt`, `lens`, `finding`, `phase`, `call-id`, `output`); the server derives the rest
+  and records `caller-source: asserted`. Because the gated agent makes the call, this path
+  is advisory.
+- **`arbiter_rules(trigger?)`** — lists the rule catalogue; read-only and closed-world.
+- **`arbiter_status()`** — reports the root, the rule-set hash, the rule count and the
+  provider state, never the key; read-only and closed-world.
+
+Every response leads with a provenance line naming the root it answered from; the root is
+resolved from `--repo-root`, then `KYBER_WEAVE_REPO_ROOT`, then the working directory. The
+conductor calls `arbiter_evaluate` before each dispatch and after each return, and
+code-reviewer calls it once before the lens fan-out and once before the refutation
+fan-out. Holding `arbiter_evaluate` is the agent's signal to use the fallback: the
+`decision.query` capability is allowed only for the `orchestrator` and `reviewer` profiles
+and denied for the other ten, and on Warp and ZCode an `allow` lowers to the
+`kyber-weave-arbiter` server alone. The setup step — Squad writes no MCP configuration for
+either target — is in the [runbook](runbook.md#the-mcp-fallback-warp-and-zcode).
+
 ## Related
 
 - [Runbook](runbook.md) — operating the Arbiter day to day
 - [ADR 0033](../adr/0033-kyber-arbiter-three-step-decision-gates.md) — the decisions
+- [ADR 0034](../adr/0034-squad-owned-blocks-in-shared-hook-files.md) — owned entries in shared hook files
 - [Kyber-Squad architecture](../kyber-squad/architecture.md) — hook wiring per harness
 - [Review council architecture](../code-review/architecture.md) — review triggers
 - [Configuration](../configuration.md) — `arbiter:` and `applies-when`

@@ -50,7 +50,19 @@ public static class TriggerFactBuilder
     }
 
     /// <summary>Builds the fact bag for a classified dispatch.</summary>
-    public static ArbiterFactSet Build(TriggerClassification classification, string prompt, KyberWeaveConfig config)
+    /// <param name="classification">The classified dispatch.</param>
+    /// <param name="prompt">The dispatch prompt, header block included.</param>
+    /// <param name="config">The host configuration.</param>
+    /// <param name="observesReturns">Whether the host's harness observes sub-agent
+    /// returns (task 16.9): the value of <c>harness.observes-returns</c>. The host
+    /// always supplies it — true for every harness except the ones whose adapter
+    /// declares otherwise — so a missing value can never silently disable an
+    /// enforced rule.</param>
+    public static ArbiterFactSet Build(
+        TriggerClassification classification,
+        string prompt,
+        KyberWeaveConfig config,
+        bool observesReturns = true)
     {
         ArgumentNullException.ThrowIfNull(classification);
         ArgumentNullException.ThrowIfNull(prompt);
@@ -65,7 +77,8 @@ public static class TriggerFactBuilder
             prompt,
             classification.Caller,
             classification.CallerSource,
-            config);
+            config,
+            observesReturns);
     }
 
     /// <summary>Builds the fact bag for <paramref name="trigger"/> from dispatch input.</summary>
@@ -76,7 +89,8 @@ public static class TriggerFactBuilder
         string prompt,
         string? caller,
         string? callerSource,
-        KyberWeaveConfig config)
+        KyberWeaveConfig config,
+        bool observesReturns = true)
     {
         ArgumentNullException.ThrowIfNull(trigger);
         ArgumentNullException.ThrowIfNull(prompt);
@@ -138,6 +152,7 @@ public static class TriggerFactBuilder
                 "lens.applicability" => applicability,
                 "roster.caller.delegates-to" => delegatesTo,
                 "roster.descriptions" => descriptions,
+                "harness.observes-returns" => observesReturns,
                 _ => null,
             };
 

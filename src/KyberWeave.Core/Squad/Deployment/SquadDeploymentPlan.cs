@@ -1,4 +1,7 @@
 using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using KyberWeave.Core.Squad.Rendering;
 
 namespace KyberWeave.Core.Squad.Deployment;
@@ -17,7 +20,8 @@ public sealed class SquadDeploymentPlan
         SquadStateMutation lockMutation,
         SquadStateMutation receiptMutation,
         ISquadGlobalRootResolver? globalRoots = null,
-        bool isSingleRootLayout = false)
+        bool isSingleRootLayout = false,
+        IReadOnlyList<SquadOwnedBlockDrift>? blockDrifts = null)
     {
         TargetRoot = targetRoot;
         PhysicalRootPath = physicalRootIdentity.PhysicalPath;
@@ -33,6 +37,7 @@ public sealed class SquadDeploymentPlan
         ReceiptMutation = receiptMutation;
         _globalRoots = globalRoots;
         _isSingleRootLayout = isSingleRootLayout;
+        BlockDrifts = blockDrifts ?? [];
     }
 
     /// <summary>The absolute root into which harness-native files are deployed.</summary>
@@ -65,6 +70,14 @@ public sealed class SquadDeploymentPlan
     public IReadOnlyList<SquadPlannedFileChange> PlannedFileChanges { get; }
 
     internal IReadOnlyList<SquadFilePrecondition> FilePreconditions { get; }
+
+    /// <summary>
+    /// The owned block entries whose current file content no longer matches the receipt at
+    /// plan time. Update preserves these entries — rewriting only the blocks without drift —
+    /// unless the caller passes <c>replaceManaged</c>, so the operator can see what was
+    /// kept and why.
+    /// </summary>
+    public IReadOnlyList<SquadOwnedBlockDrift> BlockDrifts { get; }
 
     internal SquadStateMutation LockMutation { get; }
 
@@ -278,7 +291,8 @@ public sealed class SquadDeploymentPlan
         bool adopt,
         TimeProvider timeProvider,
         ISquadGlobalRootResolver? globalRoots = null,
-        IReadOnlyList<SquadReceipt>? siblingGlobalReceipts = null)
+        IReadOnlyList<SquadReceipt>? siblingGlobalReceipts = null,
+        IReadOnlyList<SquadRenderedBlock>? blocks = null)
     {
         ValidateCommon(targetRoot, squadLock, renderedFiles, degradations, timeProvider);
         SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(targetRoot);
@@ -334,7 +348,16 @@ public sealed class SquadDeploymentPlan
                 false));
         }
 
-        SquadReceipt receipt = NewReceipt(scope, timeProvider, degradations, ownedFiles);
+        List<SquadOwnedBlock> ownedBlocks = PlanBlockInstalls(
+            root,
+            scope,
+            globalRoots,
+            normalizedFiles,
+            blocks,
+            mutations,
+            preconditions);
+
+        SquadReceipt receipt = NewReceipt(scope, timeProvider, degradations, ownedFiles, ownedBlocks);
         return new SquadDeploymentPlan(
             Path.GetFullPath(targetRoot),
             identity,
@@ -360,7 +383,8 @@ public sealed class SquadDeploymentPlan
         bool replaceManaged,
         TimeProvider timeProvider,
         ISquadGlobalRootResolver? globalRoots = null,
-        IReadOnlyList<SquadReceipt>? siblingGlobalReceipts = null)
+        IReadOnlyList<SquadReceipt>? siblingGlobalReceipts = null,
+        IReadOnlyList<SquadRenderedBlock>? blocks = null)
     {
         ValidateCommon(targetRoot, squadLock, renderedFiles, degradations, timeProvider);
         ArgumentNullException.ThrowIfNull(previousReceipt);
@@ -457,6 +481,19 @@ public sealed class SquadDeploymentPlan
                 previous.Adopted && !fileWillBeWritten));
         }
 
+        List<SquadOwnedBlockDrift> blockDrifts = [];
+        (List<SquadOwnedBlock> nextBlocks, HashSet<string> renderedBlockIdentities) = PlanBlockUpdates(
+            root,
+            scope,
+            globalRoots,
+            normalizedFiles,
+            previousReceipt,
+            blocks,
+            replaceManaged,
+            mutations,
+            preconditions,
+            blockDrifts);
+
         foreach (SquadOwnedFile previous in previousReceipt.Files)
         {
             if (renderedIdentities.Contains(DeployedFileIdentity(previous.Target, previous.RelativePath)))
@@ -493,6 +530,16 @@ public sealed class SquadDeploymentPlan
                 nextOwnedFiles.Add(previous);
         }
 
+        RetireMissingBlocks(
+            root,
+            scope,
+            globalRoots,
+            previousReceipt,
+            renderedBlockIdentities,
+            nextBlocks,
+            mutations,
+            preconditions);
+
         // Classified from what this update actually produces, not merely inherited from
         // previousReceipt (already confirmed non-single-root above whenever a resolver is
         // supplied) — so an update run with no resolver, where retained and freshly rendered
@@ -512,7 +559,7 @@ public sealed class SquadDeploymentPlan
             }
         }
 
-        SquadReceipt receipt = NewReceipt(scope, timeProvider, degradations, nextOwnedFiles) with
+        SquadReceipt receipt = NewReceipt(scope, timeProvider, degradations, nextOwnedFiles, nextBlocks) with
         {
             Layout = nextLayout
         };
@@ -527,7 +574,8 @@ public sealed class SquadDeploymentPlan
             SquadStateMutation.Write,
             SquadStateMutation.Write,
             globalRoots,
-            isSingleRootLayout: nextLayout == SquadReceiptLayout.SingleRoot);
+            isSingleRootLayout: nextLayout == SquadReceiptLayout.SingleRoot,
+            blockDrifts: blockDrifts);
     }
 
     /// <summary>Preflights an ownership-aware uninstall without changing the deployment tree.</summary>
@@ -551,6 +599,7 @@ public sealed class SquadDeploymentPlan
         SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(targetRoot);
         string root = identity.PhysicalPath;
         _ = ReceiptFilesByPath(root, receipt);
+        RequireProjectScopeForBlocks(scope, receipt.Blocks.Count > 0, "uninstall");
         List<SquadFileMutation> mutations = new List<SquadFileMutation>();
         List<SquadFilePrecondition> preconditions = new List<SquadFilePrecondition>();
         List<SquadOwnedFile> retained = new List<SquadOwnedFile>();
@@ -584,14 +633,35 @@ public sealed class SquadDeploymentPlan
                 retained.Add(owned);
         }
 
+        List<SquadOwnedBlock> retainedBlocks = PlanBlockRemovals(
+            root,
+            scope,
+            globalRoots,
+            receipt,
+            mutations,
+            preconditions);
+
         // The layout carries forward onto the retained receipt so a later re-serialize (when
         // any file was locally edited and survives the uninstall) still writes the correct
         // explicit `layout` — reclassified from what actually remains, not merely copied.
         SquadReceiptLayout retainedLayout = scope == SquadDeploymentScope.Global
             ? ClassifyGlobalLayout(retained)
             : receipt.Layout;
-        SquadReceipt retainedReceipt = receipt with { Files = retained, Layout = retainedLayout };
-        bool hasRetainedFiles = retained.Count > 0;
+        // The schema follows the same rule as the writer: a project receipt that still owns
+        // a block stays on v3, while one whose blocks are all gone drops back to v1 so it
+        // serializes byte-identical to every block-less receipt. Global receipts never own
+        // blocks, so their schema carries over untouched.
+        string retainedSchema = scope == SquadDeploymentScope.Global
+            ? receipt.Schema
+            : retainedBlocks.Count > 0 ? SquadStateStore.ReceiptSchemaV3 : SquadStateStore.ReceiptSchemaV1;
+        SquadReceipt retainedReceipt = receipt with
+        {
+            Files = retained,
+            Blocks = retainedBlocks,
+            Layout = retainedLayout,
+            Schema = retainedSchema
+        };
+        bool hasRetainedFiles = retained.Count > 0 || retainedBlocks.Count > 0;
         return new SquadDeploymentPlan(
             Path.GetFullPath(targetRoot),
             identity,
@@ -824,14 +894,26 @@ public sealed class SquadDeploymentPlan
         SquadDeploymentScope scope,
         TimeProvider timeProvider,
         IReadOnlyList<SquadDegradation> degradations,
-        IReadOnlyList<SquadOwnedFile> ownedFiles) =>
-        new(
-            SquadStateStore.ReceiptSchemaV1,
+        IReadOnlyList<SquadOwnedFile> ownedFiles,
+        IReadOnlyList<SquadOwnedBlock>? ownedBlocks = null)
+    {
+        IReadOnlyList<SquadOwnedBlock> blocks = ownedBlocks ?? [];
+        // The in-memory schema follows the writer: a project receipt that owns a block reads
+        // v3, everything else keeps today's value (v1 — Global upgrades to v2 at write time).
+        string schema = blocks.Count > 0 && scope == SquadDeploymentScope.Project
+            ? SquadStateStore.ReceiptSchemaV3
+            : SquadStateStore.ReceiptSchemaV1;
+        return new(
+            schema,
             scope,
             ".",
             timeProvider.GetUtcNow(),
             degradations.ToArray(),
-            ownedFiles.ToArray());
+            ownedFiles.ToArray())
+        {
+            Blocks = blocks.ToArray()
+        };
+    }
 
     private static void EnsureReceiptScope(
         SquadReceipt receipt,
@@ -844,6 +926,546 @@ public sealed class SquadDeploymentPlan
                 $"'{requestedScope}'. Use the receipt's original scope.");
         }
     }
+
+    /// <summary>
+    /// Blocks are a project-scope ownership kind: the v3 receipt that records them exists for
+    /// project scope only. A block arriving with any other scope is a renderer contract
+    /// violation, refused loudly rather than silently dropped.
+    /// </summary>
+    private static void RequireProjectScopeForBlocks(
+        SquadDeploymentScope scope,
+        bool hasBlocks,
+        string operation)
+    {
+        if (scope != SquadDeploymentScope.Project && hasBlocks)
+        {
+            throw new SquadDeploymentConflictException(
+                $"Squad hook blocks cannot be {operation} under '{scope}' scope: " +
+                $"'{SquadStateStore.ReceiptSchemaV3}' receipts are written for project scope only.");
+        }
+    }
+
+    /// <summary>
+    /// Plans the install-time splice for every rendered block: the spliced file becomes a
+    /// <see cref="SquadFileMutation.Write"/> with an <see cref="SquadFilePrecondition.Exact"/>
+    /// precondition on the current digest (or <c>Missing</c> when the file is absent), and the
+    /// receipt claims only the spliced entries — never the whole file.
+    /// </summary>
+    /// <remarks>
+    /// An existing user file at a block path is content to merge with, never an
+    /// <c>UnmanagedCollision</c>: blocks own entries, not files, so there is nothing to
+    /// collide with. <see cref="SquadTransaction"/>'s claim-and-publish protocol is
+    /// unchanged because a block rides it as an ordinary write with a precondition.
+    /// </remarks>
+    private static List<SquadOwnedBlock> PlanBlockInstalls(
+        string root,
+        SquadDeploymentScope scope,
+        ISquadGlobalRootResolver? globalRoots,
+        IReadOnlyList<NormalizedDeploymentFile> normalizedFiles,
+        IReadOnlyList<SquadRenderedBlock>? blocks,
+        List<SquadFileMutation> mutations,
+        List<SquadFilePrecondition> preconditions)
+    {
+        if (blocks is null || blocks.Count == 0)
+            return [];
+        RequireProjectScopeForBlocks(scope, hasBlocks: true, operation: "installed");
+
+        HashSet<string> seenIdentities = new HashSet<string>(StringComparer.Ordinal);
+        foreach (NormalizedDeploymentFile normalized in normalizedFiles)
+            seenIdentities.Add(DeployedFileIdentity(normalized.File.Target, normalized.File.RelativePath));
+
+        List<SquadOwnedBlock> ownedBlocks = new List<SquadOwnedBlock>(blocks.Count);
+        foreach (SquadRenderedBlock block in blocks)
+        {
+            ArgumentNullException.ThrowIfNull(block);
+            string relativePath = NormalizeBlockPath(block);
+            string identity = DeployedFileIdentity(block.Target, relativePath);
+            if (!seenIdentities.Add(identity))
+            {
+                throw new SquadDeploymentConflictException(
+                    $"Rendered Squad block '{block.RelativePath}' has a portable " +
+                    "alias collision. Fix the upstream render before deploying it.");
+            }
+
+            string fullPath = ResolvePhysicalPath(
+                scope, root, globalRoots, block.Target, relativePath, isSingleRootLayout: false);
+            (IReadOnlyList<JsonNode> pre, IReadOnlyList<JsonNode> post) = SplitBlockEntries(block);
+
+            bool existsAsFile = File.Exists(fullPath);
+            string spliced;
+            IReadOnlyList<SquadHookOwnedEntry> owned;
+            if (existsAsFile)
+            {
+                byte[] currentBytes = File.ReadAllBytes(fullPath);
+                string currentText = DecodeBlockText(relativePath, currentBytes);
+                (spliced, owned) = SpliceBlockContent(block.Format, relativePath, currentText, pre, post);
+                preconditions.Add(SquadFilePrecondition.Exact(
+                    relativePath,
+                    block.Target,
+                    Digest(currentBytes)));
+                if (!string.Equals(spliced, currentText, StringComparison.Ordinal))
+                    mutations.Add(SquadFileMutation.Write(relativePath, block.Target, Encoding.UTF8.GetBytes(spliced)));
+            }
+            else
+            {
+                if (Directory.Exists(fullPath))
+                    throw UnmanagedCollision(relativePath);
+
+                (spliced, owned) = SpliceBlockContent(block.Format, relativePath, null, pre, post);
+                preconditions.Add(SquadFilePrecondition.Missing(relativePath, block.Target));
+                mutations.Add(SquadFileMutation.Write(relativePath, block.Target, Encoding.UTF8.GetBytes(spliced)));
+            }
+
+            ownedBlocks.Add(new SquadOwnedBlock(
+                relativePath,
+                block.Target,
+                !existsAsFile,
+                [.. owned.Select(entry => new SquadOwnedBlockEntry(entry.Location, entry.Digest))]));
+        }
+
+        return ownedBlocks;
+    }
+
+    /// <summary>
+    /// Plans the update-time rewrite for every rendered block. A block whose owned entries
+    /// drifted is left untouched and reported on <see cref="BlockDrifts"/> unless
+    /// <paramref name="replaceManaged"/> is set, in which case the drift is overwritten like
+    /// any other managed byte.
+    /// </summary>
+    private static (List<SquadOwnedBlock> Next, HashSet<string> Rendered) PlanBlockUpdates(
+        string root,
+        SquadDeploymentScope scope,
+        ISquadGlobalRootResolver? globalRoots,
+        IReadOnlyList<NormalizedDeploymentFile> normalizedFiles,
+        SquadReceipt previousReceipt,
+        IReadOnlyList<SquadRenderedBlock>? blocks,
+        bool replaceManaged,
+        List<SquadFileMutation> mutations,
+        List<SquadFilePrecondition> preconditions,
+        List<SquadOwnedBlockDrift> blockDrifts)
+    {
+        if ((blocks is null || blocks.Count == 0) && previousReceipt.Blocks.Count == 0)
+            return ([], []);
+        RequireProjectScopeForBlocks(scope, blocks is not null && blocks.Count > 0, "updated");
+        RequireProjectScopeForBlocks(scope, previousReceipt.Blocks.Count > 0, "updated");
+
+        HashSet<string> seenIdentities = new HashSet<string>(StringComparer.Ordinal);
+        foreach (NormalizedDeploymentFile normalized in normalizedFiles)
+            seenIdentities.Add(DeployedFileIdentity(normalized.File.Target, normalized.File.RelativePath));
+
+        Dictionary<string, SquadOwnedBlock> previousByIdentity = new(StringComparer.Ordinal);
+        foreach (SquadOwnedBlock previous in previousReceipt.Blocks)
+        {
+            ArgumentNullException.ThrowIfNull(previous);
+            previousByIdentity[DeployedFileIdentity(previous.Target, previous.RelativePath)] = previous;
+        }
+
+        List<SquadOwnedBlock> nextBlocks = [];
+        HashSet<string> renderedIdentities = new(StringComparer.Ordinal);
+        foreach (SquadRenderedBlock block in blocks ?? [])
+        {
+            ArgumentNullException.ThrowIfNull(block);
+            string relativePath = NormalizeBlockPath(block);
+            string identity = DeployedFileIdentity(block.Target, relativePath);
+            if (!seenIdentities.Add(identity))
+            {
+                throw new SquadDeploymentConflictException(
+                    $"Rendered Squad block '{block.RelativePath}' has a portable " +
+                    "alias collision. Fix the upstream render before deploying it.");
+            }
+
+            renderedIdentities.Add(identity);
+            string fullPath = ResolvePhysicalPath(
+                scope, root, globalRoots, block.Target, relativePath, isSingleRootLayout: false);
+            (IReadOnlyList<JsonNode> pre, IReadOnlyList<JsonNode> post) = SplitBlockEntries(block);
+
+            if (!previousByIdentity.TryGetValue(identity, out SquadOwnedBlock? previous))
+            {
+                if (Directory.Exists(fullPath))
+                    throw UnmanagedCollision(relativePath);
+
+                if (File.Exists(fullPath))
+                {
+                    byte[] currentBytes = File.ReadAllBytes(fullPath);
+                    string currentText = DecodeBlockText(relativePath, currentBytes);
+                    (string spliced, IReadOnlyList<SquadHookOwnedEntry> owned) = SpliceBlockContent(
+                        block.Format, relativePath, currentText, pre, post);
+                    preconditions.Add(SquadFilePrecondition.Exact(
+                        relativePath,
+                        block.Target,
+                        Digest(currentBytes)));
+                    if (!string.Equals(spliced, currentText, StringComparison.Ordinal))
+                        mutations.Add(SquadFileMutation.Write(relativePath, block.Target, Encoding.UTF8.GetBytes(spliced)));
+                    nextBlocks.Add(new SquadOwnedBlock(
+                        relativePath,
+                        block.Target,
+                        false,
+                        [.. owned.Select(entry => new SquadOwnedBlockEntry(entry.Location, entry.Digest))]));
+                }
+                else
+                {
+                    (string spliced, IReadOnlyList<SquadHookOwnedEntry> owned) = SpliceBlockContent(
+                        block.Format, relativePath, null, pre, post);
+                    preconditions.Add(SquadFilePrecondition.Missing(relativePath, block.Target));
+                    mutations.Add(SquadFileMutation.Write(relativePath, block.Target, Encoding.UTF8.GetBytes(spliced)));
+                    nextBlocks.Add(new SquadOwnedBlock(
+                        relativePath,
+                        block.Target,
+                        true,
+                        [.. owned.Select(entry => new SquadOwnedBlockEntry(entry.Location, entry.Digest))]));
+                }
+
+                continue;
+            }
+
+            if (Directory.Exists(fullPath))
+            {
+                throw new SquadDeploymentConflictException(
+                    $"Receipt-owned block path '{relativePath}' is now a directory. " +
+                    "Move it aside before updating Squad.");
+            }
+
+            if (!File.Exists(fullPath))
+            {
+                (string spliced, IReadOnlyList<SquadHookOwnedEntry> owned) = SpliceBlockContent(
+                    block.Format, relativePath, null, pre, post);
+                preconditions.Add(SquadFilePrecondition.Missing(relativePath, block.Target));
+                mutations.Add(SquadFileMutation.Write(relativePath, block.Target, Encoding.UTF8.GetBytes(spliced)));
+                nextBlocks.Add(new SquadOwnedBlock(
+                    relativePath,
+                    block.Target,
+                    true,
+                    [.. owned.Select(entry => new SquadOwnedBlockEntry(entry.Location, entry.Digest))]));
+                continue;
+            }
+
+            byte[] current = File.ReadAllBytes(fullPath);
+            string currentJson = DecodeBlockText(relativePath, current, allowBlank: false);
+            IReadOnlyList<SquadHookDrift> drifts = FindBlockDrift(block, relativePath, currentJson, previous);
+            if (drifts.Count > 0 && !replaceManaged)
+            {
+                foreach (SquadHookDrift drift in drifts)
+                    blockDrifts.Add(new SquadOwnedBlockDrift(relativePath, block.Target, drift.Location, drift.Reason));
+                nextBlocks.Add(previous);
+                continue;
+            }
+
+            (string rewritten, IReadOnlyList<SquadHookOwnedEntry> rewrittenOwned) = SpliceBlockContent(
+                block.Format, relativePath, currentJson, pre, post);
+            preconditions.Add(SquadFilePrecondition.Exact(
+                relativePath,
+                block.Target,
+                Digest(current)));
+            if (!string.Equals(rewritten, currentJson, StringComparison.Ordinal))
+                mutations.Add(SquadFileMutation.Write(relativePath, block.Target, Encoding.UTF8.GetBytes(rewritten)));
+            nextBlocks.Add(new SquadOwnedBlock(
+                relativePath,
+                block.Target,
+                previous.CreatedFile,
+                [.. rewrittenOwned.Select(entry => new SquadOwnedBlockEntry(entry.Location, entry.Digest))]));
+        }
+
+        return (nextBlocks, renderedIdentities);
+    }
+
+    /// <summary>
+    /// Retires previously owned blocks the new render no longer carries: only the owned
+    /// entries are removed, the user's file otherwise untouched.
+    /// </summary>
+    private static void RetireMissingBlocks(
+        string root,
+        SquadDeploymentScope scope,
+        ISquadGlobalRootResolver? globalRoots,
+        SquadReceipt previousReceipt,
+        HashSet<string> renderedIdentities,
+        List<SquadOwnedBlock> nextBlocks,
+        List<SquadFileMutation> mutations,
+        List<SquadFilePrecondition> preconditions)
+    {
+        foreach (SquadOwnedBlock previous in previousReceipt.Blocks)
+        {
+            if (renderedIdentities.Contains(DeployedFileIdentity(previous.Target, previous.RelativePath)))
+                continue;
+
+            if (RemoveOwnedBlockEntries(root, scope, globalRoots, previous, mutations, preconditions))
+                nextBlocks.Add(previous);
+        }
+    }
+
+    /// <summary>
+    /// Plans the removal of one receipt-owned block's entries from its shared file.
+    /// Returns <see langword="true"/> when the block survives in the receipt — the path is
+    /// now a directory or the file no longer parses, so hand repair owns it.
+    /// </summary>
+    /// <remarks>
+    /// The file is deleted only when Squad created it and no hook remains: anything else
+    /// is the user's file with Squad's entries excised.
+    /// </remarks>
+    private static List<SquadOwnedBlock> PlanBlockRemovals(
+        string root,
+        SquadDeploymentScope scope,
+        ISquadGlobalRootResolver? globalRoots,
+        SquadReceipt receipt,
+        List<SquadFileMutation> mutations,
+        List<SquadFilePrecondition> preconditions)
+    {
+        List<SquadOwnedBlock> retained = [];
+        foreach (SquadOwnedBlock owned in receipt.Blocks)
+        {
+            ArgumentNullException.ThrowIfNull(owned);
+            if (RemoveOwnedBlockEntries(root, scope, globalRoots, owned, mutations, preconditions))
+                retained.Add(owned);
+        }
+
+        return retained;
+    }
+
+    private static bool RemoveOwnedBlockEntries(
+        string root,
+        SquadDeploymentScope scope,
+        ISquadGlobalRootResolver? globalRoots,
+        SquadOwnedBlock owned,
+        List<SquadFileMutation> mutations,
+        List<SquadFilePrecondition> preconditions)
+    {
+        string fullPath = ResolvePhysicalPath(
+            scope, root, globalRoots, owned.Target, owned.RelativePath, isSingleRootLayout: false);
+
+        if (Directory.Exists(fullPath))
+            return true;
+
+        if (!File.Exists(fullPath))
+            return false;
+
+        byte[] currentBytes = File.ReadAllBytes(fullPath);
+        string currentText;
+        string trimmed;
+        try
+        {
+            // Update already refuses to deploy against a blanked receipt-owned file. Uninstall
+            // made the opposite call and reported the block removed, so it dropped out of
+            // the receipt and the file was left blank with nothing recorded to repair it
+            // from. Take the same decision here, by the same code: allow the blank only
+            // when the receipt owns no entries in the file, which is the case where a
+            // blank file genuinely has nothing to lose.
+            currentText = DecodeBlockText(
+                owned.RelativePath,
+                currentBytes,
+                allowBlank: owned.Entries.Count == 0);
+            if (string.IsNullOrWhiteSpace(currentText))
+                return false;
+
+            trimmed = RemoveBlockContent(FormatForTarget(owned), owned.RelativePath, currentText);
+        }
+        catch (SquadDeploymentConflictException)
+        {
+            return true;
+        }
+
+        if (string.Equals(trimmed, NormalizeBlockJson(owned.RelativePath, currentText), StringComparison.Ordinal))
+            return false;
+
+        preconditions.Add(SquadFilePrecondition.Exact(
+            owned.RelativePath,
+            owned.Target,
+            Digest(currentBytes)));
+        if (SquadHookJsonBlock.IsEmpty(FormatForTarget(owned), trimmed) && owned.CreatedFile)
+            mutations.Add(SquadFileMutation.Delete(owned.RelativePath, owned.Target));
+        else
+            mutations.Add(SquadFileMutation.Write(owned.RelativePath, owned.Target, Encoding.UTF8.GetBytes(trimmed)));
+
+        return false;
+    }
+
+    /// <summary>
+    /// Resolves the hook-file shape for a receipt-owned block from its recorded relative
+    /// path, so removal never depends on a render that may no longer exist.
+    /// </summary>
+    private static SquadHookBlockFormat FormatForTarget(SquadOwnedBlock owned)
+    {
+        ArgumentNullException.ThrowIfNull(owned);
+        foreach (SquadHookBlockFormat format in Enum.GetValues<SquadHookBlockFormat>())
+        {
+            if (string.Equals(
+                    SquadHookJsonBlock.RelativePath(format),
+                    owned.RelativePath,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return format;
+            }
+        }
+
+        throw new SquadDeploymentConflictException(
+            $"Squad receipt block '{owned.RelativePath}' is not a known shared hook file. " +
+            "Recover it by hand: verify or remove each entry, then delete the receipt and lock " +
+            "so a fresh install can recreate them.");
+    }
+
+    private static string NormalizeBlockPath(SquadRenderedBlock block)
+    {
+        string relativePath = SquadPathPolicy.NormalizeRelativePath(block.RelativePath);
+        string portableIdentity = SquadPathPolicy.GetPortableIdentity(relativePath);
+        if (!string.Equals(portableIdentity, relativePath, StringComparison.Ordinal))
+        {
+            throw new SquadDeploymentConflictException(
+                $"Rendered Squad block path '{block.RelativePath}' is not a portable " +
+                "canonical path because a segment ends in a dot or space.");
+        }
+
+        return relativePath;
+    }
+
+    /// <summary>
+    /// Splits a rendered block's entries into the pre and post hook containers by their
+    /// logical container name. Anything else is a renderer bug, refused before it can
+    /// silently land in the wrong container.
+    /// </summary>
+    private static (IReadOnlyList<JsonNode> Pre, IReadOnlyList<JsonNode> Post) SplitBlockEntries(
+        SquadRenderedBlock block)
+    {
+        ArgumentNullException.ThrowIfNull(block.Entries);
+        List<JsonNode> pre = [];
+        List<JsonNode> post = [];
+        foreach (SquadRenderedBlockEntry entry in block.Entries)
+        {
+            ArgumentNullException.ThrowIfNull(entry);
+            if (entry.Entry is null)
+            {
+                throw new SquadDeploymentConflictException(
+                    $"Rendered Squad block '{block.RelativePath}' carries an empty hook entry. " +
+                    "Fix the upstream render before deploying it.");
+            }
+
+            if (string.Equals(entry.Container, "PreToolUse", StringComparison.OrdinalIgnoreCase))
+                pre.Add(entry.Entry);
+            else if (string.Equals(entry.Container, "PostToolUse", StringComparison.OrdinalIgnoreCase))
+                post.Add(entry.Entry);
+            else
+            {
+                throw new SquadDeploymentConflictException(
+                    $"Rendered Squad block '{block.RelativePath}' names unknown hook container " +
+                    $"'{entry.Container ?? "null"}'. Fix the upstream render before deploying it.");
+            }
+        }
+
+        return (pre, post);
+    }
+
+    private static IReadOnlyList<SquadHookDrift> FindBlockDrift(
+        SquadRenderedBlock block,
+        string relativePath,
+        string currentJson,
+        SquadOwnedBlock previous)
+    {
+        Dictionary<string, string> expected = new(StringComparer.Ordinal);
+        foreach (SquadOwnedBlockEntry entry in previous.Entries)
+        {
+            ArgumentNullException.ThrowIfNull(entry);
+            expected[entry.Container] = entry.Sha256;
+        }
+
+        try
+        {
+            return SquadHookJsonBlock.FindDrift(block.Format, currentJson, expected);
+        }
+        catch (Exception exception) when (
+            exception is JsonException or InvalidOperationException)
+        {
+            throw BlockConflict(
+                relativePath,
+                "does not parse as a hook file. Move it aside before updating Squad.",
+                exception);
+        }
+    }
+
+    private static SquadDeploymentConflictException BlockConflict(
+        string relativePath,
+        string detail,
+        Exception? inner = null) =>
+        inner is null
+            ? new($"Squad hook block '{relativePath}' {detail}")
+            : new($"Squad hook block '{relativePath}' {detail}", inner);
+
+    private static string DecodeBlockText(string relativePath, byte[] bytes, bool allowBlank = true)
+    {
+        string text = Encoding.UTF8.GetString(bytes);
+        if (text.Length > 0 && text[0] == '\uFEFF')
+            text = text[1..];
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            // A blank hook file is a minimal document, not an error: a user can create
+            // .codex/hooks.json empty and still expect `squad install` to work. A file a
+            // receipt already owns is different: Squad's entries cannot vanish silently.
+            if (allowBlank)
+                return string.Empty;
+
+            throw BlockConflict(
+                relativePath,
+                "is empty although a receipt owns entries in it. Move it aside before deploying Squad.");
+        }
+
+        return text;
+    }
+
+    /// <summary>
+    /// Splices the managed entries into the current hook-file content, replacing Squad's
+    /// previous entries while leaving the user's entries in place. Planning must stay
+    /// side-effect free for dry runs, so this calls the content-level splice that
+    /// <see cref="SquadHookJsonBlock"/> owns: there is exactly one implementation, and a
+    /// dry run, an install and the file-level splice cannot drift apart. A missing or blank
+    /// file starts from the format's minimal document.
+    /// </summary>
+    private static (string Content, IReadOnlyList<SquadHookOwnedEntry> Owned) SpliceBlockContent(
+        SquadHookBlockFormat format,
+        string relativePath,
+        string? existingJson,
+        IReadOnlyList<JsonNode> preToolUse,
+        IReadOnlyList<JsonNode> postToolUse)
+    {
+        try
+        {
+            return SquadHookJsonBlock.SpliceContent(format, existingJson, preToolUse, postToolUse);
+        }
+        catch (Exception exception) when (exception is JsonException or InvalidOperationException)
+        {
+            throw UnusableBlockFile(relativePath, exception);
+        }
+    }
+
+    /// <summary>Removes Squad's entries from hook-file content, restoring the user's content.</summary>
+    private static string RemoveBlockContent(
+        SquadHookBlockFormat format,
+        string relativePath,
+        string existingJson)
+    {
+        try
+        {
+            return SquadHookJsonBlock.RemoveContent(format, existingJson);
+        }
+        catch (Exception exception) when (exception is JsonException or InvalidOperationException)
+        {
+            throw UnusableBlockFile(relativePath, exception);
+        }
+    }
+
+    /// <summary>Serializes the parsed content back, so removal can tell "nothing ours left" apart from a rewrite.</summary>
+    private static string NormalizeBlockJson(string relativePath, string existingJson)
+    {
+        try
+        {
+            return SquadHookJsonBlock.NormalizeContent(existingJson);
+        }
+        catch (Exception exception) when (exception is JsonException or InvalidOperationException)
+        {
+            throw UnusableBlockFile(relativePath, exception);
+        }
+    }
+
+    private static SquadDeploymentConflictException UnusableBlockFile(string relativePath, Exception inner) =>
+        BlockConflict(
+            relativePath,
+            $"is not a usable hook file ({inner.Message}) Move it aside before deploying Squad.",
+            inner);
 
     internal static string DeployedFileIdentity(string target, string relativePath) =>
         target + '\0' + relativePath;

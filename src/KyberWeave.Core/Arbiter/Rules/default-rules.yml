@@ -59,7 +59,7 @@ rules:
   - id: KW-ARB-READY-001
     trigger: delegate
     question: Are the task's dependencies complete, and are its files clear of work in flight?
-    answers: [ready, waiting, overlaps-in-flight, unknown-dependency]
+    answers: [ready, waiting, overlaps-in-flight, unknown-dependency, returns-unobservable]
     decide:
       - when: { fact: plan.task.files, intersects: ledger.in-flight.paths }
         answer: overlaps-in-flight
@@ -67,12 +67,14 @@ rules:
         answer: ready
       - when: { fact: plan.task.depends-on, subset-of: ledger.completed-tasks }
         answer: ready
+      - when: { fact: harness.observes-returns, equals: false }
+        answer: returns-unobservable
       - when: { fact: plan.task.depends-on, exists: true }
         answer: waiting
     # unknown-dependency (a dependency naming no task in the artifact) needs plan
     # membership the delegate trigger does not supply; it stays declared so the
     # runtime evaluator can answer it once plan parsing reports it.
-    effects: { ready: allow, waiting: escalate, overlaps-in-flight: escalate, unknown-dependency: escalate }
+    effects: { ready: allow, waiting: escalate, overlaps-in-flight: escalate, unknown-dependency: escalate, returns-unobservable: allow }
 
   - id: KW-ARB-OWNER-001
     trigger: delegate
@@ -108,7 +110,7 @@ rules:
   - id: KW-ARB-MODE-001
     trigger: delegate
     question: In test-first mode, does RED evidence exist before an implementation dispatch?
-    answers: [not-required, present, missing]
+    answers: [not-required, present, missing, returns-unobservable]
     decide:
       - when: { fact: plan.development-mode, equals: standard }
         answer: not-required
@@ -120,9 +122,11 @@ rules:
         answer: not-required
       - when: { fact: ledger.red-evidence, exists: true }
         answer: present
+      - when: { fact: harness.observes-returns, equals: false }
+        answer: returns-unobservable
       - when: { fact: ledger.red-evidence, exists: false }
         answer: missing
-    effects: { not-required: allow, present: allow, missing: escalate }
+    effects: { not-required: allow, present: allow, missing: escalate, returns-unobservable: allow }
 
   - id: KW-ARB-ROSTER-001
     trigger: [delegate, investigate]

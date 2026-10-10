@@ -56,7 +56,7 @@ public sealed class ArbiterDoctorCommand : Command<ArbiterSettings>
         CheckLogIgnored(settings, report);
         CheckBinary(report);
         CheckGuard(config, settings, report);
-        CheckCopilotCliLimitation();
+        CheckAdvisoryPostDispatchTargets();
 
         CommandHelpers.Finish(report, settings, "arbiter doctor", "Rule");
         return report.HasErrors ? 1 : 0;
@@ -218,16 +218,27 @@ public sealed class ArbiterDoctorCommand : Command<ArbiterSettings>
     }
 
     /// <summary>
-    /// Notes the Copilot CLI post-dispatch limitation as information: on the
-    /// <c>copilot-cli</c> target <c>Deny</c>, <c>PostBlock</c> and <c>PostAnnotation</c>
-    /// render only as <c>additionalContext</c>, so post-dispatch findings are advisory.
-    /// Informational only, hence no diagnostic id.
+    /// Notes, as information, the targets whose post-dispatch findings are advisory:
+    /// on <c>copilot-cli</c>, <c>codex</c> and <c>cursor</c> a post-dispatch
+    /// <c>Deny</c>, <c>PostBlock</c> or <c>PostAnnotation</c> renders only as additional
+    /// context, so the conductor can ignore it. Pre-dispatch denies still block on all
+    /// three. Informational only, hence no diagnostic id.
     /// </summary>
-    private static void CheckCopilotCliLimitation()
+    private static void CheckAdvisoryPostDispatchTargets()
     {
-        AnsiConsole.MarkupLine(
-            "  [blue]info[/] Copilot CLI (copilot-cli): post-dispatch Deny/PostBlock/PostAnnotation render as additionalContext (advisory); pre-dispatch denies still block.");
+        foreach ((string label, string target, string channel) in AdvisoryPostDispatchTargets)
+        {
+            AnsiConsole.MarkupLine(
+                $"  [blue]info[/] {label} ({target}): post-dispatch Deny/PostBlock/PostAnnotation render as {channel} (advisory); pre-dispatch denies still block.");
+        }
     }
+
+    private static readonly (string Label, string Target, string Channel)[] AdvisoryPostDispatchTargets =
+    [
+        ("Copilot CLI", "copilot-cli", "additionalContext"),
+        ("Codex", "codex", "additionalContext"),
+        ("Cursor", "cursor", "additional_context"),
+    ];
 
     private static bool IndexExists(string root, string path)
     {

@@ -221,6 +221,34 @@ public sealed class ArbiterCliCommandTests : IDisposable
     }
 
     [Fact]
+    public void Audit_UnmarkedDispatchWithNullTarget_ReportsAudit002()
+    {
+        // A Devin dispatch whose profile argument is missing has no target. The adapter
+        // promises audit reports it, so a null target must be flagged too (review 20.1, b).
+        string host = SeedLedger("arbiter-audit-002-null-target", ledger =>
+        {
+            ledger.AppendAsync(new ArbiterLedgerEvent(
+                "0000000000000004-aaaaaaaa",
+                DateTimeOffset.UtcNow,
+                "hook",
+                "devin",
+                "session-4",
+                ArbiterLedgerPhases.Unmarked)
+            {
+                Trigger = "delegate",
+                Target = null,
+            }).GetAwaiter().GetResult();
+        });
+
+        ArbiterAuditCommand command = new();
+        CommandExecution execution = Capture(() => command.Execute(
+            null!,
+            new ArbiterSettings { Path = host }));
+
+        Assert.Contains("KW-ARB-AUDIT-002", execution.Output, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Audit_MalformedLedgerLine_ReportsRatherThanEscaping()
     {
         // A truncated or hand-edited line is malformed JSON, which throws JsonException --
@@ -323,6 +351,70 @@ public sealed class ArbiterCliCommandTests : IDisposable
 
         Assert.Equal(0, execution.ExitCode);
         Assert.Contains("T1=complete", execution.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A dispatch that classified as no trigger is the pass-through shape: the evaluator
+    /// has no rule to run, returns allow, and records no decision. Reporting it as a
+    /// missing decision makes every benign pass on a host with no hooks look like a
+    /// crashed hook, which is the one thing this id is supposed to mean.
+    /// </summary>
+    [Fact]
+    public void Audit_APassThroughEventWithNoTrigger_ReportsNoMissingDecision()
+    {
+        string host = SeedLedger("arbiter-audit-pass-through", ledger =>
+        {
+            ledger.AppendAsync(new ArbiterLedgerEvent(
+                "0000000000000005-bbbbbbbb",
+                DateTimeOffset.UtcNow,
+                "hook",
+                "claude",
+                "session-5",
+                ArbiterLedgerPhases.Pre)
+            {
+                // No trigger and no caller: nothing classified, nothing to decide.
+                Target = "Read",
+            }).GetAwaiter().GetResult();
+        });
+
+        ArbiterAuditCommand command = new();
+        CommandExecution execution = Capture(() => command.Execute(
+            null!,
+            new ArbiterSettings { Path = host }));
+
+        Assert.Equal(0, execution.ExitCode);
+        Assert.DoesNotContain("KW-ARB-AUDIT-001", execution.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The exemption is the pass-through shape only: an event that named a trigger
+    /// still has to produce a decision, or the hook did die mid-evaluation.
+    /// </summary>
+    [Fact]
+    public void Audit_ATriggeredEventWithNoDecision_StillReportsTheMissingDecision()
+    {
+        string host = SeedLedger("arbiter-audit-triggered-no-decision", ledger =>
+        {
+            ledger.AppendAsync(new ArbiterLedgerEvent(
+                "0000000000000006-cccccccc",
+                DateTimeOffset.UtcNow,
+                "hook",
+                "claude",
+                "session-6",
+                ArbiterLedgerPhases.Pre)
+            {
+                Trigger = "refute.spawn",
+                Target = "review-lens",
+                Caller = "code-reviewer",
+            }).GetAwaiter().GetResult();
+        });
+
+        ArbiterAuditCommand command = new();
+        CommandExecution execution = Capture(() => command.Execute(
+            null!,
+            new ArbiterSettings { Path = host }));
+
+        Assert.Contains("KW-ARB-AUDIT-001", execution.Output, StringComparison.Ordinal);
     }
 
     private string SeedLedger(string name, Action<InFlightLedger> seed)

@@ -116,17 +116,17 @@ public static class Composition
                 }
                 catch (Exception)
                 {
-                    block = FallbackBlock;
+                    block = LastResortBlock.For(harness);
                 }
             }
             else
             {
-                block = FallbackBlock;
+                block = LastResortBlock.For(harness);
             }
         }
         catch (Exception)
         {
-            block = FallbackBlock;
+            block = LastResortBlock.For(harness);
         }
 
         try
@@ -152,10 +152,6 @@ public static class Composition
 
         return 0;
     }
-
-    /// <summary>The last-resort block when even the harness adapter cannot render.</summary>
-    private static string FallbackBlock =>
-        """{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"KW-ARB-HOOK-001: hook host failed."}}""";
 
     private static string OneLine(string message) =>
         message.Replace("\r\n", " ", StringComparison.Ordinal)

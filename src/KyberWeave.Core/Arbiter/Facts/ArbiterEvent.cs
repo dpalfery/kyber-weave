@@ -56,6 +56,15 @@ public sealed record ArbiterEvent
     /// <summary>The working directory the dispatch runs in.</summary>
     public string? Cwd { get; init; }
 
+    /// <summary>
+    /// Whether the serving harness observes sub-agent returns (task 16.9). The hook
+    /// host copies it from the harness adapter so <c>harness.observes-returns</c> is
+    /// always supplied: true for every harness, false only where the adapter declares
+    /// returns unobservable. Defaults to true — returns observed — so paths without a
+    /// harness hook keep every rule enforced.
+    /// </summary>
+    public bool ObservesReturns { get; init; } = true;
+
     /// <summary>The tool output, on post-dispatch (return) events.</summary>
     public string? ToolOutput { get; init; }
 

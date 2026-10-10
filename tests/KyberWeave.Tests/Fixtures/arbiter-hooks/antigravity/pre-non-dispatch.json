@@ -1,0 +1,16 @@
+{
+  "hook_event_name": "PreToolUse",
+  "toolCall": {
+    "name": "view_file",
+    "args": {
+      "AbsolutePath": "/repo/docs/plans/x.md"
+    }
+  },
+  "stepIdx": 2,
+  "conversationId": "conv-antigravity-4",
+  "workspacePaths": [
+    "/repo"
+  ],
+  "transcriptPath": "/repo/.antigravity/transcript.json",
+  "modelName": "antigravity-test-model"
+}

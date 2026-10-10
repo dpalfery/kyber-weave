@@ -1,16 +1,16 @@
 ---
-id: specs/kyber-arbiter/tasks
+id: archive/specs/kyber-arbiter/tasks
 title: Kyber Arbiter tasks
 doc-type: spec
-status: draft
+status: archived
 owner: dpalfery
-last-reviewed: 2026-10-04
+last-reviewed: 2026-10-10
 component: KyberSquad
 ---
 
 # Kyber Arbiter tasks
 
-**Phase status:** Draft
+**Phase status:** Archived 2026-10-10 at closeout (task 21.1). The checkboxes below record the plan as authored and are not a completion record; the [archive README](README.md) states the closeout outcome.
 
 **Development mode:** test-first
 

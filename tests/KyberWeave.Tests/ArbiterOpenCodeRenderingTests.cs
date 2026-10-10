@@ -134,6 +134,21 @@ public sealed class ArbiterOpenCodeRenderingTests : IDisposable
     }
 
     [Fact]
+    public async Task RenderAsync_Shim_TreatsEmptyStdoutAsAllowBeforeParsing()
+    {
+        string content = await ShimContentAsync();
+
+        // Exit 0 with empty stdout is the host's allow (arbiter.enabled: false, or a
+        // dispatch with no target). Parsing "" would throw and wrongly block. The parse
+        // is the parseDecision call, which validates the shape before returning.
+        int emptyCheck = content.IndexOf("trim() === \"\"", StringComparison.Ordinal);
+        int parse = content.IndexOf("parseDecision(text)", StringComparison.Ordinal);
+        Assert.True(emptyCheck >= 0, "shim must test for empty stdout");
+        Assert.True(parse > emptyCheck, "the empty-stdout check must precede parsing the decision");
+        Assert.Contains("{ decision: \"allow\" }", content, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task RenderAsync_ShimGenerator_IsReusableAcrossHarnessTokens()
     {
         string kilo = ArbiterPluginShim.Render("kilo");
