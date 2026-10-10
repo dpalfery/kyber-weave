@@ -53,39 +53,55 @@ static async Task<int> ServeAsync(string[] args)
             Directory.GetCurrentDirectory(),
             Environment.GetEnvironmentVariable(ArbiterRootResolver.EnvironmentVariable));
     }
-    catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+    catch (Exception ex)
     {
+        // Every failure here is a configuration mistake the message already names:
+        // Path.GetFullPath rejects more than the two types the resolver documents, and
+        // the exit is 1 either way. Stdout carries protocol frames only, so the message
+        // goes to stderr and never a stack trace.
         await Console.Error.WriteLineAsync($"kyber-weave-arbiter serve: {ex.Message}").ConfigureAwait(false);
         return 1;
     }
 
-    HostApplicationBuilder builder = Host.CreateApplicationBuilder(args);
-    builder.Logging.AddConsole(o => o.LogToStandardErrorThreshold = LogLevel.Trace);
-    builder.Services.AddSingleton(new ArbiterServeContext(
-        repoRoot,
-        new ArbiterHookDecisionEngine(),
-        Console.Error,
-        Composition.LoadHostConfig,
-        ServeKeyResolved,
-        ServeEffectiveProvider));
+    try
+    {
+        HostApplicationBuilder builder = Host.CreateApplicationBuilder(args);
+        builder.Logging.AddConsole(o => o.LogToStandardErrorThreshold = LogLevel.Trace);
+        builder.Services.AddSingleton(new ArbiterServeContext(
+            repoRoot,
+            new ArbiterHookDecisionEngine(),
+            Console.Error,
+            Composition.LoadHostConfig,
+            ServeKeyResolved,
+            ServeEffectiveProvider));
 
-    builder.Services
-        .AddMcpServer()
-        .WithStdioServerTransport()
-        .WithTools<ArbiterTools>();
+        builder.Services
+            .AddMcpServer()
+            .WithStdioServerTransport()
+            .WithTools<ArbiterTools>();
 
-    // The stdio extension supplies the hosting, and its ITransport is swapped for one
-    // that still answers requests read before stdin closed, which the SDK transport
-    // silently drops (see DrainingStreamServerTransport). The SDK's factory is replaced
-    // before anything resolves it, so its transport is never constructed and never
-    // starts reading stdin.
-    builder.Services.Replace(ServiceDescriptor.Singleton<ITransport>(services =>
-        DrainingStreamServerTransport.ForStandardStreams(
-            services.GetRequiredService<IOptions<McpServerOptions>>().Value.ServerInfo?.Name ?? "kyber-weave-arbiter",
-            services.GetService<ILoggerFactory>())));
+        // The stdio extension supplies the hosting, and its ITransport is swapped for one
+        // that still answers requests read before stdin closed, which the SDK transport
+        // silently drops (see DrainingStreamServerTransport). The SDK's factory is replaced
+        // before anything resolves it, so its transport is never constructed and never
+        // starts reading stdin.
+        builder.Services.Replace(ServiceDescriptor.Singleton<ITransport>(services =>
+            DrainingStreamServerTransport.ForStandardStreams(
+                services.GetRequiredService<IOptions<McpServerOptions>>().Value.ServerInfo?.Name ?? "kyber-weave-arbiter",
+                services.GetService<ILoggerFactory>())));
 
-    await builder.Build().RunAsync().ConfigureAwait(false);
-    return 0;
+        await builder.Build().RunAsync().ConfigureAwait(false);
+        return 0;
+    }
+    catch (Exception ex)
+    {
+        // A host that never came up is the client's mistake to fix, not a crash to read:
+        // stdout owns protocol frames, so the message goes to stderr, one line, and the
+        // process exits 1. An unhandled exception here would print a stack trace that
+        // names the client's own arguments back at them.
+        await Console.Error.WriteLineAsync($"kyber-weave-arbiter serve: {ex.Message}").ConfigureAwait(false);
+        return 1;
+    }
 }
 
 // Presence only: the key is read from the store or the environment and discarded here.
