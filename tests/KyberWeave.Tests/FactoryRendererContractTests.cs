@@ -23,6 +23,8 @@ namespace KyberWeave.Tests;
 /// </remarks>
 public sealed class FactoryRendererContractTests : IDisposable
 {
+    private static readonly string[] AllowedReasoningEfforts = ["low", "medium", "high"];
+
     private static readonly string ProductRoot =
         Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
 
@@ -188,9 +190,15 @@ public sealed class FactoryRendererContractTests : IDisposable
             Assert.False(
                 frontmatter.Children.ContainsKey(new YamlScalarNode("permissions")),
                 $"Agent '{agent.Name}' should not emit 'permissions'.");
-            Assert.False(
-                frontmatter.Children.ContainsKey(new YamlScalarNode("reasoningEffort")),
-                $"Agent '{agent.Name}' should omit 'reasoningEffort'.");
+            if (frontmatter.Children.ContainsKey(new YamlScalarNode("reasoningEffort")))
+            {
+                Assert.Contains(
+                    RequireScalar(frontmatter, "reasoningEffort", agent.Name),
+                    AllowedReasoningEfforts);
+                Assert.True(
+                    frontmatter.Children.ContainsKey(new YamlScalarNode("model")),
+                    $"Agent '{agent.Name}' emits 'reasoningEffort' without a pinned 'model' (Factory ignores it on inherit).");
+            }
             Assert.False(
                 frontmatter.Children.ContainsKey(new YamlScalarNode("license")),
                 $"Agent '{agent.Name}' should not emit 'license' on a droid.");
@@ -220,7 +228,12 @@ public sealed class FactoryRendererContractTests : IDisposable
                 }
                 else
                 {
-                    Assert.Equal(factoryHarnessModel, RequireScalar(frontmatter, "model", agent.Name));
+                    (string expectedModel, string? expectedEffort) = FactoryRenderer.ParseReasoningEffortSuffix(factoryHarnessModel);
+                    Assert.Equal(expectedModel, RequireScalar(frontmatter, "model", agent.Name));
+                    if (expectedEffort is not null)
+                    {
+                        Assert.Equal(expectedEffort, RequireScalar(frontmatter, "reasoningEffort", agent.Name));
+                    }
                 }
             }
             else if (!string.Equals(modelProfile.Default, "inherit", StringComparison.Ordinal) &&
