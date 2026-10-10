@@ -206,13 +206,16 @@ describe('Issue #319: clean re-ingest is an explicit choice', () => {
 })
 
 describe('Issue #312: Clean database control', () => {
-  it('renders a Clean database button', () => {
+  it('renders a Wipe database button', () => {
     const html = renderToStaticMarkup(
       <QueryClientProvider client={new QueryClient()}>
         <CleanDatabaseControl harnesses={HARNESSES} />
       </QueryClientProvider>,
     )
-    expect(html).toContain('Clean database')
+    // Named for what it does: the control sits in the Maintenance panel beside
+    // "Refresh data now", and "clean" beside a refresh reads as the same kind
+    // of action.
+    expect(html).toContain('Wipe database')
     expect(html).toContain('data-testid="clean-database-button"')
   })
 

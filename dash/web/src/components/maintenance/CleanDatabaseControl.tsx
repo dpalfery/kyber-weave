@@ -1,11 +1,16 @@
 // Database clean control for the Context Doctor ingest panel (issue #312).
 //
-// A "Clean database" button opens a confirmation dialog — scope (one or more
+// A "Wipe database" button opens a confirmation dialog — scope (one or more
 // harnesses, or all), record/session counts, and the fixed disclosures: no
 // backup is taken, the wipe cannot be undone, and OTLP-collected records have
 // no source logs to re-ingest from. Confirming POSTs the bounded
 // `cleanDatabase` client; the status line is built from counts and scope only,
 // never from a server error string (the `refreshModelWindows` convention).
+//
+// The button is named "Wipe database" rather than "Clean database" because it
+// renders in the Maintenance panel beside "Refresh data now": "clean" beside
+// a refresh reads as the same kind of action, and it is not. The endpoint,
+// request body and dialog are unchanged.
 //
 // Issue #319: re-ingest is now an explicit operator choice. The dialog carries
 // an UNCHECKED "import folder history" box and a weeks window (1..52, default
@@ -129,7 +134,7 @@ export function CleanDatabaseControl({ harnesses }: CleanDatabaseControlProps) {
           setPhase('confirm')
         }}
       >
-        Clean database
+        Wipe database
       </button>
       {status !== null && phase === 'done' && (
         <p data-testid="clean-database-status" className="text-density-xs text-muted-foreground mt-density-hair">

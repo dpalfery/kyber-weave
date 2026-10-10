@@ -2,32 +2,15 @@ import { useState, useMemo, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Skeleton } from '../components/ui/skeleton.js'
 import {
-  fetchCoverage,
-  fetchHarnesses,
-  fetchRuns,
   fetchFindings,
-  refreshModelWindows,
-  type ModelCatalogRefreshResult,
+  fetchKyberSessions,
   type FindingsPage,
-  type KyberCoverage,
-  type KyberCoverageCheckpoint,
-  type KyberCoverageRefresh,
-  type KyberHarnessSummary,
   type KyberFinding,
+  type KyberSessionSummary,
 } from '../lib/kyberApi.js'
-import {
-  HierarchyBreadcrumb,
-  FindingList,
-  BaselineSelect,
-  ScorecardMatrix,
-  formatCoverageWindow,
-} from '../components/analysis/index.js'
-import type { ScorecardMatrixRow, ScorecardCoverageWindow } from '../components/analysis/ScorecardMatrix.js'
-import { CleanDatabaseControl } from '../components/maintenance/CleanDatabaseControl.js'
-import { MaintenancePanel } from '../components/maintenance/MaintenancePanel.js'
+import { HierarchyBreadcrumb, FindingList, BaselineSelect } from '../components/analysis/index.js'
 
 export interface ContextDoctorProps {
-  initialHarnesses?: KyberHarnessSummary[]
   /**
    * Initial findings page, or a bare row list (the coverage suites pass
    * `[]`: it normalizes to an empty envelope). Prefer the envelope — a bare
@@ -35,17 +18,40 @@ export interface ContextDoctorProps {
    */
   initialFindings?: FindingsPage | KyberFinding[]
   /**
-   * Coverage facts for the banner (T10) and ingest panel (T9). Accepts the
-   * full `GET /api/kyber/coverage` payload or the refresh slice alone —
-   * the T10 suite feeds the refresh slice; the panel renders only when the
-   * full payload (with ingest activity) is present, so a refresh-only value
-   * never invents receiver facts.
+   * The harness the owner has selected; `undefined` or `'all'` means every
+   * harness. The scope belongs to the header above this page, so the findings
+   * queries carry it rather than a second harness selector here — two
+   * selectors are two answers to "which harness am I looking at".
    */
-  initialCoverage?: KyberCoverage | KyberCoverageRefresh
+  activeHarness?: string
+  /** One session, or `undefined` for every session in scope. */
+  sessionId?: string
+  /**
+   * Reports a session chosen in this page's selector to the owner, which
+   * holds the shared selection. Absent, the page keeps the choice in internal
+   * state and stands alone.
+   */
+  onSessionChange?: (sessionId: string | undefined) => void
+  /**
+   * Opening a harness from the scorecard matrix. The matrix moved to the
+   * header panels, so nothing here calls this; the prop stays only because
+   * `App.tsx` still passes it, and it is removed with that call site.
+   */
   onSelectHarness?: (harnessId: string) => void
   onSelectRun?: (runId: string, harnessId?: string) => void
   onSelectFinding?: (findingId: string) => void
   onSelectTurn?: (turnIndex: number, executionId?: string, runId?: string) => void
+}
+
+/**
+ * The harness scope a findings query runs under, or `undefined` for every
+ * harness. `'all'` is the tab the header shows for the whole workspace, and
+ * the API has no such harness — sending it would filter to nothing.
+ */
+export function harnessScopeOf(activeHarness: string | undefined): string | undefined {
+  return activeHarness === undefined || activeHarness === '' || activeHarness === 'all'
+    ? undefined
+    : activeHarness
 }
 
 export type HarnessCatalogEntry = {
@@ -93,13 +99,41 @@ export const HARNESS_CATALOG: readonly HarnessCatalogEntry[] = [
   { harness: 'all', name: 'All Harnesses' },
 ]
 
-/** Returns whether a harness id represents collected, harness-specific data. */
-function isObservedHarness(harness: string): boolean {
-  return harness.length > 0 && harness !== 'all'
-}
-
 /** Page size for the workspace findings browser (issue #191). */
 export const FINDINGS_PAGE_SIZE = 25
+
+/** The canonical session id, whichever spelling the payload used. */
+export function sessionIdOf(session: KyberSessionSummary): string {
+  return session.sessionId ?? session.session_id
+}
+
+/** What the session selector lists for one option. */
+export function sessionOptionLabel(session: KyberSessionSummary): string {
+  const id = sessionIdOf(session)
+  const label = session.label ?? null
+  return label !== null && label.length > 0 ? `${label} — ${id}` : id
+}
+
+/**
+ * The canonical sessions a scope may select: every session, narrowed to the
+ * selected harness when there is one.
+ *
+ * <remarks>
+ * Session metadata is selection only. It says which ids exist under a harness
+ * — nothing about findings, pressure or waste, all of which the server
+ * computes. Filtering here also keeps a scope change from offering a session
+ * that belongs to a harness the operator is no longer looking at.
+ * </remarks>
+ */
+export function sessionsInScope(
+  sessions: readonly KyberSessionSummary[] | undefined,
+  harness: string | undefined,
+): KyberSessionSummary[] {
+  const all = sessions ?? []
+  if (harness === undefined) return [...all]
+  const wanted = harness.toLowerCase()
+  return all.filter((session) => (session.harness ?? '').toLowerCase() === wanted)
+}
 
 export interface FindingsBrowserViewProps {
   findings: readonly KyberFinding[]
@@ -107,15 +141,14 @@ export interface FindingsBrowserViewProps {
   detectorCounts: Readonly<Record<string, number>>
   unknownWindowSessions?: number
   detectorFilter?: string
-  harnessFilter?: string
-  harnesses: readonly ScorecardMatrixRow[]
+  /** Plain-language statement of the scope above this list. */
+  scopeNote?: string
   /** True while a page is in flight. The skeleton shows only when there is
    * nothing stored yet (review M1): pages already on screen stay up. */
   loading: boolean
   /** Bounded fetch failure. Raw server text never renders (council review). */
   error?: string | null
   onDetectorChange?: (detector: string | undefined) => void
-  onHarnessChange?: (harness: string | undefined) => void
   onLoadMore?: () => void
   onRetry?: () => void
   onSelectFinding?: (findingId: string) => void
@@ -134,12 +167,10 @@ export function FindingsBrowserView({
   detectorCounts,
   unknownWindowSessions,
   detectorFilter,
-  harnessFilter,
-  harnesses,
+  scopeNote,
   loading,
   error = null,
   onDetectorChange = () => {},
-  onHarnessChange = () => {},
   onLoadMore = () => {},
   onRetry = () => {},
   onSelectFinding,
@@ -166,21 +197,11 @@ export function FindingsBrowserView({
         <h3 className="font-display text-density-base font-semibold text-foreground">
           All Workspace Findings ({total})
         </h3>
-        <label className="text-density-xs text-muted-foreground">
-          Harness:{' '}
-          <select
-            data-testid="findings-harness-filter"
-            value={harnessFilter ?? ''}
-            onChange={(event) => onHarnessChange(event.target.value === '' ? undefined : event.target.value)}
-          >
-            <option value="">All harnesses</option>
-            {harnesses.map((row) => (
-              <option key={row.harness} value={row.harness}>
-                {row.name ?? harnessDisplayName(row.harness)}
-              </option>
-            ))}
-          </select>
-        </label>
+        {scopeNote !== undefined && (
+          <p data-testid="findings-scope-note" className="text-density-xs text-muted-foreground">
+            {scopeNote}
+          </p>
+        )}
       </div>
 
       {/* Suppression is stated only when it is measured. While the envelope
@@ -203,14 +224,13 @@ export function FindingsBrowserView({
       )}
 
       <div className="flex flex-wrap gap-density-cluster mt-density-hair" data-testid="findings-detector-chips">
-        {(detectorFilter !== undefined || harnessFilter !== undefined) && (
+        {detectorFilter !== undefined && (
           <button
             type="button"
             data-testid="findings-clear-filters"
-            title="Clear detector and harness filters"
+            title="Clear detector filter"
             onClick={() => {
               onDetectorChange(undefined)
-              onHarnessChange(undefined)
             }}
           >
             Clear ×
@@ -308,8 +328,8 @@ export type AccumulatedPage = {
  * The first page is stored like any other. Skipping offset zero is what made
  * "Load more" replace the list rather than extend it: page one never entered
  * `appended`, so advancing the offset left nothing to extend and the rendered
- * rows collapsed to the newly fetched page alone. Re-storing the same page is a
- * no-op, which is what keeps a refetch from duplicating it.
+ * rows collapsed to the newly fetched page alone. Re-storing the same page is
+ * a no-op, which is what keeps a refetch from duplicating it.
  *
  * The no-op returns `pages` itself, not a copy: the accumulate effect depends
  * on the stored list, so a fresh array per render would loop forever.
@@ -365,9 +385,9 @@ export function nextAccumulated(
  * to the newly fetched page alone.
  *
  * Tagging each page with its scope stops a page fetched under a previous
- * harness or detector from being re-appended after the filter changes.
- * `current` covers the window before the effect has stored the first page,
- * which is also the only thing that exists during static render.
+ * harness, session or detector from being re-appended after the filter
+ * changes. `current` covers the window before the effect has stored the first
+ * page, which is also the only thing that exists during static render.
  */
 export function browserRows(
   pages: readonly AccumulatedPage[],
@@ -449,237 +469,6 @@ export function servedOffset(pages: readonly AccumulatedPage[], scope: string): 
 }
 
 /**
- * Relative age of an ISO timestamp for the ingest panel's last-received line.
- * A pure formatter over a recorded timestamp — never a claim about whether
- * the receiver process is still running.
- */
-export function formatCoverageAgo(iso: string, nowMs: number = Date.now()): string {
-  const then = Date.parse(iso)
-  if (!Number.isFinite(then)) return 'unknown age'
-  const deltaMs = nowMs - then
-  // A timestamp in the future (clock skew, NTP correction) is data the
-  // panel cannot place — folding it into `just now` would claim fresh
-  // arrival for a time that has not happened yet.
-  if (deltaMs < 0) return 'in the future (clock skew)'
-  const minutes = Math.floor(deltaMs / 60000)
-  if (minutes < 1) return 'just now'
-  if (minutes < 60) return `${minutes}m ago`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 48) return `${hours}h ago`
-  return `${Math.floor(hours / 24)}d ago`
-}
-
-function formatModelCatalogRefreshStatus(result: ModelCatalogRefreshResult): string {
-  const failed = result.vendorsFailed.map((entry) => entry.vendor)
-  const when = result.lastRefreshAt ?? ''
-  if (failed.length > 0 && result.vendorsUpdated.length > 0) {
-    return `Partial refresh. Failed vendors: ${failed.join(', ')}. ${result.rowCount} rows at ${when}`
-  }
-  if (failed.length > 0) {
-    return `Refresh failed for ${failed.join(', ')}.`
-  }
-  return `${result.rowCount} rows at ${when}`
-}
-
-/**
- * Coverage-panel control for the vendor-window catalog. The status line is
- * built from row count, timestamp, and vendor names — never from a refresh
- * error string, which can carry a remote body.
- */
-function ModelCatalogRefreshControl() {
-  const [inFlight, setInFlight] = useState(false)
-  const [status, setStatus] = useState<string | null>(null)
-
-  return (
-    <div className="mt-density-cluster">
-      <button
-        type="button"
-        data-testid="model-catalog-refresh-button"
-        disabled={inFlight}
-        onClick={() => {
-          setInFlight(true)
-          void refreshModelWindows()
-            .then((result) => {
-              setStatus(formatModelCatalogRefreshStatus(result))
-            })
-            .catch(() => {
-              setStatus('Refresh failed. The model-window catalog was left unchanged.')
-            })
-            .finally(() => {
-              setInFlight(false)
-            })
-        }}
-      >
-        Refresh model windows
-      </button>
-      {status !== null && (
-        <p data-testid="model-catalog-refresh-status" className="text-density-xs text-muted-foreground mt-density-hair">
-          {status}
-        </p>
-      )}
-    </div>
-  )
-}
-
-/**
- * Ingest coverage panel (T9: issues #189/#198/#199). Reads the single
- * `GET /api/kyber/coverage` payload: per-source counts under T7 display
- * names (the stored id rides along only as a `data-raw-source` audit
- * attribute, never as the shown label), the last-received line, verbatim
- * quarantine reasons, and partial-checkpoint state. Empty log ⇒ unknown;
- * null window ⇒ unknown; zero-data keeps its verbatim reason. This panel
- * owns ingest activity only — the matrix banner and row grouping below
- * belong to T10.
- */
-export function CoverageIngestPanel({
-  coverage,
-  harnesses = [],
-}: {
-  coverage: KyberCoverage
-  harnesses?: KyberHarnessSummary[]
-}) {
-  const { refresh, ingest, quarantineByReason, checkpoints } = coverage
-  const partialUnits =
-    checkpoints === null ? [] : checkpoints.filter((unit) => unit.lastStatus === 'partial')
-  const zeroRecordByReason = zeroRecordReasons(checkpoints)
-  const zeroRecordTotal = zeroRecordByReason.reduce((sum, [, count]) => sum + count, 0)
-  const receiverLine =
-    ingest.status === 'unknown'
-      ? 'no receiver activity recorded — receiver status is not observable from this page'
-      : ingest.lastReceivedAt === null
-        ? 'last received unknown (no receiver timestamp recorded)'
-        : `last received ${ingest.lastReceivedAt} (${formatCoverageAgo(ingest.lastReceivedAt)})`
-
-  return (
-    <section
-      className="rounded-lg border border-border bg-card p-chrome"
-      data-testid="coverage-ingest-panel"
-      aria-label="Ingest coverage"
-    >
-      <h3 className="text-density-xs font-semibold uppercase tracking-density text-heading">
-        Ingest coverage
-      </h3>
-      <ModelCatalogRefreshControl />
-      <CleanDatabaseControl harnesses={harnesses} />
-      <p className="text-density-xs text-muted-foreground mt-density-hair leading-density" data-testid="coverage-window">
-        {formatCoverageWindow(refresh)}
-      </p>
-      <p className="text-density-xs text-muted-foreground mt-density-hair leading-density" data-testid="coverage-last-received">
-        {receiverLine}
-      </p>
-      {ingest.status === 'known' && (
-        <ul className="mt-density-cluster flex flex-col gap-density-hair">
-          {ingest.sources.map((entry) => (
-            <li
-              key={entry.source}
-              data-testid="coverage-source-row"
-              data-raw-source={entry.source}
-              className="flex flex-wrap items-baseline justify-between gap-density-cluster text-density-xs"
-            >
-              <span data-testid="coverage-source-label">{entry.display || entry.source}</span>
-              <span className="text-muted-foreground">
-                {entry.recordCount} records · {entry.kind}
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
-      {quarantineByReason.length > 0 && (
-        <ul className="mt-density-cluster flex flex-col gap-density-hair">
-          {quarantineByReason.map((entry) => (
-            <li
-              key={entry.reason}
-              data-testid="coverage-quarantine-row"
-              className="flex flex-wrap items-baseline justify-between gap-density-cluster text-density-xs"
-            >
-              <span>{entry.reason}</span>
-              <span className="text-muted-foreground">{entry.count}</span>
-            </li>
-          ))}
-        </ul>
-      )}
-      {checkpoints === null ? (
-        <p
-          className="text-density-xs text-muted-foreground mt-density-hair leading-density"
-          data-testid="coverage-checkpoints-unknown"
-        >
-          checkpoint status not observable from this page
-        </p>
-      ) : (
-        partialUnits.length > 0 && (
-          <div className="mt-density-cluster text-density-xs" data-testid="coverage-partial">
-            <p>
-              {partialUnits.length} source{partialUnits.length === 1 ? '' : 's'} partial (problems
-              recorded, coverage incomplete)
-            </p>
-            <ul className="mt-density-hair flex flex-col gap-density-hair">
-              {partialUnits.map((unit) => (
-                <li
-                  key={`${unit.harnessId}:${unit.sourceKey}`}
-                  data-testid="coverage-partial-unit"
-                  className="text-muted-foreground"
-                >
-                  {unit.harnessId}: {unit.recordCount} records
-                </li>
-              ))}
-            </ul>
-          </div>
-        )
-      )}
-      {zeroRecordTotal > 0 && (
-        <div className="mt-density-cluster text-density-xs" data-testid="coverage-zero-record">
-          <p>
-            {zeroRecordTotal} source{zeroRecordTotal === 1 ? '' : 's'} discovered but not ingested
-          </p>
-          <ul className="mt-density-hair flex flex-col gap-density-hair">
-            {zeroRecordByReason.map(([reason, count]) => (
-              <li
-                key={reason}
-                data-testid="coverage-zero-record-reason"
-                className="flex flex-wrap items-baseline justify-between gap-density-cluster text-muted-foreground"
-              >
-                <span>{reason}</span>
-                <span>{count}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-    </section>
-  )
-}
-
-/**
- * Zero-record checkpoints grouped by their persisted reason (issue #196).
- * Only `ok`/`unchanged` units that carry a reason count: failed and partial
- * units already surface through their own status, and a unit with no reason
- * is never given an invented one.
- */
-function zeroRecordReasons(
-  checkpoints: readonly KyberCoverageCheckpoint[] | null,
-): [string, number][] {
-  if (checkpoints === null) return []
-  const counts = new Map<string, number>()
-  for (const unit of checkpoints) {
-    if (unit.recordCount !== 0 || unit.lastErrorCode === null) continue
-    if (unit.lastStatus !== 'ok' && unit.lastStatus !== 'unchanged') continue
-    counts.set(unit.lastErrorCode, (counts.get(unit.lastErrorCode) ?? 0) + 1)
-  }
-  return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-}
-
-/**
- * Type guard for the coverage prop union: the full payload carries `ingest`,
- * the refresh slice does not. The ingest panel renders only for the full
- * payload; the matrix banner reads the refresh facts from either shape.
- */
-export function isFullCoverage(
-  coverage: KyberCoverage | KyberCoverageRefresh | undefined,
-): coverage is KyberCoverage {
-  return coverage !== undefined && 'ingest' in coverage
-}
-
-/**
  * The next page offset from the extent the server has served this scope
  * (`servedOffset`), or `undefined` when everything is loaded and the button
  * hides.
@@ -698,7 +487,7 @@ export function nextBrowserOffset(served: number, total: number): number | undef
 
 /**
  * The current page eligible for display (review M1): placeholder rows from
- * a previous key are never the current page of a new filter — they belong
+ * a previous key are never the current page of a new scope — they belong
  * to no scope until the server answers.
  */
 export function currentBrowserPage(
@@ -710,39 +499,70 @@ export function currentBrowserPage(
 
 /**
  * Whether the browser query may keep the previous page on screen while the
- * next one loads. Offset-only moves stay within the same filter scope, so
- * the stored rows are still valid; a detector or harness change re-scopes
- * the list and the old filter's rows must not pose as the new filter's.
- * Both filter slots are compared — checking only one would keep stale rows
- * when the other filter changes.
+ * next one loads. Offset-only moves stay within the same filter scope, so the
+ * stored rows are still valid; a detector, harness or session change
+ * re-scopes the list and the old scope's rows must not pose as the new one's.
+ * All three scope slots are compared — checking only some would keep stale rows
+ * when another changes.
  */
 export function shouldKeepPreviousData(
   prevKey: readonly unknown[] | undefined,
   nextKey: readonly unknown[],
 ): boolean {
-  return prevKey?.[1] === nextKey[1] && prevKey?.[2] === nextKey[2]
+  return (
+    prevKey?.[1] === nextKey[1] &&
+    prevKey?.[2] === nextKey[2] &&
+    prevKey?.[3] === nextKey[3]
+  )
 }
 
 /**
- * Renders the Context Doctor landing page with workspace findings and a
- * per-harness diagnostic scorecard.
+ * The scope the browser list is showing, in words. A narrowed list says so:
+ * a reader who lands on one harness's findings has to be able to tell that
+ * from the whole workspace.
+ */
+export function scopeNoteFor(
+  harness: string | undefined,
+  session: string | undefined,
+  sessionLabel?: string,
+): string {
+  const harnessPart = harness === undefined ? 'All harnesses' : harnessDisplayName(harness)
+  const sessionPart =
+    session === undefined ? 'all sessions' : `session ${sessionLabel ?? session}`
+  return `${harnessPart} · ${sessionPart}`
+}
+
+/**
+ * Renders the Context Doctor landing page: findings and the scope they were
+ * drawn in. Maintenance, ingest coverage and the scorecard matrix are not
+ * here — the header's Status and Maintenance panels own them
+ * (`DashboardTools`), so this page is the diagnosis, not the operator's
+ * console.
  */
 export function ContextDoctor({
-  initialHarnesses,
   initialFindings,
-  initialCoverage,
-  onSelectHarness,
+  activeHarness,
+  sessionId: selectedSession,
+  onSessionChange,
   onSelectRun,
   onSelectFinding,
   onSelectTurn,
 }: ContextDoctorProps) {
   const [baseline, setBaseline] = useState('none')
   const [detectorFilter, setDetectorFilter] = useState<string | undefined>(undefined)
-  const [harnessFilter, setHarnessFilter] = useState<string | undefined>(undefined)
+  // Standalone session state, for the page mounted without an owner. When an
+  // owner supplies `sessionId`, that value is the scope and this state is not
+  // consulted.
+  const [localSession, setLocalSession] = useState<string | undefined>(undefined)
   // Offset paging (issue #191): Load more advances `offset` and appends the
-  // next page instead of refetching a growing prefix.
-  const [offset, setOffset] = useState(0)
+  // next page instead of refetching a growing prefix. The offset is tagged
+  // with the scope it belongs to, so a scope change restarts at page one
+  // without an effect having to run first.
+  const [paging, setPaging] = useState<{ scope: string; offset: number }>({ scope: '', offset: 0 })
   const [appended, setAppended] = useState<AccumulatedPage[]>([])
+
+  const harnessFilter = harnessScopeOf(activeHarness)
+  const sessionId = selectedSession ?? localSession
 
   // A bare row list normalizes to an empty-total envelope (see props).
   const initialPage: FindingsPage | undefined = Array.isArray(initialFindings)
@@ -757,7 +577,17 @@ export function ContextDoctor({
 
   // Every page is stored under the scope it was fetched for, including the
   // first, so advancing the offset extends the list instead of replacing it.
-  const browseScope = `${detectorFilter ?? ''}|${harnessFilter ?? ''}`
+  // The scope names the harness, the session and the detector: a page fetched
+  // under one of them must never be re-appended under another.
+  const browseScope = `${detectorFilter ?? ''}|${harnessFilter ?? ''}|${sessionId ?? ''}`
+  const offset = paging.scope === browseScope ? paging.offset : 0
+  // Seeded initial rows describe the whole workspace, so they are only ever
+  // the page one of an unscoped list.
+  const unscoped = harnessFilter === undefined && sessionId === undefined
+
+  const setOffset = (next: number) => {
+    setPaging({ scope: browseScope, offset: next })
+  }
 
   const resetBrowse = (update: () => void) => {
     update()
@@ -765,34 +595,22 @@ export function ContextDoctor({
     setAppended([])
   }
 
-  // Query live harnesses
-  const { data: harnessesData, isLoading: loadingHarnesses } = useQuery({
-    queryKey: ['kyber-harnesses'],
-    queryFn: fetchHarnesses,
-    initialData: initialHarnesses,
-  })
-
-  // Harness rollups are deliberately optional. When their endpoint has not
-  // been populated yet, the existing run projection still supplies real
-  // harness identities for navigation. It supplies no metrics: those remain
-  // not measurable until the rollup contract is available.
-  const { data: runsData, isLoading: loadingRuns } = useQuery({
-    queryKey: ['kyber-runs-navigation'],
-    queryFn: () => fetchRuns(),
-  })
-
-  // Headline findings across the entire workspace. The query fetches a full
-  // page; the card keeps four on screen and scrolls the rest.
+  // Headline findings, under the same scope as the browser below. The query
+  // fetches a full page; the card keeps four on screen and scrolls the rest.
   const { data: headlineData, isLoading: loadingFindings } = useQuery({
-    queryKey: ['kyber-findings-workspace'],
-    queryFn: () => fetchFindings({ limit: FINDINGS_PAGE_SIZE }),
-    initialData: initialPage,
+    queryKey: ['kyber-findings-workspace', harnessFilter ?? '', sessionId ?? ''],
+    queryFn: () =>
+      fetchFindings({
+        ...(harnessFilter !== undefined ? { harness: harnessFilter } : {}),
+        ...(sessionId !== undefined ? { sessionId } : {}),
+        limit: FINDINGS_PAGE_SIZE,
+      }),
+    initialData: unscoped ? initialPage : undefined,
   })
 
-  // Full workspace browser (issue #191): server-side detector/harness
-  // filters with per-detector counts over the narrowed set, paged by
-  // offset. Counts ignore paging, so chips stay comparable across pages.
-  const filtersActive = detectorFilter !== undefined || harnessFilter !== undefined
+  // Full workspace browser (issue #191): server-side scope and detector
+  // filters with per-detector counts over the narrowed set, paged by offset.
+  // Counts ignore paging, so chips stay comparable across pages.
   const {
     data: pageData,
     isLoading: loadingBrowser,
@@ -800,30 +618,45 @@ export function ContextDoctor({
     error: browserError,
     refetch: refetchBrowser,
   } = useQuery({
-    queryKey: ['kyber-findings-browser', detectorFilter ?? '', harnessFilter ?? '', offset],
+    queryKey: [
+      'kyber-findings-browser',
+      detectorFilter ?? '',
+      harnessFilter ?? '',
+      sessionId ?? '',
+      offset,
+    ],
     queryFn: () =>
       fetchFindings({
         ...(detectorFilter !== undefined ? { detector: detectorFilter } : {}),
         ...(harnessFilter !== undefined ? { harness: harnessFilter } : {}),
+        ...(sessionId !== undefined ? { sessionId } : {}),
         limit: FINDINGS_PAGE_SIZE,
         offset,
       }),
-    initialData: offset === 0 && !filtersActive ? initialPage : undefined,
+    initialData: offset === 0 && detectorFilter === undefined && unscoped ? initialPage : undefined,
     // Keep the current list on screen while the next page loads (review
     // M1): without this every offset change flashes a skeleton and the
     // heading reads "(0)" mid-flight. Scoped to unchanged filters: after
-    // resetBrowse the old filter's page must not pose as the new filter's.
+    // resetBrowse the old scope's page must not pose as the new scope's.
     placeholderData: (previousData, previousQuery) => {
       const prevKey = previousQuery?.queryKey as readonly unknown[] | undefined
       const nextKey: readonly unknown[] = [
         'kyber-findings-browser',
         detectorFilter ?? '',
         harnessFilter ?? '',
+        sessionId ?? '',
         offset,
       ]
       return shouldKeepPreviousData(prevKey, nextKey) ? previousData : undefined
     },
   })
+
+  // A scope change empties the retained pages. Rendering is already safe
+  // without it (pages are tagged), but keeping rows the server will never
+  // serve again under this scope is memory the operator cannot see the use of.
+  useEffect(() => {
+    setAppended([])
+  }, [browseScope])
 
   // Accumulate each page as it arrives, first page included, keyed by the
   // offset the server actually served (review M1): storing placeholder data
@@ -843,50 +676,41 @@ export function ContextDoctor({
     }
     setAppended((prev) => nextAccumulated(prev, browseScope, pageData))
   }, [pageData, isPlaceholderData, browseScope, appended])
-  // Coverage payload for the T9 ingest panel: window, receiver activity,
-  // quarantine reasons, checkpoint statuses. Optional initial data keeps the
-  // panel deterministic under test; otherwise the live endpoint supplies it.
-  // A refresh-only initial value feeds the T10 banner below without
-  // inventing ingest facts — the panel renders only for the full payload.
-  const { data: coverageData } = useQuery({
-    queryKey: ['kyber-coverage'],
-    queryFn: fetchCoverage,
-    initialData: isFullCoverage(initialCoverage) ? initialCoverage : undefined,
-  })
-  const refreshFacts: KyberCoverageRefresh | undefined =
-    coverageData?.refresh ?? (isFullCoverage(initialCoverage) ? initialCoverage.refresh : initialCoverage)
-  // T10's matrix banner owns the window wording (ScorecardMatrix `coverage`
-  // prop); T9 only feeds it the refresh facts, which read identically from
-  // the full payload's `refresh` slice or from a refresh-only value.
-  // `undefined` (not fetched) renders no banner — absence is never invented.
-  const matrixCoverage: ScorecardCoverageWindow | undefined =
-    refreshFacts === undefined
-      ? undefined
-      : {
-          historyWeeks: refreshFacts.historyWeeks,
-          coveredFrom: refreshFacts.coveredFrom,
-          coveredThrough: refreshFacts.coveredThrough,
-          // A fresh store (null) must not read as a legacy tracked run in
-          // the banner — the window formatter distinguishes the two.
-          lastSuccessAt: refreshFacts.lastSuccessAt,
-        }
 
-  const harnesses = useMemo((): ScorecardMatrixRow[] => {
-    const fromRollups = (harnessesData ?? []).filter((h) => isObservedHarness(h.harness))
-    if (fromRollups.length > 0) {
-      return fromRollups.map((row) => ({
-        ...row,
-        sessionCount: row.sessionCount,
-        sampleCount: row.sessionCount ?? row.sampleCount,
-      }))
-    }
+  // Canonical sessions for the selector. The scope filter runs here, over the
+  // unfiltered list, so a harness change never fires a second request for a
+  // list this page already holds.
+  const {
+    data: sessionData,
+    isLoading: loadingSessions,
+    isError: sessionsError,
+    refetch: refetchSessions,
+  } = useQuery({ queryKey: ['kyber-sessions'], queryFn: () => fetchKyberSessions() })
 
-    const observed = [...new Set((runsData ?? []).map((run) => run.harness).filter(isObservedHarness))]
-    return observed.map((harness) => ({
-      harness,
-      name: harnessDisplayName(harness),
-    }))
-  }, [harnessesData, runsData])
+  const sessions = useMemo(
+    () => sessionsInScope(sessionData, harnessFilter),
+    [sessionData, harnessFilter],
+  )
+  const sessionLabels = useMemo(() => {
+    const labels = new Map<string, string>()
+    for (const session of sessions) labels.set(sessionIdOf(session), sessionOptionLabel(session))
+    return labels
+  }, [sessions])
+
+  // A session the current harness does not hold would scope the findings to
+  // something the selector cannot even show. It is cleared, and the owner is
+  // told, rather than left filtering by a session outside the scope.
+  useEffect(() => {
+    if (sessionId === undefined || sessionData === undefined || sessionsError) return
+    if (sessions.some((session) => sessionIdOf(session) === sessionId)) return
+    setLocalSession(undefined)
+    onSessionChange?.(undefined)
+  }, [sessionId, sessionData, sessionsError, sessions, onSessionChange])
+
+  function chooseSession(next: string | undefined) {
+    setLocalSession(next)
+    onSessionChange?.(next)
+  }
 
   const headline: KyberFinding[] = headlineData?.findings ?? []
   // Every page fetched so far for this filter scope, oldest first.
@@ -908,7 +732,6 @@ export function ContextDoctor({
   // Never a fabricated 0: while the envelope is unavailable the banner says
   // the count is unknown rather than that nothing is suppressed.
   const unknownWindowSessions = pageData?.unknownWindowSessions ?? retained?.unknownWindowSessions
-  const loadingMatrix = loadingHarnesses || (!harnessesData?.length && loadingRuns)
 
   return (
     <div className="flex flex-col gap-density-stack" data-testid="page-context-doctor">
@@ -929,14 +752,45 @@ export function ContextDoctor({
         </div>
       </div>
 
-      {coverageData && (
-        <CoverageIngestPanel coverage={coverageData} harnesses={harnessesData ?? []} />
-      )}
-
-      {/* The maintenance surface sits beside the ingest panel: pause, manual
-          refresh, folder import and cadence are the same operator decisions as
-          the clean control, read from the host's own status. */}
-      <MaintenancePanel harnesses={harnessesData ?? []} />
+      {/* Session scope. The harness is chosen above this page, so the one
+          selector here is the one dimension this page narrows itself: all
+          sessions in scope by default, one session on request. */}
+      <div className="flex flex-wrap items-center gap-density-cluster">
+        <label className="text-density-xs text-muted-foreground" htmlFor="context-doctor-session">
+          Session
+        </label>
+        <select
+          id="context-doctor-session"
+          data-testid="context-doctor-session-select"
+          className="text-density-xs text-foreground"
+          value={sessionId ?? ''}
+          onChange={(event) => chooseSession(event.target.value === '' ? undefined : event.target.value)}
+        >
+          <option value="">All sessions</option>
+          {sessions.map((session) => (
+            <option key={sessionIdOf(session)} value={sessionIdOf(session)}>
+              {sessionOptionLabel(session)}
+            </option>
+          ))}
+        </select>
+        <p
+          data-testid="context-doctor-session-scope-note"
+          className="text-density-xs text-muted-foreground"
+        >
+          {sessionsError
+            ? 'Sessions could not be read, so the scope stays at all sessions.'
+            : loadingSessions
+              ? 'Reading sessions…'
+              : sessionId === undefined
+                ? `Findings cover all sessions in ${harnessFilter === undefined ? 'every harness' : harnessDisplayName(harnessFilter)}.`
+                : `Findings cover one session in ${harnessFilter === undefined ? 'every harness' : harnessDisplayName(harnessFilter)}.`}
+        </p>
+        {sessionsError && (
+          <button type="button" data-testid="context-doctor-session-retry" onClick={() => void refetchSessions()}>
+            Retry
+          </button>
+        )}
+      </div>
 
       {loadingFindings ? (
         <Skeleton className="h-44 w-full" />
@@ -960,15 +814,13 @@ export function ContextDoctor({
         detectorCounts={detectorCounts}
         unknownWindowSessions={unknownWindowSessions}
         detectorFilter={detectorFilter}
-        harnessFilter={harnessFilter}
-        harnesses={harnesses}
+        scopeNote={scopeNoteFor(harnessFilter, sessionId, sessionId === undefined ? undefined : sessionLabels.get(sessionId))}
         loading={loadingBrowser}
         error={browserError ? 'findings-load-failed' : null}
         onRetry={() => {
           void refetchBrowser()
         }}
         onDetectorChange={(detector) => resetBrowse(() => setDetectorFilter(detector))}
-        onHarnessChange={(harness) => resetBrowse(() => setHarnessFilter(harness))}
         onLoadMore={() => {
           // The offset follows the extent the server served, not the rows
           // painted: `browserRows` dedupes an overlap by id, and paging from
@@ -979,13 +831,6 @@ export function ContextDoctor({
         onSelectFinding={onSelectFinding}
         onSelectTurn={(turnIdx, execId) => onSelectTurn?.(turnIdx, execId)}
         onSelectExecution={(execId) => onSelectRun?.(execId)}
-      />
-
-      <ScorecardMatrix
-        rows={harnesses}
-        loading={loadingMatrix}
-        coverage={matrixCoverage}
-        onSelectHarness={onSelectHarness}
       />
     </div>
   )
