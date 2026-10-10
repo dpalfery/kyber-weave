@@ -235,6 +235,60 @@ public sealed class DistributionManifestTests : IDisposable
     // ---- npm lib/platform.js ----
 
     [Theory]
+    [InlineData("arbiter", "win-x64", "kyber-weave-arbiter-win-x64.zip")]
+    [InlineData("mcp", "osx-arm64", "kyber-weave-mcp-osx-arm64.tar.gz")]
+    [InlineData("cli", "linux-x64", "kyber-weave-linux-x64.tar.gz")]
+    public void NpmPlatformModuleResolvesEveryKnownTool(
+        string tool,
+        string rid,
+        string expectedArchive)
+    {
+        string node = RequireRuntime("node");
+
+        ProcessStartInfo startInfo = CreateNodeStartInfo(
+            node,
+            "const platform = require(process.argv[1]); " +
+            "process.stdout.write(platform.assetArchiveName(process.argv[2], process.argv[3]));");
+        startInfo.ArgumentList.Add(NpmPlatformModulePath);
+        startInfo.ArgumentList.Add(tool);
+        startInfo.ArgumentList.Add(rid);
+
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+
+        Assert.True(
+            result.ExitCode == 0,
+            $"node failed resolving {tool}: {result.StandardError.Trim()}");
+        Assert.Equal(expectedArchive, result.StandardOutput.Trim());
+    }
+
+    [Theory]
+    [InlineData("bogus")]
+    [InlineData("CLI")]
+    [InlineData("kilo")]
+    [InlineData("")]
+    public void NpmPlatformModuleThrowsOnAnUnknownToolRatherThanResolvingTheCli(string tool)
+    {
+        // The fallback resolved every typo to the CLI binary, so a caller naming a tool
+        // that does not exist quietly downloaded and launched kyber-weave instead.
+        string node = RequireRuntime("node");
+
+        ProcessStartInfo startInfo = CreateNodeStartInfo(
+            node,
+            "const platform = require(process.argv[1]); " +
+            "try { process.stdout.write(platform.assetArchiveName(process.argv[2], 'linux-x64')); } " +
+            "catch (e) { process.stdout.write('THREW: ' + e.message); }");
+        startInfo.ArgumentList.Add(NpmPlatformModulePath);
+        startInfo.ArgumentList.Add(tool);
+
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+
+        Assert.True(
+            result.ExitCode == 0,
+            $"node failed evaluating lib/platform.js: {result.StandardError.Trim()}");
+        Assert.StartsWith("THREW:", result.StandardOutput.Trim(), StringComparison.Ordinal);
+    }
+
+    [Theory]
     [InlineData("linux-x64", "kyber-weave-arbiter", "kyber-weave-arbiter-linux-x64.tar.gz")]
     [InlineData("linux-arm64", "kyber-weave-arbiter", "kyber-weave-arbiter-linux-arm64.tar.gz")]
     [InlineData("osx-x64", "kyber-weave-arbiter", "kyber-weave-arbiter-osx-x64.tar.gz")]
