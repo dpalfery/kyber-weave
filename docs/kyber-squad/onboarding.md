@@ -319,7 +319,7 @@ initialise the destination via shell (e.g. `touch <file>`) before editing.
 renders from its shared profile and keeps `ask` narrowing to withheld. If a plan or spec write still
 fails on a missing file, create the empty file and re-run the request — the conductor does this as
 fallback when the harness withholds file creation from subagents. See
-[ADR 0033](../adr/0028-devin-target-scoped-authoring-capability-profiles.md).
+[ADR 0028](../adr/0028-devin-target-scoped-authoring-capability-profiles.md).
 
 **Conductor and delegation**: Devin has no primary-agent primitive, so the conductor is
 deployed as the skill `conductor` — invoke it as `/conductor` — and runs in the main Devin Local
