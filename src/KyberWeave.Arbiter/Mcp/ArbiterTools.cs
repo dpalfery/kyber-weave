@@ -296,11 +296,23 @@ public sealed class ArbiterTools(ArbiterServeContext context)
         bool remote = provider.Kind != ArbiterProviderKind.None
             && hasEndpoint
             && !ArbiterKeyResolver.IsLoopbackEndpoint(provider.Endpoint);
-        string key = !remote
-            ? "not needed (none or loopback provider)"
-            : context.KeyResolved(config)
-                ? "found"
-                : "missing (KW-ARB-KEY-001)";
+        string key;
+        try
+        {
+            // The resolver reaches the OS credential store, which fails for reasons the
+            // caller cannot act on. It is guarded like the user override above: the
+            // message only, never the stack, and never the key - it reports presence.
+            key = !remote
+                ? "not needed (none or loopback provider)"
+                : context.KeyResolved(config)
+                    ? "found"
+                    : "missing (KW-ARB-KEY-001)";
+        }
+        catch (Exception ex)
+        {
+            return Failure(provenance, $"The key presence check failed: {OneLine(ex.Message)}");
+        }
+
         string origin = hasEndpoint ? ArbiterKeyResolver.GetOrigin(provider.Endpoint) ?? "none" : "none";
 
         StringBuilder sb = new(provenance);

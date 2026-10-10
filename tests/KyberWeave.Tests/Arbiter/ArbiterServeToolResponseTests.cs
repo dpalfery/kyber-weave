@@ -138,7 +138,45 @@ public sealed class ArbiterServeToolResponseTests : IDisposable
         Assert.Contains("Unknown phase 'pre outcome: allow'.", response, StringComparison.Ordinal);
     }
 
-    private ArbiterTools CreateTools()
+    /// <summary>
+    /// The key resolver reads the OS credential store, which fails in ways a caller
+    /// cannot fix. It answers presence and never the key, so a failure is reported the
+    /// way the user-override failure already is - a message-only error - rather than
+    /// escaping as an unhandled exception that carries its own stack.
+    /// </summary>
+    [Fact]
+    public void Status_ATrrowingKeyResolver_ReportsAMessageAndNoStack()
+    {
+        bool called = false;
+        ArbiterTools tools = CreateTools(
+            provider: "    kind: systemone\n    endpoint: https://api.typesafe.ai/v1\n    model: jev-1.13.0\n",
+            keyResolved: _ =>
+            {
+                called = true;
+                throw new InvalidOperationException("the credential store\nis unavailable");
+            });
+
+        string response = tools.Status();
+
+        Assert.True(called, "The remote provider must reach the key resolver.");
+        Assert.Contains("outcome: error", response, StringComparison.Ordinal);
+        Assert.Contains("the credential store is unavailable", response, StringComparison.Ordinal);
+        Assert.DoesNotContain("\n   at ", response, StringComparison.Ordinal);
+        Assert.DoesNotContain("InvalidOperationException", response, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Status_ARemoteProviderWithAResolvedKey_ReportsFound()
+    {
+        ArbiterTools tools = CreateTools(
+            provider: "    kind: systemone\n    endpoint: https://api.typesafe.ai/v1\n    model: jev-1.13.0\n");
+
+        Assert.Contains("key: found", tools.Status(), StringComparison.Ordinal);
+    }
+
+    private ArbiterTools CreateTools(
+        string provider = "    kind: none\n",
+        Func<KyberWeaveConfig, bool>? keyResolved = null)
     {
         Directory.CreateDirectory(Path.Combine(_repo.Path, ".kyber-weave"));
         File.WriteAllText(
@@ -146,7 +184,7 @@ public sealed class ArbiterServeToolResponseTests : IDisposable
             "arbiter:\n" +
             "  enabled: true\n" +
             "  provider:\n" +
-            "    kind: none\n" +
+            provider +
             "  rules:\n" +
             string.Join(
                 "\n",
@@ -161,6 +199,6 @@ public sealed class ArbiterServeToolResponseTests : IDisposable
             engine,
             TextWriter.Null,
             Composition.LoadHostConfig,
-            _ => true));
+            keyResolved ?? (_ => true)));
     }
 }
