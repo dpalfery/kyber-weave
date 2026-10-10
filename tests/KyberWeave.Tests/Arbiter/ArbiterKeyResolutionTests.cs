@@ -154,6 +154,37 @@ public sealed class ArbiterKeyResolutionTests
     }
 
     [Fact]
+    public void MacRead_TreatsTheItemNotFoundStatusAsAnAbsentKey()
+    {
+        // `security find-generic-password` exits 44 (errSecItemNotFound) when nothing
+        // matches. Verified against the real tool: it exits 44, not 1.
+        FakeCredentialProcessRunner runner = new();
+        runner.NextResult = new ProcessResult(44, string.Empty, "security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain.");
+        MacKeychainCredentialStore store = new(runner);
+
+        Assert.Null(store.Read("https://api.typesafe.ai"));
+    }
+
+    [Theory]
+    // Every other non-zero exit is a failure of the lookup itself -- a locked keychain, a
+    // denied ACL, a broken security binary. Reading those as "no key" tells the user to
+    // store one and silently drops the key on the floor.
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(36)]
+    [InlineData(127)]
+    public void MacRead_RaisesRatherThanReportingAnAbsentKey(int exitCode)
+    {
+        FakeCredentialProcessRunner runner = new();
+        runner.NextResult = new ProcessResult(exitCode, string.Empty, "security: some other failure");
+        MacKeychainCredentialStore store = new(runner);
+
+        InvalidOperationException error = Assert.Throws<KeychainUnavailableException>(
+            () => store.Read("https://api.typesafe.ai"));
+        Assert.Contains(exitCode.ToString(System.Globalization.CultureInfo.InvariantCulture), error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void MacWriteKeepsKeyOnStdinOnly()
     {
         FakeCredentialProcessRunner runner = new();

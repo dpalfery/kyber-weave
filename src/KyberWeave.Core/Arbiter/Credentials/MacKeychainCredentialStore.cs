@@ -15,6 +15,12 @@ public sealed class MacKeychainCredentialStore : ICredentialStore
 {
     private const string Service = "kyber-weave-arbiter";
 
+    /// <summary>
+    /// <c>security find-generic-password</c> exits 44 (errSecItemNotFound) when no entry
+    /// matches. Verified against the real tool rather than assumed.
+    /// </summary>
+    private const int ItemNotFoundExitCode = 44;
+
     private readonly ICredentialProcessRunner _runner;
 
     /// <summary>Creates a store that runs <c>security</c> through <paramref name="runner"/>.</summary>
@@ -43,9 +49,19 @@ public sealed class MacKeychainCredentialStore : ICredentialStore
         startInfo.ArgumentList.Add("-w");
 
         ProcessResult result = _runner.Run(startInfo, string.Empty);
+        if (result.ExitCode == ItemNotFoundExitCode)
+        {
+            // errSecItemNotFound: nothing matched these attributes, so there is no key.
+            // This is the only non-zero exit that means "absent"; every other one is a
+            // failed lookup and must not be reported to the operator as a missing key.
+            return null;
+        }
+
         if (result.ExitCode != 0)
         {
-            return null;
+            throw new KeychainUnavailableException(
+                $"The macOS keychain read failed with exit code {result.ExitCode}: " +
+                $"{OneLine(result.StandardError)}");
         }
 
         string output = result.StandardOutput.TrimEnd('\r', '\n');
@@ -94,6 +110,12 @@ public sealed class MacKeychainCredentialStore : ICredentialStore
 
     private static bool HasNewline(string value) =>
         value.Contains('\n', StringComparison.Ordinal) || value.Contains('\r', StringComparison.Ordinal);
+
+    private static string OneLine(string value) =>
+        value.Replace("\r\n", " ", StringComparison.Ordinal)
+            .Replace('\n', ' ')
+            .Replace('\r', ' ')
+            .Trim();
 
     private static string Quote(string value) =>
         "\"" + value.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal) + "\"";
