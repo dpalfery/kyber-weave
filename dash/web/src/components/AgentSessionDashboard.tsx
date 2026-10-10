@@ -8,7 +8,7 @@ import { SessionInspectorDrawer } from './SessionInspectorDrawer.js'
 import { SessionSpendCharts, CONTEXT_BUCKET_LABELS } from './SessionSpendCharts.js'
 import { SchemaCostRanking, type SchemaCostAnalysis, type SchemaCostToolRow } from './SchemaCostRanking.js'
 import { TimelineView, type TimelineNode, type CostBlock } from './analysis/TimelineView.js'
-import { SessionCostPanel } from './SessionCostPanel.js'
+import { SessionCostPanel, SessionTokenTotals } from './SessionCostPanel.js'
 import { findContextTurn, findTurnByTransport } from '../lib/kyberApi.js'
 import type {
   KyberContextBucket,
@@ -1064,6 +1064,11 @@ export function AgentSessionContent({
             </div>
           </Card>
         </div>
+
+        {/* Moved, not duplicated: the same Underlying Token Totals section from
+            the lower cost panel, kept inside Session Overview above the later
+            detail sections. */}
+        <SessionTokenTotals summary={u} />
       </div>
 
       {/* ---------------------------------------------------------------------

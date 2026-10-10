@@ -433,6 +433,8 @@ describe('AgentSessionDashboard: Assembly and Subpanels', () => {
     expect(html).toContain('$0.42')
 
     expect(html.indexOf('Session Overview')).toBeLessThan(html.indexOf('Token Spend per Turn'))
+    expect(html.indexOf('Underlying Token Totals')).toBeGreaterThan(html.indexOf('Session Overview'))
+    expect(html.indexOf('Underlying Token Totals')).toBeLessThan(html.indexOf('Token Spend per Turn'))
     expect(html.indexOf('Token Spend per Turn')).toBeLessThan(html.indexOf('Context Composition'))
     expect(html.indexOf('Context Composition')).toBeLessThan(
       html.indexOf('3 · Tool &amp; Schema Cost Ranking')
@@ -496,6 +498,36 @@ describe('AgentSessionDashboard: Assembly and Subpanels', () => {
     expect(html).toContain('Tools Offered')
     expect(html).toContain('3')
     expect(html).toContain('1 never called')
+  })
+
+  it('renders Underlying Token Totals inside Session Overview, above later detail sections, with no lower duplicate', () => {
+    const html = renderHtml(<AgentSessionDashboard session={sampleSession} />)
+
+    // The moved section renders with its existing labels and figures.
+    expect(html).toContain('Underlying Token Totals')
+    expect(html).toContain('data-testid="cost-tokens-section"')
+    expect(html).toContain('data-testid="token-total-input"')
+
+    const overviewStart = html.indexOf('data-testid="overview-strip-section"')
+    const overviewEnd = html.indexOf('data-testid="spend-composition-section"')
+    const totalsIndex = html.indexOf('data-testid="cost-tokens-section"')
+    expect(overviewStart).toBeGreaterThan(-1)
+    expect(overviewEnd).toBeGreaterThan(-1)
+    expect(totalsIndex).toBeGreaterThan(-1)
+    // Inside the Session Overview grouping, before the later detail sections.
+    expect(totalsIndex).toBeGreaterThan(overviewStart)
+    expect(totalsIndex).toBeLessThan(overviewEnd)
+    expect(totalsIndex).toBeLessThan(html.indexOf('data-testid="tool-schema-section"'))
+    expect(totalsIndex).toBeLessThan(html.indexOf('data-testid="execution-timeline-section"'))
+
+    // Moved, not duplicated: exactly one totals section, and the lower cost
+    // panel keeps its cost content without a second copy.
+    expect(html.split('data-testid="cost-tokens-section"')).toHaveLength(2)
+    const costPanelIndex = html.indexOf('data-testid="session-cost-panel"')
+    expect(costPanelIndex).toBeGreaterThan(-1)
+    expect(costPanelIndex).toBeGreaterThan(totalsIndex)
+    expect(html.slice(costPanelIndex)).not.toContain('data-testid="cost-tokens-section"')
+    expect(html.slice(costPanelIndex)).toContain('Session Cost &amp; Token Accounting')
   })
 
   it('marks an unreported tool-call counter unavailable instead of rendering zero', () => {
