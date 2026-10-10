@@ -1,3 +1,6 @@
+using System.Text.Json;
+using System.Text.RegularExpressions;
+
 namespace KyberWeave.Core.Squad.Rendering;
 
 /// <summary>
@@ -24,11 +27,32 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// </remarks>
 public static class ArbiterPluginShim
 {
+    /// <summary>The shape every harness token has: lowercase, digits and hyphens.</summary>
+    private const string TokenPatternText = "^[a-z0-9-]+$";
+
+    private static readonly Regex TokenPattern = new(TokenPatternText, RegexOptions.CultureInvariant);
     /// <summary>Renders the plugin shim for the given harness token (for example <c>opencode</c>).</summary>
+    /// <remarks>
+    /// The token reaches the generated source twice, so it is both constrained and
+    /// encoded. <c>^[a-z0-9-]+$</c> is the shape every harness token already has, and it
+    /// excludes the quote that would otherwise close the surrounding TypeScript string
+    /// literal. The value is then written as a JSON string, so even a token that slipped
+    /// through could not break out of the literal it lands in.
+    /// </remarks>
+    /// <exception cref="ArgumentException">Thrown when the token is not a plain lowercase token.</exception>
     public static string Render(string harnessToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(harnessToken);
+        if (!TokenPattern.IsMatch(harnessToken))
+        {
+            throw new ArgumentException(
+                $"Arbiter plugin harness token '{harnessToken}' is not a plain lowercase " +
+                $"token: it must match {TokenPatternText}.",
+                nameof(harnessToken));
+        }
 
+        // JSON string encoding, so the token lands inside the TypeScript literal as data.
+        string literal = JsonSerializer.Serialize(harnessToken);
         return $$"""
             import type { Plugin } from "@opencode-ai/plugin";
 
@@ -41,7 +65,7 @@ public static class ArbiterPluginShim
             async function runArbiterHook(envelope: unknown, cwd: string): Promise<ArbiterDecision> {
               let proc: ReturnType<typeof Bun.spawn>;
               try {
-                proc = Bun.spawn(["kyber-weave-arbiter", "hook", "--harness", "{{harnessToken}}"], {
+                proc = Bun.spawn(["kyber-weave-arbiter", "hook", "--harness", {{literal}}], {
                   stdin: "pipe",
                   stdout: "pipe",
                   cwd,
@@ -64,7 +88,7 @@ public static class ArbiterPluginShim
               "tool.execute.before": async (input, output) => {
                 const envelope = {
                   schema: "kyber-arbiter.plugin-event/v1",
-                  harness: "{{harnessToken}}",
+                  harness: {{literal}},
                   phase: "before",
                   tool: input.tool,
                   "call-id": input.callID,
@@ -83,7 +107,7 @@ public static class ArbiterPluginShim
               "tool.execute.after": async (input, output) => {
                 const envelope = {
                   schema: "kyber-arbiter.plugin-event/v1",
-                  harness: "{{harnessToken}}",
+                  harness: {{literal}},
                   phase: "after",
                   tool: input.tool,
                   "call-id": input.callID,
