@@ -245,7 +245,7 @@ public sealed class FactoryRenderer : ISquadRenderer
 
     /// <summary>
     /// Splits an optional trailing <c>[reasoningEffort=&lt;level&gt;]</c> suffix off a model value.
-    /// Factory's droid frontmatter accepts only <c>low | medium | high</c> (docs.factory.com,
+    /// Factory's droid frontmatter accepts only <c>low | medium | high</c> (docs.factory.ai,
     /// subagents), so any other level throws <see cref="SquadRenderValidationException"/>.
     /// </summary>
     internal static (string BareModel, string? ReasoningEffort) ParseReasoningEffortSuffix(string modelValue)
@@ -270,7 +270,16 @@ public sealed class FactoryRenderer : ISquadRenderer
                 $"Invalid reasoningEffort '{level}' in model value '{modelValue}': Factory accepts low, medium, or high.");
         }
 
-        return (modelValue[..start], level);
+        string bareModel = modelValue[..start];
+        if (string.IsNullOrWhiteSpace(bareModel) ||
+            bareModel.Contains('[', StringComparison.Ordinal) ||
+            bareModel.Contains(']', StringComparison.Ordinal))
+        {
+            throw new SquadRenderValidationException(
+                $"Malformed model value '{modelValue}': the model id before the reasoningEffort suffix must be non-blank and free of brackets (stacked suffixes are not allowed).");
+        }
+
+        return (bareModel, level);
     }
 
     private static string? ResolveFactoryModel(

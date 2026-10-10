@@ -23,6 +23,7 @@ namespace KyberWeave.Tests;
 /// </remarks>
 public sealed class FactoryRendererContractTests : IDisposable
 {
+    // Mirrors FactoryRenderer's allow-list (Factory accepts only these); update both together.
     private static readonly string[] AllowedReasoningEfforts = ["low", "medium", "high"];
 
     private static readonly string ProductRoot =
@@ -131,6 +132,17 @@ public sealed class FactoryRendererContractTests : IDisposable
         await Assert.ThrowsAsync<ArgumentException>(() => renderer.RenderAsync(request));
     }
 
+    [Theory]
+    [InlineData("glm-5.3[reasoningEffort=max]")]
+    [InlineData("glm-5.3[reasoningEffort=high][reasoningEffort=low]")]
+    [InlineData("[reasoningEffort=high]")]
+    [InlineData(" [reasoningEffort=high]")]
+    [InlineData("glm-5.3[reasoningEffort=high")]
+    public void ParseReasoningEffortSuffix_RejectsMalformedValues(string value)
+    {
+        Assert.Throws<SquadRenderValidationException>(() => FactoryRenderer.ParseReasoningEffortSuffix(value));
+    }
+
     [Fact]
     public async Task RenderAsync_Factory_RendersTheRealCanonicalCorpus()
     {
@@ -234,18 +246,31 @@ public sealed class FactoryRendererContractTests : IDisposable
                     {
                         Assert.Equal(expectedEffort, RequireScalar(frontmatter, "reasoningEffort", agent.Name));
                     }
+                    else
+                    {
+                        Assert.False(
+                            frontmatter.Children.ContainsKey(new YamlScalarNode("reasoningEffort")),
+                            $"Agent '{agent.Name}' should omit 'reasoningEffort' (no suffix on the factory model).");
+                    }
                 }
             }
             else if (!string.Equals(modelProfile.Default, "inherit", StringComparison.Ordinal) &&
                      !string.IsNullOrWhiteSpace(modelProfile.Default))
             {
-                Assert.Equal(modelProfile.Default, RequireScalar(frontmatter, "model", agent.Name));
+                (string defaultModel, string? defaultEffort) = FactoryRenderer.ParseReasoningEffortSuffix(modelProfile.Default);
+                Assert.Equal(defaultModel, RequireScalar(frontmatter, "model", agent.Name));
+                Assert.Equal(
+                    defaultEffort is not null,
+                    frontmatter.Children.ContainsKey(new YamlScalarNode("reasoningEffort")));
             }
             else
             {
                 Assert.False(
                     frontmatter.Children.ContainsKey(new YamlScalarNode("model")),
                     $"Agent '{agent.Name}' should omit 'model' (profile default is inherit).");
+                Assert.False(
+                    frontmatter.Children.ContainsKey(new YamlScalarNode("reasoningEffort")),
+                    $"Agent '{agent.Name}' should omit 'reasoningEffort' (profile default is inherit).");
             }
 
             string expectedBody = agent.InstructionBody.Replace("\r\n", "\n", StringComparison.Ordinal);
