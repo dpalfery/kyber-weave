@@ -191,7 +191,19 @@ public sealed class FactoryRenderer : ISquadRenderer
             SquadResourceProjection.Append(files, principal, skill.Resources);
         }
 
-        return Task.FromResult(new SquadRenderResult(true, files, degradations, [], [], BuildArbiterBlocks(request)));
+        // Absence and emptiness are different claims here: FactoryHooksShadowing reads
+        // null as "no block was rendered" and an empty list as "a block was rendered
+        // and it held nothing", and only the first is true when the wiring is absent.
+        // Antigravity and Devin normalise the same way; this renderer's own byte-for-byte
+        // claim is about Files, which is untouched either way.
+        IReadOnlyList<SquadRenderedBlock> blocks = BuildArbiterBlocks(request);
+        return Task.FromResult(new SquadRenderResult(
+            true,
+            files,
+            degradations,
+            [],
+            [],
+            blocks.Count > 0 ? blocks : null));
     }
 
     /// <summary>
