@@ -41,6 +41,7 @@ const NOOP_COMMANDS: TrayCommands = {
   openView: () => {},
   setSettings: () => {},
   quit: () => {},
+  cleanDatabase: () => {},
 }
 
 function viewState(overrides: Partial<ViewState> = {}): ViewState {

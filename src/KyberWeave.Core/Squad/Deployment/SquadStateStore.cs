@@ -353,7 +353,7 @@ public sealed class SquadStateStore
     /// Receipts for other project roots that share this machine's Global state directory.
     /// Two <c>--global</c> installs must not both own one harness file.
     /// </summary>
-    internal IReadOnlyList<SquadReceipt> ListOtherGlobalReceipts(string targetRoot)
+    public IReadOnlyList<SquadReceipt> ListOtherGlobalReceipts(string targetRoot)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(targetRoot);
 

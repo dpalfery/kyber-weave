@@ -1,5 +1,5 @@
 ---
-id: adr/0029-squad-owned-blocks-in-shared-hook-files
+id: adr/0034-squad-owned-blocks-in-shared-hook-files
 title: Squad owns marked entries in shared hook files
 doc-type: adr
 status: current
@@ -8,14 +8,14 @@ owner: dpalfery
 last-reviewed: 2026-10-09
 ---
 
-# ADR 0029: Squad owns marked entries in shared hook files
+# ADR 0034: Squad owns marked entries in shared hook files
 
 ## Status
 
 Accepted, 2026-10-09. Records owner decisions D8 (2026-10-01) and D25 (2026-10-03):
 Squad writes receipt-tracked blocks into hook files the user also owns, identified by
 the hook command signature. This is the exception to the owned-files-not-settings
-boundary that [ADR 0028](0028-kyber-arbiter-three-step-decision-gates.md) decision 6
+boundary that [ADR 0033](0033-kyber-arbiter-three-step-decision-gates.md) decision 6
 announces and defers here, as Req 8.3 requires.
 
 ## Context
@@ -122,7 +122,7 @@ shapes — `.factory/hooks.json`, `.devin/hooks.v1.json`, and the Antigravity
 
 - [ADR 0026](0026-kyber-utilities-owned-files-not-settings.md) — the sibling
   owned-files-not-settings boundary this decision is the exception to
-- [ADR 0028](0028-kyber-arbiter-three-step-decision-gates.md) — decision 6, which
+- [ADR 0033](0033-kyber-arbiter-three-step-decision-gates.md) — decision 6, which
   announces this exception and defers it here
 - [Kyber-Squad architecture](../kyber-squad/architecture.md) — receipt v3 and the
   block splice

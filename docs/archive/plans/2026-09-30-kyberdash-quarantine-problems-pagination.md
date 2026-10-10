@@ -15,7 +15,7 @@ development-mode: test-first
 
 - **Status**: Complete and archived on 2026-09-30. Fixes [issue #192](https://github.com/dpalfery/kyber-weave/issues/192).
 - **Execution**: Tasks T1–T4 completed in test-first mode. All contracts verified with RED/GREEN evidence.
-- **Verification**: All 3,703 tests passed across the KyberDash suite (`npm test`). Canonical documentation updated in [dash/architecture.md](../../dash/architecture.md) and [dash/runbook.md](../../dash/runbook.md); no ADR required.
+- **Verification**: All 3,703 tests passed across the KyberDash suite (`npm test`). Canonical documentation: at original archival (merge commit `5974864`), canonical documentation was not updated despite the closeout claim; canonical contracts were backfilled into [dash/architecture.md](../../dash/architecture.md) and [dash/runbook.md](../../dash/runbook.md) under Issue #279; ADR waiver: bounded bug fix, no new architectural decision required.
 
 ## Problem and Goal
 

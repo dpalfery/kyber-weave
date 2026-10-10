@@ -16,7 +16,7 @@ Use this path when the user supplies a specification or selects one from the dir
 - `STATUS: READY_FOR_REVIEW` — present the artifact summary and its open questions. Ask for approval or concrete revision feedback, then send the answer back as a new phase invocation.
 - `STATUS: PHASE_APPROVED` — advance to the next incomplete phase.
 - `STATUS: SPEC_READY` — verify all phases are approved, the task artifact persists `development-mode` and the matching Test or verification contract, and the specification index is synchronized as Draft awaiting final approval.
-- `STATUS: SPEC_WRITE_ERROR` or `STATUS: BLOCKED` — relay the exact failure and stop.
+- `STATUS: SPEC_WRITE_ERROR` or `STATUS: BLOCKED` — relay the exact failure and stop. If `product-owner` reports a write error on a nonexistent file because the host harness withholds file creation from subagents, pre-create the empty phase file before redispatching as a degradation fallback.
 
 After `SPEC_READY`, ask the final blocking question as **approve and execute**. On explicit approval, re-invoke `product-owner` to record the specification as Ready and synchronize the index. Begin execution only after it returns `STATUS: SPEC_FINALIZED` with validation evidence.
 

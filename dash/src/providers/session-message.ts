@@ -8,7 +8,10 @@ import type { ParsedProviderCall } from './types.js'
 export type MessageData = {
   role: string
   modelID?: string
-  model?: string
+  // Kilo (and some OpenCode-shaped stores) persist model as `{ id, providerID }`
+  // rather than a string; the object branch in `buildAssistantCall` is live
+  // only when this union includes that shape.
+  model?: string | { id?: string; providerID?: string }
   cost?: number
   tokens?: {
     input?: number
@@ -22,6 +25,13 @@ export type MessageData = {
     cache_creation_input_tokens?: number
     cache_read_input_tokens?: number
   }
+  // Divergent stores (e.g. KiloCode) carry flat token keys instead of a `tokens`/`usage`
+  // object; without these the turn silently parses as zero tokens (issue #227).
+  tokens_input?: number
+  tokens_output?: number
+  tokens_reasoning?: number
+  tokens_cache_read?: number
+  tokens_cache_write?: number
 }
 
 export type PartData = {
@@ -73,6 +83,13 @@ export function parseTimestamp(raw: number): string {
 // null when the message has no tokens, no cost, and no substantive parts (an
 // empty or errored turn worth skipping). Shared by the SQLite and file-based
 // OpenCode parsers so both attribute tokens, tools, and cost identically.
+// Divergent stores sometimes persist token fields as strings (or NaN slips in
+// through JSON). Anything that is not a finite number must behave as absent so
+// the fallback default applies, instead of leaking into cost maths as a string
+// or NaN (PR #264 review).
+const finiteOrUndefined = (v: unknown): number | undefined =>
+  typeof v === 'number' && Number.isFinite(v) ? v : undefined
+
 export function buildAssistantCall(opts: {
   providerName: string
   dedupKey: string
@@ -85,18 +102,18 @@ export function buildAssistantCall(opts: {
   const { data, parts } = opts
 
   const tokens = {
-    input: data.tokens?.input ?? data.usage?.input_tokens ?? 0,
-    output: data.tokens?.output ?? data.usage?.output_tokens ?? 0,
-    reasoning: data.tokens?.reasoning ?? 0,
-    cacheRead: data.tokens?.cache?.read ?? data.usage?.cache_read_input_tokens ?? 0,
-    cacheWrite: data.tokens?.cache?.write ?? data.usage?.cache_creation_input_tokens ?? 0,
+    input: finiteOrUndefined(data.tokens?.input) ?? finiteOrUndefined(data.usage?.input_tokens) ?? finiteOrUndefined(data.tokens_input) ?? 0,
+    output: finiteOrUndefined(data.tokens?.output) ?? finiteOrUndefined(data.usage?.output_tokens) ?? finiteOrUndefined(data.tokens_output) ?? 0,
+    reasoning: finiteOrUndefined(data.tokens?.reasoning) ?? finiteOrUndefined(data.tokens_reasoning) ?? 0,
+    cacheRead: finiteOrUndefined(data.tokens?.cache?.read) ?? finiteOrUndefined(data.usage?.cache_read_input_tokens) ?? finiteOrUndefined(data.tokens_cache_read) ?? 0,
+    cacheWrite: finiteOrUndefined(data.tokens?.cache?.write) ?? finiteOrUndefined(data.usage?.cache_creation_input_tokens) ?? finiteOrUndefined(data.tokens_cache_write) ?? 0,
   }
 
   const toolParts = parts.filter((p) => (p.type === 'tool' || p.type === 'tool-call' || p.type === 'tool_call') && normalizeToolName(p.tool))
-  const hasTextOutput = parts.some((p) => p.type === 'text' && typeof p.text === 'string' && p.text.trim().length > 0)
+  const hasTextOutput = parts.some((p) => (p.type === 'text' || p.type === 'markdown') && typeof p.text === 'string' && p.text.trim().length > 0)
   const hasToolOrTextParts = hasTextOutput || toolParts.length > 0
   const hasAnySubstantiveParts = parts.some((p) =>
-    p.type === 'text' || p.type === 'tool' || p.type === 'tool-call' || p.type === 'tool_call' ||
+    p.type === 'text' || p.type === 'markdown' || p.type === 'tool' || p.type === 'tool-call' || p.type === 'tool_call' ||
     p.type === 'tool-result' || p.type === 'tool_result' || p.type === 'reasoning' || p.type === 'file'
   )
   const hasActivity = hasToolOrTextParts || hasAnySubstantiveParts
@@ -129,7 +146,16 @@ export function buildAssistantCall(opts: {
     .map((p) => p.state!.input!.subagent_type!)
     .filter(Boolean)
 
-  const model = data.modelID ?? data.model ?? 'unknown'
+  let model = typeof data.modelID === 'string' && data.modelID.trim() ? data.modelID.trim() : undefined
+  if (!model && typeof data.model === 'string' && data.model.trim()) {
+    model = data.model.trim()
+  } else if (!model && data.model !== null && typeof data.model === 'object' && !Array.isArray(data.model)) {
+    const id = typeof data.model.id === 'string' ? data.model.id.trim() : ''
+    const providerID = typeof data.model.providerID === 'string' ? data.model.providerID.trim() : ''
+    if (id && providerID) model = `${providerID}/${id}`
+    else if (id) model = id
+  }
+  if (!model) model = 'unknown'
   let costUSD = calculateCost(
     model,
     tokens.input,

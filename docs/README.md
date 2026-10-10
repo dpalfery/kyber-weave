@@ -4,7 +4,7 @@ title: Kyber-Weave documentation
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-09-30
+last-reviewed: 2026-10-03
 ---
 
 # Kyber-Weave documentation
@@ -127,8 +127,8 @@ Start at the [Kyber-Squad Overview](kyber-squad/README.md) for value proposition
 |---|---|
 | [Overview & Why Kyber-Squad](kyber-squad/README.md) | Value proposition, solving multi-harness fragmentation, capability lattices |
 | [Adoption & usage guide](kyber-squad/onboarding.md) | `squad install`, `update`, `uninstall`, `status`, `doctor`, `pack`, scopes, target resolution |
-| [Architecture](kyber-squad/architecture.md) | AgentIR, permission lattice, role-skill lowering, state store, mutex lease, transaction engine |
-| [Requirements & degradation](kyber-squad/requirements.md) | KS-001–KS-008 specifications, structured degradation taxonomy, capability matrix |
+| [Architecture](kyber-squad/architecture.md) | AgentIR, permission lattice, role-skill lowering, state store, mutex lease, transaction engine, conductor execution circuit-breaker |
+| [Requirements & degradation](kyber-squad/requirements.md) | KS-001–KS-008 specifications, structured degradation taxonomy, capability matrix, conductor circuit-breaker harvest |
 
 ## Feature 4 — Kyber Arbiter
 

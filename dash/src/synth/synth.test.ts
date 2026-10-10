@@ -352,9 +352,9 @@ describe('token conversion (R4.2)', () => {
   })
 
   it('does not manufacture output from copilot reasoning on an output-absent row (#240)', () => {
-    // Copilot store/shutdown rows carry reasoning with output 0 by design.
-    // Folding would invent output from reasoning alone; those rows stay
-    // rejected so #240/#241 can give them an honest unobservable treatment.
+    // Non-compaction copilot-store rows omit output because per-turn
+    // assistant messages already own it: output stays 0 (absent, not a
+    // measured zero) and is declared not_measurable so reasoning validates.
     const record = synthesizeCall(
       call({
         provider: 'copilot',
@@ -364,11 +364,85 @@ describe('token conversion (R4.2)', () => {
         cachedInputTokens: 0,
         outputTokens: 0,
         reasoningTokens: 127,
+        deduplicationKey: 'copilot-store:sess:1:abc',
+      }),
+    )
+    expect(record.tokens.output).toBe(0)
+    expect(record.tokens.reasoning).toBe(127)
+    expect(record.measurability?.output).toMatchObject({
+      availability: 'not_measurable',
+    })
+    expect(
+      (record.measurability?.output as { reason?: string })?.reason,
+    ).toMatch(/store/i)
+    expect(tokenValidator(record)).toBeUndefined()
+  })
+
+  it('treats a compaction copilot-store row as measured zero, not output-absent', () => {
+    const record = synthesizeCall(
+      call({
+        provider: 'copilot',
+        inputTokens: 3,
+        cacheReadInputTokens: 49_394,
+        cacheCreationInputTokens: 0,
+        cachedInputTokens: 0,
+        outputTokens: 0,
+        reasoningTokens: 127,
+        deduplicationKey: 'copilot-store:sess:1:abc',
+        initiator: 'compaction',
+      }),
+    )
+    expect(tokenValidator(record)?.code).toBe('TOKEN_REASONING_EXCEEDS_OUTPUT')
+    expect(
+      (record.measurability?.output as { reason?: string })?.reason ?? '',
+    ).not.toMatch(/store/i)
+  })
+
+  it('still rejects copilot reasoning on a measured-zero output row', () => {
+    // Same counters but a per-turn key (neither shutdown nor copilot-store):
+    // output is a measured zero, so reasoning 127 still violates the subset
+    // invariant and stays quarantined.
+    const record = synthesizeCall(
+      call({
+        provider: 'copilot',
+        inputTokens: 3,
+        cacheReadInputTokens: 49_394,
+        cacheCreationInputTokens: 0,
+        cachedInputTokens: 0,
+        outputTokens: 0,
+        reasoningTokens: 127,
+        deduplicationKey: 'copilot:sess:turn:1',
       }),
     )
     expect(record.tokens.output).toBe(0)
     expect(record.tokens.reasoning).toBe(127)
     expect(tokenValidator(record)?.code).toBe('TOKEN_REASONING_EXCEEDS_OUTPUT')
+  })
+
+  it('surfaces reasoning on outputless copilot shutdown rollup without manufacturing output (#241)', () => {
+    // Copilot shutdown rollups carry output 0 by design (excluded to prevent
+    // double-counting per-turn calls) while reasoning rides alongside.
+    // The fix must be honest unobservability: surface reasoning on outputless
+    // rollups without inventing output, and declare output not_measurable.
+    const record = synthesizeCall(
+      call({
+        provider: 'copilot',
+        sessionId: 'sess-shutdown-1',
+        deduplicationKey: 'copilot:sess-shutdown-1:shutdown:claude-sonnet-4-5:1',
+        inputTokens: 4,
+        cacheReadInputTokens: 35_495,
+        cacheCreationInputTokens: 35_783,
+        cachedInputTokens: 0,
+        outputTokens: 0,
+        reasoningTokens: 31,
+      }),
+    )
+    expect(record.tokens.output).toBe(0)
+    expect(record.tokens.reasoning).toBe(31)
+    expect(record.measurability?.output).toMatchObject({
+      availability: 'not_measurable',
+    })
+    expect(tokenValidator(record)).toBeUndefined()
   })
 })
 

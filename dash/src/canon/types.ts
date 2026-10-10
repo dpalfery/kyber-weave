@@ -216,7 +216,11 @@ export type TokenValidation =
  * applies identically to orphans with no resolvable parent. The caller rejects
  * the record and writes the returned problem rather than storing it.
  */
-export function validateTokens(tokens: TokenUsage, location?: string): TokenValidation {
+export function validateTokens(
+  tokens: TokenUsage,
+  location?: string,
+  measurability?: Measurability,
+): TokenValidation {
   if (tokens.freshInput < 0) {
     return {
       valid: false,
@@ -241,7 +245,11 @@ export function validateTokens(tokens: TokenUsage, location?: string): TokenVali
     }
   }
 
-  if (tokens.reasoning !== undefined && (tokens.reasoning < 0 || tokens.reasoning > tokens.output)) {
+  const outputAvailability = measurability?.output ?? measurability?.output_tokens
+  const outputUnmeasured =
+    typeof outputAvailability === 'object' && outputAvailability.availability === 'not_measurable'
+
+  if (tokens.reasoning !== undefined && (tokens.reasoning < 0 || (!outputUnmeasured && tokens.reasoning > tokens.output))) {
     return {
       valid: false,
       problem: {

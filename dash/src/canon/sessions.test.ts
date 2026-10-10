@@ -673,6 +673,41 @@ describe('buildSessionRow', () => {
     expect(unmeasuredHarnessSession.payload.summary.tools_invoked).toBeUndefined()
   })
 
+  // Issue #235 / A7: Copilot OTLP records with tool_definitions but no
+  // tool.invoke spans must omit tools_invoked — absence means unobserved, not
+  // a measured empty list that would enter tool_yield.
+  it('omits tools_invoked for Copilot OTLP sessions with tool_definitions and no tool.invoke (issue #235 / A7)', () => {
+    const copilotTurn = turn(
+      'copilot-otlp-defs',
+      [
+        {
+          part: 'tool_definitions',
+          text: JSON.stringify([{ name: 'ToolA' }, { name: 'ToolB' }]),
+          tokens: 200,
+        },
+      ],
+      {
+        source: 'codeburn-prod-7',
+        harness: 'copilot',
+        sessionId: 'sess-copilot-a7',
+        // Mirror normalize: token_usage may be present; tool_calls must not.
+        measurability: { token_usage: 'measured' },
+      },
+    )
+
+    const session = sessionRow(
+      buildSessionRow('sess-copilot-a7', [copilotTurn], approximateO200kBase),
+    )
+
+    expect(session.summary?.tools_offered).toEqual(expect.arrayContaining(['ToolA', 'ToolB']))
+    expect(session.summary?.tools_invoked).toBeUndefined()
+    expect(session.payload.summary.tools_invoked).toBeUndefined()
+    expect(session.summary?.tool_calls).toBeUndefined()
+    expect(session.payload.summary.tool_calls).toBeUndefined()
+    expect(session.summary ?? {}).not.toHaveProperty('tools_invoked')
+    expect(session.payload.summary).not.toHaveProperty('tools_invoked')
+  })
+
   it('preserves empty array tools_offered when empty tool definitions were observed (Thread 4)', () => {
     // Observed empty tool catalogue:
     const turnWithEmptyCatalog = turn('turn-empty-cat', [

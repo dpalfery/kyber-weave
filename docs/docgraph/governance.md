@@ -67,7 +67,11 @@ its index, or by archiving it.
 `KW-DOC-LIFECYCLE-003` (Error, opt-in) is the merge gate. A plan or specification sits in its
 active folder only while it is being built, and the change that finishes it archives it — so
 a merge that still carries one either merges unfinished work or leaves finished work looking
-live. Open work is correct on a branch, so the rule runs only under
+live. Note that `KW-DOC-LIFECYCLE-003` is a mechanical location check verifying that no active
+artifacts remain under the plans or specs folders; it is not semantic proof that durable
+decisions were harvested into canonical documentation. The review council's `intent-alignment`
+lens independently audits that durable decisions were migrated or carry explicit documentation
+waivers. Open work is correct on a branch, so the rule runs only under
 `docs validate --merge-ready`, which pull-request CI passes. Each plan file, and each folder
 under the plans or specs folder, is one finding however many documents it holds. The folders
 are those of the `plan-index` and `specification-index` registry properties, and an entry

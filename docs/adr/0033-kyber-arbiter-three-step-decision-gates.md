@@ -1,5 +1,5 @@
 ---
-id: adr/0028-kyber-arbiter-three-step-decision-gates
+id: adr/0033-kyber-arbiter-three-step-decision-gates
 title: Kyber Arbiter three-step decision gates
 doc-type: adr
 status: current
@@ -7,7 +7,7 @@ owner: dpalfery
 last-reviewed: 2026-10-09
 ---
 
-# ADR 0028: Kyber Arbiter three-step decision gates
+# ADR 0033: Kyber Arbiter three-step decision gates
 
 ## Status
 

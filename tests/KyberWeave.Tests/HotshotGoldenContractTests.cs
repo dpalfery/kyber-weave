@@ -42,34 +42,44 @@ public sealed partial class HotshotGoldenContractTests
         "architect",
         "code-reviewer",      // in-process council when the harness gives subagents no agent tool (ADR 0025)
         "conductor",
+        "csharp-dev",         // JEV checkpoints and iteration circuit-breaker (issue #249)
+        "dal-dev",            // Worker-packet scope rule: packet is whole scope (issue #278)
+        "docs-dev",           // Plan closeout decision mapping table and waiver conventions (issue #279)
+        "github-devops",      // JEV checkpoints and iteration circuit-breaker (issue #249)
+        "maui-dev",           // Worker-packet scope rule: packet is whole scope (issue #278)
         "product-owner",
+        "pulumi-dev",         // Worker-packet scope rule: packet is whole scope (issue #278)
+        "python-dev",         // Worker-packet scope rule: packet is whole scope (issue #278)
+        "react-dev",          // Worker-packet scope rule: packet is whole scope (issue #278)
         "review-lens",        // Arbiter routing headers and refutation framing (packet 7.3)
+        "sql-database-architect", // Worker-packet scope rule: packet is whole scope (issue #278)
         "task-reviewer",
-        "test-dev"            // RED_EVIDENCE digest line the ledger reads for MODE-001 (packet 7.4)
+        "tauri-dev",          // Worker-packet scope rule: packet is whole scope (issue #278)
+        "test-dev"            // JEV checkpoints and iteration circuit-breaker (issue #249); RED_EVIDENCE digest line the ledger reads for MODE-001 (packet 7.4)
     ];
 
     /// <summary>
-    /// Agents whose Copilot model values diverged from the Hotshot golden snapshot on 2026-09-14
-    /// per plan <c>docs/archive/plans/2026-09-14-pi-harness-target.md</c> §6b, decisions U10–U12 (owner-approved
-    /// model profile changes). Only the model field is allowed to diverge; all other fields
+    /// Agents whose Copilot model values diverge from the Hotshot golden snapshot through
+    /// operator-approved model profile changes. Only the model field is allowed to diverge; all other fields
     /// (description, body, tools, capability, delegation, aliases, invocation) must match the golden.
     /// </summary>
     private static readonly string[] ModelEvolvedAgentIdentities =
     [
         "azure-reader",       // fast: GPT-5.6 Luna → MAI-Code-1.1-Flash (copilot)
-        "code-reviewer",      // reviewer: Grok 4.5 → Kimi K2.7 Code (copilot)
+        "bug-crusher-investigator", // deep-planning: GPT-5.6 Sol → GPT-6.1 Sol (copilot)
+        "code-reviewer",      // reviewer: Grok 4.5 → Grok 4.7 (copilot)
         "csharp-dev",         // fast: GPT-5.6 Luna → MAI-Code-1.1-Flash (copilot)
-        "dal-dev",            // general: Grok 4.5 → Grok 4.6 (copilot)
+        "dal-dev",            // general: Grok 4.5 → Claude Haiku 5.5 (copilot)
         "docs-dev",           // fast: GPT-5.6 Luna → MAI-Code-1.1-Flash (copilot)
-        "github-devops",      // general: Grok 4.5 → Grok 4.6 (copilot)
+        "github-devops",      // general: Grok 4.5 → Claude Haiku 5.5 (copilot)
         "maui-dev",           // fast: GPT-5.6 Luna → MAI-Code-1.1-Flash (copilot)
-        "pulumi-dev",         // general: Grok 4.5 → Grok 4.6 (copilot)
+        "pulumi-dev",         // general: Grok 4.5 → Claude Haiku 5.5 (copilot)
         "python-dev",         // fast: GPT-5.6 Luna → MAI-Code-1.1-Flash (copilot)
         "react-dev",          // fast: GPT-5.6 Luna → MAI-Code-1.1-Flash (copilot)
         "research-agent",     // fast: GPT-5.6 Luna → MAI-Code-1.1-Flash (copilot)
-        "review-lens",        // reviewer: Grok 4.5 → Kimi K2.7 Code (copilot)
-        "review-triage",      // reviewer: GPT-5.6 Luna → Kimi K2.7 Code (copilot)
-        "tauri-dev"           // general: Grok 4.5 → Grok 4.6 (copilot)
+        "review-lens",        // reviewer: Grok 4.5 → Grok 4.7 (copilot)
+        "review-triage",      // reviewer: GPT-5.6 Luna → Grok 4.7 (copilot)
+        "tauri-dev"           // general: Grok 4.5 → Claude Haiku 5.5 (copilot)
     ];
 
     private static readonly string[] EvolvedSkillIdentities =
@@ -540,6 +550,22 @@ public sealed partial class HotshotGoldenContractTests
             if (goldenModel == sourceModel)
             {
                 mismatches.Add($"model-evolved agent '{modelEvolvedName}' has unchanged model (should differ from golden)");
+            }
+        }
+
+        // Guard: an EvolvedAgentIdentities entry that still matches golden silently
+        // disables every field comparison. Fail so a stale name is removed rather than rotting.
+        foreach (string evolvedName in EvolvedAgentIdentities)
+        {
+            GoldenAgentEntry goldenEntry = manifest.Agents.FirstOrDefault(entry => AgentName(entry.Path) == evolvedName);
+            if (string.IsNullOrEmpty(goldenEntry.Path) || !sourceAgents.TryGetValue(evolvedName, out SquadAgent? sourceAgent))
+            {
+                continue;
+            }
+
+            if (string.Equals(goldenEntry.BodySha256, sourceAgent.BodyDigest, StringComparison.Ordinal))
+            {
+                mismatches.Add($"evolved agent '{evolvedName}' matches golden; remove it from the list");
             }
         }
 

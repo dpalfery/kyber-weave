@@ -809,16 +809,22 @@ export async function fetchCalibration(opts?: { runId?: string }): Promise<Kyber
 /** Task phase used by phase-aligned run comparison. */
 export type KyberTaskPhase = 'exploration' | 'implementation' | 'verification' | 'resolution'
 
+/** Whether a comparison figure was measured or is explicitly unavailable (issue #190). */
+export type KyberComparisonAvailability = 'measured' | 'unavailable' | 'not_measurable'
+
 export interface KyberComparisonVerdict {
   status: 'promoted' | 'candidate_only' | 'insufficient_history' | 'outcome_regression' | 'neutral'
-  pairCount: number
-  completedPairCount: number
-  meetsSufficiencyThreshold: boolean
-  outcomeRegression: boolean
+  pairCount?: number
+  /** Omitted when recommendation history is not measured — never treat absence as zero. */
+  completedPairCount?: number
+  meetsSufficiencyThreshold?: boolean
+  outcomeRegression?: boolean
   canPromote: boolean
-  recommendation: string
+  recommendation?: string
   refusalReason?: string
-  summary: string
+  summary?: string
+  /** When history is not store-backed, the pair stays manual-only with no n / 5 display. */
+  historyAvailability?: KyberComparisonAvailability | 'not_measured'
 }
 
 export interface KyberPhaseAlignedTurnPair {
@@ -830,30 +836,75 @@ export interface KyberPhaseAlignedTurnPair {
   reading: string
 }
 
+/** Measured run side of `GET /api/kyber/compare/runs`. */
+export type KyberComparisonRunSideMeasured = {
+  runId: string
+  harness: string
+  label?: string
+  outcome?: unknown
+  availability: 'measured'
+  totalTokens: number
+  totalCost?: number
+  turnCount: number
+}
+
+/** Unavailable run side — token totals withheld; never a fabricated zero. */
+export type KyberComparisonRunSideUnavailable = {
+  runId: string
+  harness: string
+  label?: string
+  outcome?: unknown
+  availability: 'unavailable'
+  reason: string
+  /** Per-run metrics unavailability reason (issue #190). */
+  metricsReason: string
+  totalCost?: number
+  turnCount?: number
+  totalTokens?: never
+}
+
+export type KyberComparisonRunSide =
+  | KyberComparisonRunSideMeasured
+  | KyberComparisonRunSideUnavailable
+
+/** Aggregate totals for a run pair — mirrors the server `ComparisonTotals` union. */
+export type KyberComparisonTotalsMeasured = {
+  availability: 'measured'
+  tokensA: number
+  tokensB: number
+  tokenDelta: number
+  turnCountA: number
+  turnCountB: number
+  turnDelta: number
+  costA?: number
+  costB?: number
+  costDelta?: number
+  costComparable: boolean
+  costRefusalReason?: string
+}
+
+export type KyberComparisonTotalsUnavailable = {
+  availability: 'unavailable'
+  reason: string
+  turnCountA: number
+  turnCountB: number
+  turnDelta: number
+  costComparable: boolean
+  costRefusalReason?: string
+}
+
+export type KyberComparisonTotals =
+  | KyberComparisonTotalsMeasured
+  | KyberComparisonTotalsUnavailable
+
 /** `GET /api/kyber/compare/runs` body — engine `ComparisonSummary` without turn `raw`. */
 export interface KyberRunComparison {
-  runA: {
-    runId: string
-    harness: string
-    label?: string
-    outcome?: unknown
-    totalTokens: number
-    totalCost?: number
-    turnCount: number
-  }
-  runB: {
-    runId: string
-    harness: string
-    label?: string
-    outcome?: unknown
-    totalTokens: number
-    totalCost?: number
-    turnCount: number
-  }
+  runA: KyberComparisonRunSide
+  runB: KyberComparisonRunSide
   taskFamily?: string
   pairs: KyberPhaseAlignedTurnPair[]
   phaseSummaries: Record<KyberTaskPhase, Record<string, unknown>>
-  totals: Record<string, unknown>
+  totals: KyberComparisonTotals
   verdict: KyberComparisonVerdict
 }
 
@@ -864,14 +915,13 @@ export interface KyberRunComparison {
 export async function fetchRunComparison(
   runAId: string,
   runBId: string,
-  opts?: { completedPairCount?: number },
 ): Promise<KyberRunComparison> {
+  // Public compare does not accept a caller-supplied completedPairCount: that
+  // would invent recommendation-history sufficiency. History is unavailable
+  // until a store-backed measurement exists (issue #190).
   const params = new URLSearchParams()
   params.set('runA', runAId)
   params.set('runB', runBId)
-  if (opts?.completedPairCount !== undefined) {
-    params.set('completedPairCount', String(opts.completedPairCount))
-  }
   return fetchJson<KyberRunComparison>(`/api/kyber/compare/runs?${params.toString()}`)
 }
 
@@ -930,8 +980,98 @@ export async function requestContextReview(
   return res.json() as Promise<KyberReviewResult>
 }
 
+/**
+ * Bounded catalog refresh. Vendor names and counts only — `error` strings
+ * from the server are dropped here so a remote body cannot reach the page.
+ */
+export interface ModelCatalogRefreshResult {
+  rowCount: number
+  lastRefreshAt: string | null
+  vendorsUpdated: string[]
+  vendorsFailed: { vendor: string }[]
+  derivedRebuildCount: number
+}
+
+function stringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return value.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0)
+}
+
+export async function refreshModelWindows(): Promise<ModelCatalogRefreshResult> {
+  const path = '/api/kyber/model-catalog/refresh'
+  const res = await fetch(path, { method: 'POST' })
+  if (!res.ok) throw new KyberApiError(res.status, path)
+  const json: unknown = await res.json()
+  const body = json !== null && typeof json === 'object' ? (json as Record<string, unknown>) : {}
+  const failed = Array.isArray(body.vendorsFailed) ? body.vendorsFailed : []
+  return {
+    rowCount: typeof body.rowCount === 'number' ? body.rowCount : 0,
+    lastRefreshAt: typeof body.lastRefreshAt === 'string' ? body.lastRefreshAt : null,
+    vendorsUpdated: stringList(body.vendorsUpdated),
+    vendorsFailed: failed.flatMap((entry) => {
+      if (entry === null || typeof entry !== 'object') return []
+      const vendor = (entry as { vendor?: unknown }).vendor
+      return typeof vendor === 'string' && vendor.length > 0 ? [{ vendor }] : []
+    }),
+    derivedRebuildCount: typeof body.derivedRebuildCount === 'number' ? body.derivedRebuildCount : 0,
+  }
+}
+
 export async function fetchReviewStatus(): Promise<{ provider: string; isConfigured: boolean }> {
   return fetchJson<{ provider: string; isConfigured: boolean }>('/api/kyber/review/status')
+}
+
+/**
+ * Database clean request. `confirm` is the browser's explicit consent to the
+ * irreversible wipe; `reingestWeeks: null` skips re-ingestion, omission means
+ * the server default (last 7 days).
+ */
+export interface CleanDatabaseRequest {
+  all?: boolean
+  harnesses?: string[]
+  reingestWeeks?: number | null
+  confirm: true
+}
+
+/** Bounded clean summary. Counts only — never a remote error string. */
+export interface CleanDatabaseResult {
+  harnesses: string[]
+  records: number
+  reingested: boolean
+  historyWeeks: number | null
+}
+
+function cleanCount(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0
+}
+
+/**
+ * Bounded database clean. The scope and counts are echoed from the server;
+ * `error` strings are dropped here so a remote body cannot reach the page —
+ * callers distinguish outcomes by `KyberApiError.status` (400 usage, 409
+ * busy) instead.
+ */
+export async function cleanDatabase(request: CleanDatabaseRequest): Promise<CleanDatabaseResult> {
+  const path = '/api/kyber/clean'
+  const res = await fetch(path, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(request),
+  })
+  if (!res.ok) throw new KyberApiError(res.status, path)
+  const json: unknown = await res.json()
+  const body = json !== null && typeof json === 'object' ? (json as Record<string, unknown>) : {}
+  const wipe = body.wipe !== null && typeof body.wipe === 'object'
+    ? (body.wipe as Record<string, unknown>)
+    : {}
+  return {
+    harnesses: stringList(body.harnesses),
+    records: cleanCount(wipe.records),
+    reingested: body.reingested === true,
+    historyWeeks: typeof body.historyWeeks === 'number' && Number.isFinite(body.historyWeeks)
+      ? body.historyWeeks
+      : null,
+  }
 }
 
 // ===========================================================================

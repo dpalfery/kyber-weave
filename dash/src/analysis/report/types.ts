@@ -18,12 +18,20 @@
  * consumers get `null` and a reason; text and Markdown get `—` and the reason through
  * `formatMeasured`. Neither ever gets `0` for an absent figure.
  *
+ * The `derived` arm is a number that is not telemetry (D5, D15): a harness-declared
+ * window or a vendor-catalog window. `class` and `label` stop that number from
+ * reading as a measurement. Absence stays on the null arm — a derived figure is
+ * never a stand-in for "we do not know".
+ *
  * This is the report's carried value, and is deliberately not `canon/types.ts`'s
  * `MetricAvailability`: that one declares what a *source* can report, per metric, before
  * any figure exists. This one pairs one figure with its own absence. Collapsing them
  * would make an unmeasurable bucket indistinguishable from a source-level gap.
  */
-export type Measured<T> = { value: T; unit?: string } | { value: null; reason: string }
+export type Measured<T> =
+  | { value: T; unit?: string }
+  | { class: 'derived'; label: string; value: T; unit?: string }
+  | { value: null; reason: string }
 
 /** The mark an unmeasurable figure renders as. Never `0`, never blank (R14.1). */
 export const NOT_MEASURABLE = '—'
@@ -38,9 +46,26 @@ export function unmeasurable<T = never>(reason: string): Measured<T> {
   return { value: null, reason }
 }
 
+/**
+ * A figure computed from a named window that is not telemetry (D5, D15).
+ *
+ * The label is the provenance a reader sees — "declared window" or "vendor
+ * catalog" — so the number cannot be mistaken for a harness-reported measurement.
+ */
+export function derived<T>(value: T, label: string, unit?: string): Measured<T> {
+  return unit === undefined ? { class: 'derived', label, value } : { class: 'derived', label, value, unit }
+}
+
 /** True when the figure is absent, narrowing to the branch that carries `reason`. */
 export function isUnmeasurable<T>(m: Measured<T>): m is { value: null; reason: string } {
   return m.value === null
+}
+
+/** True when the figure is a labelled derivation, not a measurement and not an absence. */
+export function isDerived<T>(
+  m: Measured<T>,
+): m is { class: 'derived'; label: string; value: T; unit?: string } {
+  return 'class' in m && m.class === 'derived'
 }
 
 /**
@@ -53,7 +78,10 @@ export function isUnmeasurable<T>(m: Measured<T>): m is { value: null; reason: s
  */
 export function formatMeasured<T>(m: Measured<T>, format: (value: T) => string = String): string {
   if (isUnmeasurable(m)) return `${NOT_MEASURABLE} (${m.reason})`
-  return m.unit === undefined ? format(m.value) : `${format(m.value)} ${m.unit}`
+  const body = m.unit === undefined ? format(m.value) : `${format(m.value)} ${m.unit}`
+  // A derived window is a real number. Dropping the label here would make the
+  // text and Markdown identical to a measurement (D5, D15).
+  return isDerived(m) ? `${body} (${m.label})` : body
 }
 
 /**
