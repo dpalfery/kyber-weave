@@ -21,9 +21,16 @@ public static class PluginHookAdapters
         ("pi", "Agent"),
     ];
 
-    /// <summary>The harness tokens that take a plugin shim (and so read a <c>decision</c> document).</summary>
+    /// <summary>
+    /// The harness tokens that take a plugin shim (and so read a <c>decision</c> document).
+    /// </summary>
+    /// <remarks>
+    /// Ordinal-ignore-case because the registry resolves harness tokens that way; a
+    /// token set that did not would let a capitalised <c>--harness OpenCode</c> miss
+    /// its dialect in <see cref="LastResortBlock"/>.
+    /// </remarks>
     public static IReadOnlySet<string> Tokens { get; } =
-        Entries.Select(entry => entry.Token).ToHashSet(StringComparer.Ordinal);
+        Entries.Select(entry => entry.Token).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>The plugin-hook adapters: OpenCode dispatches on <c>task</c>; Pi dispatches on <c>Agent</c>.</summary>
     public static IReadOnlyList<IHarnessHookAdapter> All(IHookDecisionEngine? engine = null)
