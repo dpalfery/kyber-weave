@@ -183,6 +183,12 @@ public sealed class ArbiterEvaluator
         facts = _gitFacts.Enrich(facts, classification, ev);
         facts = _planReader.Enrich(facts, classification);
 
+        // Read once here and reused for both REPEAT and the record, so the count and the
+        // entry it is written beside are keyed on the same digest.
+        string? planDigest = facts.TryGet("plan.digest", out ArbiterFact? digestFact)
+            ? digestFact.Value as string
+            : null;
+
         List<ArbiterRule> step0Rules = config.Arbiter.Rules
             .Where(rule => rule.Enabled
                 && string.Equals(rule.Trigger, trigger, StringComparison.Ordinal)
@@ -247,7 +253,7 @@ public sealed class ArbiterEvaluator
                     classification, ev, config, effective, ledgerId, family, step0, step1,
                     ProviderKindName(config),
                     EndpointOrigin(config), model, usage, providerStatus, outcomeAfterError,
-                    elapsed, cancellationToken)
+                    elapsed, planDigest, cancellationToken)
                     .ConfigureAwait(false);
                 _ = before;
                 return new ArbiterDispatchEvaluation(trigger, outcomeAfterError);
@@ -285,7 +291,7 @@ public sealed class ArbiterEvaluator
             classification, ev, config, effective, ledgerId, family, step0, step1,
             ProviderKindName(config),
             EndpointOrigin(config), model, usage, providerStatus, outcome,
-            elapsed, cancellationToken)
+            elapsed, planDigest, cancellationToken)
             .ConfigureAwait(false);
         return new ArbiterDispatchEvaluation(trigger, outcome);
     }
@@ -306,6 +312,7 @@ public sealed class ArbiterEvaluator
         string providerStatus,
         string outcome,
         Stopwatch elapsed,
+        string? planDigest,
         CancellationToken cancellationToken)
     {
         string trigger = classification.Trigger ?? string.Empty;
@@ -331,7 +338,7 @@ public sealed class ArbiterEvaluator
         classification.Headers.TryGetValue("PLAN_FILE", out string? planFile);
         classification.Headers.TryGetValue("TASK", out string? task);
         string repeatKey = rules.Count > 0 ? rules[0].Id : trigger;
-        int repeat = _decisionLog.Repeat(repeatKey, planFile, null, task);
+        int repeat = _decisionLog.Repeat(repeatKey, planFile, planDigest, task);
         ArbiterProviderRecord provider = new(
             providerKind,
             endpointOrigin,
@@ -351,7 +358,7 @@ public sealed class ArbiterEvaluator
             classification.CallerSource,
             classification.Target,
             planFile,
-            null,
+            planDigest,
             task,
             RuleSetDigest(config.Arbiter.Rules),
             rules,

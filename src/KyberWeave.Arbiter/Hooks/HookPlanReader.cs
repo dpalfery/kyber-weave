@@ -37,15 +37,21 @@ internal sealed class HookPlanReader(string repositoryRoot) : IArbiterPlanReader
         }
 
         PlanDocument document;
+        string content;
         try
         {
-            document = PlanDocumentParser.Parse(File.ReadAllText(resolved));
+            content = File.ReadAllText(resolved);
+            document = PlanDocumentParser.Parse(content);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
             return facts.With("plan.exists", false, ArbiterFactLabel.Derived);
         }
 
+        // The digest of the text just parsed. REPEAT is keyed on it so that amending a
+        // plan restarts the count (design 1.10, R8); the evaluator reads this fact rather
+        // than hashing the file a second time.
+        facts = facts.With("plan.digest", PlanDocumentParser.Digest(content), ArbiterFactLabel.Derived);
         facts = facts.With("plan.exists", true, ArbiterFactLabel.Derived);
         if (document.Status is not null)
         {

@@ -485,15 +485,19 @@ public static class ArbiterCommandComposition
             }
 
             PlanDocument document;
+            string content;
             try
             {
-                document = PlanDocumentParser.Parse(File.ReadAllText(resolved));
+                content = File.ReadAllText(resolved);
+                document = PlanDocumentParser.Parse(content);
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
             {
                 return facts.With("plan.exists", false, ArbiterFactLabel.Derived);
             }
 
+            // The digest of the text just parsed; the evaluator keys REPEAT on it.
+            facts = facts.With("plan.digest", PlanDocumentParser.Digest(content), ArbiterFactLabel.Derived);
             facts = facts.With("plan.exists", true, ArbiterFactLabel.Derived);
             if (document.Status is not null)
                 facts = facts.With("plan.status", document.Status, ArbiterFactLabel.Derived);
