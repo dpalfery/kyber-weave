@@ -102,9 +102,15 @@ public sealed class ClaudeRenderer : ISquadRenderer
 
     /// <summary>
     /// Anchored matchers for Arbiter frontmatter hooks. A matcher containing characters
-    /// outside <c>[A-Za-z0-9_-, |]</c> is an unanchored JavaScript regex, so both are
-    /// anchored explicitly.
+    /// outside <c>[A-Za-z0-9_-, |]</c> is an unanchored JavaScript regex, so all three
+    /// are anchored explicitly.
     /// </summary>
+    /// <remarks>
+    /// <see cref="HandbackMatcher"/> names a Claude tool, not a regex fragment: since
+    /// v2.1.271 a sub-agent returns through <c>SubagentHandback</c>, and the vendor
+    /// documents matching a <c>PreToolUse</c> or <c>PostToolUse</c> hook on it and reading
+    /// <c>tool_input.message</c> [F1].
+    /// </remarks>
     private const string DispatchMatcher = "^(Agent|Task)$";
     private const string ReadGuardMatcher = "^(Read|Grep|Glob|Bash)$";
     private const string HandbackMatcher = "^SubagentHandback$";
