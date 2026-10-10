@@ -17,6 +17,8 @@ import {
 import { createRequire } from 'node:module'
 import { harnessFamily, normalizeHarnessName } from '../canon/measurability.js'
 import type { SourceCheckpoint } from '../canon/source-state.js'
+import type { CleanRequest } from '../clean/clean.js'
+import { MAX_CLEAN_REINGEST_WEEKS } from '../clean/clean.js'
 
 /** The build this server is, carried on `/meta` so a client can check it (R6.7). */
 const KYBERDASH_VERSION = String(
@@ -359,6 +361,55 @@ type SessionViewPayload = {
   timeline?: unknown
 }
 
+/**
+ * Bound on a `POST /api/kyber/clean` body. The payload is a tiny
+ * scope/confirm/window document, so anything past 64KB is an oversized POST
+ * in front of a wipe endpoint — reject it before the accumulator can grow
+ * without bound (F2), matching the receiver's `readBody` discipline.
+ */
+const MAX_CLEAN_BODY_BYTES = 64 * 1024
+
+/**
+ * Validate a `POST /api/kyber/clean` body: exactly one scope (`all` or a
+ * non-empty `harnesses` list), explicit `confirm: true`, and — when present —
+ * a `reingestWeeks` between 1 and MAX_CLEAN_REINGEST_WEEKS (one year) or
+ * explicit null to skip re-ingestion. Anything else answers 400 with nothing
+ * wiped.
+ */
+function parseCleanBody(bodyText: string): CleanRequest | undefined {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(bodyText || '{}')
+  } catch {
+    return undefined
+  }
+  if (typeof parsed !== 'object' || parsed === null) return undefined
+  const body = parsed as Record<string, unknown>
+  if (body['confirm'] !== true) return undefined
+  const all = body['all']
+  const harnesses = body['harnesses']
+  const hasAll = all === true
+  const hasHarnesses =
+    Array.isArray(harnesses) &&
+    harnesses.length > 0 &&
+    harnesses.every((h) => typeof h === 'string' && h.trim() !== '')
+  if ((hasAll && hasHarnesses) || (!hasAll && !hasHarnesses)) return undefined
+  const request: CleanRequest = { confirm: true }
+  if (hasAll) request.all = true
+  else request.harnesses = (harnesses as string[]).map((h) => h.trim())
+  if ('reingestWeeks' in body) {
+    const weeks = body['reingestWeeks']
+    if (weeks === null) {
+      request.reingestWeeks = null
+    } else if (typeof weeks === 'number' && Number.isSafeInteger(weeks) && weeks >= 1 && weeks <= MAX_CLEAN_REINGEST_WEEKS) {
+      request.reingestWeeks = weeks
+    } else {
+      return undefined
+    }
+  }
+  return request
+}
+
 export function handleKyberRequest(
   req: IncomingMessage,
   res: ServerResponse,
@@ -505,13 +556,18 @@ export function handleKyberRequest(
       sendKyberJson(res, 400, { error: 'Missing runA or runB' })
       return true
     }
-    const pairCountParam = url.searchParams.get('completedPairCount')
-    const completedPairCount = pairCountParam ? parseInt(pairCountParam, 10) : undefined
-    const comparison = bridge.compareRuns(
-      runA,
-      runB,
-      completedPairCount !== undefined && !isNaN(completedPairCount) ? { completedPairCount } : undefined,
-    )
+    // Recommendation history is not caller-supplied on the public route (issue
+    // #190): an arbitrary query count is not store-backed measurement. Reject
+    // the retired parameter rather than silently ignoring it (same house rule
+    // as parseReportScope for a bad `days`).
+    if (url.searchParams.has('completedPairCount')) {
+      sendKyberJson(res, 400, {
+        error:
+          'completedPairCount is not accepted: recommendation history is not caller-supplied (issue #190)',
+      })
+      return true
+    }
+    const comparison = bridge.compareRuns(runA, runB)
     if (!comparison) {
       sendKyberJson(res, 404, { error: 'Run not found' })
       return true
@@ -1063,6 +1119,81 @@ export function handleKyberRequest(
     sendKyberJson(res, 200, {
       provider: provider.name,
       isConfigured: provider.isConfigured,
+    })
+    return true
+  }
+
+  // Model-window catalog (D15). Refresh is matched first so a snapshot
+  // prefix cannot swallow it. Neither route reads a caller-supplied URL.
+  if (url.pathname === '/api/kyber/model-catalog/refresh') {
+    if (req.method !== 'POST') {
+      sendKyberJson(res, 405, { error: 'Method Not Allowed' })
+      return true
+    }
+    void bridge.refreshModelCatalog().then(
+      (body) => sendKyberJson(res, 200, body),
+      () => sendKyberJson(res, 500, { error: 'Model catalog refresh failed' }),
+    )
+    return true
+  }
+
+  if (url.pathname === '/api/kyber/model-catalog') {
+    if (req.method !== 'GET') {
+      sendKyberJson(res, 405, { error: 'Method Not Allowed' })
+      return true
+    }
+    sendKyberJson(res, 200, bridge.getModelCatalog())
+    return true
+  }
+
+  // Database clean (issue #312). The web dash reaches the central
+  // `cleanDatabase` module over this route; the request body carries the
+  // scope, the confirmation, and the optional re-ingest window. Matched
+  // before the JSON-404 catch-all like every other /api/kyber/* route.
+  if (url.pathname === '/api/kyber/clean') {
+    if (req.method !== 'POST') {
+      sendKyberJson(res, 405, { error: 'Method Not Allowed' })
+      return true
+    }
+    let bodyText = ''
+    let received = 0
+    let settled = false
+    const rejectCleanBody = (status: number, error: string): void => {
+      if (settled) return
+      settled = true
+      sendKyberJson(res, status, { error })
+      req.destroy()
+    }
+    req.on('data', (chunk) => {
+      if (settled) return
+      received += typeof chunk === 'string' ? Buffer.byteLength(chunk) : chunk.length
+      if (received > MAX_CLEAN_BODY_BYTES) {
+        rejectCleanBody(413, `Clean request body exceeds the ${MAX_CLEAN_BODY_BYTES}-byte limit`)
+        return
+      }
+      bodyText += chunk
+    })
+    req.on('error', () => {
+      rejectCleanBody(400, 'Invalid clean request payload')
+    })
+    req.on('end', async () => {
+      if (settled) return
+      settled = true
+      const parsed = parseCleanBody(bodyText)
+      if (parsed === undefined) {
+        sendKyberJson(res, 400, { error: 'Invalid clean request payload' })
+        return
+      }
+      try {
+        const report = await bridge.cleanDatabase(parsed)
+        sendKyberJson(res, 200, report)
+      } catch (err) {
+        if (err instanceof Error && (err as { code?: string }).code === 'CLEAN_BUSY') {
+          sendKyberJson(res, 409, { error: 'A refresh or clean is already running' })
+          return
+        }
+        sendKyberJson(res, 500, { error: 'Clean failed' })
+      }
     })
     return true
   }

@@ -7,7 +7,7 @@ owner: dpalfery
 last-reviewed: 2026-10-09
 status: current
 decided-by:
-  - adr/0028-kyber-arbiter-three-step-decision-gates
+  - adr/0033-kyber-arbiter-three-step-decision-gates
 ---
 
 # Kyber Arbiter runbook

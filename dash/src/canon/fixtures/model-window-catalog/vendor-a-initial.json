@@ -1,0 +1,15 @@
+{
+  "models": [
+    {
+      "lookupId": "zz-synth-alpha-1",
+      "canonicalModelId": "zz-synth-alpha-1",
+      "contextWindow": 128000
+    },
+    {
+      "lookupId": "zz-synth-alpha-1-alias",
+      "canonicalModelId": "zz-synth-alpha-1",
+      "contextWindow": 128000,
+      "isAlias": true
+    }
+  ]
+}

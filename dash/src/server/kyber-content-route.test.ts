@@ -30,6 +30,9 @@ describe('Backend Contract Tests: GET /api/kyber/session/:id/content', () => {
   const TOOL_DEFINITION = '{"name":"read_file","description":"Read a file from the workspace"}'
   const CONVERSATION = 'user: why is the inspector showing a stub mid-sentence?'
   const HUGE_TOOL_RESULT = 'R'.repeat(CONTENT_RESPONSE_BUDGET + 50_000)
+  // Issue #216: Claude Desktop synth spans — conversation text the inspector must surface.
+  const DESKTOP_CONVERSATION =
+    'user: why are Claude Desktop inspector blocks empty?\nassistant: capture should attach parts.'
 
   const tokens = () => ({
     freshInput: 1000,
@@ -192,6 +195,61 @@ describe('Backend Contract Tests: GET /api/kyber/session/:id/content', () => {
         id: 'sess-noidentity-001',
         harness: 'copilot',
         turns: [{ spanId: 'span-q0', model: 'm' }],
+      },
+    })
+
+    // Issue #216: codeburn/claude-desktop synth: span with conversation parts
+    // (the HTTP shape the inspector should see once capture lands).
+    const desktopPartsSpan =
+      'synth:claude-desktop:sess-desktop-parts-001:msg-with-parts'
+    store.upsertMany([
+      turn(
+        desktopPartsSpan,
+        [{ part: 'conversation_history', text: DESKTOP_CONVERSATION, tokens: 22 }],
+        {
+          source: 'codeburn/claude-desktop',
+          harness: 'claude-desktop',
+          sessionId: 'sess-desktop-parts-001',
+          traceId: 'trace-desktop-parts-001',
+          name: 'claude-sonnet-5-5',
+          timestamp: '2026-09-30T10:00:00.000Z',
+        },
+      ),
+    ])
+    store.upsertSession({
+      sessionId: 'sess-desktop-parts-001',
+      harness: 'claude-desktop',
+      label: 'Claude Desktop with parts',
+      payload: {
+        id: 'sess-desktop-parts-001',
+        harness: 'claude-desktop',
+        turns: [{ index: 0, spanId: desktopPartsSpan, model: 'claude-sonnet-5-5' }],
+      },
+    })
+
+    // Issue #216 control: counters-only desktop synth (no reader parts) must
+    // stay honestly empty — the route must not fabricate inspector text.
+    const desktopEmptySpan =
+      'synth:claude-desktop:sess-desktop-empty-001:msg-counters-only'
+    store.upsertMany([
+      turn(desktopEmptySpan, [], {
+        source: 'codeburn/claude-desktop',
+        harness: 'claude-desktop',
+        sessionId: 'sess-desktop-empty-001',
+        traceId: 'trace-desktop-empty-001',
+        name: 'claude-sonnet-5-5',
+        timestamp: '2026-09-30T11:00:00.000Z',
+        parts: undefined,
+      }),
+    ])
+    store.upsertSession({
+      sessionId: 'sess-desktop-empty-001',
+      harness: 'claude-desktop',
+      label: 'Claude Desktop counters-only',
+      payload: {
+        id: 'sess-desktop-empty-001',
+        harness: 'claude-desktop',
+        turns: [{ index: 0, spanId: desktopEmptySpan, model: 'claude-sonnet-5-5' }],
       },
     })
 
@@ -447,6 +505,54 @@ describe('Backend Contract Tests: GET /api/kyber/session/:id/content', () => {
       expect(body.truncated).toBe(true)
       expect(body.totalLength).toBeGreaterThan(100)
       expect(body.assembledText.length).toBeLessThanOrEqual(100)
+    })
+
+    describe('claude-desktop synth parts (issue #216)', () => {
+      it('returns non-empty parts and assembledText for a desktop synth span that has conversation parts', async () => {
+        const res = await fetch(
+          `${base}/api/kyber/session/sess-desktop-parts-001/turn/0/content`,
+        )
+        expect(res.status).toBe(200)
+        assertStandardKyberHeaders(res)
+
+        const body = (await res.json()) as TurnContentResult
+        expect(body.sessionId).toBe('sess-desktop-parts-001')
+        expect(body.turnIndex).toBe(0)
+        expect(body.spanId).toBe(
+          'synth:claude-desktop:sess-desktop-parts-001:msg-with-parts',
+        )
+        expect(body.parts.length).toBeGreaterThan(0)
+        // assembleTurnContent splits parseable conversation_history into
+        // user_messages / assistant_turns (same contract as the copilot cases).
+        expect(
+          body.parts.some(
+            (p) =>
+              p.part === 'conversation_history' ||
+              p.part === 'user_messages' ||
+              p.part === 'assistant_turns',
+          ),
+        ).toBe(true)
+        expect(body.assembledText).toContain('why are Claude Desktop inspector blocks empty?')
+        expect(body.assembledText).toContain('capture should attach parts.')
+      })
+
+      it('returns honest empty parts for a counters-only desktop synth span (no fabrication)', async () => {
+        const res = await fetch(
+          `${base}/api/kyber/session/sess-desktop-empty-001/turn/0/content`,
+        )
+        expect(res.status).toBe(200)
+        assertStandardKyberHeaders(res)
+
+        const body = (await res.json()) as TurnContentResult
+        expect(body.sessionId).toBe('sess-desktop-empty-001')
+        expect(body.spanId).toBe(
+          'synth:claude-desktop:sess-desktop-empty-001:msg-counters-only',
+        )
+        expect(body.parts).toEqual([])
+        expect(body.assembledText).toBe('')
+        // Blocks may exist as structure, but none carry fabricated text.
+        expect(body.blocks.every((b) => b.text === '')).toBe(true)
+      })
     })
   })
 })

@@ -9,6 +9,7 @@ import {
   type CanonicalContent,
   type CanonicalRecord,
   type TokenUsage,
+  notMeasurable,
   validateTokens,
 } from './types.js'
 
@@ -166,6 +167,37 @@ describe('validateTokens', () => {
       expect(result.problem.code).toBe(TOKEN_NEGATIVE_FRESH)
       expect(result.problem.location).toBe(broken.spanId)
     }
+  })
+
+  describe('honest unobservability (issue #241)', () => {
+    it('accepts reasoning > output when output is declared not_measurable', () => {
+      const tokens = usage({ output: 0, reasoning: 127, reportedOutput: 0 })
+      const measurability = {
+        output: notMeasurable('Output tokens are excluded from Copilot shutdown rollups to avoid double-counting per-turn requests.'),
+      }
+      expect(validateTokens(tokens, 'span-1', measurability)).toEqual({ valid: true })
+    })
+
+    it('still rejects negative reasoning when output is declared not_measurable', () => {
+      const tokens = usage({ output: 0, reasoning: -5, reportedOutput: 0 })
+      const measurability = {
+        output: notMeasurable('Output tokens are excluded from Copilot shutdown rollups to avoid double-counting per-turn requests.'),
+      }
+      const result = validateTokens(tokens, 'span-1', measurability)
+      expect(result.valid).toBe(false)
+      if (!result.valid) {
+        expect(result.problem.code).toBe(TOKEN_REASONING_EXCEEDS_OUTPUT)
+      }
+    })
+
+    it('rejects reasoning > output when output is measurable', () => {
+      const tokens = usage({ output: 0, reasoning: 127, reportedOutput: 0 })
+      const result = validateTokens(tokens, 'span-1', { output: 'measured' })
+      expect(result.valid).toBe(false)
+      if (!result.valid) {
+        expect(result.problem.code).toBe(TOKEN_REASONING_EXCEEDS_OUTPUT)
+      }
+    })
   })
 })
 

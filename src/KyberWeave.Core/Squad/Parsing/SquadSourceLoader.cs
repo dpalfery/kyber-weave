@@ -47,6 +47,15 @@ public static class SquadSourceLoader
         "antigravity", "warp", "factory", "pi", "zcode", "devin"
     };
 
+    /// <remarks>
+    /// Internal so the canonical-content pin can compare the published schema enum
+    /// and the <c>target:</c> markers in capabilities.yml against the same set the
+    /// loader enforces. The schema file is not applied at load time.
+    /// <c>IReadOnlyList&lt;string&gt;</c> keeps the widened field from remaining a
+    /// mutable array another assembly can reorder.
+    /// </remarks>
+    internal static readonly IReadOnlyList<string> TargetScopedProfileTargets = ["copilot", "devin"];
+
     /// <summary>Loads the default bundle from a canonical product source root.</summary>
     public static SquadSource Load(string root)
     {
@@ -252,14 +261,17 @@ public static class SquadSourceLoader
             YamlMappingNode profile = RequireMapping(node, name, file.RelativePath, nodeIsValue: true);
             EnsureOnlyFields(profile, ["target", "permissions"], file.RelativePath);
             string? target = TryGetScalar(profile, "target", file.RelativePath);
-            if (target is not null)
+            if (target is not null &&
+                !TargetScopedProfileTargets.Contains(target, StringComparer.Ordinal))
             {
-                RequireLiteral(
-                    target,
+                string allowed = string.Join(
+                    " or ",
+                    TargetScopedProfileTargets.Select(static name => $"'{name}'"));
+                SquadSourceValidator.Throw(
+                    $"Capability profile '{name}' uses unsupported target '{target}'.",
                     $"profiles.{name}.target",
-                    "copilot",
                     file.RelativePath,
-                    "Use 'copilot' for a target-specific capability profile or omit target for a shared profile.");
+                    $"Use {allowed} for a target-specific capability profile or omit target for a shared profile.");
             }
 
             YamlMappingNode permissionsNode = RequireMapping(profile, "permissions", file.RelativePath);
@@ -563,7 +575,7 @@ public static class SquadSourceLoader
         YamlMappingNode root = ParseYamlMapping(file with { Content = frontmatter.Yaml }, frontmatter.LineOffset);
         EnsureOnlyFields(
             root,
-            ["schema", "name", "description", "invocation", "model-profile", "capability-profile", "copilot-capability-profile", "copilot-tools", "delegates-to", "fallback", "aliases"],
+            ["schema", "name", "description", "invocation", "model-profile", "capability-profile", "copilot-capability-profile", "copilot-tools", "devin-capability-profile", "delegates-to", "fallback", "aliases"],
             file.RelativePath,
             frontmatter.LineOffset);
 
@@ -620,6 +632,7 @@ public static class SquadSourceLoader
             RequireScalar(root, "capability-profile", file.RelativePath, frontmatter.LineOffset),
             TryGetScalar(root, "copilot-capability-profile", file.RelativePath, frontmatter.LineOffset),
             copilotTools,
+            TryGetScalar(root, "devin-capability-profile", file.RelativePath, frontmatter.LineOffset),
             delegates,
             RequireScalar(root, "fallback", file.RelativePath, frontmatter.LineOffset),
             aliases,

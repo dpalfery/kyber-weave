@@ -43,8 +43,8 @@ describe('registered top-level commands', () => {
         .find(command => command.name() === name)!
         .commands.map(command => command.name())
         .sort()
-    expect(sub('kyber')).toEqual(['antigravity-statusline', 'backfill', 'build', 'cursor-hook', 'otel', 'renormalize'])
-    expect(sub('dash')).toEqual(['refresh'])
+    expect(sub('kyber')).toEqual(['antigravity-statusline', 'backfill', 'build', 'capture', 'cursor-hook', 'otel', 'renormalize'])
+    expect(sub('dash')).toEqual(['clean', 'refresh'])
   })
 
   it('keep report as the default command', () => {

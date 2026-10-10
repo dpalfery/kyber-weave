@@ -8,7 +8,7 @@ owner: dpalfery
 last-reviewed: 2026-10-09
 status: current
 decided-by:
-  - adr/0028-kyber-arbiter-three-step-decision-gates
+  - adr/0033-kyber-arbiter-three-step-decision-gates
 code-refs:
   - ArbiterEvaluator
   - RuleEngine
@@ -31,7 +31,7 @@ code-refs:
 The Arbiter is a rule engine that gates Squad delegations and review fan-out. It evaluates
 each decision in up to three steps inside the hook process, then gets out of the way: step 2
 — the reasoning agent — always runs after the block, outside the Arbiter. Decided by
-[ADR 0028](../adr/0028-kyber-arbiter-three-step-decision-gates.md).
+[ADR 0033](../adr/0033-kyber-arbiter-three-step-decision-gates.md).
 
 ## Terminology
 
@@ -158,7 +158,7 @@ finding is surfaced as context rather than enforced. Pre-dispatch denies still b
 ## Related
 
 - [Runbook](runbook.md) — operating the Arbiter day to day
-- [ADR 0028](../adr/0028-kyber-arbiter-three-step-decision-gates.md) — the decisions
+- [ADR 0033](../adr/0033-kyber-arbiter-three-step-decision-gates.md) — the decisions
 - [Kyber-Squad architecture](../kyber-squad/architecture.md) — hook wiring per harness
 - [Review council architecture](../code-review/architecture.md) — review triggers
 - [Configuration](../configuration.md) — `arbiter:` and `applies-when`

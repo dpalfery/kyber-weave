@@ -6,7 +6,7 @@ status: current
 component: KyberDash
 source-root: dash
 owner: dpalfery
-last-reviewed: 2026-10-01
+last-reviewed: 2026-10-09
 code-refs:
   - registerKyberCommands
   - refreshHarnessSources
@@ -21,7 +21,7 @@ First-party code under `dash/` since a one-time fork of CodeBurn
 
 1. [KyberDash Tray (`dash/tray/`)](#6-the-kyberdash-tray-dashtray) — the macOS and Windows tray: a Tauri 2 shell whose popover renders the context report and which owns the refresh cadence and the optional OTLP receiver.
 2. [Web Dashboard (`dash/web/`)](#web-dashboard-dashweb) — Standalone React browser interface served by the CLI over HTTP.
-3. [CLI engine (`dash/src/`)](#telemetry-ingest-canonical-store-and-cli-operations) — `kyberdash report`, `web`, `dash refresh`, `kyber otel`, and the store operations documented below.
+3. [CLI engine (`dash/src/`)](#telemetry-ingest-canonical-store-and-cli-operations) — `kyberdash report`, `web`, `dash refresh`, `dash clean`, `kyber otel`, and the store operations documented below.
 
 This runbook covers the local prerequisites, build workflows, dev runners, CLI operations, and test suites
 for each surface.
@@ -174,6 +174,19 @@ per-harness table plus a derived summary; diagnostics for `failed`/`partial` row
 stderr without chat content or raw paths. Use a temporary `--db` when experimenting. There is
 no dashboard refresh button.
 
+Parser-contract bumps: each harness-source descriptor carries a
+`parserContractVersion`. When Claude family parsing output changes — for example
+attaching conversation/tool-result parts on Desktop/CLI file-synth records
+([issue #216](https://github.com/dpalfery/kyber-weave/issues/216)) — that version
+advances and the next `dash refresh` treats prior `source_checkpoint` rows as
+stale, re-reads transcript files, and re-synthesizes affected units still
+inside the 14-day content-retention window. Rows older than that floor are
+not rewritten — the same refresh would empty their parts via
+`purgeExpiredContent`. No separate repair command is required; prefer a
+temporary `--db` when validating a bump.
+Capturable versus inherent-empty Claude buckets are recorded in the
+[telemetry inventory](telemetry-inventory.md#claude-desktop-and-cli-file-synth-parts-issue-216).
+
 Coverage window persistence: every refresh run records its window in
 `refresh_run.history_weeks` (schema 15). The value is the `--history-weeks` argument of
 that run (default 2). Rows written before window tracking read as `null`, which surfaces
@@ -199,6 +212,45 @@ their persisted reason: `window_filtered` (all native records predate the refres
 widen `--history-weeks` to ingest them) or `no_recordable_events` (the file holds no usage
 or model events, so there is nothing to ingest).
 
+### 2b. Database clean (`dash clean`)
+
+Wipe bad or stale telemetry — double-counting, mis-attribution, test noise — by harness
+scope or for all harnesses, then re-ingest from source logs
+([ADR 0032](../adr/0032-kyberdash-user-initiated-clean.md)):
+
+```bash
+node dash/dist/cli.js dash clean --all --yes
+node dash/dist/cli.js dash clean --harness pi --harness cursor --yes
+node dash/dist/cli.js dash clean --all --yes --reingest-weeks 4
+node dash/dist/cli.js dash clean --all --yes --no-reingest
+```
+
+`--all` or at least one `--harness <id>` is required, and so is `--yes`: without the
+flag the command exits **2** before the store opens (the CLI is non-interactive, so there
+is no prompt). `--reingest-weeks <n>` is a positive integer defaulting to **1** (the last
+7 days); `--no-reingest` skips re-ingestion. A held refresh lock exits **3** with nothing
+written; clean failure exits **1**; success exits **0**.
+
+One clean pauses the OTLP receiver (loopback admin routes; export paths answer 503 +
+Retry-After while paused, `/healthz` stays 200 with `paused`), holds the refresh lock,
+wipes the scope in one store transaction (records including `records.raw`, provenance,
+checkpoints, and harness-scoped derived caches), projects the derived tables, re-ingests
+the scope, and resumes ingestion. `ingest_log`, `refresh_run`, `metadata` (stamped
+`last_clean_at`/scope), `token_cache`, and the model-window catalog are never wiped.
+Wipe-all additionally clears `quarantine` and the log-enrichment tables; a per-harness
+wipe cannot scope quarantine rows (no harness column).
+
+There is no backup and no undo: the data is ephemeral point-in-time telemetry, and
+file-backed harnesses re-derive it from source logs. OTLP-collected records have no
+source logs and do not come back — the web dialog and the tray confirm both say so
+before anything is wiped. Prefer a temporary `--db` when validating a wipe.
+
+The web dashboard reaches the same operation at `POST /api/kyber/clean` (confirmed dialog
+in the Context Doctor ingest panel); the tray spawns `dash clean --all` or
+`dash clean --harness <id>` with `--yes` and `--no-reingest` behind its two-step confirm
+(the next scheduled refresh re-ingests on its own cadence, so a foreground clean returns
+promptly; the tray holds no clean logic).
+
 ### 3. Raw Content Backfill and Re-normalization
 
 ```bash
@@ -217,6 +269,12 @@ and restricts the excluded-harness remediation sweep the same way, so traces
 from other sources — and their derived sessions — are left untouched.
 Prefer it whenever the repair is scoped to one source (for example,
 re-attributing live Antigravity rows after an adapter change).
+
+#### Tool Result Truncation and Parser Checkpoint Re-synthesis (issues #180, #232)
+
+Tool execution outputs captured during file or OTLP ingest are bounded to 64KiB (`MAX_TOOL_RESULT_BYTES = 65_536`) in stored parts (`part: 'tool_result_content'`). Truncated records carry `truncated: true`, with pre-truncation byte length stored in `attributes['gen_ai.tool.result_bytes']`.
+
+When reader extraction or normalization contracts change (such as tool extraction in #180 or request/response turn deduplication in #232), the source's `PARSER_CONTRACT_VERSION` in `dash/src/refresh/registry.ts` is incremented. Running `kyber-weave dash refresh` detects that existing `source_checkpoint` entries carry an older contract version, marks them stale, and automatically re-reads and re-synthesizes historical sessions without requiring manual database deletion.
 
 > **Warning:** unscoped `kyber renormalize` quarantines every row the
 > fingerprint vote cannot claim, including file-sourced rows (`codeburn/*`),
@@ -257,7 +315,48 @@ spawns exactly one `web --no-open` child (default loopback port **4747**) and, w
 allow, the OTLP receiver child (port **4318**), polls the report over loopback, and renders
 it. The webview holds no network permission and no analysis logic of its own.
 
-Local gates (after a one-time `npm --prefix dash/tray/ui ci`):
+#### Native development prerequisites
+
+The released tray needs no Rust installation. To build or test `dash/tray/`, install
+the stable Rust toolchain, Cargo, rustfmt, and Clippy. Use current stable Rust: the
+crate's `rust-version` is a minimum for its own source, not a pin for all locked
+dependencies. Node.js and npm are also required for the React UI.
+
+On macOS, install the Xcode Command Line Tools if `xcode-select -p` fails, then use
+Homebrew to install rustup, the Rust toolchain manager:
+
+```bash
+xcode-select -p || xcode-select --install
+brew install rustup
+export PATH="$(brew --prefix rustup)/bin:$PATH"
+rustup default stable
+rustup component add rustfmt clippy
+rustc --version
+cargo --version
+```
+
+Homebrew's rustup is keg-only. Add that `export PATH=...` line to `~/.zprofile`
+and `~/.zshrc` so both login shells and interactive terminals can find Cargo.
+It does not provide `rustup-init`; use `rustup default stable` to install the toolchain.
+If Xcode opens an installation dialog, finish it before building.
+
+On Windows, follow the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/)
+to install Microsoft C++ Build Tools with the **Desktop development with C++** workload
+and WebView2, then install Rust through [rustup](https://rustup.rs/) using the MSVC
+toolchain. In a fresh terminal, run `rustup default stable`,
+`rustup component add rustfmt clippy`, `rustc --version`, and `cargo --version`.
+
+From the repository root, prepare the frontend before a direct Cargo build or test:
+
+```bash
+npm --prefix dash/tray/ui ci
+npm --prefix dash/tray/ui run build
+```
+
+The frontend build creates the `ui/dist` assets embedded by `tauri.conf.json`.
+Build the native shell with `cargo build --locked --manifest-path dash/tray/src-tauri/Cargo.toml`.
+
+#### Local gates
 
 ```bash
 npm --prefix dash/tray/ui run typecheck
@@ -268,6 +367,11 @@ cd dash/tray/src-tauri && cargo fmt --check && cargo clippy -- -D warnings && ca
 `npm --prefix dash run lint` also covers the tray UI. To run the shell against a locally
 built CLI, build `dash/dist/cli.js` first (`npm --prefix dash run build:cli`) and point
 `KYBERDASH_BIN` at it.
+
+For a multi-monitor smoke check, open the card from each monitor's menu bar, including
+displays above or left of the primary and displays with different scaling. The card
+should open on the clicked display. Repeat after moving between 1× and 2× displays.
+The card closes when another app gains focus, so inspect its placement before switching apps.
 
 Deployed shape (per-user, no administrator rights). The Windows installer is unsigned; see
 [Windows: unsigned binaries and SmartScreen](../install.md#windows-unsigned-binaries-and-smartscreen)
@@ -379,6 +483,21 @@ controls appear on Usage only.
   - *Execution Timeline / Call Tree*: Hierarchical span call tree with duration, status badges, and auxiliary flags.
   - *Inspector Drawer (`SessionInspectorDrawer`)*: Slide-out drawer with XML tag folding (`<instructions>`, `<environment_info>`, `<context>`) and formatted tool call/result trees.
 - **Compare** (rail): Phase-aligned run comparison (`page-compare`), not a fifth header tab.
+  Open it from the sidebar or navigate directly to `/compare?a=:runId&b=:runId` to pre-select
+  two runs; without explicit `a`/`b` query ids, **Run A** and **Run B** both start at
+  **Select a run** and kyberdash issues no comparison request until two distinct run ids are
+  chosen. Each selector has its own harness filter (**All harnesses** plus every harness id
+  observed in the inventory); filters are independent so cross-harness A/B comparisons remain
+  possible and narrowing one side does not affect the other. Harness filters use measured
+  canonical ids only — kyberdash does not infer ZCode (or any harness) subagent vs parent role
+  from id, label, or run size. The run inventory stays newest-first (`started DESC` from
+  `/api/kyber/runs`); within each filtered list, options read
+  `YYYY-MM-DD · <harness> · <n> turns · <label or id>` (`date unknown` / `turns unknown` when
+  the server omits those fields). Same-run selection does not fetch. When turns, token delta, or
+  recommendation history are unavailable, the UI shows `—` and the API reason — never fabricated
+  `0` turns, a zero token delta, or `0 / 5` completed pairs; promotion stays disabled
+  (`canPromote: false`) until history is explicitly measured. See
+  [Run Comparison and Phase Alignment](architecture.md#run-comparison-and-phase-alignment-decision-d11).
 - **Usage**: Device spend overview, multi-provider cost rollups, top projects, daily spend, Share.
 - **Quarantine**: Quarantined spans holding unrecognized namespaces or malformed attributes.
 - **Problems**: Recorded token reconciliation mismatches, validation anomalies, and parser errors.
@@ -390,9 +509,15 @@ sessions across all available harnesses. The other tabs come from the canonical 
 inventory: each distinct nonempty harness ID with sessions gets one tab, regardless of how
 many sessions share that ID. A harness without sessions has no tab.
 
-Select a harness tab to show only sessions with that exact harness ID. Client variants stay
-separate: Claude Code, Claude Desktop and Claude CLI; Codex Desktop and Codex CLI;
-Antigravity CLI and Antigravity IDE; and each Copilot client. Labels describe the tabs;
+Select a harness tab to show only sessions with that exact harness ID. Under the
+harvested #182 twin fold, client front-ends fold onto their primary harness: Claude Desktop
+folds onto Claude Code (and Cursor Agent onto Cursor) for derived rows, rollups, and API
+filters, so Claude Desktop turns appear under the Claude Code tab rather than a duplicate
+surface. The two evidenced exceptions where variants stay separate are: (1) file-side
+standalone sessions that lack OTLP twins remain directly retrievable by session ID, and
+(2) unclipped content inspection preserves the raw origin. Other client variants stay
+separate: Codex Desktop and Codex CLI; Antigravity CLI and Antigravity IDE; and each
+Copilot client. Labels describe the tabs;
 future or unknown harness IDs use their stored ID as the label and remain selectable.
 **Agent Sessions (All)** restores sessions across harnesses.
 
@@ -420,7 +545,7 @@ curl -s http://127.0.0.1:3000/api/kyber/run/run-copilot-001 | jq .
 curl -s http://127.0.0.1:3000/api/kyber/sessions | jq .
 curl -s http://127.0.0.1:3000/api/kyber/session/sess-copilot-001 | jq .
 
-# Inspect unclipped assembled turn context (Task G1 / Decision D14)
+# Inspect unclipped assembled turn context (ADR 0014, issue #184; 0-based turn index)
 curl -s "http://127.0.0.1:3000/api/kyber/session/sess-copilot-001/turn/0/content" | jq .
 
 # Query ranked telemetry findings (Task F3 / Decision D5 / D6)
@@ -436,9 +561,12 @@ curl -s http://127.0.0.1:3000/api/kyber/review/status | jq .
 # Cross-harness comparison matrix
 curl -s http://127.0.0.1:3000/api/kyber/compare | jq .
 
-# Quarantine entries and problems
-curl -s http://127.0.0.1:3000/api/kyber/quarantine | jq .
-curl -s http://127.0.0.1:3000/api/kyber/problems | jq .
+# Phase-aligned run comparison (requires two run ids; no caller-supplied history count)
+curl -s "http://127.0.0.1:3000/api/kyber/compare/runs?runA=run-a&runB=run-b" | jq .
+
+# Quarantine entries and problems with pagination (issue #192; supports ?limit= with ?offset= or ?page=; offset takes precedence when both are supplied)
+curl -s "http://127.0.0.1:3000/api/kyber/quarantine?limit=50&offset=0" | jq .
+curl -s "http://127.0.0.1:3000/api/kyber/problems?limit=50&page=1" | jq .
 
 # Coverage route (refresh window, ingest activity, checkpoints)
 curl -s http://127.0.0.1:3000/api/kyber/coverage | jq .
@@ -568,7 +696,31 @@ here.
   `canon.db-wal` or `canon.db-shm` from the old file. A replacement that leaves those sidecars
   behind can make SQLite misread the new file; the server has no way to detect that case.
 
-### 7. A model shows "no published rate"
+### 7. Devin doctor says costs unpriced, or cost shows $0
+
+- **Cause**: `~/.kyberdash/config.json` has no finite positive `devin.acuUsdRate` (absent,
+  non-numeric, `<= 0`, or a JSON literal such as `1e400` that parses as `Infinity`).
+- **Behavior**: transcripts still ingest. Token fields parse. Cost is unknown (`costUSD: 0`
+  with `costIsEstimated: true`), never a measured zero. Doctor's Devin verdict names the
+  missing rate instead of "holds no sessions".
+- **Fix**: set `devin.acuUsdRate` to the USD-per-ACU rate. Do not invent a figure to make
+  the tile look priced.
+
+### 8. Warp doctor says permission denied, or Warp checkpoints stay at 0 records
+
+- **Cause**: the Warp sqlite path exists but the process cannot read it (typically macOS
+  TCC on Group Containers), *or* kyberdash could not write its own sqlite cache copy.
+- **Behavior**: a readable database that only failed `copyfile(2)` is copied via read/write
+  and produces records. A true source-unreadable `EPERM`/`EACCES` is surfaced as
+  `<path> is not readable — permission denied` (Full Disk Access on macOS; owner/permissions
+  otherwise). Discovery returns no sessions; the 0-record checkpoint is the parsed count.
+  An unwritable `KYBERDASH_CACHE_DIR` is kyberdash's cache, not a Warp TCC denial — doctor
+  must not prescribe Full Disk Access for that case.
+- **Fix**: on macOS grant Full Disk Access to the process reading Warp. There is no TCC
+  workaround and no retry as another user. Check cache-directory ownership if the denial
+  is kyberdash's own write.
+
+### 9. A model shows "no published rate"
 
 - **Cause**: Claude Code and Codex turns are priced from the bundled published table, and Copilot
   turns from the Copilot credits table. A model in neither table is honestly unpriced; rates are
