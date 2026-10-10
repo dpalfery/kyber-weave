@@ -27,13 +27,18 @@ public sealed class ArbiterCanonicalSquadTests
 
     private static readonly string[] AllowedProfiles = ["orchestrator", "reviewer"];
 
+    // Extended, never pruned: main's two target-scoped Devin profiles arrived with
+    // the merge and deny decision.query, because Devin's qualified generic grants
+    // deliberately exclude the Arbiter server (ADR 0028).
     private static readonly string[] DeniedProfiles =
     [
         "architect",
         "architect-copilot",
+        "architect-devin",
         "documentation",
         "investigator",
         "product-planning",
+        "product-planning-devin",
         "publishing-worker",
         "read-only",
         "worker",
