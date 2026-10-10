@@ -142,6 +142,12 @@ public sealed class ArbiterKeyResolutionTests
     }
 
     [Theory]
+    // `localhost.` is the absolute spelling of `localhost` and names the same interface.
+    // RuleValidator asks the same helper, so a spelling one accepts and the other refuses
+    // is a configuration the validator permits and the key resolver then withholds a key
+    // from, which is the disagreement this rules out.
+    [InlineData("http://localhost.:11434/v1")]
+    [InlineData("http://LOCALHOST.:11434/v1")]
     [InlineData("http://localhost:11434/v1")]
     [InlineData("http://LocalHost:11434/v1")]
     [InlineData("http://127.0.0.1:11434/v1")]
