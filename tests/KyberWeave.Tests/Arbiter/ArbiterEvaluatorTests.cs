@@ -232,6 +232,33 @@ public sealed class ArbiterEvaluatorTests : IDisposable
     }
 
     [Fact]
+    public async Task Evaluator_NoneProviderNeverConsultsTheCredentialStore()
+    {
+        const string Prompt = "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/plan.md\nTASK: T3\n\nImplement.";
+        int resolverCalls = 0;
+        ArbiterEvaluator evaluator = new(
+            new NoneProvider(),
+            _ =>
+            {
+                resolverCalls++;
+                return null;
+            },
+            new InFlightLedger(ArbiterDirectory),
+            new DecisionLog(ArbiterDirectory),
+            new PassThroughGitFacts(),
+            new PassThroughPlanReader(),
+            new FixedClock(new DateTimeOffset(2025, 10, 1, 12, 0, 0, TimeSpan.Zero)));
+        KyberWeaveConfig config = ConfigWith([
+            AskRule("KW-ARB-ASK-001", "delegate", "within-task", RuleEffects.Allow),
+        ]);
+
+        ArbiterEvaluationResult result = await evaluator.EvaluateAsync(DelegateEvent(Prompt), config);
+
+        Assert.False(result.IsError);
+        Assert.Equal(0, resolverCalls);
+    }
+
+    [Fact]
     public async Task Evaluator_ProviderErrorEscalatesConductorButAllowsReview()
     {
         const string DelegatePrompt = "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/plan.md\nTASK: T3\n\nImplement.";

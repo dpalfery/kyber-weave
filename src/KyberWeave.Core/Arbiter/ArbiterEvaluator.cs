@@ -361,6 +361,14 @@ public sealed class ArbiterEvaluator
 
     private void ResolveKey(KyberWeaveConfig config)
     {
+        // The none provider sends nothing, so it has no key to prove. Reading the OS
+        // credential store for it would fail on hosts without that store, such as a
+        // Linux runner without secret-tool, and block a configuration that needs no key.
+        if (config.Arbiter.Provider.Kind == ArbiterProviderKind.None)
+        {
+            return;
+        }
+
         if (Uri.TryCreate(config.Arbiter.Provider.Endpoint, UriKind.Absolute, out Uri? endpoint))
         {
             // The key itself is never stored, logged, or interpolated anywhere.
