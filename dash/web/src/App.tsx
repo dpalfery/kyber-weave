@@ -32,12 +32,15 @@ export const HARNESS_TABS = HARNESS_CATALOG
 
 /**
  * The harness tabs to show: "All Harnesses" plus every harness the store has
- * samples for, newest-heaviest first.
+ * samples for, newest-heaviest first, plus an "Unknown" tab for rows the
+ * server could not attribute.
  *
  * The strip used to be a hardcoded three (claude-code, copilot, gemini), so a
  * machine collecting Codex, Cursor, OpenCode or Antigravity had that data
  * ingested and then no way to reach it. Harnesses with no samples are left out
- * rather than shown as empty tabs.
+ * rather than shown as empty tabs. Unknown is always present: quarantine and
+ * problem rows with no stored harness would otherwise have no scope to be
+ * read under.
  */
 export function harnessTabsFrom(
   summaries: readonly KyberHarnessSummary[] | undefined,
@@ -53,7 +56,7 @@ export function harnessTabsFrom(
     seen.add(summary.harness)
     live.push({ harness: summary.harness, name: summary.name ?? harnessDisplayName(summary.harness) })
   }
-  return [{ harness: 'all', name: 'All Harnesses' }, ...live]
+  return [{ harness: 'all', name: 'All Harnesses' }, ...live, { harness: 'unknown', name: 'Unknown' }]
 }
 
 function useHarnessTabs(): Array<{ harness: string; name: string }> {
@@ -195,11 +198,13 @@ export const NAV_TABS = [
 
 export type KyberPage = (typeof NAV_TABS)[number]['key']
 
-export function KyberQuarantinePanel() {
+export function KyberQuarantinePanel({ activeHarness }: { activeHarness?: string } = {}) {
+  const scoped = activeHarness === undefined || activeHarness === 'all' ? undefined : activeHarness
   const { data, isLoading, isError } = useQuery({
-    queryKey: ['kyber-quarantine'],
+    queryKey: scoped === undefined ? ['kyber-quarantine'] : ['kyber-quarantine', scoped],
     queryFn: async () => {
-      const r = await fetch('/api/kyber/quarantine')
+      const harness = scoped === undefined ? '' : `?harness=${encodeURIComponent(scoped)}`
+      const r = await fetch(`/api/kyber/quarantine${harness}`)
       if (!r.ok) {
         const err = await r.json().catch(() => null)
         throw new Error(err?.error || `HTTP ${r.status}`)
@@ -210,11 +215,11 @@ export function KyberQuarantinePanel() {
   })
 
   if (isLoading) return <Skeleton className="h-20" />
-  if (isError || !data) return <QuarantineView entries={[]} />
+  if (isError || !data) return <QuarantineView entries={[]} activeHarness={activeHarness} />
 
   const rawEntries = Array.isArray(data) ? data : (data as { entries?: unknown[] }).entries ?? []
   if (!Array.isArray(rawEntries)) {
-    return <QuarantineView entries={[]} />
+    return <QuarantineView entries={[]} activeHarness={activeHarness} />
   }
 
   const entries: QuarantineEntry[] = rawEntries.map((raw, idx: number) => {
@@ -230,21 +235,36 @@ export function KyberQuarantinePanel() {
         ns = e.namespaces.includes(',') ? e.namespaces.split(',').map((s: string) => s.trim()) : [e.namespaces.trim()]
       }
     }
+    const source = typeof e.source === 'string' && e.source.trim() !== '' ? e.source : null
+    const harness = typeof e.harness === 'string' && (e.harness as string).trim() !== '' ? (e.harness as string) : null
+    const name = typeof e.name === 'string' ? (e.name as string) : null
+    const seenAt =
+      typeof e.seen_at === 'string' ? (e.seen_at as string)
+      : typeof e.timestamp === 'string' ? (e.timestamp as string)
+      : null
+    const timestamp = typeof e.timestamp === 'string' ? (e.timestamp as string) : null
     return {
       spanId: String(e.spanId || e.span_id || `quarantine-${idx}`),
       namespaces: ns,
       reason: String(e.reason || ''),
+      ...(source !== null ? { source } : {}),
+      ...(harness !== null ? { harness } : {}),
+      ...(name !== null ? { name } : {}),
+      ...(seenAt !== null ? { seenAt } : {}),
+      ...(timestamp !== null ? { timestamp } : {}),
     }
   })
 
-  return <QuarantineView entries={entries} />
+  return <QuarantineView entries={entries} activeHarness={activeHarness} />
 }
 
-export function KyberProblemsPanel() {
+export function KyberProblemsPanel({ activeHarness }: { activeHarness?: string } = {}) {
+  const scoped = activeHarness === undefined || activeHarness === 'all' ? undefined : activeHarness
   const { data, isLoading, isError } = useQuery({
-    queryKey: ['kyber-problems'],
+    queryKey: scoped === undefined ? ['kyber-problems'] : ['kyber-problems', scoped],
     queryFn: async () => {
-      const r = await fetch('/api/kyber/problems')
+      const harness = scoped === undefined ? '' : `?harness=${encodeURIComponent(scoped)}`
+      const r = await fetch(`/api/kyber/problems${harness}`)
       if (!r.ok) {
         const err = await r.json().catch(() => null)
         throw new Error(err?.error || `HTTP ${r.status}`)
@@ -255,25 +275,34 @@ export function KyberProblemsPanel() {
   })
 
   if (isLoading) return <Skeleton className="h-20" />
-  if (isError || !data) return <ProblemsView problems={[]} />
+  if (isError || !data) return <ProblemsView problems={[]} activeHarness={activeHarness} />
 
   const rawProblems = Array.isArray(data) ? data : (data as { problems?: unknown[] }).problems ?? []
   if (!Array.isArray(rawProblems)) {
-    return <ProblemsView problems={[]} />
+    return <ProblemsView problems={[]} activeHarness={activeHarness} />
   }
 
-  const problems: ProblemEntry[] = rawProblems.map((raw) => {
+  const problems: ProblemEntry[] = rawProblems.map((raw, idx: number) => {
     const p = raw as Record<string, unknown>
+    const harness = typeof p.harness === 'string' && (p.harness as string).trim() !== '' ? ((p.harness as string).trim() as string) : null
+    const at =
+      typeof p.at === 'string' ? (p.at as string)
+      : typeof p.timestamp === 'string' ? (p.timestamp as string)
+      : null
+    const id = typeof p.id === 'string' || typeof p.id === 'number' ? (p.id as string | number) : `problem-${idx}`
     return {
+      id,
       severity: (p.severity === 'error' ? 'error' : 'warning') as 'error' | 'warning',
       code: String(p.code || 'unknown'),
       message: String(p.message || ''),
       location: (p.location || p.at || p.harness || undefined) as string | undefined,
       spanId: (p.spanId || p.span_id || undefined) as string | undefined,
+      ...(harness !== null ? { harness } : {}),
+      ...(at !== null ? { at } : {}),
     }
   })
 
-  return <ProblemsView problems={problems} />
+  return <ProblemsView problems={problems} activeHarness={activeHarness} />
 }
 
 export interface AppProps {
@@ -632,9 +661,9 @@ export function App({ initialPage = 'context-doctor', initialPath, initialNotFou
           ) : section === 'sessions' ? (
             <Sessions activeHarness={activeHarness} onSelectSession={setSessionId} />
           ) : section === 'quarantine' ? (
-            <KyberQuarantinePanel />
+            <KyberQuarantinePanel activeHarness={activeHarness} />
           ) : (
-            <KyberProblemsPanel />
+            <KyberProblemsPanel activeHarness={activeHarness} />
           )}
         </main>
       </div>

@@ -30,16 +30,21 @@ pub const REPORT_PATH: &str = "/api/kyber/report";
 pub const JOBS_PATH: &str = "/api/kyber/jobs";
 /// Shared, server-owned settings: `GET` to read, `PUT` a patch to change.
 pub const SETTINGS_PATH: &str = "/api/kyber/settings";
+/// Live receiver health plus ingest coverage (`GET`, read-only). The tray
+/// reads only `receiver` from it for the green/red collector saber; the full
+/// document rides to the popover as `coverage` in `ViewState`.
+pub const COVERAGE_PATH: &str = "/api/kyber/coverage";
 pub const REFRESH_PATH: &str = "/api/kyber/refresh";
 pub const CLEAN_PATH: &str = "/api/kyber/clean";
 pub const IMPORT_HISTORY_PATH: &str = "/api/kyber/import-history";
 
 /// Every endpoint the tray may contact. A closed list, so a bug that builds a
 /// URL from webview input cannot reach an arbitrary route on the server.
-const API_PATHS: [&str; 6] = [
+const API_PATHS: [&str; 7] = [
     REPORT_PATH,
     JOBS_PATH,
     SETTINGS_PATH,
+    COVERAGE_PATH,
     REFRESH_PATH,
     CLEAN_PATH,
     IMPORT_HISTORY_PATH,

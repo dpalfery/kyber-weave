@@ -27,6 +27,7 @@ import { Skeleton } from '../ui/skeleton.js'
 import { fetchCoverage, fetchHarnesses } from '../../lib/kyberApi.js'
 import { CleanDatabaseControl } from './CleanDatabaseControl.js'
 import { CoverageIngestPanel } from './CoverageIngestPanel.js'
+import { ReceiverHealthPanel } from './ReceiverHealthPanel.js'
 import { MaintenancePanel } from './MaintenancePanel.js'
 import { ModelCatalogRefreshControl } from './ModelCatalogRefreshControl.js'
 import { SlideInPanel } from './SlideInPanel.js'
@@ -92,9 +93,15 @@ export function DashboardTools() {
  * failure claims the store is healthy.
  */
 function StatusPanel() {
+  // Read-only poll while the slideout is open: the Status panel mounts only
+  // when opened, so `refetchInterval` polls exactly while it is on screen.
+  // 10s matches the engine's receiver-probe cadence order of magnitude. This
+  // is React Query's own timer — no `setInterval` literal lives in this
+  // display layer (rule R1: only `lib/storeGeneration.ts` may hold one).
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['kyber-coverage'],
     queryFn: fetchCoverage,
+    refetchInterval: 10_000,
   })
 
   if (isLoading) {
@@ -125,7 +132,12 @@ function StatusPanel() {
     )
   }
 
-  return <CoverageIngestPanel coverage={data} />
+  return (
+    <div className="flex flex-col gap-density-stack">
+      <ReceiverHealthPanel coverage={data} />
+      <CoverageIngestPanel coverage={data} />
+    </div>
+  )
 }
 
 /**

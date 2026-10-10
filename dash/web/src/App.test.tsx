@@ -295,12 +295,13 @@ describe('App: Harness selector storage filters', () => {
       { harness: 'cursor', name: 'Cursor' },
       { harness: 'codex', name: 'Codex' },
       { harness: 'claude-code', name: 'Claude Code' },
+      { harness: 'unknown', name: 'Unknown' },
     ])
   })
 
   it('leaves out surveyed harnesses that recorded nothing', () => {
     const tabs = harnessTabsFrom([summary('copilot', 56), summary('windsurf', 0)])
-    expect(tabs.map((t) => t.harness)).toEqual(['all', 'copilot'])
+    expect(tabs.map((t) => t.harness)).toEqual(['all', 'copilot', 'unknown'])
   })
 
   it('uses each live canonical harness ID exactly once', () => {
@@ -309,8 +310,14 @@ describe('App: Harness selector storage filters', () => {
   })
 
   it('falls back to All Harnesses alone when nothing has been collected', () => {
-    expect(harnessTabsFrom([])).toEqual([{ harness: 'all', name: 'All Harnesses' }])
-    expect(harnessTabsFrom(undefined)).toEqual([{ harness: 'all', name: 'All Harnesses' }])
+    expect(harnessTabsFrom([])).toEqual([
+      { harness: 'all', name: 'All Harnesses' },
+      { harness: 'unknown', name: 'Unknown' },
+    ])
+    expect(harnessTabsFrom(undefined)).toEqual([
+      { harness: 'all', name: 'All Harnesses' },
+      { harness: 'unknown', name: 'Unknown' },
+    ])
   })
 })
 

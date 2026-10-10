@@ -55,8 +55,97 @@ export function fetchKyberComparison(): Promise<KyberComparisonTable> {
 export function fetchKyberQuarantine(): Promise<{ entries: KyberQuarantineEntry[] }> {
   return fetchJson<{ entries: KyberQuarantineEntry[] }>('/api/kyber/quarantine')
 }
+
+/**
+ * Quarantine list scoped to one harness. `all`/`unknown` are UI sentinels,
+ * not harness ids: `all` omits the filter, `unknown` asks for rows the
+ * server cannot attribute (and the panel client-filters the same way when
+ * the server predates the filter). The server may ignore the param — the
+ * panel always applies the same predicate locally, so the list is truthful
+ * either way.
+ */
+export function fetchKyberQuarantineScoped(harness?: string | null): Promise<{ entries: KyberQuarantineEntry[] }> {
+  if (harness === undefined || harness === null || harness === '' || harness === 'all') {
+    return fetchKyberQuarantine()
+  }
+  return fetchJson<{ entries: KyberQuarantineEntry[] }>(
+    `/api/kyber/quarantine?harness=${encodeURIComponent(harness)}`,
+  )
+}
+
+/**
+ * One quarantined span with whatever stored evidence the server holds.
+ *
+ * The envelope is deliberately wide: the detail route
+ * (`GET /api/kyber/quarantine/:spanId`) does not exist on servers predating
+ * this surface, and its exact shape is owned by the engine worktree. The
+ * panel reads the row it already has first and layers any of these keys on
+ * top — never inventing a payload, a message, or a stack.
+ */
+export interface KyberQuarantineDetail {
+  spanId?: string
+  span_id?: string
+  source?: string | null
+  harness?: string | null
+  name?: string | null
+  namespaces?: unknown
+  reason?: string | null
+  seen_at?: unknown
+  timestamp?: string | null
+  payload?: unknown
+  attributes?: unknown
+  message?: unknown
+  [key: string]: unknown
+}
+
+export async function fetchQuarantineDetail(spanId: string): Promise<KyberQuarantineDetail> {
+  return fetchJson<KyberQuarantineDetail>(`/api/kyber/quarantine/${encodeURIComponent(spanId)}`)
+}
 export function fetchKyberProblems(): Promise<{ problems: KyberProblemEntry[] }> {
   return fetchJson<{ problems: KyberProblemEntry[] }>('/api/kyber/problems')
+}
+
+/**
+ * Problems list scoped to one harness. Same sentinel contract as the
+ * quarantine list: `all` omits the filter, `unknown` asks for unattributed
+ * rows, and the panel client-filters identically for servers that predate
+ * the query param.
+ */
+export function fetchKyberProblemsScoped(harness?: string | null): Promise<{ problems: KyberProblemEntry[] }> {
+  if (harness === undefined || harness === null || harness === '' || harness === 'all') {
+    return fetchKyberProblems()
+  }
+  return fetchJson<{ problems: KyberProblemEntry[] }>(
+    `/api/kyber/problems?harness=${encodeURIComponent(harness)}`,
+  )
+}
+
+/**
+ * One problem row with whatever stored evidence the server holds.
+ * Same unknown-envelope rule as the quarantine detail: the panel shows the
+ * list row's code/message plus any of these keys the server returns, and
+ * states plainly when the message, payload, or stack was never stored.
+ */
+export interface KyberProblemDetail {
+  id?: string | number
+  severity?: string
+  code?: string | null
+  message?: unknown
+  location?: unknown
+  at?: unknown
+  timestamp?: string | null
+  harness?: string | null
+  session_id?: string | null
+  span_id?: string | null
+  spanId?: string | null
+  payload?: unknown
+  stack?: unknown
+  stackTrace?: unknown
+  [key: string]: unknown
+}
+
+export async function fetchProblemDetail(id: string): Promise<KyberProblemDetail> {
+  return fetchJson<KyberProblemDetail>(`/api/kyber/problems/${encodeURIComponent(id)}`)
 }
 
 export interface KyberSessionSummary {
@@ -1175,6 +1264,40 @@ export interface KyberCoverage {
   quarantineByReason: KyberCoverageQuarantine[]
   /** Null when the checkpoint read is unobservable; [] means zero units. */
   checkpoints: KyberCoverageCheckpoint[] | null
+  /**
+   * Live OTLP receiver health as the engine reports it.
+   *
+   * Optional because servers predating the receiver probe serve no such key:
+   * absent means unknown, never healthy. When present, `healthy` is the
+   * authoritative saber state — the display layer renders it and never
+   * re-derives liveness from counts.
+   */
+  receiver?: KyberReceiverHealth | null
+}
+
+/**
+ * Live OTLP receiver health (`GET /api/kyber/coverage` → `receiver`).
+ *
+ * Every field is read defensively: an older engine serves no `receiver` key
+ * at all, and a newer one may add keys. `healthy` is authoritative; the rest
+ * is supporting detail for the Status panel (endpoint, listener/paused
+ * state, last accepted batch, recent errors). Health probes are excluded
+ * from the server error count — that exclusion is engine behaviour, not
+ * something a surface recomputes.
+ */
+export interface KyberReceiverHealth {
+  status?: string | null
+  listening?: boolean | null
+  hostedByUs?: boolean | null
+  paused?: boolean | null
+  healthy?: boolean | null
+  endpoint?: string | null
+  checkedAt?: string | null
+  lastAcceptedAt?: string | null
+  errors5m?: {
+    total?: number | null
+    last?: { at?: string | null; code?: string | null; message?: string | null } | null
+  } | null
 }
 
 export async function fetchCoverage(): Promise<KyberCoverage> {

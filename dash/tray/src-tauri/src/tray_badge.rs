@@ -267,3 +267,65 @@ pub fn taskbar_is_dark() -> bool {
 pub fn taskbar_is_dark() -> bool {
     true
 }
+
+/// Green/red collector dot for the menu-bar / notification-area icon.
+///
+/// The previous macOS asset was a monochrome template (`icon_as_template =
+/// true`), so the system tinted it and no colour ever survived. This renders
+/// a solid coloured disc dynamically — green when the shared coverage API
+/// says the receiver is live, red otherwise — and callers must present it
+/// with template treatment OFF, or macOS will tint it back to monochrome.
+pub fn render_status_dot(live: bool, size: u32) -> Image<'static> {
+    /// Accessible green/red that survives both light and dark menu bars.
+    const LIVE: [u8; 3] = [0x22, 0xC5, 0x5E];
+    const DOWN: [u8; 3] = [0xEF, 0x44, 0x44];
+    let color = if live { LIVE } else { DOWN };
+    let size = size.max(16);
+    let mut rgba = vec![0u8; (size * size * 4) as usize];
+    let centre = size as f32 / 2.0;
+    // A filled disc with a small transparent margin, so it reads as a glyph
+    // rather than a full-bleed square at 16px.
+    let radius = centre - 2.0;
+    for y in 0..size {
+        for x in 0..size {
+            let dx = x as f32 + 0.5 - centre;
+            let dy = y as f32 + 0.5 - centre;
+            if dx * dx + dy * dy <= radius * radius {
+                let i = ((y * size + x) * 4) as usize;
+                rgba[i] = color[0];
+                rgba[i + 1] = color[1];
+                rgba[i + 2] = color[2];
+                rgba[i + 3] = 0xFF;
+            }
+        }
+    }
+    Image::new_owned(rgba, size, size)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_status_dot_is_opaque_and_coloured() {
+        for live in [true, false] {
+            let image = render_status_dot(live, 22);
+            assert_eq!(image.width(), 22);
+            assert_eq!(image.height(), 22);
+            let rgba = image.rgba();
+            // The centre pixel is the disc: opaque and the expected colour.
+            let cx = 11u32;
+            let cy = 11u32;
+            let i = ((cy * 22 + cx) * 4) as usize;
+            let expected = if live {
+                [0x22u8, 0xC5, 0x5E]
+            } else {
+                [0xEFu8, 0x44, 0x44]
+            };
+            assert_eq!([rgba[i], rgba[i + 1], rgba[i + 2]], expected);
+            assert_eq!(rgba[i + 3], 0xFF);
+            // A corner pixel is outside the disc: transparent.
+            assert_eq!(rgba[3], 0x00);
+        }
+    }
+}

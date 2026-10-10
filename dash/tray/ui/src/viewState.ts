@@ -47,6 +47,31 @@ export type SharedSettings = {
   receiverHosted: boolean
 }
 
+/**
+ * Live receiver health (`GET /api/kyber/coverage` → `receiver`), carried
+ * verbatim like `jobs`. `healthy` is authoritative; the saber renders it and
+ * never re-derives liveness. Absent (servers predating the probe, or a failed
+ * fetch) is unknown — and unknown renders red.
+ */
+export type CoverageReceiver = {
+  status?: string | null
+  listening?: boolean | null
+  hostedByUs?: boolean | null
+  paused?: boolean | null
+  healthy?: boolean | null
+  endpoint?: string | null
+  checkedAt?: string | null
+  lastAcceptedAt?: string | null
+  errors5m?: {
+    total?: number | null
+    last?: { at?: string | null; code?: string | null; message?: string | null } | null
+  } | null
+}
+
+export type CoverageDoc = {
+  receiver?: CoverageReceiver | null
+}
+
 export type ReceiverStatus =
   | 'reachable'
   | 'not-reachable'
@@ -80,6 +105,8 @@ export type ViewState = {
    */
   jobs?: JobsInfo | null
   sharedSettings?: SharedSettings | null
+  /** Shared coverage, carried verbatim; the saber reads only `receiver`. */
+  coverage?: CoverageDoc | null
   /**
    * Legacy: the Rust core no longer serializes these two (the server owns the
    * refresh and receiver state now, see `jobs` / `sharedSettings`). They stay
