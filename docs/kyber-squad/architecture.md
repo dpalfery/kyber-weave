@@ -435,7 +435,7 @@ and validates.
   `devin-capability-profile` naming a profile without that marker is rejected,
   and a primary agent naming one is rejected because Devin lowers primaries to
   skills with no tool allow-list
-  ([ADR 0033](../adr/0028-devin-target-scoped-authoring-capability-profiles.md)).
+  ([ADR 0028](../adr/0028-devin-target-scoped-authoring-capability-profiles.md)).
 - **Copilot tool order ([ADR 0017](../adr/0017-copilot-deterministic-tool-order.md))**:
   `CopilotRenderer` emits `CopilotToolCatalog.Normalize(agent.CopilotTools)` — membership from
   the agent, order from one global catalog sequence (`vscode`, `read`, `todo`, MCP wildcards,
@@ -511,7 +511,7 @@ and validates.
   `.agents/` natively and imports `.claude/`, `.github/skills/`, and `.windsurf/skills/` by
   default, so `squad doctor` warns when a workspace would load a Squad identity twice.
 - **`devin` cannot create a file with its write tools, so the authoring roles are granted a
-  target-scoped shell** ([ADR 0033](../adr/0028-devin-target-scoped-authoring-capability-profiles.md)).
+  target-scoped shell** ([ADR 0028](../adr/0028-devin-target-scoped-authoring-capability-profiles.md)).
   The grant above is an upper bound on `allowed-tools`, not a statement about the tools the harness
   hands the model: on the Devin CLI the tool exposed for file changes is `edit`, `apply_patch`
   requires `agent.codex_tools`, and `edit` fails when the destination does not exist. A role whose
@@ -731,7 +731,7 @@ Regression pins live in `tests/KyberWeave.Tests/SquadCanonicalContentTests.cs` a
 - [ADR 0017](../adr/0017-copilot-deterministic-tool-order.md) — Copilot tool membership and global emission order
 - [ADR 0021](../adr/0021-zcode-command-lowering-and-resource-relocation.md) — ZCode command lowering and resource relocation
 - [ADR 0022](../adr/0022-antigravity-native-agents.md) — Native per-agent Antigravity rendering and cross-target capability-not-isolable degradation
-- [ADR 0033](../adr/0028-devin-target-scoped-authoring-capability-profiles.md) — Devin target-scoped authoring profiles and the conductor pre-creation fallback
+- [ADR 0028](../adr/0028-devin-target-scoped-authoring-capability-profiles.md) — Devin target-scoped authoring profiles and the conductor pre-creation fallback
 - [Kyber-Squad adoption guide](onboarding.md) — CLI commands, flags, and workflows
 - [Requirements and degradation contract](requirements.md) — KS-001 through KS-008 specifications and the conductor execution circuit-breaker
 - [Configuration](../configuration.md) — repository configuration options
