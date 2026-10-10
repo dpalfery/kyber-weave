@@ -24,6 +24,17 @@ const { acquireStoreRefreshLockMock } = vi.hoisted(() => ({
   })),
 }))
 
+// A clean that did not ask for a backfill must never scan source logs (issue #319 T11).
+const { importFolderHistoryMock } = vi.hoisted(() => ({
+  // Typed with the real signature so `mock.calls[0][1]` keeps the options tuple; a bare
+  // zero-argument mock would widen the call tuple to `[]`.
+  importFolderHistoryMock: vi.fn(async (_store: unknown, _options: { weeks?: number; harnesses?: readonly string[]; trigger: string }) => ({})),
+}))
+vi.mock('../refresh/folder-import.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../refresh/folder-import.js')>()
+  return { ...actual, importFolderHistory: importFolderHistoryMock }
+})
+
 vi.mock('../refresh/lock.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../refresh/lock.js')>()
   return { ...actual, acquireStoreRefreshLock: acquireStoreRefreshLockMock }
@@ -34,6 +45,7 @@ const temporaryRoots: string[] = []
 afterEach(() => {
   for (const root of temporaryRoots.splice(0)) rmSync(root, { recursive: true, force: true })
   vi.restoreAllMocks()
+  importFolderHistoryMock.mockClear()
 })
 
 function seedRecord(store: CanonStore, spanId: string, harness: string): void {
@@ -115,6 +127,42 @@ describe('KyberBridge.cleanDatabase against a store file (issue #312)', () => {
 
       expect(report.harnesses).toEqual(['*'])
       expect(store.count()).toBe(0)
+    } finally {
+      bridge.close()
+      store.close()
+    }
+  })
+
+  it('does not import when the request omits reingestWeeks (tray default)', async () => {
+    const store = new CanonStore(':memory:')
+    const bridge = new KyberBridge({ store })
+    try {
+      seedRecord(store, 'span-pi', 'pi')
+
+      const report = await bridge.cleanDatabase({ all: true, confirm: true })
+
+      expect(report.reingested).toBe(false)
+      expect(report.historyWeeks).toBeNull()
+      expect(importFolderHistoryMock).not.toHaveBeenCalled()
+      expect(store.count()).toBe(0)
+    } finally {
+      bridge.close()
+      store.close()
+    }
+  })
+
+  it('imports exactly the requested number of weeks when reingestWeeks is given', async () => {
+    const store = new CanonStore(':memory:')
+    const bridge = new KyberBridge({ store })
+    try {
+      seedRecord(store, 'span-pi', 'pi')
+
+      const report = await bridge.cleanDatabase({ all: true, confirm: true, reingestWeeks: 3 })
+
+      expect(report.reingested).toBe(true)
+      expect(report.historyWeeks).toBe(3)
+      expect(importFolderHistoryMock).toHaveBeenCalledTimes(1)
+      expect(importFolderHistoryMock.mock.calls[0]?.[1]).toMatchObject({ weeks: 3 })
     } finally {
       bridge.close()
       store.close()

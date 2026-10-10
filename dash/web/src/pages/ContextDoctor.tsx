@@ -24,6 +24,7 @@ import {
 } from '../components/analysis/index.js'
 import type { ScorecardMatrixRow, ScorecardCoverageWindow } from '../components/analysis/ScorecardMatrix.js'
 import { CleanDatabaseControl } from '../components/maintenance/CleanDatabaseControl.js'
+import { MaintenancePanel } from '../components/maintenance/MaintenancePanel.js'
 
 export interface ContextDoctorProps {
   initialHarnesses?: KyberHarnessSummary[]
@@ -931,6 +932,11 @@ export function ContextDoctor({
       {coverageData && (
         <CoverageIngestPanel coverage={coverageData} harnesses={harnessesData ?? []} />
       )}
+
+      {/* The maintenance surface sits beside the ingest panel: pause, manual
+          refresh, folder import and cadence are the same operator decisions as
+          the clean control, read from the host's own status. */}
+      <MaintenancePanel harnesses={harnessesData ?? []} />
 
       {loadingFindings ? (
         <Skeleton className="h-44 w-full" />

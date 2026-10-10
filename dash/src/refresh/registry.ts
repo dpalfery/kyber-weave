@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 
 import { getAllProviders } from '../providers/index.js'
 import type { SessionSource } from '../providers/types.js'
-import { READER_UNMEASURABLE } from '../canon/measurability.js'
+import { harnessFamily, normalizeHarnessName, READER_UNMEASURABLE } from '../canon/measurability.js'
 import { PROVIDER_READERS } from '../synth/provider.js'
 
 import type {
@@ -574,6 +574,82 @@ export const HARNESS_CONTENT_CAPABILITIES: ReadonlyMap<string, HarnessContentCap
 
 export function descriptorFor(harnessId: string): HarnessSourceDescriptor | undefined {
   return DESCRIPTORS_BY_ID.get(harnessId)
+}
+
+/**
+ * One resolution of a caller-supplied harness scope, shared by every consumer that takes
+ * harness names from a user: the folder-history import, the clean wipe scope, and the
+ * route validation that guards both.
+ *
+ * <remarks>
+ * Two vocabularies meet here. The registry stores per-front-end ids (`codex-cli`,
+ * `codex-desktop`, `codex-unclassified`) and `normalizeHarnessName` deliberately does
+ * NOT fold them onto `codex` — the split is what tells two clients apart in stored data
+ * (issue #182). Surfaces, however, show and accept the FAMILY label: the tray's harness
+ * preference is `codex`, and the web dashboard's clean control shows rollup rows beside a
+ * `family` field. So a family label resolves to every member descriptor, while a direct
+ * descriptor id resolves to itself.
+ *
+ * `known` is the expanded id list, not the labels, and that matters: `CanonStore.
+ * wipeHarnesses` matches stored raw names against the requested set and their normalized
+ * forms, and `normalizeHarnessName('codex-cli')` is still `codex-cli`. Handing the wipe
+ * `codex` would therefore delete nothing at all while reporting a successful clean.
+ *
+ * `descriptors` is what the folder reader can actually open, so an id the wipe understands
+ * but no folder exists for is visible rather than silently dropped. `unknown` is the
+ * caller's own spelling, kept for the error message.
+ * </remarks>
+ */
+export type HarnessScopeResolution = {
+  /** Canonical ids the store wipe understands, family labels expanded, in first-seen order. */
+  readonly known: string[]
+  /** Folder source descriptors, a family label expanded to all of its members. */
+  readonly descriptors: HarnessSourceDescriptor[]
+  /** The requested names this registry cannot place at all. */
+  readonly unknown: string[]
+}
+
+export function resolveHarnessScope(ids: readonly string[]): HarnessScopeResolution {
+  const known: string[] = []
+  const descriptors: HarnessSourceDescriptor[] = []
+  const unknown: string[] = []
+  const seenKnown = new Set<string>()
+  const seenDescriptors = new Set<string>()
+  const addKnown = (id: string): void => {
+    if (seenKnown.has(id)) return
+    seenKnown.add(id)
+    known.push(id)
+  }
+  const addDescriptor = (entry: HarnessSourceDescriptor): void => {
+    if (seenDescriptors.has(entry.harnessId)) return
+    seenDescriptors.add(entry.harnessId)
+    descriptors.push(entry)
+  }
+  for (const requested of ids) {
+    const name = requested.trim()
+    if (name === '') {
+      unknown.push(requested)
+      continue
+    }
+    const id = normalizeHarnessName(name)
+    const direct = descriptorFor(id)
+    if (direct !== undefined) {
+      addKnown(id)
+      addDescriptor(direct)
+      continue
+    }
+    // Not a descriptor id: it is either a family label or a name nothing knows.
+    const members = HARNESS_DESCRIPTORS.filter((entry) => harnessFamily(entry.harnessId) === id)
+    if (members.length === 0) {
+      unknown.push(requested)
+      continue
+    }
+    for (const member of members) {
+      addKnown(member.harnessId)
+      addDescriptor(member)
+    }
+  }
+  return { known, descriptors, unknown }
 }
 
 export function auditProviderRegistry(providers: readonly { name: string }[]): void {

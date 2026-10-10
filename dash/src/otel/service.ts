@@ -1,11 +1,11 @@
 // Service runner for KyberDash OTLP trace receiver
-import { homedir } from 'os'
-import { join } from 'path'
+import { dirname } from 'path'
 import { mkdirSync } from 'fs'
 import chalk from 'chalk'
 import { OtlpReceiver, PortConflictError, type OtlpLog, type OtlpSpan } from './receiver.js'
 import { IngestWriter, type SignalBatchSink } from './writer.js'
 import { CanonStore } from '../canon/store.js'
+import { resolveCanonDbPath } from '../canon/paths.js'
 import { CanonicalProjectionScheduler } from '../canon/projection.js'
 import { readUsageCounters, exclusiveConvention, canonicalContent } from '../canon/adapters/copilot.js'
 import { ingestBatch, toRawSpan } from '../canon/ingest.js'
@@ -94,9 +94,13 @@ export async function startOtlpCollectorService(opts: CollectorOptions = {}): Pr
 }> {
   const port = opts.port ?? 4318
   const host = opts.host ?? '127.0.0.1'
-  const defaultDir = join(homedir(), '.kyberdash')
-  mkdirSync(defaultDir, { recursive: true })
-  const dbPath = opts.dbPath ?? join(defaultDir, 'canon.db')
+  // Shared with the CLI and the dashboard server (src/canon/paths.ts): the
+  // receiver must write the store those two read. The directory is created
+  // from the resolved path rather than assumed to be ~/.kyberdash, because
+  // KYBER_CANON_DB can point anywhere — including a directory that does not
+  // exist yet, which would otherwise fail on first ingest.
+  const dbPath = resolveCanonDbPath(opts.dbPath)
+  mkdirSync(dirname(dbPath), { recursive: true })
 
   const canon = new CanonStore(dbPath)
 

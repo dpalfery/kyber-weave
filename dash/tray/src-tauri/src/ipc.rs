@@ -19,8 +19,6 @@ use serde::Serialize;
 
 use crate::api::{self, ReportCache};
 use crate::cli::SetupState;
-use crate::receiver::ReceiverStatus;
-use crate::scheduler::RefreshStatus;
 use crate::settings::TraySettings;
 use crate::supervisor::ServerPhase;
 
@@ -49,8 +47,12 @@ pub struct ViewState {
     pub report: Option<serde_json::Value>,
     pub report_fetched_at: Option<String>,
     pub error: Option<String>,
-    pub refresh: RefreshStatus,
-    pub receiver: ReceiverStatus,
+    /// The server's job state (`GET /api/kyber/jobs`), carried verbatim. `None`
+    /// means the fetch failed: unknown must not be shown as a default.
+    pub jobs: Option<serde_json::Value>,
+    /// The server-owned settings (`GET /api/kyber/settings`), same rule.
+    pub shared_settings: Option<serde_json::Value>,
+    /// Tray-local display preferences only.
     pub settings: TraySettings,
 }
 
@@ -64,8 +66,8 @@ pub fn view_state(
     setup: Option<SetupState>,
     server: ServerPhase,
     cache: &ReportCache,
-    refresh: &RefreshStatus,
-    receiver: ReceiverStatus,
+    jobs: Option<serde_json::Value>,
+    shared_settings: Option<serde_json::Value>,
     settings: &TraySettings,
 ) -> ViewState {
     let phase = match (&setup, server) {
@@ -82,8 +84,8 @@ pub fn view_state(
         report: cache.report.clone(),
         report_fetched_at: cache.report_fetched_at.clone(),
         error: cache.error.clone(),
-        refresh: refresh.clone(),
-        receiver,
+        jobs,
+        shared_settings,
         settings: settings.clone(),
     }
 }
@@ -193,7 +195,6 @@ pub fn open_view_url(server_url: &str, view: &str) -> Result<String> {
 mod tests {
     use super::*;
     use crate::cli::SetupReason;
-    use crate::scheduler::RefreshState;
     use serde_json::json;
     use std::time::{Duration, SystemTime};
 
@@ -207,14 +208,7 @@ mod tests {
     }
 
     fn state(setup: Option<SetupState>, server: ServerPhase, cache: &ReportCache) -> ViewState {
-        view_state(
-            setup,
-            server,
-            cache,
-            &RefreshStatus::default(),
-            ReceiverStatus::Unknown,
-            &TraySettings::default(),
-        )
+        view_state(setup, server, cache, None, None, &TraySettings::default())
     }
 
     /// The design's ViewState, by its own field names.
@@ -227,8 +221,12 @@ mod tests {
         assert_eq!(json["report"]["schemaVersion"], 1);
         assert_eq!(json["reportFetchedAt"], "2023-11-14T22:13:20.000Z");
         assert!(json["error"].is_null());
-        assert_eq!(json["refresh"]["state"], "idle");
-        assert_eq!(json["receiver"], "unknown");
+        assert!(
+            json["jobs"].is_null(),
+            "unknown jobs are null, not a default"
+        );
+        assert!(json["sharedSettings"].is_null());
+        assert!(json.get("refresh").is_none() && json.get("receiver").is_none());
         assert_eq!(json["settings"]["harness"], "all");
         assert!(json.get("setup").is_none(), "absent unless in setup");
     }
@@ -279,30 +277,24 @@ mod tests {
         assert_eq!(state(None, ServerPhase::Stale, &cache).phase, Phase::Stale);
     }
 
+    /// The server's job and settings documents ride along untouched: the tray
+    /// does not interpret them.
     #[test]
-    fn a_failed_refresh_is_carried_verbatim() {
-        let refresh = RefreshStatus {
-            state: RefreshState::Failed,
-            last_success_at: Some("2023-11-14T22:13:20.000Z".to_string()),
-            last_failure: Some("canon.db is locked at 2023-11-14T22:23:20.000Z".to_string()),
-        };
+    fn jobs_and_shared_settings_are_carried_verbatim() {
+        let jobs = json!({ "refresh": { "state": "failed", "lastFailure": "canon.db is locked" } });
+        let shared = json!({ "refreshMinutes": 15, "hostReceiver": true });
         let json = serde_json::to_value(view_state(
             None,
             ServerPhase::Ready,
             &cache_with_report(),
-            &refresh,
-            ReceiverStatus::Hosted,
+            Some(jobs.clone()),
+            Some(shared.clone()),
             &TraySettings::default(),
         ))
         .unwrap();
 
-        assert_eq!(json["refresh"]["state"], "failed");
-        assert_eq!(json["refresh"]["lastSuccessAt"], "2023-11-14T22:13:20.000Z");
-        assert!(json["refresh"]["lastFailure"]
-            .as_str()
-            .unwrap()
-            .contains("canon.db is locked"));
-        assert_eq!(json["receiver"], "hosted");
+        assert_eq!(json["jobs"], jobs);
+        assert_eq!(json["sharedSettings"], shared);
     }
 
     /// The tray matches the same table the CLI and the web router match.

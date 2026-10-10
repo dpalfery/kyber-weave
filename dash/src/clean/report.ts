@@ -15,7 +15,11 @@ export function formatCleanReport(report: CleanReport): string {
   if (report.reingested) {
     lines.push(`Re-ingested: last ${report.historyWeeks} week${report.historyWeeks === 1 ? '' : 's'}`)
   } else {
-    lines.push('Re-ingested: skipped (--no-reingest)')
+    // No automatic re-ingest any more: a wipe leaves the store without folder history
+    // until someone asks for it again, with `dash import-history` or `dash clean
+    // --reingest-weeks`. Naming the opt-in here, rather than the flag that used to force
+    // it off, keeps the line true for every caller of cleanDatabase (A6).
+    lines.push('Re-ingested: none (opt in with --reingest-weeks <n>)')
   }
   return `${lines.join('\n')}\n`
 }

@@ -159,11 +159,9 @@ describe('App', () => {
             settings: {
               harness: 'cursor',
               windowDays: 7,
-              refreshMinutes: 5,
               attentionThreshold: 0.7,
               criticalThreshold: 0.9,
               launchAtLogin: false,
-              hostReceiver: false,
             },
           }),
         )
@@ -319,11 +317,9 @@ function viewState(overrides: Partial<ViewState> = {}): ViewState {
     settings: {
       harness: 'all',
       windowDays: 7,
-      refreshMinutes: 5,
       attentionThreshold: 0.7,
       criticalThreshold: 0.9,
       launchAtLogin: false,
-      hostReceiver: false,
     },
     ...overrides,
   }

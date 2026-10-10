@@ -118,6 +118,59 @@ describe('POST /api/kyber/clean (issue #312)', () => {
     expect(seen).toEqual([{ all: true, confirm: true, reingestWeeks: 4 }])
   })
 
+  // Issue #319 T11: the tray sends scope/all/harnesses/confirm and, unless the operator
+  // asked for a backfill, NO reingestWeeks. Omission means "do not import"; the route must
+  // forward the request without inventing a window, and tolerate the tray's extra keys.
+  it('forwards a tray-shaped body with no reingestWeeks and ignores its extra keys', async () => {
+    const seen: unknown[] = []
+    const bridge = bridgeStub({
+      cleanDatabase: (async (input: unknown) => {
+        seen.push(input)
+        return { harnesses: ['*'], wipe: { harnesses: ['*'], records: 0, provenance: 0, checkpoints: 0 }, reingested: false, historyWeeks: null }
+      }) as never,
+    })
+
+    const { status, body } = await postClean(bridge, {
+      scope: 'all',
+      all: true,
+      harnesses: [],
+      confirm: true,
+      surface: 'tray',
+    })
+
+    expect(status).toBe(200)
+    expect(seen).toEqual([{ all: true, confirm: true }])
+    expect(seen[0]).not.toHaveProperty('reingestWeeks')
+    expect(body).toMatchObject({ reingested: false, historyWeeks: null })
+  })
+
+  it('forwards reingestWeeks n so the clean imports exactly n weeks', async () => {
+    const seen: unknown[] = []
+    const bridge = bridgeStub({
+      cleanDatabase: (async (input: unknown) => {
+        seen.push(input)
+        return { harnesses: ['pi'], wipe: { harnesses: ['pi'], records: 0, provenance: 0, checkpoints: 0 }, reingested: true, historyWeeks: 3 }
+      }) as never,
+    })
+
+    const { status, body } = await postClean(bridge, { scope: 'harnesses', harnesses: ['pi'], confirm: true, reingestWeeks: 3 })
+
+    expect(status).toBe(200)
+    expect(seen).toEqual([{ harnesses: ['pi'], confirm: true, reingestWeeks: 3 }])
+    expect(body).toMatchObject({ reingested: true, historyWeeks: 3 })
+  })
+
+  it('keeps remote error strings out of every clean failure body', async () => {
+    const bridge = bridgeStub({
+      cleanDatabase: (async () => {
+        throw new Error('EACCES /Users/secret/.kyberdash/canon.db')
+      }) as never,
+    })
+    const { body, status } = await postClean(bridge, { all: true, confirm: true })
+    expect(status).toBe(500)
+    expect(JSON.stringify(body)).not.toContain('secret')
+  })
+
   it('rejects GET with 405', () => {
     const { status, handled } = getClean(bridgeStub())
     expect(handled).toBe(true)

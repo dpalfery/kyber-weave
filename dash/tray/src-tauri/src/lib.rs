@@ -6,10 +6,7 @@ pub mod ipc;
 #[cfg(target_os = "macos")]
 pub mod login_item_macos;
 pub mod position;
-pub mod receiver;
 pub mod runtime;
-mod runtime_adapters;
-pub mod scheduler;
 pub mod settings;
 pub mod status_item;
 pub mod supervisor;
@@ -25,11 +22,9 @@ use tauri::{
 };
 use tauri_plugin_opener::OpenerExt;
 
+use crate::api::LoopbackFetcher;
 use crate::runtime::{CleanScope, EventSink, Opener, Runtime, RuntimeDependencies};
-use crate::runtime_adapters::{
-    SystemHealthProbe, SystemReceiverSpawner, SystemRefreshRunner, SystemReportFetcher,
-    SystemServerSpawner, ThreadClock,
-};
+use crate::supervisor::{SystemServerSpawner, ThreadClock};
 
 pub use args::wants_quit;
 
@@ -175,23 +170,59 @@ async fn quit(
     Ok(())
 }
 
-/// IPC contract: `clean_database({ scope: "all" | { harness: string } }) -> null`.
+/// IPC contract: `clean_database({ scope: "all" | { harness: string }, importWeeks?: number }) -> null`.
 ///
-/// The tray holds no clean logic (issue #312): the scope only chooses the
-/// `dash clean` child's argv — always with `--yes` (the popover asked twice)
-/// and `--no-reingest` (the next scheduled refresh re-ingests on its own
-/// cadence, so a foreground clean returns promptly). Multi-harness selection
-/// stays web-only.
+/// The tray holds no clean logic (issue #312): it relays the confirmed scope to
+/// the server's clean endpoint. `importWeeks` (1..=52) asks the server to
+/// re-import that much history afterwards; omitted, the server decides.
+/// Multi-harness selection stays web-only.
 #[tauri::command]
 async fn clean_database(
     state: State<'_, ManagedRuntime>,
     scope: serde_json::Value,
+    import_weeks: Option<u32>,
 ) -> std::result::Result<(), CommandError> {
     let scope =
         CleanScope::from_ipc(&scope).map_err(|error| command_error("clean_database", error))?;
     with_runtime("clean_database", Arc::clone(&state.0), move |runtime| {
-        runtime.clean_database(scope)
+        runtime.clean_database(scope, import_weeks)
     })
+    .await
+}
+
+/// IPC contract: `import_folder_history({ weeks: number, harness?: string }) -> null`.
+///
+/// `weeks` is 1..=52. The server runs the import; a busy server answers with
+/// the same "already running" error as a clean.
+#[tauri::command]
+async fn import_folder_history(
+    state: State<'_, ManagedRuntime>,
+    weeks: u32,
+    harness: Option<String>,
+) -> std::result::Result<(), CommandError> {
+    with_runtime(
+        "import_folder_history",
+        Arc::clone(&state.0),
+        move |runtime| runtime.import_folder_history(weeks, harness.as_deref()),
+    )
+    .await
+}
+
+/// IPC contract: `set_shared_settings({ patch: object }) -> null`.
+///
+/// The patch is relayed to the server, which owns, validates and persists
+/// these settings; the next `view-state-changed` carries them as
+/// `sharedSettings`.
+#[tauri::command]
+async fn set_shared_settings(
+    state: State<'_, ManagedRuntime>,
+    patch: serde_json::Value,
+) -> std::result::Result<(), CommandError> {
+    with_runtime(
+        "set_shared_settings",
+        Arc::clone(&state.0),
+        move |runtime| runtime.set_shared_settings(patch),
+    )
     .await
 }
 
@@ -304,12 +335,9 @@ fn apply_status_item(app: &AppHandle, state: &ipc::ViewState) {
 
 fn runtime_dependencies(app: AppHandle, leading_args: Vec<String>) -> Result<RuntimeDependencies> {
     Ok(RuntimeDependencies {
-        server_spawner: Box::new(SystemServerSpawner::new(leading_args.clone())),
-        refresh_runner: Box::new(SystemRefreshRunner::new(leading_args.clone())),
-        fetcher: Box::new(SystemReportFetcher::new()?),
+        server_spawner: Box::new(SystemServerSpawner::new(leading_args)),
+        fetcher: Box::new(LoopbackFetcher::new().context("creating the loopback client")?),
         clock: Box::new(ThreadClock),
-        receiver_probe: Box::new(SystemHealthProbe::new()?),
-        receiver_spawner: Box::new(SystemReceiverSpawner::new(leading_args)),
         event_sink: Box::new(TauriEventSink { app: app.clone() }),
         opener: Box::new(TauriOpener { app }),
     })
@@ -416,8 +444,15 @@ pub fn run() {
                 .map(|cli| cli.extra_args().to_vec())
                 .unwrap_or_default();
             let settings_dir = app.path().app_config_dir()?;
+            // The server records itself beside the rest of KyberDash's state
+            // (where `kyberdash menubar` keeps tray.json), not in the tray's
+            // private config directory.
+            let server_dir = dirs::home_dir()
+                .ok_or_else(|| anyhow!("no home directory to find the KyberDash server in"))?
+                .join(".kyberdash");
             let runtime = Runtime::from_resolution(
                 settings_dir,
+                server_dir,
                 resolution,
                 runtime_dependencies(app.handle().clone(), leading_args)?,
             );
@@ -468,7 +503,9 @@ pub fn run() {
             set_settings,
             quit,
             hide_popover,
-            clean_database
+            clean_database,
+            import_folder_history,
+            set_shared_settings
         ])
         .build(tauri::generate_context!())
         .expect("error while building KyberDash tray");

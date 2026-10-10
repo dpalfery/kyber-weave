@@ -4,7 +4,7 @@ title: The KyberDash Capture Command Owns Harness Telemetry Keys, with Key-Level
 doc-type: adr
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-07
+last-reviewed: 2026-10-10
 ---
 
 # ADR 0031: The KyberDash Capture Command Owns Harness Telemetry Keys, with Key-Level Edits, Receipt Restore, and a Tray-Hosted Receiver
@@ -17,6 +17,17 @@ This is a deliberate departure from
 [ADR 0026](0026-kyber-utilities-owned-files-not-settings.md), scoped to KyberDash. ADR 0026
 remains in force for Kyber Utilities, which still never reads or writes a shared harness
 settings file. ADR 0026 is not edited. This record borrows its receipt-and-digest pattern.
+
+Amended 2026-10-10 ([issue #319](https://github.com/dpalfery/kyber-weave/issues/319)): the
+"tray-hosted receiver" reading of decision 4 and of the Context paragraph below no longer
+holds as written. The `kyberdash web` server now hosts the receiver (`ReceiverHost`,
+`dash/src/jobs/receiver-host.ts`) and owns it through the shared setting
+`settings.receiver.hosted`, so a "host receiver" switch is now the engine's switch rather
+than tray-local state, and the tray's former `host_receiver` setting is no longer read
+([ADR 0033](0033-kyberdash-surfaces-are-display-layers.md),
+[`rules/kyberdash-display-layer`](../rules/kyberdash-display-layer.md)). Capture's own
+position — it installs no service, it writes no telemetry key beyond the export keys above —
+is unchanged, and so is the liveness probe this record depends on.
 
 ## Context
 
@@ -41,10 +52,11 @@ ADR 0026's objections still apply. These files belong to the user, their schemas
 harness versions, and a wrong merge is hard to undo. Owning the keys is only acceptable if each
 edit is narrow, recorded and reversible.
 
-Exporting also needs something listening. The tray already supervises the embedded OTLP receiver
-under [ADR 0023](0023-kyberdash-report-model-and-tray-ownership.md). Its "host receiver" and
-"launch at login" settings (`host_receiver` and `launch_at_login` in
-`dash/tray/src-tauri/src/settings.rs`) are both off by default. The receiver answers a liveness
+Exporting also needs something listening. The receiver now runs under
+[ADR 0033](0033-kyberdash-surfaces-are-display-layers.md) as a child of the `kyberdash web`
+server rather than of the tray, which attaches to that server. The "host receiver" setting
+this record describes has become the shared `settings.receiver.hosted`
+(`dash/src/settings/shared-settings.ts`), still off by default. The receiver answers a liveness
 probe at `OTLP_HEALTHZ_PATH` (`dash/src/otel/receiver.ts`).
 
 ## Decision
@@ -66,8 +78,11 @@ probe at `OTLP_HEALTHZ_PATH` (`dash/src/otel/receiver.ts`).
    the key, only where the key still holds what KyberDash wrote. If any written key has drifted,
    it refuses, prints the drift, and exits non-zero. This is ADR 0026's receipt-and-digest
    pattern, applied to keys rather than whole files.
-4. **The tray hosts the receiver; capture does not install a service.** Keep-alive reuses the
-   tray's existing "host receiver" and "launch at login" settings, which stay off by default.
+4. **The engine hosts the receiver; capture does not install a service.** Keep-alive reuses
+   the existing "host receiver" and "launch at login" switches, which stay off by default;
+   as of [ADR 0033](0033-kyberdash-surfaces-are-display-layers.md) the first of those is the
+   shared `settings.receiver.hosted`, owned by the `kyberdash web` server rather than the
+   tray, while `launch_at_login` remains the tray's own autostart switch.
    `capture status` and `capture enable` probe `GET 127.0.0.1:4318/healthz` and print the exact
    remedy when nothing answers. Capture installs no LaunchAgent and no systemd unit.
 5. **The departure is scoped to KyberDash.** It applies only to the telemetry keys the capture
