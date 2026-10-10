@@ -8,8 +8,9 @@ namespace KyberWeave.Core.Arbiter.Credentials;
 /// Attributes <c>service=kyber-weave-arbiter</c> and <c>account=&lt;origin&gt;</c> under
 /// the <c>Kyber Arbiter</c> label. The secret travels on stdin to
 /// <c>secret-tool store</c> and never appears in argv. A missing entry is an absent key
-/// (null), not a failure. A host without Secret Service fails at setup time with a hint
-/// to use <c>TYPESAFE_API_KEY</c> instead.
+/// (null), not a failure. A host whose <c>secret-tool</c> cannot be started raises
+/// <see cref="SecretServiceUnavailableException"/> with the next step to take, from both
+/// reads and writes.
 /// </remarks>
 public sealed class SecretServiceCredentialStore : ICredentialStore
 {
@@ -43,7 +44,7 @@ public sealed class SecretServiceCredentialStore : ICredentialStore
         startInfo.ArgumentList.Add("account");
         startInfo.ArgumentList.Add(origin);
 
-        ProcessResult result = _runner.Run(startInfo, string.Empty);
+        ProcessResult result = RunSecretTool(startInfo, string.Empty);
         if (result.ExitCode != 0)
         {
             return null;
@@ -74,11 +75,25 @@ public sealed class SecretServiceCredentialStore : ICredentialStore
 
         // The secret travels on stdin only: argv carries the lookup attributes, where
         // any local user could read them, so the key must never be among them.
-        ProcessResult result = _runner.Run(startInfo, key);
+        ProcessResult result = RunSecretTool(startInfo, key);
         if (result.ExitCode != 0)
         {
             throw new InvalidOperationException(
                 $"The Secret Service write failed with exit code {result.ExitCode}.");
+        }
+    }
+
+    private ProcessResult RunSecretTool(ProcessStartInfo startInfo, string standardInput)
+    {
+        try
+        {
+            return _runner.Run(startInfo, standardInput);
+        }
+        catch (System.ComponentModel.Win32Exception exception)
+        {
+            // Process.Start raises Win32Exception when secret-tool is not on PATH. Mapping it
+            // here keeps the raw OS text out of every surface and states the remedy instead.
+            throw new SecretServiceUnavailableException(exception);
         }
     }
 }
