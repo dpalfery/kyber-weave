@@ -22,4 +22,8 @@ required-mcp-tools:
     - docs_explore
     - docs_for_symbol
     - docs_glossary
+  kyber-weave-arbiter:
+    - arbiter_evaluate
+    - arbiter_rules
+    - arbiter_status
 validated-release: null

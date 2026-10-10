@@ -118,6 +118,8 @@ public sealed class ZCodeRendererContractTests : IDisposable
     /// </summary>
     private const string PureOrchestratorProfile = "orchestrator";
 
+    private const string ArbiterServer = "kyber-weave-arbiter";
+
     /// <summary>
     /// The fully qualified MCP tool names the canonical toolchain declares, transcribed here
     /// from source rather than from the renderer, in the same server-then-tool order.
@@ -125,11 +127,32 @@ public sealed class ZCodeRendererContractTests : IDisposable
     private static IReadOnlyList<string> ExpectedMcpToolNames(SquadSource source) =>
     [
         .. source.Toolchain.RequiredMcpTools
+            .Where(entry => !string.Equals(entry.Key, ArbiterServer, StringComparison.Ordinal))
             .OrderBy(entry => entry.Key, StringComparer.Ordinal)
             .SelectMany(entry => entry.Value
                 .OrderBy(tool => tool, StringComparer.Ordinal)
                 .Select(tool => $"mcp__{entry.Key}__{tool}"))
     ];
+
+    /// <summary>
+    /// The Arbiter server's tools, granted on ZCode only to the conductor and the
+    /// code-reviewer, only when the render carries an enabled project-scope wiring, and
+    /// never through the standard MCP grant.
+    /// </summary>
+    private static IReadOnlyList<string> ExpectedArbiterToolNames(SquadSource source) =>
+    [
+        .. source.Toolchain.RequiredMcpTools
+            .Where(entry => string.Equals(entry.Key, ArbiterServer, StringComparison.Ordinal))
+            .SelectMany(entry => entry.Value
+                .OrderBy(tool => tool, StringComparer.Ordinal)
+                .Select(tool => $"mcp__{entry.Key}__{tool}"))
+    ];
+
+    private static bool ExpectsArbiter(SquadAgent agent, SquadCapabilityProfile profile) =>
+        (string.Equals(agent.Name, "conductor", StringComparison.Ordinal)
+            || string.Equals(agent.Name, "code-reviewer", StringComparison.Ordinal)) &&
+        profile.Permissions.TryGetValue("decision.query", out SquadPermissionDecision decision) &&
+        decision == SquadPermissionDecision.Allow;
 
     private static bool ExpectsMcp(SquadAgent agent, SquadCapabilityProfile profile) =>
         !string.Equals(agent.CapabilityProfile, PureOrchestratorProfile, StringComparison.Ordinal) &&
@@ -157,7 +180,8 @@ public sealed class ZCodeRendererContractTests : IDisposable
         return
         [
             .. ToolOrder.Where(granted.Contains),
-            .. ExpectsMcp(agent, profile) ? ExpectedMcpToolNames(source) : []
+            .. ExpectsMcp(agent, profile) ? ExpectedMcpToolNames(source) : [],
+            .. ExpectsArbiter(agent, profile) ? ExpectedArbiterToolNames(source) : []
         ];
     }
 
@@ -282,13 +306,15 @@ public sealed class ZCodeRendererContractTests : IDisposable
 
     private static async Task<SquadRenderResult> RenderZCodeAsync(
         string sourceDirectory,
-        SquadDeploymentScope scope = SquadDeploymentScope.Project)
+        SquadDeploymentScope scope = SquadDeploymentScope.Project,
+        SquadArbiterWiring? arbiter = null)
     {
         SquadRendererRegistry registry = new([new ZCodeRenderer()]);
         return await registry.RenderAsync(new SquadRenderRequest(
             SourceDirectory: sourceDirectory,
             Targets: [SquadTarget.ZCode],
-            Scope: scope));
+            Scope: scope,
+            Arbiter: arbiter));
     }
 
     public void Dispose()
@@ -376,7 +402,7 @@ public sealed class ZCodeRendererContractTests : IDisposable
             source.Agents,
             agent => agent.Invocation == SquadInvocation.Primary);
 
-        SquadRenderResult result = await RenderZCodeAsync(ProductRoot);
+        SquadRenderResult result = await RenderZCodeAsync(ProductRoot, arbiter: new SquadArbiterWiring(true, 30));
 
         SquadDeploymentFile command = Assert.Single(
             result.Files, f => f.RelativePath == $".zcode/commands/{primary.Name}.md");
@@ -437,7 +463,7 @@ public sealed class ZCodeRendererContractTests : IDisposable
     public async Task RenderAsync_ZCode_AlwaysEmitsTheToolListBecauseOmittingItGrantsEverything()
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
-        SquadRenderResult result = await RenderZCodeAsync(ProductRoot);
+        SquadRenderResult result = await RenderZCodeAsync(ProductRoot, arbiter: new SquadArbiterWiring(true, 30));
 
         foreach (SquadAgent agent in source.Agents.Where(a => a.Invocation == SquadInvocation.Subagent))
         {
@@ -884,7 +910,7 @@ public sealed class ZCodeRendererContractTests : IDisposable
     public async Task RenderAsync_ZCode_GrantsEveryDeclaredMcpToolByQualifiedName()
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
-        SquadRenderResult result = await RenderZCodeAsync(ProductRoot);
+        SquadRenderResult result = await RenderZCodeAsync(ProductRoot, arbiter: new SquadArbiterWiring(true, 30));
 
         IReadOnlyList<string> expected = ExpectedMcpToolNames(source);
         Assert.NotEmpty(expected);
@@ -924,6 +950,18 @@ public sealed class ZCodeRendererContractTests : IDisposable
                     expected,
                     tool => Assert.DoesNotContain(tool, tools, StringComparer.Ordinal));
             }
+
+            IReadOnlyList<string> arbiterTools = ExpectedArbiterToolNames(source);
+            if (ExpectsArbiter(agent, source.CapabilityProfiles.Profiles[agent.CapabilityProfile]))
+            {
+                Assert.All(arbiterTools, tool => Assert.Contains(tool, tools, StringComparer.Ordinal));
+            }
+            else
+            {
+                Assert.All(
+                    arbiterTools,
+                    tool => Assert.DoesNotContain(tool, tools, StringComparer.Ordinal));
+            }
         }
 
         Assert.True(granted > 0, "No canonical agent was granted the declared MCP tools.");
@@ -951,7 +989,7 @@ public sealed class ZCodeRendererContractTests : IDisposable
                 result.Degradations,
                 d => d.CanonicalIdentity == agent.Name && d.Code == "permission-not-expressible");
             Assert.All(
-                source.Toolchain.RequiredMcpTools.Keys,
+                source.Toolchain.RequiredMcpTools.Keys.Where(server => server != ArbiterServer),
                 server => Assert.Contains(server, record.Details!, StringComparison.Ordinal));
         }
 

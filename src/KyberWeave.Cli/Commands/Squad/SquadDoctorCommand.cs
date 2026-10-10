@@ -18,6 +18,8 @@ namespace KyberWeave.Cli.Commands.Squad;
 /// </summary>
 public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
 {
+    private const string ArbiterServer = "kyber-weave-arbiter";
+
     private readonly IProcessExecutor? _executor;
     private readonly ISquadUserPaths? _userPaths;
     private readonly SquadStateStore? _stateStore;
@@ -131,7 +133,7 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
                 AnsiConsole.MarkupLine($"  [green]ok[/] Canonical source: valid ([grey]{Markup.Escape(source.Manifest.Name)}[/], {source.Agents.Count} agents, {source.Skills.Count} skills)");
                 canonicalSourceValid = true;
 
-                if (ReportZCodeMcpConfiguration(source, workingDirectory))
+                if (ReportZCodeMcpConfiguration(source, workingDirectory, settings.Global))
                 {
                     hasIssues = true;
                 }
@@ -189,8 +191,7 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
     /// <returns><see langword="true"/> when doctor should exit non-zero.</returns>
     private bool ReportArbiterBinary(string workingDirectory)
     {
-        KyberWeaveConfigLoadResult configResult = KyberWeaveConfigLoader.TryLoad(workingDirectory);
-        if (!configResult.Success || configResult.Config?.Arbiter.Enabled != true)
+        if (!ArbiterEnabled(workingDirectory))
         {
             AnsiConsole.MarkupLine(
                 "  [grey]info[/] Kyber-Weave Arbiter: not checked (Arbiter is not enabled)");
@@ -214,6 +215,14 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
                 : $"The 'kyber-weave-arbiter' version '{arbiterResult.Version}' differs from the CLI version '{cliVersion}'.");
         AnsiConsole.MarkupLine($"  [red]fail[/] Kyber-Weave Arbiter [bold]KW-ARB-BIN-001[/]: {Markup.Escape(reason)}");
         return true;
+    }
+
+    /// <summary>Whether the repository configuration enables the Arbiter. An unreadable
+    /// configuration reads as disabled, the product default.</summary>
+    private static bool ArbiterEnabled(string workingDirectory)
+    {
+        KyberWeaveConfigLoadResult configResult = KyberWeaveConfigLoader.TryLoad(workingDirectory);
+        return configResult.Success && configResult.Config?.Arbiter.Enabled == true;
     }
 
     /// <summary>
@@ -247,9 +256,17 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
     /// </para>
     /// </remarks>
     /// <returns><see langword="true"/> when doctor should exit non-zero.</returns>
-    private bool ReportZCodeMcpConfiguration(SquadSource source, string workingDirectory)
+    private bool ReportZCodeMcpConfiguration(SquadSource source, string workingDirectory, bool isGlobal)
     {
-        IReadOnlyCollection<string> required = source.Toolchain.RequiredMcpTools.Keys.ToArray();
+        // The render grants the Arbiter server only to an enabled project-scope wiring
+        // (ZCodeRenderer.ArbiterEnforced), so doctor requires it only for a project deployment
+        // with the Arbiter enabled. The scope is the one the deployment is inspected at: the same
+        // scope ReportOwnedBlockDrift reads the receipt for, so it is never unknowable here.
+        bool arbiterGranted = SquadCommandComposition.ResolveScope(isGlobal) == SquadDeploymentScope.Project
+            && ArbiterEnabled(workingDirectory);
+        IReadOnlyCollection<string> required = source.Toolchain.RequiredMcpTools.Keys
+            .Where(server => arbiterGranted || !string.Equals(server, ArbiterServer, StringComparison.Ordinal))
+            .ToArray();
         if (required.Count == 0)
         {
             return false;

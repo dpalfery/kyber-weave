@@ -11,6 +11,10 @@ capabilities:
   - network.read
   - network.publish
   - delegate
+  # Holding the Arbiter's evaluate tool is the signal to use the D4 fallback. Only the roles
+  # that must reach arbiter_evaluate hold it; the server is never granted through any
+  # other capability.
+  - decision.query
 profiles:
   architect:
     permissions:
@@ -37,6 +41,7 @@ profiles:
       # delegates-to, not the implementation roster — and it does not let the architect
       # hand work back: discovery agents return findings, never tasks.
       delegate: allow
+      decision.query: deny
   # This target-specific validation envelope exists only because Copilot represents the
   # imported Hotshot architect contract as an exact tool allow-list without an ask state.
   # Agents reference it through copilot-capability-profile; validation rejects assigning it
@@ -52,6 +57,7 @@ profiles:
       network.read: allow
       network.publish: deny
       delegate: allow
+      decision.query: deny
   # Devin authoring envelope: Devin subagents run non-interactively without prompt
   # capabilities, so process.execute: ask narrows to withheld. Devin CLI also has no
   # standalone file creation tool (edit fails when the file does not exist, and apply_patch
@@ -68,6 +74,10 @@ profiles:
       network.read: allow
       network.publish: deny
       delegate: allow
+      # Devin's qualified generic grants deliberately exclude kyber-weave-arbiter, so the
+      # subagent envelope must not reach arbiter_evaluate: the D4 fallback is not available
+      # to this role. The loader requires an explicit decision for every declared capability.
+      decision.query: deny
   documentation:
     permissions:
       filesystem.read: allow
@@ -77,6 +87,7 @@ profiles:
       network.read: deny
       network.publish: deny
       delegate: deny
+      decision.query: deny
   investigator:
     permissions:
       filesystem.read: allow
@@ -86,6 +97,7 @@ profiles:
       network.read: allow
       network.publish: deny
       delegate: deny
+      decision.query: deny
   orchestrator:
     permissions:
       # Conductors open the plan, spec, and todo documents they route and sequence work
@@ -100,6 +112,7 @@ profiles:
       network.read: deny
       network.publish: deny
       delegate: allow
+      decision.query: allow
   product-planning:
     permissions:
       filesystem.read: allow
@@ -111,6 +124,7 @@ profiles:
       network.read: allow
       network.publish: deny
       delegate: allow
+      decision.query: deny
   # Devin specification envelope: same reasoning as architect-devin, granting process.execute:
   # allow so product-owner can initialize nonexistent spec phase files before editing and
   # run documentation checks. Validation rejects assigning it as a shared profile.
@@ -124,6 +138,9 @@ profiles:
       network.read: allow
       network.publish: deny
       delegate: allow
+      # Same reasoning as architect-devin: Devin grants no Arbiter tools here, so this
+      # envelope must not reach arbiter_evaluate either.
+      decision.query: deny
   publishing-worker:
     permissions:
       filesystem.read: allow
@@ -133,6 +150,7 @@ profiles:
       network.read: allow
       network.publish: ask
       delegate: deny
+      decision.query: deny
   read-only:
     permissions:
       filesystem.read: allow
@@ -142,6 +160,7 @@ profiles:
       network.read: allow
       network.publish: deny
       delegate: deny
+      decision.query: deny
   reviewer:
     permissions:
       filesystem.read: allow
@@ -166,6 +185,8 @@ profiles:
       # it outright, and the ones that hold it — reviewer for its council, architect for
       # read-only discovery — reach only the roles their own delegates-to names.
       delegate: allow
+      # code-reviewer must reach arbiter_evaluate to consult the Arbiter's decision record.
+      decision.query: allow
   worker:
     permissions:
       filesystem.read: allow
@@ -175,3 +196,4 @@ profiles:
       network.read: deny
       network.publish: deny
       delegate: deny
+      decision.query: deny

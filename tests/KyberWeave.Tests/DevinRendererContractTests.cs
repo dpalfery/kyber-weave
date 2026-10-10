@@ -658,6 +658,7 @@ public sealed class DevinRendererContractTests : IDisposable
     private static IReadOnlyList<string> QualifiedMcpTools(SquadSource source) =>
     [
         .. source.Toolchain.RequiredMcpTools
+            .Where(entry => !string.Equals(entry.Key, "kyber-weave-arbiter", StringComparison.Ordinal))
             .OrderBy(entry => entry.Key, StringComparer.Ordinal)
             .SelectMany(entry => entry.Value
                 .OrderBy(tool => tool, StringComparer.Ordinal)

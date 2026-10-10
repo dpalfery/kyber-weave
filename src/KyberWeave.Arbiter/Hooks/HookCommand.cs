@@ -74,15 +74,30 @@ public sealed class HookCommand
                 return 0;
             }
 
-            string repoRoot = RepoRootOf(payload);
+            string? unconfigured = adapter.AnswerWithoutConfig(payload, caller);
+            if (unconfigured is not null)
+            {
+                stdout.Write(unconfigured);
+                return 0;
+            }
+
+            string repoRoot = RepoRootOf(adapter, payload);
             KyberWeaveConfig config = _configLoader(repoRoot);
             if (!config.Arbiter.Enabled)
             {
                 log.WriteLine("Arbiter is disabled (arbiter.enabled: false): allowing without evaluation.");
+                // A harness whose protocol has no silent answer (Antigravity writes {}
+                // for every event) still receives its allow document here.
+                string? disabledAllow = adapter.DisabledAllowDocument;
+                if (disabledAllow is not null)
+                {
+                    stdout.Write(disabledAllow);
+                }
+
                 return 0;
             }
 
-            HookContext context = new(repoRoot, _newDecisionId, log);
+            HookContext context = new(repoRoot, _newDecisionId, log, adapter.ObservesReturns);
             string output = adapter.Handle(payload, stdin, caller, config, context);
             if (output.Length > 0)
             {
@@ -135,17 +150,17 @@ public sealed class HookCommand
         return payload;
     }
 
-    private static string RepoRootOf(JsonElement payload)
-    {
-        if (payload.TryGetProperty("cwd", out JsonElement cwd)
+    // The adapter's own payload root wins: Antigravity carries the workspace in
+    // workspacePaths[0] ([F10]) and has no cwd, so without this the configuration
+    // loads from the process directory. The payload's cwd is the Claude-family
+    // fallback, and the process directory is the last resort.
+    private static string RepoRootOf(IHarnessHookAdapter adapter, JsonElement payload) =>
+        adapter.RepoRootOf(payload)
+        ?? (payload.TryGetProperty("cwd", out JsonElement cwd)
             && cwd.ValueKind == JsonValueKind.String
-            && !string.IsNullOrWhiteSpace(cwd.GetString()))
-        {
-            return cwd.GetString()!;
-        }
-
-        return Directory.GetCurrentDirectory();
-    }
+            && !string.IsNullOrWhiteSpace(cwd.GetString())
+                ? cwd.GetString()!
+                : Directory.GetCurrentDirectory());
 
     private static string OneLine(string message) =>
         message.Replace("\r\n", " ", StringComparison.Ordinal)

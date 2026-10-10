@@ -19,15 +19,16 @@ three steps — plain code for exact facts, a decision model for judgements abou
 a reasoning agent for what the model flags or is unsure about — invoked by harness hooks at
 the Squad's decision points.
 
-## Phase 1 scope
+## Scope
 
-Phase 1 delivers the harness-neutral core and hooks for four harnesses: **Claude, Copilot in
-VS Code, Copilot CLI, and OpenCode**. Later phases extend the same engine to further
-harnesses and add the MCP fallback; this documentation describes only what Phase 1 delivers.
+The engine is harness-neutral. Hooks deliver it on eleven harnesses in three phases:
+**Claude, Copilot in VS Code, Copilot CLI and OpenCode** (Phase 1); **Pi, Codex and Cursor**
+(Phase 2); and **Kilo, Antigravity, Factory and Devin** (Phase 3). **Warp and ZCode** have no
+hooks and use the MCP fallback, `kyber-weave-arbiter serve`.
 
 ## Start here
 
-- [Architecture](architecture.md) — engine, rules, configuration, and Phase 1 harness facts
+- [Architecture](architecture.md) — engine, rules, configuration, and the harness table
 - [Runbook](runbook.md) — hooks, trust steps, fail-closed behaviour, `setup`, `doctor`,
   `audit`, and recording harness defects
 - [ADR 0033](../adr/0033-kyber-arbiter-three-step-decision-gates.md) — the decisions behind it

@@ -1,15 +1,18 @@
 ---
-id: specs/kyber-arbiter/index
+id: archive/specs/kyber-arbiter/index
 title: Kyber Arbiter specification
 doc-type: index
-status: draft
+status: archived
 owner: dpalfery
-last-reviewed: 2026-10-04
+last-reviewed: 2026-10-10
 ---
 
 # Kyber Arbiter specification
 
-**Status:** Requirements and design are approved. Tasks for all three delivery phases are in Draft, with three open questions (Q15–Q17).
+**Status:** Archived
+**Archive Date:** 2026-10-10
+
+Delivered and closed out 2026-10-10: all three phases shipped, each as its own PR, and every requirement (1–25) and decision (D1–D34) traces to delivered evidence. The durable decisions live in [ADR 0033](../../../adr/0033-kyber-arbiter-three-step-decision-gates.md) and [ADR 0034](../../../adr/0034-squad-owned-blocks-in-shared-hook-files.md). The canonical documents are [`docs/kyber-arbiter/`](../../../kyber-arbiter/README.md) and the [Kyber-Squad](../../../kyber-squad/architecture.md) documents.
 
 A rule engine, configured in `.kyber-weave/kyber-weave.yml` and invoked by harness hooks at the squad's decision points, with up to three steps of escalation: plain code answering exact facts, a decision model (TypeSafe JEV or local Ollama) answering judgements about meaning, and a reasoning agent answering what the model flags or is unsure about. Each rule's question is answered according to the TypeSafe escalation pattern, with one confident red flag enough to escalate—signals are not averaged.
 

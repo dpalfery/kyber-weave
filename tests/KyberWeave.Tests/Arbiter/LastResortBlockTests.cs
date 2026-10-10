@@ -14,6 +14,28 @@ namespace KyberWeave.Tests.Arbiter;
 public sealed class LastResortBlockTests
 {
     [Fact]
+    public void For_Devin_UsesTheDecisionBlockDialect()
+    {
+        // [F12]: the top-level decision block is the only deny shape Devin documents;
+        // the Claude-shaped fallback would let a double fault through.
+        using JsonDocument doc = JsonDocument.Parse(LastResortBlock.For("devin"));
+
+        Assert.Equal("block", doc.RootElement.GetProperty("decision").GetString());
+        Assert.Contains(HookCommand.FailClosedCode, doc.RootElement.GetProperty("reason").GetString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void For_Antigravity_UsesTheDecisionDenyDialect()
+    {
+        // [F10]: Antigravity reads decision deny|allow|ask, not permissionDecision;
+        // decision deny is the shape its adapter renders fail-closed.
+        using JsonDocument doc = JsonDocument.Parse(LastResortBlock.For("antigravity"));
+
+        Assert.Equal("deny", doc.RootElement.GetProperty("decision").GetString());
+        Assert.Contains(HookCommand.FailClosedCode, doc.RootElement.GetProperty("reason").GetString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void For_EveryRegisteredToken_InAnyCase_StillGetsItsOwnDialect()
     {
         // The registry resolves --harness case-insensitively, so `--harness OpenCode`
@@ -114,13 +136,63 @@ public sealed class LastResortBlockTests
         {
             using JsonDocument doc = JsonDocument.Parse(LastResortBlock.For(token));
             Assert.Equal("block", doc.RootElement.GetProperty("decision").GetString());
+            Assert.Contains(
+                HookCommand.FailClosedCode,
+                doc.RootElement.GetProperty("reason").GetString(),
+                StringComparison.Ordinal);
         }
+    }
+
+    private static readonly IReadOnlyDictionary<string, Action<JsonElement>> ExpectedDialects =
+        new Dictionary<string, Action<JsonElement>>(StringComparer.Ordinal)
+        {
+            ["claude"] = AssertHookSpecificDeny,
+            ["codex"] = AssertHookSpecificDeny,
+            ["copilot-vscode"] = AssertHookSpecificDeny,
+            ["factory"] = AssertHookSpecificDeny,
+            ["cursor"] = root => Assert.Equal("deny", root.GetProperty("permission").GetString()),
+            ["copilot-cli"] = root => Assert.Equal("deny", root.GetProperty("permissionDecision").GetString()),
+            ["antigravity"] = root => Assert.Equal("deny", root.GetProperty("decision").GetString()),
+            ["devin"] = root => Assert.Equal("block", root.GetProperty("decision").GetString()),
+            ["opencode"] = root => Assert.Equal("block", root.GetProperty("decision").GetString()),
+            ["kilo"] = root => Assert.Equal("block", root.GetProperty("decision").GetString()),
+            ["pi"] = root => Assert.Equal("block", root.GetProperty("decision").GetString()),
+        };
+
+    // The registry is the source of harness tokens; the table above is the contract for
+    // which dialect each token's last-resort block uses. A newly registered harness with
+    // no row fails here instead of silently inheriting the Claude-shaped fallback, which
+    // on Devin or a plugin shim is not a block at all.
+    [Fact]
+    public void For_EveryRegisteredHarnessToken_UsesItsAdapterDialect()
+    {
+        HarnessAdapterRegistry registry = HarnessAdapterRegistry.CreateDefault(new StubEngine());
+
+        Assert.NotEmpty(registry.Tokens);
+        foreach (string token in registry.Tokens)
+        {
+            Assert.True(
+                ExpectedDialects.TryGetValue(token, out Action<JsonElement>? dialect),
+                $"Harness '{token}' has no explicit last-resort dialect row: give the token an " +
+                "entry in LastResortBlock and a row in this test, so a double fault blocks in a " +
+                "document this harness reads.");
+            using JsonDocument doc = JsonDocument.Parse(LastResortBlock.For(token));
+            dialect!(doc.RootElement);
+        }
+    }
+
+    private static void AssertHookSpecificDeny(JsonElement root)
+    {
+        JsonElement output = root.GetProperty("hookSpecificOutput");
+        Assert.Equal("deny", output.GetProperty("permissionDecision").GetString());
+        Assert.Contains(HookCommand.FailClosedCode, output.GetRawText(), StringComparison.Ordinal);
     }
 
     [Theory]
     [InlineData("claude")]
     [InlineData("codex")]
     [InlineData("copilot-vscode")]
+    [InlineData("factory")]
     [InlineData("something-new")]
     [InlineData(null)]
     public void For_ClaudeShapedOrUnknownHarness_UsesHookSpecificOutput(string? harness)
@@ -148,6 +220,16 @@ public sealed class LastResortBlockTests
         Assert.Equal(0, exit);
         using JsonDocument doc = JsonDocument.Parse(stdout.ToString());
         Assert.Equal(expected, doc.RootElement.GetProperty(key).GetString());
+    }
+
+    /// <summary>Allows everything; the registry-completeness test never consults an adapter.</summary>
+    private sealed class StubEngine : IHookDecisionEngine
+    {
+        public HookOutcome DecidePreDispatch(string caller, string? target, string prompt, KyberWeaveConfig config) =>
+            new(HookOutcomeKind.Allow);
+
+        public HookOutcome DecidePostDispatch(string caller, string? target, string toolOutput, KyberWeaveConfig config) =>
+            new(HookOutcomeKind.Allow);
     }
 
     /// <summary>Composed only so the registry can be built; no adapter is ever invoked.</summary>
