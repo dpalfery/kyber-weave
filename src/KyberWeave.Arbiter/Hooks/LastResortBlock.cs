@@ -37,7 +37,7 @@ internal static class LastResortBlock
         string reason = $"{HookCommand.FailClosedCode}: hook host failed" +
             (token.Length == 0 ? "." : $" ({harness}).");
 
-// The key is the trimmed token, not the raw argument: the table's comparer is
+        // The key is the trimmed token, not the raw argument: the table's comparer is
         // OrdinalIgnoreCase and the registry resolves --harness the same way, so the two
         // must not disagree. The reason text still echoes `harness` as the caller wrote it.
         return Dialects.TryGetValue(token, out Func<string, string>? render)

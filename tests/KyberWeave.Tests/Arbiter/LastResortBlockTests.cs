@@ -222,7 +222,7 @@ public sealed class LastResortBlockTests
         Assert.Equal(expected, doc.RootElement.GetProperty(key).GetString());
     }
 
-/// <summary>Allows everything; the registry-completeness test never consults an adapter.</summary>
+    /// <summary>Allows everything; the registry-completeness test never consults an adapter.</summary>
     private sealed class StubEngine : IHookDecisionEngine
     {
         public HookOutcome DecidePreDispatch(string caller, string? target, string prompt, KyberWeaveConfig config) =>
