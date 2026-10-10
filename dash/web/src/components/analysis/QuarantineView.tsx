@@ -176,7 +176,11 @@ function QuarantineDetailPanel({
   const source = textOf(body.source ?? body.harness) ?? entryHarness(entry) ?? 'unknown'
   const name = textOf(body.name) ?? entry.name ?? null
   const seenAt = textOf(body.seen_at ?? body.timestamp ?? body.at) ?? entry.seenAt ?? entry.timestamp ?? null
-  const payload = body.payload ?? body.attributes ?? null
+  // WHY rawPayload first: the detail route serves the stored span JSON as
+  // `rawPayload` with `evidenceAvailable`; `payload`/`attributes` are legacy
+  // keys. Reading only the legacy keys reported "no payload" for rows that
+  // had stored evidence.
+  const payload = body.rawPayload ?? body.payload ?? body.attributes ?? null
   const hasPayload = payload !== null && payload !== undefined
 
   return (
