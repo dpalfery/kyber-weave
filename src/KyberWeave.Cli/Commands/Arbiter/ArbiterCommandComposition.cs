@@ -465,7 +465,13 @@ public static class ArbiterCommandComposition
     /// caller-controlled, so a path that does not resolve inside the repository
     /// reads as <c>plan.exists: false</c>.
     /// </summary>
-    private sealed class ArbiterCliPlanReader(string repositoryRoot) : IArbiterPlanReader
+    /// <remarks>
+    /// Internal rather than private so the tests reach this reader itself. The
+    /// hook host's equivalent is internal for the same reason, and a containment
+    /// rule proved against a stand-in reader is not a proof about the reader that
+    /// ships.
+    /// </remarks>
+    internal sealed class ArbiterCliPlanReader(string repositoryRoot) : IArbiterPlanReader
     {
         public ArbiterFactSet Enrich(ArbiterFactSet facts, TriggerClassification classification)
         {
