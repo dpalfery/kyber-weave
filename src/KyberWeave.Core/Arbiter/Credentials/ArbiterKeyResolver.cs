@@ -1,3 +1,5 @@
+using KyberWeave.Core.Networking;
+
 namespace KyberWeave.Core.Arbiter.Credentials;
 
 /// <summary>Resolves the TypeSafe key the same way in every process.</summary>
@@ -121,17 +123,6 @@ public static class ArbiterKeyResolver
     /// Whether a host is loopback. Mirrors the validator's endpoint-scheme check so the
     /// key is refused on plain HTTP everywhere except where no key is sent at all.
     /// </summary>
-    private static bool IsLoopbackHost(string host)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(host);
-        string normalized = host.Trim().Trim('[', ']');
-        if (string.Equals(normalized, "localhost", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(normalized, "::1", StringComparison.Ordinal))
-        {
-            return true;
-        }
-
-        return normalized.StartsWith("127.", StringComparison.Ordinal) &&
-            byte.TryParse(normalized.Split('.')[1..].FirstOrDefault(), out _);
-    }
+    private static bool IsLoopbackHost(string host) =>
+        LoopbackAddress.IsLoopbackHost(host);
 }

@@ -125,6 +125,34 @@ public sealed class ArbiterKeyResolutionTests
         Assert.False(envRead);
     }
 
+    [Theory]
+    // A hostname that merely begins "127." is not loopback. Reading it as loopback would
+    // suppress the key for an endpoint the user's key must never reach.
+    [InlineData("http://127.0.0.1.evil.com/v1")]
+    [InlineData("http://127.0.evil/v1")]
+    [InlineData("http://127.1.2.3.4.5/v1")]
+    [InlineData("http://localhost.evil.com/v1")]
+    public void LookalikeLoopbackEndpointStillResolvesTheKey(string endpoint)
+    {
+        FakeCredentialStore store = new() { NextKey = SentinelKey };
+
+        string? resolved = ArbiterKeyResolver.Resolve(endpoint, store, EnvReader(SentinelKey));
+
+        Assert.Equal(SentinelKey, resolved);
+    }
+
+    [Theory]
+    [InlineData("http://localhost:11434/v1")]
+    [InlineData("http://LocalHost:11434/v1")]
+    [InlineData("http://127.0.0.1:11434/v1")]
+    [InlineData("http://127.1.2.3:11434/v1")]
+    [InlineData("http://[::1]:11434/v1")]
+    [InlineData("http://[0:0:0:0:0:0:0:1]:11434/v1")]
+    public void GenuineLoopbackEndpointNeedsNoKey(string endpoint)
+    {
+        Assert.True(ArbiterKeyResolver.IsLoopbackEndpoint(endpoint));
+    }
+
     [Fact]
     public void MacWriteKeepsKeyOnStdinOnly()
     {

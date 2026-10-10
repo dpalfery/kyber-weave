@@ -305,6 +305,47 @@ public sealed class ArbiterConfigTests
             d => d.Code == RuleValidator.PlainHttpEndpoint);
     }
 
+    [Theory]
+    // The endpoint checker only inspects the first octet and the second label today, so a
+    // hostname that merely starts with 127. counts as loopback. It must not: plain HTTP
+    // off-host would be accepted with the key resolver declining to serve a key.
+    [InlineData("http://127.0.0.1.evil.com/v1")]
+    [InlineData("http://127.0.evil/v1")]
+    [InlineData("http://127.1.2.3.4.5/v1")]
+    [InlineData("http://localhost.evil.com/v1")]
+    public void PlainHttpLookalikeLoopbackEndpoint_RaisesConfig010(string endpoint)
+    {
+        ArbiterConfig config = ArbiterConfig.ProductDefaults with
+        {
+            Provider = new ArbiterProviderConfig(
+                ArbiterProviderKind.Systemone, endpoint, "nimble", 3000),
+        };
+
+        Assert.Contains(
+            RuleValidator.Validate(config),
+            d => d.Code == RuleValidator.PlainHttpEndpoint);
+    }
+
+    [Theory]
+    [InlineData("http://localhost:11434/v1")]
+    [InlineData("http://LocalHost:11434/v1")]
+    [InlineData("http://127.0.0.1:11434/v1")]
+    [InlineData("http://127.1.2.3:11434/v1")]
+    [InlineData("http://[::1]:11434/v1")]
+    [InlineData("http://[0:0:0:0:0:0:0:1]:11434/v1")]
+    public void PlainHttpGenuineLoopbackEndpoint_PassesConfig010(string endpoint)
+    {
+        ArbiterConfig config = ArbiterConfig.ProductDefaults with
+        {
+            Provider = new ArbiterProviderConfig(
+                ArbiterProviderKind.Systemone, endpoint, "nimble", 3000),
+        };
+
+        Assert.DoesNotContain(
+            RuleValidator.Validate(config),
+            d => d.Code == RuleValidator.PlainHttpEndpoint);
+    }
+
     [Fact]
     public void Clone_PreservesArbiterSection()
     {
