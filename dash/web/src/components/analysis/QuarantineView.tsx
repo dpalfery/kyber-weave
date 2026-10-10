@@ -36,9 +36,6 @@ export function QuarantineView({ entries }: { entries: QuarantineEntry[] | null 
           </tbody>
         </table>
       </div>
-      <p className="mt-3 text-xs text-tertiary-foreground">
-        Counts and namespaces needed to write the missing adapter (R6.3).
-      </p>
     </div>
   )
 }
