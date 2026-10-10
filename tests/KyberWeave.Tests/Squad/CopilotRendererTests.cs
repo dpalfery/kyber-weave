@@ -249,7 +249,7 @@ public sealed class CopilotRendererTests
 
         // The reviewer profile's Copilot value is the expected model
         string expectedModel = source.ModelProfiles.Profiles["reviewer"].HarnessModels["copilot"];
-        Assert.Equal("Kimi K2.7 Code (copilot)", expectedModel);
+        Assert.Equal("Grok 4.7 (copilot)", expectedModel);
 
         // Verify the rendered file contains that model
         SquadDeploymentFile file = Assert.Single(
@@ -263,7 +263,7 @@ public sealed class CopilotRendererTests
     }
 
     [Theory]
-    [InlineData("task-reviewer", "reviewer", "Kimi K2.7 Code (copilot)")]
+    [InlineData("task-reviewer", "reviewer", "Grok 4.7 (copilot)")]
     [InlineData("test-dev", "fast", "MAI-Code-1.1-Flash (copilot)")]
     public async Task RenderAsync_ReviewerAndFastAgentsResolveToTheirProfileCopilotModels(
         string agentName,

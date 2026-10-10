@@ -75,48 +75,45 @@ public sealed class SquadSourceTests
     }
 
     /// <summary>
-    /// Asserts every changed cell in models.yml per plan section 6b (the profile × harness table,
-    /// final state). Data-driven over (profileName, harbessName, expectedValue) tuples covering:
-    /// - All six harness columns (claude, codex, copilot, cursor, opencode, pi)
-    /// - Every profile; the `mai-code-flash` key (a model name, not a profile) must be absent from models.yml
-    /// - Both changed values and unchanged values, to catch regressions
+    /// Pins the operator-selected model assignments across planning, coding, review, and
+    /// orchestration profiles, including unchanged harness values that must remain stable.
     /// </summary>
     [Theory]
     [InlineData("architect", "claude", "opus")]
-    [InlineData("architect", "codex", "gpt-5.6-sol")]
-    [InlineData("architect", "copilot", "GPT-5.6 Sol (copilot)")]
-    [InlineData("architect", "cursor", "gpt-5.6-sol[context=272k,reasoning=high,fast=false]")]
-    [InlineData("architect", "kilo", "glm5.3")]
+    [InlineData("architect", "codex", "gpt-6.1-sol")]
+    [InlineData("architect", "copilot", "GPT-6.1 Sol (copilot)")]
+    [InlineData("architect", "cursor", "claude-sonnet-5-5[effort=high]")]
+    [InlineData("architect", "kilo", "kilo/deepseek/deepseek-v4-pro-0813")]
     [InlineData("architect", "opencode", "zai-coding-plan/glm-5.3")]
     [InlineData("architect", "pi", "zai/glm-5.3[thinking=high]")]
     [InlineData("architect", "devin", "claude-opus-5-5-high")]
     [InlineData("deep-planning", "claude", "opus")]
-    [InlineData("deep-planning", "codex", "gpt-5.6-sol")]
-    [InlineData("deep-planning", "copilot", "GPT-5.6 Sol (copilot)")]
-    [InlineData("deep-planning", "cursor", "gpt-5.6-sol[context=272k,reasoning=high,fast=false]")]
-    [InlineData("deep-planning", "kilo", "glm5.3")]
+    [InlineData("deep-planning", "codex", "gpt-6.1-sol")]
+    [InlineData("deep-planning", "copilot", "GPT-6.1 Sol (copilot)")]
+    [InlineData("deep-planning", "cursor", "claude-sonnet-5-5[effort=high]")]
+    [InlineData("deep-planning", "kilo", "kilo/deepseek/deepseek-v4-pro-0813")]
     [InlineData("deep-planning", "opencode", "zai-coding-plan/glm-5.3")]
     [InlineData("deep-planning", "pi", "zai/glm-5.3[thinking=high]")]
     [InlineData("deep-planning", "devin", "claude-opus-5-5-high")]
-    [InlineData("fast", "claude", "sonnet")]
-    [InlineData("fast", "codex", "gpt-5.6-luna")]
+    [InlineData("fast", "claude", "claude-haiku-5-5")]
+    [InlineData("fast", "codex", "gpt-6-luna")]
     [InlineData("fast", "copilot", "MAI-Code-1.1-Flash (copilot)")]
     [InlineData("fast", "cursor", "composer-2.5[]")]
     [InlineData("fast", "kilo", "spark1.3 contributor")]
     [InlineData("fast", "opencode", "opencode/muse-spark-1.3-contributor-free")]
     [InlineData("fast", "pi", "opencode/muse-spark-1.3-contributor-free[thinking=low]")]
     [InlineData("fast", "devin", "deepseek-v4-1-flash-high")]
-    [InlineData("general", "claude", "sonnet")]
+    [InlineData("general", "claude", "claude-sonnet-5-5")]
     [InlineData("general", "codex", "gpt-5.6-terra")]
-    [InlineData("general", "copilot", "Grok 4.6 (copilot)")]
-    [InlineData("general", "cursor", "grok-4.6[]")]
+    [InlineData("general", "copilot", "Claude Haiku 5.5 (copilot)")]
+    [InlineData("general", "cursor", "grok-4.7[]")]
     [InlineData("general", "kilo", "muse-spark1.3 contributor")]
     [InlineData("general", "opencode", "opencode/muse-spark-1.3-contributor-free")]
     [InlineData("general", "pi", "opencode/muse-spark-1.3-contributor-free[thinking=medium]")]
     [InlineData("general", "devin", "swe-2-high")]
     [InlineData("reviewer", "claude", "sonnet")]
     [InlineData("reviewer", "codex", "gpt-5.6-terra")]
-    [InlineData("reviewer", "copilot", "Kimi K2.7 Code (copilot)")]
+    [InlineData("reviewer", "copilot", "Grok 4.7 (copilot)")]
     [InlineData("reviewer", "cursor", "kimi-k2.7-code[]")]
     [InlineData("reviewer", "kilo", "kimi k2.7 code")]
     [InlineData("reviewer", "opencode", "opencode-go/kimi-k2.7-code")]
@@ -162,7 +159,7 @@ public sealed class SquadSourceTests
     }
 
     [Fact]
-    public void ModelsYmlCarriesNoHaikuResolutionAcrossAllProfiles()
+    public void ModelsYmlUsesHaiku55OnlyForClaudeFastAndCopilotGeneralProfiles()
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
 
@@ -171,29 +168,30 @@ public sealed class SquadSourceTests
             Assert.DoesNotContain("haiku", profile.Default, StringComparison.OrdinalIgnoreCase);
             foreach ((string harness, string model) in profile.HarnessModels)
             {
-                Assert.False(
-                    model.Contains("haiku", StringComparison.OrdinalIgnoreCase),
-                    $"Profile '{profileName}' on harness '{harness}' unexpectedly resolves to '{model}'.");
+                if (model.Contains("haiku", StringComparison.OrdinalIgnoreCase))
+                {
+                    Assert.True(
+                        (profileName == "fast" && harness == "claude" && model == "claude-haiku-5-5") ||
+                        (profileName == "general" && harness == "copilot" && model == "Claude Haiku 5.5 (copilot)"),
+                        $"Profile '{profileName}' on harness '{harness}' unexpectedly resolves to '{model}'.");
+                }
             }
         }
     }
 
 
     /// <summary>
-    /// Pins the Antigravity column of each model profile (issue #209). Only the dedicated
-    /// <c>architect</c> profile is <c>claude-opus-4-6</c>; every other profile —
-    /// including shared <c>deep-planning</c> used by non-architect agents — is Gemini Flash.
-    /// Without this pin, <c>deep-planning</c> and <c>reviewer</c> can silently return to
-    /// <c>pro</c> (Gemini 3.1 Pro) and still pass renderer tests that only echo <c>models.yml</c>.
+    /// Pins Antigravity planning and review to Pro while routine work stays on Flash.
+    /// This catches unintended model changes independently of the renderer's YAML echo.
     /// </summary>
     [Theory]
-    [InlineData("architect", "claude-opus-4-6")]
-    [InlineData("deep-planning", "flash")]
+    [InlineData("architect", "pro")]
+    [InlineData("deep-planning", "pro")]
     [InlineData("fast", "flash")]
     [InlineData("general", "flash")]
     [InlineData("orchestration", "flash")]
-    [InlineData("reviewer", "flash")]
-    public void ModelsYmlAntigravityColumnPinsArchitectOnClaudeOpusAndOtherProfilesOnFlash(
+    [InlineData("reviewer", "pro")]
+    public void ModelsYmlAntigravityColumnPinsPlanningAndReviewOnProAndOtherProfilesOnFlash(
         string profileName,
         string expectedAntigravityModel)
     {
@@ -212,9 +210,8 @@ public sealed class SquadSourceTests
     }
 
     /// <summary>
-    /// Issue #209 / Issue #286: only the <c>architect</c> and <c>product-owner</c> agents may own the
-    /// Opus Antigravity profile. Shared <c>deep-planning</c> stays Flash so <c>sql-database-architect</c> and
-    /// <c>bug-crusher-investigator</c> cannot inherit Opus through profile membership.
+    /// Keeps the architect/product-owner profile distinct from the other planning roles even
+    /// when both profiles currently select the same planning models.
     /// </summary>
     [Fact]
     public void ArchitectAndProductOwnerOwnArchitectModelProfileAndDeepPlanningPeersStayOnDeepPlanning()
