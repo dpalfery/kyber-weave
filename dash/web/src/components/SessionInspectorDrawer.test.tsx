@@ -1059,10 +1059,57 @@ describe('SessionInspectorDrawer: Copilot turn readability', () => {
     expect(html).not.toContain('turn-content-section-prompt_text')
   })
 
-  it('renders nothing for absent buckets and empty content', () => {
+  it('renders nothing only for absent buckets; explicit empty values get markers', () => {
+    // Message-only keys stay rendered elsewhere, so no sections here.
     expect(renderHtml(React.createElement(TurnContentSections, { content: { prompt_text: 'x' } }))).toBe('')
     expect(renderHtml(React.createElement(TurnContentSections, { content: null }))).toBe('')
-    expect(renderHtml(React.createElement(TurnContentSections, { content: '' }))).toBe('')
-    expect(renderHtml(React.createElement(ReadableContentText, { text: '' }))).toBe('')
+    // A whole empty-string content value is explicit: show a marker section.
+    const emptyContentHtml = renderHtml(React.createElement(TurnContentSections, { content: '' }))
+    expect(emptyContentHtml).toContain('data-testid="turn-content-sections"')
+    expect(emptyContentHtml).toContain('data-testid="turn-content-section-content"')
+    expect(emptyContentHtml).toContain('empty string')
+    const emptyTextHtml = renderHtml(React.createElement(ReadableContentText, { text: '' }))
+    expect(emptyTextHtml).toContain('empty string')
+  })
+
+  it('preserves explicit null, empty string, and undefined content values', () => {
+    const content = {
+      system_prompt: null,
+      instruction_context: '',
+      conversation_history: undefined,
+      tool_result_content: 'ok',
+    }
+    const html = renderHtml(React.createElement(TurnContentSections, { content }))
+    expect(html).toContain('data-testid="turn-content-section-system_prompt"')
+    expect(html).toContain('data-testid="explicit-null-value"')
+    expect(html).toContain('>null<')
+    expect(html).toContain('data-testid="turn-content-section-instruction_context"')
+    expect(html).toContain('data-testid="empty-string-value"')
+    expect(html).toContain('empty string')
+    expect(html).toContain('data-testid="turn-content-section-conversation_history"')
+    expect(html).toContain('data-testid="explicit-undefined-value"')
+    expect(html).toContain('>undefined<')
+    expect(html).toContain('data-testid="turn-content-section-tool_result_content"')
+    expect(html).toContain('ok')
+    // A key that is not present at all renders no section.
+    expect(html).not.toContain('turn-content-section-tool_definitions')
+  })
+
+  it('distinguishes false, zero, and empty collections from null and empty string', () => {
+    const content = {
+      system_prompt: false,
+      instruction_context: 0,
+      conversation_history: [],
+      tool_result_content: {},
+    }
+    const html = renderHtml(React.createElement(TurnContentSections, { content }))
+    expect(html).toContain('data-testid="turn-content-section-system_prompt"')
+    expect(html).toContain('false')
+    expect(html).toContain('data-testid="turn-content-section-instruction_context"')
+    expect(html).toContain('>0<')
+    expect(html).toContain('empty list')
+    expect(html).toContain('empty object')
+    expect(html).not.toContain('explicit-null-value')
+    expect(html).not.toContain('empty-string-value')
   })
 })

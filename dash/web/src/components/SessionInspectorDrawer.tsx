@@ -569,9 +569,18 @@ export function JsonStringView({
 /**
  * Readable rendering for a content string of unknown shape: JSON text gets
  * the structured view (with its exact-raw toggle), everything else keeps the
- * XML-folding text view. Either way the complete text stays visible.
+ * XML-folding text view. Either way the complete text stays visible. An
+ * empty string is an explicit value, not absent data, so it renders a
+ * visible marker instead of nothing.
  */
 export function ReadableContentText({ text, label }: { text: string; label?: string }) {
+  if (text === '') {
+    return (
+      <p className="text-xs font-mono text-tertiary-foreground" data-testid="empty-string-value">
+        &quot;&quot; (empty string)
+      </p>
+    )
+  }
   if (!text) return null
   if (isJsonText(text)) {
     return <JsonStringView text={text} label={label} />
@@ -623,14 +632,31 @@ function ToolDefinitionCards({ definitions }: { definitions: unknown[] }) {
  * flat canonical buckets here — system prompt, instruction context, tool
  * definitions, conversation history, tool results — which the message blocks
  * above do not read, so without this they stay invisible (or surface
- * elsewhere as one raw JSON wall). Every present bucket renders in full:
+ * elsewhere as one raw JSON wall). Every own bucket renders in full:
  * JSON strings get the structured view, long prose keeps XML folding, and
- * real objects keep the key-value view. Absent buckets render nothing — no
- * placeholder stands in for missing data — and array order is never touched.
+ * real objects keep the key-value view. Only absent keys render nothing —
+ * an own key with null, an empty string, or undefined renders an explicit
+ * marker so missing data is never confused with an explicit empty value —
+ * and array order is never touched.
  */
 export function TurnContentSections({ content }: { content: unknown }) {
   if (typeof content === 'string') {
-    if (content === '') return null
+    if (content === '') {
+      return (
+        <div className="space-y-2" data-testid="turn-content-sections">
+          <section data-testid="turn-content-section-content">
+            <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
+              Turn content
+            </h4>
+            <div className="rounded border border-border bg-card p-3 overflow-hidden">
+              <p className="text-xs font-mono text-tertiary-foreground" data-testid="empty-string-value">
+                &quot;&quot; (empty string)
+              </p>
+            </div>
+          </section>
+        </div>
+      )
+    }
     return (
       <div className="space-y-2" data-testid="turn-content-sections">
         <section data-testid="turn-content-section-content">
@@ -645,13 +671,13 @@ export function TurnContentSections({ content }: { content: unknown }) {
     )
   }
   if (!isRecord(content)) return null
-  const isPresent = (key: string): boolean => {
-    const value = content[key]
-    return value !== undefined && value !== null && value !== ''
-  }
+  // Every own key counts as present: null, '', false, 0, and undefined
+  // are explicit values with visible markers below. Only a key that is not
+  // present at all is absent.
+  const hasOwn = (key: string): boolean => Object.prototype.hasOwnProperty.call(content, key)
   const ordered = [
-    ...TURN_CONTENT_SECTION_ORDER.filter(isPresent),
-    ...Object.keys(content).filter((key) => !KNOWN_CONTENT_KEYS.has(key) && !MESSAGE_CONTENT_KEYS.has(key) && isPresent(key)),
+    ...TURN_CONTENT_SECTION_ORDER.filter(hasOwn),
+    ...Object.keys(content).filter((key) => !KNOWN_CONTENT_KEYS.has(key) && !MESSAGE_CONTENT_KEYS.has(key)),
   ]
   if (ordered.length === 0) return null
   return (
@@ -666,7 +692,21 @@ export function TurnContentSections({ content }: { content: unknown }) {
             </h4>
             <div className="rounded border border-border bg-card p-3 overflow-hidden">
               {typeof value === 'string' ? (
-                <ReadableContentText text={value} label={label} />
+                value === '' ? (
+                  <p className="text-xs font-mono text-tertiary-foreground" data-testid="empty-string-value">
+                    &quot;&quot; (empty string)
+                  </p>
+                ) : (
+                  <ReadableContentText text={value} label={label} />
+                )
+              ) : value === null ? (
+                <span className="text-xs font-mono text-foreground" data-testid="explicit-null-value">
+                  null
+                </span>
+              ) : value === undefined ? (
+                <span className="text-xs font-mono text-foreground" data-testid="explicit-undefined-value">
+                  undefined
+                </span>
               ) : key === 'tool_definitions' && Array.isArray(value) ? (
                 <ToolDefinitionCards definitions={value} />
               ) : (
