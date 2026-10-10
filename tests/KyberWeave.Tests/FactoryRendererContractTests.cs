@@ -137,6 +137,8 @@ public sealed class FactoryRendererContractTests : IDisposable
     [InlineData("glm-5.3[reasoningEffort=high][reasoningEffort=low]")]
     [InlineData("[reasoningEffort=high]")]
     [InlineData(" [reasoningEffort=high]")]
+    [InlineData("glm-5.3 [reasoningEffort=high]")]
+    [InlineData("glm 5.3[reasoningEffort=high]")]
     [InlineData("glm-5.3[reasoningEffort=high")]
     public void ParseReasoningEffortSuffix_RejectsMalformedValues(string value)
     {
@@ -259,9 +261,16 @@ public sealed class FactoryRendererContractTests : IDisposable
             {
                 (string defaultModel, string? defaultEffort) = FactoryRenderer.ParseReasoningEffortSuffix(modelProfile.Default);
                 Assert.Equal(defaultModel, RequireScalar(frontmatter, "model", agent.Name));
-                Assert.Equal(
-                    defaultEffort is not null,
-                    frontmatter.Children.ContainsKey(new YamlScalarNode("reasoningEffort")));
+                if (defaultEffort is not null)
+                {
+                    Assert.Equal(defaultEffort, RequireScalar(frontmatter, "reasoningEffort", agent.Name));
+                }
+                else
+                {
+                    Assert.False(
+                        frontmatter.Children.ContainsKey(new YamlScalarNode("reasoningEffort")),
+                        $"Agent '{agent.Name}' should omit 'reasoningEffort' (profile default has no suffix).");
+                }
             }
             else
             {

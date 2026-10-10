@@ -272,11 +272,12 @@ public sealed class FactoryRenderer : ISquadRenderer
 
         string bareModel = modelValue[..start];
         if (string.IsNullOrWhiteSpace(bareModel) ||
+            bareModel.Any(char.IsWhiteSpace) ||
             bareModel.Contains('[', StringComparison.Ordinal) ||
             bareModel.Contains(']', StringComparison.Ordinal))
         {
             throw new SquadRenderValidationException(
-                $"Malformed model value '{modelValue}': the model id before the reasoningEffort suffix must be non-blank and free of brackets (stacked suffixes are not allowed).");
+                $"Malformed model value '{modelValue}': the model id before the reasoningEffort suffix must be non-blank and free of whitespace and brackets (stacked suffixes are not allowed).");
         }
 
         return (bareModel, level);
