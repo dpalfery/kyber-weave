@@ -76,7 +76,32 @@ public sealed class ArbiterDoctorCommand : Command<ArbiterSettings>
         }
 
         string? origin = ArbiterKeyResolver.GetOrigin(provider.Endpoint);
-        if (ArbiterCommandComposition.TryResolveKey(config, provider.Endpoint) is not null)
+        string? key;
+        try
+        {
+            key = ArbiterCommandComposition.ResolveKey(config, provider.Endpoint);
+        }
+        catch (SecretServiceUnavailableException exception)
+        {
+            // The store cannot run on this host: the finding carries the remedy, not a generic "no key".
+            AnsiConsole.MarkupLine(
+                $"  [yellow]warn[/] Key [bold]{ArbiterStatusCommand.KeyMissing}[/]: {Markup.Escape(exception.Message)}");
+            report.Add(new Diagnostic(
+                ArbiterStatusCommand.KeyMissing,
+                Severity.Warning,
+                exception.Message,
+                "arbiter.provider"));
+            return;
+        }
+        catch (Exception exception) when (exception is InvalidOperationException
+            or IOException
+            or UnauthorizedAccessException
+            or System.ComponentModel.Win32Exception)
+        {
+            key = null;
+        }
+
+        if (key is not null)
         {
             AnsiConsole.MarkupLine($"  [green]ok[/] Key: found for {Markup.Escape(origin ?? provider.Endpoint)}.");
             return;

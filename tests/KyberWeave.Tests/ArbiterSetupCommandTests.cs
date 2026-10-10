@@ -5,6 +5,7 @@ using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Arbiter.Credentials;
 using KyberWeave.Core.Processes;
+using KyberWeave.Tests.Arbiter;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -19,6 +20,7 @@ public sealed class ArbiterSetupCommandTests : IDisposable
     private readonly TempDirectory _temp = new();
     private readonly TempDirectory _home = new();
     private readonly FakeCredentialStore _store = new();
+    private ICredentialStore? _storeOverride;
 
     // While one of this class's tests executes, the composition seams route to the
     // injected home, store and stubs; every other flow keeps the saved production
@@ -54,7 +56,7 @@ public sealed class ArbiterSetupCommandTests : IDisposable
         _savedProbeExecutor = ArbiterCommandComposition.ArbiterProbeExecutor;
 
         ArbiterCommandComposition.HomeDirectory = () => _isolated.Value ? _home.Path : _savedHome();
-        ArbiterCommandComposition.CredentialStore = () => _isolated.Value ? _store : _savedStore();
+        ArbiterCommandComposition.CredentialStore = () => _isolated.Value ? _storeOverride ?? _store : _savedStore();
         ArbiterCommandComposition.GetEnvironmentVariable = name => _isolated.Value ? null : _savedEnvironment(name);
         ArbiterCommandComposition.KeyStdinReader = () => _isolated.Value ? _keyStdinValue : _savedKeyStdin();
         ArbiterCommandComposition.KeyPrompt = () => _isolated.Value ? _keyPromptValue : _savedKeyPrompt();
@@ -299,6 +301,48 @@ public sealed class ArbiterSetupCommandTests : IDisposable
             new ArbiterSettings { Path = host }));
 
         Assert.Contains(ArbiterStatusCommand.KeyMissing, execution.Output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Doctor_SecretToolMissing_ReportsKey001WithActionableText()
+    {
+        WriteOverride("provider:\n  kind: systemone\n  endpoint: https://api.typesafe.ai/v1\n  model: jev-1.13.0\n");
+        _storeOverride = new SecretServiceCredentialStore(new ArbiterSecretToolMissingTests.MissingExecutableCredentialProcessRunner());
+        string host = NewDir("doctor-no-secret-tool");
+
+        CommandExecution execution = Capture(() => new ArbiterDoctorCommand().Execute(
+            null!,
+            new ArbiterSettings { Path = host }));
+
+        Assert.Contains(ArbiterStatusCommand.KeyMissing, execution.Output, StringComparison.Ordinal);
+        Assert.Contains("TYPESAFE_API_KEY", execution.Output, StringComparison.Ordinal);
+        Assert.Contains("libsecret-tools", execution.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain("Key: found", execution.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain("An error occurred trying to start process", execution.Output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Setup_SecretToolMissing_ExitsOneWithActionableText()
+    {
+        _keyStdinValue = "TS-NOTOOL-KEY-0c1d2e3f";
+        _storeOverride = new SecretServiceCredentialStore(new ArbiterSecretToolMissingTests.MissingExecutableCredentialProcessRunner());
+        string host = NewDir("setup-no-secret-tool");
+
+        CommandExecution execution = Capture(() => new ArbiterSetupCommand().Execute(
+            null!,
+            new ArbiterSettings
+            {
+                Path = host,
+                Provider = "systemone",
+                Endpoint = "https://api.typesafe.ai/v1",
+                Model = "jev-1.13.0",
+                KeyStdin = true,
+            }));
+
+        Assert.Equal(1, execution.ExitCode);
+        Assert.Contains("TYPESAFE_API_KEY", execution.Output, StringComparison.Ordinal);
+        Assert.Contains("libsecret-tools", execution.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain(_keyStdinValue, execution.Output, StringComparison.Ordinal);
     }
 
     [Fact]

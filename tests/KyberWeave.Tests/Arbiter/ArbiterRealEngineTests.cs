@@ -2,10 +2,12 @@ using System.Text.Json;
 using KyberWeave.Arbiter;
 using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Core.Arbiter;
+using KyberWeave.Core.Arbiter.Credentials;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Core.Processes;
 using Xunit;
 
 namespace KyberWeave.Tests.Arbiter;
@@ -67,7 +69,7 @@ public sealed class ArbiterRealEngineTests : IDisposable
     private static string DisabledShippedRules() =>
         string.Join("\n", ArbiterConfigTests.ExpectedRuleIds.Select(id => $"                - id: {id}\n                  enabled: false"));
 
-    private void WriteConfig(string rulesYaml)
+    private void WriteConfig(string rulesYaml, string providerYaml = "    kind: none")
     {
         Directory.CreateDirectory(Path.Combine(_repo.Path, ".kyber-weave"));
         File.WriteAllText(
@@ -75,17 +77,23 @@ public sealed class ArbiterRealEngineTests : IDisposable
             "arbiter:\n" +
             "  enabled: true\n" +
             "  provider:\n" +
-            "    kind: none\n" +
+            providerYaml + "\n" +
             "  rules:\n" +
             rulesYaml + "\n");
     }
 
-    private HookCommand CreateCommand(IArbiterProvider provider, IArbiterGitFacts? gitFacts = null)
+    private HookCommand CreateCommand(
+        IArbiterProvider provider,
+        IArbiterGitFacts? gitFacts = null,
+        Func<ICredentialStore>? credentialStoreFactory = null,
+        Func<string, string?>? environment = null)
     {
         ArbiterHookDecisionEngine engine = new(
             providerFactory: _ => provider,
             gitFactsFactory: gitFacts is null ? null : _ => gitFacts,
-            homeDirectory: () => _home.Path);
+            homeDirectory: () => _home.Path,
+            credentialStoreFactory: credentialStoreFactory,
+            environment: environment);
         return new HookCommand(
             HarnessAdapterRegistry.CreateDefault(engine),
             Composition.LoadHostConfig,
@@ -224,6 +232,68 @@ public sealed class ArbiterRealEngineTests : IDisposable
             .GetProperty("permissionDecisionReason").GetString() ?? string.Empty;
         Assert.Contains(HookCommand.FailClosedCode, reason, StringComparison.Ordinal);
         Assert.Contains("ANSWER: error", reason, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RealEngine_RemoteProviderWithoutSecretTool_BlocksWithActionableEvidence()
+    {
+        WriteConfig(DisabledShippedRules(), RemoteProviderYaml);
+        HookCommand command = CreateCommand(
+            new FakeProvider(),
+            credentialStoreFactory: () => new SecretServiceCredentialStore(
+                new ArbiterSecretToolMissingTests.MissingExecutableCredentialProcessRunner()),
+            environment: _ => null);
+
+        (int exit, string stdout, _) = Run(command, Payload("PreToolUse", "csharp-dev", Prompt));
+
+        Assert.Equal(0, exit);
+        using JsonDocument doc = JsonDocument.Parse(stdout);
+        JsonElement output = doc.RootElement.GetProperty("hookSpecificOutput");
+        Assert.Equal("deny", output.GetProperty("permissionDecision").GetString());
+        string reason = output.GetProperty("permissionDecisionReason").GetString() ?? string.Empty;
+        Assert.Contains(HookCommand.FailClosedCode, reason, StringComparison.Ordinal);
+        Assert.Contains("ANSWER: error", reason, StringComparison.Ordinal);
+        Assert.Contains("TYPESAFE_API_KEY", reason, StringComparison.Ordinal);
+        Assert.Contains("libsecret-tools", reason, StringComparison.Ordinal);
+        Assert.DoesNotContain("An error occurred trying to start process", reason, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RealEngine_RemoteProviderWithRealSecretServiceAndNoSecretTool_BlocksWithActionableEvidence()
+    {
+        Assert.SkipWhen(SecretToolOnPath(), "secret-tool is installed, so the missing-tool path is not reachable here.");
+        WriteConfig(DisabledShippedRules(), RemoteProviderYaml);
+        HookCommand command = CreateCommand(
+            new FakeProvider(),
+            credentialStoreFactory: () => new SecretServiceCredentialStore(new ProcessRunnerCredentialProcessRunner()),
+            environment: _ => null);
+
+        (int exit, string stdout, _) = Run(command, Payload("PreToolUse", "csharp-dev", Prompt));
+
+        Assert.Equal(0, exit);
+        using JsonDocument doc = JsonDocument.Parse(stdout);
+        JsonElement output = doc.RootElement.GetProperty("hookSpecificOutput");
+        Assert.Equal("deny", output.GetProperty("permissionDecision").GetString());
+        string reason = output.GetProperty("permissionDecisionReason").GetString() ?? string.Empty;
+        Assert.Contains("TYPESAFE_API_KEY", reason, StringComparison.Ordinal);
+        Assert.Contains("libsecret-tools", reason, StringComparison.Ordinal);
+    }
+
+    private const string RemoteProviderYaml =
+        "    kind: systemone\n" +
+        "    endpoint: https://api.typesafe.ai/v1\n" +
+        "    model: jev-1.13.0";
+
+    private static bool SecretToolOnPath()
+    {
+        string? path = Environment.GetEnvironmentVariable("PATH");
+        if (string.IsNullOrEmpty(path))
+        {
+            return false;
+        }
+
+        return path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
+            .Any(directory => File.Exists(Path.Combine(directory, "secret-tool")));
     }
 
     [Fact]
