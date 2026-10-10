@@ -23,13 +23,19 @@ is true. Phase 1 wires Claude (per-agent frontmatter hooks), Copilot in VS Code 
 `.agent.md` hooks), Copilot CLI (`.github/hooks/kyber-arbiter.json`), and OpenCode (the
 plugin shim). Phase 2 adds Pi (the `.pi/extensions/kyber-arbiter.ts` shim), Codex (the
 owned block in the shared `.codex/hooks.json`), and Cursor (owned entries in the shared
-`.cursor/hooks.json`). The hook binary is invoked as:
+`.cursor/hooks.json`). Phase 3 adds Kilo (the `.kilo/plugin/kyber-arbiter.ts` shim),
+Antigravity (the owned `kyber-arbiter` group in `.agents/hooks.json`), Factory (the owned
+block in `.factory/hooks.json`, dropped while the user's hooks live in
+`.factory/settings.json` — see fail-closed behaviour below), and Devin (the owned block
+in `.devin/hooks.v1.json`). Warp and ZCode render no hooks: they are fallback-only — see
+the MCP fallback below. The hook binary is invoked as:
 
 ```bash
-kyber-weave-arbiter hook --harness <claude|copilot-vscode|copilot-cli|opencode|pi|codex|cursor> [--caller <agent>]
+kyber-weave-arbiter hook --harness <claude|copilot-vscode|copilot-cli|opencode|pi|codex|cursor|kilo|antigravity|factory|devin> [--caller <agent>]
 ```
 
-Shared-file hooks (`pi`, `codex`, `cursor`) gate project-wide and carry no `--caller`.
+Shared-file hooks (`codex`, `cursor`, `antigravity`, `factory`, `devin`) gate project-wide
+and carry no `--caller`.
 It reads the harness event on stdin and writes only the harness's decision document on
 stdout — logging goes to stderr. The exit code is 0.
 
@@ -44,6 +50,8 @@ observed — so grant trust at install time:
 | Copilot in VS Code | Open the project as a trusted workspace and keep `chat.useHooks` enabled, or the hooks stay off. |
 | Codex | Trust the project's `.codex/` layer, then review and trust the new hook through `/hooks`. Every `squad update` that changes the hook needs that review again, or the changed hook is skipped. |
 | Pi | Trust the project so that `.pi/extensions/` loads. Until trust is granted the extension does not load and dispatches stay ungated. |
+| Warp | No trust gate — there are no hooks to trust. Setup instead: Squad writes no MCP configuration for Warp, so register `kyber-weave-arbiter serve --repo-root <root>` as an MCP server in Warp's own MCP configuration. Until it is registered only the advisory marker fallback enforces there. |
+| ZCode | No trust gate — there are no hooks to trust. Setup instead: Squad writes no MCP configuration for ZCode, so register `kyber-weave-arbiter serve --repo-root <root>` as an MCP server in ZCode's own MCP configuration. Until it is registered only the advisory marker fallback enforces there. |
 | Cursor, Copilot CLI, OpenCode | No documented trust gate. |
 
 `squad install` and `squad update` print the applicable step for the rendered targets.
@@ -66,7 +74,42 @@ post-dispatch outcome renders as `hookSpecificOutput.additionalContext`, because
 On the Cursor target (`cursor`) the post-dispatch path writes only `additional_context`,
 so a post-dispatch finding is advisory there too; the pre-dispatch `permission: deny`
 still blocks.
-`arbiter doctor` prints one informational line for each of these three targets.
+On the Factory target (`factory`) post-dispatch outcomes are likewise advisory only: every
+post-dispatch outcome renders as `hookSpecificOutput.additionalContext`, and the
+pre-dispatch `permissionDecision: deny` still blocks.
+On Antigravity and Devin, post-dispatch outcomes are not delivered at all — Antigravity's
+`PostToolUse` output is `{}` and Devin documents no post-dispatch output field — so they
+are recorded and reported by `audit` instead, and both targets record
+`arbiter-not-enforced` (`no-post-dispatch-feedback`) per agent at render time. Antigravity
+cannot observe returns, so `READY-001`'s completion check and `MODE-001`'s RED check
+answer `returns-unobservable` there, which allows and is logged; the in-flight overlap
+check still runs.
+`arbiter doctor` prints one informational line for each of copilot-cli, codex and cursor.
+
+## The MCP fallback (Warp and ZCode)
+
+Warp documents no hooks, and project-level hooks are not executed in ZCode's current
+version, so the marker fallback is advisory there and the MCP fallback is the enforcement
+surface. Squad writes no MCP configuration for either, so register the server yourself in
+the harness's own MCP configuration:
+
+```bash
+kyber-weave-arbiter serve --repo-root <root>
+```
+
+`serve` exposes three tools. `arbiter_evaluate(trigger, facts)` evaluates one event
+exactly as the hook would — same facts, rules, ledger append and decision record — and
+returns the same allow, envelope or review note; the caller asserts the routing facts and
+the log records `caller-source: asserted`, so this path is advisory.
+`arbiter_rules(trigger?)` lists the rule catalogue, and `arbiter_status()` reports the
+root, rule-set hash, rule count and provider state, never the key — both read-only. Every
+response leads with a provenance line naming the root it answered from; the root is
+resolved from `--repo-root`, then `KYBER_WEAVE_REPO_ROOT`, then the working directory. The
+conductor calls `arbiter_evaluate` before each dispatch and after each return, and
+code-reviewer calls it once before the lens fan-out and once before the refutation
+fan-out. On Squad-rendered fallback targets the tools are granted through the
+`decision.query` capability, allowed only for the `orchestrator` and `reviewer` profiles —
+the conductor and code-reviewer.
 
 ## Setup, doctor, audit
 
@@ -101,8 +144,10 @@ vendor's stated behaviour — record each one with three facts:
 
 1. **Harness and version** — the harness token and the exact harness version observed.
 2. **The contradicted documented cell** — which cell of the per-harness hook tables in the
-   [architecture](architecture.md#phase-1-harness-facts) (Phase 1) or
-   [architecture](architecture.md#phase-2-harness-facts) (Phase 2) the behaviour contradicts.
+   [architecture](architecture.md#phase-1-harness-facts) (Phase 1),
+   [architecture](architecture.md#phase-2-harness-facts) (Phase 2), or
+   [architecture](architecture.md#phase-3-harness-facts) (Phase 3) the behaviour
+   contradicts.
 3. **The affected trigger** — recorded as `arbiter-not-enforced` for that trigger on that
    harness until the defect is fixed or the fallback covers it.
 

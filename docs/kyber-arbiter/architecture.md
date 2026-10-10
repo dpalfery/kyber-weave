@@ -28,6 +28,8 @@ code-refs:
   - CodexHookAdapter
   - CursorHookAdapter
   - PluginHookAdapter
+  - FactoryHooksShadowing
+  - ArbiterTools
 ---
 
 # Kyber Arbiter architecture
@@ -118,6 +120,11 @@ thresholds, and per-answer `effects`. Host rules use the same shape under non-`K
 | `KW-ARB-GATE-CORROBORATED-001` | `refute.spawn` | 0 | Does a failed gate already corroborate the finding? |
 | `KW-ARB-GATE-001` | `gate.select` | 0 | Does any changed path match the gate's `applies-when.paths`? |
 
+Two answers are return-dependent: on a harness whose adapter declares returns unobservable
+(today only Antigravity), `READY-001`'s completion check and `MODE-001`'s RED check answer
+`returns-unobservable`, which allows and is logged; the in-flight overlap check still
+runs.
+
 Diagnostics are permanent too: `KW-ARB-CONFIG-001`…`-010` for configuration and rules,
 `KW-ARB-KEY-001` for a missing key, `KW-ARB-LOG-001` for an un-ignored log directory,
 `KW-ARB-BIN-001` for a missing binary, `KW-ARB-GUARD-001` for undeclared planning indexes,
@@ -195,6 +202,95 @@ changes the hook needs trust again, or the changed hook is skipped); Pi needs
 project trust so that `.pi/extensions/` loads. Cursor's hooks carry no trust gate
 today. See the [runbook](runbook.md) and
 [Squad onboarding](../kyber-squad/onboarding.md).
+
+Claude observes background dispatches through a hand-back hook. Every agent a governed
+dispatcher can target gets a frontmatter `PreToolUse` hook on `^SubagentHandback$`: it
+records the return under the payload's `agent_id`, joined to the dispatch through the
+`agentId` the dispatcher's `PostToolUse(Agent)` reports at the background launch, and then
+runs the post-dispatch rules. A non-allow outcome never denies the hand-back — it returns
+`allow` with `updatedInput`, the complete input with the envelope or note appended to
+`message`, so the dispatcher receives the outcome inside the hand-back. Foreground calls
+keep the `PostToolUse` path, and a return observed by neither is reported by `audit` as an
+unpaired event (`KW-ARB-AUDIT-003`).
+
+## Phase 3 harness facts
+
+Phase 3 hooks Kilo, Antigravity, Factory, and Devin, and leaves Warp and ZCode without
+hooks — they are fallback-only, served by [`serve`](#the-mcp-fallback-serve) below. The
+four hooked targets are project-wide hooks with no caller identity: they gate only
+dispatches carrying the `KYBER-ARBITER: true` marker, infer the caller from the headers,
+and pass anything else through, logged with `caller: unidentified`.
+
+| Harness | What Squad renders | Dispatch tool | Deny output | Post-dispatch |
+|---|---|---|---|---|
+| Kilo | The `.kilo/plugin/kyber-arbiter.ts` shim speaking the plugin envelope | `task` | A thrown error blocks | `tool.execute.after` |
+| Antigravity | An owned top-level group `kyber-arbiter` in `.agents/hooks.json`, matching `^invoke_subagent$` | `invoke_subagent` | `{decision: "deny", reason}`; pass-through writes `{}` — an explicit allow would bypass the user's approval prompts | Output is `{}`: returns are unobservable |
+| Factory | An owned block in `.factory/hooks.json` — matcher groups at the top level, no `hooks` wrapper — unless shadowed (below) | `Task` | `hookSpecificOutput.permissionDecision: "deny"` with the reason | `additionalContext` (advisory) |
+| Devin | An owned block in `.devin/hooks.v1.json` (the Claude Code format; matcher groups at the top level), matching `^run_subagent$` | `run_subagent` | Top-level `{decision: "block", reason}` | Read from `tool_response.output`, but no post-dispatch output field is documented, so outcomes are never delivered |
+| Warp, ZCode | No hooks — the MCP fallback | — | — | — |
+
+Per-harness notes:
+
+- **Kilo** is a plugin harness like OpenCode: the rendered shim spawns the binary by argv,
+  writes a `kyber-arbiter.plugin-event/v1` envelope, blocks by throwing, and strips the
+  routing headers by assigning `output.args`. The target comes from `args.subagent_type`
+  and the prompt from `args.prompt`; returns pair by `callID`. No trust gate is documented.
+- **Antigravity** can dispatch several subagents in one call (`toolCall.args.Subagents`,
+  each element with its own target and prompt); the call is denied when any element
+  escalates. It documents no input-rewrite field for `hooks.json`, so routing headers are
+  not stripped — only documented fields are written. Because `PostToolUse` output is `{}`,
+  the adapter declares returns unobservable (`harness.observes-returns` is false):
+  `READY-001`'s completion check and `MODE-001`'s RED check answer `returns-unobservable`,
+  which allows and is logged, while the dependency's in-flight overlap check still runs —
+  pre-dispatch gating (plan, scope, intent, ownership, overlap) is unaffected, and
+  completion order is advisory there. The render records `arbiter-not-enforced` with
+  `no-post-dispatch-feedback` for every rendered agent: post-dispatch outcomes are logged
+  and reported by `audit`, never delivered back to the harness.
+- **Factory** reads the `hooks` key of `.factory/settings.json` only while
+  `.factory/hooks.json` is absent, so creating `hooks.json` would silently disable any
+  hooks the user keeps in `settings.json`. When that shape is found the renderer drops its
+  block and records `arbiter-not-enforced` with `settings-hooks-shadowed`, naming the fix:
+  move the user's hooks into `.factory/hooks.json`, then run `squad update`. A strip writes
+  `allow` with the complete `updatedInput` (every `tool_input` field copied, only `prompt`
+  rewritten); no call id is documented, so returns pair by `pair-digest`.
+- **Devin** takes the target from `tool_input.profile` and the prompt from
+  `tool_input.prompt`; when either is absent the dispatch is treated as unmarked and
+  logged, so `audit` reports it. A strip writes `hookSpecificOutput.updatedInput:
+  {prompt: …}`, which Devin merges into the arguments. Post-dispatch outcomes are logged
+  and reported by `audit`, never delivered, so the render records `arbiter-not-enforced`
+  with `no-post-dispatch-feedback` for every dispatcher agent.
+
+On Factory, as on Codex, Copilot CLI and Cursor, post-dispatch denials are advisory only:
+every post-dispatch outcome renders as `hookSpecificOutput.additionalContext`, so a
+post-dispatch finding is surfaced as context rather than enforced. Pre-dispatch denies
+still block. On Antigravity and Devin, post-dispatch outcomes are not delivered at all —
+they are recorded and reported by `audit`. No trust gate is documented for any Phase 3
+harness.
+
+## The MCP fallback (`serve`)
+
+`kyber-weave-arbiter serve --repo-root <root>` is a stdio MCP server carrying the fallback
+for the harnesses without hooks — Warp and ZCode. Three tools:
+
+- **`arbiter_evaluate(trigger, facts)`** — evaluates one event exactly as the hook would:
+  the same facts, rules, ledger append and decision record, and the same allow, envelope or
+  review note. The caller asserts the routing facts (`target`, `plan-file`, `task`,
+  `prompt`, `lens`, `finding`, `phase`, `call-id`, `output`); the server derives the rest
+  and records `caller-source: asserted`. Because the gated agent makes the call, this path
+  is advisory.
+- **`arbiter_rules(trigger?)`** — lists the rule catalogue; read-only and closed-world.
+- **`arbiter_status()`** — reports the root, the rule-set hash, the rule count and the
+  provider state, never the key; read-only and closed-world.
+
+Every response leads with a provenance line naming the root it answered from; the root is
+resolved from `--repo-root`, then `KYBER_WEAVE_REPO_ROOT`, then the working directory. The
+conductor calls `arbiter_evaluate` before each dispatch and after each return, and
+code-reviewer calls it once before the lens fan-out and once before the refutation
+fan-out. Holding `arbiter_evaluate` is the agent's signal to use the fallback: the
+`decision.query` capability is allowed only for the `orchestrator` and `reviewer` profiles
+and denied for the other eight, and on Warp and ZCode an `allow` lowers to the
+`kyber-weave-arbiter` server alone. The setup step — Squad writes no MCP configuration for
+either target — is in the [runbook](runbook.md#the-mcp-fallback-warp-and-zcode).
 
 ## Related
 
