@@ -93,6 +93,20 @@ function pageHeading(section: KyberPage, location: SpineLocation): string {
   }
 }
 
+/** One guidance line beside the shell title for each top-level page; always visible, including loading and empty states. */
+function pageDescription(section: KyberPage, location: SpineLocation): string | undefined {
+  if (section === 'compare' || location.level === 'compare')
+    return 'Choose two runs, from the same or different harnesses, to compare recorded results.'
+  if (section === 'sessions') return 'Browse captured sessions; open one to inspect its context and activity.'
+  if (section === 'quarantine' || location.level === 'quarantine')
+    return 'Telemetry held out of analysis; inspect namespaces and reasons to understand why.'
+  if (section === 'problems' || location.level === 'problems')
+    return 'Ingestion and validation warnings or errors; inspect the code, message, and location to trace failures.'
+  if (section === 'context-doctor' && location.level === 'context-doctor')
+    return 'Find context advice for the selected harness; choose a session to narrow findings.'
+  return undefined
+}
+
 function pageFor(location: SpineLocation): KyberPage {
   if (location.level === 'quarantine') return 'quarantine'
   if (location.level === 'problems') return 'problems'
@@ -373,6 +387,8 @@ export function App({ initialPage = 'context-doctor', initialPath, initialNotFou
   }, [])
 
   const showSpine = section === 'context-doctor' || section === 'compare'
+  // Guidance line beside the shell title; undefined on drill-down detail pages.
+  const shellDescription = pageDescription(section, location)
   /** Opens a diagnostic spine location, records it in history, and makes Context Doctor active. */
   const openSpine = (next: SpineLocation, action: 'push' | 'replace' | 'goTo' = 'push') => {
     setNotFoundId(null)
@@ -539,10 +555,15 @@ export function App({ initialPage = 'context-doctor', initialPath, initialNotFou
           be reachable.
         */}
         <main className="min-h-0 min-w-0 flex-1 overflow-y-auto pr-0.5">
-          <div className="mb-3 flex items-baseline justify-between">
+          <div className="mb-3 flex flex-wrap items-baseline gap-x-3 gap-y-1">
             <h1 className="font-display text-xl tracking-tight text-foreground" data-testid="page-title">
               {pageHeading(section, location)}
             </h1>
+            {shellDescription !== undefined && (
+              <p data-testid="page-description" className="text-xs text-muted-foreground">
+                {shellDescription}
+              </p>
+            )}
           </div>
 
           {notFoundId ? (

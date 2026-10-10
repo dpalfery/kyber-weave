@@ -780,9 +780,6 @@ export function ContextDoctor({
           <h2 className="font-display text-density-display font-bold tracking-density text-foreground">
             Context Doctor
           </h2>
-          <p className="text-density-xs text-muted-foreground mt-density-hair leading-density">
-            What's bloating or breaking your agents' context, per harness, and what to change.
-          </p>
         </div>
       </div>
 
