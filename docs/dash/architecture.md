@@ -868,19 +868,46 @@ retention purge all continue.
 
 ### Web Dashboard (dash/web/)
 
-The React web dashboard provides progressive-disclosure views matching the 6-level spine:
-- **`ContextDoctor.tsx`**: Cross-harness dashboard and fleet-wide finding leaderboard.
-- **`Sessions.tsx`**: Sessions rail wrapping `ContextExplorer` (ASAD + timeline); not a Context tab.
+The React web dashboard provides progressive-disclosure views matching the 6-level spine.
+Top navigation carries **Context Doctor**, **Sessions**, **Quarantine** and **Problems**; the
+sidebar rail carries **Compare** only, so no view is reachable from two places.
+
+The header's **Harness:** strip is the single main harness selector. It scopes **Sessions**
+and **Context Doctor** together and narrows whichever of those two pages is open in place,
+rather than navigating away from the page you are reading. Context Doctor opens on all
+sessions for the selected harness and can be narrowed further to a single session; its
+drilldowns are unchanged. **Compare** deliberately sits outside that scope and keeps its own
+per-side harness filters, so narrowing a page's scope never touches the A/B selectors.
+
+The top-right **Status** and **Maintenance** buttons open mutually exclusive right-side
+panels — opening one closes the other, so only one is on screen at a time. **Status** is
+read-only: it renders the ingest coverage payload from `GET /api/kyber/coverage` (refresh
+window, per-source ingest activity, per-reason quarantine counts, checkpoint statuses) and
+writes nothing. **Maintenance** holds every operator action, each an `/api/kyber/*` call:
+pause/resume, manual refresh, folder import, the shared settings, the model catalog refresh,
+and the confirmed wipe with its optional import window. Neither coverage nor maintenance is
+embedded in Context Doctor any more, and neither panel adds engine behaviour — both ask the
+same routes the tray already asks ([ADR 0033](../adr/0033-kyberdash-surfaces-are-display-layers.md)).
+
+The individual views:
+
+- **`ContextDoctor.tsx`**: Findings and recommendations — the ranked headline findings, the
+  full workspace findings browser, and the cross-harness scorecard matrix. Scoped by the shared
+  harness selector with optional session narrowing; drilling harness → run → execution → turn →
+  context item, and into a finding, is unchanged.
+- **`Sessions.tsx`**: Sessions rail wrapping `ContextExplorer` (ASAD + timeline); not a
+  Context tab, and scoped by the same harness selector as Context Doctor.
 - **`HarnessDetail.tsx`**: Per-harness rollups, coverage indicators, labelled grouping basis, and run browser.
 - **`RunDetail.tsx`**: Multi-agent run topology, execution tree, run scorecard, and grouping label.
 - **`FindingDetail.tsx`**: In-depth finding view with evidence table, confidence basis, risk caveats, and calibration summary.
 - **`CompareRuns.tsx`**: Phase-aligned run diffing with outcome regression guards, reached from
-  the spine rail. Run A and Run B both begin at **Select a run** unless the route supplies
-  explicit `a`/`b` deep-link ids; kyberdash fetches comparison data only after two distinct
-  ids are chosen. Each selector has an independent harness filter (`All harnesses` plus
-  observed canonical ids) that narrows the newest-first inventory without inferring subagent
-  role from id, label, or size — harness filtering excludes a harness such as ZCode only when
-  the user selects it, not because kyberdash classifies parent vs subagent runs. Options render
+  the sidebar rail rather than the top navigation. Run A and Run B both begin at
+  **Select a run** unless the route supplies explicit `a`/`b` deep-link ids; kyberdash fetches
+  comparison data only after two distinct ids are chosen. Each selector carries an independent
+  harness filter (`All harnesses` plus observed canonical ids), unaffected by the shared
+  selector, that narrows the newest-first inventory without inferring subagent role from id,
+  label, or size — harness filtering excludes a harness such as ZCode only when the user selects
+  it, not because kyberdash classifies parent vs subagent runs. Options render
   as ISO date (or `date unknown`), harness, measured turn count (or `turns unknown`), then
   human label plus a shortened distinguishing id; the full run id remains the option value.
   Unavailable turn totals, token delta, and recommendation history render as `—` with the API
