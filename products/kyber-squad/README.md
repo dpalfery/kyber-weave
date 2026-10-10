@@ -149,7 +149,7 @@ non-policy content stays in its skill directory as its durable home, portable po
 
 ### 3. Profiles
 
-- **Model Profiles (`profiles/models.yml`)**: Defines the abstract `deep-planning`, `fast`, `general`, `mai-code-flash`, and `orchestration` tiers and maps them to target model identifiers where an override is required.
+- **Model Profiles (`profiles/models.yml`)**: Defines the `architect`, `deep-planning`, `fast`, `general`, `orchestration`, and `reviewer` tiers and maps them to target model identifiers where an override is required.
 - **Capability Profiles (`profiles/capabilities.yml`)**: Declares a closed capability lattice and assigns permissions (`deny`, `ask`, `allow`) to each agent role. A target-scoped internal profile may validate an exact Copilot tool allow-list without replacing or widening the agent's shared capability profile.
 - **Fallback Profiles (`profiles/fallbacks.yml`)**: Governs role-skill lowering on harnesses lacking native agent support.
 

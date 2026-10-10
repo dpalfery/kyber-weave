@@ -5,7 +5,7 @@ doc-type: onboarding
 component: KyberSquad
 source-root: src/KyberWeave.Core/Squad
 owner: dpalfery
-last-reviewed: 2026-10-04
+last-reviewed: 2026-10-09
 status: current
 decided-by:
   - adr/0019-pi-native-subagents-and-primary-lowering
@@ -393,6 +393,14 @@ hand-authored file, or adopt it only when the bytes already match.
 **Model pins.** Per-harness model tokens in `models.yml` are user-provider specific. An
 unresolvable pin inherits silently (the renderer omits `model`) rather than failing the
 install; confirm the resolved model in the harness itself after a first deploy.
+
+The bundled assignments live in
+[`profiles/models.yml`](../../products/kyber-squad/profiles/models.yml). Both `architect`
+(architect and product-owner) and `deep-planning` (SQL architect and bug investigator)
+are planning profiles. Antigravity uses `pro` for both planning profiles and `reviewer`,
+and `flash` for the remaining profiles. Versioned model ids such as Claude's
+`claude-haiku-5-5` and `claude-sonnet-5-5` pin that generation; aliases such as `opus`
+follow the harness's alias resolution. Cursor's planning pin carries `effort=high`.
 
 **Legacy rc.9/rc.10 global recovery.** See [Receipt version and layout contract](architecture.md#receipt-version-and-layout-contract) in the architecture section for layout semantics. If you have a global install from rc.9 or rc.10, `kyber-weave squad status --global` will inspect and flag the legacy layout. To complete migration, run `kyber-weave squad uninstall --global` followed by `kyber-weave squad install --global` with the current CLI.
 

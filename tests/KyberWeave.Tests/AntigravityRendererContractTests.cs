@@ -1046,15 +1046,11 @@ public sealed class AntigravityRendererContractTests : IDisposable
     }
 
     /// <summary>
-    /// Pins rendered Antigravity models by agent identity (issue #209 / issue #286): only
-    /// <c>architect</c> and <c>product-owner</c> render <c>claude-opus-4-6</c>; every other
-    /// agent — including <c>sql-database-architect</c> and
-    /// <c>bug-crusher-investigator</c> on shared <c>deep-planning</c> — renders
-    /// Gemini Flash. Asserting by profile would incorrectly allow Opus for those
-    /// peers.
+    /// Pins rendered Antigravity models by agent identity so planners and reviewers use
+    /// Pro while workers and orchestration remain on Flash, independently of models.yml.
     /// </summary>
     [Fact]
-    public async Task RenderAsync_Antigravity_ArchitectAndProductOwnerRunOnClaudeOpusAndEveryOtherAgentOnFlash()
+    public async Task AntigravityPlanningAndReviewAgentsRunOnProAndOtherAgentsOnFlash()
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
         SquadRendererRegistry registry = new([new AntigravityRenderer()]);
@@ -1081,9 +1077,10 @@ public sealed class AntigravityRendererContractTests : IDisposable
 
             YamlMappingNode frontmatter = ReadFrontmatter(agentFile);
             string model = RequireScalar(frontmatter, "model");
-            string expectedModel = string.Equals(agent.Name, "architect", StringComparison.Ordinal) ||
-                                   string.Equals(agent.Name, "product-owner", StringComparison.Ordinal)
-                ? "claude-opus-4-6"
+            string expectedModel = agent.Name is "architect" or "product-owner" or
+                "sql-database-architect" or "bug-crusher-investigator" or "code-reviewer" or
+                "review-lens" or "review-triage" or "task-reviewer"
+                ? "pro"
                 : "flash";
 
             Assert.True(
