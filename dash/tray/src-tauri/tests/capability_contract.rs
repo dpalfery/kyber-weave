@@ -5,13 +5,14 @@ use std::path::PathBuf;
 
 use serde_json::Value;
 
-const CUSTOM_COMMAND_PERMISSIONS: [&str; 6] = [
+const CUSTOM_COMMAND_PERMISSIONS: [&str; 7] = [
     "allow-get-view-state",
     "allow-refresh-now",
     "allow-open-view",
     "allow-set-settings",
     "allow-quit",
     "allow-hide-popover",
+    "allow-clean-database",
 ];
 
 const EVENT_LISTENING_PERMISSIONS: [&str; 2] =

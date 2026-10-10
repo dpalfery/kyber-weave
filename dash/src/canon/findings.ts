@@ -10,6 +10,7 @@
 // `execution`: a rebuild is authoritative, and rows the detectors no longer emit are pruned.
 
 import { detectFindings } from '../analysis/findings.js'
+import { catalogWindowForRecords } from './model-window-catalog.js'
 import { dedupeTwinTurns } from './twin-dedupe.js'
 import { CanonStore } from './store.js'
 import type { CanonicalRecord } from './types.js'
@@ -62,6 +63,10 @@ export function buildFindings(store: CanonStore): BuildFindingsReport {
       // and its records alone cannot say the key was split, nor which id the
       // share was given. The detector names its sessions from the same table.
       sessionIdentities: identities,
+      // Catalog only. A reported or declared window is already decided inside
+      // the detector; returning those here would let a second derivation
+      // disagree with `contextLimitOf`.
+      resolveWindow: (groupRecords) => catalogWindowForRecords(groupRecords, store),
     })
 
     for (const finding of findings) {

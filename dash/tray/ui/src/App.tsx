@@ -93,6 +93,7 @@ export function App() {
         openView: (view) => invokeAction('open_view', { view }),
         setSettings: (patch: Partial<TraySettings>) => invokeAction('set_settings', { patch }),
         quit: () => invokeAction('quit'),
+        cleanDatabase: (scope) => invokeAction('clean_database', { scope }),
       }}
     />
   )

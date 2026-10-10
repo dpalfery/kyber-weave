@@ -43,7 +43,10 @@ import type { ParsedProviderCall } from '../providers/types.js'
 // v15: builtin alias prices `codex-auto-review` (#1047). Exact-hit cache
 // entries still hold the pre-alias $0; bump so unchanged rollouts reprice.
 // Must be max(main v14 #1092, this)+1 — #1092 spent v14 on MCP/skills.
-export const CODEX_CACHE_VERSION = 15
+// v16: issue #189 / PR #264 — camelCase token usage fields. Exact-hit entries
+// written under v15 can be empty for sessions the old parser dropped; bump so
+// an unchanged rollout re-parses instead of serving the empty cache hit.
+export const CODEX_CACHE_VERSION = 16
 export const CODEX_LEGACY_CACHE_FILE = 'codex-results.json'
 export function codexCacheFileName(version = CODEX_CACHE_VERSION): string {
   return `codex-results.v${version}.json`

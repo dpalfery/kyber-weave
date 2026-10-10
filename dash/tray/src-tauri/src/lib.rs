@@ -25,7 +25,7 @@ use tauri::{
 };
 use tauri_plugin_opener::OpenerExt;
 
-use crate::runtime::{EventSink, Opener, Runtime, RuntimeDependencies};
+use crate::runtime::{CleanScope, EventSink, Opener, Runtime, RuntimeDependencies};
 use crate::runtime_adapters::{
     SystemHealthProbe, SystemReceiverSpawner, SystemRefreshRunner, SystemReportFetcher,
     SystemServerSpawner, ThreadClock,
@@ -173,6 +173,26 @@ async fn quit(
     .await?;
     app.exit(0);
     Ok(())
+}
+
+/// IPC contract: `clean_database({ scope: "all" | { harness: string } }) -> null`.
+///
+/// The tray holds no clean logic (issue #312): the scope only chooses the
+/// `dash clean` child's argv — always with `--yes` (the popover asked twice)
+/// and `--no-reingest` (the next scheduled refresh re-ingests on its own
+/// cadence, so a foreground clean returns promptly). Multi-harness selection
+/// stays web-only.
+#[tauri::command]
+async fn clean_database(
+    state: State<'_, ManagedRuntime>,
+    scope: serde_json::Value,
+) -> std::result::Result<(), CommandError> {
+    let scope =
+        CleanScope::from_ipc(&scope).map_err(|error| command_error("clean_database", error))?;
+    with_runtime("clean_database", Arc::clone(&state.0), move |runtime| {
+        runtime.clean_database(scope)
+    })
+    .await
 }
 
 /// IPC contract: `hide_popover() -> null`.
@@ -432,7 +452,7 @@ pub fn run() {
                     {
                         toggle_popover(
                             tray.app_handle(),
-                            Some((position.x as i32, position.y as i32)),
+                            position::tray_click_anchor(tray, position),
                         );
                     }
                 })
@@ -447,7 +467,8 @@ pub fn run() {
             open_view,
             set_settings,
             quit,
-            hide_popover
+            hide_popover,
+            clean_database
         ])
         .build(tauri::generate_context!())
         .expect("error while building KyberDash tray");

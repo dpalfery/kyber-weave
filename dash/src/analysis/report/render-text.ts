@@ -52,6 +52,8 @@ function dimensionText(figure: Measured<number> & { display?: string }): string 
 }
 
 function pressureText(figure: Measured<number>): string {
+  // formatMeasured keeps a derived window's label. Inlining the percent would
+  // present a declared or catalog figure as a measurement (D5, D15).
   return formatMeasured(figure, (value) => `${Math.round(value * 100)}%`)
 }
 

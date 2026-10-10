@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "NODE_ENV=development vitest run"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.8.0",

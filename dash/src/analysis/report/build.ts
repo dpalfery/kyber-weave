@@ -22,10 +22,12 @@ import {
   DEFAULT_FINDING_LIMIT,
   DEFAULT_SECTIONS,
   REPORT_SCHEMA_VERSION,
+  derived,
   measured,
   unmeasurable,
   type BucketKey,
   type ContextReport,
+  type Measured,
   type ReportCost,
   type ReportCoverage,
   type ReportFinding,
@@ -383,7 +385,7 @@ function buildLatestSession(
       ? 'harness exported no message structure for this session'
       : context.contextLimit === undefined
         ? context.unavailableReason
-        : context.contextLimitSource === 'default'
+        : context.contextLimitSource === 'default' || context.contextLimitSource === 'absent'
           ? 'source reported no context window'
           : undefined
 
@@ -394,11 +396,11 @@ function buildLatestSession(
         ? unmeasurable<number>(windowUnavailableReason)
         : context.turn.pressure === undefined
           ? unmeasurable<number>(context.unavailableReason)
-          : measured(context.turn.pressure),
+          : windowFigure(context.turn.pressure, context.contextLimitSource),
     contextWindow:
       windowUnavailableReason !== undefined
         ? unmeasurable<number>(windowUnavailableReason)
-        : measured(context.contextLimit!, 'tokens'),
+        : windowFigure(context.contextLimit!, context.contextLimitSource, 'tokens'),
     buckets: Object.fromEntries(
       BUCKET_KEYS.map((key) => {
         const value = context.turn.buckets?.[key]
@@ -435,9 +437,27 @@ function buildLatestSession(
   }
 }
 
+/** Provenance the report can carry. `catalog` is D15; `absent` is a bridge span with no declared window. */
+type ReportWindowSource = 'reported' | 'declared' | 'catalog' | 'default' | 'absent'
+
+/**
+ * A declared or catalog window is not telemetry (D5, D15). Returning `measured`
+ * for either would make the report claim a harness reported a number it only
+ * configured or looked up.
+ */
+function windowFigure(
+  value: number,
+  source: ReportWindowSource | undefined,
+  unit?: string,
+): Measured<number> {
+  if (source === 'declared') return derived(value, 'declared window', unit)
+  if (source === 'catalog') return derived(value, 'vendor catalog', unit)
+  return measured(value, unit)
+}
+
 type LatestContext = {
   contextLimit?: number
-  contextLimitSource?: 'reported' | 'default'
+  contextLimitSource?: ReportWindowSource
   measurable: boolean
   unavailableReason: string
   bucketReasons: Partial<Record<BucketKey, string>>
@@ -464,13 +484,19 @@ function extractContext(payload: { context?: unknown; turns?: unknown[] } | unde
   const lastBuckets = asObject(last?.buckets)
   const rawLimitSource = context.contextLimitSource
   const contextLimitSource =
-    rawLimitSource === 'reported' || rawLimitSource === 'default' ? rawLimitSource : undefined
+    rawLimitSource === 'reported' ||
+    rawLimitSource === 'declared' ||
+    rawLimitSource === 'catalog' ||
+    rawLimitSource === 'default' ||
+    rawLimitSource === 'absent'
+      ? rawLimitSource
+      : undefined
   const contextLimit = finiteNumber(context.contextLimit)
   const reportedInput = finiteNumber(last?.reported_input)
   const turnIndex = finiteNumber(turn?.index) ?? finiteNumber(payloadTurn?.index) ?? 0
   const turnPressure = finiteNumber(turn?.pressure)
   const pressure =
-    contextLimitSource === 'default'
+    contextLimitSource === 'default' || contextLimitSource === 'absent'
       ? undefined
       : turnPressure ??
         (reportedInput !== undefined && contextLimit !== undefined && contextLimit > 0
