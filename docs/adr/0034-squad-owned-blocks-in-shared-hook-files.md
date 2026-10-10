@@ -88,7 +88,8 @@ shapes — `.factory/hooks.json`, `.devin/hooks.v1.json`, and the Antigravity
   command signature survives any formatting the user's editor applies.
 - **Calling the file-level splice during planning.** Rejected: it writes to disk,
   which breaks `--dry-run` and makes the plan untestable without a filesystem. The
-  mirror keeps one wire format and one digest function shared by both paths.
+  shared content-level splice keeps one wire format and one digest function for
+  both paths.
 
 ## Consequences
 
