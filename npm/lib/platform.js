@@ -45,7 +45,17 @@ const TOOL_BASE_NAMES = {
 };
 
 function toolBaseName(tool) {
-  return TOOL_BASE_NAMES[tool] || "kyber-weave";
+  const base = Object.prototype.hasOwnProperty.call(TOOL_BASE_NAMES, tool)
+    ? TOOL_BASE_NAMES[tool]
+    : undefined;
+  if (base === undefined) {
+    // No fallback to the CLI binary: a typo or an unknown tool would otherwise resolve
+    // to kyber-weave, and the caller would download and launch the wrong program.
+    throw new Error(
+      `Unknown tool '${tool}'. Expected one of: ${Object.keys(TOOL_BASE_NAMES).join(", ")}.`,
+    );
+  }
+  return base;
 }
 
 function binaryFileName(tool, rid) {

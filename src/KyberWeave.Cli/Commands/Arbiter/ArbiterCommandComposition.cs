@@ -461,7 +461,9 @@ public static class ArbiterCommandComposition
     /// <summary>
     /// The plan facts for a dry run, read from the plan file the dispatch
     /// headers name. Plan and task identity come from <c>PLAN_FILE</c> and
-    /// <c>TASK</c> only; nothing is inferred from the plan index.
+    /// <c>TASK</c> only; nothing is inferred from the plan index. The header is
+    /// caller-controlled, so a path that does not resolve inside the repository
+    /// reads as <c>plan.exists: false</c>.
     /// </summary>
     private sealed class ArbiterCliPlanReader(string repositoryRoot) : IArbiterPlanReader
     {
@@ -476,24 +478,26 @@ public static class ArbiterCommandComposition
                 return facts;
             }
 
-            string resolved = Path.IsPathRooted(planFile)
-                ? planFile
-                : Path.Combine(repositoryRoot, planFile);
-            if (!File.Exists(resolved))
+            string? resolved = PlanPathResolver.Resolve(planFile, repositoryRoot);
+            if (resolved is null || !File.Exists(resolved))
             {
                 return facts.With("plan.exists", false, ArbiterFactLabel.Derived);
             }
 
             PlanDocument document;
+            string content;
             try
             {
-                document = PlanDocumentParser.Parse(File.ReadAllText(resolved));
+                content = File.ReadAllText(resolved);
+                document = PlanDocumentParser.Parse(content);
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
             {
                 return facts.With("plan.exists", false, ArbiterFactLabel.Derived);
             }
 
+            // The digest of the text just parsed; the evaluator keys REPEAT on it.
+            facts = facts.With("plan.digest", PlanDocumentParser.Digest(content), ArbiterFactLabel.Derived);
             facts = facts.With("plan.exists", true, ArbiterFactLabel.Derived);
             if (document.Status is not null)
                 facts = facts.With("plan.status", document.Status, ArbiterFactLabel.Derived);

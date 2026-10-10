@@ -221,6 +221,70 @@ public sealed class ArbiterCliCommandTests : IDisposable
     }
 
     [Fact]
+    public void Audit_MalformedLedgerLine_ReportsRatherThanEscaping()
+    {
+        // A truncated or hand-edited line is malformed JSON, which throws JsonException --
+        // not an IOException, so the read's catch never saw it and the exception escaped
+        // the command as an unhandled failure instead of a diagnostic.
+        string host = SeedLedger("arbiter-audit-malformed", ledger =>
+        {
+            ledger.AppendAsync(new ArbiterLedgerEvent(
+                "0000000000000003-aaaaaaaa",
+                DateTimeOffset.UtcNow,
+                "hook",
+                "claude",
+                "session-3",
+                ArbiterLedgerPhases.Pre)
+            {
+                Trigger = "delegate",
+                Target = "csharp-dev",
+            }).GetAwaiter().GetResult();
+        });
+        File.AppendAllText(
+            Path.Combine(host, "artifacts", "arbiter", "ledger.jsonl"),
+            "{\"id\": \"broken\", \"phase\": \n");
+
+        ArbiterAuditCommand command = new();
+        CommandExecution execution = Capture(() => command.Execute(
+            null!,
+            new ArbiterSettings { Path = host }));
+
+        Assert.Equal(1, execution.ExitCode);
+        Assert.Contains("1 error", execution.Output, StringComparison.Ordinal);
+        Assert.Contains("complete record", execution.Output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Audit_MalformedDecisionLine_ReportsRatherThanEscaping()
+    {
+        string host = SeedLedger("arbiter-audit-malformed-decision", ledger =>
+        {
+            ledger.AppendAsync(new ArbiterLedgerEvent(
+                "0000000000000004-aaaaaaaa",
+                DateTimeOffset.UtcNow,
+                "hook",
+                "claude",
+                "session-4",
+                ArbiterLedgerPhases.Pre)
+            {
+                Trigger = "delegate",
+            }).GetAwaiter().GetResult();
+        });
+        File.AppendAllText(
+            Path.Combine(host, "artifacts", "arbiter", "decisions.jsonl"),
+            "not json at all\n");
+
+        ArbiterAuditCommand command = new();
+        CommandExecution execution = Capture(() => command.Execute(
+            null!,
+            new ArbiterSettings { Path = host }));
+
+        Assert.Equal(1, execution.ExitCode);
+        Assert.Contains("1 error", execution.Output, StringComparison.Ordinal);
+        Assert.Contains("complete record", execution.Output, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Audit_ListsAttestationsAsInformation()
     {
         string host = SeedLedger("arbiter-audit-attested", ledger =>

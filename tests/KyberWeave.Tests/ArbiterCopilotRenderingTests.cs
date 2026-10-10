@@ -174,6 +174,50 @@ public sealed class ArbiterCopilotRenderingTests : IDisposable
         }
     }
 
+    [Fact]
+    public async Task RenderAsync_neverLowersAHostileAgentNameIntoTheShellCommand()
+    {
+        // The VS Code frontmatter command is what Copilot hands to a shell. An agent name
+        // carrying a space or a metacharacter would be split or executed there, so the
+        // render fails naming the agent rather than lowering an unsafe command.
+        const string hostile = "evil agent";
+        using ArbiterSquadFixture hostileFixture = ArbiterSquadFixture.Create();
+        hostileFixture.WriteAgent(hostile, "worker", "worker", "[]");
+
+        SquadRendererRegistry registry = new([new CopilotRenderer()]);
+        ArgumentException error = await Assert.ThrowsAsync<ArgumentException>(() =>
+            registry.RenderAsync(new SquadRenderRequest(
+                SourceDirectory: hostileFixture.Path,
+                Targets: [SquadTarget.Copilot],
+                Scope: SquadDeploymentScope.Project,
+                Arbiter: new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: HookTimeoutSeconds))));
+
+        Assert.Contains(hostile, error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RenderAsync_lowersTheHookCommandThroughTheSharedHelper()
+    {
+        // Pins this site to the one validated helper: a second, hand-rolled interpolation
+        // here would drift back to the raw form the helper exists to prevent.
+        SquadRenderResult result = await RenderAsync(
+            new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: HookTimeoutSeconds),
+            SquadDeploymentScope.Project);
+
+        YamlMappingNode frontmatter = FrontmatterOf(
+            AgentFile(result, ArbiterSquadFixture.CsharpDev, SquadDeploymentScope.Project),
+            ArbiterSquadFixture.CsharpDev);
+        YamlSequenceNode entries = Assert.IsType<YamlSequenceNode>(
+            frontmatter.Children[new YamlScalarNode("hooks")] is YamlMappingNode hooks
+                ? hooks.Children[new YamlScalarNode("PreToolUse")]
+                : throw new InvalidOperationException("no hooks"));
+        YamlMappingNode entry = Assert.IsType<YamlMappingNode>(Assert.Single(entries));
+
+        Assert.Equal(
+            ArbiterHookWiring.HookCommandLine("copilot-vscode", ArbiterSquadFixture.CsharpDev),
+            RequireScalar(entry, "command", ArbiterSquadFixture.CsharpDev));
+    }
+
     private async Task<SquadRenderResult> RenderAsync(SquadArbiterWiring? arbiter, SquadDeploymentScope scope)
     {
         SquadRendererRegistry registry = new([new CopilotRenderer()]);

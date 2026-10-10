@@ -19,7 +19,7 @@ public sealed record ArbiterFact(object? Value, ArbiterFactLabel Label);
 
 /// <summary>
 /// The harness-neutral fact bag step 0 evaluates against. Names use dotted
-/// paths (<c>plan.task.files</c>); an absent name satisfies
+/// paths (<c>plan.task.files</c>); a name with no value is absent, satisfies
 /// <c>exists: false</c> and fails every other operator.
 /// </summary>
 public sealed class ArbiterFactSet
@@ -47,6 +47,22 @@ public sealed class ArbiterFactSet
     {
         ArgumentNullException.ThrowIfNull(name);
         return _facts.ContainsKey(name);
+    }
+
+    /// <summary>
+    /// Whether the set carries a value for <paramref name="name"/>: present and not null.
+    /// </summary>
+    /// <remarks>
+    /// This is what "the fact is present" means to a rule. <see cref="Contains"/> answers
+    /// whether a name was ever stored, and the builder stores every declared name for a
+    /// trigger whether or not the dispatch supplied it -- so <c>Contains</c> alone made
+    /// every declared fact look present and left <c>exists: false</c> unable to match
+    /// anything. A name with no value is the absence a rule is written against.
+    /// </remarks>
+    public bool IsPresent(string name)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        return _facts.TryGetValue(name, out ArbiterFact? fact) && fact.Value is not null;
     }
 
     /// <summary>Tries to get the fact named <paramref name="name"/>.</summary>

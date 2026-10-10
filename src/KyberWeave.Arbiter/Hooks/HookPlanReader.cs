@@ -9,7 +9,9 @@ namespace KyberWeave.Arbiter.Hooks;
 /// </summary>
 /// <remarks>
 /// Plan and task identity come from <c>PLAN_FILE</c> and <c>TASK</c> only; nothing
-/// is inferred from the plan index. A missing or unreadable plan is the
+/// is inferred from the plan index. The header is caller-controlled, so the path it
+/// names has to resolve inside the repository; one that does not is <c>plan.exists:
+/// false</c> like any other unreadable plan. A missing or unreadable plan is the
 /// <c>plan.exists: false</c> fact, not a failure: the rules decide on the absence.
 /// Parsing reuses <see cref="PlanDocumentParser"/>, the same parser every other
 /// host reads plans through, rather than a hook-local one.
@@ -28,24 +30,28 @@ internal sealed class HookPlanReader(string repositoryRoot) : IArbiterPlanReader
             return facts;
         }
 
-        string resolved = Path.IsPathRooted(planFile)
-            ? planFile
-            : Path.Combine(repositoryRoot, planFile);
-        if (!File.Exists(resolved))
+        string? resolved = PlanPathResolver.Resolve(planFile, repositoryRoot);
+        if (resolved is null || !File.Exists(resolved))
         {
             return facts.With("plan.exists", false, ArbiterFactLabel.Derived);
         }
 
         PlanDocument document;
+        string content;
         try
         {
-            document = PlanDocumentParser.Parse(File.ReadAllText(resolved));
+            content = File.ReadAllText(resolved);
+            document = PlanDocumentParser.Parse(content);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
             return facts.With("plan.exists", false, ArbiterFactLabel.Derived);
         }
 
+        // The digest of the text just parsed. REPEAT is keyed on it so that amending a
+        // plan restarts the count (design 1.10, R8); the evaluator reads this fact rather
+        // than hashing the file a second time.
+        facts = facts.With("plan.digest", PlanDocumentParser.Digest(content), ArbiterFactLabel.Derived);
         facts = facts.With("plan.exists", true, ArbiterFactLabel.Derived);
         if (document.Status is not null)
         {

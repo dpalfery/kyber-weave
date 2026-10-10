@@ -317,6 +317,38 @@ public sealed class ArbiterLedgerTests : IDisposable
         Assert.Equal(2, ledger.ReadAll().Count);
     }
 
+    [Fact]
+    public async Task ConcurrentPostAppends_EachPreIsClaimedAtMostOnce()
+    {
+        // MatchPre reads the file with no lock and the append takes it afterwards, so
+        // posts racing each other all saw the same unpaired pre and every one of them
+        // claimed it. Pairing has to happen under the same lock as the write.
+        InFlightLedger ledger = new(ArbiterDirectory);
+        const string digest = "shared-pair-digest";
+        List<string> preIds = [];
+        for (int index = 0; index < 3; index++)
+        {
+            ArbiterLedgerEvent pre = NewEvent(At(index), ArbiterLedgerPhases.Pre, pairDigest: digest);
+            preIds.Add(pre.Id);
+            await ledger.AppendAsync(pre);
+        }
+
+        const int posts = 8;
+
+        // Task.Run, not bare calls: an uncontended append completes synchronously, so
+        // plain calls would serialise on one thread and never overlap the read with the
+        // write. Real hook processes race here, so the test has to as well.
+        Task[] appends = [.. Enumerable.Range(0, posts).Select(index => Task.Run(() =>
+            ledger.AppendAsync(NewEvent(At(100 + index), ArbiterLedgerPhases.Post, pairDigest: digest))))];
+        await Task.WhenAll(appends);
+
+        List<string> claims = [.. ledger.ReadAll()
+            .Where(e => e.Phase == ArbiterLedgerPhases.Post && e.PreId is not null)
+            .Select(e => e.PreId!)];
+        Assert.Equal(claims.Count, claims.Distinct(StringComparer.Ordinal).Count());
+        Assert.All(claims, claim => Assert.Contains(claim, preIds));
+    }
+
     // ---- Pairing (acceptance 4) ----
 
     [Fact]

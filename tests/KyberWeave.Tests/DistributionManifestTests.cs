@@ -143,7 +143,150 @@ public sealed class DistributionManifestTests : IDisposable
             "launch a different binary than the one its `bin` name promises.");
     }
 
+    // ---- documented release assets ----
+
+    /// <summary>
+    /// Every asset name the distribution guide lists must be one the release publishes,
+    /// and no name may be listed twice. Both checks matter: the list is prose, so nothing
+    /// caught entries that dropped a tool's infix. <c>kyber-weave-osx-arm64.tar.gz</c> was
+    /// listed for MCP and again for the arbiter while neither ships under that name, and a
+    /// membership check alone cannot see it -- that name is real, it just belongs to the
+    /// CLI. The duplicate is the tell.
+    /// </summary>
+    [Fact]
+    public void DocumentedReleaseAssetsAreTheOnesTheReleasePublishes()
+    {
+        string guide = File.ReadAllText(Path.Combine(RepoRoot, "docs", "distribution.md"));
+        HashSet<string> expected = ExpectedAssetsFromVerifier();
+
+        List<string> documented = DocumentedAssetNames(guide);
+
+        Assert.NotEmpty(documented);
+
+        string[] unknown = [.. documented.Where(name => !expected.Contains(name))];
+        Assert.True(
+            unknown.Length == 0,
+            "The distribution guide lists asset names the release does not publish: "
+            + string.Join(", ", unknown)
+            + ". Compare against EXPECTED_ASSETS in scripts/verify-release-checksums.sh.");
+
+        string[] duplicated = [.. documented
+            .GroupBy(name => name, StringComparer.Ordinal)
+            .Where(group => group.Count() > 1)
+            .Select(group => group.Key)];
+        Assert.True(
+            duplicated.Length == 0,
+            "The distribution guide lists these asset names more than once: "
+            + string.Join(", ", duplicated)
+            + ". One tool's infix is almost certainly missing from one of the lists.");
+    }
+
+    private static List<string> DocumentedAssetNames(string guide)
+    {
+        // Only the per-tool bullet lists, not the whole page: an asset is legitimately
+        // named again in prose about installing it, and counting those would report a
+        // duplicate that is not one. A bullet wraps across lines, so a bullet is read
+        // whole -- from "- **" until the next bullet or a blank line.
+        List<string> names = [];
+        bool inBullet = false;
+        foreach (string line in guide.Split('\n'))
+        {
+            bool startsBullet = line.StartsWith("- **", StringComparison.Ordinal);
+            if (startsBullet)
+            {
+                inBullet = true;
+            }
+            else if (line.Length == 0 || line.StartsWith("- ", StringComparison.Ordinal))
+            {
+                inBullet = false;
+            }
+
+            if (!inBullet)
+            {
+                continue;
+            }
+
+            names.AddRange(Regex.Matches(line, @"`([A-Za-z0-9._<>-]+\.(?:tar\.gz|zip|exe))`")
+                .Select(match => match.Groups[1].Value)
+                .Where(name => !name.Contains('<', StringComparison.Ordinal)));
+        }
+
+        return names;
+    }
+
+    private static HashSet<string> ExpectedAssetsFromVerifier()
+    {
+        const string marker = "declare -a EXPECTED_ASSETS=(";
+        string script = File.ReadAllText(
+            Path.Combine(RepoRoot, "scripts", "verify-release-checksums.sh"));
+        int start = script.IndexOf(marker, StringComparison.Ordinal);
+        Assert.True(start >= 0, "EXPECTED_ASSETS is missing from scripts/verify-release-checksums.sh.");
+        int end = script.IndexOf(')', start);
+        Assert.True(end > start, "EXPECTED_ASSETS is unterminated.");
+
+        return new HashSet<string>(
+            script[(start + marker.Length)..end]
+                .Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                .Select(line => line.Trim().Trim('"', '\'', ','))
+                .Where(line => line.Length > 0),
+            StringComparer.Ordinal);
+    }
+
     // ---- npm lib/platform.js ----
+
+    [Theory]
+    [InlineData("arbiter", "win-x64", "kyber-weave-arbiter-win-x64.zip")]
+    [InlineData("mcp", "osx-arm64", "kyber-weave-mcp-osx-arm64.tar.gz")]
+    [InlineData("cli", "linux-x64", "kyber-weave-linux-x64.tar.gz")]
+    public void NpmPlatformModuleResolvesEveryKnownTool(
+        string tool,
+        string rid,
+        string expectedArchive)
+    {
+        string node = RequireRuntime("node");
+
+        ProcessStartInfo startInfo = CreateNodeStartInfo(
+            node,
+            "const platform = require(process.argv[1]); " +
+            "process.stdout.write(platform.assetArchiveName(process.argv[2], process.argv[3]));");
+        startInfo.ArgumentList.Add(NpmPlatformModulePath);
+        startInfo.ArgumentList.Add(tool);
+        startInfo.ArgumentList.Add(rid);
+
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+
+        Assert.True(
+            result.ExitCode == 0,
+            $"node failed resolving {tool}: {result.StandardError.Trim()}");
+        Assert.Equal(expectedArchive, result.StandardOutput.Trim());
+    }
+
+    [Theory]
+    [InlineData("bogus")]
+    [InlineData("CLI")]
+    [InlineData("kilo")]
+    [InlineData("")]
+    public void NpmPlatformModuleThrowsOnAnUnknownToolRatherThanResolvingTheCli(string tool)
+    {
+        // The fallback resolved every typo to the CLI binary, so a caller naming a tool
+        // that does not exist quietly downloaded and launched kyber-weave instead.
+        string node = RequireRuntime("node");
+
+        ProcessStartInfo startInfo = CreateNodeStartInfo(
+            node,
+            "const platform = require(process.argv[1]); " +
+            "try { process.stdout.write(platform.assetArchiveName(process.argv[2], 'linux-x64')); } " +
+            "catch (e) { process.stdout.write('THREW: ' + e.message); }");
+        startInfo.ArgumentList.Add(NpmPlatformModulePath);
+        startInfo.ArgumentList.Add(tool);
+
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+
+        Assert.True(
+            result.ExitCode == 0,
+            $"node failed evaluating lib/platform.js: {result.StandardError.Trim()}");
+        Assert.StartsWith("THREW:", result.StandardOutput.Trim(), StringComparison.Ordinal);
+    }
 
     [Theory]
     [InlineData("linux-x64", "kyber-weave-arbiter", "kyber-weave-arbiter-linux-x64.tar.gz")]

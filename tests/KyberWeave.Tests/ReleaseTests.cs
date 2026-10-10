@@ -2657,6 +2657,44 @@ public sealed class ReleaseTests
     }
 
     /// <summary>
+    /// The CI publish smoke proves each published binary starts. The arbiter has no
+    /// <c>--help</c>: its entry point treats anything but <c>hook</c> or <c>--version</c> as
+    /// a usage error and exits 2, so a <c>--help</c> smoke had to be excused with
+    /// <c>|| true</c> and proved nothing. It runs <c>--version</c>, which the arbiter
+    /// implements and answers with exit 0.
+    /// </summary>
+    [Fact]
+    public void CiPublishSmokeRunsTheArbiterVersionNotAnExcusedHelp()
+    {
+        string workflow = File.ReadAllText(
+            Path.Combine(KyberWeaveTestPaths.ToolRoot, ".github", "workflows", "ci.yml"));
+
+        Assert.Contains(
+            "kyber-weave-arbiter --version",
+            workflow,
+            StringComparison.Ordinal);
+
+        // The excuse is what made the smoke vacuous; it must not come back.
+        Assert.DoesNotContain(
+            "kyber-weave-arbiter --help",
+            workflow,
+            StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The arbiter answers <c>--version</c> with exit 0 and <c>--help</c> with a usage
+    /// error, which is why the CI smoke may drop <c>|| true</c> for it.
+    /// </summary>
+    [Fact]
+    public async Task ArbiterBinaryAnswersVersionAndRejectsHelp()
+    {
+        Assert.Equal(0, await KyberWeave.Arbiter.Composition.DispatchAsync(
+            ["--version"], TextReader.Null, TextWriter.Null, TextWriter.Null));
+        Assert.Equal(2, await KyberWeave.Arbiter.Composition.DispatchAsync(
+            ["--help"], TextReader.Null, TextWriter.Null, TextWriter.Null));
+    }
+
+    /// <summary>
     /// Req 22.1: the checksum verifier's list grows from 20 to 25 assets.
     /// </summary>
     [Fact]

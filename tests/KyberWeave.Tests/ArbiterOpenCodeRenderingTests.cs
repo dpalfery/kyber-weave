@@ -24,6 +24,34 @@ public sealed class ArbiterOpenCodeRenderingTests : IDisposable
 
     public void Dispose() => _fixture.Dispose();
 
+    [Theory]
+    [InlineData("opencode")]
+    [InlineData("kilo")]
+    public void Render_AcceptsALowercaseTokenAndRendersItUnchanged(string token)
+    {
+        string content = ArbiterPluginShim.Render(token);
+
+        Assert.Contains($"\"--harness\", \"{token}\"", content, StringComparison.Ordinal);
+        Assert.Contains($"harness: \"{token}\"", content, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    // The token is interpolated into TypeScript source twice. Whitespace was the only
+    // check, so a quote could close the string literal and append code to the shim.
+    [InlineData("opencode\", evil: \"x")]
+    [InlineData("opencode\"; console.log('pwned'); const x=\"")]
+    [InlineData("open code")]
+    [InlineData("OpenCode")]
+    [InlineData("open_code")]
+    [InlineData("opencode\nconst x = 1;")]
+    [InlineData("opencode\\")]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void Render_RejectsATokenThatIsNotAPlainLowercaseToken(string hostile)
+    {
+        Assert.Throws<ArgumentException>(() => ArbiterPluginShim.Render(hostile));
+    }
+
     [Fact]
     public async Task RenderAsync_EnabledAtProjectScope_EmitsOwnedShimFromGenerator()
     {
