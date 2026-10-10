@@ -8,7 +8,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 // and a plain `render` import would be shadowed by it at every call site.
 import { render as renderDom, screen, fireEvent, cleanup, within, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import type * as React from 'react'
+import { useState } from 'react'
 
 import { ContextDoctor, browserRows, nextAccumulated, retainedEnvelope, servedOffset, FindingsBrowserView, nextBrowserOffset, currentBrowserPage, shouldKeepPreviousData, type AccumulatedPage } from './ContextDoctor.js'
 import { CoverageIngestPanel } from '../components/maintenance/CoverageIngestPanel.js'
@@ -517,8 +517,8 @@ describe('FindingsBrowserView clear filters (review S1)', () => {
   })
 })
 /**
- * T10 web matrix honesty (issues #189/#199): the coverage banner wiring.
- * The ingest activity panel is T9's hunk in this same file — merge-keep-both.
+ * Coverage-window wording (issues #189/#199, T10). Pinned on the component
+ * that renders the readout now that it lives in the Status panel.
  */
 describe('Coverage window wording (issues #189/#199, T10)', () => {
   /** The refresh facts, wrapped in the full payload the readout renders. */
@@ -771,7 +771,7 @@ describe('Ingest coverage panel (issues #189/#198/#199, T9)', () => {
   it('states the window once, with short dates and correct plurals', () => {
     // Review PR #230 (kilo nux6A): the panel formatted the same three fields
     // a second time with raw ISO stamps and a hardcoded plural — it now
-    // reads the matrix banner's shared formatter.
+    // reads the shared coverage-window formatter.
     const oneWeek: KyberCoverage = {
       ...KNOWN_COVERAGE,
       refresh: {
@@ -1278,6 +1278,36 @@ describe('ContextDoctor scope: harness and session', () => {
     return select
   }
 
+  /**
+   * A controlled owner, as `App` will be: it holds the session and feeds it
+   * back down. The page reports a choice; the scope only moves when this
+   * component moves it.
+   */
+  function renderOwnerControlled(props: {
+    activeHarness?: string
+    onSelect?: (sessionId: string | undefined) => void
+  }) {
+    function Owner() {
+      const [session, setSession] = useState<string | undefined>(undefined)
+      return (
+        <ContextDoctor
+          activeHarness={props.activeHarness}
+          sessionId={session}
+          onSessionChange={(id) => {
+            props.onSelect?.(id)
+            setSession(id)
+          }}
+        />
+      )
+    }
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
+    return renderDom(
+      <QueryClientProvider client={client}>
+        <Owner />
+      </QueryClientProvider>,
+    )
+  }
+
   function renderScoped(props: {
     initial?: FindingsPage
     activeHarness?: string
@@ -1285,12 +1315,15 @@ describe('ContextDoctor scope: harness and session', () => {
     onSessionChange?: (sessionId: string | undefined) => void
   }) {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
+    // `in` rather than `??`: an override may CLEAR the session by passing an
+    // explicit undefined, which a nullish fallback would swallow — the very
+    // case the controlled-selection tests are about.
     const tree = (extra?: { activeHarness?: string; sessionId?: string }) => (
       <QueryClientProvider client={client}>
         <ContextDoctor
           initialFindings={props.initial}
-          activeHarness={extra?.activeHarness ?? props.activeHarness}
-          sessionId={extra?.sessionId ?? props.sessionId}
+          activeHarness={extra !== undefined && 'activeHarness' in extra ? extra.activeHarness : props.activeHarness}
+          sessionId={extra !== undefined && 'sessionId' in extra ? extra.sessionId : props.sessionId}
           onSessionChange={props.onSessionChange}
         />
       </QueryClientProvider>
@@ -1301,7 +1334,9 @@ describe('ContextDoctor scope: harness and session', () => {
 
   it('carries the harness and session scope on both findings queries', async () => {
     const requested = stubScoped()
-    renderScoped({ activeHarness: 'pi', sessionId: 'sess-pi-2' })
+    // An owner is present, so the props are the scope: without one the page is
+    // standalone and ignores `sessionId` entirely.
+    renderScoped({ activeHarness: 'pi', sessionId: 'sess-pi-2', onSessionChange: () => {} })
 
     await screen.findByTestId('context-doctor-session-select')
     await waitFor(() => expect(requested.length).toBeGreaterThanOrEqual(2))
@@ -1360,7 +1395,7 @@ describe('ContextDoctor scope: harness and session', () => {
   it('refetches under the chosen session and tells the owner', async () => {
     const requested = stubScoped()
     const changes: (string | undefined)[] = []
-    renderScoped({ activeHarness: 'pi', onSessionChange: (id) => changes.push(id) })
+    renderOwnerControlled({ activeHarness: 'pi', onSelect: (id) => changes.push(id) })
 
     fireEvent.change(await sessionSelect(), { target: { value: 'sess-pi-1' } })
     expect(changes).toEqual(['sess-pi-1'])
@@ -1388,7 +1423,7 @@ describe('ContextDoctor scope: harness and session', () => {
       isScoped: (url) => url.searchParams.get('sessionId') === 'sess-pi-1',
       release: () => gate,
     })
-    const utils = renderScoped({ initial: first, activeHarness: 'pi' })
+    const utils = renderScoped({ initial: first, activeHarness: 'pi', onSessionChange: () => {} })
 
     // Page one of the harness scope is served like any other page: the seeded
     // workspace rows are only ever the page one of an UNSCOPED list.
@@ -1426,6 +1461,51 @@ describe('ContextDoctor scope: harness and session', () => {
     // selector cannot even show. The scope belongs to the owner, so the page
     // reports it rather than filtering by a session outside the scope.
     await waitFor(() => expect(changes).toEqual([undefined]))
+  })
+
+  it('ends the session scope when the controlled owner clears it', async () => {
+    // A controlled page reads the owner's `sessionId` and nothing else. If it
+    // fell back to the session it last chose itself, "All sessions" and a
+    // harness change would be undone by a selection the owner has already
+    // discarded — the page would keep querying a session nobody selected.
+    const requested = stubScoped()
+    const changes: (string | undefined)[] = []
+    renderOwnerControlled({ activeHarness: 'pi', onSelect: (id) => changes.push(id) })
+
+    fireEvent.change(await sessionSelect(), { target: { value: 'sess-pi-1' } })
+    await waitFor(() => expect(requested.some((qs) => qs.includes('sessionId=sess-pi-1'))).toBe(true))
+
+    // The owner drops the selection: All sessions at the page, an absent
+    // `sessionId` above it. The page must not fall back to what it chose.
+    fireEvent.change(screen.getByTestId('context-doctor-session-select'), { target: { value: '' } })
+    expect(changes).toEqual(['sess-pi-1', undefined])
+
+    expect((screen.getByTestId('context-doctor-session-select') as HTMLSelectElement).value).toBe('')
+    expect(screen.getByTestId('findings-scope-note').textContent).toMatch(/all sessions/i)
+    await waitFor(() => expect(requested[requested.length - 1]).not.toContain('sessionId='))
+    // And it stays ended: nothing goes on querying the discarded session.
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(requested[requested.length - 1]).not.toContain('sessionId=')
+  })
+
+  it('never queries a controlled session under a harness that changed', async () => {
+    const requested = stubScoped()
+    const changes: (string | undefined)[] = []
+    const utils = renderScoped({
+      activeHarness: 'pi',
+      sessionId: 'sess-pi-1',
+      onSessionChange: (id) => changes.push(id),
+    })
+    await waitFor(() => expect(requested.some((qs) => qs.includes('sessionId=sess-pi-1'))).toBe(true))
+
+    utils.rerender({ activeHarness: 'cursor' })
+
+    // The stale session belongs to the harness just left. The page reports the
+    // mismatch to the owner, and no request pairs it with the new harness.
+    await waitFor(() => expect(changes).toContain(undefined))
+    expect(
+      requested.some((qs) => qs.includes('harness=cursor') && qs.includes('sessionId=sess-pi-1')),
+    ).toBe(false)
   })
 
   it('drops a session that leaves the selected harness when it owns the selection', async () => {

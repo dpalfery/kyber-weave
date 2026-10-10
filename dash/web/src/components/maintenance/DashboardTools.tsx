@@ -2,7 +2,8 @@
 //
 // Context Doctor used to render the ingest coverage readout, the maintenance
 // controls and the scorecard matrix on one page, which left the operator
-// scrolling past three panels to reach the findings. They are split here:
+// scrolling past three panels to reach the findings. The two operator-facing
+// panels are split out here; the matrix was dropped from the page.
 //
 //   Status      the ingest coverage readout. Read-only. It issues no mutation,
 //               so a surface labelled "Status" cannot wipe anything.
@@ -126,14 +127,20 @@ function StatusPanel() {
  * and settings, the catalog refresh, and the clean control.
  *
  * <remarks>
- * The harness read is deliberately optional here. Without it the per-harness
- * scope checkboxes are empty, and the operator still has the wipe-all path —
- * a clean control that disappears because an unrelated read failed would be an
- * unreachable action, not an honest one.
+ * The harness read is stated, not defaulted. Without it the per-harness scope
+ * checkboxes are empty, and the operator still has the wipe-all path — but an
+ * unreadable inventory must not present as an empty one, or the wipe reads as
+ * the only thing there is to wipe. So the failure is a bounded message with a
+ * retry, and every control stays mounted through it.
  * </remarks>
  */
 function MaintenanceContent() {
-  const { data: harnesses } = useQuery({ queryKey: ['kyber-harnesses'], queryFn: fetchHarnesses })
+  const {
+    data: harnesses,
+    isLoading: loadingHarnesses,
+    isError: harnessesError,
+    refetch: refetchHarnesses,
+  } = useQuery({ queryKey: ['kyber-harnesses'], queryFn: fetchHarnesses })
   const known = harnesses ?? []
 
   return (
@@ -152,6 +159,23 @@ function MaintenanceContent() {
           Wiping the store deletes telemetry and cannot be undone; the dialog states the scope and
           asks for confirmation first.
         </p>
+        {loadingHarnesses && (
+          <p data-testid="dashboard-tools-harness-loading" className="text-density-xs text-muted-foreground mt-density-hair">
+            Reading the harness inventory… the per-harness clean scope is not known yet.
+          </p>
+        )}
+        {harnessesError && (
+          <div data-testid="dashboard-tools-harness-error" role="alert" className="mt-density-hair flex flex-wrap items-center gap-density-cluster">
+            <p className="text-density-xs text-muted-foreground">
+              The harness inventory could not be read, so the per-harness clean scope is not
+              available — that is not the same as a store holding no harnesses. Wipe all remains
+              available.
+            </p>
+            <button type="button" data-testid="dashboard-tools-harness-retry" onClick={() => void refetchHarnesses()}>
+              Retry
+            </button>
+          </div>
+        )}
         <ModelCatalogRefreshControl />
         <CleanDatabaseControl harnesses={known} />
       </section>

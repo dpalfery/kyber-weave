@@ -243,6 +243,50 @@ describe('DashboardTools: Maintenance holds the operator controls', () => {
     expect(await within(panel).findByTestId('clean-database-dialog')).toBeDefined()
     expect(within(panel).getByTestId('clean-database-wipe-all')).toBeDefined()
   })
+
+  it('says the harness inventory could not be read, and offers a retry', async () => {
+    let attempts = 0
+    stubToolsFetch((path) => {
+      if (path !== '/api/kyber/harnesses') return undefined
+      attempts += 1
+      return attempts === 1 ? { status: 503, json: { error: 'inventory boom' } } : undefined
+    })
+    const { panel } = await openPanel('dashboard-tools-maintenance-button')
+
+    const error = await within(panel).findByTestId('dashboard-tools-harness-error')
+    expect(error.getAttribute('role')).toBe('alert')
+    // An unreadable inventory is NOT an empty inventory: the scope list would
+    // otherwise read as "this store holds no harnesses", and the operator
+    // could reach for wipe-all having been told nothing else is there.
+    expect(error.textContent).not.toContain('inventory boom')
+    expect(error.textContent).toMatch(/not/i)
+
+    fireEvent.click(within(panel).getByTestId('dashboard-tools-harness-retry'))
+    await waitFor(() => expect(screen.queryByTestId('dashboard-tools-harness-error')).toBeNull())
+    expect(within(panel).getByTestId('clean-database-button')).toBeDefined()
+  })
+
+  it('keeps every control reachable while the harness inventory is unreadable', async () => {
+    stubToolsFetch((path) => (path === '/api/kyber/harnesses' ? { status: 500, json: {} } : undefined))
+    const { panel } = await openPanel('dashboard-tools-maintenance-button')
+
+    await within(panel).findByTestId('dashboard-tools-harness-error')
+    // The failure is scoped to the inventory, not to the panel: the operator
+    // can still read the host's job state, refresh the catalog, and wipe.
+    expect(within(panel).getByTestId('maintenance-panel')).toBeDefined()
+    expect(within(panel).getByTestId('model-catalog-refresh-button')).toBeDefined()
+    expect(within(panel).getByTestId('clean-database-button')).toBeDefined()
+  })
+
+  it('states that the harness inventory is still being read', async () => {
+    stubToolsFetch((path) => (path === '/api/kyber/harnesses' ? { hold: true, json: { harnesses: [] } } : undefined))
+    const { panel } = await openPanel('dashboard-tools-maintenance-button')
+
+    expect(within(panel).getByTestId('dashboard-tools-harness-loading')).toBeDefined()
+    // Loading is not an empty inventory either: the wipe is there, and so is
+    // the fact that its scope list has not arrived.
+    expect(within(panel).getByTestId('clean-database-button')).toBeDefined()
+  })
 })
 
 describe('DashboardTools: the panel behaves like a dialog', () => {

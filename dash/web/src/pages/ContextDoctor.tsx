@@ -29,12 +29,13 @@ export interface ContextDoctorProps {
   /**
    * Reports a session chosen in this page's selector to the owner, which
    * holds the shared selection. Absent, the page keeps the choice in internal
-   * state and stands alone.
+   * state and stands alone. Its presence is what makes the page controlled:
+   * the owner's `sessionId` is then the whole scope, including its absence.
    */
   onSessionChange?: (sessionId: string | undefined) => void
   /**
-   * Opening a harness from the scorecard matrix. The matrix moved to the
-   * header panels, so nothing here calls this; the prop stays only because
+   * Opening a harness from the scorecard matrix. The matrix was removed from
+   * this page, so nothing here calls this; the prop stays only because
    * `App.tsx` still passes it, and it is removed with that call site.
    */
   onSelectHarness?: (harnessId: string) => void
@@ -534,10 +535,10 @@ export function scopeNoteFor(
 
 /**
  * Renders the Context Doctor landing page: findings and the scope they were
- * drawn in. Maintenance, ingest coverage and the scorecard matrix are not
+ * drawn in. The ingest coverage readout and the maintenance controls are not
  * here — the header's Status and Maintenance panels own them
- * (`DashboardTools`), so this page is the diagnosis, not the operator's
- * console.
+ * (`DashboardTools`) — and the scorecard matrix was removed from this page
+ * outright. This is the diagnosis, not the operator's console.
  */
 export function ContextDoctor({
   initialFindings,
@@ -562,7 +563,13 @@ export function ContextDoctor({
   const [appended, setAppended] = useState<AccumulatedPage[]>([])
 
   const harnessFilter = harnessScopeOf(activeHarness)
-  const sessionId = selectedSession ?? localSession
+  // Controlled or standalone, decided once by whether an owner is listening.
+  // A nullish fallback would not do: when a controlled owner clears
+  // `sessionId` (All sessions, or a harness change), the session this page
+  // last chose itself would take over again and keep querying a session
+  // nobody selected.
+  const controlled = onSessionChange !== undefined
+  const sessionId = controlled ? selectedSession : localSession
 
   // A bare row list normalizes to an empty-total envelope (see props).
   const initialPage: FindingsPage | undefined = Array.isArray(initialFindings)
@@ -575,15 +582,56 @@ export function ContextDoctor({
       }
     : initialFindings
 
+  // Canonical sessions for the selector. The scope filter runs here, over the
+  // unfiltered list, so a harness change never fires a second request for a
+  // list this page already holds.
+  const {
+    data: sessionData,
+    isLoading: loadingSessions,
+    isError: sessionsError,
+    refetch: refetchSessions,
+  } = useQuery({ queryKey: ['kyber-sessions'], queryFn: () => fetchKyberSessions() })
+
+  const sessions = useMemo(
+    () => sessionsInScope(sessionData, harnessFilter),
+    [sessionData, harnessFilter],
+  )
+  const sessionLabels = useMemo(() => {
+    const labels = new Map<string, string>()
+    for (const session of sessions) labels.set(sessionIdOf(session), sessionOptionLabel(session))
+    return labels
+  }, [sessions])
+
+  // A session the loaded inventory says the current harness does not hold
+  // would scope the findings to something the selector cannot show. This is
+  // resolved during render, not in the effect below: an effect would let one
+  // request go out under the stale pairing before it ran. The inventory is
+  // only believed once it has landed — until then the session stands, or
+  // every harness change would flash the unscoped list.
+  const sessionsKnown = sessionData !== undefined && !sessionsError
+  const sessionInScope =
+    sessionId === undefined ||
+    !sessionsKnown ||
+    sessions.some((session) => sessionIdOf(session) === sessionId)
+  const effectiveSessionId = sessionInScope ? sessionId : undefined
+
+  // Reported, not applied: the scope belongs to the owner, which has to be
+  // told its session left the harness rather than left querying it.
+  useEffect(() => {
+    if (effectiveSessionId === sessionId || !sessionsKnown) return
+    setLocalSession(undefined)
+    onSessionChange?.(undefined)
+  }, [effectiveSessionId, sessionId, sessionsKnown, onSessionChange])
+
   // Every page is stored under the scope it was fetched for, including the
   // first, so advancing the offset extends the list instead of replacing it.
   // The scope names the harness, the session and the detector: a page fetched
   // under one of them must never be re-appended under another.
-  const browseScope = `${detectorFilter ?? ''}|${harnessFilter ?? ''}|${sessionId ?? ''}`
+  const browseScope = `${detectorFilter ?? ''}|${harnessFilter ?? ''}|${effectiveSessionId ?? ''}`
   const offset = paging.scope === browseScope ? paging.offset : 0
   // Seeded initial rows describe the whole workspace, so they are only ever
   // the page one of an unscoped list.
-  const unscoped = harnessFilter === undefined && sessionId === undefined
+  const unscoped = harnessFilter === undefined && effectiveSessionId === undefined
 
   const setOffset = (next: number) => {
     setPaging({ scope: browseScope, offset: next })
@@ -598,11 +646,11 @@ export function ContextDoctor({
   // Headline findings, under the same scope as the browser below. The query
   // fetches a full page; the card keeps four on screen and scrolls the rest.
   const { data: headlineData, isLoading: loadingFindings } = useQuery({
-    queryKey: ['kyber-findings-workspace', harnessFilter ?? '', sessionId ?? ''],
+    queryKey: ['kyber-findings-workspace', harnessFilter ?? '', effectiveSessionId ?? ''],
     queryFn: () =>
       fetchFindings({
         ...(harnessFilter !== undefined ? { harness: harnessFilter } : {}),
-        ...(sessionId !== undefined ? { sessionId } : {}),
+        ...(effectiveSessionId !== undefined ? { sessionId: effectiveSessionId } : {}),
         limit: FINDINGS_PAGE_SIZE,
       }),
     initialData: unscoped ? initialPage : undefined,
@@ -622,14 +670,14 @@ export function ContextDoctor({
       'kyber-findings-browser',
       detectorFilter ?? '',
       harnessFilter ?? '',
-      sessionId ?? '',
+      effectiveSessionId ?? '',
       offset,
     ],
     queryFn: () =>
       fetchFindings({
         ...(detectorFilter !== undefined ? { detector: detectorFilter } : {}),
         ...(harnessFilter !== undefined ? { harness: harnessFilter } : {}),
-        ...(sessionId !== undefined ? { sessionId } : {}),
+        ...(effectiveSessionId !== undefined ? { sessionId: effectiveSessionId } : {}),
         limit: FINDINGS_PAGE_SIZE,
         offset,
       }),
@@ -644,7 +692,7 @@ export function ContextDoctor({
         'kyber-findings-browser',
         detectorFilter ?? '',
         harnessFilter ?? '',
-        sessionId ?? '',
+        effectiveSessionId ?? '',
         offset,
       ]
       return shouldKeepPreviousData(prevKey, nextKey) ? previousData : undefined
@@ -677,38 +725,10 @@ export function ContextDoctor({
     setAppended((prev) => nextAccumulated(prev, browseScope, pageData))
   }, [pageData, isPlaceholderData, browseScope, appended])
 
-  // Canonical sessions for the selector. The scope filter runs here, over the
-  // unfiltered list, so a harness change never fires a second request for a
-  // list this page already holds.
-  const {
-    data: sessionData,
-    isLoading: loadingSessions,
-    isError: sessionsError,
-    refetch: refetchSessions,
-  } = useQuery({ queryKey: ['kyber-sessions'], queryFn: () => fetchKyberSessions() })
-
-  const sessions = useMemo(
-    () => sessionsInScope(sessionData, harnessFilter),
-    [sessionData, harnessFilter],
-  )
-  const sessionLabels = useMemo(() => {
-    const labels = new Map<string, string>()
-    for (const session of sessions) labels.set(sessionIdOf(session), sessionOptionLabel(session))
-    return labels
-  }, [sessions])
-
-  // A session the current harness does not hold would scope the findings to
-  // something the selector cannot even show. It is cleared, and the owner is
-  // told, rather than left filtering by a session outside the scope.
-  useEffect(() => {
-    if (sessionId === undefined || sessionData === undefined || sessionsError) return
-    if (sessions.some((session) => sessionIdOf(session) === sessionId)) return
-    setLocalSession(undefined)
-    onSessionChange?.(undefined)
-  }, [sessionId, sessionData, sessionsError, sessions, onSessionChange])
-
   function chooseSession(next: string | undefined) {
-    setLocalSession(next)
+    // Only the standalone page owns a selection; a controlled page reports the
+    // choice and waits for the owner to move the scope.
+    if (!controlled) setLocalSession(next)
     onSessionChange?.(next)
   }
 
@@ -763,7 +783,7 @@ export function ContextDoctor({
           id="context-doctor-session"
           data-testid="context-doctor-session-select"
           className="text-density-xs text-foreground"
-          value={sessionId ?? ''}
+          value={effectiveSessionId ?? ''}
           onChange={(event) => chooseSession(event.target.value === '' ? undefined : event.target.value)}
         >
           <option value="">All sessions</option>
@@ -781,7 +801,7 @@ export function ContextDoctor({
             ? 'Sessions could not be read, so the scope stays at all sessions.'
             : loadingSessions
               ? 'Reading sessions…'
-              : sessionId === undefined
+              : effectiveSessionId === undefined
                 ? `Findings cover all sessions in ${harnessFilter === undefined ? 'every harness' : harnessDisplayName(harnessFilter)}.`
                 : `Findings cover one session in ${harnessFilter === undefined ? 'every harness' : harnessDisplayName(harnessFilter)}.`}
         </p>
@@ -814,7 +834,11 @@ export function ContextDoctor({
         detectorCounts={detectorCounts}
         unknownWindowSessions={unknownWindowSessions}
         detectorFilter={detectorFilter}
-        scopeNote={scopeNoteFor(harnessFilter, sessionId, sessionId === undefined ? undefined : sessionLabels.get(sessionId))}
+        scopeNote={scopeNoteFor(
+          harnessFilter,
+          effectiveSessionId,
+          effectiveSessionId === undefined ? undefined : sessionLabels.get(effectiveSessionId),
+        )}
         loading={loadingBrowser}
         error={browserError ? 'findings-load-failed' : null}
         onRetry={() => {
