@@ -10,16 +10,24 @@ namespace KyberWeave.Arbiter.Hooks;
 /// all: a Claude-shaped document on Cursor or a plugin shim is not a block at all.
 /// Unknown tokens get the Claude-shaped document, which is what the host used before
 /// the harness was known.
+/// <para>
+/// Tokens are matched case-insensitively because
+/// <see cref="HarnessAdapterRegistry"/> resolves them that way. Matching here with
+/// Ordinal made <c>--harness OpenCode</c> find its adapter yet fall through to the
+/// Claude shape, and a plugin shim reads that as no block: a double fault that failed
+/// open. Trimming keeps the same property for a token that arrived padded.
+/// </para>
 /// </remarks>
 internal static class LastResortBlock
 {
     /// <summary>Builds the harness's deny document carrying <c>KW-ARB-HOOK-001</c>.</summary>
     public static string For(string? harness)
     {
+        string token = harness?.Trim() ?? string.Empty;
         string reason = $"{HookCommand.FailClosedCode}: hook host failed" +
-            (string.IsNullOrWhiteSpace(harness) ? "." : $" ({harness}).");
+            (token.Length == 0 ? "." : $" ({harness}).");
 
-        if (harness is not null && PluginHookAdapters.Tokens.Contains(harness))
+        if (token.Length > 0 && PluginHookAdapters.Tokens.Contains(token))
         {
             return new JsonObject
             {
@@ -28,28 +36,33 @@ internal static class LastResortBlock
             }.ToJsonString();
         }
 
-        return harness switch
+        if (string.Equals(token, "cursor", StringComparison.OrdinalIgnoreCase))
         {
-            "cursor" => new JsonObject
+            return new JsonObject
             {
                 ["permission"] = "deny",
                 ["agent_message"] = reason,
                 ["user_message"] = reason,
-            }.ToJsonString(),
-            "copilot-cli" => new JsonObject
+            }.ToJsonString();
+        }
+
+        if (string.Equals(token, "copilot-cli", StringComparison.OrdinalIgnoreCase))
+        {
+            return new JsonObject
             {
                 ["permissionDecision"] = "deny",
                 ["permissionDecisionReason"] = reason,
-            }.ToJsonString(),
-            _ => new JsonObject
+            }.ToJsonString();
+        }
+
+        return new JsonObject
+        {
+            ["hookSpecificOutput"] = new JsonObject
             {
-                ["hookSpecificOutput"] = new JsonObject
-                {
-                    ["hookEventName"] = "PreToolUse",
-                    ["permissionDecision"] = "deny",
-                    ["permissionDecisionReason"] = reason,
-                },
-            }.ToJsonString(),
-        };
+                ["hookEventName"] = "PreToolUse",
+                ["permissionDecision"] = "deny",
+                ["permissionDecisionReason"] = reason,
+            },
+        }.ToJsonString();
     }
 }

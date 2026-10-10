@@ -62,6 +62,30 @@ public static class ArbiterPluginShim
               args?: Record<string, unknown>;
             };
 
+            // JSON.parse accepts null, a bare string, an array and an object with no
+            // decision field, and the shim believed whatever came back: a document whose
+            // decision is not "block" is read as an allow. Only a plain object whose
+            // decision is exactly "allow" or "block" is a decision at all; anything else
+            // throws here and the caller turns it into a block.
+            function parseDecision(text: string): ArbiterDecision {
+              const parsed: unknown = JSON.parse(text);
+              if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+                throw new Error("kyber-arbiter: malformed arbiter decision");
+              }
+              const candidate = parsed as { decision?: unknown; reason?: unknown; args?: unknown };
+              if (candidate.decision !== "allow" && candidate.decision !== "block") {
+                throw new Error("kyber-arbiter: malformed arbiter decision");
+              }
+              const decision: ArbiterDecision = { decision: candidate.decision };
+              if (typeof candidate.reason === "string") {
+                decision.reason = candidate.reason;
+              }
+              if (typeof candidate.args === "object" && candidate.args !== null && !Array.isArray(candidate.args)) {
+                decision.args = candidate.args as Record<string, unknown>;
+              }
+              return decision;
+            }
+
             async function runArbiterHook(envelope: unknown, cwd: string): Promise<ArbiterDecision> {
               let proc: ReturnType<typeof Bun.spawn>;
               try {
@@ -86,7 +110,7 @@ public static class ArbiterPluginShim
                 if (text.trim() === "") {
                   return { decision: "allow" };
                 }
-                return JSON.parse(text) as ArbiterDecision;
+                return parseDecision(text);
               } catch (err) {
                 throw new Error("kyber-arbiter: failed to read arbiter decision: " + String(err));
               }

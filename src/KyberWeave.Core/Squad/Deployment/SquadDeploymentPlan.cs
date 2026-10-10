@@ -1242,7 +1242,16 @@ public sealed class SquadDeploymentPlan
         string trimmed;
         try
         {
-            currentText = DecodeBlockText(owned.RelativePath, currentBytes);
+            // Update already refuses to deploy against a blanked receipt-owned file. Uninstall
+            // made the opposite call and reported the block removed, so it dropped out of
+            // the receipt and the file was left blank with nothing recorded to repair it
+            // from. Take the same decision here, by the same code: allow the blank only
+            // when the receipt owns no entries in the file, which is the case where a
+            // blank file genuinely has nothing to lose.
+            currentText = DecodeBlockText(
+                owned.RelativePath,
+                currentBytes,
+                allowBlank: owned.Entries.Count == 0);
             if (string.IsNullOrWhiteSpace(currentText))
                 return false;
 

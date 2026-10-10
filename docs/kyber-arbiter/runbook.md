@@ -29,7 +29,9 @@ owned block in the shared `.codex/hooks.json`), and Cursor (owned entries in the
 kyber-weave-arbiter hook --harness <claude|copilot-vscode|copilot-cli|opencode|pi|codex|cursor> [--caller <agent>]
 ```
 
-Shared-file hooks (`pi`, `codex`, `cursor`) gate project-wide and carry no `--caller`.
+Project-wide hooks (`pi`, `codex`, `cursor`) carry no `--caller`. `codex` and
+`cursor` are owned entries spliced into a shared hook file; `pi` is a whole owned
+file, `.pi/extensions/kyber-arbiter.ts`.
 It reads the harness event on stdin and writes only the harness's decision document on
 stdout — logging goes to stderr. The exit code is 0.
 

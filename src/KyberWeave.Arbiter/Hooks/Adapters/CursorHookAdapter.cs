@@ -187,6 +187,15 @@ public sealed class CursorHookAdapter : IHarnessHookAdapter
                 "Malformed Cursor hook event: postToolUse on Task carries no tool_output.");
         }
 
+        // An explicit null is present but not a result. Reading it through GetRawText()
+        // below handed the engine the four-letter string "null", so the post-dispatch scan
+        // judged an absent output by its own spelling. Fail closed, as for a missing key.
+        if (output.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+        {
+            throw new InvalidOperationException(
+                "Malformed Cursor hook event: postToolUse on Task carries a null tool_output.");
+        }
+
         string toolOutput = output.ValueKind == JsonValueKind.String
             ? output.GetString() ?? string.Empty
             : output.GetRawText();
