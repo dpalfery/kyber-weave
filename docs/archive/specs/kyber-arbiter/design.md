@@ -1,10 +1,10 @@
 ---
-id: specs/kyber-arbiter/design
+id: archive/specs/kyber-arbiter/design
 title: Kyber Arbiter design
 doc-type: spec
-status: draft
+status: archived
 owner: dpalfery
-last-reviewed: 2026-10-03
+last-reviewed: 2026-10-10
 component: KyberSquad
 ---
 

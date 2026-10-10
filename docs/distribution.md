@@ -269,7 +269,7 @@ The pre-publish check runs before `gh release create` and fails the job if the m
 - **5** MCP: `kyber-weave-mcp-linux-x64.tar.gz`, `kyber-weave-mcp-linux-arm64.tar.gz`,
   `kyber-weave-mcp-osx-x64.tar.gz`, `kyber-weave-osx-arm64.tar.gz`, `kyber-weave-mcp-win-x64.zip`
 - **5** Arbiter: `kyber-weave-arbiter-linux-x64.tar.gz`, `kyber-weave-arbiter-linux-arm64.tar.gz`,
-  `kyber-weave-arbiter-osx-x64.tar.gz`, `kyber-weave-osx-arm64.tar.gz`, `kyber-weave-arbiter-win-x64.zip`
+  `kyber-weave-arbiter-osx-x64.tar.gz`, `kyber-weave-arbiter-osx-arm64.tar.gz`, `kyber-weave-arbiter-win-x64.zip`
 - **5** KyberDash: `kyberdash-darwin-arm64.tar.gz`, `kyberdash-darwin-x64.tar.gz`,
   `kyberdash-linux-arm64.tar.gz`, `kyberdash-linux-x64.tar.gz`, `kyberdash-win-x64.zip`
 - **3** Tray: `kyberdash-tray-darwin-arm64.zip`, `kyberdash-tray-darwin-x64.zip`, `kyberdash-tray-win-x64-setup.exe`

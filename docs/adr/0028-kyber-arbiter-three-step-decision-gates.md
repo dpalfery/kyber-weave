@@ -13,8 +13,9 @@ last-reviewed: 2026-10-09
 
 Accepted, 2026-10-03. Records the decision to gate Squad delegations and review fan-out
 through a rule engine that answers in up to three steps — plain code, a decision model, a
-reasoning agent — enforced by harness hooks, with the documented Phase 1 scope of Claude,
-Copilot in VS Code, Copilot CLI, and OpenCode.
+reasoning agent — enforced by harness hooks, delivered in three phases by harness group:
+Phase 1 Claude, Copilot in VS Code, Copilot CLI, and OpenCode; Phase 2 Pi, Codex, and Cursor;
+Phase 3 Kilo, Antigravity, Factory, Devin, Warp, and ZCode.
 
 ## Context
 
@@ -53,8 +54,9 @@ judgement about meaning is made without a confidence attached.
    it contradicts.
 6. **Owned blocks are the one settings-file exception (D8, D25).** Squad writes
    receipt-tracked blocks into shared hook files, identified by the hook command signature
-   (`kyber-weave-arbiter hook --harness <harness> --caller <agent>`), and a follow-up ADR
-   records the exception to the owned-files-not-settings boundary.
+   (`kyber-weave-arbiter hook --harness <harness> --caller <agent>`).
+   [ADR 0029](0029-squad-owned-blocks-in-shared-hook-files.md) records the exception to the
+   owned-files-not-settings boundary.
 7. **Plans are parsed at evaluation time (D9, D30).** The parser reads plan and spec-task
    artifacts with C#, Markdig, and regex, writes nothing, and resolves `TASK:` ids against
    both grammars. A task that lists no files skips its file-scope checks with a logged skip
@@ -81,7 +83,7 @@ judgement about meaning is made without a confidence attached.
 14. **One hand-written provider client (D17, D23).** TypeSafe's cloud JEV service and local
     Ollama decision models share the `systemone` API behind one BCL `HttpClient`, with the
     model pinned in configuration and recorded per decision. `setup` suggests `nimble` when
-    Ollama is detected; `tev1` stays selectable but unwarned-against only in name — its
+    Ollama is detected; `tev1` stays selectable, and `setup` warns against it because its
     ~2,000-token input is too small for most shipped rules.
 15. **Keys never rest in config (D18).** Resolution order is `TYPESAFE_API_KEY`, then the OS
     credential store entry for the endpoint origin, then no key; loopback needs none. Writes
@@ -139,9 +141,10 @@ fact outside those declared states leaves the machine.
 - **Step-1 thresholds are tuned for one model.** Shipped thresholds start conservative for
   `jev-1.13.0`; any other model warns in `doctor` until its thresholds are tuned from the
   recorded decision log.
-- **The specification stays open until Phase 3.** `docs validate --merge-ready` reports
-  `KW-DOC-LIFECYCLE-003` on the Phase 1 and Phase 2 PRs by design; where those PRs merge is
-  tracked as an open question in the task list, not decided here.
+- **Phase PRs target an integration branch.** While the specification was open,
+  `docs validate --merge-ready` reported `KW-DOC-LIFECYCLE-003` on the Phase 1 and Phase 2
+  PRs. Each phase PR targeted the long-lived integration branch `integration/kyber-arbiter`,
+  and one merge to `main` follows the closeout, which archived the specification.
 
 ## Permanent identifiers
 
@@ -153,6 +156,7 @@ receipts, and logs keyed on it.
 
 ## Related
 
+- [ADR 0029](0029-squad-owned-blocks-in-shared-hook-files.md) — owned entries in shared hook files, the exception to decision 6
 - [Kyber Arbiter architecture](../kyber-arbiter/architecture.md) — engine, rules, configuration
 - [Kyber Arbiter runbook](../kyber-arbiter/runbook.md) — hooks, trust, fail-closed operation
 - [Kyber-Squad architecture](../kyber-squad/architecture.md) — hook wiring per harness

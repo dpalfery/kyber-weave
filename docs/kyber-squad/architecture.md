@@ -574,13 +574,8 @@ and validates.
   for either, `squad install` and `squad update` print the setup step — register
   `kyber-weave-arbiter serve --repo-root <root>` in the harness's own MCP configuration —
   until which only the advisory marker fallback enforces there. A global install renders no
-  hooks and records `arbiter-not-enforced` (`global-scope`). Two Phase 3 targets degrade
-  per agent rather than per target: `antigravity` and `devin` record
-  `arbiter-not-enforced` (`no-post-dispatch-feedback`) for every rendered dispatcher —
-  post-dispatch outcomes are logged and reported by `audit`, never delivered back — and
-  `factory` swaps its block for `arbiter-not-enforced` (`settings-hooks-shadowed`) while
-  the user's hooks live in `.factory/settings.json` with no `.factory/hooks.json` (see
-  [owned blocks](#owned-blocks-in-shared-hook-files)).
+  hooks. The `arbiter-not-enforced` records these targets produce, and their details codes,
+  are listed once in the [degradation taxonomy](requirements.md#degradation-taxonomy).
 
 ---
 

@@ -17,9 +17,7 @@ A plan is open only while it is built. The pull request that finishes it archive
 
 ## Active Plans
 
-| Plan | Status | Date | Goal |
-|---|---|---|---|
-| [2026-10-01-kyber-arbiter.md](2026-10-01-kyber-arbiter.md) | Draft | 2026-10-01 | Kyber Arbiter: decision gates that harness hooks call at Kyber-Squad decision points. Each question is answered in three steps: plain code, then a decision model (TypeSafe JEV in the cloud, or `nimble` / `tev1` on a local Ollama, through the same `/v1/systemone` API), then a reasoning agent (`architect` for delegations, the refutation lens for review). The gates check the conductor's delegations against the plan, skip review lenses and refutations that are not needed, and scope gates to changed paths. Where a harness cannot hook a decision point, the agent calls the same engine through an MCP server. Development mode: test-first. |
+No plans are active.
 
 Pipeline T9 and spine S-docs harvested 2026-09-13 into [dash/architecture.md](../dash/architecture.md), [dash/runbook.md](../dash/runbook.md), [dash/telemetry-inventory.md](../dash/telemetry-inventory.md), [ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md), and [ADR 0018](../adr/0018-kyberdash-content-retention-purge.md). ADRs 0012–0015 remain the spine harvest (0014 notes that `kyber purge-content` was not shipped). Residual risks (T8 live-source coverage, findings client-side harness filter) live on the archived plans — they are not shipped claims.
 

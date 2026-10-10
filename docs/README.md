@@ -134,13 +134,13 @@ Start at the [Kyber-Squad Overview](kyber-squad/README.md) for value proposition
 
 Three-step decision gates over Squad delegations and review fan-out: plain code for exact
 facts, a decision model for judgements about meaning, and a reasoning agent after the
-block — enforced by harness hooks. Phase 1 covers Claude, Copilot in VS Code, Copilot CLI,
-and OpenCode.
+block — enforced by harness hooks on eleven harnesses in three phases, with an MCP fallback
+for Warp and ZCode.
 Start at the [Kyber Arbiter overview](kyber-arbiter/README.md) for the idea and the scope.
 
 | Page | Covers |
 |---|---|
-| [Overview & Why Kyber Arbiter](kyber-arbiter/README.md) | Value proposition, three-step gates, Phase 1 scope |
+| [Overview & Why Kyber Arbiter](kyber-arbiter/README.md) | Value proposition, three-step gates, scope |
 | [Architecture](kyber-arbiter/architecture.md) | Engine, rules, facts, provider, configuration, harness facts |
 | [Runbook](kyber-arbiter/runbook.md) | Hooks, trust steps, fail-closed behaviour, `setup`, `doctor`, `audit` |
 

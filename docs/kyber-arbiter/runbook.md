@@ -34,8 +34,8 @@ the MCP fallback below. The hook binary is invoked as:
 kyber-weave-arbiter hook --harness <claude|copilot-vscode|copilot-cli|opencode|pi|codex|cursor|kilo|antigravity|factory|devin> [--caller <agent>]
 ```
 
-Shared-file hooks (`codex`, `cursor`, `antigravity`, `factory`, `devin`) gate project-wide
-and carry no `--caller`.
+Every target except `claude` and `copilot-vscode` is project-wide: it gates only dispatches
+carrying the `KYBER-ARBITER: true` marker and carries no `--caller`.
 It reads the harness event on stdin and writes only the harness's decision document on
 stdout — logging goes to stderr. The exit code is 0.
 
@@ -65,24 +65,12 @@ retries the blocked dispatch unchanged. Timeouts are bounded by `provider.timeou
 the harness budget; a hook killed mid-evaluation still leaves its ledger event, which
 `audit` reports as a decision-less entry.
 
-On the Copilot CLI target (`copilot-cli`) post-dispatch outcomes are advisory only:
-`Deny`, `PostBlock` and `PostAnnotation` all render as `additionalContext`, which the
-harness surfaces as context rather than enforcement. Pre-dispatch denies still block.
-On the Codex target (`codex`) post-dispatch outcomes are likewise advisory only: every
-post-dispatch outcome renders as `hookSpecificOutput.additionalContext`, because a
-`decision: block` there would replace the sub-agent's result.
-On the Cursor target (`cursor`) the post-dispatch path writes only `additional_context`,
-so a post-dispatch finding is advisory there too; the pre-dispatch `permission: deny`
-still blocks.
-On the Factory target (`factory`) post-dispatch outcomes are likewise advisory only: every
-post-dispatch outcome renders as `hookSpecificOutput.additionalContext`, and the
-pre-dispatch `permissionDecision: deny` still blocks.
-On Antigravity and Devin, post-dispatch outcomes are not delivered at all — Antigravity's
-`PostToolUse` output is `{}` and Devin documents no post-dispatch output field — so they
-are recorded and reported by `audit` instead, and both targets record
-`arbiter-not-enforced` (`no-post-dispatch-feedback`) per agent at render time. Antigravity
-cannot observe returns, so `READY-001`'s completion check and `MODE-001`'s RED check
-answer `returns-unobservable` there, which allows and is logged; the in-flight overlap
+Pre-dispatch denies block on every target. Post-dispatch limits differ by harness: some
+targets deliver outcomes only as context, and Antigravity and Devin deliver none. The
+[harness notes](architecture.md#harness-facts) state each limit, and the
+[degradation taxonomy](../kyber-squad/requirements.md#degradation-taxonomy) lists the records.
+Antigravity cannot observe returns, so `READY-001`'s completion check and `MODE-001`'s RED
+check answer `returns-unobservable` there, which allows and is logged; the in-flight overlap
 check still runs.
 Devin's dispatch target and prompt are read from `tool_input.profile` and
 `tool_input.prompt`. The vendor documents only that the tool "takes a profile", so those
@@ -149,11 +137,8 @@ Support is claimed from vendor documentation, so a misbehaving hook is a defect 
 vendor's stated behaviour — record each one with three facts:
 
 1. **Harness and version** — the harness token and the exact harness version observed.
-2. **The contradicted documented cell** — which cell of the per-harness hook tables in the
-   [architecture](architecture.md#phase-1-harness-facts) (Phase 1),
-   [architecture](architecture.md#phase-2-harness-facts) (Phase 2), or
-   [architecture](architecture.md#phase-3-harness-facts) (Phase 3) the behaviour
-   contradicts.
+2. **The contradicted documented cell** — which cell of the
+   [harness table](architecture.md#harness-facts) the behaviour contradicts.
 3. **The affected trigger** — recorded as `arbiter-not-enforced` for that trigger on that
    harness until the defect is fixed or the fallback covers it.
 
