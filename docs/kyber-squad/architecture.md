@@ -473,7 +473,7 @@ and validates.
   the renderer and the doctor check must read the same list.
 - **`decision.query` grants the Arbiter fallback.** The capability vocabulary carries
   `decision.query`: the `orchestrator` and `reviewer` profiles allow it, and the other
-  eight profiles deny it. An `allow` lowers to the `kyber-weave-arbiter` server alone on
+  ten profiles deny it. An `allow` lowers to the `kyber-weave-arbiter` server alone on
   the fallback-only targets `warp` and `zcode` — the three tools `arbiter_evaluate`,
   `arbiter_rules`, and `arbiter_status`, granted by qualified name where grants are
   enumerated — and to nothing on a hooked target, so no hooked target is widened. A
