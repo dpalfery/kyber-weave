@@ -22,7 +22,7 @@ An approval that says only “approve” is sufficient when it clearly answers t
 
 ## Planner dispatches
 
-Planner dispatches to `architect` carry `KYBER-ARBITER: true` and their marker, and never `TASK:`. Draft authoring and resume carry a `PLAN_FILE:` header; finalization carries the `PLAN_FILE:` header followed by the `FINALIZE` line; the findings drain carries `FINDINGS:`; an escalation carries the `STATUS: ARBITER_ESCALATION` envelope itself as its marker.
+Unless you hold `arbiter_evaluate` (see Arbiter fallback), planner dispatches to `architect` carry `KYBER-ARBITER: true` and their marker, and never `TASK:`. Draft authoring and resume carry a `PLAN_FILE:` header; finalization carries the `PLAN_FILE:` header followed by the `FINALIZE` line; the findings drain carries `FINDINGS:`; an escalation carries the `STATUS: ARBITER_ESCALATION` envelope itself as its marker.
 
 ## Mode contract
 

@@ -180,8 +180,108 @@ public sealed class ArbiterMcpPackagingTests
         (string harness, string caller, string? target, string prompt) = Assert.Single(engine.PreDispatches);
         Assert.Equal("code-reviewer", caller);
         Assert.Equal("review-lens", target);
-        Assert.StartsWith("LENS: security", prompt, StringComparison.Ordinal);
+        // The tool synthesizes the routing header block the hook path would see.
+        Assert.StartsWith("KYBER-ARBITER: true\nLENS: security", prompt, StringComparison.Ordinal);
         Assert.False(string.IsNullOrWhiteSpace(harness));
+    }
+
+    [Fact]
+    public void Evaluate_ClassifiesAFallbackRefutationCallWithFindingOnly()
+    {
+        // The shipped contract tells a fallback code-reviewer to pass `finding` and
+        // never names `target` or the trigger header, so the tool must synthesize the
+        // routing block the hook path would see (review 20.1, Major 2).
+        using TempDirectory root = new();
+        RecordingEngine engine = new() { Outcome = new HookOutcome(HookOutcomeKind.Allow) };
+        ArbiterTools tools = new(Context(root.Path, engine));
+
+        const string finding =
+            "- id: security/key-in-argv\n" +
+            "  severity: major\n" +
+            "  file: src/Auth.cs\n" +
+            "  line: 42\n" +
+            "  excerpt: key := r.Query().Get(\"key\")\n" +
+            "  claim: The key reaches the log.\n" +
+            "  evidence: it is interpolated\n" +
+            "  failure_scenario: secrets leak";
+        string response = tools.Evaluate("refute.spawn", new ArbiterFacts { Finding = finding });
+
+        Assert.Contains("outcome: allow", response, StringComparison.Ordinal);
+        (string harness, string caller, string? target, string prompt) = Assert.Single(engine.PreDispatches);
+        Assert.Equal("code-reviewer", caller);
+        Assert.Equal("review-lens", target);
+        Assert.StartsWith("KYBER-ARBITER: true", prompt, StringComparison.Ordinal);
+        Assert.Contains("REFUTE: security/key-in-argv", prompt, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Evaluate_ClassifiesAFallbackLensCallWithoutTarget()
+    {
+        using TempDirectory root = new();
+        RecordingEngine engine = new() { Outcome = new HookOutcome(HookOutcomeKind.Allow) };
+        ArbiterTools tools = new(Context(root.Path, engine));
+
+        string response = tools.Evaluate("lens.spawn", new ArbiterFacts { Lens = ["security", "test-adequacy"] });
+
+        Assert.Contains("outcome: allow", response, StringComparison.Ordinal);
+        Assert.Equal(2, engine.PreDispatches.Count);
+        Assert.All(engine.PreDispatches, entry =>
+        {
+            Assert.Equal("code-reviewer", entry.Caller);
+            Assert.Equal("review-lens", entry.Target);
+            Assert.StartsWith("KYBER-ARBITER: true", entry.Prompt, StringComparison.Ordinal);
+        });
+        Assert.Contains("LENS: security", engine.PreDispatches[0].Prompt, StringComparison.Ordinal);
+        Assert.Contains("LENS: test-adequacy", engine.PreDispatches[1].Prompt, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("lens.spawn")]
+    [InlineData("refute.spawn")]
+    public void Evaluate_WithoutLensOrFinding_SaysWhatToPass(string trigger)
+    {
+        using TempDirectory root = new();
+        RecordingEngine engine = new();
+        ArbiterTools tools = new(Context(root.Path, engine));
+
+        string response = tools.Evaluate(trigger, new ArbiterFacts { Target = "review-lens" });
+
+        Assert.Contains("outcome: error", response, StringComparison.Ordinal);
+        Assert.Contains("lens", response, StringComparison.Ordinal);
+        Assert.Contains("finding", response, StringComparison.Ordinal);
+        Assert.Empty(engine.PreDispatches);
+    }
+
+    [Fact]
+    public void Evaluate_RefutationCallThroughTheRealEngine_DecidesAndRecords()
+    {
+        using TempDirectory root = new();
+        Directory.CreateDirectory(Path.Combine(root.Path, ".kyber-weave"));
+        File.WriteAllText(
+            Path.Combine(root.Path, ".kyber-weave", "kyber-weave.yml"),
+            "arbiter:\n  enabled: true\n  provider:\n    kind: none\n");
+        ArbiterHookDecisionEngine realEngine = new(homeDirectory: () => root.Path);
+        ArbiterTools tools = new(new ArbiterServeContext(
+            root.Path, realEngine, TextWriter.Null, _ => EnabledConfig(), _ => false));
+
+        const string finding =
+            "- id: security/key-in-argv\n" +
+            "  severity: major\n" +
+            "  file: src/Auth.cs\n" +
+            "  line: 42\n" +
+            "  excerpt: key := r.Query().Get(\"key\")\n" +
+            "  claim: The key reaches the log.\n" +
+            "  evidence: it is interpolated\n" +
+            "  failure_scenario: secrets leak";
+        string response = tools.Evaluate("refute.spawn", new ArbiterFacts { Finding = finding });
+
+        // The real evaluator re-classifies from the synthesized headers and records:
+        // the decision log holds the refute.spawn decision, the ledger its headers.
+        Assert.Contains("outcome: allow", response, StringComparison.Ordinal);
+        string decisions = File.ReadAllText(Path.Combine(root.Path, "artifacts", "arbiter", "decisions.jsonl"));
+        Assert.Contains("refute.spawn", decisions, StringComparison.Ordinal);
+        string ledger = File.ReadAllText(Path.Combine(root.Path, "artifacts", "arbiter", "ledger.jsonl"));
+        Assert.Contains("\"refute\":\"security/key-in-argv\"", ledger, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -226,6 +326,33 @@ public sealed class ArbiterMcpPackagingTests
         Assert.Contains("rule-set: ", status, StringComparison.Ordinal);
         Assert.Contains("key: found", status, StringComparison.Ordinal);
         Assert.DoesNotContain("sk-", status, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void StatusReportsTheEffectiveProviderAfterTheUserOverride()
+    {
+        // The hook resolves the key against the user override, so status must report the
+        // provider and origin the key is resolved for, not the repository's (review 20.1, c).
+        using TempDirectory root = new();
+        using TempDirectory home = new();
+        Directory.CreateDirectory(Path.GetDirectoryName(ArbiterUserSettings.GetPath(home.Path))!);
+        File.WriteAllText(
+            ArbiterUserSettings.GetPath(home.Path),
+            "provider:\n  model: nimble-override\n  endpoint: https://override.example.test/v2\n");
+        ArbiterTools tools = new(new ArbiterServeContext(
+            root.Path,
+            new RecordingEngine(),
+            TextWriter.Null,
+            _ => RemoteConfig(),
+            _ => true,
+            config => ArbiterUserSettings.ApplyTo(config.Arbiter.Provider, home.Path)));
+
+        string status = tools.Status();
+
+        Assert.Contains("model=nimble-override", status, StringComparison.Ordinal);
+        Assert.Contains("origin=https://override.example.test", status, StringComparison.Ordinal);
+        Assert.DoesNotContain("typesafe.example.test", status, StringComparison.Ordinal);
+        Assert.DoesNotContain("jev-test", status, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -14,6 +14,19 @@ public sealed record FactoryHooksShadowingOutcome(
     IReadOnlyList<SquadRenderedBlock>? Blocks,
     IReadOnlyList<SquadDegradationRecord> Degradations);
 
+/// <summary>What the target's Factory files say about the settings hooks.</summary>
+public enum FactoryHooksShadowState
+{
+    /// <summary>Squad's block can be spliced without hiding any user hook.</summary>
+    Clear,
+
+    /// <summary><c>settings.json</c> holds a <c>hooks</c> key that a new <c>hooks.json</c> would hide.</summary>
+    Shadowed,
+
+    /// <summary><c>settings.json</c> does not parse as strict JSON, so whether it holds hooks is unknown.</summary>
+    Unparsable,
+}
+
 /// <summary>
 /// Keeps Squad's Factory hook block from shadowing the user's own hooks (design §10.8, R18).
 /// </summary>
@@ -49,59 +62,81 @@ public static class FactoryHooksShadowing
     /// <summary>The Details prefix identifying this gap: the settings <c>hooks</c> key shadows the block.</summary>
     public const string Reason = "settings-hooks-shadowed";
 
+    /// <summary>The Details prefix for a <c>settings.json</c> that cannot be parsed, so whether it holds hooks is unknown.</summary>
+    public const string UnparsableReason = "settings-unparsable";
+
     private const string ArbiterIdentity = "arbiter";
 
     /// <summary>Whether Squad's block would shadow hooks kept in <c>.factory/settings.json</c>.</summary>
     /// <remarks>
     /// Shadowed means exactly the hazard shape: <c>hooks.json</c> absent (so Factory
-    /// falls back to <c>settings.json</c>) while that file carries a <c>hooks</c> key. A
-    /// present <c>hooks.json</c> wins and the key is inert. An absent or unparsable
-    /// <c>settings.json</c> is not proof of a <c>hooks</c> key, so the block renders —
-    /// a file Factory itself cannot read cannot hold hooks it would lose.
+    /// falls back to <c>settings.json</c>) while that file carries a <c>hooks</c> key. An
+    /// unparsable <c>settings.json</c> is <see cref="FactoryHooksShadowState.Unparsable"/>,
+    /// not shadowed: <see cref="Resolve"/> drops the block for it too.
     /// </remarks>
-    public static bool IsShadowed(string targetRoot)
+    public static bool IsShadowed(string targetRoot) =>
+        Inspect(targetRoot) == FactoryHooksShadowState.Shadowed;
+
+    /// <summary>
+    /// Classifies the hazard for a target. Factory may tolerate JSONC, so a
+    /// <c>settings.json</c> that does not parse as strict JSON is <see cref="FactoryHooksShadowState.Unparsable"/>:
+    /// whether it holds hooks is unknown, and a blind <c>hooks.json</c> could disable them.
+    /// </summary>
+    public static FactoryHooksShadowState Inspect(string targetRoot)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(targetRoot);
 
         if (File.Exists(Path.Combine(targetRoot, HooksJsonRelativePath)))
         {
-            return false;
+            return FactoryHooksShadowState.Clear;
         }
 
         string settingsPath = Path.Combine(targetRoot, SettingsJsonRelativePath);
         if (!File.Exists(settingsPath))
         {
-            return false;
+            return FactoryHooksShadowState.Clear;
         }
 
         try
         {
-            return JsonNode.Parse(File.ReadAllText(settingsPath)) is JsonObject settings
-                && settings.ContainsKey(SettingsHooksKey);
+            if (JsonNode.Parse(File.ReadAllText(settingsPath)) is not JsonObject settings)
+            {
+                return FactoryHooksShadowState.Unparsable;
+            }
+
+            return settings.ContainsKey(SettingsHooksKey)
+                ? FactoryHooksShadowState.Shadowed
+                : FactoryHooksShadowState.Clear;
         }
-        catch (JsonException)
+        catch (Exception exception) when (exception is JsonException or IOException or UnauthorizedAccessException)
         {
-            return false;
+            return FactoryHooksShadowState.Unparsable;
         }
     }
 
-    /// <summary>The degradation record for a dropped Factory block.</summary>
+    /// <summary>The degradation record for a dropped Factory block that would shadow the settings hooks.</summary>
     /// <remarks>
     /// Target-scoped like the other Arbiter records: the identity fields carry the arbiter
     /// wiring itself and the instruction digest is empty — no instruction body is involved.
     /// The Details carry the reason plus the fix, since a finding that cannot be acted on
     /// is noise.
     /// </remarks>
-    public static SquadDegradationRecord Degradation() => new(
+    public static SquadDegradationRecord Degradation() => DegradationFor(FactoryHooksShadowState.Shadowed);
+
+    private static SquadDegradationRecord DegradationFor(FactoryHooksShadowState state) => new(
         Target: FactoryTargetToken,
         CanonicalIdentity: ArbiterIdentity,
         OutputIdentity: ArbiterIdentity,
         Code: DegradationCode,
         InstructionDigest: string.Empty,
-        Details: $"{Reason}: Factory reads {HooksJsonRelativePath} instead of the " +
-            $"{SettingsHooksKey} key in {SettingsJsonRelativePath}; creating the file would " +
-            "disable the user's own hooks. Move the user's hooks into .factory/hooks.json, " +
-            "then run squad update.");
+        Details: state == FactoryHooksShadowState.Unparsable
+            ? $"{UnparsableReason}: {SettingsJsonRelativePath} cannot be parsed, so whether it holds " +
+                $"hooks is unknown; creating {HooksJsonRelativePath} could disable the user's own hooks. " +
+                "Fix the JSON, or move the user's hooks into .factory/hooks.json, then run squad update."
+            : $"{Reason}: Factory reads {HooksJsonRelativePath} instead of the " +
+                $"{SettingsHooksKey} key in {SettingsJsonRelativePath}; creating the file would " +
+                "disable the user's own hooks. Move the user's hooks into .factory/hooks.json, " +
+                "then run squad update.");
 
     /// <summary>
     /// Returns the blocks that may be spliced, dropping the Factory block when it would
@@ -125,7 +160,13 @@ public static class FactoryHooksShadowing
             return new FactoryHooksShadowingOutcome(blocks, []);
         }
 
-        if (!targets.Contains(SquadTarget.Factory) || !IsShadowed(targetRoot))
+        if (!targets.Contains(SquadTarget.Factory))
+        {
+            return new FactoryHooksShadowingOutcome(blocks, []);
+        }
+
+        FactoryHooksShadowState state = Inspect(targetRoot);
+        if (state == FactoryHooksShadowState.Clear)
         {
             return new FactoryHooksShadowingOutcome(blocks, []);
         }
@@ -137,6 +178,6 @@ public static class FactoryHooksShadowing
                 StringComparison.Ordinal))
             .ToList();
 
-        return new FactoryHooksShadowingOutcome(kept, [Degradation()]);
+        return new FactoryHooksShadowingOutcome(kept, [DegradationFor(state)]);
     }
 }

@@ -86,10 +86,18 @@ public sealed class HookCommand
             if (!config.Arbiter.Enabled)
             {
                 log.WriteLine("Arbiter is disabled (arbiter.enabled: false): allowing without evaluation.");
+                // A harness whose protocol has no silent answer (Antigravity writes {}
+                // for every event) still receives its allow document here.
+                string? disabledAllow = adapter.DisabledAllowDocument;
+                if (disabledAllow is not null)
+                {
+                    stdout.Write(disabledAllow);
+                }
+
                 return 0;
             }
 
-            HookContext context = new(repoRoot, _newDecisionId, log);
+            HookContext context = new(repoRoot, _newDecisionId, log, adapter.ObservesReturns);
             string output = adapter.Handle(payload, stdin, caller, config, context);
             if (output.Length > 0)
             {

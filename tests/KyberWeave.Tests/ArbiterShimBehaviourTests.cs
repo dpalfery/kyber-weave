@@ -69,6 +69,33 @@ public sealed class ArbiterShimBehaviourTests : IDisposable
 
     [Theory]
     [MemberData(nameof(Cases))]
+    public async Task KiloShim_FailsClosedUnlessTheHostAllowsOnPurpose(string stdout, string exit, string expected)
+    {
+        // Review 20.1, f: the Kilo shim is the same generator under the 'kilo' token, and
+        // it must hold the same fail-closed table as the OpenCode shim under Bun.
+        string bun = RequireBun();
+        WriteFakeBinary(stdout, exit);
+        await File.WriteAllTextAsync(Path.Combine(_temp.Path, "shim.ts"), await RenderKiloShimAsync());
+        await File.WriteAllTextAsync(Path.Combine(_temp.Path, "drive.ts"), """
+            import { KyberArbiter } from "./shim.ts";
+            const hooks: any = await KyberArbiter({ directory: process.cwd() } as any);
+            try {
+              await hooks["tool.execute.before"](
+                { tool: "task", callID: "c1", sessionID: "s1", args: { subagent_type: "x", prompt: "p" } },
+                { args: {} });
+              console.log("ALLOWED");
+            } catch (e) {
+              console.log("BLOCKED:" + String(e));
+            }
+            """);
+
+        string output = await RunBunAsync(bun, "drive.ts");
+
+        Assert.StartsWith(expected, output, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [MemberData(nameof(Cases))]
     public async Task PiExtension_FailsClosedUnlessTheHostAllowsOnPurpose(string stdout, string exit, string expected)
     {
         string bun = RequireBun();
@@ -118,6 +145,20 @@ public sealed class ArbiterShimBehaviourTests : IDisposable
           toolName: "Agent", toolCallId: "c1", input: { subagent_type: "x", prompt: "p" } });
         console.log(result && result.block ? "BLOCKED:" + result.reason : "ALLOWED");
         """;
+
+    private async Task<string> RenderKiloShimAsync()
+    {
+        SquadRendererRegistry registry = new([new KiloRenderer()]);
+        SquadRenderResult result = await registry.RenderAsync(new SquadRenderRequest(
+            SourceDirectory: _fixture.Path,
+            Targets: [SquadTarget.Kilo],
+            Scope: SquadDeploymentScope.Project,
+            Arbiter: new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: 5)));
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+        SquadDeploymentFile shim = Assert.Single(
+            result.Files, f => f.RelativePath == ".kilo/plugin/kyber-arbiter.ts");
+        return Encoding.UTF8.GetString(shim.Content.Span);
+    }
 
     private async Task<string> RenderPiExtensionAsync(int timeoutSeconds)
     {

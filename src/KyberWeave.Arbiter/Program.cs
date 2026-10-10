@@ -66,7 +66,8 @@ static async Task<int> ServeAsync(string[] args)
         new ArbiterHookDecisionEngine(),
         Console.Error,
         Composition.LoadHostConfig,
-        ServeKeyResolved));
+        ServeKeyResolved,
+        ServeEffectiveProvider));
 
     builder.Services
         .AddMcpServer()
@@ -89,14 +90,17 @@ static async Task<int> ServeAsync(string[] args)
 
 // Presence only: the key is read from the store or the environment and discarded here.
 // Status reports the answer, never the value.
+static ArbiterProviderConfig ServeEffectiveProvider(KyberWeaveConfig config) =>
+    ArbiterUserSettings.ApplyTo(
+        config.Arbiter.Provider,
+        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
+
 static bool ServeKeyResolved(KyberWeaveConfig config)
 {
     try
     {
         ArbiterProviderConfig repository = config.Arbiter.Provider;
-        ArbiterProviderConfig effective = ArbiterUserSettings.ApplyTo(
-            repository,
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
+        ArbiterProviderConfig effective = ServeEffectiveProvider(config);
         string? userOverride = string.Equals(effective.Endpoint, repository.Endpoint, StringComparison.Ordinal)
             ? null
             : effective.Endpoint;

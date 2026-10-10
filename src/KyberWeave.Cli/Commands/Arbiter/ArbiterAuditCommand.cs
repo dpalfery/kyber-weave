@@ -183,14 +183,19 @@ public sealed class ArbiterAuditCommand : Command<ArbiterSettings>
             return;
         if (!string.IsNullOrWhiteSpace(ev.Caller))
             return;
-        if (string.IsNullOrWhiteSpace(ev.Target) || !catalog.Agents.ContainsKey(ev.Target))
+        // A blank target is flagged as well: a dispatch whose target the harness did not
+        // send (Devin with no profile argument) may still be a Squad dispatch.
+        bool blankTarget = string.IsNullOrWhiteSpace(ev.Target);
+        if (!blankTarget && !catalog.Agents.ContainsKey(ev.Target!))
             return;
 
         reported++;
         report.Add(new Diagnostic(
             UnmarkedSquadDispatch,
             Severity.Warning,
-            $"Unmarked dispatch to Squad agent '{ev.Target}' with an unidentified caller.",
+            blankTarget
+                ? "Unmarked dispatch with no target and an unidentified caller."
+                : $"Unmarked dispatch to Squad agent '{ev.Target}' with an unidentified caller.",
             ev.Id,
             ev.Session,
             "Confirm the caller: an unmarked Squad dispatch bypassed the pre-dispatch gate."));

@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Text;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Credentials;
@@ -17,12 +18,14 @@ namespace KyberWeave.Arbiter.Mcp;
 /// <param name="Log">Diagnostics sink: stderr in production, never stdout.</param>
 /// <param name="LoadConfig">Loads the host configuration for the root; throws when it is missing or malformed.</param>
 /// <param name="KeyResolved">Whether a key resolves for the effective provider. It reports presence only, never the key.</param>
+/// <param name="EffectiveProvider">Applies the user override to the repository provider, the provider the hook resolves its key for. Null means the repository provider is the effective one.</param>
 public sealed record ArbiterServeContext(
     string RepoRoot,
     IContextualHookDecisionEngine Engine,
     TextWriter Log,
     Func<string, KyberWeaveConfig> LoadConfig,
-    Func<KyberWeaveConfig, bool> KeyResolved);
+    Func<KyberWeaveConfig, bool> KeyResolved,
+    Func<KyberWeaveConfig, ArbiterProviderConfig>? EffectiveProvider = null);
 
 /// <summary>
 /// The facts a calling agent asserts about one event. The server derives everything else
@@ -97,10 +100,10 @@ public sealed class ArbiterTools(ArbiterServeContext context)
 
     [McpServerTool(Name = "arbiter_evaluate", ReadOnly = false, OpenWorld = false)]
     [Description("""
-        Evaluates one Arbiter event for the D4 fallback, where no harness hook fires, and returns the outcome the hook would return for the same event: allow, an escalation envelope, or a review note. Use when the conductor is about to dispatch a Squad agent or has received a return, and when code-reviewer is about to fan out lenses or refutations. Pass the trigger the event classifies as, the target, the plan file, the task, the prompt, any lens names, the finding, the phase and the output. The facts are asserted by the calling agent, so the decision is advisory. Each call appends to the decision ledger and log.
+        Evaluates one Arbiter event for the D4 fallback, where no harness hook fires, and returns the outcome the hook would return for the same event: allow, an escalation envelope, or a review note. Use when the conductor is about to dispatch a Squad agent or has received a return, and when code-reviewer is about to fan out lenses or refute.spawn refutations. Pass the trigger the event classifies as and the asserted facts: target, plan-file, task, prompt, the lens names as lens, the findings to be refuted as finding, the phase and the output. A lens call or a finding call needs no target: the tool routes both to review-lens and synthesizes the routing header block (KYBER-ARBITER, LENS, REFUTE) itself, exactly as the hook path would see it. The facts are asserted by the calling agent, so the decision is advisory. Each call appends to the decision ledger and log.
         """)]
     public string Evaluate(
-        [Description("The trigger the event classifies as, for example delegate, delegate.returned, lens.spawn or investigate.")]
+        [Description("The trigger the event classifies as, for example delegate, delegate.returned, lens.spawn, refute.spawn or investigate.")]
         string trigger,
         [Description("The asserted facts of the event.")]
         ArbiterFacts facts)
@@ -129,6 +132,19 @@ public sealed class ArbiterTools(ArbiterServeContext context)
             return Failure(provenance, $"Unknown phase '{facts.Phase}'. Use pre, post or return.");
         }
 
+        // A refutation or lens fan-out call carries its routing in the structured
+        // fields, never in a hand-written header: a call with neither says what to
+        // pass instead of failing classification (review 20.1, Major 2).
+        bool fanOut = string.Equals(trigger, "lens.spawn", StringComparison.Ordinal)
+            || string.Equals(trigger, "refute.spawn", StringComparison.Ordinal);
+        if (fanOut && facts.Lens is not { Count: > 0 } && !Present(facts.Finding))
+        {
+            return Failure(
+                provenance,
+                $"The facts carry no routing for '{trigger}': pass the lens names as `lens`, or the findings to be refuted as `finding`.");
+        }
+
+        string? target = facts.Target ?? RoutingTarget(facts);
         List<PendingEvaluation> pending = [];
         foreach (string? lens in LensesOf(facts))
         {
@@ -138,13 +154,13 @@ public sealed class ArbiterTools(ArbiterServeContext context)
                 Harness = Harness,
                 Phase = post ? "post" : "pre",
                 Cwd = context.RepoRoot,
-                Target = facts.Target,
+                Target = target,
                 Prompt = prompt,
                 ToolCallId = facts.CallId,
                 ToolOutput = facts.Output,
                 IsDispatch = true,
             };
-            TriggerClassification classification = TriggerClassifier.ClassifySingle(ev, facts.Target, prompt);
+            TriggerClassification classification = TriggerClassifier.ClassifySingle(ev, target, prompt);
             if (!string.Equals(classification.Trigger, trigger, StringComparison.Ordinal))
             {
                 return Failure(
@@ -153,7 +169,7 @@ public sealed class ArbiterTools(ArbiterServeContext context)
                     "Pass the trigger the event classifies as.");
             }
 
-            pending.Add(new PendingEvaluation(classification.Caller ?? UnidentifiedCaller, facts.Target, prompt));
+            pending.Add(new PendingEvaluation(classification.Caller ?? UnidentifiedCaller, target, prompt));
         }
 
         HookContext hookContext = new(context.RepoRoot, () => ArbiterRecordId.New(DateTimeOffset.UtcNow), context.Log);
@@ -245,7 +261,16 @@ public sealed class ArbiterTools(ArbiterServeContext context)
             return Failure(provenance, error ?? "The host configuration could not be loaded.");
         }
 
-        ArbiterProviderConfig provider = config.Arbiter.Provider;
+        ArbiterProviderConfig provider;
+        try
+        {
+            provider = context.EffectiveProvider?.Invoke(config) ?? config.Arbiter.Provider;
+        }
+        catch (Exception ex)
+        {
+            return Failure(provenance, $"The user override could not be applied: {OneLine(ex.Message)}");
+        }
+
         bool hasEndpoint = !string.IsNullOrWhiteSpace(provider.Endpoint);
         bool remote = provider.Kind != ArbiterProviderKind.None
             && hasEndpoint
@@ -319,9 +344,21 @@ public sealed class ArbiterTools(ArbiterServeContext context)
             ? [.. lenses.Select(lens => (string?)lens)]
             : [null];
 
+    /// <summary>The target a lens or finding call routes to when the caller names none.
+    /// The fallback contract passes routing through <c>lens</c> and <c>finding</c> and
+    /// writes no routing header, so the tool names the spawn target itself.</summary>
+    private static string? RoutingTarget(ArbiterFacts facts) =>
+        facts.Lens is { Count: > 0 } || Present(facts.Finding) ? "review-lens" : null;
+
+    /// <summary>
+    /// Builds the routing header block the hook path would see for the same event:
+    /// the marker first, then the facts as headers. A finding synthesizes
+    /// <c>REFUTE:</c> from the finding ids it carries, so a code-reviewer following
+    /// its own contract gets a classified refute.spawn without writing a header.
+    /// </summary>
     private static string PromptFor(ArbiterFacts facts, string? lens)
     {
-        List<string> lines = [];
+        List<string> lines = ["KYBER-ARBITER: true"];
         if (Present(facts.PlanFile))
         {
             lines.Add("PLAN_FILE: " + Flat(facts.PlanFile));
@@ -337,6 +374,12 @@ public sealed class ArbiterTools(ArbiterServeContext context)
             lines.Add("LENS: " + Flat(lens));
         }
 
+        string? refute = RefuteHeader(facts.Finding);
+        if (refute is not null)
+        {
+            lines.Add("REFUTE: " + refute);
+        }
+
         if (Present(facts.Finding))
         {
             lines.Add("FINDING: " + Flat(facts.Finding));
@@ -349,6 +392,34 @@ public sealed class ArbiterTools(ArbiterServeContext context)
 
         return string.Join('\n', lines);
     }
+
+    /// <summary>The REFUTE header value for a finding: the finding ids it carries, as
+    /// <c>lens/slug</c>. Null when the finding names no id — the event then fails
+    /// classification instead of recording a made-up refutation.</summary>
+    private static string? RefuteHeader(string? finding)
+    {
+        if (string.IsNullOrWhiteSpace(finding))
+        {
+            return null;
+        }
+
+        List<string> ids = [];
+        foreach (Match match in FindingIdPattern.Matches(finding))
+        {
+            string id = Flat(match.Groups["id"].Value);
+            if (id.Length > 0 && !ids.Contains(id, StringComparer.Ordinal))
+            {
+                ids.Add(id);
+            }
+        }
+
+        return ids.Count > 0 ? string.Join(", ", ids) : null;
+    }
+
+    private static readonly Regex FindingIdPattern = new(
+        @"^\s*-?\s*id:\s*(?<id>\S+)",
+        RegexOptions.Multiline | RegexOptions.CultureInvariant,
+        TimeSpan.FromSeconds(2));
 
     private static bool Present(string? value) => !string.IsNullOrWhiteSpace(value);
 

@@ -289,7 +289,9 @@ public sealed class ZCodeRenderer : ISquadRenderer
         // Read from canonical source rather than a renderer-local list, so a tool renamed
         // upstream is a source edit, and so the doctor check reads the same roster.
         IReadOnlyList<string> qualifiedMcpToolNames = QualifiedMcpToolNames(source);
-        IReadOnlyList<string> arbiterMcpToolNames = ArbiterMcpToolNames(source);
+        IReadOnlyList<string> arbiterMcpToolNames = ArbiterEnforced(request)
+            ? ArbiterMcpToolNames(source)
+            : [];
         IReadOnlyList<string> mcpServerNames = DeclaredMcpServerNames(source);
 
         List<SquadDeploymentFile> files = [];
@@ -1018,13 +1020,27 @@ public sealed class ZCodeRenderer : ISquadRenderer
         decision == SquadPermissionDecision.Allow;
 
     /// <summary>
-    /// Whether a principal is entitled to the Arbiter's tools. Keyed on <c>decision.query</c>
-    /// alone, so the pure orchestrator qualifies: holding <c>arbiter_evaluate</c> is the
-    /// agent's signal to use the fallback, and it is the role that needs it most.
+    /// Whether the Arbiter's MCP tools are granted at all: only an enabled,
+    /// project-scope wiring grants them (review 20.1, Major 3). ZCode fails an agent
+    /// whose granted server is not connected, so a grant without an enforced Arbiter
+    /// would make every render require a server the deployment never uses.
+    /// </summary>
+    private static bool ArbiterEnforced(SquadRenderRequest request) =>
+        request.Arbiter is { Enabled: true }
+        && request.Scope == SquadDeploymentScope.Project;
+
+    /// <summary>
+    /// Whether a principal is entitled to the Arbiter's tools. Two gates: the render
+    /// must carry an enabled, project-scope wiring (<see cref="ArbiterEnforced"/>,
+    /// decided upstream by the empty tool list), and the agent must be the conductor or
+    /// the code-reviewer — the two whose contracts call <c>arbiter_evaluate</c>. Holding
+    /// <c>decision.query</c> alone does not grant the server.
     /// </summary>
     private static bool GrantsArbiter(
         SquadAgent agent,
         IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles) =>
+        (string.Equals(agent.Name, "conductor", StringComparison.Ordinal)
+            || string.Equals(agent.Name, "code-reviewer", StringComparison.Ordinal)) &&
         capabilityProfiles.TryGetValue(agent.CapabilityProfile, out SquadCapabilityProfile? profile) &&
         profile.Permissions.TryGetValue(ArbiterDecisionCapability, out SquadPermissionDecision decision) &&
         decision == SquadPermissionDecision.Allow;

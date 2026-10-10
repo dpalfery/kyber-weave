@@ -281,6 +281,89 @@ public sealed class ArbiterFactoryRenderingTests : IDisposable
         Assert.Contains(ExpectedCommand, hooksJson, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Resolve_UnparsableSettingsJson_DropsTheBlockAndNamesTheFile()
+    {
+        // Factory may tolerate JSONC, so an unparsable settings.json cannot be read as "no
+        // hooks key". Creating hooks.json blindly could disable the user's hooks: the block
+        // is dropped and the record names the file (review 20.1, e).
+        using TempDirectory targetRoot = new();
+        WriteFile(Path.Combine(targetRoot.Path, ".factory/settings.json"), "{ // jsonc comment\n \"hooks\": {} }");
+        SquadRenderedBlock block = new("factory", BlockPath, SquadHookBlockFormat.Factory, []);
+
+        FactoryHooksShadowingOutcome outcome = FactoryHooksShadowing.Resolve(
+            targetRoot.Path,
+            [SquadTarget.Factory],
+            new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: HookTimeoutSeconds),
+            SquadDeploymentScope.Project,
+            [block]);
+
+        Assert.Empty(outcome.Blocks ?? []);
+        SquadDegradationRecord record = Assert.Single(outcome.Degradations);
+        Assert.Equal(FactoryHooksShadowing.DegradationCode, record.Code);
+        Assert.Contains(".factory/settings.json", record.Details, StringComparison.Ordinal);
+        Assert.StartsWith(FactoryHooksShadowing.UnparsableReason, record.Details, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Install_UnparsableSettingsJson_DropsTheBlockAndNeverCreatesHooksJson()
+    {
+        using TempDirectory fixture = new();
+        string targetRoot = Path.Combine(fixture.Path, "project");
+        Directory.CreateDirectory(targetRoot);
+        WriteFile(Path.Combine(targetRoot, ".factory/settings.json"), "{ // jsonc comment\n \"hooks\": {} }");
+
+        SquadLifecycleResult result = await InstallAsync(targetRoot, fixture.Path);
+
+        Assert.True(result.Success, string.Join("; ", result.Errors ?? []));
+        Assert.True(result.Receipt?.Blocks is null || result.Receipt.Blocks.Count == 0);
+        Assert.False(File.Exists(Path.Combine(targetRoot, ".factory/hooks.json")));
+        Assert.Contains(
+            result.Degradations ?? [],
+            d => d.Target == "factory" && d.Code == "arbiter-not-enforced");
+    }
+
+    [Fact]
+    public async Task Update_SettingsHooksShadowFactoryHooks_DropsTheBlockAndNeverCreatesHooksJson()
+    {
+        // The update path has its own call to the shadowing check (review 20.1, e).
+        using TempDirectory fixture = new();
+        string targetRoot = Path.Combine(fixture.Path, "project");
+        Directory.CreateDirectory(targetRoot);
+        await InstallAsync(targetRoot, fixture.Path);
+        File.Delete(Path.Combine(targetRoot, ".factory/hooks.json"));
+        WriteFile(Path.Combine(targetRoot, ".factory/settings.json"), "{\"hooks\": {\"post_tool_use\": []}}");
+
+        SquadLifecycleResult result = await UpdateAsync(targetRoot, fixture.Path);
+
+        Assert.True(result.Success, string.Join("; ", result.Errors ?? []));
+        Assert.True(result.Receipt?.Blocks is null || result.Receipt.Blocks.Count == 0);
+        Assert.False(File.Exists(Path.Combine(targetRoot, ".factory/hooks.json")));
+        Assert.Contains(
+            result.Degradations ?? [],
+            d => d.Target == "factory" && d.Code == "arbiter-not-enforced");
+    }
+
+    [Fact]
+    public async Task Update_UnparsableSettingsJson_DropsTheBlockAndNeverCreatesHooksJson()
+    {
+        using TempDirectory fixture = new();
+        string targetRoot = Path.Combine(fixture.Path, "project");
+        Directory.CreateDirectory(targetRoot);
+        await InstallAsync(targetRoot, fixture.Path);
+        File.Delete(Path.Combine(targetRoot, ".factory/hooks.json"));
+        WriteFile(Path.Combine(targetRoot, ".factory/settings.json"), "{ // jsonc comment\n \"hooks\": {} }");
+
+        SquadLifecycleResult result = await UpdateAsync(targetRoot, fixture.Path);
+
+        Assert.True(result.Success, string.Join("; ", result.Errors ?? []));
+        Assert.True(result.Receipt?.Blocks is null || result.Receipt.Blocks.Count == 0);
+        Assert.False(File.Exists(Path.Combine(targetRoot, ".factory/hooks.json")));
+        Assert.Contains(
+            result.Degradations ?? [],
+            d => d.Target == "factory" && d.Code == "arbiter-not-enforced");
+    }
+
     private async Task<SquadLifecycleResult> InstallAsync(string targetRoot, string applicationData)
     {
         using FakeSquadReleaseSource releases = new();
@@ -296,6 +379,24 @@ public sealed class ArbiterFactoryRenderingTests : IDisposable
             SquadDeploymentScope.Project,
             [SquadTarget.Factory],
             Version: "1.2.3",
+            Arbiter: new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: HookTimeoutSeconds)));
+    }
+
+    private async Task<SquadLifecycleResult> UpdateAsync(string targetRoot, string applicationData)
+    {
+        using FakeSquadReleaseSource releases = new();
+        SquadStateStore store = new(new FakeSquadUserPaths(applicationData));
+        SquadLifecycleService service = new(
+            releases,
+            new FactoryBlockStubRenderer(),
+            store,
+            new FixedTimeProvider(DateTimeOffset.UtcNow));
+
+        return await service.UpdateAsync(new SquadUpdateRequest(
+            TargetRoot: targetRoot,
+            Scope: SquadDeploymentScope.Project,
+            Targets: [SquadTarget.Factory],
+            Version: "1.2.4",
             Arbiter: new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: HookTimeoutSeconds)));
     }
 

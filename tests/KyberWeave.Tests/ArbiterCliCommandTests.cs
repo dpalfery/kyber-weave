@@ -221,6 +221,34 @@ public sealed class ArbiterCliCommandTests : IDisposable
     }
 
     [Fact]
+    public void Audit_UnmarkedDispatchWithNullTarget_ReportsAudit002()
+    {
+        // A Devin dispatch whose profile argument is missing has no target. The adapter
+        // promises audit reports it, so a null target must be flagged too (review 20.1, b).
+        string host = SeedLedger("arbiter-audit-002-null-target", ledger =>
+        {
+            ledger.AppendAsync(new ArbiterLedgerEvent(
+                "0000000000000004-aaaaaaaa",
+                DateTimeOffset.UtcNow,
+                "hook",
+                "devin",
+                "session-4",
+                ArbiterLedgerPhases.Unmarked)
+            {
+                Trigger = "delegate",
+                Target = null,
+            }).GetAwaiter().GetResult();
+        });
+
+        ArbiterAuditCommand command = new();
+        CommandExecution execution = Capture(() => command.Execute(
+            null!,
+            new ArbiterSettings { Path = host }));
+
+        Assert.Contains("KW-ARB-AUDIT-002", execution.Output, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Audit_ListsAttestationsAsInformation()
     {
         string host = SeedLedger("arbiter-audit-attested", ledger =>

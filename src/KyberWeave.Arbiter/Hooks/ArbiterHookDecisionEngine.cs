@@ -179,6 +179,7 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine
                 ToolCallId = toolCallId,
                 Session = sessionId,
                 Cwd = repoRoot,
+                ObservesReturns = context.ObservesReturns,
                 ToolOutput = toolOutput,
                 IsDispatch = true,
             };

@@ -4,6 +4,7 @@ using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fakes;
+using KyberWeave.Tests.Fixtures;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -319,6 +320,98 @@ public sealed class SquadArbiterCliTests : IDisposable
 
         Assert.Equal(0, execution.ExitCode);
         Assert.DoesNotContain("KW-ARB-BIN-001", execution.Output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Doctor_OnZcodeRepoWithArbiterDisabled_DoesNotRequireTheArbiterServer()
+    {
+        // A repo with .zcode/ whose source toolchain declares kyber-weave-arbiter: with the
+        // Arbiter disabled the render grants no arbiter tools, so doctor must not require
+        // the server (review 20.1, Major 3).
+        string workingDir = NewDir("arbiter-doctor-zcode-off");
+        WriteArbiterConfig(workingDir, enabled: false, timeoutMs: 3000);
+        WriteDoctorSourceWithArbiterOnlyToolchain(workingDir);
+        Directory.CreateDirectory(Path.Combine(workingDir, ".zcode"));
+
+        FakeProcessExecutor executor = new FakeProcessExecutor()
+            .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
+        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
+        SquadDoctorCommand command = new(
+            executor,
+            userPaths,
+            workingDirectory: workingDir,
+            globalRoots: new FixedDoctorRoot(Path.Combine(_temp.Path, "doctor-global-root")));
+
+        CommandExecution execution = Capture(() => command.Execute(
+            null!,
+            new SquadDoctorSettings { Path = workingDir, Global = false }));
+
+        Assert.Equal(0, execution.ExitCode);
+        Assert.DoesNotContain("kyber-weave-arbiter", execution.Output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Doctor_OnZcodeRepoWithArbiterEnabled_RequiresTheArbiterServer()
+    {
+        string workingDir = NewDir("arbiter-doctor-zcode-on");
+        WriteArbiterConfig(workingDir, enabled: true, timeoutMs: 3000);
+        WriteDoctorSourceWithArbiterOnlyToolchain(workingDir);
+        Directory.CreateDirectory(Path.Combine(workingDir, ".zcode"));
+        Directory.CreateDirectory(Path.Combine(_temp.Path, "doctor-global-root"));
+
+        string cliVersion = CliVersion();
+        FakeProcessExecutor executor = new FakeProcessExecutor()
+            .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n")
+            .WithProbeOutput("kyber-weave-arbiter", $"kyber-weave-arbiter {cliVersion}\n");
+        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
+        SquadDoctorCommand command = new(
+            executor,
+            userPaths,
+            workingDirectory: workingDir,
+            globalRoots: new FixedDoctorRoot(Path.Combine(_temp.Path, "doctor-global-root")));
+
+        CommandExecution execution = Capture(() => command.Execute(
+            null!,
+            new SquadDoctorSettings { Path = workingDir, Global = false }));
+
+        Assert.Equal(1, execution.ExitCode);
+        Assert.Contains("ZCode MCP servers not configured", execution.Output, StringComparison.Ordinal);
+        Assert.Contains("kyber-weave-arbiter", execution.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>Copies the Arbiter Squad fixture into the doctor's canonical-source
+    /// location with a toolchain declaring only the Arbiter server, and drops the
+    /// solution marker the pack-source locator keys on.</summary>
+    private static void WriteDoctorSourceWithArbiterOnlyToolchain(string workingDir)
+    {
+        using ArbiterSquadFixture fixture = ArbiterSquadFixture.Create();
+        string target = Path.Combine(workingDir, "products", "kyber-squad");
+        foreach (string sourceFile in Directory.GetFiles(fixture.Path, "*", SearchOption.AllDirectories))
+        {
+            string relative = Path.GetRelativePath(fixture.Path, sourceFile);
+            string destination = Path.Combine(target, relative);
+            Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+            File.Copy(sourceFile, destination);
+        }
+
+        File.WriteAllText(
+            Path.Combine(target, "toolchain.yml"),
+            "schema: kyber-squad.toolchain/v1\n" +
+            "required-features:\n" +
+            "  - agent-ir/v1\n" +
+            "required-mcp-tools:\n" +
+            "  kyber-weave-arbiter:\n" +
+            "    - arbiter_evaluate\n" +
+            "    - arbiter_rules\n" +
+            "    - arbiter_status\n" +
+            "validated-release: null\n",
+            Encoding.UTF8);
+        File.WriteAllText(Path.Combine(workingDir, "KyberWeave.sln"), string.Empty, Encoding.UTF8);
+    }
+
+    private sealed class FixedDoctorRoot(string root) : ISquadGlobalRootResolver
+    {
+        public string ResolveGlobalRoot(SquadTarget target) => root;
     }
 
     private static string CliVersion()

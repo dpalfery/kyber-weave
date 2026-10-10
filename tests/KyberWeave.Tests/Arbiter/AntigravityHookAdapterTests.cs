@@ -178,6 +178,20 @@ public sealed class AntigravityHookAdapterTests
     }
 
     [Fact]
+    public void DisabledArbiter_AnswersTheDocumentedAllowDocument_NotEmptyOutput()
+    {
+        // The adapter documents {} as the plain allow shape: with the Arbiter disabled
+        // the host still writes it instead of empty output, which Antigravity does not
+        // document as an allow (review 20.1, item d).
+        (int exit, string stdout, string log) =
+            Run(Fixture("pre-invoke-subagent.json"), null, new ScriptedEngine(), _ => DisabledConfig());
+
+        Assert.Equal(0, exit);
+        Assert.Equal("{}", stdout);
+        Assert.Contains("disabled", log, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void PreInvoke_CallIdFromConversationAndStep_AndCwdFromWorkspacePaths()
     {
         ContextualEngine engine = new();
@@ -302,7 +316,8 @@ public sealed class AntigravityHookAdapterTests
 
         Assert.Equal(0, exit);
         Assert.Equal([workspace.Path], roots);
-        Assert.Equal(string.Empty, stdout);
+        // Even disabled, Antigravity receives its documented allow document ({}).
+        Assert.Equal("{}", stdout);
         Assert.Contains("Arbiter is disabled", log, StringComparison.Ordinal);
     }
 

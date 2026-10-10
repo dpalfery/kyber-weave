@@ -39,10 +39,16 @@ public sealed record HookOutcome(
 /// <param name="RepoRoot">The repository root configuration is loaded from.</param>
 /// <param name="NewDecisionId">Builds the decision id carried by error envelopes.</param>
 /// <param name="Log">Diagnostics sink. Always stderr in production, never stdout.</param>
+/// <param name="ObservesReturns">Whether the serving harness observes sub-agent
+/// returns (task 16.9). The hook host copies it from the harness adapter, so
+/// <c>harness.observes-returns</c> always carries a value: true for every harness
+/// except the adapters that declare otherwise. Never null-by-absence — a missing
+/// fact must not silently disable an enforced rule.</param>
 public sealed record HookContext(
     string RepoRoot,
     Func<string> NewDecisionId,
-    TextWriter Log);
+    TextWriter Log,
+    bool ObservesReturns = true);
 
 /// <summary>The dispatch-gating decision behind a hook: later tasks replace the default
 /// allow-all engine with step-0/step-1 evaluation (the <c>serve</c>/<c>eval</c> entry
@@ -92,6 +98,15 @@ public interface IHarnessHookAdapter
     /// (Antigravity writes <c>{}</c> for every event, [F10]) must still write it here.
     /// </summary>
     string? AnswerWithoutConfig(JsonElement payload, string? renderedCaller) => null;
+
+    /// <summary>
+    /// The document the disabled-arbiter path answers with, or null when the harness
+    /// documents proceeding by writing nothing. Most harnesses fall silent on allow;
+    /// harnesses whose only documented output is a document (Antigravity, [F10]) must
+    /// write their allow shape here too, so a disabled Arbiter is indistinguishable
+    /// from an allowed one in that harness's own protocol.
+    /// </summary>
+    string? DisabledAllowDocument => null;
 
     /// <summary>Handles a classified event. Returns the exact stdout text:
     /// empty means proceed.</summary>

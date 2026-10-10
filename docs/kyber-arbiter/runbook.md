@@ -84,6 +84,12 @@ are recorded and reported by `audit` instead, and both targets record
 cannot observe returns, so `READY-001`'s completion check and `MODE-001`'s RED check
 answer `returns-unobservable` there, which allows and is logged; the in-flight overlap
 check still runs.
+Devin's dispatch target and prompt are read from `tool_input.profile` and
+`tool_input.prompt`. The vendor documents only that the tool "takes a profile", so those
+argument names rest on the undocumented fact F12. A `run_subagent` dispatch missing either
+is logged as unmarked, and `audit` reports it as `KW-ARB-AUDIT-002`, including when the
+target is absent: a Squad dispatch whose profile the harness did not send is still flagged.
+If Devin renames the arguments, every dispatch goes unmarked until the adapter is updated.
 `arbiter doctor` prints one informational line for each of copilot-cli, codex and cursor.
 
 ## The MCP fallback (Warp and ZCode)

@@ -54,6 +54,12 @@ public sealed class AntigravityHookAdapter : IHarnessHookAdapter
     /// </remarks>
     public bool ObservesReturns => false;
 
+    /// <summary>
+    /// The empty object is Antigravity's only documented allow: even with the Arbiter
+    /// disabled the host writes it, because empty output is not a documented answer.
+    /// </summary>
+    public string? DisabledAllowDocument => EmptyDocument();
+
     /// <inheritdoc/>
     public bool IsPassThrough(JsonElement payload, string? renderedCaller)
     {
