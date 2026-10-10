@@ -188,7 +188,10 @@ jobs:
           set -euo pipefail
           ./artifacts/cli-linux-x64/kyber-weave --help
           ./artifacts/mcp-linux-x64/kyber-weave-mcp --help || true
-          ./artifacts/arbiter-linux-x64/kyber-weave-arbiter --help || true
+          # The arbiter has no --help: its entry point treats anything but `hook` or
+          # `--version` as a usage error and exits 2, so `--help || true` proved nothing.
+          # --version is what it implements, and it exits 0.
+          ./artifacts/arbiter-linux-x64/kyber-weave-arbiter --version
 
       - name: Upload RID smoke artifacts
         if: always()
