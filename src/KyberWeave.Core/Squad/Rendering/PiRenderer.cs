@@ -411,6 +411,29 @@ public sealed class PiRenderer : ISquadRenderer
               args?: Record<string, unknown>;
             };
 
+            // JSON.parse accepts null, a bare string, an array and an object with no
+            // decision field, and the extension believed whatever came back: a document
+            // whose decision is not "block" is read as an allow. Only a plain object whose
+            // decision is exactly "allow" or "block" is a decision at all; anything else
+            // blocks, because a dispatch the host never approved must not pass.
+            function asDecision(parsed: unknown): ArbiterDecision {
+              if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+                return { decision: "block", reason: "kyber-arbiter: malformed arbiter decision" };
+              }
+              const candidate = parsed as { decision?: unknown; reason?: unknown; args?: unknown };
+              if (candidate.decision !== "allow" && candidate.decision !== "block") {
+                return { decision: "block", reason: "kyber-arbiter: malformed arbiter decision" };
+              }
+              const decision: ArbiterDecision = { decision: candidate.decision };
+              if (typeof candidate.reason === "string") {
+                decision.reason = candidate.reason;
+              }
+              if (typeof candidate.args === "object" && candidate.args !== null && !Array.isArray(candidate.args)) {
+                decision.args = candidate.args as Record<string, unknown>;
+              }
+              return decision;
+            }
+
             function runArbiterHook(envelope: unknown): ArbiterDecision {
               try {
                 const result = spawnSync("kyber-weave-arbiter", ["hook", "--harness", "pi"], {
@@ -428,7 +451,7 @@ public sealed class PiRenderer : ISquadRenderer
                 if (out.trim() === "") {
                   return { decision: "allow" };
                 }
-                return JSON.parse(out) as ArbiterDecision;
+                return asDecision(JSON.parse(out));
               } catch (err) {
                 return { decision: "block", reason: "kyber-arbiter: failed to run arbiter hook: " + String(err) };
               }

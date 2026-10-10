@@ -40,6 +40,14 @@ public sealed class ArbiterShimBehaviourTests : IDisposable
         { string.Empty, "2", Blocked },
         { "{\"decision\":\"allow\"}", "1", Blocked },
         { "this is not json", "0", Blocked },
+        // Well-formed JSON that is not a decision. `JSON.parse` accepts all of these
+        // and the shim believed whatever came back: a non-block decision is an allow,
+        // so a document the host never meant as an allow was read as one.
+        { "null", "0", Blocked },
+        { "\"x\"", "0", Blocked },
+        { "[]", "0", Blocked },
+        { "{}", "0", Blocked },
+        { "{\"decision\":\"maybe\"}", "0", Blocked },
     };
 
     [Theory]
