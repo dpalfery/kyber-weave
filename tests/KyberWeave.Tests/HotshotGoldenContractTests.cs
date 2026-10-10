@@ -58,27 +58,27 @@ public sealed partial class HotshotGoldenContractTests
     ];
 
     /// <summary>
-    /// Agents whose Copilot model values diverged from the Hotshot golden snapshot on 2026-09-14
-    /// per plan <c>docs/archive/plans/2026-09-14-pi-harness-target.md</c> §6b, decisions U10–U12 (owner-approved
-    /// model profile changes). Only the model field is allowed to diverge; all other fields
+    /// Agents whose Copilot model values diverge from the Hotshot golden snapshot through
+    /// operator-approved model profile changes. Only the model field is allowed to diverge; all other fields
     /// (description, body, tools, capability, delegation, aliases, invocation) must match the golden.
     /// </summary>
     private static readonly string[] ModelEvolvedAgentIdentities =
     [
         "azure-reader",       // fast: GPT-5.6 Luna → MAI-Code-1.1-Flash (copilot)
-        "code-reviewer",      // reviewer: Grok 4.5 → Kimi K2.7 Code (copilot)
+        "bug-crusher-investigator", // deep-planning: GPT-5.6 Sol → GPT-6.1 Sol (copilot)
+        "code-reviewer",      // reviewer: Grok 4.5 → Grok 4.7 (copilot)
         "csharp-dev",         // fast: GPT-5.6 Luna → MAI-Code-1.1-Flash (copilot)
-        "dal-dev",            // general: Grok 4.5 → Grok 4.6 (copilot)
+        "dal-dev",            // general: Grok 4.5 → Claude Haiku 5.5 (copilot)
         "docs-dev",           // fast: GPT-5.6 Luna → MAI-Code-1.1-Flash (copilot)
-        "github-devops",      // general: Grok 4.5 → Grok 4.6 (copilot)
+        "github-devops",      // general: Grok 4.5 → Claude Haiku 5.5 (copilot)
         "maui-dev",           // fast: GPT-5.6 Luna → MAI-Code-1.1-Flash (copilot)
-        "pulumi-dev",         // general: Grok 4.5 → Grok 4.6 (copilot)
+        "pulumi-dev",         // general: Grok 4.5 → Claude Haiku 5.5 (copilot)
         "python-dev",         // fast: GPT-5.6 Luna → MAI-Code-1.1-Flash (copilot)
         "react-dev",          // fast: GPT-5.6 Luna → MAI-Code-1.1-Flash (copilot)
         "research-agent",     // fast: GPT-5.6 Luna → MAI-Code-1.1-Flash (copilot)
-        "review-lens",        // reviewer: Grok 4.5 → Kimi K2.7 Code (copilot)
-        "review-triage",      // reviewer: GPT-5.6 Luna → Kimi K2.7 Code (copilot)
-        "tauri-dev"           // general: Grok 4.5 → Grok 4.6 (copilot)
+        "review-lens",        // reviewer: Grok 4.5 → Grok 4.7 (copilot)
+        "review-triage",      // reviewer: GPT-5.6 Luna → Grok 4.7 (copilot)
+        "tauri-dev"           // general: Grok 4.5 → Claude Haiku 5.5 (copilot)
     ];
 
     private static readonly string[] EvolvedSkillIdentities =

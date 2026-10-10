@@ -547,15 +547,12 @@ public sealed class ClaudeRendererContractTests : IDisposable
     }
 
     /// <summary>
-    /// Pins the Claude model of the <c>fast</c>-profile authoring workers by value. On
-    /// <c>haiku</c>, <c>test-dev</c> twice returned a red contract whose tests passed vacuously
-    /// or failed for the wrong reason, and <c>docs-dev</c> described <c>squad update</c> as
-    /// comparing against canonical bytes rather than the receipt.
+    /// Pins the operator-selected Haiku 5.5 model for Claude's fast authoring workers.
     /// </summary>
     [Theory]
     [InlineData("test-dev")]
     [InlineData("docs-dev")]
-    public async Task RenderAsync_Claude_FastProfileWorkersRunOnSonnet(string agent)
+    public async Task RenderAsync_Claude_FastProfileWorkersRunOnHaiku55(string agent)
     {
         SquadRendererRegistry registry = new([new ClaudeRenderer()]);
         SquadRenderRequest request = new(
@@ -572,7 +569,7 @@ public sealed class ClaudeRendererContractTests : IDisposable
         (YamlMappingNode frontmatter, _) = SplitFrontmatter(
             Encoding.UTF8.GetString(file.Content.Span),
             agent);
-        Assert.Equal("sonnet", RequireScalar(frontmatter, "model", agent));
+        Assert.Equal("claude-haiku-5-5", RequireScalar(frontmatter, "model", agent));
     }
 
     /// <summary>
@@ -601,16 +598,14 @@ public sealed class ClaudeRendererContractTests : IDisposable
     }
 
     /// <summary>
-    /// Pins the Claude model of the <c>general</c>-profile workers by value (issue #286).
-    /// When <c>general.claude</c> is raised from <c>haiku</c> to <c>sonnet</c>, these agents
-    /// execute on Sonnet without leaking the architect profile.
+    /// Pins Sonnet 5.5 for Claude's general workers without changing planning membership.
     /// </summary>
     [Theory]
     [InlineData("dal-dev")]
     [InlineData("github-devops")]
     [InlineData("pulumi-dev")]
     [InlineData("tauri-dev")]
-    public async Task RenderAsync_Claude_GeneralProfileWorkersRunOnSonnet(string agent)
+    public async Task RenderAsync_Claude_GeneralProfileWorkersRunOnSonnet55(string agent)
     {
         SquadRendererRegistry registry = new([new ClaudeRenderer()]);
         SquadRenderRequest request = new(
@@ -627,14 +622,14 @@ public sealed class ClaudeRendererContractTests : IDisposable
         (YamlMappingNode frontmatter, _) = SplitFrontmatter(
             Encoding.UTF8.GetString(file.Content.Span),
             agent);
-        Assert.Equal("sonnet", RequireScalar(frontmatter, "model", agent));
+        Assert.Equal("claude-sonnet-5-5", RequireScalar(frontmatter, "model", agent));
     }
 
     /// <summary>
-    /// Asserts that no agent in the rendered Claude squad uses <c>haiku</c> (issue #286).
+    /// Confines Haiku 5.5 to Claude's fast workers and verifies every fast worker gets that pin.
     /// </summary>
     [Fact]
-    public async Task RenderAsync_Claude_NoAgentRunsOnHaiku()
+    public async Task RenderAsync_Claude_OnlyFastWorkersRunOnHaiku55()
     {
         SquadRendererRegistry registry = new([new ClaudeRenderer()]);
         SquadRenderRequest request = new(
@@ -645,10 +640,23 @@ public sealed class ClaudeRendererContractTests : IDisposable
         SquadRenderResult result = await registry.RenderAsync(request);
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
-        IEnumerable<SquadDeploymentFile> agentFiles = result.Files
+        HashSet<string> fastAgentPaths = new(StringComparer.Ordinal)
+        {
+            ".claude/agents/azure-reader.md",
+            ".claude/agents/csharp-dev.md",
+            ".claude/agents/docs-dev.md",
+            ".claude/agents/maui-dev.md",
+            ".claude/agents/python-dev.md",
+            ".claude/agents/react-dev.md",
+            ".claude/agents/research-agent.md",
+            ".claude/agents/test-dev.md"
+        };
+        SquadDeploymentFile[] agentFiles = result.Files
             .Where(f => f.RelativePath.StartsWith(".claude/agents/", StringComparison.Ordinal)
                 && f.RelativePath.EndsWith(".md", StringComparison.Ordinal)
-                && f.RelativePath.Count(c => c == '/') == 2);
+                && f.RelativePath.Count(c => c == '/') == 2)
+            .ToArray();
+        Assert.Equal(fastAgentPaths.Count, agentFiles.Count(file => fastAgentPaths.Contains(file.RelativePath)));
 
         foreach (SquadDeploymentFile file in agentFiles)
         {
@@ -656,9 +664,14 @@ public sealed class ClaudeRendererContractTests : IDisposable
                 Encoding.UTF8.GetString(file.Content.Span),
                 file.RelativePath);
             string model = RequireScalar(frontmatter, "model", file.RelativePath);
-            Assert.False(
-                model.Contains("haiku", StringComparison.OrdinalIgnoreCase),
-                $"Agent '{file.RelativePath}' in Claude render unexpectedly has model '{model}'.");
+            if (fastAgentPaths.Contains(file.RelativePath))
+            {
+                Assert.Equal("claude-haiku-5-5", model);
+            }
+            else
+            {
+                Assert.DoesNotContain("haiku", model, StringComparison.OrdinalIgnoreCase);
+            }
         }
     }
 
