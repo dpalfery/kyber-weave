@@ -5,8 +5,11 @@ using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Credentials;
 using KyberWeave.Core.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 
 if (args.Length > 0 && string.Equals(args[0], "serve", StringComparison.Ordinal))
@@ -69,6 +72,16 @@ static async Task<int> ServeAsync(string[] args)
         .AddMcpServer()
         .WithStdioServerTransport()
         .WithTools<ArbiterTools>();
+
+    // The stdio extension supplies the hosting, and its ITransport is swapped for one
+    // that still answers requests read before stdin closed, which the SDK transport
+    // silently drops (see DrainingStreamServerTransport). The SDK's factory is replaced
+    // before anything resolves it, so its transport is never constructed and never
+    // starts reading stdin.
+    builder.Services.Replace(ServiceDescriptor.Singleton<ITransport>(services =>
+        DrainingStreamServerTransport.ForStandardStreams(
+            services.GetRequiredService<IOptions<McpServerOptions>>().Value.ServerInfo?.Name ?? "kyber-weave-arbiter",
+            services.GetService<ILoggerFactory>())));
 
     await builder.Build().RunAsync().ConfigureAwait(false);
     return 0;

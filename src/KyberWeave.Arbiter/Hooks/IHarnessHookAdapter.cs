@@ -77,6 +77,22 @@ public interface IHarnessHookAdapter
     /// the host returns before <c>.kyber-weave/kyber-weave.yml</c> is loaded.</summary>
     bool IsPassThrough(JsonElement payload, string? renderedCaller);
 
+    /// <summary>The repository root this harness's payload names, or null when it
+    /// carries none. The host prefers it over the payload's <c>cwd</c> and the process
+    /// directory, so configuration loads from the workspace the event belongs to:
+    /// Antigravity names it in <c>workspacePaths[0]</c> ([F10]) and has no
+    /// <c>cwd</c> at all.</summary>
+    string? RepoRootOf(JsonElement payload) => null;
+
+    /// <summary>
+    /// The document an event is answered with before configuration is loaded, or null
+    /// when the event must go down the classified path. Must not touch configuration.
+    /// Separate from <see cref="IsPassThrough"/> because most harnesses signal allow by
+    /// writing nothing, while harnesses whose only documented output is a document
+    /// (Antigravity writes <c>{}</c> for every event, [F10]) must still write it here.
+    /// </summary>
+    string? AnswerWithoutConfig(JsonElement payload, string? renderedCaller) => null;
+
     /// <summary>Handles a classified event. Returns the exact stdout text:
     /// empty means proceed.</summary>
     string Handle(

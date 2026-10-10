@@ -63,6 +63,25 @@ public sealed class AntigravityHookAdapter : IHarnessHookAdapter
     }
 
     /// <inheritdoc/>
+    public string? RepoRootOf(JsonElement payload) => WorkspaceOf(payload);
+
+    /// <inheritdoc/>
+    public string? AnswerWithoutConfig(JsonElement payload, string? renderedCaller)
+    {
+        _ = renderedCaller;
+        string? eventName = GetString(payload, "hook_event_name");
+        bool classified = string.Equals(eventName, "PreToolUse", StringComparison.Ordinal)
+            || string.Equals(eventName, "PostToolUse", StringComparison.Ordinal);
+
+        // A non-dispatch event is answered exactly as Handle answers it, only earlier:
+        // the rendered matcher limits events to invoke_subagent, so anything else here
+        // arrives through misconfiguration and must not force a configuration load.
+        // Events outside the two known event names still take the classified path, so
+        // an unknown name keeps failing closed.
+        return classified && !IsDispatchTool(ToolNameOf(payload)) ? EmptyDocument() : null;
+    }
+
+    /// <inheritdoc/>
     public string Handle(
         JsonElement payload,
         string rawJson,

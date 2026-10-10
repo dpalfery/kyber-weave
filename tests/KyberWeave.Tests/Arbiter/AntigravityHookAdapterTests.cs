@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Arbiter.Hooks.Adapters;
 using KyberWeave.Core.Arbiter;
@@ -107,6 +108,9 @@ public sealed class AntigravityHookAdapterTests
 
     private static KyberWeaveConfig EnabledConfig() =>
         new() { Arbiter = new ArbiterConfig { Enabled = true } };
+
+    private static KyberWeaveConfig DisabledConfig() =>
+        new() { Arbiter = new ArbiterConfig { Enabled = false } };
 
     private static string Fixture(string name) =>
         File.ReadAllText(Path.Combine(
@@ -226,6 +230,123 @@ public sealed class AntigravityHookAdapterTests
         Assert.Contains(HookCommand.FailClosedCode, reason, StringComparison.Ordinal);
         Assert.Contains("ANSWER: error", reason, StringComparison.Ordinal);
         Assert.StartsWith("STATUS: ARBITER_ESCALATION", reason, StringComparison.Ordinal);
+    }
+
+    private static string Payload(string eventName, string tool, string workspace, string? cwd = null)
+    {
+        JsonObject payload = new()
+        {
+            ["hook_event_name"] = eventName,
+            ["toolCall"] = new JsonObject
+            {
+                ["name"] = tool,
+                ["args"] = new JsonObject
+                {
+                    ["Subagents"] = new JsonArray(new JsonObject
+                    {
+                        ["TypeName"] = "csharp-dev",
+                        ["Prompt"] = "Implement the change.",
+                    }),
+                },
+            },
+            ["stepIdx"] = 1,
+            ["conversationId"] = "conv-workspace-1",
+            ["workspacePaths"] = new JsonArray(workspace),
+            ["transcriptPath"] = "/repo/.antigravity/transcript.json",
+            ["modelName"] = "antigravity-test-model",
+        };
+        if (cwd is not null)
+        {
+            payload["cwd"] = cwd;
+        }
+
+        return payload.ToJsonString();
+    }
+
+    private static (int Exit, string Stdout, string Log) RunWithLoader(
+        string stdin,
+        Func<string, KyberWeaveConfig> loader)
+    {
+        HookCommand command = new(
+            HarnessAdapterRegistry.CreateDefault(new ScriptedEngine()),
+            loader,
+            () => "decision-test-1");
+        using StringWriter stdout = new();
+        using StringWriter log = new();
+        int exit = command.Run(AntigravityHookAdapter.Token, null, stdin, stdout, log);
+        return (exit, stdout.ToString(), log.ToString());
+    }
+
+    // The workspace config is the only one the loader accepts: any other root (the
+    // process directory, a payload cwd) fails the load exactly as a directory without
+    // host configuration would, so a fix that loads from anywhere else cannot pass.
+    [Fact]
+    public void Hook_WorkspaceSuppliesRepoRoot_LoadsTheWorkspaceConfig()
+    {
+        using TempDirectory workspace = new();
+        Directory.CreateDirectory(System.IO.Path.Combine(workspace.Path, ".kyber-weave"));
+        File.WriteAllText(
+            System.IO.Path.Combine(workspace.Path, ".kyber-weave", "kyber-weave.yml"),
+            "arbiter:\n  enabled: false\n");
+
+        List<string> roots = [];
+        (int exit, string stdout, string log) = RunWithLoader(
+            Payload("PreToolUse", "invoke_subagent", workspace.Path),
+            root =>
+            {
+                roots.Add(root);
+                return string.Equals(root, workspace.Path, StringComparison.Ordinal)
+                    ? DisabledConfig()
+                    : throw new InvalidOperationException($"no host configuration at '{root}'");
+            });
+
+        Assert.Equal(0, exit);
+        Assert.Equal([workspace.Path], roots);
+        Assert.Equal(string.Empty, stdout);
+        Assert.Contains("Arbiter is disabled", log, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Hook_WorkspaceTakesPrecedenceOverThePayloadCwd()
+    {
+        using TempDirectory workspace = new();
+        using TempDirectory cwdDirectory = new();
+        Directory.CreateDirectory(System.IO.Path.Combine(workspace.Path, ".kyber-weave"));
+        File.WriteAllText(
+            System.IO.Path.Combine(workspace.Path, ".kyber-weave", "kyber-weave.yml"),
+            "arbiter:\n  enabled: false\n");
+
+        List<string> roots = [];
+        (int exit, _, string log) = RunWithLoader(
+            Payload("PreToolUse", "invoke_subagent", workspace.Path, cwd: cwdDirectory.Path),
+            root =>
+            {
+                roots.Add(root);
+                return string.Equals(root, workspace.Path, StringComparison.Ordinal)
+                    ? DisabledConfig()
+                    : throw new InvalidOperationException($"no host configuration at '{root}'");
+            });
+
+        Assert.Equal(0, exit);
+        Assert.Equal([workspace.Path], roots);
+        Assert.Contains("Arbiter is disabled", log, StringComparison.Ordinal);
+    }
+
+    // [F10]: the only documented output is `{}`, so a non-dispatch event must be
+    // answered with it before the host loads configuration — a misconfigured matcher
+    // must not force a config load, and silence is not an Antigravity allow.
+    [Fact]
+    public void Hook_NonDispatchEvent_AnswersEmptyDocumentBeforeConfigLoad()
+    {
+        int loads = 0;
+
+        (int exit, string stdout, _) = RunWithLoader(
+            Payload("PreToolUse", "view_file", "/repo"),
+            root => { loads++; return EnabledConfig(); });
+
+        Assert.Equal(0, exit);
+        Assert.Equal("{}", stdout);
+        Assert.Equal(0, loads);
     }
 
     [Fact]

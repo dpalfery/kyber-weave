@@ -131,6 +131,13 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine
         string? sessionId)
     {
         string? resolved = string.IsNullOrWhiteSpace(caller) || IsUnidentified(caller) ? null : caller;
+
+        // A serve event arrives with no harness hook: the whole event is the MCP
+        // client's assertion (design 'Fact labels': derived vs asserted, R7), so a
+        // caller it names records as asserted. A hook event keeps the harness label —
+        // there the caller is what the harness payload itself reported.
+        bool asserted = resolved is not null
+            && string.Equals(harness, ArbiterServeToken.Harness, StringComparison.Ordinal);
         string repoRoot = context.RepoRoot;
         string arbiterDirectory = Path.Combine(repoRoot, "artifacts", "arbiter");
         KyberWeaveConfig effective;
@@ -161,9 +168,12 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine
                 Harness = harness,
                 Phase = isPost ? "post" : "pre",
                 Caller = resolved,
-                CallerSource = resolved is null ? ArbiterCallerSources.None : ArbiterCallerSources.Harness,
-                HarnessCaller = resolved,
-                RenderedCaller = resolved,
+                CallerSource = resolved is null
+                    ? ArbiterCallerSources.None
+                    : asserted ? ArbiterCallerSources.Asserted : ArbiterCallerSources.Harness,
+                HarnessCaller = asserted ? null : resolved,
+                RenderedCaller = asserted ? null : resolved,
+                AssertedCaller = asserted ? resolved : null,
                 Target = target,
                 Prompt = prompt,
                 ToolCallId = toolCallId,
