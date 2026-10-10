@@ -169,7 +169,11 @@ public static class ReadGuard
 
         foreach (string dir in protectedDirs)
         {
-            if (IsInside(relative, dir))
+            // Both directions, as the bare-pattern Glob branch already does. A search or a
+            // glob rooted at "." or "docs" sweeps the planning directories on the way down,
+            // so only checking "is the path inside a protected directory" let the whole
+            // corpus be searched through a single ancestor.
+            if (IsInside(relative, dir) || IsInside(dir, relative))
             {
                 return Deny(toolName, value, dir);
             }
@@ -272,6 +276,9 @@ public static class ReadGuard
 
     private static bool IsInside(string path, string dir) =>
         string.Equals(path, dir, StringComparison.Ordinal)
+        // The repository root normalises to an empty path and contains every protected
+        // directory, so it has to read as a parent of them all.
+        || dir.Length == 0
         || path.StartsWith(dir + "/", StringComparison.Ordinal);
 
     private static string DirectoryOf(string? path)

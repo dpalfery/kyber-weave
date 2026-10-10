@@ -229,6 +229,32 @@ public sealed class ArbiterReadGuardTests
         Assert.True(result.Allowed);
     }
 
+    [Theory]
+    // A search rooted above a protected directory covers it, so searching "." or "docs"
+    // reaches the planning paths just as surely as naming one. Only the inward direction
+    // was checked, so those searches were allowed.
+    [InlineData("Grep", """{"path": ".", "pattern": "KW-ARB"}""")]
+    [InlineData("Grep", """{"path": "docs", "pattern": "KW-ARB"}""")]
+    [InlineData("Grep", """{"path": "./", "pattern": "KW-ARB"}""")]
+    [InlineData("Glob", """{"path": "docs", "pattern": "plans/**"}""")]
+    public void Check_SearchRootedAboveAProtectedDirectory_Denies(string tool, string input)
+    {
+        ReadGuardResult result = ReadGuard.Check(tool, ToolInput(input), "/repo", ProtectedDirs);
+
+        Assert.False(result.Allowed);
+        Assert.Contains("Req 25", result.Reason ?? string.Empty, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("Grep", """{"path": "src", "pattern": "KW-ARB"}""")]
+    [InlineData("Glob", """{"path": "src/KyberWeave.Core", "pattern": "*.cs"}""")]
+    public void Check_SearchOutsideEveryProtectedDirectory_Allows(string tool, string input)
+    {
+        ReadGuardResult result = ReadGuard.Check(tool, ToolInput(input), "/repo", ProtectedDirs);
+
+        Assert.True(result.Allowed);
+    }
+
     [Fact]
     public void Check_WithoutProtectedDirs_AllowsEverything()
     {
