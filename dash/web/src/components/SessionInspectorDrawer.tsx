@@ -640,6 +640,27 @@ function ToolDefinitionCards({ definitions }: { definitions: unknown[] }) {
  * and array order is never touched.
  */
 export function TurnContentSections({ content }: { content: unknown }) {
+  // The serialized API cannot distinguish an own undefined from a missing
+  // key without a separate presence bit, so undefined counts as absent at
+  // this component boundary. Every other explicit top-level value renders
+  // visibly so missing data is never confused with an explicit value.
+  if (content === undefined) return null
+  if (content === null) {
+    return (
+      <div className="space-y-2" data-testid="turn-content-sections">
+        <section data-testid="turn-content-section-content">
+          <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
+            Turn content
+          </h4>
+          <div className="rounded border border-border bg-card p-3 overflow-hidden">
+            <span className="text-xs font-mono text-foreground" data-testid="explicit-null-value">
+              null
+            </span>
+          </div>
+        </section>
+      </div>
+    )
+  }
   if (typeof content === 'string') {
     if (content === '') {
       return (
@@ -670,7 +691,39 @@ export function TurnContentSections({ content }: { content: unknown }) {
       </div>
     )
   }
+  // Booleans, numbers, and arrays render through the key-value view so the
+  // full value survives: scalars via their string form, arrays in order,
+  // and an empty array as the distinct "empty list" marker.
+  if (typeof content === 'boolean' || typeof content === 'number' || Array.isArray(content)) {
+    return (
+      <div className="space-y-2" data-testid="turn-content-sections">
+        <section data-testid="turn-content-section-content">
+          <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
+            Turn content
+          </h4>
+          <div className="rounded border border-border bg-card p-3 overflow-hidden">
+            <KeyValueList data={content} />
+          </div>
+        </section>
+      </div>
+    )
+  }
   if (!isRecord(content)) return null
+  // An explicitly empty object is a value, not absent data.
+  if (Object.keys(content).length === 0) {
+    return (
+      <div className="space-y-2" data-testid="turn-content-sections">
+        <section data-testid="turn-content-section-content">
+          <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
+            Turn content
+          </h4>
+          <div className="rounded border border-border bg-card p-3 overflow-hidden">
+            <KeyValueList data={content} />
+          </div>
+        </section>
+      </div>
+    )
+  }
   // Every own key counts as present: null, '', false, 0, and undefined
   // are explicit values with visible markers below. Only a key that is not
   // present at all is absent.

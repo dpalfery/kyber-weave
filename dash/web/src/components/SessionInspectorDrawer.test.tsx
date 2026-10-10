@@ -1062,7 +1062,12 @@ describe('SessionInspectorDrawer: Copilot turn readability', () => {
   it('renders nothing only for absent buckets; explicit empty values get markers', () => {
     // Message-only keys stay rendered elsewhere, so no sections here.
     expect(renderHtml(React.createElement(TurnContentSections, { content: { prompt_text: 'x' } }))).toBe('')
-    expect(renderHtml(React.createElement(TurnContentSections, { content: null }))).toBe('')
+    // Absent top-level content renders nothing; explicit null renders visibly.
+    expect(renderHtml(React.createElement(TurnContentSections, { content: undefined }))).toBe('')
+    const nullHtml = renderHtml(React.createElement(TurnContentSections, { content: null }))
+    expect(nullHtml).toContain('data-testid="turn-content-sections"')
+    expect(nullHtml).toContain('data-testid="explicit-null-value"')
+    expect(nullHtml).toContain('>null<')
     // A whole empty-string content value is explicit: show a marker section.
     const emptyContentHtml = renderHtml(React.createElement(TurnContentSections, { content: '' }))
     expect(emptyContentHtml).toContain('data-testid="turn-content-sections"')
@@ -1111,5 +1116,42 @@ describe('SessionInspectorDrawer: Copilot turn readability', () => {
     expect(html).toContain('empty object')
     expect(html).not.toContain('explicit-null-value')
     expect(html).not.toContain('empty-string-value')
+  })
+
+  it('preserves explicit top-level values instead of dropping them', () => {
+    // Explicit top-level null stays visible as "null".
+    const nullHtml = renderHtml(React.createElement(TurnContentSections, { content: null }))
+    expect(nullHtml).toContain('data-testid="turn-content-sections"')
+    expect(nullHtml).toContain('data-testid="turn-content-section-content"')
+    expect(nullHtml).toContain('data-testid="explicit-null-value"')
+    expect(nullHtml).toContain('>null<')
+
+    // An explicitly empty object stays visible as "empty object".
+    const emptyObjectHtml = renderHtml(React.createElement(TurnContentSections, { content: {} }))
+    expect(emptyObjectHtml).toContain('data-testid="turn-content-sections"')
+    expect(emptyObjectHtml).toContain('empty object')
+
+    // Top-level scalars keep their full value.
+    const falseHtml = renderHtml(React.createElement(TurnContentSections, { content: false }))
+    expect(falseHtml).toContain('data-testid="turn-content-sections"')
+    expect(falseHtml).toContain('false')
+    const zeroHtml = renderHtml(React.createElement(TurnContentSections, { content: 0 }))
+    expect(zeroHtml).toContain('data-testid="turn-content-sections"')
+    expect(zeroHtml).toContain('>0<')
+
+    // Arrays keep order; an empty array stays distinct as "empty list".
+    const arrayHtml = renderHtml(
+      React.createElement(TurnContentSections, { content: ['zeta', 'alpha'] })
+    )
+    expect(arrayHtml).toContain('data-testid="turn-content-sections"')
+    expect(arrayHtml).toContain('zeta')
+    expect(arrayHtml).toContain('alpha')
+    expect(arrayHtml.indexOf('zeta')).toBeLessThan(arrayHtml.indexOf('alpha'))
+    const emptyArrayHtml = renderHtml(React.createElement(TurnContentSections, { content: [] }))
+    expect(emptyArrayHtml).toContain('data-testid="turn-content-sections"')
+    expect(emptyArrayHtml).toContain('empty list')
+
+    // Undefined is absent at this component boundary: nothing renders.
+    expect(renderHtml(React.createElement(TurnContentSections, { content: undefined }))).toBe('')
   })
 })
