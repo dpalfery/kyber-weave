@@ -419,28 +419,63 @@ export function App({ initialPage = 'context-doctor', initialPath, initialNotFou
   return (
     <div className="min-h-screen bg-outer-background p-2.5 max-md:min-h-[100dvh]">
       <div className="flex h-[calc(100vh-20px)] flex-col gap-2.5 max-md:h-[calc(100dvh-20px)]">
-        <header className="flex h-12 shrink-0 items-center gap-4 rounded-md border border-border bg-card px-5 shadow-[0_2px_8px_rgba(0,0,0,0.03)] dark:shadow-[0_2px_8px_rgba(0,0,0,0.5)] max-md:gap-3 max-md:px-3">
-          <button
-            type="button"
-            onClick={() => setSidebarOpen(true)}
-            aria-label="Open menu"
-            aria-expanded={sidebarOpen}
-            aria-controls="dashboard-sidebar"
-            className="-ml-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-foreground transition-colors hover:bg-interactive-secondary md:hidden"
-          >
-            <svg viewBox="0 0 16 16" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
-              <path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11" />
-            </svg>
-          </button>
-          <div className="flex items-center gap-2 max-md:shrink-0">
-            <LightsaberLogo className="h-6 w-6" />
-            <span className="text-lg font-semibold tracking-[-0.02em] text-foreground">
-              kyber<span className="text-primary">Dash</span>
-            </span>
-            <span className="ml-1 text-[11px] font-light uppercase tracking-[0.14em] text-tertiary-foreground max-sm:hidden">telemetry</span>
+        {/*
+          One top navigation, laid out for the width in front of it.
+
+          The header was one fixed 48px row, and the operator tools do not fit
+          into 48px of a phone-width viewport: the action group was a scrollable
+          strip that put Status and Maintenance past the right edge, and squeezed
+          to a tablet width it split those two onto separate lines inside a row
+          with no height left to give them. Below the wide breakpoint the row
+          wraps instead — the mark and the action group share the first row, and
+          the navigation becomes a full-width row beneath them that scrolls
+          sideways rather than widening the page. At and above the breakpoint the
+          same three children sit on the one 48px row as before.
+
+          It is one header and one navigation in both layouts: only the placement
+          changes, so nothing is duplicated to make room, and the header is padded
+          rather than fixed-height so neither row can be clipped by the other.
+        */}
+        <header
+          data-testid="app-header"
+          className="flex shrink-0 flex-wrap items-center gap-x-2 gap-y-2 rounded-md border border-border bg-card px-2 py-2 shadow-[0_2px_8px_rgba(0,0,0,0.03)] dark:shadow-[0_2px_8px_rgba(0,0,0,0.5)] sm:gap-x-4 sm:px-4 lg:h-12 lg:flex-nowrap lg:px-5 lg:py-0"
+        >
+          <div className="flex min-w-0 items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setSidebarOpen(true)}
+              aria-label="Open menu"
+              aria-expanded={sidebarOpen}
+              aria-controls="dashboard-sidebar"
+              className="-ml-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-foreground transition-colors hover:bg-interactive-secondary md:hidden"
+            >
+              <svg viewBox="0 0 16 16" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
+                <path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11" />
+              </svg>
+            </button>
+            <div className="flex min-w-0 items-center gap-2">
+              <LightsaberLogo className="h-6 w-6 shrink-0" />
+              {/* Below the small breakpoint the mark carries the brand on its own.
+                  Both operator tools, the menu and the mark together need more
+                  width than a 375px viewport has, and the wordmark is the one
+                  piece of this row that may give way: it is the part that is
+                  decoration rather than a control. The logo keeps its
+                  accessible name, and from `sm` up there is room for the word. */}
+              <span className="max-sm:hidden truncate text-lg font-semibold tracking-[-0.02em] text-foreground">
+                kyber<span className="text-primary">Dash</span>
+              </span>
+              <span className="ml-1 shrink-0 text-[11px] font-light uppercase tracking-[0.14em] text-tertiary-foreground max-sm:hidden">telemetry</span>
+            </div>
           </div>
 
-          <div className="ml-6 flex rounded-md border border-border bg-interactive-secondary p-0.5 max-md:ml-2 max-md:shrink-0" data-testid="nav-tabs">
+          {/* The navigation row: last on the wrapped layout, in place on the wide
+              one. `basis-full` gives it a row of its own, `min-w-0` lets it
+              scroll inside that row rather than widening the page, and each tab
+              keeps its own width rather than wrapping to a second line. */}
+          <div
+            className="flex min-w-0 items-center overflow-x-auto rounded-md border border-border bg-interactive-secondary p-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden max-lg:order-last max-lg:basis-full lg:order-none lg:ml-6 lg:basis-auto"
+            data-testid="nav-tabs"
+          >
             {NAV_TABS.map((pg) => (
               <button
                 key={pg.key}
@@ -455,7 +490,7 @@ export function App({ initialPage = 'context-doctor', initialPath, initialNotFou
                   else goHeader({ level: 'problems' })
                 }}
                 className={cn(
-                  'rounded-[5px] px-3 py-1 text-xs font-medium transition-colors',
+                  'shrink-0 whitespace-nowrap rounded-[5px] px-3 py-1 text-xs font-medium transition-colors',
                   section === pg.key ? 'bg-active-primary text-foreground shadow-sm' : 'text-tertiary-foreground hover:text-foreground',
                 )}
               >
@@ -464,9 +499,12 @@ export function App({ initialPage = 'context-doctor', initialPath, initialNotFou
             ))}
           </div>
 
-          <div className="ml-auto flex items-center gap-2 max-md:min-w-0 max-md:overflow-x-auto max-md:[-ms-overflow-style:none] max-md:[scrollbar-width:none] max-md:[&::-webkit-scrollbar]:hidden" data-testid="header-actions">
-            {/* Right-aligned action group: the status/maintenance panels, then the
-                theme toggle, so the panels never displace the navigation. */}
+          {/* Right-aligned action group: the status/maintenance panels, then the
+              theme toggle, so the panels never displace the navigation. It is
+              never compressed (a squeezed group wraps Status and Maintenance onto
+              two lines) and never scrolled (a scrolled group puts them past the
+              edge of the screen) — the navigation row is what gives way instead. */}
+          <div className="ml-auto flex shrink-0 items-center gap-2" data-testid="header-actions">
             <DashboardTools />
             <ThemeToggle />
           </div>

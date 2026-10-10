@@ -1,13 +1,13 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import * as React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
-// PI owns the maintenance panels; the shell only decides where they mount.
-// Mocked here so this suite asserts the shell, not the panels' data fetching.
-vi.mock('./components/maintenance/DashboardTools', () => ({
-  DashboardTools: () => <div data-testid="dashboard-tools" />,
-}))
+// No DashboardTools mock: PI's panels are mounted for real, because this suite
+// asserts where the operator tools sit in the shell. It renders its two
+// triggers and only queries once a panel is opened, so mounting it costs no
+// data fetching — and a stubbed empty div could never have shown a tool that a
+// responsive header squeezed out of the group.
 
 import {
   App,
@@ -148,17 +148,97 @@ describe('App: Top Navigation Refactoring', () => {
     expect((html.match(/data-testid="harness-selector"/g) ?? [])).toHaveLength(1)
   })
 
-  it('mounts the dashboard tools beside the theme toggle in the header action group', () => {
+  it('mounts one header action group and one navigation row, in either layout', () => {
     const qc = createTestQueryClient()
     const html = renderHtml(
       <QueryClientProvider client={qc}>
         <App initialPage="context-doctor" />
       </QueryClientProvider>
     )
-    const actions = html.match(/<div[^>]*data-testid="header-actions"[^>]*>([\s\S]*?)<\/div>\s*<\/header>/)?.[1]
-    expect(actions, 'header must render a right-aligned action group').toBeDefined()
-    expect(actions).toContain('data-testid="dashboard-tools"')
-    expect(actions).toContain('aria-label="Switch to')
+
+    // Below the wide breakpoint the navigation is a second header row rather
+    // than a second set of tabs, so neither group may be duplicated to make
+    // room: one action group, one navigation row, one harness scope.
+    expect((html.match(/data-testid="header-actions"/g) ?? [])).toHaveLength(1)
+    expect((html.match(/data-testid="nav-tabs"/g) ?? [])).toHaveLength(1)
+
+    // Both operator tools and the theme toggle are in the shell. The trigger
+    // labels are asserted because a responsive header that drops or collapses
+    // one of them is the defect this guards, not a detail.
+    expect(html).toContain('data-testid="dashboard-tools-status-button"')
+    expect(html).toContain('data-testid="dashboard-tools-maintenance-button"')
+    expect(html).toContain('aria-label="Switch to')
+  })
+
+  it('gives the header two rows below the wide breakpoint and one row at or above it', () => {
+    const qc = createTestQueryClient()
+    const html = renderHtml(
+      <QueryClientProvider client={qc}>
+        <App initialPage="context-doctor" />
+      </QueryClientProvider>
+    )
+    const header = html.match(/<header[^>]*data-testid="app-header"[^>]*>/)?.[0]
+    expect(header, 'the shell renders one header').toBeDefined()
+
+    // Below the breakpoint the row wraps, so the navigation moves to a row of
+    // its own; the header is padded rather than fixed-height, because a fixed
+    // 48px is what clipped the two rows into each other at 768.
+    expect(header).toContain('flex-wrap')
+    expect(header).toContain('py-2')
+
+    // At and above the wide breakpoint the same children are one 48px row.
+    expect(header).toContain('lg:flex-nowrap')
+    expect(header).toContain('lg:h-12')
+    expect(header).toContain('lg:py-0')
+  })
+
+  it('scrolls the navigation row sideways instead of widening the page', () => {
+    const qc = createTestQueryClient()
+    const html = renderHtml(
+      <QueryClientProvider client={qc}>
+        <App initialPage="context-doctor" />
+      </QueryClientProvider>
+    )
+    const nav = html.match(/<div[^>]*data-testid="nav-tabs"[^>]*>/)?.[0]
+    expect(nav, 'the shell renders one navigation row').toBeDefined()
+
+    // The whole second row below the breakpoint (its own basis, and last in the
+    // wrapped row, so it sits under the action group rather than beside it),
+    // scrolling inside it, with a zero minimum width so the row scrolls rather
+    // than forcing the row — and the page — wider.
+    expect(nav).toContain('max-lg:order-last')
+    expect(nav).toContain('max-lg:basis-full')
+    expect(nav).toContain('min-w-0')
+    expect(nav).toContain('overflow-x-auto')
+
+    // Back to a share of the one desktop row at the breakpoint and above.
+    expect(nav).toContain('lg:order-none')
+    expect(nav).toContain('lg:basis-auto')
+
+    // Every tab keeps its own width: a shrunken label wraps to two lines inside
+    // a row with no height for them.
+    for (const tab of ['context-doctor', 'sessions', 'quarantine', 'problems']) {
+      const button = html.match(new RegExp(`<button[^>]*data-testid="nav-tab-${tab}"[^>]*>`))?.[0]
+      expect(button).toContain('shrink-0')
+      expect(button).toContain('whitespace-nowrap')
+    }
+  })
+
+  it('never compresses or scrolls the action group out of reach', () => {
+    const qc = createTestQueryClient()
+    const html = renderHtml(
+      <QueryClientProvider client={qc}>
+        <App initialPage="context-doctor" />
+      </QueryClientProvider>
+    )
+    const actions = html.match(/<div[^>]*data-testid="header-actions"[^>]*>/)?.[0]
+    expect(actions, 'the shell renders one header action group').toBeDefined()
+
+    // Status and Maintenance wrap inside their own group, so a group that can be
+    // squeezed is a group that splits them onto two lines — and one that scrolls
+    // is a group that puts them past the edge of the screen.
+    expect(actions).toContain('shrink-0')
+    expect(actions).not.toContain('overflow')
   })
 
   it('applies active styling to the currently active page tab and inactive to others', () => {

@@ -6,6 +6,9 @@
  * it never walks away from Sessions into the harness detail route — the choice
  * survives switching between those two tabs, and a session picked under one
  * harness is dropped rather than shown under the next.
+ *
+ * It also owns the responsive header: one navigation row, scrolled sideways
+ * below the wide breakpoint rather than pushed off the screen.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as React from 'react'
@@ -16,11 +19,11 @@ import type { ContextDoctorProps } from '@/pages/ContextDoctor'
 import type { KyberHarnessSummary, KyberSessionSummary } from '@/lib/kyberApi'
 import { fetchHarnesses, fetchKyberSession, fetchKyberSessions } from '@/lib/kyberApi'
 
-// PI owns the maintenance panels. The shell mounts them; these tests assert the
-// mount point, so the module is mocked rather than pulled in for real.
-vi.mock('./components/maintenance/DashboardTools', () => ({
-  DashboardTools: () => React.createElement('div', { 'data-testid': 'dashboard-tools' }),
-}))
+// No DashboardTools mock: PI's header tools are mounted for real, because the
+// defect this suite guards is what a narrow row does to those two controls. A
+// stubbed empty div would have shown the shell renders *a* group and nothing
+// more. DashboardTools only issues its reads once a panel is opened, so no test
+// here reaches the API.
 
 vi.mock('@/lib/kyberApi', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/kyberApi')>()
@@ -44,11 +47,12 @@ vi.mock('@/pages/ContextDoctor', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/pages/ContextDoctor')>()
   return {
     ...actual,
-    ContextDoctor: ({ activeHarness, sessionId, onSessionChange }: ScopedDoctorProps) =>
+    ContextDoctor: ({ activeHarness, sessionId, onSessionChange, onSelectHarness }: ScopedDoctorProps) =>
       React.createElement('div', {
         'data-testid': 'doctor-probe',
         'data-active-harness': activeHarness ?? '',
         'data-session-id': sessionId ?? '',
+        'data-select-harness': onSelectHarness === undefined ? 'absent' : 'present',
       }, React.createElement('button', {
         type: 'button',
         'data-testid': 'doctor-pick-session',
@@ -278,11 +282,72 @@ describe('navigation surface', () => {
     expect(await screen.findByTestId('page-compare')).toBeDefined()
   })
 
-  it('mounts the dashboard tools beside the theme toggle in the header', async () => {
+  it('mounts both operator tools and the theme toggle in the header action group', async () => {
     renderApp({ initialPage: 'sessions' })
     await harnessTab('codex')
     const actions = screen.getByTestId('header-actions')
-    expect(actions.querySelector('[data-testid="dashboard-tools"]')).not.toBeNull()
-    expect(actions.querySelector('[aria-label="Switch to dark mode"]')).not.toBeNull()
+
+    // The real controls, in the group: neither tool may be dropped, collapsed
+    // to a menu, or moved out of the header to make the narrow layout fit.
+    const status = actions.querySelector('[data-testid="dashboard-tools-status-button"]')
+    const maintenance = actions.querySelector('[data-testid="dashboard-tools-maintenance-button"]')
+    expect(status, 'Status stays in the header action group').not.toBeNull()
+    expect(maintenance, 'Maintenance stays in the header action group').not.toBeNull()
+    expect(
+      actions.querySelector('[aria-label="Switch to dark mode"], [aria-label="Switch to light mode"]'),
+    ).not.toBeNull()
+
+    for (const tool of [status, maintenance]) {
+      expect(tool!.closest('[hidden]')).toBeNull()
+      expect(tool!.getAttribute('aria-hidden')).not.toBe('true')
+      expect(tool!.className).not.toContain('hidden')
+      expect(tool!.textContent?.trim()).toBe(tool === status ? 'Status' : 'Maintenance')
+    }
+  })
+
+  it('renders the navigation once, as a row that scrolls sideways below the breakpoint', async () => {
+    const { container } = renderApp({ initialPage: 'sessions' })
+    await harnessTab('codex')
+
+    // One top navigation in the DOM whatever the viewport: the narrow layout
+    // moves it to a second row, it does not add a second strip.
+    expect(container.querySelectorAll('[data-testid="nav-tabs"]')).toHaveLength(1)
+    expect(container.querySelectorAll('[data-testid="header-actions"]')).toHaveLength(1)
+
+    const nav = screen.getByTestId('nav-tabs')
+    expect(nav.className).toContain('max-lg:order-last')
+    expect(nav.className).toContain('max-lg:basis-full')
+    expect(nav.className).toContain('min-w-0')
+    expect(nav.className).toContain('overflow-x-auto')
+    expect(nav.className).toContain('lg:order-none')
+    expect(nav.className).toContain('lg:basis-auto')
+
+    // Tabs keep their own width inside that row; a squeezed tab wraps onto two
+    // lines, which is what the fixed 48px header could not show.
+    for (const key of ['context-doctor', 'sessions', 'quarantine', 'problems']) {
+      const tab = screen.getByTestId(`nav-tab-${key}`)
+      expect(tab.className, `${key} tab keeps its width`).toContain('shrink-0')
+      expect(tab.className, `${key} tab does not wrap`).toContain('whitespace-nowrap')
+    }
+  })
+
+  it('leaves the action group uncompressed and unscrolled', async () => {
+    renderApp({ initialPage: 'sessions' })
+    await harnessTab('codex')
+    const actions = screen.getByTestId('header-actions')
+    // A group that can shrink splits Status and Maintenance onto two lines; a
+    // group that scrolls puts them past the edge of a 375px screen.
+    expect(actions.className).toContain('shrink-0')
+    expect(actions.className).not.toContain('overflow')
+  })
+
+  it('stops handing Context Doctor the scorecard matrix callback', async () => {
+    renderApp()
+    await harnessTab('codex')
+
+    // The matrix left the page with the operator panels, so nothing there calls
+    // this. The prop is ContextDoctor's to drop from its own type; what the
+    // shell owns is the call site.
+    expect(doctorProbe().dataset.selectHarness).toBe('absent')
   })
 })
