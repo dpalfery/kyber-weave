@@ -4,6 +4,8 @@ using System.Xml.Linq;
 using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Arbiter.Mcp;
 using KyberWeave.Core.Arbiter;
+using KyberWeave.Core.Arbiter.Providers;
+using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Skills.Model;
 using KyberWeave.Core.Skills.Validation;
@@ -78,6 +80,63 @@ public sealed class ArbiterMcpPackagingTests
 
     private static ArbiterServeContext Context(string root, RecordingEngine engine, bool keyResolved = false) =>
         new(root, engine, TextWriter.Null, _ => EnabledConfig(), _ => keyResolved);
+
+    /// <summary>
+    /// Answers the shipped <c>KW-ARB-CLAIM-001</c> question in call order, so a test
+    /// stages which finding escalates: <c>supports</c> is <c>verify</c> for a refutation.
+    /// </summary>
+    private sealed class ScriptedClaimProvider(params string[] answers) : IArbiterProvider
+    {
+        private int _calls;
+
+        public int Calls => _calls;
+
+        public Task<ArbiterStep1BatchResult> AskStep1Async(
+            IReadOnlyList<ArbiterRule> rules,
+            ArbiterFactSet facts,
+            IReadOnlyDictionary<string, string>? step0Answers = null,
+            CancellationToken cancellationToken = default)
+        {
+            Dictionary<string, string> byRule = new(StringComparer.Ordinal);
+            foreach (ArbiterRule rule in rules)
+            {
+                byRule[rule.Id] = string.Equals(rule.Id, "KW-ARB-CLAIM-001", StringComparison.Ordinal)
+                    ? NextAnswer()
+                    : "undecidable";
+            }
+
+            return Task.FromResult(new ArbiterStep1BatchResult(byRule, "scripted", null, RequestSent: true));
+        }
+
+        private string NextAnswer() => answers[Math.Min(_calls++, answers.Length - 1)];
+    }
+
+    private static ArbiterTools RealEngineTools(string root, IArbiterProvider provider) =>
+        new(new ArbiterServeContext(
+            root,
+            new ArbiterHookDecisionEngine(_ => provider, homeDirectory: () => root),
+            TextWriter.Null,
+            _ => EnabledConfig(),
+            _ => false));
+
+    private static string Finding(string id) =>
+        $"- id: {id}\n" +
+        "  severity: major\n" +
+        "  file: src/Auth.cs\n" +
+        "  line: 42\n" +
+        "  excerpt: key := r.Query().Get(\"key\")\n" +
+        "  claim: The key reaches the log.\n" +
+        "  evidence: it is interpolated\n" +
+        "  failure_scenario: secrets leak";
+
+    private static string BadFindings(string kind) => kind switch
+    {
+        "slash" => Finding("security/key/in-argv"),
+        "comma" => Finding("security/key-in-argv,correctness/off-by-one"),
+        "empty" => "- id:\n  severity: major\n  claim: The key reaches the log.",
+        "duplicate" => Finding("security/key-in-argv") + "\n" + Finding("security/key-in-argv"),
+        _ => "severity: major\n  claim: The key reaches the log.",
+    };
 
     private static string FullPath(string path) => Path.GetFullPath(path);
 
@@ -282,6 +341,82 @@ public sealed class ArbiterMcpPackagingTests
         Assert.Contains("refute.spawn", decisions, StringComparison.Ordinal);
         string ledger = File.ReadAllText(Path.Combine(root.Path, "artifacts", "arbiter", "ledger.jsonl"));
         Assert.Contains("\"refute\":\"security/key-in-argv\"", ledger, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RefuteBatch_TwoFindingsBothAllowed_ReturnsAllowAndDecidesEachFinding()
+    {
+        using TempDirectory root = new();
+        ScriptedClaimProvider provider = new("contradicts");
+        ArbiterTools tools = RealEngineTools(root.Path, provider);
+
+        string response = tools.Evaluate(
+            "refute.spawn",
+            new ArbiterFacts { Finding = Finding("security/key-in-argv") + "\n" + Finding("correctness/off-by-one") });
+
+        Assert.Contains("outcome: allow", response, StringComparison.Ordinal);
+        Assert.Equal(2, provider.Calls);
+        string ledger = File.ReadAllText(Path.Combine(root.Path, "artifacts", "arbiter", "ledger.jsonl"));
+        Assert.Contains("\"refute\":\"security/key-in-argv\"", ledger, StringComparison.Ordinal);
+        Assert.Contains("\"refute\":\"correctness/off-by-one\"", ledger, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RefuteBatch_SecondFindingEscalates_NamesThatFindingInTheOutcome()
+    {
+        using TempDirectory root = new();
+        ScriptedClaimProvider provider = new("contradicts", "supports");
+        ArbiterTools tools = RealEngineTools(root.Path, provider);
+
+        string response = tools.Evaluate(
+            "refute.spawn",
+            new ArbiterFacts { Finding = Finding("security/key-in-argv") + "\n" + Finding("correctness/off-by-one") });
+
+        Assert.DoesNotContain("outcome: allow", response, StringComparison.Ordinal);
+        Assert.Contains("finding: correctness/off-by-one", response, StringComparison.Ordinal);
+        Assert.DoesNotContain("finding: security/key-in-argv", response, StringComparison.Ordinal);
+        Assert.Equal(2, provider.Calls);
+    }
+
+    [Fact]
+    public void RefuteBatch_ThreeFindings_ThirdEscalatesAndNamesItself()
+    {
+        using TempDirectory root = new();
+        ScriptedClaimProvider provider = new("contradicts", "contradicts", "supports");
+        ArbiterTools tools = RealEngineTools(root.Path, provider);
+
+        string response = tools.Evaluate(
+            "refute.spawn",
+            new ArbiterFacts
+            {
+                Finding = Finding("security/key-in-argv") + "\n"
+                    + Finding("correctness/off-by-one") + "\n"
+                    + Finding("test-adequacy/no-null-case"),
+            });
+
+        Assert.DoesNotContain("outcome: allow", response, StringComparison.Ordinal);
+        Assert.Contains("finding: test-adequacy/no-null-case", response, StringComparison.Ordinal);
+        Assert.Equal(3, provider.Calls);
+    }
+
+    [Theory]
+    [InlineData("slash")]
+    [InlineData("comma")]
+    [InlineData("empty")]
+    [InlineData("duplicate")]
+    [InlineData("no-id")]
+    public void RefuteBatch_InvalidFindingIds_FailWithWhatToPassAndDecideNothing(string kind)
+    {
+        using TempDirectory root = new();
+        ScriptedClaimProvider provider = new("contradicts");
+        ArbiterTools tools = RealEngineTools(root.Path, provider);
+
+        string response = tools.Evaluate("refute.spawn", new ArbiterFacts { Finding = BadFindings(kind) });
+
+        Assert.Contains("outcome: error", response, StringComparison.Ordinal);
+        Assert.Contains("lens/slug", response, StringComparison.Ordinal);
+        Assert.Equal(0, provider.Calls);
+        Assert.False(Directory.Exists(Path.Combine(root.Path, "artifacts")));
     }
 
     [Fact]

@@ -379,6 +379,71 @@ public sealed class SquadArbiterCliTests : IDisposable
         Assert.Contains("kyber-weave-arbiter", execution.Output, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Doctor_OnZcodeRepoWithArbiterEnabledAndGlobalReceipt_DoesNotRequireTheArbiterServer()
+    {
+        // The render grants the Arbiter server only to a project-scope wiring, so a
+        // global-scope deployment must not be told to configure a server it never granted.
+        string workingDir = NewDir("arbiter-doctor-zcode-global");
+        WriteArbiterConfig(workingDir, enabled: true, timeoutMs: 3000);
+        WriteDoctorSourceWithArbiterOnlyToolchain(workingDir);
+        Directory.CreateDirectory(Path.Combine(workingDir, ".zcode"));
+        Directory.CreateDirectory(Path.Combine(_temp.Path, "doctor-global-root"));
+
+        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
+        SquadStateStore stateStore = new(userPaths);
+        SeedReceipt(workingDir, stateStore, SquadDeploymentScope.Global);
+
+        FakeProcessExecutor executor = new FakeProcessExecutor()
+            .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n")
+            .WithProbeOutput("kyber-weave-arbiter", $"kyber-weave-arbiter {CliVersion()}\n");
+        SquadDoctorCommand command = new(
+            executor,
+            userPaths,
+            workingDirectory: workingDir,
+            globalRoots: new FixedDoctorRoot(Path.Combine(_temp.Path, "doctor-global-root")),
+            stateStore: stateStore);
+
+        CommandExecution execution = Capture(() => command.Execute(
+            null!,
+            new SquadDoctorSettings { Path = workingDir, Global = true }));
+
+        Assert.DoesNotContain("ZCode MCP servers not configured", execution.Output, StringComparison.Ordinal);
+        Assert.Equal(0, execution.ExitCode);
+    }
+
+    [Fact]
+    public void Doctor_OnZcodeRepoWithArbiterEnabledAndProjectReceipt_RequiresTheArbiterServer()
+    {
+        string workingDir = NewDir("arbiter-doctor-zcode-project-receipt");
+        WriteArbiterConfig(workingDir, enabled: true, timeoutMs: 3000);
+        WriteDoctorSourceWithArbiterOnlyToolchain(workingDir);
+        Directory.CreateDirectory(Path.Combine(workingDir, ".zcode"));
+        Directory.CreateDirectory(Path.Combine(_temp.Path, "doctor-global-root"));
+
+        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
+        SquadStateStore stateStore = new(userPaths);
+        SeedReceipt(workingDir, stateStore, SquadDeploymentScope.Project);
+
+        FakeProcessExecutor executor = new FakeProcessExecutor()
+            .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n")
+            .WithProbeOutput("kyber-weave-arbiter", $"kyber-weave-arbiter {CliVersion()}\n");
+        SquadDoctorCommand command = new(
+            executor,
+            userPaths,
+            workingDirectory: workingDir,
+            globalRoots: new FixedDoctorRoot(Path.Combine(_temp.Path, "doctor-global-root")),
+            stateStore: stateStore);
+
+        CommandExecution execution = Capture(() => command.Execute(
+            null!,
+            new SquadDoctorSettings { Path = workingDir, Global = false }));
+
+        Assert.Equal(1, execution.ExitCode);
+        Assert.Contains("ZCode MCP servers not configured", execution.Output, StringComparison.Ordinal);
+        Assert.Contains("kyber-weave-arbiter", execution.Output, StringComparison.Ordinal);
+    }
+
     /// <summary>Copies the Arbiter Squad fixture into the doctor's canonical-source
     /// location with a toolchain declaring only the Arbiter server, and drops the
     /// solution marker the pack-source locator keys on.</summary>
@@ -488,6 +553,20 @@ public sealed class SquadArbiterCliTests : IDisposable
 
         File.WriteAllText(receiptPath, stateStore.SerializeReceipt(receipt), Encoding.UTF8);
         File.WriteAllText(lockPath, stateStore.SerializeLock(squadLock), Encoding.UTF8);
+    }
+
+    private static void SeedReceipt(string targetRoot, SquadStateStore stateStore, SquadDeploymentScope scope)
+    {
+        string receiptPath = stateStore.ResolveReceiptPath(targetRoot, scope);
+        Directory.CreateDirectory(Path.GetDirectoryName(receiptPath)!);
+        SquadReceipt receipt = new(
+            Schema: "kyber-squad.receipt/v1",
+            Scope: scope,
+            TargetRoot: ".",
+            InstalledAtUtc: DateTimeOffset.UtcNow,
+            Degradations: [],
+            Files: []);
+        File.WriteAllText(receiptPath, stateStore.SerializeReceipt(receipt), Encoding.UTF8);
     }
 
     private sealed record CommandExecution(int ExitCode, string Output);

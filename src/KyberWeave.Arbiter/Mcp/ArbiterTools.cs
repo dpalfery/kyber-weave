@@ -144,11 +144,31 @@ public sealed class ArbiterTools(ArbiterServeContext context)
                 $"The facts carry no routing for '{trigger}': pass the lens names as `lens`, or the findings to be refuted as `finding`.");
         }
 
+        // A refutation call is one evaluation per finding id, because a REFUTE header
+        // names one finding. Ids are checked before any evaluation, so a bad id records
+        // nothing (review 20.1-2, Major).
+        List<EvaluationUnit> units = [];
+        if (facts.Lens is not { Count: > 0 } && Present(facts.Finding))
+        {
+            List<FindingBlock> blocks = FindingBlocks(facts.Finding!);
+            string? problem = FindingIdProblem(blocks);
+            if (problem is not null)
+            {
+                return Failure(provenance, problem);
+            }
+
+            units.AddRange(blocks.Select(block => new EvaluationUnit(null, block.Id, block.Text)));
+        }
+        else
+        {
+            units.AddRange(LensesOf(facts).Select(lens => new EvaluationUnit(lens, null, facts.Finding)));
+        }
+
         string? target = facts.Target ?? RoutingTarget(facts);
         List<PendingEvaluation> pending = [];
-        foreach (string? lens in LensesOf(facts))
+        foreach (EvaluationUnit unit in units)
         {
-            string prompt = PromptFor(facts, lens);
+            string prompt = PromptFor(facts, unit);
             ArbiterEvent ev = new()
             {
                 Harness = Harness,
@@ -169,7 +189,7 @@ public sealed class ArbiterTools(ArbiterServeContext context)
                     "Pass the trigger the event classifies as.");
             }
 
-            pending.Add(new PendingEvaluation(classification.Caller ?? UnidentifiedCaller, target, prompt));
+            pending.Add(new PendingEvaluation(classification.Caller ?? UnidentifiedCaller, target, prompt, unit.Refute));
         }
 
         HookContext hookContext = new(context.RepoRoot, () => ArbiterRecordId.New(DateTimeOffset.UtcNow), context.Log);
@@ -194,7 +214,8 @@ public sealed class ArbiterTools(ArbiterServeContext context)
 
             if (outcome.Kind is not (HookOutcomeKind.Allow or HookOutcomeKind.PassThrough or HookOutcomeKind.AllowWithRewrite))
             {
-                return provenance + "\noutcome: " + OutcomeName(outcome.Kind) + "\n" + outcome.Reason;
+                string named = item.Refute is null ? string.Empty : $"finding: {item.Refute}\n";
+                return provenance + "\noutcome: " + OutcomeName(outcome.Kind) + "\n" + named + outcome.Reason;
             }
         }
 
@@ -351,12 +372,11 @@ public sealed class ArbiterTools(ArbiterServeContext context)
         facts.Lens is { Count: > 0 } || Present(facts.Finding) ? "review-lens" : null;
 
     /// <summary>
-    /// Builds the routing header block the hook path would see for the same event:
-    /// the marker first, then the facts as headers. A finding synthesizes
-    /// <c>REFUTE:</c> from the finding ids it carries, so a code-reviewer following
-    /// its own contract gets a classified refute.spawn without writing a header.
+    /// Builds the routing header block the hook path would see for one unit: the marker
+    /// first, then the facts as headers. A refutation unit carries exactly one finding id,
+    /// so its <c>REFUTE:</c> names one finding and classifies as refute.spawn.
     /// </summary>
-    private static string PromptFor(ArbiterFacts facts, string? lens)
+    private static string PromptFor(ArbiterFacts facts, EvaluationUnit unit)
     {
         List<string> lines = ["KYBER-ARBITER: true"];
         if (Present(facts.PlanFile))
@@ -369,20 +389,19 @@ public sealed class ArbiterTools(ArbiterServeContext context)
             lines.Add("TASK: " + Flat(facts.Task));
         }
 
-        if (Present(lens))
+        if (Present(unit.Lens))
         {
-            lines.Add("LENS: " + Flat(lens));
+            lines.Add("LENS: " + Flat(unit.Lens));
         }
 
-        string? refute = RefuteHeader(facts.Finding);
-        if (refute is not null)
+        if (Present(unit.Refute))
         {
-            lines.Add("REFUTE: " + refute);
+            lines.Add("REFUTE: " + Flat(unit.Refute));
         }
 
-        if (Present(facts.Finding))
+        if (Present(unit.Finding))
         {
-            lines.Add("FINDING: " + Flat(facts.Finding));
+            lines.Add("FINDING: " + Flat(unit.Finding));
         }
 
         if (facts.Prompt is not null)
@@ -393,31 +412,62 @@ public sealed class ArbiterTools(ArbiterServeContext context)
         return string.Join('\n', lines);
     }
 
-    /// <summary>The REFUTE header value for a finding: the finding ids it carries, as
-    /// <c>lens/slug</c>. Null when the finding names no id — the event then fails
-    /// classification instead of recording a made-up refutation.</summary>
-    private static string? RefuteHeader(string? finding)
+    /// <summary>
+    /// Splits a finding payload at each <c>id:</c> line, so each finding is refuted with
+    /// its own text and its own single-id header.
+    /// </summary>
+    private static List<FindingBlock> FindingBlocks(string finding)
     {
-        if (string.IsNullOrWhiteSpace(finding))
+        MatchCollection starts = FindingIdPattern.Matches(finding);
+        List<FindingBlock> blocks = [];
+        for (int i = 0; i < starts.Count; i++)
         {
-            return null;
+            int end = i + 1 < starts.Count ? starts[i + 1].Index : finding.Length;
+            blocks.Add(new FindingBlock(starts[i].Groups["id"].Value, finding[starts[i].Index..end]));
         }
 
-        List<string> ids = [];
-        foreach (Match match in FindingIdPattern.Matches(finding))
+        return blocks;
+    }
+
+    /// <summary>
+    /// The reason a refutation call cannot be evaluated, or null when every finding id is a
+    /// single <c>lens/slug</c> and unique. Each message says what to pass instead.
+    /// </summary>
+    private static string? FindingIdProblem(IReadOnlyList<FindingBlock> blocks)
+    {
+        if (blocks.Count == 0)
         {
-            string id = Flat(match.Groups["id"].Value);
-            if (id.Length > 0 && !ids.Contains(id, StringComparer.Ordinal))
+            return "The finding names no id: pass each finding as YAML with an `id: lens/slug` line, " +
+                "for example `id: security/key-in-argv`.";
+        }
+
+        HashSet<string> seen = new(StringComparer.Ordinal);
+        foreach (FindingBlock block in blocks)
+        {
+            if (block.Id.Length == 0)
             {
-                ids.Add(id);
+                return "A finding has an empty `id:`: give each finding an `id: lens/slug` line, " +
+                    "for example `id: security/key-in-argv`.";
+            }
+
+            if (!HeaderBlock.Parse("REFUTE: " + block.Id).TryGet("REFUTE", out _))
+            {
+                return $"The finding id '{block.Id}' is not lens/slug: use one lens name, a slash and a lowercase slug, " +
+                    "for example `id: security/key-in-argv`.";
+            }
+
+            if (!seen.Add(block.Id))
+            {
+                return $"The finding id '{block.Id}' appears more than once: pass each finding once, " +
+                    "as its own `id: lens/slug`.";
             }
         }
 
-        return ids.Count > 0 ? string.Join(", ", ids) : null;
+        return null;
     }
 
     private static readonly Regex FindingIdPattern = new(
-        @"^\s*-?\s*id:\s*(?<id>\S+)",
+        @"^[ \t]*-?[ \t]*id:[ \t]*(?<id>\S*)",
         RegexOptions.Multiline | RegexOptions.CultureInvariant,
         TimeSpan.FromSeconds(2));
 
@@ -448,5 +498,10 @@ public sealed class ArbiterTools(ArbiterServeContext context)
         };
     }
 
-    private sealed record PendingEvaluation(string Caller, string? Target, string Prompt);
+    /// <summary>One evaluation: a lens, or one finding id of a refutation (<paramref name="Refute"/>).</summary>
+    private sealed record EvaluationUnit(string? Lens, string? Refute, string? Finding);
+
+    private sealed record FindingBlock(string Id, string Text);
+
+    private sealed record PendingEvaluation(string Caller, string? Target, string Prompt, string? Refute);
 }
