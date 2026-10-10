@@ -405,6 +405,9 @@ public sealed class PiRenderer : ISquadRenderer
         return $$"""
             import { spawnSync } from "node:child_process";
 
+            // Keys that mutate an object's linkage rather than adding a property to it.
+            const POLLUTING_ARG_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
             type ArbiterDecision = {
               decision: "allow" | "block";
               reason?: string;
@@ -479,6 +482,14 @@ public sealed class PiRenderer : ISquadRenderer
                 }
                 if (decision.args !== undefined) {
                   for (const key of Object.keys(decision.args)) {
+                    // These three keys run an inherited setter rather than creating an own
+                    // property: assigning to `__proto__` rebinds the target object's
+                    // prototype, so a decision could hand the host's tool input an object
+                    // it then inherits properties from. Skip them; a decision has no
+                    // legitimate reason to name them.
+                    if (POLLUTING_ARG_KEYS.has(key)) {
+                      continue;
+                    }
                     event.input[key] = decision.args[key];
                   }
                 }
