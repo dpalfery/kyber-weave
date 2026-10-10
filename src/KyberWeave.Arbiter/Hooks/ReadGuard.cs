@@ -109,7 +109,7 @@ public static class ReadGuard
                 return ReadGuardResult.Allow;
             }
 
-            string normalized = command.Replace('\\', '/');
+            string normalized = NormalizeCommand(command);
             foreach (string dir in protectedDirs)
             {
                 if (normalized.Contains(dir, StringComparison.Ordinal))
@@ -213,6 +213,34 @@ public static class ReadGuard
         }
 
         return NormalizeLexically(forward);
+    }
+
+    /// <summary>
+    /// Collapses each whitespace-separated token of a shell command lexically before the
+    /// substring match, so one protected directory has one spelling to match.
+    /// </summary>
+    /// <remarks>
+    /// Matching raw text alone let the same path through as <c>docs//plans</c>,
+    /// <c>docs/./plans</c> or <c>docs/specs/../plans</c>, because none of those contains
+    /// the protected directory literally. Normalising first is still best effort in the
+    /// sense of R24: a command that reaches the path indirectly, through a variable, a
+    /// substitution or a constructed string, is not matched here, and no amount of
+    /// text normalisation would catch it. Normalising narrows the obvious spellings; it
+    /// does not make the check sound.
+    /// </remarks>
+    private static string NormalizeCommand(string command)
+    {
+        List<string> tokens = [];
+        foreach (string token in command.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries))
+        {
+            string forward = token.Replace('\\', '/');
+
+            // A token that climbs above the working directory has no lexical form to
+            // match on, so it keeps its text and is left to the substring check.
+            tokens.Add(NormalizeLexically(forward) ?? forward);
+        }
+
+        return string.Join(' ', tokens);
     }
 
     private static string? NormalizeLexically(string path)

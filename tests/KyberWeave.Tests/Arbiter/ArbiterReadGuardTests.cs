@@ -197,6 +197,26 @@ public sealed class ArbiterReadGuardTests
         Assert.Contains("Req 25", result.Reason ?? string.Empty, StringComparison.Ordinal);
     }
 
+    [Theory]
+    // The substring match ran against the raw text, so an equivalent path spelled with a
+    // repeated separator or a "." segment never contained "docs/plans" and passed.
+    [InlineData("cat docs//plans/plan.md")]
+    [InlineData("cat docs/./plans/plan.md")]
+    [InlineData("cat ./docs/plans/plan.md")]
+    [InlineData("cat docs/specs/../plans/plan.md")]
+    [InlineData("cat docs/plans\\plan.md")]
+    public void Check_BashNamingAPlanningPathThroughAnEquivalentSpelling_Denies(string command)
+    {
+        ReadGuardResult result = ReadGuard.Check(
+            "Bash",
+            ToolInput(JsonSerializer.Serialize(new { command })),
+            "/repo",
+            ProtectedDirs);
+
+        Assert.False(result.Allowed);
+        Assert.Contains("Req 25", result.Reason ?? string.Empty, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void Check_BashWithoutPlanningPath_Allows()
     {
