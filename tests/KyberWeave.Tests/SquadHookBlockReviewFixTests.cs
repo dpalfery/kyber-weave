@@ -154,6 +154,32 @@ public sealed class SquadHookBlockReviewFixTests
     }
 
     [Fact]
+    public void Update_WhenOneOfTwoIdenticalSquadEntriesIsEdited_StillReportsDrift()
+    {
+        using TempDirectory fixture = new();
+        SquadStateStore store = Store(fixture.Path);
+        new SquadTransaction(store).Execute(Install(fixture.Path, TwoIdenticalCursorEntries()));
+        SquadReceipt previous = Assert.IsType<SquadReceipt>(
+            store.ReadReceipt(fixture.Path, SquadDeploymentScope.Project));
+
+        // Two byte-identical owned entries, recorded at index 0 and 1 with one digest.
+        // Editing the first left its twin intact, and the twin then satisfied the edited
+        // entry's digest: the edit read as "Squad's entry, merely moved", so no drift was
+        // reported and the update overwrote the user's edit without a word.
+        string path = Path.Combine(fixture.Path, ".cursor", "hooks.json");
+        JsonNode file = JsonNode.Parse(File.ReadAllText(path))!;
+        JsonArray entries = file["hooks"]!["preToolUse"]!.AsArray();
+        Assert.Equal(2, entries.Count);
+        ((JsonObject)entries[0]!)["command"] = "kyber-weave-arbiter hook --harness cursor --probe edited";
+        File.WriteAllText(path, file.ToJsonString());
+
+        IReadOnlyList<SquadOwnedBlockDrift> drifts = Update(fixture.Path, previous, TwoIdenticalCursorEntries()).BlockDrifts;
+
+        Assert.Single(drifts);
+        Assert.EndsWith("/0", drifts[0].Location, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Update_WhenTheUserEditsSquadsEntry_StillReportsDrift()
     {
         using TempDirectory fixture = new();
@@ -237,6 +263,17 @@ public sealed class SquadHookBlockReviewFixTests
             ".cursor/hooks.json",
             SquadHookBlockFormat.Cursor,
             [new SquadRenderedBlockEntry("preToolUse", CursorEntry($"kyber-weave-arbiter hook --harness cursor --probe {marker}"))]);
+
+    /// <summary>Two owned entries with identical content, so both record the same digest.</summary>
+    private static SquadRenderedBlock TwoIdenticalCursorEntries() =>
+        new(
+            "cursor",
+            ".cursor/hooks.json",
+            SquadHookBlockFormat.Cursor,
+            [
+                new SquadRenderedBlockEntry("preToolUse", CursorEntry("kyber-weave-arbiter hook --harness cursor --probe one")),
+                new SquadRenderedBlockEntry("preToolUse", CursorEntry("kyber-weave-arbiter hook --harness cursor --probe one")),
+            ]);
 
     private static SquadRenderedBlock CodexBlock(string marker) =>
         new(
