@@ -1166,7 +1166,8 @@ public sealed class ReleaseTests
     /// <summary>
     /// The script lists all expected assets when run with --list mode.
     /// The list must include the three tray assets: both darwin variants
-    /// (arm64 and x64) and the Windows setup exe.
+    /// (arm64 and x64) and the Windows setup exe. Req 22.1 adds the five
+    /// arbiter archives, growing the list from 20 to 25.
     /// </summary>
     [Fact]
     public void VerifyReleaseChecksumsListModeOutputsAssetNames()
@@ -1193,9 +1194,9 @@ public sealed class ReleaseTests
 
         Assert.Equal(0, result.ExitCode);
 
-        // Must output exactly 20 lines (one per asset).
+        // Must output exactly 25 lines (one per asset).
         string[] lines = result.StandardOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries);
-        Assert.Equal(20, lines.Length);
+        Assert.Equal(25, lines.Length);
 
         // The three tray assets must be in the list: both darwin architectures and Windows setup.
         Assert.Contains("kyberdash-tray-darwin-arm64.zip", lines);
@@ -1255,7 +1256,7 @@ public sealed class ReleaseTests
     }
 
     /// <summary>
-    /// Helper array of all 20 expected release assets for fixture tests.
+    /// Helper array of all 25 expected release assets for fixture tests.
     /// </summary>
     private static readonly string[] ReleaseAssets =
     [
@@ -1269,6 +1270,11 @@ public sealed class ReleaseTests
         "kyber-weave-mcp-osx-x64.tar.gz",
         "kyber-weave-mcp-osx-arm64.tar.gz",
         "kyber-weave-mcp-win-x64.zip",
+        "kyber-weave-arbiter-linux-x64.tar.gz",
+        "kyber-weave-arbiter-linux-arm64.tar.gz",
+        "kyber-weave-arbiter-osx-x64.tar.gz",
+        "kyber-weave-arbiter-osx-arm64.tar.gz",
+        "kyber-weave-arbiter-win-x64.zip",
         "kyberdash-darwin-arm64.tar.gz",
         "kyberdash-darwin-x64.tar.gz",
         "kyberdash-linux-arm64.tar.gz",
@@ -1282,7 +1288,7 @@ public sealed class ReleaseTests
     ];
 
     /// <summary>
-    /// The complete fixture with all 20 expected assets present and no extras.
+    /// The complete fixture with all 25 expected assets present and no extras.
     /// The script must exit 0 and create a valid SHA256SUMS.txt.
     /// </summary>
     [Fact]
@@ -1293,7 +1299,7 @@ public sealed class ReleaseTests
         using Sandbox sandbox = new();
         string version = "0.1.0";
 
-        // Create all 20 expected assets.
+        // Create all 25 expected assets.
         foreach (string assetTemplate in ReleaseAssets)
         {
             string asset = string.Format(System.Globalization.CultureInfo.InvariantCulture, assetTemplate, version);
@@ -1317,10 +1323,10 @@ public sealed class ReleaseTests
         Assert.Equal(0, result.ExitCode);
         Assert.True(File.Exists(Path.Combine(sandbox.Root, "SHA256SUMS.txt")));
 
-        // The manifest must have 20 lines (one per asset).
+        // The manifest must have 25 lines (one per asset).
         string manifest = File.ReadAllText(Path.Combine(sandbox.Root, "SHA256SUMS.txt"));
         string[] manifestLines = manifest.Split('\n', StringSplitOptions.RemoveEmptyEntries);
-        Assert.Equal(20, manifestLines.Length);
+        Assert.Equal(25, manifestLines.Length);
 
         // Each line must match the format: 64 hex characters, two spaces, filename.
         foreach (string line in manifestLines)
@@ -1426,7 +1432,7 @@ public sealed class ReleaseTests
         using Sandbox sandbox = new();
         string version = "0.1.0";
 
-        // Create all 20 expected assets.
+        // Create all 25 expected assets.
         foreach (string assetTemplate in ReleaseAssets)
         {
             string asset = string.Format(System.Globalization.CultureInfo.InvariantCulture, assetTemplate, version);
@@ -1479,7 +1485,7 @@ public sealed class ReleaseTests
         using Sandbox sandbox = new();
         string version = "0.1.0";
 
-        // Create all 20 expected assets.
+        // Create all 25 expected assets.
         foreach (string assetTemplate in ReleaseAssets)
         {
             string asset = string.Format(System.Globalization.CultureInfo.InvariantCulture, assetTemplate, version);
@@ -1509,7 +1515,7 @@ public sealed class ReleaseTests
     }
 
     /// <summary>
-    /// Against an empty asset directory the script exits non-zero, reports all 20
+    /// Against an empty asset directory the script exits non-zero, reports all 25
     /// expected assets as missing, names the first and last, writes no SHA256SUMS.txt,
     /// and does not print "unbound variable". The last assertion guards the
     /// empty-array expansion under set -u on bash older than 4.4 (for example macOS
@@ -1543,9 +1549,9 @@ public sealed class ReleaseTests
         // On bash < 4.4 this fails if an empty-array expansion is unguarded under set -u.
         Assert.DoesNotContain("unbound variable", result.StandardError, StringComparison.Ordinal);
 
-        // Stderr must report all 20 missing assets.
+        // Stderr must report all 25 missing assets.
         int missingCount = Regex.Count(result.StandardError, "::error::missing release asset:");
-        Assert.Equal(20, missingCount);
+        Assert.Equal(25, missingCount);
 
         // Must name the first and last expected assets.
         Assert.Contains("kyber-weave-linux-x64.tar.gz", result.StandardError, StringComparison.Ordinal);
@@ -2594,6 +2600,219 @@ public sealed class ReleaseTests
 
         string path = result.StandardOutput.Trim();
         return path.Length == 0 ? null : path;
+    }
+
+    // ---- arbiter distribution (task 5.1, Req 22.1) ----
+    //
+    // The third binary ships like kyber-weave-mcp: five archives in release
+    // and CI, five more rows in the checksum manifest, an installer opt-out
+    // with a version floor, and an update-loop --version assertion.
+
+    /// <summary>The five arbiter archives, named the way kyber-weave-mcp's are.</summary>
+    private static readonly string[] ArbiterAssetNames =
+    [
+        "kyber-weave-arbiter-linux-x64.tar.gz",
+        "kyber-weave-arbiter-linux-arm64.tar.gz",
+        "kyber-weave-arbiter-osx-x64.tar.gz",
+        "kyber-weave-arbiter-osx-arm64.tar.gz",
+        "kyber-weave-arbiter-win-x64.zip"
+    ];
+
+    /// <summary>
+    /// Req 22.1: the release workflow publishes the arbiter alongside the CLI
+    /// and the MCP server, one archive per RID, from the Arbiter project.
+    /// Archives are parameterized by the RID matrix the way kyber-weave-mcp's
+    /// are; the literal per-RID names are pinned by the checksum manifest.
+    /// </summary>
+    [Fact]
+    public void ReleaseWorkflowPublishesFiveArbiterArchives()
+    {
+        string workflow = File.ReadAllText(ReleaseWorkflowPath);
+
+        Assert.Contains("kyber-weave-arbiter-${RID}.tar.gz", workflow, StringComparison.Ordinal);
+        Assert.Contains("kyber-weave-arbiter-${RID}.zip", workflow, StringComparison.Ordinal);
+        Assert.Contains(
+            "src/KyberWeave.Arbiter/KyberWeave.Arbiter.csproj",
+            workflow,
+            StringComparison.Ordinal);
+        foreach (string rid in new[] { "linux-x64", "linux-arm64", "osx-x64", "osx-arm64", "win-x64" })
+        {
+            Assert.True(
+                workflow.Contains(rid, StringComparison.Ordinal),
+                $"release.yml RID matrix no longer covers {rid}.");
+        }
+    }
+
+    /// <summary>
+    /// Req 22.1: CI publishes the arbiter too, so the publish smoke covers it.
+    /// </summary>
+    [Fact]
+    public void CiPublishSmokePublishesArbiterArchive()
+    {
+        string workflow = File.ReadAllText(
+            Path.Combine(KyberWeaveTestPaths.ToolRoot, ".github", "workflows", "ci.yml"));
+
+        Assert.Contains("KyberWeave.Arbiter", workflow, StringComparison.Ordinal);
+        Assert.Contains("kyber-weave-arbiter", workflow, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The CI publish smoke proves each published binary starts. The arbiter has no
+    /// <c>--help</c>: its entry point treats anything but <c>hook</c> or <c>--version</c> as
+    /// a usage error and exits 2, so a <c>--help</c> smoke had to be excused with
+    /// <c>|| true</c> and proved nothing. It runs <c>--version</c>, which the arbiter
+    /// implements and answers with exit 0.
+    /// </summary>
+    [Fact]
+    public void CiPublishSmokeRunsTheArbiterVersionNotAnExcusedHelp()
+    {
+        string workflow = File.ReadAllText(
+            Path.Combine(KyberWeaveTestPaths.ToolRoot, ".github", "workflows", "ci.yml"));
+
+        Assert.Contains(
+            "kyber-weave-arbiter --version",
+            workflow,
+            StringComparison.Ordinal);
+
+        // The excuse is what made the smoke vacuous; it must not come back.
+        Assert.DoesNotContain(
+            "kyber-weave-arbiter --help",
+            workflow,
+            StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The arbiter answers <c>--version</c> with exit 0 and <c>--help</c> with a usage
+    /// error, which is why the CI smoke may drop <c>|| true</c> for it.
+    /// </summary>
+    [Fact]
+    public async Task ArbiterBinaryAnswersVersionAndRejectsHelp()
+    {
+        Assert.Equal(0, await KyberWeave.Arbiter.Composition.DispatchAsync(
+            ["--version"], TextReader.Null, TextWriter.Null, TextWriter.Null));
+        Assert.Equal(2, await KyberWeave.Arbiter.Composition.DispatchAsync(
+            ["--help"], TextReader.Null, TextWriter.Null, TextWriter.Null));
+    }
+
+    /// <summary>
+    /// Req 22.1: the checksum verifier's list grows from 20 to 25 assets.
+    /// </summary>
+    [Fact]
+    public void VerifyReleaseChecksumsListsTwentyFiveAssetsIncludingArbiter()
+    {
+        SkipOnWindows();
+
+        using Sandbox sandbox = new();
+        const string version = "0.1.0";
+
+        ProcessStartInfo startInfo = new("/bin/bash")
+        {
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        startInfo.ArgumentList.Add(
+            Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "verify-release-checksums.sh"));
+        startInfo.ArgumentList.Add("--list");
+        startInfo.ArgumentList.Add(sandbox.Root);
+        startInfo.ArgumentList.Add(version);
+
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+
+        Assert.Equal(0, result.ExitCode);
+        string[] lines = result.StandardOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        Assert.Equal(25, lines.Length);
+        foreach (string asset in ArbiterAssetNames)
+        {
+            Assert.Contains(asset, lines);
+        }
+    }
+
+    /// <summary>
+    /// install.sh installs the arbiter by default but honours --no-arbiter and
+    /// KYBER_WEAVE_NO_ARBITER, following the NO_MCP pattern.
+    /// </summary>
+    [Fact]
+    public void InstallShSupportsNoArbiterOptOut()
+    {
+        string installer = File.ReadAllText(InstallShPath);
+
+        Assert.Contains("--no-arbiter", installer, StringComparison.Ordinal);
+        Assert.Contains("KYBER_WEAVE_NO_ARBITER", installer, StringComparison.Ordinal);
+        Assert.Contains("NO_ARBITER", installer, StringComparison.Ordinal);
+        Assert.Contains("kyber-weave-arbiter", installer, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// install.sh skips the arbiter on releases older than ARBITER_MIN_VERSION,
+    /// following the KYBERDASH_MIN_VERSION pattern.
+    /// </summary>
+    [Fact]
+    public void InstallShGatesArbiterOnPublishedFloor()
+    {
+        string installer = File.ReadAllText(InstallShPath);
+
+        Assert.Contains("ARBITER_MIN_VERSION", installer, StringComparison.Ordinal);
+        Assert.Contains("kyber_weave_release_has_arbiter", installer, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// ARBITER_MIN_VERSION is pinned so raising the floor is a deliberate edit:
+    /// bumping it silently would stop installing the arbiter for everyone on the
+    /// releases in between. The value is what scripts/next-release-version.sh
+    /// printed at implementation time.
+    /// </summary>
+    [Fact]
+    public void ArbiterMinVersionIsTheTagThatFirstPublishedTheAsset()
+    {
+        SkipOnWindows();
+
+        ProcessStartInfo startInfo = CreateShellStartInfo(
+            ". \"" + InstallShPath + "\"; " +
+            "printf '%s' \"$ARBITER_MIN_VERSION\"");
+
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Equal("0.1.7-rc.17", result.StandardOutput.Trim());
+    }
+
+    [Theory]
+    // Every published release below the floor resolves to "skip".
+    [InlineData("0.1.6", false)]
+    [InlineData("0.1.7-rc.9", false)]
+    [InlineData("0.1.7-rc.16", false)]
+    // The floor and everything above it resolves to "install".
+    [InlineData("0.1.7-rc.17", true)]
+    [InlineData("0.1.7", true)]
+    [InlineData("0.2.0", true)]
+    [InlineData("1.0.0", true)]
+    public void ReleaseHasArbiterGatesOnThePublishedFloor(string version, bool expected)
+    {
+        SkipOnWindows();
+
+        ProcessStartInfo startInfo = CreateShellStartInfo(
+            ". \"" + InstallShPath + "\"; " +
+            "kyber_weave_release_has_arbiter '" + version + "'");
+
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+
+        Assert.Equal(expected ? 0 : 1, result.ExitCode);
+    }
+
+    /// <summary>
+    /// update-loop.sh asserts kyber-weave-arbiter --version, proving the
+    /// published release carries a runnable arbiter.
+    /// </summary>
+    [Fact]
+    public void UpdateLoopAssertsArbiterVersion()
+    {
+        string loop = File.ReadAllText(
+            Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "update-loop.sh"));
+
+        Assert.Contains("kyber-weave-arbiter", loop, StringComparison.Ordinal);
+        Assert.Contains("--version", loop, StringComparison.Ordinal);
     }
 
     // ------------------------------------------------------------- Sandbox

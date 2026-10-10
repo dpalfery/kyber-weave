@@ -44,6 +44,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\src\KyberWeave.Arbiter\KyberWeave.Arbiter.csproj" />
     <ProjectReference Include="..\..\src\KyberWeave.Cli\KyberWeave.Cli.csproj" />
     <ProjectReference Include="..\..\src\KyberWeave.Core\KyberWeave.Core.csproj" />
     <ProjectReference Include="..\..\src\KyberWeave.Mcp\KyberWeave.Mcp.csproj" />

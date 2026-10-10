@@ -51,10 +51,11 @@ public sealed partial class HotshotGoldenContractTests
         "pulumi-dev",         // Worker-packet scope rule: packet is whole scope (issue #278)
         "python-dev",         // Worker-packet scope rule: packet is whole scope (issue #278)
         "react-dev",          // Worker-packet scope rule: packet is whole scope (issue #278)
+        "review-lens",        // Arbiter routing headers and refutation framing (packet 7.3)
         "sql-database-architect", // Worker-packet scope rule: packet is whole scope (issue #278)
         "task-reviewer",
         "tauri-dev",          // Worker-packet scope rule: packet is whole scope (issue #278)
-        "test-dev"            // JEV checkpoints and iteration circuit-breaker (issue #249)
+        "test-dev"            // JEV checkpoints and iteration circuit-breaker (issue #249); RED_EVIDENCE digest line the ledger reads for MODE-001 (packet 7.4)
     ];
 
     /// <summary>

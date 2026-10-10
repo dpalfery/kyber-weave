@@ -65,3 +65,19 @@ After approval, assign `docs-dev` the closeout named by the execution artifact:
 - Spec-backed work verifies requirements, migrates durable facts, synchronizes the specification index, and archives the specification.
 
 Only a successful closeout completes the objective.
+
+## Arbiter routing headers
+
+Every dispatch starts with `KYBER-ARBITER: true`. Dispatches that execute or audit a task — implementation specialist invocations, `task-reviewer` audits, the `code-reviewer` end-of-run review dispatch, and the `docs-dev` closeout — also carry `PLAN_FILE:` and `TASK:`.
+
+## Worker packets
+
+A packet to an implementation specialist is its whole context. State in the packet that the worker does not open plan, spec, or todo files and performs only the work the packet describes.
+
+## Escalations
+
+On `STATUS: ARBITER_ESCALATION`, follow `NEXT` and do not retry the blocked dispatch unchanged:
+
+- `REPEAT: 1`: dispatch architect with the envelope as a planner dispatch whose marker is the envelope.
+- `REPEAT` 2 or greater: record a run finding and stop that task; do not dispatch architect again for it. The findings drain takes the finding.
+- A `malformed` planner answer: re-issue the planner dispatch with a recognised marker; do not send the envelope onward. A repeat stops as above.

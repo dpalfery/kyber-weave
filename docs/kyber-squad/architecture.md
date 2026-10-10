@@ -14,6 +14,7 @@ decided-by:
   - adr/0024-squad-global-receipt-layout-marker
   - adr/0025-devin-native-agents-and-skill-lowering
   - adr/0028-devin-target-scoped-authoring-capability-profiles
+  - adr/0033-kyber-arbiter-three-step-decision-gates
 keywords:
   - multi-harness
   - deployment
@@ -40,6 +41,7 @@ code-refs:
   - PiRenderer
   - FactoryRenderer
   - DevinRenderer
+  - ArbiterHookWiring
 ---
 
 # Kyber-Squad architecture
@@ -520,6 +522,19 @@ and validates.
   `.kyber-weave/squad.receipt.json` are an intentional stale self-deployment, not inputs to source
   loading or packaging. They remain untouched until a human refreshes them after a fresh release
   candidate.
+- **Arbiter hook wiring ([ADR 0033](../adr/0033-kyber-arbiter-three-step-decision-gates.md))**:
+  `ArbiterHookWiring` renders decision-gate hooks for the
+  [Kyber Arbiter](../kyber-arbiter/architecture.md) beside the agent deployment, in project
+  scope only and only when the project's `arbiter.enabled` is true. Phase 1 wires three
+  targets: per-agent frontmatter hooks on `claude` (each dispatching agent plus the
+  `/conductor` entry-point skill, with `--caller <agent>`), per-agent `.agent.md` hooks on
+  `copilot` plus the project-level `.github/hooks/kyber-arbiter.json`, and the
+  `.opencode/plugins/kyber-arbiter.ts` shim on `opencode`. Only agents with a non-empty
+  `delegates-to` roster get dispatch-gating hooks, so the caller is trusted without a new
+  agent field; implementation specialists in the worker profiles get the planning-path Read
+  guard instead. Phase 1 outputs are whole owned files, so the receipt schema does not
+  change. A global install renders no hooks and records `arbiter-not-enforced`
+  (`global-scope`), as does any target the Arbiter does not hook yet.
 
 ---
 

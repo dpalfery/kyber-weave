@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>KyberWeave.Arbiter</RootNamespace>
+    <AssemblyName>kyber-weave-arbiter</AssemblyName>
+
+    <!-- dotnet tool packaging -->
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>kyber-weave-arbiter</ToolCommandName>
+    <IsPackable>true</IsPackable>
+    <PackageId>KyberWeave.Arbiter</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>KyberWeave</Authors>
+    <Description>Kyber-Weave Arbiter hook host: the separate binary harness hooks call to gate dispatches and guard planning paths.</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Test-only visibility for the launch-link store and other hook internals. -->
+    <InternalsVisibleTo Include="KyberWeave.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\KyberWeave.Core\KyberWeave.Core.csproj" />
+  </ItemGroup>
+
+</Project>

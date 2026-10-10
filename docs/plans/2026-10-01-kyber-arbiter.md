@@ -121,7 +121,7 @@ too large to ship in one piece". `docs validate --merge-ready` fails on any plan
 - **(a) One plan, one PR.** Accept the size escalation, with one human review of the whole
   change.
 - **(b) Three sequential plans, each with its own PR and council pass.**
-  - This plan delivers Phase A: the engine, the CLI, `applies-when`, ADR 0028 and the
+  - This plan delivers Phase A: the engine, the CLI, `applies-when`, ADR 0033 and the
     Arbiter documentation, which harvest D1–D23.
   - Phases B (the binary and distribution) and C (Squad wiring and the agent contracts)
     become todos when Phase A closes. Each is re-planned from its task section below.
@@ -180,7 +180,7 @@ its command rather than by a comment.
   - Hooks are rendered on Claude and on Copilot in VS Code.
   - Every other harness uses the D4 MCP fallback and records `arbiter-not-enforced`.
   - No shared files are written, so D8's owned blocks and Q10 are dropped, along with tasks
-    T22, T23 and ADR 0029.
+    T22, T23 and ADR 0034.
   - Copilot CLI, a D6 priority surface, becomes fallback-only.
 - **(b) Infer the caller from the target.**
   - Project-wide hooks treat any dispatch of an agent on the conductor's roster as a
@@ -874,7 +874,7 @@ green, and the broader filter in [Verification gates](#verification-gates) prove
 | T9 | `tests/KyberWeave.Tests/ReviewGateApplicabilityTests.cs` | `FullyQualifiedName~ReviewGateApplicabilityTests\|FullyQualifiedName~ReviewVerdictTests\|FullyQualifiedName~ReviewConfigTests\|FullyQualifiedName~ReviewJsonTests` | Without `--base`, every gate runs and the report says `applies-when` was not evaluated. With `--base`, a non-matching gate is not executed and is reported with `KW-REVIEW-026` and its reason. `VerdictEngine` never counts it as passed or failed. Older `review-gates/v1` reports still read. The verdict with not-applicable gates equals the verdict without them. | Run fails: `applies-when` is not parsed and `GateResult` has no not-applicable state | Filter passes, including the pre-existing review classes |
 | T10 | `tests/KyberWeave.Tests/ArbiterCliCommandTests.cs` | `FullyQualifiedName~ArbiterCliCommandTests` | `validate .` exits 0 on this repository and on a host with no section, and 1 with hinted diagnostics on an invalid one. `rules` lists ids, triggers, steps and facts. `plan` prints the parse, and reports `KW-ARB-PLAN-001` for a plan without tasks. `eval --trigger --event` prints the outcome or envelope offline with `--provider none`. `audit` reports `KW-ARB-AUDIT-001`. | Run fails: the `arbiter` branch is not registered | Filter passes |
 | T11 | `tests/KyberWeave.Tests/ArbiterSetupCommandTests.cs` (injected home, fake store, stub Ollama handler) | `FullyQualifiedName~ArbiterSetupCommandTests` | `setup` writes the provider to `<home>/.config/kyber-weave/arbiter.yml` and the key to the store from `--key-stdin` or a masked prompt, never echoing it. With Ollama 0.35 or later at `/api/version`, it suggests `nimble` and warns on `tev1`. `status` shows key found or missing, never the value. `doctor` raises `KW-ARB-CONFIG-006`/`-007`, `KW-ARB-KEY-001`, `KW-ARB-LOG-001` and `KW-ARB-BIN-001`. | Run fails: `setup`, `status` and `doctor` are not registered | Filter passes |
-| T12 | Docs only | `dotnet run --project src/KyberWeave.Cli -c Release -- docs validate .` and `… docs drift .` | ADR 0028 and the Arbiter docs state D1–D23 and the identifiers as shipped by T1–T11 | Not applicable (documentation) | Both checks report zero findings |
+| T12 | Docs only | `dotnet run --project src/KyberWeave.Cli -c Release -- docs validate .` and `… docs drift .` | ADR 0033 and the Arbiter docs state D1–D23 and the identifiers as shipped by T1–T11 | Not applicable (documentation) | Both checks report zero findings |
 | T13 | `tests/KyberWeave.Tests/Arbiter/ArbiterHookHostTests.cs`, `ClaudeHookAdapterTests.cs`, fixtures `tests/KyberWeave.Tests/Fixtures/arbiter-hooks/claude/` | `FullyQualifiedName~ArbiterHookHostTests\|FullyQualifiedName~ClaudeHookAdapterTests` | A Claude `PreToolUse(Agent)` fixture gives a deny with the envelope on escalate, and the allow shape on allow. A `PostToolUse` non-allow gives `decision: block`. Malformed stdin, missing configuration or a provider crash gives a `KW-ARB-HOOK-001` block, never a pass. Stdout holds only the decision document. An unidentified caller is allowed and logged. `--version` prints `kyber-weave-arbiter <semver>`. | Run fails: the project and the hook host do not exist | Filter passes; `dotnet build KyberWeave.sln -c Release` is clean |
 | T14 | `tests/KyberWeave.Tests/Arbiter/CommandHookAdapterTests.cs`, fixtures `tests/KyberWeave.Tests/Fixtures/arbiter-hooks/<harness>/` | `FullyQualifiedName~CommandHookAdapterTests` | For Copilot CLI, Copilot in VS Code, Cursor, Antigravity, Factory, Devin and Codex, each input fixture gives exactly that harness's decision shape from the matrix. An internal error gives that harness's block. Copilot in VS Code ignores non-dispatch tools. | Run fails: the adapters do not exist | Filter passes |
 | T15 | `tests/KyberWeave.Tests/Arbiter/PluginHookAdapterTests.cs` | `FullyQualifiedName~PluginHookAdapterTests` | A `kyber-arbiter.plugin-event/v1` envelope for OpenCode, Kilo or Pi gives `{decision, reason}`. A malformed envelope gives a block. The harness token is recorded. | Run fails: the plugin adapter does not exist | Filter passes |
@@ -893,7 +893,7 @@ green, and the broader filter in [Verification gates](#verification-gates) prove
 | T28 | `tests/KyberWeave.Tests/ArbiterCanonicalSquadTests.cs`, plus the pinned classes it updates | `FullyQualifiedName~ArbiterCanonicalSquadTests\|FullyQualifiedName~Squad\|FullyQualifiedName~RendererContractTests\|FullyQualifiedName~McpPackagingTests` | The real canonical tree declares `decision.query` (allow for `orchestrator` and `reviewer`, deny elsewhere), the `kyber-weave-arbiter` server in `mcp.json`, and its three tools in `toolchain.yml`. No hooked target grants the Arbiter server. | Run fails on the new assertions | Filter passes |
 | T29 | `tests/KyberWeave.Tests/SquadArbiterCliTests.cs` | `FullyQualifiedName~SquadArbiterCliTests\|FullyQualifiedName~SquadCliCommandTests` | `squad install/update` pass `arbiter.enabled` into the render request. `--global` renders no hooks and records `arbiter-not-enforced`. `squad doctor` probes `kyber-weave-arbiter --version` and reports owned-block drift. `squad status` lists blocks. | Run fails | Filter passes |
 | T30 | `tests/KyberWeave.Tests/SquadCanonicalContentTests.cs`, `HotshotGoldenContractTests.cs` | `FullyQualifiedName~SquadCanonicalContentTests\|FullyQualifiedName~HotshotGoldenContractTests` | The conductor writes `PLAN_FILE:`/`TASK:` in every delegation. It dispatches `architect` on `ARBITER_ESCALATION` and never retries unchanged. It stops after a repeat escalation on the same rule and task (R8). It calls `arbiter_evaluate` only when holding it. `architect` routes escalations to its new reference and emits `ESCALATION_RESOLVED`. `code-reviewer` and the `code-review` skill record Arbiter skips as `SKIPPED`, pass `--base`, write `LENS:`/`REFUTE:` headers, and run `kyber-weave arbiter audit`. `review-lens` carries the refutation framing. `review-lens` and `code-review` are in the evolved lists. | Run fails on the new content assertions | Filter passes |
-| T31 | Docs only | `docs validate .` and `docs drift .` | ADR 0029 (owned blocks; omitted under Q11 (a)) and the Squad architecture, requirements and onboarding match T21–T30 | Not applicable | Both checks report zero findings |
+| T31 | Docs only | `docs validate .` and `docs drift .` | ADR 0034 (owned blocks; omitted under Q11 (a)) and the Squad architecture, requirements and onboarding match T21–T30 | Not applicable | Both checks report zero findings |
 | T32 | Verification only | See [Verification gates](#verification-gates) | Every contract above still passes on the integrated tree | Not applicable | All gates pass, except those listed as expected escalations |
 
 ## Tasks
@@ -924,7 +924,7 @@ closeout. When Phase A closes, Phases B and C become todos.
 
 | Phase | Tasks | Delivers |
 |---|---|---|
-| A | T1–T12 | Engine, CLI, `applies-when`, ADR 0028 |
+| A | T1–T12 | Engine, CLI, `applies-when`, ADR 0033 |
 | B | T13–T20 | `kyber-weave-arbiter` and its distribution |
 | C | T21–T31 | Squad wiring and agent contracts |
 | — | T32–T34 | Verification, review and closeout of whatever this plan delivers |
@@ -933,7 +933,7 @@ closeout. When Phase A closes, Phases B and C become todos.
 for GREEN. Every C# task also follows the path declared as **<csharp-coding-standard>**, and
 every test follows **<test-coding-standard>**.
 
-**Q11 (a) changes the task list.** T22, T23 and ADR 0029 drop out. T25 and T26 shrink to
+**Q11 (a) changes the task list.** T22, T23 and ADR 0034 drop out. T25 and T26 shrink to
 degradation records. T24 keeps only Claude and the `.agent.md` hooks.
 
 ### T1: Rule model and step-0 engine
@@ -1212,7 +1212,7 @@ degradation records. T24 keeps only Claude and the `.agent.md` hooks.
 
 **Files:**
 
-- `docs/adr/0028-kyber-arbiter-three-step-decision-gates.md` (new). It records D1–D23, the
+- `docs/adr/0033-kyber-arbiter-three-step-decision-gates.md` (new). It records D1–D23, the
   egress rules (R9) and the identifiers.
 - `docs/adr/README.md`
 - `docs/kyber-arbiter/README.md`, `architecture.md` and `runbook.md` (new). The architecture
@@ -1392,7 +1392,7 @@ degradation records. T24 keeps only Claude and the `.agent.md` hooks.
 **Acceptance:**
 
 1. ADR 0027's decision is not rewritten. Its asset count is superseded in
-   `docs/distribution.md`, which ADR 0028 references.
+   `docs/distribution.md`, which ADR 0033 references.
 2. The T20 row is GREEN.
 
 **Depends on:** T14, T15, T16, T17, T18, T19.
@@ -1614,7 +1614,7 @@ before the data lands (finding 19).
 
 **Files:**
 
-- `docs/adr/0029-squad-owned-blocks-in-shared-hook-files.md` (new; omitted under Q11 (a))
+- `docs/adr/0034-squad-owned-blocks-in-shared-hook-files.md` (new; omitted under Q11 (a))
 - `docs/adr/README.md`
 - `docs/kyber-squad/architecture.md`: the owned blocks, the receipt v3, the
   `arbiter-not-enforced` degradation, and the amendment to "Squad does not own settings files"
@@ -1661,7 +1661,7 @@ The owning agent is `code-reviewer`, which uses the `code-review` skill.
 
 **Acceptance:**
 
-1. Harvest durable facts into ADR 0028, ADR 0029 and the Arbiter docs.
+1. Harvest durable facts into ADR 0033, ADR 0034 and the Arbiter docs.
 2. `docs validate --merge-ready` passes.
 
 **Depends on:** T33.
@@ -1871,7 +1871,7 @@ Then run these:
 
 `docs-dev` then does the T34 closeout:
 
-- migrates durable facts into ADR 0028, ADR 0029 (if Q11 is not (a)) and the
+- migrates durable facts into ADR 0033, ADR 0034 (if Q11 is not (a)) and the
   `docs/kyber-arbiter/` documents;
 - synchronizes the plan index;
 - archives this plan;

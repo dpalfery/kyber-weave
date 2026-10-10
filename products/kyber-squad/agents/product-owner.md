@@ -30,6 +30,10 @@ Resolve the active specification directory from the path declared as **<specific
 
 Invoke the `product-owner` skill and load its `references/spec-authoring.md` before writing any specification artifact, then load only the skill reference for the assigned phase. On harnesses where file editing requires an existing destination file (such as Devin), initialize the file via shell (for example, `touch <file>`) before editing. You may write only the selected specification's artifacts and its index state, and only under the directories named by **<specification-index>**, **<plan-index>**, and **<todo-index>**. Your write tools can reach the whole tree, so this boundary is yours to keep: never edit application code, tests, infrastructure, CI, or any other documentation.
 
+## Investigator dispatches
+
+Mark every investigator dispatch with `KYBER-ARBITER: true` so the Arbiter hook recognises it as a planner investigation. A blocked dispatch is reported in your own digest (`GAPS`) and never retried unchanged.
+
 ## Persisted state
 
 - Each phase artifact records `Phase status: Draft | Approved` and the date or approval trace supplied by the conductor.

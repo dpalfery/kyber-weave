@@ -16,6 +16,7 @@ internal sealed class SelfUpdater : IDisposable
     private const string CliBaseName = "kyber-weave";
     private const string McpBaseName = "kyber-weave-mcp";
     private const string KyberDashBaseName = "kyberdash";
+    private const string ArbiterBaseName = "kyber-weave-arbiter";
 
     /// <summary>
     /// First release whose <c>build-kyberdash</c> job succeeded and published
@@ -25,6 +26,15 @@ internal sealed class SelfUpdater : IDisposable
     /// <c>KYBERDASH_MIN_VERSION</c> in <c>scripts/install.sh</c> is the same floor.
     /// </summary>
     private const string KyberDashMinVersion = "0.1.7-rc.9";
+
+    /// <summary>
+    /// First release whose build published <c>kyber-weave-arbiter-&lt;rid&gt;</c>
+    /// assets; every earlier tag has none. An update that resolves an older release
+    /// must not ask for the archive, because a missing asset fails the whole update —
+    /// including the CLI replacement that would have worked.
+    /// <c>ARBITER_MIN_VERSION</c> in <c>scripts/install.sh</c> is the same floor.
+    /// </summary>
+    private const string ArbiterMinVersion = "0.1.7-rc.17";
 
     /// <summary>
     /// First release whose <c>build-tray</c> job publishes the tray installers.
@@ -151,6 +161,18 @@ internal sealed class SelfUpdater : IDisposable
                 staged.Add(StageBinary(
                     KyberDashBaseName,
                     PlatformRid.KyberDashRid(_host.Rid),
+                    tag,
+                    windows,
+                    sums,
+                    work.FullName));
+            }
+
+            // The arbiter ships like kyber-weave-mcp, under this host's .NET RID.
+            if (ShouldUpdateArbiter(options, version, windows))
+            {
+                staged.Add(StageBinary(
+                    ArbiterBaseName,
+                    _host.Rid,
                     tag,
                     windows,
                     sums,
@@ -410,6 +432,37 @@ internal sealed class SelfUpdater : IDisposable
         if (!File.Exists(installed))
         {
             _log($"kyberdash is not installed in {_host.InstallDirectory}; add it with scripts/install.sh");
+            return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>Decides whether this update should replace an installed arbiter.</summary>
+    /// <remarks>
+    /// Update replaces what is installed; it does not add a binary the user left out.
+    /// <c>install.sh --no-arbiter</c> is an explicit opt-out, and a machine that installed
+    /// before the arbiter existed never chose to run it either — so an absent binary is reported
+    /// rather than silently created. Both skips are logged, because a silent one reads as the
+    /// update having covered the arbiter when it did not.
+    /// </remarks>
+    private bool ShouldUpdateArbiter(SelfUpdateOptions options, string version, bool windows)
+    {
+        if (options.NoArbiter)
+            return false;
+
+        if (ReleaseVersion.Compare(version, ArbiterMinVersion) < 0)
+        {
+            _log($"release {version} predates the arbiter (first published in {ArbiterMinVersion}); leaving kyber-weave-arbiter unchanged");
+            return false;
+        }
+
+        string installed = Path.Combine(
+            _host.InstallDirectory,
+            BinaryInstaller.InstalledFileName(ArbiterBaseName, windows));
+        if (!File.Exists(installed))
+        {
+            _log($"kyber-weave-arbiter is not installed in {_host.InstallDirectory}; add it with scripts/install.sh");
             return false;
         }
 

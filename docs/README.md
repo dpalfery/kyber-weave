@@ -37,6 +37,7 @@ correct in a repository that arranges its documentation differently.
 - [Context Hygiene](context-hygiene/README.md) — Why and how to govern agent prompts and skills across coding harnesses
 - [DocGraph](docgraph/README.md) — Why and how to turn markdown docs into a queryable in-memory graph joined to live code
 - [Kyber-Squad](kyber-squad/README.md) — Why and how to govern a twelve-target harness catalog; twelve targets render today with rollback
+- [Kyber Arbiter](kyber-arbiter/README.md) — Why and how to gate delegations and review fan-out through three-step decision gates enforced by harness hooks
 - [KyberDash](dash/README.md) — Why and how to observe and tune agent context with local .NET Aspire OTEL telemetry
 
 ---
@@ -129,7 +130,21 @@ Start at the [Kyber-Squad Overview](kyber-squad/README.md) for value proposition
 | [Architecture](kyber-squad/architecture.md) | AgentIR, permission lattice, role-skill lowering, state store, mutex lease, transaction engine, conductor execution circuit-breaker |
 | [Requirements & degradation](kyber-squad/requirements.md) | KS-001–KS-008 specifications, structured degradation taxonomy, capability matrix, conductor circuit-breaker harvest |
 
-## Feature 4 — Review council
+## Feature 4 — Kyber Arbiter
+
+Three-step decision gates over Squad delegations and review fan-out: plain code for exact
+facts, a decision model for judgements about meaning, and a reasoning agent after the
+block — enforced by harness hooks. Phase 1 covers Claude, Copilot in VS Code, Copilot CLI,
+and OpenCode.
+Start at the [Kyber Arbiter overview](kyber-arbiter/README.md) for the idea and the scope.
+
+| Page | Covers |
+|---|---|
+| [Overview & Why Kyber Arbiter](kyber-arbiter/README.md) | Value proposition, three-step gates, Phase 1 scope |
+| [Architecture](kyber-arbiter/architecture.md) | Engine, rules, facts, provider, configuration, harness facts |
+| [Runbook](kyber-arbiter/runbook.md) | Hooks, trust steps, fail-closed behaviour, `setup`, `doctor`, `audit` |
+
+## Feature 5 — Review council
 
 Parallel code review: a council of specialist lenses over the diff, the host's deterministic
 gate suite, and a rule-based verdict engine that decides from both.
@@ -140,7 +155,7 @@ Start at the [Review council overview](code-review/README.md) for the idea and t
 | [Overview & Why the council](code-review/README.md) | Lens fan-out, gates as evidence, what makes the verdict trustworthy |
 | [Architecture](code-review/architecture.md) | Three layers, two lens seats, the evidence schema, verdict rules, permissions, configuration |
 
-## Feature 5 — KyberDash
+## Feature 6 — KyberDash
 
 Local telemetry observability and context tuning for agentic workflows: an OTLP receiver and a
 single canonical store feeding three local surfaces, none of which sends anything off the
@@ -156,7 +171,7 @@ machine. Start at the [KyberDash Overview](dash/README.md) for the value proposi
 The `kyberdash` binary installs alongside the CLI — see
 [the version floor](install.md#kyberdash-and-the-version-floor) for which releases publish it.
 
-## Feature 6 — Kyber Utilities
+## Feature 7 — Kyber Utilities
 
 Kyber-owned deployment of per-harness utility artifacts, starting with status lines: files
 staged at per-user locations, recorded in a Kyber Utilities receipt, and activated by hand. It

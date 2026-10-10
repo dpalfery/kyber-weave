@@ -28,6 +28,14 @@ internal sealed class ReviewGateYaml
     public bool? Blocking { get; init; }
 
     public int? TimeoutSeconds { get; init; }
+
+    public ReviewAppliesWhenYaml? AppliesWhen { get; init; }
+}
+
+/// <summary>One entry's <c>applies-when</c> mapping: the paths the gate applies to.</summary>
+internal sealed class ReviewAppliesWhenYaml
+{
+    public List<string>? Paths { get; init; }
 }
 
 /// <summary>The <c>review.coverage</c> mapping.</summary>

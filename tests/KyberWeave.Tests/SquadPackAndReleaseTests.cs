@@ -531,6 +531,14 @@ public sealed class SquadPackAndReleaseTests : IDisposable
                     continue;
                 }
 
+                // The Arbiter's embedded agent and lens copies are the same kind of
+                // deliberate exception: host repositories have no canonical tree, so
+                // the rules read these copies instead.
+                if (IsAllowedArbiterEmbeddedInclude(path, element.Attribute("LogicalName")?.Value))
+                {
+                    continue;
+                }
+
                 if (TryGetAllowedKyberStandardTemplateInclude(path, out string technology))
                 {
                     Assert.Equal(
@@ -574,6 +582,62 @@ public sealed class SquadPackAndReleaseTests : IDisposable
 
         technology = string.Empty;
         return false;
+    }
+
+    /// <summary>
+    /// Core may embed the Arbiter's Squad agent and lens copies from
+    /// <c>products/kyber-squad/agents/*.md</c> and
+    /// <c>products/kyber-squad/skills/code-review/references/lenses/*.md</c> only,
+    /// non-recursive, with logical names under <c>Arbiter.Roster.</c> and
+    /// <c>Arbiter.Lens.</c> respectively.
+    /// Their logical names carry no raw-corpus token, so the resource-name check above
+    /// already passes them; this covers the project-file half. Any other
+    /// products/kyber-squad path stays prohibited.
+    /// </summary>
+    private static bool IsAllowedArbiterEmbeddedInclude(string path, string? logicalName)
+    {
+        string normalized = path.Replace('\\', '/');
+        if (IsSingleSegmentMarkdownUnder(normalized, "products/kyber-squad/agents/"))
+        {
+            return (logicalName ?? string.Empty).StartsWith("Arbiter.Roster.", StringComparison.Ordinal);
+        }
+
+        if (IsSingleSegmentMarkdownUnder(normalized, "products/kyber-squad/skills/code-review/references/lenses/"))
+        {
+            return (logicalName ?? string.Empty).StartsWith("Arbiter.Lens.", StringComparison.Ordinal);
+        }
+
+        return false;
+    }
+
+    private static bool IsSingleSegmentMarkdownUnder(string normalizedPath, string prefix)
+    {
+        int marker = normalizedPath.IndexOf(prefix, StringComparison.OrdinalIgnoreCase);
+        if (marker < 0)
+        {
+            return false;
+        }
+
+        string remainder = normalizedPath[(marker + prefix.Length)..];
+        return remainder.EndsWith(".md", StringComparison.OrdinalIgnoreCase)
+            && !remainder.Contains('/', StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Fix5_ArbiterEmbeddedInclude_RejectsNestedPaths()
+    {
+        Assert.False(IsAllowedArbiterEmbeddedInclude(
+            "..\\..\\products\\kyber-squad\\agents\\nested\\evil.md", "Arbiter.Roster.evil.md"));
+        Assert.False(IsAllowedArbiterEmbeddedInclude(
+            "../../products/kyber-squad/skills/code-review/references/lenses/nested/evil.md", "Arbiter.Lens.evil.md"));
+        Assert.False(IsAllowedArbiterEmbeddedInclude(
+            "..\\..\\products\\kyber-squad\\agents\\conductor.md", "Raw.conductor.md"));
+        Assert.False(IsAllowedArbiterEmbeddedInclude(
+            "..\\..\\products\\kyber-squad\\agents\\conductor.md", null));
+        Assert.True(IsAllowedArbiterEmbeddedInclude(
+            "..\\..\\products\\kyber-squad\\agents\\conductor.md", "Arbiter.Roster.conductor.md"));
+        Assert.True(IsAllowedArbiterEmbeddedInclude(
+            "..\\..\\products\\kyber-squad\\skills\\code-review\\references\\lenses\\scope.md", "Arbiter.Lens.scope.md"));
     }
 
     private static readonly string[] TextFileExtensions =

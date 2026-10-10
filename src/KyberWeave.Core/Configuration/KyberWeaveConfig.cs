@@ -1,3 +1,5 @@
+using KyberWeave.Core.Arbiter;
+
 namespace KyberWeave.Core.Configuration;
 
 /// <summary>Combined Kyber-Weave host configuration.</summary>
@@ -14,6 +16,8 @@ public sealed class KyberWeaveConfig
     public ConfigRegConfig ConfigReg { get; init; } = ConfigRegConfig.ProductDefaults;
 
     public ReviewConfig Review { get; init; } = ReviewConfig.ProductDefaults;
+
+    public ArbiterConfig Arbiter { get; init; } = ArbiterConfig.ProductDefaults;
 
     public static KyberWeaveConfig ProductDefaults { get; } = new();
 
@@ -59,7 +63,8 @@ public sealed class KyberWeaveConfig
         DocsAnalysisConfig? docsAnalysis = null,
         SquadConfig? squad = null,
         ConfigRegConfig? configReg = null,
-        ReviewConfig? review = null) =>
+        ReviewConfig? review = null,
+        ArbiterConfig? arbiter = null) =>
         new()
         {
             Ontology = ontology ?? Ontology,
@@ -67,6 +72,7 @@ public sealed class KyberWeaveConfig
             DocsAnalysis = docsAnalysis ?? DocsAnalysis,
             Squad = squad ?? Squad,
             ConfigReg = configReg ?? ConfigReg,
-            Review = review ?? Review
+            Review = review ?? Review,
+            Arbiter = arbiter ?? Arbiter
         };
 }

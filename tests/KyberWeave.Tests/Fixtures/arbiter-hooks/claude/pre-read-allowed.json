@@ -1,0 +1,14 @@
+{
+  "hook_event_name": "PreToolUse",
+  "session_id": "sess-read-2",
+  "transcript_path": "/repo/transcript.jsonl",
+  "cwd": "/repo",
+  "permission_mode": "default",
+  "agent_id": "agent-worker-2",
+  "agent_type": "csharp-dev",
+  "tool_name": "Read",
+  "tool_input": {
+    "file_path": "/repo/src/Foo.cs"
+  },
+  "tool_use_id": "toolu-read-2"
+}

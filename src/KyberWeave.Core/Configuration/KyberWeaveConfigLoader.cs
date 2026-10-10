@@ -1,3 +1,4 @@
+using KyberWeave.Core.Arbiter;
 using YamlDotNet.Core;
 
 namespace KyberWeave.Core.Configuration;
@@ -118,7 +119,8 @@ public static class KyberWeaveConfigLoader
                 ontology),
             Squad = SquadConfigLoader.Merge(SquadConfig.ProductDefaults, document.Squad),
             ConfigReg = ConfigRegConfigLoader.Merge(ConfigRegConfig.ProductDefaults, document.ConfigReg),
-            Review = ReviewConfigLoader.Merge(ReviewConfig.ProductDefaults, document.Review)
+            Review = ReviewConfigLoader.Merge(ReviewConfig.ProductDefaults, document.Review),
+            Arbiter = ArbiterConfigLoader.Merge(ArbiterConfig.ProductDefaults, document.Arbiter)
         };
     }
 }

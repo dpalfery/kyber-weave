@@ -18,7 +18,8 @@ public sealed record SquadInstallRequest(
     string Translation = "best-effort",
     bool Adopt = false,
     bool DryRun = false,
-    string Repository = "dpalfery/kyber-weave");
+    string Repository = "dpalfery/kyber-weave",
+    SquadArbiterWiring? Arbiter = null);
 
 /// <summary>Parameters for a Kyber-Squad update lifecycle operation.</summary>
 public sealed record SquadUpdateRequest(
@@ -31,7 +32,8 @@ public sealed record SquadUpdateRequest(
     string Translation = "best-effort",
     bool ReplaceManaged = false,
     bool DryRun = false,
-    string Repository = "dpalfery/kyber-weave");
+    string Repository = "dpalfery/kyber-weave",
+    SquadArbiterWiring? Arbiter = null);
 
 /// <summary>Parameters for a Kyber-Squad uninstall lifecycle operation.</summary>
 public sealed record SquadUninstallRequest(
@@ -151,7 +153,8 @@ public sealed class SquadLifecycleService
                 Targets: request.Targets,
                 Scope: request.Scope,
                 UserScopeDirectory: userScopeDir,
-                TranslationMode: request.Translation);
+                TranslationMode: request.Translation,
+                Arbiter: request.Arbiter);
 
             SquadRenderResult renderResult = await _renderer.RenderAsync(renderRequest, cancellationToken).ConfigureAwait(false);
             if (!renderResult.Success || renderResult.Errors.Count > 0)
@@ -171,9 +174,14 @@ public sealed class SquadLifecycleService
                 assetDigest: releaseResult.Checksum.Sha256,
                 extractionRoot: releaseResult.ExtractionRoot);
 
-            IReadOnlyList<SquadDegradation> degradations = renderResult.Degradations
-                .Select(d => new SquadDegradation(d.Target, d.CanonicalIdentity, d.Code))
-                .ToArray();
+            // With the Arbiter enabled, the targets and scope that stay unenforced are
+            // recorded at render time (Req 22.4): the reason lands in the render record's
+            // Details while the receipt keeps only the code.
+            IReadOnlyList<SquadDegradation> degradations = AppendArbiterDegradations(
+                renderResult.Degradations,
+                request.Arbiter,
+                request.Targets,
+                request.Scope);
 
             SquadDeploymentPlan plan;
             IReadOnlyList<SquadReceipt>? siblingReceipts = SiblingGlobalReceipts(targetRoot, request.Scope);
@@ -300,7 +308,8 @@ public sealed class SquadLifecycleService
                 Targets: targets,
                 Scope: request.Scope,
                 UserScopeDirectory: userScopeDir,
-                TranslationMode: request.Translation);
+                TranslationMode: request.Translation,
+                Arbiter: request.Arbiter);
 
             SquadRenderResult renderResult = await _renderer.RenderAsync(renderRequest, cancellationToken).ConfigureAwait(false);
             if (!renderResult.Success || renderResult.Errors.Count > 0)
@@ -320,9 +329,11 @@ public sealed class SquadLifecycleService
                 assetDigest: releaseResult.Checksum.Sha256,
                 extractionRoot: releaseResult.ExtractionRoot);
 
-            IReadOnlyList<SquadDegradation> degradations = renderResult.Degradations
-                .Select(d => new SquadDegradation(d.Target, d.CanonicalIdentity, d.Code))
-                .ToArray();
+            IReadOnlyList<SquadDegradation> degradations = AppendArbiterDegradations(
+                renderResult.Degradations,
+                request.Arbiter,
+                targets,
+                request.Scope);
 
             SquadDeploymentPlan plan = SquadDeploymentPlan.CreateUpdate(
                 targetRoot: targetRoot,
@@ -427,6 +438,35 @@ public sealed class SquadLifecycleService
         scope == SquadDeploymentScope.Global
             ? _stateStore.ListOtherGlobalReceipts(targetRoot)
             : null;
+
+    /// <summary>
+    /// Carries the renderer degradations into receipt degradations, appending the
+    /// Arbiter unenforced-target records when the wiring is enabled.
+    /// </summary>
+    /// <remarks>
+    /// The Arbiter records are derived from the selected targets and scope (Req 22.4),
+    /// not from what the renderers emitted, so an unhooked target and a global install
+    /// are recorded even when the render itself produced no hooks.
+    /// </remarks>
+    private static IReadOnlyList<SquadDegradation> AppendArbiterDegradations(
+        IReadOnlyList<SquadDegradationRecord> rendered,
+        SquadArbiterWiring? arbiter,
+        IReadOnlyList<SquadTarget> targets,
+        SquadDeploymentScope scope)
+    {
+        List<SquadDegradation> degradations = rendered
+            .Select(d => new SquadDegradation(d.Target, d.CanonicalIdentity, d.Code))
+            .ToList();
+        if (arbiter?.Enabled == true)
+        {
+            foreach (SquadDegradationRecord record in ArbiterHookWiring.TargetDegradations(targets, scope))
+            {
+                degradations.Add(new SquadDegradation(record.Target, record.CanonicalIdentity, record.Code));
+            }
+        }
+
+        return degradations;
+    }
 
     /// <summary>
     /// Rejects any requested target with no registered renderer before the release is

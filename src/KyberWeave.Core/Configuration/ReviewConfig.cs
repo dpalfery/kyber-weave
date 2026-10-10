@@ -1,10 +1,20 @@
 namespace KyberWeave.Core.Configuration;
 
+/// <summary>The paths a gate applies to, when it declares any.</summary>
+/// <param name="Paths">PathGlob patterns; the gate applies when a changed path matches one.</param>
+/// <remarks>
+/// A gate without this runs unconditionally. The patterns are evaluated through
+/// <c>KW-ARB-GATE-001</c>, so the runner and the Arbiter answer "does this gate apply"
+/// from the same rule rather than from two implementations that can drift apart.
+/// </remarks>
+public sealed record ReviewGateAppliesWhen(IReadOnlyList<string> Paths);
+
 /// <summary>One deterministic gate the host declares.</summary>
 /// <param name="Id">Slug identifying the gate in findings and reports.</param>
 /// <param name="Run">The command and its arguments, already split into argv.</param>
 /// <param name="Blocking">Whether failing this gate blocks the change.</param>
 /// <param name="TimeoutSeconds">Seconds to wait before the runner kills the process tree.</param>
+/// <param name="AppliesWhen">The paths the gate applies to, or null when it always runs.</param>
 /// <remarks>
 /// <see cref="Run"/> is a list, never a command line, because
 /// <see cref="Processes.ProcessRunner"/> refuses a concatenated argument string and refuses
@@ -13,7 +23,7 @@ namespace KyberWeave.Core.Configuration;
 /// vocabulary is exactly "run this program with these arguments", which is the whole
 /// injection surface closed at the point the value is written.
 /// </remarks>
-public sealed record ReviewGate(string Id, IReadOnlyList<string> Run, bool Blocking = true, int TimeoutSeconds = 900);
+public sealed record ReviewGate(string Id, IReadOnlyList<string> Run, bool Blocking = true, int TimeoutSeconds = 900, ReviewGateAppliesWhen? AppliesWhen = null);
 
 /// <summary>The unit-coverage floor a change must clear.</summary>
 /// <param name="FileLinePercent">Minimum line coverage across files.</param>

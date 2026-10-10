@@ -1,5 +1,6 @@
 using System.Reflection;
 using KyberWeave.Cli.Commands.Agents;
+using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Cli.Commands.Docs;
 using KyberWeave.Cli.Commands.Review;
 using KyberWeave.Cli.Commands.Skills;
@@ -228,6 +229,45 @@ app.Configure(config =>
         review.AddCommand<ReviewVerdictCommand>("verdict")
             .WithDescription("Compute approve / request-changes / needs-human from findings and gates.")
             .WithExample("review", "verdict", ".", "--findings", "findings.json", "--gates", "gates.json");
+    });
+
+    // Kyber-Arbiter Human Surfaces — validate, list, inspect, dry-run, audit,
+    // and the provider setup, status and doctor verbs.
+    config.AddBranch("arbiter", arbiter =>
+    {
+        arbiter.SetDescription("Validate Arbiter configuration and inspect rules, plans, evaluations and the decision log.");
+
+        arbiter.AddCommand<ArbiterValidateCommand>("validate")
+            .WithDescription("Validate the arbiter: section, the user override and the shipped rules.")
+            .WithExample("arbiter", "validate", ".");
+
+        arbiter.AddCommand<ArbiterRulesCommand>("rules")
+            .WithDescription("List each rule's id, trigger, step, question, answers, effects and facts.")
+            .WithExample("arbiter", "rules", "--trigger", "delegate");
+
+        arbiter.AddCommand<ArbiterPlanCommand>("plan")
+            .WithDescription("Print what the parser understood for a plan file.")
+            .WithExample("arbiter", "plan", "docs/plans/plan.md");
+
+        arbiter.AddCommand<ArbiterEvalCommand>("eval")
+            .WithDescription("Evaluate a recorded event offline through the evaluator's dry run.")
+            .WithExample("arbiter", "eval", "--trigger", "delegate", "--event", "./event.json", "--provider", "none");
+
+        arbiter.AddCommand<ArbiterAuditCommand>("audit")
+            .WithDescription("Report unpaired, undecided and unmarked dispatches from the ledger.")
+            .WithExample("arbiter", "audit", "--plan", "docs/plans/plan.md");
+
+        arbiter.AddCommand<ArbiterSetupCommand>("setup")
+            .WithDescription("Choose the provider and store the TypeSafe key for the endpoint origin.")
+            .WithExample("arbiter", "setup", "--provider", "systemone", "--key-stdin");
+
+        arbiter.AddCommand<ArbiterStatusCommand>("status")
+            .WithDescription("Show the provider, model, endpoint origin and whether a key was found.")
+            .WithExample("arbiter", "status");
+
+        arbiter.AddCommand<ArbiterDoctorCommand>("doctor")
+            .WithDescription("Diagnose the Arbiter configuration, key, log ignore, binary and guard.")
+            .WithExample("arbiter", "doctor");
     });
 
     // Distribution: replace the running Release binaries. Not an artifact-class branch.

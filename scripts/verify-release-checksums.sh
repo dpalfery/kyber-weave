@@ -39,9 +39,10 @@ else
     LIST_MODE=0
 fi
 
-# Expected assets: 20 files from five groups.
+# Expected assets: 25 files from six groups.
 # CLI (5): kyber-weave-<rid>, osx and linux as .tar.gz, win as .zip
 # MCP (5): kyber-weave-mcp-<rid>, same pattern
+# Arbiter (5): kyber-weave-arbiter-<rid>, same pattern
 # KyberDash (5): kyberdash-<rid>, darwin as .tar.gz, linux as .tar.gz, win as .zip
 # Tray (3): kyberdash-tray-darwin-arm64.zip, darwin-x64.zip, win-x64-setup.exe
 # Squad (2): kyber-squad-<version>.zip, kyber-squad-plugin-<version>.zip
@@ -56,6 +57,11 @@ declare -a EXPECTED_ASSETS=(
     "kyber-weave-mcp-osx-x64.tar.gz"
     "kyber-weave-mcp-osx-arm64.tar.gz"
     "kyber-weave-mcp-win-x64.zip"
+    "kyber-weave-arbiter-linux-x64.tar.gz"
+    "kyber-weave-arbiter-linux-arm64.tar.gz"
+    "kyber-weave-arbiter-osx-x64.tar.gz"
+    "kyber-weave-arbiter-osx-arm64.tar.gz"
+    "kyber-weave-arbiter-win-x64.zip"
     "kyberdash-darwin-arm64.tar.gz"
     "kyberdash-darwin-x64.tar.gz"
     "kyberdash-linux-arm64.tar.gz"

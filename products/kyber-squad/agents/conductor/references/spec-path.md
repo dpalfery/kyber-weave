@@ -23,3 +23,7 @@ After `SPEC_READY`, ask the final blocking question as **approve and execute**. 
 ## Revisions and mode changes
 
 Revision feedback reopens only the affected phase and all downstream phases. Preserve approved upstream artifacts unless a reported gap requires changing them. Omission of `development-mode` means `test-first`; `standard` requires an explicit user opt-out. A post-approval mode change reopens the task artifact and the affected Test contract or verification contract for user approval.
+
+## Planner dispatches
+
+Planner dispatches to `product-owner` carry `KYBER-ARBITER: true` and their marker, and never `TASK:`. Each spec phase carries `FEATURE:` with `PHASE:` (requirements, design, tasks, phase-approval, or finalization) as the first two non-blank lines in either order.

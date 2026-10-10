@@ -574,6 +574,22 @@ Task 16.9 waits on this answer. Tasks 16.3 and 16.4 can run without it.
   - **Depends on:** 4.1; decision gate Q15
   - **Packet attachments:** design §1.6, §1.10; [F1]; the Q15 decision text
   - _Requirements: 5.3, 15.1, 21.3_
+- [ ] 4.1b Real hook decision engine
+  - **Objective:** Replace the scripted engine in the production host with real evaluation: run `ArbiterEvaluator` end to end through `HookCommand` and map the result onto the engine port the adapters render.
+  - **Files:**
+    - `src/KyberWeave.Arbiter/Hooks/ArbiterHookDecisionEngine.cs` (new)
+    - `src/KyberWeave.Arbiter/Hooks/IContextualHookDecisionEngine.cs` (new)
+    - `src/KyberWeave.Arbiter/Composition.cs` (compose the real engine by default)
+    - `tests/KyberWeave.Tests/Arbiter/ArbiterRealEngineTests.cs` (new)
+  - **Acceptance:**
+    1. **Real evaluation.** The engine builds the provider (`none` or `systemone`), the origin-bound key resolver over the OS credential stores, the ledger and decision log under `artifacts/arbiter/`, real git facts and the plan reader from the loaded host configuration, then evaluates through `ArbiterEvaluator`.
+    2. **Context.** Adapters prefer the contextual overloads (harness, repository root, prompt history, tool-call and session ids) when the engine implements them and fall back to the base methods otherwise; the base port stays untouched so the scripted-engine host tests keep compiling.
+    3. **Outcomes.** A non-allow outcome renders the escalation envelope on conductor and investigate triggers, the post-return block, or the review note; an error result blocks with `KW-ARB-HOOK-001`, never allows.
+    4. **Contract.** One deny, one allow, one escalate and one exception-to-block run end to end against a temp repo with a fake provider; the scripted-engine host tests stay untouched.
+  - **Skills:** `test-dev`, `csharp-dev`
+  - **Depends on:** 4.1, 1.9
+  - **Packet attachments:** design §5, §8
+  - _Requirements: 5.1, 5.2_
 - [ ] 5. Phase 1: distribution
 - [ ] 5.1 Release workflows and scripts
   - **Objective:** Publish `kyber-weave-arbiter` alongside the CLI and the MCP server, and let `install.sh` install or skip it.
@@ -823,7 +839,7 @@ Task 16.9 waits on this answer. Tasks 16.3 and 16.4 can run without it.
 - [ ] 8.1 Phase 1 canonical documentation
   - **Objective:** Make the canonical documentation describe what Phase 1 delivers, so it is current when the Phase 1 PR merges.
   - **Files:**
-    - `docs/adr/0028-kyber-arbiter-three-step-decision-gates.md` (new)
+    - `docs/adr/0033-kyber-arbiter-three-step-decision-gates.md` (new)
     - `docs/adr/README.md`
     - `docs/kyber-arbiter/README.md`, `docs/kyber-arbiter/architecture.md` and `docs/kyber-arbiter/runbook.md` (new)
     - `docs/catalog.md` (a `KyberArbiter` row)
@@ -837,7 +853,7 @@ Task 16.9 waits on this answer. Tasks 16.3 and 16.4 can run without it.
     - `docs/kyber-squad/requirements.md`
     - `docs/kyber-squad/onboarding.md`
   - **Acceptance:**
-    1. **ADR 0028** records D1–D34, the egress rules (R9) and the permanent identifiers.
+    1. **ADR 0033** records D1–D34, the egress rules (R9) and the permanent identifiers.
     2. **The architecture document** holds:
        - the terminology for *Arbiter* and *JEV*, which stands in for a glossary because this repository has no managed one;
        - the link to TypeSafe's skill (Req 20.1);
@@ -879,7 +895,7 @@ Task 16.9 waits on this answer. Tasks 16.3 and 16.4 can run without it.
     5. **A dry run.** `kyber-weave squad install --target claude,copilot,opencode --dry-run`, in a scratch repository with `arbiter.enabled: true`, shows the hooks, the Copilot hook file and the OpenCode shim.
     6. **Expected escalations, not failures:** `KW-REVIEW-008` (reserved paths) and `KW-REVIEW-009` (size, D26).
   - **Skills:** `test-dev`
-  - **Depends on:** 8.1
+  - **Depends on:** 4.1b, 8.1
   - **Packet attachments:** none
   - _Requirements: 7.1, 13.1_
 - [ ] 10. Phase 1: review
@@ -1076,7 +1092,7 @@ Task 16.9 waits on this answer. Tasks 16.3 and 16.4 can run without it.
 - [ ] 13.1 Phase 2 canonical documentation
   - **Objective:** Make the canonical documentation describe owned blocks and the Phase 2 harnesses.
   - **Files:**
-    - `docs/adr/0029-squad-owned-blocks-in-shared-hook-files.md` (new)
+    - `docs/adr/0034-squad-owned-blocks-in-shared-hook-files.md` (new)
     - `docs/adr/README.md`
     - `docs/kyber-squad/architecture.md`
     - `docs/kyber-squad/requirements.md`
@@ -1084,7 +1100,7 @@ Task 16.9 waits on this answer. Tasks 16.3 and 16.4 can run without it.
     - `docs/kyber-arbiter/architecture.md`
     - `docs/kyber-arbiter/runbook.md`
   - **Acceptance:**
-    1. **ADR 0029** records:
+    1. **ADR 0034** records:
        - that Squad owns marked entries in shared hook files, an exception to the rule that Squad does not own settings files (ADR 0026), as Req 8.3 requires;
        - identification by command signature, and by the Antigravity group (D25);
        - receipt v3, and drift.
@@ -1406,7 +1422,7 @@ Task 16.9 waits on this answer. Tasks 16.3 and 16.4 can run without it.
     1. **Verify delivery.**
        - Check every requirement (Req 1–25) and decision (D1–D34) against delivered evidence: test classes, the three phases' gate reports, and the three reviews.
        - Anything unmet is reported to the conductor, with evidence, before archiving. Nothing is deferred to a todo (D34).
-    2. **Finish the canonical documents.** They are consistent across the three phases' additions: one harness table, one degradation list, and ADR 0028 and ADR 0029 cross-linked. None links this specification.
+    2. **Finish the canonical documents.** They are consistent across the three phases' additions: one harness table, one degradation list, and ADR 0033 and ADR 0034 cross-linked. None links this specification.
     3. **Archive.** The specification index marks this specification Archived, with its archive date and links to the canonical documents. The folder moves to `docs/archive/specs/kyber-arbiter/`.
     4. **Remove the plan.** The superseded Draft plan `docs/plans/2026-10-01-kyber-arbiter.md`, and its row in `docs/plans/README.md`, are deleted, as the owner directed.
     5. **Final checks.** `docs validate . --merge-ready` and `docs drift .` report zero findings.
@@ -1434,6 +1450,7 @@ Every row runs from the repository root. RED is a failing run of the row's filte
 | 3.1 | `tests/KyberWeave.Tests/ArbiterCliCommandTests.cs` | `<cmd> "FullyQualifiedName~ArbiterCliCommandTests"` | `validate`, `rules`, `plan`, `eval` and `audit` outputs and exit codes; `eval` writes nothing | Run fails: the `arbiter` branch is not registered | Filter passes |
 | 3.2 | `tests/KyberWeave.Tests/ArbiterSetupCommandTests.cs` | `<cmd> "FullyQualifiedName~ArbiterSetupCommandTests"` | `setup` writes override and store, never echoing; Ollama detection suggests `nimble`, warns on `tev1`; `status` never shows the key; `doctor` raises each listed id | Run fails: `setup`, `status` and `doctor` are not registered | Filter passes |
 | 4.1 | `tests/KyberWeave.Tests/Arbiter/ArbiterHookHostTests.cs`, `ClaudeHookAdapterTests.cs`, `ArbiterReadGuardTests.cs` | `<cmd> "FullyQualifiedName~ArbiterHookHostTests\|FullyQualifiedName~ClaudeHookAdapterTests\|FullyQualifiedName~ArbiterReadGuardTests"` | Claude fixtures give deny, allow, strip, post block, annotation and launch-link shapes; pass-through; fail-closed blocks; stdout holds only the decision; fast path loads no config; Read guard denies planning paths; `--version` | Run fails: the project and the hook host do not exist | Filter passes; `dotnet build KyberWeave.sln -c Release` is clean |
+| 4.1b | `tests/KyberWeave.Tests/Arbiter/ArbiterRealEngineTests.cs` | `<cmd> "FullyQualifiedName~ArbiterRealEngineTests"` | The production engine runs `ArbiterEvaluator` end to end through `HookCommand` against a temp repo with a fake provider: one deny, one allow, one escalate and one exception-to-block; the scripted-engine host tests stay untouched | Run fails: `ArbiterHookDecisionEngine` does not exist | Filter passes |
 | 4.2 | `tests/KyberWeave.Tests/Arbiter/CopilotHookAdapterTests.cs` | `<cmd> "FullyQualifiedName~CopilotHookAdapterTests"` | Local-schema and CLI-schema fixtures each give their own decision shape; `toolArgs` as string or object; missing CLI target gives `undecidable`; schema detection and trusted-decision reuse; internal error blocks | Run fails: `CopilotHookAdapter` does not exist | Filter passes |
 | 4.3 | `tests/KyberWeave.Tests/Arbiter/PluginHookAdapterTests.cs` | `<cmd> "FullyQualifiedName~PluginHookAdapterTests"` | `before` and `after` envelopes give `{decision, reason, args}`; strip returns complete args; malformed envelope blocks | Run fails: `PluginEnvelope` and `PluginHookAdapter` do not exist | Filter passes |
 | 4.4 | `tests/KyberWeave.Tests/Arbiter/ClaudeHandbackTests.cs` | `<cmd> "FullyQualifiedName~ClaudeHandbackTests"` | Hand-back fixture records a joined return; non-allow appends the envelope via complete `updatedInput`; never denies; unjoined return recorded unpaired; no double recording | Run fails: the hand-back path does not exist | Filter passes |
@@ -1463,7 +1480,7 @@ Every row runs from the repository root. RED is a failing run of the row's filte
 | 12.5 | `tests/KyberWeave.Tests/Arbiter/CursorHookAdapterTests.cs` | `<cmd> "FullyQualifiedName~CursorHookAdapterTests"` | `Task` fixtures give deny, pass and strip JSON every time; missing target gives `undecidable`; post `additional_context` | Run fails: `CursorHookAdapter` does not exist | Filter passes |
 | 12.6 | `tests/KyberWeave.Tests/ArbiterCursorRenderingTests.cs` | `<cmd> "FullyQualifiedName~ArbiterCursorRenderingTests\|FullyQualifiedName~CursorRendererContractTests"` | A `cursor` block with `failClosed: true` and a timeout; nothing when disabled or global | Run fails: the renderer emits no block | Filter passes |
 | 12.7 | `tests/KyberWeave.Tests/ArbiterHookWiringTests.cs` | `<cmd> "FullyQualifiedName~ArbiterHookWiringTests"` | Pi, Codex and Cursor are hooked; their trust steps | Run fails on the new roster assertions | Filter passes |
-| 13.1 | Documentation only | `docs validate .` and `docs drift .` | ADR 0029 and the Phase 2 documents | Not applicable (documentation) | Both checks report zero findings |
+| 13.1 | Documentation only | `docs validate .` and `docs drift .` | ADR 0034 and the Phase 2 documents | Not applicable (documentation) | Both checks report zero findings |
 | 14.1 | Verification only | The root gate list, `review gates . --base` and the scratch-repository lifecycle in the task | Every gate on the Phase 2 tree | Not applicable (verification) | Every gate passes, apart from `KW-DOC-LIFECYCLE-003` (Q16) |
 | 15.1 | Review only | `code-review` skill over the Phase 2 change | One council pass | Not applicable (review) | The council's verdict, with its evidence |
 | 16.1 | `tests/KyberWeave.Tests/Arbiter/KiloHookAdapterTests.cs` | `<cmd> "FullyQualifiedName~KiloHookAdapterTests"` | `task` envelopes classified by `subagent_type`; both phases | Run fails: no `kilo` adapter is registered | Filter passes |
@@ -1759,6 +1776,8 @@ flowchart LR
     T4_1 --> T4_2[4.2]
     T4_1 --> T4_3[4.3]
     T4_1 --> T4_4[4.4]
+    T4_1 --> T4_1b[4.1b]
+    T1_9 --> T4_1b
     T4_1 --> T5_1[5.1]
     T5_1 --> T5_2[5.2]
     T4_3 --> T6_4[6.4]
@@ -1775,12 +1794,14 @@ flowchart LR
     T3_2 --> T8_1
     T4_2 --> T8_1
     T4_4 --> T8_1
+    T4_1b --> T8_1
     T5_2 --> T8_1
     T6_3 --> T8_1
     T6_4 --> T8_1
     T6_6 --> T8_1
     T7_4 --> T8_1
     T8_1 --> T9_1[9.1]
+    T4_1b --> T9_1
     T9_1 --> T10_1[10.1]
   end
   subgraph P2[Phase 2]
@@ -1840,6 +1861,7 @@ flowchart LR
 | `src/KyberWeave.Arbiter/Hooks/CommandHookAdapters.cs` | 4.1, 4.2; 12.3, 12.5; 16.3, 16.5, 16.7 |
 | `src/KyberWeave.Arbiter/Hooks/PluginHookAdapters.cs` | 4.3; 12.1; 16.1 |
 | `src/KyberWeave.Arbiter/Hooks/Adapters/ClaudeHookAdapter.cs` | 4.1, 4.4 |
+| `src/KyberWeave.Arbiter/Composition.cs`, `Hooks/ArbiterHookDecisionEngine.cs`, `Hooks/IContextualHookDecisionEngine.cs` | 4.1, 4.1b |
 | `src/KyberWeave.Arbiter/Hooks/Adapters/AntigravityHookAdapter.cs` | 16.3, 16.9 |
 | `src/KyberWeave.Arbiter/KyberWeave.Arbiter.csproj`, `Program.cs` | 4.1; 17.1 |
 | `src/KyberWeave.Core/Squad/Rendering/ClaudeRenderer.cs` | 6.2, 6.6 |
@@ -1876,10 +1898,10 @@ Semicolons separate phases; an edge between phases is already ordered by the pha
 | 2 | 3.1, 3.2, 4.1, 17.1 |
 | 3 | 1.5, 4.1–4.3 |
 | 4 | 17.1–17.4, 18.1 |
-| 5 | 1.5, 1.9, 4.1, 4.4, 6.5, 12.3, 12.5, 12.6, 16.3, 16.5, 16.7 |
+| 5 | 1.5, 1.9, 4.1, 4.1b, 4.4, 6.5, 12.3, 12.5, 12.6, 16.3, 16.5, 16.7 |
 | 6 | Req 6.1: 4.1–4.3 and 6.1–6.5. Req 6.2: 12.1–12.7. Req 6.3: 16.1–16.9 and 17.5. Req 6.4: 1.6 and 4.2. Req 6.5: 17.2, 17.3 and 17.5 |
 | 7 | Req 7.1 and 7.2: the adapter tasks, whose fixtures are built from the cited vendor pages. Req 7.3: the runbooks in 8.1, 13.1 and 18.1 |
-| 8 | 11.1–11.3, 12.4, 12.6, 16.4, 16.6, 16.8, 13.1 (ADR 0029, Req 8.3) |
+| 8 | 11.1–11.3, 12.4, 12.6, 16.4, 16.6, 16.8, 13.1 (ADR 0034, Req 8.3) |
 | 9 | 1.3 |
 | 10 | 1.1, 1.3, 16.9 |
 | 11 | 1.2, 7.3 |

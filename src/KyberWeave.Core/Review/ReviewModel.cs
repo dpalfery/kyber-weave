@@ -80,15 +80,26 @@ public sealed record ReviewFinding(
 /// <param name="ExitCode">The runner's exit code.</param>
 /// <param name="Summary">One line describing the outcome.</param>
 /// <param name="DurationMilliseconds">How long the gate took.</param>
+/// <param name="NotApplicableReason">Why the gate did not run, when it did not apply.</param>
+/// <remarks>
+/// A gate that did not apply is neither passed nor failed: <see cref="Passed"/> is false,
+/// and the verdict engine excludes it from the failure count rather than treating an
+/// unexecuted gate as evidence either way. The reason is optional so reports written
+/// before it existed still read.
+/// </remarks>
 public sealed record GateResult(
     string Id,
     bool Blocking,
     int ExitCode,
     string Summary,
-    long DurationMilliseconds = 0)
+    long DurationMilliseconds = 0,
+    string? NotApplicableReason = null)
 {
     /// <summary>Whether the gate succeeded.</summary>
-    public bool Passed => ExitCode == 0;
+    public bool Passed => ExitCode == 0 && NotApplicableReason is null;
+
+    /// <summary>Whether the gate was skipped as not applicable to the change.</summary>
+    public bool NotApplicable => NotApplicableReason is not null;
 }
 
 /// <summary>Measured line coverage, as reported by the coverage gate.</summary>
