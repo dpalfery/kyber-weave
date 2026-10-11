@@ -7,7 +7,7 @@
 // `disable` write nothing: agents never edit that script, and KyberDash does
 // not invent a window the user has not declared.
 
-import { closeSync, existsSync, fstatSync, openSync, readFileSync } from 'node:fs'
+import { closeSync, existsSync, fstatSync, openSync, readFileSync, readSync } from 'node:fs'
 import { join } from 'node:path'
 import { parse, type ParseError } from 'jsonc-parser'
 
@@ -92,7 +92,15 @@ function readBridgeScript(command: string): string | undefined {
     fd = openSync(command, 'r')
     const info = fstatSync(fd)
     if (!info.isFile() || info.size > MAX_BRIDGE_SCRIPT_BYTES) return undefined
-    return readFileSync(fd, 'utf8')
+    // Bounded read: a file that grew after the check above must not pass the cap.
+    const buffer = Buffer.alloc(MAX_BRIDGE_SCRIPT_BYTES + 1)
+    let length = 0
+    while (length < buffer.length) {
+      const read = readSync(fd, buffer, length, buffer.length - length, null)
+      if (read === 0) break
+      length += read
+    }
+    return length > MAX_BRIDGE_SCRIPT_BYTES ? undefined : buffer.toString('utf8', 0, length)
   } catch {
     return undefined
   } finally {
