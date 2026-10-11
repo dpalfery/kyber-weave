@@ -50,9 +50,10 @@ internal static class TestTempRoot
         {
             Directory.Delete(root, recursive: true);
         }
-        catch (DirectoryNotFoundException)
+        catch (Exception ex) when (ex is DirectoryNotFoundException or IOException or UnauthorizedAccessException)
         {
-            // The normal case: nothing to clear.
+            // Nothing to clear, or a leftover we cannot remove: leave it. This runs in a module
+            // initializer, where a throw would fail every test before any of them start.
         }
 
         Directory.CreateDirectory(

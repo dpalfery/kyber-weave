@@ -23,7 +23,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         new(2026, 8, 14, 12, 34, 56, TimeSpan.Zero);
 
     [Fact]
-    public void ExecuteWithDurableWritesEnabledDeploysAndRemovesWhatItWrote()
+    public void ExecuteWithDurableWritesEnabledDeploysWhatItWrote()
     {
         // The test assembly turns SyncToDisk off for speed (SquadTestDurability), so the branch
         // that ships would otherwise never run. Exercise it once, then put the switch back.
