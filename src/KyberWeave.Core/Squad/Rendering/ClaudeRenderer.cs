@@ -189,6 +189,12 @@ public sealed class ClaudeRenderer : ISquadRenderer
             .Select(skill => skill.Name)
             .ToHashSet(StringComparer.Ordinal);
 
+        // A subagent shared identity is suppressed because the agent file carries the identical
+        // body; a primary shared identity is the thin wrapper whose canonical skill IS the entry
+        // point, so suppressing it would leave the wrapper pointing at nothing.
+        HashSet<string> suppressedSkillIdentities =
+            SquadSharedIdentityProjection.SuppressedSkillIdentities(source, sharedIdentities);
+
         // The declared vocabulary, not a renderer-local copy: a capability added to
         // profiles/capabilities.yml must appear in a lowered primary agent's
         // permission-not-expressible details without a renderer change.
@@ -212,28 +218,48 @@ public sealed class ClaudeRenderer : ISquadRenderer
                 SquadFallbackProfile fallbackProfile = source.FallbackProfiles.Profiles[agent.Fallback];
                 if (string.Equals(fallbackProfile.NoPrimaryAgent, "skill", StringComparison.Ordinal))
                 {
-                    // Fail closed if a canonical skill occupies the entry-point identity:
-                    // Claude renders both a subagent and an entry-point skill, so collision here
-                    // cannot be resolved by role-prefixed fallback.
                     if (skillIdentities.Contains(agent.Name))
                     {
-                        throw new SquadRenderValidationException(
-                            $"Cannot render primary agent '{agent.Name}' as a Claude entry-point " +
-                            $"skill: a canonical skill named '{agent.Name}' already occupies that " +
-                            "identity. Claude renders both a subagent and an entry-point skill, " +
-                            "so this is a fail-closed condition rather than a naming collision " +
-                            "this renderer can resolve on its own.");
+                        // A declared shared identity already has its canonical skill as the entry
+                        // point at .claude/skills/<name>/SKILL.md, so emitting the entry-point
+                        // skill too would project one identity twice. The canonical skill is the
+                        // entry point; skip the duplicate rather than failing closed.
+                        if (sharedIdentities.Contains(agent.Name))
+                        {
+                            degradations.AddRange(BuildPrimaryAgentDegradationRecords(
+                                agent,
+                                fallbackProfile,
+                                source.CapabilityProfiles.Profiles,
+                                capabilityVocabulary,
+                                reusedCanonicalSkill: true));
+                        }
+                        else
+                        {
+                            // Not a declared shared identity: the canonical skill and the
+                            // entry-point skill would both claim
+                            // .claude/skills/<name>/SKILL.md, and a native target has no
+                            // role-prefixed escape hatch, so this is a real collision that
+                            // cannot be resolved here.
+                            throw new SquadRenderValidationException(
+                                $"Cannot render primary agent '{agent.Name}' as a Claude entry-point " +
+                                $"skill: a canonical skill named '{agent.Name}' already occupies that " +
+                                "identity. Claude renders both a subagent and an entry-point skill, " +
+                                "so this is a fail-closed condition rather than a naming collision " +
+                                "this renderer can resolve on its own.");
+                        }
                     }
+                    else
+                    {
+                        SquadDeploymentFile skillPrincipal = RenderPrimaryAgentEntryPointSkill(agent, request.Scope);
+                        files.Add(skillPrincipal);
+                        SquadResourceProjection.Append(files, skillPrincipal, agent.Resources);
 
-                    SquadDeploymentFile skillPrincipal = RenderPrimaryAgentEntryPointSkill(agent, request.Scope);
-                    files.Add(skillPrincipal);
-                    SquadResourceProjection.Append(files, skillPrincipal, agent.Resources);
-
-                    degradations.AddRange(BuildPrimaryAgentDegradationRecords(
-                        agent,
-                        fallbackProfile,
-                        source.CapabilityProfiles.Profiles,
-                        capabilityVocabulary));
+                        degradations.AddRange(BuildPrimaryAgentDegradationRecords(
+                            agent,
+                            fallbackProfile,
+                            source.CapabilityProfiles.Profiles,
+                            capabilityVocabulary));
+                    }
                 }
                 else if (string.Equals(fallbackProfile.NoPrimaryAgent, "omit", StringComparison.Ordinal))
                 {
@@ -258,8 +284,9 @@ public sealed class ClaudeRenderer : ISquadRenderer
         {
             // A profile-declared shared identity has one canonical projection. Resolve the
             // set from source so removing or adding a shared identity never requires a
-            // renderer-local roster change.
-            if (sharedIdentities.Contains(skill.Name))
+            // renderer-local roster change. A primary shared identity is the exception: its
+            // canonical skill is the entry point and must be emitted.
+            if (suppressedSkillIdentities.Contains(skill.Name))
             {
                 continue;
             }
@@ -462,12 +489,21 @@ public sealed class ClaudeRenderer : ISquadRenderer
         SquadAgent agent,
         SquadFallbackProfile fallbackProfile,
         IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
-        IReadOnlyList<string> capabilityVocabulary)
+        IReadOnlyList<string> capabilityVocabulary,
+        bool reusedCanonicalSkill = false)
     {
         bool isSkillMode = string.Equals(fallbackProfile.NoPrimaryAgent, "skill", StringComparison.Ordinal);
 
         if (isSkillMode)
         {
+            string entryPointDetails = reusedCanonicalSkill
+                ? $"The same-name canonical skill at `.claude/skills/{agent.Name}/SKILL.md` is " +
+                    "the entry point and carries the role; no duplicate entry-point skill is " +
+                    "emitted, because the canonical skill already occupies that identity."
+                : $"Fallback profile '{agent.Fallback}' declares no-primary-agent: skill, so " +
+                    $"this agent also renders as an entry-point skill invoked as `/{agent.Name}` " +
+                    "in the main conversation.";
+
             yield return new SquadDegradationRecord(
                 Target: "claude",
                 CanonicalIdentity: agent.Name,
@@ -476,11 +512,9 @@ public sealed class ClaudeRenderer : ISquadRenderer
                 InstructionDigest: agent.BodyDigest,
                 Details: $"Claude has a real primary-agent primitive only through " +
                     $"'claude --agent <name>' or the 'agent' setting; Claude Code enforces " +
-                    $"tools, Agent(roster) and model only in those modes. Fallback profile " +
-                    $"'{agent.Fallback}' declares no-primary-agent: skill, so this agent also " +
-                    $"renders as an entry-point skill invoked as `/{agent.Name}` in the main " +
-                    "conversation, where the primary-agent enforcement does not apply. The " +
-                    "subagent file is kept.");
+                    $"tools, Agent(roster) and model only in those modes. {entryPointDetails} " +
+                    "Where the entry point runs in the main conversation, the primary-agent " +
+                    "enforcement does not apply. The subagent file is kept.");
         }
 
         List<string> notExpressibleDetails = [];

@@ -522,8 +522,7 @@ public sealed class SquadGlobalRootTests : IDisposable
         {
             string productRoot = Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
             SquadSource source = SquadSourceLoader.Load(productRoot);
-            SquadAgent primaryAgent = Assert.Single(source.Agents, a => a.Invocation == SquadInvocation.Primary);
-            Assert.Equal("conductor", primaryAgent.Name);
+            SquadAgent primaryAgent = Assert.Single(source.Agents, a => a.Name == "conductor");
 
             // The conductor carries plan-path, spec-path, intake-path, and
             // execution-and-review references; the entry-point skill projects all four.
@@ -948,8 +947,7 @@ public sealed class SquadGlobalRootTests : IDisposable
         {
             string productRoot = Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
             SquadSource source = SquadSourceLoader.Load(productRoot);
-            SquadAgent primaryAgent = Assert.Single(source.Agents, a => a.Invocation == SquadInvocation.Primary);
-            Assert.Equal("conductor", primaryAgent.Name);
+            SquadAgent primaryAgent = Assert.Single(source.Agents, a => a.Name == "conductor");
 
             // The conductor carries plan-path, spec-path, intake-path, and
             // execution-and-review references; the entry-point skill projects all four.
@@ -1059,26 +1057,35 @@ public sealed class SquadGlobalRootTests : IDisposable
         HashSet<string> sharedIdentities = source.FallbackProfiles.Profiles.Values
             .SelectMany(profile => profile.SharedIdentities)
             .ToHashSet(StringComparer.Ordinal);
-        int suppressedSkillCount = source.Skills.Count(skill => sharedIdentities.Contains(skill.Name));
+
+        // A subagent shared identity suppresses its canonical skill; a primary shared identity
+        // reuses it as the entry point and emits it, so nothing is suppressed here.
+        HashSet<string> suppressedSkillIdentities =
+            SquadSharedIdentityProjection.SuppressedSkillIdentities(source, sharedIdentities);
+        int suppressedSkillCount = source.Skills.Count(skill => suppressedSkillIdentities.Contains(skill.Name));
 
         int baseCount = source.Agents.Count + source.Agents.Sum(agent => agent.Resources.Count)
             + source.Skills.Count - suppressedSkillCount
-            + source.Skills.Where(skill => !sharedIdentities.Contains(skill.Name))
+            + source.Skills.Where(skill => !suppressedSkillIdentities.Contains(skill.Name))
                 .Sum(skill => skill.Resources.Count);
 
-        // Claude and Factory keep the native principal (subagent / droid) and add an
-        // entry-point skill beside it; Cursor replaces the agent principal with the
-        // entry-point skill (Pi precedent), so its total is unchanged and only the receipt
-        // paths differ (asserted above).
-        if (target is SquadTarget.Claude or SquadTarget.Cursor or SquadTarget.Factory)
-        {
-            if (target == SquadTarget.Cursor)
-            {
-                return baseCount;
-            }
+        // A primary shared identity emits no agent principal of its own: its canonical skill is the
+        // entry point and is already counted in baseCount. That subtracts one principal per shared
+        // identity on a target that lowers primaries, and adds nothing on a target that keeps the
+        // agent file.
+        int sharedPrimaryCount = source.Agents.Count(agent =>
+            agent.Invocation == SquadInvocation.Primary && sharedIdentities.Contains(agent.Name));
 
+        // Claude and Factory keep the native principal (subagent / droid) and add an entry-point
+        // skill beside it, but only for a non-shared primary: a primary shared identity already has
+        // its canonical skill as the entry point. The lowering targets (Cursor, Pi, ZCode, Devin,
+        // Warp) replace a non-shared primary's agent principal with an entry point, and emit
+        // nothing at all for a shared one.
+        if (target is SquadTarget.Claude or SquadTarget.Factory)
+        {
             int entryPointAddition = 0;
-            foreach (SquadAgent agent in source.Agents.Where(a => a.Invocation == SquadInvocation.Primary))
+            foreach (SquadAgent agent in source.Agents.Where(a =>
+                a.Invocation == SquadInvocation.Primary && !sharedIdentities.Contains(a.Name)))
             {
                 string fallbackProfileId = agent.Fallback;
                 SquadFallbackProfile profile = source.FallbackProfiles.Profiles[fallbackProfileId];
@@ -1089,6 +1096,12 @@ public sealed class SquadGlobalRootTests : IDisposable
                 }
             }
             return baseCount + entryPointAddition;
+        }
+
+        if (target is SquadTarget.Cursor or SquadTarget.Pi or SquadTarget.ZCode
+            or SquadTarget.Devin or SquadTarget.Warp)
+        {
+            return baseCount - sharedPrimaryCount;
         }
 
         return baseCount;

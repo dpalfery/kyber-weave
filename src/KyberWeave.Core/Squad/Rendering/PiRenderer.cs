@@ -186,6 +186,12 @@ public sealed class PiRenderer : ISquadRenderer
             .SelectMany(profile => profile.SharedIdentities)
             .ToHashSet(StringComparer.Ordinal);
 
+        // A subagent shared identity is suppressed because the agent file carries the identical
+        // body; a primary shared identity is the thin wrapper whose canonical skill IS the entry
+        // point, so suppressing it would leave the wrapper pointing at nothing.
+        HashSet<string> suppressedSkillIdentities =
+            SquadSharedIdentityProjection.SuppressedSkillIdentities(source, sharedIdentities);
+
         // Read upfront so the primary-agent fail-closed check (R3) can see whether a
         // canonical skill already occupies the lowered identity before any file is built,
         // regardless of which loop encounters the collision first.
@@ -222,6 +228,20 @@ public sealed class PiRenderer : ISquadRenderer
             {
                 if (skillIdentities.Contains(agent.Name))
                 {
+                    if (sharedIdentities.Contains(agent.Name))
+                    {
+                        // The canonical skill is the entry point and is emitted by the skill
+                        // loop, so no lowered skill is emitted here; one identity, one
+                        // projection.
+                        degradations.AddRange(BuildPrimaryAgentDegradations(
+                            agent,
+                            fallbackProfile,
+                            source.CapabilityProfiles.Profiles,
+                            capabilityVocabulary,
+                            reusedCanonicalSkill: true));
+                        continue;
+                    }
+
                     throw new SquadRenderValidationException(
                         $"Cannot lower primary agent '{agent.Name}' to a Pi skill: a canonical " +
                         $"skill named '{agent.Name}' already occupies that identity. Pi has " +
@@ -265,8 +285,9 @@ public sealed class PiRenderer : ISquadRenderer
         {
             // A profile-declared shared identity has one canonical projection, per the same
             // rule ClaudeRenderer follows. Resolved from source so a fallbacks.yml change is
-            // honored without a renderer change.
-            if (sharedIdentities.Contains(skill.Name))
+            // honored without a renderer change. A primary shared identity is the exception:
+            // its canonical skill is the entry point and must be emitted.
+            if (suppressedSkillIdentities.Contains(skill.Name))
             {
                 continue;
             }
@@ -572,8 +593,14 @@ public sealed class PiRenderer : ISquadRenderer
         SquadAgent agent,
         SquadFallbackProfile fallbackProfile,
         IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
-        IReadOnlyList<string> capabilityVocabulary)
+        IReadOnlyList<string> capabilityVocabulary,
+        bool reusedCanonicalSkill = false)
     {
+        string projectionText = reusedCanonicalSkill
+            ? "this agent reuses the same-name canonical skill as its entry point, because the " +
+                "canonical skill already occupies that identity; no separate lowered skill is emitted"
+            : "this agent renders as a top-level Pi skill instead of a '.pi/agents/' file";
+
         yield return new SquadDegradationRecord(
             Target: "pi",
             CanonicalIdentity: agent.Name,
@@ -583,8 +610,7 @@ public sealed class PiRenderer : ISquadRenderer
             Details: "Pi core has no primary-agent selection primitive: '.pi/SYSTEM.md' and " +
                 "'--system-prompt' replace the whole session prompt, not a per-agent one. " +
                 $"Fallback profile '{agent.Fallback}' declares no-primary-agent: " +
-                $"{fallbackProfile.NoPrimaryAgent}, so this agent renders as a top-level Pi " +
-                "skill instead of a '.pi/agents/' file.");
+                $"{fallbackProfile.NoPrimaryAgent}, so " + projectionText + ".");
 
         string rosterText = agent.DelegatesTo.Count > 0
             ? string.Join(", ", agent.DelegatesTo)

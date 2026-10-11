@@ -173,11 +173,22 @@ public sealed class PiSquadLifecycleTests : IDisposable
         HashSet<string> sharedIdentities = source.FallbackProfiles.Profiles.Values
             .SelectMany(profile => profile.SharedIdentities)
             .ToHashSet(StringComparer.Ordinal);
-        int suppressedSkillCount = source.Skills.Count(skill => sharedIdentities.Contains(skill.Name));
 
-        return source.Agents.Count + source.Agents.Sum(agent => agent.Resources.Count)
+        // A subagent shared identity suppresses its canonical skill; a primary shared identity
+        // reuses it as the entry point and emits it, so nothing is suppressed here.
+        HashSet<string> suppressedSkillIdentities =
+            SquadSharedIdentityProjection.SuppressedSkillIdentities(source, sharedIdentities);
+        int suppressedSkillCount = source.Skills.Count(skill => suppressedSkillIdentities.Contains(skill.Name));
+
+        // A primary shared identity emits no agent principal: its canonical skill is the entry
+        // point and is counted with the skills. A non-shared primary (the conductor) still
+        // contributes one principal, lowered to a skill.
+        int sharedPrimaryCount = source.Agents.Count(agent =>
+            agent.Invocation == SquadInvocation.Primary && sharedIdentities.Contains(agent.Name));
+
+        return source.Agents.Count - sharedPrimaryCount + source.Agents.Sum(agent => agent.Resources.Count)
             + source.Skills.Count - suppressedSkillCount
-            + source.Skills.Where(skill => !sharedIdentities.Contains(skill.Name))
+            + source.Skills.Where(skill => !suppressedSkillIdentities.Contains(skill.Name))
                 .Sum(skill => skill.Resources.Count);
     }
 }

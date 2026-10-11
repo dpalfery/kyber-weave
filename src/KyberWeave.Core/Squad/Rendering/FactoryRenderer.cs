@@ -158,6 +158,12 @@ public sealed class FactoryRenderer : ISquadRenderer
             .Select(skill => skill.Name)
             .ToHashSet(StringComparer.Ordinal);
 
+        // A subagent shared identity is suppressed because the agent file carries the identical
+        // body; a primary shared identity is the thin wrapper whose canonical skill IS the entry
+        // point, so suppressing it would leave the wrapper pointing at nothing.
+        HashSet<string> suppressedSkillIdentities =
+            SquadSharedIdentityProjection.SuppressedSkillIdentities(source, sharedIdentities);
+
         List<SquadDeploymentFile> files = [];
         List<SquadDegradationRecord> degradations = [];
 
@@ -176,28 +182,46 @@ public sealed class FactoryRenderer : ISquadRenderer
                 SquadFallbackProfile fallbackProfile = source.FallbackProfiles.Profiles[agent.Fallback];
                 if (string.Equals(fallbackProfile.NoPrimaryAgent, "skill", StringComparison.Ordinal))
                 {
-                    // Fail closed if a canonical skill occupies the entry-point identity:
-                    // Factory renders both a droid and an entry-point skill, so collision here
-                    // cannot be resolved by role-prefixed fallback.
                     if (skillIdentities.Contains(agent.Name))
                     {
-                        throw new SquadRenderValidationException(
-                            $"Cannot render primary agent '{agent.Name}' as a Factory entry-point " +
-                            $"skill: a canonical skill named '{agent.Name}' already occupies that " +
-                            "identity. Factory renders both a droid and an entry-point skill, " +
-                            "so this is a fail-closed condition rather than a naming collision " +
-                            "this renderer can resolve on its own.");
+                        // A declared shared identity already has its canonical skill as the entry
+                        // point at .factory/skills/<name>/SKILL.md, so emitting the entry-point
+                        // skill too would project one identity twice. The canonical skill is the
+                        // entry point; skip the duplicate rather than failing closed.
+                        if (sharedIdentities.Contains(agent.Name))
+                        {
+                            degradations.AddRange(BuildPrimaryAgentDegradationRecords(
+                                agent,
+                                fallbackProfile,
+                                source.CapabilityProfiles.Profiles,
+                                $"{ResolvePrefixedDirectory(SkillsDirectory, request.Scope)}/{agent.Name}/SKILL.md",
+                                reusedCanonicalSkill: true));
+                        }
+                        else
+                        {
+                            // Not a declared shared identity: Factory renders both a droid and an
+                            // entry-point skill for the identity, and a native target has no
+                            // role-prefixed escape hatch, so this is a real collision.
+                            throw new SquadRenderValidationException(
+                                $"Cannot render primary agent '{agent.Name}' as a Factory entry-point " +
+                                $"skill: a canonical skill named '{agent.Name}' already occupies that " +
+                                "identity. Factory renders both a droid and an entry-point skill, " +
+                                "so this is a fail-closed condition rather than a naming collision " +
+                                "this renderer can resolve on its own.");
+                        }
                     }
+                    else
+                    {
+                        SquadDeploymentFile skillPrincipal = RenderPrimaryAgentEntryPointSkill(agent, request.Scope);
+                        files.Add(skillPrincipal);
+                        SquadResourceProjection.Append(files, skillPrincipal, agent.Resources);
 
-                    SquadDeploymentFile skillPrincipal = RenderPrimaryAgentEntryPointSkill(agent, request.Scope);
-                    files.Add(skillPrincipal);
-                    SquadResourceProjection.Append(files, skillPrincipal, agent.Resources);
-
-                    degradations.AddRange(BuildPrimaryAgentDegradationRecords(
-                        agent,
-                        fallbackProfile,
-                        source.CapabilityProfiles.Profiles,
-                        skillPrincipal.RelativePath));
+                        degradations.AddRange(BuildPrimaryAgentDegradationRecords(
+                            agent,
+                            fallbackProfile,
+                            source.CapabilityProfiles.Profiles,
+                            skillPrincipal.RelativePath));
+                    }
                 }
                 else if (string.Equals(fallbackProfile.NoPrimaryAgent, "omit", StringComparison.Ordinal))
                 {
@@ -221,8 +245,9 @@ public sealed class FactoryRenderer : ISquadRenderer
         {
             // A profile-declared shared identity has one canonical projection. Resolve the
             // set from source so removing or adding a shared identity never requires a
-            // renderer-local roster change.
-            if (sharedIdentities.Contains(skill.Name))
+            // renderer-local roster change. A primary shared identity is the exception: its
+            // canonical skill is the entry point and must be emitted.
+            if (suppressedSkillIdentities.Contains(skill.Name))
             {
                 continue;
             }
@@ -441,8 +466,17 @@ public sealed class FactoryRenderer : ISquadRenderer
         SquadAgent agent,
         SquadFallbackProfile fallbackProfile,
         IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
-        string entryPointSkillPath)
+        string entryPointSkillPath,
+        bool reusedCanonicalSkill = false)
     {
+        string entryPointDetails = reusedCanonicalSkill
+            ? $"The same-name canonical skill at {entryPointSkillPath} is the entry point and " +
+                "carries the role; no duplicate entry-point skill is emitted, because the " +
+                "canonical skill already occupies that identity."
+            : $"Fallback profile '{agent.Fallback}' declares no-primary-agent: " +
+                $"{fallbackProfile.NoPrimaryAgent}, so this agent also renders as an entry-point " +
+                $"skill at {entryPointSkillPath}.";
+
         yield return new SquadDegradationRecord(
             Target: SquadTargetCatalog.GetToken(SquadTarget.Factory),
             CanonicalIdentity: agent.Name,
@@ -450,18 +484,16 @@ public sealed class FactoryRenderer : ISquadRenderer
             Code: "role-skill-fallback",
             InstructionDigest: agent.BodyDigest,
             Details: "The Factory app dispatches custom droids as subagents and exposes no " +
-                "session-parent selector to start a conversation as one. Fallback profile " +
-                $"'{agent.Fallback}' declares no-primary-agent: {fallbackProfile.NoPrimaryAgent}, " +
-                $"so this agent also renders as an entry-point skill at {entryPointSkillPath} " +
-                "that runs in the main session under the session's permissions — the droid's " +
-                "explicit tools allow-list does not apply to it. The droid file is kept for " +
-                "Task dispatch.");
+                "session-parent selector to start a conversation as one. " + entryPointDetails +
+                " The entry point runs in the main session under the session's permissions — " +
+                "the droid's explicit tools allow-list does not apply to it. The droid file is " +
+                "kept for Task dispatch.");
 
         foreach (SquadDegradationRecord record in BuildDegradationRecords(
             agent,
             capabilityProfiles,
             entryPointSkillNote:
-                $"The same-name entry-point skill at {entryPointSkillPath} runs under the " +
+                $"The same-name entry point at {entryPointSkillPath} runs under the " +
                 "session's permissions; the droid's explicit tools allow-list and " +
                 "mcpServers: [] do not apply to it."))
         {
