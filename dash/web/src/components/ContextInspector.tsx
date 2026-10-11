@@ -4,6 +4,8 @@ import { useQuery } from '@tanstack/react-query'
 import { cn, fmtTokens } from '../lib/utils.js'
 import {
   fetchTurnContent,
+  fetchSpanAttributes,
+  fetchQuarantineEntry,
   type KyberTurnContentResult,
   type KyberTurnContentBlock,
   type KyberTurnContentPart,
@@ -429,6 +431,160 @@ export function ContentPane({
   )
 }
 
+/**
+ * The packet a quarantine row kept, pretty-printed when it is a JSON document
+ * and shown verbatim when it is not. The row stores the sender's decoded packet
+ * as text, so this is presentation of one served string — never a re-derivation
+ * of it, and never a reason to hide a payload that will not parse.
+ */
+function decodeKeptPacket(rawPayload: string | null | undefined): string | null {
+  if (typeof rawPayload !== 'string' || rawPayload.trim() === '') return null
+  try {
+    return JSON.stringify(JSON.parse(rawPayload), null, 2)
+  } catch {
+    return rawPayload
+  }
+}
+
+export interface RawPacketDisclosureProps {
+  /**
+   * The request span whose attributes were captured. Fetched by id, not by the
+   * served path: `fetchSpanAttributes` builds `/api/kyber/span/<id>/attributes`
+   * itself, so handing it a path would nest a second one.
+   */
+  spanId?: string
+  /** The turn record's parent span — where a quarantined packet is filed (B7). */
+  parentSpanId?: string
+  /** The pointers the server named. Absent means the server linked no packet. */
+  rawPacket?: { spanAttributesPath: string; interactionPath?: string }
+  className?: string
+}
+
+interface RawPacketPayloadProps {
+  testId: string
+  title: string
+  value: unknown
+  isPending: boolean
+  error: unknown
+  children?: React.ReactNode
+}
+
+/**
+ * One fetched packet, rendered as served and unclipped. The tail of a payload
+ * is often the part that explains a turn, so nothing here truncates, samples or
+ * summarizes it — the body scrolls instead.
+ */
+function RawPacketPayload({ testId, title, value, isPending, error, children }: RawPacketPayloadProps) {
+  return (
+    <div className="space-y-1" data-testid={testId}>
+      <div className="text-[10px] font-semibold uppercase tracking-wider text-tertiary-foreground">{title}</div>
+      {isPending ? (
+        <p className="text-xs italic text-tertiary-foreground">Loading packet…</p>
+      ) : error ? (
+        <p className="text-xs text-red-600 dark:text-red-400">
+          {error instanceof Error ? error.message : 'Unable to load this packet.'}
+        </p>
+      ) : (
+        <pre className="max-h-[min(50vh,28rem)] overflow-auto rounded border border-border bg-muted/40 p-2 text-[11px] font-mono whitespace-pre-wrap break-words text-foreground">
+          {JSON.stringify(value, null, 2)}
+        </pre>
+      )}
+      {children}
+    </div>
+  )
+}
+
+/**
+ * The turn's raw packets, on demand (B7).
+ *
+ * Two payloads sit behind this disclosure: the request span's harness-emitted
+ * attributes, and — only when the server named the link, which it does only when
+ * the quarantine row actually kept a payload — the parent interaction packet that
+ * was quarantined out of the canonical store. Both are large, so nothing is
+ * requested until the disclosure is opened. What arrives is rendered as served:
+ * which links exist was decided by the server, and this surface decides nothing
+ * (ADR 0033, the display-layer rule).
+ */
+export function RawPacketDisclosure({ spanId, parentSpanId, rawPacket, className }: RawPacketDisclosureProps) {
+  const [open, setOpen] = useState(false)
+
+  // `enabled: open` is the whole of "closed fetches nothing". A turn view that
+  // pulled two packets per turn to fill a collapsed header would pay for evidence
+  // nobody asked to see.
+  const spanAttributes = useQuery({
+    queryKey: ['kyber-span-attributes', spanId],
+    queryFn: () => fetchSpanAttributes(spanId!),
+    enabled: open && Boolean(spanId),
+  })
+
+  // Only the link the server named: an absent `interactionPath` means the parent
+  // row kept no payload, and a pointer to nothing is worse than none.
+  const interactionPacket = useQuery({
+    queryKey: ['kyber-quarantine-entry', parentSpanId],
+    queryFn: () => fetchQuarantineEntry(parentSpanId!),
+    enabled: open && Boolean(rawPacket?.interactionPath) && Boolean(parentSpanId),
+  })
+
+  // The server links packets only for a turn it resolved, so an absent
+  // `rawPacket` is "this turn has none" — never a disclosure to render empty.
+  if (!rawPacket) return null
+
+  const keptPacket = decodeKeptPacket(interactionPacket.data?.rawPayload)
+
+  return (
+    <div className={cn('rounded border border-border bg-card/60', className)} data-testid="raw-packet-disclosure">
+      <button
+        type="button"
+        data-testid="raw-packet-toggle"
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
+        className="flex w-full items-center gap-2 rounded px-3 py-2 text-left text-xs font-semibold text-muted-foreground transition-colors select-none hover:bg-interactive-secondary/50 hover:text-foreground"
+      >
+        <span aria-hidden="true" className={cn('font-mono text-[10px] transition-transform', open && 'rotate-90')}>
+          ▶
+        </span>
+        <span>Raw packet</span>
+        <span className="ml-auto font-mono text-[10px] font-normal text-tertiary-foreground">
+          {open ? 'Hide' : 'Show'}
+        </span>
+      </button>
+
+      {open && (
+        <div className="space-y-3 border-t border-border p-3">
+          <RawPacketPayload
+            testId="raw-packet-span-attributes"
+            title="Span attributes"
+            value={spanAttributes.data}
+            isPending={spanAttributes.isPending}
+            error={spanAttributes.error}
+          />
+
+          {rawPacket.interactionPath ? (
+            <RawPacketPayload
+              testId="raw-packet-interaction"
+              title="Quarantined parent packet, as filed"
+              value={interactionPacket.data}
+              isPending={interactionPacket.isPending}
+              error={interactionPacket.error}
+            >
+              {keptPacket !== null ? (
+                <div className="space-y-1">
+                  <div className="text-[10px] font-semibold uppercase tracking-wider text-tertiary-foreground">
+                    Packet as sent by the harness
+                  </div>
+                  <pre className="max-h-[min(50vh,28rem)] overflow-auto rounded border border-border bg-muted/40 p-2 text-[11px] font-mono whitespace-pre-wrap break-words text-foreground">
+                    {keptPacket}
+                  </pre>
+                </div>
+              ) : null}
+            </RawPacketPayload>
+          ) : null}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export interface ContextInspectorProps {
   sessionId?: string
   turnIndex?: number
@@ -679,6 +835,13 @@ export function ContextInspector({
           />
         </div>
       </div>
+
+      {/* B7: the raw packets this turn's server response named, on demand. */}
+      <RawPacketDisclosure
+        spanId={turnData.spanId}
+        parentSpanId={turnData.parentSpanId}
+        rawPacket={turnData.rawPacket}
+      />
     </div>
   )
 }
