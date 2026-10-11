@@ -12,7 +12,7 @@ last-reviewed: 2026-10-10
 ## Status
 
 Accepted, 2026-10-10. Records decisions Q3, B7, and B10 of the
-[Claude Code turn-content plan](../plans/2026-10-10-kyberdash-claude-code-turn-content.md).
+[Claude Code turn-content plan](../archive/plans/2026-10-10-kyberdash-claude-code-turn-content.md).
 
 This record amends one documented consequence of
 [ADR 0032](0032-kyberdash-user-initiated-clean.md): "a per-harness wipe cannot scope
@@ -120,5 +120,5 @@ per-harness wipe should clean all the data for that harness.
   — the server decides which links exist; the web renders them
 - [KyberDash architecture](../dash/architecture.md) — schema and route contract
 - [KyberDash runbook](../dash/runbook.md) — seeing a turn's raw packet
-- [Claude Code turn-content plan](../plans/2026-10-10-kyberdash-claude-code-turn-content.md)
+- [Claude Code turn-content plan](../archive/plans/2026-10-10-kyberdash-claude-code-turn-content.md)
   — the defect and decisions this record harvests

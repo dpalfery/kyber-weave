@@ -200,14 +200,18 @@ function clearSuppliedBuckets(
 
 /**
  * Give one interaction prompt to every stored llm.invoke child that still
- * lacks parts (Q4), or declare the redaction on it. A child already
- * carrying parts got them from an api_request_body parse — the richer
- * source, which subsumes the prompt-derived part — or from an earlier pass
- * over this same prompt; either way the interaction path leaves it alone.
- * The one guard is also the redacted case's protection: a redaction explains
- * absent text, so it must not stamp `not_measurable` over content the
- * record actually holds. Skipping parted children is what makes the parked
- * re-delivery below idempotent.
+ * lacks the prompt's bucket (Q4), or declare the redaction on it. The guard
+ * is per bucket, not per child: a child holding only a `system_prompt` part
+ * (a body parse cut before its messages array) still has no
+ * `conversation_history`, and the prompt is the only source for that bucket —
+ * delivering appends the prompt part to what the child already carries rather
+ * than replacing it. A child that already holds `conversation_history` got it
+ * from an api_request_body parse — the richer source, which subsumes the
+ * prompt-derived part — or from an earlier pass over this same prompt; either
+ * way the interaction path leaves it alone. The same check is the redacted
+ * case's protection: a redaction explains absent text, so it never stamps
+ * `not_measurable` over a bucket the record actually holds. The bucket check
+ * is also what makes the parked re-delivery below idempotent.
  */
 function deliverInteractionPrompt(
   store: CanonStore,
@@ -217,15 +221,21 @@ function deliverInteractionPrompt(
 ): void {
   const children = interactionChildren(store, traceId, interactionSpanId)
   for (const child of children) {
-    if ((child.parts?.length ?? 0) > 0) continue
+    const hasHistory =
+      (child.parts?.some((part) => part.part === 'conversation_history') ?? false) ||
+      child.content['conversation_history'] !== undefined
+    if (hasHistory) continue
     if (prompt.redacted) {
       declareRedactedPrompt(store, child)
       continue
     }
-    // A single prompt-derived part is everything the span carried; a later
-    // api_request_body parse replaces it wholesale rather than the turn
-    // drawing text from two sources (Q4).
-    const parts: ContentPart[] = [{ part: 'conversation_history', text: prompt.text }]
+    // Merge with whatever the child already holds: a body-derived part and the
+    // prompt-derived part describe different buckets here, and replacing the
+    // parts list would drop the body's buckets (Q4).
+    const parts: ContentPart[] = [
+      ...(child.parts ?? []),
+      { part: 'conversation_history', text: prompt.text },
+    ]
     store.setContent(child.spanId, contentFromParts(parts), parts)
     clearSuppliedBuckets(store, child, parts)
   }

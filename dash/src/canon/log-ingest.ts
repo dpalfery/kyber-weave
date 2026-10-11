@@ -77,6 +77,9 @@ function isClaudeLog(log: OtlpLog): boolean {
   )
 }
 
+/** The body_ref echo a failure reason may carry — it is persisted and served, so it is capped. */
+const MAX_BODY_REF_ECHO_CHARS = 200
+
 /**
  * Why a recognised api_request_body event carried no usable request JSON
  * (R8), or undefined when its `body` attribute may still yield parts.
@@ -96,12 +99,14 @@ function claudeBodyFailureReason(attributes: Record<string, unknown>): string | 
   const body = attributes['body']
   if (body === undefined || body === null) {
     const ref = attributes['body_ref']
-    // The event named itself api_request_body yet emitted nothing to parse:
-    // that is a sender-side gap of its own, declared like any other rather
-    // than left to a silent enrich.
-    return typeof ref === 'string'
-      ? `The Claude Code request body arrived as a file reference (body_ref: ${ref}), which this receiver does not read.`
-      : 'The Claude Code api_request_body event carried no request body — neither a body attribute nor a body_ref was emitted.'
+    if (typeof ref !== 'string') {
+      return 'The Claude Code api_request_body event carried no request body — neither a body attribute nor a body_ref was emitted.'
+    }
+    // The reference is sender-controlled and this reason lands in
+    // measurability_json and on the API: echo a bounded prefix, never the
+    // whole unbounded string.
+    const echoed = ref.length > MAX_BODY_REF_ECHO_CHARS ? `${ref.slice(0, MAX_BODY_REF_ECHO_CHARS)}…` : ref
+    return `The Claude Code request body arrived as a file reference (body_ref: ${echoed}), which this receiver does not read.`
   }
   return claudeApiRequestBodyFailureReason(body)
 }

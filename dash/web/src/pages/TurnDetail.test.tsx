@@ -407,6 +407,43 @@ describe('TurnDetail raw packet disclosure (B7)', () => {
     expect(rawPacketApi.fetchQuarantineEntry).not.toHaveBeenCalled()
   })
 
+  it('caps the rendered packet past the display budget and says so, while the API still serves the whole payload', async () => {
+    // The scroll container handles the display, but not the cost of
+    // stringifying a multi-megabyte payload or mounting the resulting DOM
+    // nodes. Past the cap the render cuts and names how to reach the rest.
+    const huge = 'H'.repeat(200_000)
+    rawPacketApi.fetchQuarantineEntry.mockResolvedValue({
+      ...rawPacketApi.quarantineEntry,
+      rawPayload: JSON.stringify({ name: 'claude_code.interaction', blob: huge }),
+    })
+    rawPacketApi.fetchTurnContent.mockResolvedValue(
+      turnContent({
+        parentSpanId: rawPacketApi.PARENT_SPAN_ID,
+        rawPacket: {
+          spanAttributesPath: rawPacketApi.spanAttributesPath,
+          interactionPath: rawPacketApi.interactionPath,
+        },
+      }),
+    )
+    renderTurn()
+
+    await waitFor(() => {
+      expect(screen.getByTestId('raw-packet-disclosure')).toBeTruthy()
+    })
+    openDisclosure()
+
+    const shown = () => screen.getByTestId('raw-packet-disclosure').textContent ?? ''
+    await waitFor(() => {
+      expect(shown()).toContain('truncated')
+    })
+    // The cut happened near the cap, not at a whole-payload mount. The
+    // disclosure renders the quarantined entry twice (as filed, and the kept
+    // packet as sent), each bounded by the cap — an uncapped mount of this
+    // payload would be roughly twice what a capped pair can reach.
+    expect(shown().length).toBeLessThan(220_000)
+    expect(shown()).not.toContain(huge)
+  })
+
   it('renders no disclosure when the turn-content result carries no raw packet', async () => {
     rawPacketApi.fetchTurnContent.mockResolvedValue(turnContent())
     renderTurn()

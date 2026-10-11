@@ -470,9 +470,25 @@ interface RawPacketPayloadProps {
 }
 
 /**
- * One fetched packet, rendered as served and unclipped. The tail of a payload
- * is often the part that explains a turn, so nothing here truncates, samples or
- * summarizes it — the body scrolls instead.
+ * Character ceiling for one rendered packet. The scroll container below
+ * handles the display, but it does nothing for the cost of stringifying a
+ * multi-megabyte payload or for the DOM node count mounting it whole would
+ * produce. Past the ceiling the render cuts and says so; the full payload
+ * stays served by the API endpoint the disclosure fetched it from.
+ */
+const MAX_RENDERED_PACKET_CHARS = 100_000
+
+/** The capped form of one packet's text: whole below the ceiling, cut with a pointer past it. */
+function capPacketText(text: string): string {
+  if (text.length <= MAX_RENDERED_PACKET_CHARS) return text
+  return `${text.slice(0, MAX_RENDERED_PACKET_CHARS)}\n… truncated at ${MAX_RENDERED_PACKET_CHARS} characters — the full packet is served by the API endpoint this disclosure fetched.`
+}
+
+/**
+ * One fetched packet, rendered as served. Below the display ceiling nothing
+ * is clipped — the tail of a payload is often the part that explains a turn,
+ * so the body scrolls instead of being cut — and past it the render cuts
+ * rather than stringifying and mounting unbounded bytes.
  */
 function RawPacketPayload({ testId, title, value, isPending, error, children }: RawPacketPayloadProps) {
   return (
@@ -486,7 +502,7 @@ function RawPacketPayload({ testId, title, value, isPending, error, children }: 
         </p>
       ) : (
         <pre className="max-h-[min(50vh,28rem)] overflow-auto rounded border border-border bg-muted/40 p-2 text-[11px] font-mono whitespace-pre-wrap break-words text-foreground">
-          {JSON.stringify(value, null, 2)}
+          {capPacketText(JSON.stringify(value, null, 2))}
         </pre>
       )}
       {children}
@@ -573,7 +589,7 @@ export function RawPacketDisclosure({ spanId, parentSpanId, rawPacket, className
                     Packet as sent by the harness
                   </div>
                   <pre className="max-h-[min(50vh,28rem)] overflow-auto rounded border border-border bg-muted/40 p-2 text-[11px] font-mono whitespace-pre-wrap break-words text-foreground">
-                    {keptPacket}
+                    {capPacketText(keptPacket)}
                   </pre>
                 </div>
               ) : null}

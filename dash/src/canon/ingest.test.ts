@@ -633,6 +633,55 @@ describe('ingestBatch — Claude Code interaction prompt (Task T5)', () => {
     store.close()
   })
 
+  it('delivers the prompt to a child whose body parse filled only other buckets', () => {
+    // Per-bucket, not all-or-nothing: a body parse that supplied system_prompt
+    // but no messages (a body cut before its messages array) leaves
+    // conversation_history empty, and the prompt is the only source for it.
+    // The delivery must merge with the parts the parse delivered, never
+    // replace them.
+    const store = new CanonStore(':memory:')
+    ingestBatch([llmChild('llm-1')], store)
+    ingestLogBatch(
+      [apiRequestBodyLog('llm-1', { system: [{ type: 'text', text: 'Body-parse system prompt.' }] })],
+      store,
+    )
+    expect(store.get('llm-1')?.parts).toEqual([
+      { part: 'system_prompt', text: 'Body-parse system prompt.' },
+    ])
+
+    ingestBatch([interactionSpan(PROMPT)], store)
+
+    expect(store.get('llm-1')?.parts).toEqual([
+      { part: 'system_prompt', text: 'Body-parse system prompt.' },
+      { part: 'conversation_history', text: PROMPT },
+    ])
+    expect(store.get('llm-1')?.content).toMatchObject({
+      system_prompt: 'Body-parse system prompt.',
+      conversation_history: PROMPT,
+    })
+    store.close()
+  })
+
+  it('declares the redacted prompt on a child that has parts but no conversation_history', () => {
+    // The per-bucket redaction guard: a record holding only system_prompt has
+    // no prompt text for the redaction to lie about, so the honest
+    // not_measurable naming the opt-in lands on exactly that empty bucket.
+    const store = new CanonStore(':memory:')
+    ingestBatch([llmChild('llm-1')], store)
+    ingestLogBatch(
+      [apiRequestBodyLog('llm-1', { system: 'Body-parse system prompt.' })],
+      store,
+    )
+
+    ingestBatch([interactionSpan(REDACTED_PROMPT)], store)
+
+    expect(store.get('llm-1')?.parts).toEqual([
+      { part: 'system_prompt', text: 'Body-parse system prompt.' },
+    ])
+    expect(notMeasurableReason(store, 'llm-1', 'conversation_history')).toMatch(/OTEL_LOG_USER_PROMPTS=1/)
+    store.close()
+  })
+
   it('keeps the interaction span quarantined as a non-model span, with its packet as evidence', () => {
     const store = new CanonStore(':memory:')
     const interaction = interactionSpan(PROMPT)

@@ -925,21 +925,6 @@ function sha256Hex(text: string): string {
   return createHash('sha256').update(text, 'utf8').digest('hex')
 }
 
-/**
- * Read a stored raw-payload cell for a detail route. Stored text parses back to the exact
- * incoming span object; unparseable text is served verbatim rather than dropped (it is
- * still the closest thing to the original evidence); null stays null — unavailable,
- * never invented.
- */
-function parseStoredRawPayload(rawText: string | null): unknown | null {
-  if (rawText === null) return null
-  try {
-    return JSON.parse(rawText) as unknown
-  } catch {
-    return rawText
-  }
-}
-
 
 function isCanonicalPart(value: string): value is CanonicalContentKey {
   return (CANONICAL_CONTENT_KEYS as readonly string[]).includes(value)

@@ -328,6 +328,26 @@ describe('ingestLogBatch (ADR 0009)', () => {
     store.close()
   })
 
+  it('caps the body_ref echo a failure reason carries', () => {
+    // The reference is sender-controlled and the reason is persisted to
+    // measurability_json and served on the API: echoing it verbatim would let
+    // a path string of unbounded length into the store and onto the wire.
+    const store = new CanonStore(':memory:')
+    store.upsert(modelRecord())
+
+    expect(
+      ingestLogBatch(
+        [claudeRequestBodyLog({ body_ref: `/tmp/${'x'.repeat(10_000)}/body.json` })],
+        store,
+      ),
+    ).toEqual({ enriched: 1, pending: 0, quarantined: 0 })
+
+    const enriched = store.get(MODEL_SPAN_ID)
+    expect(measurabilityReasons(enriched)).toContainEqual(expect.stringMatching(/body_ref/i))
+    expect(measurabilityReasons(enriched).every((reason) => reason.length < 1_000)).toBe(true)
+    store.close()
+  })
+
   it('never lets the session-time fallback land on a tool.invoke record', () => {
     const store = new CanonStore(':memory:')
     const request = { system: [{ type: 'text', text: 'Synthetic Claude system prompt.' }] }

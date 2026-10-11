@@ -126,12 +126,16 @@ export function parseClaudeApiRequestBody(body: unknown): ContentPart[] {
 /**
  * Why a request body yielded no parts, when the failure is the sender's.
  *
- * Only a string body that will not parse earns a reason: Claude Code cuts
- * inline bodies at `CLAUDE_CODE_OTEL_CONTENT_MAX_LENGTH` (61,440 UTF-16
- * units by default), so a truncated payload and a malformed one fail at
- * the same `JSON.parse` and the actionable hint is the same knob. A body
- * that parsed — or never needed parsing — reports nothing: an empty part
- * list from a well-formed body is a real answer, not a failure.
+ * A string body that will not parse earns a reason, and which reason depends
+ * on what the body still looks like. Claude Code cuts inline bodies at
+ * `CLAUDE_CODE_OTEL_CONTENT_MAX_LENGTH` (61,440 UTF-16 units by default), and
+ * a body cut that way is a broken-off JSON document — it still *begins* like
+ * one. So a body opening with `{` or `[` that fails to parse points at the
+ * length knob, while anything else — an empty string, a stray prefix — was
+ * never JSON at any length, and no knob would fix it: that body gets the
+ * malformed reason instead. A body that parsed — or never needed parsing —
+ * reports nothing: an empty part list from a well-formed body is a real
+ * answer, not a failure.
  */
 export function claudeApiRequestBodyFailureReason(body: unknown): string | undefined {
   if (typeof body !== 'string') return undefined
@@ -139,7 +143,11 @@ export function claudeApiRequestBodyFailureReason(body: unknown): string | undef
     JSON.parse(body)
     return undefined
   } catch {
-    return 'The Claude Code request body did not parse — it was likely truncated at the sender limit. Set CLAUDE_CODE_OTEL_CONTENT_MAX_LENGTH to raise it.'
+    const trimmed = body.trim()
+    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+      return 'The Claude Code request body did not parse — it was likely truncated at the sender limit. Set CLAUDE_CODE_OTEL_CONTENT_MAX_LENGTH to raise it.'
+    }
+    return 'The Claude Code request body did not parse as JSON — the sender emitted something that was never a request document, so there is nothing to reassemble.'
   }
 }
 
@@ -154,8 +162,11 @@ export function claudeApiRequestBodyFailureReason(body: unknown): string | undef
  * A block may nest its own `content` list — a `tool_result` can carry
  * image sub-blocks — so nested blocks run through this same mapping and
  * the placeholder and skip rules hold at every depth. Anything else keeps
- * its `text`/`content` string or, lacking one, the whole block as JSON; a
- * `tool_use` takes that last path (B5).
+ * its `text`/`content` string; an unanticipated shape carrying string
+ * `data` — or a `source` carrying it — still collapses to a placeholder,
+ * because bytes are payload on any block shape, not only on the ones the
+ * mapping anticipated. Only a block with neither collapses to the whole
+ * block as JSON; a `tool_use` takes that last path (B5).
  */
 function contentBlockText(block: Record<string, unknown>): string | undefined {
   const type = block.type
@@ -170,6 +181,15 @@ function contentBlockText(block: Record<string, unknown>): string | undefined {
       .map(contentBlockText)
       .filter((text): text is string => text !== undefined)
     return nested.length > 0 ? nested.join('\n') : undefined
+  }
+  const source = block.source
+  if (
+    typeof block.data === 'string' ||
+    (source !== null &&
+      typeof source === 'object' &&
+      typeof (source as Record<string, unknown>).data === 'string')
+  ) {
+    return `[${typeof type === 'string' ? type : 'binary'} block]`
   }
   return JSON.stringify(block)
 }

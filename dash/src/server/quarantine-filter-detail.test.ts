@@ -6,8 +6,8 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { CanonStore, problemsHarnessWhere, quarantineHarnessWhere } from '../canon/store.js'
-import { KyberBridge, type ProblemDetail, type ProblemRow, type QuarantineEntryDetail, type QuarantineRow } from './bridge.js'
+import { CanonStore, problemsHarnessWhere, quarantineHarnessWhere, type QuarantineEntryDetail } from '../canon/store.js'
+import { KyberBridge, type ProblemDetail, type ProblemRow, type QuarantineRow } from './bridge.js'
 import { handleKyberRequest, type KyberRouteDeps } from './routes.js'
 
 const stores: CanonStore[] = []
