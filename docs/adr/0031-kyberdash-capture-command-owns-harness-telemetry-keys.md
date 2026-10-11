@@ -46,8 +46,8 @@ well, in process in TypeScript, with no `.bat`, `.cmd` or `.ps1` shipped and the
 (appData injected by the caller, else `APPDATA`, else `<home>\AppData\Roaming`), and OpenCode
 at `<home>\.config\opencode\opencode.jsonc`, with XDG variables ignored on every OS. The route
 couples the receiver to a successful enable where the CLI deliberately does not (D5, D7, D20):
-a non-dry enable that ends in `wrote` or `noop` turns `settings.receiver.hosted` on when it is
-off, after the config write succeeds, and a setting write that fails is still a 200 carrying
+a non-dry enable that ends in `wrote` or `noop`, or that wrote at least one file before a later
+file refused (a partial write), turns `settings.receiver.hosted` on when it is off, after the config write succeeds, and a setting write that fails is still a 200 carrying
 `receiver.enableFailed: true`; disable never touches the receiver, including when the last
 managed harness is turned off — the dashboard says the receiver is still hosted — and
 `capture enable` at the terminal keeps printing the receiver remedy. The route also filters
