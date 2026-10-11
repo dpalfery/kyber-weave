@@ -1012,21 +1012,26 @@ export function quarantineHarnessWhere(harness: string | undefined): { where: st
     }
   }
   const spellings = sourceSpellingsForHarness(harness)
+  // An id with no known spelling matches nothing; `IN ()` is not portable SQL.
+  if (spellings.length === 0) return { where: ' WHERE 1 = 0', params: [] }
   const placeholders = spellings.map(() => '?').join(', ')
   return { where: ` WHERE LOWER(source) IN (${placeholders})`, params: spellings }
 }
 
 /**
  * The `WHERE` fragment scoping problem rows to one harness filter. Problems carry the
- * attributed harness id (adapter names are canonical already), so a concrete id is an
- * exact case-insensitive match; `unknown` is a null or blank harness.
+ * attributed harness id, matched case-insensitively against the same spelling expansion
+ * the quarantine filter uses (so `?harness=copilot-chat` finds the twin front-end's rows
+ * in both lists); `unknown` is a null or blank harness.
  */
 export function problemsHarnessWhere(harness: string | undefined): { where: string; params: Array<string | number> } {
   if (harness === undefined) return { where: '', params: [] }
   if (harness === 'unknown') {
     return { where: ` WHERE harness IS NULL OR TRIM(COALESCE(harness, '')) = ''`, params: [] }
   }
-  return { where: ` WHERE LOWER(harness) = ?`, params: [harness.toLowerCase()] }
+  const spellings = new Set([harness.toLowerCase(), ...sourceSpellingsForHarness(harness)])
+  const placeholders = [...spellings].map(() => '?').join(', ')
+  return { where: ` WHERE LOWER(harness) IN (${placeholders})`, params: [...spellings] }
 }
 
 function nullableText(value: unknown): string | null {

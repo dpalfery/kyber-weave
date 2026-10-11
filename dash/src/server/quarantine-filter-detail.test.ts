@@ -6,7 +6,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { CanonStore } from '../canon/store.js'
+import { CanonStore, problemsHarnessWhere, quarantineHarnessWhere } from '../canon/store.js'
 import { KyberBridge, type ProblemDetail, type ProblemRow, type QuarantineDetail, type QuarantineRow } from './bridge.js'
 import { handleKyberRequest, type KyberRouteDeps } from './routes.js'
 
@@ -274,5 +274,41 @@ describe('problems harness filtering and detail', () => {
 
     expect(call('/api/kyber/problem/999999', bridge, deps).status).toBe(404)
     expect(call('/api/kyber/problem/not-a-number', bridge, deps).status).toBe(404)
+  })
+})
+
+describe('harness filter SQL fragments', () => {
+  it('never builds an empty IN () list for a harness with no known spellings', () => {
+    const { where } = quarantineHarnessWhere('not-a-known-harness')
+    expect(where).not.toMatch(/IN \(\s*\)/)
+    const store = new CanonStore(':memory:')
+    stores.push(store)
+    store.quarantine('s1', [], 'unclaimed', { source: 'opencode', name: 'x' })
+    expect(store.countQuarantineFiltered('not-a-known-harness')).toBe(0)
+  })
+
+  it('expands twin spellings in the problems filter exactly as the quarantine filter does', () => {
+    const store = new CanonStore(':memory:')
+    stores.push(store)
+    store.quarantine('q1', [], 'unclaimed', { source: 'copilot-chat', name: 'x' })
+    store.recordProblem({
+      spanId: 'p1',
+      severity: 'error',
+      code: 'X',
+      message: 'm',
+      location: 'p1',
+      harness: 'copilot-chat',
+      timestamp: '2026-10-10T20:05:58.000Z',
+    })
+    const bridge = new KyberBridge({ store })
+    bridges.push(bridge)
+    const deps = { store }
+    const quarantine = call('/api/kyber/quarantine?harness=copilot-vscode', bridge, deps)
+    const problems = call('/api/kyber/problems?harness=copilot-vscode', bridge, deps)
+    expect(entriesOf(quarantine.body)).toHaveLength(1)
+    expect(problemsOf(problems.body)).toHaveLength(1)
+    expect(problemsHarnessWhere('copilot-vscode').params).toEqual(
+      expect.arrayContaining(['copilot-chat', 'copilot-vscode']),
+    )
   })
 })
