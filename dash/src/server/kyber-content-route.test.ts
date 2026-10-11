@@ -30,6 +30,10 @@ describe('Backend Contract Tests: GET /api/kyber/session/:id/content', () => {
   const TOOL_DEFINITION = '{"name":"read_file","description":"Read a file from the workspace"}'
   const CONVERSATION = 'user: why is the inspector showing a stub mid-sentence?'
   const HUGE_TOOL_RESULT = 'R'.repeat(CONTENT_RESPONSE_BUDGET + 50_000)
+  // Longer than the session-content default response budget: the shared
+  // session-level system prompt the whole-turn view reads losslessly.
+  const HUGE_SYSTEM_PROMPT =
+    'HUGE_SHARED_PROMPT_HEAD_7d2a\n' + 'S'.repeat(CONTENT_RESPONSE_BUDGET + 1_000) + '\nHUGE_SHARED_PROMPT_TAIL_c814'
   // Issue #216: Claude Desktop synth spans — conversation text the inspector must surface.
   const DESKTOP_CONVERSATION =
     'user: why are Claude Desktop inspector blocks empty?\nassistant: capture should attach parts.'
@@ -94,6 +98,21 @@ describe('Backend Contract Tests: GET /api/kyber/session/:id/content', () => {
       harness: 'copilot',
       label: 'Content drill-down',
       payload: { id: 'sess-content-001', harness: 'copilot' },
+    })
+    // Session-level system prompt longer than the session-content default
+    // budget: the shared-context reader's lossless contract fixture.
+    store.upsertMany([
+      turn('span-huge-prompt', [{ part: 'system_prompt', text: HUGE_SYSTEM_PROMPT, tokens: 999 }], {
+        sessionId: 'sess-huge-001',
+        traceId: 'trace-huge-001',
+        timestamp: '2026-09-03T10:00:00.000Z',
+      }),
+    ])
+    store.upsertSession({
+      sessionId: 'sess-huge-001',
+      harness: 'copilot',
+      label: 'Huge shared prompt',
+      payload: { id: 'sess-huge-001', harness: 'copilot' },
     })
     // Session whose payload carries explicit turn descriptors: one current
     // 0-based `index` row and one legacy 1-based `turn` row (issue #184).
@@ -342,6 +361,44 @@ describe('Backend Contract Tests: GET /api/kyber/session/:id/content', () => {
       expect(part.text.length).toBe(CONTENT_RESPONSE_BUDGET)
       expect(part.text).toBe(HUGE_TOOL_RESULT.slice(0, CONTENT_RESPONSE_BUDGET))
       expect(part.tokens).toBeUndefined()
+    })
+
+    describe('explicit lossless session-content path (?full=true)', () => {
+      it('keeps the default capped behavior for existing callers', async () => {
+        expect(HUGE_SYSTEM_PROMPT.length).toBeGreaterThan(CONTENT_RESPONSE_BUDGET)
+
+        const res = await fetch(`${base}/api/kyber/session/sess-huge-001/content?part=system_prompt`)
+        expect(res.status).toBe(200)
+        assertStandardKyberHeaders(res)
+
+        const body = (await res.json()) as SessionContentResult
+        expect(body.parts).toHaveLength(1)
+        const part = body.parts[0]
+        expect(part.part).toBe('system_prompt')
+        expect(part.truncated).toBe(true)
+        expect(part.totalLength).toBe(HUGE_SYSTEM_PROMPT.length)
+        expect(part.text.length).toBe(CONTENT_RESPONSE_BUDGET)
+        expect(part.text).toBe(HUGE_SYSTEM_PROMPT.slice(0, CONTENT_RESPONSE_BUDGET))
+      })
+
+      it('returns an over-budget system prompt exact with no truncation flags', async () => {
+        expect(HUGE_SYSTEM_PROMPT.length).toBeGreaterThan(CONTENT_RESPONSE_BUDGET)
+
+        const res = await fetch(`${base}/api/kyber/session/sess-huge-001/content?part=system_prompt&full=true`)
+        expect(res.status).toBe(200)
+        assertStandardKyberHeaders(res)
+
+        const body = (await res.json()) as SessionContentResult
+        expect(body.parts).toHaveLength(1)
+        const part = body.parts[0]
+        expect(part.part).toBe('system_prompt')
+        expect(part.text).toBe(HUGE_SYSTEM_PROMPT)
+        expect(part.text).toContain('HUGE_SHARED_PROMPT_HEAD_7d2a')
+        expect(part.text).toContain('HUGE_SHARED_PROMPT_TAIL_c814')
+        expect(part.truncated).toBeUndefined()
+        expect(part.totalLength).toBeUndefined()
+        expect(part.tokens).toBe(999)
+      })
     })
   })
 

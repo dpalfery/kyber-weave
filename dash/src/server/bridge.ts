@@ -570,6 +570,14 @@ export type SessionContentResult = {
 export type SessionContentOptions = {
   spanId?: string
   part?: string
+  /**
+   * Explicit lossless request (`?full=true` on the session-content route):
+   * bypasses `CONTENT_RESPONSE_BUDGET` so the full source text returns
+   * intact with no truncation flags. A large-number budget is not offered
+   * here — lossless is opt-in and documented, the default stays capped so
+   * existing callers keep their current behavior.
+   */
+  full?: boolean
 }
 
 export type TurnContentPart = {
@@ -1630,7 +1638,13 @@ export class KyberBridge {
 
     const result: SessionContentResult = {
       sessionId,
-      parts: applyContentBudget(assembled, CONTENT_RESPONSE_BUDGET),
+      // Lossless callers pass `full` so content longer than the default
+      // budget returns exact with no flags; everyone else keeps the capped
+      // behavior with explicit `truncated`/`totalLength` markers. Flags are
+      // only ever added by the budget below — never invented, and upstream
+      // (storage-level) truncation stays visible wherever the store records
+      // it rather than being papered over here.
+      parts: applyContentBudget(assembled, options.full === true ? Number.POSITIVE_INFINITY : CONTENT_RESPONSE_BUDGET),
     }
     if (options.spanId) result.spanId = options.spanId
     return result

@@ -280,6 +280,35 @@ export function isJsonText(value: string): boolean {
 }
 
 /**
+ * True for a JSON string literal whose decoded value is itself a JSON
+ * object or array (a root-encoded string such as
+ * `"[{\"type\":\"text\",\"text\":\"prompt\"}]"`). The outer quotes make
+ * `isJsonText` false, so without this check a root-encoded payload renders
+ * as one escaped line instead of reaching the structured view. Parsing here
+ * is only the shape gate; the original outer text is never re-encoded and
+ * stays the exact source for raw/copy.
+ */
+export function isRootEncodedJsonText(value: string): boolean {
+  const trimmed = value.trim()
+  if (trimmed.length < 2 || !trimmed.startsWith('"') || !trimmed.endsWith('"')) return false
+  let decoded: unknown
+  try {
+    decoded = JSON.parse(trimmed)
+  } catch {
+    return false
+  }
+  if (typeof decoded !== 'string') return false
+  const inner = decoded.trim()
+  if (!isJsonText(inner)) return false
+  try {
+    JSON.parse(inner)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
  * Lossless JSON AST scoped to the nested-string expansion below. Numbers and
  * literals keep their exact source slices so large integers, key order, and
  * array order survive; strings keep both the raw literal and its decoded
@@ -530,6 +559,15 @@ export function prettyPrintJsonNested(raw: string): string | null {
   try {
     const node = parseJsonLosslessDocument(trimmed)
     if (!node) return prettyPrintJson(raw)
+    // A root-encoded JSON string (a string literal whose decoded value is a
+    // JSON object/array) expands one layer so the formatted view is readable
+    // instead of a single escaped line. The expansion consumes one layer of
+    // the string-expansion budget, and the original outer text is untouched:
+    // raw/copy paths keep using the caller's exact input, never this output.
+    if (node.kind === 'string') {
+      const expanded = expandJsonLosslessStrings(node, 0)
+      if (expanded !== node) return printJsonLosslessNode(expanded, 0, 1)
+    }
     return printJsonLosslessNode(node, 0)
   } catch {
     return prettyPrintJson(raw)
@@ -854,11 +892,11 @@ export function JsonStringView({
 }
 
 /**
- * Readable rendering for a content string of unknown shape: JSON text gets
- * the structured view (with its exact-raw toggle), everything else keeps the
- * XML-folding text view. Either way the complete text stays visible. An
- * empty string is an explicit value, not absent data, so it renders a
- * visible marker instead of nothing.
+ * Readable rendering for a content string of unknown shape: JSON text (or a
+ * root-encoded JSON string) gets the structured view (with its exact-raw
+ * toggle), everything else keeps the XML-folding text view. Either way the
+ * complete text stays visible. An empty string is an explicit value, not
+ * absent data, so it renders a visible marker instead of nothing.
  */
 export function ReadableContentText({ text, label }: { text: string; label?: string }) {
   if (text === '') {
@@ -869,7 +907,7 @@ export function ReadableContentText({ text, label }: { text: string; label?: str
     )
   }
   if (!text) return null
-  if (isJsonText(text)) {
+  if (isJsonText(text) || isRootEncodedJsonText(text)) {
     return <JsonStringView text={text} label={label} />
   }
   return <XmlFoldedText text={text} />
@@ -935,7 +973,7 @@ export function TurnLosslessValue({ value, label }: { value: unknown; label?: st
         </p>
       )
     }
-    if (isJsonText(value)) {
+    if (isJsonText(value) || isRootEncodedJsonText(value)) {
       const single = prettyPrintJson(value)
       const lines = single === null ? prettyPrintJsonLines(value) : null
       if (single !== null || lines !== null) {
@@ -2008,6 +2046,256 @@ function readMeasuredFigure(value: unknown): number | undefined {
 }
 
 /**
+ * Stable identity for matching a top-level part against block members.
+ * Block parts and top-level parts are separate objects after the JSON
+ * round-trip, so the server-assigned `id` matches them; part+text is the
+ * fallback. Callers count matches so repeated identical parts pair off
+ * instead of collapsing.
+ */
+export function turnPartKey(part: Pick<KyberTurnContentPart, 'id' | 'part' | 'text'>): string {
+  return part.id ?? `${part.part}${part.text}`
+}
+
+/**
+ * Top-level parts covered by no block (unknown part kinds the canonical
+ * block set does not name), in server order. Rendered explicitly so no
+ * returned part is silently dropped from the whole-turn view.
+ */
+export function orphanTurnParts(data: KyberTurnContentResult): KyberTurnContentPart[] {
+  const remaining = new Map<string, number>()
+  for (const block of data.blocks) {
+    for (const p of block.parts) {
+      const key = turnPartKey(p)
+      remaining.set(key, (remaining.get(key) ?? 0) + 1)
+    }
+  }
+  const orphans: KyberTurnContentPart[] = []
+  for (const p of data.parts) {
+    const key = turnPartKey(p)
+    const count = remaining.get(key) ?? 0
+    if (count > 0) {
+      remaining.set(key, count - 1)
+    } else {
+      orphans.push(p)
+    }
+  }
+  return orphans
+}
+
+/**
+ * Exact text for the whole-turn copy action: the shared session context
+ * (when shown), the server-assembled block text, then every additional part
+ * under its own header. Part texts are concatenated verbatim — never
+ * re-encoded — so the copy carries every returned byte exactly once. Shared
+ * context stays separately copyable per part; it is included here, clearly
+ * labeled, so a button called "Copy Turn" never silently omits it.
+ */
+export function buildWholeTurnCopyText(
+  data: KyberTurnContentResult,
+  sharedTexts: string[],
+): string {
+  const sections: string[] = []
+  const shared = sharedTexts.filter((t) => t !== '')
+  if (shared.length > 0) {
+    sections.push(`=== SHARED SESSION CONTEXT ===\n${shared.join('\n\n')}`)
+  }
+  if (data.assembledText !== '') {
+    sections.push(data.assembledText)
+  }
+  const orphans = orphanTurnParts(data)
+  if (orphans.length > 0) {
+    sections.push(orphans.map((p) => `=== ${p.label.toUpperCase()} ===\n${p.text}`).join('\n\n'))
+  }
+  return sections.join('\n\n')
+}
+
+export type TurnContentViewMode = 'formatted' | 'raw'
+
+/**
+ * Formatted-by-default content with exact raw one toggle away. Only one
+ * rendering prints at a time so large content is not duplicated in the DOM
+ * by default; the formatted view never trims (readable structure only) and
+ * the raw view is the exact source bytes with its own copy button.
+ */
+export function ToggleRawView({
+  formatted,
+  rawText,
+  rawTestId,
+  copyTestId,
+  viewPrefix,
+  defaultView = 'formatted',
+}: {
+  formatted: React.ReactNode
+  rawText: string
+  rawTestId: string
+  copyTestId: string
+  viewPrefix: string
+  defaultView?: TurnContentViewMode
+}) {
+  const [view, setView] = useState<TurnContentViewMode>(defaultView)
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex rounded border border-border bg-interactive-secondary p-0.5 text-xs">
+          <button
+            type="button"
+            onClick={() => setView('formatted')}
+            data-testid={`${viewPrefix}-view-formatted`}
+            className={cn(
+              'px-2 py-0.5 rounded-[4px] font-medium transition-colors',
+              view === 'formatted' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
+            )}
+          >
+            Formatted
+          </button>
+          <button
+            type="button"
+            onClick={() => setView('raw')}
+            data-testid={`${viewPrefix}-view-raw`}
+            className={cn(
+              'px-2 py-0.5 rounded-[4px] font-medium transition-colors',
+              view === 'raw' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
+            )}
+          >
+            Raw
+          </button>
+        </div>
+        <CopyExactButton text={rawText} testId={copyTestId} label="Copy" />
+      </div>
+      {view === 'formatted' ? (
+        formatted
+      ) : (
+        <pre
+          className="text-xs font-mono p-2.5 overflow-auto whitespace-pre-wrap break-words rounded border border-border bg-muted/40 text-foreground max-h-[400px]"
+          data-testid={rawTestId}
+        >
+          {rawText}
+        </pre>
+      )}
+    </div>
+  )
+}
+
+/**
+ * One canonical turn-content block: measured tokens (or an honest absent
+ * marker — zero renders as an explicit zero), measurability and truncation
+ * notices, then the formatted/raw toggle. No per-block cache attribution.
+ */
+export function TurnContentBlockView({
+  block,
+  defaultView = 'formatted',
+}: {
+  block: KyberTurnContentBlock
+  defaultView?: TurnContentViewMode
+}) {
+  const prefix = `turn-block-${block.key}`
+  return (
+    <section data-testid={prefix}>
+      <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
+        {block.label}
+      </h4>
+      <div className="rounded border border-border bg-card p-3 overflow-hidden space-y-2">
+        {typeof block.tokens === 'number' ? (
+          <p className="text-[11px] font-mono text-tertiary-foreground" data-testid={`${prefix}-tokens`}>
+            {fmtTokens(block.tokens)} tokens
+          </p>
+        ) : (
+          <p className="text-[11px] font-mono text-tertiary-foreground italic" data-testid={`${prefix}-tokens-absent`}>
+            token count not recorded
+          </p>
+        )}
+        {block.notMeasurable ? (
+          <p
+            className="rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300"
+            data-testid={`${prefix}-not-measurable`}
+          >
+            Not measurable: {block.notMeasurable.reason}
+          </p>
+        ) : null}
+        {block.truncated === true ? (
+          <p
+            className="rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300"
+            data-testid={`${prefix}-truncated`}
+          >
+            {block.totalLength != null
+              ? `showing ${block.text.length} of ${block.totalLength} characters`
+              : `showing ${block.text.length} characters (total length not measurable)`}
+          </p>
+        ) : null}
+        {block.text !== '' ? (
+          <ToggleRawView
+            formatted={<InspectorContent data={block.text} />}
+            rawText={block.text}
+            rawTestId={`${prefix}-raw`}
+            copyTestId={`copy-${prefix}`}
+            viewPrefix={prefix}
+            defaultView={defaultView}
+          />
+        ) : (
+          <p className="text-xs text-tertiary-foreground italic" data-testid={`${prefix}-empty`}>
+            No content recorded for this block.
+          </p>
+        )}
+      </div>
+    </section>
+  )
+}
+
+/**
+ * One additional (non-block) turn part with the same formatted/raw/copy
+ * contract as canonical blocks.
+ */
+export function TurnContentPartView({
+  part,
+  index,
+  defaultView = 'formatted',
+}: {
+  part: KyberTurnContentPart
+  index: number
+  defaultView?: TurnContentViewMode
+}) {
+  const prefix = `turn-part-${part.part}-${index}`
+  return (
+    <div data-testid={prefix}>
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-xs font-semibold text-foreground">{part.label}</span>
+        <span className="rounded bg-muted border border-border px-1.5 py-0.5 font-mono text-[10px] text-tertiary-foreground">
+          {part.part}
+        </span>
+        {part.server ? (
+          <span className="rounded bg-interactive-secondary px-1.5 py-0.5 font-mono text-[10px] text-tertiary-foreground">
+            {part.server}
+          </span>
+        ) : null}
+        {typeof part.tokens === 'number' ? (
+          <span className="font-mono text-[10px] text-tertiary-foreground">{fmtTokens(part.tokens)} tokens</span>
+        ) : null}
+      </div>
+      {part.truncated === true ? (
+        <p
+          className="rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300 mt-1.5"
+          data-testid={`${prefix}-truncated`}
+        >
+          {part.totalLength != null
+            ? `showing ${part.text.length} of ${part.totalLength} characters`
+            : `showing ${part.text.length} characters (total length not measurable)`}
+        </p>
+      ) : null}
+      <div className="mt-1.5">
+        <ToggleRawView
+          formatted={<InspectorContent data={part.text} />}
+          rawText={part.text}
+          rawTestId={`${prefix}-raw`}
+          copyTestId={`copy-${prefix}`}
+          viewPrefix={prefix}
+          defaultView={defaultView}
+        />
+      </div>
+    </div>
+  )
+}
+
+/**
  * Whole-turn inspector panel backed by the lossless turn-content endpoint.
  *
  * - Renders every returned block and part in server order, including unknown
@@ -2029,17 +2317,23 @@ function readMeasuredFigure(value: unknown): number | undefined {
 export function TurnFullContentPanel({
   request,
   turn,
+  defaultView = 'formatted',
 }: {
   request: TurnFullContentRequest
   turn?: TurnFullContentTurn | null
+  defaultView?: TurnContentViewMode
 }) {
   const turnQuery = useQuery({
     queryKey: ['kyber-turn-content-full', request.sessionId, request.turnIndex],
     queryFn: () => fetchTurnContentFull(request.sessionId, request.turnIndex),
   })
+  // The shared session-level prompt reads through the explicit lossless
+  // session-content path: the default budget would silently cap a long
+  // prompt, and this reader needs every byte. The `full` key segment keeps
+  // this lossless response distinct from capped bucket reads in the cache.
   const sharedQuery = useQuery({
-    queryKey: ['kyber-session-content', request.sessionId, undefined, 'system_prompt'],
-    queryFn: () => fetchKyberSessionContent(request.sessionId, { part: 'system_prompt' }),
+    queryKey: ['kyber-session-content', request.sessionId, undefined, 'system_prompt', 'full'],
+    queryFn: () => fetchKyberSessionContent(request.sessionId, { part: 'system_prompt', full: true }),
   })
 
   const data: KyberTurnContentResult | undefined = turnQuery.data
@@ -2052,27 +2346,7 @@ export function TurnFullContentPanel({
 
   const orphanParts: KyberTurnContentPart[] = useMemo(() => {
     if (!data) return []
-    // Block parts and top-level parts are separate objects after the JSON
-    // round-trip, so match by stable `id` (the server assigns one per part),
-    // falling back to part+text. Counts handle repeated identical parts.
-    const remaining = new Map<string, number>()
-    for (const block of data.blocks) {
-      for (const p of block.parts) {
-        const key = p.id ?? `${p.part}${p.text}`
-        remaining.set(key, (remaining.get(key) ?? 0) + 1)
-      }
-    }
-    const orphans: KyberTurnContentPart[] = []
-    for (const p of data.parts) {
-      const key = p.id ?? `${p.part}${p.text}`
-      const count = remaining.get(key) ?? 0
-      if (count > 0) {
-        remaining.set(key, count - 1)
-      } else {
-        orphans.push(p)
-      }
-    }
-    return orphans
+    return orphanTurnParts(data)
   }, [data])
 
   const sharedParts = useMemo(() => {
@@ -2089,6 +2363,17 @@ export function TurnFullContentPanel({
     return candidates.filter((p) => !turnTexts.has(p.text))
   }, [sharedQuery.data, data])
 
+  // Copy Turn carries every returned byte exactly once (shared context
+  // labeled, blocks verbatim, additional parts under their own headers) so
+  // the action never silently omits content the view shows.
+  const wholeTurnCopyText = useMemo(() => {
+    if (!data) return ''
+    return buildWholeTurnCopyText(
+      data,
+      sharedParts.map((p) => p.text),
+    )
+  }, [data, sharedParts])
+
   const renderFigure = (label: string, value: number | undefined, testId: string) => (
     <div className="flex justify-between py-0.5" data-testid={testId}>
       <span className="text-muted-foreground">{label}</span>
@@ -2097,102 +2382,6 @@ export function TurnFullContentPanel({
       ) : (
         <span className="font-mono text-tertiary-foreground italic">not recorded</span>
       )}
-    </div>
-  )
-
-  const renderBlock = (block: KyberTurnContentBlock) => (
-    <section key={block.key} data-testid={`turn-block-${block.key}`}>
-      <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
-        {block.label}
-      </h4>
-      <div className="rounded border border-border bg-card p-3 overflow-hidden space-y-2">
-        {typeof block.tokens === 'number' ? (
-          <p className="text-[11px] font-mono text-tertiary-foreground" data-testid={`turn-block-${block.key}-tokens`}>
-            {fmtTokens(block.tokens)} tokens
-          </p>
-        ) : (
-          <p className="text-[11px] font-mono text-tertiary-foreground italic" data-testid={`turn-block-${block.key}-tokens-absent`}>
-            token count not recorded
-          </p>
-        )}
-        {block.notMeasurable ? (
-          <p
-            className="rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300"
-            data-testid={`turn-block-${block.key}-not-measurable`}
-          >
-            Not measurable: {block.notMeasurable.reason}
-          </p>
-        ) : null}
-        {block.truncated === true ? (
-          <p
-            className="rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300"
-            data-testid={`turn-block-${block.key}-truncated`}
-          >
-            {block.totalLength != null
-              ? `showing ${block.text.length} of ${block.totalLength} characters`
-              : `showing ${block.text.length} characters (total length not measurable)`}
-          </p>
-        ) : null}
-        {block.text !== '' ? (
-          <InspectorContent data={block.text} />
-        ) : (
-          <p className="text-xs text-tertiary-foreground italic" data-testid={`turn-block-${block.key}-empty`}>
-            No content recorded for this block.
-          </p>
-        )}
-        <div className="flex items-center justify-between gap-2">
-          <span className="text-[11px] font-mono text-tertiary-foreground">Raw · exact bytes</span>
-          <CopyExactButton text={block.text} testId={`copy-turn-block-${block.key}`} label="Copy" />
-        </div>
-        <pre
-          className="text-xs font-mono p-2.5 overflow-auto whitespace-pre-wrap break-words rounded border border-border bg-muted/40 text-foreground max-h-[400px]"
-          data-testid={`turn-block-${block.key}-raw`}
-        >
-          {block.text}
-        </pre>
-      </div>
-    </section>
-  )
-
-  const renderPart = (part: KyberTurnContentPart, idx: number) => (
-    <div key={part.id ?? `${part.part}-${idx}`} data-testid={`turn-part-${part.part}-${idx}`}>
-      <div className="flex items-center gap-2 flex-wrap">
-        <span className="text-xs font-semibold text-foreground">{part.label}</span>
-        <span className="rounded bg-muted border border-border px-1.5 py-0.5 font-mono text-[10px] text-tertiary-foreground">
-          {part.part}
-        </span>
-        {part.server ? (
-          <span className="rounded bg-interactive-secondary px-1.5 py-0.5 font-mono text-[10px] text-tertiary-foreground">
-            {part.server}
-          </span>
-        ) : null}
-        {typeof part.tokens === 'number' ? (
-          <span className="font-mono text-[10px] text-tertiary-foreground">{fmtTokens(part.tokens)} tokens</span>
-        ) : null}
-      </div>
-      {part.truncated === true ? (
-        <p
-          className="rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300 mt-1.5"
-          data-testid={`turn-part-${part.part}-${idx}-truncated`}
-        >
-          {part.totalLength != null
-            ? `showing ${part.text.length} of ${part.totalLength} characters`
-            : `showing ${part.text.length} characters (total length not measurable)`}
-        </p>
-      ) : null}
-      <div className="mt-1.5">
-        <InspectorContent data={part.text} />
-      </div>
-      <div className="flex items-center justify-between gap-2 mt-1.5">
-        <span className="text-[11px] font-mono text-tertiary-foreground">Raw · exact bytes</span>
-        <CopyExactButton text={part.text} testId={`copy-turn-part-${part.part}-${idx}`} label="Copy" />
-      </div>
-      <pre
-        className="text-xs font-mono p-2.5 overflow-auto whitespace-pre-wrap break-words rounded border border-border bg-muted/40 text-foreground max-h-[400px] mt-1.5"
-        data-testid={`turn-part-${part.part}-${idx}-raw`}
-      >
-        {part.text}
-      </pre>
     </div>
   )
 
@@ -2225,7 +2414,7 @@ export function TurnFullContentPanel({
         </div>
       ) : null}
 
-      {isTurnError || (data === undefined && turnQuery.isError) ? (
+      {isTurnError ? (
         <div
           className="rounded border border-red-500/30 bg-red-500/10 p-4 text-xs text-red-600 dark:text-red-400 space-y-1.5"
           data-testid="turn-content-error"
@@ -2261,17 +2450,14 @@ export function TurnFullContentPanel({
               <div className="space-y-2">
                 {sharedParts.map((part, idx) => (
                   <div key={`${part.spanId}-${part.part}-${idx}`} className="rounded border border-border bg-card p-3 overflow-hidden space-y-2" data-testid={`shared-session-context-part-${idx}`}>
-                    <InspectorContent data={part.text} />
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-[11px] font-mono text-tertiary-foreground">Raw · exact bytes</span>
-                      <CopyExactButton text={part.text} testId={`copy-shared-session-context-${idx}`} label="Copy" />
-                    </div>
-                    <pre
-                      className="text-xs font-mono p-2.5 overflow-auto whitespace-pre-wrap break-words rounded border border-border bg-muted/40 text-foreground max-h-[400px]"
-                      data-testid={`shared-session-context-part-${idx}-raw`}
-                    >
-                      {part.text}
-                    </pre>
+                    <ToggleRawView
+                      formatted={<InspectorContent data={part.text} />}
+                      rawText={part.text}
+                      rawTestId={`shared-session-context-part-${idx}-raw`}
+                      copyTestId={`copy-shared-session-context-${idx}`}
+                      viewPrefix={`shared-session-context-part-${idx}`}
+                      defaultView={defaultView}
+                    />
                   </div>
                 ))}
               </div>
@@ -2288,10 +2474,12 @@ export function TurnFullContentPanel({
               Turn {data.turnIndex + 1}
               {data.model ? <span className="ml-2 font-mono text-[11px] font-normal text-tertiary-foreground">{data.model}</span> : null}
             </span>
-            <CopyExactButton text={data.assembledText} testId="copy-turn-button" label="Copy Turn" />
+            <CopyExactButton text={wholeTurnCopyText} testId="copy-turn-button" label="Copy Turn" />
           </div>
 
-          {data.blocks.map(renderBlock)}
+          {data.blocks.map((block) => (
+            <TurnContentBlockView key={block.key} block={block} defaultView={defaultView} />
+          ))}
 
           {orphanParts.length > 0 ? (
             <section data-testid="turn-additional-parts">
@@ -2299,7 +2487,9 @@ export function TurnFullContentPanel({
                 Additional parts
               </h4>
               <div className="rounded border border-border bg-card p-3 overflow-hidden space-y-3">
-                {orphanParts.map(renderPart)}
+                {orphanParts.map((part, idx) => (
+                  <TurnContentPartView key={part.id ?? `${part.part}-${idx}`} part={part} index={idx} defaultView={defaultView} />
+                ))}
               </div>
             </section>
           ) : null}

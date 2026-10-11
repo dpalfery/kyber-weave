@@ -14,6 +14,7 @@ import {
   MessagePartView,
   TURN_CONTENT_SECTION_ORDER,
   isJsonText,
+  isRootEncodedJsonText,
   prettyPrintJson,
   prettyPrintJsonLines,
   splitTopLevelArrayItems,
@@ -27,10 +28,13 @@ import {
   TurnFullContentPanel,
   CopyExactButton,
   isTurnFullContentRequest,
+  buildWholeTurnCopyText,
+  orphanTurnParts,
 } from './SessionInspectorDrawer.js'
 
 import { renderToStaticMarkup } from 'react-dom/server'
 import type { KyberSessionContentResult, KyberTurnContentResult } from '../lib/kyberApi.js'
+import { fetchKyberSessionContent, fetchTurnContentFull } from '../lib/kyberApi.js'
 
 // Set up React 19 test hook dispatcher so components using hooks can be rendered in tests
 const reactInternals = (
@@ -1418,7 +1422,7 @@ describe('SessionInspectorDrawer: whole-turn full context', () => {
   const TURN_SESSION_ID = 'sess-turn-001'
   const TURN_INDEX = 1
   const TURN_KEY = ['kyber-turn-content-full', TURN_SESSION_ID, TURN_INDEX]
-  const SHARED_KEY = ['kyber-session-content', TURN_SESSION_ID, undefined, 'system_prompt']
+  const SHARED_KEY = ['kyber-session-content', TURN_SESSION_ID, undefined, 'system_prompt', 'full']
 
   const SHARED_PROMPT = 'SHARED_SESSION_PROMPT_HEAD_8aa1\nFollow every rule.\nSHARED_PROMPT_TAIL_3f9c'
   const OWN_SYSTEM_PROMPT = 'TURN_OWN_SYSTEM_PROMPT_HEAD_51bd\nTurn-specific instructions.\nOWN_PROMPT_TAIL_c742'
@@ -1469,12 +1473,14 @@ describe('SessionInspectorDrawer: whole-turn full context', () => {
   function renderPanel(
     qc: QueryClient,
     turn: Record<string, unknown> = { fresh: 250, cache_read: 200, cache_creation: 50 },
+    defaultView: 'formatted' | 'raw' = 'formatted',
   ): string {
     return renderHtml(
       <QueryClientProvider client={qc}>
         <TurnFullContentPanel
           request={{ sessionId: TURN_SESSION_ID, turnIndex: TURN_INDEX, full: true }}
           turn={turn as unknown as Parameters<typeof TurnFullContentPanel>[0]['turn']}
+          defaultView={defaultView}
         />
       </QueryClientProvider>
     )
@@ -1502,15 +1508,23 @@ describe('SessionInspectorDrawer: whole-turn full context', () => {
     expect(html).toContain('data-testid="turn-block-tool_definitions-tokens"')
     expect(html).toContain('0 tokens')
     // Unknown part kinds are not dropped: they render under Additional parts
-    // with exact text, ordering metadata, and raw access.
+    // with exact text and ordering metadata. Formatted shows every byte;
+    // the exact raw bytes sit one Raw toggle away (raw is not printed
+    // twice in the default DOM).
     expect(html).toContain('data-testid="turn-additional-parts"')
     expect(html).toContain('mystery_blob')
     expect(text).toContain(MYSTERY_TEXT)
-    expect(text).toContain('turn-part-mystery_blob-0-raw')
+    expect(html).toContain('data-testid="turn-part-mystery_blob-0-view-raw"')
+    expect(html).toContain('data-testid="copy-turn-part-mystery_blob-0"')
     expect(text).toContain(OWN_SYSTEM_PROMPT)
     expect(text).toContain('user asks about the failing gate')
     expect(text).toContain('assistant starts reading the row')
     expect(text).toContain('read_file produced 42 lines')
+
+    // Raw mode exposes the exact source bytes for every part.
+    const rawHtml = renderPanel(qc, undefined, 'raw')
+    expect(rawHtml).toContain('data-testid="turn-part-mystery_blob-0-raw"')
+    expect(unescapeHtml(rawHtml)).toContain(MYSTERY_TEXT)
   })
 
   it('shows shared session context once and skips exact duplicates', () => {
@@ -1530,6 +1544,20 @@ describe('SessionInspectorDrawer: whole-turn full context', () => {
     expect(html).toContain('Session-level system content')
     expect(text).toContain(SHARED_PROMPT)
     expect(text).toContain('SHARED_PROMPT_TAIL_3f9c')
+    // Exact raw bytes stay one toggle away with their own copy action.
+    expect(html).toContain('data-testid="shared-session-context-part-0-view-raw"')
+    expect(html).toContain('data-testid="copy-shared-session-context-0"')
+    const sharedRaw = unescapeHtml(renderHtml(
+      <QueryClientProvider client={qc}>
+        <TurnFullContentPanel
+          request={{ sessionId: TURN_SESSION_ID, turnIndex: TURN_INDEX, full: true }}
+          turn={{ fresh: 1, cache_read: 2, cache_creation: 3 }}
+          defaultView="raw"
+        />
+      </QueryClientProvider>
+    ))
+    expect(sharedRaw).toContain('data-testid="shared-session-context-part-0-raw"')
+    expect(sharedRaw).toContain(SHARED_PROMPT)
     // The turn's own prompt still renders in its own block.
     expect(text).toContain(OWN_SYSTEM_PROMPT)
 
@@ -1603,13 +1631,25 @@ describe('SessionInspectorDrawer: whole-turn full context', () => {
       </QueryClientProvider>
     )
     const text = unescapeHtml(html)
-    // Every byte survives: head through tail, with raw access and copy affordances.
+    // Every byte survives in formatted view: head through tail, with raw
+    // access and copy affordances alongside (raw prints only in raw mode).
     expect(text).toContain(LONG_TEXT)
     expect(text).toContain('LONG_HEAD_d4e2_')
     expect(text).toContain('LONG_TAIL_9b1f')
-    expect(html).toContain('data-testid="turn-block-long_block-raw"')
+    expect(html).toContain('data-testid="turn-block-long_block-view-raw"')
     expect(html).toContain('data-testid="copy-turn-block-long_block"')
     expect(html).toContain('data-testid="copy-turn-button"')
+    const longRaw = unescapeHtml(renderHtml(
+      <QueryClientProvider client={qc}>
+        <TurnFullContentPanel
+          request={{ sessionId: TURN_SESSION_ID, turnIndex: TURN_INDEX, full: true }}
+          turn={{ fresh: 1, cache_read: 1, cache_creation: 1 }}
+          defaultView="raw"
+        />
+      </QueryClientProvider>
+    ))
+    expect(longRaw).toContain('data-testid="turn-block-long_block-raw"')
+    expect(longRaw).toContain(LONG_TEXT)
 
     // Copy writes the exact bytes, not the formatted view.
     const written: string[] = []
@@ -1682,5 +1722,163 @@ describe('SessionInspectorDrawer: whole-turn full context', () => {
     // The clipped payload-row inspector stays out of the lossless view.
     expect(html).not.toContain('data-testid="turn-inspector"')
     expect(html).not.toContain('data-testid="drawer-content-loading"')
+  })
+
+  it('builds Copy Turn text covering every returned part plus labeled shared context', () => {
+    const body = buildTurnFixture()
+    const copy = buildWholeTurnCopyText(body, [SHARED_PROMPT])
+    // Shared context first, clearly labeled — never silently omitted.
+    expect(copy).toContain('=== SHARED SESSION CONTEXT ===')
+    expect(copy.indexOf('=== SHARED SESSION CONTEXT ===')).toBeLessThan(copy.indexOf(OWN_SYSTEM_PROMPT))
+    expect(copy).toContain(SHARED_PROMPT)
+    // Every block and the orphaned unknown part survive byte-exact.
+    expect(copy).toContain(OWN_SYSTEM_PROMPT)
+    expect(copy).toContain('{"name": "zeta_tool"}')
+    expect(copy).toContain('user asks about the failing gate')
+    expect(copy).toContain('read_file produced 42 lines')
+    expect(copy).toContain(MYSTERY_TEXT)
+    expect(copy).toContain('=== MYSTERY BLOB ===')
+    // No shared section when there is no shared text; empty turns copy empty.
+    const noShared = buildWholeTurnCopyText(body, [])
+    expect(noShared).not.toContain('SHARED SESSION CONTEXT')
+    expect(noShared).toContain(MYSTERY_TEXT)
+    expect(
+      buildWholeTurnCopyText(
+        { ...body, blocks: [], parts: [], assembledText: '' } as KyberTurnContentResult,
+        [],
+      ),
+    ).toBe('')
+  })
+
+  it('identifies orphan parts by stable id without collapsing repeats', () => {
+    const body = buildTurnFixture()
+    const orphans = orphanTurnParts(body)
+    expect(orphans.map((p) => p.part)).toEqual(['mystery_blob'])
+    // A repeated identical unknown part pairs off per occurrence, not once.
+    const dup = { ...body.parts[5], id: 'part-other-6' } as KyberTurnContentResult['parts'][number]
+    const doubled = { ...body, parts: [...body.parts, dup] } as KyberTurnContentResult
+    expect(orphanTurnParts(doubled).map((p) => p.id)).toEqual(['part-other-5', 'part-other-6'])
+  })
+})
+
+describe('SessionInspectorDrawer: root-encoded JSON strings', () => {
+  const ROOT_ENCODED = '"[{\\"type\\":\\"text\\",\\"text\\":\\"prompt\\"}]"'
+
+  it('detects root-encoded JSON text', () => {
+    expect(isRootEncodedJsonText(ROOT_ENCODED)).toBe(true)
+    expect(isRootEncodedJsonText('  ' + ROOT_ENCODED + '  ')).toBe(true)
+    expect(isRootEncodedJsonText('plain prose prompt')).toBe(false)
+    expect(isRootEncodedJsonText('{"a": 1}')).toBe(false)
+    expect(isRootEncodedJsonText('"just a string"')).toBe(false)
+    expect(isRootEncodedJsonText('"123"')).toBe(false)
+    expect(isRootEncodedJsonText('"{oops}"')).toBe(false)
+    expect(isRootEncodedJsonText('')).toBe(false)
+  })
+
+  it('expands root-encoded strings in the nested formatter', () => {
+    const pretty = prettyPrintJsonNested(ROOT_ENCODED)
+    expect(pretty).not.toBeNull()
+    // Readable structure, not one escaped line.
+    expect(pretty!).toContain('"type"')
+    expect(pretty!).toContain('prompt')
+    expect(pretty!).not.toContain('\\"')
+    // Expanding twice changes nothing.
+    expect(prettyPrintJsonNested(pretty!)).toBe(pretty)
+  })
+
+  it('renders root-encoded text readable in Formatted with exact Raw and Copy', () => {
+    const formatted = renderHtml(React.createElement(JsonStringView, { text: ROOT_ENCODED }))
+    const formattedText = unescapeHtml(formatted)
+    expect(formatted).toContain('data-testid="json-string-view"')
+    expect(formattedText).toContain('"type"')
+    expect(formattedText).toContain('prompt')
+
+    const rawHtml = renderHtml(React.createElement(JsonStringView, { text: ROOT_ENCODED, defaultView: 'raw' }))
+    // Raw keeps the exact original outer bytes, escapes and all.
+    expect(unescapeHtml(rawHtml)).toContain(ROOT_ENCODED)
+    expect(rawHtml).toContain('data-testid="json-raw"')
+
+    // Copy writes the exact original outer text, not the expansion.
+    const written: string[] = []
+    const nav = (globalThis as { navigator?: unknown }).navigator
+    const hadNavigator = nav !== undefined
+    Object.defineProperty(globalThis, 'navigator', {
+      value: { clipboard: { writeText: (s: string) => { written.push(s); return Promise.resolve() } } },
+      configurable: true,
+    })
+    try {
+      const rendered = (JsonStringView as (p: unknown) => unknown)({ text: ROOT_ENCODED, defaultView: 'raw' })
+      const buttons: React.ReactElement[] = []
+      const walk = (node: unknown): void => {
+        if (node == null) return
+        if (Array.isArray(node)) {
+          node.forEach(walk)
+          return
+        }
+        if (React.isValidElement(node)) {
+          const props = node.props as Record<string, unknown>
+          if (node.type === 'button' && props['children'] === 'Copy') buttons.push(node as React.ReactElement)
+          walk(props['children'])
+        }
+      }
+      walk(rendered)
+      expect(buttons.length).toBeGreaterThan(0)
+      ;(buttons[0]!.props as { onClick: () => void }).onClick()
+      expect(written).toEqual([ROOT_ENCODED])
+    } finally {
+      if (hadNavigator) {
+        Object.defineProperty(globalThis, 'navigator', { value: nav, configurable: true })
+      } else {
+        const g = globalThis as { navigator?: unknown }
+        delete g.navigator
+      }
+    }
+  })
+
+  it('routes root-encoded strings to the structured view, prose stays folded', () => {
+    const jsonHtml = renderHtml(React.createElement(ReadableContentText, { text: ROOT_ENCODED }))
+    expect(jsonHtml).toContain('data-testid="json-string-view"')
+    const proseHtml = renderHtml(React.createElement(ReadableContentText, { text: '"just a string"' }))
+    expect(proseHtml).not.toContain('data-testid="json-string-view"')
+  })
+})
+
+describe('SessionInspectorDrawer: lossless request builders', () => {
+  function mockFetch(captured: string[]) {
+    const origFetch = globalThis.fetch
+    globalThis.fetch = ((input: unknown) => {
+      captured.push(String(input))
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    }) as typeof fetch
+    return () => {
+      globalThis.fetch = origFetch
+    }
+  }
+
+  it('requests the explicit lossless turn path instead of a large-number budget', async () => {
+    const urls: string[] = []
+    const restore = mockFetch(urls)
+    try {
+      await fetchTurnContentFull('sess-x', 2)
+      expect(urls).toHaveLength(1)
+      expect(urls[0]).toBe('/api/kyber/session/sess-x/turn/2/content?full=true')
+      expect(urls[0]).not.toContain('budget')
+    } finally {
+      restore()
+    }
+  })
+
+  it('passes the explicit lossless flag for session content', async () => {
+    const urls: string[] = []
+    const restore = mockFetch(urls)
+    try {
+      await fetchKyberSessionContent('sess-x', { part: 'system_prompt', full: true })
+      expect(urls).toHaveLength(1)
+      expect(urls[0]).toContain('/api/kyber/session/sess-x/content')
+      expect(urls[0]).toContain('part=system_prompt')
+      expect(urls[0]).toContain('full=true')
+    } finally {
+      restore()
+    }
   })
 })
