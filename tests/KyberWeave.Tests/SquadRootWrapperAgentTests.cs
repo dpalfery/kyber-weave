@@ -54,6 +54,7 @@ public sealed class SquadRootWrapperAgentTests
         string? agentPathTemplate,
         string skillPathTemplate)
     {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
         SquadRendererRegistry registry = AllRenderers();
         SquadRenderResult result = await registry.RenderAsync(new SquadRenderRequest(
             ProductRoot,
@@ -64,24 +65,69 @@ public sealed class SquadRootWrapperAgentTests
 
         foreach (string identity in RootWrapperIdentities)
         {
+            SquadSkill skill = Assert.Single(source.Skills, s => s.Name == identity);
             string skillPath = string.Format(System.Globalization.CultureInfo.InvariantCulture, skillPathTemplate, identity);
-            Assert.Single(result.Files, f => f.RelativePath == skillPath);
+            string skillDirectory = skillPath[..^"/SKILL.md".Length];
+
+            // The complete expected path set for this identity, built from source. Asserting the
+            // whole set rather than a few members is deliberate: the projection defects this test
+            // exists to catch are duplicated or leaked paths, and a count that only ever checks
+            // presence would let an extra path through. Every assertion here reads the in-memory
+            // render result, so it is independent of any temp-directory cleanup behaviour.
+            HashSet<string> expectedPaths = new(StringComparer.Ordinal) { skillPath };
+            foreach (SquadResource resource in skill.Resources)
+            {
+                expectedPaths.Add($"{skillDirectory}/{resource.RelativePath}");
+            }
 
             if (agentPathTemplate is null)
             {
-                Assert.DoesNotContain(result.Files, f => f.RelativePath.Contains($"/{identity}.md", StringComparison.Ordinal)
-                    || f.RelativePath.Contains($"/{identity}.toml", StringComparison.Ordinal));
+                // This target emits no agent principal for a primary; the canonical skill is the
+                // only principal.
+                Assert.DoesNotContain(
+                    result.Files,
+                    f => MentionsIdentity(f.RelativePath, identity) && f.RelativePath.EndsWith(".md", StringComparison.Ordinal) &&
+                         !f.RelativePath.StartsWith($"{skillDirectory}/", StringComparison.Ordinal) &&
+                         !f.RelativePath.StartsWith($".agents/agents/{identity}/", StringComparison.Ordinal) &&
+                         !f.RelativePath.StartsWith($".devin/agents/{identity}/", StringComparison.Ordinal));
             }
             else
             {
-                string agentPath = string.Format(System.Globalization.CultureInfo.InvariantCulture, agentPathTemplate, identity);
-                Assert.Single(result.Files, f => f.RelativePath == agentPath);
+                expectedPaths.Add(string.Format(System.Globalization.CultureInfo.InvariantCulture, agentPathTemplate, identity));
             }
 
+            string[] actualPaths = result.Files
+                .Select(f => f.RelativePath)
+                .Where(path => MentionsIdentity(path, identity))
+                .Order(StringComparer.Ordinal)
+                .ToArray();
+            Assert.Equal(expectedPaths.Order(StringComparer.Ordinal), actualPaths);
+
+            // No role-prefixed duplicate of a root wrapper on any target.
             Assert.DoesNotContain(
                 result.Files,
                 f => f.RelativePath.Contains($"role-{identity}", StringComparison.Ordinal));
         }
+    }
+
+    /// <summary>
+    /// True when <paramref name="path"/> names <paramref name="identity"/> as a whole path
+    /// segment or as the file stem. Segment matching keeps <c>bug-crusher</c> from matching
+    /// <c>bug-crusher-investigator</c>, and the stem check covers the flat agent-file forms
+    /// (<c>&lt;name&gt;.md</c>, <c>&lt;name&gt;.agent.md</c>, <c>&lt;name&gt;.toml</c>).
+    /// </summary>
+    private static bool MentionsIdentity(string path, string identity)
+    {
+        string[] segments = path.Split('/');
+        if (segments.Any(segment => string.Equals(segment, identity, StringComparison.Ordinal)))
+        {
+            return true;
+        }
+
+        string fileName = segments[^1];
+        int dot = fileName.IndexOf('.', StringComparison.Ordinal);
+        string stem = dot >= 0 ? fileName[..dot] : fileName;
+        return string.Equals(stem, identity, StringComparison.Ordinal);
     }
 
     /// <summary>
