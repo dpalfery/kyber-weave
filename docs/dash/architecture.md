@@ -945,6 +945,42 @@ The turn inspection drawer and turn-content endpoints follow explicit numbering 
 - **Diagnosable empty state:** The turn content pane distinguishes an existing turn with no recorded content (`200 OK` with empty content parts, disclosing `spanId` and 0-based `turnIndex`) from an invalid or nonexistent turn (`404 Not Found`).
 - **Measured inspector figures:** Turn inspector headers display measured per-turn token figures only, never text-length estimates. Unmeasured values render honest not-measured treatments per [honest unobservability](../rules/honest-unobservability.md).
 
+#### Ordered, API-seen turn context
+
+Selecting a turn opens the whole-turn view over `GET /api/kyber/session/:id/turn/:index/content`,
+whose explicit `?full=true` path is lossless: no default-budget truncation and no large-number
+sentinel. Blocks and parts render in API order, every part included — unknown kinds and zero-token
+blocks among them — with exact truncation notices when a budget applied.
+
+- **Order is the API's, not the parser's.** `parseReadableXmlChunks` and the formatted view
+  preserve every occurrence in source order with its exact inner bytes. Nothing is deduplicated,
+  reordered, or re-serialized between the endpoint and the DOM.
+- **Turn-indexed repeats stay repeated.** Shared context carries every captured occurrence, and
+  `resolveSharedDisplay` suppresses only what the selected turn already renders in its own
+  blocks. Overlap pairs off by source turn index **with multiplicity**, never by span id or text
+  globally, so identical text from distinct earlier spans remains visible and copyable. An
+  earlier-turn occurrence is a distinct API-seen occurrence even when it shares text and span id
+  with the selected turn.
+- **Session-scope prompts are distinguished.** Provenance comes from the server's `turnIndex`
+  alone: a shared-context card reads `Turn N` when the part carries one and `Session scope` when
+  it does not, never inferred from text or span id. Entries without a `turnIndex` are never
+  suppressed — absent is not a turn and must not be guessed as one.
+- **Formatted tag recognition preserves literal angle-bracket expressions.** A generic XML-like
+  name counts as structural only with a matching open/close pair or as self-closing. An unclosed
+  open folds only for the known Copilot/harness wrapper allowlist
+  (`READABLE_XML_UNCLOSED_ALLOWLIST`, stored lowercase so unclosed camel/upper variants still
+  fold), so any other unclosed name — `List<string>`, `<void>`, or an `if (a<b && c>d)`
+  comparison whose `&&` is not a plausible attribute name — stays literal and cannot swallow a
+  later real section. Stray `<`, `>`, `<>`, `< 3`, and denylisted HTML-active tags stay literal
+  text, and whitespace-only inter-section chunks survive with every code point intact so section
+  boundaries and order read truthfully.
+- **Raw and Copy stay exact.** The formatted view is a display transform; the Raw toggle and
+  every Copy path (Copy Turn covers shared context, all blocks, and orphaned parts) return the
+  exact original source bytes. Nested JSON strings expand in the formatted view only, to a bounded
+  10 layers, leaving the tail visible as an escaped string. No view claims cache attribution for
+  an individual block: recurrence badges are text-labelled against earlier captured turns, and
+  measured per-turn fresh/cache-read/cache-creation totals stay separate from the blocks.
+
 ### Backend REST API Contract (dash/src/server/routes.ts)
 
 The web dashboard server wires HTTP requests directly to `KyberBridge`:
@@ -958,7 +994,7 @@ The web dashboard server wires HTTP requests directly to `KyberBridge`:
 | `/api/kyber/sessions` | `GET` | `{ sessions: SessionSummary[] }` | List sessions; supports `?limit=` and `?harness=`. |
 | `/api/kyber/session/:id` | `GET` | `SessionPayload` | Full session payload with turns, context, tools, and timeline. Summary emits `cache_hit_ratio` and `cache_creation_coverage` from single engine writer. |
 | `/api/kyber/session/:id/content` | `GET` | `SessionContent` | Full canonical content for an inspected session part. |
-| `/api/kyber/session/:id/turn/:index/content` | `GET` | `TurnContentResult` | Full unclipped assembled context for a specific turn ([ADR 0014](../adr/0014-unclipped-turn-inspection-and-copy-out-protocol.md)). Uses 0-based `:index`; strict resolution returns 404 for out-of-bounds turn indices, and 200 with empty parts when the turn exists but recorded no content. |
+| `/api/kyber/session/:id/turn/:index/content` | `GET` | `TurnContentResult` | Full unclipped assembled context for a specific turn ([ADR 0014](../adr/0014-unclipped-turn-inspection-and-copy-out-protocol.md)). Uses 0-based `:index`; strict resolution returns 404 for out-of-bounds turn indices, and 200 with empty parts when the turn exists but recorded no content. `?full=true` is the explicit lossless path — no default-budget truncation, no large-number sentinel — backing the whole-turn inspector; each part annotates recurrence against earlier captured turns by whole-text sha256 with no normalization, and `sharedContext` unions turn-span system prompts with non-turn session prompts, each tagged with its contributing `turnIndex` ([ordered, API-seen turn context](#ordered-api-seen-turn-context)). |
 | `/api/kyber/findings` | `GET` | `{ findings: Finding[], total, limit, offset, detectorCounts, unknownWindowSessions }` | Ranked findings; supports `?runId=`, `?sessionId=`, `?harness=`, `?detector=`, `?limit=`, `?offset=`. `total` describes the narrowed set; `detectorCounts` cover the run/session/harness scope ignoring paging and the detector filter so filter chips never evaporate; `unknownWindowSessions` counts sessions with an unreported context window in scope. |
 | `/api/kyber/finding/:id` | `GET` | `Finding` | Single finding detail with evidence rows and risk caveats. |
 | `/api/kyber/predictions` | `GET`, `POST` | `{ predictions: Prediction[] }` | Query or record prediction calibration entries. |
