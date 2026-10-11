@@ -2,7 +2,7 @@
 id: plans/2026-10-10-kyberdash-claude-code-turn-content
 title: KyberDash — Claude Code turn content ingest and raw-packet inspection
 doc-type: plan
-status: current
+status: complete
 component: KyberDash
 owner: dpalfery
 last-reviewed: 2026-10-10
@@ -20,10 +20,20 @@ keywords:
 
 ## Status
 
-**Ready — executing.** Q1–Q4 were answered by the user on 2026-10-10, as relayed by the
-conductor, and approve-and-execute (A1) was granted the same day. The premises behind Q1 and
-Q3 were re-checked against the latest `origin/main`
-([F0](#f0-what-latest-originmain-is-and-where-the-codex-branch-lives)).
+**Complete 2026-10-10 — `[NOT LIVE-VERIFIED]`.** Q1–Q4 were answered by the user on
+2026-10-10, as relayed by the conductor, and approve-and-execute (A1) was granted the same
+day. The premises behind Q1 and Q3 were re-checked against the latest `origin/main`
+([F0](#f0-what-latest-originmain-is-and-where-the-codex-branch-lives)). Executed on branch
+`fix/kyberdash-claude-turn-content` off `2794cc8`: TP plus T1–T9, T11–T19 all delivered
+test-first (T10 correctly not needed — the e2e regression passed after the GREEN chain);
+every task audited with T3, T13, T15, and T6 each reworked once inside the three-pass
+budget. Gates: typecheck, lint, full test suite (346 files / 5226 tests), check:reachable,
+`docs validate`, and `docs drift` all clean. T0 owner live-capture was not supplied, so the
+real-world `api_request_body` shape remains documented-but-unverified; everything else is
+verified against synthetic OTLP shaped from Anthropic's documented event format. Decisions
+Q1–Q4 and B1–B10 are recorded below and harvested into
+[ADR 0034](../adr/0034-kyberdash-quarantine-raw-packet-evidence.md) plus the dash docs.
+Archived per KW-DOC-LIFECYCLE-003.
 
 - **Date:** 2026-10-10
 - **Development mode:** test-first (default; the user has not opted out)
