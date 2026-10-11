@@ -677,6 +677,24 @@ public sealed class FactoryRendererContractTests : IDisposable
             result.Files,
             f => f.RelativePath == $"droids/{primaryAgent.Name}.md");
 
+        // Degradation records name the skill at its global-scope path, not the
+        // project-scope form.
+        SquadDegradationRecord roleSkillFallback = Assert.Single(
+            result.Degradations,
+            d => d.CanonicalIdentity == primaryAgent.Name && d.Code == "role-skill-fallback");
+        Assert.Contains(
+            $"skills/{primaryAgent.Name}/SKILL.md",
+            roleSkillFallback.Details,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(".factory/", roleSkillFallback.Details, StringComparison.Ordinal);
+        SquadDegradationRecord permissionNotExpressible = Assert.Single(
+            result.Degradations,
+            d => d.CanonicalIdentity == primaryAgent.Name && d.Code == "permission-not-expressible");
+        Assert.Contains(
+            $"skills/{primaryAgent.Name}/SKILL.md",
+            permissionNotExpressible.Details,
+            StringComparison.Ordinal);
+
         Assert.DoesNotContain(result.Files, f => f.RelativePath.StartsWith(".factory/", StringComparison.Ordinal));
     }
 

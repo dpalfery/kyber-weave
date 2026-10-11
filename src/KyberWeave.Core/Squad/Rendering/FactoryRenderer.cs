@@ -196,7 +196,8 @@ public sealed class FactoryRenderer : ISquadRenderer
                     degradations.AddRange(BuildPrimaryAgentDegradationRecords(
                         agent,
                         fallbackProfile,
-                        source.CapabilityProfiles.Profiles));
+                        source.CapabilityProfiles.Profiles,
+                        skillPrincipal.RelativePath));
                 }
                 else if (string.Equals(fallbackProfile.NoPrimaryAgent, "omit", StringComparison.Ordinal))
                 {
@@ -432,12 +433,15 @@ public sealed class FactoryRenderer : ISquadRenderer
     /// Builds the degradation records for a primary agent that also renders as an
     /// entry-point skill: the fallback record naming the additional projection, then the
     /// agent's own records with the entry-point caveat folded into the shared
-    /// permission-not-expressible record.
+    /// permission-not-expressible record. The path is the scope-resolved deployment path the
+    /// skill actually renders at, so a global install's records point at
+    /// <c>skills/&lt;name&gt;/SKILL.md</c>, not the project-scope form.
     /// </summary>
     private static IEnumerable<SquadDegradationRecord> BuildPrimaryAgentDegradationRecords(
         SquadAgent agent,
         SquadFallbackProfile fallbackProfile,
-        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles)
+        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
+        string entryPointSkillPath)
     {
         yield return new SquadDegradationRecord(
             Target: SquadTargetCatalog.GetToken(SquadTarget.Factory),
@@ -448,18 +452,18 @@ public sealed class FactoryRenderer : ISquadRenderer
             Details: "The Factory app dispatches custom droids as subagents and exposes no " +
                 "session-parent selector to start a conversation as one. Fallback profile " +
                 $"'{agent.Fallback}' declares no-primary-agent: {fallbackProfile.NoPrimaryAgent}, " +
-                $"so this agent also renders as an entry-point skill at " +
-                $".factory/skills/{agent.Name}/SKILL.md that runs in the main session under " +
-                "the session's permissions — the droid's explicit tools allow-list does not " +
-                "apply to it. The droid file is kept for Task dispatch.");
+                $"so this agent also renders as an entry-point skill at {entryPointSkillPath} " +
+                "that runs in the main session under the session's permissions — the droid's " +
+                "explicit tools allow-list does not apply to it. The droid file is kept for " +
+                "Task dispatch.");
 
         foreach (SquadDegradationRecord record in BuildDegradationRecords(
             agent,
             capabilityProfiles,
             entryPointSkillNote:
-                $"The same-name entry-point skill at .factory/skills/{agent.Name}/SKILL.md " +
-                "runs under the session's permissions; the droid's explicit tools allow-list " +
-                "and mcpServers: [] do not apply to it."))
+                $"The same-name entry-point skill at {entryPointSkillPath} runs under the " +
+                "session's permissions; the droid's explicit tools allow-list and " +
+                "mcpServers: [] do not apply to it."))
         {
             yield return record;
         }
