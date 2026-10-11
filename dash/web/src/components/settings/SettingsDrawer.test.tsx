@@ -315,6 +315,7 @@ describe('SettingsDrawer: preview, confirm, cancel', () => {
   it('names the receiver change in the preview when the route says it will enable it', async () => {
     const withReceiver = clone(postPreviewEnable) as Json
     withReceiver.receiver.willEnable = true
+    withReceiver.receiver.hosted = false
     stubFetch({ status: offClaude, post: () => ({ json: withReceiver }) })
     await openedDrawer()
 
@@ -323,6 +324,20 @@ describe('SettingsDrawer: preview, confirm, cancel', () => {
     const note = await screen.findByTestId('settings-preview-receiver-note')
     expect(note.textContent).toMatch(/receiver/i)
     expect(note.textContent).toMatch(/turn(ed)? on|enable/i)
+  })
+
+  it('says the receiver is already on, not that it will be turned on, when it is hosted', async () => {
+    const hostedPreview = clone(postPreviewEnable) as Json
+    hostedPreview.receiver.willEnable = true
+    hostedPreview.receiver.hosted = true
+    stubFetch({ status: offClaude, post: () => ({ json: hostedPreview }) })
+    await openedDrawer()
+
+    fireEvent.click(checkbox('claude-code'))
+
+    const note = await screen.findByTestId('settings-preview-receiver-note')
+    expect(note.textContent).toMatch(/already on/i)
+    expect(note.textContent).not.toMatch(/currently off|will also turn on/i)
   })
 
   it('Cancel sends nothing more and dismisses the preview', async () => {

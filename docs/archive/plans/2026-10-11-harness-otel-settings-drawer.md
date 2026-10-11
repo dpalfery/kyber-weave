@@ -2,7 +2,7 @@
 id: plans/2026-10-11-harness-otel-settings-drawer
 title: "Harness OpenTelemetry collection switches in a web dashboard Settings drawer"
 doc-type: plan
-status: current
+status: complete
 component: KyberDash
 owner: dpalfery
 last-reviewed: 2026-10-11
@@ -11,7 +11,7 @@ development-mode: test-first
 
 # Harness OpenTelemetry collection switches in a web dashboard Settings drawer
 
-**Status: Ready 2026-10-11.** The user chose "Approve and execute" on 2026-10-11. Decisions D1–D6 are user decisions; D7–D20 were settled by the architect from cited evidence and are approved by that same approval. No decision is open.
+**Status: Complete 2026-10-11.** Executed through T14 on branch `feat/harness-otel-settings-drawer`; see [section 11](#11-risks-scope-review-and-closeout) for the closeout, including the owner gates that were not run. Originally **Ready 2026-10-11**: The user chose "Approve and execute" on 2026-10-11. Decisions D1–D6 are user decisions; D7–D20 were settled by the architect from cited evidence and are approved by that same approval. No decision is open.
 
 **Development mode:** `test-first`. Every implementation task has a Test-contract row in [section 7](#7-test-contract-test-first); RED evidence precedes GREEN. The default was persisted because the user did not opt out.
 
@@ -235,4 +235,43 @@ Owner gates (cannot run in this plan's environment; recorded at closeout, not cl
 
 **Review.** T13 runs the council over the whole accumulated change after T9, T10 and T12.
 
-**Closeout mapping (to be completed by T14).** D1–D6 and D10–D20 harvest into `docs/dash/runbook.md` (capture section, Windows, receiver coupling) and `docs/dash/architecture.md` (route contract and drawer). D6, D7, D19 and D20 are recorded in ADR 0031's amendment (T11). D9, D13 and D14 live in the runbook and architecture text. Waivers: none requested; the architecture and runbook documents are updated, and the ADR amendment is the decision record.
+### Closeout
+
+**Outcome.** T0-T13 were delivered in development mode `test-first` and T14 archived this plan. The engine route `/api/kyber/capture`, the Windows path seam, the structured status API, the `SlideOutDrawer` shell, the Settings drawer and header button, the `capture-windows` CI job and the ADR 0031 amendment all exist on the branch. No decision was left open.
+
+**Durable facts and where they now live.**
+
+| Decision | Destination |
+|---|---|
+| D1-D4, D8, D10, D13, D15 (Settings drawer, toggle semantics, API shape, no environment values in the API, shared `SlideOutDrawer`) | [`docs/dash/architecture.md`](../../dash/architecture.md) (Harness OpenTelemetry capture section, route contract and `SettingsDrawer.tsx` entry) and [`docs/dash/runbook.md`](../../dash/runbook.md) (Harness OpenTelemetry capture, Settings drawer). |
+| D5, D7, D20 (receiver coupling, last-harness-off leaves the receiver, CLI does not couple) | [ADR 0031](../../adr/0031-kyberdash-capture-command-owns-harness-telemetry-keys.md) amended in place 2026-10-11, plus the runbook capture section. |
+| D6, D14, D18 (Windows support and path rules; the "Windows unsupported" test replaced) | ADR 0031 amendment, `docs/dash/runbook.md` (Windows) and `docs/dash/architecture.md`. |
+| D9, D11, D12, D19 (evidence-based detection, additive `events`, serialized writes, which files are written) | `docs/dash/architecture.md` and `docs/dash/runbook.md` (limits). |
+| D16 (Windows evidence in CI) | `.github/workflows/ci.yml` (`capture-windows` job); see deviation 1 below. |
+| D17 (ADR amendment form) | ADR 0031 in place, with its [ADR index](../../adr/README.md) row. |
+
+**No ADR waiver and no documentation waiver was claimed:** the ADR 0031 amendment is the decision record and the architecture and runbook documents were updated.
+
+**Owner gates NOT run.** None of these were executed in this environment and none is claimed:
+
+1. On a Windows machine, enable then disable each of the three harnesses from the drawer and confirm the receipt and file bytes round-trip with no unrelated key changed.
+2. On macOS, the same round trip against copies of the real config files.
+3. Confirm the receiver reaches `kyberdash` liveness after the first enable.
+
+The `capture-windows` CI job is **unverified until its first pull request run**; it has never executed on a `windows-latest` runner.
+
+**Deviations from the plan as written.**
+
+1. The `capture-windows` job runs only `src/capture`. It does not run `capture-route.test.ts`, which injects `darwin` and compares host-joined paths, so it cannot pass on Windows. That pinned contract test was not edited.
+2. Three assertions in `capture-route.test.ts` and `web.test.ts` looked for the literal `experimental.openTelemetry`. The writer emits nested JSON, so they were corrected to `"openTelemetry": true`.
+3. The fixture `post-preview-enable.json` pins `willEnable: true` with `hosted: true`, so the drawer's preview wording uses "hosted".
+4. Security-review (T10) fixes were applied: a partial-write receipt, refusal on a corrupt receipt, atomic receipt writes, and redaction of the Antigravity statusline in the structured status.
+5. A refused real enable that wrote at least one file couples the receiver on.
+6. A corrupt receipt still reports `receipt: absent` in status; this is unchanged.
+
+**Known low findings not addressed.**
+
+- The receiver turns on for a `noop` enable. This is by design (D5).
+- The Origin guard regex allows any localhost port. This is pre-existing and not introduced here.
+
+**Verification run (T14).** `codegraph index .`, `dotnet build KyberWeave.sln -c Release --no-restore`, then `docs validate . --merge-ready` and `docs drift .` from the repository root; results are in the T14 report. The dash gates of section 10 and the full gates run belong to the finishing pull request.

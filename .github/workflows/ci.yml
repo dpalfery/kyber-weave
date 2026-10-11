@@ -592,9 +592,11 @@ jobs:
         working-directory: dash
         run: npm ci --no-audit --no-fund
 
-      - name: Capture engine and route tests
+      # The route test (src/server/capture-route.test.ts) injects platform 'darwin' and
+      # compares host-joined paths, so it is POSIX-only; the engine tests are host-neutral.
+      - name: Capture engine tests
         working-directory: dash
-        run: npx vitest run src/capture src/server/capture-route.test.ts
+        run: npx vitest run src/capture
 
   tray-rust:
     name: Tray Rust gates (${{ matrix.os }})

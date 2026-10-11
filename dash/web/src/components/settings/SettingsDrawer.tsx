@@ -93,7 +93,9 @@ function PreviewPanel({
       {!changed && <p className="mt-2 text-xs text-muted-foreground">No keys would change.</p>}
       {result.receiver.willEnable && (
         <p data-testid="settings-preview-receiver-note" className="mt-2 text-xs text-foreground">
-          This will also turn on the OTLP receiver, which is currently off.
+          {result.receiver.hosted
+            ? 'The OTLP receiver is already on.'
+            : 'This will also turn on the OTLP receiver, which is currently off.'}
         </p>
       )}
       <div className="mt-3 flex gap-2">

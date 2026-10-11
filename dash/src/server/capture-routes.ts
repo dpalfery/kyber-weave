@@ -119,6 +119,10 @@ const REFUSAL_WORDING: Record<string, string> = {
 }
 
 function refusalMessage(request: CaptureRequest, result: CaptureActionResult): string {
+  const partial = result.events.some((event) => event.kind === 'wrote' || event.kind === 'restored')
+  if (partial) {
+    return `${request.action} refused: ${request.harness} stopped partway; some files were already changed`
+  }
   const wording = REFUSAL_WORDING[result.reason ?? 'unreadable'] ?? REFUSAL_WORDING['unreadable']!
   return `${request.action} refused: ${request.harness} ${wording}`
 }
@@ -159,23 +163,16 @@ async function answerPost(
     fileFilter: createApplicabilityFilter(CAPTURE_HARNESS_REGISTRY),
   })
 
-  if (result.outcome === 'refused') {
-    io.sendJson(res, 409, {
-      error: refusalMessage(request, result),
-      outcome: 'refused',
-      reason: result.reason ?? 'unreadable',
-      events: result.events,
-    })
-    return
-  }
-
-  // D5: a real enable that ended in wrote or noop makes sure the receiver is hosted, after
-  // the config write succeeded. The config is already on disk, so a failing setting write is
+  // D5: a real enable that wrote something makes sure the receiver is hosted, after the
+  // config write succeeded. The config is already on disk, so a failing setting write is
   // reported in the receiver block (200), not as a 5xx that would misreport the state.
+  // A partial write (an earlier file written, a later one refused) counts as written: the
+  // receipt already records that file, so the harness needs somewhere to send.
+  const wroteSomething = result.events.some((event) => event.kind === 'wrote')
   let hosted = readSetting(store, SETTING_KEYS.receiverHosted) === 'on'
   let enabled = false
   let enableFailed = false
-  if (request.action === 'enable' && !request.dryRun) {
+  if (request.action === 'enable' && !request.dryRun && (result.outcome !== 'refused' || wroteSomething)) {
     if (!hosted) {
       try {
         writeSetting(store, SETTING_KEYS.receiverHosted, 'on')
@@ -186,6 +183,16 @@ async function answerPost(
       }
     }
     enabled = hosted
+  }
+
+  if (result.outcome === 'refused') {
+    io.sendJson(res, 409, {
+      error: refusalMessage(request, result),
+      outcome: 'refused',
+      reason: result.reason ?? 'unreadable',
+      events: result.events,
+    })
+    return
   }
 
   const statuses = buildCaptureStatus(ctx)

@@ -812,8 +812,11 @@ drawer shows the exact keys it would change, and only **Confirm** sends the real
 A row is not switchable, with the reason printed, when its state is unknown, when it is `on`
 but KyberDash recorded no receipt (the keys were set elsewhere, so there is nothing to
 restore), or when it is not detected and has no receipt. A harness with a receipt can always
-be switched off. A refusal (drift, conflict, unparseable, unreadable, busy) leaves every file
-unchanged and is shown on the row with the drifted keys.
+be switched off. A refusal that happens before any write (drift on a disable, an unparseable or unreadable
+config, a conflict, busy) leaves every file unchanged and is shown on the row with the drifted
+keys. A harness with several files is written file by file, so a refusal or host error on a
+later file can follow earlier files that were already written and receipted; the response keeps
+those files' events, and a real enable that wrote anything still turns the receiver on.
 
 **Receiver coupling.** A real `enable` that ends written or already-set turns the shared
 `settings.receiver.hosted` on after the config write, so the harness has somewhere to send.

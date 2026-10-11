@@ -15,6 +15,7 @@ import {
   runCapture,
   type CaptureEvent,
   type CaptureFileFilter,
+  partialEventsOf,
 } from './index.js'
 import { withCaptureLock } from './lock.js'
 import type { HealthFetcher } from './probe.js'
@@ -89,7 +90,11 @@ export async function runCaptureAction(request: CaptureActionRequest): Promise<C
       return {
         outcome: 'refused',
         reason,
-        events: [{ kind: 'error', harness: request.harnessId, fileId: '', path: '', reason, code }],
+        // Earlier files may already be written and receipted: keep their events.
+        events: [
+          ...partialEventsOf(error),
+          { kind: 'error', harness: request.harnessId, fileId: '', path: '', reason, code },
+        ],
       }
     }
   })

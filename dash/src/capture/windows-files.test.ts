@@ -126,9 +126,7 @@ describe('edit-json with Windows-authored documents (BOM + CRLF)', () => {
 })
 
 describe('capture enable/disable round-trips Windows-authored files', () => {
-  // runCapture refuses the win32 platform outright; these tests exercise
-  // Windows-authored *files*, not the Windows platform.
-  it.skipIf(process.platform === 'win32')(
+  it(
     'JSONC with BOM and CRLF: enable keeps the BOM and CRLF, disable restores the prior bytes',
     async () => {
       const home = makeHome()
@@ -170,7 +168,7 @@ describe('capture enable/disable round-trips Windows-authored files', () => {
     },
   )
 
-  it.skipIf(process.platform === 'win32')(
+  it(
     'plain JSON with BOM and CRLF round-trips to its original bytes',
     async () => {
       const home = makeHome()

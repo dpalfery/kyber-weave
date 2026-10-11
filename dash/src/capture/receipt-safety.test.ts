@@ -57,6 +57,9 @@ describe('receipt safety', () => {
       const result = await runCaptureAction(req(home, 'copilot', 'enable'))
       expect(result.outcome).toBe('refused')
       expect(readFileSync(stable, 'utf8')).not.toBe('{}\n')
+      // The earlier file's wrote event survives the later file's errno failure.
+      expect(result.events.map((event) => event.kind)).toEqual(['wrote', 'error'])
+      expect(result.events[0]).toMatchObject({ kind: 'wrote', path: stable })
 
       const receipt = JSON.parse(readFileSync(receiptPathForHome(home), 'utf8')) as {
         files: Array<{ path: string }>

@@ -138,7 +138,7 @@ function RowAlert({ harnessId, alert }: { harnessId: string; alert: HarnessRowAl
         <p>{alert.message}</p>
       ) : (
         <>
-          <p>{alert.refusal.error || `Refused (${alert.refusal.reason}); no files were changed.`}</p>
+          <p>{alert.refusal.error || `Refused (${alert.refusal.reason}).`}</p>
           {alert.refusal.events.map((event, index) => (
             <div key={`${event.fileId}-${index}`} className="mt-1">
               {event.path && <p className="break-all text-muted-foreground">{event.path}</p>}

@@ -126,6 +126,13 @@ export type CaptureEvent = {
   code?: string
 }
 
+const partialEvents = new WeakMap<object, CaptureEvent[]>()
+
+/** The events a run had produced when it threw; empty when the error did not come from a run. */
+export function partialEventsOf(error: unknown): CaptureEvent[] {
+  return typeof error === 'object' && error !== null ? (partialEvents.get(error) ?? []) : []
+}
+
 export type CaptureRunResult = {
   exitCode: number
   stdout: string
@@ -355,20 +362,31 @@ export async function runCapture(
     return { exitCode: 0, stdout: `${out.join('\n')}\n`, stderr: '', events: [] }
   }
 
-  if (action === 'enable') {
-    return runEnable(
-      selected,
-      home,
-      pathEnv,
-      endpoint,
-      probe.state,
-      probe.detail,
-      options.dryRun ?? false,
-      options.fileFilter,
-    )
+  // The engine writes file by file, so a host error on a later file can follow earlier
+  // writes. The events gathered so far travel with the thrown error (`partialEventsOf`) so
+  // the structured front door can still report what was written.
+  const events: CaptureEvent[] = []
+  try {
+    if (action === 'enable') {
+      return await runEnable(
+        events,
+        selected,
+        home,
+        pathEnv,
+        endpoint,
+        probe.state,
+        probe.detail,
+        options.dryRun ?? false,
+        options.fileFilter,
+      )
+    }
+    return await runDisable(events, selected, home, pathEnv, options.dryRun ?? false, options.fileFilter)
+  } catch (error) {
+    if (typeof error === 'object' && error !== null) {
+      partialEvents.set(error, [...events])
+    }
+    throw error
   }
-
-  return runDisable(selected, home, pathEnv, options.dryRun ?? false, options.fileFilter)
 }
 
 function statusLines(
@@ -707,6 +725,7 @@ function dryRunLines(
 }
 
 async function runEnable(
+  events: CaptureEvent[],
   writers: readonly CaptureHarnessWriter[],
   home: string,
   env: PathEnv,
@@ -718,7 +737,6 @@ async function runEnable(
 ): Promise<CaptureRunResult> {
   const out: string[] = []
   const err: string[] = []
-  const events: CaptureEvent[] = []
   let exitCode = 0
   const loaded = loadReceiptState(home)
   if (loaded.corrupt) {
@@ -906,6 +924,7 @@ function driftLinesFor(
 }
 
 async function runDisable(
+  events: CaptureEvent[],
   writers: readonly CaptureHarnessWriter[],
   home: string,
   env: PathEnv,
@@ -914,7 +933,6 @@ async function runDisable(
 ): Promise<CaptureRunResult> {
   const out: string[] = []
   const err: string[] = []
-  const events: CaptureEvent[] = []
   let exitCode = 0
   const receipt = loadReceiptLenient(home)
   const revertedPaths: string[] = []
