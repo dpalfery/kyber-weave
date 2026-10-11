@@ -43,25 +43,32 @@ review:
     # coverlet.MTP writes Cobertura under artifacts/coverage so GateRunner can populate
     # the coverage floor. xUnit 4 uses Microsoft Testing Platform, whose coverage
     # extension uses `--coverlet` instead of VSTest's `--collect` data-collector option.
+    # `--no-build` because the `build` gate above already produced these binaries in
+    # Release. Without it every run re-links the test project, and the gate evidence
+    # would come from binaries the suite did not actually gate.
     - id: test
-      run: [dotnet, test, tests/KyberWeave.Tests/KyberWeave.Tests.csproj, -c, Release, --coverlet, --coverlet-output-format, cobertura, --results-directory, artifacts/coverage]
+      run: [dotnet, test, tests/KyberWeave.Tests/KyberWeave.Tests.csproj, -c, Release, --no-build, --coverlet, --coverlet-output-format, cobertura, --results-directory, artifacts/coverage]
       blocking: true
+    # `-c Release --no-build` on every `dotnet run` below. Omitting them built the CLI a
+    # sixth time, in Debug, once per gate — the single largest avoidable cost in the suite
+    # and invisible in the report, which records one line per gate regardless. The build
+    # gate above is what makes `--no-build` safe; that coupling is why it stays here.
     - id: skill-validate
-      run: [dotnet, run, --project, src/KyberWeave.Cli, --, skill, validate, .apm/skills/kyber-weave-docs]
+      run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, validate, .apm/skills/kyber-weave-docs]
       blocking: true
     - id: skill-lint
-      run: [dotnet, run, --project, src/KyberWeave.Cli, --, skill, lint, .apm/skills/kyber-weave-docs, --min-desc-score, "70"]
+      run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, lint, .apm/skills/kyber-weave-docs, --min-desc-score, "70"]
       blocking: true
     # `--fail-on critical` is the documented local check. Binding it here means a
     # later change to the CLI default cannot silently loosen what the gate enforces.
     - id: skill-scan
-      run: [dotnet, run, --project, src/KyberWeave.Cli, --, skill, scan, .apm/skills/kyber-weave-docs, --fail-on, critical]
+      run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, scan, .apm/skills/kyber-weave-docs, --fail-on, critical]
       blocking: true
     - id: docs-validate
-      run: [dotnet, run, --project, src/KyberWeave.Cli, --, docs, validate, .]
+      run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, docs, validate, .]
       blocking: true
     - id: docs-drift
-      run: [dotnet, run, --project, src/KyberWeave.Cli, --, docs, drift, .]
+      run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, docs, drift, .]
       blocking: true
     # ReSharper InspectCode. The `resharper-clt` skill owns how to read this; the
     # `static-analysis-triage` lens reads the report at the --output path below and
@@ -80,7 +87,7 @@ review:
     # which clusters this change is responsible for. Like the analyzer gate it exits 0
     # whether or not it finds anything, so "blocking" means it must have *run*.
     - id: duplicates
-      run: [dotnet, run, --project, src/KyberWeave.Cli, --, review, duplicates, ., --out, artifacts/duplicates.json]
+      run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, review, duplicates, ., --out, artifacts/duplicates.json]
       blocking: true
 
     # TypeScript gates for KyberDash under dash/. They are the counterpart to
