@@ -217,16 +217,16 @@ function HarnessRow({
         </ul>
       )}
 
-      {harness.warnings.map((warning) => (
-        <p key={`${warning.code}-${warning.text}`} className="mt-1.5 text-xs text-foreground">
+      {harness.warnings.map((warning, index) => (
+        <p key={`${warning.code}-${warning.text}-${index}`} className="mt-1.5 text-xs text-foreground">
           <span className="font-semibold">Warning ({warning.code}):</span> {warning.text}
         </p>
       ))}
 
       {harness.statusLines.length > 0 && (
         <ul data-testid={`settings-harness-status-lines-${harness.id}`} className="mt-1.5 space-y-0.5 text-xs text-muted-foreground">
-          {harness.statusLines.map((line) => (
-            <li key={line}>{line}</li>
+          {harness.statusLines.map((line, index) => (
+            <li key={`${line}-${index}`}>{line}</li>
           ))}
         </ul>
       )}
