@@ -1540,12 +1540,14 @@ describe('CanonStore finding indexes (council review)', () => {
 
 
 describe('store migrations v17: quarantine and problems schema upgrade', () => {
-  it('bumps SCHEMA_VERSION to 17 and initializes fresh database with new quarantine and problems columns', () => {
-    expect(SCHEMA_VERSION).toBe(17)
+  it('initializes a fresh database at the current schema with the v17 quarantine and problems columns', () => {
+    // Plan 2026-10-10 (B10) moves the schema past the live codex store's 18, so
+    // the version pin here tracks SCHEMA_VERSION rather than a fixed 17.
+    expect(SCHEMA_VERSION).toBe(19)
 
     const path = tempStorePath()
     const store = new CanonStore(path)
-    expect(store.getMetadata('schema_version')).toBe('17')
+    expect(store.getMetadata('schema_version')).toBe(String(SCHEMA_VERSION))
     store.close()
 
     const verifyDb = new DatabaseSync(path)
@@ -1677,9 +1679,9 @@ describe('store migrations v17: quarantine and problems schema upgrade', () => {
     `)
     v14Db.close()
 
-    // 2. Open with CanonStore: should run migrations up to 17
+    // 2. Open with CanonStore: should run migrations up to the current version
     const migrated = new CanonStore(path)
-    expect(migrated.getMetadata('schema_version')).toBe('17')
+    expect(migrated.getMetadata('schema_version')).toBe(String(SCHEMA_VERSION))
 
     // 3. Verify existing rows are preserved
     const qRow = migrated.getQuarantine('span-v14-q')
@@ -1716,5 +1718,76 @@ describe('store migrations v17: quarantine and problems schema upgrade', () => {
 
     verifyDb.close()
     migrated.close()
+  })
+})
+
+// Plan 2026-10-10 (B7/B10): a quarantined span's raw packet survives only in its
+// quarantine row, and `harness` is what lets a per-harness wipe scope that row.
+// Both are written by `quarantineAndDelete` and asserted on the stored row,
+// because the row is what a restart reads back.
+describe('CanonStore quarantine evidence metadata (plan 2026-10-10, B7/B10)', () => {
+  it('persists the raw payload and harness a caller supplies with the quarantine row', () => {
+    const path = tempStorePath()
+    const store = new CanonStore(path)
+    const packet = JSON.stringify({
+      name: 'claude_code.interaction',
+      attributes: { 'span.type': 'interaction', user_prompt: 'why is the inspector empty?' },
+    })
+    // Assigned to a variable so the metadata travels structurally; the options
+    // object gains rawPayload/harness with T14.
+    const metadata = {
+      source: 'claude-code',
+      name: 'claude_code.interaction',
+      timestamp: '2026-10-10T10:00:00.000Z',
+      rawPayload: packet,
+      harness: 'claude-code',
+    }
+    try {
+      store.quarantineAndDelete('span-evidence', ['claude_code'], 'non-model span', metadata)
+    } finally {
+      store.close()
+    }
+
+    const db = new DatabaseSync(path)
+    try {
+      const columns = (db.prepare('PRAGMA table_info(quarantine)').all() as { name: string }[]).map(
+        (column) => column.name,
+      )
+      expect(columns).toEqual(expect.arrayContaining(['raw_payload', 'harness']))
+      const row = db
+        .prepare('SELECT raw_payload, harness FROM quarantine WHERE span_id = ?')
+        .get('span-evidence') as { raw_payload: string | null; harness: string | null }
+      expect(row.raw_payload).toBe(packet)
+      expect(row.harness).toBe('claude-code')
+    } finally {
+      db.close()
+    }
+  })
+
+  it('leaves raw_payload and harness NULL when the caller supplies no evidence', () => {
+    // An audit row with no packet must read back as absent evidence, never as an
+    // invented payload (B7's `rawPayload: null`).
+    const path = tempStorePath()
+    const store = new CanonStore(path)
+    try {
+      store.quarantineAndDelete('span-no-evidence', ['pi'], 'unresolved parent span', {
+        source: 'pi',
+        name: 'llm_request',
+        timestamp: '2026-09-01T00:00:00.000Z',
+      })
+    } finally {
+      store.close()
+    }
+
+    const db = new DatabaseSync(path)
+    try {
+      const row = db
+        .prepare('SELECT raw_payload, harness FROM quarantine WHERE span_id = ?')
+        .get('span-no-evidence') as { raw_payload: string | null; harness: string | null }
+      expect(row.raw_payload).toBeNull()
+      expect(row.harness).toBeNull()
+    } finally {
+      db.close()
+    }
   })
 })
