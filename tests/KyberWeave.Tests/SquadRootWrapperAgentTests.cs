@@ -211,7 +211,15 @@ public sealed class SquadRootWrapperAgentTests
                 [SquadTarget.Claude],
                 SquadDeploymentScope.Project)));
 
-        Assert.Contains("conductor", exception.Message, StringComparison.Ordinal);
+        // Assert the collision-specific wording, not just the agent name: any
+        // validation error that happens to mention "conductor" would satisfy a
+        // bare Contains, including an unrelated failure from the same fixture.
+        Assert.Contains(
+            $"Cannot render primary agent 'conductor' as a Claude entry-point skill",
+            exception.Message,
+            StringComparison.Ordinal);
+        Assert.Contains("already occupies that identity", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("fail-closed", exception.Message, StringComparison.Ordinal);
     }
 
     /// <summary>
