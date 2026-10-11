@@ -1422,7 +1422,6 @@ describe('SessionInspectorDrawer: whole-turn full context', () => {
   const TURN_SESSION_ID = 'sess-turn-001'
   const TURN_INDEX = 1
   const TURN_KEY = ['kyber-turn-content-full', TURN_SESSION_ID, TURN_INDEX]
-  const SHARED_KEY = ['kyber-session-content', TURN_SESSION_ID, undefined, 'system_prompt', 'full']
 
   const SHARED_PROMPT = 'SHARED_SESSION_PROMPT_HEAD_8aa1\nFollow every rule.\nSHARED_PROMPT_TAIL_3f9c'
   const OWN_SYSTEM_PROMPT = 'TURN_OWN_SYSTEM_PROMPT_HEAD_51bd\nTurn-specific instructions.\nOWN_PROMPT_TAIL_c742'
@@ -1460,14 +1459,15 @@ describe('SessionInspectorDrawer: whole-turn full context', () => {
     } as KyberTurnContentResult
   }
 
-  function seedTurn(qc: QueryClient, body: KyberTurnContentResult, sharedText: string | null = SHARED_PROMPT) {
-    qc.setQueryData(TURN_KEY, body)
-    if (sharedText !== null) {
-      qc.setQueryData(SHARED_KEY, {
-        sessionId: TURN_SESSION_ID,
-        parts: [{ spanId: 'span-turn-0', part: 'system_prompt', text: sharedText, tokens: 150 }],
-      } satisfies KyberSessionContentResult)
-    }
+  function seedTurn(
+    qc: QueryClient,
+    body: KyberTurnContentResult,
+    shared: { text: string; seenBefore: boolean } | null = { text: SHARED_PROMPT, seenBefore: false },
+  ) {
+    qc.setQueryData(TURN_KEY, {
+      ...body,
+      sharedContext: shared ? { text: shared.text, spanId: 'span-turn-0', seenBefore: shared.seenBefore } : null,
+    } satisfies KyberTurnContentResult)
   }
 
   function renderPanel(
@@ -1544,6 +1544,11 @@ describe('SessionInspectorDrawer: whole-turn full context', () => {
     expect(html).toContain('Session-level system content')
     expect(text).toContain(SHARED_PROMPT)
     expect(text).toContain('SHARED_PROMPT_TAIL_3f9c')
+    // Fresh shared content carries its own New badge, independent of the
+    // session-level label — never a cache claim.
+    expect(html).toContain('data-testid="shared-session-context-recurrence-new"')
+    expect(html).toContain('New this turn')
+    expect(html).not.toContain('data-testid="shared-session-context-recurrence-seen"')
     // Exact raw bytes stay one toggle away with their own copy action.
     expect(html).toContain('data-testid="shared-session-context-part-0-view-raw"')
     expect(html).toContain('data-testid="copy-shared-session-context-0"')
@@ -1563,7 +1568,7 @@ describe('SessionInspectorDrawer: whole-turn full context', () => {
 
     // An exact duplicate already among the turn's parts is not shown twice.
     const dupQc = createTestQueryClient()
-    seedTurn(dupQc, buildTurnFixture(), OWN_SYSTEM_PROMPT)
+    seedTurn(dupQc, buildTurnFixture(), { text: OWN_SYSTEM_PROMPT, seenBefore: true })
     const dupHtml = renderHtml(
       <QueryClientProvider client={dupQc}>
         <TurnFullContentPanel
@@ -1608,6 +1613,89 @@ describe('SessionInspectorDrawer: whole-turn full context', () => {
     )
     expect(absentHtml).toContain('data-testid="turn-token-totals-absent"')
     expect(absentHtml).toContain('token counts not recorded')
+  })
+
+  describe('recurrence labels stay independent of cache', () => {
+    function buildLabeledFixture(): KyberTurnContentResult {
+      const sysPart = { id: 'r-sys', spanId: 'span-r1', part: 'system_prompt', label: 'System Prompt', text: OWN_SYSTEM_PROMPT, recurrence: { seenBefore: true } }
+      const toolPart = { id: 'r-tool', spanId: 'span-r1', part: 'tool_definitions', label: 'Tools', text: '{"name": "zeta_tool"}', recurrence: { seenBefore: false } }
+      const userPart = { id: 'r-user', spanId: 'span-r1', part: 'user_messages', label: 'User Messages', text: 'same user line', recurrence: { seenBefore: true } }
+      const asstPart = { id: 'r-asst', spanId: 'span-r1', part: 'assistant_turns', label: 'Assistant Turns', text: 'fresh assistant line', recurrence: { seenBefore: false } }
+      const mysteryPart = { id: 'r-mys', spanId: 'span-r1', part: 'mystery_blob', label: 'mystery blob', text: MYSTERY_TEXT, recurrence: { seenBefore: true } }
+      const parts = [sysPart, toolPart, userPart, asstPart, mysteryPart]
+      const blocks = [
+        { key: 'system_prompt', label: 'System prompt', parts: [sysPart], text: OWN_SYSTEM_PROMPT, recurrence: { newThisTurn: false, seenBefore: true } },
+        { key: 'tool_definitions', label: 'Tools', parts: [toolPart], text: '{"name": "zeta_tool"}', recurrence: { newThisTurn: true, seenBefore: false } },
+        {
+          key: 'conversation_history',
+          label: 'Conversation history',
+          parts: [userPart, asstPart],
+          text: 'same user line\n\nfresh assistant line',
+          recurrence: { newThisTurn: true, seenBefore: true },
+        },
+      ]
+      return {
+        sessionId: TURN_SESSION_ID,
+        turnIndex: TURN_INDEX,
+        spanId: 'span-r1',
+        model: 'gpt-5',
+        blocks,
+        parts,
+        assembledText: blocks.map((b) => b.text).join('\n\n'),
+        sharedContext: { text: SHARED_PROMPT, spanId: 'span-r0', seenBefore: true },
+      } as KyberTurnContentResult
+    }
+
+    function renderLabeled(): string {
+      const qc = createTestQueryClient()
+      const body = buildLabeledFixture()
+      qc.setQueryData(TURN_KEY, body)
+      return renderPanel(qc, { fresh: 250, cache_read: 200, cache_creation: 50 })
+    }
+
+    it('shows seen-only, new-only, and both badges per block', () => {
+      const html = renderLabeled()
+      // Repeated-only block: seen badge, no new badge.
+      expect(html).toContain('data-testid="turn-block-system_prompt-recurrence-seen"')
+      expect(html).not.toContain('data-testid="turn-block-system_prompt-recurrence-new"')
+      // New-only block (kind absent from earlier turns): new badge only.
+      expect(html).toContain('data-testid="turn-block-tool_definitions-recurrence-new"')
+      expect(html).not.toContain('data-testid="turn-block-tool_definitions-recurrence-seen"')
+      // Mixed block: both badges at once.
+      expect(html).toContain('data-testid="turn-block-conversation_history-recurrence-new"')
+      expect(html).toContain('data-testid="turn-block-conversation_history-recurrence-seen"')
+      expect(html).toContain('New this turn')
+      expect(html).toContain('Also present in prior captured context')
+    })
+
+    it('never converts recurrence into a per-block cache claim', () => {
+      const html = renderLabeled()
+      const text = unescapeHtml(html)
+      for (const key of ['system_prompt', 'tool_definitions', 'conversation_history']) {
+        expect(html).toContain(`data-testid="turn-block-${key}-cache-note"`)
+      }
+      expect(text).toContain('Cache: attribution is not reported for individual blocks.')
+      // Seen blocks are not called cached; new blocks are not called uncached.
+      expect(html).not.toContain('cached')
+      expect(html).not.toContain('uncached')
+      expect(html).not.toContain('cache-hit')
+      // Measured cache figures still appear exactly once — in the turn totals.
+      expect(html.match(/Cache read/g)?.length).toBe(1)
+      expect(html.match(/Cache creation/g)?.length).toBe(1)
+    })
+
+    it('labels shared context recurrence independently of the session-level tag', () => {
+      const html = renderLabeled()
+      expect(html).toContain('data-testid="shared-session-context"')
+      expect(html).toContain('Shared session context')
+      expect(html).toContain('data-testid="shared-session-context-recurrence-seen"')
+      expect(html).not.toContain('data-testid="shared-session-context-recurrence-new"')
+      // Copy Turn still covers the labeled shared text plus every part.
+      const copy = buildWholeTurnCopyText(buildLabeledFixture(), [SHARED_PROMPT])
+      expect(copy).toContain('=== SHARED SESSION CONTEXT ===')
+      expect(copy).toContain(SHARED_PROMPT)
+      expect(copy).toContain(MYSTERY_TEXT)
+    })
   })
 
   it('keeps long text intact with exact raw and copy access', () => {

@@ -2194,6 +2194,28 @@ export function TurnContentBlockView({
       <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
         {block.label}
       </h4>
+      {/* Independent recurrence labels: either, neither, or both. Capture
+          only — never converted into a cache claim (see the cache note). */}
+      {block.recurrence?.newThisTurn || block.recurrence?.seenBefore ? (
+        <div className="flex items-center gap-1.5 flex-wrap mb-1.5">
+          {block.recurrence?.newThisTurn ? (
+            <span
+              className="shrink-0 rounded bg-emerald-500/15 border border-emerald-500/30 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-emerald-600 dark:text-emerald-400"
+              data-testid={`${prefix}-recurrence-new`}
+            >
+              New this turn
+            </span>
+          ) : null}
+          {block.recurrence?.seenBefore ? (
+            <span
+              className="shrink-0 rounded bg-sky-500/15 border border-sky-500/30 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-sky-600 dark:text-sky-400"
+              data-testid={`${prefix}-recurrence-seen`}
+            >
+              Also present in prior captured context
+            </span>
+          ) : null}
+        </div>
+      ) : null}
       <div className="rounded border border-border bg-card p-3 overflow-hidden space-y-2">
         {typeof block.tokens === 'number' ? (
           <p className="text-[11px] font-mono text-tertiary-foreground" data-testid={`${prefix}-tokens`}>
@@ -2204,6 +2226,12 @@ export function TurnContentBlockView({
             token count not recorded
           </p>
         )}
+        {/* Separate dimension from recurrence: cache attribution is not
+            reported for individual blocks. Measured cache totals render once
+            per turn, above. */}
+        <p className="text-[11px] text-tertiary-foreground" data-testid={`${prefix}-cache-note`}>
+          Cache: attribution is not reported for individual blocks.
+        </p>
         {block.notMeasurable ? (
           <p
             className="rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300"
@@ -2296,23 +2324,25 @@ export function TurnContentPartView({
 }
 
 /**
- * Whole-turn inspector panel backed by the lossless turn-content endpoint.
+ * Whole-turn inspector panel backed by the single lossless turn-content
+ * endpoint (one bounded request: the turn plus its preceding-turn
+ * recurrence, no browser fan-out).
  *
  * - Renders every returned block and part in server order, including unknown
  *   part kinds (as an explicit "Additional parts" section) and zero-token
  *   blocks; nothing is summarized, dropped, trimmed, or truncated for
  *   display. When the API flags `truncated`, the exact limitation is stated
  *   while all returned bytes still render.
- * - The Copilot session-level system prompt renders once under `Shared
- *   session context`, explicitly labeled as session-level content rather
- *   than captured for this turn; an exact duplicate already present among
- *   the turn's own parts is not shown twice.
- * - Measured per-turn fresh/cache-read/cache-creation totals render
- *   separately from the blocks. The collector does not map cache hits to
- *   specific blocks, so no per-block cache claim is rendered. Per-block
- *   `new`/`repeated` labels are intentionally not implemented yet (awaiting
- *   the user's distinction answer); each block keeps its stable `key`/`part`
- *   identity so labels can attach later without implying a cache mapping.
+ * - The session-level system prompt from `sharedContext` renders once under
+ *   `Shared session context`, explicitly labeled as session-level content
+ *   rather than captured for this turn; an exact duplicate already present
+ *   among the turn's own parts is not shown twice. It carries its own
+ *   exact-match recurrence badges, independent of the session-level label.
+ * - Per-block `New this turn` / `Also present in prior captured context`
+ *   badges aggregate member-part recurrence (either, neither, or both).
+ *   Recurrence is capture-only: a separate per-block cache note states that
+ *   attribution is not reported for individual blocks, and measured
+ *   per-turn fresh/cache-read/cache-creation totals render separately above.
  */
 export function TurnFullContentPanel({
   request,
@@ -2326,14 +2356,6 @@ export function TurnFullContentPanel({
   const turnQuery = useQuery({
     queryKey: ['kyber-turn-content-full', request.sessionId, request.turnIndex],
     queryFn: () => fetchTurnContentFull(request.sessionId, request.turnIndex),
-  })
-  // The shared session-level prompt reads through the explicit lossless
-  // session-content path: the default budget would silently cap a long
-  // prompt, and this reader needs every byte. The `full` key segment keeps
-  // this lossless response distinct from capped bucket reads in the cache.
-  const sharedQuery = useQuery({
-    queryKey: ['kyber-session-content', request.sessionId, undefined, 'system_prompt', 'full'],
-    queryFn: () => fetchKyberSessionContent(request.sessionId, { part: 'system_prompt', full: true }),
   })
 
   const data: KyberTurnContentResult | undefined = turnQuery.data
@@ -2349,19 +2371,20 @@ export function TurnFullContentPanel({
     return orphanTurnParts(data)
   }, [data])
 
-  const sharedParts = useMemo(() => {
-    const candidates = (sharedQuery.data?.parts ?? []).filter(
-      (p) => p.part === 'system_prompt' && typeof p.text === 'string' && p.text !== ''
-    )
-    if (candidates.length === 0 || !data) return candidates
+  // Shared session context arrives embedded in the single turn-content
+  // response (one bounded request, no N-query fan-out). An exact duplicate
+  // already among the turn's own parts stays hidden; anything else renders
+  // once under its session-level label with its own recurrence badges.
+  const sharedDisplay = useMemo(() => {
+    const shared = data?.sharedContext
+    if (!shared || shared.text === '' || !data) return null
     const turnTexts = new Set<string>([
       ...data.blocks.map((b) => b.text),
       ...data.parts.map((p) => p.text),
     ])
-    // An exact duplicate already among the turn's own parts stays hidden;
-    // anything else is genuinely shared context for this turn.
-    return candidates.filter((p) => !turnTexts.has(p.text))
-  }, [sharedQuery.data, data])
+    if (turnTexts.has(shared.text)) return null
+    return shared
+  }, [data])
 
   // Copy Turn carries every returned byte exactly once (shared context
   // labeled, blocks verbatim, additional parts under their own headers) so
@@ -2370,9 +2393,9 @@ export function TurnFullContentPanel({
     if (!data) return ''
     return buildWholeTurnCopyText(
       data,
-      sharedParts.map((p) => p.text),
+      sharedDisplay ? [sharedDisplay.text] : [],
     )
-  }, [data, sharedParts])
+  }, [data, sharedDisplay])
 
   const renderFigure = (label: string, value: number | undefined, testId: string) => (
     <div className="flex justify-between py-0.5" data-testid={testId}>
@@ -2439,7 +2462,7 @@ export function TurnFullContentPanel({
             </p>
           ) : null}
 
-          {sharedParts.length > 0 ? (
+          {sharedDisplay ? (
             <section data-testid="shared-session-context">
               <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
                 Shared session context
@@ -2447,26 +2470,38 @@ export function TurnFullContentPanel({
               <p className="text-[11px] text-tertiary-foreground leading-relaxed mb-1.5">
                 Session-level system content · applies to every turn · not captured separately for this turn.
               </p>
+              {/* Shared context carries its own exact-match recurrence,
+                  independent of the session-level label. */}
+              <div className="flex items-center gap-1.5 flex-wrap mb-1.5">
+                {sharedDisplay.seenBefore ? (
+                  <span
+                    className="shrink-0 rounded bg-sky-500/15 border border-sky-500/30 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-sky-600 dark:text-sky-400"
+                    data-testid="shared-session-context-recurrence-seen"
+                  >
+                    Also present in prior captured context
+                  </span>
+                ) : (
+                  <span
+                    className="shrink-0 rounded bg-emerald-500/15 border border-emerald-500/30 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-emerald-600 dark:text-emerald-400"
+                    data-testid="shared-session-context-recurrence-new"
+                  >
+                    New this turn
+                  </span>
+                )}
+              </div>
               <div className="space-y-2">
-                {sharedParts.map((part, idx) => (
-                  <div key={`${part.spanId}-${part.part}-${idx}`} className="rounded border border-border bg-card p-3 overflow-hidden space-y-2" data-testid={`shared-session-context-part-${idx}`}>
-                    <ToggleRawView
-                      formatted={<InspectorContent data={part.text} />}
-                      rawText={part.text}
-                      rawTestId={`shared-session-context-part-${idx}-raw`}
-                      copyTestId={`copy-shared-session-context-${idx}`}
-                      viewPrefix={`shared-session-context-part-${idx}`}
-                      defaultView={defaultView}
-                    />
-                  </div>
-                ))}
+                <div className="rounded border border-border bg-card p-3 overflow-hidden space-y-2" data-testid="shared-session-context-part-0">
+                  <ToggleRawView
+                    formatted={<InspectorContent data={sharedDisplay.text} />}
+                    rawText={sharedDisplay.text}
+                    rawTestId="shared-session-context-part-0-raw"
+                    copyTestId="copy-shared-session-context-0"
+                    viewPrefix="shared-session-context-part-0"
+                    defaultView={defaultView}
+                  />
+                </div>
               </div>
             </section>
-          ) : null}
-          {sharedQuery.isError ? (
-            <p className="text-[11px] text-tertiary-foreground italic" data-testid="shared-session-context-unavailable">
-              Shared session context unavailable (session content request failed).
-            </p>
           ) : null}
 
           <div className="flex items-center justify-between gap-2 flex-wrap">

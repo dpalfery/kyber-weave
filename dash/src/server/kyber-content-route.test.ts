@@ -114,6 +114,59 @@ describe('Backend Contract Tests: GET /api/kyber/session/:id/content', () => {
       label: 'Huge shared prompt',
       payload: { id: 'sess-huge-001', harness: 'copilot' },
     })
+    // Captured-context recurrence: three turns sharing some exact part
+    // texts while changing others, with explicit 0-based descriptors.
+    const REC_SHARED = 'SHARED_PROMPT_REC_aaa'
+    const recHistory = (user: string, assistant: string) =>
+      JSON.stringify([
+        { role: 'user', content: user },
+        { role: 'assistant', content: assistant },
+      ])
+    store.upsertMany([
+      turn(
+        'span-r0',
+        [
+          { part: 'system_prompt', text: REC_SHARED, tokens: 10 },
+          { part: 'conversation_history', text: recHistory('USER_Q_REC', 'ASSIST_A0_REC') },
+          { part: 'tool_result_content', text: 'RESULT_R0_REC' },
+          { part: 'custom_skill', text: 'SKILL_ALPHA_REC' } as unknown as ContentPart,
+        ],
+        { sessionId: 'sess-rec-001', traceId: 'trace-rec-001', timestamp: '2026-09-03T15:00:00.000Z' },
+      ),
+      turn(
+        'span-r1',
+        [
+          { part: 'system_prompt', text: REC_SHARED, tokens: 10 },
+          { part: 'tool_definitions', text: '{"name":"zeta_tool"}' },
+          { part: 'conversation_history', text: recHistory('USER_Q_REC', 'ASSIST_A1_NEW') },
+          { part: 'tool_result_content', text: 'RESULT_R1_NEW' },
+          { part: 'custom_skill', text: 'SKILL_ALPHA_REC' } as unknown as ContentPart,
+        ],
+        { sessionId: 'sess-rec-001', traceId: 'trace-rec-001', timestamp: '2026-09-03T15:01:00.000Z' },
+      ),
+      turn(
+        'span-r2',
+        [
+          { part: 'system_prompt', text: 'PROMPT_V2_NEW', tokens: 11 },
+          { part: 'conversation_history', text: recHistory('USER_Q2_NEW', 'ASSIST_A2_NEW') },
+        ],
+        { sessionId: 'sess-rec-001', traceId: 'trace-rec-001', timestamp: '2026-09-03T15:02:00.000Z' },
+      ),
+    ])
+    store.upsertSession({
+      sessionId: 'sess-rec-001',
+      harness: 'copilot',
+      label: 'Recurrence labels',
+      payload: {
+        id: 'sess-rec-001',
+        harness: 'copilot',
+        turns: [
+          { index: 0, spanId: 'span-r0', model: 'm' },
+          { index: 1, spanId: 'span-r1', model: 'm' },
+          { index: 2, spanId: 'span-r2', model: 'm' },
+        ],
+      },
+    })
     // Session whose payload carries explicit turn descriptors: one current
     // 0-based `index` row and one legacy 1-based `turn` row (issue #184).
     store.upsertMany([
@@ -613,6 +666,105 @@ describe('Backend Contract Tests: GET /api/kyber/session/:id/content', () => {
         expect(aliasBody.turnIndex).toBe(2)
         expect(aliasBody.assembledText).toContain(HUGE_TOOL_RESULT)
         expect(aliasBody.truncated).toBeUndefined()
+      })
+    })
+
+    describe('captured-context recurrence (exact whole-part text)', () => {
+      async function turnBody(index: number): Promise<TurnContentResult> {
+        const res = await fetch(`${base}/api/kyber/session/sess-rec-001/turn/${index}/content?full=true`)
+        expect(res.status).toBe(200)
+        assertStandardKyberHeaders(res)
+        return (await res.json()) as TurnContentResult
+      }
+
+      function blockOf(body: TurnContentResult, key: string) {
+        const block = body.blocks.find((b) => b.key === key)
+        expect(block).toBeDefined()
+        return block!
+      }
+
+      it('marks every part new on the first turn with earliest shared context', async () => {
+        const body = await turnBody(0)
+        expect(body.spanId).toBe('span-r0')
+        for (const part of body.parts) {
+          expect(part.recurrence).toEqual({ seenBefore: false })
+        }
+        for (const block of body.blocks) {
+          if (block.parts.length > 0) {
+            expect(block.recurrence).toEqual({ newThisTurn: true, seenBefore: false })
+          }
+        }
+        expect(body.sharedContext).toEqual({
+          text: 'SHARED_PROMPT_REC_aaa',
+          spanId: 'span-r0',
+          seenBefore: false,
+        })
+      })
+
+      it('marks a repeated-only block seen with no new claim', async () => {
+        const body = await turnBody(1)
+        const sys = blockOf(body, 'system_prompt')
+        expect(sys.text).toBe('SHARED_PROMPT_REC_aaa')
+        expect(sys.recurrence).toEqual({ newThisTurn: false, seenBefore: true })
+        expect(sys.parts).toHaveLength(1)
+        expect(sys.parts[0].recurrence).toEqual({ seenBefore: true })
+      })
+
+      it('marks a changed same-kind part new without calling it cached', async () => {
+        const body = await turnBody(1)
+        const results = blockOf(body, 'tool_result_content')
+        expect(results.text).toBe('RESULT_R1_NEW')
+        expect(results.recurrence).toEqual({ newThisTurn: true, seenBefore: false })
+        // Recurrence never converts into a cache claim anywhere in the body.
+        const serialized = JSON.stringify(body)
+        expect(serialized).not.toContain('cached')
+        expect(serialized).not.toContain('cache_read')
+        expect(serialized).not.toContain('"cache"')
+      })
+
+      it('treats a part kind absent from earlier turns as new, not repeated', async () => {
+        const body = await turnBody(1)
+        const tools = blockOf(body, 'tool_definitions')
+        expect(tools.text).toBe('{"name":"zeta_tool"}')
+        expect(tools.recurrence).toEqual({ newThisTurn: true, seenBefore: false })
+      })
+
+      it('shows both labels on one block mixing new and repeated parts', async () => {
+        const body = await turnBody(1)
+        const history = blockOf(body, 'conversation_history')
+        const kinds = history.parts.map((p) => p.part).sort()
+        expect(kinds).toEqual(['assistant_turns', 'user_messages'])
+        const user = history.parts.find((p) => p.part === 'user_messages')!
+        const assistant = history.parts.find((p) => p.part === 'assistant_turns')!
+        expect(user.text).toBe('USER_Q_REC')
+        expect(user.recurrence).toEqual({ seenBefore: true })
+        expect(assistant.text).toBe('ASSIST_A1_NEW')
+        expect(assistant.recurrence).toEqual({ seenBefore: false })
+        expect(history.recurrence).toEqual({ newThisTurn: true, seenBefore: true })
+      })
+
+      it('passes unknown part kinds through with recurrence', async () => {
+        const body = await turnBody(1)
+        const skill = body.parts.find((p) => p.part === 'custom_skill')
+        expect(skill).toBeDefined()
+        expect(skill!.text).toBe('SKILL_ALPHA_REC')
+        expect(skill!.recurrence).toEqual({ seenBefore: true })
+      })
+
+      it('reports shared context with its own earlier-turn recurrence', async () => {
+        const first = await turnBody(1)
+        expect(first.sharedContext).toEqual({
+          text: 'SHARED_PROMPT_REC_aaa',
+          spanId: 'span-r0',
+          seenBefore: true,
+        })
+        // The earliest prompt stays shared even after a turn carries its own.
+        const second = await turnBody(2)
+        expect(second.sharedContext?.text).toBe('SHARED_PROMPT_REC_aaa')
+        expect(second.sharedContext?.seenBefore).toBe(true)
+        const own = blockOf(second, 'system_prompt')
+        expect(own.text).toBe('PROMPT_V2_NEW')
+        expect(own.recurrence).toEqual({ newThisTurn: true, seenBefore: false })
       })
     })
 

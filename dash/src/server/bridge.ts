@@ -2,6 +2,7 @@
 
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import type { BigIntStats } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { inflateSync } from 'node:zlib'
 import { createRequire } from 'node:module'
 import { resolveCanonDbPath } from '../canon/paths.js'
@@ -580,6 +581,29 @@ export type SessionContentOptions = {
   full?: boolean
 }
 
+/**
+ * Captured-context recurrence for one turn-content part: whether its exact
+ * whole source text was captured as the same part kind in an earlier turn of
+ * this session. Exact bytes only — no normalization, trimming, or
+ * token-level similarity. Recurrence is independent of model cache use: a
+ * repeated part may still be uncached, and a new part may sit in a cached
+ * prefix. Never convert this into a cache claim.
+ */
+export type TurnContentPartRecurrence = {
+  seenBefore: boolean
+}
+
+/**
+ * Aggregated recurrence for one canonical block: `newThisTurn` when at
+ * least one member part is new, `seenBefore` when at least one member part
+ * exactly matches an earlier same-kind part. Both may hold at once for a
+ * block mixing new and repeated parts.
+ */
+export type TurnContentBlockRecurrence = {
+  newThisTurn: boolean
+  seenBefore: boolean
+}
+
 export type TurnContentPart = {
   id?: string
   spanId?: string
@@ -591,6 +615,7 @@ export type TurnContentPart = {
   truncated?: boolean
   totalLength?: number
   order?: number
+  recurrence?: TurnContentPartRecurrence
 }
 
 export type TurnContentBlock = {
@@ -602,6 +627,21 @@ export type TurnContentBlock = {
   truncated?: boolean
   totalLength?: number
   notMeasurable?: { reason: string }
+  recurrence?: TurnContentBlockRecurrence
+}
+
+/**
+ * Session-level shared context for a turn: the earliest captured
+ * `system_prompt` text in this session (the Copilot session prompt), with
+ * its own exact-match recurrence against earlier turns. The client hides it
+ * when it exactly duplicates the turn's own parts, and otherwise labels it
+ * `Shared session context` — session-level content, not captured for the
+ * turn. Null when no system prompt was captured at or before this turn.
+ */
+export type TurnContentSharedContext = {
+  text: string
+  spanId?: string
+  seenBefore: boolean
 }
 
 export type TurnContentResult = {
@@ -614,6 +654,7 @@ export type TurnContentResult = {
   assembledText: string
   truncated?: boolean
   totalLength?: number
+  sharedContext?: TurnContentSharedContext | null
 }
 
 /**
@@ -764,6 +805,33 @@ function resolveTurn<T>(
 }
 
 /**
+ * Normalized turn-resolution row: the span an index resolves to plus its
+ * explicit 0-based identity (`undefined` for position-only rows). Both the
+ * target lookup and the preceding-turn reads resolve through
+ * `resolveTurnEntry`, so recurrence compares exactly the turns the route
+ * would serve.
+ */
+type TurnResolutionEntry = {
+  spanId: string
+  model?: string
+  identity: number | undefined
+}
+
+/**
+ * Entry-pool form of `resolveTurn`: explicit identity first, array position
+ * only for identity-free rows.
+ */
+function resolveTurnEntry(
+  entries: readonly TurnResolutionEntry[],
+  turnIndex: number,
+): TurnResolutionEntry | undefined {
+  return (
+    entries.find((e) => e.identity === turnIndex) ??
+    entries.find((e, i) => i === turnIndex && e.identity === undefined)
+  )
+}
+
+/**
  * Per-metric measurability as a payload carries it, under either the flat
  * `measurability` map or `context.first.buckets`. `SessionPayload` types both
  * as `unknown`, so the read that consults them names the shape here.
@@ -788,6 +856,15 @@ function logId(value: string): string {
 function logErr(value: unknown): string {
   const raw = value instanceof Error ? value.message : String(value)
   return raw.replace(/[^\x20-\x7e]/g, '?').slice(0, 500)
+}
+
+/**
+ * Stable hash of exact source bytes for recurrence comparison. Hashes (not
+ * texts) are retained per earlier part so a long session keeps one small
+ * digest per captured part instead of every earlier byte in memory.
+ */
+function sha256Hex(text: string): string {
+  return createHash('sha256').update(text, 'utf8').digest('hex')
 }
 
 /**
@@ -1662,6 +1739,12 @@ export class KyberBridge {
    * instruction_context, conversation_history, tool_result_content) and parts
    * (including user_messages, assistant_turns, etc.).
    *
+   * Every part carries exact-match `recurrence` against earlier captured
+   * turns of this session (same part kind, whole text, hashed), aggregated
+   * per block; `sharedContext` carries the earliest captured system prompt
+   * with its own recurrence. Recurrence is capture-only and never a cache
+   * claim — cache totals stay on the turn row, unattributed to blocks.
+   *
    * `budget` caps the returned characters with explicit `truncated` flags.
    * Pass `Number.POSITIVE_INFINITY` for the documented lossless path (the
    * route maps `?full=true` to it): no branch silently truncates, so content
@@ -1700,42 +1783,12 @@ export class KyberBridge {
 
     // 2. If targetSpanId not resolved yet, search canonical records
     if (!targetSpanId) {
-      if (this.store) {
-        const records = this.store.recordsForSession(sessionId)
-        const turnRecords = records.filter((r) => r.op === 'llm.invoke')
-        const pool = turnRecords.length > 0 ? turnRecords : records
-        const target = resolveTurn(pool, turnIndex, (r) =>
-          turnTransportIndexOf(r as CanonicalRecord & TurnDescriptor),
-        )
+      const entries = this.loadTurnResolutionEntries(sessionId, db)
+      if (entries) {
+        const target = resolveTurnEntry(entries, turnIndex)
         if (target) {
           targetSpanId = target.spanId
-          model = (target as CanonicalRecord & TurnDescriptor).model ?? target.name
-        }
-      } else if (this.hasTable(db, 'records')) {
-        try {
-          const rows = db!
-            .prepare('SELECT * FROM records WHERE COALESCE(session_id, trace_id) = ? ORDER BY timestamp')
-            .all(sessionId) as Record<string, unknown>[]
-          const turnRows = rows.filter((r) => r.op === 'llm.invoke')
-          const pool = turnRows.length > 0 ? turnRows : rows
-          // DB rows predate the descriptor shape: `index` may arrive as a
-          // numeric string, and a null/empty index is no identity (unlike
-          // `Number(null)`, which coerces to 0 and would hijack turn 0).
-          const target = resolveTurn(pool, turnIndex, (r) => {
-            const rawIndex: unknown = r.index
-            const index =
-              rawIndex === null || rawIndex === undefined || rawIndex === '' ? undefined : Number(rawIndex)
-            return turnTransportIndexOf({
-              index: typeof index === 'number' && Number.isFinite(index) ? index : undefined,
-              turn: r.turn,
-            })
-          })
-          if (target) {
-            targetSpanId = String(target.span_id)
-            model = String(target.name || '')
-          }
-        } catch {
-          // ignore
+          model = target.model
         }
       }
     }
@@ -1747,112 +1800,41 @@ export class KyberBridge {
     const rawParts: ContentPart[] = contentRecords[0]?.parts ?? []
 
     // Map and extract structured parts (system prompt, tools, user messages, assistant turns, etc.)
-    const parts: TurnContentPart[] = []
-    let orderCounter = 0
+    const parts = this.mapTurnContentParts(rawParts, targetSpanId)
 
-    for (const p of rawParts) {
-      if (p.part === 'system_prompt') {
-        parts.push({
-          id: `part-sys-${orderCounter++}`,
-          spanId: targetSpanId,
-          part: 'system_prompt',
-          label: 'System Prompt',
-          text: p.text,
-          tokens: p.tokens,
-          server: p.server,
-          order: p.order ?? orderCounter,
-        })
-      } else if (p.part === 'tool_definitions') {
-        const label = p.server ? `Tools (${p.server})` : 'Tools'
-        parts.push({
-          id: `part-tool-${orderCounter++}`,
-          spanId: targetSpanId,
-          part: 'tool_definitions',
-          label,
-          text: p.text,
-          tokens: p.tokens,
-          server: p.server,
-          order: p.order ?? orderCounter,
-        })
-      } else if (p.part === 'instruction_context') {
-        parts.push({
-          id: `part-inst-${orderCounter++}`,
-          spanId: targetSpanId,
-          part: 'instruction_context',
-          label: 'Instruction Context',
-          text: p.text,
-          tokens: p.tokens,
-          server: p.server,
-          order: p.order ?? orderCounter,
-        })
-      } else if (p.part === 'tool_result_content') {
-        parts.push({
-          id: `part-toolres-${orderCounter++}`,
-          spanId: targetSpanId,
-          part: 'tool_result_content',
-          label: 'Tool Results',
-          text: p.text,
-          tokens: p.tokens,
-          server: p.server,
-          order: p.order ?? orderCounter,
-        })
-      } else if (p.part === 'conversation_history') {
-        const { userMessages, assistantMessages } = extractMessagesFromHistory(p.text)
-        if (userMessages.length > 0 || assistantMessages.length > 0) {
-          if (userMessages.length > 0) {
-            parts.push({
-              id: `part-user-${orderCounter++}`,
-              spanId: targetSpanId,
-              part: 'user_messages',
-              label: 'User Messages',
-              text: userMessages.join('\n\n'),
-              tokens: p.tokens ? Math.round(p.tokens * (userMessages.length / (userMessages.length + assistantMessages.length))) : undefined,
-              order: p.order ?? orderCounter,
-            })
-          }
-          if (assistantMessages.length > 0) {
-            parts.push({
-              id: `part-asst-${orderCounter++}`,
-              spanId: targetSpanId,
-              part: 'assistant_turns',
-              label: 'Assistant Turns',
-              text: assistantMessages.join('\n\n'),
-              tokens: p.tokens ? Math.round(p.tokens * (assistantMessages.length / (userMessages.length + assistantMessages.length))) : undefined,
-              order: p.order ?? orderCounter,
-            })
-          }
-        } else {
-          // Generic conversation history
-          parts.push({
-            id: `part-user-${orderCounter++}`,
-            spanId: targetSpanId,
-            part: 'user_messages',
-            label: 'User Messages',
-            text: p.text,
-            tokens: p.tokens,
-            order: p.order ?? orderCounter,
-          })
-          parts.push({
-            id: `part-conv-${orderCounter++}`,
-            spanId: targetSpanId,
-            part: 'conversation_history',
-            label: 'Conversation History',
-            text: p.text,
-            tokens: p.tokens,
-            order: p.order ?? orderCounter,
-          })
+    // Captured-context recurrence: exact whole-part-text matches of the same
+    // part kind in earlier captured turns (hashes, so long sessions keep one
+    // small digest per earlier part). No normalization, no token-level
+    // similarity — a changed part is new unless its exact text was captured
+    // before. Recurrence is independent of model cache use and is never a
+    // cache claim; computed before budgeting so truncation cannot rewrite it.
+    const preceding = this.loadPrecedingTurnParts(sessionId, turnIndex, turns, db)
+    const earlierHashes = new Map<string, Set<string>>()
+    for (const t of preceding) {
+      for (const p of t.parts) {
+        const set = earlierHashes.get(p.part) ?? new Set<string>()
+        set.add(sha256Hex(p.text))
+        earlierHashes.set(p.part, set)
+      }
+    }
+    for (const p of parts) {
+      p.recurrence = { seenBefore: earlierHashes.get(p.part)?.has(sha256Hex(p.text)) ?? false }
+    }
+
+    // Session-level shared context: the earliest captured system_prompt at
+    // or before this turn (the Copilot session prompt). Its own recurrence
+    // follows the same exact-match rule against strictly earlier turns; the
+    // client hides it on exact duplication with the turn's own parts.
+    let sharedContext: TurnContentSharedContext | null = null
+    for (const t of [...preceding, { spanId: targetSpanId, parts }]) {
+      const found = t.parts.find((p) => p.part === 'system_prompt' && p.text !== '')
+      if (found) {
+        sharedContext = {
+          text: found.text,
+          spanId: t.spanId,
+          seenBefore: earlierHashes.get('system_prompt')?.has(sha256Hex(found.text)) ?? false,
         }
-      } else {
-        parts.push({
-          id: `part-other-${orderCounter++}`,
-          spanId: targetSpanId,
-          part: p.part,
-          label: String(p.part).replace(/_/g, ' '),
-          text: p.text,
-          tokens: p.tokens,
-          server: p.server,
-          order: p.order ?? orderCounter,
-        })
+        break
       }
     }
 
@@ -1893,6 +1875,14 @@ export class KyberBridge {
       const measurability = flat?.[def.key] ?? buckets?.[def.key]
       if (measurability && typeof measurability === 'object' && measurability.availability === 'not_measurable') {
         block.notMeasurable = { reason: measurability.reason || 'Not measurable for this harness.' }
+      }
+
+      // Block recurrence aggregates its rendered members: new when any
+      // member part is new, seen when any member part exactly matches an
+      // earlier same-kind part. Both hold for mixed blocks.
+      block.recurrence = {
+        newThisTurn: uniqueParts.some((p) => p.recurrence !== undefined && !p.recurrence.seenBefore),
+        seenBefore: uniqueParts.some((p) => p.recurrence?.seenBefore === true),
       }
 
       blocks.push(block)
@@ -1947,9 +1937,233 @@ export class KyberBridge {
       parts,
       assembledText,
       ...(truncated ? { truncated, totalLength } : {}),
+      sharedContext,
     }
 
     return result
+  }
+
+  /**
+   * Structured turn parts for one span, in raw order: system prompt, tools,
+   * instruction context, tool results, conversation history split into user
+   * messages / assistant turns (or kept generic when unparseable), and any
+   * other part kind passed through with its exact text. The current turn and
+   * every preceding turn map through this same function so recurrence
+   * compares identical kinds.
+   */
+  private mapTurnContentParts(rawParts: ContentPart[], spanId: string): TurnContentPart[] {
+    const parts: TurnContentPart[] = []
+    let orderCounter = 0
+
+    for (const p of rawParts) {
+      if (p.part === 'system_prompt') {
+        parts.push({
+          id: `part-sys-${orderCounter++}`,
+          spanId,
+          part: 'system_prompt',
+          label: 'System Prompt',
+          text: p.text,
+          tokens: p.tokens,
+          server: p.server,
+          order: p.order ?? orderCounter,
+        })
+      } else if (p.part === 'tool_definitions') {
+        const label = p.server ? `Tools (${p.server})` : 'Tools'
+        parts.push({
+          id: `part-tool-${orderCounter++}`,
+          spanId,
+          part: 'tool_definitions',
+          label,
+          text: p.text,
+          tokens: p.tokens,
+          server: p.server,
+          order: p.order ?? orderCounter,
+        })
+      } else if (p.part === 'instruction_context') {
+        parts.push({
+          id: `part-inst-${orderCounter++}`,
+          spanId,
+          part: 'instruction_context',
+          label: 'Instruction Context',
+          text: p.text,
+          tokens: p.tokens,
+          server: p.server,
+          order: p.order ?? orderCounter,
+        })
+      } else if (p.part === 'tool_result_content') {
+        parts.push({
+          id: `part-toolres-${orderCounter++}`,
+          spanId,
+          part: 'tool_result_content',
+          label: 'Tool Results',
+          text: p.text,
+          tokens: p.tokens,
+          server: p.server,
+          order: p.order ?? orderCounter,
+        })
+      } else if (p.part === 'conversation_history') {
+        const { userMessages, assistantMessages } = extractMessagesFromHistory(p.text)
+        if (userMessages.length > 0 || assistantMessages.length > 0) {
+          if (userMessages.length > 0) {
+            parts.push({
+              id: `part-user-${orderCounter++}`,
+              spanId,
+              part: 'user_messages',
+              label: 'User Messages',
+              text: userMessages.join('\n\n'),
+              tokens: p.tokens ? Math.round(p.tokens * (userMessages.length / (userMessages.length + assistantMessages.length))) : undefined,
+              order: p.order ?? orderCounter,
+            })
+          }
+          if (assistantMessages.length > 0) {
+            parts.push({
+              id: `part-asst-${orderCounter++}`,
+              spanId,
+              part: 'assistant_turns',
+              label: 'Assistant Turns',
+              text: assistantMessages.join('\n\n'),
+              tokens: p.tokens ? Math.round(p.tokens * (assistantMessages.length / (userMessages.length + assistantMessages.length))) : undefined,
+              order: p.order ?? orderCounter,
+            })
+          }
+        } else {
+          // Generic conversation history
+          parts.push({
+            id: `part-user-${orderCounter++}`,
+            spanId,
+            part: 'user_messages',
+            label: 'User Messages',
+            text: p.text,
+            tokens: p.tokens,
+            order: p.order ?? orderCounter,
+          })
+          parts.push({
+            id: `part-conv-${orderCounter++}`,
+            spanId,
+            part: 'conversation_history',
+            label: 'Conversation History',
+            text: p.text,
+            tokens: p.tokens,
+            order: p.order ?? orderCounter,
+          })
+        }
+      } else {
+        parts.push({
+          id: `part-other-${orderCounter++}`,
+          spanId,
+          part: p.part,
+          label: String(p.part).replace(/_/g, ' '),
+          text: p.text,
+          tokens: p.tokens,
+          server: p.server,
+          order: p.order ?? orderCounter,
+        })
+      }
+    }
+
+    return parts
+  }
+
+  /**
+   * One ordered pool of turn-resolution entries (explicit 0-based identity
+   * plus `llm.invoke`-preferred span order) shared by the target lookup and
+   * the preceding-turn reads below. Same entries, same `resolveTurnEntry`
+   * rule as the previous inline code — explicit identity first, array
+   * position only for rows carrying neither.
+   */
+  private loadTurnResolutionEntries(
+    sessionId: string,
+    db: DatabaseSync | undefined,
+  ): TurnResolutionEntry[] | null {
+    if (this.store) {
+      const records = this.store.recordsForSession(sessionId)
+      const turnRecords = records.filter((r) => r.op === 'llm.invoke')
+      const pool = turnRecords.length > 0 ? turnRecords : records
+      return pool.map((r) => ({
+        spanId: r.spanId,
+        model: (r as CanonicalRecord & TurnDescriptor).model ?? r.name,
+        identity: turnTransportIndexOf(r as CanonicalRecord & TurnDescriptor),
+      }))
+    }
+    if (this.hasTable(db, 'records')) {
+      try {
+        const rows = db!
+          .prepare('SELECT * FROM records WHERE COALESCE(session_id, trace_id) = ? ORDER BY timestamp')
+          .all(sessionId) as Record<string, unknown>[]
+        const turnRows = rows.filter((r) => r.op === 'llm.invoke')
+        const pool = turnRows.length > 0 ? turnRows : rows
+        // DB rows predate the descriptor shape: `index` may arrive as a
+        // numeric string, and a null/empty index is no identity (unlike
+        // `Number(null)`, which coerces to 0 and would hijack turn 0).
+        return pool.map((r) => {
+          const rawIndex: unknown = r.index
+          const index =
+            rawIndex === null || rawIndex === undefined || rawIndex === '' ? undefined : Number(rawIndex)
+          return {
+            spanId: String(r.span_id),
+            model: String(r.name || ''),
+            identity: turnTransportIndexOf({
+              index: typeof index === 'number' && Number.isFinite(index) ? index : undefined,
+              turn: r.turn,
+            }),
+          }
+        })
+      } catch {
+        return null
+      }
+    }
+    return null
+  }
+
+  /**
+   * Mapped parts for every captured turn before `turnIndex`, in turn order.
+   * Resolution prefers explicit payload identities (no record reads); only
+   * turns the payload cannot name fall back to the shared ordered pool, and
+   * content itself is read with single-span gets — never a full-session
+   * content walk. Cost scales with the number of preceding turns; each read
+   * is one indexed span fetch plus its part mapping.
+   */
+  private loadPrecedingTurnParts(
+    sessionId: string,
+    turnIndex: number,
+    payloadTurns: TurnDescriptor[],
+    db: DatabaseSync | undefined,
+  ): Array<{ spanId: string; parts: TurnContentPart[] }> {
+    const preceding: Array<{ spanId: string; parts: TurnContentPart[] }> = []
+    if (turnIndex <= 0) return preceding
+    const payloadHasIdentity = payloadTurns.some((t) => turnTransportIndexOf(t) !== undefined)
+    let entries: TurnResolutionEntry[] | null | undefined
+    const spans: string[] = []
+    for (let i = 0; i < turnIndex; i++) {
+      let span: string | undefined
+      if (payloadTurns.length > 0) {
+        const item = resolveTurn(payloadTurns, i, turnTransportIndexOf)
+        if (item && typeof item.spanId === 'string') {
+          span = item.spanId
+        } else if (payloadHasIdentity) {
+          // An identity-bearing payload that names no turn i contributes
+          // nothing for i — same guard as the target lookup (issue #184).
+          continue
+        }
+      }
+      if (span === undefined) {
+        if (entries === undefined) entries = this.loadTurnResolutionEntries(sessionId, db)
+        if (entries) {
+          const found = resolveTurnEntry(entries, i)
+          if (found) span = found.spanId
+        }
+      }
+      if (span !== undefined) spans.push(span)
+    }
+    const seen = new Set<string>()
+    for (const span of spans) {
+      if (seen.has(span)) continue
+      seen.add(span)
+      const records = this.loadContentRecords(sessionId, span)
+      const raw: ContentPart[] = records[0]?.parts ?? []
+      preceding.push({ spanId: span, parts: this.mapTurnContentParts(raw, span) })
+    }
+    return preceding
   }
 
 

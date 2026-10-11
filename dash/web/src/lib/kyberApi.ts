@@ -493,6 +493,11 @@ export interface KyberTurnContentPart {
   truncated?: boolean
   totalLength?: number
   order?: number
+  /**
+   * Exact-match recurrence against earlier captured turns of this session
+   * (same part kind, whole source text). Capture-only — never a cache claim.
+   */
+  recurrence?: { seenBefore: boolean }
 }
 
 export interface KyberTurnContentBlock {
@@ -504,6 +509,12 @@ export interface KyberTurnContentBlock {
   truncated?: boolean
   totalLength?: number
   notMeasurable?: { reason: string }
+  /**
+   * Block aggregate: `newThisTurn` when any member part is new,
+   * `seenBefore` when any member part exactly matches an earlier same-kind
+   * part. Both may hold at once for mixed blocks.
+   */
+  recurrence?: { newThisTurn: boolean; seenBefore: boolean }
 }
 
 export interface KyberTurnContentResult {
@@ -518,6 +529,12 @@ export interface KyberTurnContentResult {
   totalLength?: number
   measurability?: string | Record<string, unknown>
   notMeasurable?: { reason: string }
+  /**
+   * Earliest captured session-level system prompt with its own
+   * earlier-turn recurrence. Null when none was captured at or before this
+   * turn. The view hides it on exact duplication with the turn's own parts.
+   */
+  sharedContext?: { text: string; spanId?: string; seenBefore: boolean } | null
 }
 
 export function fetchTurnContent(
