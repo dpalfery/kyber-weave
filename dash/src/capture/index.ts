@@ -33,6 +33,7 @@ import {
 } from './probe.js'
 import {
   loadCaptureReceipt,
+  receiptPathForHome,
   saveCaptureReceipt,
   sha256Hex,
   type CaptureReceipt,
@@ -45,6 +46,7 @@ import {
   type CaptureHarnessWriter,
   type ManagedHarnessWriter,
 } from './harnesses/registry.js'
+import { classifyFsError, type FsErrorReason } from './errno.js'
 import type { PathEnv } from './paths.js'
 
 export { SUPPORTED_CAPTURE_HARNESS_IDS }
@@ -77,12 +79,59 @@ export type CaptureRunOptions = {
   fetchHealth?: HealthFetcher
   /** Writer set override; defaults to the pending-discovery registry. */
   writers?: CaptureHarnessWriter[]
+  /** Deadline for the receiver liveness probe; defaults to the probe's own 5s. */
+  probeTimeoutMs?: number
+  /**
+   * Decides, per declared file, whether this call touches it (D19). The CLI
+   * passes none and so keeps writing every declared file; the settings route
+   * passes one so enable never creates a VS Code Insiders profile directory on
+   * a machine without Insiders. On disable it only silences the "no record"
+   * noise for a file that was never receipted: a receipted file is always
+   * restored, so a profile removed since enable cannot strand its keys.
+   */
+  fileFilter?: CaptureFileFilter
+}
+
+export type CaptureFileFilter = (file: {
+  harnessId: string
+  fileId: string
+  path: string
+}) => boolean
+
+/** What happened to one key, for a preview or a report. `before` is absent when the key was. */
+export type CaptureEventChange = { key: string; before?: unknown; after?: unknown }
+
+export type CaptureEventKind =
+  | 'would-write'
+  | 'wrote'
+  | 'noop'
+  | 'would-restore'
+  | 'restored'
+  | 'refused'
+  | 'error'
+
+/**
+ * One structured per-file outcome, built beside the CLI text and never parsed
+ * from it (D11). A host error is reduced to its errno `code`: the message of a
+ * Node fs error names the owner's absolute paths and must not cross a wire.
+ */
+export type CaptureEvent = {
+  kind: CaptureEventKind
+  harness: string
+  fileId: string
+  path: string
+  changes?: CaptureEventChange[]
+  reason?: FsErrorReason
+  drift?: Array<{ key: string; written: unknown; current: unknown }>
+  code?: string
 }
 
 export type CaptureRunResult = {
   exitCode: number
   stdout: string
   stderr: string
+  /** Additive structured outcomes; the text above is unchanged by their presence. */
+  events: CaptureEvent[]
 }
 
 /** Usage errors exit 2; operational refusals (drift, conflict) exit 1. */
@@ -99,7 +148,15 @@ function isOtlpHttpEndpoint(endpoint: string): boolean {
   }
 }
 
-function readTextIfPresent(path: string): { found: boolean; content: string; error?: string } {
+export function readTextIfPresent(path: string): {
+  found: boolean
+  content: string
+  error?: string
+  /** The errno code of a failed read, when the host supplied one. */
+  code?: string
+  /** The thrown value of a failed read, for callers that classify it; never serialized. */
+  thrown?: unknown
+} {
   // One read, not exists-then-read: the check and the bytes are the same
   // syscall, so a path that vanishes between them cannot throw a stack out
   // of the command. Other failures become a message the caller prints.
@@ -112,7 +169,13 @@ function readTextIfPresent(path: string): { found: boolean; content: string; err
         : undefined
     if (code === 'ENOENT') return { found: false, content: '' }
     const message = error instanceof Error ? error.message : String(error)
-    return { found: false, content: '', error: message }
+    return {
+      found: false,
+      content: '',
+      error: message,
+      ...(typeof code === 'string' ? { code } : {}),
+      thrown: error,
+    }
   }
 }
 
@@ -122,11 +185,30 @@ function writeText(path: string, content: string): void {
 }
 
 /** One config file resolved for this call. Paths are not resolved at load. */
-type ResolvedConfigFile = {
+export type ResolvedConfigFile = {
+  /** Stable file id the structured status and events name this file by. */
+  id: string
   path: string
   format: CaptureFileFormat
   desiredKeys: (endpoint: string) => Record<string, JsonScalar>
   ensureIfAbsentKeys?: (endpoint: string) => Record<string, JsonScalar>
+}
+
+/**
+ * The stable id of a harness's single config file. Multi-file writers carry
+ * their own `fileId`s; the single-file and status-only writers predate the
+ * field, so the ids the structured status and events use live here once.
+ */
+const SINGLE_FILE_IDS: Readonly<Record<string, string>> = {
+  'claude-code': 'claude-settings',
+  opencode: 'opencode-config',
+  codex: 'codex-config',
+  pi: 'pi-agent-settings',
+  antigravity: 'antigravity-settings',
+}
+
+export function fileIdFor(harnessId: string): string {
+  return SINGLE_FILE_IDS[harnessId] ?? `${harnessId}-config`
 }
 
 /**
@@ -135,13 +217,14 @@ type ResolvedConfigFile = {
  * surface, and using it would turn boolean `true` into the string `"true"`
  * and would skip every file after the first.
  */
-function declaredFiles(
+export function declaredFiles(
   writer: ManagedHarnessWriter,
   home: string,
   env: PathEnv,
 ): ResolvedConfigFile[] {
   if (writer.configFiles !== undefined && writer.configFiles.length > 0) {
     return writer.configFiles.map((file) => ({
+      id: file.fileId,
       path: file.resolvePath(home, env),
       format: file.format,
       desiredKeys: file.desiredKeys,
@@ -150,6 +233,7 @@ function declaredFiles(
   }
   return [
     {
+      id: fileIdFor(writer.id),
       path: writer.resolvePath(home, env),
       format: writer.format,
       desiredKeys: writer.desiredKeys,
@@ -241,7 +325,7 @@ export async function runCapture(
       `kyberdash capture: --endpoint must be an OTLP/HTTP URL (http:// or https://); got "${endpoint}". ` +
         'Only OTLP/HTTP protocols may be written.',
     )
-    return { exitCode: USAGE_EXIT, stdout: '', stderr: `${err.join('\n')}\n` }
+    return { exitCode: USAGE_EXIT, stdout: '', stderr: `${err.join('\n')}\n`, events: [] }
   }
 
   const writers = options.writers ?? [...CAPTURE_HARNESS_REGISTRY]
@@ -255,20 +339,20 @@ export async function runCapture(
         `kyberdash capture: unknown harness "${id}". ` +
           `Expected one of: ${writers.map((writer) => writer.id).join(', ')}.`,
       )
-      return { exitCode: USAGE_EXIT, stdout: '', stderr: `${err.join('\n')}\n` }
+      return { exitCode: USAGE_EXIT, stdout: '', stderr: `${err.join('\n')}\n`, events: [] }
     }
   }
   const selected = requested
     .map((id) => writers.find((writer) => writer.id === id))
     .filter((writer): writer is CaptureHarnessWriter => writer !== undefined)
 
-  const probe = await probeReceiver(endpoint, options.fetchHealth)
+  const probe = await probeReceiver(endpoint, options.fetchHealth, options.probeTimeoutMs)
 
   if (action === 'status') {
     out.push(...statusLines(selected, home, pathEnv, endpoint))
     out.push(`receiver: ${probe.state}`, `  ${probe.detail}`)
     if (probe.state === 'none') out.push(RECEIVER_DOWN_REMEDY)
-    return { exitCode: 0, stdout: `${out.join('\n')}\n`, stderr: '' }
+    return { exitCode: 0, stdout: `${out.join('\n')}\n`, stderr: '', events: [] }
   }
 
   if (action === 'enable') {
@@ -280,10 +364,11 @@ export async function runCapture(
       probe.state,
       probe.detail,
       options.dryRun ?? false,
+      options.fileFilter,
     )
   }
 
-  return runDisable(selected, home, pathEnv, options.dryRun ?? false)
+  return runDisable(selected, home, pathEnv, options.dryRun ?? false, options.fileFilter)
 }
 
 function statusLines(
@@ -382,7 +467,7 @@ function appendFileStatus(
   }
 }
 
-function presentKeys(
+export function presentKeys(
   file: ResolvedConfigFile,
   content: string,
   endpoint: string,
@@ -399,7 +484,7 @@ function presentKeys(
   return readBlockKeys(content)
 }
 
-function statusWarningLines(writer: ManagedHarnessWriter, home: string, env: PathEnv): string[] {
+export function statusWarningLines(writer: ManagedHarnessWriter, home: string, env: PathEnv): string[] {
   const warnings = writer.statusWarnings
   if (warnings === undefined || warnings.length === 0) return []
   const files = writer.configFiles ?? []
@@ -445,6 +530,45 @@ function statusEnvSnippetLines(writer: ManagedHarnessWriter): string[] {
   return lines
 }
 
+function eventFor(
+  kind: CaptureEventKind,
+  writer: { id: string },
+  file: { id: string; path: string },
+  extra: Partial<Pick<CaptureEvent, 'changes' | 'reason' | 'drift' | 'code'>> = {},
+): CaptureEvent {
+  return { kind, harness: writer.id, fileId: file.id, path: file.path, ...extra }
+}
+
+/** A refused event for a failed read: the errno code and a stable reason, never the message. */
+function readRefusal(
+  writer: { id: string },
+  file: { id: string; path: string },
+  thrown: unknown,
+): CaptureEvent {
+  const { code, reason } = classifyFsError(thrown)
+  return eventFor('refused', writer, file, { reason, code })
+}
+
+function sameValue(a: unknown, b: unknown): boolean {
+  return JSON.stringify(a) === JSON.stringify(b)
+}
+
+/** Only the keys that would actually change: a key already at its desired value is no change. */
+function changesFor(
+  desired: Record<string, JsonScalar>,
+  prior: Record<string, { present: boolean; value?: unknown }>,
+): CaptureEventChange[] {
+  const changes: CaptureEventChange[] = []
+  for (const [key, after] of Object.entries(desired)) {
+    const previous = prior[key]
+    if (previous?.present === true && sameValue(previous.value, after)) continue
+    changes.push(
+      previous?.present === true ? { key, before: previous.value, after } : { key, after },
+    )
+  }
+  return changes
+}
+
 type EnableWrite = {
   desired: Record<string, JsonScalar>
   prior: Record<string, { present: boolean; value?: unknown }>
@@ -456,6 +580,7 @@ type EnableFileResult = {
   exitCode: number
   out: string[]
   err: string[]
+  events: CaptureEvent[]
   record?: EnableWrite
 }
 
@@ -467,12 +592,15 @@ function enableFile(
 ): EnableFileResult {
   const path = file.path
   const desired = file.desiredKeys(endpoint)
-  const { found, content, error } = readTextIfPresent(path)
+  const read = readTextIfPresent(path)
+  const { found, content, error } = read
   const out: string[] = []
   const err: string[] = []
+  const events: CaptureEvent[] = []
   if (error !== undefined) {
     err.push(`harness ${writer.id}: cannot read ${path}: ${error}`)
-    return { exitCode: REFUSAL_EXIT, out, err }
+    events.push(readRefusal(writer, file, read.thrown))
+    return { exitCode: REFUSAL_EXIT, out, err, events }
   }
 
   if (file.format === 'json' || file.format === 'jsonc') {
@@ -489,24 +617,31 @@ function enableFile(
     )
     if (upToDate) {
       out.push(`harness ${writer.id}: already enabled (no-op): ${path}`)
-      return { exitCode: 0, out, err }
+      events.push(eventFor('noop', writer, file))
+      return { exitCode: 0, out, err, events }
     }
     const applied = applyJsonEdits(content, desiredWrites)
     if (applied.refused !== undefined) {
       err.push(`harness ${writer.id}: ${path}: ${applied.refused}`)
-      return { exitCode: REFUSAL_EXIT, out, err }
+      events.push(eventFor('refused', writer, file, { reason: 'unparseable' }))
+      return { exitCode: REFUSAL_EXIT, out, err, events }
     }
     if (dryRun) {
       out.push(...dryRunLines(path, desiredWrites, applied.prior))
-      return { exitCode: 0, out, err }
+      events.push(
+        eventFor('would-write', writer, file, { changes: changesFor(desiredWrites, applied.prior) }),
+      )
+      return { exitCode: 0, out, err, events }
     }
     const preSha = sha256Hex(content)
     writeText(path, applied.content)
     out.push(`harness ${writer.id}: enabled: ${path} (${found ? 'updated' : 'created'})`)
+    events.push(eventFor('wrote', writer, file, { changes: changesFor(desiredWrites, applied.prior) }))
     return {
       exitCode: 0,
       out,
       err,
+      events,
       record: {
         desired: desiredWrites,
         prior: applied.prior,
@@ -523,23 +658,30 @@ function enableFile(
       `harness ${writer.id}: refusing ${path}: conflicting key "${applied.conflict.key}" outside the managed block`,
     )
     err.push(applied.conflict.snippet)
-    return { exitCode: REFUSAL_EXIT, out, err }
+    events.push(eventFor('refused', writer, file, { reason: 'conflict' }))
+    return { exitCode: REFUSAL_EXIT, out, err, events }
   }
   if (!applied.changed) {
     out.push(`harness ${writer.id}: already enabled (no-op): ${path}`)
-    return { exitCode: 0, out, err }
+    events.push(eventFor('noop', writer, file))
+    return { exitCode: 0, out, err, events }
   }
   if (dryRun) {
     out.push(...dryRunLines(path, blockDesired, applied.prior))
-    return { exitCode: 0, out, err }
+    events.push(
+      eventFor('would-write', writer, file, { changes: changesFor(blockDesired, applied.prior) }),
+    )
+    return { exitCode: 0, out, err, events }
   }
   const preSha = sha256Hex(content)
   writeText(path, applied.content)
   out.push(`harness ${writer.id}: enabled: ${path} (${found ? 'updated' : 'created'})`)
+  events.push(eventFor('wrote', writer, file, { changes: changesFor(blockDesired, applied.prior) }))
   return {
     exitCode: 0,
     out,
     err,
+    events,
     record: {
       desired: blockDesired,
       prior: applied.prior,
@@ -572,44 +714,65 @@ async function runEnable(
   probeState: string,
   probeDetail: string,
   dryRun: boolean,
+  fileFilter: CaptureFileFilter | undefined,
 ): Promise<CaptureRunResult> {
   const out: string[] = []
   const err: string[] = []
+  const events: CaptureEvent[] = []
   let exitCode = 0
-  const receipt = loadReceiptLenient(home) ?? { version: 1 as const, files: [] }
-  let wroteAny = false
-
-  for (const writer of writers) {
-    if (writer.kind === 'pending') {
-      out.push(`harness ${writer.id}: ${writer.reason} (pending discovery); skipped`)
-      continue
-    }
-    for (const file of declaredFiles(writer, home, env)) {
-      const enabled = enableFile(writer, file, endpoint, dryRun)
-      out.push(...enabled.out)
-      err.push(...enabled.err)
-      if (enabled.exitCode !== 0) exitCode = enabled.exitCode
-      if (enabled.record === undefined) continue
-      const existing = receipt.files.find((entry) => entry.path === file.path)
-      const ensure =
-        file.format === 'json' || file.format === 'jsonc'
-          ? (file.ensureIfAbsentKeys?.(endpoint) ?? {})
-          : {}
-      upsertReceipt(
-        receipt,
-        file.path,
-        file.format,
-        writer.id,
-        retainWrittenEnsureKeys(enabled.record.desired, ensure, existing),
-        enabled.record.prior,
-        enabled.record.preSha,
-        enabled.record.postSha,
-      )
-      wroteAny = true
+  const loaded = loadReceiptState(home)
+  if (loaded.corrupt) {
+    // Replacing an unreadable receipt would lose the prior values `disable`
+    // restores from. Refuse and leave it for the owner to inspect.
+    const harness = writers[0]?.id ?? ''
+    err.push(`kyberdash capture: refusing to enable: the capture receipt is unparseable (${receiptPathForHome(home)})`)
+    return {
+      exitCode: REFUSAL_EXIT,
+      stdout: '',
+      stderr: `${err.join('\n')}\n`,
+      events: [{ kind: 'refused', harness, fileId: 'receipt', path: receiptPathForHome(home), reason: 'unparseable' }],
     }
   }
+  const receipt = loaded.receipt ?? { version: 1 as const, files: [] }
+  let wroteAny = false
 
-  if (wroteAny && !dryRun) saveCaptureReceipt(home, receipt)
+  try {
+    for (const writer of writers) {
+      if (writer.kind === 'pending') {
+        out.push(`harness ${writer.id}: ${writer.reason} (pending discovery); skipped`)
+        continue
+      }
+      for (const file of declaredFiles(writer, home, env)) {
+        if (fileFilter?.({ harnessId: writer.id, fileId: file.id, path: file.path }) === false) continue
+        const enabled = enableFile(writer, file, endpoint, dryRun)
+        out.push(...enabled.out)
+        err.push(...enabled.err)
+        events.push(...enabled.events)
+        if (enabled.exitCode !== 0) exitCode = enabled.exitCode
+        if (enabled.record === undefined) continue
+        const existing = receipt.files.find((entry) => entry.path === file.path)
+        const ensure =
+          file.format === 'json' || file.format === 'jsonc'
+            ? (file.ensureIfAbsentKeys?.(endpoint) ?? {})
+            : {}
+        upsertReceipt(
+          receipt,
+          file.path,
+          file.format,
+          writer.id,
+          retainWrittenEnsureKeys(enabled.record.desired, ensure, existing),
+          enabled.record.prior,
+          enabled.record.preSha,
+          enabled.record.postSha,
+        )
+        wroteAny = true
+      }
+    }
+
+  } finally {
+    // A write that throws on a later file must not strand earlier files without a record.
+    if (wroteAny && !dryRun) saveCaptureReceipt(home, receipt)
+  }
 
   out.push(`receiver: ${probeState}`)
   out.push(`  ${probeDetail}`)
@@ -618,6 +781,7 @@ async function runEnable(
     exitCode,
     stdout: out.length > 0 ? `${out.join('\n')}\n` : '',
     stderr: err.length > 0 ? `${err.join('\n')}\n` : '',
+    events,
   }
 }
 
@@ -676,12 +840,24 @@ function upsertReceipt(
   else receipt.files[receipt.files.indexOf(existing)] = record
 }
 
+/** The `current` of a drift entry on the wire: an absent key is null, never `undefined`. */
+function driftEntries(
+  drift: ReadonlyArray<{ key: string; written: unknown; current: unknown }>,
+): Array<{ key: string; written: unknown; current: unknown }> {
+  return drift.map((entry) => ({
+    key: entry.key,
+    written: entry.written,
+    current: entry.current === undefined ? null : entry.current,
+  }))
+}
+
 function driftLinesFor(
   writer: ManagedHarnessWriter,
   files: readonly ResolvedConfigFile[],
   receipt: CaptureReceipt | null,
-): string[] {
+): { lines: string[]; events: CaptureEvent[] } {
   const lines: string[] = []
+  const events: CaptureEvent[] = []
   for (const file of files) {
     const record = receipt?.files.find((entry) => entry.path === file.path)
     if (record === undefined) continue
@@ -690,6 +866,7 @@ function driftLinesFor(
       lines.push(
         `harness ${writer.id}: cannot read ${file.path}: ${read.error}; leaving file unchanged`,
       )
+      events.push(readRefusal(writer, file, read.thrown))
       continue
     }
     if (!read.found) continue
@@ -700,11 +877,17 @@ function driftLinesFor(
         lines.push(
           `harness ${writer.id}: ${file.path}: ${reverted.refused}; leaving file unchanged`,
         )
+        events.push(eventFor('refused', writer, file, { reason: 'unparseable' }))
         continue
       }
       for (const entry of reverted.drift) {
         lines.push(
           `harness ${writer.id}: drift: ${file.path} key "${entry.key}": written "${String(entry.written)}", current "${entry.current === undefined ? '(absent)' : String(entry.current)}"; leaving file unchanged`,
+        )
+      }
+      if (reverted.drift.length > 0) {
+        events.push(
+          eventFor('refused', writer, file, { reason: 'drift', drift: driftEntries(reverted.drift) }),
         )
       }
       continue
@@ -715,8 +898,11 @@ function driftLinesFor(
         `harness ${writer.id}: drift: ${file.path} key "${entry.key}": written "${String(entry.written)}", current "${entry.current === undefined ? '(absent)' : String(entry.current)}"; leaving file unchanged`,
       )
     }
+    if (drift.length > 0) {
+      events.push(eventFor('refused', writer, file, { reason: 'drift', drift: driftEntries(drift) }))
+    }
   }
-  return lines
+  return { lines, events }
 }
 
 async function runDisable(
@@ -724,9 +910,11 @@ async function runDisable(
   home: string,
   env: PathEnv,
   dryRun: boolean,
+  fileFilter: CaptureFileFilter | undefined,
 ): Promise<CaptureRunResult> {
   const out: string[] = []
   const err: string[] = []
+  const events: CaptureEvent[] = []
   let exitCode = 0
   const receipt = loadReceiptLenient(home)
   const revertedPaths: string[] = []
@@ -741,36 +929,54 @@ async function runDisable(
     // drifted file leaves the others in place so the receipt still describes
     // the whole enable; a later disable can restore every file once the
     // drift is gone.
-    const driftLines = driftLinesFor(writer, files, receipt)
-    if (driftLines.length > 0) {
+    const drifted = driftLinesFor(writer, files, receipt)
+    if (drifted.lines.length > 0) {
       exitCode = REFUSAL_EXIT
-      err.push(...driftLines)
+      err.push(...drifted.lines)
+      events.push(...drifted.events)
       continue
     }
     for (const file of files) {
       const path = file.path
       const record = receipt?.files.find((entry) => entry.path === path)
       if (record === undefined) {
-        out.push(`harness ${writer.id}: no record for ${path}; nothing to do`)
+        // A file this harness never wrote and the filter rules out (an absent
+        // Insiders profile) is not worth a "nothing to do" line in a report.
+        if (fileFilter?.({ harnessId: writer.id, fileId: file.id, path }) !== false) {
+          out.push(`harness ${writer.id}: no record for ${path}; nothing to do`)
+          events.push(eventFor('noop', writer, file))
+        }
         continue
       }
-      const { found, content, error } = readTextIfPresent(path)
+      const read = readTextIfPresent(path)
+      const { found, content, error } = read
       if (error !== undefined) {
         exitCode = REFUSAL_EXIT
         err.push(`harness ${writer.id}: cannot read ${path}: ${error}; leaving file unchanged`)
+        events.push(readRefusal(writer, file, read.thrown))
         continue
       }
       if (!found) {
         exitCode = REFUSAL_EXIT
         err.push(`harness ${writer.id}: drift: ${path} is missing since enable; leaving receipt unchanged`)
+        // ENOENT is drift in this domain (errno.ts): the file left since enable.
+        events.push(eventFor('refused', writer, file, { reason: 'drift', code: 'ENOENT' }))
         continue
       }
+
+      const restoreChanges = (): CaptureEventChange[] =>
+        Object.entries(record.keys).map(([key, entry]) => ({
+          key,
+          before: entry.written,
+          ...(entry.prior.present ? { after: entry.prior.value } : {}),
+        }))
 
       if (file.format === 'json' || file.format === 'jsonc') {
         const reverted = revertJsonEdits(content, record.keys)
         if (reverted.refused !== undefined) {
           exitCode = REFUSAL_EXIT
           err.push(`harness ${writer.id}: ${path}: ${reverted.refused}; leaving file unchanged`)
+          events.push(eventFor('refused', writer, file, { reason: 'unparseable' }))
           continue
         }
         if (reverted.drift.length > 0) {
@@ -780,20 +986,26 @@ async function runDisable(
               `harness ${writer.id}: drift: ${path} key "${entry.key}": written "${String(entry.written)}", current "${entry.current === undefined ? '(absent)' : String(entry.current)}"; leaving file unchanged`,
             )
           }
+          events.push(
+            eventFor('refused', writer, file, { reason: 'drift', drift: driftEntries(reverted.drift) }),
+          )
           continue
         }
         if (!reverted.changed) {
           out.push(`harness ${writer.id}: already disabled (no-op): ${path}`)
+          events.push(eventFor('noop', writer, file))
           revertedPaths.push(path)
           continue
         }
         if (dryRun) {
           out.push(`dry-run: ${path} would restore ${Object.keys(record.keys).join(', ')}`)
+          events.push(eventFor('would-restore', writer, file, { changes: restoreChanges() }))
           continue
         }
         writeText(path, reverted.content)
         revertedPaths.push(path)
         out.push(`harness ${writer.id}: disabled: ${path} (restored)`)
+        events.push(eventFor('restored', writer, file, { changes: restoreChanges() }))
         continue
       }
 
@@ -805,20 +1017,26 @@ async function runDisable(
             `harness ${writer.id}: drift: ${path} key "${entry.key}": written "${String(entry.written)}", current "${entry.current === undefined ? '(absent)' : String(entry.current)}"; leaving file unchanged`,
           )
         }
+        events.push(
+          eventFor('refused', writer, file, { reason: 'drift', drift: driftEntries(reverted.drift) }),
+        )
         continue
       }
       if (!reverted.changed) {
         out.push(`harness ${writer.id}: already disabled (no-op): ${path}`)
+        events.push(eventFor('noop', writer, file))
         revertedPaths.push(path)
         continue
       }
       if (dryRun) {
         out.push(`dry-run: ${path} would restore ${Object.keys(record.keys).join(', ')}`)
+        events.push(eventFor('would-restore', writer, file, { changes: restoreChanges() }))
         continue
       }
       writeText(path, reverted.content)
       revertedPaths.push(path)
       out.push(`harness ${writer.id}: disabled: ${path} (restored)`)
+      events.push(eventFor('restored', writer, file, { changes: restoreChanges() }))
     }
   }
 
@@ -831,10 +1049,20 @@ async function runDisable(
     exitCode,
     stdout: out.length > 0 ? `${out.join('\n')}\n` : '',
     stderr: err.length > 0 ? `${err.join('\n')}\n` : '',
+    events,
   }
 }
 
-function loadReceiptLenient(home: string): CaptureReceipt | null {
+/** Distinguishes "no receipt" from "a receipt that exists but cannot be parsed". */
+export function loadReceiptState(home: string): { receipt: CaptureReceipt | null; corrupt: boolean } {
+  try {
+    return { receipt: loadCaptureReceipt(home), corrupt: false }
+  } catch {
+    return { receipt: null, corrupt: true }
+  }
+}
+
+export function loadReceiptLenient(home: string): CaptureReceipt | null {
   try {
     return loadCaptureReceipt(home)
   } catch {

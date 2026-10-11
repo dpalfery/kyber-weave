@@ -6,7 +6,7 @@ component: KyberDash
 source-root: dash
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-10
+last-reviewed: 2026-10-11
 decided-by:
   - adr/0020-kyberdash-one-time-fork
   - adr/0008-kyberdash-single-canonical-store
@@ -62,6 +62,9 @@ code-refs:
   - recordsForShare
   - alignByPhase
   - dedupeTwinTurns
+  - runCaptureAction
+  - handleCaptureRequest
+  - buildCaptureStatus
 ---
 
 # KyberDash architecture
@@ -888,6 +891,7 @@ The React web dashboard provides progressive-disclosure views matching the 6-lev
 - **`ContextInspector.tsx`**: Full unclipped context viewer with part tabs and copy-out protocol.
 - **`ContextReviewPanel.tsx`**: Opt-in LLM review console with credential safety.
 - **`ScorecardMatrix.tsx`**: Cross-harness six-dimension matrix on Context Doctor.
+- **`SettingsDrawer.tsx`** (`dash/web/src/components/settings/`): Header **Settings** button opens a slide-out over the shared `SlideOutDrawer` shell. It lists each harness (`HarnessCollectionList.tsx`) with its collection state from `GET /api/kyber/capture`, previews every switch as a dry run before **Confirm**, and carries the OTLP receiver switch. Display only: every state shown is the server's report and every change is an `/api/kyber/*` call ([runbook](runbook.md#harness-opentelemetry-capture)).
 
 The workspace findings browser pages on what the **server** served, not on what is painted:
 the next offset is the extent of the contiguous run of the scope's stored pages that starts at
@@ -902,6 +906,23 @@ never rewrites a count: the heading, the detector chips and the suppression bann
 successful envelope, the failure renders as an inline retryable banner above the retained rows
 rather than the no-rows panel, and while the envelope is unavailable the suppression count is
 stated in words as unknown, never as `0` ([honest unobservability](../rules/honest-unobservability.md)).
+
+### Harness OpenTelemetry capture (ADR 0031)
+
+`runCaptureAction` (`dash/src/capture/actions.ts`) is the engine entry the web dashboard uses; the
+`kyberdash kyber capture` commands run the same capture core. `handleCaptureRequest`
+(`dash/src/server/capture-routes.ts`) mounts `GET|POST /api/kyber/capture` over it in process.
+The route is the only place the capture engine meets the settings store, because the CLI has
+none: a real `enable` ends by switching `settings.receiver.hosted` on, a failed setting write is
+reported in the receiver block of a 200 rather than as a 5xx (the config is already written),
+and `disable` never stops the receiver. State is built by `buildCaptureStatus`
+(`dash/src/capture/status.ts`) from the engine's own primitives rather than by parsing CLI
+text. Enable passes an applicability filter so a multi-file harness (Copilot's two VS Code
+editions) writes only files that exist or whose host directory exists. Actions run under a
+per-process mutex (`dash/src/capture/lock.ts`) that queues overlapping requests, so a repeated
+enable becomes a no-op rather than a race; another process is not covered.
+Paths resolve through a platform seam (`dash/src/capture/paths.ts`), so macOS, Linux and
+Windows are all supported, and JSON/JSONC edits preserve BOM and CRLF.
 
 ### Turn inspection numbering and resolution contracts (issue #184)
 
@@ -940,6 +961,7 @@ The web dashboard server wires HTTP requests directly to `KyberBridge`:
 | `/api/kyber/report` | `GET` | `ContextReport` | The versioned context report for the query scope (`harness`, `session`, `run`, `days`); the same document `kyberdash report` prints. |
 | `/api/kyber/settings` | `GET`, `PUT` | `SettingsView` | The four shared switches as JSON booleans and a number: `folderImportScheduled`, `jobsPaused`, `refreshCadenceMinutes`, `receiverHosted` ([ADR 0033](../adr/0033-kyberdash-surfaces-are-display-layers.md)). A `PUT` is partial; an unknown key or a value of the wrong type is refused whole (400), leaving every switch as it was. |
 | `/api/kyber/jobs` | `GET` | `{ refresh, paused, storeGeneration, hostedElsewhere }` | What the job host is actually doing — state, last success, last failure, next due, whether it is paused, and whether another process holds `jobs.lock`. The flat host status is mapped here once, so both surfaces read the same shape. |
+| `/api/kyber/capture` | `GET`, `POST` | `GET`: `{ platform, receiver: { hosted, liveness, detail }, harnesses: CaptureHarnessStatus[] }` · `POST`: `{ action, harness, dryRun, outcome, events, harnessState, receiver: { hosted, willEnable, enabled, enableFailed, lastManagedHarnessDisabled } }` | Harness OpenTelemetry collection ([ADR 0031](../adr/0031-kyberdash-capture-command-owns-harness-telemetry-keys.md)). `GET` is read-only: per-harness `state` (`on` / `off` / `partial` / `unknown` / `not-applicable`), install detection, files with expected and present keys, drift, warnings, manual steps, and receiver liveness probed at `/healthz` (`unknown`, not probed, when this server does not host the receiver). `POST` body is exactly `{ action: 'enable' \| 'disable', harness, dryRun }` for a managed harness (Copilot, Claude Code, OpenCode); any other key or harness is 400. A dry run returns the exact per-file changes and writes nothing. A real `enable` that ends `wrote` or `noop` turns `settings.receiver.hosted` on afterwards; `disable` never turns it off and only reports `lastManagedHarnessDisabled`. 200 result; 400 invalid payload; 404 when the server has no store; 405 other methods; 409 `{ error, outcome: 'refused', reason, events }` on drift, conflict, unparseable, unreadable or busy, with no files changed; 413 body over 64KB; 415 non-JSON content type; 500 fixed `{ error: 'Capture failed' }` (no path or host error text crosses the wire). |
 | `/api/kyber/refresh` | `POST` | `202 { accepted: true }` · `409 { error }` · `500 { error }` | Ask the host to run a refresh; the body names the asking surface (`{ surface: 'tray' \| 'web' }`). `scheduled` and `cli` are not accepted from a client: the host owns the schedule, and a client-triggered run must name the surface that asked. Answers as soon as the job is taken, not when it finishes, so the outcome is read from `GET /api/kyber/jobs`. 400 invalid body; 409 `{ error }` when this server started nothing (job declined, busy, or hosted elsewhere); 500 `{ error }` when the spawn itself failed (a fixed string — no paths cross the wire). |
 | `/api/kyber/clean` | `POST` | `CleanReport` | User-initiated database clean ([ADR 0032](../adr/0032-kyberdash-user-initiated-clean.md)). Body carries exactly one scope (`all: true` or a non-empty `harnesses` list), explicit `confirm: true`, and the optional `reingestWeeks` window (1–52; absent or null means no re-ingest, which is the default). 200 with the wipe counts and re-ingest summary; 400 invalid body/scope; 405 non-POST; 409 lock busy; 413 body over 64KB; 500 bounded failure. |
 | `/api/kyber/import-history` | `POST` | `202 { accepted: true }` · `409 { error }` · `500 { error }` | One-off folder history import ([§2c](../dash/runbook.md#2c-import-folder-history-dash-import-history) of the runbook). The **request body** is `{ weeks?, harness? \| harnesses? }` — `weeks` defaults to 1 and is capped at 52, and the singular and plural harness keys are mutually exclusive (either may be omitted, meaning every readable harness). Never reads or changes `settings.folder_import.scheduled`. 400 invalid payload; 409 `{ error }` when a job is already running here; 500 `{ error }` when the spawn itself failed. Like refresh, it answers once the job is taken, so the outcome is read from `GET /api/kyber/jobs`. |

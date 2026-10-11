@@ -465,7 +465,7 @@ describe('the capture route behind the web server', () => {
       dryRun: false,
       outcome: 'wrote',
     })
-    expect(readFileSync(h.opencodeConfig, 'utf8')).toContain('experimental.openTelemetry')
+    expect(readFileSync(h.opencodeConfig, 'utf8')).toContain('"openTelemetry": true')
     // The enable turned the shared receiver-hosted setting on through the web server's store.
     expect(readSetting(h.store, SETTING_KEYS.receiverHosted)).toBe('on')
   })

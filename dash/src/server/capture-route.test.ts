@@ -762,7 +762,7 @@ describe('POST /api/kyber/capture', () => {
     expect(asBody(body).outcome).toBe('wrote')
     expect(asBody(body).receiver).toMatchObject({ enableFailed: false })
     expect(readSetting(deps.store, SETTING_KEYS.receiverHosted)).toBe('on')
-    expect(readFileSync(opencodePath(home), 'utf8')).toContain('experimental.openTelemetry')
+    expect(readFileSync(opencodePath(home), 'utf8')).toContain('"openTelemetry": true')
   })
 
   it('answers 200 with enableFailed when the receiver-setting write fails AFTER the config write', async () => {
@@ -793,7 +793,7 @@ describe('POST /api/kyber/capture', () => {
     })
     expect(typeof doc.receiver?.['willEnable']).toBe('boolean')
     // The config write happened before the setting write, so both stand recorded.
-    expect(readFileSync(opencodePath(home), 'utf8')).toContain('experimental.openTelemetry')
+    expect(readFileSync(opencodePath(home), 'utf8')).toContain('"openTelemetry": true')
     expect(existsSync(receiptPathForHome(home))).toBe(true)
     // The sqlite message names a real path on this machine; it stays off the wire.
     expect(raw).not.toContain('/Users/secret')

@@ -7,7 +7,7 @@
 // `disable` write nothing: agents never edit that script, and KyberDash does
 // not invent a window the user has not declared.
 
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { parse, type ParseError } from 'jsonc-parser'
 
@@ -24,6 +24,9 @@ const RECEIVER_PORT = '4318'
  */
 const DECLARED_WINDOW_SNIPPET = 'span.set_attribute("declaredContextWindow", <positive token count>)'
 
+/** A statusline script larger than this is not read: it is a hint, not a program to slurp. */
+const MAX_BRIDGE_SCRIPT_BYTES = 1024 * 1024
+
 export const antigravityHarness: PendingHarnessWriter = {
   kind: 'pending',
   id: 'antigravity',
@@ -38,14 +41,18 @@ export const antigravityHarness: PendingHarnessWriter = {
   describeStatus: antigravityStatusDetail,
 }
 
-function antigravityStatusDetail(home: string): readonly string[] {
+function antigravityStatusDetail(home: string, options?: { redact?: boolean }): readonly string[] {
   const settings = join(home, '.gemini', 'antigravity-cli', 'settings.json')
   const command = readStatusLineCommand(settings)
   const lines: string[] = []
   if (command === undefined) {
-    lines.push('statusline bridge: statusLine.command is not set')
+    lines.push(
+      options?.redact === true
+        ? 'statusline bridge: not set'
+        : 'statusline bridge: statusLine.command is not set',
+    )
   } else {
-    lines.push(`statusline bridge: ${command}`)
+    lines.push(options?.redact === true ? 'statusline bridge: configured' : `statusline bridge: ${command}`)
     const script = readBridgeScript(command)
     // A digit boundary: `4318` must not match inside `14318` or `43180`.
     lines.push(
@@ -79,8 +86,9 @@ function readStatusLineCommand(settingsPath: string): string | undefined {
  * read and never executed. A missing or unreadable path is absence, not an error.
  */
 function readBridgeScript(command: string): string | undefined {
-  if (!existsSync(command)) return undefined
   try {
+    const info = statSync(command)
+    if (!info.isFile() || info.size > MAX_BRIDGE_SCRIPT_BYTES) return undefined
     return readFileSync(command, 'utf8')
   } catch {
     return undefined

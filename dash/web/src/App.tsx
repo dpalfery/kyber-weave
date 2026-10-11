@@ -6,6 +6,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { QuarantineView, type QuarantineEntry } from '@/components/analysis/QuarantineView'
 import { ProblemsView, type ProblemEntry } from '@/components/analysis/ProblemsView'
 import { LightsaberLogo } from '@/components/LightsaberLogo'
+import { SettingsDrawer } from '@/components/settings/SettingsDrawer'
 import { NotFoundPanel } from '@/components/analysis/NotFoundPanel'
 import { fetchHarnesses, type KyberHarnessSummary } from '@/lib/kyberApi'
 import {
@@ -170,6 +171,30 @@ function ThemeToggle() {
   )
 }
 
+/**
+ * Header button that opens the Settings drawer. It owns no state: `App` holds
+ * the open flag, so the drawer and the button's `aria-expanded` cannot disagree.
+ */
+function SettingsButton({ open, onClick }: { open: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-haspopup="dialog"
+      aria-expanded={open}
+      data-testid="header-settings-button"
+      className="flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-border bg-card px-2.5 text-xs font-medium text-tertiary-foreground transition-colors hover:bg-interactive-secondary hover:text-foreground max-md:h-9"
+    >
+      <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true">
+        <path d="M2.5 4.5h6M11.5 4.5h2M2.5 11.5h2M7.5 11.5h6" />
+        <circle cx="10" cy="4.5" r="1.5" />
+        <circle cx="6" cy="11.5" r="1.5" />
+      </svg>
+      Settings
+    </button>
+  )
+}
+
 export const NAV_TABS = [
   { key: 'context-doctor', label: 'Context Doctor' },
   { key: 'quarantine', label: 'Quarantine' },
@@ -284,6 +309,8 @@ export function App({ initialPage = 'context-doctor', initialPath, initialNotFou
   // On desktop this flag is inert (the max-md: transform classes don't apply).
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [notFoundId, setNotFoundId] = useState<string | null>(initialNotFoundId ?? null)
+  // Display state only: whether the Settings drawer is showing.
+  const [settingsOpen, setSettingsOpen] = useState(false)
 
   // Follow the OS theme live while the user has no explicit preference, so
   // flipping the system theme updates the dashboard without a reload.
@@ -430,6 +457,7 @@ export function App({ initialPage = 'context-doctor', initialPath, initialNotFou
           </div>
 
           <div className="ml-auto flex items-center gap-2 max-md:min-w-0 max-md:overflow-x-auto max-md:[-ms-overflow-style:none] max-md:[scrollbar-width:none] max-md:[&::-webkit-scrollbar]:hidden">
+            <SettingsButton open={settingsOpen} onClick={() => setSettingsOpen(true)} />
             <ThemeToggle />
           </div>
         </header>
@@ -610,7 +638,7 @@ export function App({ initialPage = 'context-doctor', initialPath, initialNotFou
           </main>
         </div>
       </div>
-
+      <SettingsDrawer open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </div>
   )
 }

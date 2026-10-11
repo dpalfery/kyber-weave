@@ -20,6 +20,7 @@ import { resolveCanonDbPath } from '../canon/paths.js'
 import { JobHost, type JobSpawner } from '../jobs/host.js'
 import { ReceiverHost, type ReceiverProber } from '../jobs/receiver-host.js'
 import { runMaintenancePass } from '../refresh/folder-import.js'
+import type { CaptureRouteSettings } from '../server/capture-routes.js'
 import { formatValidViewForms, matchesViewPath } from '../server/view-paths.js'
 import { currentSpawnRuntime, resolveJobSpawnTarget } from './spawn-target.js'
 
@@ -411,6 +412,11 @@ export type WebDashboardServices = {
    * lease release retries and then swallows - so the seam is what makes it testable.
    */
   closeJobHost?: (jobHost: JobHost) => Promise<void>
+  /**
+   * Where the capture route reads and writes harness configs. Defaults to the real home
+   * directory; injectable so a test points the whole server at a temporary one.
+   */
+  capture?: CaptureRouteSettings
 }
 
 /**
@@ -765,7 +771,15 @@ export async function runWebDashboard(opts: WebDashboardServices & {
       // The store is always passed, so the settings routes answer from the first accepted
       // connection; only the JobHost is absent while the pair is coming up, and the job
       // routes answer 503 for that on their own account.
-      if (handleKyberRequest(req, res, url, bridge, { store, jobHost: current?.jobHost })) return
+      if (
+        handleKyberRequest(req, res, url, bridge, {
+          store,
+          jobHost: current?.jobHost,
+          ...(opts.capture === undefined ? {} : { capture: opts.capture }),
+        })
+      ) {
+        return
+      }
 
       if (!staticSource) {
         res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })

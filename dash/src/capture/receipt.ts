@@ -7,7 +7,7 @@
 // per key and everything `status` needs to report drift.
 
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
 /** Hex SHA-256 of a document, for the receipt's pre- and post-edit digests. */
@@ -63,5 +63,13 @@ export function loadCaptureReceipt(home: string): CaptureReceipt | null {
 export function saveCaptureReceipt(home: string, receipt: CaptureReceipt): void {
   const path = receiptPathForHome(home)
   mkdirSync(dirname(path), { recursive: true })
-  writeFileSync(path, `${JSON.stringify(receipt, null, 2)}\n`)
+  // Temp file + rename: a crash mid-write must never leave a truncated receipt.
+  const temp = `${path}.${process.pid}.tmp`
+  try {
+    writeFileSync(temp, `${JSON.stringify(receipt, null, 2)}\n`)
+    renameSync(temp, path)
+  } catch (error) {
+    rmSync(temp, { force: true })
+    throw error
+  }
 }

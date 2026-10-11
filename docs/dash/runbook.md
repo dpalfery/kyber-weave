@@ -6,7 +6,7 @@ status: current
 component: KyberDash
 source-root: dash
 owner: dpalfery
-last-reviewed: 2026-10-10
+last-reviewed: 2026-10-11
 code-refs:
   - registerKyberCommands
   - refreshHarnessSources
@@ -590,9 +590,11 @@ Every view has its own URL, so a view can be bookmarked, shared, or opened direc
 (`dash/web/src/lib/router.ts`), `kyberdash web --view`, and the tray's open actions all read
 that one list. Browser back and forward restore the spine.
 
-Header tabs (`nav-tabs`) are four: **Context Doctor**, **Usage**, **Quarantine**, **Problems**.
-The sidebar is the diagnostic spine rail: **Context Doctor**, **Sessions**, **Compare**. Share
-controls appear on Usage only.
+Header tabs (`nav-tabs`) are three: **Context Doctor**, **Quarantine**, **Problems**. Next to
+the theme toggle the header carries a **Settings** button (not a tab) that opens the Settings
+drawer ([Harness OpenTelemetry capture](#harness-opentelemetry-capture)). The sidebar is the
+diagnostic spine rail: **Context Doctor**, **Sessions**, **Compare**. The web dashboard has no
+Usage view or Share controls.
 
 - **Context Doctor**: Cross-harness landing (findings, scorecard matrix). Drill harness → run →
   execution → turn → context item.
@@ -620,7 +622,6 @@ controls appear on Usage only.
   `0` turns, a zero token delta, or `0 / 5` completed pairs; promotion stays disabled
   (`canPromote: false`) until history is explicitly measured. See
   [Run Comparison and Phase Alignment](architecture.md#run-comparison-and-phase-alignment-decision-d11).
-- **Usage**: Device spend overview, multi-provider cost rollups, top projects, daily spend, Share.
 - **Quarantine**: Quarantined spans holding unrecognized namespaces or malformed attributes.
 - **Problems**: Recorded token reconciliation mismatches, validation anomalies, and parser errors.
 
@@ -769,6 +770,70 @@ These suites validate:
 - Edge cases: 400 on missing session IDs, 404 on nonexistent sessions/routes, 405 on non-GET methods.
 - Resilient error handling (returns HTTP 400 on invalid query params without crashing the long-running server process).
 - That the CLI report and the REST report are equal for the same store and scope.
+
+### Harness OpenTelemetry capture
+
+`kyberdash kyber capture` points a harness's OTLP exporter at the KyberDash receiver by
+editing the harness's own user-level config, and the dashboard's Settings drawer drives the
+same engine. Both run the one implementation
+([ADR 0031](../adr/0031-kyberdash-capture-command-owns-harness-telemetry-keys.md)); the web
+dashboard holds no capture logic of its own
+([ADR 0033](../adr/0033-kyberdash-surfaces-are-display-layers.md)).
+
+**CLI.** Three leaves, each taking a repeatable `--harness <id>` (default: all six) and
+`--endpoint <url>` (OTLP/HTTP only; default `http://127.0.0.1:4318`):
+
+```bash
+kyberdash kyber capture status                      # per-harness state + receiver liveness
+kyberdash kyber capture enable  --dry-run           # print the exact per-file change, write nothing
+kyberdash kyber capture enable  --harness claude-code
+kyberdash kyber capture disable --harness claude-code   # restore per key; refuse on drift
+```
+
+`enable` writes only the telemetry keys and records, per key, the prior value and the file's
+pre- and post-edit hashes in a receipt. `disable` restores only keys that still hold what
+`enable` wrote and otherwise refuses, naming the drift. The CLI has no store, so it never
+touches the receiver setting.
+
+**Which harnesses are written.** Three are managed and can be switched: **Copilot** (VS Code
+and VS Code Insiders `settings.json`), **Claude Code**, and **OpenCode** (`opencode.jsonc`).
+**Codex**, **pi**, and **Antigravity** are status-only: status reports them, `enable` and
+`disable` do not write them, and the drawer shows them read-only. OpenCode reads its OTLP
+endpoint from the process environment, so `enable` writes only its flag; the drawer and
+`status` show `OTEL_EXPORTER_OTLP_ENDPOINT` and the receiver origin as a manual step, and
+KyberDash cannot see whether the shell that launches OpenCode has it set.
+
+**Settings drawer.** The header **Settings** button opens a right slide-out. It reads
+`GET /api/kyber/capture` on open and offers **Refresh status**. Each managed harness row shows
+its state (On, Off, Partly on, Unknown, Read-only), whether it was detected, the config files
+and how many expected keys are set, any warnings (for example a differing endpoint that was
+kept), and manual steps. A click never writes directly: the first request is a dry run, the
+drawer shows the exact keys it would change, and only **Confirm** sends the real request.
+A row is not switchable, with the reason printed, when its state is unknown, when it is `on`
+but KyberDash recorded no receipt (the keys were set elsewhere, so there is nothing to
+restore), or when it is not detected and has no receipt. A harness with a receipt can always
+be switched off. A refusal (drift, conflict, unparseable, unreadable, busy) leaves every file
+unchanged and is shown on the row with the drifted keys.
+
+**Receiver coupling.** A real `enable` that ends written or already-set turns the shared
+`settings.receiver.hosted` on after the config write, so the harness has somewhere to send.
+A failed setting write is reported in the drawer (the config is already on disk) rather than
+as an error. `disable` never turns the receiver off, because other exporters may still post
+to the port; when the last managed harness is switched off the drawer says the receiver is
+still hosted and points at the receiver switch, which lives in the same drawer and in the
+Maintenance panel. The receiver block shows liveness probed at `/healthz`; when this server
+does not host the receiver, liveness is `unknown` and not probed. A newly started receiver
+can take several seconds to answer, so use **Refresh status**. An enabled harness is not
+collecting until it is restarted and emits a turn; a green enable is not capture.
+
+**Windows.** Capture runs on macOS, Linux and Windows. Paths are joined with the platform's
+separator; Copilot's VS Code settings are under the `%APPDATA%` directory, and the other
+harnesses under the user profile. JSON and JSONC edits preserve a byte-order mark and CRLF
+line endings. For Copilot, an edition's file is written only when it exists or its host
+directory exists, so enable never creates a VS Code Insiders profile on a machine without it.
+
+**Limits.** Overlapping actions in one server are queued, but a CLI run and a drawer run
+are not serialized against each other. OpenCode's `XDG_CONFIG_HOME` is not consulted.
 
 ### Optional Cursor hook collection
 

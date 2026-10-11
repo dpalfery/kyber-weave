@@ -39,7 +39,11 @@ export type PendingHarnessWriter = {
    * Antigravity reports the statusline bridge. `enable` and `disable` do
    * not call this and never write config.
    */
-  describeStatus?: (home: string) => readonly string[]
+  /**
+   * `redact` is set by the structured (API) status: it must not echo text copied
+   * from config the owner wrote. The CLI text omits it and is unchanged.
+   */
+  describeStatus?: (home: string, options?: { redact?: boolean }) => readonly string[]
 }
 
 /**
