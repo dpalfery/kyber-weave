@@ -898,7 +898,7 @@ export function systemPromptTextsFromContentColumns(
       if (Array.isArray(parts) && parts.length > 0) {
         return [...parts]
           .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
-          .filter((part) => part.part === 'system_prompt' && part.text !== '')
+          .filter((part) => part.part === 'system_prompt' && typeof part.text === 'string' && part.text !== '')
           .map((part) => part.text)
       }
     } catch {
@@ -2208,7 +2208,11 @@ export class CanonStore {
     if (!sessionId) return []
     const rows = this.db
       .prepare(
-        'SELECT span_id, op, timestamp, content_json, parts_json FROM records WHERE COALESCE(session_id, trace_id) = ? ORDER BY timestamp',
+        // Turn spans (`llm.invoke`) are skipped in SQL, so their (largest) parts blobs are
+        // never read or inflated; a row cap would silently drop session prompts instead.
+        `SELECT span_id, op, timestamp, content_json, parts_json FROM records
+         WHERE COALESCE(session_id, trace_id) = ? AND COALESCE(op, '') <> 'llm.invoke'
+         ORDER BY timestamp`,
       )
       .all(sessionId) as { span_id: unknown; op: unknown; timestamp: unknown; content_json: unknown; parts_json: unknown }[]
     const out: Array<{ spanId: string; text: string; timestamp?: string }> = []
