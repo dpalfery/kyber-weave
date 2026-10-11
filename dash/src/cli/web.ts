@@ -254,10 +254,18 @@ export class DashboardPortOccupiedError extends DashboardPortRefusedError {
  */
 export class DashboardPortUnavailableError extends DashboardPortRefusedError {
   constructor(port: number, code: string) {
+    // The privilege hint applies only to low ports: a socket-layer rejection on a
+    // high port (e.g. ERR_SOCKET_BAD_PORT on 70000) lectured about sub-1024 privilege
+    // reads like the wrong remedy. Keep the same remedies in both wordings.
+    const reason =
+      port < 1024
+        ? `A port below 1024 needs privilege to bind; `
+        : `The socket layer rejected the port; `
     super(
       port,
       `port ${port} could not be bound (${code}). ` +
-        `A port below 1024 needs privilege to bind; start this run with --port <free port>, ` +
+        reason +
+        `start this run with --port <free port>, ` +
         `or persist another port with 'kyberdash dash settings set dashboard.port <port>' ` +
         `and restart. The dashboard did not start on a different port.`
     )

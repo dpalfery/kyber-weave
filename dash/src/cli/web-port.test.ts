@@ -379,8 +379,14 @@ describe('portRefusalFor: every bind refusal reads like the feature, not a trace
     expect(String(err!.message)).toMatch(/privilege|--port|dashboard\.port/i)
   })
 
-  it('maps ERR_SOCKET_BAD_PORT, and leaves port 0 and unknown codes to the caller', () => {
-    expect(portRefusalFor(70000, 'ERR_SOCKET_BAD_PORT')).toBeInstanceOf(DashboardPortUnavailableError)
+  it('maps ERR_SOCKET_BAD_PORT without the sub-1024 privilege lecture, and leaves port 0 and unknown codes to the caller', () => {
+    // A socket-layer rejection on a high port must not claim privilege is the issue,
+    // but must keep the same remedies.
+    const err = portRefusalFor(70000, 'ERR_SOCKET_BAD_PORT')
+    expect(err).toBeInstanceOf(DashboardPortUnavailableError)
+    expect(String(err!.message)).toContain('70000')
+    expect(String(err!.message)).not.toMatch(/privilege/i)
+    expect(String(err!.message)).toMatch(/--port|dashboard\.port|restart/i)
     // 0 is an ephemeral bind, never a configured choice, so the raw error is kept.
     expect(portRefusalFor(0, 'EADDRINUSE')).toBeUndefined()
     expect(portRefusalFor(4747, 'ENOTFOUND')).toBeUndefined()
