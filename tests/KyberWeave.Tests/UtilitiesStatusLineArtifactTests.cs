@@ -976,10 +976,10 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
     // out its whole timeout and passed on the final check: a 30 second stall in a passing test.
     private static bool WaitForFile(string path, TimeSpan timeout)
     {
-        DateTime deadline = DateTime.UtcNow + timeout;
+        System.Diagnostics.Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
         while (!File.Exists(path))
         {
-            if (DateTime.UtcNow >= deadline)
+            if (clock.Elapsed >= timeout)
                 return false;
 
             Thread.Sleep(20);

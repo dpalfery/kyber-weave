@@ -17,6 +17,8 @@ namespace KyberWeave.Tests;
 /// The root must stay short: Microsoft.Testing.Platform creates a named pipe at
 /// <c>$TMPDIR/&lt;32 hex&gt;</c> and a Unix domain socket path is limited to 103 bytes, so a root
 /// inside a deep checkout (every AO worktree) crashes <c>dotnet test</c> before any test runs.
+/// The redirect runs when the test assembly loads, which is before the pipe is created in the
+/// <c>dotnet test</c> flow (the pipe path, and so this length limit, follows <c>TMPDIR</c>).
 /// Windows is left alone: it has no <c>TMPDIR</c> and does not canonicalise this way.
 /// </remarks>
 internal static class TestTempRoot
@@ -33,7 +35,7 @@ internal static class TestTempRoot
         }
 
         byte[] hash = SHA256.HashData(Encoding.UTF8.GetBytes(KyberWeaveTestPaths.ToolRoot));
-        string checkoutKey = Convert.ToHexStringLower(hash.AsSpan(0, 4));
+        string checkoutKey = Convert.ToHexStringLower(hash.AsSpan(0, 8));
         string root = Path.Combine(
             "/tmp",
             "kw-" + checkoutKey,
@@ -41,6 +43,16 @@ internal static class TestTempRoot
         if (root.Length > MaxRootLength)
         {
             return;
+        }
+
+        // A recycled PID may find the previous run's leftovers (kill -9 skips the exit cleanup).
+        try
+        {
+            Directory.Delete(root, recursive: true);
+        }
+        catch (DirectoryNotFoundException)
+        {
+            // The normal case: nothing to clear.
         }
 
         Directory.CreateDirectory(

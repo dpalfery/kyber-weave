@@ -23,7 +23,7 @@ internal sealed class TempDirectory : IDisposable
                     Directory.Delete(Path, recursive: true);
                 return;
             }
-            catch (IOException)
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
                 Thread.Sleep(100);
             }

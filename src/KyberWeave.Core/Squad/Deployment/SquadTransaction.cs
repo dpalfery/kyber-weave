@@ -1586,7 +1586,9 @@ public sealed class SquadTransaction
                            targetPath,
                            FileMode.CreateNew,
                            FileAccess.Write,
-                           FileShare.None))
+                           FileShare.None,
+                           bufferSize: 4096,
+                           SyncToDisk ? FileOptions.WriteThrough : FileOptions.None))
                 {
                     stream.Write(payload.Content.Span);
                     if (SyncToDisk)

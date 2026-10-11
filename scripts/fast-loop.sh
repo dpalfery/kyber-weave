@@ -57,8 +57,8 @@ if [[ "${1:-}" == "--regenerate" ]]; then
   timings="${2:-}"
   if [[ -z "${timings}" ]]; then
     step "collecting per-test timings (this takes ~90 seconds)"
-    timings="$(mktemp -t kw-timings).xml"
-    dotnet "${TEST_DLL}" -xml "${timings}" >/dev/null 2>&1
+    timings="$(mktemp "${TMPDIR:-/tmp}/kw-timings.XXXXXX")"
+    dotnet "${TEST_DLL}" -xml "${timings}" >/dev/null
   fi
   python3 - "${timings}" "${CLASS_LIST}" <<'PY'
 import sys, xml.etree.ElementTree as ET
@@ -93,10 +93,7 @@ if [[ "${1:-}" == "--full" ]]; then
     review gates . --out artifacts/gates.json
 fi
 
-step "build (Release, warnings-as-errors, AnalysisMode=all)"
-dotnet build KyberWeave.sln -c "${CONFIGURATION}"
-
-# Build filters first so a typo fails before the (slower) build.
+# Parse and validate arguments before the build so a typo fails before the (slower) build.
 test_args=()
 case "${1:-}" in
   --class)  test_args+=(-class "${2:?--class needs a pattern}") ;;
@@ -106,9 +103,15 @@ case "${1:-}" in
 esac
 
 if [[ ${#test_args[@]} -eq 0 ]]; then
-  while read -r class; do
-    [[ -n "${class}" ]] && test_args+=(-class "${class}")
+  while IFS= read -r class || [[ -n "${class}" ]]; do
+    class="${class%$'\r'}"
+    [[ -z "${class}" || "${class}" == \#* ]] && continue
+    test_args+=(-class "${class}")
   done < "${CLASS_LIST}"
+  if [[ ${#test_args[@]} -eq 0 ]]; then
+    printf 'no classes in %s; run --regenerate\n' "${CLASS_LIST}" >&2
+    exit 1
+  fi
   # The scale envelope is a size-stress test, not an edit check; keep it out even if its class
   # ever lands in the generated list.
   test_args+=(-trait- "Category=Scale")
@@ -117,7 +120,17 @@ else
   step "tests (filtered)"
 fi
 
-dotnet "${TEST_DLL}" "${test_args[@]}"
+step "build (Release, warnings-as-errors, AnalysisMode=all)"
+dotnet build KyberWeave.sln -c "${CONFIGURATION}"
+
+# A filter that matches nothing exits 0, which reads as a pass, so read the runner's own total.
+test_log="$(mktemp "${TMPDIR:-/tmp}/kw-fast-loop.XXXXXX")"
+trap 'rm -f "${test_log}"' EXIT
+dotnet "${TEST_DLL}" "${test_args[@]}" | tee "${test_log}"
+if ! sed $'s/\x1b\\[[0-9;]*m//g' "${test_log}" | grep -Eq 'Total: [1-9][0-9]*,'; then
+  printf 'no tests ran; check the --class / --method filter\n' >&2
+  exit 1
+fi
 
 step "docs validate (no CodeGraph index required)"
 dotnet run --project src/KyberWeave.Cli -c "${CONFIGURATION}" --no-build -- \
