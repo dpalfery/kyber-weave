@@ -1,0 +1,99 @@
+{
+  "action": "enable",
+  "harness": "copilot",
+  "dryRun": false,
+  "outcome": "wrote",
+  "events": [
+    {
+      "kind": "wrote",
+      "harness": "copilot",
+      "fileId": "vscode-stable",
+      "path": "/Users/example/Library/Application Support/Code/User/settings.json",
+      "changes": [
+        {
+          "key": "github.copilot.chat.otel.enabled",
+          "before": false,
+          "after": true
+        },
+        {
+          "key": "github.copilot.chat.otel.exporterType",
+          "after": "otlp-http"
+        },
+        {
+          "key": "github.copilot.chat.otel.otlpEndpoint",
+          "after": "http://127.0.0.1:4318"
+        },
+        {
+          "key": "github.copilot.chat.otel.captureContent",
+          "after": true
+        },
+        {
+          "key": "github.copilot.chat.otel.maxAttributeSizeChars",
+          "after": 0
+        }
+      ]
+    }
+  ],
+  "harnessState": {
+    "id": "copilot",
+    "displayName": "Copilot",
+    "mode": "managed",
+    "installed": "detected",
+    "installEvidence": [
+      "VS Code Stable user settings found at /Users/example/Library/Application Support/Code/User/settings.json",
+      "VS Code Insiders user settings not found at /Users/example/Library/Application Support/Code - Insiders/User/settings.json"
+    ],
+    "state": "on",
+    "receipt": "recorded",
+    "files": [
+      {
+        "id": "vscode-stable",
+        "path": "/Users/example/Library/Application Support/Code/User/settings.json",
+        "applicable": true,
+        "exists": true,
+        "expectedKeys": [
+          "github.copilot.chat.otel.enabled",
+          "github.copilot.chat.otel.exporterType",
+          "github.copilot.chat.otel.otlpEndpoint",
+          "github.copilot.chat.otel.captureContent",
+          "github.copilot.chat.otel.maxAttributeSizeChars"
+        ],
+        "presentKeys": [
+          "github.copilot.chat.otel.enabled",
+          "github.copilot.chat.otel.exporterType",
+          "github.copilot.chat.otel.otlpEndpoint",
+          "github.copilot.chat.otel.captureContent",
+          "github.copilot.chat.otel.maxAttributeSizeChars"
+        ],
+        "missingKeys": [],
+        "drift": null
+      },
+      {
+        "id": "vscode-insiders",
+        "path": "/Users/example/Library/Application Support/Code - Insiders/User/settings.json",
+        "applicable": false,
+        "exists": false,
+        "expectedKeys": [
+          "github.copilot.chat.otel.enabled",
+          "github.copilot.chat.otel.exporterType",
+          "github.copilot.chat.otel.otlpEndpoint",
+          "github.copilot.chat.otel.captureContent",
+          "github.copilot.chat.otel.maxAttributeSizeChars"
+        ],
+        "presentKeys": [],
+        "missingKeys": [],
+        "drift": null
+      }
+    ],
+    "warnings": [],
+    "manualSteps": [],
+    "statusLines": []
+  },
+  "receiver": {
+    "hosted": true,
+    "willEnable": false,
+    "enabled": true,
+    "enableFailed": false,
+    "lastManagedHarnessDisabled": false
+  }
+}

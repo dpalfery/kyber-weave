@@ -1,0 +1,234 @@
+{
+  "platform": "linux",
+  "receiver": {
+    "hosted": false,
+    "liveness": "unknown",
+    "detail": "this KyberDash server does not host the OTLP receiver; liveness was not probed"
+  },
+  "harnesses": [
+    {
+      "id": "copilot",
+      "displayName": "Copilot",
+      "mode": "managed",
+      "installed": "detected",
+      "installEvidence": [
+        "VS Code Stable user settings found at /home/example/.config/Code/User/settings.json",
+        "VS Code Insiders user settings not found at /home/example/.config/Code - Insiders/User/settings.json"
+      ],
+      "state": "off",
+      "receipt": "absent",
+      "files": [
+        {
+          "id": "vscode-stable",
+          "path": "/home/example/.config/Code/User/settings.json",
+          "applicable": true,
+          "exists": true,
+          "expectedKeys": [
+            "github.copilot.chat.otel.enabled",
+            "github.copilot.chat.otel.exporterType",
+            "github.copilot.chat.otel.otlpEndpoint",
+            "github.copilot.chat.otel.captureContent",
+            "github.copilot.chat.otel.maxAttributeSizeChars"
+          ],
+          "presentKeys": [],
+          "missingKeys": [
+            "github.copilot.chat.otel.enabled",
+            "github.copilot.chat.otel.exporterType",
+            "github.copilot.chat.otel.otlpEndpoint",
+            "github.copilot.chat.otel.captureContent",
+            "github.copilot.chat.otel.maxAttributeSizeChars"
+          ],
+          "drift": null
+        },
+        {
+          "id": "vscode-insiders",
+          "path": "/home/example/.config/Code - Insiders/User/settings.json",
+          "applicable": false,
+          "exists": false,
+          "expectedKeys": [
+            "github.copilot.chat.otel.enabled",
+            "github.copilot.chat.otel.exporterType",
+            "github.copilot.chat.otel.otlpEndpoint",
+            "github.copilot.chat.otel.captureContent",
+            "github.copilot.chat.otel.maxAttributeSizeChars"
+          ],
+          "presentKeys": [],
+          "missingKeys": [],
+          "drift": null
+        }
+      ],
+      "warnings": [],
+      "manualSteps": [],
+      "statusLines": []
+    },
+    {
+      "id": "claude-code",
+      "displayName": "Claude Code",
+      "mode": "managed",
+      "installed": "unknown",
+      "installEvidence": [
+        "could not inspect /home/example/.claude/settings.json (EACCES)"
+      ],
+      "state": "unknown",
+      "receipt": "absent",
+      "files": [
+        {
+          "id": "claude-settings",
+          "path": "/home/example/.claude/settings.json",
+          "applicable": true,
+          "exists": null,
+          "expectedKeys": [
+            "env.OTEL_LOGS_EXPORTER",
+            "env.OTEL_LOG_USER_PROMPTS",
+            "env.OTEL_LOG_ASSISTANT_RESPONSES",
+            "env.OTEL_LOG_TOOL_DETAILS",
+            "env.OTEL_LOG_TOOL_CONTENT",
+            "env.OTEL_LOG_RAW_API_BODIES",
+            "env.CLAUDE_CODE_OTEL_CONTENT_MAX_LENGTH",
+            "env.CLAUDE_CODE_ENABLE_TELEMETRY",
+            "env.CLAUDE_CODE_ENHANCED_TELEMETRY_BETA",
+            "env.OTEL_TRACES_EXPORTER",
+            "env.OTEL_EXPORTER_OTLP_PROTOCOL",
+            "env.OTEL_EXPORTER_OTLP_ENDPOINT"
+          ],
+          "presentKeys": [],
+          "missingKeys": [],
+          "drift": null
+        }
+      ],
+      "warnings": [],
+      "manualSteps": [],
+      "statusLines": []
+    },
+    {
+      "id": "codex",
+      "displayName": "Codex",
+      "mode": "status-only",
+      "installed": "not-detected",
+      "installEvidence": [
+        "no config found at /home/example/.codex/config.toml"
+      ],
+      "state": "not-applicable",
+      "receipt": "absent",
+      "files": [
+        {
+          "id": "codex-config",
+          "path": "/home/example/.codex/config.toml",
+          "applicable": false,
+          "exists": false,
+          "expectedKeys": [],
+          "presentKeys": [],
+          "missingKeys": [],
+          "drift": null
+        }
+      ],
+      "warnings": [],
+      "manualSteps": [],
+      "statusLines": [
+        "no [otel] table is present; coverage comes from session files"
+      ]
+    },
+    {
+      "id": "opencode",
+      "displayName": "OpenCode",
+      "mode": "managed",
+      "installed": "detected",
+      "installEvidence": [
+        "config found at /home/example/.config/opencode/opencode.jsonc"
+      ],
+      "state": "on",
+      "receipt": "recorded",
+      "files": [
+        {
+          "id": "opencode-config",
+          "path": "/home/example/.config/opencode/opencode.jsonc",
+          "applicable": true,
+          "exists": true,
+          "expectedKeys": [
+            "experimental.openTelemetry"
+          ],
+          "presentKeys": [
+            "experimental.openTelemetry"
+          ],
+          "missingKeys": [],
+          "drift": null
+        }
+      ],
+      "warnings": [],
+      "manualSteps": [
+        {
+          "id": "opencode-otel-endpoint",
+          "text": "OpenCode reads the OTLP endpoint from its process environment (upstream #13438), not from opencode.jsonc; set OTEL_EXPORTER_OTLP_ENDPOINT in the environment OpenCode is launched from",
+          "env": {
+            "name": "OTEL_EXPORTER_OTLP_ENDPOINT",
+            "value": "http://127.0.0.1:4318"
+          }
+        }
+      ],
+      "statusLines": []
+    },
+    {
+      "id": "pi",
+      "displayName": "Pi",
+      "mode": "status-only",
+      "installed": "detected",
+      "installEvidence": [
+        "agent settings found at /home/example/.pi/agent/settings.json",
+        "observme.yaml present at /home/example/.pi/agent/observme.yaml"
+      ],
+      "state": "not-applicable",
+      "receipt": "absent",
+      "files": [
+        {
+          "id": "pi-agent-settings",
+          "path": "/home/example/.pi/agent/settings.json",
+          "applicable": false,
+          "exists": true,
+          "expectedKeys": [],
+          "presentKeys": [],
+          "missingKeys": [],
+          "drift": null
+        }
+      ],
+      "warnings": [],
+      "manualSteps": [],
+      "statusLines": [
+        "extension: ObservMe (observme.yaml)"
+      ]
+    },
+    {
+      "id": "antigravity",
+      "displayName": "Antigravity",
+      "mode": "status-only",
+      "installed": "detected",
+      "installEvidence": [
+        "settings found at /home/example/.gemini/antigravity-cli/settings.json"
+      ],
+      "state": "not-applicable",
+      "receipt": "absent",
+      "files": [
+        {
+          "id": "antigravity-settings",
+          "path": "/home/example/.gemini/antigravity-cli/settings.json",
+          "applicable": false,
+          "exists": true,
+          "expectedKeys": [],
+          "presentKeys": [],
+          "missingKeys": [],
+          "drift": null
+        }
+      ],
+      "warnings": [],
+      "manualSteps": [
+        {
+          "id": "antigravity-declared-context-window",
+          "text": "Add span.set_attribute(\"declaredContextWindow\", <positive token count>) on the statusline bridge's chat span; the window exists only when the user declares it"
+        }
+      ],
+      "statusLines": [
+        "statusline bridge: statusLine.command is not set",
+        "declaredContextWindow snippet: span.set_attribute(\"declaredContextWindow\", <positive token count>)"
+      ]
+    }
+  ]
+}

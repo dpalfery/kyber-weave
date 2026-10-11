@@ -4,13 +4,18 @@
 // maps the harness's real OTLP exporter surface and turns it into a managed
 // writer. Phase 2 tasks edit only their own writer file; the registry stays
 // a plain list. Config paths resolve from the HOME passed at call time —
-// never at module load — so tests run entirely under a temporary HOME.
+// never at module load — so tests run entirely under a temporary HOME. Since
+// D14 each resolvePath also takes an optional path environment: the platform
+// picks the joining rules and carries the Windows appData root, so win32
+// resolution is testable on any host while every one-argument caller stays
+// valid.
 //
 // The managed-writer fields below are the shared declaration seam. Multi-file
 // paths, JSON scalar types, status warnings and the env snippet live here so
 // a harness module cannot grow a second writer that bypasses D11.
 
 import type { JsonScalar } from '../edit-json.js'
+import type { PathEnv } from '../paths.js'
 import { antigravityHarness } from './antigravity.js'
 import { claudeCodeHarness } from './claude-code.js'
 import { codexHarness } from './codex.js'
@@ -26,7 +31,7 @@ export type PendingHarnessWriter = {
   id: string
   displayName: string
   reason: string
-  resolvePath: (home: string) => string
+  resolvePath: (home: string, env?: PathEnv) => string
   format: CaptureFileFormat
   /**
    * Home-dependent status lines. When set and non-empty, `status` prints
@@ -44,7 +49,7 @@ export type PendingHarnessWriter = {
 export type CaptureConfigFile = {
   fileId: string
   format: CaptureFileFormat
-  resolvePath: (home: string) => string
+  resolvePath: (home: string, env?: PathEnv) => string
   /**
    * Keys `enable` writes. JSON and JSONC keep JSON types (string, boolean,
    * number, null). TOML and YAML are still written as strings by the core.
@@ -85,7 +90,7 @@ export type ManagedHarnessWriter = {
   kind: 'managed'
   id: string
   displayName: string
-  resolvePath: (home: string) => string
+  resolvePath: (home: string, env?: PathEnv) => string
   format: CaptureFileFormat
   /**
    * The single-file surface. Strings remain valid. JSON scalars are accepted

@@ -7,6 +7,7 @@ import { fetchKyberSessionContent, fetchSpanAttributes } from '../lib/kyberApi.j
 import type { KyberMessageLike, KyberTurnContentShadow } from '../lib/kyberApi.js'
 import type { DrawerContent, SessionTimelineNode } from './AgentSessionDashboard.js'
 import { Skeleton } from './ui/skeleton.js'
+import { SlideOutDrawer } from './ui/SlideOutDrawer.js'
 
 /**
  * Harness XML tags folded into collapsible <details> elements.
@@ -1055,6 +1056,10 @@ export interface SessionInspectorDrawerProps {
  * Slide-out Inspector Drawer.
  * Slides in from right (z-50) with dark backdrop.
  * Closed via Escape key, close button ('✕'), or clicking backdrop.
+ *
+ * A thin wrapper over the shared SlideOutDrawer shell. `manageFocus` is left
+ * off: this drawer has never moved focus, and turning it on here would change
+ * behavior no test ever pinned.
  */
 export function SessionInspectorDrawer({
   open,
@@ -1065,19 +1070,6 @@ export function SessionInspectorDrawer({
   rawContent,
   contentRequest,
 }: SessionInspectorDrawerProps) {
-  useEffect(() => {
-    if (!open || typeof window === 'undefined') return
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        onClose()
-      }
-    }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [open, onClose])
-
-  if (!open) return null
-
   // Drop the clipped leaf while the unclipped route is in play, otherwise the
   // 2000-char stub renders next to (or instead of) the text this route exists for.
   const rawRecord =
@@ -1085,73 +1077,40 @@ export function SessionInspectorDrawer({
   const inspectorData = contentRequest && rawRecord ? { ...rawRecord, content: undefined } : rawContent
   const fallbackContent = rawRecord && 'content' in rawRecord ? rawRecord.content : undefined
 
-  return (
-    <div className="relative z-50">
-      {/* Dark backdrop */}
-      <div
-        className="fixed inset-0 bg-black/60 backdrop-blur-[1px] transition-opacity"
-        onClick={onClose}
-        aria-hidden="true"
-        data-testid="drawer-backdrop"
-      />
-
-      {/* Drawer panel sliding in from right */}
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-        className={cn(
-          'fixed top-0 right-0 bottom-0 z-50 flex flex-col',
-          'w-full max-w-full sm:max-w-xl md:max-w-2xl',
-          'bg-card border-l border-border shadow-2xl',
-          'animate-in slide-in-from-right duration-200 ease-in-out'
+  // Invoked as a function rather than returned as JSX on purpose: the
+  // characterization harnesses render this component directly — under a hook
+  // dispatcher that provides only useEffect/useState/useMemo — then walk the
+  // returned tree for test ids and run the last registered effect to assert
+  // the keydown listener. Returning <SlideOutDrawer/> would hand both an
+  // unexpanded child element. The shell's test-id derivation keeps every
+  // historical id (`drawer-backdrop`, `drawer-title`, `drawer-close-button`,
+  // `drawer-body`, …) exactly; only the panel id is not derivable from
+  // `drawer`, so it is pinned to `session-inspector-drawer`.
+  return SlideOutDrawer({
+    open,
+    onClose,
+    label: title,
+    title,
+    subtitle,
+    testIdPrefix: 'drawer',
+    panelTestId: 'session-inspector-drawer',
+    children: (
+      <>
+        {children}
+        {inspectorData !== undefined && inspectorData !== null && (
+          <InspectorContent data={inspectorData} />
         )}
-        onClick={(e) => e.stopPropagation()}
-        data-testid="session-inspector-drawer"
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between border-b border-border px-5 py-3.5 shrink-0 bg-card">
-          <div className="min-w-0 flex-1 pr-3">
-            <h2 className="text-sm font-semibold text-foreground truncate" data-testid="drawer-title">
-              {title}
-            </h2>
-            {subtitle && (
-              <p className="text-xs text-muted-foreground truncate mt-0.5" data-testid="drawer-subtitle">
-                {subtitle}
-              </p>
-            )}
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <button
-              type="button"
-              onClick={onClose}
-              aria-label="Close"
-              className="flex h-8 w-8 items-center justify-center rounded-md border border-border text-tertiary-foreground transition-colors hover:bg-interactive-secondary hover:text-foreground"
-              data-testid="drawer-close-button"
-            >
-              ✕
-            </button>
-          </div>
-        </div>
-
-        {/* Scrollable Body */}
-        <div className="flex-1 overflow-y-auto p-5 space-y-4 text-xs" data-testid="drawer-body">
-          {children}
-          {inspectorData !== undefined && inspectorData !== null && (
-            <InspectorContent data={inspectorData} />
-          )}
-          {contentRequest && (
-            <FullContentPanel request={contentRequest} fallback={fallbackContent} />
-          )}
-          {!children && (rawContent === undefined || rawContent === null) && !contentRequest && (
-            <p className="text-xs text-tertiary-foreground italic py-8 text-center">
-              No content to inspect.
-            </p>
-          )}
-        </div>
-      </div>
-    </div>
-  )
+        {contentRequest && (
+          <FullContentPanel request={contentRequest} fallback={fallbackContent} />
+        )}
+        {!children && (rawContent === undefined || rawContent === null) && !contentRequest && (
+          <p className="text-xs text-tertiary-foreground italic py-8 text-center">
+            No content to inspect.
+          </p>
+        )}
+      </>
+    ),
+  })
 }
 
 export default SessionInspectorDrawer

@@ -8,6 +8,8 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
+import { pjoin, type PathEnv } from '../paths.js'
+
 import type { PendingHarnessWriter } from './registry.js'
 
 /** The collector extension Pi loads through agent packages. */
@@ -60,7 +62,11 @@ export const piHarness: PendingHarnessWriter = {
   id: 'pi',
   displayName: 'Pi',
   reason: 'status-only; the loaded Pi OTLP extension is reported and no config is written',
-  resolvePath: (home: string) => join(home, '.pi', 'agent', 'settings.json'),
+  // D14: resolves on win32 through the same segments so `status` reports
+  // instead of throwing; describeStatus keeps the host join because its
+  // reads are status-only and follow the real filesystem.
+  resolvePath: (home: string, env?: PathEnv) =>
+    pjoin(env?.platform ?? process.platform, home, '.pi', 'agent', 'settings.json'),
   format: 'json',
   describeStatus: describePiStatus,
 }

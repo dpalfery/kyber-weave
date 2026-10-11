@@ -321,14 +321,24 @@ describe('capture usage errors and platform', () => {
     expect(`${result.stdout}\n${result.stderr}`).toMatch(/otlp\/http/i)
   })
 
-  it('reports Windows as unsupported', async () => {
+  it('reports status under an injected win32 platform instead of refusing Windows (D14)', async () => {
     const home = makeHome()
+    // A temporary application-data directory keeps the win32 VS Code seam off
+    // the real APPDATA root; status is read-only, so win32 paths are resolved
+    // and existence-checked, never written, on any host.
+    const appData = mkdtempSync(join(tmpdir(), 'kyber-capture-t8-appdata-'))
+    temporaryHomes.push(appData)
     const result = await runCapture('status', {
       homeDir: home,
+      appDataDir: appData,
       platform: 'win32',
       fetchHealth: NO_LISTENER,
     })
-    expect(result.exitCode).not.toBe(0)
-    expect(`${result.stdout}\n${result.stderr}`).toMatch(/unsupported/i)
+    expect(result.exitCode).toBe(0)
+    expect(`${result.stdout}\n${result.stderr}`).not.toMatch(/unsupported/i)
+    // The injected application-data directory is the VS Code settings root on
+    // win32, so both D14 edition paths appear with win32 separators.
+    expect(result.stdout).toContain(`${appData}\\Code\\User\\settings.json`)
+    expect(result.stdout).toContain(`${appData}\\Code - Insiders\\User\\settings.json`)
   })
 })

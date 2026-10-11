@@ -4,7 +4,7 @@ title: Kyber-Weave Plan Inventory
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-07
+last-reviewed: 2026-10-11
 ---
 
 # Kyber-Weave Plan Inventory
@@ -29,7 +29,7 @@ Closeout explicitly distinguishes between two waiver categories:
 
 | Plan | Status | Date | Development mode | Goal |
 |---|---|---|---|---|---|
-| _None._ | — | — | — | No plan is currently active. A plan is open only while it is built; the PR that finishes one archives it (see [Archived Plans](#archived-plans) below). |
+| [2026-10-11-harness-otel-settings-drawer.md](2026-10-11-harness-otel-settings-drawer.md) | Ready | 2026-10-11 | test-first | Add a Settings button and right slide-out drawer to the KyberDash web dashboard header that turns OpenTelemetry collection on and off for the three writable harnesses (Claude Code, Copilot, OpenCode) through a new `/api/kyber/capture` engine route over the existing capture core, with a dry-run preview, visible drift refusals, receiver auto-enable, Windows path support, a structured installed-harness status API, and an ADR 0031 amendment. A plan is open only while it is built; the PR that finishes it archives it. |
 
 Earlier history: pipeline T9 and spine S-docs harvested 2026-09-13 into [dash/architecture.md](../dash/architecture.md), [dash/runbook.md](../dash/runbook.md), [dash/telemetry-inventory.md](../dash/telemetry-inventory.md), [ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md), and [ADR 0018](../adr/0018-kyberdash-content-retention-purge.md). ADRs 0012–0015 remain the spine harvest (0014 notes that `kyber purge-content` was not shipped). Residual risks (T8 live-source coverage, findings client-side harness filter) live on the archived plans — they are not shipped claims.
 

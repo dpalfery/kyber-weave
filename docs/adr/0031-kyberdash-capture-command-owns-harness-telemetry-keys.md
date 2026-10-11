@@ -4,7 +4,7 @@ title: The KyberDash Capture Command Owns Harness Telemetry Keys, with Key-Level
 doc-type: adr
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-10
+last-reviewed: 2026-10-11
 ---
 
 # ADR 0031: The KyberDash Capture Command Owns Harness Telemetry Keys, with Key-Level Edits, Receipt Restore, and a Tray-Hosted Receiver
@@ -28,6 +28,35 @@ than tray-local state, and the tray's former `host_receiver` setting is no longe
 [`rules/kyberdash-display-layer`](../rules/kyberdash-display-layer.md)). Capture's own
 position — it installs no service, it writes no telemetry key beyond the export keys above —
 is unchanged, and so is the liveness probe this record depends on.
+
+Amended 2026-10-11 (the harness-OTel settings-drawer plan): decision 1's "The user runs it" is
+extended rather than contradicted, decision 4 gains the route's receiver coupling, and the
+"a green `capture enable` is not capture" consequence below is revised; the departure's scope
+and its receipt, drift and restore contracts are unchanged. The `kyberdash web` server now
+serves the capture engine in process behind `/api/kyber/capture` — `GET` returns structured
+status, `POST` takes `{action, harness, dryRun}` — and the dashboard's Settings drawer uses it
+for enable and disable of the same engine: one harness per explicit user action, a dry-run
+preview first, and never a spawned CLI or script, so
+[ADR 0033](0033-kyberdash-surfaces-are-display-layers.md) and
+[`rules/kyberdash-display-layer`](../rules/kyberdash-display-layer.md) stand unbroken — a
+click in the dashboard is the user running the same engine. Capture now runs on Windows as
+well, in process in TypeScript, with no `.bat`, `.cmd` or `.ps1` shipped and the previous
+`win32` refusal withdrawn: Claude resolves at `<home>\.claude\settings.json`, VS Code at
+`<appData>\Code\User\settings.json` and `<appData>\Code - Insiders\User\settings.json`
+(appData injected by the caller, else `APPDATA`, else `<home>\AppData\Roaming`), and OpenCode
+at `<home>\.config\opencode\opencode.jsonc`, with XDG variables ignored on every OS. The route
+couples the receiver to a successful enable where the CLI deliberately does not (D5, D7, D20):
+a non-dry enable that ends in `wrote` or `noop` turns `settings.receiver.hosted` on when it is
+off, after the config write succeeds, and a setting write that fails is still a 200 carrying
+`receiver.enableFailed: true`; disable never touches the receiver, including when the last
+managed harness is turned off — the dashboard says the receiver is still hosted — and
+`capture enable` at the terminal keeps printing the receiver remedy. The route also filters
+applicability (D19): it writes only config files that already exist or whose host application
+is detected, so enabling Copilot never creates a phantom VS Code Insiders profile directory,
+while the CLI keeps writing every declared file. The harness write scope is unchanged — the
+managed harnesses stay claude-code, copilot and opencode, with codex, pi and antigravity
+status-only — and [ADR 0026](0026-kyber-utilities-owned-files-not-settings.md)'s bar on Kyber
+Utilities writing harness settings is untouched.
 
 ## Context
 
@@ -70,7 +99,11 @@ probe at `OTLP_HEALTHZ_PATH` (`dash/src/otel/receiver.ts`).
    - reversible: `capture disable` restores what was there before;
    - testable against a temporary `HOME`.
 
-   The user runs it. Agents never hand-edit the user's harness config.
+   The user runs it. Since the 2026-10-11 amendment a click in the dashboard is the user running
+   it too: the Settings drawer asks `/api/kyber/capture` on the `kyberdash web` server, which
+   runs the same engine code in process — one harness per explicit user action, behind a
+   dry-run preview — and never spawns a CLI or a script. Agents never hand-edit the user's
+   harness config.
 2. **Edits are key-level, and a KyberDash-owned receipt records them.** For each file, the
    receipt records every key KyberDash wrote, together with that key's prior value or the fact
    that it was absent. It also records the file's SHA-256 before and after the edit.
@@ -84,7 +117,12 @@ probe at `OTLP_HEALTHZ_PATH` (`dash/src/otel/receiver.ts`).
    shared `settings.receiver.hosted`, owned by the `kyberdash web` server rather than the
    tray, while `launch_at_login` remains the tray's own autostart switch.
    `capture status` and `capture enable` probe `GET 127.0.0.1:4318/healthz` and print the exact
-   remedy when nothing answers. Capture installs no LaunchAgent and no systemd unit.
+   remedy when nothing answers. The route couples where the CLI does not (2026-10-11
+   amendment): a non-dry enable over `/api/kyber/capture` that ends in `wrote` or `noop` turns
+   `settings.receiver.hosted` on when it is off, after the config write succeeds, and a
+   setting write that fails is still a 200 carrying `receiver.enableFailed: true`. The CLI
+   stays uncoupled: `capture enable` keeps printing the receiver remedy. Capture installs no
+   LaunchAgent and no systemd unit.
 5. **The departure is scoped to KyberDash.** It applies only to the telemetry keys the capture
    command owns. ADR 0026 continues to govern Kyber Utilities, and nothing here licenses any
    other component to write harness settings.
@@ -115,9 +153,13 @@ probe at `OTLP_HEALTHZ_PATH` (`dash/src/otel/receiver.ts`).
   printed. That is the cost of never overwriting a user's change.
 - The receipt is new KyberDash state. It is separate from Kyber-Squad's receipts and from Kyber
   Utilities' receipt, and none of them reads another's.
-- A green `capture enable` is not capture. With the tray's receiver settings off, which is the
-  default, nothing listens on 4318. The probe makes that visible, but the remedy is still the
-  user's to apply.
+- A green enable is not capture. With `settings.receiver.hosted` off, which is the default,
+  nothing listens on 4318; an ensure-if-absent endpoint the file already holds is kept, not
+  overwritten, so when it points elsewhere the enable response carries an `endpoint-differs`
+  warning, and receiver liveness is reported separately, never assumed. At the terminal the
+  remedy is still the user's to apply; over the route, a successful enable turns the receiver
+  on itself, and a setting write that fails is `receiver.enableFailed: true` on a 200 rather
+  than a failed request (2026-10-11 amendment).
 - Two components now take opposite positions on harness settings. The boundary between them is
   this record's scope clause. A future component that wants to write harness settings needs its
   own record.

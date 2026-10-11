@@ -11,6 +11,8 @@ import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { parse, type ParseError } from 'jsonc-parser'
 
+import { pjoin, type PathEnv } from '../paths.js'
+
 import type { PendingHarnessWriter } from './registry.js'
 
 /** The KyberDash OTLP/HTTP port the bridge is grepped for. Read-only. */
@@ -27,7 +29,11 @@ export const antigravityHarness: PendingHarnessWriter = {
   id: 'antigravity',
   displayName: 'Antigravity',
   reason: 'status-only: the user statusline bridge is left unchanged',
-  resolvePath: (home: string) => join(home, '.gemini', 'antigravity-cli', 'settings.json'),
+  // D14: resolves on win32 through the same segments so `status` reports
+  // instead of throwing; describeStatus keeps the host join because its
+  // reads are status-only and follow the real filesystem.
+  resolvePath: (home: string, env?: PathEnv) =>
+    pjoin(env?.platform ?? process.platform, home, '.gemini', 'antigravity-cli', 'settings.json'),
   format: 'json',
   describeStatus: antigravityStatusDetail,
 }

@@ -2,9 +2,11 @@
 //
 // `kyberdash kyber capture status | enable | disable` points the six D6
 // harnesses' OTLP exporters at the KyberDash receiver. Only OTLP/HTTP
-// endpoints may be written; macOS and Linux are supported, Windows reports
-// unsupported. Every config path resolves from the HOME passed at call time
-// — never at module load — so tests run entirely under a temporary HOME.
+// endpoints may be written. macOS, Linux and Windows are all supported:
+// since D14 every path resolves through the platform-aware seam in paths.ts,
+// so Windows runs in-process with no script shipped (ADR 0031 amendment).
+// Every config path resolves from the HOME passed at call time — never at
+// module load — so tests run entirely under a temporary HOME.
 //
 // A managed declaration may name several config files. JSON and JSONC values
 // keep their JSON types; TOML and YAML managed blocks stay strings. An
@@ -43,6 +45,7 @@ import {
   type CaptureHarnessWriter,
   type ManagedHarnessWriter,
 } from './harnesses/registry.js'
+import type { PathEnv } from './paths.js'
 
 export { SUPPORTED_CAPTURE_HARNESS_IDS }
 export type { CaptureHarnessWriter }
@@ -63,6 +66,13 @@ export type CaptureRunOptions = {
   homeDir?: string
   /** Platform override; defaults to `process.platform` at call time. */
   platform?: NodeJS.Platform
+  /**
+   * Windows application-data root for the VS Code settings seam (D14).
+   * Injected so tests point win32 resolution at a temp directory instead of
+   * the real APPDATA; a real run defaults to APPDATA, then
+   * `<home>\AppData\Roaming`. Ignored on every other platform.
+   */
+  appDataDir?: string
   /** Injectable health fetch so tests pin liveness without a socket. */
   fetchHealth?: HealthFetcher
   /** Writer set override; defaults to the pending-discovery registry. */
@@ -125,10 +135,14 @@ type ResolvedConfigFile = {
  * surface, and using it would turn boolean `true` into the string `"true"`
  * and would skip every file after the first.
  */
-function declaredFiles(writer: ManagedHarnessWriter, home: string): ResolvedConfigFile[] {
+function declaredFiles(
+  writer: ManagedHarnessWriter,
+  home: string,
+  env: PathEnv,
+): ResolvedConfigFile[] {
   if (writer.configFiles !== undefined && writer.configFiles.length > 0) {
     return writer.configFiles.map((file) => ({
-      path: file.resolvePath(home),
+      path: file.resolvePath(home, env),
       format: file.format,
       desiredKeys: file.desiredKeys,
       ensureIfAbsentKeys: file.ensureIfAbsentKeys,
@@ -136,7 +150,7 @@ function declaredFiles(writer: ManagedHarnessWriter, home: string): ResolvedConf
   }
   return [
     {
-      path: writer.resolvePath(home),
+      path: writer.resolvePath(home, env),
       format: writer.format,
       desiredKeys: writer.desiredKeys,
       ensureIfAbsentKeys: writer.ensureIfAbsentKeys,
@@ -212,15 +226,14 @@ export async function runCapture(
   // temporary for the whole call.
   const home = options.homeDir ?? homedir()
   const platform = options.platform ?? process.platform
+  // D14 (ADR 0031 amendment): Windows is supported in-process — every harness
+  // resolves its config through the platform-aware seam in paths.ts, and no
+  // script is shipped — so the win32 refusal that used to stand here is gone.
+  // Status stays read-only: a win32 platform injected on another host changes
+  // only the strings it prints, never the filesystem.
+  const pathEnv: PathEnv = { platform, appData: options.appDataDir }
   const out: string[] = []
   const err: string[] = []
-
-  if (platform === 'win32') {
-    err.push(
-      'kyberdash capture: Windows is unsupported; capture runs on macOS and Linux only.',
-    )
-    return { exitCode: REFUSAL_EXIT, stdout: '', stderr: `${err.join('\n')}\n` }
-  }
 
   const endpoint = options.endpoint ?? DEFAULT_CAPTURE_ENDPOINT
   if (!isOtlpHttpEndpoint(endpoint)) {
@@ -252,22 +265,31 @@ export async function runCapture(
   const probe = await probeReceiver(endpoint, options.fetchHealth)
 
   if (action === 'status') {
-    out.push(...statusLines(selected, home, endpoint))
+    out.push(...statusLines(selected, home, pathEnv, endpoint))
     out.push(`receiver: ${probe.state}`, `  ${probe.detail}`)
     if (probe.state === 'none') out.push(RECEIVER_DOWN_REMEDY)
     return { exitCode: 0, stdout: `${out.join('\n')}\n`, stderr: '' }
   }
 
   if (action === 'enable') {
-    return runEnable(selected, home, endpoint, probe.state, probe.detail, options.dryRun ?? false)
+    return runEnable(
+      selected,
+      home,
+      pathEnv,
+      endpoint,
+      probe.state,
+      probe.detail,
+      options.dryRun ?? false,
+    )
   }
 
-  return runDisable(selected, home, options.dryRun ?? false)
+  return runDisable(selected, home, pathEnv, options.dryRun ?? false)
 }
 
 function statusLines(
   writers: readonly CaptureHarnessWriter[],
   home: string,
+  env: PathEnv,
   endpoint: string,
 ): string[] {
   const lines: string[] = []
@@ -275,7 +297,7 @@ function statusLines(
   for (const writer of writers) {
     lines.push(`harness ${writer.id} (${writer.displayName})`)
     if (writer.kind === 'pending') {
-      const path = writer.resolvePath(home)
+      const path = writer.resolvePath(home, env)
       const read = readTextIfPresent(path)
       lines.push(
         read.error !== undefined
@@ -296,12 +318,12 @@ function statusLines(
       }
       continue
     }
-    for (const file of declaredFiles(writer, home)) {
+    for (const file of declaredFiles(writer, home, env)) {
       appendFileStatus(lines, file, endpoint, receipt)
     }
     // Warnings and the env snippet are status text only. They are not keys
     // `enable` writes, so they never enter the receipt.
-    lines.push(...statusWarningLines(writer, home))
+    lines.push(...statusWarningLines(writer, home, env))
     lines.push(...statusEnvSnippetLines(writer))
   }
   return lines
@@ -377,7 +399,7 @@ function presentKeys(
   return readBlockKeys(content)
 }
 
-function statusWarningLines(writer: ManagedHarnessWriter, home: string): string[] {
+function statusWarningLines(writer: ManagedHarnessWriter, home: string, env: PathEnv): string[] {
   const warnings = writer.statusWarnings
   if (warnings === undefined || warnings.length === 0) return []
   const files = writer.configFiles ?? []
@@ -385,7 +407,7 @@ function statusWarningLines(writer: ManagedHarnessWriter, home: string): string[
   for (const warning of warnings) {
     const file = files.find((candidate) => candidate.fileId === warning.fileId)
     if (file === undefined) continue
-    const { found, content, error } = readTextIfPresent(file.resolvePath(home))
+    const { found, content, error } = readTextIfPresent(file.resolvePath(home, env))
     if (error !== undefined || !found) continue
     const observed = observedConfigValue(file.format, content, warning.key)
     if (observed.present && observed.value === warning.whenValue) {
@@ -545,6 +567,7 @@ function dryRunLines(
 async function runEnable(
   writers: readonly CaptureHarnessWriter[],
   home: string,
+  env: PathEnv,
   endpoint: string,
   probeState: string,
   probeDetail: string,
@@ -561,7 +584,7 @@ async function runEnable(
       out.push(`harness ${writer.id}: ${writer.reason} (pending discovery); skipped`)
       continue
     }
-    for (const file of declaredFiles(writer, home)) {
+    for (const file of declaredFiles(writer, home, env)) {
       const enabled = enableFile(writer, file, endpoint, dryRun)
       out.push(...enabled.out)
       err.push(...enabled.err)
@@ -699,6 +722,7 @@ function driftLinesFor(
 async function runDisable(
   writers: readonly CaptureHarnessWriter[],
   home: string,
+  env: PathEnv,
   dryRun: boolean,
 ): Promise<CaptureRunResult> {
   const out: string[] = []
@@ -712,7 +736,7 @@ async function runDisable(
       out.push(`harness ${writer.id}: ${writer.reason} (pending discovery); skipped`)
       continue
     }
-    const files = declaredFiles(writer, home)
+    const files = declaredFiles(writer, home, env)
     // Drift is decided for every file before any revert is written. One
     // drifted file leaves the others in place so the receipt still describes
     // the whole enable; a later disable can restore every file once the

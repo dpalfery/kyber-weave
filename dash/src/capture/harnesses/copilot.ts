@@ -9,9 +9,8 @@
 // and does not turn identity attributes on. The Copilot CLI is env-only;
 // the snippet is read from this process, and shell rc files are never opened.
 
-import { join } from 'node:path'
-
 import type { JsonScalar } from '../edit-json.js'
+import { pjoin, type PathEnv } from '../paths.js'
 import type { CaptureConfigFile, CaptureStatusWarning, ManagedHarnessWriter } from './registry.js'
 
 /** The one settings property Copilot uses for chat OTel. Children hang off it. */
@@ -39,23 +38,40 @@ function copilotDesiredKeys(endpoint: string): Record<string, JsonScalar> {
 }
 
 /**
- * VS Code user settings for one edition, rooted at the HOME capture was given.
- * XDG_CONFIG_HOME and the real Library are ignored so a temporary HOME cannot
- * leak into the user's live settings, and so receipt paths match the files
- * enable wrote.
+ * VS Code user settings for one edition, rooted at the HOME capture was given;
+ * win32 roots at the application-data directory instead, because that is
+ * where VS Code reads User/settings.json on Windows. XDG_CONFIG_HOME and the
+ * real Library are ignored so a temporary HOME cannot leak into the user's
+ * live settings, and so receipt paths match the files enable wrote.
  */
-function vscodeSettingsPath(home: string, edition: 'Code' | 'Code - Insiders'): string {
-  if (process.platform === 'darwin') {
-    return join(home, 'Library', 'Application Support', edition, 'User', 'settings.json')
+function vscodeSettingsPath(
+  home: string,
+  edition: 'Code' | 'Code - Insiders',
+  env?: PathEnv,
+): string {
+  const platform = env?.platform ?? process.platform
+  if (platform === 'win32') {
+    // WHY this precedence: an injected appData (a test's temp directory) must
+    // beat the real APPDATA so a synthetic run never resolves into the
+    // user's live settings; APPDATA beats the HOME guess because Windows
+    // itself exports it; <home>\AppData\Roaming is the documented default
+    // when neither is available. An injected appData is ignored on darwin
+    // and linux, whose strings D14 leaves unchanged.
+    const fallbackRoaming = pjoin(platform, home, 'AppData', 'Roaming')
+    const appData = env?.appData ?? process.env.APPDATA ?? fallbackRoaming
+    return pjoin(platform, appData, edition, 'User', 'settings.json')
   }
-  return join(home, '.config', edition, 'User', 'settings.json')
+  if (platform === 'darwin') {
+    return pjoin(platform, home, 'Library', 'Application Support', edition, 'User', 'settings.json')
+  }
+  return pjoin(platform, home, '.config', edition, 'User', 'settings.json')
 }
 
 function vscodeConfigFile(fileId: string, edition: 'Code' | 'Code - Insiders'): CaptureConfigFile {
   return {
     fileId,
     format: 'jsonc',
-    resolvePath: (home: string) => vscodeSettingsPath(home, edition),
+    resolvePath: (home: string, env?: PathEnv) => vscodeSettingsPath(home, edition, env),
     desiredKeys: copilotDesiredKeys,
   }
 }

@@ -318,3 +318,225 @@ describe('the shared API and its origin rule', () => {
     expect(bad.status).toBe(400)
   })
 })
+
+// ---------------------------------------------------------------------------
+// Appended (task T5): the capture route behind the web server's loopback guard,
+// plus the Host-header rebinding case for every mutator. The existing cross-origin
+// tests cover an evil Origin; a rebinding attack keeps the Origin loopback (or sends
+// none, like the native tray) and lies only in the Host header, so these pin that the
+// Host check alone refuses the request.
+//
+// The capture route is reached through runWebDashboard's new `capture` seam (recorded
+// contract: WebDashboardServices.capture?: CaptureRouteSettings from
+// dash/src/server/capture-routes.ts, forwarded into the route deps), so these run the
+// real server against a temporary capture HOME and never touch a real harness config.
+// ---------------------------------------------------------------------------
+
+/** The capture seam as this file understands it (the type lives in capture-routes.ts). */
+type WebCaptureSettings = {
+  homeDir: string
+  platform?: NodeJS.Platform
+  fetchHealth?: (url: string) => Promise<{ status: number; body: string }>
+}
+
+const WEB_CAPTURE_NO_RECEIVER: NonNullable<WebCaptureSettings['fetchHealth']> = async () => {
+  throw new Error('connect ECONNREFUSED 127.0.0.1:4318 (synthetic)')
+}
+
+/** send() with a chosen Host header — the DNS-rebinding shape, where only the Host lies. */
+function sendWithHost(
+  base: string,
+  host: string,
+  method: string,
+  path: string,
+  options: { body?: unknown } = {},
+): Promise<{ status: number; text: string; json: unknown }> {
+  return new Promise((resolve, reject) => {
+    const payload = options.body === undefined ? undefined : JSON.stringify(options.body)
+    const headers: Record<string, string> = { host }
+    if (payload !== undefined) {
+      headers['content-type'] = 'application/json'
+      headers['content-length'] = String(Buffer.byteLength(payload))
+    }
+    // No Origin header: the native tray sends none, so the Host is the only lie in play.
+    const req = request(`${base}${path}`, { method, headers }, (res) => {
+      let text = ''
+      res.setEncoding('utf8')
+      res.on('data', (chunk: string) => {
+        text += chunk
+      })
+      res.on('end', () => {
+        let json: unknown
+        try {
+          json = JSON.parse(text)
+        } catch {
+          json = undefined
+        }
+        resolve({ status: res.statusCode ?? 0, text, json })
+      })
+    })
+    req.on('error', reject)
+    if (payload !== undefined) req.write(payload)
+    req.end()
+  })
+}
+
+type CaptureServerHarness = {
+  server: Server
+  base: string
+  store: CanonStore
+  captureHome: string
+  opencodeConfig: string
+  receiptPath: string
+}
+
+/** The real web server with the capture route pointed at a temporary HOME. */
+async function startCaptureServer(): Promise<CaptureServerHarness> {
+  // writeFileSync/mkdirSync are not in this file's import list, and the append-only
+  // rule means the import block stays untouched: a dynamic import keeps the additions
+  // purely additive.
+  const { mkdirSync, writeFileSync } = await import('node:fs')
+  const stateDir = await mkdtemp(join(tmpdir(), 'kyber-web-test-'))
+  const captureHome = await mkdtemp(join(tmpdir(), 'kyber-web-capture-'))
+  const store = new CanonStore(':memory:')
+  writeSetting(store, SETTING_KEYS.jobsPaused, 'on')
+  const opencodeConfig = join(captureHome, '.config', 'opencode', 'opencode.jsonc')
+  mkdirSync(join(captureHome, '.config', 'opencode'), { recursive: true })
+  writeFileSync(opencodeConfig, '{\n  // synthetic opencode fixture (comments survive enable)\n}\n')
+  const jobSpawner = new FakeSpawner()
+  const receiverSpawner = new FakeSpawner()
+  const stdout: string[] = []
+  const bridge = new KyberBridge({ store, reopenCheckIntervalMs: 0 })
+  const opts = {
+    port: 0,
+    open: false,
+    kyberBridge: bridge,
+    writeStdout: (text: string) => {
+      stdout.push(text)
+    },
+    store,
+    stateDir,
+    program: 'kyberdash-test',
+    jobSpawner,
+    receiverSpawner,
+    receiverProber: { probe: async () => 'refused' },
+    capture: {
+      homeDir: captureHome,
+      platform: 'darwin',
+      fetchHealth: WEB_CAPTURE_NO_RECEIVER,
+    } as WebCaptureSettings,
+  }
+  // The `capture` injection does not exist yet (RED); the same cast `start()` uses keeps
+  // this block compiling.
+  const server = await (runWebDashboard as unknown as (o: unknown) => Promise<Server>)(opts)
+  const harness: CaptureServerHarness = {
+    server,
+    base: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
+    store,
+    captureHome,
+    opencodeConfig,
+    receiptPath: join(captureHome, '.kyberdash', 'capture-receipt.json'),
+  }
+  cleanups.push(async () => {
+    if (server.listening) await new Promise<void>((resolve) => server.close(() => resolve()))
+    store.close()
+    await rm(stateDir, { recursive: true, force: true })
+    await rm(captureHome, { recursive: true, force: true })
+  })
+  return harness
+}
+
+describe('the capture route behind the web server', () => {
+  it('mounts the route and writes through the injected capture home on an allowed POST', async () => {
+    const h = await startCaptureServer()
+
+    const mounted = await send(h.base, 'GET', '/api/kyber/capture')
+    expect(mounted.status).toBe(200)
+    expect(mounted.json).toHaveProperty('harnesses')
+
+    const res = await send(h.base, 'POST', '/api/kyber/capture', {
+      body: { action: 'enable', harness: 'opencode', dryRun: false },
+      origin: h.base,
+    })
+    expect(res.status).toBe(200)
+    expect(res.json).toMatchObject({
+      action: 'enable',
+      harness: 'opencode',
+      dryRun: false,
+      outcome: 'wrote',
+    })
+    expect(readFileSync(h.opencodeConfig, 'utf8')).toContain('experimental.openTelemetry')
+    // The enable turned the shared receiver-hosted setting on through the web server's store.
+    expect(readSetting(h.store, SETTING_KEYS.receiverHosted)).toBe('on')
+  })
+
+  it('rejects a cross-origin POST on the capture route with 403 and writes nothing', async () => {
+    const h = await startCaptureServer()
+    // The guard assertions only mean something on a mounted route, so the loopback
+    // control is part of the same test.
+    const mounted = await send(h.base, 'GET', '/api/kyber/capture')
+    expect(mounted.status).toBe(200)
+
+    const before = readFileSync(h.opencodeConfig, 'utf8')
+    const res = await send(h.base, 'POST', '/api/kyber/capture', {
+      body: { action: 'enable', harness: 'opencode', dryRun: false },
+      origin: 'https://evil.example',
+    })
+    expect(res.status).toBe(403)
+    expect(readFileSync(h.opencodeConfig, 'utf8')).toBe(before)
+    expect(existsSync(h.receiptPath)).toBe(false)
+  })
+
+  it('rejects a rebinding Host header on the capture route with 403 and writes nothing', async () => {
+    const h = await startCaptureServer()
+    // Same control as above: the guard test only means something on a mounted route.
+    const mounted = await send(h.base, 'GET', '/api/kyber/capture')
+    expect(mounted.status).toBe(200)
+
+    const before = readFileSync(h.opencodeConfig, 'utf8')
+    const res = await sendWithHost(h.base, 'evil.example', 'POST', '/api/kyber/capture', {
+      body: { action: 'enable', harness: 'opencode', dryRun: false },
+    })
+    expect(res.status).toBe(403)
+    expect(readFileSync(h.opencodeConfig, 'utf8')).toBe(before)
+    expect(existsSync(h.receiptPath)).toBe(false)
+  })
+})
+
+describe('a rebinding Host header is rejected on every mutator', () => {
+  it('settings PUT answers 403 and writes nothing', async () => {
+    const h = await start({ jobsPaused: true })
+    const res = await sendWithHost(h.base, 'evil.example', 'PUT', '/api/kyber/settings', {
+      body: { jobsPaused: false },
+    })
+    expect(res.status).toBe(403)
+    expect(readSetting(h.store, SETTING_KEYS.jobsPaused)).toBe('on')
+  })
+
+  it('refresh POST answers 403 and starts no job', async () => {
+    const h = await start({ jobsPaused: true })
+    const res = await sendWithHost(h.base, 'evil.example', 'POST', '/api/kyber/refresh', {
+      body: { surface: 'tray' },
+    })
+    expect(res.status).toBe(403)
+    expect(h.jobSpawner.children).toEqual([])
+  })
+
+  it('import-history POST answers 403 and starts no job', async () => {
+    const h = await start({ jobsPaused: true })
+    const res = await sendWithHost(h.base, 'evil.example', 'POST', '/api/kyber/import-history', {
+      body: { weeks: 2 },
+    })
+    expect(res.status).toBe(403)
+    expect(h.jobSpawner.children).toEqual([])
+  })
+
+  it('clean POST answers 403 and starts nothing', async () => {
+    const h = await start({ jobsPaused: true })
+    const res = await sendWithHost(h.base, 'evil.example', 'POST', '/api/kyber/clean', {
+      body: { all: true, confirm: true },
+    })
+    expect(res.status).toBe(403)
+    expect(h.jobSpawner.children).toEqual([])
+  })
+})
