@@ -11,6 +11,7 @@ import {
   OTLP_LOGS_PATH,
   OTLP_TRACES_PATH,
   OtlpReceiver,
+  healthBodyForPeer,
   RECEIVER_ERROR_WINDOW_MS,
 } from './receiver.js'
 import { IngestWriter } from './writer.js'
@@ -280,5 +281,21 @@ describe('receiver lastAcceptedAt moves only on persistence', () => {
     expect(health.lastAcceptedAt).toBeNull()
 
     await writer.stop().catch(() => {})
+  })
+})
+
+describe('/healthz error text for remote callers', () => {
+  it('withholds the store error message from a non-loopback peer but keeps the code', async () => {
+    const { receiver } = await startReceiver()
+    receiver.recordPersistenceFailure('SQLITE_FULL: /home/dave/.kyberdash/canon.db')
+    const health = receiver.getHealth()
+
+    const remote = healthBodyForPeer(health, '203.0.113.9')
+    expect(remote.lastError).toBeNull()
+    expect(remote.lastCode).toBe('OTLP_PERSISTENCE_FAILED')
+    expect(remote.failures5m).toBe(1)
+
+    expect(healthBodyForPeer(health, '127.0.0.1').lastError).toContain('SQLITE_FULL')
+    expect(healthBodyForPeer(health, '::1').lastError).toContain('SQLITE_FULL')
   })
 })
