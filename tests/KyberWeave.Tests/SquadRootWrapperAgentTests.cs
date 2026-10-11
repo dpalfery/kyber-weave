@@ -151,7 +151,14 @@ public sealed class SquadRootWrapperAgentTests
 
             Assert.Equal(SquadInvocation.Primary, agent.Invocation);
             Assert.Equal("role-skill", agent.Fallback);
-            Assert.NotEqual(agent.BodyDigest, skill.InstructionBody);
+
+            // Compare the two bodies, not the agent's digest against the skill's text:
+            // BodyDigest is Sha256(body) and InstructionBody is raw markdown, so they can
+            // never be equal and NotEqual passes no matter what the bodies say.
+            Assert.False(
+                string.Equals(agent.InstructionBody, skill.InstructionBody, StringComparison.Ordinal),
+                $"The '{identity}' agent body must differ from its canonical skill body: the skill "
+                + "carries the role and the agent body is a thin wrapper pointing at it.");
             Assert.Contains($"`{identity}` skill", agent.InstructionBody, StringComparison.Ordinal);
         }
     }
