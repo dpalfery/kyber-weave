@@ -236,6 +236,12 @@ write `.factory/agents/` or the compatibility trees `~/.agents/skills/` and
 `.factory/` definition wins (docs.factory.ai, 2026-09-16). There is no documented environment
 override for `~/.factory`.
 
+**Model and reasoning effort:** a `factory:` value in `models.yml` may end in
+`[reasoningEffort=<level>]` (for example `glm-5.3[reasoningEffort=high]`). The renderer writes the
+bare model as `model:` and the level as `reasoningEffort:`. Factory accepts only `low`, `medium`,
+or `high`; any other level fails the render. The renderer never emits `reasoningEffort` without a
+pinned `model` (Factory ignores it on `inherit`), so leave the suffix off `inherit` entries.
+
 **Inspect:** in a Factory session, `/droids` lists project and personal droids; `/skills`
 lists discovered skills. Confirm names there after install.
 
