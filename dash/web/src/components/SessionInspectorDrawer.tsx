@@ -133,29 +133,37 @@ export function parseReadableXmlChunks(raw: string): XmlFoldChunk[] {
   }
 
   /**
-   * Index of the close tag balancing `open`, scanning forward with same-name
-   * depth counting so nested same-name sections pair correctly. Other names'
-   * tokens are content and never disturb the depth. Returns -1 when the open
-   * never closes.
+   * Single-pass pairing index: one left-to-right scan pairs each close with
+   * the most recent unmatched open of the same lowercased name, so every
+   * open resolves in O(1) below and the whole parse stays O(number of
+   * tokens). A per-name stack is exactly the forward depth-counting the old
+   * repeated lookahead did (opens push, closes pop the same name; other
+   * names never disturb the depth), including nested same-name sections.
+   * Denylisted HTML-active tokens never enter the index, and self-closing
+   * same-name tokens are self-contained (neither pushed nor popped).
+   * Unmatched opens keep -1, as before.
    */
-  const findMatchingClose = (openIdx: number): number => {
-    const open = tokens[openIdx] as ReadableXmlToken
-    const name = open.tag.toLowerCase()
-    let depth = 1
-    for (let j = openIdx + 1; j < tokens.length; j++) {
-      const candidate = tokens[j] as ReadableXmlToken
-      if (READABLE_XML_LITERAL_TAGS.has(candidate.tag.toLowerCase())) continue
-      if (candidate.tag.toLowerCase() !== name) continue
-      if (candidate.kind === 'open') {
-        depth++
-      } else if (candidate.kind === 'close') {
-        depth--
-        if (depth === 0) return j
+  const matchingClose = new Array<number>(tokens.length).fill(-1)
+  const openStacks = new Map<string, number[]>()
+  for (let j = 0; j < tokens.length; j++) {
+    const candidate = tokens[j] as ReadableXmlToken
+    if (READABLE_XML_LITERAL_TAGS.has(candidate.tag.toLowerCase())) continue
+    if (candidate.kind === 'selfClosing') continue
+    const name = candidate.tag.toLowerCase()
+    if (candidate.kind === 'open') {
+      let stack = openStacks.get(name)
+      if (!stack) {
+        stack = []
+        openStacks.set(name, stack)
       }
-      // A self-closing same-name token is self-contained: neither an open
-      // that needs balancing nor a close that balances one.
+      stack.push(j)
+    } else if (candidate.kind === 'close') {
+      const stack = openStacks.get(name)
+      if (stack && stack.length > 0) {
+        const openIdx = stack.pop() as number
+        matchingClose[openIdx] = j
+      }
     }
-    return -1
   }
 
   let i = 0
@@ -173,12 +181,12 @@ export function parseReadableXmlChunks(raw: string): XmlFoldChunk[] {
       continue
     }
     if (token.kind === 'close') {
-      // Stray closes (no open consumed them via the lookahead below) are
+      // Stray closes (no open claims them in the pairing index above) are
       // literal text.
       i++
       continue
     }
-    const closeIdx = findMatchingClose(i)
+    const closeIdx = matchingClose[i] as number
     if (closeIdx !== -1) {
       const close = tokens[closeIdx] as ReadableXmlToken
       pushText(raw.slice(pos, token.index))

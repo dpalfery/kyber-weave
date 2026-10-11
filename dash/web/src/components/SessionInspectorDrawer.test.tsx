@@ -536,6 +536,35 @@ describe('SessionInspectorDrawer: safe structural-tag recognition', () => {
     expectRawAndCopyExact(raw)
   })
 
+  it('keeps many unmatched generics literal without swallowing a later real section', () => {
+    // Linear-matching regression: code-heavy prompts can carry hundreds of
+    // unmatched generic opens (each once rescanned the whole tail). All of
+    // them must stay literal text while the later real section still folds.
+    const unmatched = Array.from({ length: 300 }, () => '<T>').join(' ')
+    const raw = `${unmatched}\n<system>rules</system>\nDone.`
+    const chunks = parseReadableXmlChunks(raw)
+    const tags = chunks.filter((chunk) => chunk.type === 'tag')
+    expect(tags).toHaveLength(1)
+    expect(tags[0]).toMatchObject({ type: 'tag', tag: 'system', content: 'rules' })
+    // The leading text keeps every unmatched generic verbatim.
+    expect(chunks[0]?.type).toBe('text')
+    expect(chunks[0]?.content).toContain('<T>')
+    expect((chunks[0]?.content.match(/<T>/g) ?? []).length).toBe(300)
+
+    const html = renderHtml(React.createElement(XmlFoldedText, { text: raw }))
+    const text = unescapeHtml(html)
+    expect(html).toContain('data-testid="folded-tag-system"')
+    expect(html).not.toContain('&lt;system')
+    expect(html).not.toContain('&lt;/system')
+    expect(text).toContain('<T>')
+    expect(text).toContain('rules')
+    expect(text).toContain('Done.')
+    expect(text.indexOf('<T>')).toBeLessThan(text.indexOf('rules'))
+    expect(text.indexOf('rules')).toBeLessThan(text.indexOf('Done.'))
+    expect(containsReadableXmlTag(raw)).toBe(true)
+    expectRawAndCopyExact(raw)
+  })
+
   it('still folds a valid matched generic section', () => {
     const raw = '<note>hello world</note>'
     const html = renderHtml(React.createElement(XmlFoldedText, { text: raw }))
