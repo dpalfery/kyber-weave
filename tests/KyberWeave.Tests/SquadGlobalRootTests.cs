@@ -1043,6 +1043,41 @@ public sealed class SquadGlobalRootTests : IDisposable
     }
 
     /// <summary>
+    /// The receipt assertions name one primary agent by name. That only says the conductor
+    /// exists; it does not say it is the only non-shared primary. Pin the whole set, so a
+    /// fourth primary agent added later is caught here rather than silently changing what
+    /// the per-target receipt and file-count expectations mean.
+    /// </summary>
+    [Fact]
+    public void ThePrimarySetIsExactlyTheThreeDeclaredPrimaryAgents()
+    {
+        string productRoot = Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+        SquadSource source = SquadSourceLoader.Load(productRoot);
+
+        string[] primaries = [.. source.Agents
+            .Where(agent => agent.Invocation == SquadInvocation.Primary)
+            .Select(agent => agent.Name)
+            .Order(StringComparer.Ordinal)];
+
+        Assert.Equal(["bug-crusher", "conductor", "product-owner"], primaries);
+
+        // The two root wrappers are declared shared identities, so they reuse their canonical
+        // skill and emit no agent principal of their own; the conductor is the only primary that
+        // is not. The receipt assertions select on the conductor's name, so this is what keeps
+        // that selection meaning "the only non-shared primary".
+        HashSet<string> sharedIdentities = source.FallbackProfiles.Profiles.Values
+            .SelectMany(profile => profile.SharedIdentities)
+            .ToHashSet(StringComparer.Ordinal);
+        string[] nonSharedPrimaries = [.. source.Agents
+            .Where(agent => agent.Invocation == SquadInvocation.Primary
+                && !sharedIdentities.Contains(agent.Name))
+            .Select(agent => agent.Name)
+            .Order(StringComparer.Ordinal)];
+
+        Assert.Equal(["conductor"], nonSharedPrimaries);
+    }
+
+    /// <summary>
     /// R17: <c>Agents.Count + Σ agent resources + Skills.Count − shared-identity skills +
     /// Σ non-suppressed skill resources</c>, read from the loaded corpus rather than a
     /// hardcoded literal. Claude and Factory keep the primary agent's native principal and
