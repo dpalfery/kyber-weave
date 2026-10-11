@@ -2,6 +2,9 @@ import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import { cn } from '../../lib/utils.js'
 
+const FOCUSABLE_SELECTOR =
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+
 export interface SlideOutDrawerProps {
   open: boolean
   onClose: () => void
@@ -109,11 +112,40 @@ export function SlideOutDrawer({
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         onClose()
+        return
+      }
+      // aria-modal promises keyboard confinement: with manageFocus on, Tab cycles inside
+      // the panel. Off, focus is never touched (the session drawer's contract).
+      if (e.key === 'Tab' && manageFocus && typeof document !== 'undefined') {
+        const panel = document.querySelector<HTMLElement>(
+          `[data-testid="${panelTestId ?? `${testIdPrefix}-panel`}"]`,
+        )
+        if (panel === null) return
+        const focusable = Array.from(
+          panel.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
+        )
+        const first = focusable[0]
+        const last = focusable[focusable.length - 1]
+        if (first === undefined || last === undefined) {
+          e.preventDefault()
+          return
+        }
+        const active = document.activeElement
+        if (!panel.contains(active)) {
+          e.preventDefault()
+          ;(e.shiftKey ? last : first).focus()
+        } else if (e.shiftKey && active === first) {
+          e.preventDefault()
+          last.focus()
+        } else if (!e.shiftKey && active === last) {
+          e.preventDefault()
+          first.focus()
+        }
       }
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [open, onClose])
+  }, [open, onClose, manageFocus, panelTestId, testIdPrefix])
 
   if (!open) return null
 

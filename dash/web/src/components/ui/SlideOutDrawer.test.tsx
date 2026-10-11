@@ -165,3 +165,46 @@ describe('SlideOutDrawer: focus management', () => {
     expect(dialog.contains(document.activeElement)).toBe(false)
   })
 })
+
+describe('SlideOutDrawer: focus trap', () => {
+  function TrapHost({ manageFocus }: { manageFocus: boolean }) {
+    return (
+      <div>
+        <button type="button" data-testid="outside">
+          outside
+        </button>
+        <SlideOutDrawer open onClose={() => {}} label="Trap drawer" testIdPrefix={PREFIX} manageFocus={manageFocus}>
+          <button type="button" data-testid="inner-last">
+            last
+          </button>
+        </SlideOutDrawer>
+      </div>
+    )
+  }
+
+  it('wraps Tab from the last control to the first and Shift+Tab back when manageFocus is on', () => {
+    render(<TrapHost manageFocus />)
+    const close = screen.getByTestId(`${PREFIX}-close-button`)
+    const last = screen.getByTestId('inner-last')
+    last.focus()
+    expect(fireEvent.keyDown(last, { key: 'Tab' })).toBe(false)
+    expect(document.activeElement).toBe(close)
+    expect(fireEvent.keyDown(close, { key: 'Tab', shiftKey: true })).toBe(false)
+    expect(document.activeElement).toBe(last)
+  })
+
+  it('pulls focus that escaped the panel back inside', () => {
+    render(<TrapHost manageFocus />)
+    const outside = screen.getByTestId('outside')
+    outside.focus()
+    fireEvent.keyDown(outside, { key: 'Tab' })
+    expect(screen.getByTestId(`${PREFIX}-panel`).contains(document.activeElement)).toBe(true)
+  })
+
+  it('leaves Tab alone when manageFocus is off', () => {
+    render(<TrapHost manageFocus={false} />)
+    const last = screen.getByTestId('inner-last')
+    last.focus()
+    expect(fireEvent.keyDown(last, { key: 'Tab' })).toBe(true)
+  })
+})
