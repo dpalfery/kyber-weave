@@ -572,6 +572,24 @@ describe('SessionInspectorDrawer: safe structural-tag recognition', () => {
     expectRawAndCopyExact(raw)
   })
 
+  it('folds camel-cased and uppercase reminderInstructions unclosed wrappers', () => {
+    for (const raw of [
+      '<reminderInstructions>unclosed reminder bytes stay in the section',
+      '<REMINDERINSTRUCTIONS>unclosed reminder bytes stay in the section',
+    ]) {
+      const chunks = parseReadableXmlChunks(raw)
+      expect(chunks.some((chunk) => chunk.type === 'tag')).toBe(true)
+      const tagChunk = chunks.find((chunk) => chunk.type === 'tag')
+      expect(tagChunk?.content).toBe('unclosed reminder bytes stay in the section')
+      const html = renderHtml(React.createElement(XmlFoldedText, { text: raw }))
+      const text = unescapeHtml(html)
+      expect(html).toContain('data-testid="folded-tag-')
+      expect(text).toContain('unclosed reminder bytes stay in the section')
+      expect(containsReadableXmlTag(raw)).toBe(true)
+      expectRawAndCopyExact(raw)
+    }
+  })
+
   it('keeps an arbitrary unclosed `<void>` literal and requires a close for generics', () => {
     const raw = '<void>some text with no close'
     const html = renderHtml(React.createElement(XmlFoldedText, { text: raw }))

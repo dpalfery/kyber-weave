@@ -44,7 +44,7 @@ const READABLE_XML_UNCLOSED_ALLOWLIST = new Set([
   'instructions',
   'copilot_instructions',
   'context',
-  'reminderInstructions',
+  'reminderinstructions',
   'editor_context',
   'tool_use_instructions',
   'notebook_info',
