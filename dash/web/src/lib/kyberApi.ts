@@ -536,7 +536,7 @@ export interface KyberTurnContentResult {
    * duplicates of the turn's own parts.
    */
   sharedContext?: {
-    parts: Array<{ text: string; spanId?: string; truncated?: boolean; totalLength?: number }>
+    parts: Array<{ text: string; spanId?: string; turnIndex?: number; truncated?: boolean; totalLength?: number }>
     seenBefore: boolean
   } | null
 }

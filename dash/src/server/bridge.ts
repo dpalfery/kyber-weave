@@ -635,10 +635,15 @@ export type TurnContentBlock = {
  * One session-level shared prompt part. `truncated`/`totalLength` appear
  * only when the default (non-`full`) response budget cut this part — the
  * same truthful flagging as every other budgeted text in this response.
+ * `turnIndex` is the 0-based transport index of the turn that contributed a
+ * turn-derived occurrence; it is present only on turn-derived parts.
+ * Session-scope (non-turn) parts carry no `turnIndex` — absent is not zero
+ * and must never be guessed as a turn.
  */
 export type TurnContentSharedPart = {
   text: string
   spanId?: string
+  turnIndex?: number
   truncated?: boolean
   totalLength?: number
 }
@@ -646,9 +651,10 @@ export type TurnContentSharedPart = {
 /**
  * Session-level shared context for a turn: every captured `system_prompt`
  * part in session scope at or before this turn, in capture order — the turn
- * spans' own prompts (preceding plus current) united with the session-wide
- * scan that also reaches prompts living off the turn spans (e.g. on a
- * non-`llm.invoke` span). `seenBefore`
+ * spans' own prompts (preceding plus current, each occurrence carrying its
+ * contributing `turnIndex`) united with the session-wide scan that reaches
+ * only non-turn prompts (turn span ids are filtered from that scan, so a
+ * turn span never appears as an unindexed duplicate). `seenBefore`
  * holds when any part exactly matches an earlier-turn same-kind part; it is
  * capture evidence only, never a cache claim. Null when no system prompt
  * was captured in scope. The client hides exact duplicates of the turn's
@@ -1008,18 +1014,6 @@ function sessionPromptAtOrBefore(candidate: string | undefined, target: string |
   const targetMs = Date.parse(target)
   if (!Number.isFinite(candidateMs) || !Number.isFinite(targetMs)) return true
   return candidateMs <= targetMs
-}
-
-/**
- * Identity of one separately captured system-prompt occurrence: the source
- * span plus its 0-based position among that span's system prompts in parts
- * order. Text is deliberately not part of the key — identical text from
- * distinct spans (or distinct occurrences of one span) stays repeated, and
- * the exact same source record reached through both the turn and the
- * session scans collapses to one.
- */
-function sharedPromptKey(spanId: string, occurrence: number): string {
-  return JSON.stringify([spanId, occurrence])
 }
 
 function applyContentBudget(
@@ -1911,15 +1905,18 @@ export class KyberBridge {
     }
 
     // Session-level shared context: the union of the turn spans at or
-    // before this turn (preceding plus current) and every other captured
-    // system_prompt in session scope at or before this turn, in capture
-    // order. A mixed session — an `llm.invoke` turn prompt coexisting with
-    // one or more non-turn (e.g. `session.start`) prompts — keeps both: the
-    // old only-when-empty fallback silently dropped the non-turn prompt as
-    // soon as any turn prompt existed. Union identity is the source span
-    // plus the occurrence within that span, never the text: identical text
-    // from distinct spans (or distinct occurrences) stays repeated, while
-    // the exact same source record reached through both scans appears once.
+    // before this turn (preceding plus current, each occurrence carrying its
+    // contributing turnIndex) and every non-turn captured system_prompt in
+    // session scope at or before this turn, in capture order. A mixed session
+    // — an `llm.invoke` turn prompt coexisting with one or more non-turn
+    // (e.g. `session.start`) prompts — keeps both: the old only-when-empty
+    // fallback silently dropped the non-turn prompt as soon as any turn
+    // prompt existed. Occurrence identity is the contributing turn index,
+    // never the text alone: identical text from distinct turns stays
+    // repeated, and one span serving two turn indexes contributes two
+    // occurrences. Turn span ids are filtered from the session scan (using
+    // the resolved turn set, never text inference), so a turn span never
+    // appears as an unindexed duplicate.
     // Temporal scope comes from captured timestamps — a prompt provably
     // captured after this turn is withheld; missing, unparseable, or equal
     // timestamps stay included (see `sessionPromptAtOrBefore`), because the
@@ -1931,54 +1928,60 @@ export class KyberBridge {
     // evidence; parts without it show no recurrence badge (never "new" —
     // first capture is unverifiable outside the turn spans).
     const targetTimestamp = contentRecords[0]?.timestamp
-    const sharedCandidates: TurnContentSharedPart[] = []
-    const sharedKeys = new Set<string>()
-    const sessionOccurrences = new Map<string, number>()
-    for (const fallback of this.loadSessionSystemPrompts(sessionId, targetSpanId)) {
+    // Turn span ids known from the resolved turn set (payload first, so the
+    // narrow seam pays no extra record walk; the already-loaded pool joins
+    // when present). The session scan filters these out, so a turn span is
+    // never contributed as an unindexed session duplicate — turn occurrences
+    // arrive only with their contributing turnIndex below. Identity is never
+    // inferred from text.
+    const turnSpanIds = new Set<string>()
+    for (const t of turns) {
+      if (typeof t.spanId === 'string') turnSpanIds.add(t.spanId)
+    }
+    if (pool !== undefined && pool !== null) {
+      for (const e of pool.entries) turnSpanIds.add(e.spanId)
+    }
+    type SharedCandidate = TurnContentSharedPart & { timestamp?: string; seq: number }
+    const sharedCandidates: SharedCandidate[] = []
+    let sharedSeq = 0
+    for (const fallback of this.loadSessionSystemPrompts(sessionId, turnSpanIds)) {
       if (!sessionPromptAtOrBefore(fallback.timestamp, targetTimestamp)) continue
       const spanId = fallback.spanId ?? targetSpanId
       if (spanId === undefined) continue
-      const occurrence = sessionOccurrences.get(spanId) ?? 0
-      sessionOccurrences.set(spanId, occurrence + 1)
-      const key = sharedPromptKey(spanId, occurrence)
-      if (sharedKeys.has(key)) continue
-      sharedKeys.add(key)
-      sharedCandidates.push({ text: fallback.text, spanId })
-    }
-    const turnOccurrences = new Map<string, number>()
-    const noteTurnPrompt = (text: string, spanId: string): void => {
-      const occurrence = turnOccurrences.get(spanId) ?? 0
-      turnOccurrences.set(spanId, occurrence + 1)
-      const key = sharedPromptKey(spanId, occurrence)
-      // Same source record already contributed by the session scan: once.
-      if (sharedKeys.has(key)) return
-      sharedKeys.add(key)
-      sharedCandidates.push({ text, spanId })
+      if (turnSpanIds.has(spanId)) continue
+      sharedCandidates.push({ text: fallback.text, spanId, timestamp: fallback.timestamp, seq: sharedSeq++ })
     }
     for (const p of preceding.prompts) {
-      noteTurnPrompt(p.text, p.spanId)
+      sharedCandidates.push({ text: p.text, spanId: p.spanId, turnIndex: p.turnIndex, timestamp: p.timestamp, seq: sharedSeq++ })
     }
-    // The current turn re-reads its own span, so its occurrences count from
-    // that span's own parts — not from the map above. When the target span
-    // also served an earlier turn index, the same source record then
-    // collides with the preceding entry and is kept once, as documented.
-    const currentOccurrences = new Map<string, number>()
+    // The current turn contributes its own occurrences under the requested
+    // turn index — even when its span also served an earlier turn index. Each
+    // full-turn copy is a distinct API-seen occurrence, so the same span id
+    // at turn 0 and turn 1 yields two entries with different turnIndex
+    // values. Same-turn repeated identical parts stay repeated.
     for (const p of parts.filter((p) => p.part === 'system_prompt' && p.text !== '')) {
       const spanId = p.spanId ?? targetSpanId
-      const occurrence = currentOccurrences.get(spanId) ?? 0
-      currentOccurrences.set(spanId, occurrence + 1)
-      const key = sharedPromptKey(spanId, occurrence)
-      // Same source record already contributed by the session scan or an
-      // earlier turn index on this span: once.
-      if (sharedKeys.has(key)) continue
-      sharedKeys.add(key)
-      sharedCandidates.push({ text: p.text, spanId })
+      sharedCandidates.push({ text: p.text, spanId, turnIndex, timestamp: targetTimestamp, seq: sharedSeq++ })
     }
+    // Capture order: provable timestamps order the union; missing,
+    // unparseable, or equal timestamps keep insertion order (stable sort) —
+    // the corpus cannot order those captures and the reader must not invent it.
+    sharedCandidates.sort((a, b) => {
+      const aMs = a.timestamp === undefined ? Number.NaN : Date.parse(a.timestamp)
+      const bMs = b.timestamp === undefined ? Number.NaN : Date.parse(b.timestamp)
+      const aKnown = Number.isFinite(aMs)
+      const bKnown = Number.isFinite(bMs)
+      if (aKnown && bKnown && aMs !== bMs) return (aMs as number) - (bMs as number)
+      return a.seq - b.seq
+    })
+    const sharedParts: TurnContentSharedPart[] = sharedCandidates.map(({ text, spanId, turnIndex: ti, truncated, totalLength }) =>
+      ti === undefined ? { text, spanId, ...(truncated !== undefined ? { truncated } : {}), ...(totalLength !== undefined ? { totalLength } : {}) } : { text, spanId, turnIndex: ti },
+    )
     let sharedContext: TurnContentSharedContext | null = null
-    if (sharedCandidates.length > 0) {
+    if (sharedParts.length > 0) {
       sharedContext = {
-        parts: sharedCandidates,
-        seenBefore: sharedCandidates.some(
+        parts: sharedParts,
+        seenBefore: sharedParts.some(
           (c) => preceding.digests.get('system_prompt')?.has(sha256Hex(c.text)) ?? false,
         ),
       }
@@ -2291,12 +2294,12 @@ export class KyberBridge {
     getPool: () => TurnResolutionPool | null,
   ): {
     digests: Map<string, Set<string>>
-    prompts: Array<{ text: string; spanId: string }>
+    prompts: Array<{ text: string; spanId: string; turnIndex: number; timestamp?: string }>
   } {
     const digests = new Map<string, Set<string>>()
-    const prompts: Array<{ text: string; spanId: string }> = []
+    const prompts: Array<{ text: string; spanId: string; turnIndex: number; timestamp?: string }> = []
     if (turnIndex <= 0) return { digests, prompts }
-    const spans: string[] = []
+    const occurrences: Array<{ span: string; turnIndex: number }> = []
     for (let i = 0; i < turnIndex; i++) {
       let span: string | undefined
       if (payloadTurns.length > 0) {
@@ -2314,14 +2317,19 @@ export class KyberBridge {
         const found = lookupTransport(pool?.entries, pool?.byIdentity, (e) => e.identity, i)
         if (found) span = found.spanId
       }
-      if (span !== undefined) spans.push(span)
+      if (span !== undefined) occurrences.push({ span, turnIndex: i })
     }
-    const seen = new Set<string>()
-    for (const span of spans) {
-      if (seen.has(span)) continue
-      seen.add(span)
+    // Load each distinct span once for digests, then replicate its system
+    // prompts once per turn index that references it: complete turn copies
+    // repeat a prompt, so the same span id at two turn indexes is two
+    // API-seen occurrences with different turnIndex values.
+    const cached = new Map<string, { texts: string[]; timestamp?: string }>()
+    for (const { span } of occurrences) {
+      if (cached.has(span)) continue
       const records = this.loadContentRecords(sessionId, span)
       const raw: ContentPart[] = records[0]?.parts ?? []
+      const timestamp = records[0]?.timestamp
+      const texts: string[] = []
       for (const p of this.mapTurnContentParts(raw, span)) {
         const set = digests.get(p.part) ?? new Set<string>()
         set.add(sha256Hex(p.text))
@@ -2329,8 +2337,16 @@ export class KyberBridge {
         // System-prompt texts alone are retained (shared-context
         // candidates); every other part releases its text after hashing.
         if (p.part === 'system_prompt' && p.text !== '') {
-          prompts.push({ text: p.text, spanId: span })
+          texts.push(p.text)
         }
+      }
+      cached.set(span, { texts, timestamp })
+    }
+    for (const { span, turnIndex: sourceIndex } of occurrences) {
+      const entry = cached.get(span)
+      if (!entry) continue
+      for (const text of entry.texts) {
+        prompts.push({ text, spanId: span, turnIndex: sourceIndex, timestamp: entry.timestamp })
       }
     }
     return { digests, prompts }
@@ -2359,12 +2375,17 @@ export class KyberBridge {
    */
   private loadSessionSystemPrompts(
     sessionId: string,
-    excludeSpan?: string,
+    excludeSpans?: string | Set<string>,
   ): Array<{ text: string; spanId?: string; timestamp?: string }> {
     if (!sessionId) return []
+    const isExcluded = (spanId: string): boolean => {
+      if (excludeSpans === undefined) return false
+      if (typeof excludeSpans === 'string') return spanId === excludeSpans
+      return excludeSpans.has(spanId)
+    }
     if (this.store) {
       return this.store
-        .systemPromptPartsForSession(sessionId, excludeSpan)
+        .systemPromptPartsForSession(sessionId, excludeSpans)
         .map(({ spanId, text, timestamp }) => (timestamp === undefined ? { text, spanId } : { text, spanId, timestamp }))
     }
     const db = this.getDb()
@@ -2378,7 +2399,7 @@ export class KyberBridge {
       const out: Array<{ text: string; spanId?: string; timestamp?: string }> = []
       for (const row of rows) {
         const spanId = String(row.span_id)
-        if (excludeSpan !== undefined && spanId === excludeSpan) continue
+        if (isExcluded(spanId)) continue
         const timestamp = row.timestamp === null || row.timestamp === undefined ? undefined : String(row.timestamp)
         for (const text of systemPromptTextsFromContentColumns(row.content_json, row.parts_json)) {
           out.push(timestamp === undefined ? { text, spanId } : { text, spanId, timestamp })

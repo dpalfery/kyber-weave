@@ -2303,22 +2303,22 @@ export function orphanTurnParts(data: KyberTurnContentResult): KyberTurnContentP
  * Shared session context entries to display for a turn, preserving every
  * captured occurrence in server order.
  *
- * The server builds `sharedContext` as prior-turn `system_prompt` parts
- * first, then the selected turn's own `system_prompt` parts (same span id
- * as `data.spanId`). The turn's own occurrences already render in their
- * blocks, so showing them again under shared context would display and copy
- * the exact same captured occurrence twice. Every other entry stays —
- * identical text from distinct earlier spans is a distinct occurrence the
- * API actually contains, not a duplicate to collapse.
+ * The server builds `sharedContext` as non-turn session `system_prompt`
+ * parts plus every turn-derived occurrence at or before the selected turn,
+ * each carrying its contributing `turnIndex`. The turn's own occurrences
+ * already render in their blocks, so showing them again under shared context
+ * would display and copy the exact same captured occurrence twice. Every
+ * other entry stays — an earlier-turn occurrence is a distinct API-seen
+ * occurrence even when it shares text and span id with the selected turn.
  *
- * Overlap is identified by source occurrence (span id) with multiplicity,
- * never by text globally: a shared entry is skipped only when its `spanId`
- * equals the selected turn's `spanId` and its exact text still has an
- * unmatched own `system_prompt` occurrence. Counts pair off per occurrence,
- * so repeated identical parts do not collapse. When span ids are absent on
- * either side the source cannot be reliably distinguished with current
- * data, so nothing is filtered — preserving occurrences rather than
- * guessing. Empty-text entries carry no bytes and stay skipped.
+ * Overlap is identified by source turn index with multiplicity, never by
+ * span id or text globally: a shared entry is skipped only when its
+ * `turnIndex` equals the selected turn's `turnIndex` and its exact text
+ * still has an unmatched own `system_prompt` occurrence. Counts pair off
+ * per occurrence, so repeated identical parts do not collapse. Entries
+ * without a `turnIndex` (session-scope parts) are never suppressed — absent
+ * is not a turn and must never be guessed as one. Empty-text entries carry
+ * no bytes and stay skipped.
  */
 export function resolveSharedDisplay(
   data: KyberTurnContentResult,
@@ -2342,9 +2342,8 @@ export function resolveSharedDisplay(
   const parts: NonNullable<KyberTurnContentResult['sharedContext']>['parts'] = []
   for (const sp of shared.parts) {
     if (sp.text === '') continue
-    const isOwnSpan =
-      sp.spanId !== undefined && data.spanId !== undefined && sp.spanId === data.spanId
-    if (isOwnSpan) {
+    const isOwnOccurrence = sp.turnIndex !== undefined && sp.turnIndex === data.turnIndex
+    if (isOwnOccurrence) {
       const remaining = ownCounts.get(sp.text) ?? 0
       if (remaining > 0) {
         ownCounts.set(sp.text, remaining - 1)

@@ -773,7 +773,7 @@ describe('Backend Contract Tests: GET /api/kyber/session/:id/content', () => {
           }
         }
         expect(body.sharedContext).toEqual({
-          parts: [{ text: 'SHARED_PROMPT_REC_aaa', spanId: 'span-r0' }],
+          parts: [{ text: 'SHARED_PROMPT_REC_aaa', spanId: 'span-r0', turnIndex: 0 }],
           seenBefore: false,
         })
       })
@@ -831,20 +831,21 @@ describe('Backend Contract Tests: GET /api/kyber/session/:id/content', () => {
       it('reports shared context with its own earlier-turn recurrence', async () => {
         const first = await turnBody(1)
         // Every matching part is preserved: turn 0's prompt plus the turn's
-        // own identical prompt (the client dedups the latter from display).
+        // own identical prompt, each with its contributing turnIndex. The
+        // client suppresses only the selected-turn occurrence from display.
         expect(first.sharedContext).toEqual({
           parts: [
-            { text: 'SHARED_PROMPT_REC_aaa', spanId: 'span-r0' },
-            { text: 'SHARED_PROMPT_REC_aaa', spanId: 'span-r1' },
+            { text: 'SHARED_PROMPT_REC_aaa', spanId: 'span-r0', turnIndex: 0 },
+            { text: 'SHARED_PROMPT_REC_aaa', spanId: 'span-r1', turnIndex: 1 },
           ],
           seenBefore: true,
         })
         // The earliest prompt stays shared even after a turn carries its own.
         const second = await turnBody(2)
         expect(second.sharedContext?.parts).toEqual([
-          { text: 'SHARED_PROMPT_REC_aaa', spanId: 'span-r0' },
-          { text: 'SHARED_PROMPT_REC_aaa', spanId: 'span-r1' },
-          { text: 'PROMPT_V2_NEW', spanId: 'span-r2' },
+          { text: 'SHARED_PROMPT_REC_aaa', spanId: 'span-r0', turnIndex: 0 },
+          { text: 'SHARED_PROMPT_REC_aaa', spanId: 'span-r1', turnIndex: 1 },
+          { text: 'PROMPT_V2_NEW', spanId: 'span-r2', turnIndex: 2 },
         ])
         expect(second.sharedContext?.seenBefore).toBe(true)
         const own = blockOf(second, 'system_prompt')
@@ -880,7 +881,7 @@ describe('Backend Contract Tests: GET /api/kyber/session/:id/content', () => {
         // with exact texts and distinct span ids.
         expect(body.sharedContext?.parts).toEqual([
           { text: 'SESSION_PROMPT_MIXED_ROUTE', spanId: 'span-g-session-a' },
-          { text: 'TURN_PROMPT_MIXED_ROUTE', spanId: 'span-g0' },
+          { text: 'TURN_PROMPT_MIXED_ROUTE', spanId: 'span-g0', turnIndex: 0 },
         ])
         expect(body.sharedContext?.seenBefore).toBe(false)
         expect(body.blocks.find((b) => b.key === 'system_prompt')?.text).toBe('TURN_PROMPT_MIXED_ROUTE')

@@ -275,12 +275,14 @@ describe('Mixed session and turn prompts (PI blocking finding)', () => {
         expect(body).not.toBeNull()
         // Capture order, exact texts, distinct span ids: the session spans
         // first (multi-part span keeps parts order), then the turn span.
-        // The turn text stays twice — once per captured span.
+        // The turn text stays twice — once per captured span. Turn-derived
+        // occurrences carry their contributing turnIndex; session-scope
+        // parts carry none and are never guessed as a turn.
         expect(body?.sharedContext?.parts).toEqual([
           { text: 'SESSION_PROMPT_MIXED_A', spanId: 'span-mix-sess-a' },
           { text: 'SESSION_PROMPT_MIXED_B', spanId: 'span-mix-sess-a' },
           { text: 'TURN_PROMPT_MIXED', spanId: 'span-mix-sess-b' },
-          { text: 'TURN_PROMPT_MIXED', spanId: 'span-mix-turn-0' },
+          { text: 'TURN_PROMPT_MIXED', spanId: 'span-mix-turn-0', turnIndex: 0 },
         ])
         expect(body?.sharedContext?.seenBefore).toBe(false)
         // The turn's own block still renders its prompt.
@@ -302,7 +304,7 @@ describe('Mixed session and turn prompts (PI blocking finding)', () => {
       try {
         // Turn 0 must not present what was captured after it saw the API.
         const first = bridge.assembleTurnContent(TWO_TURN_ID, 0, Number.POSITIVE_INFINITY)
-        expect(first?.sharedContext?.parts).toEqual([{ text: 'T0_PROMPT', spanId: 'span-m2-t0' }])
+        expect(first?.sharedContext?.parts).toEqual([{ text: 'T0_PROMPT', spanId: 'span-m2-t0', turnIndex: 0 }])
         expect(first?.sharedContext?.parts.some((p) => p.text === 'MID_SESSION_PROMPT')).toBe(false)
         expect(first?.sharedContext?.parts.some((p) => p.text === 'LATE_SESSION_PROMPT')).toBe(false)
 
@@ -310,9 +312,9 @@ describe('Mixed session and turn prompts (PI blocking finding)', () => {
         // prompt in capture position, and its own prompt — but not the late one.
         const second = bridge.assembleTurnContent(TWO_TURN_ID, 1, Number.POSITIVE_INFINITY)
         expect(second?.sharedContext?.parts).toEqual([
-          { text: 'T0_PROMPT', spanId: 'span-m2-t0' },
+          { text: 'T0_PROMPT', spanId: 'span-m2-t0', turnIndex: 0 },
           { text: 'MID_SESSION_PROMPT', spanId: 'span-m2-sess' },
-          { text: 'T1_PROMPT', spanId: 'span-m2-t1' },
+          { text: 'T1_PROMPT', spanId: 'span-m2-t1', turnIndex: 1 },
         ])
         expect(second?.sharedContext?.parts.some((p) => p.text === 'LATE_SESSION_PROMPT')).toBe(false)
         // The repeated earliest prompt carries earlier-turn evidence.
@@ -325,16 +327,50 @@ describe('Mixed session and turn prompts (PI blocking finding)', () => {
     }
   })
 
-  it('represents one span serving two turn indexes once', () => {
+  it('represents one span serving two turn indexes as two occurrences', () => {
     const store = new CanonStore(':memory:')
     try {
       seedDupSpan(store)
       const bridge = new KyberBridge({ store })
       try {
         const body = bridge.assembleTurnContent(DUP_SPAN_ID, 1, Number.POSITIVE_INFINITY)
-        // The same source record is reached as both the preceding turn's
-        // prompt and the current turn's prompt: exactly once.
-        expect(body?.sharedContext?.parts).toEqual([{ text: 'DUP_PROMPT', spanId: 'span-dup-x' }])
+        // Full-turn semantics: complete turn copies repeat a prompt, so the
+        // same span id referenced at turn 0 and turn 1 yields two API-seen
+        // occurrences with different turnIndex values.
+        expect(body?.sharedContext?.parts).toEqual([
+          { text: 'DUP_PROMPT', spanId: 'span-dup-x', turnIndex: 0 },
+          { text: 'DUP_PROMPT', spanId: 'span-dup-x', turnIndex: 1 },
+        ])
+        // The selected turn's own occurrence still renders once in its block.
+        expect(body?.blocks.find((b) => b.key === 'system_prompt')?.text).toBe('DUP_PROMPT')
+      } finally {
+        bridge.close()
+      }
+    } finally {
+      store.close()
+    }
+  })
+
+  it('keeps same-turn repeated identical parts repeated with one turnIndex', () => {
+    const store = new CanonStore(':memory:')
+    try {
+      const base: Partial<CanonicalRecord> = { sessionId: 'sess-mixed-repeat-001', traceId: 'trace-mixed-repeat-001' }
+      store.upsertMany([
+        { ...record('span-rep-t0', [{ part: 'system_prompt', text: 'REP_PROMPT' }, { part: 'system_prompt', text: 'REP_PROMPT' }], base), timestamp: '2026-09-03T16:00:00.000Z' },
+      ])
+      store.upsertSession({
+        sessionId: 'sess-mixed-repeat-001',
+        harness: 'copilot',
+        label: 'Repeated in one turn',
+        payload: { id: 'sess-mixed-repeat-001', harness: 'copilot', turns: [{ index: 0, spanId: 'span-rep-t0', model: 'm' }] },
+      })
+      const bridge = new KyberBridge({ store })
+      try {
+        const body = bridge.assembleTurnContent('sess-mixed-repeat-001', 0, Number.POSITIVE_INFINITY)
+        expect(body?.sharedContext?.parts).toEqual([
+          { text: 'REP_PROMPT', spanId: 'span-rep-t0', turnIndex: 0 },
+          { text: 'REP_PROMPT', spanId: 'span-rep-t0', turnIndex: 0 },
+        ])
       } finally {
         bridge.close()
       }

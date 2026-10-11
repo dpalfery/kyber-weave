@@ -2192,7 +2192,7 @@ export class CanonStore {
    */
   systemPromptPartsForSession(
     sessionId: string,
-    excludeSpanId?: string,
+    excludeSpanId?: string | Set<string>,
   ): Array<{ spanId: string; text: string; timestamp?: string }> {
     if (!sessionId) return []
     const rows = this.db
@@ -2203,7 +2203,7 @@ export class CanonStore {
     const out: Array<{ spanId: string; text: string; timestamp?: string }> = []
     for (const row of rows) {
       const spanId = String(row.span_id)
-      if (excludeSpanId !== undefined && spanId === excludeSpanId) continue
+      if (typeof excludeSpanId === 'string' ? spanId === excludeSpanId : excludeSpanId?.has(spanId) === true) continue
       const timestamp = row.timestamp === null || row.timestamp === undefined ? undefined : String(row.timestamp)
       for (const text of systemPromptTextsFromContentColumns(row.content_json, row.parts_json)) {
         out.push(timestamp === undefined ? { spanId, text } : { spanId, text, timestamp })
