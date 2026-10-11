@@ -166,6 +166,26 @@ profiles:
       # it outright, and the ones that hold it — reviewer for its council, architect for
       # read-only discovery — reach only the roles their own delegates-to names.
       delegate: allow
+  # `root-fixer` is `worker` plus delegation, not conductor parity. `bug-crusher` is a root
+  # agent that applies a fully-specified fix itself — so it needs `worker`'s read/search/write/
+  # execute envelope and `worker`'s denied network — but its first act is to spawn
+  # `bug-crusher-investigator`, and the existing `worker` profile denies `delegate`, so the
+  # worker profile cannot express it. It is deliberately not the `orchestrator` profile:
+  # conductor's `filesystem.write: deny` and `process.execute: deny` would strip exactly the
+  # grants a fixer exists to use, and `orchestrator` also carries the pure-orchestrator MCP
+  # withholding keyed on the profile id (see `ClaudeRenderer`/`OpenCodeRenderer`), which a role
+  # that edits files and runs commands must not inherit. The grant stays a per-role one: the
+  # roster is the agent's own `delegates-to`, and every other worker profile keeps
+  # `delegate: deny`.
+  root-fixer:
+    permissions:
+      filesystem.read: allow
+      filesystem.search: allow
+      filesystem.write: allow
+      process.execute: allow
+      network.read: deny
+      network.publish: deny
+      delegate: allow
   worker:
     permissions:
       filesystem.read: allow

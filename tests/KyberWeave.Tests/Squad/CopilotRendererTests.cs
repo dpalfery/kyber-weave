@@ -574,12 +574,11 @@ public sealed class CopilotRendererTests
     /// with an empty roster — delegation that looks configured and silently does nothing.
     /// This holds for primary agents too: GitHub Copilot does not grant a primary agent
     /// the full roster automatically, so a delegating primary declares its roster exactly
-    /// like a subagent does.
+    /// like a subagent does — but stays user-invocable (asserted separately).
     /// </summary>
     [Theory]
     [InlineData("architect", "agents: ['azure-reader', 'research-agent']")]
     [InlineData("code-reviewer", "agents: ['azure-reader', 'review-lens', 'review-triage']")]
-    [InlineData("product-owner", "agents: ['research-agent']")]
     public async Task RenderAsync_DeclaresDelegationRosterForDelegatingSubagents(
         string agentName,
         string expectedAgentsLine)
@@ -599,24 +598,29 @@ public sealed class CopilotRendererTests
     /// The real product conductor is a primary agent with a delegation roster. GitHub
     /// Copilot does not grant it the full roster automatically, so it declares its roster
     /// exactly like a subagent does — but stays user-invocable, since it is the default
-    /// entry point a human chooses directly.
+    /// entry point a human chooses directly. The two root wrappers follow the same rule.
     /// </summary>
-    [Fact]
-    public async Task RenderAsync_DeclaresDelegationRosterForDelegatingPrimaryConductor()
+    [Theory]
+    [InlineData(
+        "conductor",
+        "agents: ['architect', 'azure-reader', 'bug-crusher-investigator', 'code-reviewer', " +
+        "'csharp-dev', 'dal-dev', 'docs-dev', 'github-devops', 'maui-dev', 'product-owner', " +
+        "'pulumi-dev', 'python-dev', 'react-dev', 'research-agent', 'sql-database-architect', " +
+        "'task-reviewer', 'tauri-dev', 'test-dev']")]
+    [InlineData("product-owner", "agents: ['research-agent']")]
+    [InlineData("bug-crusher", "agents: ['bug-crusher-investigator']")]
+    public async Task RenderAsync_DeclaresDelegationRosterForDelegatingPrimaryAgents(
+        string agentName,
+        string expectedAgentsLine)
     {
-        string frontmatter = await RenderFrontmatterAsync("conductor");
+        string frontmatter = await RenderFrontmatterAsync(agentName);
 
         string? actual = frontmatter
             .Split('\n')
             .FirstOrDefault(l => l.StartsWith("agents:", StringComparison.Ordinal))
             ?.Trim();
 
-        Assert.Equal(
-            "agents: ['architect', 'azure-reader', 'bug-crusher-investigator', 'code-reviewer', " +
-            "'csharp-dev', 'dal-dev', 'docs-dev', 'github-devops', 'maui-dev', 'product-owner', " +
-            "'pulumi-dev', 'python-dev', 'react-dev', 'research-agent', 'sql-database-architect', " +
-            "'task-reviewer', 'tauri-dev', 'test-dev']",
-            actual);
+        Assert.Equal(expectedAgentsLine, actual);
         Assert.DoesNotContain(
             frontmatter.Split('\n'),
             l => l.StartsWith("user-invocable:", StringComparison.Ordinal));

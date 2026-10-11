@@ -3,6 +3,7 @@ name: full
 agents:
   - architect
   - azure-reader
+  - bug-crusher
   - bug-crusher-investigator
   - code-reviewer
   - conductor

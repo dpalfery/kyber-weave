@@ -107,6 +107,15 @@ public sealed class OpenCodeRendererContractTests : IDisposable
             .SelectMany(profile => profile.SharedIdentities)
             .ToHashSet(StringComparer.Ordinal);
 
+    /// <summary>
+    /// The shared identities whose canonical skill is suppressed: those carried by a subagent,
+    /// whose file already holds the identical body. A primary shared identity reuses its
+    /// canonical skill as the entry point, so it is emitted. Delegated to the renderer's own
+    /// resolver so the test cannot drift from the contract.
+    /// </summary>
+    private static HashSet<string> SuppressedSkillIdentities(SquadSource source) =>
+        SquadSharedIdentityProjection.SuppressedSkillIdentities(source, SharedIdentities(source));
+
     /// <summary>Nothing to release: the suite only reads the checked-in corpus.</summary>
     public void Dispose()
     {
@@ -156,6 +165,7 @@ public sealed class OpenCodeRendererContractTests : IDisposable
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
         HashSet<string> sharedIdentities = SharedIdentities(source);
+        HashSet<string> suppressedSkillIdentities = SuppressedSkillIdentities(source);
         SquadRendererRegistry registry = new([new OpenCodeRenderer()]);
         SquadRenderRequest request = new(
             SourceDirectory: ProductRoot,
@@ -173,7 +183,7 @@ public sealed class OpenCodeRendererContractTests : IDisposable
             f.RelativePath.StartsWith(".opencode/skills/", StringComparison.Ordinal),
             $"File '{f.RelativePath}' does not start with expected OpenCode directory."));
 
-        // 2. Output counts: exactly 45 principal files (21 agents under .opencode/agents/*.md
+        // 2. Output counts: exactly 46 principal files (22 agents under .opencode/agents/*.md
         // + 24 skills under .opencode/skills/*/SKILL.md) plus linked resource closures.
         int principalAgentCount = result.Files.Count(f =>
             f.RelativePath.StartsWith(".opencode/agents/", StringComparison.Ordinal) &&
@@ -185,19 +195,19 @@ public sealed class OpenCodeRendererContractTests : IDisposable
             f.RelativePath.EndsWith("/SKILL.md", StringComparison.Ordinal) &&
             !f.RelativePath[".opencode/skills/".Length..^"/SKILL.md".Length].Contains('/', StringComparison.Ordinal));
 
-        Assert.Equal(21, principalAgentCount);
+        Assert.Equal(22, principalAgentCount);
         Assert.Equal(24, principalSkillCount);
-        Assert.Equal(45, principalAgentCount + principalSkillCount);
+        Assert.Equal(46, principalAgentCount + principalSkillCount);
 
-        int suppressedSkillCount = source.Skills.Count(skill => sharedIdentities.Contains(skill.Name));
+        int suppressedSkillCount = source.Skills.Count(skill => suppressedSkillIdentities.Contains(skill.Name));
         int expectedFileCount =
             source.Agents.Count + source.Agents.Sum(agent => agent.Resources.Count)
             + source.Skills.Count - suppressedSkillCount
-            + source.Skills.Where(skill => !sharedIdentities.Contains(skill.Name))
+            + source.Skills.Where(skill => !suppressedSkillIdentities.Contains(skill.Name))
                 .Sum(skill => skill.Resources.Count);
 
         Assert.Equal(expectedFileCount, result.Files.Count);
-        Assert.Equal(122, result.Files.Count);
+        Assert.Equal(123, result.Files.Count);
 
         // 3. Native single-projection rule: shared identities (like conductor) must NOT emit a skill
         // under .opencode/skills/conductor/SKILL.md, and no role- prefixes are emitted.
@@ -207,7 +217,16 @@ public sealed class OpenCodeRendererContractTests : IDisposable
         foreach (string sharedIdentity in sharedIdentities)
         {
             Assert.Contains(result.Files, f => f.RelativePath == $".opencode/agents/{sharedIdentity}.md");
-            Assert.DoesNotContain(result.Files, f => f.RelativePath == $".opencode/skills/{sharedIdentity}/SKILL.md");
+            string sharedSkillPath = $".opencode/skills/{sharedIdentity}/SKILL.md";
+            if (suppressedSkillIdentities.Contains(sharedIdentity))
+            {
+                Assert.DoesNotContain(result.Files, f => f.RelativePath == sharedSkillPath);
+            }
+            else
+            {
+                // Primary shared identity: the canonical skill is the entry point and ships.
+                Assert.Single(result.Files, f => f.RelativePath == sharedSkillPath);
+            }
         }
 
         Assert.DoesNotContain(result.Files, f => f.RelativePath.Contains("role-", StringComparison.OrdinalIgnoreCase));
@@ -304,11 +323,13 @@ public sealed class OpenCodeRendererContractTests : IDisposable
                 }
             }
 
-            // D8 MCP mapping: kyber-weave_* granted to agents with filesystem.read: allow, excluding pure orchestrators and shared identities
+            // D8 MCP mapping: kyber-weave_* granted to agents with filesystem.read: allow,
+            // excluding pure orchestrators and suppressed (subagent) shared identities. A primary
+            // shared identity keeps the grant: it edits files and runs commands.
             bool isPureOrchestrator = string.Equals(agent.CapabilityProfile, "orchestrator", StringComparison.Ordinal);
             bool readAllowed = capProfile.Permissions.TryGetValue("filesystem.read", out SquadPermissionDecision readDecision) &&
                                readDecision == SquadPermissionDecision.Allow;
-            bool expectedKwMcp = !isPureOrchestrator && !sharedIdentities.Contains(agent.Name) && readAllowed;
+            bool expectedKwMcp = !isPureOrchestrator && !suppressedSkillIdentities.Contains(agent.Name) && readAllowed;
             Assert.True(
                 permissionMap.Children.ContainsKey(new YamlScalarNode("kyber-weave_*")),
                 $"Agent '{agent.Name}' leaves 'kyber-weave_*' unpinned.");
@@ -456,9 +477,9 @@ public sealed class OpenCodeRendererContractTests : IDisposable
         // Skills verification
         foreach (SquadSkill skill in source.Skills)
         {
-            bool isSharedIdentity = sharedIdentities.Contains(skill.Name);
+            bool isSuppressedSharedIdentity = suppressedSkillIdentities.Contains(skill.Name);
             string path = $".opencode/skills/{skill.Name}/SKILL.md";
-            if (isSharedIdentity)
+            if (isSuppressedSharedIdentity)
             {
                 Assert.DoesNotContain(result.Files, f => f.RelativePath == path);
                 continue;
