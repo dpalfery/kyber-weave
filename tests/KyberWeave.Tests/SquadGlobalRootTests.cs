@@ -1017,6 +1017,10 @@ public sealed class SquadGlobalRootTests : IDisposable
             { SquadTarget.Devin, ".devin/" }
         };
 
+        string tempHome = Path.Combine(_temp.Path, "home-guard");
+        Directory.CreateDirectory(tempHome);
+        SquadGlobalRoots globalRoots = new(_ => null, tempHome);
+
         ISquadRenderer renderer = SquadCommandComposition.ResolveRenderer();
 
         foreach (SquadTarget target in SquadTargetCatalog.All)
@@ -1025,7 +1029,8 @@ public sealed class SquadGlobalRootTests : IDisposable
                 new SquadRenderRequest(
                     SourceDirectory: productRoot,
                     Targets: [target],
-                    Scope: SquadDeploymentScope.Global));
+                    Scope: SquadDeploymentScope.Global,
+                    GlobalRoots: globalRoots));
 
             if (legacyPrefixes.TryGetValue(target, out string? prefix))
             {
