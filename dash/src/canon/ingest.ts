@@ -119,6 +119,20 @@ export type IngestOutcome = {
 }
 
 /**
+ * Longest quarantine `rawPayload` stored, in UTF-16 code units. A quarantined span keeps
+ * its decoded JSON as evidence, and one span can carry whole prompts; past this the
+ * stored text is cut and ends in a marker naming the original length, so a truncated
+ * payload is never mistaken for the complete one (it is no longer valid JSON, and says so).
+ */
+export const MAX_QUARANTINE_RAW_PAYLOAD_CHARS = 256 * 1024
+
+/** The payload as stored: whole when within the cap, else a prefix plus a truncation marker. */
+export function boundRawPayload(json: string): string {
+  if (json.length <= MAX_QUARANTINE_RAW_PAYLOAD_CHARS) return json
+  return `${json.slice(0, MAX_QUARANTINE_RAW_PAYLOAD_CHARS)}\n...[truncated: stored ${MAX_QUARANTINE_RAW_PAYLOAD_CHARS} of ${json.length} characters]`
+}
+
+/**
  * Normalize and store one batch of decoded spans.
  *
  * A batch is one unit of attribution — the same unit one live OTLP request
@@ -152,7 +166,7 @@ export function ingestBatchWithAdapters(
   // The exact incoming span for the quarantine detail route (v18 `raw_payload`).
   // Decoded-span JSON, not the normalized record: the record is what attribution made
   // of the span, and mislabeling it as the original message is forbidden.
-  const rawPayloadOf = (index: number): string => JSON.stringify(spans[index])
+  const rawPayloadOf = (index: number): string => boundRawPayload(JSON.stringify(spans[index]))
 
   const unclaimed: string[] = []
   for (const [index, raw] of rawSpans.entries()) {

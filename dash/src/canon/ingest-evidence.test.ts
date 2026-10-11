@@ -11,7 +11,7 @@ import type { HarnessAdapter, RawSpan } from './adapters/base.js'
 import { resolveRootByParentage, traceGroup } from './adapters/base.js'
 import { copilotAdapter } from './adapters/copilot.js'
 import { recordValidationProblems } from './adapters/quarantine.js'
-import { ingestBatch, ingestBatchWithAdapters, toRawSpan } from './ingest.js'
+import { MAX_QUARANTINE_RAW_PAYLOAD_CHARS, ingestBatch, ingestBatchWithAdapters, toRawSpan } from './ingest.js'
 import { CanonStore } from './store.js'
 import type { CanonicalRecord } from './types.js'
 import type { OtlpSpan } from '../otel/receiver.js'
@@ -45,6 +45,23 @@ const COPILOT_ATTRIBUTES = {
 }
 
 describe('ingest quarantine evidence (v18 raw_payload)', () => {
+  it('caps an oversized payload with an explicit truncation marker', () => {
+    const store = new CanonStore(':memory:')
+    try {
+      const huge = 'x'.repeat(MAX_QUARANTINE_RAW_PAYLOAD_CHARS * 2)
+      const input = span({ 'totally.unknown': huge }, { spanId: 'huge-1' })
+      const full = JSON.stringify(input)
+      ingestBatch([input], store)
+
+      const stored = store.getQuarantine('huge-1')?.rawPayload ?? ''
+      expect(stored.startsWith(full.slice(0, MAX_QUARANTINE_RAW_PAYLOAD_CHARS))).toBe(true)
+      expect(stored).toContain(`[truncated: stored ${MAX_QUARANTINE_RAW_PAYLOAD_CHARS} of ${full.length} characters]`)
+      expect(stored.length).toBeLessThan(MAX_QUARANTINE_RAW_PAYLOAD_CHARS + 200)
+    } finally {
+      store.close()
+    }
+  })
+
   it('stores the exact incoming span for an unclaimed span', () => {
     const store = new CanonStore(':memory:')
     try {
