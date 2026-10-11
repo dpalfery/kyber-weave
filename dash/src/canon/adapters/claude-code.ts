@@ -50,8 +50,12 @@ const CLAUDE_VENDOR_NAMESPACES = ['claude', 'claude_code']
  * Extract the content Claude sends in its API request body.
  *
  * The raw body is deliberately treated as an opaque boundary: only the
- * observed `system`, `tools`, and tool `server` fields are interpreted.
- * Tool names are not split because their spelling is not server evidence.
+ * observed `system`, `tools`, `messages`, and tool `server` fields are
+ * interpreted. Tool names are not split because their spelling is not
+ * server evidence. Message blocks bucket on block TYPE, never role —
+ * the same rule copilot.ts `messageParts` applies, so one bucketing
+ * covers both harnesses (B5) — and no `instruction_context` is invented
+ * for them: the sender does not mark one.
  */
 export function parseClaudeApiRequestBody(body: unknown): ContentPart[] {
   let value: unknown = body
@@ -89,7 +93,85 @@ export function parseClaudeApiRequestBody(body: unknown): ContentPart[] {
       parts.push(part)
     }
   }
+
+  if (Array.isArray(request.messages)) {
+    for (const message of request.messages) {
+      if (message === null || typeof message !== 'object') continue
+      const content = (message as Record<string, unknown>).content
+      if (typeof content === 'string') {
+        parts.push({ part: 'conversation_history', text: content })
+        continue
+      }
+      if (!Array.isArray(content)) {
+        // A message with no readable content list is still turn evidence;
+        // mirror copilot.ts and keep the whole message verbatim.
+        parts.push({ part: 'conversation_history', text: JSON.stringify(message) })
+        continue
+      }
+      for (const block of content) {
+        if (block === null || typeof block !== 'object') continue
+        const blockRecord = block as Record<string, unknown>
+        const text = contentBlockText(blockRecord)
+        if (text === undefined) continue
+        parts.push({
+          part: blockRecord.type === 'tool_result' ? 'tool_result_content' : 'conversation_history',
+          text,
+        })
+      }
+    }
+  }
   return parts
+}
+
+/**
+ * Why a request body yielded no parts, when the failure is the sender's.
+ *
+ * Only a string body that will not parse earns a reason: Claude Code cuts
+ * inline bodies at `CLAUDE_CODE_OTEL_CONTENT_MAX_LENGTH` (61,440 UTF-16
+ * units by default), so a truncated payload and a malformed one fail at
+ * the same `JSON.parse` and the actionable hint is the same knob. A body
+ * that parsed — or never needed parsing — reports nothing: an empty part
+ * list from a well-formed body is a real answer, not a failure.
+ */
+export function claudeApiRequestBodyFailureReason(body: unknown): string | undefined {
+  if (typeof body !== 'string') return undefined
+  try {
+    JSON.parse(body)
+    return undefined
+  } catch {
+    return 'The Claude Code request body did not parse — it was likely truncated at the sender limit. Set CLAUDE_CODE_OTEL_CONTENT_MAX_LENGTH to raise it.'
+  }
+}
+
+/**
+ * The text one message content block contributes, or undefined when it
+ * contributes none. Thinking blocks contribute nothing — the sender
+ * redacts them, and a `redacted_thinking` block's `data` is the opaque
+ * redaction payload rather than reasoning text. An `image` or `document`
+ * block collapses to its `[<type> block]` placeholder: the bytes are
+ * payload, never content.
+ *
+ * A block may nest its own `content` list — a `tool_result` can carry
+ * image sub-blocks — so nested blocks run through this same mapping and
+ * the placeholder and skip rules hold at every depth. Anything else keeps
+ * its `text`/`content` string or, lacking one, the whole block as JSON; a
+ * `tool_use` takes that last path (B5).
+ */
+function contentBlockText(block: Record<string, unknown>): string | undefined {
+  const type = block.type
+  if (type === 'thinking' || type === 'redacted_thinking') return undefined
+  if (type === 'image' || type === 'document') return `[${type} block]`
+  if (typeof block.text === 'string') return block.text
+  const content = block.content
+  if (typeof content === 'string') return content
+  if (content !== null && typeof content === 'object') {
+    const nested = (Array.isArray(content) ? content : [content])
+      .filter((sub): sub is Record<string, unknown> => sub !== null && typeof sub === 'object')
+      .map(contentBlockText)
+      .filter((text): text is string => text !== undefined)
+    return nested.length > 0 ? nested.join('\n') : undefined
+  }
+  return JSON.stringify(block)
 }
 
 /**
@@ -143,9 +225,11 @@ export const claudeCodeAdapter: HarnessAdapter = {
    * no system prompt, no tool definitions, no message structure. Measured
    * across the corpus, not one span carried a content attribute. Every
    * content bucket is therefore declared unexported rather than reported as
-   * zero (R7.6, R10.1) — the composition chart must say "not measurable"
-   * for this source, and the content it needs lives in the harness's
-   * on-disk transcripts instead.
+   * zero (R7.6, R10.1) — the span itself reads "not measurable" whether or
+   * not content reaches the record by another route. That route is the
+   * `api_request_body` log event parsed above when the sender opts in
+   * (B3/B5); the on-disk transcripts fill conversation and tool results
+   * too, but never carry a system prompt or tool definitions.
    */
   unexportedMetrics() {
     return [
