@@ -2172,8 +2172,8 @@ export class CanonStore {
   }
 
   /**
-   * Session-scope system prompts for the shared-context reader, without
-   * materializing full records.
+   * Non-turn session-scope system prompts for the shared-context reader,
+   * without materializing full records.
    *
    * <remarks>
    * The projection selects only the prompt-bearing content columns plus the
@@ -2188,6 +2188,12 @@ export class CanonStore {
    * earlier turn saw. Rows with a missing or unparseable timestamp stay
    * included — the caller cannot prove they are future evidence, and
    * dropping them would invent a claim the store cannot support.
+   * Turn spans are excluded by their canonical operation (`llm.invoke`, the
+   * same predicate `isTurn` in `canon/sessions.ts` uses): a turn-derived
+   * prompt missing from the payload turn list must never masquerade as an
+   * unindexed session-scope prompt, and identity is never inferred from
+   * text. The `excludeSpanId` filter stays as defense for turn spans the
+   * caller already resolved.
    * </remarks>
    */
   systemPromptPartsForSession(
@@ -2197,11 +2203,12 @@ export class CanonStore {
     if (!sessionId) return []
     const rows = this.db
       .prepare(
-        'SELECT span_id, timestamp, content_json, parts_json FROM records WHERE COALESCE(session_id, trace_id) = ? ORDER BY timestamp',
+        'SELECT span_id, op, timestamp, content_json, parts_json FROM records WHERE COALESCE(session_id, trace_id) = ? ORDER BY timestamp',
       )
-      .all(sessionId) as { span_id: unknown; timestamp: unknown; content_json: unknown; parts_json: unknown }[]
+      .all(sessionId) as { span_id: unknown; op: unknown; timestamp: unknown; content_json: unknown; parts_json: unknown }[]
     const out: Array<{ spanId: string; text: string; timestamp?: string }> = []
     for (const row of rows) {
+      if (row.op === 'llm.invoke') continue
       const spanId = String(row.span_id)
       if (typeof excludeSpanId === 'string' ? spanId === excludeSpanId : excludeSpanId?.has(spanId) === true) continue
       const timestamp = row.timestamp === null || row.timestamp === undefined ? undefined : String(row.timestamp)

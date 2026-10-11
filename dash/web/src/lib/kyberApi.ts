@@ -469,14 +469,11 @@ export interface KyberSessionContentResult {
 
 export function fetchKyberSessionContent(
   sessionId: string,
-  opts?: { span?: string; part?: string; full?: boolean },
+  opts?: { span?: string; part?: string },
 ): Promise<KyberSessionContentResult> {
   const params = new URLSearchParams()
   if (opts?.span) params.set('span', opts.span)
   if (opts?.part) params.set('part', opts.part)
-  // Explicit lossless path for readers that need every byte (e.g. the
-  // whole-turn shared session context) past the default response budget.
-  if (opts?.full) params.set('full', 'true')
   const qs = params.toString()
   const path = `/api/kyber/session/${encodeURIComponent(sessionId)}/content${qs ? `?${qs}` : ''}`
   return fetchJson<KyberSessionContentResult>(path)

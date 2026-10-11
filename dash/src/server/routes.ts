@@ -862,9 +862,11 @@ export function handleKyberRequest(
     }
     const span = (url.searchParams.get('span') ?? '').trim() || undefined
     const part = (url.searchParams.get('part') ?? '').trim() || undefined
-    // Explicit lossless path (`?full=true`): the shared-context reader needs
-    // the whole session-level prompt even past the default budget. Existing
-    // callers without `full` keep the capped behavior unchanged.
+    // Explicit lossless path (`?full=true`) for over-budget session content
+    // on this route. The whole-turn shared-context reader is served by the
+    // turn-content endpoint above (`/api/kyber/session/:id/turn/:index/content`),
+    // not here — this flag only widens this session-content response.
+    // Existing callers without `full` keep the capped behavior unchanged.
     const full = isFullContentRequest(url.searchParams)
     const body = bridge.getSessionContent(contentSessionId, { spanId: span, part, ...(full ? { full: true as const } : {}) })
     if (!body) {

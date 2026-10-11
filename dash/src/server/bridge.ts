@@ -653,8 +653,8 @@ export type TurnContentSharedPart = {
  * part in session scope at or before this turn, in capture order — the turn
  * spans' own prompts (preceding plus current, each occurrence carrying its
  * contributing `turnIndex`) united with the session-wide scan that reaches
- * only non-turn prompts (turn span ids are filtered from that scan, so a
- * turn span never appears as an unindexed duplicate). `seenBefore`
+ * only non-turn prompts (turn spans are excluded by operation as well as by
+ * span id, so a turn span never appears as an unindexed duplicate). `seenBefore`
  * holds when any part exactly matches an earlier-turn same-kind part; it is
  * capture evidence only, never a cache claim. Null when no system prompt
  * was captured in scope. The client hides exact duplicates of the turn's
@@ -1914,9 +1914,10 @@ export class KyberBridge {
     // prompt existed. Occurrence identity is the contributing turn index,
     // never the text alone: identical text from distinct turns stays
     // repeated, and one span serving two turn indexes contributes two
-    // occurrences. Turn span ids are filtered from the session scan (using
-    // the resolved turn set, never text inference), so a turn span never
-    // appears as an unindexed duplicate.
+    // occurrences. Turn spans are excluded from the session scan by their
+    // canonical operation (`llm.invoke`) as well as by the resolved turn
+    // span set (never by text inference), so a turn span missing from the
+    // payload turn list never appears as an unindexed duplicate.
     // Temporal scope comes from captured timestamps — a prompt provably
     // captured after this turn is withheld; missing, unparseable, or equal
     // timestamps stay included (see `sessionPromptAtOrBefore`), because the
@@ -2353,9 +2354,13 @@ export class KyberBridge {
   }
 
   /**
-   * Session-wide system prompts for the shared-context reader: every
+   * Non-turn session-wide system prompts for the shared-context reader: every
    * captured `system_prompt` part outside `excludeSpan`, in session order.
-   * Always combined with the turn spans' own prompts by the caller (a mixed
+   * Turn spans are excluded by their canonical operation (`llm.invoke`) as
+   * well as by the caller's resolved span set, so a turn-derived prompt
+   * missing from the payload turn list never masquerades as an unindexed
+   * session-scope prompt; identity is never inferred from text. Always
+   * combined with the turn spans' own prompts by the caller (a mixed
    * session keeps both); retains system prompts alone — never the
    * surrounding content. Each entry carries its row's captured timestamp so
    * the caller can withhold prompts captured after the turn being shown.
@@ -2393,11 +2398,12 @@ export class KyberBridge {
     try {
       const rows = db!
         .prepare(
-          'SELECT span_id, timestamp, content_json, parts_json FROM records WHERE COALESCE(session_id, trace_id) = ? ORDER BY timestamp',
+          'SELECT span_id, op, timestamp, content_json, parts_json FROM records WHERE COALESCE(session_id, trace_id) = ? ORDER BY timestamp',
         )
-        .all(sessionId) as { span_id: unknown; timestamp: unknown; content_json: unknown; parts_json: unknown }[]
+        .all(sessionId) as { span_id: unknown; op: unknown; timestamp: unknown; content_json: unknown; parts_json: unknown }[]
       const out: Array<{ text: string; spanId?: string; timestamp?: string }> = []
       for (const row of rows) {
+        if (row.op === 'llm.invoke') continue
         const spanId = String(row.span_id)
         if (isExcluded(spanId)) continue
         const timestamp = row.timestamp === null || row.timestamp === undefined ? undefined : String(row.timestamp)

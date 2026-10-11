@@ -3,8 +3,6 @@ import * as React from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 import {
-  XML_FOLD_TAGS,
-  parseXmlFoldChunks,
   parseReadableXmlChunks,
   containsReadableXmlTag,
   XmlFoldedText,
@@ -115,47 +113,6 @@ function findDetailsNodes(element: React.ReactElement | null | undefined): React
 }
 
 describe('SessionInspectorDrawer: XML Tag Folding Engine', () => {
-  it('contains all 13 required XML fold tags', () => {
-    const required = [
-      'environment_info',
-      'workspace_info',
-      'instructions',
-      'copilot_instructions',
-      'context',
-      'reminderInstructions',
-      'editor_context',
-      'tool_use_instructions',
-      'notebook_info',
-      'system_reminder',
-      'file_contents',
-      'attachment',
-      'environment_details',
-    ]
-    for (const tag of required) {
-      expect(XML_FOLD_TAGS).toContain(tag)
-    }
-  })
-
-  it('correctly parses plain text and XML tags into chunks', () => {
-    const raw = `Prefix text
-<instructions>Please adhere to coding conventions.</instructions>
-Middle text
-<environment_info os="mac">OS: Darwin arm64</environment_info>
-Suffix text`
-    const chunks = parseXmlFoldChunks(raw)
-    expect(chunks.length).toBe(5)
-    expect(chunks[0].type).toBe('text')
-    expect(chunks[0].content).toContain('Prefix text')
-    expect(chunks[1].type).toBe('tag')
-    expect(chunks[1].tag).toBe('instructions')
-    expect(chunks[1].content).toBe('Please adhere to coding conventions.')
-    expect(chunks[2].type).toBe('text')
-    expect(chunks[3].type).toBe('tag')
-    expect(chunks[3].tag).toBe('environment_info')
-    expect(chunks[3].content).toBe('OS: Darwin arm64')
-    expect(chunks[4].type).toBe('text')
-  })
-
   it('folds XML tags into details and summary with tag badge and preview', () => {
     const raw = `<instructions>This is an instruction block that will be previewed in the summary element.</instructions>`
     const element = React.createElement(XmlFoldedText, { text: raw })
@@ -204,7 +161,7 @@ Trailing notes`
 
   it('correctly handles unclosed XML tags (e.g. <instructions>hello without closing tag)', () => {
     const raw = '<instructions>hello unclosed block'
-    const chunks = parseXmlFoldChunks(raw)
+    const chunks = parseReadableXmlChunks(raw)
     expect(chunks.length).toBe(1)
     expect(chunks[0].type).toBe('tag')
     expect(chunks[0].tag).toBe('instructions')
@@ -220,7 +177,7 @@ Trailing notes`
 
   it('correctly handles unclosed XML tag preceded by normal text', () => {
     const raw = 'Before tag <context>some context that is not closed'
-    const chunks = parseXmlFoldChunks(raw)
+    const chunks = parseReadableXmlChunks(raw)
     expect(chunks.length).toBe(2)
     expect(chunks[0].type).toBe('text')
     expect(chunks[0].content).toBe('Before tag ')
@@ -278,7 +235,7 @@ describe('SessionInspectorDrawer: human-readable API context display', () => {
     expect(text.indexOf('nested project context')).toBeLessThan(text.indexOf('Closing note.'))
   })
 
-  it('parses generic readable sections while keeping the harness parser intact', () => {
+  it('parses generic readable sections including representative harness tags', () => {
     const raw = '<system>hello <b>bold</b> world</system>'
     const chunks = parseReadableXmlChunks(raw)
     expect(chunks).toHaveLength(1)
@@ -287,8 +244,9 @@ describe('SessionInspectorDrawer: human-readable API context display', () => {
     expect(chunks[0].content).toBe('hello <b>bold</b> world')
     expect(containsReadableXmlTag(raw)).toBe(true)
     expect(containsReadableXmlTag('plain prose without tags')).toBe(false)
-    // The harness allowlist parser is unchanged in shape.
-    expect(parseXmlFoldChunks('<instructions>hi</instructions>')[0]).toMatchObject({ type: 'tag', tag: 'instructions' })
+    // The shipped generic parser folds representative tags outside any
+    // legacy harness allowlist.
+    expect(parseReadableXmlChunks('<instructions>hi</instructions>')[0]).toMatchObject({ type: 'tag', tag: 'instructions' })
   })
 
   it('preserves literal angle-bracket text that is not a structural tag', () => {
@@ -416,6 +374,71 @@ describe('SessionInspectorDrawer: human-readable API context display', () => {
     })
     try {
       const button = CopyExactButton({ text: raw, testId: 'copy-ws-probe' }) as React.ReactElement
+      ;(button.props as { onClick: () => void }).onClick()
+      expect(written).toEqual([raw])
+    } finally {
+      if (hadNavigator) {
+        Object.defineProperty(globalThis, 'navigator', { value: nav, configurable: true })
+      } else {
+        const g = globalThis as { navigator?: unknown }
+        delete g.navigator
+      }
+    }
+  })
+
+  it('keeps whitespace-only inter-section text chunks as parsed boundaries in order', () => {
+    const separator = '\n   \n\t '
+    const raw = `<system>Section body alpha.</system>${separator}<context>Section body beta.</context>`
+    const chunks = parseReadableXmlChunks(raw)
+    expect(chunks).toHaveLength(3)
+    expect(chunks[0]).toMatchObject({ type: 'tag', tag: 'system' })
+    expect(chunks[1]).toMatchObject({ type: 'text', content: separator })
+    expect(chunks[2]).toMatchObject({ type: 'tag', tag: 'context' })
+  })
+
+  it('preserves whitespace-only separators in the formatted view with every code point intact', () => {
+    const separator = ' \n\t '
+    const raw = `<system>Section body alpha.</system>${separator}<context>Section body beta.</context>`
+    const element = React.createElement(XmlFoldedText, { text: raw })
+    const html = renderHtml(element)
+    const text = unescapeHtml(html)
+
+    // Structural sections still fold with readable labels and no delimiters.
+    expect(html).toContain('data-testid="folded-tag-system"')
+    expect(html).toContain('data-testid="folded-tag-context"')
+    // The separator keeps its own marked node instead of being dropped, and
+    // the node carries every original whitespace code point untrimmed.
+    expect(html).toContain('data-testid="xml-folded-whitespace"')
+    expect(text).toContain(separator)
+    // Boundaries and order survive: alpha, separator, beta.
+    expect(text.indexOf('Section body alpha.')).toBeLessThan(text.indexOf(separator))
+    expect(text.indexOf(separator)).toBeLessThan(text.indexOf('Section body beta.'))
+  })
+
+  it('keeps raw and copy byte-exact for inputs with whitespace-only separators', () => {
+    const separator = '\n  \n'
+    const raw = `<system>Section body alpha.</system>${separator}<context>Section body beta.</context>`
+
+    const rawHtml = renderHtml(React.createElement(ToggleRawView, {
+      text: raw,
+      label: 'System prompt',
+      rawTestId: 'readable-sep-raw',
+      copyTestId: 'copy-readable-sep',
+      viewPrefix: 'readable-sep',
+      defaultView: 'raw',
+    }))
+    expect(rawHtml).toContain('data-testid="readable-sep-raw"')
+    expect(unescapeHtml(rawHtml)).toContain(raw)
+
+    const written: string[] = []
+    const nav = (globalThis as { navigator?: unknown }).navigator
+    const hadNavigator = nav !== undefined
+    Object.defineProperty(globalThis, 'navigator', {
+      value: { clipboard: { writeText: (s: string) => { written.push(s); return Promise.resolve() } } },
+      configurable: true,
+    })
+    try {
+      const button = CopyExactButton({ text: raw, testId: 'copy-sep-probe' }) as React.ReactElement
       ;(button.props as { onClick: () => void }).onClick()
       expect(written).toEqual([raw])
     } finally {
@@ -2410,15 +2433,15 @@ describe('SessionInspectorDrawer: lossless request builders', () => {
     }
   })
 
-  it('passes the explicit lossless flag for session content', async () => {
+  it('requests session content without a lossless flag (lossless lives on the turn-content endpoint)', async () => {
     const urls: string[] = []
     const restore = mockFetch(urls)
     try {
-      await fetchKyberSessionContent('sess-x', { part: 'system_prompt', full: true })
+      await fetchKyberSessionContent('sess-x', { part: 'system_prompt' })
       expect(urls).toHaveLength(1)
       expect(urls[0]).toContain('/api/kyber/session/sess-x/content')
       expect(urls[0]).toContain('part=system_prompt')
-      expect(urls[0]).toContain('full=true')
+      expect(urls[0]).not.toContain('full')
     } finally {
       restore()
     }

@@ -56,9 +56,15 @@ function seed(store: CanonStore): void {
       { op: 'session.start', name: 'session_scope', timestamp: '2026-09-03T15:59:00.000Z' },
     ),
     // Legacy content-only row (no parts): the fallback must read it from
-    // content_json with no inflate.
+    // content_json with no inflate. Stamped `session.start` so it is a
+    // genuine non-turn session prompt — turn spans (`llm.invoke`) are
+    // excluded from the session scan by operation, never by text.
     {
-      ...record('span-cost-legacy', undefined, { timestamp: '2026-09-03T15:59:15.000Z' }),
+      ...record('span-cost-legacy', undefined, {
+        op: 'session.start',
+        name: 'session_scope',
+        timestamp: '2026-09-03T15:59:15.000Z',
+      }),
       content: { system_prompt: 'COST_FALLBACK_LEGACY' },
     },
     record(
@@ -394,6 +400,86 @@ describe('Mixed session and turn prompts (PI blocking finding)', () => {
         // from the narrow timestamped projection.
         expect(get).toHaveBeenCalledTimes(1)
         expect(get).toHaveBeenCalledWith('span-mix-turn-0')
+      } finally {
+        bridge.close()
+      }
+    } finally {
+      store.close()
+    }
+  })
+
+  it('excludes a turn-derived prompt missing from the payload turn list from the session scan', () => {
+    const P3_ID = 'sess-p3-hidden-turn-001'
+    const store = new CanonStore(':memory:')
+    try {
+      const base: Partial<CanonicalRecord> = { sessionId: P3_ID, traceId: 'trace-p3-001' }
+      store.upsertMany([
+        {
+          ...record('span-p3-sess', [{ part: 'system_prompt', text: 'P3_SESSION_PROMPT', tokens: 4 }], base),
+          op: 'session.start',
+          name: 'session_scope',
+          timestamp: '2026-09-03T15:59:00.000Z',
+        },
+        // Turn-derived by operation (`llm.invoke`) but absent from the
+        // payload turn list below: without the operation filter it would
+        // masquerade as an unindexed session-scope prompt. Identity is never
+        // inferred from text — this text is distinct on purpose.
+        {
+          ...record('span-p3-hidden', [{ part: 'system_prompt', text: 'P3_HIDDEN_TURN_PROMPT', tokens: 4 }], base),
+          timestamp: '2026-09-03T15:59:30.000Z',
+        },
+        {
+          ...record('span-p3-t0', [{ part: 'system_prompt', text: 'P3_T0_PROMPT', tokens: 3 }], base),
+          timestamp: '2026-09-03T16:00:00.000Z',
+        },
+        {
+          ...record('span-p3-t1', [{ part: 'system_prompt', text: 'P3_T1_PROMPT', tokens: 3 }], base),
+          timestamp: '2026-09-03T16:01:00.000Z',
+        },
+      ])
+      store.upsertSession({
+        sessionId: P3_ID,
+        harness: 'copilot',
+        label: 'Hidden turn prompt',
+        payload: {
+          id: P3_ID,
+          harness: 'copilot',
+          turns: [
+            { index: 0, spanId: 'span-p3-t0', model: 'm' },
+            { index: 1, spanId: 'span-p3-t1', model: 'm' },
+          ],
+        },
+      })
+      const recordsForSession = vi.spyOn(store, 'recordsForSession')
+      const get = vi.spyOn(store, 'get')
+      const bridge = new KyberBridge({ store })
+      try {
+        // Turn 0: genuine session prompt plus its own occurrence — the
+        // hidden turn record stays out, and the future turn stays withheld.
+        const first = bridge.assembleTurnContent(P3_ID, 0, Number.POSITIVE_INFINITY)
+        expect(first?.sharedContext?.parts).toEqual([
+          { text: 'P3_SESSION_PROMPT', spanId: 'span-p3-sess' },
+          { text: 'P3_T0_PROMPT', spanId: 'span-p3-t0', turnIndex: 0 },
+        ])
+        expect(first?.sharedContext?.parts.some((p) => p.text === 'P3_HIDDEN_TURN_PROMPT')).toBe(false)
+        expect(first?.sharedContext?.parts.some((p) => p.text === 'P3_T1_PROMPT')).toBe(false)
+
+        // Turn 1: prior and current turn occurrences each appear once, in
+        // capture order around the genuine session prompt.
+        const second = bridge.assembleTurnContent(P3_ID, 1, Number.POSITIVE_INFINITY)
+        expect(second?.sharedContext?.parts).toEqual([
+          { text: 'P3_SESSION_PROMPT', spanId: 'span-p3-sess' },
+          { text: 'P3_T0_PROMPT', spanId: 'span-p3-t0', turnIndex: 0 },
+          { text: 'P3_T1_PROMPT', spanId: 'span-p3-t1', turnIndex: 1 },
+        ])
+        expect(second?.sharedContext?.parts.some((p) => p.text === 'P3_HIDDEN_TURN_PROMPT')).toBe(false)
+        expect(second?.sharedContext?.seenBefore).toBe(true)
+        expect(second?.blocks.find((b) => b.key === 'system_prompt')?.text).toBe('P3_T1_PROMPT')
+        // The exclusion rides on the narrow op-filtered projection — no
+        // full-session record walk pays for it.
+        expect(recordsForSession).not.toHaveBeenCalled()
+        expect(get).toHaveBeenCalledWith('span-p3-t0')
+        expect(get).toHaveBeenCalledWith('span-p3-t1')
       } finally {
         bridge.close()
       }

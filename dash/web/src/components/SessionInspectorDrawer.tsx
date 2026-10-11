@@ -14,27 +14,6 @@ import type {
 import type { DrawerContent, SessionTimelineNode } from './AgentSessionDashboard.js'
 import { Skeleton } from './ui/skeleton.js'
 
-/**
- * Harness XML tags folded into collapsible <details> elements.
- */
-export const XML_FOLD_TAGS = [
-  'environment_info',
-  'workspace_info',
-  'instructions',
-  'copilot_instructions',
-  'context',
-  'reminderInstructions',
-  'editor_context',
-  'tool_use_instructions',
-  'notebook_info',
-  'system_reminder',
-  'file_contents',
-  'attachment',
-  'environment_details',
-] as const
-
-export type XmlFoldTag = (typeof XML_FOLD_TAGS)[number]
-
 export interface XmlFoldChunk {
   type: 'text' | 'tag'
   tag?: string
@@ -187,49 +166,6 @@ function readablePreviewText(inner: string, maxLength = 80): { preview: string; 
   return { preview: collapsed.slice(0, maxLength), hasMore: collapsed.length > maxLength }
 }
 /**
- * Parses raw text into plain text chunks and recognized harness XML blocks.
- * Kept for the allowlist unit tests; the formatted view below uses the
- * generic readable parser so representative tags outside the harness list
- * (for example `<system>`) render as readable sections too.
- */
-export function parseXmlFoldChunks(raw: string): XmlFoldChunk[] {
-  if (!raw) return []
-  const tagsPattern = XML_FOLD_TAGS.join('|')
-  const regex = new RegExp(`<(${tagsPattern})(\\s[^>]*)?>([\\s\\S]*?)(?:<\\/\\1>|$)`, 'gi')
-  const chunks: XmlFoldChunk[] = []
-  let lastIndex = 0
-  let match: RegExpExecArray | null
-
-  while ((match = regex.exec(raw)) !== null) {
-    if (match.index > lastIndex) {
-      const before = raw.slice(lastIndex, match.index)
-      if (before) {
-        chunks.push({ type: 'text', content: before })
-      }
-    }
-    const tag = match[1]
-    const attributes = match[2]?.trim()
-    const inner = match[3] ?? ''
-    chunks.push({
-      type: 'tag',
-      tag,
-      attributes,
-      content: inner,
-    })
-    lastIndex = match.index + match[0].length
-  }
-
-  if (lastIndex < raw.length) {
-    const after = raw.slice(lastIndex)
-    if (after) {
-      chunks.push({ type: 'text', content: after })
-    }
-  }
-
-  return chunks
-}
-
-/**
  * True when the formatted readable view would fold at least one structural
  * XML section. Denylisted HTML-active tags and stray angle brackets never
  * count, so literals route to plain text instead of folding.
@@ -260,8 +196,23 @@ export function XmlFoldedText({ text, className }: { text: string; className?: s
     <div className={cn('space-y-1 text-xs', className)} data-testid="xml-folded-content">
       {chunks.map((chunk, i) => {
         if (chunk.type === 'text') {
-          const trimmed = chunk.content.trim()
-          if (!trimmed) return null
+          if (chunk.content.trim() === '') {
+            // Whitespace-only separators stay in the DOM byte-for-byte, just
+            // as whitespace-only tag bodies do below: dropping them would
+            // rewrite section boundaries and lose original whitespace code
+            // points. The test id and accessible label identify the node;
+            // the text node itself keeps every original code point untrimmed.
+            return (
+              <div
+                key={i}
+                className="whitespace-pre-wrap break-words leading-relaxed text-foreground/90 my-1"
+                data-testid="xml-folded-whitespace"
+                aria-label="whitespace-only separator between sections"
+              >
+                {chunk.content}
+              </div>
+            )
+          }
           return (
             <div key={i} className="whitespace-pre-wrap break-words leading-relaxed text-foreground/90 my-1">
               {chunk.content}
