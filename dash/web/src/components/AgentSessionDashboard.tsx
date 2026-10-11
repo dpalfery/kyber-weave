@@ -215,6 +215,10 @@ export type DrawerContent =
       turn: KyberSessionTurnRow
       context: KyberSessionContext
     }
+  | {
+      turnIndex: number
+      turn: KyberSessionTurnRow
+    }
   // Anything else InspectorContent's shape dispatch can render — tests hand
   // the drawer bare records, and the runtime dispatch is the contract.
   | Record<string, unknown>
@@ -536,12 +540,16 @@ export function AgentSessionContent({
           context: ctx as KyberSessionContext,
         })
       } else {
+        // Whole-turn view: a plain turn selection opens the complete
+        // available context for that turn via the turn-content endpoint
+        // (lossless `full` path), not just the payload row or one bucket.
+        // The drawer resolves the exact zero-based `turnIndex` below.
         // Issue #184: transport `turnIndex` is 0-based; humans see 1-based.
-        setDrawerTitle(`Turn ${turnIndex + 1}`)
+        setDrawerTitle(`Turn ${turnIndex + 1} · Full context`)
         setDrawerSubtitle(
           `${turn.model ? `Model: ${formatModelLabel(turn.model)} · ` : ''}${formatDuration(turn.durationMs)}`
         )
-        setDrawerContent(turn)
+        setDrawerContent({ turnIndex, turn })
       }
       setDrawerOpen(true)
     },
@@ -650,12 +658,25 @@ export function AgentSessionContent({
   const isSchemaMeasurable = schemaOffered.length > 0
 
   // Which content-route request the drawer should issue for what it is
-  // showing: an explicit span selection, the tool-definition drawer, a bucket
-  // drill-down onto its turn's span, or the span the drawer is inspecting.
+  // showing: a whole-turn lossless request, an explicit span selection, the
+  // tool-definition drawer, a bucket drill-down onto its turn's span, or the
+  // span the drawer is inspecting.
   const drawerContentRequest = (() => {
     const sessionId = session.id ?? session.session_id
     if (!sessionId) return undefined
     if (selectedSpanId) return { sessionId: String(sessionId), span: selectedSpanId }
+    if (
+      drawerContent &&
+      typeof drawerContent === 'object' &&
+      'turnIndex' in drawerContent &&
+      !('bucket' in drawerContent) &&
+      typeof (drawerContent as { turnIndex?: unknown }).turnIndex === 'number'
+    ) {
+      // Whole-turn lossless view: the exact zero-based transport index the
+      // turn-content route resolves (issue #184), with the explicit `full`
+      // path instead of the default budget.
+      return { sessionId: String(sessionId), turnIndex: (drawerContent as { turnIndex: number }).turnIndex, full: true as const }
+    }
     if (drawerContent && typeof drawerContent === 'object' && 'contentRequest' in drawerContent) {
       return { sessionId: String(sessionId), ...(drawerContent.contentRequest as { span?: string; part: string }) }
     }

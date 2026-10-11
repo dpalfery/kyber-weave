@@ -24,10 +24,13 @@ import {
   TurnLosslessValue,
   prettyPrintJsonNested,
   prettyPrintJsonLinesNested,
+  TurnFullContentPanel,
+  CopyExactButton,
+  isTurnFullContentRequest,
 } from './SessionInspectorDrawer.js'
 
 import { renderToStaticMarkup } from 'react-dom/server'
-import type { KyberSessionContentResult } from '../lib/kyberApi.js'
+import type { KyberSessionContentResult, KyberTurnContentResult } from '../lib/kyberApi.js'
 
 // Set up React 19 test hook dispatcher so components using hooks can be rendered in tests
 const reactInternals = (
@@ -1408,5 +1411,276 @@ describe('SessionInspectorDrawer: nested JSON readability', () => {
     expect(pretty).not.toBeNull()
     expect(pretty!).toContain('[')
     expect(pretty!).toContain(']')
+  })
+})
+
+describe('SessionInspectorDrawer: whole-turn full context', () => {
+  const TURN_SESSION_ID = 'sess-turn-001'
+  const TURN_INDEX = 1
+  const TURN_KEY = ['kyber-turn-content-full', TURN_SESSION_ID, TURN_INDEX]
+  const SHARED_KEY = ['kyber-session-content', TURN_SESSION_ID, undefined, 'system_prompt']
+
+  const SHARED_PROMPT = 'SHARED_SESSION_PROMPT_HEAD_8aa1\nFollow every rule.\nSHARED_PROMPT_TAIL_3f9c'
+  const OWN_SYSTEM_PROMPT = 'TURN_OWN_SYSTEM_PROMPT_HEAD_51bd\nTurn-specific instructions.\nOWN_PROMPT_TAIL_c742'
+  const MYSTERY_TEXT = 'MYSTERY_PAYLOAD_9z7q exact bytes <> & "preserved"'
+  const LONG_TEXT = `LONG_HEAD_d4e2_${'L'.repeat(8000)}_LONG_TAIL_9b1f`
+
+  function buildTurnFixture(overrides?: Partial<KyberTurnContentResult>): KyberTurnContentResult {
+    const sysPart = { id: 'part-sys-0', spanId: 'span-turn-1', part: 'system_prompt', label: 'System Prompt', text: OWN_SYSTEM_PROMPT, tokens: 150 }
+    const toolPart = { id: 'part-tool-1', spanId: 'span-turn-1', part: 'tool_definitions', label: 'Tools', text: '{"name": "zeta_tool"}', tokens: 0 }
+    const userPart = { id: 'part-user-2', spanId: 'span-turn-1', part: 'user_messages', label: 'User Messages', text: 'user asks about the failing gate' }
+    const asstPart = { id: 'part-asst-3', spanId: 'span-turn-1', part: 'assistant_turns', label: 'Assistant Turns', text: 'assistant starts reading the row' }
+    const resPart = { id: 'part-res-4', spanId: 'span-turn-1', part: 'tool_result_content', label: 'Tool Results', text: 'read_file produced 42 lines' }
+    const mysteryPart = { id: 'part-other-5', spanId: 'span-turn-1', part: 'mystery_blob', label: 'mystery blob', text: MYSTERY_TEXT }
+    const parts = [sysPart, toolPart, userPart, asstPart, resPart, mysteryPart]
+    const blocks = [
+      { key: 'system_prompt', label: 'System prompt', tokens: 150, parts: [sysPart], text: OWN_SYSTEM_PROMPT },
+      { key: 'tool_definitions', label: 'Tools', tokens: 0, parts: [toolPart], text: '{"name": "zeta_tool"}' },
+      {
+        key: 'conversation_history',
+        label: 'Conversation history',
+        parts: [userPart, asstPart],
+        text: 'user asks about the failing gate\n\nassistant starts reading the row',
+      },
+      { key: 'tool_result_content', label: 'Tool results', parts: [resPart], text: 'read_file produced 42 lines' },
+    ]
+    return {
+      sessionId: TURN_SESSION_ID,
+      turnIndex: TURN_INDEX,
+      spanId: 'span-turn-1',
+      model: 'gpt-5',
+      blocks,
+      parts,
+      assembledText: [...blocks.map((b) => b.text), MYSTERY_TEXT].join('\n\n'),
+      ...overrides,
+    } as KyberTurnContentResult
+  }
+
+  function seedTurn(qc: QueryClient, body: KyberTurnContentResult, sharedText: string | null = SHARED_PROMPT) {
+    qc.setQueryData(TURN_KEY, body)
+    if (sharedText !== null) {
+      qc.setQueryData(SHARED_KEY, {
+        sessionId: TURN_SESSION_ID,
+        parts: [{ spanId: 'span-turn-0', part: 'system_prompt', text: sharedText, tokens: 150 }],
+      } satisfies KyberSessionContentResult)
+    }
+  }
+
+  function renderPanel(
+    qc: QueryClient,
+    turn: Record<string, unknown> = { fresh: 250, cache_read: 200, cache_creation: 50 },
+  ): string {
+    return renderHtml(
+      <QueryClientProvider client={qc}>
+        <TurnFullContentPanel
+          request={{ sessionId: TURN_SESSION_ID, turnIndex: TURN_INDEX, full: true }}
+          turn={turn as unknown as Parameters<typeof TurnFullContentPanel>[0]['turn']}
+        />
+      </QueryClientProvider>
+    )
+  }
+
+  it('recognizes whole-turn requests', () => {
+    expect(isTurnFullContentRequest({ sessionId: 's', turnIndex: 1, full: true })).toBe(true)
+    expect(isTurnFullContentRequest({ sessionId: 's', span: 'x', part: 'system_prompt' })).toBe(false)
+    expect(isTurnFullContentRequest(null)).toBe(false)
+  })
+
+  it('renders every block and part including unknown kinds and zero-token blocks', () => {
+    const qc = createTestQueryClient()
+    seedTurn(qc, buildTurnFixture())
+    const html = renderPanel(qc)
+    const text = unescapeHtml(html)
+
+    expect(html).toContain('data-testid="turn-content-full"')
+    for (const key of ['system_prompt', 'tool_definitions', 'conversation_history', 'tool_result_content']) {
+      expect(html).toContain(`data-testid="turn-block-${key}"`)
+    }
+    // Server order is preserved: system prompt first, tool results last.
+    expect(html.indexOf('turn-block-system_prompt')).toBeLessThan(html.indexOf('turn-block-tool_result_content'))
+    // Zero-token blocks stay visible with an explicit zero, not hidden.
+    expect(html).toContain('data-testid="turn-block-tool_definitions-tokens"')
+    expect(html).toContain('0 tokens')
+    // Unknown part kinds are not dropped: they render under Additional parts
+    // with exact text, ordering metadata, and raw access.
+    expect(html).toContain('data-testid="turn-additional-parts"')
+    expect(html).toContain('mystery_blob')
+    expect(text).toContain(MYSTERY_TEXT)
+    expect(text).toContain('turn-part-mystery_blob-0-raw')
+    expect(text).toContain(OWN_SYSTEM_PROMPT)
+    expect(text).toContain('user asks about the failing gate')
+    expect(text).toContain('assistant starts reading the row')
+    expect(text).toContain('read_file produced 42 lines')
+  })
+
+  it('shows shared session context once and skips exact duplicates', () => {
+    const qc = createTestQueryClient()
+    seedTurn(qc, buildTurnFixture())
+    const html = renderHtml(
+      <QueryClientProvider client={qc}>
+        <TurnFullContentPanel
+          request={{ sessionId: TURN_SESSION_ID, turnIndex: TURN_INDEX, full: true }}
+          turn={{ fresh: 1, cache_read: 2, cache_creation: 3 }}
+        />
+      </QueryClientProvider>
+    )
+    const text = unescapeHtml(html)
+    expect(html).toContain('data-testid="shared-session-context"')
+    expect(html).toContain('Shared session context')
+    expect(html).toContain('Session-level system content')
+    expect(text).toContain(SHARED_PROMPT)
+    expect(text).toContain('SHARED_PROMPT_TAIL_3f9c')
+    // The turn's own prompt still renders in its own block.
+    expect(text).toContain(OWN_SYSTEM_PROMPT)
+
+    // An exact duplicate already among the turn's parts is not shown twice.
+    const dupQc = createTestQueryClient()
+    seedTurn(dupQc, buildTurnFixture(), OWN_SYSTEM_PROMPT)
+    const dupHtml = renderHtml(
+      <QueryClientProvider client={dupQc}>
+        <TurnFullContentPanel
+          request={{ sessionId: TURN_SESSION_ID, turnIndex: TURN_INDEX, full: true }}
+          turn={{ fresh: 1, cache_read: 2, cache_creation: 3 }}
+        />
+      </QueryClientProvider>
+    )
+    expect(dupHtml).not.toContain('data-testid="shared-session-context"')
+    expect(unescapeHtml(dupHtml)).toContain(OWN_SYSTEM_PROMPT)
+  })
+
+  it('shows measured turn totals separately with no per-block cache claims', () => {
+    const qc = createTestQueryClient()
+    seedTurn(qc, buildTurnFixture())
+    const html = renderPanel(qc, { fresh: 250, cache_read: 200, cache_creation: 50 })
+
+    expect(html).toContain('data-testid="turn-token-totals"')
+    expect(html).toContain('Measured turn totals')
+    expect(html).toContain('data-testid="turn-total-fresh"')
+    expect(html).toContain('data-testid="turn-total-cache-read"')
+    expect(html).toContain('data-testid="turn-total-cache-creation"')
+    expect(html).toContain('does not map them to specific blocks')
+    // Cache figures appear exactly once — in the totals strip, never as a
+    // per-block cached/uncached or new/repeated claim.
+    expect(html.match(/Cache read/g)?.length).toBe(1)
+    expect(html.match(/Cache creation/g)?.length).toBe(1)
+    expect(html).not.toContain('repeated')
+    expect(html).not.toContain('cached-block')
+    expect(html).not.toContain('uncached-block')
+
+    // Missing figures render honestly instead of synthesizing zeros.
+    const absentQc = createTestQueryClient()
+    seedTurn(absentQc, buildTurnFixture())
+    const absentHtml = renderHtml(
+      <QueryClientProvider client={absentQc}>
+        <TurnFullContentPanel
+          request={{ sessionId: TURN_SESSION_ID, turnIndex: TURN_INDEX, full: true }}
+          turn={{}}
+        />
+      </QueryClientProvider>
+    )
+    expect(absentHtml).toContain('data-testid="turn-token-totals-absent"')
+    expect(absentHtml).toContain('token counts not recorded')
+  })
+
+  it('keeps long text intact with exact raw and copy access', () => {
+    const body = buildTurnFixture()
+    const longPart = { id: 'part-long-9', spanId: 'span-turn-1', part: 'user_messages', label: 'User Messages', text: LONG_TEXT }
+    const longBlock = { key: 'long_block', label: 'Long block', parts: [longPart], text: LONG_TEXT }
+    const full = {
+      ...body,
+      blocks: [...body.blocks, longBlock],
+      parts: [...body.parts, longPart],
+      assembledText: `${body.assembledText}\n\n${LONG_TEXT}`,
+    } as KyberTurnContentResult
+    const qc = createTestQueryClient()
+    seedTurn(qc, full)
+    const html = renderHtml(
+      <QueryClientProvider client={qc}>
+        <TurnFullContentPanel
+          request={{ sessionId: TURN_SESSION_ID, turnIndex: TURN_INDEX, full: true }}
+          turn={{ fresh: 1, cache_read: 1, cache_creation: 1 }}
+        />
+      </QueryClientProvider>
+    )
+    const text = unescapeHtml(html)
+    // Every byte survives: head through tail, with raw access and copy affordances.
+    expect(text).toContain(LONG_TEXT)
+    expect(text).toContain('LONG_HEAD_d4e2_')
+    expect(text).toContain('LONG_TAIL_9b1f')
+    expect(html).toContain('data-testid="turn-block-long_block-raw"')
+    expect(html).toContain('data-testid="copy-turn-block-long_block"')
+    expect(html).toContain('data-testid="copy-turn-button"')
+
+    // Copy writes the exact bytes, not the formatted view.
+    const written: string[] = []
+    const nav = (globalThis as { navigator?: unknown }).navigator
+    const hadNavigator = nav !== undefined
+    Object.defineProperty(globalThis, 'navigator', {
+      value: { clipboard: { writeText: (s: string) => { written.push(s); return Promise.resolve() } } },
+      configurable: true,
+    })
+    try {
+      const button = CopyExactButton({ text: LONG_TEXT, testId: 'copy-probe' }) as React.ReactElement
+      ;(button.props as { onClick: () => void }).onClick()
+      expect(written).toEqual([LONG_TEXT])
+    } finally {
+      if (hadNavigator) {
+        Object.defineProperty(globalThis, 'navigator', { value: nav, configurable: true })
+      } else {
+        const g = globalThis as { navigator?: unknown }
+        delete g.navigator
+      }
+    }
+  })
+
+  it('states truncation exactly while still showing returned bytes', () => {
+    const returned = 'TRUNCATED_RETURNED_BYTES_6c2a'
+    const body = buildTurnFixture({
+      assembledText: returned,
+      truncated: true,
+      totalLength: 5000,
+      blocks: [
+        {
+          key: 'tool_result_content',
+          label: 'Tool results',
+          parts: [{ id: 'part-res-4', spanId: 'span-turn-1', part: 'tool_result_content', label: 'Tool Results', text: returned }],
+          text: returned,
+          truncated: true,
+          totalLength: 5000,
+        },
+      ],
+    })
+    const qc = createTestQueryClient()
+    seedTurn(qc, body, null)
+    const html = renderPanel(qc)
+    const text = unescapeHtml(html)
+    expect(html).toContain('data-testid="turn-content-truncated"')
+    expect(html).toContain(`showing ${returned.length} of 5000 characters`)
+    expect(html).toContain('data-testid="turn-block-tool_result_content-truncated"')
+    // Returned bytes still render; missing source is never pretended present.
+    expect(text).toContain(returned)
+  })
+
+  it('routes a whole-turn drawer request to the full panel without clipped content', () => {
+    const qc = createTestQueryClient()
+    seedTurn(qc, buildTurnFixture())
+    const html = renderHtml(
+      <QueryClientProvider client={qc}>
+        <SessionInspectorDrawer
+          open={true}
+          onClose={() => {}}
+          title="Turn 2 · Full context"
+          rawContent={{ turnIndex: TURN_INDEX, turn: { fresh: 250, cache_read: 200, cache_creation: 50 } } as unknown as Parameters<typeof SessionInspectorDrawer>[0]['rawContent']}
+          contentRequest={{ sessionId: TURN_SESSION_ID, turnIndex: TURN_INDEX, full: true }}
+        />
+      </QueryClientProvider>
+    )
+    const text = unescapeHtml(html)
+    expect(html).toContain('data-testid="turn-content-full"')
+    expect(text).toContain(OWN_SYSTEM_PROMPT)
+    expect(text).toContain(SHARED_PROMPT)
+    // The clipped payload-row inspector stays out of the lossless view.
+    expect(html).not.toContain('data-testid="turn-inspector"')
+    expect(html).not.toContain('data-testid="drawer-content-loading"')
   })
 })

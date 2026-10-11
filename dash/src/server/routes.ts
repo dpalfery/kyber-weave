@@ -114,7 +114,16 @@ function parseSpanAttributesPath(pathname: string): string | null {
 /**
  * `/api/kyber/session/:id/turn/:index/content` — returns unclipped assembled context
  * for a specific turn index (Task G1 / Decision D14).
+ *
+ * Explicit lossless path: `?full=true` (or `?full=1`) bypasses
+ * `CONTENT_RESPONSE_BUDGET` so the full source text returns intact. A
+ * large-number `budget` is not a substitute — it still truncates past its
+ * value and is undocumented for lossless use.
  */
+function isFullContentRequest(params: URLSearchParams): boolean {
+  const full = params.get('full')
+  return full === 'true' || full === '1'
+}
 function parseTurnContentPath(pathname: string): { sessionId: string; turnIndex: number } | null {
   const prefix = '/api/kyber/session/'
   const suffix = '/content'
@@ -798,7 +807,17 @@ export function handleKyberRequest(
     }
     const budgetParam = url.searchParams.get('budget')
     const budget = budgetParam ? parseInt(budgetParam, 10) : undefined
-    const body = bridge.assembleTurnContent(sessionId, turnIndex, budget && !isNaN(budget) ? budget : undefined)
+    // Explicit lossless path first: `?full=true` maps to an unbounded
+    // budget so over-budget source text returns intact with no truncation
+    // flags. A plain `budget` number still truncates past its value.
+    const full = isFullContentRequest(url.searchParams)
+    let effectiveBudget: number | undefined
+    if (full) {
+      effectiveBudget = Number.POSITIVE_INFINITY
+    } else if (budget !== undefined && !isNaN(budget)) {
+      effectiveBudget = budget
+    }
+    const body = bridge.assembleTurnContent(sessionId, turnIndex, effectiveBudget)
     if (!body) {
       sendKyberJson(res, 404, { error: 'Turn content not found' })
       return true
@@ -825,7 +844,14 @@ export function handleKyberRequest(
       if (!isNaN(turnIndex)) {
         const budgetParam = url.searchParams.get('budget')
         const budget = budgetParam ? parseInt(budgetParam, 10) : undefined
-        const turnBody = bridge.assembleTurnContent(contentSessionId, turnIndex, budget && !isNaN(budget) ? budget : undefined)
+        const full = isFullContentRequest(url.searchParams)
+        let effectiveBudget: number | undefined
+        if (full) {
+          effectiveBudget = Number.POSITIVE_INFINITY
+        } else if (budget !== undefined && !isNaN(budget)) {
+          effectiveBudget = budget
+        }
+        const turnBody = bridge.assembleTurnContent(contentSessionId, turnIndex, effectiveBudget)
         if (!turnBody) {
           sendKyberJson(res, 404, { error: 'Turn content not found' })
           return true

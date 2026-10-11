@@ -520,13 +520,32 @@ export interface KyberTurnContentResult {
 export function fetchTurnContent(
   sessionId: string,
   turnIndex: number,
-  opts?: { budget?: number },
+  opts?: { budget?: number; full?: boolean },
 ): Promise<KyberTurnContentResult> {
   const params = new URLSearchParams()
-  if (opts?.budget) params.set('budget', String(opts.budget))
+  // Explicit lossless path: `full` bypasses the server's default budget so
+  // the full source text returns intact. A large-number `budget` is not a
+  // substitute — it still truncates past its value.
+  if (opts?.full) {
+    params.set('full', 'true')
+  } else if (opts?.budget) {
+    params.set('budget', String(opts.budget))
+  }
   const qs = params.toString()
   const path = `/api/kyber/session/${encodeURIComponent(sessionId)}/turn/${turnIndex}/content${qs ? `?${qs}` : ''}`
   return fetchJson<KyberTurnContentResult>(path)
+}
+
+/**
+ * Lossless whole-turn fetch: every available byte of the turn's blocks and
+ * parts, with no budget truncation. Use for the turn inspector — never rely
+ * on the default budget or a large-number sentinel for complete content.
+ */
+export function fetchTurnContentFull(
+  sessionId: string,
+  turnIndex: number,
+): Promise<KyberTurnContentResult> {
+  return fetchTurnContent(sessionId, turnIndex, { full: true })
 }
 
 export const assembleTurnContent = fetchTurnContent

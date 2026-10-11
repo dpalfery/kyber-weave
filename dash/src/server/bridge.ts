@@ -613,8 +613,20 @@ export type TurnContentResult = {
  * characters). A single system prompt fits; a 7,000-turn dump does not get
  * serialized whole. When a part does not fit, it is cut and flagged — never
  * silently shortened.
+ *
+ * The turn-content route also accepts an explicit lossless request
+ * (`?full=true`): callers that need every byte pass `full` instead of
+ * guessing a large `budget` number. See `isFullContentRequest` in routes.ts.
  */
 export const CONTENT_RESPONSE_BUDGET = 2_000_000
+
+/**
+ * Documented sentinel for an explicit lossless turn-content request. The
+ * route checks the `full` query value (`true`/`1`); anything else keeps the
+ * default budget. A large-number `budget` is not a substitute — it is
+ * undocumented and still truncates past its value.
+ */
+export const TURN_CONTENT_FULL_PARAM = 'full'
 
 interface SessionDbRow {
   session_id: string
@@ -1635,6 +1647,11 @@ export class KyberBridge {
    * Sub-divided into canonical context blocks (system_prompt, tool_definitions,
    * instruction_context, conversation_history, tool_result_content) and parts
    * (including user_messages, assistant_turns, etc.).
+   *
+   * `budget` caps the returned characters with explicit `truncated` flags.
+   * Pass `Number.POSITIVE_INFINITY` for the documented lossless path (the
+   * route maps `?full=true` to it): no branch silently truncates, so content
+   * longer than `CONTENT_RESPONSE_BUDGET` returns intact.
    */
   assembleTurnContent(
     sessionId: string,

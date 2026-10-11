@@ -507,6 +507,58 @@ describe('Backend Contract Tests: GET /api/kyber/session/:id/content', () => {
       expect(body.assembledText.length).toBeLessThanOrEqual(100)
     })
 
+    describe('explicit lossless full-content path (?full=true)', () => {
+      it('truncates over-budget content by default', async () => {
+        expect(HUGE_TOOL_RESULT.length).toBeGreaterThan(CONTENT_RESPONSE_BUDGET)
+
+        const res = await fetch(`${base}/api/kyber/session/sess-content-001/turn/2/content`)
+        expect(res.status).toBe(200)
+        assertStandardKyberHeaders(res)
+
+        const body = (await res.json()) as TurnContentResult
+        // The assembled turn text wraps the block with a section header, so
+        // the total exceeds the raw part by exactly that header length.
+        const header = '=== TOOL RESULTS ===\n'
+        expect(body.truncated).toBe(true)
+        expect(body.totalLength).toBe(HUGE_TOOL_RESULT.length + header.length)
+        expect(body.assembledText.length).toBe(CONTENT_RESPONSE_BUDGET)
+        expect(body.assembledText).toBe((header + HUGE_TOOL_RESULT).slice(0, CONTENT_RESPONSE_BUDGET))
+      })
+
+      it('returns over-budget source text intact with ?full=true', async () => {
+        expect(HUGE_TOOL_RESULT.length).toBeGreaterThan(CONTENT_RESPONSE_BUDGET)
+
+        const res = await fetch(`${base}/api/kyber/session/sess-content-001/turn/2/content?full=true`)
+        expect(res.status).toBe(200)
+        assertStandardKyberHeaders(res)
+
+        const body = (await res.json()) as TurnContentResult
+        expect(body.truncated).toBeUndefined()
+        expect(body.totalLength).toBeUndefined()
+        expect(body.assembledText).toBe(`=== TOOL RESULTS ===\n${HUGE_TOOL_RESULT}`)
+        expect(body.assembledText).toContain(HUGE_TOOL_RESULT)
+        const toolBlock = body.blocks.find((b) => b.key === 'tool_result_content')
+        expect(toolBlock?.truncated).toBeUndefined()
+        expect(toolBlock?.text).toBe(HUGE_TOOL_RESULT)
+      })
+
+      it('supports ?full=1 and the ?turn= alias lossless path', async () => {
+        const direct = await fetch(`${base}/api/kyber/session/sess-content-001/turn/2/content?full=1`)
+        expect(direct.status).toBe(200)
+        const directBody = (await direct.json()) as TurnContentResult
+        expect(directBody.assembledText).toContain(HUGE_TOOL_RESULT)
+        expect(directBody.truncated).toBeUndefined()
+
+        const alias = await fetch(`${base}/api/kyber/session/sess-content-001/content?turn=2&full=true`)
+        expect(alias.status).toBe(200)
+        assertStandardKyberHeaders(alias)
+        const aliasBody = (await alias.json()) as TurnContentResult
+        expect(aliasBody.turnIndex).toBe(2)
+        expect(aliasBody.assembledText).toContain(HUGE_TOOL_RESULT)
+        expect(aliasBody.truncated).toBeUndefined()
+      })
+    })
+
     describe('claude-desktop synth parts (issue #216)', () => {
       it('returns non-empty parts and assembledText for a desktop synth span that has conversation parts', async () => {
         const res = await fetch(

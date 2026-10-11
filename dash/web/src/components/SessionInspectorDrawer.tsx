@@ -3,8 +3,14 @@ import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { formatDuration } from '../lib/labels.js'
 import { cn, usd, fmtTokens } from '../lib/utils.js'
-import { fetchKyberSessionContent, fetchSpanAttributes } from '../lib/kyberApi.js'
-import type { KyberMessageLike, KyberTurnContentShadow } from '../lib/kyberApi.js'
+import { fetchKyberSessionContent, fetchSpanAttributes, fetchTurnContentFull } from '../lib/kyberApi.js'
+import type {
+  KyberMessageLike,
+  KyberTurnContentBlock,
+  KyberTurnContentPart,
+  KyberTurnContentResult,
+  KyberTurnContentShadow,
+} from '../lib/kyberApi.js'
 import type { DrawerContent, SessionTimelineNode } from './AgentSessionDashboard.js'
 import { Skeleton } from './ui/skeleton.js'
 
@@ -1929,6 +1935,387 @@ export interface SessionContentRequest {
   part?: string
 }
 
+/**
+ * Whole-turn lossless request: the exact zero-based transport turn index the
+ * turn-content route resolves (issue #184), always via the explicit `full`
+ * path so the complete source text returns intact.
+ */
+export interface TurnFullContentRequest {
+  sessionId: string
+  turnIndex: number
+  full?: boolean
+}
+
+export type DrawerContentRequest = SessionContentRequest | TurnFullContentRequest
+
+/**
+ * Narrowing helper: a whole-turn request carries a numeric `turnIndex`; a
+ * span/bucket request never does.
+ */
+export function isTurnFullContentRequest(request: unknown): request is TurnFullContentRequest {
+  if (request === null || typeof request !== 'object') return false
+  return typeof (request as { turnIndex?: unknown }).turnIndex === 'number'
+}
+
+/**
+ * Exact-bytes copy button: writes `text` verbatim to the clipboard. Every
+ * turn-content block and part gets one so raw access never depends on the
+ * formatted view above it.
+ */
+export function CopyExactButton({ text, testId, label = 'Copy' }: { text: string; testId: string; label?: string }) {
+  const [copied, setCopied] = useState(false)
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        try {
+          void navigator.clipboard.writeText(text)
+          setCopied(true)
+          setTimeout(() => setCopied(false), 2000)
+        } catch {
+          // ignore
+        }
+      }}
+      className="rounded border border-border px-2 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-interactive-secondary transition-colors"
+      data-testid={testId}
+    >
+      {copied ? 'Copied!' : label}
+    </button>
+  )
+}
+
+/**
+ * Measured per-turn aggregate token figures, read off the served turn row.
+ * Every field is a harness-measured counter; absent fields render honestly
+ * as not recorded — never estimated from text.
+ */
+export interface TurnFullContentTurn {
+  fresh?: number | null
+  fresh_input?: number | null
+  cache_read?: number | null
+  cache_creation?: number | null
+  tokens?: {
+    fresh?: number | null
+    fresh_input?: number | null
+    cache_read?: number | null
+    cache_creation?: number | null
+  } | null
+  model?: string | null
+}
+
+function readMeasuredFigure(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+}
+
+/**
+ * Whole-turn inspector panel backed by the lossless turn-content endpoint.
+ *
+ * - Renders every returned block and part in server order, including unknown
+ *   part kinds (as an explicit "Additional parts" section) and zero-token
+ *   blocks; nothing is summarized, dropped, trimmed, or truncated for
+ *   display. When the API flags `truncated`, the exact limitation is stated
+ *   while all returned bytes still render.
+ * - The Copilot session-level system prompt renders once under `Shared
+ *   session context`, explicitly labeled as session-level content rather
+ *   than captured for this turn; an exact duplicate already present among
+ *   the turn's own parts is not shown twice.
+ * - Measured per-turn fresh/cache-read/cache-creation totals render
+ *   separately from the blocks. The collector does not map cache hits to
+ *   specific blocks, so no per-block cache claim is rendered. Per-block
+ *   `new`/`repeated` labels are intentionally not implemented yet (awaiting
+ *   the user's distinction answer); each block keeps its stable `key`/`part`
+ *   identity so labels can attach later without implying a cache mapping.
+ */
+export function TurnFullContentPanel({
+  request,
+  turn,
+}: {
+  request: TurnFullContentRequest
+  turn?: TurnFullContentTurn | null
+}) {
+  const turnQuery = useQuery({
+    queryKey: ['kyber-turn-content-full', request.sessionId, request.turnIndex],
+    queryFn: () => fetchTurnContentFull(request.sessionId, request.turnIndex),
+  })
+  const sharedQuery = useQuery({
+    queryKey: ['kyber-session-content', request.sessionId, undefined, 'system_prompt'],
+    queryFn: () => fetchKyberSessionContent(request.sessionId, { part: 'system_prompt' }),
+  })
+
+  const data: KyberTurnContentResult | undefined = turnQuery.data
+  const isTurnError = turnQuery.isError
+
+  const fresh = readMeasuredFigure(turn?.fresh ?? turn?.fresh_input ?? turn?.tokens?.fresh ?? turn?.tokens?.fresh_input)
+  const cacheRead = readMeasuredFigure(turn?.cache_read ?? turn?.tokens?.cache_read)
+  const cacheCreation = readMeasuredFigure(turn?.cache_creation ?? turn?.tokens?.cache_creation)
+  const hasTotals = fresh !== undefined || cacheRead !== undefined || cacheCreation !== undefined
+
+  const orphanParts: KyberTurnContentPart[] = useMemo(() => {
+    if (!data) return []
+    // Block parts and top-level parts are separate objects after the JSON
+    // round-trip, so match by stable `id` (the server assigns one per part),
+    // falling back to part+text. Counts handle repeated identical parts.
+    const remaining = new Map<string, number>()
+    for (const block of data.blocks) {
+      for (const p of block.parts) {
+        const key = p.id ?? `${p.part}${p.text}`
+        remaining.set(key, (remaining.get(key) ?? 0) + 1)
+      }
+    }
+    const orphans: KyberTurnContentPart[] = []
+    for (const p of data.parts) {
+      const key = p.id ?? `${p.part}${p.text}`
+      const count = remaining.get(key) ?? 0
+      if (count > 0) {
+        remaining.set(key, count - 1)
+      } else {
+        orphans.push(p)
+      }
+    }
+    return orphans
+  }, [data])
+
+  const sharedParts = useMemo(() => {
+    const candidates = (sharedQuery.data?.parts ?? []).filter(
+      (p) => p.part === 'system_prompt' && typeof p.text === 'string' && p.text !== ''
+    )
+    if (candidates.length === 0 || !data) return candidates
+    const turnTexts = new Set<string>([
+      ...data.blocks.map((b) => b.text),
+      ...data.parts.map((p) => p.text),
+    ])
+    // An exact duplicate already among the turn's own parts stays hidden;
+    // anything else is genuinely shared context for this turn.
+    return candidates.filter((p) => !turnTexts.has(p.text))
+  }, [sharedQuery.data, data])
+
+  const renderFigure = (label: string, value: number | undefined, testId: string) => (
+    <div className="flex justify-between py-0.5" data-testid={testId}>
+      <span className="text-muted-foreground">{label}</span>
+      {value !== undefined ? (
+        <span className="font-mono font-semibold text-foreground">{fmtTokens(value)}</span>
+      ) : (
+        <span className="font-mono text-tertiary-foreground italic">not recorded</span>
+      )}
+    </div>
+  )
+
+  const renderBlock = (block: KyberTurnContentBlock) => (
+    <section key={block.key} data-testid={`turn-block-${block.key}`}>
+      <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
+        {block.label}
+      </h4>
+      <div className="rounded border border-border bg-card p-3 overflow-hidden space-y-2">
+        {typeof block.tokens === 'number' ? (
+          <p className="text-[11px] font-mono text-tertiary-foreground" data-testid={`turn-block-${block.key}-tokens`}>
+            {fmtTokens(block.tokens)} tokens
+          </p>
+        ) : (
+          <p className="text-[11px] font-mono text-tertiary-foreground italic" data-testid={`turn-block-${block.key}-tokens-absent`}>
+            token count not recorded
+          </p>
+        )}
+        {block.notMeasurable ? (
+          <p
+            className="rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300"
+            data-testid={`turn-block-${block.key}-not-measurable`}
+          >
+            Not measurable: {block.notMeasurable.reason}
+          </p>
+        ) : null}
+        {block.truncated === true ? (
+          <p
+            className="rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300"
+            data-testid={`turn-block-${block.key}-truncated`}
+          >
+            {block.totalLength != null
+              ? `showing ${block.text.length} of ${block.totalLength} characters`
+              : `showing ${block.text.length} characters (total length not measurable)`}
+          </p>
+        ) : null}
+        {block.text !== '' ? (
+          <InspectorContent data={block.text} />
+        ) : (
+          <p className="text-xs text-tertiary-foreground italic" data-testid={`turn-block-${block.key}-empty`}>
+            No content recorded for this block.
+          </p>
+        )}
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[11px] font-mono text-tertiary-foreground">Raw · exact bytes</span>
+          <CopyExactButton text={block.text} testId={`copy-turn-block-${block.key}`} label="Copy" />
+        </div>
+        <pre
+          className="text-xs font-mono p-2.5 overflow-auto whitespace-pre-wrap break-words rounded border border-border bg-muted/40 text-foreground max-h-[400px]"
+          data-testid={`turn-block-${block.key}-raw`}
+        >
+          {block.text}
+        </pre>
+      </div>
+    </section>
+  )
+
+  const renderPart = (part: KyberTurnContentPart, idx: number) => (
+    <div key={part.id ?? `${part.part}-${idx}`} data-testid={`turn-part-${part.part}-${idx}`}>
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-xs font-semibold text-foreground">{part.label}</span>
+        <span className="rounded bg-muted border border-border px-1.5 py-0.5 font-mono text-[10px] text-tertiary-foreground">
+          {part.part}
+        </span>
+        {part.server ? (
+          <span className="rounded bg-interactive-secondary px-1.5 py-0.5 font-mono text-[10px] text-tertiary-foreground">
+            {part.server}
+          </span>
+        ) : null}
+        {typeof part.tokens === 'number' ? (
+          <span className="font-mono text-[10px] text-tertiary-foreground">{fmtTokens(part.tokens)} tokens</span>
+        ) : null}
+      </div>
+      {part.truncated === true ? (
+        <p
+          className="rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300 mt-1.5"
+          data-testid={`turn-part-${part.part}-${idx}-truncated`}
+        >
+          {part.totalLength != null
+            ? `showing ${part.text.length} of ${part.totalLength} characters`
+            : `showing ${part.text.length} characters (total length not measurable)`}
+        </p>
+      ) : null}
+      <div className="mt-1.5">
+        <InspectorContent data={part.text} />
+      </div>
+      <div className="flex items-center justify-between gap-2 mt-1.5">
+        <span className="text-[11px] font-mono text-tertiary-foreground">Raw · exact bytes</span>
+        <CopyExactButton text={part.text} testId={`copy-turn-part-${part.part}-${idx}`} label="Copy" />
+      </div>
+      <pre
+        className="text-xs font-mono p-2.5 overflow-auto whitespace-pre-wrap break-words rounded border border-border bg-muted/40 text-foreground max-h-[400px] mt-1.5"
+        data-testid={`turn-part-${part.part}-${idx}-raw`}
+      >
+        {part.text}
+      </pre>
+    </div>
+  )
+
+  return (
+    <div className="space-y-3" data-testid="turn-content-full">
+      {hasTotals ? (
+        <div className="rounded border border-border bg-card p-3 space-y-1 text-xs" data-testid="turn-token-totals">
+          <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            Measured turn totals
+          </h4>
+          {renderFigure('Fresh input', fresh, 'turn-total-fresh')}
+          {renderFigure('Cache read', cacheRead, 'turn-total-cache-read')}
+          {renderFigure('Cache creation', cacheCreation, 'turn-total-cache-creation')}
+          <p className="text-[11px] text-tertiary-foreground leading-relaxed pt-1">
+            Cache totals are measured for the whole turn; the collector does not map them to specific blocks.
+          </p>
+        </div>
+      ) : (
+        <div className="rounded border border-border bg-card p-3 text-xs" data-testid="turn-token-totals-absent">
+          <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Measured turn totals</span>
+          <p className="text-tertiary-foreground italic mt-1">token counts not recorded</p>
+        </div>
+      )}
+
+      {!isTurnError && data === undefined ? (
+        <div className="space-y-2" data-testid="turn-content-loading">
+          <Skeleton className="h-4 w-40" />
+          <Skeleton className="h-32 w-full" />
+          <p className="text-xs text-tertiary-foreground">Loading full turn content…</p>
+        </div>
+      ) : null}
+
+      {isTurnError || (data === undefined && turnQuery.isError) ? (
+        <div
+          className="rounded border border-red-500/30 bg-red-500/10 p-4 text-xs text-red-600 dark:text-red-400 space-y-1.5"
+          data-testid="turn-content-error"
+        >
+          <p className="font-semibold">Unable to load full turn content.</p>
+          <p className="text-muted-foreground">
+            {turnQuery.error instanceof Error ? turnQuery.error.message : 'Turn content not found.'}
+          </p>
+        </div>
+      ) : null}
+
+      {data ? (
+        <div className="space-y-3">
+          {data.truncated === true ? (
+            <p
+              className="rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300"
+              data-testid="turn-content-truncated"
+            >
+              {data.totalLength != null
+                ? `showing ${data.assembledText.length} of ${data.totalLength} characters`
+                : `showing ${data.assembledText.length} characters (total length not measurable)`}
+            </p>
+          ) : null}
+
+          {sharedParts.length > 0 ? (
+            <section data-testid="shared-session-context">
+              <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
+                Shared session context
+              </h4>
+              <p className="text-[11px] text-tertiary-foreground leading-relaxed mb-1.5">
+                Session-level system content · applies to every turn · not captured separately for this turn.
+              </p>
+              <div className="space-y-2">
+                {sharedParts.map((part, idx) => (
+                  <div key={`${part.spanId}-${part.part}-${idx}`} className="rounded border border-border bg-card p-3 overflow-hidden space-y-2" data-testid={`shared-session-context-part-${idx}`}>
+                    <InspectorContent data={part.text} />
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[11px] font-mono text-tertiary-foreground">Raw · exact bytes</span>
+                      <CopyExactButton text={part.text} testId={`copy-shared-session-context-${idx}`} label="Copy" />
+                    </div>
+                    <pre
+                      className="text-xs font-mono p-2.5 overflow-auto whitespace-pre-wrap break-words rounded border border-border bg-muted/40 text-foreground max-h-[400px]"
+                      data-testid={`shared-session-context-part-${idx}-raw`}
+                    >
+                      {part.text}
+                    </pre>
+                  </div>
+                ))}
+              </div>
+            </section>
+          ) : null}
+          {sharedQuery.isError ? (
+            <p className="text-[11px] text-tertiary-foreground italic" data-testid="shared-session-context-unavailable">
+              Shared session context unavailable (session content request failed).
+            </p>
+          ) : null}
+
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <span className="text-xs font-semibold text-foreground">
+              Turn {data.turnIndex + 1}
+              {data.model ? <span className="ml-2 font-mono text-[11px] font-normal text-tertiary-foreground">{data.model}</span> : null}
+            </span>
+            <CopyExactButton text={data.assembledText} testId="copy-turn-button" label="Copy Turn" />
+          </div>
+
+          {data.blocks.map(renderBlock)}
+
+          {orphanParts.length > 0 ? (
+            <section data-testid="turn-additional-parts">
+              <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
+                Additional parts
+              </h4>
+              <div className="rounded border border-border bg-card p-3 overflow-hidden space-y-3">
+                {orphanParts.map(renderPart)}
+              </div>
+            </section>
+          ) : null}
+
+          {data.blocks.length === 0 && orphanParts.length === 0 ? (
+            <p className="text-xs text-tertiary-foreground italic" data-testid="turn-content-empty">
+              session {data.sessionId} · turn {data.turnIndex}
+              {data.spanId ? ` · span ${data.spanId}` : ''} — the harness captured no unclipped content parts here.
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 function FullContentPanel({
   request,
   fallback,
@@ -2021,7 +2408,7 @@ export interface SessionInspectorDrawerProps {
   subtitle?: string
   children?: React.ReactNode
   rawContent?: DrawerContent
-  contentRequest?: SessionContentRequest
+  contentRequest?: DrawerContentRequest
 }
 
 /**
@@ -2055,7 +2442,16 @@ export function SessionInspectorDrawer({
   // 2000-char stub renders next to (or instead of) the text this route exists for.
   const rawRecord =
     rawContent !== null && rawContent !== undefined && typeof rawContent === 'object' ? rawContent : null
-  const inspectorData = contentRequest && rawRecord ? { ...rawRecord, content: undefined } : rawContent
+  const turnRequest = isTurnFullContentRequest(contentRequest) ? contentRequest : null
+  // A whole-turn request carries its own panel (with the turn row as the
+  // measured-totals source); the clipped payload row must not render
+  // alongside the lossless content.
+  const turnFallback =
+    turnRequest !== null && rawRecord !== null && 'turn' in rawRecord
+      ? (rawRecord as { turn?: TurnFullContentTurn }).turn ?? undefined
+      : undefined
+  const inspectorData =
+    turnRequest !== null ? null : contentRequest && rawRecord ? { ...rawRecord, content: undefined } : rawContent
   const fallbackContent = rawRecord && 'content' in rawRecord ? rawRecord.content : undefined
 
   return (
@@ -2113,7 +2509,10 @@ export function SessionInspectorDrawer({
           {inspectorData !== undefined && inspectorData !== null && (
             <InspectorContent data={inspectorData} />
           )}
-          {contentRequest && (
+          {turnRequest !== null ? (
+            <TurnFullContentPanel request={turnRequest} turn={turnFallback} />
+          ) : null}
+          {contentRequest && !isTurnFullContentRequest(contentRequest) && (
             <FullContentPanel request={contentRequest} fallback={fallbackContent} />
           )}
           {!children && (rawContent === undefined || rawContent === null) && !contentRequest && (
