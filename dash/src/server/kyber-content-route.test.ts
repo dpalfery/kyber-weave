@@ -695,6 +695,25 @@ describe('Backend Contract Tests: GET /api/kyber/session/:id/content', () => {
       expect(body.assembledText.length).toBeLessThanOrEqual(100)
     })
 
+    it('ignores a negative or non-numeric budget instead of slicing from the end', async () => {
+      const baseline = await fetch(`${base}/api/kyber/session/sess-content-001/turn/2/content`)
+      const baselineBody = (await baseline.json()) as TurnContentResult
+
+      for (const query of ['budget=-1', 'budget=-100', 'budget=abc']) {
+        for (const path of [
+          `/api/kyber/session/sess-content-001/turn/2/content?${query}`,
+          `/api/kyber/session/sess-content-001/content?turn=2&${query}`,
+        ]) {
+          const res = await fetch(`${base}${path}`)
+          expect(res.status).toBe(200)
+          const body = (await res.json()) as TurnContentResult
+          expect(body.truncated).toBe(true)
+          expect(body.assembledText.length).toBe(baselineBody.assembledText.length)
+          expect(body.assembledText).toBe(baselineBody.assembledText)
+        }
+      }
+    })
+
     describe('explicit lossless full-content path (?full=true)', () => {
       it('truncates over-budget content by default', async () => {
         expect(HUGE_TOOL_RESULT.length).toBeGreaterThan(CONTENT_RESPONSE_BUDGET)

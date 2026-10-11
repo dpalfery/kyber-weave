@@ -112,6 +112,32 @@ function parseSpanAttributesPath(pathname: string): string | null {
 }
 
 /**
+ * Decode and trim one percent-encoded path segment, or `null` when it is malformed
+ * (a stray `%` makes `decodeURIComponent` throw a `URIError`, which would otherwise
+ * surface as a 500 instead of the client error it is).
+ */
+function decodePathId(raw: string): string | null {
+  try {
+    return decodeURIComponent(raw).trim()
+  } catch (err) {
+    if (err instanceof URIError) return null
+    throw err
+  }
+}
+
+/**
+ * A `?budget=` value usable as a character budget: a finite, non-negative integer.
+ * Anything else (blank, NaN, negative, infinite) is ignored, so the default budget
+ * applies. A negative budget must never reach `slice(0, -n)`, which would return
+ * nearly the whole text while the flags claim a budget was honored.
+ */
+function parseContentBudget(param: string | null): number | undefined {
+  if (!param) return undefined
+  const budget = parseInt(param, 10)
+  return Number.isFinite(budget) && budget >= 0 ? budget : undefined
+}
+
+/**
  * `/api/kyber/session/:id/turn/:index/content` — returns unclipped assembled context
  * for a specific turn index (Task G1 / Decision D14).
  *
@@ -805,8 +831,7 @@ export function handleKyberRequest(
       sendKyberJson(res, 400, { error: 'Missing session id' })
       return true
     }
-    const budgetParam = url.searchParams.get('budget')
-    const budget = budgetParam ? parseInt(budgetParam, 10) : undefined
+    const budget = parseContentBudget(url.searchParams.get('budget'))
     // Explicit lossless path first: `?full=true` maps to an unbounded
     // budget so over-budget source text returns intact with no truncation
     // flags. A plain `budget` number still truncates past its value.
@@ -814,7 +839,7 @@ export function handleKyberRequest(
     let effectiveBudget: number | undefined
     if (full) {
       effectiveBudget = Number.POSITIVE_INFINITY
-    } else if (budget !== undefined && !isNaN(budget)) {
+    } else if (budget !== undefined) {
       effectiveBudget = budget
     }
     const body = bridge.assembleTurnContent(sessionId, turnIndex, effectiveBudget)
@@ -842,13 +867,12 @@ export function handleKyberRequest(
     if (turnParam !== null && turnParam.trim() !== '') {
       const turnIndex = parseInt(turnParam, 10)
       if (!isNaN(turnIndex)) {
-        const budgetParam = url.searchParams.get('budget')
-        const budget = budgetParam ? parseInt(budgetParam, 10) : undefined
+        const budget = parseContentBudget(url.searchParams.get('budget'))
         const full = isFullContentRequest(url.searchParams)
         let effectiveBudget: number | undefined
         if (full) {
           effectiveBudget = Number.POSITIVE_INFINITY
-        } else if (budget !== undefined && !isNaN(budget)) {
+        } else if (budget !== undefined) {
           effectiveBudget = budget
         }
         const turnBody = bridge.assembleTurnContent(contentSessionId, turnIndex, effectiveBudget)
@@ -984,7 +1008,11 @@ export function handleKyberRequest(
       sendKyberJson(res, 405, { error: 'Method Not Allowed' })
       return true
     }
-    const spanId = decodeURIComponent(url.pathname.slice('/api/kyber/quarantine/'.length)).trim()
+    const spanId = decodePathId(url.pathname.slice('/api/kyber/quarantine/'.length))
+    if (spanId === null) {
+      sendKyberJson(res, 400, { error: 'Malformed quarantine span id' })
+      return true
+    }
     if (!spanId) {
       sendKyberJson(res, 400, { error: 'Missing quarantine span id' })
       return true
@@ -1032,7 +1060,11 @@ export function handleKyberRequest(
       sendKyberJson(res, 405, { error: 'Method Not Allowed' })
       return true
     }
-    const rawId = decodeURIComponent(url.pathname.slice('/api/kyber/problem/'.length)).trim()
+    const rawId = decodePathId(url.pathname.slice('/api/kyber/problem/'.length))
+    if (rawId === null) {
+      sendKyberJson(res, 400, { error: 'Malformed problem id' })
+      return true
+    }
     if (!rawId) {
       sendKyberJson(res, 400, { error: 'Missing problem id' })
       return true

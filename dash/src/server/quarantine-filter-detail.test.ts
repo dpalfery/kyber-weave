@@ -312,3 +312,14 @@ describe('harness filter SQL fragments', () => {
     )
   })
 })
+
+describe('malformed percent-encoding in detail ids', () => {
+  it('answers 400, not a thrown URIError, for a stray % in the quarantine and problem ids', () => {
+    const { bridge, deps } = seed()
+    for (const href of ['/api/kyber/quarantine/%E0%A4%A', '/api/kyber/problem/100%']) {
+      const result = call(href, bridge, deps)
+      expect(result.status).toBe(400)
+      expect(result.body['error']).toEqual(expect.stringContaining('Malformed'))
+    }
+  })
+})
