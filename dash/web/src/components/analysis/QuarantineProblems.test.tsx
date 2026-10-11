@@ -153,7 +153,8 @@ describe('row navigation opens a read-only detail inspector', () => {
 
   it('reads detail from the singular /api/kyber/problem/:id route the server serves', async () => {
     const fetchMock = vi.fn(
-      async () => ({ ok: true, status: 200, json: async () => ({ code: 'E', message: 'stored', stack: 'Error: x' }) }) as Response,
+      async (_url: string) =>
+        ({ ok: true, status: 200, json: async () => ({ code: 'E', message: 'stored', stack: 'Error: x' }) }) as Response,
     )
     vi.stubGlobal('fetch', fetchMock)
     renderDom(
