@@ -124,6 +124,7 @@ export function Popover({ state, commands, actionError = null, now = new Date() 
         report={report}
         refresh={jobs?.refresh ?? state.refresh ?? null}
         receiver={state.receiver ?? receiverStatus(state.sharedSettings)}
+        coverage={state.coverage ?? null}
         now={now}
       />
 

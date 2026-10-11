@@ -55,8 +55,97 @@ export function fetchKyberComparison(): Promise<KyberComparisonTable> {
 export function fetchKyberQuarantine(): Promise<{ entries: KyberQuarantineEntry[] }> {
   return fetchJson<{ entries: KyberQuarantineEntry[] }>('/api/kyber/quarantine')
 }
+
+/**
+ * Quarantine list scoped to one harness. `all`/`unknown` are UI sentinels,
+ * not harness ids: `all` omits the filter, `unknown` asks for rows the
+ * server cannot attribute (and the panel client-filters the same way when
+ * the server predates the filter). The server may ignore the param — the
+ * panel always applies the same predicate locally, so the list is truthful
+ * either way.
+ */
+export function fetchKyberQuarantineScoped(harness?: string | null): Promise<{ entries: KyberQuarantineEntry[] }> {
+  if (harness === undefined || harness === null || harness === '' || harness === 'all') {
+    return fetchKyberQuarantine()
+  }
+  return fetchJson<{ entries: KyberQuarantineEntry[] }>(
+    `/api/kyber/quarantine?harness=${encodeURIComponent(harness)}`,
+  )
+}
+
+/**
+ * One quarantined span with whatever stored evidence the server holds.
+ *
+ * The envelope is deliberately wide: the detail route
+ * (`GET /api/kyber/quarantine/:spanId`) does not exist on servers predating
+ * this surface, and its exact shape is owned by the engine worktree. The
+ * panel reads the row it already has first and layers any of these keys on
+ * top — never inventing a payload, a message, or a stack.
+ */
+export interface KyberQuarantineDetail {
+  spanId?: string
+  span_id?: string
+  source?: string | null
+  harness?: string | null
+  name?: string | null
+  namespaces?: unknown
+  reason?: string | null
+  seen_at?: unknown
+  timestamp?: string | null
+  payload?: unknown
+  attributes?: unknown
+  message?: unknown
+  [key: string]: unknown
+}
+
+export async function fetchQuarantineDetail(spanId: string): Promise<KyberQuarantineDetail> {
+  return fetchJson<KyberQuarantineDetail>(`/api/kyber/quarantine/${encodeURIComponent(spanId)}`)
+}
 export function fetchKyberProblems(): Promise<{ problems: KyberProblemEntry[] }> {
   return fetchJson<{ problems: KyberProblemEntry[] }>('/api/kyber/problems')
+}
+
+/**
+ * Problems list scoped to one harness. Same sentinel contract as the
+ * quarantine list: `all` omits the filter, `unknown` asks for unattributed
+ * rows, and the panel client-filters identically for servers that predate
+ * the query param.
+ */
+export function fetchKyberProblemsScoped(harness?: string | null): Promise<{ problems: KyberProblemEntry[] }> {
+  if (harness === undefined || harness === null || harness === '' || harness === 'all') {
+    return fetchKyberProblems()
+  }
+  return fetchJson<{ problems: KyberProblemEntry[] }>(
+    `/api/kyber/problems?harness=${encodeURIComponent(harness)}`,
+  )
+}
+
+/**
+ * One problem row with whatever stored evidence the server holds.
+ * Same unknown-envelope rule as the quarantine detail: the panel shows the
+ * list row's code/message plus any of these keys the server returns, and
+ * states plainly when the message, payload, or stack was never stored.
+ */
+export interface KyberProblemDetail {
+  id?: string | number
+  severity?: string
+  code?: string | null
+  message?: unknown
+  location?: unknown
+  at?: unknown
+  timestamp?: string | null
+  harness?: string | null
+  session_id?: string | null
+  span_id?: string | null
+  spanId?: string | null
+  payload?: unknown
+  stack?: unknown
+  stackTrace?: unknown
+  [key: string]: unknown
+}
+
+export async function fetchProblemDetail(id: string): Promise<KyberProblemDetail> {
+  return fetchJson<KyberProblemDetail>(`/api/kyber/problem/${encodeURIComponent(id)}`)
 }
 
 export interface KyberSessionSummary {
@@ -401,6 +490,11 @@ export interface KyberTurnContentPart {
   truncated?: boolean
   totalLength?: number
   order?: number
+  /**
+   * Exact-match recurrence against earlier captured turns of this session
+   * (same part kind, whole source text). Capture-only — never a cache claim.
+   */
+  recurrence?: { seenBefore: boolean }
 }
 
 export interface KyberTurnContentBlock {
@@ -412,6 +506,12 @@ export interface KyberTurnContentBlock {
   truncated?: boolean
   totalLength?: number
   notMeasurable?: { reason: string }
+  /**
+   * Block aggregate: `newThisTurn` when any member part is new,
+   * `seenBefore` when any member part exactly matches an earlier same-kind
+   * part. Both may hold at once for mixed blocks.
+   */
+  recurrence?: { newThisTurn: boolean; seenBefore: boolean }
 }
 
 export interface KyberTurnContentResult {
@@ -426,18 +526,47 @@ export interface KyberTurnContentResult {
   totalLength?: number
   measurability?: string | Record<string, unknown>
   notMeasurable?: { reason: string }
+  /**
+   * Session-level shared context: every captured `system_prompt` part in
+   * session scope, in capture order, with section-level earlier-turn
+   * recurrence. Null when none was captured. The view hides exact
+   * duplicates of the turn's own parts.
+   */
+  sharedContext?: {
+    parts: Array<{ text: string; spanId?: string; turnIndex?: number; truncated?: boolean; totalLength?: number }>
+    seenBefore: boolean
+  } | null
 }
 
 export function fetchTurnContent(
   sessionId: string,
   turnIndex: number,
-  opts?: { budget?: number },
+  opts?: { budget?: number; full?: boolean },
 ): Promise<KyberTurnContentResult> {
   const params = new URLSearchParams()
-  if (opts?.budget) params.set('budget', String(opts.budget))
+  // Explicit lossless path: `full` bypasses the server's default budget so
+  // the full source text returns intact. A large-number `budget` is not a
+  // substitute — it still truncates past its value.
+  if (opts?.full) {
+    params.set('full', 'true')
+  } else if (opts?.budget) {
+    params.set('budget', String(opts.budget))
+  }
   const qs = params.toString()
   const path = `/api/kyber/session/${encodeURIComponent(sessionId)}/turn/${turnIndex}/content${qs ? `?${qs}` : ''}`
   return fetchJson<KyberTurnContentResult>(path)
+}
+
+/**
+ * Lossless whole-turn fetch: every available byte of the turn's blocks and
+ * parts, with no budget truncation. Use for the turn inspector — never rely
+ * on the default budget or a large-number sentinel for complete content.
+ */
+export function fetchTurnContentFull(
+  sessionId: string,
+  turnIndex: number,
+): Promise<KyberTurnContentResult> {
+  return fetchTurnContent(sessionId, turnIndex, { full: true })
 }
 
 export const assembleTurnContent = fetchTurnContent
@@ -1175,6 +1304,41 @@ export interface KyberCoverage {
   quarantineByReason: KyberCoverageQuarantine[]
   /** Null when the checkpoint read is unobservable; [] means zero units. */
   checkpoints: KyberCoverageCheckpoint[] | null
+  /**
+   * Live OTLP receiver health as the engine reports it.
+   *
+   * Optional because servers predating the receiver probe serve no such key:
+   * absent means unknown, never healthy. When present, `healthy` is the
+   * authoritative saber state — the display layer renders it and never
+   * re-derives liveness from counts.
+   */
+  receiver?: KyberReceiverHealth | null
+}
+
+/**
+ * Live OTLP receiver health (`GET /api/kyber/coverage` → `receiver`).
+ *
+ * Every field is read defensively: an older engine serves no `receiver` key
+ * at all, and a newer one may add keys. `healthy` is authoritative; the rest
+ * is supporting detail for the Status panel (endpoint, listener/paused
+ * state, last accepted batch, recent errors). Health probes are excluded
+ * from the server error count — that exclusion is engine behaviour, not
+ * something a surface recomputes.
+ */
+export interface KyberReceiverHealth {
+  enabled?: boolean | null
+  status?: string | null
+  listening?: boolean | null
+  hostedByUs?: boolean | null
+  paused?: boolean | null
+  healthy?: boolean | null
+  endpoint?: string | null
+  checkedAt?: string | null
+  lastAcceptedAt?: string | null
+  failures5m?: number | null
+  lastError?: string | null
+  lastCode?: string | null
+  lastErrorAt?: string | null
 }
 
 export async function fetchCoverage(): Promise<KyberCoverage> {

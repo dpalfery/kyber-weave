@@ -13,14 +13,16 @@ import { formatCostFigure, normalizeCostBlock } from './SessionCostPanel.js'
 // constrains nothing on purpose, and the All sentinel is the one fixed value.
 export type ExplorerProvider = string
 
-// The All callback sentinel is compatible with the established provider contract,
-// and doubles as the only inbound spelling of All: a parent that captures
-// `onHarnessChange` and feeds it back needs no translation. A harness ID that is
-// not in the inventory falls back to All, so an unknown inbound value degrades
-// to All rather than to a phantom empty tab.
+// The shell's selector speaks `all`; `agent-all` is the spelling that predates
+// it, kept so a value handed in from an older caller still reads as unscoped
+// rather than as a harness canonically named "agent-all".
 export const ALL_PROVIDER = 'agent-all' as const
 
-// Labels never determine membership or merge canonical harness identities.
+/** The scope that means every harness, as the shell's selector spells it. */
+export const ALL_HARNESS = 'all' as const
+
+// Labels never determine membership or merge canonical harness identities: they
+// only name a harness in prose, so anything unrecognised keeps its own id.
 const HARNESS_LABELS: Record<string, string> = {
   'claude-code': 'Claude Code',
   'claude-desktop': 'Claude Desktop',
@@ -36,6 +38,24 @@ const HARNESS_LABELS: Record<string, string> = {
   zcode: 'ZCode',
   pi: 'Pi',
   opencode: 'OpenCode',
+}
+
+/** How a harness reads in prose; an id this build does not know is its own name. */
+export function harnessLabel(harness: string): string {
+  return Object.hasOwn(HARNESS_LABELS, harness) ? HARNESS_LABELS[harness]! : harness
+}
+
+/**
+ * The harness this view is scoped to, or `all` for the whole inventory.
+ *
+ * An id this build has never seen is returned verbatim rather than widened to
+ * all: the scope comes from the store's own harness identities, so resolving an
+ * unfamiliar one to "all" would discard the narrowing the user just asked for
+ * and hand them another harness's sessions under the name they picked.
+ */
+export function scopeOf(activeHarness?: string): ExplorerProvider {
+  if (!activeHarness || activeHarness === ALL_PROVIDER) return ALL_HARNESS
+  return activeHarness
 }
 
 export function ago(mtimeMs: number): string {
@@ -175,22 +195,52 @@ export function AgentSessionRow({
   )
 }
 
-export function ContextExplorer({
-  activeHarness,
-  onHarnessChange,
-}: {
+export interface ContextExplorerProps {
+  /**
+   * The harness scope held by the shell's one selector. Omitted, `all` or
+   * `agent-all` means every harness; any other value scopes to exactly that
+   * canonical id.
+   */
   activeHarness?: string
-  onHarnessChange?: (h: ExplorerProvider) => void
-} = {}) {
-  const [localProvider, setLocalProvider] = useState<ExplorerProvider>(ALL_PROVIDER)
-  const setProvider = (p: ExplorerProvider) => {
-    setLocalProvider(p)
-    onHarnessChange?.(p)
-  }
-  const [openId, setOpenId] = useState<string | null>(null)
+  /**
+   * Reports the session the user opened here so the shell can carry it to
+   * Context Doctor, and `undefined` when they close it again — a session the
+   * user has just closed must not stay selected on the other side.
+   */
+  onSelectSession?: (sessionId: string | undefined) => void
+}
 
-  // Tabs and rows share the unfiltered canonical inventory, so a selected subset
-  // cannot hide other harnesses or turn provider aliases into request filters.
+/**
+ * The session list behind the shell's harness scope.
+ *
+ * There is no selector here: the shell owns one harness scope for Context
+ * Doctor and this list, and a second strip over the same store would put the
+ * same choice on screen twice, each able to disagree with the other.
+ */
+export function ContextExplorer({ activeHarness, onSelectSession }: ContextExplorerProps = {}) {
+  const scope = scopeOf(activeHarness)
+  // Expansion is remembered against the scope that opened it, and dropped when
+  // the shell moves to another: a session chosen under one harness must never
+  // still read as open — or still reportable — under the next. Resetting here
+  // rather than only on the way out means returning to a harness starts clean,
+  // instead of resurrecting a session the user closed by leaving.
+  const [renderedScope, setRenderedScope] = useState<ExplorerProvider>(scope)
+  const [expanded, setExpanded] = useState<{ scope: ExplorerProvider; id: string | null }>({
+    scope,
+    id: null,
+  })
+  if (scope !== renderedScope) {
+    setRenderedScope(scope)
+    setExpanded({ scope, id: null })
+  }
+  const openId = expanded.scope === scope ? expanded.id : null
+  const selectSession = (id: string | null) => {
+    setExpanded({ scope, id })
+    onSelectSession?.(id ?? undefined)
+  }
+
+  // One unfiltered read backs every scope, so a harness this machine has never
+  // collected simply narrows to nothing instead of minting a request filter.
   const {
     data: kyberData,
     isLoading: isKyberLoading,
@@ -202,89 +252,49 @@ export function ContextExplorer({
     staleTime: 30_000,
   })
 
-  // Sort so the tab strip is stable: the store returns started DESC, which would
-  // otherwise slide every tab right as a new session lands, moving the tab a user
-  // is mid-click on. Excluding the sentinel keeps the inventory provably disjoint
-  // from the All tab, so no session can mint a second tab sharing its key.
-  const harnesses = [...new Set(
-    kyberData
-      ?.map((s) => s.harness)
-      .filter((h): h is string => Boolean(h) && h !== ALL_PROVIDER),
-  )].sort()
-  const providers = [
-    { key: ALL_PROVIDER, label: 'Agent Sessions (All)' },
-    ...harnesses.map((key) => ({ key, label: Object.hasOwn(HARNESS_LABELS, key) ? HARNESS_LABELS[key] : key })),
-  ]
-  const selectedProvider = activeHarness ?? localProvider
-  const provider = harnesses.includes(selectedProvider) ? selectedProvider : ALL_PROVIDER
-  const sessions = provider === ALL_PROVIDER ? kyberData : kyberData?.filter((s) => s.harness === provider)
+  const sessions =
+    scope === ALL_HARNESS ? kyberData : kyberData?.filter((s) => s.harness === scope)
 
   return (
-    <>
-      <div className="mb-3 flex flex-wrap items-center gap-2">
-        {providers.map((p) => (
-          <button
-            key={p.key}
-            type="button"
-            onClick={() => {
-              setProvider(p.key)
-              setOpenId(null)
-            }}
-            className={cn(
-              'rounded-md border px-3 py-1.5 text-xs font-medium transition-all',
-              provider === p.key
-                ? 'border-primary/50 bg-primary/15 text-primary font-semibold shadow-xs'
-                : 'border-border bg-card text-tertiary-foreground hover:bg-interactive-secondary hover:text-foreground',
-            )}
-            data-testid={`provider-tab-${p.key}`}
-          >
-            {p.label}
-          </button>
-        ))}
-        <span className="ml-auto text-xs text-tertiary-foreground max-md:hidden">
-          what fills each session’s context window, block by block
-        </span>
-      </div>
+    <Card className="overflow-hidden">
+      {isKyberLoading && (
+        <div className="flex flex-col gap-2 p-4" data-testid="explorer-loading">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <Skeleton key={i} className="h-9" />
+          ))}
+        </div>
+      )}
 
-      <Card className="overflow-hidden">
-        {isKyberLoading && (
-          <div className="flex flex-col gap-2 p-4" data-testid="explorer-loading">
-            {Array.from({ length: 6 }).map((_, i) => (
-              <Skeleton key={i} className="h-9" />
-            ))}
-          </div>
-        )}
+      {isKyberError && (
+        <p className="px-4 py-6 text-sm text-tertiary-foreground" data-testid="explorer-error">
+          Failed to load sessions: {String((kyberError as Error)?.message)}
+        </p>
+      )}
 
-        {isKyberError && (
-          <p className="px-4 py-6 text-sm text-tertiary-foreground" data-testid="explorer-error">
-            Failed to load sessions: {String((kyberError as Error)?.message)}
-          </p>
-        )}
-
-        {!isKyberLoading && !isKyberError && kyberData && (
-          <>
-            {sessions?.length === 0 && (
-              <p className="px-4 py-6 text-sm text-tertiary-foreground" data-testid="explorer-empty">
-                {/* The empty state can only be All: `harnesses` is derived from these rows
-                    by a non-empty filter, so any selected subset already has a session. */}
-                No sessions found.
-              </p>
-            )}
-            {sessions?.map((s) => {
-              const sid = s.session_id || s.sessionId || ''
-              return (
-                <AgentSessionRow
-                  key={sid}
-                  s={s}
-                  open={openId === sid}
-                  onToggle={() => setOpenId(openId === sid ? null : sid)}
-                  onSelectSession={(id) => setOpenId(id)}
-                />
-              )
-            })}
-          </>
-        )}
-      </Card>
-    </>
+      {!isKyberLoading && !isKyberError && kyberData && (
+        <>
+          {sessions?.length === 0 && (
+            <p className="px-4 py-6 text-sm text-tertiary-foreground" data-testid="explorer-empty">
+              {/* The empty state names the scope it is empty for. Answering with
+                  "all" here would reply to a question about one harness with
+                  another's inventory. */}
+              {scope === ALL_HARNESS ? 'No sessions found.' : `No sessions for ${harnessLabel(scope)}.`}
+            </p>
+          )}
+          {sessions?.map((s) => {
+            const sid = s.session_id || s.sessionId || ''
+            return (
+              <AgentSessionRow
+                key={sid}
+                s={s}
+                open={openId === sid}
+                onToggle={() => selectSession(openId === sid ? null : sid)}
+                onSelectSession={(id) => selectSession(id)}
+              />
+            )
+          })}
+        </>
+      )}
+    </Card>
   )
 }

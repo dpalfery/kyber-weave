@@ -440,17 +440,6 @@ describe('Pages Smoke Rendering: Context Doctor, HarnessDetail, RunDetail', () =
   it('renders Context Doctor page (Level 1)', () => {
     const html = renderWithQuery(
       <ContextDoctor
-        initialHarnesses={[
-          {
-            harness: 'claude',
-            name: 'Claude Code',
-            sampleCount: 12,
-            contextPressureMedian: 0.65,
-            cacheHitRate: 0.82,
-            fieldCoverage: 0.83,
-            measurability: { token_usage: 'measured' },
-          },
-        ]}
         initialFindings={{ findings: [], total: 0, offset: 0, detectorCounts: {}, unknownWindowSessions: 0 }}
       />,
     )
@@ -458,9 +447,14 @@ describe('Pages Smoke Rendering: Context Doctor, HarnessDetail, RunDetail', () =
     expect(html).toContain('Context Doctor')
     expect(html).toContain('finding-list')
     expect(html).toContain('Highest-Leverage Workspace Findings')
-    expect(html).toContain('scorecard-matrix')
-    expect(html).toContain('Claude Code')
-    expect(html.indexOf('finding-list')).toBeLessThan(html.indexOf('scorecard-matrix'))
+    // The page is the diagnosis, not the operator's console: the ingest
+    // readout and the maintenance controls moved to the header's Status and
+    // Maintenance panels, and the scorecard matrix was dropped from it.
+    expect(html).not.toContain('scorecard-matrix')
+    expect(html).not.toContain('maintenance-panel')
+    // The scope it is showing is stated, so a narrowed list is never mistaken
+    // for the whole workspace.
+    expect(html).toContain('findings-scope-note')
   })
 
   it('renders HarnessDetail page (Level 2)', () => {

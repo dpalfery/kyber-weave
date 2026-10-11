@@ -57,7 +57,9 @@ describe('ContextExplorer Claude Code canonical-session integration', () => {
     hookIndex = 0
   })
 
-  it.each(['agent-all', 'claude-code'])('renders Claude Code in %s and expands AgentSessionDashboard', (activeHarness) => {
+  // `all` is the shell's unscoped spelling; `agent-all` is the legacy one. Both
+  // reach the same inventory, because the harness scope lives in the shell now.
+  it.each(['all', 'agent-all', 'claude-code'])('renders Claude Code in %s and expands AgentSessionDashboard', (activeHarness) => {
     const queryClient = createQueryClient()
     queryClient.setQueryData(['kyber-sessions'], [claudeSession])
     queryClient.setQueryData(['kyber-session', claudeSession.session_id], {
@@ -78,9 +80,9 @@ describe('ContextExplorer Claude Code canonical-session integration', () => {
     )
     expect(explorerHtml).toContain('data-testid="agent-session-row-sess-claude-canonical"')
     expect(explorerHtml).toContain('Canonical Claude session')
-    // The tab is derived from the single unfiltered ['kyber-sessions'] cache seeded
-    // above, so assert it rather than seeding a second key nothing reads.
-    expect(explorerHtml).toContain('data-testid="provider-tab-claude-code"')
+    // The one harness selector belongs to the shell, so the explorer must not
+    // mint a second strip of its own over the same ['kyber-sessions'] cache.
+    expect(explorerHtml).not.toMatch(/data-testid="provider-tab-/)
 
     const expandedHtml = renderHtml(
       <QueryClientProvider client={queryClient}>

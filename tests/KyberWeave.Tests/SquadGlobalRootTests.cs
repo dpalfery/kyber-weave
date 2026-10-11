@@ -1017,6 +1017,10 @@ public sealed class SquadGlobalRootTests : IDisposable
             { SquadTarget.Devin, ".devin/" }
         };
 
+        string tempHome = Path.Combine(_temp.Path, "home-guard");
+        Directory.CreateDirectory(tempHome);
+        SquadGlobalRoots globalRoots = new(_ => null, tempHome);
+
         ISquadRenderer renderer = SquadCommandComposition.ResolveRenderer();
 
         foreach (SquadTarget target in SquadTargetCatalog.All)
@@ -1025,7 +1029,8 @@ public sealed class SquadGlobalRootTests : IDisposable
                 new SquadRenderRequest(
                     SourceDirectory: productRoot,
                     Targets: [target],
-                    Scope: SquadDeploymentScope.Global));
+                    Scope: SquadDeploymentScope.Global,
+                    GlobalRoots: globalRoots));
 
             if (legacyPrefixes.TryGetValue(target, out string? prefix))
             {
@@ -1042,10 +1047,10 @@ public sealed class SquadGlobalRootTests : IDisposable
     /// <summary>
     /// R17: <c>Agents.Count + Σ agent resources + Skills.Count − shared-identity skills +
     /// Σ non-suppressed skill resources</c>, read from the loaded corpus rather than a
-    /// hardcoded literal. Claude adds a principal (an entry-point skill beside its
-    /// subagent); Cursor is count-neutral under the skill-only Pi precedent (the agent
-    /// principal plus its refs out, <c>SKILL.md</c> plus its refs in), so only the
-    /// receipt paths differ there.
+    /// hardcoded literal. Claude and Factory keep the primary agent's native principal and
+    /// add an entry-point skill beside it; Cursor is count-neutral under the skill-only Pi
+    /// precedent (the agent principal plus its refs out, <c>SKILL.md</c> plus its refs in),
+    /// so only the receipt paths differ there.
     /// </summary>
     private static int ExpectedRenderedFileCount(SquadTarget target)
     {
@@ -1061,17 +1066,18 @@ public sealed class SquadGlobalRootTests : IDisposable
             + source.Skills.Where(skill => !sharedIdentities.Contains(skill.Name))
                 .Sum(skill => skill.Resources.Count);
 
-        // Claude keeps the subagent and adds an entry-point skill beside it; Cursor
-        // replaces the agent principal with the entry-point skill (Pi precedent), so
-        // its total is unchanged and only the receipt paths differ (asserted above).
-        if (target is SquadTarget.Claude or SquadTarget.Cursor)
+        // Claude and Factory keep the native principal (subagent / droid) and add an
+        // entry-point skill beside it; Cursor replaces the agent principal with the
+        // entry-point skill (Pi precedent), so its total is unchanged and only the receipt
+        // paths differ (asserted above).
+        if (target is SquadTarget.Claude or SquadTarget.Cursor or SquadTarget.Factory)
         {
             if (target == SquadTarget.Cursor)
             {
                 return baseCount;
             }
 
-            int claudeAddition = 0;
+            int entryPointAddition = 0;
             foreach (SquadAgent agent in source.Agents.Where(a => a.Invocation == SquadInvocation.Primary))
             {
                 string fallbackProfileId = agent.Fallback;
@@ -1079,10 +1085,10 @@ public sealed class SquadGlobalRootTests : IDisposable
                 if (profile.NoPrimaryAgent == "skill")
                 {
                     // Add 1 for the SKILL.md and agent.Resources.Count for the resources
-                    claudeAddition += 1 + agent.Resources.Count;
+                    entryPointAddition += 1 + agent.Resources.Count;
                 }
             }
-            return baseCount + claudeAddition;
+            return baseCount + entryPointAddition;
         }
 
         return baseCount;

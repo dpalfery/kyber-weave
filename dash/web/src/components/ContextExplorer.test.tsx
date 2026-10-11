@@ -134,21 +134,8 @@ function nodes(tree: React.ReactNode, predicate: (node: TestNode) => boolean): T
   walk(tree)
   return found
 }
-function clickTab(tree: React.ReactElement, harness: string) {
-  const tabs = nodes(tree, (node) => node.props['data-testid'] === `provider-tab-${harness}`)
-  expect(tabs, `Expected exactly one selectable tab for ${harness}`).toHaveLength(1)
-  tabs[0].props.onClick!()
-}
 function rowIds(tree: React.ReactElement) {
   return [...html(tree).matchAll(/data-testid="agent-session-row-([^"]+)"/g)].map((match) => match[1]).sort()
-}
-function tabIds(tree: React.ReactElement) {
-  return [...tabIdSequence(tree)].sort()
-}
-/** Tab ids in rendered order, so ordering is assertable rather than incidental. */
-function tabIdSequence(tree: React.ReactElement) {
-  return nodes(tree, (node) => node.props['data-testid']?.startsWith('provider-tab-') ?? false)
-    .map((node) => node.props['data-testid']!.slice('provider-tab-'.length))
 }
 function openRow(tree: React.ReactElement, sessionId: string) {
   const rows = nodes(tree, (node) => node.type === AgentSessionRow)
@@ -156,6 +143,14 @@ function openRow(tree: React.ReactElement, sessionId: string) {
   expect(row, `Expected visible canonical session ${sessionId}`).toBeDefined()
   const onToggle = (row!.props as { onToggle: () => void }).onToggle
   onToggle()
+}
+/** The detail payload AgentSessionDashboard reads when a row is expanded. */
+function seedSessionDetail(id: string, harness = 'claude-code') {
+  queryClient.setQueryData(['kyber-session', id], {
+    id, session_id: id, harness,
+    summary: { turn_count: 3, cost: { usd: 0.185, basis: 'published_rates', status: 'ok' } },
+    turns: [], tools: [], timeline: [],
+  })
 }
 
 beforeEach(() => {
@@ -168,91 +163,67 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-describe('ContextExplorer canonical harness inventory', () => {
-  it('defaults to All and shows every canonical session', async () => {
+describe('ContextExplorer renders under the shell harness scope', () => {
+  it('shows every canonical session when the scope is all', async () => {
     expect(rowIds(await loadExplorer())).toEqual(inventory.map((s) => s.session_id).sort())
   })
-  it('offers one tab per observed canonical ID and excludes absent static providers', async () => {
-    expect(tabIds(await loadExplorer())).toEqual(['agent-all', ...canonicalHarnesses].sort())
+  it('renders no harness strip of its own (the shell owns the one selector)', async () => {
+    const markup = html(await loadExplorer())
+    expect(markup).not.toMatch(/data-testid="provider-tab-/)
+    expect(nodes(await loadExplorer(), (node) => node.props['data-testid']?.startsWith('provider-tab-') ?? false))
+      .toEqual([])
   })
-  it.each(canonicalHarnesses)('selects only exact %s rows and reports that canonical ID', async (harness) => {
-    const onHarnessChange = vi.fn()
-    clickTab(await loadExplorer({ onHarnessChange }), harness)
-    expect(rowIds(await loadExplorer({ onHarnessChange }))).toEqual(
+  it.each(canonicalHarnesses)('scopes rows to exactly %s', async (harness) => {
+    expect(rowIds(await loadExplorer({ activeHarness: harness }))).toEqual(
       inventory.filter((s) => s.harness === harness).map((s) => s.session_id).sort(),
     )
-    expect(onHarnessChange).toHaveBeenCalledExactlyOnceWith(harness)
   })
-  it('restores every row and reports the agent-all sentinel when All is clicked', async () => {
-    const onHarnessChange = vi.fn()
-    clickTab(await loadExplorer({ onHarnessChange }), 'claude-code')
-    clickTab(await loadExplorer({ onHarnessChange }), 'agent-all')
-    expect(rowIds(await loadExplorer({ onHarnessChange }))).toEqual(inventory.map((s) => s.session_id).sort())
-    expect(onHarnessChange.mock.calls).toEqual([['claude-code'], ['agent-all']])
-  })
-  it('discovers through one unfiltered HTTP request and never requests provider aliases on tab switches', async () => {
+  it('scopes through one unfiltered HTTP request, never a per-harness refetch', async () => {
     const fetchMock = mockSessions()
-    let tree = await loadExplorer()
-    expect(fetchMock.mock.calls).toEqual([['/api/kyber/sessions']])
-    for (const harness of [...canonicalHarnesses, 'agent-all']) {
-      clickTab(tree, harness)
-      tree = await loadExplorer()
+    for (const harness of [...canonicalHarnesses, 'all']) {
+      renderExplorer({ activeHarness: harness })
+      await queryClient.ensureQueryData(inventoryQuery)
     }
     expect(fetchMock.mock.calls).toEqual([['/api/kyber/sessions']])
   })
-  it('keeps future harness IDs selectable with their raw ID as the display fallback', async () => {
-    const tree = await loadExplorer()
-    const tab = nodes(tree, (node) => node.props['data-testid'] === 'provider-tab-future-harness-v2')
-    expect(tab).toHaveLength(1)
-    expect(renderToStaticMarkup(tab[0])).toContain('future-harness-v2')
-    clickTab(tree, 'future-harness-v2')
-    expect(rowIds(await loadExplorer())).toEqual(['sess-future-harness-v2'])
+  it('keeps an unrecognized canonical harness scoped, showing its raw id', async () => {
+    const tree = await loadExplorer({ activeHarness: 'future-harness-v2' })
+    expect(rowIds(tree)).toEqual(['sess-future-harness-v2'])
   })
-  it('uses labels for display while keeping the canonical identity selectable', async () => {
-    const tree = await loadExplorer()
-    const tab = nodes(tree, (node) => node.props['data-testid'] === 'provider-tab-claude-code')
-    expect(tab).toHaveLength(1)
-    expect(renderToStaticMarkup(tab[0])).toContain('Claude Code')
-    clickTab(tree, 'claude-code')
-    expect(rowIds(await loadExplorer())).toEqual(['sess-claude-code', 'sess-claude-code-second'])
+  it('names a scoped empty state with the harness label, never the whole inventory', async () => {
+    // Codex is a known harness with sessions; scoping to a harness that has none
+    // must read as scoped, and must not fall back to another harness's rows.
+    mockSessions([session('claude-code')])
+    const tree = await loadExplorer({ activeHarness: 'codex-cli' })
+    expect(rowIds(tree)).toEqual([])
+    expect(html(tree)).toContain('data-testid="explorer-empty"')
+    expect(html(tree)).toContain('No sessions for Codex CLI.')
   })
-  it.each(['claude-desktop', 'codex-desktop', 'antigravity-ide', 'future-harness-v2'])(
-    'honors available controlled canonical selection %s', async (harness) => {
-      const tree = await loadExplorer({ activeHarness: harness })
-      expect(rowIds(tree)).toEqual([`sess-${harness}`])
-      expect(tabIds(tree)).toEqual(['agent-all', ...canonicalHarnesses].sort())
-    },
-  )
-  it('explicit controlled all replaces an earlier local selection', async () => {
-    clickTab(await loadExplorer(), 'copilot-cli')
-    expect(rowIds(await loadExplorer())).toEqual(['sess-copilot-cli'])
-    expect(rowIds(await loadExplorer({ activeHarness: 'agent-all' }))).toEqual(inventory.map((s) => s.session_id).sort())
+  it('shows an unrecognized id verbatim in the scoped empty state', async () => {
+    mockSessions([session('claude-code')])
+    const tree = await loadExplorer({ activeHarness: 'future-harness-v2' })
+    expect(html(tree)).toContain('No sessions for future-harness-v2.')
   })
-  it('controlled agent-all selects the full canonical inventory', async () => {
-    expect(rowIds(await loadExplorer({ activeHarness: 'agent-all' }))).toEqual(inventory.map((s) => s.session_id).sort())
+  it('shows a scoped empty state for an unknown harness instead of falling back to All', async () => {
+    const tree = await loadExplorer({ activeHarness: 'missing-harness' })
+    expect(rowIds(tree)).toEqual([])
+    expect(html(tree)).toContain('No sessions for missing-harness.')
   })
-  it('falls back to All when a controlled harness is unavailable', async () => {
-    expect(rowIds(await loadExplorer({ activeHarness: 'missing-harness' }))).toEqual(inventory.map((s) => s.session_id).sort())
-  })
-  it('falls back to All when a controlled harness disappears from refreshed inventory', async () => {
+  it('keeps the scope and empties out when that harness disappears from refreshed inventory', async () => {
     expect(rowIds(await loadExplorer({ activeHarness: 'copilot-cli' }))).toEqual(['sess-copilot-cli'])
     const remaining = inventory.filter((s) => s.harness !== 'copilot-cli')
     queryClient.setQueryData(inventoryQuery.queryKey, remaining)
     const tree = renderExplorer({ activeHarness: 'copilot-cli' })
-    expect(rowIds(tree)).toEqual(remaining.map((s) => s.session_id).sort())
-    expect(tabIds(tree)).not.toContain('copilot-cli')
+    expect(rowIds(tree)).toEqual([])
+    expect(html(tree)).toContain('No sessions for GitHub Copilot CLI.')
   })
-  it('falls back to All when a local harness disappears from refreshed inventory', async () => {
-    clickTab(await loadExplorer(), 'copilot-cli')
-    expect(rowIds(await loadExplorer())).toEqual(['sess-copilot-cli'])
-    const remaining = inventory.filter((s) => s.harness !== 'copilot-cli')
-    queryClient.setQueryData(inventoryQuery.queryKey, remaining)
-    expect(rowIds(renderExplorer())).toEqual(remaining.map((s) => s.session_id).sort())
+  it.each(['agent-all', 'all'])('treats the %s spelling as the unscoped inventory', async (spelling) => {
+    expect(rowIds(await loadExplorer({ activeHarness: spelling }))).toEqual(inventory.map((s) => s.session_id).sort())
   })
-  it('keeps All and the empty message when the canonical inventory is empty', async () => {
+  it('keeps the empty message when the canonical inventory is empty', async () => {
     mockSessions([])
     const tree = await loadExplorer()
-    expect(tabIds(tree)).toEqual(['agent-all'])
+    expect(rowIds(tree)).toEqual([])
     expect(html(tree)).toContain('data-testid="explorer-empty"')
     expect(html(tree)).toContain('No sessions found.')
   })
@@ -266,43 +237,61 @@ describe('ContextExplorer canonical harness inventory', () => {
     expect(html(renderExplorer())).toContain('data-testid="explorer-error"')
     expect(html(renderExplorer())).toContain('Request failed (503)')
   })
-  it('orders the tab strip deterministically regardless of store ordering', async () => {
-    // The store hands back started DESC; a new session must not reshuffle the strip.
-    const byAge = [...canonicalHarnesses].sort((a, b) => a.localeCompare(b)).reverse()
-    mockSessions([...byAge.map((harness) => session(harness)), ...byAge.map((harness) => session(harness, '-old'))])
-    const tree = await loadExplorer()
-    // All is pinned first and only the harness IDs are sorted; a harness sorting
-    // ahead of "agent-all" must not move All out of position.
-    expect([...tabIdSequence(tree)]).toEqual(['agent-all', ...[...canonicalHarnesses].sort()])
+})
+
+describe('ContextExplorer reports the session it opens', () => {
+  it('reports the expanded session and clears it on collapse', async () => {
+    const onSelectSession = vi.fn()
+    seedSessionDetail('sess-claude-code')
+    openRow(await loadExplorer({ onSelectSession }), 'sess-claude-code')
+    expect(onSelectSession).toHaveBeenCalledExactlyOnceWith('sess-claude-code')
+    expect(html(renderExplorer({ onSelectSession }))).toContain('data-testid="agent-session-dashboard"')
+
+    openRow(renderExplorer({ onSelectSession }), 'sess-claude-code')
+    expect(onSelectSession).toHaveBeenLastCalledWith(undefined)
+    expect(html(renderExplorer({ onSelectSession }))).not.toContain('data-testid="agent-session-dashboard"')
   })
-  it('never lets a stored agent-all harness mint a second All tab', async () => {
-    mockSessions([...inventory, { ...session('agent-all') }])
-    const tree = await loadExplorer()
-    const tabs = nodes(tree, (node) => node.props['data-testid'] === 'provider-tab-agent-all')
-    expect(tabs).toHaveLength(1)
-    expect(tabIds(tree)).toEqual(['agent-all', ...canonicalHarnesses].sort())
+  it('reports the parent session a subagent row points at', async () => {
+    const onSelectSession = vi.fn()
+    mockSessions([
+      { ...session('claude-code'), is_subagent: true, parent_session: 'sess-parent-001' },
+      { ...session('claude-code', '-parent'), session_id: 'sess-parent-001' },
+    ])
+    seedSessionDetail('sess-parent-001')
+    const tree = await loadExplorer({ onSelectSession })
+    // The link lives inside AgentSessionRow's own output, so invoke the row
+    // element the explorer rendered rather than walking its unrendered props.
+    const row = nodes(tree, (node) => node.type === AgentSessionRow)[0]!
+    const link = nodes(
+      AgentSessionRow(row.props as Parameters<typeof AgentSessionRow>[0]),
+      (node) => node.props['data-testid'] === 'parent-session-link',
+    )
+    expect(link).toHaveLength(1)
+    link[0].props.onClick!({ stopPropagation: vi.fn() })
+    expect(onSelectSession).toHaveBeenCalledExactlyOnceWith('sess-parent-001')
+    expect(html(renderExplorer({ onSelectSession }))).toContain('data-testid="agent-session-dashboard"')
   })
-  it('treats the legacy all spelling as a selection that resolves to All', async () => {
-    expect(rowIds(await loadExplorer({ activeHarness: 'all' }))).toEqual(inventory.map((s) => s.session_id).sort())
-    expect(tabIds(await loadExplorer({ activeHarness: 'all' }))).toEqual(['agent-all', ...canonicalHarnesses].sort())
+  it('closes the expanded session when the scope moves to another harness', async () => {
+    seedSessionDetail('sess-claude-code')
+    const onSelectSession = vi.fn()
+    const claude = { activeHarness: 'claude-code', onSelectSession }
+    openRow(await loadExplorer(claude), 'sess-claude-code')
+    expect(html(renderExplorer(claude))).toContain('data-testid="agent-session-dashboard"')
+
+    // A session expanded under Claude Code must not stay expanded — or reportable —
+    // once the shell scopes to another harness.
+    const codex = { activeHarness: 'codex-cli', onSelectSession }
+    expect(html(renderExplorer(codex))).not.toContain('data-testid="agent-session-dashboard"')
+    expect(rowIds(renderExplorer(codex))).toEqual(['sess-codex-cli'])
+
+    // Returning to the original scope does not resurrect the old expansion either.
+    expect(html(renderExplorer(claude))).not.toContain('data-testid="agent-session-dashboard"')
   })
-  it('opens the canonical Claude Code dashboard and clears expansion when switching tabs', async () => {
-    queryClient.setQueryData(['kyber-session', 'sess-claude-code'], {
-      id: 'sess-claude-code', session_id: 'sess-claude-code', harness: 'claude-code',
-      summary: { turn_count: 3, cost: { usd: 0.185, basis: 'published_rates', status: 'ok' } },
-      turns: [], tools: [], timeline: [],
-    })
-    openRow(await loadExplorer(), 'sess-claude-code')
-    expect(html(renderExplorer())).toContain('data-testid="agent-session-dashboard"')
-    clickTab(renderExplorer(), 'agent-all')
-    expect(html(await loadExplorer())).not.toContain('data-testid="agent-session-dashboard"')
-    clickTab(await loadExplorer(), 'claude-code')
-    openRow(await loadExplorer(), 'sess-claude-code')
-    expect(html(renderExplorer())).toContain('data-testid="agent-session-dashboard"')
-    clickTab(renderExplorer(), 'codex-desktop')
-    expect(html(await loadExplorer())).not.toContain('data-testid="agent-session-dashboard"')
-    clickTab(await loadExplorer(), 'claude-code')
-    expect(html(await loadExplorer())).not.toContain('data-testid="agent-session-dashboard"')
+  it('keeps the expanded session while the scope is unchanged', async () => {
+    seedSessionDetail('sess-claude-code')
+    const claude = { activeHarness: 'claude-code' }
+    openRow(await loadExplorer(claude), 'sess-claude-code')
+    expect(html(renderExplorer(claude))).toContain('data-testid="agent-session-dashboard"')
   })
   it('expanding a canonical row mounts AgentSessionDashboard', () => {
     const detailClient = createTestQueryClient()

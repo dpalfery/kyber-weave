@@ -336,6 +336,8 @@ describe('reingestFromExports — rebuilding the corpus from existing exports (R
         source: 'orphan-exporter',
         name: 'tool.exec',
         timestamp: '2025-08-29T14:40:02.000Z',
+        // Reingest stores the incoming span JSON as quarantine evidence (v18).
+        rawPayload: expect.any(String),
       },
     ])
 
@@ -496,6 +498,8 @@ describe('reingestFromExports — rebuilding the corpus from existing exports (R
         source: 'gemini-statusline',
         name: 'GlobalHttpApi.health',
         timestamp: '2025-08-29T14:40:00.100Z',
+        // Reingest stores the incoming span JSON as quarantine evidence (v18).
+        rawPayload: expect.any(String),
       },
       {
         spanId: S_HTTP_SERVER,
@@ -504,6 +508,7 @@ describe('reingestFromExports — rebuilding the corpus from existing exports (R
         source: 'gemini-statusline',
         name: 'GET /v1/status',
         timestamp: '2025-08-29T14:40:00.105Z',
+        rawPayload: expect.any(String),
       },
     ])
 

@@ -677,18 +677,19 @@ export const USAGE_EVIDENCE = 0.4
  * `gen_ai.usage.*` keys alone score every GenAI harness identically (0.4,
  * below the registry's threshold — the alone-in-its-trace case R6.1
  * quarantines), while a Copilot vendor attribute (`github.copilot.chat.turn.id`,
- * `copilot.*`, `codeburn.provider`) carries the vote. The source name is
- * never consulted (R6.2).
+ * `copilot.*`, `codeburn.provider`) carries the vote. Neither the source
+ * name nor the span name is consulted (R6.2).
  */
 export const copilotAdapter: HarnessAdapter = {
   name: 'copilot',
   namespaces: ['gen_ai', ...COPILOT_VENDOR_NAMESPACES],
 
   detect(span) {
-    const isCopilotEvidence =
-      hasNamespace(span.attributes, ['copilot_chat', 'github.copilot', 'copilot']) ||
-      span.name.startsWith('copilot_chat') ||
-      span.name.startsWith('copilot')
+    // Vendor attributes are the only admissible Copilot evidence (R6.2):
+    // neither the source name nor the span name may vote, so a span named
+    // `copilot_chat/...` with only shared `gen_ai.usage.*` counters scores
+    // 0.4 and stays quarantined.
+    const isCopilotEvidence = hasNamespace(span.attributes, ['copilot_chat', 'github.copilot', 'copilot'])
     // An explicit Gemini system identity outranks a generic Copilot exporter
     // label that may be attached by the collector or wrapper process, unless
     // the span carries explicit copilot_chat or copilot evidence.
@@ -700,7 +701,7 @@ export const copilotAdapter: HarnessAdapter = {
       }
     }
     let score = 0
-    if (hasNamespace(span.attributes, COPILOT_VENDOR_NAMESPACES) || isCopilotEvidence) {
+    if (hasNamespace(span.attributes, COPILOT_VENDOR_NAMESPACES)) {
       score += VENDOR_EVIDENCE
     }
     if (INPUT_TOKEN_KEYS.some((key) => key in span.attributes)) score += USAGE_EVIDENCE

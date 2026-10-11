@@ -2,6 +2,7 @@
 
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import type { BigIntStats } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { inflateSync } from 'node:zlib'
 import { createRequire } from 'node:module'
 import { resolveCanonDbPath } from '../canon/paths.js'
@@ -17,6 +18,9 @@ import {
   CanonStore,
   decompressRaw,
   normalizeHistoryWeeks,
+  problemsHarnessWhere,
+  quarantineHarnessWhere,
+  systemPromptTextsFromContentColumns,
   toFinding,
   toPrediction,
   toRecord,
@@ -204,9 +208,18 @@ export type IngestActivitySource = {
   display: string
   /** T7 origin kind for the stored name. */
   kind: SourceKind
-  /** Rows in `records` carrying this source. */
+  /**
+   * Rows in `records` carrying this source — canonical stored telemetry only.
+   * Quarantined spans are held out of the corpus and never counted here.
+   */
   recordCount: number
-  /** Summed `ingest_log.count` for this source; 0 when the log names it nowhere. */
+  /**
+   * Summed `ingest_log.count` for this source: received OTLP span/log volume as the
+   * collector tallied it on arrival — including spans later quarantined or rejected.
+   * `ingestedCount > 0` beside `recordCount === 0` therefore means transport is
+   * receiving while nothing is landing in the corpus (quarantine, not silence); 0 when
+   * the log names the source nowhere.
+   */
   ingestedCount: number
   /** Latest `ingest_log.timestamp` for this source; null when the log names it nowhere. */
   lastReceivedAt: string | null
@@ -231,6 +244,18 @@ export type QuarantineRow = {
   timestamp?: string | null
 }
 
+/**
+ * One quarantined span with its incoming evidence. `rawPayload` is the exact span JSON
+ * stored at quarantine time (v18+ rows), parsed; older rows carry null with
+ * `evidenceAvailable: false` — explicitly unavailable, never reconstructed from the
+ * records table (that row is the normalized record, not the incoming payload).
+ * List routes never serve this shape; it is metadata-only there (bounded).
+ */
+export type QuarantineDetail = QuarantineRow & {
+  rawPayload: unknown | null
+  evidenceAvailable: boolean
+}
+
 export type ProblemRow = {
   id: number | string
   session_id: string | null
@@ -241,6 +266,16 @@ export type ProblemRow = {
   at: number | string | null
   harness: string | null
   timestamp?: string | null
+}
+
+/**
+ * One recorded problem with its exception evidence. `message` is the exact stored
+ * message; `stack` is the exception stack when the problem came from a throw, null
+ * otherwise — a computed validation problem has no stack and must not claim one.
+ * List routes never serve the stack; it is metadata-only there (bounded).
+ */
+export type ProblemDetail = ProblemRow & {
+  stack: string | null
 }
 
 export type ParsedSummary = {
@@ -537,6 +572,37 @@ export type SessionContentResult = {
 export type SessionContentOptions = {
   spanId?: string
   part?: string
+  /**
+   * Explicit lossless request (`?full=true` on the session-content route):
+   * bypasses `CONTENT_RESPONSE_BUDGET` so the full source text returns
+   * intact with no truncation flags. A large-number budget is not offered
+   * here — lossless is opt-in and documented, the default stays capped so
+   * existing callers keep their current behavior.
+   */
+  full?: boolean
+}
+
+/**
+ * Captured-context recurrence for one turn-content part: whether its exact
+ * whole source text was captured as the same part kind in an earlier turn of
+ * this session. Exact bytes only — no normalization, trimming, or
+ * token-level similarity. Recurrence is independent of model cache use: a
+ * repeated part may still be uncached, and a new part may sit in a cached
+ * prefix. Never convert this into a cache claim.
+ */
+export type TurnContentPartRecurrence = {
+  seenBefore: boolean
+}
+
+/**
+ * Aggregated recurrence for one canonical block: `newThisTurn` when at
+ * least one member part is new, `seenBefore` when at least one member part
+ * exactly matches an earlier same-kind part. Both may hold at once for a
+ * block mixing new and repeated parts.
+ */
+export type TurnContentBlockRecurrence = {
+  newThisTurn: boolean
+  seenBefore: boolean
 }
 
 export type TurnContentPart = {
@@ -550,6 +616,7 @@ export type TurnContentPart = {
   truncated?: boolean
   totalLength?: number
   order?: number
+  recurrence?: TurnContentPartRecurrence
 }
 
 export type TurnContentBlock = {
@@ -561,8 +628,53 @@ export type TurnContentBlock = {
   truncated?: boolean
   totalLength?: number
   notMeasurable?: { reason: string }
+  recurrence?: TurnContentBlockRecurrence
 }
 
+/**
+ * One session-level shared prompt part. `truncated`/`totalLength` appear
+ * only when the default (non-`full`) response budget cut this part — the
+ * same truthful flagging as every other budgeted text in this response.
+ * `turnIndex` is the 0-based transport index of the turn that contributed a
+ * turn-derived occurrence; it is present only on turn-derived parts.
+ * Session-scope (non-turn) parts carry no `turnIndex` — absent is not zero
+ * and must never be guessed as a turn.
+ */
+export type TurnContentSharedPart = {
+  text: string
+  spanId?: string
+  turnIndex?: number
+  truncated?: boolean
+  totalLength?: number
+}
+
+/**
+ * Session-level shared context for a turn: every captured `system_prompt`
+ * part in session scope at or before this turn, in capture order — the turn
+ * spans' own prompts (preceding plus current, each occurrence carrying its
+ * contributing `turnIndex`) united with the session-wide scan that reaches
+ * only non-turn prompts (turn spans are excluded by operation as well as by
+ * span id, so a turn span never appears as an unindexed duplicate). `seenBefore`
+ * holds when any part exactly matches an earlier-turn same-kind part; it is
+ * capture evidence only, never a cache claim. Null when no system prompt
+ * was captured in scope. The client hides exact duplicates of the turn's
+ * own parts and otherwise labels the section `Shared session context`.
+ */
+export type TurnContentSharedContext = {
+  parts: TurnContentSharedPart[]
+  seenBefore: boolean
+}
+
+/**
+ * Payload-size note (no silent omission): the explicit lossless path
+ * returns every source byte, and by design the same bytes appear up to
+ * three times per response — once in `assembledText`, once across
+ * `blocks[].text`/`blocks[].parts[].text`, and once in `parts[].text` —
+ * because supported callers (`ContextInspector`, the TurnDetail page) read
+ * `assembledText` and per-part views respectively. Callers that cannot hold
+ * ~3x source bytes must use the default budget (explicit `truncated` flags),
+ * never a trimmed illusion of completeness.
+ */
 export type TurnContentResult = {
   sessionId: string
   turnIndex: number
@@ -573,6 +685,7 @@ export type TurnContentResult = {
   assembledText: string
   truncated?: boolean
   totalLength?: number
+  sharedContext?: TurnContentSharedContext | null
 }
 
 /**
@@ -580,8 +693,20 @@ export type TurnContentResult = {
  * characters). A single system prompt fits; a 7,000-turn dump does not get
  * serialized whole. When a part does not fit, it is cut and flagged — never
  * silently shortened.
+ *
+ * The turn-content route also accepts an explicit lossless request
+ * (`?full=true`): callers that need every byte pass `full` instead of
+ * guessing a large `budget` number. See `isFullContentRequest` in routes.ts.
  */
 export const CONTENT_RESPONSE_BUDGET = 2_000_000
+
+/**
+ * Documented sentinel for an explicit lossless turn-content request. The
+ * route checks the `full` query value (`true`/`1`); anything else keeps the
+ * default budget. A large-number `budget` is not a substitute — it is
+ * undocumented and still truncates past its value.
+ */
+export const TURN_CONTENT_FULL_PARAM = 'full'
 
 interface SessionDbRow {
   session_id: string
@@ -663,6 +788,12 @@ type ContentSourceRecord = {
   spanId: string
   sessionKey: string | null
   parts: ContentPart[]
+  /**
+   * Captured timestamp of the span, when the seam carries one. Lets the
+   * turn-content reader scope session prompts to those captured at or
+   * before the turn being shown without a second lookup per span.
+   */
+  timestamp?: string
 }
 
 /**
@@ -695,19 +826,55 @@ function turnTransportIndexOf(item: TurnDescriptor): number | undefined {
 }
 
 /**
- * Strict turn resolution: explicit identity first, array position only for
- * rows carrying neither `index` nor `turn`. Anything else resolves to
- * nothing — never a neighboring turn.
+ * Index of explicit 0-based transport identities over one ordered turn list,
+ * built in a single pass. First identity wins on duplicates, matching the
+ * historic `find` order.
  */
-function resolveTurn<T>(
-  pool: readonly T[],
-  turnIndex: number,
+export function buildTransportIndex<T>(
+  items: readonly T[],
   identityOf: (item: T) => number | undefined,
+): Map<number, T> {
+  const byIdentity = new Map<number, T>()
+  for (const item of items) {
+    const id = identityOf(item)
+    if (id !== undefined && !byIdentity.has(id)) byIdentity.set(id, item)
+  }
+  return byIdentity
+}
+
+/**
+ * Strict turn resolution over one ordered list: explicit identity first,
+ * array position only for the row that carries neither `index` nor `turn`.
+ * Anything else resolves to nothing — never a neighboring turn (issue #184).
+ */
+export function lookupTransport<T>(
+  items: readonly T[] | undefined,
+  byIdentity: Map<number, T> | undefined,
+  identityOf: (item: T) => number | undefined,
+  turnIndex: number,
 ): T | undefined {
-  return (
-    pool.find((item) => identityOf(item) === turnIndex) ??
-    pool.find((item, i) => i === turnIndex && identityOf(item) === undefined)
-  )
+  const direct = byIdentity?.get(turnIndex)
+  if (direct !== undefined) return direct
+  const positional = items !== undefined && turnIndex >= 0 && turnIndex < items.length ? items[turnIndex] : undefined
+  if (positional !== undefined && identityOf(positional) === undefined) return positional
+  return undefined
+}
+
+/**
+ * Normalized turn-resolution row: the span an index resolves to plus its
+ * explicit 0-based identity (`undefined` for position-only rows), with the
+ * one-pass identity map beside the ordered entries. Built once per response
+ * and shared by the target lookup and every preceding-turn lookup.
+ */
+export type TurnResolutionEntry = {
+  spanId: string
+  model?: string
+  identity: number | undefined
+}
+
+export type TurnResolutionPool = {
+  entries: TurnResolutionEntry[]
+  byIdentity: Map<number, TurnResolutionEntry>
 }
 
 /**
@@ -735,6 +902,30 @@ function logId(value: string): string {
 function logErr(value: unknown): string {
   const raw = value instanceof Error ? value.message : String(value)
   return raw.replace(/[^\x20-\x7e]/g, '?').slice(0, 500)
+}
+
+/**
+ * Stable hash of exact source bytes for recurrence comparison. Hashes (not
+ * texts) are retained per earlier part so a long session keeps one small
+ * digest per captured part instead of every earlier byte in memory.
+ */
+function sha256Hex(text: string): string {
+  return createHash('sha256').update(text, 'utf8').digest('hex')
+}
+
+/**
+ * Read a stored raw-payload cell for a detail route. Stored text parses back to the exact
+ * incoming span object; unparseable text is served verbatim rather than dropped (it is
+ * still the closest thing to the original evidence); null stays null — unavailable,
+ * never invented.
+ */
+function parseStoredRawPayload(rawText: string | null): unknown | null {
+  if (rawText === null) return null
+  try {
+    return JSON.parse(rawText) as unknown
+  } catch {
+    return rawText
+  }
 }
 
 
@@ -794,7 +985,35 @@ function toContentSource(record: CanonicalRecord): ContentSourceRecord {
     spanId: record.spanId,
     sessionKey: sessionKeyOf(record),
     parts: partsFromRecord(record),
+    timestamp: normalizeRecordTimestamp(record.timestamp),
   }
+}
+
+/**
+ * A canonical timestamp as the narrow stored string. A `Date` round-trips
+ * through ISO; anything else is unknown rather than invented.
+ */
+function normalizeRecordTimestamp(value: CanonicalRecord['timestamp'] | unknown): string | undefined {
+  if (typeof value === 'string') return value
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString()
+  return undefined
+}
+
+/**
+ * Temporal gate for shared session prompts: only a prompt provably captured
+ * after the shown turn is withheld. Both timestamps parse and the candidate
+ * is strictly later — anything missing or unparseable stays included,
+ * because the reader cannot prove it is future evidence and dropping it
+ * would invent a claim the corpus cannot support. Equal timestamps stay
+ * included for the same reason: millisecond equality cannot order two
+ * captures, so the limitation is documented, not decided.
+ */
+function sessionPromptAtOrBefore(candidate: string | undefined, target: string | undefined): boolean {
+  if (candidate === undefined || target === undefined) return true
+  const candidateMs = Date.parse(candidate)
+  const targetMs = Date.parse(target)
+  if (!Number.isFinite(candidateMs) || !Number.isFinite(targetMs)) return true
+  return candidateMs <= targetMs
 }
 
 function applyContentBudget(
@@ -1570,7 +1789,13 @@ export class KyberBridge {
 
     const result: SessionContentResult = {
       sessionId,
-      parts: applyContentBudget(assembled, CONTENT_RESPONSE_BUDGET),
+      // Lossless callers pass `full` so content longer than the default
+      // budget returns exact with no flags; everyone else keeps the capped
+      // behavior with explicit `truncated`/`totalLength` markers. Flags are
+      // only ever added by the budget below — never invented, and upstream
+      // (storage-level) truncation stays visible wherever the store records
+      // it rather than being papered over here.
+      parts: applyContentBudget(assembled, options.full === true ? Number.POSITIVE_INFINITY : CONTENT_RESPONSE_BUDGET),
     }
     if (options.spanId) result.spanId = options.spanId
     return result
@@ -1587,6 +1812,18 @@ export class KyberBridge {
    * Sub-divided into canonical context blocks (system_prompt, tool_definitions,
    * instruction_context, conversation_history, tool_result_content) and parts
    * (including user_messages, assistant_turns, etc.).
+   *
+   * Every part carries exact-match `recurrence` against earlier captured
+   * turns of this session (same part kind, whole text, hashed), aggregated
+   * per block; `sharedContext` carries every captured `system_prompt` part
+   * in scope at or before this turn, in capture order, each with its own recurrence. Recurrence is
+   * capture-only and never a cache claim — cache totals stay on the turn
+   * row, unattributed to blocks.
+   *
+   * `budget` caps the returned characters with explicit `truncated` flags.
+   * Pass `Number.POSITIVE_INFINITY` for the documented lossless path (the
+   * route maps `?full=true` to it): no branch silently truncates, so content
+   * longer than `CONTENT_RESPONSE_BUDGET` returns intact.
    */
   assembleTurnContent(
     sessionId: string,
@@ -1600,17 +1837,20 @@ export class KyberBridge {
     let targetSpanId: string | undefined
     let model: string | undefined
 
-    // 1. Try resolving via session payload if available
+    // 1. Try resolving via session payload if available. The identity map is
+    // built in one pass and shared by the target lookup and every
+    // preceding-turn lookup below — O(1) per index, no repeated scans.
     const payload = this.getSessionPayload<SessionPayload>(sessionId)
     const turns: TurnDescriptor[] = Array.isArray(payload?.turns)
       ? (payload.turns as TurnDescriptor[])
       : []
+    const payloadByIdentity = buildTransportIndex(turns, turnTransportIndexOf)
     if (turns.length > 0) {
-      const turnItem = resolveTurn(turns, turnIndex, turnTransportIndexOf)
+      const turnItem = lookupTransport(turns, payloadByIdentity, turnTransportIndexOf, turnIndex)
       if (turnItem) {
         if (typeof turnItem.spanId === 'string') targetSpanId = turnItem.spanId
         if (typeof turnItem.model === 'string') model = turnItem.model
-      } else if (turns.some((t) => turnTransportIndexOf(t) !== undefined)) {
+      } else if (payloadByIdentity.size > 0) {
         // The payload names its turns and none matches: stop here. Falling
         // through to the positional record lookup below could serve a
         // neighboring span's content instead of the documented 404
@@ -1619,45 +1859,26 @@ export class KyberBridge {
       }
     }
 
+    // Ordered record pool, loaded at most once and shared by the target
+    // lookup and the preceding-turn reads (payload-less sessions).
+    let pool: TurnResolutionPool | null | undefined
+    const getPool = (): TurnResolutionPool | null => {
+      if (pool === undefined) pool = this.loadTurnResolutionPool(sessionId, db)
+      return pool
+    }
+
     // 2. If targetSpanId not resolved yet, search canonical records
     if (!targetSpanId) {
-      if (this.store) {
-        const records = this.store.recordsForSession(sessionId)
-        const turnRecords = records.filter((r) => r.op === 'llm.invoke')
-        const pool = turnRecords.length > 0 ? turnRecords : records
-        const target = resolveTurn(pool, turnIndex, (r) =>
-          turnTransportIndexOf(r as CanonicalRecord & TurnDescriptor),
-        )
-        if (target) {
-          targetSpanId = target.spanId
-          model = (target as CanonicalRecord & TurnDescriptor).model ?? target.name
-        }
-      } else if (this.hasTable(db, 'records')) {
-        try {
-          const rows = db!
-            .prepare('SELECT * FROM records WHERE COALESCE(session_id, trace_id) = ? ORDER BY timestamp')
-            .all(sessionId) as Record<string, unknown>[]
-          const turnRows = rows.filter((r) => r.op === 'llm.invoke')
-          const pool = turnRows.length > 0 ? turnRows : rows
-          // DB rows predate the descriptor shape: `index` may arrive as a
-          // numeric string, and a null/empty index is no identity (unlike
-          // `Number(null)`, which coerces to 0 and would hijack turn 0).
-          const target = resolveTurn(pool, turnIndex, (r) => {
-            const rawIndex: unknown = r.index
-            const index =
-              rawIndex === null || rawIndex === undefined || rawIndex === '' ? undefined : Number(rawIndex)
-            return turnTransportIndexOf({
-              index: typeof index === 'number' && Number.isFinite(index) ? index : undefined,
-              turn: r.turn,
-            })
-          })
-          if (target) {
-            targetSpanId = String(target.span_id)
-            model = String(target.name || '')
-          }
-        } catch {
-          // ignore
-        }
+      const resolvedPool = getPool()
+      const resolved = lookupTransport(
+        resolvedPool?.entries,
+        resolvedPool?.byIdentity,
+        (e: TurnResolutionEntry) => e.identity,
+        turnIndex,
+      )
+      if (resolved) {
+        targetSpanId = resolved.spanId
+        model = resolved.model
       }
     }
 
@@ -1668,112 +1889,102 @@ export class KyberBridge {
     const rawParts: ContentPart[] = contentRecords[0]?.parts ?? []
 
     // Map and extract structured parts (system prompt, tools, user messages, assistant turns, etc.)
-    const parts: TurnContentPart[] = []
-    let orderCounter = 0
+    const parts = this.mapTurnContentParts(rawParts, targetSpanId)
 
-    for (const p of rawParts) {
-      if (p.part === 'system_prompt') {
-        parts.push({
-          id: `part-sys-${orderCounter++}`,
-          spanId: targetSpanId,
-          part: 'system_prompt',
-          label: 'System Prompt',
-          text: p.text,
-          tokens: p.tokens,
-          server: p.server,
-          order: p.order ?? orderCounter,
-        })
-      } else if (p.part === 'tool_definitions') {
-        const label = p.server ? `Tools (${p.server})` : 'Tools'
-        parts.push({
-          id: `part-tool-${orderCounter++}`,
-          spanId: targetSpanId,
-          part: 'tool_definitions',
-          label,
-          text: p.text,
-          tokens: p.tokens,
-          server: p.server,
-          order: p.order ?? orderCounter,
-        })
-      } else if (p.part === 'instruction_context') {
-        parts.push({
-          id: `part-inst-${orderCounter++}`,
-          spanId: targetSpanId,
-          part: 'instruction_context',
-          label: 'Instruction Context',
-          text: p.text,
-          tokens: p.tokens,
-          server: p.server,
-          order: p.order ?? orderCounter,
-        })
-      } else if (p.part === 'tool_result_content') {
-        parts.push({
-          id: `part-toolres-${orderCounter++}`,
-          spanId: targetSpanId,
-          part: 'tool_result_content',
-          label: 'Tool Results',
-          text: p.text,
-          tokens: p.tokens,
-          server: p.server,
-          order: p.order ?? orderCounter,
-        })
-      } else if (p.part === 'conversation_history') {
-        const { userMessages, assistantMessages } = extractMessagesFromHistory(p.text)
-        if (userMessages.length > 0 || assistantMessages.length > 0) {
-          if (userMessages.length > 0) {
-            parts.push({
-              id: `part-user-${orderCounter++}`,
-              spanId: targetSpanId,
-              part: 'user_messages',
-              label: 'User Messages',
-              text: userMessages.join('\n\n'),
-              tokens: p.tokens ? Math.round(p.tokens * (userMessages.length / (userMessages.length + assistantMessages.length))) : undefined,
-              order: p.order ?? orderCounter,
-            })
-          }
-          if (assistantMessages.length > 0) {
-            parts.push({
-              id: `part-asst-${orderCounter++}`,
-              spanId: targetSpanId,
-              part: 'assistant_turns',
-              label: 'Assistant Turns',
-              text: assistantMessages.join('\n\n'),
-              tokens: p.tokens ? Math.round(p.tokens * (assistantMessages.length / (userMessages.length + assistantMessages.length))) : undefined,
-              order: p.order ?? orderCounter,
-            })
-          }
-        } else {
-          // Generic conversation history
-          parts.push({
-            id: `part-user-${orderCounter++}`,
-            spanId: targetSpanId,
-            part: 'user_messages',
-            label: 'User Messages',
-            text: p.text,
-            tokens: p.tokens,
-            order: p.order ?? orderCounter,
-          })
-          parts.push({
-            id: `part-conv-${orderCounter++}`,
-            spanId: targetSpanId,
-            part: 'conversation_history',
-            label: 'Conversation History',
-            text: p.text,
-            tokens: p.tokens,
-            order: p.order ?? orderCounter,
-          })
-        }
-      } else {
-        parts.push({
-          id: `part-other-${orderCounter++}`,
-          spanId: targetSpanId,
-          part: p.part,
-          label: String(p.part).replace(/_/g, ' '),
-          text: p.text,
-          tokens: p.tokens,
-          server: p.server,
-          order: p.order ?? orderCounter,
-        })
+    // Captured-context recurrence: exact whole-part-text matches of the same
+    // part kind in earlier captured turns. Only per-kind digest sets plus the
+    // system-prompt candidate texts below are retained — each preceding part
+    // is hashed and released turn-by-turn, never accumulated. No
+    // normalization, no token-level similarity: a changed part is new unless
+    // its exact text was captured before. Recurrence is independent of model
+    // cache use and is never a cache claim; computed before budgeting so
+    // truncation cannot rewrite it.
+    const preceding = this.loadPrecedingTurnDigests(sessionId, turnIndex, turns, payloadByIdentity, getPool)
+    for (const p of parts) {
+      p.recurrence = { seenBefore: preceding.digests.get(p.part)?.has(sha256Hex(p.text)) ?? false }
+    }
+
+    // Session-level shared context: the union of the turn spans at or
+    // before this turn (preceding plus current, each occurrence carrying its
+    // contributing turnIndex) and every non-turn captured system_prompt in
+    // session scope at or before this turn, in capture order. A mixed session
+    // — an `llm.invoke` turn prompt coexisting with one or more non-turn
+    // (e.g. `session.start`) prompts — keeps both: the old only-when-empty
+    // fallback silently dropped the non-turn prompt as soon as any turn
+    // prompt existed. Occurrence identity is the contributing turn index,
+    // never the text alone: identical text from distinct turns stays
+    // repeated, and one span serving two turn indexes contributes two
+    // occurrences. Turn spans are excluded from the session scan by their
+    // canonical operation (`llm.invoke`) as well as by the resolved turn
+    // span set (never by text inference), so a turn span missing from the
+    // payload turn list never appears as an unindexed duplicate.
+    // Temporal scope comes from captured timestamps — a prompt provably
+    // captured after this turn is withheld; missing, unparseable, or equal
+    // timestamps stay included (see `sessionPromptAtOrBefore`), because the
+    // corpus cannot order those captures and the reader must not invent it.
+    // Each part's own recurrence follows the same exact-match rule against
+    // strictly earlier turns; the client hides exact duplicates of the
+    // turn's own parts and otherwise labels the section Shared session
+    // context. `seenBefore` for the section holds when any part has earlier
+    // evidence; parts without it show no recurrence badge (never "new" —
+    // first capture is unverifiable outside the turn spans).
+    const targetTimestamp = contentRecords[0]?.timestamp
+    // Turn span ids known from the resolved turn set (payload first, so the
+    // narrow seam pays no extra record walk; the already-loaded pool joins
+    // when present). The session scan filters these out, so a turn span is
+    // never contributed as an unindexed session duplicate — turn occurrences
+    // arrive only with their contributing turnIndex below. Identity is never
+    // inferred from text.
+    const turnSpanIds = new Set<string>()
+    for (const t of turns) {
+      if (typeof t.spanId === 'string') turnSpanIds.add(t.spanId)
+    }
+    if (pool !== undefined && pool !== null) {
+      for (const e of pool.entries) turnSpanIds.add(e.spanId)
+    }
+    type SharedCandidate = TurnContentSharedPart & { timestamp?: string; seq: number }
+    const sharedCandidates: SharedCandidate[] = []
+    let sharedSeq = 0
+    for (const fallback of this.loadSessionSystemPrompts(sessionId, turnSpanIds)) {
+      if (!sessionPromptAtOrBefore(fallback.timestamp, targetTimestamp)) continue
+      const spanId = fallback.spanId ?? targetSpanId
+      if (spanId === undefined) continue
+      if (turnSpanIds.has(spanId)) continue
+      sharedCandidates.push({ text: fallback.text, spanId, timestamp: fallback.timestamp, seq: sharedSeq++ })
+    }
+    for (const p of preceding.prompts) {
+      sharedCandidates.push({ text: p.text, spanId: p.spanId, turnIndex: p.turnIndex, timestamp: p.timestamp, seq: sharedSeq++ })
+    }
+    // The current turn contributes its own occurrences under the requested
+    // turn index — even when its span also served an earlier turn index. Each
+    // full-turn copy is a distinct API-seen occurrence, so the same span id
+    // at turn 0 and turn 1 yields two entries with different turnIndex
+    // values. Same-turn repeated identical parts stay repeated.
+    for (const p of parts.filter((p) => p.part === 'system_prompt' && p.text !== '')) {
+      const spanId = p.spanId ?? targetSpanId
+      sharedCandidates.push({ text: p.text, spanId, turnIndex, timestamp: targetTimestamp, seq: sharedSeq++ })
+    }
+    // Capture order: provable timestamps order the union; missing,
+    // unparseable, or equal timestamps keep insertion order (stable sort) —
+    // the corpus cannot order those captures and the reader must not invent it.
+    sharedCandidates.sort((a, b) => {
+      const aMs = a.timestamp === undefined ? Number.NaN : Date.parse(a.timestamp)
+      const bMs = b.timestamp === undefined ? Number.NaN : Date.parse(b.timestamp)
+      const aKnown = Number.isFinite(aMs)
+      const bKnown = Number.isFinite(bMs)
+      if (aKnown && bKnown && aMs !== bMs) return (aMs as number) - (bMs as number)
+      return a.seq - b.seq
+    })
+    const sharedParts: TurnContentSharedPart[] = sharedCandidates.map(({ text, spanId, turnIndex: ti, truncated, totalLength }) =>
+      ti === undefined ? { text, spanId, ...(truncated !== undefined ? { truncated } : {}), ...(totalLength !== undefined ? { totalLength } : {}) } : { text, spanId, turnIndex: ti },
+    )
+    let sharedContext: TurnContentSharedContext | null = null
+    if (sharedParts.length > 0) {
+      sharedContext = {
+        parts: sharedParts,
+        seenBefore: sharedParts.some(
+          (c) => preceding.digests.get('system_prompt')?.has(sha256Hex(c.text)) ?? false,
+        ),
       }
     }
 
@@ -1814,6 +2025,14 @@ export class KyberBridge {
       const measurability = flat?.[def.key] ?? buckets?.[def.key]
       if (measurability && typeof measurability === 'object' && measurability.availability === 'not_measurable') {
         block.notMeasurable = { reason: measurability.reason || 'Not measurable for this harness.' }
+      }
+
+      // Block recurrence aggregates its rendered members: new when any
+      // member part is new, seen when any member part exactly matches an
+      // earlier same-kind part. Both hold for mixed blocks.
+      block.recurrence = {
+        newThisTurn: uniqueParts.some((p) => p.recurrence !== undefined && !p.recurrence.seenBefore),
+        seenBefore: uniqueParts.some((p) => p.recurrence?.seenBefore === true),
       }
 
       blocks.push(block)
@@ -1858,6 +2077,18 @@ export class KyberBridge {
         part.truncated = true
       }
     }
+    // Shared context is budgeted and flagged exactly like every other text:
+    // a default response caps each part with explicit markers, while the
+    // explicit lossless path (unbounded budget) returns every byte intact.
+    if (sharedContext) {
+      for (const sharedPart of sharedContext.parts) {
+        if (sharedPart.text.length > budget) {
+          sharedPart.totalLength = sharedPart.text.length
+          sharedPart.text = sharedPart.text.slice(0, budget)
+          sharedPart.truncated = true
+        }
+      }
+    }
 
     const result: TurnContentResult = {
       sessionId,
@@ -1868,9 +2099,322 @@ export class KyberBridge {
       parts,
       assembledText,
       ...(truncated ? { truncated, totalLength } : {}),
+      sharedContext,
     }
 
     return result
+  }
+
+  /**
+   * Structured turn parts for one span, in raw order: system prompt, tools,
+   * instruction context, tool results, conversation history split into user
+   * messages / assistant turns (or kept generic when unparseable), and any
+   * other part kind passed through with its exact text. The current turn and
+   * every preceding turn map through this same function so recurrence
+   * compares identical kinds.
+   */
+  private mapTurnContentParts(rawParts: ContentPart[], spanId: string): TurnContentPart[] {
+    const parts: TurnContentPart[] = []
+    let orderCounter = 0
+
+    for (const p of rawParts) {
+      if (p.part === 'system_prompt') {
+        parts.push({
+          id: `part-sys-${orderCounter++}`,
+          spanId,
+          part: 'system_prompt',
+          label: 'System Prompt',
+          text: p.text,
+          tokens: p.tokens,
+          server: p.server,
+          order: p.order ?? orderCounter,
+        })
+      } else if (p.part === 'tool_definitions') {
+        const label = p.server ? `Tools (${p.server})` : 'Tools'
+        parts.push({
+          id: `part-tool-${orderCounter++}`,
+          spanId,
+          part: 'tool_definitions',
+          label,
+          text: p.text,
+          tokens: p.tokens,
+          server: p.server,
+          order: p.order ?? orderCounter,
+        })
+      } else if (p.part === 'instruction_context') {
+        parts.push({
+          id: `part-inst-${orderCounter++}`,
+          spanId,
+          part: 'instruction_context',
+          label: 'Instruction Context',
+          text: p.text,
+          tokens: p.tokens,
+          server: p.server,
+          order: p.order ?? orderCounter,
+        })
+      } else if (p.part === 'tool_result_content') {
+        parts.push({
+          id: `part-toolres-${orderCounter++}`,
+          spanId,
+          part: 'tool_result_content',
+          label: 'Tool Results',
+          text: p.text,
+          tokens: p.tokens,
+          server: p.server,
+          order: p.order ?? orderCounter,
+        })
+      } else if (p.part === 'conversation_history') {
+        const { userMessages, assistantMessages } = extractMessagesFromHistory(p.text)
+        if (userMessages.length > 0 || assistantMessages.length > 0) {
+          if (userMessages.length > 0) {
+            parts.push({
+              id: `part-user-${orderCounter++}`,
+              spanId,
+              part: 'user_messages',
+              label: 'User Messages',
+              text: userMessages.join('\n\n'),
+              tokens: p.tokens ? Math.round(p.tokens * (userMessages.length / (userMessages.length + assistantMessages.length))) : undefined,
+              order: p.order ?? orderCounter,
+            })
+          }
+          if (assistantMessages.length > 0) {
+            parts.push({
+              id: `part-asst-${orderCounter++}`,
+              spanId,
+              part: 'assistant_turns',
+              label: 'Assistant Turns',
+              text: assistantMessages.join('\n\n'),
+              tokens: p.tokens ? Math.round(p.tokens * (assistantMessages.length / (userMessages.length + assistantMessages.length))) : undefined,
+              order: p.order ?? orderCounter,
+            })
+          }
+        } else {
+          // Generic conversation history
+          parts.push({
+            id: `part-user-${orderCounter++}`,
+            spanId,
+            part: 'user_messages',
+            label: 'User Messages',
+            text: p.text,
+            tokens: p.tokens,
+            order: p.order ?? orderCounter,
+          })
+          parts.push({
+            id: `part-conv-${orderCounter++}`,
+            spanId,
+            part: 'conversation_history',
+            label: 'Conversation History',
+            text: p.text,
+            tokens: p.tokens,
+            order: p.order ?? orderCounter,
+          })
+        }
+      } else {
+        parts.push({
+          id: `part-other-${orderCounter++}`,
+          spanId,
+          part: p.part,
+          label: String(p.part).replace(/_/g, ' '),
+          text: p.text,
+          tokens: p.tokens,
+          server: p.server,
+          order: p.order ?? orderCounter,
+        })
+      }
+    }
+
+    return parts
+  }
+
+  /**
+   * Normalized turn-resolution row: the span an index resolves to plus its
+   * explicit 0-based identity (`undefined` for position-only rows).
+   */
+  private loadTurnResolutionPool(
+    sessionId: string,
+    db: DatabaseSync | undefined,
+  ): TurnResolutionPool | null {
+    if (this.store) {
+      const records = this.store.recordsForSession(sessionId)
+      const turnRecords = records.filter((r) => r.op === 'llm.invoke')
+      const pool = turnRecords.length > 0 ? turnRecords : records
+      const entries = pool.map((r) => ({
+        spanId: r.spanId,
+        model: (r as CanonicalRecord & TurnDescriptor).model ?? r.name,
+        identity: turnTransportIndexOf(r as CanonicalRecord & TurnDescriptor),
+      }))
+      return { entries, byIdentity: buildTransportIndex(entries, (e) => e.identity) }
+    }
+    if (this.hasTable(db, 'records')) {
+      try {
+        const rows = db!
+          .prepare('SELECT * FROM records WHERE COALESCE(session_id, trace_id) = ? ORDER BY timestamp')
+          .all(sessionId) as Record<string, unknown>[]
+        const turnRows = rows.filter((r) => r.op === 'llm.invoke')
+        const pool = turnRows.length > 0 ? turnRows : rows
+        // DB rows predate the descriptor shape: `index` may arrive as a
+        // numeric string, and a null/empty index is no identity (unlike
+        // `Number(null)`, which coerces to 0 and would hijack turn 0).
+        const entries = pool.map((r) => {
+          const rawIndex: unknown = r.index
+          const index =
+            rawIndex === null || rawIndex === undefined || rawIndex === '' ? undefined : Number(rawIndex)
+          return {
+            spanId: String(r.span_id),
+            model: String(r.name || ''),
+            identity: turnTransportIndexOf({
+              index: typeof index === 'number' && Number.isFinite(index) ? index : undefined,
+              turn: r.turn,
+            }),
+          }
+        })
+        return { entries, byIdentity: buildTransportIndex(entries, (e) => e.identity) }
+      } catch {
+        return null
+      }
+    }
+    return null
+  }
+
+  /**
+   * Recurrence evidence for every captured turn before `turnIndex`: per-kind
+   * digest sets plus the system-prompt candidate texts in turn order.
+   * Resolution reuses the caller's one-pass payload index and the shared
+   * pool (loaded at most once per response); content itself is read with
+   * single-span gets — never a full-session content walk. Each preceding
+   * part is hashed and released immediately: only digests and prompt texts
+   * are retained, so prefix cost is one small digest per earlier part.
+   * Comparisons stay exact and follow the same identity rules as the target
+   * lookup (issue #184).
+   */
+  private loadPrecedingTurnDigests(
+    sessionId: string,
+    turnIndex: number,
+    payloadTurns: TurnDescriptor[],
+    payloadByIdentity: Map<number, TurnDescriptor>,
+    getPool: () => TurnResolutionPool | null,
+  ): {
+    digests: Map<string, Set<string>>
+    prompts: Array<{ text: string; spanId: string; turnIndex: number; timestamp?: string }>
+  } {
+    const digests = new Map<string, Set<string>>()
+    const prompts: Array<{ text: string; spanId: string; turnIndex: number; timestamp?: string }> = []
+    if (turnIndex <= 0) return { digests, prompts }
+    const occurrences: Array<{ span: string; turnIndex: number }> = []
+    for (let i = 0; i < turnIndex; i++) {
+      let span: string | undefined
+      if (payloadTurns.length > 0) {
+        const item = lookupTransport(payloadTurns, payloadByIdentity, turnTransportIndexOf, i)
+        if (item && typeof item.spanId === 'string') {
+          span = item.spanId
+        } else if (payloadByIdentity.size > 0) {
+          // An identity-bearing payload that names no turn i contributes
+          // nothing for i — same guard as the target lookup (issue #184).
+          continue
+        }
+      }
+      if (span === undefined) {
+        const pool = getPool()
+        const found = lookupTransport(pool?.entries, pool?.byIdentity, (e) => e.identity, i)
+        if (found) span = found.spanId
+      }
+      if (span !== undefined) occurrences.push({ span, turnIndex: i })
+    }
+    // Load each distinct span once for digests, then replicate its system
+    // prompts once per turn index that references it: complete turn copies
+    // repeat a prompt, so the same span id at two turn indexes is two
+    // API-seen occurrences with different turnIndex values.
+    const cached = new Map<string, { texts: string[]; timestamp?: string }>()
+    for (const { span } of occurrences) {
+      if (cached.has(span)) continue
+      const records = this.loadContentRecords(sessionId, span)
+      const raw: ContentPart[] = records[0]?.parts ?? []
+      const timestamp = records[0]?.timestamp
+      const texts: string[] = []
+      for (const p of this.mapTurnContentParts(raw, span)) {
+        const set = digests.get(p.part) ?? new Set<string>()
+        set.add(sha256Hex(p.text))
+        digests.set(p.part, set)
+        // System-prompt texts alone are retained (shared-context
+        // candidates); every other part releases its text after hashing.
+        if (p.part === 'system_prompt' && p.text !== '') {
+          texts.push(p.text)
+        }
+      }
+      cached.set(span, { texts, timestamp })
+    }
+    for (const { span, turnIndex: sourceIndex } of occurrences) {
+      const entry = cached.get(span)
+      if (!entry) continue
+      for (const text of entry.texts) {
+        prompts.push({ text, spanId: span, turnIndex: sourceIndex, timestamp: entry.timestamp })
+      }
+    }
+    return { digests, prompts }
+  }
+
+  /**
+   * Non-turn session-wide system prompts for the shared-context reader: every
+   * captured `system_prompt` part outside `excludeSpan`, in session order.
+   * Turn spans are excluded by their canonical operation (`llm.invoke`) as
+   * well as by the caller's resolved span set, so a turn-derived prompt
+   * missing from the payload turn list never masquerades as an unindexed
+   * session-scope prompt; identity is never inferred from text. Always
+   * combined with the turn spans' own prompts by the caller (a mixed
+   * session keeps both); retains system prompts alone — never the
+   * surrounding content. Each entry carries its row's captured timestamp so
+   * the caller can withhold prompts captured after the turn being shown.
+   *
+   * <remarks>
+   * Cost: this deliberately never calls `loadContentRecords(sessionId)` — that
+   * walk selects every column (including the large `raw` blob) and inflates
+   * every session row's parts just to keep the prompts. The store seam reads
+   * only the content columns plus the short timestamp through
+   * `CanonStore.systemPromptPartsForSession`, and the store-less seam runs the
+   * same projection directly; rows carrying parts still inflate their own blob
+   * to filter (deflated bytes admit no SQL index — an indexed pre-filter would
+   * need a schema migration, out of scope), but unrelated rows are never
+   * materialized into records and their other columns never leave SQLite.
+   * Returned content, order, texts, and span ids match the old walk exactly.
+   * </remarks>
+   */
+  private loadSessionSystemPrompts(
+    sessionId: string,
+    excludeSpans?: string | Set<string>,
+  ): Array<{ text: string; spanId?: string; timestamp?: string }> {
+    if (!sessionId) return []
+    const isExcluded = (spanId: string): boolean => {
+      if (excludeSpans === undefined) return false
+      if (typeof excludeSpans === 'string') return spanId === excludeSpans
+      return excludeSpans.has(spanId)
+    }
+    if (this.store) {
+      return this.store
+        .systemPromptPartsForSession(sessionId, excludeSpans)
+        .map(({ spanId, text, timestamp }) => (timestamp === undefined ? { text, spanId } : { text, spanId, timestamp }))
+    }
+    const db = this.getDb()
+    if (!this.hasTable(db, 'records')) return []
+    try {
+      const rows = db!
+        .prepare(
+          'SELECT span_id, op, timestamp, content_json, parts_json FROM records WHERE COALESCE(session_id, trace_id) = ? ORDER BY timestamp',
+        )
+        .all(sessionId) as { span_id: unknown; op: unknown; timestamp: unknown; content_json: unknown; parts_json: unknown }[]
+      const out: Array<{ text: string; spanId?: string; timestamp?: string }> = []
+      for (const row of rows) {
+        if (row.op === 'llm.invoke') continue
+        const spanId = String(row.span_id)
+        if (isExcluded(spanId)) continue
+        const timestamp = row.timestamp === null || row.timestamp === undefined ? undefined : String(row.timestamp)
+        for (const text of systemPromptTextsFromContentColumns(row.content_json, row.parts_json)) {
+          out.push(timestamp === undefined ? { text, spanId } : { text, spanId, timestamp })
+        }
+      }
+      return out
+    } catch {
+      return []
+    }
   }
 
 
@@ -1936,6 +2480,7 @@ export class KyberBridge {
             spanId: String(row.span_id),
             sessionKey: key,
             parts: partsFromRow(row),
+            timestamp: normalizeRecordTimestamp(row.timestamp),
           },
         ]
       } catch {
@@ -1953,6 +2498,7 @@ export class KyberBridge {
         spanId: String(row.span_id),
         sessionKey: sessionId,
         parts: partsFromRow(row),
+        timestamp: normalizeRecordTimestamp(row.timestamp),
       }))
     } catch {
       try {
@@ -1963,6 +2509,7 @@ export class KyberBridge {
           spanId: String(row.span_id),
           sessionKey: sessionId,
           parts: partsFromRow(row),
+          timestamp: normalizeRecordTimestamp(row.timestamp),
         }))
       } catch {
         return []
@@ -2266,7 +2813,14 @@ export class KyberBridge {
     }
   }
 
-  getQuarantine(limit = 200, offset = 0): QuarantineRow[] {
+  /**
+   * Quarantine rows, metadata-only (bounded — never the stored raw payload).
+   * `harness` scopes the list: `undefined` is unfiltered (backwards-compatible),
+   * `'unknown'` keeps unattributed sources only, and a canonical id keeps the stored
+   * source spellings normalizing to it. The scope matches the stored source grouping,
+   * never attribution — quarantined spans have no harness by construction.
+   */
+  getQuarantine(limit = 200, offset = 0, harness?: string): QuarantineRow[] {
     const db = this.getDb()
     if (!this.hasTable(db, 'quarantine')) {
       return []
@@ -2279,6 +2833,9 @@ export class KyberBridge {
       const cols = new Set(
         (db!.prepare("PRAGMA table_info('quarantine')").all() as Array<{ name: string }>).map((c) => c.name),
       )
+      // A scope needs the column it matches on; without `source` no row can be scoped.
+      if (harness !== undefined && !cols.has('source')) return []
+      const { where, params } = quarantineHarnessWhere(harness)
 
       const selectCols = ['span_id', 'namespaces', 'reason']
       selectCols.push(cols.has('source') ? 'source' : 'NULL AS source')
@@ -2294,9 +2851,9 @@ export class KyberBridge {
             ? 'seen_at'
             : 'span_id'
 
-      const sql = `SELECT ${selectCols.join(', ')} FROM quarantine ORDER BY ${orderCol} DESC, span_id DESC LIMIT ? OFFSET ?`
+      const sql = `SELECT ${selectCols.join(', ')} FROM quarantine${where} ORDER BY ${orderCol} DESC, span_id DESC LIMIT ? OFFSET ?`
 
-      const rows = db!.prepare(sql).all(safeLimit, safeOffset) as unknown as QuarantineDbRow[]
+      const rows = db!.prepare(sql).all(...params, safeLimit, safeOffset) as unknown as QuarantineDbRow[]
       const results: QuarantineRow[] = []
       for (const r of rows) {
         results.push({
@@ -2316,24 +2873,76 @@ export class KyberBridge {
     }
   }
 
-  /** Count every quarantine row without applying the inspector's default page limit. */
-  getQuarantineCount(): number {
+  /** Count quarantine rows under one scope, without applying the page limit. */
+  getQuarantineCount(harness?: string): number {
     if (this.store) {
-      return this.store.countQuarantine()
+      // Unscoped keeps the legacy seam so older store fakes still throw their own
+      // errors through; a scope needs the filtered seam (unfiltered would mis-scope).
+      if (harness === undefined) return this.store.countQuarantine()
+      return this.store.countQuarantineFiltered(harness)
     }
     const db = this.getDb()
     if (!this.hasTable(db, 'quarantine')) return 0
-    const row = db!.prepare('SELECT COUNT(*) AS n FROM quarantine').get() as
+    if (harness !== undefined) {
+      const cols = new Set(
+        (db!.prepare("PRAGMA table_info('quarantine')").all() as Array<{ name: string }>).map((c) => c.name),
+      )
+      if (!cols.has('source')) return 0
+    }
+    const { where, params } = quarantineHarnessWhere(harness)
+    const row = db!.prepare(`SELECT COUNT(*) AS n FROM quarantine${where}`).get(...params) as
       | { n?: number }
       | undefined
     return Number(row?.n) || 0
   }
 
   /**
+   * One quarantined span with its incoming evidence. Rows stored before the evidence
+   * column read `rawPayload: null, evidenceAvailable: false` — explicitly unavailable,
+   * never reconstructed. Absent span id gives undefined (the route's 404).
+   */
+  getQuarantineEntry(spanId: string): QuarantineDetail | undefined {
+    const db = this.getDb()
+    if (!this.hasTable(db, 'quarantine')) return undefined
+    try {
+      const cols = new Set(
+        (db!.prepare("PRAGMA table_info('quarantine')").all() as Array<{ name: string }>).map((c) => c.name),
+      )
+      const selectCols = ['span_id', 'namespaces', 'reason']
+      selectCols.push(cols.has('source') ? 'source' : 'NULL AS source')
+      selectCols.push(cols.has('name') ? 'name' : 'NULL AS name')
+      selectCols.push(cols.has('seen_at') ? 'seen_at' : 'NULL AS seen_at')
+      selectCols.push(cols.has('timestamp') ? 'timestamp' : 'NULL AS timestamp')
+      selectCols.push(cols.has('raw_payload') ? 'raw_payload' : 'NULL AS raw_payload')
+      const row = db!.prepare(`SELECT ${selectCols.join(', ')} FROM quarantine WHERE span_id = ?`).get(spanId) as
+        | (QuarantineDbRow & { raw_payload?: unknown })
+        | undefined
+      if (row === undefined) return undefined
+      const rawText = typeof row.raw_payload === 'string' && row.raw_payload !== '' ? row.raw_payload : null
+      return {
+        span_id: row.span_id,
+        source: row.source ?? null,
+        name: row.name ?? null,
+        namespaces: row.namespaces ?? null,
+        reason: row.reason ?? null,
+        seen_at: row.seen_at ?? row.timestamp ?? null,
+        timestamp: row.timestamp ?? (typeof row.seen_at === 'number' ? new Date(row.seen_at * 1000).toISOString() : (row.seen_at ? String(row.seen_at) : null)),
+        rawPayload: parseStoredRawPayload(rawText),
+        evidenceAvailable: rawText !== null,
+      }
+    } catch (err) {
+      console.warn('[KyberBridge] Failed querying quarantine entry from canon.db:', err)
+      return undefined
+    }
+  }
+
+  /**
    * Return recorded validation errors, token reconciliation mismatches, and anomalies.
    * Reads canonical diagnostics, deduplicated by the store's problem identity.
+   * Metadata-only (bounded — never the exception stack); `harness` scopes like the
+   * quarantine list (`undefined` is unfiltered and backwards-compatible).
    */
-  getProblems(limit = 200, offset = 0): ProblemRow[] {
+  getProblems(limit = 200, offset = 0, harness?: string): ProblemRow[] {
     const db = this.getDb()
     const canonTable = this.hasTable(db, 'problems')
       ? 'problems'
@@ -2360,9 +2969,13 @@ export class KyberBridge {
       selectCols.push(cols.has('at') ? 'at' : 'NULL AS at')
       selectCols.push(cols.has('timestamp') ? 'timestamp' : 'NULL AS timestamp')
 
-      const sql = `SELECT ${selectCols.join(', ')} FROM ${canonTable} ORDER BY id DESC LIMIT ? OFFSET ?`
+      // A scope needs the column it matches on; without `harness` no row can be scoped.
+      if (harness !== undefined && !cols.has('harness')) return []
+      const { where, params } = problemsHarnessWhere(harness)
 
-      const rows = db!.prepare(sql).all(safeLimit, safeOffset) as unknown as ProblemDbRow[]
+      const sql = `SELECT ${selectCols.join(', ')} FROM ${canonTable}${where} ORDER BY id DESC LIMIT ? OFFSET ?`
+
+      const rows = db!.prepare(sql).all(...params, safeLimit, safeOffset) as unknown as ProblemDbRow[]
       const results: ProblemRow[] = []
       for (const r of rows) {
         results.push({
@@ -2384,10 +2997,13 @@ export class KyberBridge {
     }
   }
 
-  /** Count every problem row without applying the inspector's default page limit. */
-  getProblemCount(): number {
+  /** Count problem rows under one scope, without applying the page limit. */
+  getProblemCount(harness?: string): number {
     if (this.store) {
-      return this.store.countProblems()
+      // Unscoped keeps the legacy seam so older store fakes still throw their own
+      // errors through; a scope needs the filtered seam (unfiltered would mis-scope).
+      if (harness === undefined) return this.store.countProblems()
+      return this.store.countProblemsFiltered(harness)
     }
     const db = this.getDb()
     const table = this.hasTable(db, 'problems')
@@ -2396,10 +3012,65 @@ export class KyberBridge {
         ? 'problem'
         : null
     if (table === null) return 0
-    const row = db!.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as
+    if (harness !== undefined) {
+      const cols = new Set(
+        (db!.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map((c) => c.name),
+      )
+      if (!cols.has('harness')) return 0
+    }
+    const { where, params } = problemsHarnessWhere(harness)
+    const row = db!.prepare(`SELECT COUNT(*) AS n FROM ${table}${where}`).get(...params) as
       | { n?: number }
       | undefined
     return Number(row?.n) || 0
+  }
+
+  /**
+   * One recorded problem with its exception evidence. `message` is the exact stored
+   * message; `stack` is the exception stack when the problem came from a throw, null
+   * otherwise. Absent id gives undefined (the route's 404).
+   */
+  getProblemEntry(id: number | string): ProblemDetail | undefined {
+    const numeric = typeof id === 'number' ? id : /^\d+$/.test(id.trim()) ? Number(id.trim()) : NaN
+    if (!Number.isSafeInteger(numeric)) return undefined
+    const db = this.getDb()
+    const canonTable = this.hasTable(db, 'problems')
+      ? 'problems'
+      : this.hasTable(db, 'problem')
+        ? 'problem'
+        : null
+    if (!canonTable) return undefined
+    try {
+      const cols = new Set(
+        (db!.prepare(`PRAGMA table_info(${canonTable})`).all() as Array<{ name: string }>).map((c) => c.name),
+      )
+      const selectCols = ['id', 'severity', 'code', 'message']
+      selectCols.push(cols.has('session_id') ? 'session_id' : 'NULL AS session_id')
+      selectCols.push(cols.has('span_id') ? 'span_id' : 'NULL AS span_id')
+      selectCols.push(cols.has('harness') ? 'harness' : 'NULL AS harness')
+      selectCols.push(cols.has('at') ? 'at' : 'NULL AS at')
+      selectCols.push(cols.has('timestamp') ? 'timestamp' : 'NULL AS timestamp')
+      selectCols.push(cols.has('stack') ? 'stack' : 'NULL AS stack')
+      const row = db!.prepare(`SELECT ${selectCols.join(', ')} FROM ${canonTable} WHERE id = ?`).get(numeric) as
+        | (ProblemDbRow & { stack?: unknown })
+        | undefined
+      if (row === undefined) return undefined
+      return {
+        id: row.id,
+        session_id: row.session_id ?? null,
+        span_id: row.span_id ?? null,
+        severity: row.severity,
+        code: row.code,
+        message: row.message,
+        at: row.at ?? row.timestamp ?? null,
+        timestamp: row.timestamp ?? (typeof row.at === 'number' ? new Date(row.at * 1000).toISOString() : (row.at ? String(row.at) : null)),
+        harness: row.harness ?? null,
+        stack: typeof row.stack === 'string' && row.stack !== '' ? row.stack : null,
+      }
+    } catch (err) {
+      console.warn('[KyberBridge] Failed querying problem entry from canon.db:', err)
+      return undefined
+    }
   }
 
   /**

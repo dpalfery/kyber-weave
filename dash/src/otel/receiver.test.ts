@@ -756,7 +756,9 @@ describe('OtlpReceiver GET /healthz (R10.6, R10.8)', () => {
 
     expect(response.status).toBe(200)
     expect(response.headers.get('content-type')).toContain('application/json')
-    expect(await response.json()).toEqual({
+    // Identity keys keep their names; the health contract is additive (endpoint,
+    // listening, lastAcceptedAt, window facts) so the tray probe keeps reading it.
+    expect(await response.json()).toMatchObject({
       service: 'kyberdash-otlp',
       version: PACKAGE_VERSION,
       paused: false,

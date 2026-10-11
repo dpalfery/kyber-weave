@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 
-import { CanonStore, SCHEMA_VERSION, compressRaw } from './store.js'
+import { CanonStore, SCHEMA_VERSION, compressRaw, systemPromptTextsFromContentColumns } from './store.js'
 import type { Finding } from '../analysis/findings.js'
 import type { RecordProvenance, SourceCheckpoint } from './source-state.js'
 import { TOKEN_SUM_MISMATCH, notMeasurable, type CanonicalRecord, type CostBlock, type TokenUsage } from './types.js'
@@ -1540,12 +1540,12 @@ describe('CanonStore finding indexes (council review)', () => {
 
 
 describe('store migrations v17: quarantine and problems schema upgrade', () => {
-  it('bumps SCHEMA_VERSION to 17 and initializes fresh database with new quarantine and problems columns', () => {
-    expect(SCHEMA_VERSION).toBe(17)
+  it('bumps SCHEMA_VERSION to 18 and initializes fresh database with new quarantine and problems columns', () => {
+    expect(SCHEMA_VERSION).toBe(18)
 
     const path = tempStorePath()
     const store = new CanonStore(path)
-    expect(store.getMetadata('schema_version')).toBe('17')
+    expect(store.getMetadata('schema_version')).toBe('18')
     store.close()
 
     const verifyDb = new DatabaseSync(path)
@@ -1677,9 +1677,9 @@ describe('store migrations v17: quarantine and problems schema upgrade', () => {
     `)
     v14Db.close()
 
-    // 2. Open with CanonStore: should run migrations up to 17
+    // 2. Open with CanonStore: should run migrations up to 18
     const migrated = new CanonStore(path)
-    expect(migrated.getMetadata('schema_version')).toBe('17')
+    expect(migrated.getMetadata('schema_version')).toBe('18')
 
     // 3. Verify existing rows are preserved
     const qRow = migrated.getQuarantine('span-v14-q')
@@ -1716,5 +1716,17 @@ describe('store migrations v17: quarantine and problems schema upgrade', () => {
 
     verifyDb.close()
     migrated.close()
+  })
+})
+
+describe('systemPromptTextsFromContentColumns', () => {
+  it('drops system_prompt parts whose text is missing or not a string (corrupt blob)', () => {
+    const parts = [
+      { part: 'system_prompt', order: 0 },
+      { part: 'system_prompt', order: 1, text: 42 },
+      { part: 'system_prompt', order: 2, text: '' },
+      { part: 'system_prompt', order: 3, text: 'kept' },
+    ]
+    expect(systemPromptTextsFromContentColumns(null, compressRaw(parts))).toEqual(['kept'])
   })
 })

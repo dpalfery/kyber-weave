@@ -1094,3 +1094,119 @@ export function harnessDimensionAvailability(
   return 'measured'
 }
 
+
+ // ---------------------------------------------------------------------------
+ // Harness scoping for the quarantine/problems list routes
+ // ---------------------------------------------------------------------------
+
+ /**
+  * Every harness spelling the `?harness=` filter accepts, front-end ids included
+  * (`claude-desktop`, `agy`, `copilot-chat`). The filter normalizes through
+  * `normalizeHarnessName` before matching, so twin front-ends scope to the same rows
+  * as their canonical owner — one harness reached through two collectors is one
+  * harness (issue #182). Anything normalizing outside this set is invalid (400),
+  * never silently unfiltered.
+  */
+ export const HARNESS_FILTER_SPELLINGS: readonly string[] = [
+   'pi',
+   'copilot',
+   'copilot-cli',
+   'copilot-vscode',
+   'copilot-jetbrains',
+   'copilot-agent',
+   'copilot-chat',
+   'github-copilot',
+   'claude-code',
+   'claude-desktop',
+   'claude',
+   'claude-cli',
+   'claude-unclassified',
+   'cursor',
+   'cursor-agent',
+   'codex',
+   'codex-cli',
+   'codex-desktop',
+   'codex-unclassified',
+   'openai-codex',
+   'gemini',
+   'antigravity',
+   'agy',
+   'antigravity-cli',
+   'antigravity-ide',
+   'opencode',
+   'kilo',
+   'kilo-code',
+   'kilo-shared-runtime',
+   'kilo-vscode-legacy',
+   'cline',
+   'cline-cli',
+   'aider',
+   'windsurf',
+   'cascade',
+   'roo',
+   'roo-code',
+   'roo-cline',
+   'kimi-code',
+   'kimicode',
+   'devin',
+   'codebuff',
+   'codewhale',
+ ]
+
+ /** Canonical harness ids the filter can resolve to, derived from the spellings above. */
+ const KNOWN_HARNESS_FILTER_IDS: ReadonlySet<string> = new Set(
+   HARNESS_FILTER_SPELLINGS.map((spelling) => normalizeHarnessName(spelling)),
+ )
+
+ /**
+  * The declared spellings, lower-cased. `normalizeHarnessName` folds every `kilo*` prefix
+  * into the shared runtime, so checking only the normalized id would accept `kilo-bogus`;
+  * the filter validates the spelling itself first.
+  */
+ const KNOWN_HARNESS_FILTER_SPELLINGS: ReadonlySet<string> = new Set(
+   HARNESS_FILTER_SPELLINGS.map((spelling) => spelling.toLowerCase()),
+ )
+
+ /**
+  * Stored source values that count as unattributed for the `unknown` scope. `otlp` is the
+  * neutral grouping key `toRawSpan` stamps when the export named no service (ingest.ts);
+  * `unattributed` is the legacy collector's equivalent. Both are grouping keys, never
+  * attribution evidence — which is exactly why they scope to `unknown`.
+  */
+ export const QUARANTINE_UNKNOWN_SOURCES: readonly string[] = ['otlp', 'unattributed', 'unknown']
+
+ /** A parsed `?harness=` filter: unfiltered, unattributed-only, one harness, or invalid. */
+ export type HarnessFilter =
+   | { kind: 'all' }
+   | { kind: 'unknown' }
+   | { kind: 'harness'; id: string }
+   | { kind: 'invalid'; raw: string }
+
+ /**
+  * Parse the quarantine/problems `?harness=` filter. Absent, blank, or `all` means
+  * unfiltered (the list routes' backwards-compatible shape); `unknown` scopes to
+  * unattributed rows; anything else must resolve to a known harness id or it is invalid.
+  */
+ export function parseHarnessFilter(raw: string | null | undefined): HarnessFilter {
+   if (raw === null || raw === undefined || raw.trim() === '') return { kind: 'all' }
+   const trimmed = raw.trim()
+   const lower = trimmed.toLowerCase()
+   if (lower === 'all') return { kind: 'all' }
+   if (lower === 'unknown') return { kind: 'unknown' }
+   if (!KNOWN_HARNESS_FILTER_SPELLINGS.has(lower)) return { kind: 'invalid', raw: trimmed }
+   const id = normalizeHarnessName(trimmed)
+   if (KNOWN_HARNESS_FILTER_IDS.has(id)) return { kind: 'harness', id }
+   return { kind: 'invalid', raw: trimmed }
+ }
+
+ /**
+  * Stored-source spellings that belong to one canonical harness id: every known spelling
+  * normalizing to it, so `?harness=claude-code` also matches rows grouped under
+  * `claude-desktop`. Lower-cased for case-insensitive SQL matching.
+  */
+ export function sourceSpellingsForHarness(id: string): string[] {
+   const want = normalizeHarnessName(id)
+   return HARNESS_FILTER_SPELLINGS.filter((spelling) => normalizeHarnessName(spelling) === want).map(
+     (spelling) => spelling.toLowerCase(),
+   )
+ }

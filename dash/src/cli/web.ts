@@ -770,11 +770,13 @@ export async function runWebDashboard(opts: WebDashboardServices & {
       }
       // The store is always passed, so the settings routes answer from the first accepted
       // connection; only the JobHost is absent while the pair is coming up, and the job
-      // routes answer 503 for that on their own account.
+      // routes answer 503 for that on their own account. The receiver host rides along so
+      // coverage reports the polled receiver state instead of unknown.
       if (
         handleKyberRequest(req, res, url, bridge, {
           store,
           jobHost: current?.jobHost,
+          receiverHost: current?.receiverHost,
           ...(opts.capture === undefined ? {} : { capture: opts.capture }),
         })
       ) {

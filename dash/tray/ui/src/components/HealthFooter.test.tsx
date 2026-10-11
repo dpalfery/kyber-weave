@@ -13,7 +13,7 @@
 import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 
-import { HealthFooter } from './HealthFooter'
+import { HealthFooter, collectorLive } from './HealthFooter'
 import type { ReceiverStatus } from '../viewState'
 
 const NOW = new Date('2026-09-19T12:00:00.000Z')
@@ -45,5 +45,40 @@ describe('the receiver line names the state rather than guessing at a fault', ()
     expect(receiverLine('hosted')).toBe('receiver hosted by KyberDash')
     expect(receiverLine('port-held-by-other')).toBe('receiver port held by another process')
     expect(receiverLine('unknown')).toBe('receiver unknown')
+  })
+})
+
+describe('the collector saber follows the shared coverage API, unknown is red', () => {
+  const liveCoverage = {
+    receiver: {
+      enabled: true,
+      healthy: true,
+      listening: true,
+      paused: false,
+      checkedAt: new Date(NOW.getTime() - 10_000).toISOString(),
+      failures5m: 0,
+    },
+  }
+
+  it('is live only for an enabled, healthy, listening, unpaused, error-free receiver', () => {
+    expect(collectorLive(liveCoverage, NOW)).toBe(true)
+  })
+
+  it('is down when coverage is missing, disabled, paused, failing, or stale', () => {
+    expect(collectorLive(null, NOW)).toBe(false)
+    expect(collectorLive(undefined, NOW)).toBe(false)
+    expect(collectorLive({}, NOW)).toBe(false)
+    expect(collectorLive({ receiver: { ...liveCoverage.receiver, enabled: false } }, NOW)).toBe(false)
+    expect(collectorLive({ receiver: { ...liveCoverage.receiver, paused: true } }, NOW)).toBe(false)
+    expect(collectorLive({ receiver: { ...liveCoverage.receiver, paused: null } }, NOW)).toBe(false)
+    expect(collectorLive({ receiver: { ...liveCoverage.receiver, healthy: false } }, NOW)).toBe(false)
+    expect(collectorLive({ receiver: { ...liveCoverage.receiver, failures5m: 1 } }, NOW)).toBe(false)
+    expect(collectorLive({ receiver: { ...liveCoverage.receiver, failures5m: null } }, NOW)).toBe(false)
+    expect(
+      collectorLive(
+        { receiver: { ...liveCoverage.receiver, checkedAt: new Date(NOW.getTime() - 300_000).toISOString() } },
+        NOW,
+      ),
+    ).toBe(false)
   })
 })

@@ -6,7 +6,9 @@ import { join } from 'node:path'
 
 import {
   KyberBridge,
+  buildTransportIndex,
   dedupedRunSessions,
+  lookupTransport,
   sumSessionFigures,
   type SessionSummaryFigures,
   _clip,
@@ -2056,5 +2058,55 @@ describe('KyberBridge.compareRuns split-share identity (issue #190 / D1)', () =>
       bridge.close()
       store.close()
     }
+  })
+})
+
+describe('KyberBridge: transport index lookup (single-pass identity map)', () => {
+  type Row = { span: string; index?: number; turn?: number }
+
+  const identityOf = (r: Row): number | undefined => {
+    if (typeof r.index === 'number' && Number.isFinite(r.index)) return r.index
+    if (typeof r.turn === 'number' && Number.isFinite(r.turn)) return r.turn - 1
+    return undefined
+  }
+
+  it('prefers explicit identity over array position', () => {
+    // Payload order is [{turn: 2}, {turn: 1}]: transport 0 is the second row.
+    const rows: Row[] = [
+      { span: 'span-pa', turn: 2 },
+      { span: 'span-pb', turn: 1 },
+    ]
+    const byIdentity = buildTransportIndex(rows, identityOf)
+    expect(lookupTransport(rows, byIdentity, identityOf, 0)?.span).toBe('span-pb')
+    expect(lookupTransport(rows, byIdentity, identityOf, 1)?.span).toBe('span-pa')
+  })
+
+  it('falls back to array position only for identity-free rows', () => {
+    const rows: Row[] = [{ span: 'span-q0' }, { span: 'span-q1' }]
+    const byIdentity = buildTransportIndex(rows, identityOf)
+    expect(byIdentity.size).toBe(0)
+    expect(lookupTransport(rows, byIdentity, identityOf, 0)?.span).toBe('span-q0')
+    expect(lookupTransport(rows, byIdentity, identityOf, 1)?.span).toBe('span-q1')
+    expect(lookupTransport(rows, byIdentity, identityOf, 2)).toBeUndefined()
+  })
+
+  it('never resolves a neighbor when identities disagree with position', () => {
+    const rows: Row[] = [
+      { span: 'span-x0', index: 0 },
+      { span: 'span-x1', index: 1 },
+    ]
+    const byIdentity = buildTransportIndex(rows, identityOf)
+    // Transport 2 matches no identity and row 2 does not exist.
+    expect(lookupTransport(rows, byIdentity, identityOf, 2)).toBeUndefined()
+    expect(lookupTransport(rows, byIdentity, identityOf, -1)).toBeUndefined()
+  })
+
+  it('keeps the first row on duplicate identities, matching find order', () => {
+    const rows: Row[] = [
+      { span: 'span-first', index: 0 },
+      { span: 'span-second', index: 0 },
+    ]
+    const byIdentity = buildTransportIndex(rows, identityOf)
+    expect(lookupTransport(rows, byIdentity, identityOf, 0)?.span).toBe('span-first')
   })
 })

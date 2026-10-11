@@ -29,6 +29,71 @@ pub enum IconState {
     Stale,
 }
 
+/// Live-collector saber state, derived only from the shared coverage API's
+/// `receiver` document (`GET /api/kyber/coverage`). Green (`Live`) only when
+/// the receiver is enabled, healthy, listening, explicitly unpaused, and
+/// error-free (`failures5m` exactly 0) with a fresh check; every other shape —
+/// including a missing `receiver` key (servers predating the probe) or a
+/// stale check — is `Down` (red). Unknown is red, never amber: the saber must
+/// not read as "maybe fine".
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum CollectorState {
+    Live,
+    #[default]
+    Down,
+}
+
+/// How long a successful probe stays trustworthy without a fresh check.
+/// Matches the web Status panel's `RECEIVER_STALE_AFTER_MS`.
+pub const COLLECTOR_STALE_AFTER_SECS: u64 = 120;
+
+/// Reads the authoritative saber state from a coverage document.
+///
+/// `healthy` is the engine's word; the rest guards against a healthy flag
+/// riding alongside a paused listener, recent errors, or a stale check.
+/// Health probes are excluded from the server error count by the engine —
+/// this function never recomputes that exclusion, it only renders it.
+pub fn collector_health(coverage: Option<&Value>, now: SystemTime) -> CollectorState {
+    let Some(receiver) = coverage.and_then(|c| c.get("receiver")) else {
+        return CollectorState::Down;
+    };
+    if receiver.is_null() {
+        return CollectorState::Down;
+    }
+    if receiver.get("enabled").and_then(Value::as_bool) != Some(true) {
+        return CollectorState::Down;
+    }
+    if receiver.get("healthy").and_then(Value::as_bool) != Some(true) {
+        return CollectorState::Down;
+    }
+    if receiver.get("paused").and_then(Value::as_bool) != Some(false) {
+        return CollectorState::Down;
+    }
+    if receiver.get("listening").and_then(Value::as_bool) != Some(true) {
+        return CollectorState::Down;
+    }
+    let failures_5m = receiver.get("failures5m").and_then(Value::as_u64);
+    if failures_5m != Some(0) {
+        return CollectorState::Down;
+    }
+    let Some(checked_at) = receiver.get("checkedAt").and_then(Value::as_str) else {
+        return CollectorState::Down;
+    };
+    let Ok(parsed) = chrono::DateTime::parse_from_rfc3339(checked_at) else {
+        return CollectorState::Down;
+    };
+    let checked: SystemTime = parsed.with_timezone(&chrono::Utc).into();
+    let Ok(age) = now.duration_since(checked) else {
+        // Checked-at is in the future (clock skew): not current.
+        return CollectorState::Down;
+    };
+    if age.as_secs() > COLLECTOR_STALE_AFTER_SECS {
+        return CollectorState::Down;
+    }
+    CollectorState::Live
+}
+
 /// Pressure thresholds, as fractions of the context window (9.2).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Thresholds {
@@ -54,6 +119,10 @@ pub struct StatusItem {
     /// (9.3). macOS draws it as title text; Windows draws it as a badge.
     pub title: Option<String>,
     pub tooltip: String,
+    /// Green/red collector saber from the shared coverage API. Serialized so
+    /// tests and the popover can assert it; the native icon renderer reads it
+    /// to pick the coloured asset (template treatment off).
+    pub collector: CollectorState,
 }
 
 /// Builds the status item from the report, the settings and the phase.
@@ -61,8 +130,25 @@ pub struct StatusItem {
 /// `stale` folds together the two causes Requirement 9.4 names — an unreachable
 /// server and a failed refresh — because the item renders them identically and
 /// the distinction belongs in the footer, which has room to explain it.
+///
+/// `coverage` is the shared `GET /api/kyber/coverage` document (only its
+/// `receiver` key is read). A `None` coverage forces the collector saber red:
+/// unavailable health is down, never "maybe". Collector status is independent
+/// of session/report freshness: a stale report drives the pressure icon, never
+/// the collector saber.
 pub fn status_item(
     report: Option<&Value>,
+    thresholds: &Thresholds,
+    stale: bool,
+    now: SystemTime,
+) -> StatusItem {
+    status_item_with_coverage(report, None, thresholds, stale, now)
+}
+
+/// Same as [`status_item`], plus the collector saber from coverage.
+pub fn status_item_with_coverage(
+    report: Option<&Value>,
+    coverage: Option<&Value>,
     thresholds: &Thresholds,
     stale: bool,
     now: SystemTime,
@@ -92,10 +178,17 @@ pub fn status_item(
         _ => None,
     };
 
+    // The collector saber reads only receiver health: a stale report affects
+    // the pressure icon above, never the collector. A stale report may mean
+    // the pressure indicator is not current, but the receiver's own health
+    // (freshness of `checkedAt` included) is judged on its own probe.
+    let collector = collector_health(coverage, now);
+
     StatusItem {
         icon,
         title,
-        tooltip: tooltip_for(session, pressure, stale, report, now),
+        tooltip: tooltip_for(session, pressure, stale, report, now, collector),
+        collector,
     }
 }
 
@@ -125,18 +218,27 @@ fn measured_value(measured: &Value) -> Option<f64> {
 /// 9.5: the harness, the project, the pressure and the age of the data.
 ///
 /// 9.6 is a property of what is *not* here: no cost figure reaches this string.
+///
+/// The collector saber rides at the end in words (`collector live` / down),
+/// so the pressure detail is preserved and the health is named, not colour
+/// alone.
 fn tooltip_for(
     session: Option<&Value>,
     pressure: Option<f64>,
     stale: bool,
     report: Option<&Value>,
     now: SystemTime,
+    collector: CollectorState,
 ) -> String {
+    let collector_text = match collector {
+        CollectorState::Live => "collector live",
+        CollectorState::Down => "collector down",
+    };
     let Some(session) = session else {
         return if stale {
-            "KyberDash — data may be out of date".to_string()
+            format!("KyberDash — data may be out of date · {collector_text}")
         } else {
-            "KyberDash — no session in scope".to_string()
+            format!("KyberDash — no session in scope · {collector_text}")
         };
     };
 
@@ -169,7 +271,7 @@ fn tooltip_for(
         .unwrap_or_else(|| "age unknown".to_string());
 
     let suffix = if stale { ", not current" } else { "" };
-    format!("{harness} · {project} · {pressure_text} · {age}{suffix}")
+    format!("{harness} · {project} · {pressure_text} · {age}{suffix} · {collector_text}")
 }
 
 fn age_of(generated_at: &str, now: SystemTime) -> Option<Duration> {
@@ -487,5 +589,131 @@ mod tests {
         assert_eq!(json["icon"], "critical");
         assert_eq!(json["title"], "95%");
         assert!(json["tooltip"].is_string());
+        assert_eq!(json["collector"], "down");
+    }
+
+    fn coverage_with(receiver: Value) -> Value {
+        json!({ "receiver": receiver })
+    }
+
+    fn live_receiver() -> Value {
+        json!({
+            "enabled": true,
+            "status": "hosted",
+            "listening": true,
+            "hostedByUs": true,
+            "paused": false,
+            "healthy": true,
+            "endpoint": "http://127.0.0.1:4318",
+            "checkedAt": "2023-11-14T22:13:20Z",
+            "lastAcceptedAt": "2023-11-14T22:13:00Z",
+            "failures5m": 0,
+            "lastError": Value::Null,
+            "lastCode": Value::Null,
+            "lastErrorAt": Value::Null,
+        })
+    }
+
+    /// Green only on the engine's own healthy word with a fresh check.
+    #[test]
+    fn collector_is_live_only_for_a_healthy_fresh_receiver() {
+        let coverage = coverage_with(live_receiver());
+        assert_eq!(
+            collector_health(Some(&coverage), at(GENERATED_EPOCH)),
+            CollectorState::Live
+        );
+    }
+
+    /// Red for off, paused, failing, missing, or stale health. Unknown is red.
+    #[test]
+    fn collector_is_down_when_off_paused_failing_missing_or_stale() {
+        // Missing coverage entirely.
+        assert_eq!(
+            collector_health(None, at(GENERATED_EPOCH)),
+            CollectorState::Down
+        );
+        // No receiver key (servers predating the probe).
+        assert_eq!(
+            collector_health(Some(&json!({})), at(GENERATED_EPOCH)),
+            CollectorState::Down
+        );
+        let mut cases: Vec<Value> = Vec::new();
+        let mut disabled = live_receiver();
+        disabled["enabled"] = json!(false);
+        cases.push(disabled);
+        let mut unknown_enabled = live_receiver();
+        unknown_enabled["enabled"] = Value::Null;
+        cases.push(unknown_enabled);
+        let mut paused = live_receiver();
+        paused["paused"] = json!(true);
+        cases.push(paused);
+        let mut unknown_paused = live_receiver();
+        unknown_paused["paused"] = Value::Null;
+        cases.push(unknown_paused);
+        let mut not_listening = live_receiver();
+        not_listening["listening"] = json!(false);
+        cases.push(not_listening);
+        let mut unhealthy = live_receiver();
+        unhealthy["healthy"] = json!(false);
+        cases.push(unhealthy);
+        let mut erroring = live_receiver();
+        erroring["failures5m"] = json!(2);
+        erroring["lastCode"] = json!("OTLP_500");
+        erroring["lastError"] = json!("boom");
+        erroring["lastErrorAt"] = json!("2023-11-14T22:13:00Z");
+        cases.push(erroring);
+        let mut unknown_errors = live_receiver();
+        unknown_errors["failures5m"] = Value::Null;
+        cases.push(unknown_errors);
+        let mut stale = live_receiver();
+        stale["checkedAt"] = json!("2023-11-14T22:10:00Z");
+        cases.push(stale);
+        let mut no_check = live_receiver();
+        no_check["checkedAt"] = Value::Null;
+        cases.push(no_check);
+        for receiver in cases {
+            let coverage = coverage_with(receiver);
+            assert_eq!(
+                collector_health(Some(&coverage), at(GENERATED_EPOCH)),
+                CollectorState::Down
+            );
+        }
+    }
+
+    /// Stale report freshness drives the pressure icon, never the collector
+    /// saber: a healthy fresh receiver stays live while the report reads
+    /// stale, and the tooltip still names both. Collector freshness is judged
+    /// only on the receiver's own `checkedAt`.
+    #[test]
+    fn stale_report_leaves_a_healthy_fresh_collector_live() {
+        let report = report_with_pressure(measured(0.42));
+        let coverage = coverage_with(live_receiver());
+        let item = status_item_with_coverage(
+            Some(&report),
+            Some(&coverage),
+            &Thresholds::default(),
+            true,
+            at(GENERATED_EPOCH),
+        );
+        assert_eq!(item.icon, IconState::Stale);
+        assert_eq!(item.title, None);
+        assert_eq!(item.collector, CollectorState::Live);
+        assert!(item.tooltip.contains("collector live"), "{}", item.tooltip);
+        assert!(item.tooltip.contains("not current"), "{}", item.tooltip);
+    }
+
+    #[test]
+    fn a_live_collector_is_named_in_the_tooltip() {
+        let report = report_with_pressure(measured(0.42));
+        let coverage = coverage_with(live_receiver());
+        let item = status_item_with_coverage(
+            Some(&report),
+            Some(&coverage),
+            &Thresholds::default(),
+            false,
+            at(GENERATED_EPOCH),
+        );
+        assert_eq!(item.collector, CollectorState::Live);
+        assert!(item.tooltip.contains("collector live"), "{}", item.tooltip);
     }
 }

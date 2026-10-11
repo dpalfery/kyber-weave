@@ -22,6 +22,7 @@
 // never been through the vote.
 
 import type { HarnessAdapter, RawSpan } from './adapters/base.js'
+import { canonicalSessionId } from './adapters/copilot.js'
 import { claudeCodeAdapter } from './adapters/claude-code.js'
 import { codexAdapter } from './adapters/codex.js'
 import { copilotAdapter } from './adapters/copilot.js'
@@ -118,6 +119,20 @@ export type IngestOutcome = {
 }
 
 /**
+ * Longest quarantine `rawPayload` stored, in UTF-16 code units. A quarantined span keeps
+ * its decoded JSON as evidence, and one span can carry whole prompts; past this the
+ * stored text is cut and ends in a marker naming the original length, so a truncated
+ * payload is never mistaken for the complete one (it is no longer valid JSON, and says so).
+ */
+export const MAX_QUARANTINE_RAW_PAYLOAD_CHARS = 256 * 1024
+
+/** The payload as stored: whole when within the cap, else a prefix plus a truncation marker. */
+export function boundRawPayload(json: string): string {
+  if (json.length <= MAX_QUARANTINE_RAW_PAYLOAD_CHARS) return json
+  return `${json.slice(0, MAX_QUARANTINE_RAW_PAYLOAD_CHARS)}\n...[truncated: stored ${MAX_QUARANTINE_RAW_PAYLOAD_CHARS} of ${json.length} characters]`
+}
+
+/**
  * Normalize and store one batch of decoded spans.
  *
  * A batch is one unit of attribution — the same unit one live OTLP request
@@ -126,13 +141,32 @@ export type IngestOutcome = {
  * rejections persist their problem instead of a broken decomposition.
  */
 export function ingestBatch(spans: readonly OtlpSpan[], store: CanonStore): IngestOutcome {
+  return ingestBatchWithAdapters(spans, store, ADAPTERS)
+}
+
+/**
+ * The batch core with the adapter set injected. Production passes `ADAPTERS`; tests pass
+ * a throwing adapter to prove a normalize failure is recorded with its stack rather than
+ * aborting the batch (a throw that escaped here used to propagate through the writer's
+ * flush, re-queue the whole batch, and retry it forever).
+ */
+export function ingestBatchWithAdapters(
+  spans: readonly OtlpSpan[],
+  store: CanonStore,
+  adapters: readonly HarnessAdapter[],
+): IngestOutcome {
   if (spans.length === 0) return { accepted: 0, quarantined: 0, rejected: 0 }
 
-  const registry = new AdapterRegistry(ADAPTERS)
-  const adapterByName = new Map(ADAPTERS.map((adapter) => [adapter.name, adapter]))
+  const registry = new AdapterRegistry(adapters)
+  const adapterByName = new Map(adapters.map((adapter) => [adapter.name, adapter]))
 
   const rawSpans = spans.map(toRawSpan)
   const attributed = registry.attribute(rawSpans)
+
+  // The exact incoming span for the quarantine detail route (v18 `raw_payload`).
+  // Decoded-span JSON, not the normalized record: the record is what attribution made
+  // of the span, and mislabeling it as the original message is forbidden.
+  const rawPayloadOf = (index: number): string => boundRawPayload(JSON.stringify(spans[index]))
 
   const unclaimed: string[] = []
   for (const [index, raw] of rawSpans.entries()) {
@@ -146,10 +180,12 @@ export function ingestBatch(spans: readonly OtlpSpan[], store: CanonStore): Inge
         source: raw.source,
         name: raw.name,
         timestamp: spans[index]?.timestamp ?? raw.timestamp,
+        rawPayload: rawPayloadOf(index),
       },
     )
   }
   let quarantined = unclaimed.length
+  let rejected = 0
 
   const byHarness = new Map<string, { adapter: HarnessAdapter; records: CanonicalRecord[] }>()
   for (const [index, raw] of rawSpans.entries()) {
@@ -161,7 +197,27 @@ export function ingestBatch(spans: readonly OtlpSpan[], store: CanonStore): Inge
       throw new Error(`attribution named unregistered harness "${harness}"`)
     }
 
-    const record = adapter.normalize(raw)
+    let record: CanonicalRecord
+    try {
+      record = adapter.normalize(raw)
+    } catch (err) {
+      // The span WAS attributed; its normalization is what failed. Record the failure
+      // with the exact message and the exception stack, and keep the batch moving —
+      // the alternative is the writer re-queueing this batch on every flush, forever.
+      rejected += 1
+      store.recordProblem({
+        spanId: raw.spanId,
+        severity: 'error',
+        code: 'ADAPTER_NORMALIZE_FAILED',
+        message: err instanceof Error ? err.message : String(err),
+        ...(err instanceof Error && typeof err.stack === 'string' ? { stack: err.stack } : {}),
+        location: raw.spanId,
+        sessionId: canonicalSessionId(raw.attributes) ?? null,
+        harness,
+        timestamp: spans[index]?.timestamp ?? raw.timestamp ?? null,
+      })
+      continue
+    }
     growWithReceiverTiming(record, spans[index]!)
     if (record.op === 'unspecified') {
       // Attribution establishes the harness, not that every span in its trace
@@ -175,6 +231,7 @@ export function ingestBatch(spans: readonly OtlpSpan[], store: CanonStore): Inge
           source: raw.source,
           name: raw.name,
           timestamp: spans[index]?.timestamp ?? raw.timestamp,
+          rawPayload: rawPayloadOf(index),
         },
       )
       quarantined += 1
@@ -198,5 +255,7 @@ export function ingestBatch(spans: readonly OtlpSpan[], store: CanonStore): Inge
     ingestLogBatch(pendingLogs as Parameters<typeof ingestLogBatch>[0], store)
   }
 
-  return { accepted: accepted.length, quarantined, rejected: claimed - accepted.length }
+  // `rejected` counts both validation rejections and normalize failures: neither produced
+  // a canonical record, and both persisted their problem instead.
+  return { accepted: accepted.length, quarantined, rejected: claimed - accepted.length + rejected }
 }

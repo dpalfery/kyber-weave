@@ -349,25 +349,65 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
             "the agy variant");
     }
 
+    /// <summary>
+    /// The agy variant must open no socket at all, observed on its own process through
+    /// the audit probe. A previous revision bound host-global port 4318 and blamed any
+    /// loopback connection on the artifact (red reproduction: synthetic empty connects
+    /// false-failed it in ~256ms while the artifact opened nothing).
+    /// </summary>
     [Fact]
-    public void AgyVariantNeverConnectsToTheLocalCollectorPort()
+    public async Task AgyVariantNeverConnectsToTheLocalCollectorPort()
     {
         string artifact = RequireArtifact(AgyArtifactRelativePath);
         string python = RequireRuntime("python3");
         Sandbox sandbox = new(_temp);
-        using TcpListener listener = new(IPAddress.Loopback, 4318);
-        if (!TryStartCollectorListener(listener))
+
+        // Unrelated host-side traffic on a private listener, concurrent with the run.
+        // Only that task dials it, so it can never be mistaken for the artifact — and
+        // the artifact's audit log can never observe it.
+        Task<int> unrelated = Task.Run(EmitAndAcceptUnrelatedConnections);
+
+        ProcessResult result;
+        int completed;
+        try
         {
-            Assert.Skip("TCP port 4318 is already in use on this host, so the listener check cannot run.");
-            return;
+            result = RunWithSocketAudit(sandbox, python, artifact, FixtureText(AgyFixture));
+        }
+        finally
+        {
+            // Joined on every path, so no background task survives a failure either.
+            completed = await unrelated.WaitAsync(TimeSpan.FromSeconds(30));
         }
 
-        ProcessResult result = RunVariant(sandbox, python, artifact, FixtureText(AgyFixture), false);
-
         AssertSucceeded(result, "agy");
-        Assert.False(
-            listener.Pending(),
-            "The agy variant opened a connection to localhost:4318; the OTLP post is replaced by the KyberDash hand-off (D10).");
+        Assert.True(
+            completed > 0,
+            "The unrelated-traffic fixture completed no loopback connection, so it proved nothing.");
+        AssertNoSocketConnects(sandbox.SocketAuditLogFile, "the agy variant");
+    }
+
+    /// <summary>
+    /// Negative control: a script that deliberately attempts the collector port must be
+    /// recorded, whether the port refuses or a real collector accepts. No payload is sent.
+    /// </summary>
+    [Fact]
+    public void SocketAuditProbeRecordsADeliberateCollectorConnectionAttempt()
+    {
+        string python = RequireRuntime("python3");
+        Sandbox sandbox = new(_temp);
+        string fixture = Path.Combine(sandbox.WorkDirectory, "deliberate-collector-connect.py");
+        File.WriteAllText(fixture, DeliberateCollectorConnectScript);
+
+        ProcessResult result = RunWithSocketAudit(sandbox, python, fixture, string.Empty);
+
+        AssertSucceeded(result, "audit probe");
+        string audit = File.Exists(sandbox.SocketAuditLogFile)
+            ? File.ReadAllText(sandbox.SocketAuditLogFile)
+            : string.Empty;
+        Assert.Contains(
+            "4318",
+            audit,
+            StringComparison.Ordinal);
     }
 
     [Fact]
@@ -688,6 +728,16 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
         bool withKyberdash,
         TimeSpan? timeout = null)
     {
+        ProcessStartInfo startInfo = VariantStartInfo(sandbox, interpreter, artifactPath, withKyberdash);
+        return ProcessRunner.Run(startInfo, standardInput, timeout ?? TimeSpan.FromSeconds(30));
+    }
+
+    private static ProcessStartInfo VariantStartInfo(
+        Sandbox sandbox,
+        string interpreter,
+        string artifactPath,
+        bool withKyberdash)
+    {
         ProcessStartInfo startInfo = new(interpreter)
         {
             WorkingDirectory = sandbox.WorkDirectory,
@@ -699,7 +749,79 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
         };
         startInfo.ArgumentList.Add(artifactPath);
         sandbox.ConfigureEnvironment(startInfo, withKyberdash);
-        return ProcessRunner.Run(startInfo, standardInput, timeout ?? TimeSpan.FromSeconds(30));
+        return startInfo;
+    }
+
+    /// <summary>
+    /// Runs a Python script with the child-scoped socket-connect audit installed: a
+    /// <c>sitecustomize</c> probe, found through a <c>PYTHONPATH</c> that exists only in
+    /// the child's environment, records every <c>socket.connect</c> attempt to the audit
+    /// log. Fails the run when the probe itself did not initialize — an empty log must
+    /// mean no connects, never a broken hook.
+    /// </summary>
+    private static ProcessResult RunWithSocketAudit(
+        Sandbox sandbox,
+        string python,
+        string scriptPath,
+        string standardInput)
+    {
+        string probeDirectory = Path.Combine(sandbox.RecordDirectory, "socket-audit");
+        Directory.CreateDirectory(probeDirectory);
+        File.WriteAllText(Path.Combine(probeDirectory, "sitecustomize.py"), SocketAuditProbeScript);
+        if (File.Exists(sandbox.SocketAuditLogFile))
+            File.Delete(sandbox.SocketAuditLogFile);
+
+        ProcessStartInfo startInfo = VariantStartInfo(sandbox, python, scriptPath, false);
+        // Child-only: ProcessRunner copies exactly this environment, so the host and
+        // every other test keep their own PYTHONPATH.
+        startInfo.Environment["PYTHONPATH"] = probeDirectory;
+        startInfo.Environment["KYBER_SOCKET_AUDIT_LOG"] = sandbox.SocketAuditLogFile;
+        startInfo.Environment["PYTHONDONTWRITEBYTECODE"] = "1";
+        ProcessResult result = ProcessRunner.Run(startInfo, standardInput, TimeSpan.FromSeconds(30));
+        AssertProbeInitialized(sandbox.SocketAuditLogFile, result);
+        return result;
+    }
+
+    /// <summary>
+    /// The probe writes a READY sentinel at import and reports recording failures on
+    /// stderr instead of swallowing them. Either missing here means the observation is
+    /// broken, so the run fails rather than passing on an empty log.
+    /// </summary>
+    private static void AssertProbeInitialized(string auditLogFile, ProcessResult result)
+    {
+        Assert.DoesNotContain(
+            "kyber-socket-audit:",
+            result.StandardError,
+            StringComparison.Ordinal);
+        string? first = File.Exists(auditLogFile)
+            ? File.ReadAllLines(auditLogFile).FirstOrDefault(line => !string.IsNullOrWhiteSpace(line))
+            : null;
+        Assert.True(
+            string.Equals(first, SocketAuditReadyLine, StringComparison.Ordinal),
+            "The socket-audit probe did not initialize (no READY sentinel); an empty log proves nothing, so this run fails.");
+    }
+
+    /// <summary>
+    /// Bounded loopback connects to a private listener this task owns, each paired with
+    /// its accept — never the artifact's process, never the user's real 4318. The
+    /// returned count proves the connections really completed. No sleeps, no hangs: each
+    /// accept pairs a connect that already returned.
+    /// </summary>
+    private static int EmitAndAcceptUnrelatedConnections()
+    {
+        using TcpListener listener = new(IPAddress.Loopback, 0);
+        listener.Start();
+        int port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        int accepted = 0;
+        for (int i = 0; i < 20; i++)
+        {
+            using TcpClient connector = new();
+            connector.Connect(IPAddress.Loopback, port);
+            using TcpClient server = listener.AcceptTcpClient();
+            accepted++;
+        }
+
+        return accepted;
     }
 
     private static ProcessResult RunPiHarness(
@@ -738,6 +860,25 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
             result.ExitCode == 0,
             $"The {variant} artifact exited {result.ExitCode} instead of 0.\n" +
             $"stdout:\n{result.StandardOutput}\nstderr:\n{result.StandardError}");
+    }
+
+    /// <summary>
+    /// Any socket counts, not just the collector port: the contract is that the artifact
+    /// opens no socket at all. The probe's READY sentinel is not a connection.
+    /// </summary>
+    private static void AssertNoSocketConnects(string auditLogFile, string subject)
+    {
+        string[] attempts = File.Exists(auditLogFile)
+            ?
+            [
+                .. File.ReadAllLines(auditLogFile)
+                    .Where(line => !string.IsNullOrWhiteSpace(line) &&
+                                   !string.Equals(line, SocketAuditReadyLine, StringComparison.Ordinal))
+            ]
+            : [];
+        Assert.True(
+            attempts.Length == 0,
+            $"{subject} opened a socket connection ({string.Join("; ", attempts)}); the OTLP post is replaced by the KyberDash hand-off (D10).");
     }
 
     private static void AssertRendersValue(string output, string value, string segment)
@@ -846,19 +987,6 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
         return signal.Wait(timeout) || File.Exists(path);
     }
 
-    private static bool TryStartCollectorListener(TcpListener listener)
-    {
-        try
-        {
-            listener.Start();
-            return true;
-        }
-        catch (SocketException)
-        {
-            return false;
-        }
-    }
-
     private static string ToNative(string relativePath)
     {
         return relativePath.Replace('/', Path.DirectorySeparatorChar);
@@ -901,6 +1029,7 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
             KyberdashStartedFile = Path.Combine(RecordDirectory, "kyberdash-started");
             KyberdashFinishedFile = Path.Combine(RecordDirectory, "kyberdash-finished");
             KyberdashReleaseFile = Path.Combine(RecordDirectory, "kyberdash-release");
+            SocketAuditLogFile = Path.Combine(RecordDirectory, "socket-audit.log");
             HarnessPath = Path.Combine(temp.Path, "pi-harness.mjs");
 
             File.WriteAllText(GitBranchFile, SyntheticBranch + "\n");
@@ -943,6 +1072,8 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
         public string KyberdashFinishedFile { get; }
 
         public string KyberdashReleaseFile { get; }
+
+        public string SocketAuditLogFile { get; }
 
         public string HarnessPath { get; }
 
@@ -1046,6 +1177,51 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
                                              : > "$KYBER_STUB_RECORD_DIR/network-called"
                                              exit 1
                                              """;
+
+    /// <summary>Sentinel the probe writes at import; its absence means the hook never loaded.</summary>
+    private const string SocketAuditReadyLine = "READY";
+
+    /// <summary>
+    /// Child-scoped audit, loaded as <c>sitecustomize</c> through a child-only
+    /// <c>PYTHONPATH</c>. The hook fires before the attempt, so refused and swallowed
+    /// connects are still recorded; only endpoints are logged, never payloads. Import
+    /// writes READY (a missing log or sentinel fails the run), and a recording failure
+    /// is reported on stderr instead of swallowed. Stdlib only.
+    /// </summary>
+    private const string SocketAuditProbeScript = """
+                                                  import os
+                                                  import sys
+                                                  _LOG = os.environ.get("KYBER_SOCKET_AUDIT_LOG", "")
+                                                  if not _LOG:
+                                                      raise RuntimeError("KYBER_SOCKET_AUDIT_LOG is not set; socket audit cannot record")
+                                                  with open(_LOG, "w", encoding="utf-8") as handle:
+                                                      handle.write("READY\n")
+                                                  def _hook(event, args):
+                                                      if event != "socket.connect":
+                                                          return
+                                                      try:
+                                                          with open(_LOG, "a", encoding="utf-8") as handle:
+                                                              handle.write(repr(args[1]) + "\n")
+                                                      except OSError as exc:
+                                                          os.write(2, ("kyber-socket-audit: RECORD-FAILED %r\n" % (exc,)).encode("utf-8", "replace"))
+                                                  sys.addaudithook(_hook)
+                                                  """;
+
+    /// <summary>
+    /// Negative-control fixture: one bounded connect attempt at the collector port,
+    /// recorded refused or accepted alike, with nothing sent.
+    /// </summary>
+    private const string DeliberateCollectorConnectScript = """
+                                                            import socket
+                                                            sock = socket.socket()
+                                                            sock.settimeout(5)
+                                                            try:
+                                                                sock.connect(("127.0.0.1", 4318))
+                                                            except OSError:
+                                                                pass
+                                                            finally:
+                                                                sock.close()
+                                                            """;
 
     private const string HostnameStubScript = """
                                               #!/bin/sh

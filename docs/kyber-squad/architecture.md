@@ -5,7 +5,7 @@ doc-type: architecture
 component: KyberSquad
 source-root: src/KyberWeave.Core/Squad
 owner: dpalfery
-last-reviewed: 2026-10-04
+last-reviewed: 2026-10-10
 status: current
 decided-by:
   - adr/0017-copilot-deterministic-tool-order
@@ -14,6 +14,7 @@ decided-by:
   - adr/0024-squad-global-receipt-layout-marker
   - adr/0025-devin-native-agents-and-skill-lowering
   - adr/0028-devin-target-scoped-authoring-capability-profiles
+  - adr/0034-factory-droid-entry-point-skill
 keywords:
   - multi-harness
   - deployment
@@ -396,7 +397,33 @@ and validates.
 - **Resource projection**: after each principal file, the renderer appends the owner's validated
   resource closure beside it — each resource at its artifact-relative path under the principal's
   directory — so authored relative links resolve verbatim in the deployed tree. A resource that
-  would alias another principal's output is a validation error, never an overwrite.
+  would alias another principal's output is a validation error, never an overwrite. There are
+  two target-specific exceptions to "verbatim":
+  - **ZCode** rewrites declared-resource links to `../skills/…` (ADR 0021); the rewrite stays
+    relative.
+  - **Copilot, global scope only.** A global-scope agent is read from outside any workspace, so
+    a relative link has no base the model can resolve. Each link in the agent body whose target
+    exactly equals one of that agent's declared resource paths is rewritten to an absolute
+    forward-slash path under the resolved Copilot global root
+    (`<root>/agents/<resource-path>`, Windows roots included). A `#anchor` or `?query` suffix and
+    a link title are kept; an authored angle-form destination is matched too. Links outside the
+    declared closure, links inside fenced code blocks or inline code spans, and prose that merely mentions a path are
+    untouched; a target containing whitespace or parentheses uses the CommonMark angle form
+    `(<…>)`. Resource files stay beside the
+    principal and are not themselves rewritten. Each rewrite is recorded as a
+    `resource-links-rewritten` degradation, as for ZCode. Project scope is unchanged and
+    byte-identical: links stay relative and the files sit inside the workspace.
+
+  The Copilot rewrite needs the machine's global root, so `SquadRenderRequest` carries an optional
+  `ISquadGlobalRootResolver? GlobalRoots` render input, supplied by lifecycle install, lifecycle
+  update, and `squad doctor` so install, receipt, and doctor see the same bytes. It **fails
+  closed**: a Copilot global render with no resolver throws `SquadRenderValidationException`
+  naming the missing input, rather than shipping relative links. Rendered global content therefore
+  embeds the machine's resolved root (`$COPILOT_HOME` or `~/.copilot`). The closure-driven rewrite
+  lives in the internal `SquadResourceLinkRewriter` helper (taking the resources and a
+  target-path mapping), which only ZCode and Copilot (global) use today; `SquadResourceProjection`
+  is unchanged. No ADR — ADR waiver: a narrow, target-specific refinement of this rule following
+  the ADR 0021 pattern; this bullet is the record.
 - **An omitted permission is not a withheld one on `opencode`.** Agent permissions merge with
   OpenCode's global config, whose documented behaviour is that most permissions default to
   `allow` (`external_directory` and `doom_loop` are the stated exceptions). A renderer that
@@ -513,7 +540,7 @@ and validates.
 - **Generated-output boundary**: target-rendered `.github` files are deployment output, not
   canonical product or package source, and this synchronization does not add a generated target
   tree to `products/kyber-squad/`.
-- **Coverage today**: `claude` (native subagents with primary-agent entry-point skill), `copilot` (native), `cursor` (native), `codex` (native: `.codex/agents/*.toml` + `.codex/skills/*/SKILL.md`), `antigravity` (native: `.agents/agents/*/agent.md` + `.agents/skills/*/SKILL.md`, [ADR 0022](../adr/0022-antigravity-native-agents.md)), `opencode` (native: `.opencode/agents/*.md` + `.opencode/skills/*/SKILL.md`), `kilo` (native: `.kilo/agents/*.md` + `.kilo/skills/*/SKILL.md`), `pi` (native subagents with primary-agent lowering to `.pi/agents/*.md` and `.pi/skills/*/SKILL.md`), `factory` (native: `.factory/droids/*.md` + `.factory/skills/*/SKILL.md`), `warp` (fallback role-skill lowering to `.warp/skills/`), `zcode` (native: `.zcode/agents/*.md` + `.zcode/skills/*/SKILL.md`, with the primary agent lowered to `.zcode/commands/*.md`), and `devin` (native: `.devin/agents/*/AGENT.md` + `.devin/skills/*/SKILL.md`, with the primary agent lowered to a skill) are implemented and registered. All twelve declared targets are covered. `kyber-weave squad doctor` reports which
+- **Coverage today**: `claude` (native subagents with primary-agent entry-point skill), `copilot` (native), `cursor` (native), `codex` (native: `.codex/agents/*.toml` + `.codex/skills/*/SKILL.md`), `antigravity` (native: `.agents/agents/*/agent.md` + `.agents/skills/*/SKILL.md`, [ADR 0022](../adr/0022-antigravity-native-agents.md)), `opencode` (native: `.opencode/agents/*.md` + `.opencode/skills/*/SKILL.md`), `kilo` (native: `.kilo/agents/*.md` + `.kilo/skills/*/SKILL.md`), `pi` (native subagents with primary-agent lowering to `.pi/agents/*.md` and `.pi/skills/*/SKILL.md`), `factory` (native: `.factory/droids/*.md` + `.factory/skills/*/SKILL.md`, with the primary agent additionally exposed as an entry-point skill, [ADR 0034](../adr/0034-factory-droid-entry-point-skill.md)), `warp` (fallback role-skill lowering to `.warp/skills/`), `zcode` (native: `.zcode/agents/*.md` + `.zcode/skills/*/SKILL.md`, with the primary agent lowered to `.zcode/commands/*.md`), and `devin` (native: `.devin/agents/*/AGENT.md` + `.devin/skills/*/SKILL.md`, with the primary agent lowered to a skill) are implemented and registered. All twelve declared targets are covered. `kyber-weave squad doctor` reports which
   targets are covered.
 - **Authority and self-deployment boundary**: `products/kyber-squad/` is canonical and package
   authority. Root `.github/agents/`, `.github/skills/`, `.kyber-weave/squad.lock.yml`, and

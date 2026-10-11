@@ -573,23 +573,24 @@ Level 1: All Harnesses (Context Doctor)
 ```
 
 The web app lands on Context Doctor (`App` default `initialPage` / `spineReducer` stack
-`{ level: 'context-doctor' }`). Header tabs are `Context Doctor · Usage · Quarantine · Problems`
-(`NAV_TABS`). Usage is the CodeBurn spend grid; it does not open the app. There is no
-Context tab: session browsing is the **Sessions** rail destination wrapping
-`ContextExplorer` / `AgentSessionDashboard` (D17). Compare is not a header peer; it is a
-spine-rail destination that mounts `CompareRuns` (D20). The sidebar is the spine rail
-(`nav-rail-context-doctor`, `nav-rail-sessions`, `nav-rail-compare`); Share chrome is on Usage
-only (D21). Density tokens live in the dashboard `@theme` (D22). A single shell harness
-strip (`data-testid="harness-selector"`) is the harness level of the spine; selecting a
-canonical id pushes `{ level: 'harness', harnessId }` and loads `runs?harness=`. A second
-provider `<select>` exists only on the Usage tab. Gemini may appear as a selector **label**;
-canonical rows and rollups do not use harness id `gemini`.
+`{ level: 'context-doctor' }`). Top navigation (`NAV_TABS`) carries **Context Doctor**,
+**Sessions**, **Compare**, **Quarantine** and **Problems**, and it is the whole navigation:
+the entire left rail and the mobile hamburger/toggle that opened it are gone, so no second
+navigation surface can drift from the tabs and main content takes the full width of the shell.
+There is no Context tab: session browsing is the **Sessions** top-navigation destination
+wrapping `ContextExplorer` / `AgentSessionDashboard` (D17). Compare is a top-navigation peer
+that mounts `CompareRuns` (D20). Density tokens live in the dashboard `@theme` (D22). The single shell harness strip
+(`data-testid="harness-selector"`) changes the shared scope of Context Doctor and Sessions in
+place and clears the selected session when the harness changes. It does not navigate to harness
+detail. Explicit harness drill-down routes remain separate: they push `{ level: 'harness',
+harnessId }` and load `runs?harness=`. Gemini may appear as a selector **label**; canonical rows
+and rollups do not use harness id `gemini`.
 
 Live gates G1–G7 and G4a have passed on a local host against a real store: drill the six
 levels, one diagnostic harness selector, canonical ids (including Claude Code), no
 decision-id copy, empty charts marked empty rather than plotted as zero, layout inside the
-shell. Findings-first Context Doctor, scorecard matrix, Turn inspector, and live Compare are on
-the spine. Derived runs show a labelled grouping basis (`derived run` / `explicit run`,
+shell. Findings-first Context Doctor, Turn inspector, and live Compare are
+reachable through the spine. Derived runs show a labelled grouping basis (`derived run` / `explicit run`,
 `data-testid="run-grouping-basis"`) and are never silent clusters (D19). Calibration is
 wired on Finding detail (`CalibrationSummary`). Content older than 14 days is purged after
 refresh ([ADR 0018](../adr/0018-kyberdash-content-retention-purge.md)). Scorecard cells use
@@ -871,19 +872,52 @@ retention purge all continue.
 
 ### Web Dashboard (dash/web/)
 
-The React web dashboard provides progressive-disclosure views matching the 6-level spine:
-- **`ContextDoctor.tsx`**: Cross-harness dashboard and fleet-wide finding leaderboard.
-- **`Sessions.tsx`**: Sessions rail wrapping `ContextExplorer` (ASAD + timeline); not a Context tab.
+The React web dashboard provides progressive-disclosure views matching the 6-level spine.
+Top navigation carries **Context Doctor**, **Sessions**, **Compare**, **Quarantine** and
+**Problems**. It is the only navigation surface: the whole left rail and the mobile
+hamburger/toggle that opened it were removed, so nothing duplicates a tab and the main
+content column takes the full width of the shell.
+
+The header's **Harness:** strip is the single main harness selector. It scopes **Sessions**
+and **Context Doctor** together and narrows whichever of those two pages is open in place,
+rather than navigating away from the page you are reading. Its entries are the harness
+summaries the store reports (`GET /api/kyber/harnesses`) plus an **All Harnesses** all-scope
+entry; a selected harness with no sessions keeps its selection and shows the scoped empty
+state rather than falling back to All. **Compare** deliberately sits outside that scope and
+keeps its own per-side harness filters, so narrowing a page's scope never touches the A/B
+selectors.
+
+The top-right **Status** and **Maintenance** buttons open mutually exclusive right-side
+panels — opening one closes the other, so only one is on screen at a time. **Status** is
+read-only: it renders the ingest coverage payload from `GET /api/kyber/coverage` (refresh
+window, per-source ingest activity, per-reason quarantine counts, checkpoint statuses), with
+close and retry controls that re-read the same route; it starts no job and writes nothing.
+**Maintenance** holds every operator action, each an `/api/kyber/*` call: pause/resume,
+manual refresh, folder import, the shared settings, the model context-window catalog
+refresh, and the confirmed wipe with its optional import window. Neither coverage nor
+maintenance is embedded in Context Doctor any more, and neither panel adds engine behaviour —
+both ask the same routes the tray already asks
+([ADR 0033](../adr/0033-kyberdash-surfaces-are-display-layers.md)).
+
+The individual views:
+
+- **`ContextDoctor.tsx`**: Findings and recommendations — the ranked headline findings and
+  the full workspace findings browser. Scoped by the shared harness selector with optional
+  session narrowing; drilling harness → run → execution → turn →
+  context item, and into a finding, is unchanged.
+- **`Sessions.tsx`**: Top-navigation destination wrapping `ContextExplorer` (ASAD +
+  timeline); not a Context tab, and scoped by the same harness selector as Context Doctor.
 - **`HarnessDetail.tsx`**: Per-harness rollups, coverage indicators, labelled grouping basis, and run browser.
 - **`RunDetail.tsx`**: Multi-agent run topology, execution tree, run scorecard, and grouping label.
 - **`FindingDetail.tsx`**: In-depth finding view with evidence table, confidence basis, risk caveats, and calibration summary.
-- **`CompareRuns.tsx`**: Phase-aligned run diffing with outcome regression guards, reached from
-  the spine rail. Run A and Run B both begin at **Select a run** unless the route supplies
-  explicit `a`/`b` deep-link ids; kyberdash fetches comparison data only after two distinct
-  ids are chosen. Each selector has an independent harness filter (`All harnesses` plus
-  observed canonical ids) that narrows the newest-first inventory without inferring subagent
-  role from id, label, or size — harness filtering excludes a harness such as ZCode only when
-  the user selects it, not because kyberdash classifies parent vs subagent runs. Options render
+- **`CompareRuns.tsx`**: Phase-aligned run diffing with outcome regression guards, reached
+  from the top navigation. Run A and Run B both begin at
+  **Select a run** unless the route supplies explicit `a`/`b` deep-link ids; kyberdash fetches
+  comparison data only after two distinct ids are chosen. Each selector carries an independent
+  harness filter (`All harnesses` plus observed canonical ids), unaffected by the shared
+  selector, that narrows the newest-first inventory without inferring subagent role from id,
+  label, or size — harness filtering excludes a harness such as ZCode only when the user selects
+  it, not because kyberdash classifies parent vs subagent runs. Options render
   as ISO date (or `date unknown`), harness, measured turn count (or `turns unknown`), then
   human label plus a shortened distinguishing id; the full run id remains the option value.
   Unavailable turn totals, token delta, and recommendation history render as `—` with the API
@@ -932,6 +966,42 @@ The turn inspection drawer and turn-content endpoints follow explicit numbering 
 - **Diagnosable empty state:** The turn content pane distinguishes an existing turn with no recorded content (`200 OK` with empty content parts, disclosing `spanId` and 0-based `turnIndex`) from an invalid or nonexistent turn (`404 Not Found`).
 - **Measured inspector figures:** Turn inspector headers display measured per-turn token figures only, never text-length estimates. Unmeasured values render honest not-measured treatments per [honest unobservability](../rules/honest-unobservability.md).
 
+#### Ordered, API-seen turn context
+
+Selecting a turn opens the whole-turn view over `GET /api/kyber/session/:id/turn/:index/content`,
+whose explicit `?full=true` path is lossless: no default-budget truncation and no large-number
+sentinel. Blocks and parts render in API order, every part included — unknown kinds and zero-token
+blocks among them — with exact truncation notices when a budget applied.
+
+- **Order is the API's, not the parser's.** `parseReadableXmlChunks` and the formatted view
+  preserve every occurrence in source order with its exact inner bytes. Nothing is deduplicated,
+  reordered, or re-serialized between the endpoint and the DOM.
+- **Turn-indexed repeats stay repeated.** Shared context carries every captured occurrence, and
+  `resolveSharedDisplay` suppresses only what the selected turn already renders in its own
+  blocks. Overlap pairs off by source turn index **with multiplicity**, never by span id or text
+  globally, so identical text from distinct earlier spans remains visible and copyable. An
+  earlier-turn occurrence is a distinct API-seen occurrence even when it shares text and span id
+  with the selected turn.
+- **Session-scope prompts are distinguished.** Provenance comes from the server's `turnIndex`
+  alone: a shared-context card reads `Turn N` when the part carries one and `Session scope` when
+  it does not, never inferred from text or span id. Entries without a `turnIndex` are never
+  suppressed — absent is not a turn and must not be guessed as one.
+- **Formatted tag recognition preserves literal angle-bracket expressions.** A generic XML-like
+  name counts as structural only with a matching open/close pair or as self-closing. An unclosed
+  open folds only for the known Copilot/harness wrapper allowlist
+  (`READABLE_XML_UNCLOSED_ALLOWLIST`, stored lowercase so unclosed camel/upper variants still
+  fold), so any other unclosed name — `List<string>`, `<void>`, or an `if (a<b && c>d)`
+  comparison whose `&&` is not a plausible attribute name — stays literal and cannot swallow a
+  later real section. Stray `<`, `>`, `<>`, `< 3`, and denylisted HTML-active tags stay literal
+  text, and whitespace-only inter-section chunks survive with every code point intact so section
+  boundaries and order read truthfully.
+- **Raw and Copy stay exact.** The formatted view is a display transform; the Raw toggle and
+  every Copy path (Copy Turn covers shared context, all blocks, and orphaned parts) return the
+  exact original source bytes. Nested JSON strings expand in the formatted view only, to a bounded
+  10 layers, leaving the tail visible as an escaped string. No view claims cache attribution for
+  an individual block: recurrence badges are text-labelled against earlier captured turns, and
+  measured per-turn fresh/cache-read/cache-creation totals stay separate from the blocks.
+
 ### Backend REST API Contract (dash/src/server/routes.ts)
 
 The web dashboard server wires HTTP requests directly to `KyberBridge`:
@@ -945,7 +1015,7 @@ The web dashboard server wires HTTP requests directly to `KyberBridge`:
 | `/api/kyber/sessions` | `GET` | `{ sessions: SessionSummary[] }` | List sessions; supports `?limit=` and `?harness=`. |
 | `/api/kyber/session/:id` | `GET` | `SessionPayload` | Full session payload with turns, context, tools, and timeline. Summary emits `cache_hit_ratio` and `cache_creation_coverage` from single engine writer. |
 | `/api/kyber/session/:id/content` | `GET` | `SessionContent` | Full canonical content for an inspected session part. |
-| `/api/kyber/session/:id/turn/:index/content` | `GET` | `TurnContentResult` | Full unclipped assembled context for a specific turn ([ADR 0014](../adr/0014-unclipped-turn-inspection-and-copy-out-protocol.md)). Uses 0-based `:index`; strict resolution returns 404 for out-of-bounds turn indices, and 200 with empty parts when the turn exists but recorded no content. |
+| `/api/kyber/session/:id/turn/:index/content` | `GET` | `TurnContentResult` | Full unclipped assembled context for a specific turn ([ADR 0014](../adr/0014-unclipped-turn-inspection-and-copy-out-protocol.md)). Uses 0-based `:index`; strict resolution returns 404 for out-of-bounds turn indices, and 200 with empty parts when the turn exists but recorded no content. `?full=true` is the explicit lossless path — no default-budget truncation, no large-number sentinel — backing the whole-turn inspector; each part annotates recurrence against earlier captured turns by whole-text sha256 with no normalization, and `sharedContext` unions turn-span system prompts with non-turn session prompts, each tagged with its contributing `turnIndex` ([ordered, API-seen turn context](#ordered-api-seen-turn-context)). |
 | `/api/kyber/findings` | `GET` | `{ findings: Finding[], total, limit, offset, detectorCounts, unknownWindowSessions }` | Ranked findings; supports `?runId=`, `?sessionId=`, `?harness=`, `?detector=`, `?limit=`, `?offset=`. `total` describes the narrowed set; `detectorCounts` cover the run/session/harness scope ignoring paging and the detector filter so filter chips never evaporate; `unknownWindowSessions` counts sessions with an unreported context window in scope. |
 | `/api/kyber/finding/:id` | `GET` | `Finding` | Single finding detail with evidence rows and risk caveats. |
 | `/api/kyber/predictions` | `GET`, `POST` | `{ predictions: Prediction[] }` | Query or record prediction calibration entries. |
