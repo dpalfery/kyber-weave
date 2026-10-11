@@ -13,6 +13,7 @@ import {
   type KyberCaptureResult,
   type KyberCaptureValue,
 } from '../../lib/kyberApi.js'
+import { DashboardPortSetting } from './DashboardPortSetting.js'
 import { HarnessCollectionList, type HarnessRowAlert } from './HarnessCollectionList.js'
 
 export interface SettingsDrawerProps {
@@ -321,6 +322,8 @@ function SettingsContent() {
           </p>
         </section>
       )}
+
+      <DashboardPortSetting />
     </>
   )
 }
@@ -339,7 +342,7 @@ export function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
       testIdPrefix="settings-drawer"
       manageFocus
       title="Settings"
-      subtitle="OpenTelemetry collection per harness"
+      subtitle="Collection, receiver and dashboard port"
     >
       <SettingsContent />
     </SlideOutDrawer>

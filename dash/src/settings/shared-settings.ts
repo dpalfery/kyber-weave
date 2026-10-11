@@ -17,6 +17,7 @@ export const SETTING_KEYS = {
   jobsPaused: 'settings.jobs.paused',
   refreshCadenceMinutes: 'settings.jobs.refresh_cadence_minutes',
   receiverHosted: 'settings.receiver.hosted',
+  dashboardPort: 'settings.dashboard.port',
 } as const
 
 export type OnOff = 'on' | 'off'
@@ -26,6 +27,7 @@ export type SettingValues = {
   readonly [SETTING_KEYS.jobsPaused]: OnOff
   readonly [SETTING_KEYS.refreshCadenceMinutes]: number
   readonly [SETTING_KEYS.receiverHosted]: OnOff
+  readonly [SETTING_KEYS.dashboardPort]: number
 }
 
 export type SettingKey = keyof SettingValues
@@ -33,6 +35,17 @@ export type SettingKey = keyof SettingValues
 /** Bounds match the tray's minimum and the one-day ceiling a refresh cadence is useful within. */
 const CADENCE_MIN_MINUTES = 1
 const CADENCE_MAX_MINUTES = 1440
+
+/**
+ * The dashboard's default loopback port. It is the port `kyberdash web` listened on
+ * before the setting existed, so a store that never recorded a choice keeps serving
+ * exactly where every bookmark, tray attach and script already looks.
+ */
+export const DEFAULT_DASHBOARD_PORT = 4747
+
+/** A TCP port is 1..65535: 0 is "let the OS pick", never an addressable choice. */
+const PORT_MIN = 1
+const PORT_MAX = 65535
 
 type SettingCodec<T> = {
   readonly defaultValue: T
@@ -65,11 +78,33 @@ const cadenceCodec: SettingCodec<number> = {
   },
 }
 
+// Digits only, like the cadence above: Number() alone would accept '', ' 80' and
+// '0x50', none of which a person means as a port. 0 is refused even though it is a
+// meaningful bind argument ("pick a free port"): a persisted 0 would make every later
+// startup land somewhere unannounced, which is the silent-fallback defect this setting
+// exists to end. Ephemeral binding stays available to in-process callers that pass
+// port 0 directly; it is just never a storable choice.
+const portCodec: SettingCodec<number> = {
+  defaultValue: DEFAULT_DASHBOARD_PORT,
+  accepts: (value): value is number =>
+    typeof value === 'number' &&
+    Number.isInteger(value) &&
+    value >= PORT_MIN &&
+    value <= PORT_MAX,
+  encode: (value) => String(value),
+  decode: (raw) => {
+    if (!/^\d+$/.test(raw)) return undefined
+    const port = Number(raw)
+    return portCodec.accepts(port) ? port : undefined
+  },
+}
+
 const CODECS: { readonly [K in SettingKey]: SettingCodec<SettingValues[K]> } = {
   [SETTING_KEYS.folderImportScheduled]: onOffCodec,
   [SETTING_KEYS.jobsPaused]: onOffCodec,
   [SETTING_KEYS.refreshCadenceMinutes]: cadenceCodec,
   [SETTING_KEYS.receiverHosted]: onOffCodec,
+  [SETTING_KEYS.dashboardPort]: portCodec,
 }
 
 export function readSetting<K extends SettingKey>(store: CanonStore, key: K): SettingValues[K] {

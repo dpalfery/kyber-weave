@@ -44,6 +44,20 @@ interface Mock {
   puts: () => Recorded[]
 }
 
+/** The dashboard-port control reads the shared settings on open, beside the capture status. */
+const SETTINGS_JSON = {
+  folderImportScheduled: false,
+  jobsPaused: false,
+  refreshCadenceMinutes: 5,
+  receiverHosted: false,
+  dashboardPort: 4747,
+}
+
+/** GET calls to one URL, so a new read-only fetch elsewhere does not move a count. */
+function getsTo(mock: Mock, url: string): number {
+  return mock.calls.filter((c) => c.method === 'GET' && c.url === url).length
+}
+
 /**
  * One fetch mock for the drawer's whole surface. `status` may be a function so
  * a test can serve a different answer after a write; `post` answers each POST.
@@ -65,7 +79,8 @@ function stubFetch(options: {
       }
       calls.push(call)
       let reply: Reply
-      if (method === 'GET') reply = options.status?.() ?? { json: statusMixed }
+      if (method === 'GET' && String(url).includes('/api/kyber/settings')) reply = { json: SETTINGS_JSON }
+      else if (method === 'GET') reply = options.status?.() ?? { json: statusMixed }
       else if (method === 'POST') reply = options.post?.(call) ?? { status: 500, json: {} }
       else reply = options.put?.(call) ?? { json: { receiverHosted: true } }
       if (reply.hold) await reply.hold
@@ -122,8 +137,9 @@ describe('SettingsDrawer: opening', () => {
     const dialog = screen.getByRole('dialog')
     expect(dialog.getAttribute('aria-modal')).toBe('true')
     expect(dialog.getAttribute('aria-label')).toBe('Settings')
-    expect(mock.gets()).toBe(1)
-    expect(mock.calls[0]!.url).toBe('/api/kyber/capture')
+    expect(getsTo(mock, '/api/kyber/capture')).toBe(1)
+    // The dashboard-port control reads the shared settings beside the capture status.
+    expect(getsTo(mock, '/api/kyber/settings')).toBe(1)
   })
 
   it('moves focus into the dialog (the close button) when it opens', async () => {
@@ -189,7 +205,7 @@ describe('SettingsDrawer: opening', () => {
 
     fireEvent.click(screen.getByTestId('settings-refresh-status-button'))
 
-    await waitFor(() => expect(mock.gets()).toBe(2))
+    await waitFor(() => expect(getsTo(mock, '/api/kyber/capture')).toBe(2))
     expect(mock.posts()).toHaveLength(0)
   })
 })
@@ -377,7 +393,7 @@ describe('SettingsDrawer: preview, confirm, cancel', () => {
 
     await waitFor(() => expect(mock.posts()).toHaveLength(2))
     expect(mock.posts()[1]!.body).toEqual({ action: 'enable', harness: 'copilot', dryRun: false })
-    await waitFor(() => expect(mock.gets()).toBe(2))
+    await waitFor(() => expect(getsTo(mock, '/api/kyber/capture')).toBe(2))
     await waitFor(() => expect(screen.queryByTestId('settings-preview')).toBeNull())
     expect(screen.getByTestId('settings-result').textContent).toMatch(/copilot/i)
   })
@@ -522,7 +538,9 @@ describe('SettingsDrawer: receiver section', () => {
     await waitFor(() => expect(mock.puts()).toHaveLength(1))
     expect(mock.puts()[0]!.url).toBe('/api/kyber/settings')
     expect(mock.puts()[0]!.body).toEqual({ receiverHosted: false })
-    await waitFor(() => expect(mock.gets()).toBe(2))
+    // The receiver write re-reads both the capture status and the shared settings.
+    await waitFor(() => expect(getsTo(mock, '/api/kyber/capture')).toBe(2))
+    await waitFor(() => expect(getsTo(mock, '/api/kyber/settings')).toBe(2))
   })
 
   it('shows a not-hosted receiver as off and turns it on when toggled', async () => {

@@ -1,6 +1,6 @@
 import { Command } from 'commander'
 import { allProviderNames } from '../providers/index.js'
-import { runWebDashboard, UnknownViewError } from './web.js'
+import { DashboardPortOccupiedError, runWebDashboard, UnknownViewError } from './web.js'
 import { resolveCliName } from '../brand-overlay.js'
 import { registerKyberCommands } from './register.js'
 import { registerReportCommand } from './report.js'
@@ -84,18 +84,42 @@ export function buildProgram(): Command {
   program
     .command('web')
     .description('Open the local KyberDash web dashboard in your browser')
-    .option('--port <number>', 'Port to listen on (falls back to a free port if taken)', parseInteger, 4747)
+    // No commander default: an absent --port resolves inside the engine from the
+    // persisted settings.dashboard.port (default 4747), so the CLI surface can never
+    // disagree with what the Settings drawer saved. An explicit --port wins for this
+    // run only and is never persisted. A taken port is a refused start, never a quiet
+    // move to a random one: the tray attaches by the configured URL.
+    .option('--port <number>', 'Port to listen on for this run (overrides the persisted dashboard port, default 4747)', parseInteger)
     .option('--no-open', 'Do not open the browser automatically')
     .option('--view <path>', 'Open a dashboard view (for example finding/<id>)')
-    .action(async (opts: { port: number; open: boolean; view?: string }) => {
+    .action(async (opts: { port?: number; open: boolean; view?: string }) => {
+      // Surface-side input validation: the engine owns persistence and semantic
+      // validation, but a value the CLI cannot even express as a port is refused here,
+      // before the store opens, so a rejected flag never leaves a half-created state
+      // behind. 0 keeps its in-process meaning (bind an ephemeral port).
+      if (opts.port !== undefined && (!Number.isInteger(opts.port) || opts.port < 0 || opts.port > 65535)) {
+        process.stderr.write(`kyberdash web: --port must be a whole number from 0 to 65535.\n`)
+        process.exit(2)
+      }
       try {
-        await runWebDashboard({ port: opts.port, open: opts.open, view: opts.view })
+        await runWebDashboard({
+          ...(opts.port === undefined ? {} : { port: opts.port }),
+          open: opts.open,
+          view: opts.view,
+        })
       } catch (err) {
         if (err instanceof UnknownViewError) {
           // Exit 2 is the bad-argument contract; starting the server and then
           // refusing would leave the tray holding a listener it did not ask for.
           process.stderr.write(`kyberdash web: ${err.message}\n`)
           process.exit(2)
+        }
+        if (err instanceof DashboardPortOccupiedError) {
+          // A taken configured port is a failure with its remedy in the message: the
+          // message names the port and what to do next, and a traceback would add
+          // nothing it does not already say.
+          process.stderr.write(`kyberdash web: ${err.message}\n`)
+          process.exit(1)
         }
         throw err
       }

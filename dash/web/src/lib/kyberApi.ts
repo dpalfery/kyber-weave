@@ -1415,12 +1415,17 @@ export interface KyberJobStatus {
   hostedElsewhere: boolean
 }
 
-/** The shared settings both display layers read and write over one API. */
+/**
+ * The shared settings both display layers read and write over one API.
+ * `dashboardPort` is the persisted `settings.dashboard.port` (default 4747): it applies
+ * on the next engine restart, never to the running server.
+ */
 export interface KyberSettings {
   folderImportScheduled: boolean
   jobsPaused: boolean
   refreshCadenceMinutes: number
   receiverHosted: boolean
+  dashboardPort: number
 }
 
 /** A partial `PUT /api/kyber/settings` body — every key is optional. */
