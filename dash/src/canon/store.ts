@@ -65,8 +65,10 @@ export interface StoreWipeReport {
  * provenance, checkpoints, and the harness-scoped derived caches (`session`,
  * `run`, `execution`, `harness_rollup`, `problems`, and predictions via their
  * wiped run ids). `finding` has no harness column: the post-wipe projection
- * clears it authoritatively, so this function leaves it. Quarantine rows
- * likewise have no harness column and stay. Call inside the caller's
+ * clears it authoritatively, so this function leaves it. `quarantine`,
+ * `pending_logs`, and `quarantined_logs` carry the harness tag since schema
+ * v19 (plan 2026-10-10, D-Q3) and go with the wipe; `enriched_logs` has no
+ * attribution and stays for the complete wipe. Call inside the caller's
  * transaction, like `commitSourceUnit`'s inverse: a failure rolls back
  * everything, so records and checkpoints can never disagree about coverage.
  *
@@ -112,6 +114,13 @@ function wipeHarnessRows(
     const runPlaceholders = wipedRunIds.map(() => '?').join(', ')
     db.prepare(`DELETE FROM prediction WHERE run_id IN (${runPlaceholders})`).run(...wipedRunIds)
   }
+  // The audit rows follow the harness tag T14 stamped on them — but that
+  // scoping is only as good as the attribution on the row: NULL reads as
+  // "unknown", never "matches", so unclaimed rows survive here and only the
+  // complete `wipeAll` clears them.
+  db.prepare(`DELETE FROM quarantine WHERE harness IN (${placeholders})`).run(...rawNames)
+  db.prepare(`DELETE FROM pending_logs WHERE harness IN (${placeholders})`).run(...rawNames)
+  db.prepare(`DELETE FROM quarantined_logs WHERE harness IN (${placeholders})`).run(...rawNames)
   return report
 }
 
@@ -871,6 +880,8 @@ export type QuarantinedLog = {
   logId: string
   reason: string
   log: unknown
+  /** The harness tag the row was written with (B3/D-Q3); absent on rows that predate v19. */
+  harness?: string
 }
 
 export type RecordRow = {
@@ -1760,6 +1771,20 @@ export class CanonStore {
     return rows.map(toRecord)
   }
 
+  /**
+   * Stored records naming one span as their parent, scoped by trace because
+   * OTLP span ids are only unique within one. This is the back-fill
+   * direction of `parent_span_id`: the parent itself need not be a record
+   * (Claude Code's interaction span is quarantined), so an exact
+   * `findByTraceSpan` on it can never see the children beneath it (B8).
+   */
+  childrenOf(traceId: string, parentSpanId: string): CanonicalRecord[] {
+    const rows = this.db
+      .prepare('SELECT * FROM records WHERE trace_id = ? AND parent_span_id = ?')
+      .all(traceId, parentSpanId) as RecordRow[]
+    return rows.map(toRecord)
+  }
+
   /** Rewrite the fields re-normalization decides, leaving content untouched. */
   setAttribution(
     spanId: string,
@@ -1843,15 +1868,23 @@ export class CanonStore {
     return row === undefined ? undefined : toRecord(row)
   }
 
-  /** Find the nearest record in a session, bounded to avoid accidental joins. */
-  findBySessionTime(sessionId: string, timestamp: string, windowMs = 5_000): CanonicalRecord | undefined {
+  /**
+   * Find the nearest record in a session, bounded to avoid accidental joins.
+   * `op` narrows the candidate set: the log-correlation fallback is only
+   * allowed to land on a model call (R7) — an unfiltered nearest pick hands
+   * the log to whatever tool span happened to share the window — so callers
+   * pass `'llm.invoke'`. Without it any record in the window is eligible.
+   */
+  findBySessionTime(sessionId: string, timestamp: string, windowMs = 5_000, op?: string): CanonicalRecord | undefined {
     const rows = this.db
       .prepare('SELECT * FROM records WHERE session_id = ?')
       .all(sessionId) as RecordRow[]
     const target = Date.parse(timestamp)
     return rows
       .map(toRecord)
-      .filter((record) => Math.abs(Date.parse(String(record.timestamp)) - target) <= windowMs)
+      .filter((record) =>
+        (op === undefined || record.op === op) &&
+        Math.abs(Date.parse(String(record.timestamp)) - target) <= windowMs)
       .sort((a, b) => Math.abs(Date.parse(String(a.timestamp)) - target) - Math.abs(Date.parse(String(b.timestamp)) - target))[0]
   }
 
@@ -1867,9 +1900,31 @@ export class CanonStore {
     return true
   }
 
-  addPendingLog(log: { logId: string; pendingSince?: number }): void {
-    this.db.prepare('INSERT OR REPLACE INTO pending_logs (log_id, payload) VALUES (?, ?)')
-      .run(log.logId, JSON.stringify(log))
+  /**
+   * Rewrite one record's per-metric availability map (B6). Log enrichment
+   * uses it in both directions: a bucket whose parts just arrived drops its
+   * `not_measurable` entry, and a bucket a recognised event could not supply
+   * gains the reason it stayed unmeasured. An absent or empty map stores
+   * NULL — no stated limitation.
+   */
+  setMeasurability(spanId: string, measurability: Measurability | undefined): void {
+    const json =
+      measurability === undefined || Object.keys(measurability).length === 0
+        ? null
+        : JSON.stringify(measurability)
+    this.db
+      .prepare('UPDATE records SET measurability_json = ? WHERE span_id = ?')
+      .run(json, spanId)
+  }
+
+  /**
+   * Hold a log whose span has not arrived. `harness` is the recognition tag
+   * (B3) the v19 column exists for — it scopes the row in a per-harness
+   * wipe — and stays NULL for logs no signal named, never guessed.
+   */
+  addPendingLog(log: { logId: string; pendingSince?: number }, harness?: string): void {
+    this.db.prepare('INSERT OR REPLACE INTO pending_logs (log_id, payload, harness) VALUES (?, ?, ?)')
+      .run(log.logId, JSON.stringify(log), harness ?? null)
   }
 
   deletePendingLog(logId: string): void {
@@ -1877,8 +1932,22 @@ export class CanonStore {
   }
 
   getPendingLogs(): unknown[] {
-    return (this.db.prepare('SELECT payload FROM pending_logs ORDER BY log_id').all() as { payload: string }[])
-      .map((row) => JSON.parse(row.payload))
+    return (this.db.prepare('SELECT payload, harness FROM pending_logs ORDER BY log_id').all() as { payload: string; harness: unknown }[])
+      .map((row) => {
+        const entry: unknown = JSON.parse(row.payload)
+        // The v19 column is the tag's authority; surface it on the returned
+        // entry so a reader sees what a per-harness wipe would scope without
+        // unpicking the stored payload.
+        if (
+          typeof row.harness === 'string' &&
+          entry !== null &&
+          typeof entry === 'object' &&
+          !Array.isArray(entry)
+        ) {
+          (entry as Record<string, unknown>).harness = row.harness
+        }
+        return entry
+      })
   }
 
   consumePendingLogs(traceId: string, spanId: string, sessionId?: string | null): unknown[] {
@@ -1893,9 +1962,10 @@ export class CanonStore {
     return matched
   }
 
-  quarantineLog(log: { logId: string }, reason: string): void {
-    this.db.prepare('INSERT OR REPLACE INTO quarantined_logs (log_id, payload, reason) VALUES (?, ?, ?)')
-      .run(log.logId, JSON.stringify(log), reason)
+  /** Same `harness` contract as `addPendingLog`: the tag scopes the row in a per-harness wipe. */
+  quarantineLog(log: { logId: string }, reason: string, harness?: string): void {
+    this.db.prepare('INSERT OR REPLACE INTO quarantined_logs (log_id, payload, reason, harness) VALUES (?, ?, ?, ?)')
+      .run(log.logId, JSON.stringify(log), reason, harness ?? null)
   }
 
   isLogEnriched(logId: string): boolean {
@@ -1907,9 +1977,14 @@ export class CanonStore {
   }
 
   getQuarantinedLog(logId: string): QuarantinedLog | undefined {
-    const row = this.db.prepare('SELECT payload, reason FROM quarantined_logs WHERE log_id = ?')
-      .get(logId) as { payload: string; reason: string } | undefined
-    return row === undefined ? undefined : { logId, reason: row.reason, log: JSON.parse(row.payload) }
+    const row = this.db.prepare('SELECT payload, reason, harness FROM quarantined_logs WHERE log_id = ?')
+      .get(logId) as { payload: string; reason: string; harness: unknown } | undefined
+    if (row === undefined) return undefined
+    const entry: QuarantinedLog = { logId, reason: row.reason, log: JSON.parse(row.payload) }
+    // Same surfacing rule as `getPendingLogs`: the column is the authority,
+    // exposed beside the payload rather than written back into it.
+    if (typeof row.harness === 'string') entry.harness = row.harness
+    return entry
   }
 
   quarantinedLogCount(): number {

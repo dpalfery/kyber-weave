@@ -175,6 +175,51 @@ function contentBlockText(block: Record<string, unknown>): string | undefined {
 }
 
 /**
+ * B2's interaction-span recognition, offered as span knowledge for the
+ * ingest path: the `span.type` marker or the emitted name, either one alone
+ * sufficient — the live packet carries both, and a single rename must not
+ * blind the receiver. The claude-code attribution gate stays with the
+ * caller; this predicate says nothing about a span another harness emitted.
+ */
+export function isClaudeInteractionSpan(span: {
+  name: string
+  attributes: Record<string, unknown>
+}): boolean {
+  return (
+    span.attributes['span.type'] === 'interaction' ||
+    span.name === 'claude_code.interaction'
+  )
+}
+
+/**
+ * The literal the sender substitutes for `user_prompt` when it exports
+ * without `OTEL_LOG_USER_PROMPTS` — redaction arrives as text, not as a
+ * missing key (F1).
+ */
+const REDACTED_USER_PROMPT = '<REDACTED>'
+
+/**
+ * What an interaction span's `user_prompt` carried (Q4): text to attach, or
+ * a redaction to declare. An absent or non-string value answers undefined —
+ * the span named nothing, which is not evidence either way.
+ */
+export type ClaudeUserPrompt = { redacted: true } | { redacted: false; text: string }
+
+export function claudeUserPrompt(value: unknown): ClaudeUserPrompt | undefined {
+  if (typeof value !== 'string' || value === '') return undefined
+  return value === REDACTED_USER_PROMPT ? { redacted: true } : { redacted: false, text: value }
+}
+
+/**
+ * Why a redacted `user_prompt` yields no `conversation_history` (Q2). The
+ * sender has the text and withholds it, so the declaration names the exact
+ * opt-in that would release it — a more honest answer than the generic
+ * "does not export" the adapter stamps at normalize time.
+ */
+export const REDACTED_USER_PROMPT_REASON =
+  'Claude Code sent the user prompt redacted. Set OTEL_LOG_USER_PROMPTS=1 on the sender to export it.'
+
+/**
  * The Claude Code adapter. Detection is vendor-namespace driven, scored the
  * same way the other adapters score: a vendor attribute carries the vote,
  * and the shared usage keys alone are not enough to claim a span.

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { ingestBatch } from './ingest.js'
+import { reconcileExpiredPending } from './log-ingest.js'
 import { CanonStore, type QuarantineEntry } from './store.js'
 import { otlpSpanToRecord } from '../otel/service.js'
 import type { OtlpSpan } from '../otel/receiver.js'
@@ -496,6 +497,22 @@ describe('ingestBatch — Claude Code interaction prompt (Task T5)', () => {
     interactionFirst.close()
   })
 
+  it('delivers a prompt whose parked wait outlived the pending TTL once children arrive (B8)', () => {
+    const store = new CanonStore(':memory:')
+    ingestBatch([interactionSpan(PROMPT)], store)
+    // The collector's reconcile timer fires past the TTL before any child
+    // arrives: the parked prompt waits out its expiry in place rather than
+    // being quarantined out from under the children — which would also be
+    // a second copy of prompt text beside the span's quarantine packet.
+    reconcileExpiredPending(store, Date.now() + 5_001, 5_000)
+    ingestBatch([llmChild('llm-1'), llmChild('llm-2')], store)
+
+    expect(conversationHistory(store, 'llm-1')).toEqual([PROMPT])
+    expect(conversationHistory(store, 'llm-2')).toEqual([PROMPT])
+    expect(store.quarantinedLogCount()).toBe(0)
+    store.close()
+  })
+
   it.each(INTERACTION_SHAPES)('recognises the interaction span from $label', (shape) => {
     const store = new CanonStore(':memory:')
     ingestBatch([llmChild('llm-1')], store)
@@ -513,7 +530,9 @@ describe('ingestBatch — Claude Code interaction prompt (Task T5)', () => {
 
     expect(outcome).toMatchObject({ accepted: 0, quarantined: 1, rejected: 0 })
     expect(store.get(INTERACTION_SPAN_ID)).toBeUndefined()
-    const evidence = quarantineEvidence(store, INTERACTION_SPAN_ID)
+    // B7 made getQuarantineEntry the sole packet surface; getQuarantine is
+    // the light audit read and no longer exposes harness or rawPayload.
+    const evidence = store.getQuarantineEntry(INTERACTION_SPAN_ID)
     expect(evidence?.reason).toBe('non-model span')
     expect(evidence?.harness).toBe('claude-code')
     expect(JSON.parse(evidence?.rawPayload ?? 'null')).toEqual(interaction)
@@ -526,7 +545,7 @@ describe('ingestBatch — Claude Code interaction prompt (Task T5)', () => {
     ingestBatch([interactionSpan(PROMPT)], store)
 
     expect(store.get('tool-1')).toBeUndefined()
-    const evidence = quarantineEvidence(store, 'tool-1')
+    const evidence = store.getQuarantineEntry('tool-1')
     expect(evidence?.reason).toBe('non-model span')
     expect(evidence?.harness).toBe('claude-code')
     const packet = JSON.parse(evidence?.rawPayload ?? 'null') as OtlpSpan | null

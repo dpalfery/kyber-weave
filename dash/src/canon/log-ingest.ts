@@ -39,6 +39,16 @@ const CLAUDE_API_REQUEST_EVENT = 'api_request_body'
 const CLAUDE_EVENTS_SCOPE = 'com.anthropic.claude_code.events'
 
 /**
+ * The pending-log attribute a parked interaction prompt is stored under
+ * (B8). The key is receiver-internal — no sender emits it — which is what
+ * tells a waiting prompt apart from a genuinely pended OTLP log: expiry
+ * quarantines a log that never met its span, but a prompt whose span is
+ * already quarantined must survive the TTL in place until its children
+ * arrive — the span's quarantine packet is already its evidence copy.
+ */
+export const PENDING_INTERACTION_PROMPT = 'kyber.interaction_prompt'
+
+/**
  * The canonical buckets an `api_request_body` event can supply — exactly the
  * part kinds `parseClaudeApiRequestBody` emits. `instruction_context` is
  * absent on purpose: B5 rules out a heuristic split, so no body failure can
@@ -213,6 +223,12 @@ export function ingestLogBatch(
 export function reconcileExpiredPending(store: CanonStore, now: number, ttlMs: number): number {
   let quarantined = 0
   for (const log of store.getPendingLogs() as PendingLog[]) {
+    // A parked interaction prompt is not a log waiting for its span — the
+    // span is already quarantined. Its wait ends when children arrive or,
+    // failing them, when the ingest-side settle pass retires the expired
+    // row (B8); moving it here would drop delivery and invent a second
+    // prompt copy beside the span's own quarantine packet.
+    if (log.attributes[PENDING_INTERACTION_PROMPT] !== undefined) continue
     // Older rows predate pendingSince; treating reconciliation as their arrival
     // keeps upgrades from unexpectedly quarantining a backlog immediately.
     const pendingSince = log.pendingSince ?? now
