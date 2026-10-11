@@ -231,7 +231,9 @@ public sealed class ClaudeRenderer : ISquadRenderer
                                 fallbackProfile,
                                 source.CapabilityProfiles.Profiles,
                                 capabilityVocabulary,
-                                reusedCanonicalSkill: true));
+                                reusedCanonicalSkill: true,
+                                reusedCanonicalSkillPath:
+                                    $"{ResolvePrefixedDirectory(SkillsDirectory, request.Scope)}/{agent.Name}/SKILL.md"));
                         }
                         else
                         {
@@ -485,19 +487,28 @@ public sealed class ClaudeRenderer : ISquadRenderer
         return ordered;
     }
 
+    /// <remarks>
+    /// When <paramref name="reusedCanonicalSkill"/> is set, <paramref name="reusedCanonicalSkillPath"/>
+    /// carries the scope-resolved path of the reused canonical skill:
+    /// <c>.claude/skills/&lt;name&gt;/SKILL.md</c> under Project scope, the bare
+    /// <c>skills/&lt;name&gt;/SKILL.md</c> under Global scope, where the physical root is already
+    /// <c>~/.claude</c>. The record must name the path that was actually emitted; hardcoding the
+    /// project-scope literal points the reader at a file that was never written.
+    /// </remarks>
     private static IEnumerable<SquadDegradationRecord> BuildPrimaryAgentDegradationRecords(
         SquadAgent agent,
         SquadFallbackProfile fallbackProfile,
         IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
         IReadOnlyList<string> capabilityVocabulary,
-        bool reusedCanonicalSkill = false)
+        bool reusedCanonicalSkill = false,
+        string reusedCanonicalSkillPath = "")
     {
         bool isSkillMode = string.Equals(fallbackProfile.NoPrimaryAgent, "skill", StringComparison.Ordinal);
 
         if (isSkillMode)
         {
             string entryPointDetails = reusedCanonicalSkill
-                ? $"The same-name canonical skill at `.claude/skills/{agent.Name}/SKILL.md` is " +
+                ? $"The same-name canonical skill at `{reusedCanonicalSkillPath}` is " +
                     "the entry point and carries the role; no duplicate entry-point skill is " +
                     "emitted, because the canonical skill already occupies that identity."
                 : $"Fallback profile '{agent.Fallback}' declares no-primary-agent: skill, so " +

@@ -208,6 +208,44 @@ public sealed class SquadRootWrapperAgentTests
     }
 
     /// <summary>
+    /// The degradation record names the skill path that was actually emitted. Under Global scope
+    /// the physical root is already <c>~/.claude</c>, so the emitted path is the bare
+    /// <c>skills/&lt;name&gt;/SKILL.md</c> form; a message hardcoding the project-scope
+    /// <c>.claude/skills/...</c> literal would point at a path that was never written.
+    /// </summary>
+    [Theory]
+    [InlineData(SquadDeploymentScope.Project, ".claude/skills")]
+    [InlineData(SquadDeploymentScope.Global, "skills")]
+    public async Task ReusedCanonicalSkillDetailNamesTheEmittedPath(
+        SquadDeploymentScope scope,
+        string expectedDirectory)
+    {
+        SquadRendererRegistry registry = AllRenderers();
+        SquadRenderResult result = await registry.RenderAsync(new SquadRenderRequest(
+            ProductRoot,
+            [SquadTarget.Claude],
+            scope));
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        foreach (string identity in RootWrapperIdentities)
+        {
+            SquadDegradationRecord reused = Assert.Single(
+                result.Degradations,
+                d => d.CanonicalIdentity == identity && d.Code == "role-skill-fallback");
+            string expectedPath = $"{expectedDirectory}/{identity}/SKILL.md";
+
+            // Assert the backtick-delimited path, not a bare substring: "skills/x" is a
+            // substring of ".claude/skills/x", so a bare Contains passes for the wrong
+            // directory and the hardcoded-literal regression would slip through.
+            Assert.Contains($"`{expectedPath}`", reused.Details, StringComparison.Ordinal);
+            Assert.Single(
+                result.Files,
+                f => f.RelativePath == $"{expectedDirectory}/{identity}/SKILL.md");
+        }
+    }
+
+    /// <summary>
     /// The bundle roster and the agent directory stay in step: every canonical agent, including
     /// the new root wrapper, is listed in the full bundle.
     /// </summary>
