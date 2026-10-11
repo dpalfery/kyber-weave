@@ -452,6 +452,139 @@ describe('SessionInspectorDrawer: human-readable API context display', () => {
   })
 })
 
+describe('SessionInspectorDrawer: safe structural-tag recognition', () => {
+  function expectRawAndCopyExact(raw: string): void {
+    const rawHtml = renderHtml(React.createElement(ToggleRawView, {
+      text: raw,
+      label: 'Probe',
+      rawTestId: 'safe-tag-raw-probe',
+      copyTestId: 'copy-safe-tag-probe',
+      viewPrefix: 'safe-tag-probe',
+      defaultView: 'raw',
+    }))
+    expect(rawHtml).toContain('data-testid="safe-tag-raw-probe"')
+    expect(unescapeHtml(rawHtml)).toContain(raw)
+
+    const written: string[] = []
+    const nav = (globalThis as { navigator?: unknown }).navigator
+    const hadNavigator = nav !== undefined
+    Object.defineProperty(globalThis, 'navigator', {
+      value: { clipboard: { writeText: (s: string) => { written.push(s); return Promise.resolve() } } },
+      configurable: true,
+    })
+    try {
+      const button = CopyExactButton({ text: raw, testId: 'copy-safe-tag-probe' }) as React.ReactElement
+      ;(button.props as { onClick: () => void }).onClick()
+      expect(written).toEqual([raw])
+    } finally {
+      if (hadNavigator) {
+        Object.defineProperty(globalThis, 'navigator', { value: nav, configurable: true })
+      } else {
+        const g = globalThis as { navigator?: unknown }
+        delete g.navigator
+      }
+    }
+  }
+
+  it('keeps prose with a generic type literal: `Return Promise<void> when complete.`', () => {
+    const raw = 'Return Promise<void> when complete.'
+    const html = renderHtml(React.createElement(XmlFoldedText, { text: raw }))
+    const text = unescapeHtml(html)
+    // No structural fold: the full sentence stays visible verbatim.
+    expect(html).not.toContain('data-testid="folded-tag-')
+    expect(text).toContain(raw)
+    expect(containsReadableXmlTag(raw)).toBe(false)
+    expectRawAndCopyExact(raw)
+  })
+
+  it('keeps `List<string>` literal', () => {
+    const raw = 'Use List<string> for names.'
+    const html = renderHtml(React.createElement(XmlFoldedText, { text: raw }))
+    const text = unescapeHtml(html)
+    expect(html).not.toContain('data-testid="folded-tag-')
+    expect(text).toContain(raw)
+    expect(text).toContain('List<string>')
+    expect(containsReadableXmlTag(raw)).toBe(false)
+    expectRawAndCopyExact(raw)
+  })
+
+  it('keeps an `if (a<b && c>d)` comparison literal instead of swallowing `&&` as attributes', () => {
+    const raw = 'Check if (a<b && c>d) before merging.'
+    const html = renderHtml(React.createElement(XmlFoldedText, { text: raw }))
+    const text = unescapeHtml(html)
+    expect(html).not.toContain('data-testid="folded-tag-')
+    expect(text).toContain(raw)
+    expect(text).toContain('&&')
+    expect(containsReadableXmlTag(raw)).toBe(false)
+    expectRawAndCopyExact(raw)
+  })
+
+  it('does not let a generic swallow a following real section', () => {
+    const raw = 'Use List<string> for names.\n<system>rules</system>\nDone.'
+    const html = renderHtml(React.createElement(XmlFoldedText, { text: raw }))
+    const text = unescapeHtml(html)
+    // The real section still folds with a readable label and no delimiters.
+    expect(html).toContain('data-testid="folded-tag-system"')
+    expect(html).not.toContain('&lt;system')
+    expect(html).not.toContain('&lt;/system')
+    // The generic stays literal and in order around the section.
+    expect(text).toContain('List<string>')
+    expect(text).toContain('rules')
+    expect(text).toContain('Done.')
+    expect(text.indexOf('List<string>')).toBeLessThan(text.indexOf('rules'))
+    expect(text.indexOf('rules')).toBeLessThan(text.indexOf('Done.'))
+    expectRawAndCopyExact(raw)
+  })
+
+  it('still folds a valid matched generic section', () => {
+    const raw = '<note>hello world</note>'
+    const html = renderHtml(React.createElement(XmlFoldedText, { text: raw }))
+    const text = unescapeHtml(html)
+    expect(html).toContain('data-testid="folded-tag-note"')
+    expect(html).not.toContain('&lt;note')
+    expect(text).toContain('hello world')
+    expect(containsReadableXmlTag(raw)).toBe(true)
+    expectRawAndCopyExact(raw)
+  })
+
+  it('preserves nested matched sections', () => {
+    const raw = '<outer>alpha <inner>beta</inner> gamma</outer>'
+    const html = renderHtml(React.createElement(XmlFoldedText, { text: raw }))
+    const text = unescapeHtml(html)
+    expect(html).toContain('data-testid="folded-tag-outer"')
+    expect(html).toContain('data-testid="folded-tag-inner"')
+    for (const snippet of ['alpha', 'beta', 'gamma']) {
+      expect(text).toContain(snippet)
+    }
+    expect(text.indexOf('alpha')).toBeLessThan(text.indexOf('beta'))
+    expect(text.indexOf('beta')).toBeLessThan(text.indexOf('gamma'))
+    expectRawAndCopyExact(raw)
+  })
+
+  it('folds a known unclosed harness wrapper running to end of text', () => {
+    const raw = '<environment_info>unclosed harness bytes stay in the section'
+    const html = renderHtml(React.createElement(XmlFoldedText, { text: raw }))
+    const text = unescapeHtml(html)
+    expect(html).toContain('data-testid="folded-tag-environment_info"')
+    expect(html).not.toContain('&lt;environment_info')
+    expect(text).toContain('unclosed harness bytes stay in the section')
+    expect(containsReadableXmlTag(raw)).toBe(true)
+    expectRawAndCopyExact(raw)
+  })
+
+  it('keeps an arbitrary unclosed `<void>` literal and requires a close for generics', () => {
+    const raw = '<void>some text with no close'
+    const html = renderHtml(React.createElement(XmlFoldedText, { text: raw }))
+    const text = unescapeHtml(html)
+    expect(html).not.toContain('data-testid="folded-tag-')
+    expect(text).toContain(raw)
+    expect(containsReadableXmlTag(raw)).toBe(false)
+    // An unclosed generic outside the wrapper allowlist is literal too.
+    expect(containsReadableXmlTag('<system>unclosed section')).toBe(false)
+    expectRawAndCopyExact(raw)
+  })
+})
+
 describe('SessionInspectorDrawer: Tool Call and Tool Result Formatting', () => {
   it('formats tool call with tool name, wrench icon, and key-value parameters', () => {
     const call = {
@@ -1780,12 +1913,13 @@ describe('SessionInspectorDrawer: whole-turn full context', () => {
     const text = unescapeHtml(html)
     expect(html).toContain('data-testid="shared-session-context"')
     expect(html).toContain('Shared session context')
-    expect(html).toContain('Session-level system content')
+    expect(html).toContain('each entry shows its source turn or session scope')
+    expect(html).not.toContain('not captured separately for this turn')
     expect(text).toContain(SHARED_PROMPT)
     expect(text).toContain('SHARED_PROMPT_TAIL_3f9c')
     // Fresh shared content shows no recurrence badge: without earlier-turn
     // evidence the view must not claim "new" (first capture outside turn
-    // spans is unverifiable) — the session-level label stands on its own.
+    // spans is unverifiable) — the source label stands on its own.
     expect(html).not.toContain('data-testid="shared-session-context-recurrence-seen"')
     expect(html).not.toContain('data-testid="shared-session-context-recurrence-new"')
     expect(html).not.toContain('New this turn')
@@ -1987,6 +2121,78 @@ describe('SessionInspectorDrawer: whole-turn full context', () => {
     expect(copy.split(X).length - 1).toBe(2)
   })
 
+  it('labels each shared prompt with its source turn or session scope', () => {
+    const PRIOR = 'PRIOR_TURN_PROMPT_BODY_e51a\nFrom turn zero.\nPRIOR_TAIL_f62b'
+    const SESSION = 'SESSION_SCOPE_PROMPT_BODY_c73d\nNo turn index.\nSESSION_TAIL_d84e'
+    const body = buildTurnFixture()
+    const withSources: KyberTurnContentResult = {
+      ...body,
+      sharedContext: {
+        parts: [
+          { text: PRIOR, spanId: 'span-turn-0', turnIndex: 0 },
+          { text: SESSION, spanId: 'span-session' },
+        ],
+        seenBefore: true,
+      },
+    }
+    const resolved = resolveSharedDisplay(withSources)
+    expect(resolved).not.toBeNull()
+    expect(resolved!.parts).toHaveLength(2)
+    const qc = createTestQueryClient()
+    qc.setQueryData(TURN_KEY, withSources)
+    const html = renderPanel(qc)
+    const text = unescapeHtml(html)
+    // One card per occurrence, each with its own source label from turnIndex.
+    expect(html).toContain('data-testid="shared-session-context-part-0"')
+    expect(html).toContain('data-testid="shared-session-context-part-1"')
+    expect(html).toContain('data-testid="shared-session-context-part-0-source"')
+    expect(html).toContain('data-testid="shared-session-context-part-1-source"')
+    expect(html).toContain('>Turn 0<')
+    expect(html).toContain('>Session scope<')
+    expect(text).toContain(PRIOR)
+    expect(text).toContain(SESSION)
+    // Both occurrences stay copyable: per-part buttons plus Copy Turn.
+    expect(html).toContain('data-testid="copy-shared-session-context-0"')
+    expect(html).toContain('data-testid="copy-shared-session-context-1"')
+    const copy = buildWholeTurnCopyText(withSources, resolved!.parts.map((p) => p.text))
+    expect(copy).toContain(PRIOR)
+    expect(copy).toContain(SESSION)
+  })
+
+  it('keeps identical text at distinct sources as two visible and copyable occurrences', () => {
+    const DUP = 'IDENTICAL_SOURCE_BODY_1a2b\nSame bytes, distinct sources.\nIDENTICAL_TAIL_3c4d'
+    const body = buildTurnFixture()
+    // Same span id on both entries proves the label comes from turnIndex,
+    // never from text or span id.
+    const withDup: KyberTurnContentResult = {
+      ...body,
+      sharedContext: {
+        parts: [
+          { text: DUP, spanId: 'span-same', turnIndex: 0 },
+          { text: DUP, spanId: 'span-same' },
+        ],
+        seenBefore: true,
+      },
+    }
+    const resolved = resolveSharedDisplay(withDup)
+    expect(resolved).not.toBeNull()
+    expect(resolved!.parts).toHaveLength(2)
+    const qc = createTestQueryClient()
+    qc.setQueryData(TURN_KEY, withDup)
+    const html = renderPanel(qc)
+    const text = unescapeHtml(html)
+    // Both source labels render despite identical text and span id.
+    expect(html).toContain('data-testid="shared-session-context-part-0-source"')
+    expect(html).toContain('data-testid="shared-session-context-part-1-source"')
+    expect(html).toContain('>Turn 0<')
+    expect(html).toContain('>Session scope<')
+    // Both occurrences render in full.
+    expect(text.split(DUP).length - 1).toBeGreaterThanOrEqual(2)
+    // Copy Turn carries both occurrences, not one collapsed entry.
+    const copy = buildWholeTurnCopyText(withDup, resolved!.parts.map((p) => p.text))
+    expect(copy.split(DUP).length - 1).toBe(2)
+  })
+
   it('shows measured turn totals separately with no per-block cache claims', () => {
     const qc = createTestQueryClient()
     seedTurn(qc, buildTurnFixture())
@@ -2090,7 +2296,7 @@ describe('SessionInspectorDrawer: whole-turn full context', () => {
       expect(html.match(/Cache creation/g)?.length).toBe(1)
     })
 
-    it('labels shared context recurrence independently of the session-level tag', () => {
+    it('labels shared context recurrence independently of the source label', () => {
       const html = renderLabeled()
       expect(html).toContain('data-testid="shared-session-context"')
       expect(html).toContain('Shared session context')

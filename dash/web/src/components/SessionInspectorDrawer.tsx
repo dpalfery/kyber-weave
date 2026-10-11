@@ -29,9 +29,40 @@ export interface XmlFoldChunk {
  */
 const READABLE_XML_LITERAL_TAGS = new Set(['script', 'style', 'iframe', 'object', 'embed', 'link', 'meta'])
 
+/**
+ * Known unclosed Copilot/harness wrapper sections. The generic parser below
+ * requires a matching open/close pair; only these names may also fold when
+ * the close tag never arrives (an unclosed `<name>` runs to end of text).
+ * Recovered from the pre-generic `XML_FOLD_TAGS` harness list (commit
+ * `ec90ac4^`): every name there folded unclosed via `(?:<\/\1>|$)`, so every
+ * name there stays unclosed-tolerant here. Any other unclosed name stays
+ * literal text so generics like `List<string>` never swallow what follows.
+ */
+const READABLE_XML_UNCLOSED_ALLOWLIST = new Set([
+  'environment_info',
+  'workspace_info',
+  'instructions',
+  'copilot_instructions',
+  'context',
+  'reminderInstructions',
+  'editor_context',
+  'tool_use_instructions',
+  'notebook_info',
+  'system_reminder',
+  'file_contents',
+  'attachment',
+  'environment_details',
+])
+
 const READABLE_XML_TAG_NAME = '[A-Za-z_][\\w:.-]*'
 const READABLE_XML_ATTR_VALUE = '(?:"[^"]*"|\'[^\']*\'|[^\\s<>\"\'=]+)'
-const READABLE_XML_ATTR = `(?:\\s+[^\\s<>/=]+(?:\\s*=\\s*${READABLE_XML_ATTR_VALUE})?)`
+/**
+ * Attribute names must be syntactically plausible tag names. A permissive
+ * "any non-space run" here swallows operators: in `if (a<b && c>d)` the
+ * `&&` would parse as a valueless attribute of `<b ...>` and hide the whole
+ * comparison inside a folded section. Plausible names keep it literal.
+ */
+const READABLE_XML_ATTR = `(?:\\s+${READABLE_XML_TAG_NAME}(?:\\s*=\\s*${READABLE_XML_ATTR_VALUE})?)`
 const READABLE_XML_TOKEN_RE = new RegExp(
   `<\\/\\s*(${READABLE_XML_TAG_NAME})\\s*>` +
     `|<(${READABLE_XML_TAG_NAME})((?:${READABLE_XML_ATTR})*)\\s*(\\/?)>`,
@@ -79,21 +110,52 @@ function tokenizeReadableXml(raw: string): ReadableXmlToken[] {
 
 /**
  * Parses any well-formed XML-like sections into ordered text/tag chunks.
- * Only `<name ...>...</name>` and `<name .../>` with a valid tag name count
- * as structural; stray `<`, `>`, `<>`, `< 3`, or `a < b` stay in text chunks
- * so literal angle brackets are never silently removed. Denylisted
- * HTML-active tags stay literal too. Every occurrence is preserved in source
- * order with its exact inner bytes; nothing is deduplicated or reordered.
+ * A generic name counts as structural only with a matching open/close pair
+ * (`<name ...>...</name>`) or as self-closing (`<name .../>`); stray `<`,
+ * `>`, `<>`, `< 3`, or `a < b` stay in text chunks so literal angle
+ * brackets are never silently removed. An unclosed open folds only for the
+ * known Copilot/harness wrappers in `READABLE_XML_UNCLOSED_ALLOWLIST` —
+ * any other unclosed name (a generic like `List<string>`, `<void>`, or an
+ * `if (a<b && c>d)` comparison, whose `&&` is not a plausible attribute
+ * name) stays literal so it can never swallow a later real section.
+ * Denylisted HTML-active tags stay literal too. Every occurrence is
+ * preserved in source order with its exact inner bytes; nothing is
+ * deduplicated or reordered.
  */
 export function parseReadableXmlChunks(raw: string): XmlFoldChunk[] {
   if (!raw) return []
   const tokens = tokenizeReadableXml(raw)
   const chunks: XmlFoldChunk[] = []
   let pos = 0
-  const openStack: ReadableXmlToken[] = []
 
   const pushText = (slice: string): void => {
     if (slice) chunks.push({ type: 'text', content: slice })
+  }
+
+  /**
+   * Index of the close tag balancing `open`, scanning forward with same-name
+   * depth counting so nested same-name sections pair correctly. Other names'
+   * tokens are content and never disturb the depth. Returns -1 when the open
+   * never closes.
+   */
+  const findMatchingClose = (openIdx: number): number => {
+    const open = tokens[openIdx] as ReadableXmlToken
+    const name = open.tag.toLowerCase()
+    let depth = 1
+    for (let j = openIdx + 1; j < tokens.length; j++) {
+      const candidate = tokens[j] as ReadableXmlToken
+      if (READABLE_XML_LITERAL_TAGS.has(candidate.tag.toLowerCase())) continue
+      if (candidate.tag.toLowerCase() !== name) continue
+      if (candidate.kind === 'open') {
+        depth++
+      } else if (candidate.kind === 'close') {
+        depth--
+        if (depth === 0) return j
+      }
+      // A self-closing same-name token is self-contained: neither an open
+      // that needs balancing nor a close that balances one.
+    }
+    return -1
   }
 
   let i = 0
@@ -104,46 +166,49 @@ export function parseReadableXmlChunks(raw: string): XmlFoldChunk[] {
       continue
     }
     if (token.kind === 'selfClosing') {
-      if (openStack.length === 0) {
-        pushText(raw.slice(pos, token.index))
-        chunks.push({ type: 'tag', tag: token.tag, attributes: token.attributes, content: '' })
-        pos = token.end
-      }
+      pushText(raw.slice(pos, token.index))
+      chunks.push({ type: 'tag', tag: token.tag, attributes: token.attributes, content: '' })
+      pos = token.end
       i++
       continue
     }
-    if (token.kind === 'open') {
-      openStack.push(token)
+    if (token.kind === 'close') {
+      // Stray closes (no open consumed them via the lookahead below) are
+      // literal text.
       i++
       continue
     }
-    const top = openStack[openStack.length - 1]
-    if (top && top.tag.toLowerCase() === token.tag.toLowerCase()) {
-      openStack.pop()
-      if (openStack.length === 0) {
-        pushText(raw.slice(pos, top.index))
-        chunks.push({
-          type: 'tag',
-          tag: top.tag,
-          attributes: top.attributes,
-          content: raw.slice(top.end, token.index),
-        })
-        pos = token.end
-      }
+    const closeIdx = findMatchingClose(i)
+    if (closeIdx !== -1) {
+      const close = tokens[closeIdx] as ReadableXmlToken
+      pushText(raw.slice(pos, token.index))
+      chunks.push({
+        type: 'tag',
+        tag: token.tag,
+        attributes: token.attributes,
+        content: raw.slice(token.end, close.index),
+      })
+      pos = close.end
+      // Skip every token the section consumed, including nested ones: nested
+      // sections stay inside the raw content slice and render recursively.
+      i = closeIdx + 1
+      continue
+    }
+    // Unclosed open. Only a known harness wrapper may fold unclosed (running
+    // to end of text); any other unclosed name stays literal so a generic
+    // like `List<string>` can never swallow a later real section — scanning
+    // simply continues past it.
+    if (READABLE_XML_UNCLOSED_ALLOWLIST.has(token.tag.toLowerCase())) {
+      pushText(raw.slice(pos, token.index))
+      chunks.push({
+        type: 'tag',
+        tag: token.tag,
+        attributes: token.attributes,
+        content: raw.slice(token.end),
+      })
+      return chunks
     }
     i++
-  }
-
-  if (openStack.length > 0) {
-    const first = openStack[0] as ReadableXmlToken
-    pushText(raw.slice(pos, first.index))
-    chunks.push({
-      type: 'tag',
-      tag: first.tag,
-      attributes: first.attributes,
-      content: raw.slice(first.end),
-    })
-    return chunks
   }
 
   pushText(raw.slice(pos))
@@ -2572,11 +2637,12 @@ export function TurnContentPartView({
  *   while all returned bytes still render.
  * - Every captured `system_prompt` part in `sharedContext.parts`, in
  *   capture order, renders as its own card under `Shared session context`,
- *   explicitly labeled as session-level content rather than captured for
- *   this turn; only the selected turn's own source occurrence (same span
- *   id, paired per occurrence) is not shown twice, while identical text
- *   from distinct earlier spans stays visible. Each card carries its own
- *   exact-match recurrence badge, independent of the session-level label.
+ *   each labeled with its source API turn index (`Turn 0`, …) or
+ *   `Session scope` when the server part has no `turnIndex`; only the
+ *   selected turn's own occurrence (same turn index, paired per occurrence)
+ *   is not shown twice, while identical text from distinct sources stays
+ *   visible. Each card carries its own exact-match recurrence badge,
+ *   independent of the source label.
  * - Per-block `New this turn` / `Also present in prior captured context`
  *   badges aggregate member-part recurrence (either, neither, or both).
  *   Recurrence is capture-only: a separate per-block cache note states that
@@ -2612,8 +2678,8 @@ export function TurnFullContentPanel({
 
   // Shared session context arrives embedded in the single turn-content
   // response (one bounded request, no N-query fan-out). Occurrence
-  // preserving: every entry renders except the selected turn's own source
-  // occurrence(s), paired by span id with multiplicity (see
+  // preserving: every entry renders except the selected turn's own
+  // occurrence(s), paired by turn index with multiplicity (see
   // `resolveSharedDisplay`).
   const sharedDisplay = useMemo(() => {
     if (!data) return null
@@ -2702,10 +2768,10 @@ export function TurnFullContentPanel({
                 Shared session context
               </h4>
               <p className="text-[11px] text-tertiary-foreground leading-relaxed mb-1.5">
-                Session-level system content · applies to every turn · not captured separately for this turn.
+                Captured system prompts contributing to this turn, in capture order · each entry shows its source turn or session scope.
               </p>
               {/* Shared context carries its own exact-match recurrence,
-                  independent of the session-level label. A badge renders
+                  independent of the per-entry source label. A badge renders
                   only with earlier-turn evidence — never "new", since first
                   capture outside the turn spans is unverifiable. */}
               {sharedDisplay.seenBefore ? (
@@ -2721,6 +2787,18 @@ export function TurnFullContentPanel({
               <div className="space-y-2">
                 {sharedDisplay.parts.map((part, idx) => (
                   <div key={`${part.spanId ?? 'session'}-${idx}`} className="rounded border border-border bg-card p-3 overflow-hidden space-y-2" data-testid={`shared-session-context-part-${idx}`}>
+                    {/* Provenance comes from the server's `turnIndex` alone:
+                        a prior-turn occurrence shows its API turn index and a
+                        part with no turnIndex is session scope. Never inferred
+                        from text or span id. */}
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span
+                        className="shrink-0 rounded bg-muted border border-border px-1.5 py-0.5 font-mono text-[10px] font-semibold text-muted-foreground"
+                        data-testid={`shared-session-context-part-${idx}-source`}
+                      >
+                        {part.turnIndex !== undefined ? `Turn ${part.turnIndex}` : 'Session scope'}
+                      </span>
+                    </div>
                     {part.truncated === true ? (
                       <p
                         className="rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300"
