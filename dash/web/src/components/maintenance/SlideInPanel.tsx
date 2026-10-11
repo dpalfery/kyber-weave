@@ -59,7 +59,10 @@ export function SlideInPanel({
       const target = opener.current
       if (target instanceof HTMLElement) target.focus()
     }
-  }, [])
+    // Status and Maintenance swap by re-rendering this same instance, so the effect
+    // re-runs when the title or the opener changes: focus moves into the new panel and
+    // close restores to the control that opened it, not the one that opened the last.
+  }, [title, restoreFocusTo])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
