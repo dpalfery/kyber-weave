@@ -146,6 +146,10 @@ export function ingestBatch(spans: readonly OtlpSpan[], store: CanonStore): Inge
         source: raw.source,
         name: raw.name,
         timestamp: spans[index]?.timestamp ?? raw.timestamp,
+        // The whole decoded span is the evidence the audit row keeps (B7) —
+        // once the record is gone this packet is the only surviving copy.
+        // No harness: attribution named none for this span.
+        rawPayload: JSON.stringify(spans[index]),
       },
     )
   }
@@ -175,6 +179,10 @@ export function ingestBatch(spans: readonly OtlpSpan[], store: CanonStore): Inge
           source: raw.source,
           name: raw.name,
           timestamp: spans[index]?.timestamp ?? raw.timestamp,
+          // Same evidence as the unclaimed path, plus the harness attribution
+          // named so the row is scoped for a per-harness wipe (B7/B10).
+          rawPayload: JSON.stringify(spans[index]),
+          harness,
         },
       )
       quarantined += 1

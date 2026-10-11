@@ -110,6 +110,22 @@ function parseSpanAttributesPath(pathname: string): string | null {
 }
 
 /**
+ * `/api/kyber/quarantine/:spanId` — one quarantined span's audit row plus
+ * the packet it kept (plan 2026-10-10, B7). Everything after the prefix is
+ * the id; `null` means the detail route does not own the path, so the bare
+ * list path and anything nested fall through to their own answers. An empty
+ * or whitespace id still resolves here (as '') so the route answers the
+ * caller-error 400 rather than the catch-all 404.
+ */
+function parseQuarantineDetailPath(pathname: string): string | null {
+  const prefix = '/api/kyber/quarantine/'
+  if (!pathname.startsWith(prefix)) return null
+  const id = pathname.slice(prefix.length)
+  if (id.includes('/')) return null
+  return decodeURIComponent(id).trim()
+}
+
+/**
  * `/api/kyber/session/:id/turn/:index/content` — returns unclipped assembled context
  * for a specific turn index (Task G1 / Decision D14).
  */
@@ -920,6 +936,30 @@ export function handleKyberRequest(
       page,
       limit,
     })
+    return true
+  }
+
+  // One quarantined span's evidence (B7). Registered after the exact list
+  // match so `/api/kyber/quarantine` still answers the page; the detail
+  // path — including a bare trailing slash — is owned here, never by the
+  // catch-all. This is the only route that serves a stored packet; the list
+  // stays light by the same contract.
+  const quarantineSpanId = parseQuarantineDetailPath(url.pathname)
+  if (quarantineSpanId !== null) {
+    if (req.method !== 'GET') {
+      sendKyberJson(res, 405, { error: 'Method Not Allowed' })
+      return true
+    }
+    if (!quarantineSpanId) {
+      sendKyberJson(res, 400, { error: 'Missing span id' })
+      return true
+    }
+    const entry = bridge.getQuarantineEntry(quarantineSpanId)
+    if (!entry) {
+      sendKyberJson(res, 404, { error: 'Quarantine entry not found' })
+      return true
+    }
+    sendKyberJson(res, 200, entry)
     return true
   }
 

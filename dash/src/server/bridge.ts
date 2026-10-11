@@ -28,6 +28,7 @@ import {
   type RunDbRow,
   type HarnessRollupDbRow,
   type ExecutionDbRow,
+  type QuarantineEntryDetail,
 } from '../canon/store.js'
 import { sourceDisplayName, type SourceKind } from '../canon/measurability.js'
 import {
@@ -2327,6 +2328,75 @@ export class KyberBridge {
       | { n?: number }
       | undefined
     return Number(row?.n) || 0
+  }
+
+  /**
+   * One quarantine row in the detail shape the route serves (B7): every
+   * field present, absent values explicit null. The list stays light — this
+   * is the only bridge surface that returns a stored packet, and a row
+   * written before the columns existed answers `rawPayload: null,
+   * evidenceAvailable: false` rather than inventing evidence. `null` when
+   * no row names the span.
+   */
+  getQuarantineEntry(spanId: string): QuarantineEntryDetail | null {
+    if (!spanId) return null
+
+    if (this.store) {
+      return this.store.getQuarantineEntry(spanId) ?? null
+    }
+
+    const db = this.getDb()
+    if (!this.hasTable(db, 'quarantine')) return null
+
+    try {
+      // The shared canon.db may predate the evidence columns; presence-check
+      // each one exactly like getQuarantine does for its optional fields.
+      const cols = new Set(
+        (db!.prepare("PRAGMA table_info('quarantine')").all() as Array<{ name: string }>).map((c) => c.name),
+      )
+      const selectCols = ['span_id', 'namespaces', 'reason']
+      for (const col of ['source', 'name', 'timestamp', 'harness', 'raw_payload']) {
+        selectCols.push(cols.has(col) ? col : `NULL AS ${col}`)
+      }
+      const row = db!
+        .prepare(`SELECT ${selectCols.join(', ')} FROM quarantine WHERE span_id = ?`)
+        .get(spanId) as
+        | {
+            span_id: string
+            namespaces: string | null
+            reason: string | null
+            source: string | null
+            name: string | null
+            timestamp: string | null
+            harness: string | null
+            raw_payload: string | null
+          }
+        | undefined
+      if (row === undefined) return null
+
+      let namespaces: string[] = []
+      try {
+        const parsed: unknown = JSON.parse(row.namespaces ?? '[]')
+        if (Array.isArray(parsed)) {
+          namespaces = parsed.filter((n): n is string => typeof n === 'string')
+        }
+      } catch {}
+
+      return {
+        spanId: row.span_id,
+        source: row.source ?? null,
+        name: row.name ?? null,
+        reason: row.reason ?? '',
+        timestamp: row.timestamp ?? null,
+        namespaces,
+        harness: row.harness ?? null,
+        rawPayload: row.raw_payload ?? null,
+        evidenceAvailable: row.raw_payload !== null && row.raw_payload !== undefined,
+      }
+    } catch (err) {
+      console.warn('[KyberBridge] Failed querying quarantine entry from canon.db:', err)
+      return null
+    }
   }
 
   /**
