@@ -1289,12 +1289,12 @@ describe('SessionInspectorDrawer: Full-content endpoint', () => {
 
 function unescapeHtml(html: string): string {
   return html
-    .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
     .replace(/&#x27;/g, "'")
     .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, '&')
 }
 
 // A Copilot-shaped turn row: the content object carries the flat canonical
