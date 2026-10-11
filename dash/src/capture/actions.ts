@@ -77,7 +77,12 @@ export async function runCaptureAction(request: CaptureActionRequest): Promise<C
         ...(request.probeTimeoutMs === undefined ? {} : { probeTimeoutMs: request.probeTimeoutMs }),
         ...(request.fileFilter === undefined ? {} : { fileFilter: request.fileFilter }),
       })
-      const outcome = outcomeOf(result.events, request.dryRun)
+      // A usage failure (bad endpoint, unknown harness) exits non-zero with no events: no
+      // event can say it, so it must not fall through to a serene `noop`.
+      const outcome =
+        result.exitCode !== 0 && result.events.length === 0
+          ? 'refused'
+          : outcomeOf(result.events, request.dryRun)
       return outcome === 'refused'
         ? { outcome, events: result.events, reason: refusalReason(result.events) }
         : { outcome, events: result.events }

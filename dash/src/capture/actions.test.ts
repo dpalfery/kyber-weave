@@ -338,4 +338,14 @@ describe('runCapture: structured events beside the unchanged text', () => {
     expect(result.stdout).toContain('receiver: none')
     expect(result.stdout).toContain('timed out')
   })
+
+  it('reports a usage failure (bad endpoint) as refused, not noop', async () => {
+    const home = makeHome()
+    const result = await runCaptureAction(
+      request(home, 'claude-code', 'enable', { endpoint: 'ftp://not-otlp.example' }),
+    )
+    expect(result.outcome).toBe('refused')
+    expect(result.reason).toBe('unreadable')
+    expect(result.events).toEqual([])
+  })
 })
