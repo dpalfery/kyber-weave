@@ -85,7 +85,7 @@ function claimableSpan(over: Partial<OtlpSpan> = {}): OtlpSpan {
     traceId: TRACE_ID,
     spanId: SPAN_ID,
     parentSpanId: null,
-    name: 'llm_request',
+    name: 'claude_code.llm_request',
     kind: 'client',
     startTimeUnixNano: '1756980000000000000',
     endTimeUnixNano: '1756980000100000000',
@@ -116,9 +116,10 @@ function enrichingLog(): OtlpLog {
     spanId: SPAN_ID,
     sessionId: null,
     timestamp: '2026-09-04T10:00:00.000Z',
-    body: 'claude api request body',
+    body: 'claude_code.api_request_body',
     attributes: {
-      'claude_code.api_request_body': JSON.stringify({
+      'event.name': 'api_request_body',
+      body: JSON.stringify({
         system: [{ type: 'text', text: 'Projection fixture system prompt.' }],
         tools: [
           {
