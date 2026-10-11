@@ -2360,11 +2360,12 @@ export function TurnContentPartView({
  *   blocks; nothing is summarized, dropped, trimmed, or truncated for
  *   display. When the API flags `truncated`, the exact limitation is stated
  *   while all returned bytes still render.
- * - The session-level system prompt from `sharedContext` renders once under
- *   `Shared session context`, explicitly labeled as session-level content
- *   rather than captured for this turn; an exact duplicate already present
- *   among the turn's own parts is not shown twice. It carries its own
- *   exact-match recurrence badges, independent of the session-level label.
+ * - Every captured `system_prompt` part in `sharedContext.parts`, in
+ *   capture order, renders as its own card under `Shared session context`,
+ *   explicitly labeled as session-level content rather than captured for
+ *   this turn; an exact duplicate already present among the turn's own
+ *   parts is not shown twice. Each card carries its own exact-match
+ *   recurrence badge, independent of the session-level label.
  * - Per-block `New this turn` / `Also present in prior captured context`
  *   badges aggregate member-part recurrence (either, neither, or both).
  *   Recurrence is capture-only: a separate per-block cache note states that

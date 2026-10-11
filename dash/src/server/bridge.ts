@@ -20,6 +20,7 @@ import {
   normalizeHistoryWeeks,
   problemsHarnessWhere,
   quarantineHarnessWhere,
+  systemPromptTextsFromContentColumns,
   toFinding,
   toPrediction,
   toRecord,
@@ -1773,9 +1774,10 @@ export class KyberBridge {
    *
    * Every part carries exact-match `recurrence` against earlier captured
    * turns of this session (same part kind, whole text, hashed), aggregated
-   * per block; `sharedContext` carries the earliest captured system prompt
-   * with its own recurrence. Recurrence is capture-only and never a cache
-   * claim — cache totals stay on the turn row, unattributed to blocks.
+   * per block; `sharedContext` carries every captured `system_prompt` part
+   * in scope, in capture order, each with its own recurrence. Recurrence is
+   * capture-only and never a cache claim — cache totals stay on the turn
+   * row, unattributed to blocks.
    *
    * `budget` caps the returned characters with explicit `truncated` flags.
    * Pass `Number.POSITIVE_INFINITY` for the documented lossless path (the
@@ -2245,26 +2247,55 @@ export class KyberBridge {
   }
 
   /**
-   * Session-wide fallback for the shared system prompt: every captured
+   * Session-wide fallback for the shared system prompts: every captured
    * `system_prompt` part outside `excludeSpan`, in session order. Runs only
    * when the turn spans yielded no prompt (e.g. a prompt living on a
    * non-`llm.invoke` span), and retains system prompts alone — never the
    * surrounding content.
+   *
+   * <remarks>
+   * Cost: this deliberately never calls `loadContentRecords(sessionId)` — that
+   * walk selects every column (including the large `raw` blob) and inflates
+   * every session row's parts just to keep the prompts. The store seam reads
+   * only the two content columns through
+   * `CanonStore.systemPromptPartsForSession`, and the store-less seam runs the
+   * same projection directly; rows carrying parts still inflate their own blob
+   * to filter (deflated bytes admit no SQL index — an indexed pre-filter would
+   * need a schema migration, out of scope), but unrelated rows are never
+   * materialized into records and their other columns never leave SQLite.
+   * Returned content, order, texts, and span ids match the old walk exactly.
+   * </remarks>
    */
   private loadSessionSystemPrompts(
     sessionId: string,
     excludeSpan?: string,
   ): Array<{ text: string; spanId?: string }> {
-    const out: Array<{ text: string; spanId?: string }> = []
-    for (const record of this.loadContentRecords(sessionId)) {
-      if (excludeSpan !== undefined && record.spanId === excludeSpan) continue
-      for (const piece of record.parts) {
-        if (piece.part === 'system_prompt' && piece.text !== '') {
-          out.push({ text: piece.text, spanId: record.spanId })
+    if (!sessionId) return []
+    if (this.store) {
+      return this.store
+        .systemPromptPartsForSession(sessionId, excludeSpan)
+        .map(({ spanId, text }) => ({ text, spanId }))
+    }
+    const db = this.getDb()
+    if (!this.hasTable(db, 'records')) return []
+    try {
+      const rows = db!
+        .prepare(
+          'SELECT span_id, content_json, parts_json FROM records WHERE COALESCE(session_id, trace_id) = ? ORDER BY timestamp',
+        )
+        .all(sessionId) as { span_id: unknown; content_json: unknown; parts_json: unknown }[]
+      const out: Array<{ text: string; spanId?: string }> = []
+      for (const row of rows) {
+        const spanId = String(row.span_id)
+        if (excludeSpan !== undefined && spanId === excludeSpan) continue
+        for (const text of systemPromptTextsFromContentColumns(row.content_json, row.parts_json)) {
+          out.push({ text, spanId })
         }
       }
+      return out
+    } catch {
+      return []
     }
-    return out
   }
 
 

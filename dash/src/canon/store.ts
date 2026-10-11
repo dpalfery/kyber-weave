@@ -871,6 +871,52 @@ export function decompressRaw(blob: Uint8Array): unknown {
   return JSON.parse(inflateSync(Buffer.from(blob)).toString('utf8'))
 }
 
+/**
+ * Session-scope system-prompt texts hiding in one records row's content
+ * columns, without touching anything else on the row.
+ *
+ * <remarks>
+ * Why this shape: the turn-content fallback only needs `system_prompt`
+ * texts, so it must not pay for full records. `content_json` is plain text
+ * and filters with a parse; `parts_json` is deflated with no expression
+ * index into it, so a parts-carrying row still inflates to filter — a true
+ * indexed pre-filter would need a schema migration (a generated column over
+ * the inflated parts), deliberately out of scope. Semantics match the
+ * bridge's `partsFromRow`: parts win when present and non-empty (even when
+ * `content_json` carries something else), otherwise `content_json` decides.
+ * Both callers (the store method below and the store-less bridge path) read
+ * through here so the two seams cannot diverge.
+ * </remarks>
+ */
+export function systemPromptTextsFromContentColumns(
+  contentJson: unknown,
+  partsJson: unknown,
+): string[] {
+  if (partsJson !== null && partsJson !== undefined) {
+    try {
+      const parts = decompressRaw(partsJson as Uint8Array) as ContentPart[]
+      if (Array.isArray(parts) && parts.length > 0) {
+        return [...parts]
+          .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+          .filter((part) => part.part === 'system_prompt' && part.text !== '')
+          .map((part) => part.text)
+      }
+    } catch {
+      // A corrupt blob falls through to content_json — same as partsFromRow.
+    }
+  }
+  if (typeof contentJson === 'string' && contentJson !== '' && contentJson !== '{}') {
+    try {
+      const content = JSON.parse(contentJson) as Partial<Record<string, unknown>>
+      const text = content.system_prompt
+      if (typeof text === 'string' && text !== '') return [text]
+    } catch {
+      return []
+    }
+  }
+  return []
+}
+
 function text(value: unknown): string {
   return value as string
 }
@@ -2123,6 +2169,39 @@ export class CanonStore {
       )
       .all(key) as RecordRow[]
     return rows.map(toRecord)
+  }
+
+  /**
+   * Session-scope system prompts for the shared-context fallback, without
+   * materializing full records.
+   *
+   * <remarks>
+   * The projection selects only the two content columns in session order, so
+   * `raw` (the largest blob per span), tokens, cost, and measurability never
+   * leave SQLite, and no `CanonicalRecord` is built — unrelated rows contribute
+   * nothing but their two content cells. Capture order, exact texts, and span
+   * ids are preserved; budgeting and truncation stay with the caller.
+   * </remarks>
+   */
+  systemPromptPartsForSession(
+    sessionId: string,
+    excludeSpanId?: string,
+  ): Array<{ spanId: string; text: string }> {
+    if (!sessionId) return []
+    const rows = this.db
+      .prepare(
+        'SELECT span_id, content_json, parts_json FROM records WHERE COALESCE(session_id, trace_id) = ? ORDER BY timestamp',
+      )
+      .all(sessionId) as { span_id: unknown; content_json: unknown; parts_json: unknown }[]
+    const out: Array<{ spanId: string; text: string }> = []
+    for (const row of rows) {
+      const spanId = String(row.span_id)
+      if (excludeSpanId !== undefined && spanId === excludeSpanId) continue
+      for (const text of systemPromptTextsFromContentColumns(row.content_json, row.parts_json)) {
+        out.push({ spanId, text })
+      }
+    }
+    return out
   }
 
   /**
