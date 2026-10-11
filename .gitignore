@@ -62,3 +62,6 @@ ds-bundle/
 .design-sync/node_modules
 dash/app/types/
 dash/app/.ds-sync-styles.css
+
+# Local Playwright MCP logs and page snapshots.
+.playwright-mcp/

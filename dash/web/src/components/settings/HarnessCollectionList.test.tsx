@@ -20,7 +20,7 @@ describe('HarnessCollectionList keys', () => {
     harness.statusLines = ['line', 'line']
     const error = vi.spyOn(console, 'error').mockImplementation(() => {})
     const { container } = render(
-      <HarnessCollectionList harnesses={[harness]} busy={false} alerts={{}} onToggle={() => {}} />,
+      <HarnessCollectionList harnesses={[harness]} busy={false} alerts={{}} onToggle={() => {}} onReset={() => {}} />,
     )
     const keyWarnings = error.mock.calls.filter((call) => String(call[0]).includes('same key'))
     error.mockRestore()

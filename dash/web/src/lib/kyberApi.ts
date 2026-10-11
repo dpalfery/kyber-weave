@@ -1643,11 +1643,20 @@ export interface KyberCaptureRefusal {
   events: KyberCaptureEvent[]
 }
 
-/** Exactly the three keys the route accepts. */
+/** Exactly the documented keys the route accepts. */
 export interface KyberCaptureRequest {
   action: KyberCaptureAction
   harness: string
   dryRun: boolean
+  /**
+   * Settings-only opt-in: on Disable with no receipt, remove only this
+   * harness's declared OTEL keys that are present (user-authorized in the
+   * Settings drawer, previewed before writing). Defaults to false: omitted
+   * or false keeps the receipt-only behavior for the CLI and all callers.
+   */
+  removeUnreceiptedKeys?: boolean
+  /** Exact Settings preview echoed on confirmed manual-key removal. */
+  expectedPreviewEvents?: KyberCaptureEvent[]
 }
 
 type Raw = Record<string, unknown>
@@ -1836,7 +1845,7 @@ function parseCaptureRefusal(raw: unknown): KyberCaptureRefusal {
 
 /**
  * `POST /api/kyber/capture`. A dry run previews; a real request writes. The
- * body is built from exactly the three documented keys, so nothing a caller
+ * body is built from exactly the documented keys, so nothing a caller
  * adds can reach the route. A 409 is the server declining (drift, conflict, an
  * unreadable file) and is RETURNED as a refusal for the UI to show; every other
  * non-2xx throws `KyberApiError`.
@@ -1847,7 +1856,17 @@ export async function postKyberCapture(
   const res = await fetch(CAPTURE_PATH, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ action: request.action, harness: request.harness, dryRun: request.dryRun }),
+    body: JSON.stringify(
+      request.removeUnreceiptedKeys === true
+        ? {
+            action: request.action,
+            harness: request.harness,
+            dryRun: request.dryRun,
+            removeUnreceiptedKeys: true,
+            ...(request.expectedPreviewEvents === undefined ? {} : { expectedPreviewEvents: request.expectedPreviewEvents }),
+          }
+        : { action: request.action, harness: request.harness, dryRun: request.dryRun },
+    ),
   })
   if (res.status === 409) return parseCaptureRefusal(await res.json().catch(() => null))
   if (!res.ok) throw new KyberApiError(res.status, CAPTURE_PATH)

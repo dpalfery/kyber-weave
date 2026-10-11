@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 // T8 (RED first): the Settings drawer. It is a DISPLAY layer over
-// `/api/kyber/capture`: every checkbox state comes from the server's status,
+// `/api/kyber/capture`: every button state comes from the server's status,
 // a click asks the server for a dry-run preview, and only Confirm sends the
 // write. The shared T0 fixtures are the wire payloads, consumed unmodified (a
 // test derives a variant by cloning in memory, never by editing the files).
@@ -113,7 +113,12 @@ async function openedDrawer(props: { onClose?: () => void } = {}) {
   return utils
 }
 
-const checkbox = (id: string) => screen.getByTestId(`settings-harness-checkbox-${id}`) as HTMLInputElement
+const enableButton = (id: string) => screen.getByTestId(`settings-harness-enable-${id}`) as HTMLButtonElement
+const disableButton = (id: string) => screen.getByTestId(`settings-harness-disable-${id}`) as HTMLButtonElement
+const enableQuery = (id: string) => screen.queryByTestId(`settings-harness-enable-${id}`) as HTMLButtonElement | null
+const disableQuery = (id: string) => screen.queryByTestId(`settings-harness-disable-${id}`) as HTMLButtonElement | null
+const resetButton = (id: string) => screen.getByTestId(`settings-harness-reset-${id}`) as HTMLButtonElement
+const resetQuery = (id: string) => screen.queryByTestId(`settings-harness-reset-${id}`) as HTMLButtonElement | null
 
 afterEach(() => {
   cleanup()
@@ -211,17 +216,98 @@ describe('SettingsDrawer: opening', () => {
 })
 
 describe('SettingsDrawer: rows come only from the server', () => {
-  it('lists every harness; managed rows get a checkbox, status-only rows do not', async () => {
+  it('lists every harness; managed rows get action buttons, status-only rows do not', async () => {
     stubFetch({})
     await openedDrawer()
 
-    for (const id of ['claude-code', 'copilot', 'opencode']) {
-      expect(screen.getByTestId(`settings-harness-checkbox-${id}`)).toBeDefined()
-    }
+    // Fixture: claude-code is `on` (Disable + Reset), copilot is `partial`
+    // (Enable + Disable), opencode is `off` (Enable).
+    expect(disableButton('claude-code')).toBeDefined()
+    expect(resetButton('claude-code')).toBeDefined()
+    expect(enableButton('copilot')).toBeDefined()
+    expect(disableButton('copilot')).toBeDefined()
+    expect(enableButton('opencode')).toBeDefined()
     for (const id of ['codex', 'pi', 'antigravity']) {
       expect(screen.getByTestId(`settings-harness-row-${id}`)).toBeDefined()
-      expect(screen.queryByTestId(`settings-harness-checkbox-${id}`)).toBeNull()
+      expect(enableQuery(id)).toBeNull()
+      expect(disableQuery(id)).toBeNull()
+      expect(resetQuery(id)).toBeNull()
     }
+  })
+
+  it('labels states Enabled, Disabled, Needs setup and Read-only — never as a button', async () => {
+    stubFetch({})
+    await openedDrawer()
+
+    // Fixture: claude-code is `on`, copilot is `partial`, opencode is `off`.
+    expect(screen.getByTestId('settings-harness-state-claude-code').textContent).toBe('Enabled')
+    expect(screen.getByTestId('settings-harness-state-copilot').textContent).toBe('Needs setup')
+    expect(screen.getByTestId('settings-harness-state-opencode').textContent).toBe('Disabled')
+    expect(screen.getByTestId('settings-harness-state-codex').textContent).toBe('Read-only')
+    expect(disableButton('claude-code').textContent).toBe('Disable')
+    expect(enableButton('copilot').textContent).toBe('Enable')
+    expect(disableButton('copilot').textContent).toBe('Disable')
+    expect(enableButton('opencode').textContent).toBe('Enable')
+    expect(screen.getByTestId('settings-harness-state-claude-code').tagName).not.toBe('BUTTON')
+  })
+
+  it('shows a partial row with Enable and Disable but no Reset', async () => {
+    stubFetch({})
+    await openedDrawer()
+
+    expect(enableButton('copilot')).toBeDefined()
+    expect(disableButton('copilot')).toBeDefined()
+    expect(resetQuery('copilot')).toBeNull()
+  })
+
+  it('shows no action for a row whose state is unknown and says why', async () => {
+    stubFetch({ status: () => ({ json: statusUnknown }) })
+    await openedDrawer()
+
+    expect(enableQuery('claude-code')).toBeNull()
+    expect(disableQuery('claude-code')).toBeNull()
+    expect(screen.getByTestId('settings-harness-reason-claude-code').textContent).toMatch(/unknown|could not/i)
+    // The other managed row stays switchable.
+    expect(enableButton('copilot').disabled).toBe(false)
+  })
+
+  it('shows no action for a not-detected harness that has no receipt, naming the reason', async () => {
+    stubFetch({ status: () => ({ json: mixedWith('opencode', { installed: 'not-detected' }) }) })
+    await openedDrawer()
+
+    expect(enableQuery('opencode')).toBeNull()
+    expect(disableQuery('opencode')).toBeNull()
+    expect(screen.getByTestId('settings-harness-reason-opencode').textContent).toMatch(/not detected/i)
+  })
+
+  it('keeps a not-detected harness switchable off when KyberDash recorded a receipt', async () => {
+    stubFetch({
+      status: () => ({ json: mixedWith('opencode', { installed: 'not-detected', state: 'on', receipt: 'recorded' }) }),
+    })
+    await openedDrawer()
+
+    expect(disableButton('opencode').disabled).toBe(false)
+    expect(disableButton('opencode').textContent).toBe('Disable')
+  })
+
+  it('offers Disable and Reset for an on harness even with no receipt, through the engine-safe path', async () => {
+    stubFetch({})
+    await openedDrawer()
+
+    // Fixture: claude-code is `on` with `receipt: absent`; the engine reports any refusal.
+    expect(disableButton('claude-code').textContent).toBe('Disable')
+    expect(disableButton('claude-code').disabled).toBe(false)
+    expect(resetButton('claude-code')).toBeDefined()
+  })
+
+  it('shows Reset only for a fully-enabled (`on`) harness, never for off or partial', async () => {
+    stubFetch({})
+    await openedDrawer()
+
+    // Fixture: claude-code is `on`, copilot is `partial`, opencode is `off`.
+    expect(resetButton('claude-code')).toBeDefined()
+    expect(resetQuery('copilot')).toBeNull()
+    expect(resetQuery('opencode')).toBeNull()
   })
 
   it('shows status-only rows with their server-provided lines', async () => {
@@ -234,57 +320,6 @@ describe('SettingsDrawer: rows come only from the server', () => {
     expect(screen.getByTestId('settings-harness-row-codex').textContent).toContain(
       'no [otel] table is present; coverage comes from session files',
     )
-  })
-
-  it('renders on as checked, off as unchecked and partial as indeterminate', async () => {
-    // claude-code is on-without-receipt in the fixture; give it a receipt so it is switchable.
-    stubFetch({ status: () => ({ json: mixedWith('claude-code', { receipt: 'recorded' }) }) })
-    await openedDrawer()
-
-    expect(checkbox('claude-code').checked).toBe(true)
-    expect(checkbox('claude-code').indeterminate).toBe(false)
-    expect(checkbox('opencode').checked).toBe(false)
-    expect(checkbox('opencode').indeterminate).toBe(false)
-    expect(checkbox('copilot').indeterminate).toBe(true)
-    expect(checkbox('copilot').getAttribute('aria-checked')).toBe('mixed')
-  })
-
-  it('disables a row whose state is unknown and says why', async () => {
-    stubFetch({ status: () => ({ json: statusUnknown }) })
-    await openedDrawer()
-
-    expect(checkbox('claude-code').disabled).toBe(true)
-    expect(screen.getByTestId('settings-harness-reason-claude-code').textContent).toMatch(/unknown|could not/i)
-    // The other managed row stays switchable.
-    expect(checkbox('copilot').disabled).toBe(false)
-  })
-
-  it('disables a not-detected harness that has no receipt, naming the reason', async () => {
-    stubFetch({ status: () => ({ json: mixedWith('opencode', { installed: 'not-detected' }) }) })
-    await openedDrawer()
-
-    expect(checkbox('opencode').disabled).toBe(true)
-    expect(screen.getByTestId('settings-harness-reason-opencode').textContent).toMatch(/not detected/i)
-  })
-
-  it('keeps a not-detected harness switchable off when KyberDash recorded a receipt', async () => {
-    stubFetch({
-      status: () => ({ json: mixedWith('opencode', { installed: 'not-detected', state: 'on', receipt: 'recorded' }) }),
-    })
-    await openedDrawer()
-
-    expect(checkbox('opencode').disabled).toBe(false)
-    expect(checkbox('opencode').checked).toBe(true)
-  })
-
-  it('disables an on harness with no receipt: the keys were set outside KyberDash', async () => {
-    stubFetch({})
-    await openedDrawer()
-
-    // Fixture: claude-code is `on` with `receipt: absent`.
-    expect(checkbox('claude-code').checked).toBe(true)
-    expect(checkbox('claude-code').disabled).toBe(true)
-    expect(screen.getByTestId('settings-harness-reason-claude-code').textContent).toMatch(/outside KyberDash|nothing to restore/i)
   })
 
   it('shows the endpoint-differs warning as visible text', async () => {
@@ -315,7 +350,7 @@ describe('SettingsDrawer: preview, confirm, cancel', () => {
     const mock = stubFetch({ status: offClaude, post: () => ({ json: postPreviewEnable }) })
     await openedDrawer()
 
-    fireEvent.click(checkbox('claude-code'))
+    fireEvent.click(enableButton('claude-code'))
 
     const preview = await screen.findByTestId('settings-preview')
     expect(mock.posts()).toHaveLength(1)
@@ -324,8 +359,8 @@ describe('SettingsDrawer: preview, confirm, cancel', () => {
     expect(preview.textContent).toContain('env.OTEL_LOGS_EXPORTER')
     expect(preview.textContent).toContain('console')
     expect(preview.textContent).toContain('otlp')
-    // Still unchanged until Confirm: the checkbox shows server state only.
-    expect(checkbox('claude-code').checked).toBe(false)
+    // Still unchanged until Confirm: the row shows server state only.
+    expect(enableButton('claude-code').textContent).toBe('Enable')
   })
 
   it('names the receiver change in the preview when the route says it will enable it', async () => {
@@ -335,7 +370,7 @@ describe('SettingsDrawer: preview, confirm, cancel', () => {
     stubFetch({ status: offClaude, post: () => ({ json: withReceiver }) })
     await openedDrawer()
 
-    fireEvent.click(checkbox('claude-code'))
+    fireEvent.click(enableButton('claude-code'))
 
     const note = await screen.findByTestId('settings-preview-receiver-note')
     expect(note.textContent).toMatch(/receiver/i)
@@ -349,7 +384,7 @@ describe('SettingsDrawer: preview, confirm, cancel', () => {
     stubFetch({ status: offClaude, post: () => ({ json: hostedPreview }) })
     await openedDrawer()
 
-    fireEvent.click(checkbox('claude-code'))
+    fireEvent.click(enableButton('claude-code'))
 
     const note = await screen.findByTestId('settings-preview-receiver-note')
     expect(note.textContent).toMatch(/already on/i)
@@ -359,7 +394,7 @@ describe('SettingsDrawer: preview, confirm, cancel', () => {
   it('Cancel sends nothing more and dismisses the preview', async () => {
     const mock = stubFetch({ status: offClaude, post: () => ({ json: postPreviewEnable }) })
     await openedDrawer()
-    fireEvent.click(checkbox('claude-code'))
+    fireEvent.click(enableButton('claude-code'))
     await screen.findByTestId('settings-preview')
     const callsBefore = mock.calls.length
 
@@ -386,7 +421,7 @@ describe('SettingsDrawer: preview, confirm, cancel', () => {
       },
     })
     await openedDrawer()
-    fireEvent.click(checkbox('copilot'))
+    fireEvent.click(enableButton('copilot'))
     await screen.findByTestId('settings-preview')
 
     fireEvent.click(screen.getByTestId('settings-preview-confirm'))
@@ -398,37 +433,46 @@ describe('SettingsDrawer: preview, confirm, cancel', () => {
     expect(screen.getByTestId('settings-result').textContent).toMatch(/copilot/i)
   })
 
-  it('a partial row asks to enable (complete) rather than disable', async () => {
-    const mock = stubFetch({ post: () => ({ json: postPreviewEnable }) })
-    await openedDrawer()
-
-    fireEvent.click(checkbox('copilot'))
-
-    await screen.findByTestId('settings-preview')
-    expect(mock.posts()[0]!.body).toEqual({ action: 'enable', harness: 'copilot', dryRun: true })
-  })
-
-  it('an on row with a receipt asks to disable', async () => {
+  it('an on row asks to disable with the Settings manual-key opt-in', async () => {
     const mock = stubFetch({
       status: () => ({ json: mixedWith('claude-code', { receipt: 'recorded' }) }),
       post: () => ({ json: postPreviewEnable }),
     })
     await openedDrawer()
 
-    fireEvent.click(checkbox('claude-code'))
+    fireEvent.click(disableButton('claude-code'))
 
     await screen.findByTestId('settings-preview')
-    expect(mock.posts()[0]!.body).toEqual({ action: 'disable', harness: 'claude-code', dryRun: true })
+    expect(mock.posts()[0]!.body).toEqual({
+      action: 'disable',
+      harness: 'claude-code',
+      dryRun: true,
+      removeUnreceiptedKeys: true,
+    })
   })
 
-  it('shows a 409 drift refusal as an alert with the drifted keys, leaves the checkbox unchanged and writes nothing', async () => {
+  it('a partial row shows Needs setup with Enable and no Reset', async () => {
+    const mock = stubFetch({ post: () => ({ json: postPreviewEnable }) })
+    await openedDrawer()
+
+    expect(screen.getByTestId('settings-harness-state-copilot').textContent).toBe('Needs setup')
+    expect(enableButton('copilot').textContent).toBe('Enable')
+    expect(resetQuery('copilot')).toBeNull()
+
+    fireEvent.click(enableButton('copilot'))
+
+    await screen.findByTestId('settings-preview')
+    expect(mock.posts()[0]!.body).toEqual({ action: 'enable', harness: 'copilot', dryRun: true })
+  })
+
+  it('shows a 409 drift refusal as an alert with the drifted keys, leaves the row unchanged and writes nothing', async () => {
     const mock = stubFetch({
       status: () => ({ json: mixedWith('claude-code', { receipt: 'recorded' }) }),
       post: () => ({ status: 409, json: postRefusedDrift }),
     })
     await openedDrawer()
 
-    fireEvent.click(checkbox('claude-code'))
+    fireEvent.click(disableButton('claude-code'))
 
     const alert = await screen.findByTestId('settings-harness-alert-claude-code')
     expect(alert.getAttribute('role')).toBe('alert')
@@ -436,7 +480,7 @@ describe('SettingsDrawer: preview, confirm, cancel', () => {
     expect(alert.textContent).toContain('env.OTEL_LOG_USER_PROMPTS')
     expect(alert.textContent).toContain('env.OTEL_LOG_RAW_API_BODIES')
     expect(screen.queryByTestId('settings-preview')).toBeNull()
-    expect(checkbox('claude-code').checked).toBe(true)
+    expect(disableButton('claude-code').textContent).toBe('Disable')
     expect(mock.posts()).toHaveLength(1)
   })
 
@@ -444,14 +488,14 @@ describe('SettingsDrawer: preview, confirm, cancel', () => {
     stubFetch({ status: offClaude, post: () => ({ status: 500, json: { error: '/etc/secret/path leaked' } }) })
     await openedDrawer()
 
-    fireEvent.click(checkbox('claude-code'))
+    fireEvent.click(enableButton('claude-code'))
 
     const alert = await screen.findByTestId('settings-harness-alert-claude-code')
     expect(alert.textContent).not.toContain('/etc/secret/path')
     expect(alert.textContent).toMatch(/could not/i)
   })
 
-  it('blocks every checkbox and a second click while a request is in flight', async () => {
+  it('blocks every button and a second click while a request is in flight', async () => {
     let release!: () => void
     const hold = new Promise<void>((resolve) => {
       release = resolve
@@ -462,10 +506,10 @@ describe('SettingsDrawer: preview, confirm, cancel', () => {
     })
     await openedDrawer()
 
-    fireEvent.click(checkbox('claude-code'))
-    await waitFor(() => expect(checkbox('opencode').disabled).toBe(true))
-    expect(checkbox('copilot').disabled).toBe(true)
-    fireEvent.click(checkbox('opencode'))
+    fireEvent.click(enableButton('claude-code'))
+    await waitFor(() => expect(enableButton('opencode').disabled).toBe(true))
+    expect(enableButton('copilot').disabled).toBe(true)
+    fireEvent.click(enableButton('opencode'))
     expect(mock.posts()).toHaveLength(1)
 
     release()
@@ -482,7 +526,7 @@ describe('SettingsDrawer: preview, confirm, cancel', () => {
       post: (call) => (call.body?.dryRun === true ? { json: postPreviewEnable } : { json: postWroteEnable, hold }),
     })
     await openedDrawer()
-    fireEvent.click(checkbox('claude-code'))
+    fireEvent.click(enableButton('claude-code'))
     await screen.findByTestId('settings-preview')
 
     fireEvent.click(screen.getByTestId('settings-preview-confirm'))
@@ -508,7 +552,7 @@ describe('SettingsDrawer: preview, confirm, cancel', () => {
       },
     })
     await openedDrawer()
-    fireEvent.click(checkbox('opencode'))
+    fireEvent.click(disableButton('opencode'))
     await screen.findByTestId('settings-preview')
 
     fireEvent.click(screen.getByTestId('settings-preview-confirm'))
@@ -516,6 +560,161 @@ describe('SettingsDrawer: preview, confirm, cancel', () => {
     const note = await screen.findByTestId('settings-receiver-note')
     expect(note.textContent).toMatch(/still hosted/i)
     expect(note.textContent).toMatch(/receiver section|switch it off/i)
+  })
+
+  it('a partial row Disable also carries the Settings manual-key opt-in, with Reset hidden', async () => {
+    const mock = stubFetch({ post: () => ({ json: postPreviewEnable }) })
+    await openedDrawer()
+
+    expect(resetQuery('copilot')).toBeNull()
+    fireEvent.click(disableButton('copilot'))
+
+    await screen.findByTestId('settings-preview')
+    expect(mock.posts()[0]!.body).toEqual({
+      action: 'disable',
+      harness: 'copilot',
+      dryRun: true,
+      removeUnreceiptedKeys: true,
+    })
+  })
+
+  it('the confirmed Disable repeats the opt-in on the write', async () => {
+    let expectedPreviewEvents: Json[] = []
+    const mock = stubFetch({
+      status: () => ({ json: mixedWith('opencode', { state: 'on', receipt: 'recorded' }) }),
+      post: (call) => {
+        if (call.body?.dryRun === true) {
+          const preview = clone(postDisableLast) as Json
+          preview.dryRun = true
+          preview.outcome = 'previewed'
+          preview.events[0].kind = 'would-restore'
+          expectedPreviewEvents = preview.events
+          return { json: preview }
+        }
+        return { json: postDisableLast }
+      },
+    })
+    await openedDrawer()
+    fireEvent.click(disableButton('opencode'))
+    await screen.findByTestId('settings-preview')
+
+    fireEvent.click(screen.getByTestId('settings-preview-confirm'))
+
+    await waitFor(() => expect(mock.posts()).toHaveLength(2))
+    expect(mock.posts()[1]!.body).toEqual({
+      action: 'disable',
+      harness: 'opencode',
+      dryRun: false,
+      removeUnreceiptedKeys: true,
+      expectedPreviewEvents,
+    })
+  })
+})
+
+describe('SettingsDrawer: reset', () => {
+  it('shows Reset only for a managed on row; partial and off rows have none', async () => {
+    stubFetch({})
+    await openedDrawer()
+
+    // Fixture: claude-code is `on`, copilot is `partial`, opencode is `off`.
+    expect(resetQuery('claude-code')).not.toBeNull()
+    expect(resetQuery('copilot')).toBeNull()
+    expect(resetQuery('opencode')).toBeNull()
+    expect(resetQuery('codex')).toBeNull()
+  })
+
+  it('shows Reset for an on row without a receipt and re-runs enable, previewed first', async () => {
+    // Fixture default: claude-code is `on` with `receipt: absent`.
+    const mock = stubFetch({ post: () => ({ json: postPreviewEnable }) })
+    await openedDrawer()
+
+    fireEvent.click(screen.getByTestId('settings-harness-reset-claude-code'))
+
+    const preview = await screen.findByTestId('settings-preview')
+    expect(mock.posts()).toHaveLength(1)
+    expect(mock.posts()[0]!.body).toEqual({ action: 'enable', harness: 'claude-code', dryRun: true })
+    expect(preview.textContent).toContain('Reset collection for Claude Code')
+  })
+
+  it('Confirm on a reset reapplies through the enable path and says reapplied', async () => {
+    let written = false
+    const mock = stubFetch({
+      status: () => ({ json: statusMixed }),
+      post: (call) => {
+        if (call.body?.dryRun === true) {
+          const preview = clone(postWroteEnable) as Json
+          preview.dryRun = true
+          preview.outcome = 'previewed'
+          preview.events[0].kind = 'would-write'
+          return { json: preview }
+        }
+        written = true
+        return { json: postWroteEnable }
+      },
+    })
+    await openedDrawer()
+
+    fireEvent.click(screen.getByTestId('settings-harness-reset-claude-code'))
+    await screen.findByTestId('settings-preview')
+    fireEvent.click(screen.getByTestId('settings-preview-confirm'))
+
+    await waitFor(() => expect(mock.posts()).toHaveLength(2))
+    expect(mock.posts()[1]!.body).toEqual({ action: 'enable', harness: 'claude-code', dryRun: false })
+    expect(written).toBe(true)
+    await waitFor(() => expect(screen.getByTestId('settings-result').textContent).toMatch(/reapplied/i))
+  })
+
+  it('a reset refusal surfaces as an alert and never reports success', async () => {
+    stubFetch({
+      status: () => ({ json: mixedWith('claude-code', { receipt: 'recorded' }) }),
+      post: () => ({ status: 409, json: postRefusedDrift }),
+    })
+    await openedDrawer()
+
+    fireEvent.click(screen.getByTestId('settings-harness-reset-claude-code'))
+
+    const alert = await screen.findByTestId('settings-harness-alert-claude-code')
+    expect(alert.textContent).toContain('drifted since enable')
+    expect(screen.queryByTestId('settings-preview')).toBeNull()
+    expect(screen.queryByTestId('settings-result')).toBeNull()
+  })
+})
+
+describe('SettingsDrawer: collapse', () => {
+  it('renders the harness collection as an open disclosure with an enabled count', async () => {
+    stubFetch({})
+    await openedDrawer()
+
+    const group = screen.getByTestId('settings-harness-group')
+    expect(group.tagName).toBe('DETAILS')
+    expect(group.hasAttribute('open')).toBe(true)
+    // Fixture: exactly one managed harness is `on`.
+    expect(screen.getByTestId('settings-harness-enabled-count').textContent).toBe('1 enabled')
+  })
+
+  it('tucks paths, warnings and manual steps inside per-row configuration details', async () => {
+    stubFetch({})
+    await openedDrawer()
+
+    for (const id of ['claude-code', 'copilot', 'opencode']) {
+      const details = screen.getByTestId(`settings-harness-details-${id}`)
+      expect(details.tagName).toBe('DETAILS')
+      expect(details.hasAttribute('open')).toBe(false)
+      expect(details.textContent).toContain('Configuration details')
+    }
+    // Compact rows still show the primary actions: Reset and Disable for the
+    // `on` row, Enable for the `off` row.
+    expect(disableButton('claude-code').textContent).toBe('Disable')
+    expect(resetQuery('claude-code')).not.toBeNull()
+    expect(enableButton('opencode').textContent).toBe('Enable')
+  })
+
+  it('keeps the dashboard port control visible beside the collection group', async () => {
+    stubFetch({})
+    await openedDrawer()
+
+    expect(screen.getByTestId('dashboard-port-setting')).toBeDefined()
+    expect(screen.getByTestId('dashboard-port-input')).toBeDefined()
   })
 })
 

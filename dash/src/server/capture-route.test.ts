@@ -589,7 +589,10 @@ describe('POST /api/kyber/capture', () => {
     ['a string dryRun', { action: 'enable', harness: 'opencode', dryRun: 'false' }],
     ['a null dryRun', { action: 'enable', harness: 'opencode', dryRun: null }],
     ['a number dryRun', { action: 'disable', harness: 'opencode', dryRun: 0 }],
-    ['an extra key beyond the three', { action: 'enable', harness: 'opencode', dryRun: false, endpoint: 'http://127.0.0.1:4318' }],
+    ['an extra key beyond the documented set', { action: 'enable', harness: 'opencode', dryRun: false, endpoint: 'http://127.0.0.1:4318' }],
+    ['the opt-in on enable', { action: 'enable', harness: 'opencode', dryRun: false, removeUnreceiptedKeys: true }],
+    ['a non-boolean opt-in', { action: 'disable', harness: 'opencode', dryRun: false, removeUnreceiptedKeys: 'yes' }],
+    ['a confirmed manual-key removal without its preview', { action: 'disable', harness: 'opencode', dryRun: false, removeUnreceiptedKeys: true }],
   ])('rejects %s with 400 and writes nothing', async (_label, payload) => {
     const home = makeHome()
     const configPath = opencodePath(home)
@@ -929,6 +932,93 @@ describe('POST /api/kyber/capture', () => {
     expect(doc.reason).toBe('unparseable')
     expect(ownKeys(doc)).toEqual(['error', 'events', 'outcome', 'reason'])
     expect((doc.events ?? [])[0]).toMatchObject({ kind: 'refused', harness: 'claude-code' })
+  })
+
+  it('removes only declared keys on a Settings disable with the opt-in and no receipt, preserving the rest', async () => {
+    const home = makeHome()
+    const seed =
+      `${JSON.stringify({ env: { OTEL_LOGS_EXPORTER: 'otlp', UNRELATED_OWNER_KEY: 'keep' } }, null, 2)}\n`
+    writeConfig(claudePath(home), seed)
+    const deps = makeCaptureDeps(captureSettings(home))
+
+    const preview = await callRoute('POST', PATH, {
+      deps,
+      payload: { action: 'disable', harness: 'claude-code', dryRun: true, removeUnreceiptedKeys: true },
+    })
+    expect(preview.status).toBe(200)
+    const previewDoc = asBody(preview.body)
+    expect(previewDoc.outcome).toBe('previewed')
+    expect(readFileSync(claudePath(home), 'utf8')).toBe(seed)
+
+    const { status, body } = await callRoute('POST', PATH, {
+      deps,
+      payload: {
+        action: 'disable',
+        harness: 'claude-code',
+        dryRun: false,
+        removeUnreceiptedKeys: true,
+        expectedPreviewEvents: previewDoc['events'],
+      },
+    })
+    expect(status).toBe(200)
+    expect(asBody(body).outcome).toBe('wrote')
+    const doc = JSON.parse(readFileSync(claudePath(home), 'utf8')) as { env: Record<string, unknown> }
+    expect(doc.env['OTEL_LOGS_EXPORTER']).toBeUndefined()
+    expect(doc.env['UNRELATED_OWNER_KEY']).toBe('keep')
+    expect(existsSync(receiptPathForHome(home))).toBe(false)
+  })
+
+  it('refuses a manual-key removal when a value changed after the Settings preview', async () => {
+    const home = makeHome()
+    const seed = `${JSON.stringify({ env: { OTEL_LOGS_EXPORTER: 'otlp', UNRELATED_OWNER_KEY: 'keep' } }, null, 2)}\n`
+    writeConfig(claudePath(home), seed)
+    const deps = makeCaptureDeps(captureSettings(home))
+
+    const preview = await callRoute('POST', PATH, {
+      deps,
+      payload: { action: 'disable', harness: 'claude-code', dryRun: true, removeUnreceiptedKeys: true },
+    })
+    const previewDoc = asBody(preview.body)
+    const changed = `${JSON.stringify({ env: { OTEL_LOGS_EXPORTER: 'console', UNRELATED_OWNER_KEY: 'keep' } }, null, 2)}\n`
+    writeConfig(claudePath(home), changed)
+
+    const { status, body } = await callRoute('POST', PATH, {
+      deps,
+      payload: {
+        action: 'disable',
+        harness: 'claude-code',
+        dryRun: false,
+        removeUnreceiptedKeys: true,
+        expectedPreviewEvents: previewDoc['events'],
+      },
+    })
+
+    expect(status).toBe(409)
+    expect((asBody(body) as Record<string, unknown>)['error']).toMatch(/changed since preview/i)
+    expect(asBody(body).reason).toBe('drift')
+    expect(readFileSync(claudePath(home), 'utf8')).toBe(changed)
+  })
+
+  it('refuses a Settings disable with the opt-in when the receipt is corrupt, writing nothing', async () => {
+    const home = makeHome()
+    const seed = `${JSON.stringify({ env: { OTEL_LOGS_EXPORTER: 'otlp' } }, null, 2)}\n`
+    writeConfig(claudePath(home), seed)
+    writeConfig(receiptPathForHome(home), '{not json')
+    const deps = makeCaptureDeps(captureSettings(home))
+
+    const { status, body } = await callRoute('POST', PATH, {
+      deps,
+      payload: {
+        action: 'disable',
+        harness: 'claude-code',
+        dryRun: false,
+        removeUnreceiptedKeys: true,
+        expectedPreviewEvents: [],
+      },
+    })
+    expect(status).toBe(409)
+    expect(asBody(body).reason).toBe('unparseable')
+    expect(readFileSync(claudePath(home), 'utf8')).toBe(seed)
   })
 
   it('answers the fixed 500 body for a thrown engine failure, on GET and POST, and keeps serving', async () => {

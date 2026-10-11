@@ -129,6 +129,20 @@ function parseRefusal(errors: readonly ParseError[]): string {
   return `refusing to rewrite a JSON document that did not parse${where}`
 }
 
+/**
+ * Refusal text when a JSON/JSONC document does not parse, else undefined.
+ * An empty document is not malformed: it simply holds no keys. WHY this
+ * exists alongside `readJsonKeys`: that reader reports every key absent on a
+ * broken file, which is the right answer for status but would let a removal
+ * path mistake "malformed" for "nothing to remove".
+ */
+export function jsonParseRefusal(content: string): string | undefined {
+  const { body } = splitBom(content)
+  if (body.trim() === '') return undefined
+  const parsed = parseDocument(body)
+  return parsed.errors.length > 0 ? parseRefusal(parsed.errors) : undefined
+}
+
 /** Read one key out of already-parsed JSON. */
 export function getJsonValue(parsed: unknown, key: string): JsonPrior {
   return getByPath(parsed, resolveKeyPath(parsed, key))
