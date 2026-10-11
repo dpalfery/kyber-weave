@@ -19,7 +19,6 @@ namespace KyberWeave.Tests;
 /// and source discovery boundaries before toolchain qualification and runtime rendering.
 /// Covers Test Contract K6 (K6a, K6b, K6c, K6d) from docs/plans/2026-08-14-kyber-squad-unified-agent-skill-deployment.md.
 /// </summary>
-[Collection(SquadProcessEnvironmentCollection.Name)]
 public sealed class SquadCliCommandTests : IDisposable
 {
     private readonly TempDirectory _temp = new();
