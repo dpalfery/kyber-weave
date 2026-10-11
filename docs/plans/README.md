@@ -29,7 +29,6 @@ Closeout explicitly distinguishes between two waiver categories:
 
 | Plan | Status | Date | Development mode | Goal |
 |---|---|---|---|---|---|
-| [2026-10-10-kyberdash-sessions-500-diagnostic.md](2026-10-10-kyberdash-sessions-500-diagnostic.md) | Blocked | 2026-10-10 | test-first | Preserve and classify one reproducible Sessions HTTP 500 before adding an exact RED test or changing application code; stop for user evidence while all probes remain 2xx. |
 
 Earlier history: pipeline T9 and spine S-docs harvested 2026-09-13 into [dash/architecture.md](../dash/architecture.md), [dash/runbook.md](../dash/runbook.md), [dash/telemetry-inventory.md](../dash/telemetry-inventory.md), [ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md), and [ADR 0018](../adr/0018-kyberdash-content-retention-purge.md). ADRs 0012–0015 remain the spine harvest (0014 notes that `kyber purge-content` was not shipped). Residual risks (T8 live-source coverage, findings client-side harness filter) live on the archived plans — they are not shipped claims.
 
