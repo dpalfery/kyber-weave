@@ -367,6 +367,66 @@ describe('SessionInspectorDrawer: human-readable API context display', () => {
       }
     }
   })
+
+  it('preserves whitespace-only section bodies in the formatted view with a visible marker', () => {
+    const inner = ' \n\t '
+    const raw = `<system>${inner}</system>`
+    const element = React.createElement(XmlFoldedText, { text: raw })
+    const html = renderHtml(element)
+    const text = unescapeHtml(html)
+
+    // Structural section still folds with a readable label and no delimiters.
+    expect(html).toContain('data-testid="folded-tag-system"')
+    expect(html).not.toContain('&lt;system')
+    expect(html).not.toContain('&lt;/system')
+    expect(html).toContain('>system<')
+    // The exact whitespace body stays in its own text node, untrimmed.
+    expect(html).toContain('data-testid="folded-tag-system-whitespace"')
+    expect(text).toContain(inner)
+    // Whitespace-only data is visibly and accessibly marked without
+    // replacing the original text.
+    expect(html).toContain('data-testid="folded-tag-system-marker"')
+    expect(text).toContain('whitespace-only')
+    expect(html).toContain('contains whitespace-only content')
+  })
+
+  it('keeps raw toggle and copy byte-exact for whitespace-only sections', () => {
+    const inner = ' \n\t '
+    const raw = `<system>${inner}</system>`
+
+    const rawHtml = renderHtml(React.createElement(ToggleRawView, {
+      text: raw,
+      label: 'System prompt',
+      rawTestId: 'readable-ws-raw',
+      copyTestId: 'copy-readable-ws',
+      viewPrefix: 'readable-ws',
+      defaultView: 'raw',
+    }))
+    // Raw view preserves the entire original source string unchanged.
+    expect(rawHtml).toContain('data-testid="readable-ws-raw"')
+    expect(unescapeHtml(rawHtml)).toContain(raw)
+
+    // Copy writes the exact source bytes, not a trimmed expansion.
+    const written: string[] = []
+    const nav = (globalThis as { navigator?: unknown }).navigator
+    const hadNavigator = nav !== undefined
+    Object.defineProperty(globalThis, 'navigator', {
+      value: { clipboard: { writeText: (s: string) => { written.push(s); return Promise.resolve() } } },
+      configurable: true,
+    })
+    try {
+      const button = CopyExactButton({ text: raw, testId: 'copy-ws-probe' }) as React.ReactElement
+      ;(button.props as { onClick: () => void }).onClick()
+      expect(written).toEqual([raw])
+    } finally {
+      if (hadNavigator) {
+        Object.defineProperty(globalThis, 'navigator', { value: nav, configurable: true })
+      } else {
+        const g = globalThis as { navigator?: unknown }
+        delete g.navigator
+      }
+    }
+  })
 })
 
 describe('SessionInspectorDrawer: Tool Call and Tool Result Formatting', () => {

@@ -271,11 +271,17 @@ export function XmlFoldedText({ text, className }: { text: string; className?: s
 
         const inner = chunk.content ?? ''
         if (inner.trim() === '') {
+          const isWhitespaceOnly = inner.length > 0
           return (
             <div
               key={i}
               className="border border-border rounded my-1 bg-card/60 px-3 py-1.5 flex items-center gap-2"
               data-testid={`folded-tag-${chunk.tag}`}
+              aria-label={
+                isWhitespaceOnly
+                  ? `${chunk.tag} section contains whitespace-only content`
+                  : `${chunk.tag} section is empty`
+              }
             >
               <span className="shrink-0 rounded bg-amber-500/15 border border-amber-500/30 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-amber-600 dark:text-amber-400">
                 {chunk.tag}
@@ -285,6 +291,18 @@ export function XmlFoldedText({ text, className }: { text: string; className?: s
                   {chunk.attributes}
                 </span>
               ) : null}
+              <span
+                className="shrink-0 font-mono text-[11px] italic text-tertiary-foreground"
+                data-testid={`folded-tag-${chunk.tag}-marker`}
+              >
+                {isWhitespaceOnly ? 'whitespace-only' : 'empty'}
+              </span>
+              <span
+                className="whitespace-pre-wrap break-words font-mono text-[11px] text-tertiary-foreground"
+                data-testid={`folded-tag-${chunk.tag}-whitespace`}
+              >
+                {inner}
+              </span>
             </div>
           )
         }
