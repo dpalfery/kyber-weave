@@ -54,7 +54,7 @@ export function defaultExistenceProbe(path: string): ExistenceResult {
 type Probe = { label: string; path: string }
 type ProbeGroup = { probes: Probe[] }
 
-function dirnameFor(platform: NodeJS.Platform, path: string): string {
+export function dirnameFor(platform: NodeJS.Platform, path: string): string {
   return platform === 'win32' ? win32.dirname(path) : posix.dirname(path)
 }
 

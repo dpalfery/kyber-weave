@@ -10,8 +10,6 @@
 // key in the owner's config — an API key sharing the same `env` object, say —
 // is never read into a value that can reach a response.
 
-import { dirname } from 'node:path'
-
 import {
   declaredFiles,
   fileIdFor,
@@ -26,6 +24,7 @@ import { revertJsonEdits } from './edit-json.js'
 import {
   defaultExistenceProbe,
   detectInstall,
+  dirnameFor,
   type ExistenceProbe,
   type InstallDetection,
   type InstallState,
@@ -129,21 +128,23 @@ function isFileApplicable(
   writer: CaptureHarnessWriter,
   path: string,
   existence: ExistenceProbe,
+  platform: NodeJS.Platform,
 ): boolean {
   if (writer.kind !== 'managed' || (writer.configFiles?.length ?? 0) < 2) return true
   const file = existence(path)
   if (file !== 'absent') return true
-  return existence(dirname(path)) !== 'absent'
+  return existence(dirnameFor(platform, path)) !== 'absent'
 }
 
 /** The `fileFilter` the capture route hands the engine so enable honors D19. */
 export function createApplicabilityFilter(
   writers: readonly CaptureHarnessWriter[],
   existence: ExistenceProbe = defaultExistenceProbe,
+  platform: NodeJS.Platform = process.platform,
 ): (file: { harnessId: string; fileId: string; path: string }) => boolean {
   return (file) => {
     const writer = writers.find((candidate) => candidate.id === file.harnessId)
-    return writer === undefined ? true : isFileApplicable(writer, file.path, existence)
+    return writer === undefined ? true : isFileApplicable(writer, file.path, existence, platform)
   }
 }
 
@@ -178,7 +179,7 @@ function analyseManagedFile(
   const base: CaptureFileStatus = {
     id: file.id,
     path: file.path,
-    applicable: isFileApplicable(writer, file.path, existence),
+    applicable: isFileApplicable(writer, file.path, existence, ctx.env.platform),
     exists: read.error !== undefined ? null : read.found,
     expectedKeys,
     presentKeys: [],

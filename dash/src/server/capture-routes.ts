@@ -160,7 +160,7 @@ async function answerPost(
     ...(settings.appDataDir === undefined ? {} : { appDataDir: settings.appDataDir }),
     ...(settings.fetchHealth === undefined ? {} : { fetchHealth: settings.fetchHealth }),
     ...(settings.probeTimeoutMs === undefined ? {} : { probeTimeoutMs: settings.probeTimeoutMs }),
-    fileFilter: createApplicabilityFilter(CAPTURE_HARNESS_REGISTRY),
+    fileFilter: createApplicabilityFilter(CAPTURE_HARNESS_REGISTRY, undefined, ctx.env.platform),
   })
 
   // D5: a real enable that wrote something makes sure the receiver is hosted, after the

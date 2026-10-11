@@ -372,6 +372,16 @@ describe('createApplicabilityFilter', () => {
   })
 })
 
+describe('createApplicabilityFilter platform', () => {
+  it('takes the host directory of a win32 path with win32 rules on any host', () => {
+    const file = 'C:\\Users\\x\\AppData\\Roaming\\Code - Insiders\\User\\settings.json'
+    const dir = 'C:\\Users\\x\\AppData\\Roaming\\Code - Insiders\\User'
+    const probe = (path: string) => (path === dir ? ('present' as const) : ('absent' as const))
+    const filter = createApplicabilityFilter(CAPTURE_HARNESS_REGISTRY, probe, 'win32')
+    expect(filter({ harnessId: 'copilot', fileId: 'vscode-insiders', path: file })).toBe(true)
+  })
+})
+
 describe('buildHarnessStatus', () => {
   it('builds one harness on its own', () => {
     const writer = CAPTURE_HARNESS_REGISTRY.find((candidate) => candidate.id === 'opencode')!
