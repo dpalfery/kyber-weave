@@ -701,7 +701,7 @@ export const copilotAdapter: HarnessAdapter = {
       }
     }
     let score = 0
-    if (hasNamespace(span.attributes, COPILOT_VENDOR_NAMESPACES) || isCopilotEvidence) {
+    if (hasNamespace(span.attributes, COPILOT_VENDOR_NAMESPACES)) {
       score += VENDOR_EVIDENCE
     }
     if (INPUT_TOKEN_KEYS.some((key) => key in span.attributes)) score += USAGE_EVIDENCE
