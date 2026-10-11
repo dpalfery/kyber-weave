@@ -161,6 +161,19 @@ describe('parseClaudeApiRequestBody — messages', () => {
     expect(parts.some((part) => part.text.includes(DOCUMENT_DATA))).toBe(false)
   })
 
+  it('collapses a block whose bytes are not strings — object-shaped data is payload too', () => {
+    const parts = parseClaudeApiRequestBody(
+      JSON.stringify({
+        messages: [
+          { role: 'user', content: [{ type: 'gui_frame', data: { base64: IMAGE_DATA } }] },
+        ],
+      }),
+    )
+
+    expect(parts.map((part) => part.text)).toEqual(['[gui_frame block]'])
+    expect(parts.some((part) => part.text.includes(IMAGE_DATA))).toBe(false)
+  })
+
   it('skips thinking blocks and never invents an instruction_context split', () => {
     const parts = parseClaudeApiRequestBody(JSON.stringify(REQUEST))
     const texts = parts.map((part) => part.text)
@@ -174,9 +187,10 @@ describe('parseClaudeApiRequestBody — messages', () => {
 })
 
 describe('claudeApiRequestBodyFailureReason', () => {
-  it('names the content-length setting for a body cut off mid-document — it still begins like JSON', () => {
-    const body =
-      '{"system":"Synthetic system policy for the request body.","messages":[{"role":"user","content":"Synth'
+  it.each([
+    ['cut mid-string', '{"system":"Synthetic system policy for the request body.","messages":[{"role":"user","content":"Synth'],
+    ['cut mid-structure', '{"a": 1'],
+  ])('names the content-length setting for a body %s — closing what the cut left open makes it parse', (_label, body) => {
     expect(parseClaudeApiRequestBody(body)).toEqual([])
     expect(claudeApiRequestBodyFailureReason(body)).toContain(
       'CLAUDE_CODE_OTEL_CONTENT_MAX_LENGTH',
@@ -187,6 +201,8 @@ describe('claudeApiRequestBodyFailureReason', () => {
     ['a never-JSON string', 'not a request body at all {'],
     ['an empty string', ''],
     ['a whitespace-only string', '   \n  '],
+    ['a balanced non-JSON document', '{oops}'],
+    ['a body with an unmatched closer', '{"a":1}}'],
   ])('gives %s a malformed-body reason that does not name the length knob', (_label, body) => {
     // No knob fixes input that was never JSON: the actionable reason is the
     // malformed body itself, so the truncation hint would be noise here.

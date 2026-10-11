@@ -171,8 +171,16 @@ function enrichRecord(store: CanonStore, record: CanonicalRecord, log: OtlpLog):
     }
     const parts = parseClaudeApiRequestBody(log.attributes['body'])
     if (parts.length > 0) {
-      store.setContent(record.spanId, contentFromParts(parts), parts)
-      clearSuppliedBuckets(store, record, parts)
+      // Per-bucket symmetry with the interaction delivery (ingest.ts): the
+      // parse replaces the buckets it supplies, and a bucket an earlier
+      // writer — the parked interaction prompt — delivered that this body
+      // does not speak for survives the rewrite rather than being lost
+      // until a re-settle.
+      const supplied = new Set(parts.map((part) => part.part))
+      const preserved = (record.parts ?? []).filter((part) => !supplied.has(part.part))
+      const merged = [...preserved, ...parts]
+      store.setContent(record.spanId, contentFromParts(merged), merged)
+      clearSuppliedBuckets(store, record, merged)
       return
     }
   }

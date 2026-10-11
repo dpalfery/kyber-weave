@@ -3471,13 +3471,24 @@ export class CanonStore {
     if (row === undefined) return undefined
     const rawPayload =
       row.raw_payload === null || row.raw_payload === undefined ? null : text(row.raw_payload)
+    // One corrupt cell must not take the detail route down with a 500 —
+    // this read is exactly where an operator looks when the store is
+    // already suspect, so an unparseable namespaces blob reads as an empty
+    // list while the row's other facts still answer.
+    let namespaces: string[] = []
+    try {
+      const parsed: unknown = JSON.parse(text(row.namespaces))
+      if (Array.isArray(parsed)) {
+        namespaces = parsed.filter((n): n is string => typeof n === 'string')
+      }
+    } catch {}
     return {
       spanId: text(row.span_id),
       source: row.source === null || row.source === undefined ? null : text(row.source),
       name: row.name === null || row.name === undefined ? null : text(row.name),
       reason: text(row.reason),
       timestamp: row.timestamp === null || row.timestamp === undefined ? null : text(row.timestamp),
-      namespaces: JSON.parse(text(row.namespaces)) as string[],
+      namespaces,
       harness: row.harness === null || row.harness === undefined ? null : text(row.harness),
       rawPayload,
       evidenceAvailable: rawPayload !== null,

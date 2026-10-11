@@ -129,13 +129,13 @@ export function parseClaudeApiRequestBody(body: unknown): ContentPart[] {
  * A string body that will not parse earns a reason, and which reason depends
  * on what the body still looks like. Claude Code cuts inline bodies at
  * `CLAUDE_CODE_OTEL_CONTENT_MAX_LENGTH` (61,440 UTF-16 units by default), and
- * a body cut that way is a broken-off JSON document — it still *begins* like
- * one. So a body opening with `{` or `[` that fails to parse points at the
- * length knob, while anything else — an empty string, a stray prefix — was
- * never JSON at any length, and no knob would fix it: that body gets the
- * malformed reason instead. A body that parsed — or never needed parsing —
- * reports nothing: an empty part list from a well-formed body is a real
- * answer, not a failure.
+ * a body cut that way is a broken-off JSON document: closing the strings and
+ * brackets the cut left open turns it back into something that parses. Only
+ * such a body points at the length knob — a balanced document that fails
+ * anyway (`{oops}`) or one with an extra closer was never valid JSON at any
+ * length, and no knob would fix it: those get the malformed reason. A body
+ * that parsed — or never needed parsing — reports nothing: an empty part
+ * list from a well-formed body is a real answer, not a failure.
  */
 export function claudeApiRequestBodyFailureReason(body: unknown): string | undefined {
   if (typeof body !== 'string') return undefined
@@ -144,10 +144,50 @@ export function claudeApiRequestBodyFailureReason(body: unknown): string | undef
     return undefined
   } catch {
     const trimmed = body.trim()
-    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+    if (
+      (trimmed.startsWith('{') || trimmed.startsWith('[')) &&
+      parsesWithClosersRestored(trimmed)
+    ) {
       return 'The Claude Code request body did not parse — it was likely truncated at the sender limit. Set CLAUDE_CODE_OTEL_CONTENT_MAX_LENGTH to raise it.'
     }
     return 'The Claude Code request body did not parse as JSON — the sender emitted something that was never a request document, so there is nothing to reassemble.'
+  }
+}
+
+/**
+ * Would the body parse if the cut's open strings and brackets were closed?
+ * A sender-side truncation ends mid-structure by construction, so restoring
+ * the missing closers reassembles a document; garbage shaped like one does
+ * not. The scan tracks string state so bracket characters inside strings
+ * never count, and an unmatched closer (pop on an empty stack) or a body
+ * that stays unparseable after completion answers no.
+ */
+function parsesWithClosersRestored(body: string): boolean {
+  const closers: string[] = []
+  let inString = false
+  let escaped = false
+  for (const ch of body) {
+    if (inString) {
+      if (escaped) escaped = false
+      else if (ch === '\\') escaped = true
+      else if (ch === '"') inString = false
+      continue
+    }
+    if (ch === '"') inString = true
+    else if (ch === '{' || ch === '[') closers.push(ch === '{' ? '}' : ']')
+    else if (ch === '}' || ch === ']') {
+      if (closers.pop() === undefined) return false
+    }
+  }
+  if (closers.length === 0 && !inString) return false
+  let completed = body
+  if (inString) completed += '"'
+  for (let i = closers.length - 1; i >= 0; i--) completed += closers[i]
+  try {
+    JSON.parse(completed)
+    return true
+  } catch {
+    return false
   }
 }
 
@@ -162,11 +202,12 @@ export function claudeApiRequestBodyFailureReason(body: unknown): string | undef
  * A block may nest its own `content` list — a `tool_result` can carry
  * image sub-blocks — so nested blocks run through this same mapping and
  * the placeholder and skip rules hold at every depth. Anything else keeps
- * its `text`/`content` string; an unanticipated shape carrying string
- * `data` — or a `source` carrying it — still collapses to a placeholder,
- * because bytes are payload on any block shape, not only on the ones the
- * mapping anticipated. Only a block with neither collapses to the whole
- * block as JSON; a `tool_use` takes that last path (B5).
+ * its `text`/`content` string; an unanticipated shape carrying a `data`
+ * field — or a `source` carrying one, at any JSON type, string or not —
+ * still collapses to a placeholder, because bytes are payload on any block
+ * shape, not only on the ones the mapping anticipated. Only a block with
+ * neither collapses to the whole block as JSON; a `tool_use` takes that
+ * last path (B5).
  */
 function contentBlockText(block: Record<string, unknown>): string | undefined {
   const type = block.type
@@ -183,12 +224,8 @@ function contentBlockText(block: Record<string, unknown>): string | undefined {
     return nested.length > 0 ? nested.join('\n') : undefined
   }
   const source = block.source
-  if (
-    typeof block.data === 'string' ||
-    (source !== null &&
-      typeof source === 'object' &&
-      typeof (source as Record<string, unknown>).data === 'string')
-  ) {
+  const sourceData = source !== null && typeof source === 'object' ? (source as Record<string, unknown>).data : undefined
+  if ((block.data !== undefined && block.data !== null) || (sourceData !== undefined && sourceData !== null)) {
     return `[${typeof type === 'string' ? type : 'binary'} block]`
   }
   return JSON.stringify(block)

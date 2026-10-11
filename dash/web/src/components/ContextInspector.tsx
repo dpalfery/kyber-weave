@@ -470,13 +470,31 @@ interface RawPacketPayloadProps {
 }
 
 /**
- * Character ceiling for one rendered packet. The scroll container below
- * handles the display, but it does nothing for the cost of stringifying a
- * multi-megabyte payload or for the DOM node count mounting it whole would
- * produce. Past the ceiling the render cuts and says so; the full payload
- * stays served by the API endpoint the disclosure fetched it from.
+ * Character ceiling for one rendered packet. Two layers keep a multi-megabyte
+ * payload affordable: the stringify replacer below bounds each string's
+ * contribution before serialization, so no single multi-megabyte field is
+ * ever materialized whole, and `capPacketText` bounds what is mounted. Past
+ * the ceiling the render cuts and says so; the full payload stays served by
+ * the API endpoint the disclosure fetched it from.
  */
 const MAX_RENDERED_PACKET_CHARS = 100_000
+
+/** Longest single string value the stringify materializes — longer values are cut here. */
+const MAX_PACKET_STRING_CHARS = 1_000
+
+/**
+ * A JSON.stringify replacer that bounds the serialize cost at its worst
+ * term: one multi-megabyte base64 blob would otherwise be walked into a
+ * multi-megabyte string before any cap could look at it. Values beyond the
+ * per-string ceiling are cut with a marker; the walk itself still visits
+ * every node, but no unbounded string is ever built.
+ */
+function packetStringReplacer(_key: string, value: unknown): unknown {
+  if (typeof value === 'string' && value.length > MAX_PACKET_STRING_CHARS) {
+    return `${value.slice(0, MAX_PACKET_STRING_CHARS)}… truncated (${value.length} characters total; the full value is served by the API endpoint this disclosure fetched)`
+  }
+  return value
+}
 
 /** The capped form of one packet's text: whole below the ceiling, cut with a pointer past it. */
 function capPacketText(text: string): string {
@@ -487,8 +505,8 @@ function capPacketText(text: string): string {
 /**
  * One fetched packet, rendered as served. Below the display ceiling nothing
  * is clipped — the tail of a payload is often the part that explains a turn,
- * so the body scrolls instead of being cut — and past it the render cuts
- * rather than stringifying and mounting unbounded bytes.
+ * so the body scrolls instead of being cut — and the stringify replacer plus
+ * the mount cap bound the cost of rendering one that is not small.
  */
 function RawPacketPayload({ testId, title, value, isPending, error, children }: RawPacketPayloadProps) {
   return (
@@ -502,7 +520,7 @@ function RawPacketPayload({ testId, title, value, isPending, error, children }: 
         </p>
       ) : (
         <pre className="max-h-[min(50vh,28rem)] overflow-auto rounded border border-border bg-muted/40 p-2 text-[11px] font-mono whitespace-pre-wrap break-words text-foreground">
-          {capPacketText(JSON.stringify(value, null, 2))}
+          {capPacketText(JSON.stringify(value, packetStringReplacer, 2))}
         </pre>
       )}
       {children}

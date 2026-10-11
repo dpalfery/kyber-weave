@@ -1922,6 +1922,37 @@ describe('CanonStore quarantine evidence metadata (plan 2026-10-10, B7/B10)', ()
       db.close()
     }
   })
+
+  it('reads a corrupt namespaces cell as absent rather than throwing', () => {
+    // One corrupt cell must not turn the detail route into a 500 — the
+    // route is exactly where an operator looks when the store is already
+    // suspect, so a parse failure reads as an empty namespace list while
+    // the row's other facts still answer.
+    const path = tempStorePath()
+    const store = new CanonStore(path)
+    store.quarantine('span-corrupt-ns', ['claude_code'], 'non-model span', {
+      source: 'claude-code',
+      name: 'claude_code.interaction',
+    })
+    store.close()
+
+    const raw = new DatabaseSync(path)
+    try {
+      raw.prepare("UPDATE quarantine SET namespaces = 'not-json' WHERE span_id = 'span-corrupt-ns'").run()
+    } finally {
+      raw.close()
+    }
+
+    const reopened = new CanonStore(path)
+    try {
+      const entry = reopened.getQuarantineEntry('span-corrupt-ns')
+      expect(entry?.namespaces).toEqual([])
+      expect(entry?.reason).toBe('non-model span')
+      expect(entry?.source).toBe('claude-code')
+    } finally {
+      reopened.close()
+    }
+  })
 })
 
 describe('systemPromptTextsFromContentColumns', () => {

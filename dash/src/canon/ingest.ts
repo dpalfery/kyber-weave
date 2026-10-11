@@ -131,7 +131,7 @@ function isStructuralSpan(span: RawSpan): boolean {
 // letting its `user_prompt` be deleted with the row. The prompt therefore
 // always parks in `pending_logs`: children already stored get it at once,
 // and the settle pass keeps serving each llm.invoke child that turns up
-// later without parts, until the wait's TTL retires the row (B8).
+// later still lacking the prompt's bucket, until the wait's TTL retires the row (B8).
 
 /**
  * The instrumentation scope Claude Code event logs carry (B3). Stamping it
@@ -247,7 +247,7 @@ function deliverInteractionPrompt(
  * the prompt parks regardless: the turn's llm.invoke calls do not all
  * arrive in one batch — a child later in THIS batch has not even been
  * written yet — so the parked row is what lets the settle pass keep
- * serving every child that shows up still lacking parts (B8).
+ * serving every child that shows up still lacking the prompt's bucket (B8).
  */
 function keepInteractionPrompt(store: CanonStore, span: RawSpan): void {
   const prompt = claudeUserPrompt(span.attributes['user_prompt'])

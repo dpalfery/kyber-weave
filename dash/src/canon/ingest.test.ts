@@ -682,6 +682,31 @@ describe('ingestBatch — Claude Code interaction prompt (Task T5)', () => {
     store.close()
   })
 
+  it('does not let a body parse that fills only other buckets discard the delivered prompt', () => {
+    // Symmetry with the delivery-side merge: the body parse replaces the
+    // buckets it supplies, and the prompt bucket it does not speak for
+    // survives the rewrite instead of being lost until a re-settle.
+    const store = new CanonStore(':memory:')
+    ingestBatch([llmChild('llm-1')], store)
+    ingestBatch([interactionSpan(PROMPT)], store)
+    expect(conversationHistory(store, 'llm-1')).toEqual([PROMPT])
+
+    ingestLogBatch(
+      [apiRequestBodyLog('llm-1', { system: [{ type: 'text', text: 'Body-parse system prompt.' }] })],
+      store,
+    )
+
+    expect(store.get('llm-1')?.parts).toEqual([
+      { part: 'conversation_history', text: PROMPT },
+      { part: 'system_prompt', text: 'Body-parse system prompt.' },
+    ])
+    expect(store.get('llm-1')?.content).toMatchObject({
+      conversation_history: PROMPT,
+      system_prompt: 'Body-parse system prompt.',
+    })
+    store.close()
+  })
+
   it('keeps the interaction span quarantined as a non-model span, with its packet as evidence', () => {
     const store = new CanonStore(':memory:')
     const interaction = interactionSpan(PROMPT)
