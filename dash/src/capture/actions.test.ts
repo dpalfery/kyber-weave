@@ -287,6 +287,23 @@ describe('runCaptureAction: disable', () => {
     ])
     expect(readFileSync(claudePath(home), 'utf8')).toBe(before)
   })
+
+  it('a corrupt receipt is not absence: a plain disable refuses too, without writing', async () => {
+    // Enable-refuses / disable-noops was a split personality: a corrupt receipt masked as
+    // absence would report "nothing to do" (exit 0) while the prior values are unknowable.
+    const home = makeHome()
+    writeConfig(claudePath(home), '{}\n')
+    await runCaptureAction(request(home, 'claude-code', 'enable'))
+    const enabled = readFileSync(claudePath(home), 'utf8')
+    writeConfig(receiptPathForHome(home), '{not json')
+
+    const result = await runCaptureAction(request(home, 'claude-code', 'disable'))
+
+    expect(result.outcome).toBe('refused')
+    expect(result.reason).toBe('unparseable')
+    expect(result.events[0]).toMatchObject({ kind: 'refused', fileId: 'receipt', reason: 'unparseable' })
+    expect(readFileSync(claudePath(home), 'utf8')).toBe(enabled)
+  })
 })
 
 describe('runCaptureAction: disable with removeUnreceiptedKeys (Settings-only)', () => {
@@ -378,6 +395,26 @@ describe('runCaptureAction: disable with removeUnreceiptedKeys (Settings-only)',
     )
 
     expect(result.outcome).toBe('noop')
+  })
+
+  it('names a preview that could not be produced, not an unreadable config', async () => {
+    // A bad endpoint makes the preview run itself fail with no events. Reusing the empty
+    // event list as the refusal made refusalReason([]) fall back to 'unreadable', so the
+    // route reported "config could not be read" for a config nobody read.
+    const home = makeHome()
+    writeConfig(claudePath(home), `${JSON.stringify(manualClaude, null, 2)}\n`)
+
+    const result = await runCaptureAction(
+      request(home, 'claude-code', 'disable', {
+        removeUnreceiptedKeys: true,
+        expectedPreviewEvents: [],
+        endpoint: 'ftp://not-otlp.example',
+      }),
+    )
+
+    expect(result.outcome).toBe('refused')
+    expect(result.events).toHaveLength(1)
+    expect(result.events[0]).toMatchObject({ kind: 'refused', code: 'PREVIEW_UNAVAILABLE' })
   })
 
   it('a corrupt receipt is not absence: refuses without writing', async () => {

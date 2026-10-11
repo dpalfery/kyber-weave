@@ -33,7 +33,7 @@ import { JOBS_LOCK_FILE } from '../jobs/lease.js'
 import type { ChildResult, JobChild, JobSpawner } from '../jobs/host.js'
 import { KyberBridge } from '../server/bridge.js'
 import { SETTING_KEYS, readSetting, writeSetting } from '../settings/shared-settings.js'
-import { DashboardPortOccupiedError, resolveDashboardPort, runWebDashboard } from './web.js'
+import { DashboardPortOccupiedError, DashboardPortUnavailableError, portRefusalFor, resolveDashboardPort, runWebDashboard } from './web.js'
 
 /**
  * A spawned child that runs until killed, then exits like a real reaped process.
@@ -360,6 +360,30 @@ describe('dashboard port resolution precedence', () => {
     } finally {
       store.close()
     }
+  })
+})
+
+describe('portRefusalFor: every bind refusal reads like the feature, not a traceback', () => {
+  it('maps EADDRINUSE to the occupied error naming the port and the remedy', () => {
+    const err = portRefusalFor(4747, 'EADDRINUSE')
+    expect(err).toBeInstanceOf(DashboardPortOccupiedError)
+    expect(String(err!.message)).toContain('4747')
+    expect(String(err!.message)).toMatch(/--port|dashboard\.port|restart/i)
+  })
+
+  it('maps EACCES to an actionable unavailable error instead of a raw traceback', () => {
+    // A privileged port persisted as dashboard.port and restarted as non-root.
+    const err = portRefusalFor(80, 'EACCES')
+    expect(err).toBeInstanceOf(DashboardPortUnavailableError)
+    expect(String(err!.message)).toContain('80')
+    expect(String(err!.message)).toMatch(/privilege|--port|dashboard\.port/i)
+  })
+
+  it('maps ERR_SOCKET_BAD_PORT, and leaves port 0 and unknown codes to the caller', () => {
+    expect(portRefusalFor(70000, 'ERR_SOCKET_BAD_PORT')).toBeInstanceOf(DashboardPortUnavailableError)
+    // 0 is an ephemeral bind, never a configured choice, so the raw error is kept.
+    expect(portRefusalFor(0, 'EADDRINUSE')).toBeUndefined()
+    expect(portRefusalFor(4747, 'ENOTFOUND')).toBeUndefined()
   })
 })
 

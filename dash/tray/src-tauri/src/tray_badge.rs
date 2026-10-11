@@ -337,7 +337,7 @@ pub fn render_lightsaber(live: bool, size: u32) -> Image<'static> {
     paint(
         &mut canvas,
         &collar,
-        &frame.u,
+        &frame.v,
         |v| {
             mix_rgb(
                 COLLAR_OUTER,

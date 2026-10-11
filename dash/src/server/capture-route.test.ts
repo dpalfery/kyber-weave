@@ -625,6 +625,35 @@ describe('POST /api/kyber/capture', () => {
     },
   )
 
+  it('rejects a confirm whose echo carries more changes than the client keeps with 400', async () => {
+    // The client caps each event at 64 changes (CAPTURE_MAX_CHANGES). A larger bound here
+    // would accept an echo the client cannot produce, so the bound must match.
+    const home = makeHome()
+    const configPath = claudePath(home)
+    writeConfig(configPath, '{}\n')
+    const deps = makeCaptureDeps(captureSettings(home))
+    const event = {
+      kind: 'would-restore',
+      harness: 'claude-code',
+      fileId: 'claude-settings',
+      path: configPath,
+      changes: Array.from({ length: 65 }, (_, index) => ({ key: `env.K${index}`, after: index })),
+    }
+
+    const { status, body } = await callRoute('POST', PATH, {
+      deps,
+      payload: {
+        action: 'disable',
+        harness: 'claude-code',
+        dryRun: false,
+        removeUnreceiptedKeys: true,
+        expectedPreviewEvents: [event],
+      },
+    })
+    expect(status).toBe(400)
+    expect(ownKeys(body)).toEqual(['error'])
+  })
+
   it('rejects a non-JSON content type with 415 and writes nothing', async () => {
     const home = makeHome()
     const configPath = opencodePath(home)

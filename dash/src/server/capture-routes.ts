@@ -116,7 +116,10 @@ function isPreviewEvents(value: unknown): value is CaptureEvent[] {
       typeof event['path'] !== 'string'
     ) return false
     if (event['changes'] === undefined) return true
-    if (!Array.isArray(event['changes']) || event['changes'].length > 128) return false
+    // Bounded at the same 64 the client keeps (`CAPTURE_MAX_CHANGES` in kyberApi.ts).
+    // A larger bound here would accept an echo the client cannot produce, while the
+    // engine's own preview could still carry more — see the comparison in actions.ts.
+    if (!Array.isArray(event['changes']) || event['changes'].length > 64) return false
     return event['changes'].every((change) => {
       if (typeof change !== 'object' || change === null || Array.isArray(change)) return false
       const values = change as Record<string, unknown>
@@ -182,11 +185,14 @@ const REFUSAL_WORDING: Record<string, string> = {
 }
 
 function refusalMessage(request: CaptureRequest, result: CaptureActionResult): string {
-  if (result.events.some((event) => event.code === 'PREVIEW_REQUIRED')) {
-    return `disable refused: ${request.harness} must be previewed before applying; no files were changed`
-  }
+  // PREVIEW_REQUIRED is not handled here: `parseCaptureRequest` rejects a confirm that
+  // omits its preview as a malformed request (400) before this runs, so the 409 wording
+  // would be unreachable. The action layer still raises it for direct callers.
   if (result.events.some((event) => event.code === 'PREVIEW_CHANGED')) {
     return `disable refused: ${request.harness} settings changed since preview; no files were changed`
+  }
+  if (result.events.some((event) => event.code === 'PREVIEW_UNAVAILABLE')) {
+    return `disable refused: ${request.harness} preview could not be produced; no files were changed`
   }
   const partial = result.events.some((event) => event.kind === 'wrote' || event.kind === 'restored')
   if (partial) {

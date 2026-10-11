@@ -1,6 +1,6 @@
 import { Command } from 'commander'
 import { allProviderNames } from '../providers/index.js'
-import { DashboardPortOccupiedError, runWebDashboard, UnknownViewError } from './web.js'
+import { DashboardPortRefusedError, runWebDashboard, UnknownViewError } from './web.js'
 import { resolveCliName } from '../brand-overlay.js'
 import { registerKyberCommands } from './register.js'
 import { registerReportCommand } from './report.js'
@@ -11,8 +11,16 @@ import { createRequire } from 'node:module'
 const require = createRequire(import.meta.url)
 const { version } = require('../../package.json')
 
-function parseInteger(value: string): number {
-  return parseInt(value, 10)
+/**
+ * Strict integer for `--port`: digits only. `parseInt` would read `47.9` as `47` and
+ * `80abc` as `80`, silently binding a port the operator never asked for — the opposite
+ * of this command's contract. A non-numeric value becomes NaN here, which the action's
+ * range check refuses with exit 2 before the store opens. This mirrors the engine's
+ * `portCodec.decode`, so the surface and the persisted setting agree on what a port is.
+ */
+function parsePortOption(value: string): number {
+  const trimmed = value.trim()
+  return /^\d+$/.test(trimmed) ? Number(trimmed) : Number.NaN
 }
 
 function assertProvider(value: string, command: string): void {
@@ -89,7 +97,7 @@ export function buildProgram(): Command {
     // disagree with what the Settings drawer saved. An explicit --port wins for this
     // run only and is never persisted. A taken port is a refused start, never a quiet
     // move to a random one: the tray attaches by the configured URL.
-    .option('--port <number>', 'Port to listen on for this run (overrides the persisted dashboard port, default 4747)', parseInteger)
+    .option('--port <number>', 'Port to listen on for this run (overrides the persisted dashboard port, default 4747)', parsePortOption)
     .option('--no-open', 'Do not open the browser automatically')
     .option('--view <path>', 'Open a dashboard view (for example finding/<id>)')
     .action(async (opts: { port?: number; open: boolean; view?: string }) => {
@@ -114,10 +122,10 @@ export function buildProgram(): Command {
           process.stderr.write(`kyberdash web: ${err.message}\n`)
           process.exit(2)
         }
-        if (err instanceof DashboardPortOccupiedError) {
-          // A taken configured port is a failure with its remedy in the message: the
-          // message names the port and what to do next, and a traceback would add
-          // nothing it does not already say.
+        if (err instanceof DashboardPortRefusedError) {
+          // A configured port that is taken, or that this process may not bind, is a
+          // failure with its remedy in the message: it names the port and what to do
+          // next, and a traceback would add nothing it does not already say.
           process.stderr.write(`kyberdash web: ${err.message}\n`)
           process.exit(1)
         }

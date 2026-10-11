@@ -1169,10 +1169,12 @@ async function runDisable(
   const err: string[] = []
   let exitCode = 0
   const receiptState = loadReceiptState(home)
-  // A present but corrupt receipt is not absence: the prior values disable
-  // would restore from are unknowable, so refuse without writing rather than
-  // treating the harness as never-enabled.
-  if (receiptState.corrupt && removeUnreceiptedKeys && writers.length === 1) {
+  // A present but corrupt receipt is not absence: the prior values disable would restore
+  // from are unknowable, so refuse without writing rather than treating the harness as
+  // never-enabled. This holds for every disable path, not only the Settings opt-in — a
+  // plain disable that noops past a corrupt receipt would report "nothing to do" (exit 0)
+  // and mask the corruption, while enable already refuses it.
+  if (receiptState.corrupt) {
     const harness = writers[0]?.id ?? ''
     err.push(`kyberdash capture: refusing to disable: the capture receipt is unparseable (${receiptPathForHome(home)})`)
     events.push({ kind: 'refused', harness, fileId: 'receipt', path: receiptPathForHome(home), reason: 'unparseable' })

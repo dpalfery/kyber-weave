@@ -61,6 +61,16 @@ export function DashboardPortSetting() {
   }
 
   const current = settings.data.dashboardPort
+  // A server that predates this setting answers without `dashboardPort`. Seeding the draft
+  // with `String(undefined)` would show a permanent validation error for a server that is
+  // simply older, so treat a non-number the same as an unreadable setting.
+  if (typeof current !== 'number') {
+    return (
+      <p role="alert" data-testid="dashboard-port-unknown" className="text-xs text-foreground">
+        The dashboard port could not be read, so no port control is shown.
+      </p>
+    )
+  }
   const text = draft ?? String(current)
   const parsed = parsePort(text)
   const unchanged = parsed === current
@@ -84,13 +94,20 @@ export function DashboardPortSetting() {
       <div className="mt-2 flex items-center gap-2">
         <input
           id="dashboard-port-input"
-          type="number"
+          // `type="text"` with a digits-only pattern, not `type="number"`: a number input
+          // admits `e`, `+`, `-`, `.` and spinner steps that fight `parsePort` below. Let
+          // the validator be the single source of truth. `inputMode` keeps mobile numeric.
+          type="text"
+          inputMode="numeric"
+          pattern="[0-9]*"
           data-testid="dashboard-port-input"
           className="w-28 rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground disabled:cursor-not-allowed disabled:opacity-60"
           value={text}
           min={PORT_MIN}
           max={PORT_MAX}
           disabled={save.isPending}
+          aria-invalid={parsed === null}
+          aria-describedby={parsed === null ? 'dashboard-port-error' : failed ? 'dashboard-port-save-error' : undefined}
           onChange={(event) => {
             setDraft(event.target.value)
             setSavedPort(null)
@@ -112,12 +129,22 @@ export function DashboardPortSetting() {
         </button>
       </div>
       {parsed === null && (
-        <p role="alert" data-testid="dashboard-port-error" className="mt-1 text-xs text-foreground">
+        <p
+          id="dashboard-port-error"
+          role="alert"
+          data-testid="dashboard-port-error"
+          className="mt-1 text-xs text-foreground"
+        >
           Enter a whole-number port from {PORT_MIN} to {PORT_MAX}. Nothing was saved.
         </p>
       )}
       {failed && (
-        <p role="alert" data-testid="dashboard-port-error" className="mt-1 text-xs text-foreground">
+        <p
+          id="dashboard-port-save-error"
+          role="alert"
+          data-testid="dashboard-port-save-error"
+          className="mt-1 text-xs text-foreground"
+        >
           The dashboard port could not be saved. Nothing was changed.
         </p>
       )}

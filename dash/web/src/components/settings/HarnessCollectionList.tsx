@@ -46,14 +46,18 @@ export function decideRow(harness: KyberCaptureHarness): RowDecision {
       reason: 'State unknown: KyberDash could not read this harness\'s configuration, so it will not change it.',
     }
   }
-  if (harness.state === 'on') return { actions: ['disable'] }
-  if (harness.state === 'partial') return { actions: ['enable', 'disable'] }
+  // These guards sit above the state branches so a `partial` (or `on`) harness the server
+  // did not detect, with no receipt, obeys the same rule as `off`: no action without a
+  // receipt. Below the state branches, a half-configured ghost was offered Enable and
+  // Disable while `off` was not.
   if (harness.installed === 'not-detected' && harness.receipt === 'absent') {
     return { actions: [], reason: 'Not detected on this machine.' }
   }
   if (harness.installed === 'unknown' && harness.receipt === 'absent') {
     return { actions: [], reason: 'Install state unknown: KyberDash could not inspect this harness\'s files.' }
   }
+  if (harness.state === 'on') return { actions: ['disable'] }
+  if (harness.state === 'partial') return { actions: ['enable', 'disable'] }
   return { actions: ['enable'] }
 }
 
@@ -177,14 +181,12 @@ function ToggleButton({
   harnessId,
   action,
   busy,
-  describedBy,
   onToggle,
   testId,
 }: {
   harnessId: string
   action: KyberCaptureAction
   busy: boolean
-  describedBy?: string
   onToggle: HarnessCollectionListProps['onToggle']
   testId: string
 }) {
@@ -194,7 +196,6 @@ function ToggleButton({
       data-testid={testId}
       className="rounded-md border border-border px-2.5 py-1 text-xs font-medium text-foreground hover:bg-interactive-secondary disabled:cursor-not-allowed disabled:opacity-60"
       disabled={busy}
-      aria-describedby={describedBy}
       onClick={() => {
         if (!busy) onToggle(harnessId, action)
       }}
@@ -257,7 +258,6 @@ function HarnessRow({
               harnessId={harness.id}
               action={action}
               busy={busy}
-              describedBy={decision.reason ? reasonId : undefined}
               onToggle={onToggle}
               testId={action === 'enable' ? `settings-harness-enable-${harness.id}` : `settings-harness-disable-${harness.id}`}
             />

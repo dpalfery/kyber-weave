@@ -213,24 +213,55 @@ function openBrowser(url: string): void {
 }
 
 /**
- * A configured dashboard port that is already taken. The server never falls back to a
- * random free port: the tray attaches by the configured URL, bookmarks point at it,
- * and a server that quietly started elsewhere would leave both aimed at a refusal. The
- * message therefore names the port and the remedies — stop the occupant, pass an
- * explicit `--port` for this run, or persist another `dashboard.port` and restart.
+ * A refused start on a configured dashboard port. The server never falls back to a
+ * random free port: the tray attaches by the configured URL, bookmarks point at it, and
+ * a server that quietly started elsewhere would leave both aimed at a refusal. Every
+ * subclass therefore names the port and the remedies in its message.
  */
-export class DashboardPortOccupiedError extends Error {
+export class DashboardPortRefusedError extends Error {
   readonly port: number
 
+  constructor(port: number, detail: string) {
+    super(detail)
+    this.name = 'DashboardPortRefusedError'
+    this.port = port
+  }
+}
+
+/**
+ * A configured dashboard port that is already taken. The message names the port and the
+ * remedies — stop the occupant, pass an explicit `--port` for this run, or persist
+ * another `dashboard.port` and restart.
+ */
+export class DashboardPortOccupiedError extends DashboardPortRefusedError {
   constructor(port: number) {
     super(
+      port,
       `port ${port} is already in use. ` +
         `Stop the process holding it, start this run with --port <free port>, ` +
         `or persist another port with 'kyberdash dash settings set dashboard.port <port>' ` +
         `and restart. The dashboard did not start on a different port.`
     )
     this.name = 'DashboardPortOccupiedError'
-    this.port = port
+  }
+}
+
+/**
+ * A configured dashboard port the process is not permitted to bind, or that the socket
+ * layer rejects outright. The common case is a privileged port (< 1024) persisted as
+ * `dashboard.port` and restarted as a non-root user: without this the operator gets a
+ * raw EACCES traceback instead of the same actionable refusal an occupied port produces.
+ */
+export class DashboardPortUnavailableError extends DashboardPortRefusedError {
+  constructor(port: number, code: string) {
+    super(
+      port,
+      `port ${port} could not be bound (${code}). ` +
+        `A port below 1024 needs privilege to bind; start this run with --port <free port>, ` +
+        `or persist another port with 'kyberdash dash settings set dashboard.port <port>' ` +
+        `and restart. The dashboard did not start on a different port.`
+    )
+    this.name = 'DashboardPortUnavailableError'
   }
 }
 
@@ -245,6 +276,20 @@ export class DashboardPortOccupiedError extends Error {
 export function resolveDashboardPort(explicitPort: number | undefined, store: CanonStore): number {
   if (explicitPort !== undefined) return explicitPort
   return readSetting(store, SETTING_KEYS.dashboardPort)
+}
+
+/**
+ * The refused-start error for a failed bind, or undefined when the caller should surface
+ * the raw socket error. `EADDRINUSE` and the permission/socket-layer codes are the two
+ * ways a configured port fails to bind; both must read like the feature rather than a
+ * traceback. An ephemeral bind (port 0) is never a configured choice, so it keeps the
+ * raw error. Extracted so the mapping is testable without forcing a real EACCES.
+ */
+export function portRefusalFor(port: number, code: string | undefined): Error | undefined {
+  if (port === 0) return undefined
+  if (code === 'EADDRINUSE') return new DashboardPortOccupiedError(port)
+  if (code === 'EACCES' || code === 'ERR_SOCKET_BAD_PORT') return new DashboardPortUnavailableError(port, code)
+  return undefined
 }
 
 export class UnknownViewError extends Error {
@@ -893,16 +938,31 @@ export async function runWebDashboard(opts: WebDashboardServices & {
   // is the same handle the settings routes serve, so the number below is always the one
   // the operator last persisted. Changing the setting later never rebinds this process;
   // the new port applies on the next startup.
-  const requestedPort = resolveDashboardPort(opts.port, store)
+  //
+  // Resolved inside its own cleanup: `readSetting` reaches sqlite through a bare
+  // `prepare().get()`, which throws on a locked or corrupt store. That throw must not
+  // leak the bridge and default store this start already opened, so it takes the same
+  // close path a bind failure takes below.
+  let requestedPort: number
+  try {
+    requestedPort = resolveDashboardPort(opts.port, store)
+  } catch (err) {
+    bridge.close()
+    closeDefaultStoreIfUnused(opts.store)
+    throw err
+  }
   const port = await new Promise<number>((resolve, reject) => {
     server.once('error', (err: NodeJS.ErrnoException) => {
-      if (requestedPort !== 0 && err.code === 'EADDRINUSE') {
-        // A configured port that is taken is a refused start, never a quiet move: the
-        // tray attaches by the configured URL and a fallback would strand it. Close the
-        // failed socket before rejecting so a retry can bind; nothing is published (the
-        // listening line and server.json below only happen after a bind) and no host
-        // pair is taken (that happens further below too).
-        server.close(() => reject(new DashboardPortOccupiedError(requestedPort)))
+      // A configured port that fails to bind is a refused start, never a quiet move or a
+      // raw traceback: the tray attaches by the configured URL and a fallback would
+      // strand it, and an occupied port, a privileged port restarted as non-root, and a
+      // socket the layer rejects all deserve the same actionable refusal. Close the
+      // failed socket before rejecting so a retry can bind; nothing is published (the
+      // listening line and server.json below only happen after a bind) and no host pair
+      // is taken (that happens further below too).
+      const refusal = portRefusalFor(requestedPort, err.code)
+      if (refusal !== undefined) {
+        server.close(() => reject(refusal))
       } else {
         reject(err)
       }

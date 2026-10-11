@@ -79,6 +79,17 @@ describe('DashboardPortSetting: current value', () => {
     expect(alert.getAttribute('role')).toBe('alert')
     expect(screen.queryByTestId('dashboard-port-input')).toBeNull()
   })
+
+  it('says the setting is unknown when the server answers without a dashboardPort', async () => {
+    // A pre-feature server omits the key. `String(undefined)` must not become the draft,
+    // which would show a permanent validation error for a server that is merely older.
+    stubFetch({ settings: { json: { ...SETTINGS, dashboardPort: undefined } } })
+    renderSetting()
+
+    const alert = await screen.findByTestId('dashboard-port-unknown')
+    expect(alert.getAttribute('role')).toBe('alert')
+    expect(screen.queryByTestId('dashboard-port-input')).toBeNull()
+  })
 })
 
 describe('DashboardPortSetting: saving', () => {
@@ -124,7 +135,7 @@ describe('DashboardPortSetting: saving', () => {
 
     fireEvent.click(screen.getByTestId('dashboard-port-save'))
 
-    const alert = await screen.findByTestId('dashboard-port-error')
+    const alert = await screen.findByTestId('dashboard-port-save-error')
     expect(alert.getAttribute('role')).toBe('alert')
     expect(alert.textContent).not.toContain('/secret/path')
   })
