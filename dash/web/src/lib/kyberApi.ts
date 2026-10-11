@@ -418,6 +418,8 @@ export interface KyberTurnContentResult {
   sessionId: string
   turnIndex: number
   spanId?: string
+  /** The turn record's parent span, when the record named one (B7). */
+  parentSpanId?: string
   model?: string
   blocks: KyberTurnContentBlock[]
   parts: KyberTurnContentPart[]
@@ -426,6 +428,12 @@ export interface KyberTurnContentResult {
   totalLength?: number
   measurability?: string | Record<string, unknown>
   notMeasurable?: { reason: string }
+  /**
+   * Where this turn's raw packets can be fetched (B7): the request span's
+   * attributes always; the quarantined parent's packet only when that row
+   * kept a payload.
+   */
+  rawPacket?: { spanAttributesPath: string; interactionPath?: string }
 }
 
 export function fetchTurnContent(

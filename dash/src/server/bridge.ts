@@ -568,12 +568,21 @@ export type TurnContentResult = {
   sessionId: string
   turnIndex: number
   spanId?: string
+  /** The turn record's parent span, when the record named one (B7). */
+  parentSpanId?: string
   model?: string
   blocks: TurnContentBlock[]
   parts: TurnContentPart[]
   assembledText: string
   truncated?: boolean
   totalLength?: number
+  /**
+   * Where this turn's raw packets can be fetched (B7): the request span's
+   * attributes always — a served turn is a stored record — and the
+   * quarantined parent's packet only when that row kept a payload, so the
+   * pointer is never a link to nothing.
+   */
+  rawPacket: { spanAttributesPath: string; interactionPath?: string }
 }
 
 /**
@@ -663,6 +672,8 @@ export function _clip<T = unknown>(value: T, maxLen = MAX_STRING_LENGTH, depth =
 type ContentSourceRecord = {
   spanId: string
   sessionKey: string | null
+  /** The record's parent span; the quarantined packet a turn may point at (B7). */
+  parentSpanId: string | null
   parts: ContentPart[]
 }
 
@@ -790,10 +801,18 @@ function partsFromRow(row: Record<string, unknown>): ContentPart[] {
   return []
 }
 
+/** A record row's parent span id, or null when it carries none. */
+function parentSpanIdOf(row: Record<string, unknown>): string | null {
+  return row.parent_span_id === null || row.parent_span_id === undefined
+    ? null
+    : String(row.parent_span_id)
+}
+
 function toContentSource(record: CanonicalRecord): ContentSourceRecord {
   return {
     spanId: record.spanId,
     sessionKey: sessionKeyOf(record),
+    parentSpanId: record.parentSpanId,
     parts: partsFromRecord(record),
   }
 }
@@ -1667,6 +1686,9 @@ export class KyberBridge {
     // Load unclipped content records for this span
     const contentRecords = this.loadContentRecords(sessionId, targetSpanId)
     const rawParts: ContentPart[] = contentRecords[0]?.parts ?? []
+    // The turn's parent span is what a quarantined packet would be filed
+    // under (B7); absent when the record named no parent.
+    const parentSpanId = contentRecords[0]?.parentSpanId ?? null
 
     // Map and extract structured parts (system prompt, tools, user messages, assistant turns, etc.)
     const parts: TurnContentPart[] = []
@@ -1808,13 +1830,18 @@ export class KyberBridge {
         tokens,
       }
 
-      // Check measurability from payload
-      const flat = payload?.measurability as MeasurabilityMap | undefined
-      const buckets = (payload?.context as { first?: { buckets?: MeasurabilityMap } } | undefined)
-        ?.first?.buckets
-      const measurability = flat?.[def.key] ?? buckets?.[def.key]
-      if (measurability && typeof measurability === 'object' && measurability.availability === 'not_measurable') {
-        block.notMeasurable = { reason: measurability.reason || 'Not measurable for this harness.' }
+      // Check measurability from payload — but only for a block this turn
+      // has no parts for (R6/B6): the payload's declaration is
+      // session-level, and a session-wide "not measurable" must not
+      // survive onto a block the turn itself carries text for.
+      if (uniqueParts.length === 0) {
+        const flat = payload?.measurability as MeasurabilityMap | undefined
+        const buckets = (payload?.context as { first?: { buckets?: MeasurabilityMap } } | undefined)
+          ?.first?.buckets
+        const measurability = flat?.[def.key] ?? buckets?.[def.key]
+        if (measurability && typeof measurability === 'object' && measurability.availability === 'not_measurable') {
+          block.notMeasurable = { reason: measurability.reason || 'Not measurable for this harness.' }
+        }
       }
 
       blocks.push(block)
@@ -1860,14 +1887,30 @@ export class KyberBridge {
       }
     }
 
+    // B7's raw-packet pointers. The turn's own span is a stored record, so
+    // its attributes are always reachable; the parent's packet is linked
+    // only when its quarantine row exists and kept a payload — a pointer
+    // to nothing is worse than none.
+    const rawPacket: TurnContentResult['rawPacket'] = {
+      spanAttributesPath: `/api/kyber/span/${targetSpanId}/attributes`,
+    }
+    if (parentSpanId !== null) {
+      const entry = this.getQuarantineEntry(parentSpanId)
+      if (entry !== null && entry.rawPayload !== null) {
+        rawPacket.interactionPath = `/api/kyber/quarantine/${parentSpanId}`
+      }
+    }
+
     const result: TurnContentResult = {
       sessionId,
       turnIndex,
       spanId: targetSpanId,
+      ...(parentSpanId !== null ? { parentSpanId } : {}),
       model,
       blocks,
       parts,
       assembledText,
+      rawPacket,
       ...(truncated ? { truncated, totalLength } : {}),
     }
 
@@ -1936,6 +1979,7 @@ export class KyberBridge {
           {
             spanId: String(row.span_id),
             sessionKey: key,
+            parentSpanId: parentSpanIdOf(row),
             parts: partsFromRow(row),
           },
         ]
@@ -1953,6 +1997,7 @@ export class KyberBridge {
       return rows.map((row) => ({
         spanId: String(row.span_id),
         sessionKey: sessionId,
+        parentSpanId: parentSpanIdOf(row),
         parts: partsFromRow(row),
       }))
     } catch {
@@ -1963,6 +2008,7 @@ export class KyberBridge {
         return rows.map((row) => ({
           spanId: String(row.span_id),
           sessionKey: sessionId,
+          parentSpanId: parentSpanIdOf(row),
           parts: partsFromRow(row),
         }))
       } catch {
