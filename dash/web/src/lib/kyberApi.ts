@@ -145,7 +145,7 @@ export interface KyberProblemDetail {
 }
 
 export async function fetchProblemDetail(id: string): Promise<KyberProblemDetail> {
-  return fetchJson<KyberProblemDetail>(`/api/kyber/problems/${encodeURIComponent(id)}`)
+  return fetchJson<KyberProblemDetail>(`/api/kyber/problem/${encodeURIComponent(id)}`)
 }
 
 export interface KyberSessionSummary {

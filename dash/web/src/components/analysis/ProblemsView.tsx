@@ -1,7 +1,7 @@
 // Problems list + read-only detail inspector.
 //
 // DISPLAY layer: rows come from `GET /api/kyber/problems` (optionally
-// `?harness=`), and the inspector reads `GET /api/kyber/problems/:id` when
+// `?harness=`), and the inspector reads `GET /api/kyber/problem/:id` when
 // the server serves it. A 404 (servers predating the route) or a row that
 // never stored its evidence renders an explicit unavailable notice — the
 // code/message from the list row is shown as the list row, and no message,
@@ -73,12 +73,17 @@ export function ProblemsView({
 }) {
   const [selected, setSelected] = useState<string | null>(null)
   const scoped = problemsInScope(problems ?? [], activeHarness)
-  const selectedProblem = scoped.find((problem) => problemKey(problem) === selected) ?? null
+  // Same (problem, index) key the rows render with, so a duplicate or id-less row
+  // opens the row that was clicked rather than the first one sharing its code.
+  const selectedProblem = scoped.find((problem, i) => problemKey(problem, i) === selected) ?? null
+  // Only a row the server stored has an id to ask for; a synthetic row key would be a
+  // guaranteed 404, so no request is made and the list row itself is shown.
+  const serverId = selectedProblem?.id !== undefined ? String(selectedProblem.id) : null
 
   const detail = useQuery({
-    queryKey: ['kyber-problem-detail', selected],
-    queryFn: () => fetchProblemDetail(selected as string),
-    enabled: selected !== null,
+    queryKey: ['kyber-problem-detail', serverId],
+    queryFn: () => fetchProblemDetail(serverId as string),
+    enabled: serverId !== null,
     retry: false,
   })
 
@@ -139,8 +144,9 @@ export function ProblemsView({
         <ProblemDetailPanel
           problem={selectedProblem}
           detail={detail.data ?? null}
-          isLoading={detail.isLoading}
-          isError={detail.isError}
+          isLoading={serverId !== null && detail.isLoading}
+          isError={serverId === null || detail.isError}
+          canRetry={serverId !== null}
           onRetry={() => void detail.refetch()}
           onClose={() => setSelected(null)}
         />
@@ -149,10 +155,10 @@ export function ProblemsView({
   )
 }
 
-function problemKey(problem: ProblemEntry, fallback = 0): string {
+/** A row's identity in the list: the stored id, else code + span + position (always unique). */
+function problemKey(problem: ProblemEntry, index: number): string {
   if (problem.id !== undefined) return String(problem.id)
-  if (problem.spanId !== undefined) return `${problem.code}:${problem.spanId}`
-  return `${problem.code}:${fallback}`
+  return `${problem.code}:${problem.spanId ?? ''}:${index}`
 }
 
 function ProblemDetailPanel({
@@ -160,6 +166,7 @@ function ProblemDetailPanel({
   detail,
   isLoading,
   isError,
+  canRetry,
   onRetry,
   onClose,
 }: {
@@ -167,6 +174,7 @@ function ProblemDetailPanel({
   detail: Record<string, unknown> | null
   isLoading: boolean
   isError: boolean
+  canRetry: boolean
   onRetry: () => void
   onClose: () => void
 }) {
@@ -221,9 +229,11 @@ function ProblemDetailPanel({
             Stored evidence for this row is unavailable — this server does not serve problem detail, or the row
             predates stored payloads. What is shown above is the list row itself; no message or stack is fabricated.
           </p>
-          <button type="button" data-testid="problem-detail-retry" onClick={onRetry} className="mt-1 rounded border border-border px-2 py-1 text-xs">
-            Retry
-          </button>
+          {canRetry && (
+            <button type="button" data-testid="problem-detail-retry" onClick={onRetry} className="mt-1 rounded border border-border px-2 py-1 text-xs">
+              Retry
+            </button>
+          )}
         </div>
       )}
       {!isLoading && !isError && incoming !== null && incoming !== undefined && (
