@@ -406,7 +406,7 @@ and validates.
     forward-slash path under the resolved Copilot global root
     (`<root>/agents/<resource-path>`, Windows roots included). A `#anchor` or `?query` suffix and
     a link title are kept; an authored angle-form destination is matched too. Links outside the
-    declared closure, links inside fenced code blocks, and prose that merely mentions a path are
+    declared closure, links inside fenced code blocks or inline code spans, and prose that merely mentions a path are
     untouched; a target containing whitespace or parentheses uses the CommonMark angle form
     `(<…>)`. Resource files stay beside the
     principal and are not themselves rewritten. Each rewrite is recorded as a

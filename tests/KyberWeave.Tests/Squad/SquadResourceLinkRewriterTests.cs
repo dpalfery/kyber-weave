@@ -170,4 +170,38 @@ public sealed class SquadResourceLinkRewriterTests
         Assert.Equal("[x](</home/a(b)/references/x.md#s>)", result);
         Assert.True(changed);
     }
+
+    [Fact]
+    public void RewritesLinkWithParenthesizedTitleAndKeepsTheTitle()
+    {
+        string result = Rewrite("[x](references/x.md (see intake))", Root, out bool changed);
+
+        Assert.Equal("[x](/root/references/x.md (see intake))", result);
+        Assert.True(changed);
+    }
+
+    [Fact]
+    public void LeavesLinkInsideInlineCodeSpanUntouchedButRewritesLinksAroundIt()
+    {
+        string result = Rewrite(
+            "[a](references/x.md) and `[x](references/x.md)` and [b](references/x.md)",
+            Root,
+            out bool changed);
+
+        Assert.Equal(
+            "[a](/root/references/x.md) and `[x](references/x.md)` and [b](/root/references/x.md)",
+            result);
+        Assert.True(changed);
+    }
+
+    [Fact]
+    public void LeavesLinkInsideDoubleBacktickCodeSpanUntouched()
+    {
+        const string body = "Example: ``[x](references/x.md)``.";
+
+        string result = Rewrite(body, Root, out bool changed);
+
+        Assert.Equal(body, result);
+        Assert.False(changed);
+    }
 }

@@ -16,9 +16,10 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// each target opts in without duplicating the regex or the closure logic (ADR 0021
 /// introduced this for ZCode; Copilot global scope is the second user). An authored link may
 /// carry a title (<c>[x](path "t")</c>) or an angle-bracketed destination
-/// (<c>[x](&lt;path&gt;)</c>); both are matched and the title is preserved. Fenced code blocks
-/// are left untouched, so an example link shown in a code sample is not turned into a machine
-/// path.
+/// (<c>[x](&lt;path&gt;)</c>); both are matched and the title (double-quoted, single-quoted or
+/// parenthesized) is preserved. Fenced code blocks and inline code spans are left untouched, so
+/// an example link shown in a code sample is not turned into a machine path. Indented code
+/// blocks are not recognised.
 /// </remarks>
 internal static class SquadResourceLinkRewriter
 {
@@ -28,13 +29,17 @@ internal static class SquadResourceLinkRewriter
     /// prose that merely mentions a filename.
     /// </summary>
     private static readonly Regex MarkdownLinkTarget = new(
-        @"(?<prefix>\]\()(?:<(?<angle>[^<>\r\n]+)>|(?<target>[^)\s]+))(?<title>[ \t]+(?:""[^""\r\n]*""|'[^'\r\n]*'))?(?<suffix>\))",
+        @"(?<prefix>\]\()(?:<(?<angle>[^<>\r\n]+)>|(?<target>[^)\s]+))(?<title>[ \t]+(?:""[^""\r\n]*""|'[^'\r\n]*'|\([^()\r\n]*\)))?(?<suffix>\))",
         RegexOptions.Compiled | RegexOptions.CultureInvariant,
         TimeSpan.FromSeconds(2));
 
-    /// <summary>A fenced code block (backtick or tilde fence), matched so its content is skipped.</summary>
-    private static readonly Regex FencedCodeBlock = new(
-        @"^[ ]{0,3}(?<fence>`{3,}|~{3,})[^\r\n]*\r?\n(?:.*?\r?\n)??[ ]{0,3}\k<fence>[`~]*[ \t]*(?:\r?\n|\z)",
+    /// <summary>
+    /// A span whose content is skipped: a fenced code block (backtick or tilde fence) or an inline
+    /// code span, so an example link shown as code is not turned into a machine path.
+    /// </summary>
+    private static readonly Regex ProtectedSpan = new(
+        @"^[ ]{0,3}(?<fence>`{3,}|~{3,})[^\r\n]*\r?\n(?:.*?\r?\n)??[ ]{0,3}\k<fence>[`~]*[ \t]*(?:\r?\n|\z)"
+        + @"|(?<!`)(?<ticks>`+)(?!`)(?:(?!\k<ticks>)[^\r\n])+?(?<!`)\k<ticks>(?!`)",
         RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.Multiline | RegexOptions.Singleline,
         TimeSpan.FromSeconds(2));
 
@@ -56,11 +61,11 @@ internal static class SquadResourceLinkRewriter
         bool anyChanged = false;
         var output = new System.Text.StringBuilder(body.Length);
         int position = 0;
-        foreach (Match fence in FencedCodeBlock.Matches(body))
+        foreach (Match span in ProtectedSpan.Matches(body))
         {
-            output.Append(RewriteSegment(body[position..fence.Index]));
-            output.Append(fence.Value);
-            position = fence.Index + fence.Length;
+            output.Append(RewriteSegment(body[position..span.Index]));
+            output.Append(span.Value);
+            position = span.Index + span.Length;
         }
 
         output.Append(RewriteSegment(body[position..]));
