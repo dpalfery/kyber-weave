@@ -117,47 +117,57 @@ public sealed class SquadResourceLinkRewriterTests
     }
 
     [Fact]
-    public void CurrentlyLeavesLinkWithTitleUnchanged()
+    public void RewritesLinkWithTitleAndKeepsTheTitle()
     {
-        const string body = "[x](references/x.md \"t\")";
+        string result = Rewrite("[x](references/x.md \"t\")", Root, out bool changed);
 
-        string result = Rewrite(body, Root, out bool changed);
-
-        Assert.Equal(body, result);
-        Assert.False(changed);
+        Assert.Equal("[x](/root/references/x.md \"t\")", result);
+        Assert.True(changed);
     }
 
     [Fact]
-    public void CurrentlyLeavesAuthoredAngleFormLinkUnchanged()
+    public void RewritesAuthoredAngleFormLink()
     {
-        const string body = "[x](<references/x.md>)";
+        string result = Rewrite("[x](<references/x.md>)", Root, out bool changed);
 
-        string result = Rewrite(body, Root, out bool changed);
-
-        Assert.Equal(body, result);
-        Assert.False(changed);
+        Assert.Equal("[x](/root/references/x.md)", result);
+        Assert.True(changed);
     }
 
     [Fact]
-    public void CurrentlyRewritesLinkInsideFencedCodeBlock()
+    public void LeavesLinkInsideFencedCodeBlockUntouched()
     {
         const string body = "```\n[x](references/x.md)\n```";
 
         string result = Rewrite(body, Root, out bool changed);
 
-        Assert.Equal("```\n[x](/root/references/x.md)\n```", result);
+        Assert.Equal(body, result);
+        Assert.False(changed);
+    }
+
+    [Fact]
+    public void LeavesLinkInsideTildeFenceUntouchedButRewritesLinksAroundIt()
+    {
+        string result = Rewrite(
+            "[a](references/x.md)\n~~~md\n[x](references/x.md)\n~~~\n[b](references/x.md)",
+            Root,
+            out bool changed);
+
+        Assert.Equal(
+            "[a](/root/references/x.md)\n~~~md\n[x](references/x.md)\n~~~\n[b](/root/references/x.md)",
+            result);
         Assert.True(changed);
     }
 
     [Fact]
-    public void CurrentlyEmitsRootWithBalancedParenthesesVerbatim()
+    public void WrapsMappedTargetContainingParenthesesInAngleForm()
     {
         string result = Rewrite(
-            "[x](references/x.md)",
+            "[x](references/x.md#s)",
             p => $"/home/a(b)/{p}",
             out bool changed);
 
-        Assert.Equal("[x](/home/a(b)/references/x.md)", result);
+        Assert.Equal("[x](</home/a(b)/references/x.md#s>)", result);
         Assert.True(changed);
     }
 }

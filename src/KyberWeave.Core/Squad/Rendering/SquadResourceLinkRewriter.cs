@@ -12,9 +12,13 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// that merely names a file in text, and a link to anything outside the closure, are untouched.
 /// The target-specific part is a mapping function from the authored path to the emitted path;
 /// the closure test, the <c>#fragment</c>/<c>?query</c> handling, and the CommonMark
-/// angle-bracket form for a mapped target containing whitespace are shared, so each target
-/// opts in without duplicating the regex or the closure logic (ADR 0021 introduced this for
-/// ZCode; Copilot global scope is the second user).
+/// angle-bracket form for a mapped target containing whitespace or parentheses are shared, so
+/// each target opts in without duplicating the regex or the closure logic (ADR 0021
+/// introduced this for ZCode; Copilot global scope is the second user). An authored link may
+/// carry a title (<c>[x](path "t")</c>) or an angle-bracketed destination
+/// (<c>[x](&lt;path&gt;)</c>); both are matched and the title is preserved. Fenced code blocks
+/// are left untouched, so an example link shown in a code sample is not turned into a machine
+/// path.
 /// </remarks>
 internal static class SquadResourceLinkRewriter
 {
@@ -24,8 +28,14 @@ internal static class SquadResourceLinkRewriter
     /// prose that merely mentions a filename.
     /// </summary>
     private static readonly Regex MarkdownLinkTarget = new(
-        @"(?<prefix>\]\()(?<target>[^)\s]+)(?<suffix>\))",
+        @"(?<prefix>\]\()(?:<(?<angle>[^<>\r\n]+)>|(?<target>[^)\s]+))(?<title>[ \t]+(?:""[^""\r\n]*""|'[^'\r\n]*'))?(?<suffix>\))",
         RegexOptions.Compiled | RegexOptions.CultureInvariant,
+        TimeSpan.FromSeconds(2));
+
+    /// <summary>A fenced code block (backtick or tilde fence), matched so its content is skipped.</summary>
+    private static readonly Regex FencedCodeBlock = new(
+        @"^[ ]{0,3}(?<fence>`{3,}|~{3,})[^\r\n]*\r?\n(?:.*?\r?\n)??[ ]{0,3}\k<fence>[`~]*[ \t]*(?:\r?\n|\z)",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.Multiline | RegexOptions.Singleline,
         TimeSpan.FromSeconds(2));
 
     /// <summary>
@@ -44,9 +54,23 @@ internal static class SquadResourceLinkRewriter
         out bool changed)
     {
         bool anyChanged = false;
-        string rewritten = MarkdownLinkTarget.Replace(body, match =>
+        var output = new System.Text.StringBuilder(body.Length);
+        int position = 0;
+        foreach (Match fence in FencedCodeBlock.Matches(body))
         {
-            string target = match.Groups["target"].Value;
+            output.Append(RewriteSegment(body[position..fence.Index]));
+            output.Append(fence.Value);
+            position = fence.Index + fence.Length;
+        }
+
+        output.Append(RewriteSegment(body[position..]));
+        string rewritten = output.ToString();
+
+        string RewriteSegment(string segment) => MarkdownLinkTarget.Replace(segment, match =>
+        {
+            string target = match.Groups["angle"].Success
+                ? match.Groups["angle"].Value
+                : match.Groups["target"].Value;
             int suffixIndex = target.IndexOfAny(['#', '?']);
             string pathPart = suffixIndex < 0 ? target : target[..suffixIndex];
             string linkSuffix = suffixIndex < 0 ? string.Empty : target[suffixIndex..];
@@ -57,12 +81,12 @@ internal static class SquadResourceLinkRewriter
 
             anyChanged = true;
             string newTarget = mapPath(pathPart) + linkSuffix;
-            if (newTarget.Any(char.IsWhiteSpace))
+            if (newTarget.Any(char.IsWhiteSpace) || newTarget.Contains('(', StringComparison.Ordinal) || newTarget.Contains(')', StringComparison.Ordinal))
             {
                 newTarget = $"<{newTarget}>";
             }
 
-            return $"{match.Groups["prefix"].Value}{newTarget}{match.Groups["suffix"].Value}";
+            return $"{match.Groups["prefix"].Value}{newTarget}{match.Groups["title"].Value}{match.Groups["suffix"].Value}";
         });
 
         changed = anyChanged;

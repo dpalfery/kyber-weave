@@ -404,9 +404,11 @@ and validates.
     a relative link has no base the model can resolve. Each link in the agent body whose target
     exactly equals one of that agent's declared resource paths is rewritten to an absolute
     forward-slash path under the resolved Copilot global root
-    (`<root>/agents/<resource-path>`, Windows roots included). A `#anchor` suffix is kept; links
-    outside the declared closure and prose that merely mentions a path are untouched; a target
-    containing a space uses the CommonMark angle form `(<…>)`. Resource files stay beside the
+    (`<root>/agents/<resource-path>`, Windows roots included). A `#anchor` or `?query` suffix and
+    a link title are kept; an authored angle-form destination is matched too. Links outside the
+    declared closure, links inside fenced code blocks, and prose that merely mentions a path are
+    untouched; a target containing whitespace or parentheses uses the CommonMark angle form
+    `(<…>)`. Resource files stay beside the
     principal and are not themselves rewritten. Each rewrite is recorded as a
     `resource-links-rewritten` degradation, as for ZCode. Project scope is unchanged and
     byte-identical: links stay relative and the files sit inside the workspace.
