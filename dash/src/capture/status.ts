@@ -25,6 +25,7 @@ import {
   defaultExistenceProbe,
   detectInstall,
   dirnameFor,
+  guardProbe,
   type ExistenceProbe,
   type InstallDetection,
   type InstallState,
@@ -131,9 +132,9 @@ function isFileApplicable(
   platform: NodeJS.Platform,
 ): boolean {
   if (writer.kind !== 'managed' || (writer.configFiles?.length ?? 0) < 2) return true
-  const file = existence(path)
-  if (file !== 'absent') return true
-  return existence(dirnameFor(platform, path)) !== 'absent'
+  const probe = guardProbe(existence)
+  if (probe(path) !== 'absent') return true
+  return probe(dirnameFor(platform, path)) !== 'absent'
 }
 
 /** The `fileFilter` the capture route hands the engine so enable honors D19. */

@@ -142,4 +142,17 @@ describe('detectInstall: status-only harnesses', () => {
     expect(absent.installed).toBe('not-detected')
     expect(absent.evidence).toEqual(['config not found at /h/.codex/config.toml'])
   })
+
+  it('treats an injected probe that throws or returns a malformed result as a failed probe', () => {
+    const writer = CAPTURE_HARNESS_REGISTRY.find((candidate) => candidate.id === 'claude-code')!
+    const env = { platform: 'linux' } as const
+    const thrower = (): never => {
+      throw Object.assign(new Error('boom'), { code: 'EACCES' })
+    }
+    const thrown = detectInstall(writer, '/home/x', env, thrower)
+    expect(thrown.installed).toBe('unknown')
+    expect(thrown.evidence.join('\n')).toContain('EACCES')
+    const malformed = detectInstall(writer, '/home/x', env, (() => null) as never)
+    expect(malformed.installed).toBe('unknown')
+  })
 })

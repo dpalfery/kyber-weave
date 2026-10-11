@@ -46,6 +46,25 @@ export function defaultExistenceProbe(path: string): ExistenceResult {
 }
 
 /**
+ * An injected probe is untrusted: a throw becomes a failed probe (its errno code, else
+ * `UNKNOWN`), and a result of an unexpected shape does too, so detection never throws.
+ */
+export function guardProbe(probe: ExistenceProbe): ExistenceProbe {
+  return (path) => {
+    let result: unknown
+    try {
+      result = probe(path)
+    } catch (error) {
+      const code = (error as { code?: unknown } | null)?.code
+      return { failed: typeof code === 'string' ? code : 'UNKNOWN' }
+    }
+    if (result === 'present' || result === 'absent') return result
+    const failed = (result as { failed?: unknown } | null)?.failed
+    return { failed: typeof failed === 'string' ? failed : 'UNKNOWN' }
+  }
+}
+
+/**
  * One question the install check asks, answered by any of its alternatives:
  * "is Claude Code here?" is yes for the `.claude` directory OR the native
  * binary. Each group reports a single evidence line, so a detected harness is
@@ -124,8 +143,9 @@ export function detectInstall(
   writer: CaptureHarnessWriter,
   home: string,
   env: PathEnv,
-  exists: ExistenceProbe = defaultExistenceProbe,
+  existsProbe: ExistenceProbe = defaultExistenceProbe,
 ): InstallDetection {
+  const exists = guardProbe(existsProbe)
   let found = false
   let failed = false
   const evidence: string[] = []
