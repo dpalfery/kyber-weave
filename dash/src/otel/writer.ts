@@ -280,8 +280,10 @@ export class IngestWriter implements OtlpSpanStore {
     if (hook === undefined) return
     try {
       hook({ spans, logs })
-    } catch {
-      // The batch is committed; a hook failure must not fail the flush or re-queue it.
+    } catch (err) {
+      // The batch is committed; a hook failure must not fail the flush or re-queue it,
+      // but it is logged so a broken hook is not invisible.
+      console.warn('[ingest] onPersisted hook failed (batch already committed):', err)
     }
   }
 }
