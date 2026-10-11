@@ -5,6 +5,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import {
   XML_FOLD_TAGS,
   parseXmlFoldChunks,
+  parseReadableXmlChunks,
+  containsReadableXmlTag,
   XmlFoldedText,
   ToolCallView,
   ToolResultView,
@@ -26,6 +28,7 @@ import {
   prettyPrintJsonNested,
   prettyPrintJsonLinesNested,
   TurnFullContentPanel,
+  ToggleRawView,
   CopyExactButton,
   isTurnFullContentRequest,
   buildWholeTurnCopyText,
@@ -163,7 +166,10 @@ Suffix text`
     expect((detailsEl!.props as { className?: string }).className).toContain('group border border-border rounded my-1 bg-card/60')
 
     const html = renderHtml(element)
-    expect(html).toContain('&lt;instructions&gt;')
+    // Readable label without structural angle-bracket delimiters.
+    expect(html).toContain('>instructions<')
+    expect(html).not.toContain('&lt;instructions')
+    expect(html).not.toContain('&lt;/instructions')
     expect(html).toContain('This is an instruction block')
   })
 
@@ -173,7 +179,8 @@ Suffix text`
     const element = React.createElement(XmlFoldedText, { text: raw })
     const html = renderHtml(element)
 
-    expect(html).toContain('&lt;workspace_info&gt;')
+    expect(html).toContain('>workspace_info<')
+    expect(html).not.toContain('&lt;workspace_info')
     // Previews first 80 chars with ellipsis
     expect(html).toContain('A'.repeat(80) + '…')
   })
@@ -185,9 +192,14 @@ Trailing notes`
     const element = React.createElement(XmlFoldedText, { text: raw })
     const html = renderHtml(element)
     expect(html).toContain('Leading notes')
-    expect(html).toContain('&lt;context&gt;')
+    expect(html).toContain('>context<')
+    expect(html).not.toContain('&lt;context')
+    expect(html).not.toContain('&lt;/context')
     expect(html).toContain('Project context')
     expect(html).toContain('Trailing notes')
+    // Source order survives: leading, section, trailing.
+    expect(html.indexOf('Leading notes')).toBeLessThan(html.indexOf('Project context'))
+    expect(html.indexOf('Project context')).toBeLessThan(html.indexOf('Trailing notes'))
   })
 
   it('correctly handles unclosed XML tags (e.g. <instructions>hello without closing tag)', () => {
@@ -200,7 +212,8 @@ Trailing notes`
 
     const element = React.createElement(XmlFoldedText, { text: raw })
     const html = renderHtml(element)
-    expect(html).toContain('&lt;instructions&gt;')
+    expect(html).toContain('>instructions<')
+    expect(html).not.toContain('&lt;instructions')
     expect(html).toContain('hello unclosed block')
     expect(findDetailsNodes(element).length).toBe(1)
   })
@@ -218,8 +231,141 @@ Trailing notes`
     const element = React.createElement(XmlFoldedText, { text: raw })
     const html = renderHtml(element)
     expect(html).toContain('Before tag')
-    expect(html).toContain('&lt;context&gt;')
+    expect(html).toContain('>context<')
+    expect(html).not.toContain('&lt;context')
     expect(html).toContain('some context that is not closed')
+  })
+})
+
+describe('SessionInspectorDrawer: human-readable API context display', () => {
+  it('shows nested system sections with readable labels and no tag delimiters in source order', () => {
+    const raw = [
+      'Review the turn the API saw.',
+      '<system>You are a diagnostic agent. Follow every rule.</system>',
+      'Middle note between sections.',
+      '<system>Second occurrence with <context>nested project context</context> inside.</system>',
+      'Closing note.',
+    ].join('\n')
+    const element = React.createElement(XmlFoldedText, { text: raw })
+    const html = renderHtml(element)
+    const text = unescapeHtml(html)
+
+    // No visible structural delimiters for the representative nested tags.
+    expect(html).not.toContain('&lt;system')
+    expect(html).not.toContain('&lt;/system')
+    expect(html).not.toContain('&lt;context')
+    expect(html).not.toContain('&lt;/context')
+    // Readable tag names and section boundaries survive as labels.
+    expect(html).toContain('data-testid="folded-tag-system"')
+    expect(html).toContain('data-testid="folded-tag-context"')
+    expect(html).toContain('>system<')
+    expect(html).toContain('>context<')
+    // Every body character survives in source order, including repeats.
+    for (const snippet of [
+      'Review the turn the API saw.',
+      'You are a diagnostic agent. Follow every rule.',
+      'Middle note between sections.',
+      'Second occurrence with',
+      'nested project context',
+      'inside.',
+      'Closing note.',
+    ]) {
+      expect(text).toContain(snippet)
+    }
+    expect(text.indexOf('Review the turn the API saw.')).toBeLessThan(text.indexOf('You are a diagnostic agent.'))
+    expect(text.indexOf('You are a diagnostic agent.')).toBeLessThan(text.indexOf('Middle note between sections.'))
+    expect(text.indexOf('Middle note between sections.')).toBeLessThan(text.indexOf('Second occurrence with'))
+    expect(text.indexOf('nested project context')).toBeLessThan(text.indexOf('Closing note.'))
+  })
+
+  it('parses generic readable sections while keeping the harness parser intact', () => {
+    const raw = '<system>hello <b>bold</b> world</system>'
+    const chunks = parseReadableXmlChunks(raw)
+    expect(chunks).toHaveLength(1)
+    expect(chunks[0].type).toBe('tag')
+    expect(chunks[0].tag).toBe('system')
+    expect(chunks[0].content).toBe('hello <b>bold</b> world')
+    expect(containsReadableXmlTag(raw)).toBe(true)
+    expect(containsReadableXmlTag('plain prose without tags')).toBe(false)
+    // The harness allowlist parser is unchanged in shape.
+    expect(parseXmlFoldChunks('<instructions>hi</instructions>')[0]).toMatchObject({ type: 'tag', tag: 'instructions' })
+  })
+
+  it('preserves literal angle-bracket text that is not a structural tag', () => {
+    const literal = 'Compare 2 < 3 and 5 > 4 with empty <> markers and math a < b > c.'
+    const element = React.createElement(XmlFoldedText, { text: literal })
+    const html = renderHtml(element)
+    const text = unescapeHtml(html)
+    // No structural fold: literals render as plain text with bytes intact.
+    expect(html).not.toContain('data-testid="folded-tag-')
+    expect(text).toContain(literal)
+    expect(text).toContain('2 < 3')
+    expect(text).toContain('5 > 4')
+    expect(text).toContain('<>')
+    expect(containsReadableXmlTag(literal)).toBe(false)
+  })
+
+  it('keeps literal brackets alongside structural sections without dropping either', () => {
+    const raw = 'Score note: 2 < 3 stays.\n<system>Section body with every byte.</system>\nTail: a > b stays.'
+    const element = React.createElement(XmlFoldedText, { text: raw })
+    const html = renderHtml(element)
+    const text = unescapeHtml(html)
+    expect(html).toContain('data-testid="folded-tag-system"')
+    expect(html).not.toContain('&lt;system')
+    expect(text).toContain('2 < 3 stays.')
+    expect(text).toContain('Section body with every byte.')
+    expect(text).toContain('a > b stays.')
+  })
+
+  it('keeps raw toggle and copy byte-exact with tags, whitespace, and repeats', () => {
+    const padded = '  \n  <system>  padded section body  </system>  \n  '
+    const repeated = `${padded}\n\n${padded}`
+
+    const formattedHtml = renderHtml(React.createElement(ToggleRawView, {
+      text: repeated,
+      label: 'System prompt',
+      rawTestId: 'readable-raw-probe',
+      copyTestId: 'copy-readable-probe',
+      viewPrefix: 'readable-probe',
+    }))
+    // Formatted view is readable: labels without delimiters, body preserved.
+    expect(formattedHtml).not.toContain('&lt;system')
+    expect(unescapeHtml(formattedHtml)).toContain('padded section body')
+
+    const rawHtml = renderHtml(React.createElement(ToggleRawView, {
+      text: repeated,
+      label: 'System prompt',
+      rawTestId: 'readable-raw-probe',
+      copyTestId: 'copy-readable-probe',
+      viewPrefix: 'readable-probe',
+      defaultView: 'raw',
+    }))
+    // Raw view is byte-exact: tags, whitespace, and both occurrences.
+    expect(rawHtml).toContain('data-testid="readable-raw-probe"')
+    expect(unescapeHtml(rawHtml)).toContain(repeated)
+    expect(unescapeHtml(rawHtml).split('<system>').length - 1).toBe(2)
+    expect(unescapeHtml(rawHtml).split('</system>').length - 1).toBe(2)
+
+    // Copy writes the exact source bytes, not the readable expansion.
+    const written: string[] = []
+    const nav = (globalThis as { navigator?: unknown }).navigator
+    const hadNavigator = nav !== undefined
+    Object.defineProperty(globalThis, 'navigator', {
+      value: { clipboard: { writeText: (s: string) => { written.push(s); return Promise.resolve() } } },
+      configurable: true,
+    })
+    try {
+      const button = CopyExactButton({ text: repeated, testId: 'copy-probe' }) as React.ReactElement
+      ;(button.props as { onClick: () => void }).onClick()
+      expect(written).toEqual([repeated])
+    } finally {
+      if (hadNavigator) {
+        Object.defineProperty(globalThis, 'navigator', { value: nav, configurable: true })
+      } else {
+        const g = globalThis as { navigator?: unknown }
+        delete g.navigator
+      }
+    }
   })
 })
 
@@ -264,7 +410,12 @@ describe('SessionInspectorDrawer: Tool Call and Tool Result Formatting', () => {
     const html = renderHtml(element)
 
     expect(html).toContain('↩')
-    expect(html).toContain('&lt;file_contents&gt;')
+    // Readable section label without structural delimiters; attributes stay readable.
+    expect(html).toContain('>file_contents<')
+    expect(html).not.toContain('&lt;file_contents')
+    expect(html).not.toContain('&lt;/file_contents')
+    expect(html).toContain('path=')
+    expect(html).toContain('src/main.ts')
     expect(html).toContain('console.log(&quot;hello world&quot;);')
   })
 
@@ -451,7 +602,9 @@ describe('SessionInspectorDrawer: InspectorContent', () => {
     expect(html).toContain('Cache-read input')
     expect(html).toContain('Fresh input jumped')
     expect(html).toContain('+45%')
-    expect(html).toContain('&lt;instructions&gt;')
+    expect(html).toContain('>instructions<')
+    expect(html).not.toContain('&lt;instructions')
+    expect(html).toContain('Write tests')
     expect(html).toContain('reasoning')
     expect(html).toContain('Let us consider the edge cases...')
   })

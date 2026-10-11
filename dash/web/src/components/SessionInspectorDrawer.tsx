@@ -43,7 +43,154 @@ export interface XmlFoldChunk {
 }
 
 /**
+ * HTML-active tags are never treated as structural readable sections. They
+ * stay as escaped literal text so a payload like `<script>alert(1)</script>`
+ * keeps its delimiters visibly escaped and never becomes an executable
+ * element (React still escapes; no `dangerouslySetInnerHTML` anywhere).
+ */
+const READABLE_XML_LITERAL_TAGS = new Set(['script', 'style', 'iframe', 'object', 'embed', 'link', 'meta'])
+
+const READABLE_XML_TAG_NAME = '[A-Za-z_][\\w:.-]*'
+const READABLE_XML_ATTR_VALUE = '(?:"[^"]*"|\'[^\']*\'|[^\\s<>\"\'=]+)'
+const READABLE_XML_ATTR = `(?:\\s+[^\\s<>/=]+(?:\\s*=\\s*${READABLE_XML_ATTR_VALUE})?)`
+const READABLE_XML_TOKEN_RE = new RegExp(
+  `<\\/\\s*(${READABLE_XML_TAG_NAME})\\s*>` +
+    `|<(${READABLE_XML_TAG_NAME})((?:${READABLE_XML_ATTR})*)\\s*(\\/?)>`,
+  'g',
+)
+
+interface ReadableXmlToken {
+  index: number
+  end: number
+  raw: string
+  kind: 'open' | 'close' | 'selfClosing'
+  tag: string
+  attributes?: string
+}
+
+function tokenizeReadableXml(raw: string): ReadableXmlToken[] {
+  const tokens: ReadableXmlToken[] = []
+  READABLE_XML_TOKEN_RE.lastIndex = 0
+  let match: RegExpExecArray | null
+  while ((match = READABLE_XML_TOKEN_RE.exec(raw)) !== null) {
+    if (match[1] !== undefined) {
+      tokens.push({
+        index: match.index,
+        end: match.index + match[0].length,
+        raw: match[0],
+        kind: 'close',
+        tag: match[1],
+      })
+    } else {
+      const tag = match[2] as string
+      const attributes = (match[3] ?? '').trim() || undefined
+      const selfClosing = match[4] === '/'
+      tokens.push({
+        index: match.index,
+        end: match.index + match[0].length,
+        raw: match[0],
+        kind: selfClosing ? 'selfClosing' : 'open',
+        tag,
+        attributes,
+      })
+    }
+  }
+  return tokens
+}
+
+/**
+ * Parses any well-formed XML-like sections into ordered text/tag chunks.
+ * Only `<name ...>...</name>` and `<name .../>` with a valid tag name count
+ * as structural; stray `<`, `>`, `<>`, `< 3`, or `a < b` stay in text chunks
+ * so literal angle brackets are never silently removed. Denylisted
+ * HTML-active tags stay literal too. Every occurrence is preserved in source
+ * order with its exact inner bytes; nothing is deduplicated or reordered.
+ */
+export function parseReadableXmlChunks(raw: string): XmlFoldChunk[] {
+  if (!raw) return []
+  const tokens = tokenizeReadableXml(raw)
+  const chunks: XmlFoldChunk[] = []
+  let pos = 0
+  const openStack: ReadableXmlToken[] = []
+
+  const pushText = (slice: string): void => {
+    if (slice) chunks.push({ type: 'text', content: slice })
+  }
+
+  let i = 0
+  while (i < tokens.length) {
+    const token = tokens[i] as ReadableXmlToken
+    if (READABLE_XML_LITERAL_TAGS.has(token.tag.toLowerCase())) {
+      i++
+      continue
+    }
+    if (token.kind === 'selfClosing') {
+      if (openStack.length === 0) {
+        pushText(raw.slice(pos, token.index))
+        chunks.push({ type: 'tag', tag: token.tag, attributes: token.attributes, content: '' })
+        pos = token.end
+      }
+      i++
+      continue
+    }
+    if (token.kind === 'open') {
+      openStack.push(token)
+      i++
+      continue
+    }
+    const top = openStack[openStack.length - 1]
+    if (top && top.tag.toLowerCase() === token.tag.toLowerCase()) {
+      openStack.pop()
+      if (openStack.length === 0) {
+        pushText(raw.slice(pos, top.index))
+        chunks.push({
+          type: 'tag',
+          tag: top.tag,
+          attributes: top.attributes,
+          content: raw.slice(top.end, token.index),
+        })
+        pos = token.end
+      }
+    }
+    i++
+  }
+
+  if (openStack.length > 0) {
+    const first = openStack[0] as ReadableXmlToken
+    pushText(raw.slice(pos, first.index))
+    chunks.push({
+      type: 'tag',
+      tag: first.tag,
+      attributes: first.attributes,
+      content: raw.slice(first.end),
+    })
+    return chunks
+  }
+
+  pushText(raw.slice(pos))
+  return chunks
+}
+
+/**
+ * Preview text for a folded section with structural delimiters removed but
+ * body words kept. Structural tag tokens become a space; anything else
+ * (including literal `<`/`>` that never parsed as a tag) stays verbatim.
+ */
+function readablePreviewText(inner: string, maxLength = 80): { preview: string; hasMore: boolean } {
+  READABLE_XML_TOKEN_RE.lastIndex = 0
+  const stripped = inner.replace(READABLE_XML_TOKEN_RE, (match, closeName, openName) => {
+    const name = (closeName ?? openName ?? '') as string
+    if (name && READABLE_XML_LITERAL_TAGS.has(String(name).toLowerCase())) return match
+    return ' '
+  })
+  const collapsed = stripped.replace(/\s+/g, ' ').trim()
+  return { preview: collapsed.slice(0, maxLength), hasMore: collapsed.length > maxLength }
+}
+/**
  * Parses raw text into plain text chunks and recognized harness XML blocks.
+ * Kept for the allowlist unit tests; the formatted view below uses the
+ * generic readable parser so representative tags outside the harness list
+ * (for example `<system>`) render as readable sections too.
  */
 export function parseXmlFoldChunks(raw: string): XmlFoldChunk[] {
   if (!raw) return []
@@ -83,11 +230,25 @@ export function parseXmlFoldChunks(raw: string): XmlFoldChunk[] {
 }
 
 /**
- * Formats text containing harness XML blocks into collapsible <details> elements.
+ * True when the formatted readable view would fold at least one structural
+ * XML section. Denylisted HTML-active tags and stray angle brackets never
+ * count, so literals route to plain text instead of folding.
+ */
+export function containsReadableXmlTag(value: string): boolean {
+  if (!value) return false
+  return parseReadableXmlChunks(value).some((chunk) => chunk.type === 'tag')
+}
+
+/**
+ * Human-readable formatted view for API context text. Structural XML-like
+ * sections become collapsible readable labels with no angle-bracket
+ * delimiters; every body character and occurrence stays in source order via
+ * recursive rendering. Literal `<`/`>` that never parsed as a tag stays as
+ * escaped literal text. Raw and copy paths elsewhere keep the exact source.
  */
 export function XmlFoldedText({ text, className }: { text: string; className?: string }) {
   if (!text) return null
-  const chunks = parseXmlFoldChunks(text)
+  const chunks = parseReadableXmlChunks(text)
 
   if (chunks.length === 0) return null
 
@@ -108,9 +269,27 @@ export function XmlFoldedText({ text, className }: { text: string; className?: s
           )
         }
 
-        const trimmedInner = chunk.content.trim()
-        const preview = trimmedInner.slice(0, 80).replace(/\s+/g, ' ')
-        const hasMore = trimmedInner.length > 80
+        const inner = chunk.content ?? ''
+        if (inner.trim() === '') {
+          return (
+            <div
+              key={i}
+              className="border border-border rounded my-1 bg-card/60 px-3 py-1.5 flex items-center gap-2"
+              data-testid={`folded-tag-${chunk.tag}`}
+            >
+              <span className="shrink-0 rounded bg-amber-500/15 border border-amber-500/30 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-amber-600 dark:text-amber-400">
+                {chunk.tag}
+              </span>
+              {chunk.attributes ? (
+                <span className="truncate font-mono text-[11px] text-tertiary-foreground flex-1">
+                  {chunk.attributes}
+                </span>
+              ) : null}
+            </div>
+          )
+        }
+
+        const { preview, hasMore } = readablePreviewText(inner)
 
         return (
           <details
@@ -120,8 +299,13 @@ export function XmlFoldedText({ text, className }: { text: string; className?: s
           >
             <summary className="cursor-pointer px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground flex items-center gap-2 select-none hover:bg-interactive-secondary/50 transition-colors">
               <span className="shrink-0 rounded bg-amber-500/15 border border-amber-500/30 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-amber-600 dark:text-amber-400">
-                &lt;{chunk.tag}&gt;
+                {chunk.tag}
               </span>
+              {chunk.attributes ? (
+                <span className="truncate font-mono text-[10px] text-tertiary-foreground max-w-40">
+                  {chunk.attributes}
+                </span>
+              ) : null}
               <span className="truncate font-mono text-[11px] text-tertiary-foreground flex-1">
                 {preview}{hasMore ? '…' : ''}
               </span>
@@ -129,9 +313,9 @@ export function XmlFoldedText({ text, className }: { text: string; className?: s
                 ▶
               </span>
             </summary>
-            <pre className="text-xs font-mono p-2 overflow-x-auto whitespace-pre-wrap border-t border-border bg-muted/40 text-foreground">
-              {trimmedInner}
-            </pre>
+            <div className="border-t border-border bg-muted/40 p-2">
+              <XmlFoldedText text={inner} />
+            </div>
           </details>
         )
       })}
@@ -169,7 +353,7 @@ export function KeyValueList({ data, className }: { data: unknown; className?: s
   const parsed = tryParseJson(data)
 
   if (typeof parsed === 'string') {
-    if (XML_FOLD_TAGS.some(t => parsed.includes(`<${t}`))) {
+    if (containsReadableXmlTag(parsed)) {
       return <XmlFoldedText text={parsed} className={className} />
     }
     if (parsed.length > 120) {
@@ -1287,7 +1471,7 @@ export function ToolResultView({ result, className }: { result: KyberMessageLike
         {isJson ? (
           <KeyValueList data={parsed} />
         ) : typeof src === 'string' ? (
-          XML_FOLD_TAGS.some(t => src.includes(`<${t}`)) ? (
+          containsReadableXmlTag(src) ? (
             <XmlFoldedText text={src} />
           ) : (
             <pre className="text-xs font-mono p-2 overflow-x-auto whitespace-pre-wrap border border-border rounded bg-muted/40 text-foreground">
