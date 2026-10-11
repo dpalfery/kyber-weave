@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { ingestBatch } from './ingest.js'
-import { reconcileExpiredPending } from './log-ingest.js'
+import { ingestLogBatch, reconcileExpiredPending, type OtlpLog } from './log-ingest.js'
 import { CanonStore, type QuarantineEntry } from './store.js'
 import { otlpSpanToRecord } from '../otel/service.js'
 import type { OtlpSpan } from '../otel/receiver.js'
@@ -413,6 +413,26 @@ function llmChild(spanId: string): OtlpSpan {
 }
 
 /**
+ * The `api_request_body` log one llm child emits (B3): correlated by exact
+ * trace and span id and recognised by both signals — `event.name` and the
+ * log body. `attributes.body` is the request JSON `parseClaudeApiRequestBody`
+ * turns into parts.
+ */
+function apiRequestBodyLog(childSpanId: string, request: unknown): OtlpLog {
+  return {
+    logId: `api-body:${childSpanId}`,
+    traceId: INTERACTION_TRACE,
+    spanId: childSpanId,
+    sessionId: null,
+    timestamp: '2026-09-03T10:00:00.000Z',
+    body: 'claude_code.api_request_body',
+    attributes: { 'event.name': 'api_request_body', body: JSON.stringify(request) },
+    resource: {},
+    scope: { name: 'com.anthropic.claude_code.events' },
+  }
+}
+
+/**
  * A Claude Code tool span. It carries no usage counters either, so it stays
  * quarantined as a non-model span exactly as it does today (F4 R1 counts 634
  * such spans in the live session); the prompt must not reach it.
@@ -497,19 +517,110 @@ describe('ingestBatch — Claude Code interaction prompt (Task T5)', () => {
     interactionFirst.close()
   })
 
-  it('delivers a prompt whose parked wait outlived the pending TTL once children arrive (B8)', () => {
+  it('retires a parked prompt at the pending TTL when no children arrive, keeping one copy (B8)', () => {
     const store = new CanonStore(':memory:')
     ingestBatch([interactionSpan(PROMPT)], store)
+
     // The collector's reconcile timer fires past the TTL before any child
-    // arrives: the parked prompt waits out its expiry in place rather than
-    // being quarantined out from under the children — which would also be
-    // a second copy of prompt text beside the span's quarantine packet.
+    // arrives: the parked row is deleted rather than left to ride
+    // pending_logs until the next span batch or wipe, and it is not moved
+    // into quarantined_logs either — the interaction span's quarantine
+    // packet is already the prompt's evidence copy (T6), so a second one
+    // would only duplicate prompt text.
     reconcileExpiredPending(store, Date.now() + 5_001, 5_000)
+    expect(store.getPendingLogs()).toEqual([])
+    expect(store.quarantinedLogCount()).toBe(0)
+
+    // The wait is TTL-bounded like any other pending row: children that
+    // arrive after it closed get nothing.
     ingestBatch([llmChild('llm-1'), llmChild('llm-2')], store)
+    expect(conversationHistory(store, 'llm-1')).toEqual([])
+    expect(conversationHistory(store, 'llm-2')).toEqual([])
+    store.close()
+  })
+
+  it('serves a same-batch llm child stored after the interaction span was parked (Q4)', () => {
+    // llm-1 is already stored when a batch carries the interaction and
+    // llm-2 together. The interaction is quarantined before `upsertMany`
+    // writes llm-2, so an immediate-delivery check sees llm-1 alone — a
+    // consumed-on-first-delivery prompt would never reach llm-2.
+    const store = new CanonStore(':memory:')
+    ingestBatch([llmChild('llm-1')], store)
+    ingestBatch([interactionSpan(PROMPT), llmChild('llm-2')], store)
 
     expect(conversationHistory(store, 'llm-1')).toEqual([PROMPT])
     expect(conversationHistory(store, 'llm-2')).toEqual([PROMPT])
-    expect(store.quarantinedLogCount()).toBe(0)
+    store.close()
+  })
+
+  it('keeps serving llm children that arrive in later batches while the parked wait lasts (Q4)', () => {
+    // A turn's model calls do not arrive in one export: batch-2's child must
+    // not consume the parked prompt out from under batch-3's.
+    const store = new CanonStore(':memory:')
+    ingestBatch([interactionSpan(PROMPT)], store)
+    ingestBatch([llmChild('llm-1')], store)
+    ingestBatch([llmChild('llm-2')], store)
+
+    expect(conversationHistory(store, 'llm-1')).toEqual([PROMPT])
+    expect(conversationHistory(store, 'llm-2')).toEqual([PROMPT])
+    store.close()
+  })
+
+  it('does not let the interaction prompt replace parts an api_request_body parse delivered (Q4)', () => {
+    // Order: child, then the body log, then the interaction span. The body
+    // parse is the richer source and subsumes the prompt-derived part —
+    // delivering the prompt after it would replace system_prompt +
+    // conversation_history with the prompt alone.
+    const store = new CanonStore(':memory:')
+    ingestBatch([llmChild('llm-1')], store)
+    ingestLogBatch(
+      [
+        apiRequestBodyLog('llm-1', {
+          system: [{ type: 'text', text: 'Body-parse system prompt.' }],
+          messages: [{ role: 'user', content: 'Body-parse turn text.' }],
+        }),
+      ],
+      store,
+    )
+    const bodyParts = [
+      { part: 'system_prompt', text: 'Body-parse system prompt.' },
+      { part: 'conversation_history', text: 'Body-parse turn text.' },
+    ]
+    expect(store.get('llm-1')?.parts).toEqual(bodyParts)
+
+    ingestBatch([interactionSpan(PROMPT)], store)
+
+    expect(store.get('llm-1')?.parts).toEqual(bodyParts)
+    expect(store.get('llm-1')?.content).toMatchObject({
+      system_prompt: 'Body-parse system prompt.',
+      conversation_history: 'Body-parse turn text.',
+    })
+    store.close()
+  })
+
+  it('does not stamp the redacted-prompt reason over parts a body parse delivered (Q2/Q4)', () => {
+    // Same subsumption rule for a redacted prompt: the record holds real
+    // conversation_history, so declaring it not_measurable would be a lie —
+    // the reason describes content that is present, not withheld.
+    const store = new CanonStore(':memory:')
+    ingestBatch([llmChild('llm-1')], store)
+    ingestLogBatch(
+      [
+        apiRequestBodyLog('llm-1', {
+          system: 'Body-parse system prompt.',
+          messages: [{ role: 'user', content: 'Body-parse turn text.' }],
+        }),
+      ],
+      store,
+    )
+
+    ingestBatch([interactionSpan(REDACTED_PROMPT)], store)
+
+    expect(store.get('llm-1')?.parts).toEqual([
+      { part: 'system_prompt', text: 'Body-parse system prompt.' },
+      { part: 'conversation_history', text: 'Body-parse turn text.' },
+    ])
+    expect(notMeasurableReason(store, 'llm-1', 'conversation_history')).toBeUndefined()
     store.close()
   })
 

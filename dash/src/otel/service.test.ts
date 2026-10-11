@@ -8,6 +8,7 @@ import {
   ingestLogBatch,
   type OtlpLog,
 } from '../canon/log-ingest.js'
+import { ingestBatch } from '../canon/ingest.js'
 import { CanonStore } from '../canon/store.js'
 import { startOtlpCollectorService } from './service.js'
 import type { OtlpSpan } from './receiver.js'
@@ -26,9 +27,59 @@ function identifiedLog(): OtlpLog {
   }
 }
 
+/**
+ * A Claude Code interaction span — its `user_prompt` parks in pending_logs
+ * because no llm.invoke child is ever stored beneath it. The parked row is
+ * what the timer path must retire (B8).
+ */
+function interactionSpan(): OtlpSpan {
+  return {
+    traceId: 'interaction-trace-svc',
+    spanId: 'service-test-interaction',
+    parentSpanId: null,
+    name: 'claude_code.interaction',
+    kind: 'internal',
+    startTimeUnixNano: '1756980000000000000',
+    endTimeUnixNano: '1756980000050000000',
+    timestamp: '2026-09-04T10:00:00.000Z',
+    durationMs: 50,
+    status: { code: 'ok' },
+    resource: {},
+    scope: {},
+    attributes: {
+      'claude.deployment_mode': '1p',
+      'span.type': 'interaction',
+      user_prompt: 'service-test prompt',
+    },
+  }
+}
+
 describe('startOtlpCollectorService pending-log lifecycle', () => {
   afterEach(() => {
     vi.useRealTimers()
+  })
+
+  it('retires a parked interaction prompt at the TTL without a quarantined copy', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1_000)
+    const service = await startOtlpCollectorService({ port: 0, dbPath: ':memory:' })
+
+    try {
+      ingestBatch([interactionSpan()], service.canon)
+      // Parked: the interaction span is quarantined and no child arrives.
+      // If the timer path skipped the marker rows, this wait would outlive
+      // the TTL until the next span batch or a wipe.
+      expect(service.canon.getPendingLogs()).toHaveLength(1)
+
+      await vi.advanceTimersByTimeAsync(DEFAULT_PENDING_TTL_MS)
+
+      expect(service.canon.getPendingLogs()).toEqual([])
+      // The interaction span's quarantine packet already holds the prompt,
+      // so expiry must not invent a second copy in quarantined_logs (T6).
+      expect(service.canon.quarantinedLogCount()).toBe(0)
+    } finally {
+      await service.close()
+    }
   })
 
   it('reconciles expired pending logs without a later ingestion batch', async () => {

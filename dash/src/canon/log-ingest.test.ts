@@ -2,7 +2,7 @@
 // span-shaped record; they never establish a competing record population.
 import { describe, expect, it } from 'vitest'
 
-import { ingestLogBatch, type OtlpLog } from './log-ingest.js'
+import { ingestLogBatch, reconcileExpiredPending, type OtlpLog } from './log-ingest.js'
 import { CanonStore } from './store.js'
 import type { CanonicalRecord } from './types.js'
 import { ingestBatch } from './ingest.js'
@@ -75,6 +75,33 @@ function correlatableSpan(): OtlpSpan {
       input_tokens: 10,
       output_tokens: 5,
       session_id: SESSION_ID,
+    },
+    scope: {},
+  }
+}
+
+/**
+ * A Claude Code interaction span — the turn's only prompt carrier (B2). It
+ * carries no counters, so ingest quarantines it as a non-model span and
+ * parks its `user_prompt` in `pending_logs` for the settle pass to deliver.
+ */
+function interactionSpan(): OtlpSpan {
+  return {
+    traceId: TRACE_ID,
+    spanId: 'interaction-synthetic-1',
+    parentSpanId: null,
+    name: 'claude_code.interaction',
+    kind: 'internal',
+    startTimeUnixNano: '1756980000000000000',
+    endTimeUnixNano: '1756980000050000000',
+    timestamp: AT,
+    durationMs: 50,
+    status: { code: 'ok' },
+    resource: { 'service.name': 'synthetic-test' },
+    attributes: {
+      'claude.deployment_mode': '1p',
+      'span.type': 'interaction',
+      user_prompt: 'Synthetic interaction prompt.',
     },
     scope: {},
   }
@@ -500,6 +527,74 @@ describe('ingestLogBatch (ADR 0009)', () => {
       reason: expect.stringMatching(/expir/i),
     })
     expect(store.quarantinedLogCount()).toBe(1)
+    store.close()
+  })
+
+  it('expires a parked interaction prompt without growing a quarantined-log copy (B8)', () => {
+    const store = new CanonStore(':memory:')
+    ingestBatch([interactionSpan()], store)
+    // Parked: the interaction span is quarantined and no llm.invoke child
+    // exists yet, so its prompt waits in pending_logs under the marker.
+    expect(store.getPendingLogs()).toHaveLength(1)
+
+    // The reconcile path the collector's timer runs must bound the wait
+    // like any other pending row — otherwise a prompt whose children never
+    // arrive lingers until the next span batch or wipe. Deletion only: the
+    // interaction span's quarantine packet is already the prompt's evidence
+    // copy, so nothing belongs in quarantined_logs (T6).
+    reconcileExpiredPending(store, Date.now() + 5_001, 5_000)
+    expect(store.getPendingLogs()).toEqual([])
+    expect(store.quarantinedLogCount()).toBe(0)
+    store.close()
+  })
+
+  it('declares a reason when a recognised api_request_body event carries no body', () => {
+    const store = new CanonStore(':memory:')
+    store.upsert(modelRecord())
+
+    // The event names itself through `event.name` but emits neither a body
+    // attribute, a body_ref, nor body_truncated — a recognised event with
+    // nothing to parse must still say why its buckets stayed unmeasured
+    // rather than fall through to a silent generic enrich.
+    expect(ingestLogBatch([claudeRequestBodyLog({})], store)).toEqual({
+      enriched: 1,
+      pending: 0,
+      quarantined: 0,
+    })
+
+    const enriched = store.get(MODEL_SPAN_ID)
+    expect(enriched?.parts ?? []).toEqual([])
+    expect(measurabilityReasons(enriched)).toContainEqual(expect.stringMatching(/no request body/i))
+    store.close()
+  })
+
+  it('does not stamp the request-body failure reason on a scope-only Claude event', () => {
+    const store = new CanonStore(':memory:')
+    store.upsert(modelRecord())
+
+    // Recognised as a Claude event by instrumentation scope alone (B3) —
+    // it is not api_request_body, so a malformed `body` attribute must not
+    // borrow the request body's truncation reason on the wrong event type;
+    // the log enriches generically instead.
+    expect(
+      ingestLogBatch(
+        [
+          log({
+            logId: 'log-claude-scope-malformed-body',
+            body: 'claude_code.some_other_event',
+            attributes: { body: '{not-json' },
+            scope: { name: 'com.anthropic.claude_code.events' },
+          }),
+        ],
+        store,
+      ),
+    ).toEqual({ enriched: 1, pending: 0, quarantined: 0 })
+
+    const enriched = store.get(MODEL_SPAN_ID)
+    expect(measurabilityReasons(enriched)).not.toContainEqual(
+      expect.stringMatching(/CLAUDE_CODE_OTEL_CONTENT_MAX_LENGTH/),
+    )
+    expect(enriched?.content).toMatchObject({ body: '{not-json' })
     store.close()
   })
 

@@ -127,10 +127,10 @@ function isStructuralSpan(span: RawSpan): boolean {
 // The interaction span is the turn's only prompt carrier: Claude Code's
 // `llm_request` spans hold counters and metadata, never message text (R1).
 // Quarantining the span as non-model is still right; what was wrong was
-// letting its `user_prompt` be deleted with the row. The two halves below
-// cover the two orders the exporter can pick: children already stored get
-// the prompt directly, and a prompt that arrives first waits in
-// `pending_logs` for the settle pass at batch end.
+// letting its `user_prompt` be deleted with the row. The prompt therefore
+// always parks in `pending_logs`: children already stored get it at once,
+// and the settle pass keeps serving each llm.invoke child that turns up
+// later without parts, until the wait's TTL retires the row (B8).
 
 /**
  * The instrumentation scope Claude Code event logs carry (B3). Stamping it
@@ -198,19 +198,25 @@ function clearSuppliedBuckets(
 }
 
 /**
- * Give one interaction prompt to every stored llm.invoke child (Q4), or
- * declare the redaction on them. Returns whether any child was there to
- * receive it — false means the turn's children have not arrived and the
- * prompt must wait for a later batch (B8).
+ * Give one interaction prompt to every stored llm.invoke child that still
+ * lacks parts (Q4), or declare the redaction on it. A child already
+ * carrying parts got them from an api_request_body parse — the richer
+ * source, which subsumes the prompt-derived part — or from an earlier pass
+ * over this same prompt; either way the interaction path leaves it alone.
+ * The one guard is also the redacted case's protection: a redaction explains
+ * absent text, so it must not stamp `not_measurable` over content the
+ * record actually holds. Skipping parted children is what makes the parked
+ * re-delivery below idempotent.
  */
 function deliverInteractionPrompt(
   store: CanonStore,
   traceId: string,
   interactionSpanId: string,
   prompt: ClaudeUserPrompt,
-): boolean {
+): void {
   const children = interactionChildren(store, traceId, interactionSpanId)
   for (const child of children) {
+    if ((child.parts?.length ?? 0) > 0) continue
     if (prompt.redacted) {
       declareRedactedPrompt(store, child)
       continue
@@ -222,24 +228,25 @@ function deliverInteractionPrompt(
     store.setContent(child.spanId, contentFromParts(parts), parts)
     clearSuppliedBuckets(store, child, parts)
   }
-  return children.length > 0
 }
 
 /**
  * Harvest the prompt a B2 interaction span carries before its packet lands
- * in quarantine (R1). Children already stored receive it immediately;
- * otherwise it is parked and the settle pass delivers it when the turn's
- * children arrive (B8).
+ * in quarantine (R1). Children already stored receive it immediately, but
+ * the prompt parks regardless: the turn's llm.invoke calls do not all
+ * arrive in one batch — a child later in THIS batch has not even been
+ * written yet — so the parked row is what lets the settle pass keep
+ * serving every child that shows up still lacking parts (B8).
  */
 function keepInteractionPrompt(store: CanonStore, span: RawSpan): void {
   const prompt = claudeUserPrompt(span.attributes['user_prompt'])
   if (prompt === undefined || span.traceId === null) return
-  if (deliverInteractionPrompt(store, span.traceId, span.spanId, prompt)) return
+  deliverInteractionPrompt(store, span.traceId, span.spanId, prompt)
 
   // The wait rides the pending-log machinery rather than a new table: keyed
   // by trace and interaction span id, tagged `claude-code` so a per-harness
-  // wipe scopes it, under the existing TTL — an expired wait with no
-  // children is retired by the settle pass, leaving the quarantine packet
+  // wipe scopes it, under the existing TTL — an expired wait is retired by
+  // the settle pass or the reconcile timer, leaving the quarantine packet
   // the prompt's only copy (B8). Its shape is what
   // the `ingestLogBatch` replay leaves alone: trace/span ids set (a null
   // pair would quarantine it), no sessionId (the session/time fallback
@@ -261,31 +268,27 @@ function keepInteractionPrompt(store: CanonStore, span: RawSpan): void {
 }
 
 /**
- * Deliver prompts an earlier batch parked (B8). An entry is consumed —
- * deleted before the log replay below can see it — once at least one of its
- * interaction's llm.invoke children is stored. Parked prompts are exempt
- * from `reconcileExpiredPending`'s move to `quarantined_logs`, so this pass
- * is also where an expired wait with no children is retired: the
- * interaction span's quarantine packet then holds the prompt's only copy.
+ * Deliver prompts an earlier batch parked (B8). Delivery is per-child —
+ * Q4's "every llm.invoke child" means a turn whose model calls arrive over
+ * several batches must see each one served, so the row stays parked while
+ * it is young enough for more children to be on their way, and each pass
+ * skips whatever already carries parts. The row leaves only two ways: the
+ * parked value proves unclassifiable, or the wait itself expires — expiry
+ * makes the interaction span's quarantine packet the prompt's sole copy;
+ * it does not earn the prompt a second home in `quarantined_logs`.
  */
 function settlePendingInteractionPrompts(store: CanonStore, now: number, ttlMs: number): void {
   for (const log of store.getPendingLogs() as PendingInteractionPrompt[]) {
     const value = log.attributes[PENDING_INTERACTION_PROMPT]
     if (value === undefined || log.traceId === null || log.spanId === null) continue
     const prompt = claudeUserPrompt(value)
-    if (
-      prompt === undefined ||
-      deliverInteractionPrompt(store, log.traceId, log.spanId, prompt)
-    ) {
-      // The parked value is our own write: delivered, or unclassifiable —
-      // either way the row is done rather than left to ride the TTL.
+    if (prompt === undefined) {
+      // The parked value is our own write: unclassifiable means done rather
+      // than left to ride the TTL.
       store.deletePendingLog(log.logId)
       continue
     }
-    // No child has arrived. Once the wait itself has expired the row is
-    // retired and the prompt survives only in the interaction span's
-    // quarantine packet (B8): expiry makes the packet the sole copy — it
-    // does not earn the prompt a second home in `quarantined_logs`.
+    deliverInteractionPrompt(store, log.traceId, log.spanId, prompt)
     const pendingSince = log.pendingSince ?? now
     if (now - pendingSince >= ttlMs) store.deletePendingLog(log.logId)
   }

@@ -43,8 +43,9 @@ const CLAUDE_EVENTS_SCOPE = 'com.anthropic.claude_code.events'
  * (B8). The key is receiver-internal — no sender emits it — which is what
  * tells a waiting prompt apart from a genuinely pended OTLP log: expiry
  * quarantines a log that never met its span, but a prompt whose span is
- * already quarantined must survive the TTL in place until its children
- * arrive — the span's quarantine packet is already its evidence copy.
+ * already quarantined retires by deletion — the span's quarantine packet
+ * is already its evidence copy, so a second one would only duplicate
+ * prompt text (T6).
  */
 export const PENDING_INTERACTION_PROMPT = 'kyber.interaction_prompt'
 
@@ -77,11 +78,15 @@ function isClaudeLog(log: OtlpLog): boolean {
 }
 
 /**
- * Why a recognised body event carried no usable request JSON (R8), or
- * undefined when its `body` attribute may still yield parts. `body_ref` is
- * inspected only to name the failure — the path it points at is a local file
- * this receiver deliberately never opens; telemetry must not become a
- * file-read surface (B3).
+ * Why a recognised api_request_body event carried no usable request JSON
+ * (R8), or undefined when its `body` attribute may still yield parts.
+ * `body_ref` is inspected only to name the failure — the path it points at
+ * is a local file this receiver deliberately never opens; telemetry must
+ * not become a file-read surface (B3). Every reason here belongs to this
+ * one event type: the caller consults it only when the log named itself
+ * api_request_body, so a Claude event recognised by scope alone can never
+ * borrow the request body's explanations for a malformed `body` it happens
+ * to carry.
  */
 function claudeBodyFailureReason(attributes: Record<string, unknown>): string | undefined {
   const truncated = attributes['body_truncated']
@@ -91,9 +96,12 @@ function claudeBodyFailureReason(attributes: Record<string, unknown>): string | 
   const body = attributes['body']
   if (body === undefined || body === null) {
     const ref = attributes['body_ref']
+    // The event named itself api_request_body yet emitted nothing to parse:
+    // that is a sender-side gap of its own, declared like any other rather
+    // than left to a silent enrich.
     return typeof ref === 'string'
       ? `The Claude Code request body arrived as a file reference (body_ref: ${ref}), which this receiver does not read.`
-      : undefined
+      : 'The Claude Code api_request_body event carried no request body — neither a body attribute nor a body_ref was emitted.'
   }
   return claudeApiRequestBodyFailureReason(body)
 }
@@ -142,9 +150,16 @@ function enrichRecord(store: CanonStore, record: CanonicalRecord, log: OtlpLog):
   // consulted. Anthropic documents its emitted names as beta, so gating on
   // `claude_code.llm_request` would drop content on any rename (R2).
   if (record.harness === 'claude-code' && record.op === 'llm.invoke' && isClaudeLog(log)) {
+    // The failure reasons describe the api_request_body event only: a log
+    // recognised by instrumentation scope alone is some other Claude event,
+    // and its attributes must not borrow the request body's explanations —
+    // a malformed `body` there is just content for the generic enrich below.
+    const isRequestBodyEvent =
+      log.attributes['event.name'] === CLAUDE_API_REQUEST_EVENT ||
+      log.body === CLAUDE_API_REQUEST_BODY
     // R3: the request JSON is `attributes.body`; the key this used to read,
     // `attributes['claude_code.api_request_body']`, is never emitted.
-    const failure = claudeBodyFailureReason(log.attributes)
+    const failure = isRequestBodyEvent ? claudeBodyFailureReason(log.attributes) : undefined
     if (failure !== undefined) {
       declareBodyFailure(store, record, failure)
       return
@@ -223,16 +238,20 @@ export function ingestLogBatch(
 export function reconcileExpiredPending(store: CanonStore, now: number, ttlMs: number): number {
   let quarantined = 0
   for (const log of store.getPendingLogs() as PendingLog[]) {
-    // A parked interaction prompt is not a log waiting for its span — the
-    // span is already quarantined. Its wait ends when children arrive or,
-    // failing them, when the ingest-side settle pass retires the expired
-    // row (B8); moving it here would drop delivery and invent a second
-    // prompt copy beside the span's own quarantine packet.
-    if (log.attributes[PENDING_INTERACTION_PROMPT] !== undefined) continue
     // Older rows predate pendingSince; treating reconciliation as their arrival
     // keeps upgrades from unexpectedly quarantining a backlog immediately.
     const pendingSince = log.pendingSince ?? now
     if (now - pendingSince < ttlMs) continue
+    if (log.attributes[PENDING_INTERACTION_PROMPT] !== undefined) {
+      // A parked interaction prompt is not a log waiting for its span —
+      // the span is already quarantined, and its quarantine packet is
+      // already the prompt's evidence copy — so expiry retires the row
+      // rather than moving it (B8/T6). The wait is TTL-bounded like any
+      // other's: left unbounded, a prompt whose children never arrive
+      // would sit in pending_logs until the next span batch or a wipe.
+      store.deletePendingLog(log.logId)
+      continue
+    }
     store.deletePendingLog(log.logId)
     // The harness tag written with the pending row travels to quarantine with
     // it; a row old enough to predate tagging answers from its own signals.
