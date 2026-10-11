@@ -565,10 +565,12 @@ jobs:
         working-directory: dash/tray/ui
         run: npm test
 
-  # D6/D16 (harness OTel settings plan): the capture engine and its route are required to
-  # work on Windows, and no other job runs dash TypeScript off ubuntu. Only the capture
+  # D6/D16 (harness OTel settings plan): the capture engine is required to work on Windows
+  # (its route contract is POSIX-only), and no other job runs dash TypeScript off ubuntu. Only the capture
   # tests run here; the full suite stays on ts-gates. Equivalent local command:
-  #   cd dash && npx vitest run src/capture src/server/capture-route.test.ts
+  #   cd dash && npx vitest run src/capture
+  # This job covers the engine only; the route contract (src/server/capture-route.test.ts) is
+  # POSIX-only and runs in ts-gates.
   # If `npm ci` fails on Windows for an unrelated native dependency, the fallback is the
   # owner gate recorded in the plan (a real Windows round trip), not widening this job.
   capture-windows:
