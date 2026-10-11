@@ -4,7 +4,7 @@ title: Telemetry inventory — harness signal and content availability
 doc-type: reference
 status: draft
 owner: dpalfery
-last-reviewed: 2026-10-03
+last-reviewed: 2026-10-10
 ---
 
 # Telemetry inventory — verified harness signal and content availability
@@ -45,7 +45,7 @@ Values are never summed across the two sources. `KyberBridge` reads `canon.db` o
 | Copilot Chat | Content-enabled OTLP capture maps observed system instructions, messages, rules, skills, tool definitions, tool results, and session identity into canonical buckets. Input-message normalization separates input text from response envelopes without negative residuals. | Observed per-server schema availability remains source-dependent. |
 | Copilot CLI | SQLite ingest preserves its reported ASAD taxonomy, including `context_*_tokens` and `context_tier`. Persisted harness id is `copilot-cli`, not collapsed into `copilot`. | Omitted reported buckets remain unavailable rather than zero. |
 | Copilot VS Code | Native journal request replay into input-side `ReaderTurn` snapshots keyed by native request id via `copilotVscodeReader`. Reconstructs instructions and user message while excluding current model output from input context. | Window and pressure measured; unobserved buckets explicit `null` with reason. |
-| Claude Code (`claude-cli`, `claude-desktop`, `claude-code`) | Enhanced-telemetry counters plus JSONL conversation and tool-result parts on file-synth (`synth:`) records when the Claude content reader is paired at ingest ([issue #216](https://github.com/dpalfery/kyber-weave/issues/216)). | `system_prompt` and `tool_definitions` stay not measurable from session files; raw API-body logs require owner-enabled `OTEL_LOG_RAW_API_BODIES=1`. See [Claude Desktop and CLI file-synth parts](#claude-desktop-and-cli-file-synth-parts-issue-216). |
+| Claude Code (`claude-cli`, `claude-desktop`, `claude-code`) | Enhanced-telemetry counters; live OTLP content from the interaction span's `user_prompt` and the `api_request_body` log (see [Claude Code OTLP content (live)](#claude-code-otlp-content-live)); plus JSONL conversation and tool-result parts on file-synth (`synth:`) records when the Claude content reader is paired at ingest ([issue #216](https://github.com/dpalfery/kyber-weave/issues/216)). | `instruction_context` and `schema_cost` stay not measurable. Session files never carry `system_prompt` or `tool_definitions`; only the OTLP request body supplies those two. See [Claude Code OTLP content (live)](#claude-code-otlp-content-live) and [Claude Desktop and CLI file-synth parts](#claude-desktop-and-cli-file-synth-parts-issue-216). |
 | Codex | Dot-folder ingestion supplies the system prompt, instructions, conversation, tool results, and context window contained in rollout data. | Availability is limited to fields the source actually supplies. |
 | Codex OTLP (collector path) | Codex exports logs and spans only when the owner points its exporters at the collector. `codexAdapter` claims spans by fingerprint (`codex.*` namespace plus `gen_ai.usage.*`), never by `service.name` (`codex_cli_rs`, `codex_exec`, `codex-app-server`), so records are harness `codex` without a CLI/exec/app-server split. Sessions correlate on `conversation.id`. Only an allowlist (`model`, `slug`, `conversation.id`, `event.timestamp`, `gen_ai.usage.*`, `codex.usage.*`) is persisted; prompts, tool arguments/output, `user.email` and account ids are dropped. The adapter assumes cache-inclusive input; an exclusive payload fails validation with a negative fresh input instead of being miscounted. `model` is absent on the `handle_responses` span, so such a record has no model until log enrichment is built. | Owner-capture gates before production use of this path: (1) the exported span name of `handle_responses`, (2) whether log records carry `trace_id`/`span_id`, (3) the token convention. |
 | pi | Reader support is implemented and respects OTLP/file source precedence. | No current live collection claim is made. |
@@ -102,6 +102,89 @@ content-retention window
 Rows older than that floor are not rewritten.
 `kyber backfill` cannot repair file-synth rows — their stored `raw` is the
 counter call, not the message body.
+
+## Claude Code OTLP content (live)
+
+**[VERIFIED]** When Claude Code exports text-bearing telemetry, the receiver stores it as
+canonical content parts and the turn view renders it — no folder import required. The contract
+is `harness === 'claude-code' && op === 'llm.invoke'`; the span name is never consulted (B1),
+because Anthropic documents its emitted names as beta and a single rename would otherwise drop
+content (R2). Two sources supply the text.
+
+- **The interaction span's `user_prompt`.** A Claude Code interaction span carries no counters,
+  so it is quarantined as `non-model span`; its prompt is harvested before the packet is filed
+  and attached to every `llm.invoke` child of that interaction — records whose `parentSpanId`
+  is the interaction span's id — as one `conversation_history` part per child (Q4). Every API
+  call in the turn re-sends the prompt, so the turn's other context still shows as the
+  unattributed residual. The span is recognised by `span.type === 'interaction'` **or** the
+  name `claude_code.interaction` (B2). When the children arrive before the interaction, the
+  prompt waits in `pending_logs`, keyed by trace and interaction span id, under the existing
+  TTL; on expiry the prompt survives only in the quarantine packet (B8).
+- **The `api_request_body` log event.** Recognised by
+  `attributes['event.name'] === 'api_request_body'` **or**
+  `LogRecord.body === 'claude_code.api_request_body'`; a Claude event in general is recognised
+  by either of those or by the instrumentation scope `com.anthropic.claude_code.events`, and
+  that recognition also stamps `harness: 'claude-code'` on the row for wipe scoping (B3). The
+  JSON is read from the `body` attribute and parsed into parts (B5): user and assistant text →
+  `conversation_history`, `tool_result` → `tool_result_content`, `tool_use` →
+  `conversation_history` as JSON, image and document blocks → the placeholder `[<type> block]`
+  (never base64), thinking blocks skipped. Message order is kept, and no heuristic
+  `instruction_context` split is invented.
+
+A redacted `user_prompt` (`<REDACTED>`) yields no part and a not-measurable reason naming
+`OTEL_LOG_USER_PROMPTS=1`. A request-body log that arrives as a file reference (`body_ref`)
+instead of an inline `body` yields no part and a reason naming that reference; the receiver
+never opens the local path it names — telemetry is not a file-read surface (B3). A body cut at
+the sender limit (`body_truncated`) or one that will not parse yields no part and a reason
+naming `CLAUDE_CODE_OTEL_CONTENT_MAX_LENGTH`, which is also the knob that raises the ceiling.
+
+Where a bucket gains parts, its per-record `not_measurable` declaration is cleared (B6), and the
+turn view marks a block not measurable only when that turn's block has no parts — a turn with a
+`conversation_history` part no longer inherits the session's "not measurable" banner. The
+quarantine detail route and the turn-view raw-packet disclosure that expose the underlying
+packets are in the [runbook](runbook.md#2f-seeing-a-turns-raw-packet).
+
+**Live sender verification is owner gate 1 below.** The receiver contract is covered by a
+synthetic-OTLP end-to-end regression through the real receiver and store; no live Claude Code
+sender has exercised it on this checkout, so the sender side is
+**[NOT LIVE-VERIFIED]**.
+
+**Retention.** Assembled turn text is purged after 14 days. The raw packet keeps exactly what
+the sender sent until you wipe the `claude-code` harness or the whole database
+([ADR 0018](../adr/0018-kyberdash-content-retention-purge.md),
+[ADR 0034](../adr/0034-kyberdash-quarantine-raw-packet-evidence.md)). The 14-day window is not
+"all prompt text expires" — raw packets outlive it by design.
+
+### Enabling Claude Code content on the sender (Q2)
+
+KyberDash does not apply these settings automatically; they are the sender's opt-in, and the
+sender's opt-in is the consent ([ADR 0014](../adr/0014-unclipped-turn-inspection-and-copy-out-protocol.md)).
+`kyberdash kyber capture` writes them into the harness's own user-level config only when the
+owner runs it ([ADR 0031](../adr/0031-kyberdash-capture-command-owns-harness-telemetry-keys.md)).
+
+| Setting | Effect | Exposure |
+|---|---|---|
+| `OTEL_LOGS_EXPORTER=otlp` | Sends Claude Code event logs (including `api_request_body`) to the receiver. Without it, only traces arrive and no request body is sent. | Enables the two settings below; on its own it sends counters and metadata only. |
+| `OTEL_LOG_USER_PROMPTS=1` | Exports the interaction span's `user_prompt` as text instead of `<REDACTED>`. | Exports the user's prompt text verbatim. |
+| `OTEL_LOG_RAW_API_BODIES=1` | Inlines the raw API request body in the log event. `file:` would spill untruncated bodies onto disk instead. | Exports the full system prompt, tool definitions, and message history verbatim. |
+| `CLAUDE_CODE_OTEL_CONTENT_MAX_LENGTH` | Raises Claude Code's 61,440 UTF-16-unit inline-body ceiling (the capture writer sets 1,048,576). | Larger bodies mean more prompt text stored; the ceiling is a size limit, not a privacy control. |
+
+**Data-exposure warning.** With these enabled, the receiver stores the system prompt, tool
+definitions, message history, and the user's prompt as plaintext content parts, served on the
+loopback-only `/api/kyber/*` API. Assembled turn text is purged after 14 days; the raw packet
+keeps exactly what the sender sent until you wipe the `claude-code` harness or the whole
+database. Set them only when you accept that exposure.
+
+### The import-history alternative (issue #216)
+
+A one-off owner run of `kyberdash dash import-history` fills `conversation_history` and
+`tool_result_content` from the session's JSONL transcript. It never fills `system_prompt` or
+`tool_definitions` — transcripts do not carry them — so the OTLP request body above is the only
+route to those two buckets. Folder import is off by default on a schedule since
+[issue #319](https://github.com/dpalfery/kyber-weave/issues/319)
+([ADR 0033](../adr/0033-kyberdash-surfaces-are-display-layers.md) decision 6); the OTLP
+receiver path is the import-free route to live content. This plan neither runs nor changes the
+import path.
 
 ## Tool extraction support by harness (issue #180)
 
@@ -225,8 +308,12 @@ per-server schema bands.
 
 ## Remaining owner/runtime gates
 
-1. Enable `OTEL_LOG_RAW_API_BODIES=1` and emit a Claude request-body log to verify live
-   prompt and ground-truth per-server schema enrichment.
+1. Enable `OTEL_LOGS_EXPORTER=otlp`, `OTEL_LOG_USER_PROMPTS=1`, and `OTEL_LOG_RAW_API_BODIES=1`
+   for one Claude Code process (no settings-file edit) and capture one `api_request_body`
+   event, to verify the [Claude Code OTLP content](#claude-code-otlp-content-live) path against
+   a live sender — and to record its `LogRecord.body`, attribute keys, scope name, and whether
+   `body_truncated` fired. Until then that section is **[NOT LIVE-VERIFIED]**, and live
+   ground-truth per-server schema enrichment remains unverified.
 2. Register `codeburn kyber cursor-hook` alongside the owner's existing Cursor hooks and
    execute one turn. This repository does not edit `~/.cursor/hooks.json`.
 3. Exercise the full-content drawer against a live canonical session.
