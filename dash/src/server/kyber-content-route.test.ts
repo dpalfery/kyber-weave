@@ -38,6 +38,35 @@ describe('Backend Contract Tests: GET /api/kyber/session/:id/content', () => {
   const DESKTOP_CONVERSATION =
     'user: why are Claude Desktop inspector blocks empty?\nassistant: capture should attach parts.'
 
+  // Claude Code OTLP turn content (plan 2026-10-10, B6/B7). The sender's
+  // interaction span is quarantined and its packet is the only copy of the
+  // prompt, so the turn view must render what the child request span carries
+  // and must not repeat a session-level "not measurable" over text it has.
+  const CLAUDE_PROMPT = 'why is the Claude turn inspector empty?'
+  const CLAUDE_CONVERSATION = `user: ${CLAUDE_PROMPT}`
+  const CLAUDE_TURN_SPAN = 'span-claude-turn-1'
+  const CLAUDE_TURN_NO_PARTS_SPAN = 'span-claude-turn-2'
+  const CLAUDE_INTERACTION_SPAN = 'span-claude-interaction-1'
+  const CLAUDE_BARE_INTERACTION_SPAN = 'span-claude-interaction-2'
+  const CLAUDE_INTERACTION_PACKET = JSON.stringify({
+    name: 'claude_code.interaction',
+    attributes: { 'span.type': 'interaction', user_prompt: CLAUDE_PROMPT },
+  })
+  const SYSTEM_PROMPT_REASON =
+    'Claude Code did not capture the system prompt for this session.'
+  const PROMPT_REDACTED_REASON =
+    'The prompt text was redacted; set OTEL_LOG_USER_PROMPTS=1 to send it.'
+
+  /**
+   * B7 adds `parentSpanId` and `rawPacket` to `TurnContentResult`. They are
+   * intersected here so this RED test compiles against the pre-T8 `bridge.ts`;
+   * T8 folds both into the production type and this alias becomes redundant.
+   */
+  type TurnPacketPointers = {
+    parentSpanId?: string
+    rawPacket?: { spanAttributesPath: string; interactionPath?: string }
+  }
+
   const tokens = () => ({
     freshInput: 1000,
     cacheRead: 0,
@@ -401,6 +430,82 @@ describe('Backend Contract Tests: GET /api/kyber/session/:id/content', () => {
         harness: 'claude-desktop',
         turns: [{ index: 0, spanId: desktopEmptySpan, model: 'claude-sonnet-5-5' }],
       },
+    })
+
+    // Claude Code OTLP (plan 2026-10-10, B6/B7): two request turns whose parent
+    // interaction spans were quarantined. Turn 0 carries the prompt text the
+    // receiver recovered; turn 1 carries none. Both parents have an audit row,
+    // but only the first kept a raw packet.
+    store.upsertMany([
+      turn(
+        CLAUDE_TURN_SPAN,
+        [{ part: 'conversation_history', text: CLAUDE_CONVERSATION, tokens: 12 }],
+        {
+          source: 'claude-code',
+          harness: 'claude-code',
+          sessionId: 'sess-claude-content-001',
+          traceId: 'trace-claude-content-001',
+          name: 'claude_code.llm_request',
+          parentSpanId: CLAUDE_INTERACTION_SPAN,
+          timestamp: '2026-10-10T10:00:00.000Z',
+        },
+      ),
+      turn(CLAUDE_TURN_NO_PARTS_SPAN, [], {
+        source: 'claude-code',
+        harness: 'claude-code',
+        sessionId: 'sess-claude-content-001',
+        traceId: 'trace-claude-content-001',
+        name: 'claude_code.llm_request',
+        parentSpanId: CLAUDE_BARE_INTERACTION_SPAN,
+        timestamp: '2026-10-10T10:01:00.000Z',
+      }),
+    ])
+    store.upsertSession({
+      sessionId: 'sess-claude-content-001',
+      harness: 'claude-code',
+      label: 'Claude Code turn content',
+      payload: {
+        id: 'sess-claude-content-001',
+        harness: 'claude-code',
+        turns: [
+          { index: 0, spanId: CLAUDE_TURN_SPAN, model: 'claude-sonnet-5-5' },
+          { index: 1, spanId: CLAUDE_TURN_NO_PARTS_SPAN, model: 'claude-sonnet-5-5' },
+        ],
+        // Content buckets the session never saw. The turn view must drop this
+        // overlay for a turn that has parts of its own (B6/R6).
+        context: {
+          first: {
+            buckets: {
+              system_prompt: { availability: 'not_measurable', reason: SYSTEM_PROMPT_REASON },
+              conversation_history: {
+                availability: 'not_measurable',
+                reason: PROMPT_REDACTED_REASON,
+              },
+            },
+          },
+        },
+      },
+    })
+    // The interaction spans are already out of the corpus; only their quarantine
+    // rows remain. T14 adds `rawPayload`/`harness` to `quarantineAndDelete`, so
+    // the metadata travels through a variable rather than a fresh literal.
+    const quarantinedPacket = {
+      source: 'claude-code',
+      name: 'claude_code.interaction',
+      timestamp: '2026-10-10T10:00:00.000Z',
+      rawPayload: CLAUDE_INTERACTION_PACKET,
+      harness: 'claude-code',
+    }
+    store.quarantineAndDelete(
+      CLAUDE_INTERACTION_SPAN,
+      ['claude_code'],
+      'non-model span',
+      quarantinedPacket,
+    )
+    store.quarantine(CLAUDE_BARE_INTERACTION_SPAN, ['claude_code'], 'non-model span', {
+      source: 'claude-code',
+      name: 'claude_code.interaction',
+      timestamp: '2026-10-10T10:01:00.000Z',
     })
 
     canonDb = new DatabaseSync(':memory:')
@@ -976,6 +1081,88 @@ describe('Backend Contract Tests: GET /api/kyber/session/:id/content', () => {
         expect(body.assembledText).toBe('')
         // Blocks may exist as structure, but none carry fabricated text.
         expect(body.blocks.every((b) => b.text === '')).toBe(true)
+      })
+    })
+
+    describe('Claude Code OTLP turn content (plan 2026-10-10 B6/B7)', () => {
+      it('renders a text-bearing Claude turn block without notMeasurable while a partless bucket keeps its reason', async () => {
+        const res = await fetch(
+          `${base}/api/kyber/session/sess-claude-content-001/turn/0/content`,
+        )
+        expect(res.status).toBe(200)
+        assertStandardKyberHeaders(res)
+
+        const body = (await res.json()) as TurnContentResult & TurnPacketPointers
+
+        expect(body.sessionId).toBe('sess-claude-content-001')
+        expect(body.spanId).toBe(CLAUDE_TURN_SPAN)
+
+        const convBlock = body.blocks.find((b) => b.key === 'conversation_history')
+        expect(convBlock).toBeDefined()
+        expect(convBlock?.parts.length).toBeGreaterThan(0)
+        // The assembled block text is the message body; the `user:` label the
+        // history parser strips is asserted on the part, not the block.
+        expect(convBlock?.text).toContain(CLAUDE_PROMPT)
+        // R6: a session-level declaration must not survive onto a block this
+        // turn actually carries text for.
+        expect(convBlock?.notMeasurable).toBeUndefined()
+
+        // The system prompt is genuinely absent from this turn, so it stays
+        // declared not measurable, with the reason that explains the gap.
+        const sysBlock = body.blocks.find((b) => b.key === 'system_prompt')
+        expect(sysBlock).toBeDefined()
+        expect(sysBlock?.parts).toEqual([])
+        expect(sysBlock?.text).toBe('')
+        expect(sysBlock?.notMeasurable).toBeDefined()
+        expect(sysBlock?.notMeasurable?.reason).toContain('system prompt')
+      })
+
+      it('points a Claude turn at its own attribute path and at the quarantined parent packet that stored a payload', async () => {
+        const res = await fetch(
+          `${base}/api/kyber/session/sess-claude-content-001/turn/0/content`,
+        )
+        expect(res.status).toBe(200)
+        assertStandardKyberHeaders(res)
+
+        const body = (await res.json()) as TurnContentResult & TurnPacketPointers
+
+        expect(body.rawPacket).toBeDefined()
+        // The turn's own request span is stored, so its attributes are reachable.
+        expect(body.rawPacket?.spanAttributesPath).toBe(
+          `/api/kyber/span/${CLAUDE_TURN_SPAN}/attributes`,
+        )
+        // The interaction span is quarantined and kept its packet: the only copy
+        // of the prompt text the sender exported.
+        expect(body.rawPacket?.interactionPath).toBe(
+          `/api/kyber/quarantine/${CLAUDE_INTERACTION_SPAN}`,
+        )
+        expect(body.parentSpanId).toBe(CLAUDE_INTERACTION_SPAN)
+      })
+
+      it('keeps notMeasurable with an env-var reason on a partless turn and omits interactionPath when the quarantine row stored no payload', async () => {
+        const res = await fetch(
+          `${base}/api/kyber/session/sess-claude-content-001/turn/1/content`,
+        )
+        expect(res.status).toBe(200)
+        assertStandardKyberHeaders(res)
+
+        const body = (await res.json()) as TurnContentResult & TurnPacketPointers
+
+        expect(body.spanId).toBe(CLAUDE_TURN_NO_PARTS_SPAN)
+        expect(body.parts).toEqual([])
+
+        const convBlock = body.blocks.find((b) => b.key === 'conversation_history')
+        expect(convBlock?.parts).toEqual([])
+        // Still missing, so it still says which setting would supply it (B6).
+        expect(convBlock?.notMeasurable?.reason).toContain('OTEL_LOG_USER_PROMPTS=1')
+
+        expect(body.rawPacket).toBeDefined()
+        expect(body.rawPacket?.spanAttributesPath).toBe(
+          `/api/kyber/span/${CLAUDE_TURN_NO_PARTS_SPAN}/attributes`,
+        )
+        // The audit row exists but stored no packet: never link to nothing.
+        expect(body.rawPacket?.interactionPath).toBeUndefined()
+        expect(body.parentSpanId).toBe(CLAUDE_BARE_INTERACTION_SPAN)
       })
     })
   })

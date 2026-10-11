@@ -32,6 +32,7 @@ import {
   type RunDbRow,
   type HarnessRollupDbRow,
   type ExecutionDbRow,
+  type QuarantineEntryDetail,
 } from '../canon/store.js'
 import { sourceDisplayName, type SourceKind } from '../canon/measurability.js'
 import {
@@ -679,12 +680,21 @@ export type TurnContentResult = {
   sessionId: string
   turnIndex: number
   spanId?: string
+  /** The turn record's parent span, when the record named one (B7). */
+  parentSpanId?: string
   model?: string
   blocks: TurnContentBlock[]
   parts: TurnContentPart[]
   assembledText: string
   truncated?: boolean
   totalLength?: number
+  /**
+   * Where this turn's raw packets can be fetched (B7): the request span's
+   * attributes always — a served turn is a stored record — and the
+   * quarantined parent's packet only when that row kept a payload, so the
+   * pointer is never a link to nothing.
+   */
+  rawPacket: { spanAttributesPath: string; interactionPath?: string }
   sharedContext?: TurnContentSharedContext | null
 }
 
@@ -787,6 +797,8 @@ export function _clip<T = unknown>(value: T, maxLen = MAX_STRING_LENGTH, depth =
 type ContentSourceRecord = {
   spanId: string
   sessionKey: string | null
+  /** The record's parent span; the quarantined packet a turn may point at (B7). */
+  parentSpanId: string | null
   parts: ContentPart[]
   /**
    * Captured timestamp of the span, when the seam carries one. Lets the
@@ -913,21 +925,6 @@ function sha256Hex(text: string): string {
   return createHash('sha256').update(text, 'utf8').digest('hex')
 }
 
-/**
- * Read a stored raw-payload cell for a detail route. Stored text parses back to the exact
- * incoming span object; unparseable text is served verbatim rather than dropped (it is
- * still the closest thing to the original evidence); null stays null — unavailable,
- * never invented.
- */
-function parseStoredRawPayload(rawText: string | null): unknown | null {
-  if (rawText === null) return null
-  try {
-    return JSON.parse(rawText) as unknown
-  } catch {
-    return rawText
-  }
-}
-
 
 function isCanonicalPart(value: string): value is CanonicalContentKey {
   return (CANONICAL_CONTENT_KEYS as readonly string[]).includes(value)
@@ -980,10 +977,18 @@ function partsFromRow(row: Record<string, unknown>): ContentPart[] {
   return []
 }
 
+/** A record row's parent span id, or null when it carries none. */
+function parentSpanIdOf(row: Record<string, unknown>): string | null {
+  return row.parent_span_id === null || row.parent_span_id === undefined
+    ? null
+    : String(row.parent_span_id)
+}
+
 function toContentSource(record: CanonicalRecord): ContentSourceRecord {
   return {
     spanId: record.spanId,
     sessionKey: sessionKeyOf(record),
+    parentSpanId: record.parentSpanId,
     parts: partsFromRecord(record),
     timestamp: normalizeRecordTimestamp(record.timestamp),
   }
@@ -1887,6 +1892,9 @@ export class KyberBridge {
     // Load unclipped content records for this span
     const contentRecords = this.loadContentRecords(sessionId, targetSpanId)
     const rawParts: ContentPart[] = contentRecords[0]?.parts ?? []
+    // The turn's parent span is what a quarantined packet would be filed
+    // under (B7); absent when the record named no parent.
+    const parentSpanId = contentRecords[0]?.parentSpanId ?? null
 
     // Map and extract structured parts (system prompt, tools, user messages, assistant turns, etc.)
     const parts = this.mapTurnContentParts(rawParts, targetSpanId)
@@ -2018,13 +2026,18 @@ export class KyberBridge {
         tokens,
       }
 
-      // Check measurability from payload
-      const flat = payload?.measurability as MeasurabilityMap | undefined
-      const buckets = (payload?.context as { first?: { buckets?: MeasurabilityMap } } | undefined)
-        ?.first?.buckets
-      const measurability = flat?.[def.key] ?? buckets?.[def.key]
-      if (measurability && typeof measurability === 'object' && measurability.availability === 'not_measurable') {
-        block.notMeasurable = { reason: measurability.reason || 'Not measurable for this harness.' }
+      // Check measurability from payload — but only for a block this turn
+      // has no parts for (R6/B6): the payload's declaration is
+      // session-level, and a session-wide "not measurable" must not
+      // survive onto a block the turn itself carries text for.
+      if (uniqueParts.length === 0) {
+        const flat = payload?.measurability as MeasurabilityMap | undefined
+        const buckets = (payload?.context as { first?: { buckets?: MeasurabilityMap } } | undefined)
+          ?.first?.buckets
+        const measurability = flat?.[def.key] ?? buckets?.[def.key]
+        if (measurability && typeof measurability === 'object' && measurability.availability === 'not_measurable') {
+          block.notMeasurable = { reason: measurability.reason || 'Not measurable for this harness.' }
+        }
       }
 
       // Block recurrence aggregates its rendered members: new when any
@@ -2090,14 +2103,30 @@ export class KyberBridge {
       }
     }
 
+    // B7's raw-packet pointers. The turn's own span is a stored record, so
+    // its attributes are always reachable; the parent's packet is linked
+    // only when its quarantine row exists and kept a payload — a pointer
+    // to nothing is worse than none.
+    const rawPacket: TurnContentResult['rawPacket'] = {
+      spanAttributesPath: `/api/kyber/span/${targetSpanId}/attributes`,
+    }
+    if (parentSpanId !== null) {
+      const entry = this.getQuarantineEntry(parentSpanId)
+      if (entry !== null && entry.rawPayload !== null) {
+        rawPacket.interactionPath = `/api/kyber/quarantine/${parentSpanId}`
+      }
+    }
+
     const result: TurnContentResult = {
       sessionId,
       turnIndex,
       spanId: targetSpanId,
+      ...(parentSpanId !== null ? { parentSpanId } : {}),
       model,
       blocks,
       parts,
       assembledText,
+      rawPacket,
       ...(truncated ? { truncated, totalLength } : {}),
       sharedContext,
     }
@@ -2479,6 +2508,7 @@ export class KyberBridge {
           {
             spanId: String(row.span_id),
             sessionKey: key,
+            parentSpanId: parentSpanIdOf(row),
             parts: partsFromRow(row),
             timestamp: normalizeRecordTimestamp(row.timestamp),
           },
@@ -2497,6 +2527,7 @@ export class KyberBridge {
       return rows.map((row) => ({
         spanId: String(row.span_id),
         sessionKey: sessionId,
+        parentSpanId: parentSpanIdOf(row),
         parts: partsFromRow(row),
         timestamp: normalizeRecordTimestamp(row.timestamp),
       }))
@@ -2508,6 +2539,7 @@ export class KyberBridge {
         return rows.map((row) => ({
           spanId: String(row.span_id),
           sessionKey: sessionId,
+          parentSpanId: parentSpanIdOf(row),
           parts: partsFromRow(row),
           timestamp: normalizeRecordTimestamp(row.timestamp),
         }))
@@ -2897,42 +2929,71 @@ export class KyberBridge {
   }
 
   /**
-   * One quarantined span with its incoming evidence. Rows stored before the evidence
-   * column read `rawPayload: null, evidenceAvailable: false` — explicitly unavailable,
-   * never reconstructed. Absent span id gives undefined (the route's 404).
+   * One quarantine row in the detail shape the route serves (B7): every
+   * field present, absent values explicit null. The list stays light — this
+   * is the only bridge surface that returns a stored packet, and a row
+   * written before the columns existed answers `rawPayload: null,
+   * evidenceAvailable: false` rather than inventing evidence. `null` when
+   * no row names the span.
    */
-  getQuarantineEntry(spanId: string): QuarantineDetail | undefined {
+  getQuarantineEntry(spanId: string): QuarantineEntryDetail | null {
+    if (!spanId) return null
+
+    if (this.store) {
+      return this.store.getQuarantineEntry(spanId) ?? null
+    }
+
     const db = this.getDb()
-    if (!this.hasTable(db, 'quarantine')) return undefined
+    if (!this.hasTable(db, 'quarantine')) return null
+
     try {
+      // The shared canon.db may predate the evidence columns; presence-check
+      // each one exactly like getQuarantine does for its optional fields.
       const cols = new Set(
         (db!.prepare("PRAGMA table_info('quarantine')").all() as Array<{ name: string }>).map((c) => c.name),
       )
       const selectCols = ['span_id', 'namespaces', 'reason']
-      selectCols.push(cols.has('source') ? 'source' : 'NULL AS source')
-      selectCols.push(cols.has('name') ? 'name' : 'NULL AS name')
-      selectCols.push(cols.has('seen_at') ? 'seen_at' : 'NULL AS seen_at')
-      selectCols.push(cols.has('timestamp') ? 'timestamp' : 'NULL AS timestamp')
-      selectCols.push(cols.has('raw_payload') ? 'raw_payload' : 'NULL AS raw_payload')
-      const row = db!.prepare(`SELECT ${selectCols.join(', ')} FROM quarantine WHERE span_id = ?`).get(spanId) as
-        | (QuarantineDbRow & { raw_payload?: unknown })
+      for (const col of ['source', 'name', 'timestamp', 'harness', 'raw_payload']) {
+        selectCols.push(cols.has(col) ? col : `NULL AS ${col}`)
+      }
+      const row = db!
+        .prepare(`SELECT ${selectCols.join(', ')} FROM quarantine WHERE span_id = ?`)
+        .get(spanId) as
+        | {
+            span_id: string
+            namespaces: string | null
+            reason: string | null
+            source: string | null
+            name: string | null
+            timestamp: string | null
+            harness: string | null
+            raw_payload: string | null
+          }
         | undefined
-      if (row === undefined) return undefined
-      const rawText = typeof row.raw_payload === 'string' && row.raw_payload !== '' ? row.raw_payload : null
+      if (row === undefined) return null
+
+      let namespaces: string[] = []
+      try {
+        const parsed: unknown = JSON.parse(row.namespaces ?? '[]')
+        if (Array.isArray(parsed)) {
+          namespaces = parsed.filter((n): n is string => typeof n === 'string')
+        }
+      } catch {}
+
       return {
-        span_id: row.span_id,
+        spanId: row.span_id,
         source: row.source ?? null,
         name: row.name ?? null,
-        namespaces: row.namespaces ?? null,
-        reason: row.reason ?? null,
-        seen_at: row.seen_at ?? row.timestamp ?? null,
-        timestamp: row.timestamp ?? (typeof row.seen_at === 'number' ? new Date(row.seen_at * 1000).toISOString() : (row.seen_at ? String(row.seen_at) : null)),
-        rawPayload: parseStoredRawPayload(rawText),
-        evidenceAvailable: rawText !== null,
+        reason: row.reason ?? '',
+        timestamp: row.timestamp ?? null,
+        namespaces,
+        harness: row.harness ?? null,
+        rawPayload: row.raw_payload ?? null,
+        evidenceAvailable: row.raw_payload !== null && row.raw_payload !== undefined,
       }
     } catch (err) {
       console.warn('[KyberBridge] Failed querying quarantine entry from canon.db:', err)
-      return undefined
+      return null
     }
   }
 

@@ -6,8 +6,8 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { CanonStore, problemsHarnessWhere, quarantineHarnessWhere } from '../canon/store.js'
-import { KyberBridge, type ProblemDetail, type ProblemRow, type QuarantineDetail, type QuarantineRow } from './bridge.js'
+import { CanonStore, problemsHarnessWhere, quarantineHarnessWhere, type QuarantineEntryDetail } from '../canon/store.js'
+import { KyberBridge, type ProblemDetail, type ProblemRow, type QuarantineRow } from './bridge.js'
 import { handleKyberRequest, type KyberRouteDeps } from './routes.js'
 
 const stores: CanonStore[] = []
@@ -196,12 +196,15 @@ describe('quarantine detail route', () => {
 
     const { status, body } = call('/api/kyber/quarantine/opencode-span-1', bridge, deps)
     expect(status).toBe(200)
-    const detail = body as unknown as QuarantineDetail
-    expect(detail.span_id).toBe('opencode-span-1')
+    // The detail contract is B7's: camelCase fields, every one present, and the
+    // payload served exactly as stored — never parsed or re-shaped server-side.
+    const detail = body as unknown as QuarantineEntryDetail
+    expect(detail.spanId).toBe('opencode-span-1')
     expect(detail.source).toBe('opencode')
     expect(detail.reason).toBe('non-model span')
+    expect(detail.harness).toBeNull()
     expect(detail.evidenceAvailable).toBe(true)
-    expect(detail.rawPayload).toEqual(OPENTELEMETRY_SPAN)
+    expect(detail.rawPayload).toBe(JSON.stringify(OPENTELEMETRY_SPAN))
   })
 
   it('reads rows without stored evidence as explicitly unavailable, never invented', () => {
@@ -209,7 +212,7 @@ describe('quarantine detail route', () => {
 
     const { status, body } = call('/api/kyber/quarantine/claude-span-1', bridge, deps)
     expect(status).toBe(200)
-    const detail = body as unknown as QuarantineDetail
+    const detail = body as unknown as QuarantineEntryDetail
     expect(detail.rawPayload).toBeNull()
     expect(detail.evidenceAvailable).toBe(false)
   })

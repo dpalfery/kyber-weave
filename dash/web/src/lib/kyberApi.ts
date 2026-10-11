@@ -518,6 +518,8 @@ export interface KyberTurnContentResult {
   sessionId: string
   turnIndex: number
   spanId?: string
+  /** The turn record's parent span, when the record named one (B7). */
+  parentSpanId?: string
   model?: string
   blocks: KyberTurnContentBlock[]
   parts: KyberTurnContentPart[]
@@ -526,6 +528,12 @@ export interface KyberTurnContentResult {
   totalLength?: number
   measurability?: string | Record<string, unknown>
   notMeasurable?: { reason: string }
+  /**
+   * Where this turn's raw packets can be fetched (B7): the request span's
+   * attributes always; the quarantined parent's packet only when that row
+   * kept a payload.
+   */
+  rawPacket?: { spanAttributesPath: string; interactionPath?: string }
   /**
    * Session-level shared context: every captured `system_prompt` part in
    * session scope, in capture order, with section-level earlier-turn
@@ -585,6 +593,37 @@ export interface KyberSpanAttributes {
  */
 export function fetchSpanAttributes(spanId: string): Promise<KyberSpanAttributes> {
   return fetchJson<KyberSpanAttributes>(`/api/kyber/span/${encodeURIComponent(spanId)}/attributes`)
+}
+
+/**
+ * One quarantine row in the detail shape the route serves (B7). Unlike the
+ * light `KyberQuarantineEntry` list row every field is always present — absent
+ * values are explicit null, because a dropped key would read as "field unknown"
+ * rather than "this row kept no evidence". `evidenceAvailable` is the honest
+ * answer to "did this row keep a packet", never inferred from an empty payload.
+ */
+export interface KyberQuarantineEntryDetail {
+  spanId: string
+  source: string | null
+  name: string | null
+  reason: string
+  timestamp: string | null
+  namespaces: string[]
+  harness: string | null
+  rawPayload: string | null
+  evidenceAvailable: boolean
+}
+
+/**
+ * One quarantined span's audit row plus the packet it kept (B7).
+ *
+ * This is the fetch behind the turn view's raw-packet disclosure, and the only
+ * route that returns a stored payload: the turn's parent span was quarantined
+ * out of the canonical store, so its evidence lives here or nowhere. Takes a
+ * span id — passing the served path would nest a second `/api/kyber/` prefix.
+ */
+export function fetchQuarantineEntry(spanId: string): Promise<KyberQuarantineEntryDetail> {
+  return fetchJson<KyberQuarantineEntryDetail>(`/api/kyber/quarantine/${encodeURIComponent(spanId)}`)
 }
 
 // ===========================================================================
