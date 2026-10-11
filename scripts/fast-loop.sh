@@ -21,8 +21,9 @@
 # parallel. The fast tier keeps the fastest classes up to a 150s summed-time budget.
 #
 # The excluded classes are the slow `Squad*` and `Utilities*` lifecycle, CLI, path-safety
-# and pack classes plus SquadDeploymentStateTests, which also contends on a lease outside
-# its temp directory (docs/todo/squad-lease-contention-cross-process.md).
+# and pack classes plus SquadDeploymentStateTests, which is the slowest class and has a
+# lease test with a fixed 5-second wait that flakes on a loaded machine; its root cause is
+# not reproduced (docs/todo/squad-lease-contention-cross-process.md).
 #
 # WHY EXCLUDE BY CLASS LIST RATHER THAN BY TRAIT
 #
