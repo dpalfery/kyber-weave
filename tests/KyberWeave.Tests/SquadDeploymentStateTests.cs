@@ -23,6 +23,40 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         new(2026, 8, 14, 12, 34, 56, TimeSpan.Zero);
 
     [Fact]
+    public void ExecuteWithDurableWritesEnabledDeploysAndRemovesWhatItWrote()
+    {
+        // The test assembly turns SyncToDisk off for speed (SquadTestDurability), so the branch
+        // that ships would otherwise never run. Exercise it once, then put the switch back.
+        bool original = SquadTransaction.SyncToDisk;
+        SquadTransaction.SyncToDisk = true;
+        try
+        {
+            using TempDirectory fixture = new TempDirectory();
+            string targetRoot = Path.Combine(fixture.Path, "target");
+            Directory.CreateDirectory(targetRoot);
+            SquadStateStore store = Store(Path.Combine(fixture.Path, "application-data"));
+            SquadDeploymentPlan plan = SquadDeploymentPlan.CreateInstall(
+                targetRoot,
+                SquadDeploymentScope.Project,
+                Lock(),
+                [Rendered(".codex/agents/durable.toml", "durable")],
+                [],
+                adopt: false,
+                new FixedTimeProvider(InstalledAt));
+
+            new SquadTransaction(store).Execute(plan);
+
+            Assert.Equal(
+                "durable",
+                File.ReadAllText(Path.Combine(targetRoot, ".codex", "agents", "durable.toml")));
+        }
+        finally
+        {
+            SquadTransaction.SyncToDisk = original;
+        }
+    }
+
+    [Fact]
     public void SerializeProjectStateIsStablePortableSecretFreeAndRoundTrips()
     {
         using TempDirectory fixture = new TempDirectory();

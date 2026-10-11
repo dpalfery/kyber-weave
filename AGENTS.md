@@ -12,8 +12,10 @@ While iterating, run `scripts/fast-loop.sh` rather than the full gate suite. It 
 Release with warnings-as-errors and analyzers on, runs the fast test tier, runs
 `docs validate`, and checks formatting — in a fraction of the time the declared
 suite takes, because it drops coverage collection, the `Category=Scale` envelope, and the
-slowest classes by measured cost (listed in `scripts/fast-loop-classes.txt`, regenerated
-with `scripts/fast-loop.sh --regenerate`).
+slowest classes by measured cost. The fast tier is the list in
+`scripts/fast-loop-classes.txt` (everything else is excluded), regenerated with
+`scripts/fast-loop.sh --regenerate`. Of the declared gates it runs only `docs validate` and the
+whitespace formatting check.
 
 It is **not** evidence and must never be cited as such. It answers "did this edit break
 something"; the declared suite below answers "may this change be committed", and a

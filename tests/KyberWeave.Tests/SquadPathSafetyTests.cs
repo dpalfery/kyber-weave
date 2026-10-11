@@ -51,6 +51,7 @@ namespace KyberWeave.Tests;
 /// (<c>CODEX_HOME</c>, <c>CLAUDE_CONFIG_DIR</c>), so the sandbox roots are where the runs
 /// genuinely write; see <see cref="RunWithEnvironment{T}"/>.
 /// </remarks>
+[Collection(SquadProcessEnvironmentCollection.Name)]
 public sealed class SquadPathSafetyTests : IDisposable
 {
     private readonly TempDirectory _temp = new();
@@ -916,9 +917,10 @@ public sealed class SquadPathSafetyTests : IDisposable
     /// <c>CLAUDE_CONFIG_DIR</c>, …) through <see cref="Environment.GetEnvironmentVariable(string)"/>
     /// at resolution time, so the environment is the one seam that decides where a real
     /// <c>--global</c> command run writes; every other test in the suite injects a resolver
-    /// or a getter and never observes the process environment. xUnit runs test classes in
-    /// parallel, so the window stays as short as one command execution and is restored even
-    /// when the body fails.
+    /// or a getter and never observes the process environment. A class that also writes these
+    /// variables would otherwise race this one under xUnit's default class parallelism, so
+    /// both live in <see cref="SquadProcessEnvironmentCollection"/> and run one at a time; the
+    /// window stays as short as one command execution and is restored even when the body fails.
     /// </remarks>
     private static T RunWithEnvironment<T>(IReadOnlyDictionary<string, string> variables, [InstantHandle] Func<T> body)
     {
