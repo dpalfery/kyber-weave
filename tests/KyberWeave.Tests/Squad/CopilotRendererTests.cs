@@ -712,6 +712,247 @@ public sealed class CopilotRendererTests
             l => l.StartsWith("agents:", StringComparison.Ordinal));
     }
 
+    private static readonly string[] ConductorReferenceFiles =
+        ["plan-path.md", "spec-path.md", "intake-path.md", "execution-and-review.md"];
+
+    /// <summary>
+    /// Regression for the global-install report where <c>conductor</c> could not find
+    /// <c>intake-path.md</c>: Copilot does not reliably anchor a relative link to the agent file
+    /// for user-level agents, so every declared-resource link must be absolute under the
+    /// resolved Copilot root.
+    /// </summary>
+    [Fact]
+    public async Task GlobalRenderRewritesEveryDeclaredResourceLinkToAbsolutePathUnderResolvedRoot()
+    {
+        SquadRenderResult result = await RenderConductorGloballyAsync("/home/u/.copilot");
+
+        string content = ConductorAgentContent(result, "agents/conductor.agent.md");
+        foreach (string file in ConductorReferenceFiles)
+        {
+            Assert.Contains(
+                $"](/home/u/.copilot/agents/conductor/references/{file})",
+                content,
+                StringComparison.Ordinal);
+        }
+
+        Assert.DoesNotContain("](conductor/references/", content, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GlobalRenderKeepsFragmentSuffixAndLeavesLinksOutsideTheResourceClosureUnchanged()
+    {
+        using TempDirectory temp = new();
+        WriteSyntheticSquad(temp.Path, MinimalCapabilitiesYaml);
+        Directory.CreateDirectory(Path.Combine(temp.Path, "agents", "conductor", "references"));
+        await File.WriteAllTextAsync(
+            Path.Combine(temp.Path, "agents", "conductor", "references", "intake-path.md"),
+            "# Intake\n");
+        await File.WriteAllTextAsync(Path.Combine(temp.Path, "agents", "conductor.md"), """
+            ---
+            schema: kyber-squad.agent/v1
+            name: conductor
+            description: Test agent conductor
+            invocation: subagent
+            model-profile: default
+            capability-profile: read-only-custom
+            copilot-tools: [todo, read, vscode]
+            delegates-to: []
+            fallback: none
+            aliases: []
+            ---
+            Read [intake](conductor/references/intake-path.md#steps) first.
+            See [external](https://example.com/conductor/references/intake-path.md) and [local](#top).
+            """);
+
+        SquadRenderResult result = await RenderGloballyAsync(temp.Path, "/home/u/.copilot");
+
+        string content = ConductorAgentContent(result, "agents/conductor.agent.md");
+        Assert.Contains(
+            "](/home/u/.copilot/agents/conductor/references/intake-path.md#steps)",
+            content,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "](https://example.com/conductor/references/intake-path.md)",
+            content,
+            StringComparison.Ordinal);
+        Assert.Contains("[local](#top)", content, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GlobalRenderNormalizesWindowsRootToForwardSlashes()
+    {
+        SquadRenderResult result = await RenderConductorGloballyAsync(@"C:\Users\u\.copilot");
+
+        string content = ConductorAgentContent(result, "agents/conductor.agent.md");
+        Assert.Contains(
+            "](C:/Users/u/.copilot/agents/conductor/references/intake-path.md)",
+            content,
+            StringComparison.Ordinal);
+        string[] targets = content
+            .Split("](", StringSplitOptions.None)
+            .Skip(1)
+            .Select(segment => segment[..segment.IndexOf(')', StringComparison.Ordinal)])
+            .Where(target => target.Contains("/agents/conductor/references/", StringComparison.Ordinal))
+            .ToArray();
+        Assert.Equal(4, targets.Length);
+        Assert.All(targets, target => Assert.DoesNotContain("\\", target, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task GlobalRenderWrapsLinkTargetInAngleBracketsWhenRootContainsASpace()
+    {
+        SquadRenderResult result = await RenderConductorGloballyAsync("/home/my user/.copilot");
+
+        string content = ConductorAgentContent(result, "agents/conductor.agent.md");
+        foreach (string file in ConductorReferenceFiles)
+        {
+            Assert.Contains(
+                $"](</home/my user/.copilot/agents/conductor/references/{file}>)",
+                content,
+                StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public async Task GlobalRenderRecordsResourceLinksRewrittenDegradationForConductor()
+    {
+        SquadRenderResult result = await RenderConductorGloballyAsync("/home/u/.copilot");
+
+        Assert.Contains(
+            result.Degradations,
+            d => d.Target == "copilot" &&
+                 d.CanonicalIdentity == "conductor" &&
+                 d.Code == "resource-links-rewritten");
+    }
+
+    [Fact]
+    public async Task GlobalRenderStillEmitsResourceFilesBesideThePrincipalAtUnchangedPaths()
+    {
+        SquadRenderResult result = await RenderConductorGloballyAsync("/home/u/.copilot");
+
+        foreach (string file in ConductorReferenceFiles)
+        {
+            Assert.Contains(
+                result.Files,
+                f => f.RelativePath == $"agents/conductor/references/{file}");
+        }
+    }
+
+    [Fact]
+    public async Task ProjectRenderKeepsRelativeLinksAndIgnoresAnySuppliedGlobalRootResolver()
+    {
+        SquadRenderResult withoutResolver = await RenderAsync(ProductRoot, SquadDeploymentScope.Project, null);
+        SquadRenderResult withResolver = await RenderAsync(
+            ProductRoot,
+            SquadDeploymentScope.Project,
+            new FixedGlobalRootResolver("/home/u/.copilot"));
+
+        SquadDeploymentFile baseline = Assert.Single(
+            withoutResolver.Files,
+            f => f.RelativePath == ".github/agents/conductor.agent.md");
+        SquadDeploymentFile supplied = Assert.Single(
+            withResolver.Files,
+            f => f.RelativePath == ".github/agents/conductor.agent.md");
+
+        string content = Encoding.UTF8.GetString(baseline.Content.Span);
+        foreach (string file in ConductorReferenceFiles)
+        {
+            Assert.Contains($"](conductor/references/{file})", content, StringComparison.Ordinal);
+        }
+
+        Assert.Equal(baseline.Content.ToArray(), supplied.Content.ToArray());
+        Assert.DoesNotContain(withResolver.Degradations, d => d.Code == "resource-links-rewritten");
+    }
+
+    [Fact]
+    public async Task GlobalRenderWithoutAGlobalRootResolverFailsClosedNamingTheMissingInput()
+    {
+        SquadRendererRegistry registry = new([new CopilotRenderer()]);
+        SquadRenderRequest request = new(
+            SourceDirectory: ProductRoot,
+            Targets: [SquadTarget.Copilot],
+            Scope: SquadDeploymentScope.Global);
+
+        SquadRenderValidationException exception =
+            await Assert.ThrowsAsync<SquadRenderValidationException>(() => registry.RenderAsync(request));
+
+        Assert.Contains("GlobalRoots", exception.Message, StringComparison.Ordinal);
+    }
+
+    private const string MinimalCapabilitiesYaml = """
+        schema: kyber-squad.capability-profiles/v1
+        capabilities:
+          - filesystem.read
+          - filesystem.search
+          - filesystem.write
+          - process.execute
+          - network.read
+          - network.publish
+          - delegate
+        profiles:
+          exec-only:
+            permissions:
+              filesystem.read: deny
+              filesystem.search: deny
+              filesystem.write: deny
+              process.execute: allow
+              network.read: deny
+              network.publish: deny
+              delegate: deny
+          read-only-custom:
+            permissions:
+              filesystem.read: allow
+              filesystem.search: deny
+              filesystem.write: deny
+              process.execute: deny
+              network.read: deny
+              network.publish: deny
+              delegate: deny
+          all-denied:
+            permissions:
+              filesystem.read: deny
+              filesystem.search: deny
+              filesystem.write: deny
+              process.execute: deny
+              network.read: deny
+              network.publish: deny
+              delegate: deny
+        """;
+
+    private static Task<SquadRenderResult> RenderConductorGloballyAsync(string copilotRoot) =>
+        RenderGloballyAsync(ProductRoot, copilotRoot);
+
+    private static Task<SquadRenderResult> RenderGloballyAsync(string sourceDirectory, string copilotRoot) =>
+        RenderAsync(sourceDirectory, SquadDeploymentScope.Global, new FixedGlobalRootResolver(copilotRoot));
+
+    private static async Task<SquadRenderResult> RenderAsync(
+        string sourceDirectory,
+        SquadDeploymentScope scope,
+        ISquadGlobalRootResolver? globalRoots)
+    {
+        SquadRendererRegistry registry = new([new CopilotRenderer()]);
+        SquadRenderRequest request = new(
+            SourceDirectory: sourceDirectory,
+            Targets: [SquadTarget.Copilot],
+            Scope: scope,
+            GlobalRoots: globalRoots);
+
+        SquadRenderResult result = await registry.RenderAsync(request);
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+        return result;
+    }
+
+    private static string ConductorAgentContent(SquadRenderResult result, string relativePath)
+    {
+        SquadDeploymentFile file = Assert.Single(result.Files, f => f.RelativePath == relativePath);
+        return Encoding.UTF8.GetString(file.Content.Span);
+    }
+
+    private sealed class FixedGlobalRootResolver(string root) : ISquadGlobalRootResolver
+    {
+        public string ResolveGlobalRoot(SquadTarget target) => root;
+    }
+
     private static async Task<string> RenderFrontmatterAsync(string agentName)
     {
         SquadRendererRegistry registry = new([new CopilotRenderer()]);

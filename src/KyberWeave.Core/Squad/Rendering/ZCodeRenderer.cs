@@ -226,16 +226,6 @@ public sealed class ZCodeRenderer : ISquadRenderer
         "WebFetch", "WebSearch", "Agent"
     ];
 
-    /// <summary>
-    /// A Markdown inline link or image whose target is captured for resource-link rewriting.
-    /// Matching the link syntax rather than the bare path keeps the rewrite from touching
-    /// prose that merely mentions a filename.
-    /// </summary>
-    private static readonly Regex MarkdownLinkTarget = new(
-        @"(?<prefix>\]\()(?<target>[^)\s]+)(?<suffix>\))",
-        RegexOptions.Compiled | RegexOptions.CultureInvariant,
-        TimeSpan.FromSeconds(2));
-
     /// <inheritdoc />
     public IReadOnlyCollection<SquadTarget> SupportedTargets { get; } = [SquadTarget.ZCode];
 
@@ -568,21 +558,11 @@ public sealed class ZCodeRenderer : ISquadRenderer
             .Select(resource => resource.RelativePath)
             .ToHashSet(StringComparer.Ordinal);
 
-        bool changed = false;
-        string body = MarkdownLinkTarget.Replace(agent.InstructionBody, match =>
-        {
-            string target = match.Groups["target"].Value;
-            int suffixIndex = target.IndexOfAny(['#', '?']);
-            string pathPart = suffixIndex < 0 ? target : target[..suffixIndex];
-            string linkSuffix = suffixIndex < 0 ? string.Empty : target[suffixIndex..];
-            if (pathPart.Length == 0 || !resourcePaths.Contains(Uri.UnescapeDataString(pathPart)))
-            {
-                return match.Value;
-            }
-
-            changed = true;
-            return $"{match.Groups["prefix"].Value}../skills/{pathPart}{linkSuffix}{match.Groups["suffix"].Value}";
-        });
+        string body = SquadResourceLinkRewriter.Rewrite(
+            agent.InstructionBody,
+            resourcePaths,
+            pathPart => $"../skills/{pathPart}",
+            out bool changed);
 
         rewritten = true;
         degradations.Add(new SquadDegradationRecord(
