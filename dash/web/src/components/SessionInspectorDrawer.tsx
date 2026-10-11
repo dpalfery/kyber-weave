@@ -2289,12 +2289,14 @@ function readMeasuredFigure(value: unknown): number | undefined {
 /**
  * Stable identity for matching a top-level part against block members.
  * Block parts and top-level parts are separate objects after the JSON
- * round-trip, so the server-assigned `id` matches them; part+text is the
- * fallback. Callers count matches so repeated identical parts pair off
+ * round-trip, so the server-assigned `id` matches them; the (kind, text) pair is
+ * the fallback. Callers count matches so repeated identical parts pair off
  * instead of collapsing.
  */
 export function turnPartKey(part: Pick<KyberTurnContentPart, 'id' | 'part' | 'text'>): string {
-  return part.id ?? `${part.part}${part.text}`
+  // `||`, not `??`: an empty-string id is no identity. JSON keeps (kind, text) pairs from
+  // colliding the way plain concatenation does ('ab'+'c' vs 'a'+'bc').
+  return part.id || JSON.stringify([part.part, part.text])
 }
 
 /**
