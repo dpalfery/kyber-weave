@@ -2172,33 +2172,41 @@ export class CanonStore {
   }
 
   /**
-   * Session-scope system prompts for the shared-context fallback, without
+   * Session-scope system prompts for the shared-context reader, without
    * materializing full records.
    *
    * <remarks>
-   * The projection selects only the two content columns in session order, so
-   * `raw` (the largest blob per span), tokens, cost, and measurability never
-   * leave SQLite, and no `CanonicalRecord` is built — unrelated rows contribute
-   * nothing but their two content cells. Capture order, exact texts, and span
-   * ids are preserved; budgeting and truncation stay with the caller.
+   * The projection selects only the prompt-bearing content columns plus the
+   * span timestamp in session order, so `raw` (the largest blob per span),
+   * tokens, cost, and measurability never leave SQLite, and no
+   * `CanonicalRecord` is built — unrelated rows contribute nothing but
+   * their two content cells plus a short timestamp. Capture order, exact
+   * texts, span ids, and per-row timestamps are preserved; budgeting and
+   * truncation stay with the caller. The timestamp lets the caller keep only
+   * prompts captured at or before the turn being shown: a prompt captured
+   * after the selected turn must not be presented as part of what that
+   * earlier turn saw. Rows with a missing or unparseable timestamp stay
+   * included — the caller cannot prove they are future evidence, and
+   * dropping them would invent a claim the store cannot support.
    * </remarks>
    */
   systemPromptPartsForSession(
     sessionId: string,
     excludeSpanId?: string,
-  ): Array<{ spanId: string; text: string }> {
+  ): Array<{ spanId: string; text: string; timestamp?: string }> {
     if (!sessionId) return []
     const rows = this.db
       .prepare(
-        'SELECT span_id, content_json, parts_json FROM records WHERE COALESCE(session_id, trace_id) = ? ORDER BY timestamp',
+        'SELECT span_id, timestamp, content_json, parts_json FROM records WHERE COALESCE(session_id, trace_id) = ? ORDER BY timestamp',
       )
-      .all(sessionId) as { span_id: unknown; content_json: unknown; parts_json: unknown }[]
-    const out: Array<{ spanId: string; text: string }> = []
+      .all(sessionId) as { span_id: unknown; timestamp: unknown; content_json: unknown; parts_json: unknown }[]
+    const out: Array<{ spanId: string; text: string; timestamp?: string }> = []
     for (const row of rows) {
       const spanId = String(row.span_id)
       if (excludeSpanId !== undefined && spanId === excludeSpanId) continue
+      const timestamp = row.timestamp === null || row.timestamp === undefined ? undefined : String(row.timestamp)
       for (const text of systemPromptTextsFromContentColumns(row.content_json, row.parts_json)) {
-        out.push({ spanId, text })
+        out.push(timestamp === undefined ? { spanId, text } : { spanId, text, timestamp })
       }
     }
     return out

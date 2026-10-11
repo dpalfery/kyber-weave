@@ -210,6 +210,41 @@ describe('Backend Contract Tests: GET /api/kyber/session/:id/content', () => {
         turns: [{ index: 0, spanId: 'span-f0', model: 'm' }],
       },
     })
+    // Mixed session and turn prompts: the turn span carries its own system
+    // prompt while non-turn session spans carry theirs — the reader must
+    // keep both, in capture order, with no text deduplication.
+    store.upsertMany([
+      turn(
+        'span-g0',
+        [{ part: 'system_prompt', text: 'TURN_PROMPT_MIXED_ROUTE', tokens: 7 }] as unknown as ContentPart[],
+        {
+          sessionId: 'sess-rec-mixed-001',
+          traceId: 'trace-rec-mixed-001',
+          timestamp: '2026-09-03T16:00:00.000Z',
+        },
+      ),
+      turn(
+        'span-g-session-a',
+        [{ part: 'system_prompt', text: 'SESSION_PROMPT_MIXED_ROUTE', tokens: 5 }] as unknown as ContentPart[],
+        {
+          sessionId: 'sess-rec-mixed-001',
+          traceId: 'trace-rec-mixed-001',
+          op: 'session.start',
+          name: 'session_scope',
+          timestamp: '2026-09-03T15:59:00.000Z',
+        },
+      ),
+    ])
+    store.upsertSession({
+      sessionId: 'sess-rec-mixed-001',
+      harness: 'copilot',
+      label: 'Mixed session and turn prompts',
+      payload: {
+        id: 'sess-rec-mixed-001',
+        harness: 'copilot',
+        turns: [{ index: 0, spanId: 'span-g0', model: 'm' }],
+      },
+    })
     // Session whose payload carries explicit turn descriptors: one current
     // 0-based `index` row and one legacy 1-based `turn` row (issue #184).
     store.upsertMany([
@@ -832,6 +867,24 @@ describe('Backend Contract Tests: GET /api/kyber/session/:id/content', () => {
         expect(body.truncated).toBeUndefined()
         // The turn's own non-prompt content is unaffected.
         expect(body.assembledText).toContain('fallback turn output')
+      })
+
+      it('keeps mixed session and turn prompts together in capture order', async () => {
+        const res = await fetch(`${base}/api/kyber/session/sess-rec-mixed-001/turn/0/content?full=true`)
+        expect(res.status).toBe(200)
+        assertStandardKyberHeaders(res)
+        const body = (await res.json()) as TurnContentResult
+        expect(body.spanId).toBe('span-g0')
+        // The non-turn session prompt is not dropped merely because the
+        // turn span carries its own prompt: both render, in capture order,
+        // with exact texts and distinct span ids.
+        expect(body.sharedContext?.parts).toEqual([
+          { text: 'SESSION_PROMPT_MIXED_ROUTE', spanId: 'span-g-session-a' },
+          { text: 'TURN_PROMPT_MIXED_ROUTE', spanId: 'span-g0' },
+        ])
+        expect(body.sharedContext?.seenBefore).toBe(false)
+        expect(body.blocks.find((b) => b.key === 'system_prompt')?.text).toBe('TURN_PROMPT_MIXED_ROUTE')
+        expect(body.truncated).toBeUndefined()
       })
 
       it('budgets shared parts truthfully by default and exactly when full', async () => {

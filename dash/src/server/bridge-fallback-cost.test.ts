@@ -103,13 +103,13 @@ describe('Shared-context fallback cost (PI follow-up)', () => {
       seed(store)
       const found = store.systemPromptPartsForSession(SESSION_ID)
       expect(found).toEqual([
-        { spanId: 'span-cost-sess-a', text: 'COST_FALLBACK_ALPHA' },
-        { spanId: 'span-cost-legacy', text: 'COST_FALLBACK_LEGACY' },
-        { spanId: 'span-cost-sess-b', text: 'COST_FALLBACK_BETA' },
+        { spanId: 'span-cost-sess-a', text: 'COST_FALLBACK_ALPHA', timestamp: '2026-09-03T15:59:00.000Z' },
+        { spanId: 'span-cost-legacy', text: 'COST_FALLBACK_LEGACY', timestamp: '2026-09-03T15:59:15.000Z' },
+        { spanId: 'span-cost-sess-b', text: 'COST_FALLBACK_BETA', timestamp: '2026-09-03T15:59:30.000Z' },
       ])
       expect(store.systemPromptPartsForSession(SESSION_ID, 'span-cost-sess-a')).toEqual([
-        { spanId: 'span-cost-legacy', text: 'COST_FALLBACK_LEGACY' },
-        { spanId: 'span-cost-sess-b', text: 'COST_FALLBACK_BETA' },
+        { spanId: 'span-cost-legacy', text: 'COST_FALLBACK_LEGACY', timestamp: '2026-09-03T15:59:15.000Z' },
+        { spanId: 'span-cost-sess-b', text: 'COST_FALLBACK_BETA', timestamp: '2026-09-03T15:59:30.000Z' },
       ])
     } finally {
       store.close()
@@ -150,6 +150,214 @@ describe('Shared-context fallback cost (PI follow-up)', () => {
           expect(part.truncated).toBeUndefined()
           expect(part.totalLength).toBeUndefined()
         }
+      } finally {
+        bridge.close()
+      }
+    } finally {
+      store.close()
+    }
+  })
+})
+
+describe('Mixed session and turn prompts (PI blocking finding)', () => {
+  const MIXED_ID = 'sess-mixed-prompts-001'
+  const TWO_TURN_ID = 'sess-mixed-two-turn-001'
+  const DUP_SPAN_ID = 'sess-mixed-dup-span-001'
+
+  function mixedRecord(
+    spanId: string,
+    parts: ContentPart[] | undefined,
+    over: Partial<CanonicalRecord> = {},
+  ): CanonicalRecord {
+    return {
+      ...record(spanId, parts),
+      sessionId: MIXED_ID,
+      traceId: 'trace-mixed-001',
+      ...over,
+    }
+  }
+
+  function seedMixed(store: CanonStore): void {
+    store.upsertMany([
+      // The turn span carries its own system prompt AND non-turn session
+      // spans carry theirs: both must survive, in capture order.
+      mixedRecord('span-mix-turn-0', [{ part: 'system_prompt', text: 'TURN_PROMPT_MIXED', tokens: 7 }], {
+        timestamp: '2026-09-03T16:00:00.000Z',
+      }),
+      mixedRecord(
+        'span-mix-sess-a',
+        [
+          { part: 'system_prompt', text: 'SESSION_PROMPT_MIXED_A', tokens: 5 },
+          { part: 'system_prompt', text: 'SESSION_PROMPT_MIXED_B', tokens: 5 },
+        ],
+        { op: 'session.start', name: 'session_scope', timestamp: '2026-09-03T15:59:00.000Z' },
+      ),
+      // Same text as the turn prompt, but a distinct captured span: it must
+      // stay repeated, never text-deduplicated away.
+      mixedRecord('span-mix-sess-b', [{ part: 'system_prompt', text: 'TURN_PROMPT_MIXED', tokens: 7 }], {
+        op: 'session.start',
+        name: 'session_scope',
+        timestamp: '2026-09-03T15:59:30.000Z',
+      }),
+    ])
+    store.upsertSession({
+      sessionId: MIXED_ID,
+      harness: 'copilot',
+      label: 'Mixed prompts',
+      payload: {
+        id: MIXED_ID,
+        harness: 'copilot',
+        turns: [{ index: 0, spanId: 'span-mix-turn-0', model: 'm' }],
+      },
+    })
+  }
+
+  function seedTwoTurn(store: CanonStore): void {
+    const base: Partial<CanonicalRecord> = { sessionId: TWO_TURN_ID, traceId: 'trace-mixed-two-001' }
+    store.upsertMany([
+      { ...record('span-m2-t0', [{ part: 'system_prompt', text: 'T0_PROMPT', tokens: 3 }], base), timestamp: '2026-09-03T16:00:00.000Z' },
+      {
+        ...record('span-m2-sess', [{ part: 'system_prompt', text: 'MID_SESSION_PROMPT', tokens: 4 }], base),
+        op: 'session.start',
+        name: 'session_scope',
+        timestamp: '2026-09-03T16:00:30.000Z',
+      },
+      { ...record('span-m2-t1', [{ part: 'system_prompt', text: 'T1_PROMPT', tokens: 3 }], base), timestamp: '2026-09-03T16:01:00.000Z' },
+      {
+        ...record('span-m2-late', [{ part: 'system_prompt', text: 'LATE_SESSION_PROMPT', tokens: 4 }], base),
+        op: 'session.start',
+        name: 'session_scope',
+        timestamp: '2026-09-03T16:02:00.000Z',
+      },
+    ])
+    store.upsertSession({
+      sessionId: TWO_TURN_ID,
+      harness: 'copilot',
+      label: 'Two turns with session prompts',
+      payload: {
+        id: TWO_TURN_ID,
+        harness: 'copilot',
+        turns: [
+          { index: 0, spanId: 'span-m2-t0', model: 'm' },
+          { index: 1, spanId: 'span-m2-t1', model: 'm' },
+        ],
+      },
+    })
+  }
+
+  function seedDupSpan(store: CanonStore): void {
+    const base: Partial<CanonicalRecord> = { sessionId: DUP_SPAN_ID, traceId: 'trace-mixed-dup-001' }
+    store.upsertMany([
+      { ...record('span-dup-x', [{ part: 'system_prompt', text: 'DUP_PROMPT', tokens: 2 }], base), timestamp: '2026-09-03T16:00:00.000Z' },
+    ])
+    store.upsertSession({
+      sessionId: DUP_SPAN_ID,
+      harness: 'copilot',
+      label: 'One span serving two turns',
+      payload: {
+        id: DUP_SPAN_ID,
+        harness: 'copilot',
+        turns: [
+          { index: 0, spanId: 'span-dup-x', model: 'm' },
+          { index: 1, spanId: 'span-dup-x', model: 'm' },
+        ],
+      },
+    })
+  }
+
+  it('keeps turn and non-turn prompts together in capture order without text deduplication', () => {
+    const store = new CanonStore(':memory:')
+    try {
+      seedMixed(store)
+      const bridge = new KyberBridge({ store })
+      try {
+        const body = bridge.assembleTurnContent(MIXED_ID, 0, Number.POSITIVE_INFINITY)
+        expect(body).not.toBeNull()
+        // Capture order, exact texts, distinct span ids: the session spans
+        // first (multi-part span keeps parts order), then the turn span.
+        // The turn text stays twice — once per captured span.
+        expect(body?.sharedContext?.parts).toEqual([
+          { text: 'SESSION_PROMPT_MIXED_A', spanId: 'span-mix-sess-a' },
+          { text: 'SESSION_PROMPT_MIXED_B', spanId: 'span-mix-sess-a' },
+          { text: 'TURN_PROMPT_MIXED', spanId: 'span-mix-sess-b' },
+          { text: 'TURN_PROMPT_MIXED', spanId: 'span-mix-turn-0' },
+        ])
+        expect(body?.sharedContext?.seenBefore).toBe(false)
+        // The turn's own block still renders its prompt.
+        expect(body?.blocks.find((b) => b.key === 'system_prompt')?.text).toBe('TURN_PROMPT_MIXED')
+        expect(body?.truncated).toBeUndefined()
+      } finally {
+        bridge.close()
+      }
+    } finally {
+      store.close()
+    }
+  })
+
+  it('interleaves a between-turns session prompt and withholds prompts captured after the turn', () => {
+    const store = new CanonStore(':memory:')
+    try {
+      seedTwoTurn(store)
+      const bridge = new KyberBridge({ store })
+      try {
+        // Turn 0 must not present what was captured after it saw the API.
+        const first = bridge.assembleTurnContent(TWO_TURN_ID, 0, Number.POSITIVE_INFINITY)
+        expect(first?.sharedContext?.parts).toEqual([{ text: 'T0_PROMPT', spanId: 'span-m2-t0' }])
+        expect(first?.sharedContext?.parts.some((p) => p.text === 'MID_SESSION_PROMPT')).toBe(false)
+        expect(first?.sharedContext?.parts.some((p) => p.text === 'LATE_SESSION_PROMPT')).toBe(false)
+
+        // Turn 1 sees the earlier turn once, the between-turns session
+        // prompt in capture position, and its own prompt — but not the late one.
+        const second = bridge.assembleTurnContent(TWO_TURN_ID, 1, Number.POSITIVE_INFINITY)
+        expect(second?.sharedContext?.parts).toEqual([
+          { text: 'T0_PROMPT', spanId: 'span-m2-t0' },
+          { text: 'MID_SESSION_PROMPT', spanId: 'span-m2-sess' },
+          { text: 'T1_PROMPT', spanId: 'span-m2-t1' },
+        ])
+        expect(second?.sharedContext?.parts.some((p) => p.text === 'LATE_SESSION_PROMPT')).toBe(false)
+        // The repeated earliest prompt carries earlier-turn evidence.
+        expect(second?.sharedContext?.seenBefore).toBe(true)
+      } finally {
+        bridge.close()
+      }
+    } finally {
+      store.close()
+    }
+  })
+
+  it('represents one span serving two turn indexes once', () => {
+    const store = new CanonStore(':memory:')
+    try {
+      seedDupSpan(store)
+      const bridge = new KyberBridge({ store })
+      try {
+        const body = bridge.assembleTurnContent(DUP_SPAN_ID, 1, Number.POSITIVE_INFINITY)
+        // The same source record is reached as both the preceding turn's
+        // prompt and the current turn's prompt: exactly once.
+        expect(body?.sharedContext?.parts).toEqual([{ text: 'DUP_PROMPT', spanId: 'span-dup-x' }])
+      } finally {
+        bridge.close()
+      }
+    } finally {
+      store.close()
+    }
+  })
+
+  it('keeps the mixed union on the narrow seam without a full-session record walk', () => {
+    const store = new CanonStore(':memory:')
+    try {
+      seedMixed(store)
+      const recordsForSession = vi.spyOn(store, 'recordsForSession')
+      const get = vi.spyOn(store, 'get')
+      const bridge = new KyberBridge({ store })
+      try {
+        const body = bridge.assembleTurnContent(MIXED_ID, 0, Number.POSITIVE_INFINITY)
+        expect(body?.sharedContext?.parts).toHaveLength(4)
+        expect(recordsForSession).not.toHaveBeenCalled()
+        // Only the target span is fetched by id — the session prompts come
+        // from the narrow timestamped projection.
+        expect(get).toHaveBeenCalledTimes(1)
+        expect(get).toHaveBeenCalledWith('span-mix-turn-0')
       } finally {
         bridge.close()
       }

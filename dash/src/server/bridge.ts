@@ -645,9 +645,10 @@ export type TurnContentSharedPart = {
 
 /**
  * Session-level shared context for a turn: every captured `system_prompt`
- * part in session scope, in capture order — first the turn spans at or
- * before this turn, then (only when those yield none, e.g. a prompt living
- * on a non-`llm.invoke` span) a session-wide fallback scan. `seenBefore`
+ * part in session scope at or before this turn, in capture order — the turn
+ * spans' own prompts (preceding plus current) united with the session-wide
+ * scan that also reaches prompts living off the turn spans (e.g. on a
+ * non-`llm.invoke` span). `seenBefore`
  * holds when any part exactly matches an earlier-turn same-kind part; it is
  * capture evidence only, never a cache claim. Null when no system prompt
  * was captured in scope. The client hides exact duplicates of the turn's
@@ -781,6 +782,12 @@ type ContentSourceRecord = {
   spanId: string
   sessionKey: string | null
   parts: ContentPart[]
+  /**
+   * Captured timestamp of the span, when the seam carries one. Lets the
+   * turn-content reader scope session prompts to those captured at or
+   * before the turn being shown without a second lookup per span.
+   */
+  timestamp?: string
 }
 
 /**
@@ -972,7 +979,47 @@ function toContentSource(record: CanonicalRecord): ContentSourceRecord {
     spanId: record.spanId,
     sessionKey: sessionKeyOf(record),
     parts: partsFromRecord(record),
+    timestamp: normalizeRecordTimestamp(record.timestamp),
   }
+}
+
+/**
+ * A canonical timestamp as the narrow stored string. A `Date` round-trips
+ * through ISO; anything else is unknown rather than invented.
+ */
+function normalizeRecordTimestamp(value: CanonicalRecord['timestamp'] | unknown): string | undefined {
+  if (typeof value === 'string') return value
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString()
+  return undefined
+}
+
+/**
+ * Temporal gate for shared session prompts: only a prompt provably captured
+ * after the shown turn is withheld. Both timestamps parse and the candidate
+ * is strictly later — anything missing or unparseable stays included,
+ * because the reader cannot prove it is future evidence and dropping it
+ * would invent a claim the corpus cannot support. Equal timestamps stay
+ * included for the same reason: millisecond equality cannot order two
+ * captures, so the limitation is documented, not decided.
+ */
+function sessionPromptAtOrBefore(candidate: string | undefined, target: string | undefined): boolean {
+  if (candidate === undefined || target === undefined) return true
+  const candidateMs = Date.parse(candidate)
+  const targetMs = Date.parse(target)
+  if (!Number.isFinite(candidateMs) || !Number.isFinite(targetMs)) return true
+  return candidateMs <= targetMs
+}
+
+/**
+ * Identity of one separately captured system-prompt occurrence: the source
+ * span plus its 0-based position among that span's system prompts in parts
+ * order. Text is deliberately not part of the key — identical text from
+ * distinct spans (or distinct occurrences of one span) stays repeated, and
+ * the exact same source record reached through both the turn and the
+ * session scans collapses to one.
+ */
+function sharedPromptKey(spanId: string, occurrence: number): string {
+  return JSON.stringify([spanId, occurrence])
 }
 
 function applyContentBudget(
@@ -1775,7 +1822,7 @@ export class KyberBridge {
    * Every part carries exact-match `recurrence` against earlier captured
    * turns of this session (same part kind, whole text, hashed), aggregated
    * per block; `sharedContext` carries every captured `system_prompt` part
-   * in scope, in capture order, each with its own recurrence. Recurrence is
+   * in scope at or before this turn, in capture order, each with its own recurrence. Recurrence is
    * capture-only and never a cache claim — cache totals stay on the turn
    * row, unattributed to blocks.
    *
@@ -1863,26 +1910,69 @@ export class KyberBridge {
       p.recurrence = { seenBefore: preceding.digests.get(p.part)?.has(sha256Hex(p.text)) ?? false }
     }
 
-    // Session-level shared context: every captured system_prompt in scope,
-    // in capture order — first the turn spans at or before this turn, then
-    // (only when those yield none, e.g. a prompt living on a non-llm.invoke
-    // span) a session-wide fallback scan that retains system prompts alone.
+    // Session-level shared context: the union of the turn spans at or
+    // before this turn (preceding plus current) and every other captured
+    // system_prompt in session scope at or before this turn, in capture
+    // order. A mixed session — an `llm.invoke` turn prompt coexisting with
+    // one or more non-turn (e.g. `session.start`) prompts — keeps both: the
+    // old only-when-empty fallback silently dropped the non-turn prompt as
+    // soon as any turn prompt existed. Union identity is the source span
+    // plus the occurrence within that span, never the text: identical text
+    // from distinct spans (or distinct occurrences) stays repeated, while
+    // the exact same source record reached through both scans appears once.
+    // Temporal scope comes from captured timestamps — a prompt provably
+    // captured after this turn is withheld; missing, unparseable, or equal
+    // timestamps stay included (see `sessionPromptAtOrBefore`), because the
+    // corpus cannot order those captures and the reader must not invent it.
     // Each part's own recurrence follows the same exact-match rule against
     // strictly earlier turns; the client hides exact duplicates of the
     // turn's own parts and otherwise labels the section Shared session
     // context. `seenBefore` for the section holds when any part has earlier
     // evidence; parts without it show no recurrence badge (never "new" —
     // first capture is unverifiable outside the turn spans).
-    const sharedCandidates: TurnContentSharedPart[] = [
-      ...preceding.prompts.map((p) => ({ text: p.text, spanId: p.spanId })),
-      ...parts
-        .filter((p) => p.part === 'system_prompt' && p.text !== '')
-        .map((p) => ({ text: p.text, spanId: p.spanId ?? targetSpanId })),
-    ]
-    if (sharedCandidates.length === 0) {
-      for (const fallback of this.loadSessionSystemPrompts(sessionId, targetSpanId)) {
-        sharedCandidates.push(fallback)
-      }
+    const targetTimestamp = contentRecords[0]?.timestamp
+    const sharedCandidates: TurnContentSharedPart[] = []
+    const sharedKeys = new Set<string>()
+    const sessionOccurrences = new Map<string, number>()
+    for (const fallback of this.loadSessionSystemPrompts(sessionId, targetSpanId)) {
+      if (!sessionPromptAtOrBefore(fallback.timestamp, targetTimestamp)) continue
+      const spanId = fallback.spanId ?? targetSpanId
+      if (spanId === undefined) continue
+      const occurrence = sessionOccurrences.get(spanId) ?? 0
+      sessionOccurrences.set(spanId, occurrence + 1)
+      const key = sharedPromptKey(spanId, occurrence)
+      if (sharedKeys.has(key)) continue
+      sharedKeys.add(key)
+      sharedCandidates.push({ text: fallback.text, spanId })
+    }
+    const turnOccurrences = new Map<string, number>()
+    const noteTurnPrompt = (text: string, spanId: string): void => {
+      const occurrence = turnOccurrences.get(spanId) ?? 0
+      turnOccurrences.set(spanId, occurrence + 1)
+      const key = sharedPromptKey(spanId, occurrence)
+      // Same source record already contributed by the session scan: once.
+      if (sharedKeys.has(key)) return
+      sharedKeys.add(key)
+      sharedCandidates.push({ text, spanId })
+    }
+    for (const p of preceding.prompts) {
+      noteTurnPrompt(p.text, p.spanId)
+    }
+    // The current turn re-reads its own span, so its occurrences count from
+    // that span's own parts — not from the map above. When the target span
+    // also served an earlier turn index, the same source record then
+    // collides with the preceding entry and is kept once, as documented.
+    const currentOccurrences = new Map<string, number>()
+    for (const p of parts.filter((p) => p.part === 'system_prompt' && p.text !== '')) {
+      const spanId = p.spanId ?? targetSpanId
+      const occurrence = currentOccurrences.get(spanId) ?? 0
+      currentOccurrences.set(spanId, occurrence + 1)
+      const key = sharedPromptKey(spanId, occurrence)
+      // Same source record already contributed by the session scan or an
+      // earlier turn index on this span: once.
+      if (sharedKeys.has(key)) continue
+      sharedKeys.add(key)
+      sharedCandidates.push({ text: p.text, spanId })
     }
     let sharedContext: TurnContentSharedContext | null = null
     if (sharedCandidates.length > 0) {
@@ -2247,17 +2337,18 @@ export class KyberBridge {
   }
 
   /**
-   * Session-wide fallback for the shared system prompts: every captured
-   * `system_prompt` part outside `excludeSpan`, in session order. Runs only
-   * when the turn spans yielded no prompt (e.g. a prompt living on a
-   * non-`llm.invoke` span), and retains system prompts alone — never the
-   * surrounding content.
+   * Session-wide system prompts for the shared-context reader: every
+   * captured `system_prompt` part outside `excludeSpan`, in session order.
+   * Always combined with the turn spans' own prompts by the caller (a mixed
+   * session keeps both); retains system prompts alone — never the
+   * surrounding content. Each entry carries its row's captured timestamp so
+   * the caller can withhold prompts captured after the turn being shown.
    *
    * <remarks>
    * Cost: this deliberately never calls `loadContentRecords(sessionId)` — that
    * walk selects every column (including the large `raw` blob) and inflates
    * every session row's parts just to keep the prompts. The store seam reads
-   * only the two content columns through
+   * only the content columns plus the short timestamp through
    * `CanonStore.systemPromptPartsForSession`, and the store-less seam runs the
    * same projection directly; rows carrying parts still inflate their own blob
    * to filter (deflated bytes admit no SQL index — an indexed pre-filter would
@@ -2269,27 +2360,28 @@ export class KyberBridge {
   private loadSessionSystemPrompts(
     sessionId: string,
     excludeSpan?: string,
-  ): Array<{ text: string; spanId?: string }> {
+  ): Array<{ text: string; spanId?: string; timestamp?: string }> {
     if (!sessionId) return []
     if (this.store) {
       return this.store
         .systemPromptPartsForSession(sessionId, excludeSpan)
-        .map(({ spanId, text }) => ({ text, spanId }))
+        .map(({ spanId, text, timestamp }) => (timestamp === undefined ? { text, spanId } : { text, spanId, timestamp }))
     }
     const db = this.getDb()
     if (!this.hasTable(db, 'records')) return []
     try {
       const rows = db!
         .prepare(
-          'SELECT span_id, content_json, parts_json FROM records WHERE COALESCE(session_id, trace_id) = ? ORDER BY timestamp',
+          'SELECT span_id, timestamp, content_json, parts_json FROM records WHERE COALESCE(session_id, trace_id) = ? ORDER BY timestamp',
         )
-        .all(sessionId) as { span_id: unknown; content_json: unknown; parts_json: unknown }[]
-      const out: Array<{ text: string; spanId?: string }> = []
+        .all(sessionId) as { span_id: unknown; timestamp: unknown; content_json: unknown; parts_json: unknown }[]
+      const out: Array<{ text: string; spanId?: string; timestamp?: string }> = []
       for (const row of rows) {
         const spanId = String(row.span_id)
         if (excludeSpan !== undefined && spanId === excludeSpan) continue
+        const timestamp = row.timestamp === null || row.timestamp === undefined ? undefined : String(row.timestamp)
         for (const text of systemPromptTextsFromContentColumns(row.content_json, row.parts_json)) {
-          out.push({ text, spanId })
+          out.push(timestamp === undefined ? { text, spanId } : { text, spanId, timestamp })
         }
       }
       return out
@@ -2361,6 +2453,7 @@ export class KyberBridge {
             spanId: String(row.span_id),
             sessionKey: key,
             parts: partsFromRow(row),
+            timestamp: normalizeRecordTimestamp(row.timestamp),
           },
         ]
       } catch {
@@ -2378,6 +2471,7 @@ export class KyberBridge {
         spanId: String(row.span_id),
         sessionKey: sessionId,
         parts: partsFromRow(row),
+        timestamp: normalizeRecordTimestamp(row.timestamp),
       }))
     } catch {
       try {
@@ -2388,6 +2482,7 @@ export class KyberBridge {
           spanId: String(row.span_id),
           sessionKey: sessionId,
           parts: partsFromRow(row),
+          timestamp: normalizeRecordTimestamp(row.timestamp),
         }))
       } catch {
         return []
