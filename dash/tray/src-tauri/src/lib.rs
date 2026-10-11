@@ -327,7 +327,9 @@ fn apply_status_item(app: &AppHandle, state: &ipc::ViewState) {
         // Pressure badge preserved; the collector colour rides the tooltip
         // and the popover on Windows, where the small-icon badge has no
         // room for a second glyph. A down collector replaces the badge
-        // with a red dot so the state is still glanceable.
+        // with a red dot so the state is still glanceable. The menu-bar
+        // saber is deliberately not attempted here: a 16px slot cannot
+        // carry a blade, a hilt and the pressure number at once.
         if live {
             let badge = item.title.as_deref().unwrap_or("—");
             let _ = tray.set_icon(Some(tray_badge::render(
@@ -345,12 +347,12 @@ fn apply_status_item(app: &AppHandle, state: &ipc::ViewState) {
 
     #[cfg(not(target_os = "windows"))]
     {
-        // Coloured status glyph, template treatment OFF: the previous
-        // monochrome template asset (`icon_as_template = true`) let macOS
-        // tint the icon and destroyed any colour. A dynamically rendered
-        // green/red dot presented with `as_template = false` keeps its
-        // colour on both light and dark menu bars.
-        let icon = tray_badge::render_status_dot(live, tray_badge::small_icon_size());
+        // The KyberDash lightsaber with a green or red blade, template treatment OFF. The
+        // previous monochrome template asset (`icon_as_template = true`) let macOS tint the
+        // icon to the menu bar and destroyed any colour; a dynamically drawn saber
+        // presented with `as_template = false` keeps its blade colour on both light and
+        // dark menu bars.
+        let icon = tray_badge::render_lightsaber(live, tray_badge::small_icon_size());
         let _ = tray.set_icon_with_as_template(Some(icon), false);
     }
 }
