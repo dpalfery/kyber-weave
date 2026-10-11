@@ -123,9 +123,17 @@ function parseDocument(content: string): { value: unknown; errors: ParseError[] 
   return { value, errors }
 }
 
-function parseRefusal(errors: readonly ParseError[]): string {
+/**
+ * Refusal text for a body-relative parse error. `bomLength` re-bases the
+ * offset onto the original content: parsing happens after `splitBom` strips
+ * the UTF-8 BOM, so a raw `first.offset` would name a position one character
+ * left of the real fault in a BOM'd file — exactly the Windows-authored files
+ * this path exists to handle. The caller passes the stripped BOM's length so
+ * the offset an operator sees matches their editor, which counts the BOM.
+ */
+function parseRefusal(errors: readonly ParseError[], bomLength = 0): string {
   const first = errors[0]
-  const where = first === undefined ? '' : ` at offset ${first.offset}`
+  const where = first === undefined ? '' : ` at offset ${first.offset + bomLength}`
   return `refusing to rewrite a JSON document that did not parse${where}`
 }
 
@@ -137,10 +145,10 @@ function parseRefusal(errors: readonly ParseError[]): string {
  * path mistake "malformed" for "nothing to remove".
  */
 export function jsonParseRefusal(content: string): string | undefined {
-  const { body } = splitBom(content)
+  const { bom, body } = splitBom(content)
   if (body.trim() === '') return undefined
   const parsed = parseDocument(body)
-  return parsed.errors.length > 0 ? parseRefusal(parsed.errors) : undefined
+  return parsed.errors.length > 0 ? parseRefusal(parsed.errors, bom.length) : undefined
 }
 
 /** Read one key out of already-parsed JSON. */
@@ -188,7 +196,7 @@ export function applyJsonEdits(
   const base = body.trim() === '' ? '{}\n' : body
   const parsed = parseDocument(base)
   if (parsed.errors.length > 0) {
-    return { content, prior: {}, changed: false, refused: parseRefusal(parsed.errors) }
+    return { content, prior: {}, changed: false, refused: parseRefusal(parsed.errors, bom.length) }
   }
   const prior: Record<string, JsonPrior> = {}
   for (const key of Object.keys(desired)) prior[key] = getJsonValue(parsed.value, key)
@@ -199,7 +207,7 @@ export function applyJsonEdits(
     // its literal addressing from the prior read above.
     const step = parseDocument(next)
     if (step.errors.length > 0) {
-      return { content, prior, changed: false, refused: parseRefusal(step.errors) }
+      return { content, prior, changed: false, refused: parseRefusal(step.errors, bom.length) }
     }
     const path = resolveKeyPath(step.value, key)
     const edits = modify(next, path, value, {
@@ -235,7 +243,7 @@ export function revertJsonEdits(
   const { bom, body } = splitBom(content)
   const parsed = parseDocument(body)
   if (parsed.errors.length > 0) {
-    return { content, drift: [], changed: false, refused: parseRefusal(parsed.errors) }
+    return { content, drift: [], changed: false, refused: parseRefusal(parsed.errors, bom.length) }
   }
   const drift: JsonDrift[] = []
   for (const [key, record] of Object.entries(records)) {
@@ -261,7 +269,7 @@ export function revertJsonEdits(
     const value = record.prior.present ? record.prior.value : undefined
     const step = parseDocument(next)
     if (step.errors.length > 0) {
-      return { content, drift, changed: false, refused: parseRefusal(step.errors) }
+      return { content, drift, changed: false, refused: parseRefusal(step.errors, bom.length) }
     }
     const path = resolveKeyPath(step.value, key)
     const edits = modify(next, path, value, {
