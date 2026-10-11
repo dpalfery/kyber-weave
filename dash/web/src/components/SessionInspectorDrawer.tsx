@@ -2098,6 +2098,64 @@ export function orphanTurnParts(data: KyberTurnContentResult): KyberTurnContentP
 }
 
 /**
+ * Shared session context entries to display for a turn, preserving every
+ * captured occurrence in server order.
+ *
+ * The server builds `sharedContext` as prior-turn `system_prompt` parts
+ * first, then the selected turn's own `system_prompt` parts (same span id
+ * as `data.spanId`). The turn's own occurrences already render in their
+ * blocks, so showing them again under shared context would display and copy
+ * the exact same captured occurrence twice. Every other entry stays —
+ * identical text from distinct earlier spans is a distinct occurrence the
+ * API actually contains, not a duplicate to collapse.
+ *
+ * Overlap is identified by source occurrence (span id) with multiplicity,
+ * never by text globally: a shared entry is skipped only when its `spanId`
+ * equals the selected turn's `spanId` and its exact text still has an
+ * unmatched own `system_prompt` occurrence. Counts pair off per occurrence,
+ * so repeated identical parts do not collapse. When span ids are absent on
+ * either side the source cannot be reliably distinguished with current
+ * data, so nothing is filtered — preserving occurrences rather than
+ * guessing. Empty-text entries carry no bytes and stay skipped.
+ */
+export function resolveSharedDisplay(
+  data: KyberTurnContentResult,
+): { parts: NonNullable<KyberTurnContentResult['sharedContext']>['parts']; seenBefore: boolean } | null {
+  const shared = data.sharedContext
+  if (!shared) return null
+  // Own occurrences are the turn's `system_prompt` parts only: shared
+  // context carries that kind alone, so matching any other kind's text
+  // would suppress a distinct occurrence. `data.parts` is authoritative
+  // (blocks are built from the same part objects server-side); when it is
+  // empty, fall back to the blocks' member parts so an unexpected shape
+  // still pairs off instead of double-displaying.
+  const ownSources: KyberTurnContentPart[] =
+    data.parts.length > 0 ? data.parts : data.blocks.flatMap((b) => b.parts)
+  const ownCounts = new Map<string, number>()
+  for (const p of ownSources) {
+    if (p.part === 'system_prompt' && p.text !== '') {
+      ownCounts.set(p.text, (ownCounts.get(p.text) ?? 0) + 1)
+    }
+  }
+  const parts: NonNullable<KyberTurnContentResult['sharedContext']>['parts'] = []
+  for (const sp of shared.parts) {
+    if (sp.text === '') continue
+    const isOwnSpan =
+      sp.spanId !== undefined && data.spanId !== undefined && sp.spanId === data.spanId
+    if (isOwnSpan) {
+      const remaining = ownCounts.get(sp.text) ?? 0
+      if (remaining > 0) {
+        ownCounts.set(sp.text, remaining - 1)
+        continue
+      }
+    }
+    parts.push(sp)
+  }
+  if (parts.length === 0) return null
+  return { parts, seenBefore: shared.seenBefore }
+}
+
+/**
  * Exact text for the whole-turn copy action: the shared session context
  * (when shown), every block rebuilt from its member parts, then every
  * additional part under its own header. Sections join with blank lines;
@@ -2363,9 +2421,10 @@ export function TurnContentPartView({
  * - Every captured `system_prompt` part in `sharedContext.parts`, in
  *   capture order, renders as its own card under `Shared session context`,
  *   explicitly labeled as session-level content rather than captured for
- *   this turn; an exact duplicate already present among the turn's own
- *   parts is not shown twice. Each card carries its own exact-match
- *   recurrence badge, independent of the session-level label.
+ *   this turn; only the selected turn's own source occurrence (same span
+ *   id, paired per occurrence) is not shown twice, while identical text
+ *   from distinct earlier spans stays visible. Each card carries its own
+ *   exact-match recurrence badge, independent of the session-level label.
  * - Per-block `New this turn` / `Also present in prior captured context`
  *   badges aggregate member-part recurrence (either, neither, or both).
  *   Recurrence is capture-only: a separate per-block cache note states that
@@ -2400,19 +2459,13 @@ export function TurnFullContentPanel({
   }, [data])
 
   // Shared session context arrives embedded in the single turn-content
-  // response (one bounded request, no N-query fan-out). Every non-empty
-  // part that is not an exact duplicate of the turn's own parts renders
-  // once under its session-level label.
+  // response (one bounded request, no N-query fan-out). Occurrence
+  // preserving: every entry renders except the selected turn's own source
+  // occurrence(s), paired by span id with multiplicity (see
+  // `resolveSharedDisplay`).
   const sharedDisplay = useMemo(() => {
-    const shared = data?.sharedContext
-    if (!shared || !data) return null
-    const turnTexts = new Set<string>([
-      ...data.blocks.map((b) => b.text),
-      ...data.parts.map((p) => p.text),
-    ])
-    const parts = shared.parts.filter((p) => p.text !== '' && !turnTexts.has(p.text))
-    if (parts.length === 0) return null
-    return { parts, seenBefore: shared.seenBefore }
+    if (!data) return null
+    return resolveSharedDisplay(data)
   }, [data])
 
   // Copy Turn carries every returned byte exactly once (shared context

@@ -30,6 +30,7 @@ import {
   isTurnFullContentRequest,
   buildWholeTurnCopyText,
   orphanTurnParts,
+  resolveSharedDisplay,
 } from './SessionInspectorDrawer.js'
 
 import { renderToStaticMarkup } from 'react-dom/server'
@@ -1569,9 +1570,14 @@ describe('SessionInspectorDrawer: whole-turn full context', () => {
     // The turn's own prompt still renders in its own block.
     expect(text).toContain(OWN_SYSTEM_PROMPT)
 
-    // An exact duplicate already among the turn's parts is not shown twice.
+    // The selected turn's own source occurrence duplicated in the shared
+    // response (same span id) is not shown twice.
     const dupQc = createTestQueryClient()
-    seedTurn(dupQc, buildTurnFixture(), { texts: [OWN_SYSTEM_PROMPT], seenBefore: true })
+    const dupBody = buildTurnFixture()
+    dupQc.setQueryData(TURN_KEY, {
+      ...dupBody,
+      sharedContext: { parts: [{ text: OWN_SYSTEM_PROMPT, spanId: 'span-turn-1' }], seenBefore: true },
+    } satisfies KyberTurnContentResult)
     const dupHtml = renderHtml(
       <QueryClientProvider client={dupQc}>
         <TurnFullContentPanel
@@ -1582,6 +1588,116 @@ describe('SessionInspectorDrawer: whole-turn full context', () => {
     )
     expect(dupHtml).not.toContain('data-testid="shared-session-context"')
     expect(unescapeHtml(dupHtml)).toContain(OWN_SYSTEM_PROMPT)
+
+    // Same text from a distinct earlier span is a separate occurrence and
+    // stays visible even when it exactly matches the turn's own text.
+    const priorQc = createTestQueryClient()
+    const priorBody = buildTurnFixture()
+    priorQc.setQueryData(TURN_KEY, {
+      ...priorBody,
+      sharedContext: { parts: [{ text: OWN_SYSTEM_PROMPT, spanId: 'span-turn-0-0' }], seenBefore: true },
+    } satisfies KyberTurnContentResult)
+    const priorHtml = renderHtml(
+      <QueryClientProvider client={priorQc}>
+        <TurnFullContentPanel
+          request={{ sessionId: TURN_SESSION_ID, turnIndex: TURN_INDEX, full: true }}
+          turn={{ fresh: 1, cache_read: 2, cache_creation: 3 }}
+        />
+      </QueryClientProvider>
+    )
+    expect(priorHtml).toContain('data-testid="shared-session-context"')
+    expect(priorHtml).toContain('data-testid="shared-session-context-part-0"')
+    expect(unescapeHtml(priorHtml)).toContain(OWN_SYSTEM_PROMPT)
+  })
+
+  it('preserves two identical shared prompts from distinct earlier spans in capture order with both in Copy Turn', () => {
+    const DUP = 'REPEATED_SHARED_PROMPT_BODY_aa11\nSame bytes twice.\nREPEATED_TAIL_bb22'
+    const body = buildTurnFixture()
+    const withDup: KyberTurnContentResult = {
+      ...body,
+      sharedContext: {
+        parts: [
+          { text: DUP, spanId: 'span-turn-0-A' },
+          { text: DUP, spanId: 'span-turn-0-B' },
+        ],
+        seenBefore: true,
+      },
+    }
+    // Pure helper preserves both occurrences in server order.
+    const resolved = resolveSharedDisplay(withDup)
+    expect(resolved).not.toBeNull()
+    expect(resolved!.parts).toHaveLength(2)
+    expect(resolved!.parts.map((p) => p.spanId)).toEqual(['span-turn-0-A', 'span-turn-0-B'])
+    expect(resolved!.parts[0].text).toBe(DUP)
+    expect(resolved!.parts[1].text).toBe(DUP)
+    // Copy Turn includes both occurrences, not one collapsed entry.
+    const copy = buildWholeTurnCopyText(withDup, resolved!.parts.map((p) => p.text))
+    expect(copy).toContain('=== SHARED SESSION CONTEXT ===')
+    expect(copy.split(DUP).length - 1).toBe(2)
+    // Panel renders two cards in capture order.
+    const qc = createTestQueryClient()
+    qc.setQueryData(TURN_KEY, withDup)
+    const html = renderPanel(qc)
+    expect(html).toContain('data-testid="shared-session-context-part-0"')
+    expect(html).toContain('data-testid="shared-session-context-part-1"')
+    expect(html.indexOf('shared-session-context-part-0')).toBeLessThan(html.indexOf('shared-session-context-part-1'))
+    expect(unescapeHtml(html).split(DUP).length - 1).toBeGreaterThanOrEqual(2)
+  })
+
+  it('keeps two identical prompts within the same turn as two visible and copyable occurrences', () => {
+    const DUP = 'REPEATED_OWN_PROMPT_BODY_cc33\nSame turn twice.\nREPEATED_TAIL_dd44'
+    const body = buildTurnFixture()
+    const sysA = { id: 'part-sys-A', spanId: 'span-turn-1', part: 'system_prompt', label: 'System Prompt', text: DUP, tokens: 10 }
+    const sysB = { id: 'part-sys-B', spanId: 'span-turn-1', part: 'system_prompt', label: 'System Prompt', text: DUP, tokens: 10 }
+    const withRepeat = {
+      ...body,
+      blocks: [
+        { key: 'system_prompt', label: 'System prompt', tokens: 20, parts: [sysA, sysB], text: `${DUP}\n\n${DUP}` },
+        ...body.blocks.slice(1),
+      ],
+      parts: [sysA, sysB, ...body.parts.slice(1)],
+      sharedContext: null,
+    } as KyberTurnContentResult
+    const copy = buildWholeTurnCopyText(withRepeat, [])
+    expect(copy.split(DUP).length - 1).toBe(2)
+    const qc = createTestQueryClient()
+    qc.setQueryData(TURN_KEY, withRepeat)
+    const html = renderPanel(qc)
+    const text = unescapeHtml(html)
+    expect(html).toContain('data-testid="turn-block-system_prompt"')
+    expect(text.split(DUP).length - 1).toBeGreaterThanOrEqual(2)
+  })
+
+  it('deduplicates only the selected-turn source occurrence while keeping prior-turn identical text', () => {
+    const X = OWN_SYSTEM_PROMPT
+    const body = buildTurnFixture()
+    const mixed: KyberTurnContentResult = {
+      ...body,
+      sharedContext: {
+        parts: [
+          { text: X, spanId: 'span-turn-0-A' },
+          { text: X, spanId: 'span-turn-1' },
+          { text: X, spanId: 'span-turn-0-B' },
+        ],
+        seenBefore: true,
+      },
+    }
+    const resolved = resolveSharedDisplay(mixed)
+    expect(resolved).not.toBeNull()
+    // Only the same-span occurrence pairs off; both earlier spans remain in order.
+    expect(resolved!.parts.map((p) => p.spanId)).toEqual(['span-turn-0-A', 'span-turn-0-B'])
+    const copy = buildWholeTurnCopyText(mixed, resolved!.parts.map((p) => p.text))
+    // Shared section carries the two prior occurrences; the turn's own block
+    // carries its occurrence once more — the same-span duplicate adds no extra.
+    const sharedSection = copy.slice(copy.indexOf('=== SHARED SESSION CONTEXT ==='), copy.indexOf(`=== ${mixed.blocks[0].label.toUpperCase()} ===`))
+    expect(sharedSection.split(X).length - 1).toBe(2)
+    expect(copy.split(X).length - 1).toBe(3)
+    const qc = createTestQueryClient()
+    qc.setQueryData(TURN_KEY, mixed)
+    const html = renderPanel(qc)
+    expect(html).toContain('data-testid="shared-session-context-part-0"')
+    expect(html).toContain('data-testid="shared-session-context-part-1"')
+    expect(html).not.toContain('data-testid="shared-session-context-part-2"')
   })
 
   it('shows measured turn totals separately with no per-block cache claims', () => {
