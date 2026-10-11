@@ -151,7 +151,8 @@ public sealed class SquadLifecycleService
                 Targets: request.Targets,
                 Scope: request.Scope,
                 UserScopeDirectory: userScopeDir,
-                TranslationMode: request.Translation);
+                TranslationMode: request.Translation,
+                GlobalRoots: _globalRoots);
 
             SquadRenderResult renderResult = await _renderer.RenderAsync(renderRequest, cancellationToken).ConfigureAwait(false);
             if (!renderResult.Success || renderResult.Errors.Count > 0)
@@ -300,7 +301,8 @@ public sealed class SquadLifecycleService
                 Targets: targets,
                 Scope: request.Scope,
                 UserScopeDirectory: userScopeDir,
-                TranslationMode: request.Translation);
+                TranslationMode: request.Translation,
+                GlobalRoots: _globalRoots);
 
             SquadRenderResult renderResult = await _renderer.RenderAsync(renderRequest, cancellationToken).ConfigureAwait(false);
             if (!renderResult.Success || renderResult.Errors.Count > 0)

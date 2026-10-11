@@ -58,13 +58,19 @@ function textOf(value: unknown): string | null {
   return null
 }
 
+/** One list item as text: strings verbatim, structured values as JSON (never `[object Object]`). */
+function displayItem(value: unknown): string {
+  if (typeof value === 'string') return value
+  return JSON.stringify(value) ?? String(value)
+}
+
 function stringList(value: unknown): string[] {
-  if (Array.isArray(value)) return value.map(String)
+  if (Array.isArray(value)) return value.map(displayItem)
   if (typeof value === 'string' && value.trim() !== '') {
     try {
       const parsed: unknown = JSON.parse(value)
-      if (Array.isArray(parsed)) return parsed.map(String)
-      return [String(parsed)]
+      if (Array.isArray(parsed)) return parsed.map(displayItem)
+      return [displayItem(parsed)]
     } catch {
       return value.includes(',') ? value.split(',').map((part) => part.trim()).filter((part) => part !== '') : [value.trim()]
     }

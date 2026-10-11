@@ -1,0 +1,66 @@
+{
+  "action": "disable",
+  "harness": "opencode",
+  "dryRun": false,
+  "outcome": "wrote",
+  "events": [
+    {
+      "kind": "restored",
+      "harness": "opencode",
+      "fileId": "opencode-config",
+      "path": "/Users/example/.config/opencode/opencode.jsonc",
+      "changes": [
+        {
+          "key": "experimental.openTelemetry",
+          "before": true
+        }
+      ]
+    }
+  ],
+  "harnessState": {
+    "id": "opencode",
+    "displayName": "OpenCode",
+    "mode": "managed",
+    "installed": "detected",
+    "installEvidence": [
+      "config found at /Users/example/.config/opencode/opencode.jsonc"
+    ],
+    "state": "off",
+    "receipt": "absent",
+    "files": [
+      {
+        "id": "opencode-config",
+        "path": "/Users/example/.config/opencode/opencode.jsonc",
+        "applicable": true,
+        "exists": true,
+        "expectedKeys": [
+          "experimental.openTelemetry"
+        ],
+        "presentKeys": [],
+        "missingKeys": [
+          "experimental.openTelemetry"
+        ],
+        "drift": null
+      }
+    ],
+    "warnings": [],
+    "manualSteps": [
+      {
+        "id": "opencode-otel-endpoint",
+        "text": "OpenCode reads the OTLP endpoint from its process environment (upstream #13438), not from opencode.jsonc; set OTEL_EXPORTER_OTLP_ENDPOINT in the environment OpenCode is launched from",
+        "env": {
+          "name": "OTEL_EXPORTER_OTLP_ENDPOINT",
+          "value": "http://127.0.0.1:4318"
+        }
+      }
+    ],
+    "statusLines": []
+  },
+  "receiver": {
+    "hosted": true,
+    "willEnable": false,
+    "enabled": false,
+    "enableFailed": false,
+    "lastManagedHarnessDisabled": true
+  }
+}

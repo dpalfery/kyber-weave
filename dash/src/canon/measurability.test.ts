@@ -28,6 +28,7 @@ import {
   isFileSource,
   measurabilityFor,
   normalizeHarnessName,
+  parseHarnessFilter,
   prefixAvailability,
   schemaRankingAvailability,
   sourceDisplayName,
@@ -516,3 +517,16 @@ describe('sourceDisplayName — honest rendering of stored source names', () => 
   })
 })
 
+
+describe('parseHarnessFilter — only declared spellings resolve', () => {
+  it('rejects an undeclared kilo-prefixed spelling instead of folding it into the shared runtime', () => {
+    expect(parseHarnessFilter('kilo-bogus')).toEqual({ kind: 'invalid', raw: 'kilo-bogus' })
+    expect(parseHarnessFilter('kilofoo')).toEqual({ kind: 'invalid', raw: 'kilofoo' })
+  })
+
+  it('still accepts every declared kilo spelling, case-insensitively', () => {
+    for (const spelling of ['kilo', 'kilo-code', 'Kilo-Shared-Runtime', 'kilo-vscode-legacy']) {
+      expect(parseHarnessFilter(spelling).kind).toBe('harness')
+    }
+  })
+})

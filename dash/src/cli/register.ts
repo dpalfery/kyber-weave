@@ -238,7 +238,7 @@ export function registerKyberCommands(program: Command, dependencies: KyberComma
   // six D6 harnesses' OTLP exporters at the KyberDash receiver: `status`
   // reports per-harness state and receiver liveness, `enable` writes the
   // exporter keys and records the receipt, `disable` restores per key and
-  // refuses on drift. macOS and Linux only; Windows reports unsupported.
+  // refuses on drift. macOS, Linux and Windows are all supported (ADR 0031).
   const capture = kyber
     .command('capture')
     .description('Point harness OTLP exporters at the KyberDash receiver')

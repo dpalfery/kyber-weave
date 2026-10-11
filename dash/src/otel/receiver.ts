@@ -1343,7 +1343,11 @@ export class OtlpReceiver {
       }
       // Identity keys (`service`, `version`, `paused`) keep their names so the tray's
       // hosting probe and older main processes keep reading this probe.
-      respondJson(res, 200, this.getHealth() as unknown as Record<string, unknown>)
+      respondJson(
+        res,
+        200,
+        healthBodyForPeer(this.getHealth(), req.socket?.remoteAddress) as unknown as Record<string, unknown>,
+      )
       return
     }
     if (path === OTLP_ADMIN_PAUSE_PATH || path === OTLP_ADMIN_RESUME_PATH) {
@@ -1525,10 +1529,26 @@ function respondJson(res: ServerResponse, status: number, body: Record<string, u
  * client or OTLP exporters — must itself be loopback. A `no-cors` fetch from
  * any website the user visits therefore cannot pause ingestion.
  */
+function isLoopbackPeer(peer: string | undefined): boolean {
+  return peer === '127.0.0.1' || peer === '::1' || peer === '::ffff:127.0.0.1' || peer === 'localhost'
+}
+
+/**
+ * The `/healthz` body for one caller. `/healthz` is unauthenticated and the bind interface
+ * is configurable, so a non-loopback peer gets the failure code and counts but never the
+ * store's error text (paths, SQL, internals); loopback callers — the dashboard's own
+ * probe — keep the full message.
+ */
+export function healthBodyForPeer(
+  health: ReceiverHealthSnapshot,
+  peer: string | undefined,
+): ReceiverHealthSnapshot {
+  return isLoopbackPeer(peer) ? health : { ...health, lastError: null }
+}
+
 function isLoopbackAdminRequest(req: IncomingMessage): boolean {
   const peer = req.socket?.remoteAddress ?? ''
-  const loopbackPeer =
-    peer === '127.0.0.1' || peer === '::1' || peer === '::ffff:127.0.0.1' || peer === 'localhost'
+  const loopbackPeer = isLoopbackPeer(peer)
   if (!loopbackPeer) return false
   const origin = req.headers.origin
   if (origin === undefined) return true

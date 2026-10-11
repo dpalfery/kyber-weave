@@ -26,6 +26,7 @@ import { resolveHarnessScope } from '../refresh/registry.js'
 import type { SourceCheckpoint } from '../canon/source-state.js'
 import type { CleanRequest } from '../clean/clean.js'
 import { MAX_CLEAN_REINGEST_WEEKS } from '../clean/clean.js'
+import { handleCaptureRequest, type CaptureRouteSettings } from './capture-routes.js'
 
 /** The build this server is, carried on `/meta` so a client can check it (R6.7). */
 const KYBERDASH_VERSION = String(
@@ -109,6 +110,32 @@ function parseSpanAttributesPath(pathname: string): string | null {
   const middle = pathname.slice(prefix.length, pathname.length - suffix.length)
   if (!middle || middle.includes('/')) return null
   return decodeURIComponent(middle).trim()
+}
+
+/**
+ * Decode and trim one percent-encoded path segment, or `null` when it is malformed
+ * (a stray `%` makes `decodeURIComponent` throw a `URIError`, which would otherwise
+ * surface as a 500 instead of the client error it is).
+ */
+function decodePathId(raw: string): string | null {
+  try {
+    return decodeURIComponent(raw).trim()
+  } catch (err) {
+    if (err instanceof URIError) return null
+    throw err
+  }
+}
+
+/**
+ * A `?budget=` value usable as a character budget: a finite, non-negative integer.
+ * Anything else (blank, NaN, negative, infinite) is ignored, so the default budget
+ * applies. A negative budget must never reach `slice(0, -n)`, which would return
+ * nearly the whole text while the flags claim a budget was honored.
+ */
+function parseContentBudget(param: string | null): number | undefined {
+  if (!param) return undefined
+  const budget = parseInt(param, 10)
+  return Number.isFinite(budget) && budget >= 0 ? budget : undefined
 }
 
 /**
@@ -461,6 +488,11 @@ export type KyberRouteDeps = {
    */
   readonly jobHost?: Pick<JobHost, 'getStatus' | 'runNow' | 'runJob'>
   /**
+   * Where the capture route reads and writes harness configs (T5). Absent means the real
+   * home directory; the web server and the tests inject a temporary one.
+   */
+  readonly capture?: CaptureRouteSettings
+  /**
    * The receiver host the coverage route reads fresh receiver state from. Absent in
    * tests that drive the routes without a host pair — coverage then reports the
    * receiver as unknown (never fabricated) with the enabled flag read off the store.
@@ -805,8 +837,7 @@ export function handleKyberRequest(
       sendKyberJson(res, 400, { error: 'Missing session id' })
       return true
     }
-    const budgetParam = url.searchParams.get('budget')
-    const budget = budgetParam ? parseInt(budgetParam, 10) : undefined
+    const budget = parseContentBudget(url.searchParams.get('budget'))
     // Explicit lossless path first: `?full=true` maps to an unbounded
     // budget so over-budget source text returns intact with no truncation
     // flags. A plain `budget` number still truncates past its value.
@@ -814,7 +845,7 @@ export function handleKyberRequest(
     let effectiveBudget: number | undefined
     if (full) {
       effectiveBudget = Number.POSITIVE_INFINITY
-    } else if (budget !== undefined && !isNaN(budget)) {
+    } else if (budget !== undefined) {
       effectiveBudget = budget
     }
     const body = bridge.assembleTurnContent(sessionId, turnIndex, effectiveBudget)
@@ -842,13 +873,12 @@ export function handleKyberRequest(
     if (turnParam !== null && turnParam.trim() !== '') {
       const turnIndex = parseInt(turnParam, 10)
       if (!isNaN(turnIndex)) {
-        const budgetParam = url.searchParams.get('budget')
-        const budget = budgetParam ? parseInt(budgetParam, 10) : undefined
+        const budget = parseContentBudget(url.searchParams.get('budget'))
         const full = isFullContentRequest(url.searchParams)
         let effectiveBudget: number | undefined
         if (full) {
           effectiveBudget = Number.POSITIVE_INFINITY
-        } else if (budget !== undefined && !isNaN(budget)) {
+        } else if (budget !== undefined) {
           effectiveBudget = budget
         }
         const turnBody = bridge.assembleTurnContent(contentSessionId, turnIndex, effectiveBudget)
@@ -984,7 +1014,11 @@ export function handleKyberRequest(
       sendKyberJson(res, 405, { error: 'Method Not Allowed' })
       return true
     }
-    const spanId = decodeURIComponent(url.pathname.slice('/api/kyber/quarantine/'.length)).trim()
+    const spanId = decodePathId(url.pathname.slice('/api/kyber/quarantine/'.length))
+    if (spanId === null) {
+      sendKyberJson(res, 400, { error: 'Malformed quarantine span id' })
+      return true
+    }
     if (!spanId) {
       sendKyberJson(res, 400, { error: 'Missing quarantine span id' })
       return true
@@ -1032,7 +1066,11 @@ export function handleKyberRequest(
       sendKyberJson(res, 405, { error: 'Method Not Allowed' })
       return true
     }
-    const rawId = decodeURIComponent(url.pathname.slice('/api/kyber/problem/'.length)).trim()
+    const rawId = decodePathId(url.pathname.slice('/api/kyber/problem/'.length))
+    if (rawId === null) {
+      sendKyberJson(res, 400, { error: 'Malformed problem id' })
+      return true
+    }
     if (!rawId) {
       sendKyberJson(res, 400, { error: 'Missing problem id' })
       return true
@@ -1594,6 +1632,16 @@ export function handleKyberRequest(
     }
     sendKyberJson(res, 200, bridge.getModelCatalog())
     return true
+  }
+
+  // Harness OTel capture (ADR 0031): the Settings drawer's status and enable/disable. The
+  // module owns the route; this hands it the body helpers every mutating route shares.
+  if (url.pathname === '/api/kyber/capture') {
+    return handleCaptureRequest(req, res, url, deps, {
+      sendJson: sendKyberJson,
+      requireJsonContentType,
+      serveJsonObjectBody,
+    })
   }
 
   // Shared settings (rule R1): the tray and the web UI read and write the same four

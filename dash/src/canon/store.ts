@@ -65,8 +65,10 @@ export interface StoreWipeReport {
  * provenance, checkpoints, and the harness-scoped derived caches (`session`,
  * `run`, `execution`, `harness_rollup`, `problems`, and predictions via their
  * wiped run ids). `finding` has no harness column: the post-wipe projection
- * clears it authoritatively, so this function leaves it. Quarantine rows
- * likewise have no harness column and stay. Call inside the caller's
+ * clears it authoritatively, so this function leaves it. `quarantine`,
+ * `pending_logs`, and `quarantined_logs` carry the harness tag since schema
+ * v19 (plan 2026-10-10, D-Q3) and go with the wipe; `enriched_logs` has no
+ * attribution and stays for the complete wipe. Call inside the caller's
  * transaction, like `commitSourceUnit`'s inverse: a failure rolls back
  * everything, so records and checkpoints can never disagree about coverage.
  *
@@ -112,6 +114,13 @@ function wipeHarnessRows(
     const runPlaceholders = wipedRunIds.map(() => '?').join(', ')
     db.prepare(`DELETE FROM prediction WHERE run_id IN (${runPlaceholders})`).run(...wipedRunIds)
   }
+  // The audit rows follow the harness tag T14 stamped on them — but that
+  // scoping is only as good as the attribution on the row: NULL reads as
+  // "unknown", never "matches", so unclaimed rows survive here and only the
+  // complete `wipeAll` clears them.
+  db.prepare(`DELETE FROM quarantine WHERE harness IN (${placeholders})`).run(...rawNames)
+  db.prepare(`DELETE FROM pending_logs WHERE harness IN (${placeholders})`).run(...rawNames)
+  db.prepare(`DELETE FROM quarantined_logs WHERE harness IN (${placeholders})`).run(...rawNames)
   return report
 }
 
@@ -152,7 +161,7 @@ import {
  * corpus is the expensive thing here and re-collecting it is not always
  * possible.
  */
-export const SCHEMA_VERSION = 18
+export const SCHEMA_VERSION = 19
 
 /**
  * Version of the diagnostic signal and finding detector suite (Decision D17).
@@ -289,16 +298,21 @@ CREATE TABLE IF NOT EXISTS quarantine (
   source TEXT,
   name TEXT,
   timestamp TEXT,
-  raw_payload TEXT
+  -- The sender's decoded packet, kept as the evidence the detail route
+  -- serves, and the harness attribution named for the row (B7/B10).
+  raw_payload TEXT,
+  harness TEXT
 );
 CREATE TABLE IF NOT EXISTS pending_logs (
   log_id TEXT PRIMARY KEY,
-  payload TEXT NOT NULL
+  payload TEXT NOT NULL,
+  harness TEXT
 );
 CREATE TABLE IF NOT EXISTS quarantined_logs (
   log_id TEXT PRIMARY KEY,
   payload TEXT NOT NULL,
-  reason TEXT NOT NULL
+  reason TEXT NOT NULL,
+  harness TEXT
 );
 CREATE TABLE IF NOT EXISTS enriched_logs (
   log_id TEXT PRIMARY KEY
@@ -386,9 +400,9 @@ CREATE INDEX IF NOT EXISTS prediction_by_run ON prediction (run_id);
 CREATE INDEX IF NOT EXISTS prediction_by_created_at ON prediction (created_at);
 -- Vendor-documented model windows (D15). A new table, not a new column on
 -- an existing one, so CREATE IF NOT EXISTS on every open covers a store
--- already stamped at SCHEMA_VERSION. The version stays at 17: the projection
--- contract still requires that stamp, and an IF NOT EXISTS table does not
--- need a migration step to appear.
+-- already stamped at SCHEMA_VERSION. Landing it cost no version bump — the
+-- projection contract still required the stamp of the day — and an
+-- IF NOT EXISTS table needs no migration step to appear.
 CREATE TABLE IF NOT EXISTS model_context_window_catalog (
   lookup_id TEXT PRIMARY KEY,
   canonical_model_id TEXT NOT NULL,
@@ -724,17 +738,50 @@ export const MIGRATIONS: Record<number, (db: Database) => void> = {
       }
     }
   },
-  // v17 -> v18: incoming-evidence columns. quarantine gains raw_payload (the exact
-  // decoded OTLP span JSON for a newly quarantined span); problems gains stack (the
-  // exception stack when a problem came from a throw, null otherwise). Both nullable so
-  // existing rows keep reading as "no stored evidence" rather than being backfilled with
-  // a guess — backfilling would invent a message or stack those rows never carried.
+  // v17 -> v18: incoming-evidence columns. quarantine gains raw_payload —
+  // the sender's decoded packet, the evidence the detail route serves (plan
+  // 2026-10-10, B7/B10): a quarantined span is held out of the corpus, and
+  // for a Claude interaction span this packet is the only surviving copy of
+  // the prompt. problems gains stack (the exception stack when a problem came
+  // from a throw, null otherwise). Both nullable so existing rows keep
+  // reading as "no stored evidence" rather than being backfilled with a
+  // guess — backfilling would invent a message or stack those rows never
+  // carried. Every ADD COLUMN is presence-guarded for F9: a live canon.db
+  // can be stamped 18 by an off-main build that already added `raw_payload`,
+  // and an unguarded ALTER would die on "duplicate column" against exactly
+  // the store whose packets must survive.
   17: (db) => {
     const hasQuarantine = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='quarantine'").get()
     if (hasQuarantine) {
       const qCols = (db.prepare('PRAGMA table_info(quarantine)').all() as { name: string }[]).map((c) => c.name)
       if (!qCols.includes('raw_payload')) {
         db.exec('ALTER TABLE quarantine ADD COLUMN raw_payload TEXT')
+      }
+    }
+    const hasProblems = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='problems'").get()
+    if (hasProblems) {
+      const pCols = (db.prepare('PRAGMA table_info(problems)').all() as { name: string }[]).map((c) => c.name)
+      if (!pCols.includes('stack')) {
+        db.exec('ALTER TABLE problems ADD COLUMN stack TEXT')
+      }
+    }
+  },
+  // v18 -> v19: the harness a quarantined span or held log row is scoped to,
+  // so a per-harness wipe can key its audit rows rather than scanning
+  // payloads. `quarantine` gains the column beside `raw_payload`; the two
+  // log tables gain it for the same scoping. "Stamped 18" became ambiguous
+  // once off-main builds (raw_payload, no stack) and main (raw_payload plus
+  // stack) disagreed about what 18 means, so this step presence-guards every
+  // column the v18 shape promises, not only its own: each column is added
+  // only when missing, and a table missing entirely is skipped, not altered —
+  // every stamped-18 store must reach the identical final shape.
+  18: (db) => {
+    for (const table of ['quarantine', 'pending_logs', 'quarantined_logs'] as const) {
+      const hasTable = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?").get(table)
+      if (!hasTable) continue
+      const cols = (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((c) => c.name)
+      if (!cols.includes('harness')) {
+        db.exec(`ALTER TABLE ${table} ADD COLUMN harness TEXT`)
       }
     }
     const hasProblems = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='problems'").get()
@@ -821,19 +868,54 @@ export type QuarantineEntry = {
   source?: string
   name?: string
   timestamp?: string
+  /** The harness attribution named for the row; absent on rows that predate v19. */
+  harness?: string | null
   /**
-   * The exact incoming span JSON stored at quarantine time (v18+ rows). Absent for older
-   * rows — unknown, never reconstructed from the records table (that row, when one
-   * exists, is the normalized record, not the incoming payload, and mislabeling it as
-   * the original message is forbidden).
+   * The exact incoming span JSON stored at quarantine time (v18+ rows). Absent for
+   * older rows — unknown, never reconstructed from the records table (that row, when
+   * one exists, is the normalized record, not the incoming payload, and mislabeling
+   * it as the original message is forbidden). The sender's decoded packet, kept
+   * beside the audit row as evidence (B7).
    */
+  rawPayload?: string | null
+}
+
+/**
+ * One quarantine row in the shape the detail route serves (plan 2026-10-10,
+ * B7). Unlike `QuarantineEntry` every field is always present — the route's
+ * contract is explicit null for "row has none", because a dropped key would
+ * read as "field unknown" rather than "no evidence". `evidenceAvailable` is
+ * the honest answer to "did this row keep a packet", never inferred.
+ */
+export type QuarantineEntryDetail = {
+  spanId: string
+  source: string | null
+  name: string | null
+  reason: string
+  timestamp: string | null
+  namespaces: string[]
+  harness: string | null
+  rawPayload: string | null
+  evidenceAvailable: boolean
+}
+
+/** Audit metadata a quarantine row can carry beyond the reason. */
+export type QuarantineMetadata = {
+  source?: string
+  name?: string
+  timestamp?: string
+  /** The sender's decoded packet, kept beside the audit row as evidence (B7). */
   rawPayload?: string
+  /** The harness attribution named, so a per-harness wipe can scope the row. */
+  harness?: string
 }
 
 export type QuarantinedLog = {
   logId: string
   reason: string
   log: unknown
+  /** The harness tag the row was written with (B3/D-Q3); absent on rows that predate v19. */
+  harness?: string
 }
 
 export type RecordRow = {
@@ -898,7 +980,7 @@ export function systemPromptTextsFromContentColumns(
       if (Array.isArray(parts) && parts.length > 0) {
         return [...parts]
           .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
-          .filter((part) => part.part === 'system_prompt' && part.text !== '')
+          .filter((part) => part.part === 'system_prompt' && typeof part.text === 'string' && part.text !== '')
           .map((part) => part.text)
       }
     } catch {
@@ -1012,21 +1094,26 @@ export function quarantineHarnessWhere(harness: string | undefined): { where: st
     }
   }
   const spellings = sourceSpellingsForHarness(harness)
+  // An id with no known spelling matches nothing; `IN ()` is not portable SQL.
+  if (spellings.length === 0) return { where: ' WHERE 1 = 0', params: [] }
   const placeholders = spellings.map(() => '?').join(', ')
   return { where: ` WHERE LOWER(source) IN (${placeholders})`, params: spellings }
 }
 
 /**
  * The `WHERE` fragment scoping problem rows to one harness filter. Problems carry the
- * attributed harness id (adapter names are canonical already), so a concrete id is an
- * exact case-insensitive match; `unknown` is a null or blank harness.
+ * attributed harness id, matched case-insensitively against the same spelling expansion
+ * the quarantine filter uses (so `?harness=copilot-chat` finds the twin front-end's rows
+ * in both lists); `unknown` is a null or blank harness.
  */
 export function problemsHarnessWhere(harness: string | undefined): { where: string; params: Array<string | number> } {
   if (harness === undefined) return { where: '', params: [] }
   if (harness === 'unknown') {
     return { where: ` WHERE harness IS NULL OR TRIM(COALESCE(harness, '')) = ''`, params: [] }
   }
-  return { where: ` WHERE LOWER(harness) = ?`, params: [harness.toLowerCase()] }
+  const spellings = new Set([harness.toLowerCase(), ...sourceSpellingsForHarness(harness)])
+  const placeholders = [...spellings].map(() => '?').join(', ')
+  return { where: ` WHERE LOWER(harness) IN (${placeholders})`, params: [...spellings] }
 }
 
 function nullableText(value: unknown): string | null {
@@ -1877,6 +1964,20 @@ export class CanonStore {
     return rows.map(toRecord)
   }
 
+  /**
+   * Stored records naming one span as their parent, scoped by trace because
+   * OTLP span ids are only unique within one. This is the back-fill
+   * direction of `parent_span_id`: the parent itself need not be a record
+   * (Claude Code's interaction span is quarantined), so an exact
+   * `findByTraceSpan` on it can never see the children beneath it (B8).
+   */
+  childrenOf(traceId: string, parentSpanId: string): CanonicalRecord[] {
+    const rows = this.db
+      .prepare('SELECT * FROM records WHERE trace_id = ? AND parent_span_id = ?')
+      .all(traceId, parentSpanId) as RecordRow[]
+    return rows.map(toRecord)
+  }
+
   /** Rewrite the fields re-normalization decides, leaving content untouched. */
   setAttribution(
     spanId: string,
@@ -1896,7 +1997,7 @@ export class CanonStore {
     spanId: string,
     namespaces: readonly string[],
     reason: string,
-    metadata?: { source?: string; name?: string; timestamp?: string; rawPayload?: string },
+    metadata?: QuarantineMetadata,
   ): void
   quarantineAndDelete(
     spanId: string,
@@ -1910,7 +2011,7 @@ export class CanonStore {
     spanId: string,
     namespaces: readonly string[],
     reason: string,
-    sourceOrOptions?: string | { source?: string; name?: string; timestamp?: string; rawPayload?: string },
+    sourceOrOptions?: string | QuarantineMetadata,
     name?: string,
     timestamp?: string,
   ): void {
@@ -1918,12 +2019,14 @@ export class CanonStore {
     let nameVal: string | null = null
     let timestampVal: string | null = null
     let rawPayloadVal: string | null = null
+    let harnessVal: string | null = null
 
     if (typeof sourceOrOptions === "object" && sourceOrOptions !== null) {
       sourceVal = sourceOrOptions.source ?? null
       nameVal = sourceOrOptions.name ?? null
       timestampVal = sourceOrOptions.timestamp ?? null
       rawPayloadVal = sourceOrOptions.rawPayload ?? null
+      harnessVal = sourceOrOptions.harness ?? null
     } else if (typeof sourceOrOptions === "string") {
       sourceVal = sourceOrOptions
       nameVal = name ?? null
@@ -1934,9 +2037,9 @@ export class CanonStore {
     try {
       this.db
         .prepare(
-          "INSERT OR REPLACE INTO quarantine (span_id, namespaces, reason, source, name, timestamp, raw_payload) VALUES (?, ?, ?, ?, ?, ?, ?)",
+          "INSERT OR REPLACE INTO quarantine (span_id, namespaces, reason, source, name, timestamp, raw_payload, harness) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         )
-        .run(spanId, JSON.stringify(namespaces), reason, sourceVal, nameVal, timestampVal, rawPayloadVal)
+        .run(spanId, JSON.stringify(namespaces), reason, sourceVal, nameVal, timestampVal, rawPayloadVal, harnessVal)
       this.db.prepare("DELETE FROM records WHERE span_id = ?").run(spanId)
       this.db.exec("COMMIT")
     } catch (err) {
@@ -1958,15 +2061,23 @@ export class CanonStore {
     return row === undefined ? undefined : toRecord(row)
   }
 
-  /** Find the nearest record in a session, bounded to avoid accidental joins. */
-  findBySessionTime(sessionId: string, timestamp: string, windowMs = 5_000): CanonicalRecord | undefined {
+  /**
+   * Find the nearest record in a session, bounded to avoid accidental joins.
+   * `op` narrows the candidate set: the log-correlation fallback is only
+   * allowed to land on a model call (R7) — an unfiltered nearest pick hands
+   * the log to whatever tool span happened to share the window — so callers
+   * pass `'llm.invoke'`. Without it any record in the window is eligible.
+   */
+  findBySessionTime(sessionId: string, timestamp: string, windowMs = 5_000, op?: string): CanonicalRecord | undefined {
     const rows = this.db
       .prepare('SELECT * FROM records WHERE session_id = ?')
       .all(sessionId) as RecordRow[]
     const target = Date.parse(timestamp)
     return rows
       .map(toRecord)
-      .filter((record) => Math.abs(Date.parse(String(record.timestamp)) - target) <= windowMs)
+      .filter((record) =>
+        (op === undefined || record.op === op) &&
+        Math.abs(Date.parse(String(record.timestamp)) - target) <= windowMs)
       .sort((a, b) => Math.abs(Date.parse(String(a.timestamp)) - target) - Math.abs(Date.parse(String(b.timestamp)) - target))[0]
   }
 
@@ -1982,9 +2093,31 @@ export class CanonStore {
     return true
   }
 
-  addPendingLog(log: { logId: string; pendingSince?: number }): void {
-    this.db.prepare('INSERT OR REPLACE INTO pending_logs (log_id, payload) VALUES (?, ?)')
-      .run(log.logId, JSON.stringify(log))
+  /**
+   * Rewrite one record's per-metric availability map (B6). Log enrichment
+   * uses it in both directions: a bucket whose parts just arrived drops its
+   * `not_measurable` entry, and a bucket a recognised event could not supply
+   * gains the reason it stayed unmeasured. An absent or empty map stores
+   * NULL — no stated limitation.
+   */
+  setMeasurability(spanId: string, measurability: Measurability | undefined): void {
+    const json =
+      measurability === undefined || Object.keys(measurability).length === 0
+        ? null
+        : JSON.stringify(measurability)
+    this.db
+      .prepare('UPDATE records SET measurability_json = ? WHERE span_id = ?')
+      .run(json, spanId)
+  }
+
+  /**
+   * Hold a log whose span has not arrived. `harness` is the recognition tag
+   * (B3) the v19 column exists for — it scopes the row in a per-harness
+   * wipe — and stays NULL for logs no signal named, never guessed.
+   */
+  addPendingLog(log: { logId: string; pendingSince?: number }, harness?: string): void {
+    this.db.prepare('INSERT OR REPLACE INTO pending_logs (log_id, payload, harness) VALUES (?, ?, ?)')
+      .run(log.logId, JSON.stringify(log), harness ?? null)
   }
 
   deletePendingLog(logId: string): void {
@@ -1992,8 +2125,22 @@ export class CanonStore {
   }
 
   getPendingLogs(): unknown[] {
-    return (this.db.prepare('SELECT payload FROM pending_logs ORDER BY log_id').all() as { payload: string }[])
-      .map((row) => JSON.parse(row.payload))
+    return (this.db.prepare('SELECT payload, harness FROM pending_logs ORDER BY log_id').all() as { payload: string; harness: unknown }[])
+      .map((row) => {
+        const entry: unknown = JSON.parse(row.payload)
+        // The v19 column is the tag's authority; surface it on the returned
+        // entry so a reader sees what a per-harness wipe would scope without
+        // unpicking the stored payload.
+        if (
+          typeof row.harness === 'string' &&
+          entry !== null &&
+          typeof entry === 'object' &&
+          !Array.isArray(entry)
+        ) {
+          (entry as Record<string, unknown>).harness = row.harness
+        }
+        return entry
+      })
   }
 
   consumePendingLogs(traceId: string, spanId: string, sessionId?: string | null): unknown[] {
@@ -2008,9 +2155,10 @@ export class CanonStore {
     return matched
   }
 
-  quarantineLog(log: { logId: string }, reason: string): void {
-    this.db.prepare('INSERT OR REPLACE INTO quarantined_logs (log_id, payload, reason) VALUES (?, ?, ?)')
-      .run(log.logId, JSON.stringify(log), reason)
+  /** Same `harness` contract as `addPendingLog`: the tag scopes the row in a per-harness wipe. */
+  quarantineLog(log: { logId: string }, reason: string, harness?: string): void {
+    this.db.prepare('INSERT OR REPLACE INTO quarantined_logs (log_id, payload, reason, harness) VALUES (?, ?, ?, ?)')
+      .run(log.logId, JSON.stringify(log), reason, harness ?? null)
   }
 
   isLogEnriched(logId: string): boolean {
@@ -2022,9 +2170,14 @@ export class CanonStore {
   }
 
   getQuarantinedLog(logId: string): QuarantinedLog | undefined {
-    const row = this.db.prepare('SELECT payload, reason FROM quarantined_logs WHERE log_id = ?')
-      .get(logId) as { payload: string; reason: string } | undefined
-    return row === undefined ? undefined : { logId, reason: row.reason, log: JSON.parse(row.payload) }
+    const row = this.db.prepare('SELECT payload, reason, harness FROM quarantined_logs WHERE log_id = ?')
+      .get(logId) as { payload: string; reason: string; harness: unknown } | undefined
+    if (row === undefined) return undefined
+    const entry: QuarantinedLog = { logId, reason: row.reason, log: JSON.parse(row.payload) }
+    // Same surfacing rule as `getPendingLogs`: the column is the authority,
+    // exposed beside the payload rather than written back into it.
+    if (typeof row.harness === 'string') entry.harness = row.harness
+    return entry
   }
 
   quarantinedLogCount(): number {
@@ -2203,7 +2356,11 @@ export class CanonStore {
     if (!sessionId) return []
     const rows = this.db
       .prepare(
-        'SELECT span_id, op, timestamp, content_json, parts_json FROM records WHERE COALESCE(session_id, trace_id) = ? ORDER BY timestamp',
+        // Turn spans (`llm.invoke`) are skipped in SQL, so their (largest) parts blobs are
+        // never read or inflated; a row cap would silently drop session prompts instead.
+        `SELECT span_id, op, timestamp, content_json, parts_json FROM records
+         WHERE COALESCE(session_id, trace_id) = ? AND COALESCE(op, '') <> 'llm.invoke'
+         ORDER BY timestamp`,
       )
       .all(sessionId) as { span_id: unknown; op: unknown; timestamp: unknown; content_json: unknown; parts_json: unknown }[]
     const out: Array<{ spanId: string; text: string; timestamp?: string }> = []
@@ -3223,7 +3380,7 @@ export class CanonStore {
     spanId: string,
     namespaces: readonly string[],
     reason: string,
-    metadata?: { source?: string; name?: string; timestamp?: string; rawPayload?: string },
+    metadata?: QuarantineMetadata,
   ): void
   quarantine(
     spanId: string,
@@ -3237,7 +3394,7 @@ export class CanonStore {
     spanId: string,
     namespaces: readonly string[],
     reason: string,
-    sourceOrOptions?: string | { source?: string; name?: string; timestamp?: string; rawPayload?: string },
+    sourceOrOptions?: string | QuarantineMetadata,
     name?: string,
     timestamp?: string,
   ): void {
@@ -3245,12 +3402,14 @@ export class CanonStore {
     let nameVal: string | null = null
     let timestampVal: string | null = null
     let rawPayloadVal: string | null = null
+    let harnessVal: string | null = null
 
     if (typeof sourceOrOptions === 'object' && sourceOrOptions !== null) {
       sourceVal = sourceOrOptions.source ?? null
       nameVal = sourceOrOptions.name ?? null
       timestampVal = sourceOrOptions.timestamp ?? null
       rawPayloadVal = sourceOrOptions.rawPayload ?? null
+      harnessVal = sourceOrOptions.harness ?? null
     } else if (typeof sourceOrOptions === 'string') {
       sourceVal = sourceOrOptions
       nameVal = name ?? null
@@ -3259,9 +3418,9 @@ export class CanonStore {
 
     this.db
       .prepare(
-        'INSERT OR REPLACE INTO quarantine (span_id, namespaces, reason, source, name, timestamp, raw_payload) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        'INSERT OR REPLACE INTO quarantine (span_id, namespaces, reason, source, name, timestamp, raw_payload, harness) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
       )
-      .run(spanId, JSON.stringify(namespaces), reason, sourceVal, nameVal, timestampVal, rawPayloadVal)
+      .run(spanId, JSON.stringify(namespaces), reason, sourceVal, nameVal, timestampVal, rawPayloadVal, harnessVal)
   }
 
   /** The quarantine entry for a span, with its parsed namespaces; absent id gives undefined. */
@@ -3283,6 +3442,57 @@ export class CanonStore {
       | undefined
     if (row === undefined) return undefined
     return toQuarantineEntry(row)
+  }
+
+  /**
+   * One quarantine row in the detail shape the route serves (B7): every
+   * field present, absent values explicit null rather than a dropped key.
+   * `listQuarantine`/`getQuarantine` stay the audit accessors; this is the
+   * only read that surfaces a stored packet. `undefined` when no row names
+   * the span.
+   */
+  getQuarantineEntry(spanId: string): QuarantineEntryDetail | undefined {
+    const row = this.db
+      .prepare(
+        'SELECT span_id, namespaces, reason, source, name, timestamp, harness, raw_payload FROM quarantine WHERE span_id = ?',
+      )
+      .get(spanId) as
+      | {
+          span_id: unknown
+          namespaces: unknown
+          reason: unknown
+          source: unknown
+          name: unknown
+          timestamp: unknown
+          harness: unknown
+          raw_payload: unknown
+        }
+      | undefined
+    if (row === undefined) return undefined
+    const rawPayload =
+      row.raw_payload === null || row.raw_payload === undefined ? null : text(row.raw_payload)
+    // One corrupt cell must not take the detail route down with a 500 —
+    // this read is exactly where an operator looks when the store is
+    // already suspect, so an unparseable namespaces blob reads as an empty
+    // list while the row's other facts still answer.
+    let namespaces: string[] = []
+    try {
+      const parsed: unknown = JSON.parse(text(row.namespaces))
+      if (Array.isArray(parsed)) {
+        namespaces = parsed.filter((n): n is string => typeof n === 'string')
+      }
+    } catch {}
+    return {
+      spanId: text(row.span_id),
+      source: row.source === null || row.source === undefined ? null : text(row.source),
+      name: row.name === null || row.name === undefined ? null : text(row.name),
+      reason: text(row.reason),
+      timestamp: row.timestamp === null || row.timestamp === undefined ? null : text(row.timestamp),
+      namespaces,
+      harness: row.harness === null || row.harness === undefined ? null : text(row.harness),
+      rawPayload,
+      evidenceAvailable: rawPayload !== null,
+    }
   }
 
   /** Every quarantined span ordered by span id — the R6.3 view's row list. */

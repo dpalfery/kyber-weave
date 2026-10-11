@@ -1,0 +1,26 @@
+{
+  "error": "disable refused: claude-code drifted since enable; no files were changed",
+  "outcome": "refused",
+  "reason": "drift",
+  "events": [
+    {
+      "kind": "refused",
+      "harness": "claude-code",
+      "fileId": "claude-settings",
+      "path": "/Users/example/.claude/settings.json",
+      "reason": "drift",
+      "drift": [
+        {
+          "key": "env.OTEL_LOG_USER_PROMPTS",
+          "written": "1",
+          "current": "0"
+        },
+        {
+          "key": "env.OTEL_LOG_RAW_API_BODIES",
+          "written": "1",
+          "current": null
+        }
+      ]
+    }
+  ]
+}

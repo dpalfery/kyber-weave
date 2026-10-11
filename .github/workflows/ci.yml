@@ -565,6 +565,41 @@ jobs:
         working-directory: dash/tray/ui
         run: npm test
 
+  # D6/D16 (harness OTel settings plan): the capture engine is required to work on Windows
+  # (its route contract is POSIX-only), and no other job runs dash TypeScript off ubuntu. Only the capture
+  # tests run here; the full suite stays on ts-gates. Equivalent local command:
+  #   cd dash && npx vitest run src/capture
+  # This job covers the engine only; the route contract (src/server/capture-route.test.ts) is
+  # POSIX-only and runs in ts-gates.
+  # If `npm ci` fails on Windows for an unrelated native dependency, the fallback is the
+  # owner gate recorded in the plan (a real Windows round trip), not widening this job.
+  capture-windows:
+    name: Capture tests (windows-latest)
+    runs-on: windows-latest
+    needs: build-test
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: dash/.nvmrc
+          cache: npm
+          cache-dependency-path: dash/package-lock.json
+
+      - name: Install dash dependencies
+        working-directory: dash
+        run: npm ci --no-audit --no-fund
+
+      # The route test (src/server/capture-route.test.ts) injects platform 'darwin' and
+      # compares host-joined paths, so it is POSIX-only; the engine tests are host-neutral.
+      - name: Capture engine tests
+        working-directory: dash
+        run: npx vitest run src/capture
+
   tray-rust:
     name: Tray Rust gates (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -661,6 +696,7 @@ jobs:
       - codeql
       - skill-docs-gate
       - ts-gates
+      - capture-windows
       - tray-rust
     if: always()
     steps:
@@ -677,6 +713,7 @@ jobs:
           echo "| CodeQL Analysis | ${{ needs.codeql.result }} |" >> results.md
           echo "| Skill and docs gate | ${{ needs.skill-docs-gate.result }} |" >> results.md
           echo "| TypeScript gates (KyberDash) | ${{ needs.ts-gates.result }} |" >> results.md
+          echo "| Capture tests (Windows) | ${{ needs.capture-windows.result }} |" >> results.md
           echo "| Tray Rust gates | ${{ needs.tray-rust.result }} |" >> results.md
           echo "" >> results.md
           echo "| Trivy OSS Security Scan | ${{ needs.trivy.result }} (advisory) |" >> results.md
@@ -692,6 +729,7 @@ jobs:
             "${{ needs.codeql.result }}" \
             "${{ needs.skill-docs-gate.result }}" \
             "${{ needs.ts-gates.result }}" \
+            "${{ needs.capture-windows.result }}" \
             "${{ needs.tray-rust.result }}"; do
             if [ "$result" = "failure" ] || [ "$result" = "cancelled" ]; then
               FAILED=true

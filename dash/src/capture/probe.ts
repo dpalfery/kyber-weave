@@ -89,15 +89,39 @@ export function defaultFetchHealth(url: string): Promise<{ status: number; body:
   return fetchWithTimeout(url)
 }
 
-/** Probe the receiver and classify it as KyberDash, foreign, or absent. */
+/**
+ * Race a probe against a deadline. The default fetcher aborts itself at
+ * FETCH_TIMEOUT_MS, but an injected fetcher (or a listener that accepts and
+ * never answers) has no such bound, and a status request must not hang on it.
+ */
+async function withDeadline<T>(work: Promise<T>, timeoutMs: number): Promise<T> {
+  let timer: NodeJS.Timeout | undefined
+  const deadline = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`health probe timed out after ${timeoutMs}ms`)),
+      timeoutMs,
+    )
+  })
+  try {
+    return await Promise.race([work, deadline])
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+/**
+ * Probe the receiver and classify it as KyberDash, foreign, or absent. A probe
+ * that does not answer within `timeoutMs` (default 5s) reads as absent.
+ */
 export async function probeReceiver(
   endpoint: string,
   fetchHealth: HealthFetcher = defaultFetchHealth,
+  timeoutMs: number = FETCH_TIMEOUT_MS,
 ): Promise<ReceiverProbeResult> {
   const url = healthzUrlForEndpoint(endpoint)
   let response: { status: number; body: string }
   try {
-    response = await fetchHealth(url)
+    response = await withDeadline(Promise.resolve().then(() => fetchHealth(url)), timeoutMs)
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error)
     return { state: 'none', detail: `nothing is listening at ${url} (${reason})` }

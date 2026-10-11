@@ -15,11 +15,14 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import { CanonStore } from '../canon/store.js'
 import type { JobHostStatus, JobKind, JobOutcome, ManualTrigger } from '../jobs/host.js'
 import type { KyberBridge } from './bridge.js'
+import type { CaptureRouteSettings } from './capture-routes.js'
 import { handleKyberRequest } from './routes.js'
 
 export type RouteDeps = {
   store: CanonStore
   jobHost: FakeJobHost
+  /** Where the capture route reads and writes harness configs; a temporary HOME in tests. */
+  capture?: CaptureRouteSettings
 }
 
 export class FakeJobHost {
@@ -52,8 +55,12 @@ export class FakeJobHost {
   }
 }
 
-export function makeDeps(): RouteDeps {
-  return { store: new CanonStore(':memory:'), jobHost: new FakeJobHost() }
+export function makeDeps(options: { capture?: CaptureRouteSettings } = {}): RouteDeps {
+  return {
+    store: new CanonStore(':memory:'),
+    jobHost: new FakeJobHost(),
+    ...(options.capture === undefined ? {} : { capture: options.capture }),
+  }
 }
 
 type MockRes = {

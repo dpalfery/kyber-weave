@@ -331,6 +331,21 @@ describe('DashboardTools: the panel behaves like a dialog', () => {
     expect(document.activeElement).toBe(button)
   })
 
+  it('restores focus to the control that opened the current panel after Status swaps to Maintenance', async () => {
+    stubToolsFetch()
+    await openPanel('dashboard-tools-status-button')
+    const maintenanceButton = screen.getByTestId('dashboard-tools-maintenance-button')
+    // The swap re-renders the same SlideInPanel instance with a new title and opener.
+    fireEvent.click(maintenanceButton)
+    const panel = await screen.findByTestId('dashboard-tools-panel')
+    expect(panel.getAttribute('aria-label')).toBe('Maintenance')
+    await waitFor(() => expect(panel.contains(document.activeElement)).toBe(true))
+
+    fireEvent.click(within(panel).getByTestId('dashboard-tools-panel-close'))
+    await waitFor(() => expect(screen.queryByTestId('dashboard-tools-panel')).toBeNull())
+    expect(document.activeElement).toBe(maintenanceButton)
+  })
+
   it('stays usable at phone width and scrolls its own content', async () => {
     stubToolsFetch()
     const { panel } = await openPanel('dashboard-tools-maintenance-button')

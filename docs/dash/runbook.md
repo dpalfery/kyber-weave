@@ -6,7 +6,7 @@ status: current
 component: KyberDash
 source-root: dash
 owner: dpalfery
-last-reviewed: 2026-10-10
+last-reviewed: 2026-10-11
 code-refs:
   - registerKyberCommands
   - refreshHarnessSources
@@ -148,6 +148,31 @@ running, `ReceiverHost` (`dash/src/jobs/receiver-host.ts`) hosts the same receiv
 of that server instead, and `settings.receiver.hosted` ([§2d](#2d-shared-settings-and-pause))
 records which of the two the current setup uses.
 
+### 1a. Enabling Claude Code content on the sender
+
+Claude Code sends its prompt and request-body text only when the sender opts in. KyberDash
+never applies these settings automatically: they are the sender's consent, set for the
+Claude Code process or written into `~/.claude/settings.json` by
+`kyberdash kyber capture` when the owner runs it
+([ADR 0031](../adr/0031-kyberdash-capture-command-owns-harness-telemetry-keys.md)).
+
+| Setting | Effect | Exposure |
+|---|---|---|
+| `OTEL_LOGS_EXPORTER=otlp` | Sends Claude Code event logs — including `api_request_body` — to the receiver. Without it, only traces arrive and no request body is sent. | Enables the two settings below; on its own it sends counters and metadata only. |
+| `OTEL_LOG_USER_PROMPTS=1` | Exports the interaction span's `user_prompt` as text instead of `<REDACTED>`. | Exports the user's prompt text verbatim. |
+| `OTEL_LOG_RAW_API_BODIES=1` | Inlines the raw API request body in the log event. `file:` would spill untruncated bodies onto disk instead. | Exports the full system prompt, tool definitions, and message history verbatim. |
+| `CLAUDE_CODE_OTEL_CONTENT_MAX_LENGTH` | Raises Claude Code's 61,440 UTF-16-unit inline-body ceiling (the capture writer sets 1,048,576). | Larger bodies mean more prompt text stored; the ceiling is a size limit, not a privacy control. |
+
+**Data-exposure warning.** With these enabled, the receiver stores the system prompt, tool
+definitions, message history, and the user's prompt as plaintext content parts, served on the
+loopback-only `/api/kyber/*` API. Assembled turn text is purged after 14 days; the raw packet
+keeps exactly what the sender sent until you wipe the `claude-code` harness or the whole
+database ([§4](#4-content-retention-policy),
+[ADR 0035](../adr/0035-kyberdash-quarantine-raw-packet-evidence.md)). Set them only when you
+accept that exposure. What the receiver then does with the text — and the reasons it declares
+when a body is redacted, truncated, or arrives as a `body_ref` it will not open — is in the
+[telemetry inventory](telemetry-inventory.md#claude-code-otlp-content-live).
+
 ### 2. Derived Projection Rebuilding (`kyber build`)
 
 The `session`, `run`, `execution`, and `finding` tables are derived projections over raw canonical
@@ -273,8 +298,13 @@ wipes the scope in one store transaction (records including `records.raw`, prove
 checkpoints, and harness-scoped derived caches), projects the derived tables, re-ingests
 the scope **only if a window was requested**, and resumes ingestion. `ingest_log`,
 `refresh_run`, `metadata` (stamped `last_clean_at`/scope), `token_cache`, and the
-model-window catalog are never wiped. Wipe-all additionally clears `quarantine` and the
-log-enrichment tables; a per-harness wipe cannot scope quarantine rows (no harness column).
+model-window catalog are never wiped. Wipe-all clears `quarantine` and the
+log-enrichment tables. A per-harness wipe now deletes the `quarantine`, `pending_logs`,
+and `quarantined_logs` rows whose `harness` matches the wiped raw names — the nullable
+column schema v19 added for exactly this
+([ADR 0035](../adr/0035-kyberdash-quarantine-raw-packet-evidence.md)). A row with no
+harness is "unknown", never "matches", so unclaimed rows survive a per-harness wipe and
+are cleared only by the complete wipe.
 
 There is no backup and no undo: the data is ephemeral point-in-time telemetry, and
 file-backed harnesses re-derive it from source logs. OTLP-collected records have no
@@ -365,6 +395,36 @@ The tray now attaches to a running `kyberdash web` server rather than owning one
 dashboard was already running before the upgrade, the tray joins that server and collection
 continues even after you quit the menu bar.
 
+### 2f. Seeing a turn's raw packet
+
+A Claude Code turn can be inspected down to the packets that carried it. Open the turn in the
+Context Inspector: a **Raw packet** disclosure appears whenever the turn-content result carries
+one, and fetching nothing until it is opened. It shows two payloads
+([ADR 0035](../adr/0035-kyberdash-quarantine-raw-packet-evidence.md)):
+
+- the request span's own harness-emitted attributes, from
+  `GET /api/kyber/span/<spanId>/attributes`; and
+- when the server named the link — which it does only when the parent interaction span's
+  quarantine row kept a payload — the quarantined parent packet, from
+  `GET /api/kyber/quarantine/<parentSpanId>`.
+
+The turn view renders only the links the server returns: an absent `interactionPath` means the
+parent row kept no payload, never a disclosure to render empty. The same two routes are
+callable directly:
+
+```bash
+# The request span's attributes
+curl -s "http://127.0.0.1:4747/api/kyber/span/<spanId>/attributes" | jq .
+
+# The quarantined parent interaction packet, as filed
+curl -s "http://127.0.0.1:4747/api/kyber/quarantine/<parentSpanId>" | jq .
+```
+
+The quarantine detail route answers 200 for a known span, 404 for an unknown one, 405 for a
+non-GET method, and 400 `{ error: 'Missing span id' }` for an empty id. A row that predates the
+payload column reads `rawPayload: null, evidenceAvailable: false` — never an invented packet.
+The quarantine **list** stays light and never serves payloads.
+
 ### 3. Raw Content Backfill and Re-normalization
 
 ```bash
@@ -409,6 +469,12 @@ standing privacy and storage liability ([ADR 0014](../adr/0014-unclipped-turn-in
   schedule that is not reading folder sources. Rows older than 14 days have content emptied
   in place (`'{}'` / NULL parts). Token metrics, timestamps, findings, and `records.raw`
   stay.
+- **The window does not cover raw packets.** Assembled turn text is purged after 14 days.
+  The raw packet keeps exactly what the sender sent until you wipe the `claude-code` harness
+  or the whole database ([§2b](#2b-database-clean-dash-clean),
+  [ADR 0035](../adr/0035-kyberdash-quarantine-raw-packet-evidence.md)). Never read the 14-day
+  window as "all prompt text expires"; raw packets outlive it by design
+  ([ADR 0018](../adr/0018-kyberdash-content-retention-purge.md)).
 - There is no shipped `kyber purge-content` CLI. Re-run `dash refresh` to apply the window.
 
 ### 5. LLM Review Provider Configuration & Privacy Guardrails
@@ -590,7 +656,9 @@ Every view has its own URL, so a view can be bookmarked, shared, or opened direc
 that one list. Browser back and forward restore the spine.
 
 Top navigation (`nav-tabs`) offers five: **Context Doctor**, **Sessions**, **Compare**,
-**Quarantine**, **Problems**. It is the whole navigation — the entire left rail and the
+**Quarantine**, **Problems**. Next to the theme toggle the header carries a **Settings** button
+(not a tab) that opens the Settings drawer ([Harness OpenTelemetry capture](#harness-opentelemetry-capture)).
+It is the whole navigation — the entire left rail and the
 mobile hamburger/toggle that opened it were removed, so there is no second surface to keep in
 step and the main content takes the full width of the shell. Views reached by drilling — a
 run, an execution, a turn, a finding — stay reachable from the pages that lead to them.
@@ -814,6 +882,73 @@ These suites validate:
 - Edge cases: 400 on missing session IDs, 404 on nonexistent sessions/routes, 405 on non-GET methods.
 - Resilient error handling (returns HTTP 400 on invalid query params without crashing the long-running server process).
 - That the CLI report and the REST report are equal for the same store and scope.
+
+### Harness OpenTelemetry capture
+
+`kyberdash kyber capture` points a harness's OTLP exporter at the KyberDash receiver by
+editing the harness's own user-level config, and the dashboard's Settings drawer drives the
+same engine. Both run the one implementation
+([ADR 0031](../adr/0031-kyberdash-capture-command-owns-harness-telemetry-keys.md)); the web
+dashboard holds no capture logic of its own
+([ADR 0033](../adr/0033-kyberdash-surfaces-are-display-layers.md)).
+
+**CLI.** Three leaves, each taking a repeatable `--harness <id>` (default: all six) and
+`--endpoint <url>` (OTLP/HTTP only; default `http://127.0.0.1:4318`):
+
+```bash
+kyberdash kyber capture status                      # per-harness state + receiver liveness
+kyberdash kyber capture enable  --dry-run           # print the exact per-file change, write nothing
+kyberdash kyber capture enable  --harness claude-code
+kyberdash kyber capture disable --harness claude-code   # restore per key; refuse on drift
+```
+
+`enable` writes only the telemetry keys and records, per key, the prior value and the file's
+pre- and post-edit hashes in a receipt. `disable` restores only keys that still hold what
+`enable` wrote and otherwise refuses, naming the drift. The CLI has no store, so it never
+touches the receiver setting.
+
+**Which harnesses are written.** Three are managed and can be switched: **Copilot** (VS Code
+and VS Code Insiders `settings.json`), **Claude Code**, and **OpenCode** (`opencode.jsonc`).
+**Codex**, **pi**, and **Antigravity** are status-only: status reports them, `enable` and
+`disable` do not write them, and the drawer shows them read-only. OpenCode reads its OTLP
+endpoint from the process environment, so `enable` writes only its flag; the drawer and
+`status` show `OTEL_EXPORTER_OTLP_ENDPOINT` and the receiver origin as a manual step, and
+KyberDash cannot see whether the shell that launches OpenCode has it set.
+
+**Settings drawer.** The header **Settings** button opens a right slide-out. It reads
+`GET /api/kyber/capture` on open and offers **Refresh status**. Each managed harness row shows
+its state (On, Off, Partly on, Unknown, Read-only), whether it was detected, the config files
+and how many expected keys are set, any warnings (for example a differing endpoint that was
+kept), and manual steps. A click never writes directly: the first request is a dry run, the
+drawer shows the exact keys it would change, and only **Confirm** sends the real request.
+A row is not switchable, with the reason printed, when its state is unknown, when it is `on`
+but KyberDash recorded no receipt (the keys were set elsewhere, so there is nothing to
+restore), or when it is not detected and has no receipt. A harness with a receipt can always
+be switched off. A refusal that happens before any write (drift on a disable, an unparseable or unreadable
+config, a conflict, busy) leaves every file unchanged and is shown on the row with the drifted
+keys. A harness with several files is written file by file, so a refusal or host error on a
+later file can follow earlier files that were already written and receipted; the response keeps
+those files' events, and a real enable that wrote anything still turns the receiver on.
+
+**Receiver coupling.** A real `enable` that ends written or already-set turns the shared
+`settings.receiver.hosted` on after the config write, so the harness has somewhere to send.
+A failed setting write is reported in the drawer (the config is already on disk) rather than
+as an error. `disable` never turns the receiver off, because other exporters may still post
+to the port; when the last managed harness is switched off the drawer says the receiver is
+still hosted and points at the receiver switch, which lives in the same drawer and in the
+Maintenance panel. The receiver block shows liveness probed at `/healthz`; when this server
+does not host the receiver, liveness is `unknown` and not probed. A newly started receiver
+can take several seconds to answer, so use **Refresh status**. An enabled harness is not
+collecting until it is restarted and emits a turn; a green enable is not capture.
+
+**Windows.** Capture runs on macOS, Linux and Windows. Paths are joined with the platform's
+separator; Copilot's VS Code settings are under the `%APPDATA%` directory, and the other
+harnesses under the user profile. JSON and JSONC edits preserve a byte-order mark and CRLF
+line endings. For Copilot, an edition's file is written only when it exists or its host
+directory exists, so enable never creates a VS Code Insiders profile on a machine without it.
+
+**Limits.** Overlapping actions in one server are queued, but a CLI run and a drawer run
+are not serialized against each other. OpenCode's `XDG_CONFIG_HOME` is not consulted.
 
 ### Optional Cursor hook collection
 

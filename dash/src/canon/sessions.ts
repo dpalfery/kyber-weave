@@ -118,6 +118,48 @@ function unavailableFor(measurability: Measurability | undefined, metric: string
 }
 
 /**
+ * The canonical buckets the session's records actually carry non-empty
+ * parts for (B6). Session-level availability is derived from this
+ * evidence, not only from the merged declarations: a bucket any record
+ * carries parts for was measurable, whatever a declaration stamped at
+ * normalize time — before parts reached the record by another route, such
+ * as a request-body log or the interaction prompt — still says.
+ */
+function carriedBucketsOf(records: readonly CanonicalRecord[]): Set<string> {
+  const carried = new Set<string>()
+  for (const record of records) {
+    for (const part of partsOf(record)) {
+      if (part.text !== '') carried.add(part.part)
+    }
+  }
+  return carried
+}
+
+/**
+ * The declaration the composition gate answers from (B6): the merged map
+ * minus every content-key `not_measurable` a record's own parts
+ * contradict. Without this, one sibling's stale stamp keeps the whole
+ * session's composition refused — `declared_not_measurable` — over text
+ * the corpus demonstrably holds. Only the gate sees the adjusted map:
+ * per-bucket overlays keep the declarations, so a turn that observed a
+ * bucket at zero still gets the reason its records gave.
+ */
+function compositionDeclaration(
+  measurability: Measurability | undefined,
+  carriedBuckets: ReadonlySet<string>,
+): Measurability | undefined {
+  if (measurability === undefined) return undefined
+  const adjusted = { ...measurability }
+  for (const key of carriedBuckets) {
+    const declared = adjusted[key]
+    if (typeof declared === 'object' && declared.availability === 'not_measurable') {
+      delete adjusted[key]
+    }
+  }
+  return adjusted
+}
+
+/**
  * Tool definitions for the schema ranking. Only parts carrying a ground-truth
  * `server` are attributed to one; the rest are built-in as far as this system
  * is concerned. Splitting a prefixed name to recover a server is the thing
@@ -469,11 +511,14 @@ export function buildSessionRow(
   // window (G1-Q2 = (b)).
   const analysisLimit = window.contextLimit > 0 ? window.contextLimit : DEFAULT_CONTEXT_LIMIT
   const measurability = mergeMeasurability(records)
+  const carriedBuckets = carriedBucketsOf(records)
   const context = analyzeContext(contextTurns, {
     contextLimit: analysisLimit,
     contextLimitSource: window.contextLimitSource,
     countTokens,
-    ...(measurability !== undefined ? { measurability } : {}),
+    ...(measurability !== undefined
+      ? { measurability: compositionDeclaration(measurability, carriedBuckets) }
+      : {}),
   })
 
   const definitions = toolDefinitionsOf(records, countTokens)
@@ -580,7 +625,10 @@ export function buildSessionRow(
     Object.entries(contextBucketDeclarations).flatMap(([bucket, declaration]) => {
       const unavailable =
         unavailableFor(measurability, declaration) ??
-        (!context.measurable
+        // The "did not capture" fallback must not fire over parts a record
+        // demonstrably captured (B6) — only reachable when composition
+        // stayed unmeasurable for a reason other than this bucket.
+        (!context.measurable && !carriedBuckets.has(declaration)
           ? notMeasurable(`Session records for ${harness} did not capture ${declaration}.`)
           : undefined)
       return unavailable === undefined ? [] : [[bucket, unavailable]]

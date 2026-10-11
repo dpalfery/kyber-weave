@@ -1159,6 +1159,15 @@ export function harnessDimensionAvailability(
  )
 
  /**
+  * The declared spellings, lower-cased. `normalizeHarnessName` folds every `kilo*` prefix
+  * into the shared runtime, so checking only the normalized id would accept `kilo-bogus`;
+  * the filter validates the spelling itself first.
+  */
+ const KNOWN_HARNESS_FILTER_SPELLINGS: ReadonlySet<string> = new Set(
+   HARNESS_FILTER_SPELLINGS.map((spelling) => spelling.toLowerCase()),
+ )
+
+ /**
   * Stored source values that count as unattributed for the `unknown` scope. `otlp` is the
   * neutral grouping key `toRawSpan` stamps when the export named no service (ingest.ts);
   * `unattributed` is the legacy collector's equivalent. Both are grouping keys, never
@@ -1184,6 +1193,7 @@ export function harnessDimensionAvailability(
    const lower = trimmed.toLowerCase()
    if (lower === 'all') return { kind: 'all' }
    if (lower === 'unknown') return { kind: 'unknown' }
+   if (!KNOWN_HARNESS_FILTER_SPELLINGS.has(lower)) return { kind: 'invalid', raw: trimmed }
    const id = normalizeHarnessName(trimmed)
    if (KNOWN_HARNESS_FILTER_IDS.has(id)) return { kind: 'harness', id }
    return { kind: 'invalid', raw: trimmed }

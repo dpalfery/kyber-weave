@@ -145,7 +145,7 @@ export interface KyberProblemDetail {
 }
 
 export async function fetchProblemDetail(id: string): Promise<KyberProblemDetail> {
-  return fetchJson<KyberProblemDetail>(`/api/kyber/problems/${encodeURIComponent(id)}`)
+  return fetchJson<KyberProblemDetail>(`/api/kyber/problem/${encodeURIComponent(id)}`)
 }
 
 export interface KyberSessionSummary {
@@ -518,6 +518,8 @@ export interface KyberTurnContentResult {
   sessionId: string
   turnIndex: number
   spanId?: string
+  /** The turn record's parent span, when the record named one (B7). */
+  parentSpanId?: string
   model?: string
   blocks: KyberTurnContentBlock[]
   parts: KyberTurnContentPart[]
@@ -526,6 +528,12 @@ export interface KyberTurnContentResult {
   totalLength?: number
   measurability?: string | Record<string, unknown>
   notMeasurable?: { reason: string }
+  /**
+   * Where this turn's raw packets can be fetched (B7): the request span's
+   * attributes always; the quarantined parent's packet only when that row
+   * kept a payload.
+   */
+  rawPacket?: { spanAttributesPath: string; interactionPath?: string }
   /**
    * Session-level shared context: every captured `system_prompt` part in
    * session scope, in capture order, with section-level earlier-turn
@@ -585,6 +593,37 @@ export interface KyberSpanAttributes {
  */
 export function fetchSpanAttributes(spanId: string): Promise<KyberSpanAttributes> {
   return fetchJson<KyberSpanAttributes>(`/api/kyber/span/${encodeURIComponent(spanId)}/attributes`)
+}
+
+/**
+ * One quarantine row in the detail shape the route serves (B7). Unlike the
+ * light `KyberQuarantineEntry` list row every field is always present — absent
+ * values are explicit null, because a dropped key would read as "field unknown"
+ * rather than "this row kept no evidence". `evidenceAvailable` is the honest
+ * answer to "did this row keep a packet", never inferred from an empty payload.
+ */
+export interface KyberQuarantineEntryDetail {
+  spanId: string
+  source: string | null
+  name: string | null
+  reason: string
+  timestamp: string | null
+  namespaces: string[]
+  harness: string | null
+  rawPayload: string | null
+  evidenceAvailable: boolean
+}
+
+/**
+ * One quarantined span's audit row plus the packet it kept (B7).
+ *
+ * This is the fetch behind the turn view's raw-packet disclosure, and the only
+ * route that returns a stored payload: the turn's parent span was quarantined
+ * out of the canonical store, so its evidence lives here or nowhere. Takes a
+ * span id — passing the served path would nest a second `/api/kyber/` prefix.
+ */
+export function fetchQuarantineEntry(spanId: string): Promise<KyberQuarantineEntryDetail> {
+  return fetchJson<KyberQuarantineEntryDetail>(`/api/kyber/quarantine/${encodeURIComponent(spanId)}`)
 }
 
 // ===========================================================================
@@ -1454,4 +1493,358 @@ export async function importKyberHistory(request: {
     }),
   })
   if (!res.ok) throw new KyberApiError(res.status, path)
+}
+
+// ===========================================================================
+// Harness OpenTelemetry collection (`/api/kyber/capture`). Like the
+// maintenance surface above, this is a display client: the server decides what
+// is installed, what is on and what a write would change; the browser parses
+// the answer into bounded, vocabulary-checked values and shows them. Every
+// reader below drops unknown fields (a response must never smuggle a config
+// value into the DOM), caps strings, bounds arrays, and maps an
+// out-of-vocabulary enum to the value that grants nothing (`unknown`,
+// `status-only`) rather than trusting it.
+// ===========================================================================
+
+const CAPTURE_PATH = '/api/kyber/capture'
+
+/** Wire strings are capped so a hostile or broken answer cannot flood the DOM. */
+const CAPTURE_TEXT_MAX = 4096
+const CAPTURE_VALUE_MAX = 512
+const CAPTURE_MAX_HARNESSES = 64
+const CAPTURE_MAX_FILES = 16
+const CAPTURE_MAX_KEYS = 64
+const CAPTURE_MAX_EVIDENCE = 32
+const CAPTURE_MAX_LINES = 32
+const CAPTURE_MAX_WARNINGS = 16
+const CAPTURE_MAX_STEPS = 16
+const CAPTURE_MAX_EVENTS = 64
+const CAPTURE_MAX_CHANGES = 64
+
+export type KyberCapturePlatform = 'darwin' | 'linux' | 'win32' | 'unknown'
+export type KyberCaptureLiveness = 'kyberdash' | 'foreign' | 'none' | 'unknown'
+export type KyberCaptureMode = 'managed' | 'status-only'
+export type KyberCaptureInstalled = 'detected' | 'not-detected' | 'unknown'
+export type KyberCaptureState = 'on' | 'off' | 'partial' | 'unknown' | 'not-applicable'
+export type KyberCaptureAction = 'enable' | 'disable'
+
+/** A value the server reports for one managed key: a JSON scalar, never an object. */
+export type KyberCaptureValue = string | number | boolean | null
+
+export interface KyberCaptureDriftEntry {
+  key: string
+  written: KyberCaptureValue
+  /** `null` when the key is absent now. */
+  current: KyberCaptureValue
+}
+
+export interface KyberCaptureFile {
+  id: string
+  path: string
+  applicable: boolean
+  /** `null` is "could not be inspected" — not "absent". */
+  exists: boolean | null
+  expectedKeys: string[]
+  presentKeys: string[]
+  missingKeys: string[]
+  drift: KyberCaptureDriftEntry[] | null
+}
+
+export interface KyberCaptureManualStep {
+  id: string
+  text: string
+  env?: { name: string; value: string }
+}
+
+export interface KyberCaptureHarness {
+  id: string
+  displayName: string
+  mode: KyberCaptureMode
+  installed: KyberCaptureInstalled
+  installEvidence: string[]
+  state: KyberCaptureState
+  receipt: 'recorded' | 'absent'
+  files: KyberCaptureFile[]
+  warnings: Array<{ code: string; text: string }>
+  manualSteps: KyberCaptureManualStep[]
+  statusLines: string[]
+}
+
+export interface KyberCaptureStatus {
+  platform: KyberCapturePlatform
+  receiver: { hosted: boolean; liveness: KyberCaptureLiveness; detail: string }
+  harnesses: KyberCaptureHarness[]
+}
+
+export type KyberCaptureEventKind =
+  | 'would-write'
+  | 'wrote'
+  | 'noop'
+  | 'would-restore'
+  | 'restored'
+  | 'refused'
+  | 'error'
+
+export interface KyberCaptureChange {
+  key: string
+  /** Omitted (not `undefined`-valued) when the key was absent before. */
+  before?: KyberCaptureValue
+  after?: KyberCaptureValue
+}
+
+export interface KyberCaptureEvent {
+  kind: KyberCaptureEventKind
+  harness: string
+  fileId: string
+  path: string
+  changes?: KyberCaptureChange[]
+  reason?: string
+  drift?: KyberCaptureDriftEntry[]
+  code?: string
+}
+
+export interface KyberCaptureReceiverNote {
+  hosted: boolean
+  willEnable: boolean
+  enabled: boolean
+  enableFailed: boolean
+  lastManagedHarnessDisabled: boolean
+}
+
+/** A 200 answer to `POST /api/kyber/capture`. */
+export interface KyberCaptureResult {
+  action: KyberCaptureAction
+  harness: string
+  dryRun: boolean
+  outcome: 'previewed' | 'wrote' | 'noop'
+  events: KyberCaptureEvent[]
+  harnessState: KyberCaptureHarness
+  receiver: KyberCaptureReceiverNote
+}
+
+export type KyberCaptureRefusalReason =
+  | 'drift'
+  | 'conflict'
+  | 'unparseable'
+  | 'unreadable'
+  | 'busy'
+  | 'unknown'
+
+/** A 409 answer: the server declined and changed nothing. Shown, not thrown. */
+export interface KyberCaptureRefusal {
+  outcome: 'refused'
+  error: string
+  reason: KyberCaptureRefusalReason
+  events: KyberCaptureEvent[]
+}
+
+/** Exactly the three keys the route accepts. */
+export interface KyberCaptureRequest {
+  action: KyberCaptureAction
+  harness: string
+  dryRun: boolean
+}
+
+type Raw = Record<string, unknown>
+
+function isRaw(value: unknown): value is Raw {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function capText(value: unknown, max = CAPTURE_TEXT_MAX): string {
+  return typeof value === 'string' ? value.slice(0, max) : ''
+}
+
+function oneOf<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
+  return typeof value === 'string' && (allowed as readonly string[]).includes(value) ? (value as T) : fallback
+}
+
+function captureStrings(value: unknown, maxItems: number, maxLength = CAPTURE_TEXT_MAX): string[] {
+  if (!Array.isArray(value)) return []
+  const out: string[] = []
+  for (const item of value) {
+    if (typeof item === 'string') out.push(item.slice(0, maxLength))
+    if (out.length >= maxItems) break
+  }
+  return out
+}
+
+function captureValue(value: unknown): KyberCaptureValue {
+  if (typeof value === 'string') return value.slice(0, CAPTURE_VALUE_MAX)
+  if (typeof value === 'number' || typeof value === 'boolean') return value
+  // A nested object or array is a config value the display never needs; do not
+  // render it, and do not pretend the key is absent either.
+  return value === null || value === undefined ? null : '[structured value]'
+}
+
+function readDrift(value: unknown): KyberCaptureDriftEntry[] | null {
+  if (!Array.isArray(value)) return null
+  const out: KyberCaptureDriftEntry[] = []
+  for (const item of value) {
+    if (!isRaw(item) || typeof item.key !== 'string') continue
+    out.push({ key: item.key.slice(0, CAPTURE_VALUE_MAX), written: captureValue(item.written), current: captureValue(item.current) })
+    if (out.length >= CAPTURE_MAX_KEYS) break
+  }
+  return out
+}
+
+function readFile(raw: unknown): KyberCaptureFile | null {
+  if (!isRaw(raw)) return null
+  return {
+    id: capText(raw.id, CAPTURE_VALUE_MAX),
+    path: capText(raw.path),
+    applicable: raw.applicable === true,
+    exists: typeof raw.exists === 'boolean' ? raw.exists : null,
+    expectedKeys: captureStrings(raw.expectedKeys, CAPTURE_MAX_KEYS, CAPTURE_VALUE_MAX),
+    presentKeys: captureStrings(raw.presentKeys, CAPTURE_MAX_KEYS, CAPTURE_VALUE_MAX),
+    missingKeys: captureStrings(raw.missingKeys, CAPTURE_MAX_KEYS, CAPTURE_VALUE_MAX),
+    drift: readDrift(raw.drift),
+  }
+}
+
+function readManualStep(raw: unknown): KyberCaptureManualStep | null {
+  if (!isRaw(raw)) return null
+  const step: KyberCaptureManualStep = { id: capText(raw.id, CAPTURE_VALUE_MAX), text: capText(raw.text) }
+  if (isRaw(raw.env) && typeof raw.env.name === 'string' && typeof raw.env.value === 'string') {
+    step.env = { name: raw.env.name.slice(0, CAPTURE_VALUE_MAX), value: raw.env.value.slice(0, CAPTURE_VALUE_MAX) }
+  }
+  return step
+}
+
+function mapBounded<T>(value: unknown, max: number, read: (item: unknown) => T | null): T[] {
+  if (!Array.isArray(value)) return []
+  const out: T[] = []
+  for (const item of value) {
+    const parsed = read(item)
+    if (parsed !== null) out.push(parsed)
+    if (out.length >= max) break
+  }
+  return out
+}
+
+function readHarness(raw: unknown): KyberCaptureHarness | null {
+  if (!isRaw(raw) || typeof raw.id !== 'string') return null
+  return {
+    id: raw.id.slice(0, CAPTURE_VALUE_MAX),
+    displayName: capText(raw.displayName, CAPTURE_VALUE_MAX) || raw.id.slice(0, CAPTURE_VALUE_MAX),
+    // An unrecognised mode degrades to read-only: it must never create a toggle.
+    mode: oneOf(raw.mode, ['managed', 'status-only'], 'status-only'),
+    installed: oneOf(raw.installed, ['detected', 'not-detected', 'unknown'], 'unknown'),
+    installEvidence: captureStrings(raw.installEvidence, CAPTURE_MAX_EVIDENCE),
+    state: oneOf(raw.state, ['on', 'off', 'partial', 'unknown', 'not-applicable'], 'unknown'),
+    receipt: oneOf(raw.receipt, ['recorded', 'absent'], 'absent'),
+    files: mapBounded(raw.files, CAPTURE_MAX_FILES, readFile),
+    warnings: mapBounded(raw.warnings, CAPTURE_MAX_WARNINGS, (item) =>
+      isRaw(item) ? { code: capText(item.code, CAPTURE_VALUE_MAX), text: capText(item.text) } : null,
+    ),
+    manualSteps: mapBounded(raw.manualSteps, CAPTURE_MAX_STEPS, readManualStep),
+    statusLines: captureStrings(raw.statusLines, CAPTURE_MAX_LINES),
+  }
+}
+
+const EVENT_KINDS = ['would-write', 'wrote', 'noop', 'would-restore', 'restored', 'refused', 'error'] as const
+
+function readChange(raw: unknown): KyberCaptureChange | null {
+  if (!isRaw(raw) || typeof raw.key !== 'string') return null
+  const change: KyberCaptureChange = { key: raw.key.slice(0, CAPTURE_VALUE_MAX) }
+  if ('before' in raw) change.before = captureValue(raw.before)
+  if ('after' in raw) change.after = captureValue(raw.after)
+  return change
+}
+
+function readEvent(raw: unknown): KyberCaptureEvent | null {
+  if (!isRaw(raw) || typeof raw.kind !== 'string' || !(EVENT_KINDS as readonly string[]).includes(raw.kind)) return null
+  const event: KyberCaptureEvent = {
+    kind: raw.kind as KyberCaptureEventKind,
+    harness: capText(raw.harness, CAPTURE_VALUE_MAX),
+    fileId: capText(raw.fileId, CAPTURE_VALUE_MAX),
+    path: capText(raw.path),
+  }
+  if (Array.isArray(raw.changes)) event.changes = mapBounded(raw.changes, CAPTURE_MAX_CHANGES, readChange)
+  if (typeof raw.reason === 'string') event.reason = raw.reason.slice(0, CAPTURE_VALUE_MAX)
+  if (Array.isArray(raw.drift)) event.drift = readDrift(raw.drift) ?? []
+  if (typeof raw.code === 'string') event.code = raw.code.slice(0, CAPTURE_VALUE_MAX)
+  return event
+}
+
+function readEvents(value: unknown): KyberCaptureEvent[] {
+  return mapBounded(value, CAPTURE_MAX_EVENTS, readEvent)
+}
+
+/** A 2xx answer whose body is not the documented shape is a broken server, not data. */
+function malformed(status: number): KyberApiError {
+  return new KyberApiError(status, CAPTURE_PATH)
+}
+
+function parseCaptureStatus(raw: unknown, status: number): KyberCaptureStatus {
+  if (!isRaw(raw) || !isRaw(raw.receiver) || !Array.isArray(raw.harnesses)) throw malformed(status)
+  return {
+    platform: oneOf(raw.platform, ['darwin', 'linux', 'win32'], 'unknown'),
+    receiver: {
+      hosted: raw.receiver.hosted === true,
+      liveness: oneOf(raw.receiver.liveness, ['kyberdash', 'foreign', 'none', 'unknown'], 'unknown'),
+      detail: capText(raw.receiver.detail),
+    },
+    harnesses: mapBounded(raw.harnesses, CAPTURE_MAX_HARNESSES, readHarness),
+  }
+}
+
+/** `GET /api/kyber/capture`: the structured per-harness collection status. */
+export async function fetchKyberCaptureStatus(): Promise<KyberCaptureStatus> {
+  const res = await fetch(CAPTURE_PATH)
+  if (!res.ok) throw new KyberApiError(res.status, CAPTURE_PATH)
+  return parseCaptureStatus(await res.json().catch(() => null), res.status)
+}
+
+function parseCaptureResult(raw: unknown, status: number): KyberCaptureResult {
+  if (!isRaw(raw) || !isRaw(raw.receiver)) throw malformed(status)
+  const outcome = oneOf(raw.outcome, ['previewed', 'wrote', 'noop'], 'previewed')
+  if (raw.outcome !== outcome) throw malformed(status)
+  const harnessState = readHarness(raw.harnessState)
+  if (harnessState === null) throw malformed(status)
+  return {
+    action: oneOf(raw.action, ['enable', 'disable'], 'enable'),
+    harness: capText(raw.harness, CAPTURE_VALUE_MAX),
+    dryRun: raw.dryRun === true,
+    outcome,
+    events: readEvents(raw.events),
+    harnessState,
+    receiver: {
+      hosted: raw.receiver.hosted === true,
+      willEnable: raw.receiver.willEnable === true,
+      enabled: raw.receiver.enabled === true,
+      enableFailed: raw.receiver.enableFailed === true,
+      lastManagedHarnessDisabled: raw.receiver.lastManagedHarnessDisabled === true,
+    },
+  }
+}
+
+function parseCaptureRefusal(raw: unknown): KyberCaptureRefusal {
+  const body = isRaw(raw) ? raw : {}
+  return {
+    outcome: 'refused',
+    error: capText(body.error),
+    reason: oneOf(body.reason, ['drift', 'conflict', 'unparseable', 'unreadable', 'busy'], 'unknown'),
+    events: readEvents(body.events),
+  }
+}
+
+/**
+ * `POST /api/kyber/capture`. A dry run previews; a real request writes. The
+ * body is built from exactly the three documented keys, so nothing a caller
+ * adds can reach the route. A 409 is the server declining (drift, conflict, an
+ * unreadable file) and is RETURNED as a refusal for the UI to show; every other
+ * non-2xx throws `KyberApiError`.
+ */
+export async function postKyberCapture(
+  request: KyberCaptureRequest,
+): Promise<KyberCaptureResult | KyberCaptureRefusal> {
+  const res = await fetch(CAPTURE_PATH, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ action: request.action, harness: request.harness, dryRun: request.dryRun }),
+  })
+  if (res.status === 409) return parseCaptureRefusal(await res.json().catch(() => null))
+  if (!res.ok) throw new KyberApiError(res.status, CAPTURE_PATH)
+  return parseCaptureResult(await res.json().catch(() => null), res.status)
 }

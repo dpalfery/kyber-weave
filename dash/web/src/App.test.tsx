@@ -277,6 +277,61 @@ describe('App: Top Navigation Refactoring', () => {
   })
 })
 
+describe('App: Settings header button', () => {
+  beforeEach(() => {
+    clearHooks()
+  })
+
+  const PAGES: KyberPage[] = ['context-doctor', 'sessions', 'compare', 'quarantine', 'problems']
+
+  it('renders the Settings button on every page with dialog semantics and a collapsed state', () => {
+    const qc = createTestQueryClient()
+    for (const page of PAGES) {
+      clearHooks()
+      const html = renderHtml(
+        <QueryClientProvider client={qc}>
+          <App initialPage={page} />
+        </QueryClientProvider>
+      )
+      const button = html.match(/<button[^>]*data-testid="header-settings-button"[^>]*>/)?.[0]
+      expect(button, page).toBeDefined()
+      expect(button).toContain('aria-haspopup="dialog"')
+      expect(button).toContain('aria-expanded="false"')
+      expect(html).toContain('Settings</button>')
+    }
+  })
+
+  it('places the Settings button immediately left of the theme toggle, in the header right-hand cluster', () => {
+    const qc = createTestQueryClient()
+    const html = renderHtml(
+      <QueryClientProvider client={qc}>
+        <App initialPage="context-doctor" />
+      </QueryClientProvider>
+    )
+    const settingsAt = html.indexOf('data-testid="header-settings-button"')
+    const themeAt = html.search(/aria-label="Switch to (dark|light) mode"/)
+    expect(settingsAt).toBeGreaterThan(-1)
+    expect(themeAt).toBeGreaterThan(settingsAt)
+    // Nothing but the Settings button's own markup sits between the two.
+    const between = html.slice(settingsAt, themeAt)
+    expect(between.match(/<button/g) ?? []).toHaveLength(1)
+    // It lives after the nav tabs, in the same header.
+    expect(html.indexOf('data-testid="nav-tabs"')).toBeLessThan(settingsAt)
+  })
+
+  it('does not render the drawer, and adds no header tab, while closed', () => {
+    const qc = createTestQueryClient()
+    const html = renderHtml(
+      <QueryClientProvider client={qc}>
+        <App initialPage="context-doctor" />
+      </QueryClientProvider>
+    )
+    expect(html).not.toContain('role="dialog"')
+    expect(html).not.toContain('settings-drawer-panel')
+    expect(html.match(/data-testid="nav-tab-[^"]+"/g)).toHaveLength(NAV_TABS.length)
+  })
+})
+
 describe('App: Harness selector storage filters', () => {
   // The strip used to be a hardcoded three, so a machine collecting Codex,
   // Cursor, OpenCode or Antigravity ingested that data and then offered no tab

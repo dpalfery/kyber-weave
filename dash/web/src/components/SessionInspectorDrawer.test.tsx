@@ -32,6 +32,7 @@ import {
   buildWholeTurnCopyText,
   orphanTurnParts,
   resolveSharedDisplay,
+  turnPartKey,
 } from './SessionInspectorDrawer.js'
 
 import { renderToStaticMarkup } from 'react-dom/server'
@@ -1289,12 +1290,12 @@ describe('SessionInspectorDrawer: Full-content endpoint', () => {
 
 function unescapeHtml(html: string): string {
   return html
-    .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
     .replace(/&#x27;/g, "'")
     .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, '&')
 }
 
 // A Copilot-shaped turn row: the content object carries the flat canonical
@@ -2566,6 +2567,14 @@ describe('SessionInspectorDrawer: whole-turn full context', () => {
         [],
       ),
     ).toBe('')
+  })
+
+  it('keys id-less parts by (kind, text) without concatenation collisions, and ignores an empty id', () => {
+    expect(turnPartKey({ part: 'ab', text: 'c' })).not.toBe(turnPartKey({ part: 'a', text: 'bc' }))
+    expect(turnPartKey({ part: 'a', text: 'bc' })).toBe(turnPartKey({ part: 'a', text: 'bc' }))
+    // An empty-string id is no identity: fall back instead of keying every such part ''.
+    expect(turnPartKey({ id: '', part: 'a', text: 'x' })).not.toBe(turnPartKey({ id: '', part: 'a', text: 'y' }))
+    expect(turnPartKey({ id: 'part-1', part: 'a', text: 'x' })).toBe('part-1')
   })
 
   it('identifies orphan parts by stable id without collapsing repeats', () => {

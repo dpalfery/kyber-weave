@@ -6,7 +6,7 @@ component: KyberDash
 source-root: dash
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-10
+last-reviewed: 2026-10-11
 decided-by:
   - adr/0020-kyberdash-one-time-fork
   - adr/0008-kyberdash-single-canonical-store
@@ -20,6 +20,7 @@ decided-by:
   - adr/0016-kyberdash-harness-source-refresh
   - adr/0018-kyberdash-content-retention-purge
   - adr/0033-kyberdash-surfaces-are-display-layers
+  - adr/0035-kyberdash-quarantine-raw-packet-evidence
 keywords:
   - dashboard
   - codeburn
@@ -62,6 +63,9 @@ code-refs:
   - recordsForShare
   - alignByPhase
   - dedupeTwinTurns
+  - runCaptureAction
+  - handleCaptureRequest
+  - buildCaptureStatus
 ---
 
 # KyberDash architecture
@@ -488,7 +492,7 @@ measured independently from whether individual composition buckets are available
 
 `CanonStore` (`dash/src/canon/store.ts`) is SQLite through the runtime's built-in module —
 upstream already depends on it for two providers, so no new dependency is introduced. The
-schema is a version-controlled constant executed on construction, currently at version 17;
+schema is a version-controlled constant executed on construction, currently at version 19;
 metadata carries the schema version, and a store built by an older version is migrated in
 place on open rather than rebuilt. Idempotent upsert is keyed on the
 record identifier, which makes re-ingest idempotent (R2.5). The tables are `records`,
@@ -498,8 +502,11 @@ record identifier, which makes re-ingest idempotent (R2.5). The tables are `reco
 Schema 11 added checkpointing and provenance ([ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md)),
 schema 12 added `refresh_run`, schema 13 introduced `problem_key` with unique indexing, schema 14 rekeyed that identity by span, code, and location,
 schema 15 made finding estimated waste nullable (`estimated_waste_tokens INTEGER` NULL for coverage-gap findings with unmeasured estimates),
-schema 16 added `history_weeks INTEGER` to `refresh_run`, and
-schema 17 added trace metadata columns (`source`, `name`, `timestamp` to `quarantine`; `session_id`, `harness`, `timestamp` to `problems`).
+schema 16 added `history_weeks INTEGER` to `refresh_run`,
+schema 17 added trace metadata columns (`source`, `name`, `timestamp` to `quarantine`; `session_id`, `harness`, `timestamp` to `problems`),
+schema 18 added `quarantine.raw_payload` — the decoded packet a quarantined span is filed with, kept after the record is deleted so the turn inspector can still show what the sender sent ([ADR 0035](../adr/0035-kyberdash-quarantine-raw-packet-evidence.md)), and
+schema 19 added a nullable `harness` to `quarantine`, `pending_logs`, and `quarantined_logs`, so a per-harness wipe can scope those rows rather than missing them.
+Every `ADD COLUMN` in those two steps is presence-guarded, so a store that already carries the column — such as one stamped by an off-main build — reaches the identical final shape instead of failing on a duplicate column ([ADR 0035](../adr/0035-kyberdash-quarantine-raw-packet-evidence.md)).
 `commitSourceUnit` writes records, provenance, and the unit checkpoint together. The raw
 column is compressed (R12.4); the measured cost of not doing
 so is in the [rationale](../reference/kyberdash-rationale.md).
@@ -922,6 +929,7 @@ The individual views:
 - **`ContextInspector.tsx`**: Full unclipped context viewer with part tabs and copy-out protocol.
 - **`ContextReviewPanel.tsx`**: Opt-in LLM review console with credential safety.
 - **`ScorecardMatrix.tsx`**: Cross-harness six-dimension matrix on Context Doctor.
+- **`SettingsDrawer.tsx`** (`dash/web/src/components/settings/`): Header **Settings** button opens a slide-out over the shared `SlideOutDrawer` shell. It lists each harness (`HarnessCollectionList.tsx`) with its collection state from `GET /api/kyber/capture`, previews every switch as a dry run before **Confirm**, and carries the OTLP receiver switch. Display only: every state shown is the server's report and every change is an `/api/kyber/*` call ([runbook](runbook.md#harness-opentelemetry-capture)).
 
 The workspace findings browser pages on what the **server** served, not on what is painted:
 the next offset is the extent of the contiguous run of the scope's stored pages that starts at
@@ -936,6 +944,23 @@ never rewrites a count: the heading, the detector chips and the suppression bann
 successful envelope, the failure renders as an inline retryable banner above the retained rows
 rather than the no-rows panel, and while the envelope is unavailable the suppression count is
 stated in words as unknown, never as `0` ([honest unobservability](../rules/honest-unobservability.md)).
+
+### Harness OpenTelemetry capture (ADR 0031)
+
+`runCaptureAction` (`dash/src/capture/actions.ts`) is the engine entry the web dashboard uses; the
+`kyberdash kyber capture` commands run the same capture core. `handleCaptureRequest`
+(`dash/src/server/capture-routes.ts`) mounts `GET|POST /api/kyber/capture` over it in process.
+The route is the only place the capture engine meets the settings store, because the CLI has
+none: a real `enable` ends by switching `settings.receiver.hosted` on, a failed setting write is
+reported in the receiver block of a 200 rather than as a 5xx (the config is already written),
+and `disable` never stops the receiver. State is built by `buildCaptureStatus`
+(`dash/src/capture/status.ts`) from the engine's own primitives rather than by parsing CLI
+text. Enable passes an applicability filter so a multi-file harness (Copilot's two VS Code
+editions) writes only files that exist or whose host directory exists. Actions run under a
+per-process mutex (`dash/src/capture/lock.ts`) that queues overlapping requests, so a repeated
+enable becomes a no-op rather than a race; another process is not covered.
+Paths resolve through a platform seam (`dash/src/capture/paths.ts`), so macOS, Linux and
+Windows are all supported, and JSON/JSONC edits preserve BOM and CRLF.
 
 ### Turn inspection numbering and resolution contracts (issue #184)
 
@@ -994,7 +1019,7 @@ The web dashboard server wires HTTP requests directly to `KyberBridge`:
 | `/api/kyber/sessions` | `GET` | `{ sessions: SessionSummary[] }` | List sessions; supports `?limit=` and `?harness=`. |
 | `/api/kyber/session/:id` | `GET` | `SessionPayload` | Full session payload with turns, context, tools, and timeline. Summary emits `cache_hit_ratio` and `cache_creation_coverage` from single engine writer. |
 | `/api/kyber/session/:id/content` | `GET` | `SessionContent` | Full canonical content for an inspected session part. |
-| `/api/kyber/session/:id/turn/:index/content` | `GET` | `TurnContentResult` | Full unclipped assembled context for a specific turn ([ADR 0014](../adr/0014-unclipped-turn-inspection-and-copy-out-protocol.md)). Uses 0-based `:index`; strict resolution returns 404 for out-of-bounds turn indices, and 200 with empty parts when the turn exists but recorded no content. `?full=true` is the explicit lossless path — no default-budget truncation, no large-number sentinel — backing the whole-turn inspector; each part annotates recurrence against earlier captured turns by whole-text sha256 with no normalization, and `sharedContext` unions turn-span system prompts with non-turn session prompts, each tagged with its contributing `turnIndex` ([ordered, API-seen turn context](#ordered-api-seen-turn-context)). |
+| `/api/kyber/session/:id/turn/:index/content` | `GET` | `TurnContentResult` | Full unclipped assembled context for a specific turn ([ADR 0014](../adr/0014-unclipped-turn-inspection-and-copy-out-protocol.md)). Uses 0-based `:index`; strict resolution returns 404 for out-of-bounds turn indices, and 200 with empty parts when the turn exists but recorded no content. `?full=true` is the explicit lossless path — no default-budget truncation, no large-number sentinel — backing the whole-turn inspector; each part annotates recurrence against earlier captured turns by whole-text sha256 with no normalization, and `sharedContext` unions turn-span system prompts with non-turn session prompts, each tagged with its contributing `turnIndex` ([ordered, API-seen turn context](#ordered-api-seen-turn-context)). Additively carries `parentSpanId` and `rawPacket: { spanAttributesPath, interactionPath? }` — the packet pointers the turn view discloses; `interactionPath` is present only when the parent's quarantine row kept a payload ([ADR 0035](../adr/0035-kyberdash-quarantine-raw-packet-evidence.md)). |
 | `/api/kyber/findings` | `GET` | `{ findings: Finding[], total, limit, offset, detectorCounts, unknownWindowSessions }` | Ranked findings; supports `?runId=`, `?sessionId=`, `?harness=`, `?detector=`, `?limit=`, `?offset=`. `total` describes the narrowed set; `detectorCounts` cover the run/session/harness scope ignoring paging and the detector filter so filter chips never evaporate; `unknownWindowSessions` counts sessions with an unreported context window in scope. |
 | `/api/kyber/finding/:id` | `GET` | `Finding` | Single finding detail with evidence rows and risk caveats. |
 | `/api/kyber/predictions` | `GET`, `POST` | `{ predictions: Prediction[] }` | Query or record prediction calibration entries. |
@@ -1003,13 +1028,15 @@ The web dashboard server wires HTTP requests directly to `KyberBridge`:
 | `/api/kyber/compare/runs` | `GET` | `RunComparisonResult` | Phase-aligned comparison between two runs. Requires `?runA=` and `?runB=` (aliases `a`, `b`). Loads turns through canonical share resolution and `llm.invoke` dedupe as above. Response includes phase-aligned `pairs`, per-run sides with optional `availability`/`metricsReason`, aggregate `totals` with `availability: 'measured' \| 'unavailable'` (token delta exists only when both runs resolve comparable turns), and a `verdict` with `historyAvailability`, `canPromote`, and `completedPairCount` present only when history was explicitly measured. The public route never treats a query parameter as store-backed recommendation history. |
 | `/api/kyber/review` | `POST` | `ReviewResponse` | Opt-in LLM context review invocation (D10). |
 | `/api/kyber/review/status` | `GET` | `{ provider, isConfigured }` | Review provider configuration status. |
-| `/api/kyber/quarantine` | `GET` | `{ entries: QuarantineRow[], data: QuarantineRow[], total, page, limit }` | Quarantined spans; supports `?limit=`, `?offset=`, `?page=`. Rows carry `source`, `name`, `timestamp`. |
+| `/api/kyber/quarantine` | `GET` | `{ entries: QuarantineRow[], data: QuarantineRow[], total, page, limit }` | Quarantined spans; supports `?limit=`, `?offset=`, `?page=`. Rows carry `source`, `name`, `timestamp`. The list stays light and never serves payloads. |
+| `/api/kyber/quarantine/:spanId` | `GET` | `{ spanId, source, name, reason, timestamp, namespaces, harness, rawPayload, evidenceAvailable }` | One quarantined span's audit row plus the packet it kept ([ADR 0035](../adr/0035-kyberdash-quarantine-raw-packet-evidence.md)). 200 for a known id; 404 for an unknown one; 405 for a non-GET method; 400 with `{ error: 'Missing span id' }` for an empty id. A row that predates the payload column answers `rawPayload: null, evidenceAvailable: false` — never an invented packet. |
 | `/api/kyber/problems` | `GET` | `{ problems: ProblemRow[], data: ProblemRow[], total, page, limit }` | Recorded problems; supports `?limit=`, `?offset=`, `?page=`. Rows carry `session_id`, `harness`, `timestamp`. |
 | `/api/kyber/meta` | `GET` | `MetaResult` | Tokenizer configuration, rates, span counts, and sources. |
 | `/api/kyber/coverage` | `GET` | `{ refresh, ingest, quarantineByReason, checkpoints }` | Ingest coverage: persisted refresh window (`history_weeks`, null = unknown), per-source ingest activity (`records` counts joined with `ingest_log` sums and `lastReceivedAt`; `{ status: 'unknown' }` when nothing is recorded), per-reason quarantine counts, and `source_checkpoint` statuses including `partial` and the persisted zero-record reason (`lastErrorCode`). |
 | `/api/kyber/report` | `GET` | `ContextReport` | The versioned context report for the query scope (`harness`, `session`, `run`, `days`); the same document `kyberdash report` prints. |
 | `/api/kyber/settings` | `GET`, `PUT` | `SettingsView` | The four shared switches as JSON booleans and a number: `folderImportScheduled`, `jobsPaused`, `refreshCadenceMinutes`, `receiverHosted` ([ADR 0033](../adr/0033-kyberdash-surfaces-are-display-layers.md)). A `PUT` is partial; an unknown key or a value of the wrong type is refused whole (400), leaving every switch as it was. |
 | `/api/kyber/jobs` | `GET` | `{ refresh, paused, storeGeneration, hostedElsewhere }` | What the job host is actually doing — state, last success, last failure, next due, whether it is paused, and whether another process holds `jobs.lock`. The flat host status is mapped here once, so both surfaces read the same shape. |
+| `/api/kyber/capture` | `GET`, `POST` | `GET`: `{ platform, receiver: { hosted, liveness, detail }, harnesses: CaptureHarnessStatus[] }` · `POST`: `{ action, harness, dryRun, outcome, events, harnessState, receiver: { hosted, willEnable, enabled, enableFailed, lastManagedHarnessDisabled } }` | Harness OpenTelemetry collection ([ADR 0031](../adr/0031-kyberdash-capture-command-owns-harness-telemetry-keys.md)). `GET` is read-only: per-harness `state` (`on` / `off` / `partial` / `unknown` / `not-applicable`), install detection, files with expected and present keys, drift, warnings, manual steps, and receiver liveness probed at `/healthz` (`unknown`, not probed, when this server does not host the receiver). `POST` body is exactly `{ action: 'enable' \| 'disable', harness, dryRun }` for a managed harness (Copilot, Claude Code, OpenCode); any other key or harness is 400. A dry run returns the exact per-file changes and writes nothing. A real `enable` that ends `wrote` or `noop`, or that wrote at least one file before a later file refused, turns `settings.receiver.hosted` on afterwards; `disable` never turns it off and only reports `lastManagedHarnessDisabled`. 200 result; 400 invalid payload; 404 when the server has no store; 405 other methods; 409 `{ error, outcome: 'refused', reason, events }` on drift, conflict, unparseable, unreadable or busy; a refusal before any write changes no files (a drift refusal on disable says so), but files are written one at a time, so a later file's refusal or host error can follow earlier files already written, and `events` keeps those `wrote` events; 413 body over 64KB; 415 non-JSON content type; 500 fixed `{ error: 'Capture failed' }` (no path or host error text crosses the wire). |
 | `/api/kyber/refresh` | `POST` | `202 { accepted: true }` · `409 { error }` · `500 { error }` | Ask the host to run a refresh; the body names the asking surface (`{ surface: 'tray' \| 'web' }`). `scheduled` and `cli` are not accepted from a client: the host owns the schedule, and a client-triggered run must name the surface that asked. Answers as soon as the job is taken, not when it finishes, so the outcome is read from `GET /api/kyber/jobs`. 400 invalid body; 409 `{ error }` when this server started nothing (job declined, busy, or hosted elsewhere); 500 `{ error }` when the spawn itself failed (a fixed string — no paths cross the wire). |
 | `/api/kyber/clean` | `POST` | `CleanReport` | User-initiated database clean ([ADR 0032](../adr/0032-kyberdash-user-initiated-clean.md)). Body carries exactly one scope (`all: true` or a non-empty `harnesses` list), explicit `confirm: true`, and the optional `reingestWeeks` window (1–52; absent or null means no re-ingest, which is the default). 200 with the wipe counts and re-ingest summary; 400 invalid body/scope; 405 non-POST; 409 lock busy; 413 body over 64KB; 500 bounded failure. |
 | `/api/kyber/import-history` | `POST` | `202 { accepted: true }` · `409 { error }` · `500 { error }` | One-off folder history import ([§2c](../dash/runbook.md#2c-import-folder-history-dash-import-history) of the runbook). The **request body** is `{ weeks?, harness? \| harnesses? }` — `weeks` defaults to 1 and is capped at 52, and the singular and plural harness keys are mutually exclusive (either may be omitted, meaning every readable harness). Never reads or changes `settings.folder_import.scheduled`. 400 invalid payload; 409 `{ error }` when a job is already running here; 500 `{ error }` when the spawn itself failed. Like refresh, it answers once the job is taken, so the outcome is read from `GET /api/kyber/jobs`. |
@@ -1018,7 +1045,7 @@ All `/api/kyber/*` responses return standard headers (`content-type: application
 
 ### User-initiated database clean (ADR 0032)
 
-`cleanDatabase` (`dash/src/clean/clean.ts`) is the single implementation behind `kyberdash dash clean` and `POST /api/kyber/clean`; a surface asks for it over the API and holds no clean logic of its own. One clean pauses the OTLP receiver (loopback admin routes on `dash/src/otel/receiver.ts`; 503 + Retry-After while paused, `/healthz` stays 200 with `paused`, lease TTL auto-resumes), holds the refresh lock (exit 3 / 409 when busy), wipes the scope in one store transaction — records (fold-expanded to raw front-end names), provenance, checkpoints, and harness-scoped derived caches — projects the derived tables, re-ingests the scope **only when the caller asked for a window** (`--reingest-weeks <n>`, 1–52; absent means none, which is the default), and resumes ingestion in a `finally`. Kept in all cases: `ingest_log`, `refresh_run`, `metadata` (stamped `last_clean_at`/scope), `token_cache`, and the model-window catalog. Wipe-all additionally clears `quarantine` and the log-enrichment tables; per-harness wipe cannot scope quarantine rows (no harness column). No backup is taken, by design: the data is ephemeral point-in-time telemetry, re-derivable from source logs except OTLP-collected records, which both confirm surfaces disclose as permanently gone. Nothing re-imports after the clean on its own either: the next scheduled refresh reads folder sources only while `settings.folder_import.scheduled` is `on` ([ADR 0033](../adr/0033-kyberdash-surfaces-are-display-layers.md) decision 6). Automatic paths (refresh, retention purge) keep the ADR 0016/ADR 0018 no-delete contracts; only the confirmed clean deletes rows, and only an explicitly requested re-ingest repopulates from source logs.
+`cleanDatabase` (`dash/src/clean/clean.ts`) is the single implementation behind `kyberdash dash clean` and `POST /api/kyber/clean`; a surface asks for it over the API and holds no clean logic of its own. One clean pauses the OTLP receiver (loopback admin routes on `dash/src/otel/receiver.ts`; 503 + Retry-After while paused, `/healthz` stays 200 with `paused`, lease TTL auto-resumes), holds the refresh lock (exit 3 / 409 when busy), wipes the scope in one store transaction — records (fold-expanded to raw front-end names), provenance, checkpoints, and harness-scoped derived caches — projects the derived tables, re-ingests the scope **only when the caller asked for a window** (`--reingest-weeks <n>`, 1–52; absent means none, which is the default), and resumes ingestion in a `finally`. Kept in all cases: `ingest_log`, `refresh_run`, `metadata` (stamped `last_clean_at`/scope), `token_cache`, and the model-window catalog. Wipe-all clears `quarantine` and the log-enrichment tables. A per-harness wipe scopes the `quarantine`, `pending_logs`, and `quarantined_logs` rows whose `harness` matches the wiped raw names — the nullable column schema v19 added for exactly this ([ADR 0035](../adr/0035-kyberdash-quarantine-raw-packet-evidence.md)); a row with no harness is "unknown", never "matches", so unclaimed rows survive a per-harness wipe and are cleared only by the complete wipe. Assembled turn text is purged after 14 days. The raw packet keeps exactly what the sender sent until you wipe the `claude-code` harness or the whole database ([ADR 0018](../adr/0018-kyberdash-content-retention-purge.md)). No backup is taken, by design: the data is ephemeral point-in-time telemetry, re-derivable from source logs except OTLP-collected records, which both confirm surfaces disclose as permanently gone. Nothing re-imports after the clean on its own either: the next scheduled refresh reads folder sources only while `settings.folder_import.scheduled` is `on` ([ADR 0033](../adr/0033-kyberdash-surfaces-are-display-layers.md) decision 6). Automatic paths (refresh, retention purge) keep the ADR 0016/ADR 0018 no-delete contracts; only the confirmed clean deletes rows, and only an explicitly requested re-ingest repopulates from source logs.
 
 Coverage after a wipe: `refresh_run` rows older than the last wipe are ignored when coverage is computed. They are audit history of runs whose records are gone, and counting them would claim coverage the store no longer has.
 

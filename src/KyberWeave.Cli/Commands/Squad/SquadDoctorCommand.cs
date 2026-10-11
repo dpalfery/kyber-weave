@@ -363,7 +363,8 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
                         new SquadRenderRequest(
                             canonicalSourcePath,
                             [target],
-                            SquadDeploymentScope.Global))
+                            SquadDeploymentScope.Global,
+                            GlobalRoots: globalRoots))
                     .GetAwaiter()
                     .GetResult();
 

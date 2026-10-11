@@ -621,3 +621,197 @@ describe('Cond2 14→15 safety probe (old binary on new schema)', () => {
     expect(() => new CanonStore(path)).toThrow(/upgrade KyberDash/)
   })
 })
+
+// Plan 2026-10-10 (B10/F9): the live canon.db is stamped 18 by a local build
+// that already added `quarantine.raw_payload`, while this line shipped 17. A
+// build that understands only 17 refuses that store, so the schema lands at 19
+// and both shapes migrate: 17→18 adds `raw_payload`, 18→19 adds nullable
+// `harness` to `quarantine`, `pending_logs`, and `quarantined_logs`. Every
+// ADD COLUMN is presence-guarded, because the live store already has some of
+// them. The frozen DDL below is the v17 shape, so the migration — not
+// SCHEMA_SQL, which is all IF NOT EXISTS and never alters an existing table —
+// has to be what adds the columns.
+const V17_LOG_TABLES_SQL = `
+CREATE TABLE quarantine (
+  span_id TEXT PRIMARY KEY,
+  namespaces TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  source TEXT,
+  name TEXT,
+  timestamp TEXT
+);
+CREATE TABLE pending_logs (
+  log_id TEXT PRIMARY KEY,
+  payload TEXT NOT NULL
+);
+CREATE TABLE quarantined_logs (
+  log_id TEXT PRIMARY KEY,
+  payload TEXT NOT NULL,
+  reason TEXT NOT NULL
+);
+`
+
+const LEGACY_QUARANTINE_PACKET = JSON.stringify({
+  name: 'claude_code.interaction',
+  attributes: { 'span.type': 'interaction', user_prompt: 'why is the inspector empty?' },
+})
+
+/**
+ * A store at a historical version. v17 is main's shape; v18 is the live
+ * codex-built shape, which already carries `quarantine.raw_payload`.
+ * `quarantineRawPayload` forces that column onto a v17-stamped store — the
+ * shape B10's guard has to survive without a duplicate-column error.
+ */
+function legacyStoreAt(options: { version: 17 | 18; quarantineRawPayload?: boolean }): string {
+  const dir = mkdtempSync(join(tmpdir(), `kyber-migration-v${options.version}-`))
+  dirs.push(dir)
+  const path = join(dir, 'canon.db')
+  new CanonStore(path).close()
+
+  const db = new DatabaseSync(path)
+  db.exec('DROP TABLE quarantine; DROP TABLE pending_logs; DROP TABLE quarantined_logs;')
+  db.exec(V17_LOG_TABLES_SQL)
+  const withRawPayload = options.version === 18 || options.quarantineRawPayload === true
+  if (withRawPayload) {
+    db.exec('ALTER TABLE quarantine ADD COLUMN raw_payload TEXT')
+  }
+  db.prepare('UPDATE metadata SET value = ? WHERE key = ?').run(String(options.version), 'schema_version')
+
+  if (withRawPayload) {
+    db.prepare(
+      `INSERT INTO quarantine (span_id, namespaces, reason, source, name, timestamp, raw_payload)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      'span-legacy-quarantine',
+      JSON.stringify(['claude_code']),
+      'non-model span',
+      'claude-code',
+      'claude_code.interaction',
+      '2026-10-09T00:00:00.000Z',
+      LEGACY_QUARANTINE_PACKET,
+    )
+  } else {
+    db.prepare(
+      `INSERT INTO quarantine (span_id, namespaces, reason, source, name, timestamp)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run(
+      'span-legacy-quarantine',
+      JSON.stringify(['claude_code']),
+      'non-model span',
+      'claude-code',
+      'claude_code.interaction',
+      '2026-10-09T00:00:00.000Z',
+    )
+  }
+  db.prepare('INSERT INTO pending_logs (log_id, payload) VALUES (?, ?)').run(
+    'log-legacy-pending',
+    JSON.stringify({ harness: 'claude-code' }),
+  )
+  db.prepare('INSERT INTO quarantined_logs (log_id, payload, reason) VALUES (?, ?, ?)').run(
+    'log-legacy-quarantined',
+    JSON.stringify({ harness: 'claude-code' }),
+    'unclaimed',
+  )
+  db.close()
+  return path
+}
+
+function tableColumns(path: string, table: string): string[] {
+  const db = new DatabaseSync(path)
+  const rows = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]
+  db.close()
+  return rows.map((row) => row.name)
+}
+
+describe('schema migration v17/v18 -> v19 (quarantine evidence and harness columns)', () => {
+  it('pins the version above the live codex store and steps through 17 and 18', () => {
+    // F9: the operator's live canon.db is stamped 18, so landing at 17 refuses
+    // it. B10 lands at 19 and migrates both the v17 and the v18 shape.
+    expect(SCHEMA_VERSION).toBe(19)
+    expect(MIGRATIONS[17]).toBeTypeOf('function')
+    expect(MIGRATIONS[18]).toBeTypeOf('function')
+  })
+
+  it('opens a v17 store at the current version with raw_payload and harness on every log table', () => {
+    const path = legacyStoreAt({ version: 17 })
+    const store = new CanonStore(path)
+    try {
+      expect(store.getMetadata('schema_version')).toBe(String(SCHEMA_VERSION))
+      expect(tableColumns(path, 'quarantine')).toEqual(expect.arrayContaining(['raw_payload', 'harness']))
+      expect(tableColumns(path, 'pending_logs')).toContain('harness')
+      expect(tableColumns(path, 'quarantined_logs')).toContain('harness')
+
+      // The rows that predate the columns survive untouched.
+      expect(store.getQuarantine('span-legacy-quarantine')).toEqual({
+        spanId: 'span-legacy-quarantine',
+        namespaces: ['claude_code'],
+        reason: 'non-model span',
+        source: 'claude-code',
+        name: 'claude_code.interaction',
+        timestamp: '2026-10-09T00:00:00.000Z',
+      })
+      expect(store.getPendingLogs()).toEqual([{ harness: 'claude-code' }])
+      expect(store.getQuarantinedLog('log-legacy-quarantined')).toMatchObject({
+        logId: 'log-legacy-quarantined',
+        reason: 'unclaimed',
+        log: { harness: 'claude-code' },
+      })
+    } finally {
+      store.close()
+    }
+  })
+
+  it('opens a v18 store that already carries raw_payload at the current version, keeping its packet', () => {
+    const path = legacyStoreAt({ version: 18 })
+    const store = new CanonStore(path)
+    try {
+      expect(store.getMetadata('schema_version')).toBe(String(SCHEMA_VERSION))
+      expect(tableColumns(path, 'quarantine')).toContain('harness')
+      expect(tableColumns(path, 'pending_logs')).toContain('harness')
+      expect(tableColumns(path, 'quarantined_logs')).toContain('harness')
+
+      const db = new DatabaseSync(path)
+      try {
+        const row = db
+          .prepare('SELECT raw_payload, harness FROM quarantine WHERE span_id = ?')
+          .get('span-legacy-quarantine') as { raw_payload: string | null; harness: string | null }
+        // The live store's packet is neither re-derived nor dropped by 18 → 19.
+        expect(row.raw_payload).toBe(LEGACY_QUARANTINE_PACKET)
+        // A row written before v19 has no harness; absent is null, never invented.
+        expect(row.harness).toBeNull()
+      } finally {
+        db.close()
+      }
+      expect(store.getQuarantine('span-legacy-quarantine')?.namespaces).toEqual(['claude_code'])
+    } finally {
+      store.close()
+    }
+  })
+
+  it('is a no-op on a store stamped 17 that already has raw_payload', () => {
+    // B10 guards each ADD COLUMN with a presence check: an unguarded ALTER
+    // throws "duplicate column name" on a store that already has it.
+    const path = legacyStoreAt({ version: 17, quarantineRawPayload: true })
+    const store = new CanonStore(path)
+    try {
+      expect(store.getMetadata('schema_version')).toBe(String(SCHEMA_VERSION))
+      expect(tableColumns(path, 'quarantine')).toEqual(expect.arrayContaining(['raw_payload', 'harness']))
+      expect(store.getQuarantine('span-legacy-quarantine')?.reason).toBe('non-model span')
+    } finally {
+      store.close()
+    }
+  })
+
+  it('is idempotent: reopening a migrated store leaves the columns and rows alone', () => {
+    const path = legacyStoreAt({ version: 17 })
+    new CanonStore(path).close()
+    const store = new CanonStore(path)
+    try {
+      expect(store.getMetadata('schema_version')).toBe(String(SCHEMA_VERSION))
+      expect(tableColumns(path, 'quarantine')).toEqual(expect.arrayContaining(['raw_payload', 'harness']))
+      expect(store.countQuarantine()).toBe(1)
+    } finally {
+      store.close()
+    }
+  })
+})

@@ -109,4 +109,61 @@ describe('row navigation opens a read-only detail inspector', () => {
     expect(await within(detail).findByTestId('problem-detail-unavailable')).toBeDefined()
     expect(screen.queryByTestId('problem-detail-stack')).toBeNull()
   })
+
+  it('opens the clicked row even when rows share a code and span, or carry no id or span', async () => {
+    const fetchMock = vi.fn(async () => ({ ok: false, status: 404, json: async () => ({}) }) as Response)
+    vi.stubGlobal('fetch', fetchMock)
+    renderDom(
+      <QueryClientProvider client={queryClient()}>
+        <ProblemsView
+          problems={[
+            { severity: 'error', code: 'DUP', message: 'first duplicate', spanId: 's1' },
+            { severity: 'error', code: 'DUP', message: 'second duplicate', spanId: 's1' },
+            { severity: 'warning', code: 'BARE', message: 'bare third' },
+          ]}
+        />
+      </QueryClientProvider>,
+    )
+    const buttons = await screen.findAllByTestId('problem-row-button')
+    fireEvent.click(buttons[1]!)
+    expect(within(await screen.findByTestId('problem-detail')).getByTestId('problem-detail-message').textContent).toContain(
+      'second duplicate',
+    )
+    fireEvent.click(buttons[2]!)
+    expect(within(await screen.findByTestId('problem-detail')).getByTestId('problem-detail-message').textContent).toContain(
+      'bare third',
+    )
+  })
+
+  it('does not request detail for a row with no server id, and says it is the list row', async () => {
+    const fetchMock = vi.fn(async () => ({ ok: false, status: 404, json: async () => ({}) }) as Response)
+    vi.stubGlobal('fetch', fetchMock)
+    renderDom(
+      <QueryClientProvider client={queryClient()}>
+        <ProblemsView problems={[{ severity: 'error', code: 'NOID', message: 'no id here', spanId: 's9' }]} />
+      </QueryClientProvider>,
+    )
+    fireEvent.click(await screen.findByTestId('problem-row-button'))
+    const detail = await screen.findByTestId('problem-detail')
+    expect(within(detail).getByTestId('problem-detail-unavailable')).toBeDefined()
+    expect(within(detail).queryByTestId('problem-detail-retry')).toBeNull()
+    expect(within(detail).queryByTestId('problem-detail-loading')).toBeNull()
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('reads detail from the singular /api/kyber/problem/:id route the server serves', async () => {
+    const fetchMock = vi.fn(
+      async (_url: string) =>
+        ({ ok: true, status: 200, json: async () => ({ code: 'E', message: 'stored', stack: 'Error: x' }) }) as Response,
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    renderDom(
+      <QueryClientProvider client={queryClient()}>
+        <ProblemsView problems={[{ id: 7, severity: 'error', code: 'E', message: 'm' }]} />
+      </QueryClientProvider>,
+    )
+    fireEvent.click(await screen.findByTestId('problem-row-button'))
+    expect(await screen.findByTestId('problem-detail-stack')).toBeDefined()
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe('/api/kyber/problem/7')
+  })
 })

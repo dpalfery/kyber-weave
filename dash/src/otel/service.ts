@@ -214,7 +214,7 @@ export async function startOtlpCollectorService(opts: CollectorOptions = {}): Pr
       // transient store failure drops everything behind it, so the failure is recorded in
       // the receiver's error window and logged for the operator instead.
       receiverHolder.current?.recordPersistenceFailure(error instanceof Error ? error.message : String(error))
-      console.error(chalk.red('[ingest] persistence failed; batch re-queued:'), error instanceof Error ? error.message : String(error))
+      console.error(chalk.red('[ingest] persistence failed; batch re-queued:'), error)
     },
   })
   await writer.start()

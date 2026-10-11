@@ -27,9 +27,9 @@ function tempStorePath(): string {
   return join(root, 'canon.db')
 }
 
-describe('store migration v17→v18: incoming-evidence columns', () => {
-  it('bumps SCHEMA_VERSION to 18', () => {
-    expect(SCHEMA_VERSION).toBe(18)
+describe('store migration to the current schema: incoming-evidence columns', () => {
+  it('pins SCHEMA_VERSION at 19 (evidence columns plus harness scoping)', () => {
+    expect(SCHEMA_VERSION).toBe(19)
   })
 
   it('adds the evidence columns to a v17 store without touching existing rows', () => {
@@ -67,7 +67,7 @@ describe('store migration v17→v18: incoming-evidence columns', () => {
 
     const migrated = new CanonStore(path)
     try {
-      expect(migrated.getMetadata('schema_version')).toBe('18')
+      expect(migrated.getMetadata('schema_version')).toBe(String(SCHEMA_VERSION))
 
       // Old rows read back with their facts intact and no evidence claimed.
       const oldQ = migrated.getQuarantine('old-span')

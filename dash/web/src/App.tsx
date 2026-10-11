@@ -6,6 +6,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { QuarantineView, type QuarantineEntry } from '@/components/analysis/QuarantineView'
 import { ProblemsView, type ProblemEntry } from '@/components/analysis/ProblemsView'
 import { LightsaberLogo } from '@/components/LightsaberLogo'
+import { SettingsDrawer } from '@/components/settings/SettingsDrawer'
 import { NotFoundPanel } from '@/components/analysis/NotFoundPanel'
 import { DashboardTools } from './components/maintenance/DashboardTools'
 import { fetchHarnesses, type KyberHarnessSummary } from '@/lib/kyberApi'
@@ -172,6 +173,30 @@ function ThemeToggle() {
 }
 
 /**
+ * Header button that opens the Settings drawer. It owns no state: `App` holds
+ * the open flag, so the drawer and the button's `aria-expanded` cannot disagree.
+ */
+function SettingsButton({ open, onClick }: { open: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-haspopup="dialog"
+      aria-expanded={open}
+      data-testid="header-settings-button"
+      className="flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-border bg-card px-2.5 text-xs font-medium text-tertiary-foreground transition-colors hover:bg-interactive-secondary hover:text-foreground max-md:h-9"
+    >
+      <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true">
+        <path d="M2.5 4.5h6M11.5 4.5h2M2.5 11.5h2M7.5 11.5h6" />
+        <circle cx="10" cy="4.5" r="1.5" />
+        <circle cx="6" cy="11.5" r="1.5" />
+      </svg>
+      Settings
+    </button>
+  )
+}
+
+/**
  * The destinations in the header — the shell's one navigation.
  *
  * There was a second place to be: a left rail, empty on the desktop and an
@@ -327,6 +352,8 @@ export function App({ initialPage = 'context-doctor', initialPath, initialNotFou
   const location = spine.at(-1)!
   const harnessTabs = useHarnessTabs()
   const [notFoundId, setNotFoundId] = useState<string | null>(initialNotFoundId ?? null)
+  // Display state only: whether the Settings drawer is showing.
+  const [settingsOpen, setSettingsOpen] = useState(false)
   // The shell's one harness scope, shared by Context Doctor and Sessions. It
   // outlives a tab switch between the two, so the same choice is still in
   // force when the user comes back.
@@ -541,6 +568,7 @@ export function App({ initialPage = 'context-doctor', initialPath, initialNotFou
               edge of the screen) — the navigation row is what gives way instead. */}
           <div className="ml-auto flex shrink-0 items-center gap-2" data-testid="header-actions">
             <DashboardTools />
+            <SettingsButton open={settingsOpen} onClick={() => setSettingsOpen(true)} />
             <ThemeToggle />
           </div>
         </header>
@@ -667,7 +695,7 @@ export function App({ initialPage = 'context-doctor', initialPath, initialNotFou
           )}
         </main>
       </div>
-
+      <SettingsDrawer open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </div>
   )
 }

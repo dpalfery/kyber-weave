@@ -97,6 +97,25 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  */
 const JSONC_PARSE_OPTIONS = { allowTrailingComma: true }
 
+const UTF8_BOM = '\uFEFF'
+
+/**
+ * Windows editors and PowerShell commonly save JSON settings with a UTF-8
+ * BOM and CRLF line endings, and jsonc-parser reports a leading BOM as a
+ * parse error at offset 0 — refusing there would make capture unusable on
+ * the files Windows owners actually have. The BOM is an encoding marker and
+ * part of the owner's bytes, not a syntax fault: strip it before any parse
+ * or offset math (every jsonc-parser offset then addresses the body) and
+ * re-attach it to whatever is written back, so `disable` restores the exact
+ * prior bytes. CRLF needs no handling of its own: jsonc-parser's edit
+ * formatter detects the document's line ending and re-uses it.
+ */
+function splitBom(content: string): { bom: string; body: string } {
+  return content.startsWith(UTF8_BOM)
+    ? { bom: UTF8_BOM, body: content.slice(UTF8_BOM.length) }
+    : { bom: '', body: content }
+}
+
 function parseDocument(content: string): { value: unknown; errors: ParseError[] } {
   if (content.trim() === '') return { value: {}, errors: [] }
   const errors: ParseError[] = []
@@ -118,11 +137,12 @@ export function getJsonValue(parsed: unknown, key: string): JsonPrior {
 /** Read the presence and value of each key in a JSON/JSONC document. */
 export function readJsonKeys(content: string, keys: readonly string[]): Record<string, JsonPrior> {
   const result: Record<string, JsonPrior> = {}
-  if (content.trim() === '') {
+  const { body } = splitBom(content)
+  if (body.trim() === '') {
     for (const key of keys) result[key] = { present: false }
     return result
   }
-  const parsed = parseDocument(content)
+  const parsed = parseDocument(body)
   if (parsed.errors.length > 0) {
     // A fault-tolerant parse would invent structure from a broken file.
     for (const key of keys) result[key] = { present: false }
@@ -150,7 +170,8 @@ export function applyJsonEdits(
   content: string,
   desired: Record<string, JsonScalar>,
 ): JsonApplyResult {
-  const base = content.trim() === '' ? '{}\n' : content
+  const { bom, body } = splitBom(content)
+  const base = body.trim() === '' ? '{}\n' : body
   const parsed = parseDocument(base)
   if (parsed.errors.length > 0) {
     return { content, prior: {}, changed: false, refused: parseRefusal(parsed.errors) }
@@ -172,7 +193,8 @@ export function applyJsonEdits(
     })
     next = applyEdits(next, edits)
   }
-  return { content: next, prior, changed: next !== content }
+  const updated = bom + next
+  return { content: updated, prior, changed: updated !== content }
 }
 
 export type JsonDrift = { key: string; written: unknown; current: unknown }
@@ -196,7 +218,8 @@ export function revertJsonEdits(
   content: string,
   records: Record<string, { written: unknown; prior: JsonPrior }>,
 ): JsonRevertResult {
-  const parsed = parseDocument(content)
+  const { bom, body } = splitBom(content)
+  const parsed = parseDocument(body)
   if (parsed.errors.length > 0) {
     return { content, drift: [], changed: false, refused: parseRefusal(parsed.errors) }
   }
@@ -214,7 +237,7 @@ export function revertJsonEdits(
   }
   if (drift.length > 0) return { content, drift, changed: false }
 
-  let next = content
+  let next = body
   // Paths whose leaf was absent before enable. Removing the leaf leaves the
   // objects a dotted path created (`otel: {}`), which are not the owner's
   // bytes; those empty ancestors are pruned after every leaf is gone so a
@@ -234,7 +257,8 @@ export function revertJsonEdits(
     if (!record.prior.present) removedPaths.push(path)
   }
   next = pruneEmptyAncestors(next, removedPaths)
-  return { content: next, drift, changed: next !== content }
+  const updated = bom + next
+  return { content: updated, drift, changed: updated !== content }
 }
 
 /**

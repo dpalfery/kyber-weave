@@ -6,8 +6,8 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { CanonStore } from '../canon/store.js'
-import { KyberBridge, type ProblemDetail, type ProblemRow, type QuarantineDetail, type QuarantineRow } from './bridge.js'
+import { CanonStore, problemsHarnessWhere, quarantineHarnessWhere, type QuarantineEntryDetail } from '../canon/store.js'
+import { KyberBridge, type ProblemDetail, type ProblemRow, type QuarantineRow } from './bridge.js'
 import { handleKyberRequest, type KyberRouteDeps } from './routes.js'
 
 const stores: CanonStore[] = []
@@ -196,12 +196,15 @@ describe('quarantine detail route', () => {
 
     const { status, body } = call('/api/kyber/quarantine/opencode-span-1', bridge, deps)
     expect(status).toBe(200)
-    const detail = body as unknown as QuarantineDetail
-    expect(detail.span_id).toBe('opencode-span-1')
+    // The detail contract is B7's: camelCase fields, every one present, and the
+    // payload served exactly as stored — never parsed or re-shaped server-side.
+    const detail = body as unknown as QuarantineEntryDetail
+    expect(detail.spanId).toBe('opencode-span-1')
     expect(detail.source).toBe('opencode')
     expect(detail.reason).toBe('non-model span')
+    expect(detail.harness).toBeNull()
     expect(detail.evidenceAvailable).toBe(true)
-    expect(detail.rawPayload).toEqual(OPENTELEMETRY_SPAN)
+    expect(detail.rawPayload).toBe(JSON.stringify(OPENTELEMETRY_SPAN))
   })
 
   it('reads rows without stored evidence as explicitly unavailable, never invented', () => {
@@ -209,7 +212,7 @@ describe('quarantine detail route', () => {
 
     const { status, body } = call('/api/kyber/quarantine/claude-span-1', bridge, deps)
     expect(status).toBe(200)
-    const detail = body as unknown as QuarantineDetail
+    const detail = body as unknown as QuarantineEntryDetail
     expect(detail.rawPayload).toBeNull()
     expect(detail.evidenceAvailable).toBe(false)
   })
@@ -274,5 +277,52 @@ describe('problems harness filtering and detail', () => {
 
     expect(call('/api/kyber/problem/999999', bridge, deps).status).toBe(404)
     expect(call('/api/kyber/problem/not-a-number', bridge, deps).status).toBe(404)
+  })
+})
+
+describe('harness filter SQL fragments', () => {
+  it('never builds an empty IN () list for a harness with no known spellings', () => {
+    const { where } = quarantineHarnessWhere('not-a-known-harness')
+    expect(where).not.toMatch(/IN \(\s*\)/)
+    const store = new CanonStore(':memory:')
+    stores.push(store)
+    store.quarantine('s1', [], 'unclaimed', { source: 'opencode', name: 'x' })
+    expect(store.countQuarantineFiltered('not-a-known-harness')).toBe(0)
+  })
+
+  it('expands twin spellings in the problems filter exactly as the quarantine filter does', () => {
+    const store = new CanonStore(':memory:')
+    stores.push(store)
+    store.quarantine('q1', [], 'unclaimed', { source: 'copilot-chat', name: 'x' })
+    store.recordProblem({
+      spanId: 'p1',
+      severity: 'error',
+      code: 'X',
+      message: 'm',
+      location: 'p1',
+      harness: 'copilot-chat',
+      timestamp: '2026-10-10T20:05:58.000Z',
+    })
+    const bridge = new KyberBridge({ store })
+    bridges.push(bridge)
+    const deps = { store }
+    const quarantine = call('/api/kyber/quarantine?harness=copilot-vscode', bridge, deps)
+    const problems = call('/api/kyber/problems?harness=copilot-vscode', bridge, deps)
+    expect(entriesOf(quarantine.body)).toHaveLength(1)
+    expect(problemsOf(problems.body)).toHaveLength(1)
+    expect(problemsHarnessWhere('copilot-vscode').params).toEqual(
+      expect.arrayContaining(['copilot-chat', 'copilot-vscode']),
+    )
+  })
+})
+
+describe('malformed percent-encoding in detail ids', () => {
+  it('answers 400, not a thrown URIError, for a stray % in the quarantine and problem ids', () => {
+    const { bridge, deps } = seed()
+    for (const href of ['/api/kyber/quarantine/%E0%A4%A', '/api/kyber/problem/100%']) {
+      const result = call(href, bridge, deps)
+      expect(result.status).toBe(400)
+      expect(result.body['error']).toEqual(expect.stringContaining('Malformed'))
+    }
   })
 })
