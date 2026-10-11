@@ -167,6 +167,49 @@ describe('Backend Contract Tests: GET /api/kyber/session/:id/content', () => {
         ],
       },
     })
+    // Session prompt living outside any turn span: the turn spans carry no
+    // system prompt, so shared context must come from the session-wide
+    // fallback scan — every matching part, in session order.
+    const LONG_SESSION_PROMPT = 'SESSION_SCOPE_PROMPT_HEAD_1a2b\n' + 'P'.repeat(200) + '\nSESSION_SCOPE_PROMPT_TAIL_9e8f'
+    store.upsertMany([
+      turn(
+        'span-f0',
+        [{ part: 'tool_result_content', text: 'fallback turn output' }],
+        { sessionId: 'sess-rec-fallback-001', traceId: 'trace-rec-fallback-001', timestamp: '2026-09-03T16:00:00.000Z' },
+      ),
+      turn(
+        'span-f-session-a',
+        [{ part: 'system_prompt', text: 'SESSION_SCOPE_PROMPT_ALPHA', tokens: 5 }] as unknown as ContentPart[],
+        {
+          sessionId: 'sess-rec-fallback-001',
+          traceId: 'trace-rec-fallback-001',
+          op: 'session.start',
+          name: 'session_scope',
+          timestamp: '2026-09-03T15:59:00.000Z',
+        },
+      ),
+      turn(
+        'span-f-session-b',
+        [{ part: 'system_prompt', text: LONG_SESSION_PROMPT, tokens: 6 }] as unknown as ContentPart[],
+        {
+          sessionId: 'sess-rec-fallback-001',
+          traceId: 'trace-rec-fallback-001',
+          op: 'session.start',
+          name: 'session_scope',
+          timestamp: '2026-09-03T15:59:30.000Z',
+        },
+      ),
+    ])
+    store.upsertSession({
+      sessionId: 'sess-rec-fallback-001',
+      harness: 'copilot',
+      label: 'Session-scope prompt fallback',
+      payload: {
+        id: 'sess-rec-fallback-001',
+        harness: 'copilot',
+        turns: [{ index: 0, spanId: 'span-f0', model: 'm' }],
+      },
+    })
     // Session whose payload carries explicit turn descriptors: one current
     // 0-based `index` row and one legacy 1-based `turn` row (issue #184).
     store.upsertMany([
@@ -695,8 +738,7 @@ describe('Backend Contract Tests: GET /api/kyber/session/:id/content', () => {
           }
         }
         expect(body.sharedContext).toEqual({
-          text: 'SHARED_PROMPT_REC_aaa',
-          spanId: 'span-r0',
+          parts: [{ text: 'SHARED_PROMPT_REC_aaa', spanId: 'span-r0' }],
           seenBefore: false,
         })
       })
@@ -753,18 +795,66 @@ describe('Backend Contract Tests: GET /api/kyber/session/:id/content', () => {
 
       it('reports shared context with its own earlier-turn recurrence', async () => {
         const first = await turnBody(1)
+        // Every matching part is preserved: turn 0's prompt plus the turn's
+        // own identical prompt (the client dedups the latter from display).
         expect(first.sharedContext).toEqual({
-          text: 'SHARED_PROMPT_REC_aaa',
-          spanId: 'span-r0',
+          parts: [
+            { text: 'SHARED_PROMPT_REC_aaa', spanId: 'span-r0' },
+            { text: 'SHARED_PROMPT_REC_aaa', spanId: 'span-r1' },
+          ],
           seenBefore: true,
         })
         // The earliest prompt stays shared even after a turn carries its own.
         const second = await turnBody(2)
-        expect(second.sharedContext?.text).toBe('SHARED_PROMPT_REC_aaa')
+        expect(second.sharedContext?.parts).toEqual([
+          { text: 'SHARED_PROMPT_REC_aaa', spanId: 'span-r0' },
+          { text: 'SHARED_PROMPT_REC_aaa', spanId: 'span-r1' },
+          { text: 'PROMPT_V2_NEW', spanId: 'span-r2' },
+        ])
         expect(second.sharedContext?.seenBefore).toBe(true)
         const own = blockOf(second, 'system_prompt')
         expect(own.text).toBe('PROMPT_V2_NEW')
         expect(own.recurrence).toEqual({ newThisTurn: true, seenBefore: false })
+      })
+
+      it('preserves every session-scope prompt part via the non-turn fallback', async () => {
+        const res = await fetch(`${base}/api/kyber/session/sess-rec-fallback-001/turn/0/content?full=true`)
+        expect(res.status).toBe(200)
+        assertStandardKyberHeaders(res)
+        const body = (await res.json()) as TurnContentResult
+        expect(body.spanId).toBe('span-f0')
+        // Both session-scope prompts survive in session order — none dropped.
+        expect(body.sharedContext?.parts.map((p) => p.spanId)).toEqual(['span-f-session-a', 'span-f-session-b'])
+        expect(body.sharedContext?.parts[0].text).toBe('SESSION_SCOPE_PROMPT_ALPHA')
+        expect(body.sharedContext?.parts[1].text).toContain('SESSION_SCOPE_PROMPT_HEAD_1a2b')
+        expect(body.sharedContext?.parts[1].text).toContain('SESSION_SCOPE_PROMPT_TAIL_9e8f')
+        expect(body.sharedContext?.seenBefore).toBe(false)
+        expect(body.truncated).toBeUndefined()
+        // The turn's own non-prompt content is unaffected.
+        expect(body.assembledText).toContain('fallback turn output')
+      })
+
+      it('budgets shared parts truthfully by default and exactly when full', async () => {
+        const capped = await fetch(`${base}/api/kyber/session/sess-rec-fallback-001/turn/0/content?budget=10`)
+        expect(capped.status).toBe(200)
+        const cappedBody = (await capped.json()) as TurnContentResult
+        expect(cappedBody.truncated).toBe(true)
+        expect(cappedBody.sharedContext).toBeDefined()
+        expect(cappedBody.sharedContext!.parts).toHaveLength(2)
+        expect(cappedBody.sharedContext!.parts[0].text).toBe('SESSION_SC')
+        expect(cappedBody.sharedContext!.parts[0].truncated).toBe(true)
+        expect(cappedBody.sharedContext!.parts[0].totalLength).toBe('SESSION_SCOPE_PROMPT_ALPHA'.length)
+        expect(cappedBody.sharedContext!.parts[1].truncated).toBe(true)
+        expect(cappedBody.sharedContext!.parts[1].totalLength).toBeGreaterThan(200)
+
+        const full = await fetch(`${base}/api/kyber/session/sess-rec-fallback-001/turn/0/content?full=true`)
+        expect(full.status).toBe(200)
+        const fullBody = (await full.json()) as TurnContentResult
+        expect(fullBody.sharedContext?.parts[0].text).toBe('SESSION_SCOPE_PROMPT_ALPHA')
+        expect(fullBody.sharedContext?.parts[0].truncated).toBeUndefined()
+        expect(fullBody.sharedContext?.parts[1].text).toContain('SESSION_SCOPE_PROMPT_TAIL_9e8f')
+        expect(fullBody.sharedContext?.parts[1].truncated).toBeUndefined()
+        expect(fullBody.sharedContext?.parts[1].totalLength).toBeUndefined()
       })
     })
 

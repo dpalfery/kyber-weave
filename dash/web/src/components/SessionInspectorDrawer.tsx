@@ -768,10 +768,17 @@ export function JsonStringView({
   text,
   label,
   defaultView = 'formatted',
+  controls = 'full',
 }: {
   text: string
   label?: string
   defaultView?: 'formatted' | 'raw'
+  /**
+   * `minimal` hides this view's own Formatted/Raw switch and Copy button
+   * for embeddings that already provide one outer toggle and exact Copy
+   * (whole-turn blocks). The formatted content and descriptor stay.
+   */
+  controls?: 'full' | 'minimal'
 }) {
   const [viewMode, setViewMode] = useState<'formatted' | 'raw'>(defaultView)
   const [copied, setCopied] = useState(false)
@@ -822,37 +829,39 @@ export function JsonStringView({
             {descriptor}
           </span>
         </div>
-        <div className="flex items-center gap-1.5">
-          <div className="flex rounded border border-border bg-interactive-secondary p-0.5 text-xs">
+        {controls === 'full' ? (
+          <div className="flex items-center gap-1.5">
+            <div className="flex rounded border border-border bg-interactive-secondary p-0.5 text-xs">
+              <button
+                type="button"
+                onClick={() => setViewMode('formatted')}
+                className={cn(
+                  'px-2.5 py-1 rounded-[4px] font-medium transition-colors',
+                  viewMode === 'formatted' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
+                )}
+              >
+                Formatted
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode('raw')}
+                className={cn(
+                  'px-2.5 py-1 rounded-[4px] font-medium transition-colors',
+                  viewMode === 'raw' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
+                )}
+              >
+                Raw
+              </button>
+            </div>
             <button
               type="button"
-              onClick={() => setViewMode('formatted')}
-              className={cn(
-                'px-2.5 py-1 rounded-[4px] font-medium transition-colors',
-                viewMode === 'formatted' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
-              )}
+              onClick={copyExact}
+              className="rounded border border-border px-2 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-interactive-secondary transition-colors"
             >
-              Formatted
-            </button>
-            <button
-              type="button"
-              onClick={() => setViewMode('raw')}
-              className={cn(
-                'px-2.5 py-1 rounded-[4px] font-medium transition-colors',
-                viewMode === 'raw' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
-              )}
-            >
-              Raw
+              {copied ? 'Copied!' : 'Copy'}
             </button>
           </div>
-          <button
-            type="button"
-            onClick={copyExact}
-            className="rounded border border-border px-2 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-interactive-secondary transition-colors"
-          >
-            {copied ? 'Copied!' : 'Copy'}
-          </button>
-        </div>
+        ) : null}
       </div>
       {viewMode === 'formatted' ? (
         showItems && multiItems !== null && multiPretty !== null ? (
@@ -898,7 +907,7 @@ export function JsonStringView({
  * complete text stays visible. An empty string is an explicit value, not
  * absent data, so it renders a visible marker instead of nothing.
  */
-export function ReadableContentText({ text, label }: { text: string; label?: string }) {
+export function ReadableContentText({ text, label, suppressJsonControls }: { text: string; label?: string; suppressJsonControls?: boolean }) {
   if (text === '') {
     return (
       <p className="text-xs font-mono text-tertiary-foreground" data-testid="empty-string-value">
@@ -908,7 +917,7 @@ export function ReadableContentText({ text, label }: { text: string; label?: str
   }
   if (!text) return null
   if (isJsonText(text) || isRootEncodedJsonText(text)) {
-    return <JsonStringView text={text} label={label} />
+    return <JsonStringView text={text} label={label} controls={suppressJsonControls === true ? 'minimal' : 'full'} />
   }
   return <XmlFoldedText text={text} />
 }
@@ -1848,8 +1857,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  */
 export function InspectorContent({
   data,
+  suppressJsonControls,
 }: {
   data: unknown
+  /**
+   * Hides nested JSON views' own toggle/copy controls for embeddings that
+   * already provide one outer toggle and exact Copy (whole-turn blocks).
+   */
+  suppressJsonControls?: boolean
 }) {
   const [viewMode, setViewMode] = useState<'formatted' | 'raw'>('formatted')
   const [copied, setCopied] = useState(false)
@@ -1863,7 +1878,7 @@ export function InspectorContent({
   // blobs render as an undifferentiated wall through plain text. Route them
   // through the structured view; the exact original stays one toggle away.
   if (typeof data === 'string') {
-    return <ReadableContentText text={data} />
+    return <ReadableContentText text={data} suppressJsonControls={suppressJsonControls} />
   }
 
   const record = isRecord(data) ? data : null
@@ -2017,7 +2032,7 @@ export function CopyExactButton({ text, testId, label = 'Copy' }: { text: string
       className="rounded border border-border px-2 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-interactive-secondary transition-colors"
       data-testid={testId}
     >
-      {copied ? 'Copied!' : label}
+      <span aria-live="polite">{copied ? 'Copied!' : label}</span>
     </button>
   )
 }
@@ -2084,11 +2099,16 @@ export function orphanTurnParts(data: KyberTurnContentResult): KyberTurnContentP
 
 /**
  * Exact text for the whole-turn copy action: the shared session context
- * (when shown), the server-assembled block text, then every additional part
- * under its own header. Part texts are concatenated verbatim — never
- * re-encoded — so the copy carries every returned byte exactly once. Shared
- * context stays separately copyable per part; it is included here, clearly
- * labeled, so a button called "Copy Turn" never silently omits it.
+ * (when shown), every block rebuilt from its member parts, then every
+ * additional part under its own header. Sections join with blank lines;
+ * within a section member texts join the same way — but no part text is
+ * ever trimmed, so leading/trailing and whitespace-only source bytes
+ * survive byte-exact (unlike `assembledText`, which trims and drops
+ * whitespace-only sections for display). Part texts are concatenated
+ * verbatim — never re-encoded — so the copy carries every returned byte
+ * exactly once. Shared context stays separately copyable per part; it is
+ * included here, clearly labeled, so a button called "Copy Turn" never
+ * silently omits it.
  */
 export function buildWholeTurnCopyText(
   data: KyberTurnContentResult,
@@ -2099,8 +2119,12 @@ export function buildWholeTurnCopyText(
   if (shared.length > 0) {
     sections.push(`=== SHARED SESSION CONTEXT ===\n${shared.join('\n\n')}`)
   }
-  if (data.assembledText !== '') {
-    sections.push(data.assembledText)
+  for (const block of data.blocks) {
+    // A block with neither member parts nor text carries no bytes; anything
+    // else renders — including whitespace-only member text.
+    if (block.parts.length === 0 && block.text === '') continue
+    const body = block.parts.length > 0 ? block.parts.map((p) => p.text).join('\n\n') : block.text
+    sections.push(`=== ${block.label.toUpperCase()} ===\n${body}`)
   }
   const orphans = orphanTurnParts(data)
   if (orphans.length > 0) {
@@ -2118,29 +2142,31 @@ export type TurnContentViewMode = 'formatted' | 'raw'
  * the raw view is the exact source bytes with its own copy button.
  */
 export function ToggleRawView({
-  formatted,
-  rawText,
+  text,
+  label,
   rawTestId,
   copyTestId,
   viewPrefix,
   defaultView = 'formatted',
 }: {
-  formatted: React.ReactNode
-  rawText: string
+  text: string
+  label?: string
   rawTestId: string
   copyTestId: string
   viewPrefix: string
   defaultView?: TurnContentViewMode
 }) {
   const [view, setView] = useState<TurnContentViewMode>(defaultView)
+  const groupLabel = `${label ?? 'Content'}: formatted or raw view`
   return (
     <div className="space-y-2">
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex items-center justify-between gap-2" role="group" aria-label={groupLabel}>
         <div className="flex rounded border border-border bg-interactive-secondary p-0.5 text-xs">
           <button
             type="button"
             onClick={() => setView('formatted')}
             data-testid={`${viewPrefix}-view-formatted`}
+            aria-pressed={view === 'formatted'}
             className={cn(
               'px-2 py-0.5 rounded-[4px] font-medium transition-colors',
               view === 'formatted' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
@@ -2152,6 +2178,7 @@ export function ToggleRawView({
             type="button"
             onClick={() => setView('raw')}
             data-testid={`${viewPrefix}-view-raw`}
+            aria-pressed={view === 'raw'}
             className={cn(
               'px-2 py-0.5 rounded-[4px] font-medium transition-colors',
               view === 'raw' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
@@ -2160,16 +2187,16 @@ export function ToggleRawView({
             Raw
           </button>
         </div>
-        <CopyExactButton text={rawText} testId={copyTestId} label="Copy" />
+        <CopyExactButton text={text} testId={copyTestId} label="Copy" />
       </div>
       {view === 'formatted' ? (
-        formatted
+        <InspectorContent data={text} suppressJsonControls />
       ) : (
         <pre
           className="text-xs font-mono p-2.5 overflow-auto whitespace-pre-wrap break-words rounded border border-border bg-muted/40 text-foreground max-h-[400px]"
           data-testid={rawTestId}
         >
-          {rawText}
+          {text}
         </pre>
       )}
     </div>
@@ -2252,8 +2279,8 @@ export function TurnContentBlockView({
         ) : null}
         {block.text !== '' ? (
           <ToggleRawView
-            formatted={<InspectorContent data={block.text} />}
-            rawText={block.text}
+            text={block.text}
+            label={block.label}
             rawTestId={`${prefix}-raw`}
             copyTestId={`copy-${prefix}`}
             viewPrefix={prefix}
@@ -2311,8 +2338,8 @@ export function TurnContentPartView({
       ) : null}
       <div className="mt-1.5">
         <ToggleRawView
-          formatted={<InspectorContent data={part.text} />}
-          rawText={part.text}
+          text={part.text}
+          label={part.label}
           rawTestId={`${prefix}-raw`}
           copyTestId={`copy-${prefix}`}
           viewPrefix={prefix}
@@ -2372,18 +2399,19 @@ export function TurnFullContentPanel({
   }, [data])
 
   // Shared session context arrives embedded in the single turn-content
-  // response (one bounded request, no N-query fan-out). An exact duplicate
-  // already among the turn's own parts stays hidden; anything else renders
-  // once under its session-level label with its own recurrence badges.
+  // response (one bounded request, no N-query fan-out). Every non-empty
+  // part that is not an exact duplicate of the turn's own parts renders
+  // once under its session-level label.
   const sharedDisplay = useMemo(() => {
     const shared = data?.sharedContext
-    if (!shared || shared.text === '' || !data) return null
+    if (!shared || !data) return null
     const turnTexts = new Set<string>([
       ...data.blocks.map((b) => b.text),
       ...data.parts.map((p) => p.text),
     ])
-    if (turnTexts.has(shared.text)) return null
-    return shared
+    const parts = shared.parts.filter((p) => p.text !== '' && !turnTexts.has(p.text))
+    if (parts.length === 0) return null
+    return { parts, seenBefore: shared.seenBefore }
   }, [data])
 
   // Copy Turn carries every returned byte exactly once (shared context
@@ -2393,7 +2421,7 @@ export function TurnFullContentPanel({
     if (!data) return ''
     return buildWholeTurnCopyText(
       data,
-      sharedDisplay ? [sharedDisplay.text] : [],
+      sharedDisplay ? sharedDisplay.parts.map((p) => p.text) : [],
     )
   }, [data, sharedDisplay])
 
@@ -2471,35 +2499,42 @@ export function TurnFullContentPanel({
                 Session-level system content · applies to every turn · not captured separately for this turn.
               </p>
               {/* Shared context carries its own exact-match recurrence,
-                  independent of the session-level label. */}
-              <div className="flex items-center gap-1.5 flex-wrap mb-1.5">
-                {sharedDisplay.seenBefore ? (
+                  independent of the session-level label. A badge renders
+                  only with earlier-turn evidence — never "new", since first
+                  capture outside the turn spans is unverifiable. */}
+              {sharedDisplay.seenBefore ? (
+                <div className="flex items-center gap-1.5 flex-wrap mb-1.5">
                   <span
                     className="shrink-0 rounded bg-sky-500/15 border border-sky-500/30 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-sky-600 dark:text-sky-400"
                     data-testid="shared-session-context-recurrence-seen"
                   >
                     Also present in prior captured context
                   </span>
-                ) : (
-                  <span
-                    className="shrink-0 rounded bg-emerald-500/15 border border-emerald-500/30 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-emerald-600 dark:text-emerald-400"
-                    data-testid="shared-session-context-recurrence-new"
-                  >
-                    New this turn
-                  </span>
-                )}
-              </div>
-              <div className="space-y-2">
-                <div className="rounded border border-border bg-card p-3 overflow-hidden space-y-2" data-testid="shared-session-context-part-0">
-                  <ToggleRawView
-                    formatted={<InspectorContent data={sharedDisplay.text} />}
-                    rawText={sharedDisplay.text}
-                    rawTestId="shared-session-context-part-0-raw"
-                    copyTestId="copy-shared-session-context-0"
-                    viewPrefix="shared-session-context-part-0"
-                    defaultView={defaultView}
-                  />
                 </div>
+              ) : null}
+              <div className="space-y-2">
+                {sharedDisplay.parts.map((part, idx) => (
+                  <div key={`${part.spanId ?? 'session'}-${idx}`} className="rounded border border-border bg-card p-3 overflow-hidden space-y-2" data-testid={`shared-session-context-part-${idx}`}>
+                    {part.truncated === true ? (
+                      <p
+                        className="rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300"
+                        data-testid={`shared-session-context-part-${idx}-truncated`}
+                      >
+                        {part.totalLength != null
+                          ? `showing ${part.text.length} of ${part.totalLength} characters`
+                          : `showing ${part.text.length} characters (total length not measurable)`}
+                      </p>
+                    ) : null}
+                    <ToggleRawView
+                      text={part.text}
+                      label="Shared system prompt"
+                      rawTestId={`shared-session-context-part-${idx}-raw`}
+                      copyTestId={`copy-shared-session-context-${idx}`}
+                      viewPrefix={`shared-session-context-part-${idx}`}
+                      defaultView={defaultView}
+                    />
+                  </div>
+                ))}
               </div>
             </section>
           ) : null}

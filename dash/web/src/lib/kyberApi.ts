@@ -530,11 +530,15 @@ export interface KyberTurnContentResult {
   measurability?: string | Record<string, unknown>
   notMeasurable?: { reason: string }
   /**
-   * Earliest captured session-level system prompt with its own
-   * earlier-turn recurrence. Null when none was captured at or before this
-   * turn. The view hides it on exact duplication with the turn's own parts.
+   * Session-level shared context: every captured `system_prompt` part in
+   * session scope, in capture order, with section-level earlier-turn
+   * recurrence. Null when none was captured. The view hides exact
+   * duplicates of the turn's own parts.
    */
-  sharedContext?: { text: string; spanId?: string; seenBefore: boolean } | null
+  sharedContext?: {
+    parts: Array<{ text: string; spanId?: string; truncated?: boolean; totalLength?: number }>
+    seenBefore: boolean
+  } | null
 }
 
 export function fetchTurnContent(

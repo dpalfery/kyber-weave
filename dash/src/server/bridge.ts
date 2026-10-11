@@ -631,19 +631,42 @@ export type TurnContentBlock = {
 }
 
 /**
- * Session-level shared context for a turn: the earliest captured
- * `system_prompt` text in this session (the Copilot session prompt), with
- * its own exact-match recurrence against earlier turns. The client hides it
- * when it exactly duplicates the turn's own parts, and otherwise labels it
- * `Shared session context` — session-level content, not captured for the
- * turn. Null when no system prompt was captured at or before this turn.
+ * One session-level shared prompt part. `truncated`/`totalLength` appear
+ * only when the default (non-`full`) response budget cut this part — the
+ * same truthful flagging as every other budgeted text in this response.
  */
-export type TurnContentSharedContext = {
+export type TurnContentSharedPart = {
   text: string
   spanId?: string
+  truncated?: boolean
+  totalLength?: number
+}
+
+/**
+ * Session-level shared context for a turn: every captured `system_prompt`
+ * part in session scope, in capture order — first the turn spans at or
+ * before this turn, then (only when those yield none, e.g. a prompt living
+ * on a non-`llm.invoke` span) a session-wide fallback scan. `seenBefore`
+ * holds when any part exactly matches an earlier-turn same-kind part; it is
+ * capture evidence only, never a cache claim. Null when no system prompt
+ * was captured in scope. The client hides exact duplicates of the turn's
+ * own parts and otherwise labels the section `Shared session context`.
+ */
+export type TurnContentSharedContext = {
+  parts: TurnContentSharedPart[]
   seenBefore: boolean
 }
 
+/**
+ * Payload-size note (no silent omission): the explicit lossless path
+ * returns every source byte, and by design the same bytes appear up to
+ * three times per response — once in `assembledText`, once across
+ * `blocks[].text`/`blocks[].parts[].text`, and once in `parts[].text` —
+ * because supported callers (`ContextInspector`, the TurnDetail page) read
+ * `assembledText` and per-part views respectively. Callers that cannot hold
+ * ~3x source bytes must use the default budget (explicit `truncated` flags),
+ * never a trimmed illusion of completeness.
+ */
 export type TurnContentResult = {
   sessionId: string
   turnIndex: number
@@ -789,46 +812,55 @@ function turnTransportIndexOf(item: TurnDescriptor): number | undefined {
 }
 
 /**
- * Strict turn resolution: explicit identity first, array position only for
- * rows carrying neither `index` nor `turn`. Anything else resolves to
- * nothing — never a neighboring turn.
+ * Index of explicit 0-based transport identities over one ordered turn list,
+ * built in a single pass. First identity wins on duplicates, matching the
+ * historic `find` order.
  */
-function resolveTurn<T>(
-  pool: readonly T[],
-  turnIndex: number,
+export function buildTransportIndex<T>(
+  items: readonly T[],
   identityOf: (item: T) => number | undefined,
+): Map<number, T> {
+  const byIdentity = new Map<number, T>()
+  for (const item of items) {
+    const id = identityOf(item)
+    if (id !== undefined && !byIdentity.has(id)) byIdentity.set(id, item)
+  }
+  return byIdentity
+}
+
+/**
+ * Strict turn resolution over one ordered list: explicit identity first,
+ * array position only for the row that carries neither `index` nor `turn`.
+ * Anything else resolves to nothing — never a neighboring turn (issue #184).
+ */
+export function lookupTransport<T>(
+  items: readonly T[] | undefined,
+  byIdentity: Map<number, T> | undefined,
+  identityOf: (item: T) => number | undefined,
+  turnIndex: number,
 ): T | undefined {
-  return (
-    pool.find((item) => identityOf(item) === turnIndex) ??
-    pool.find((item, i) => i === turnIndex && identityOf(item) === undefined)
-  )
+  const direct = byIdentity?.get(turnIndex)
+  if (direct !== undefined) return direct
+  const positional = items !== undefined && turnIndex >= 0 && turnIndex < items.length ? items[turnIndex] : undefined
+  if (positional !== undefined && identityOf(positional) === undefined) return positional
+  return undefined
 }
 
 /**
  * Normalized turn-resolution row: the span an index resolves to plus its
- * explicit 0-based identity (`undefined` for position-only rows). Both the
- * target lookup and the preceding-turn reads resolve through
- * `resolveTurnEntry`, so recurrence compares exactly the turns the route
- * would serve.
+ * explicit 0-based identity (`undefined` for position-only rows), with the
+ * one-pass identity map beside the ordered entries. Built once per response
+ * and shared by the target lookup and every preceding-turn lookup.
  */
-type TurnResolutionEntry = {
+export type TurnResolutionEntry = {
   spanId: string
   model?: string
   identity: number | undefined
 }
 
-/**
- * Entry-pool form of `resolveTurn`: explicit identity first, array position
- * only for identity-free rows.
- */
-function resolveTurnEntry(
-  entries: readonly TurnResolutionEntry[],
-  turnIndex: number,
-): TurnResolutionEntry | undefined {
-  return (
-    entries.find((e) => e.identity === turnIndex) ??
-    entries.find((e, i) => i === turnIndex && e.identity === undefined)
-  )
+export type TurnResolutionPool = {
+  entries: TurnResolutionEntry[]
+  byIdentity: Map<number, TurnResolutionEntry>
 }
 
 /**
@@ -1762,17 +1794,20 @@ export class KyberBridge {
     let targetSpanId: string | undefined
     let model: string | undefined
 
-    // 1. Try resolving via session payload if available
+    // 1. Try resolving via session payload if available. The identity map is
+    // built in one pass and shared by the target lookup and every
+    // preceding-turn lookup below — O(1) per index, no repeated scans.
     const payload = this.getSessionPayload<SessionPayload>(sessionId)
     const turns: TurnDescriptor[] = Array.isArray(payload?.turns)
       ? (payload.turns as TurnDescriptor[])
       : []
+    const payloadByIdentity = buildTransportIndex(turns, turnTransportIndexOf)
     if (turns.length > 0) {
-      const turnItem = resolveTurn(turns, turnIndex, turnTransportIndexOf)
+      const turnItem = lookupTransport(turns, payloadByIdentity, turnTransportIndexOf, turnIndex)
       if (turnItem) {
         if (typeof turnItem.spanId === 'string') targetSpanId = turnItem.spanId
         if (typeof turnItem.model === 'string') model = turnItem.model
-      } else if (turns.some((t) => turnTransportIndexOf(t) !== undefined)) {
+      } else if (payloadByIdentity.size > 0) {
         // The payload names its turns and none matches: stop here. Falling
         // through to the positional record lookup below could serve a
         // neighboring span's content instead of the documented 404
@@ -1781,15 +1816,26 @@ export class KyberBridge {
       }
     }
 
+    // Ordered record pool, loaded at most once and shared by the target
+    // lookup and the preceding-turn reads (payload-less sessions).
+    let pool: TurnResolutionPool | null | undefined
+    const getPool = (): TurnResolutionPool | null => {
+      if (pool === undefined) pool = this.loadTurnResolutionPool(sessionId, db)
+      return pool
+    }
+
     // 2. If targetSpanId not resolved yet, search canonical records
     if (!targetSpanId) {
-      const entries = this.loadTurnResolutionEntries(sessionId, db)
-      if (entries) {
-        const target = resolveTurnEntry(entries, turnIndex)
-        if (target) {
-          targetSpanId = target.spanId
-          model = target.model
-        }
+      const resolvedPool = getPool()
+      const resolved = lookupTransport(
+        resolvedPool?.entries,
+        resolvedPool?.byIdentity,
+        (e: TurnResolutionEntry) => e.identity,
+        turnIndex,
+      )
+      if (resolved) {
+        targetSpanId = resolved.spanId
+        model = resolved.model
       }
     }
 
@@ -1803,38 +1849,46 @@ export class KyberBridge {
     const parts = this.mapTurnContentParts(rawParts, targetSpanId)
 
     // Captured-context recurrence: exact whole-part-text matches of the same
-    // part kind in earlier captured turns (hashes, so long sessions keep one
-    // small digest per earlier part). No normalization, no token-level
-    // similarity — a changed part is new unless its exact text was captured
-    // before. Recurrence is independent of model cache use and is never a
-    // cache claim; computed before budgeting so truncation cannot rewrite it.
-    const preceding = this.loadPrecedingTurnParts(sessionId, turnIndex, turns, db)
-    const earlierHashes = new Map<string, Set<string>>()
-    for (const t of preceding) {
-      for (const p of t.parts) {
-        const set = earlierHashes.get(p.part) ?? new Set<string>()
-        set.add(sha256Hex(p.text))
-        earlierHashes.set(p.part, set)
-      }
-    }
+    // part kind in earlier captured turns. Only per-kind digest sets plus the
+    // system-prompt candidate texts below are retained — each preceding part
+    // is hashed and released turn-by-turn, never accumulated. No
+    // normalization, no token-level similarity: a changed part is new unless
+    // its exact text was captured before. Recurrence is independent of model
+    // cache use and is never a cache claim; computed before budgeting so
+    // truncation cannot rewrite it.
+    const preceding = this.loadPrecedingTurnDigests(sessionId, turnIndex, turns, payloadByIdentity, getPool)
     for (const p of parts) {
-      p.recurrence = { seenBefore: earlierHashes.get(p.part)?.has(sha256Hex(p.text)) ?? false }
+      p.recurrence = { seenBefore: preceding.digests.get(p.part)?.has(sha256Hex(p.text)) ?? false }
     }
 
-    // Session-level shared context: the earliest captured system_prompt at
-    // or before this turn (the Copilot session prompt). Its own recurrence
-    // follows the same exact-match rule against strictly earlier turns; the
-    // client hides it on exact duplication with the turn's own parts.
+    // Session-level shared context: every captured system_prompt in scope,
+    // in capture order — first the turn spans at or before this turn, then
+    // (only when those yield none, e.g. a prompt living on a non-llm.invoke
+    // span) a session-wide fallback scan that retains system prompts alone.
+    // Each part's own recurrence follows the same exact-match rule against
+    // strictly earlier turns; the client hides exact duplicates of the
+    // turn's own parts and otherwise labels the section Shared session
+    // context. `seenBefore` for the section holds when any part has earlier
+    // evidence; parts without it show no recurrence badge (never "new" —
+    // first capture is unverifiable outside the turn spans).
+    const sharedCandidates: TurnContentSharedPart[] = [
+      ...preceding.prompts.map((p) => ({ text: p.text, spanId: p.spanId })),
+      ...parts
+        .filter((p) => p.part === 'system_prompt' && p.text !== '')
+        .map((p) => ({ text: p.text, spanId: p.spanId ?? targetSpanId })),
+    ]
+    if (sharedCandidates.length === 0) {
+      for (const fallback of this.loadSessionSystemPrompts(sessionId, targetSpanId)) {
+        sharedCandidates.push(fallback)
+      }
+    }
     let sharedContext: TurnContentSharedContext | null = null
-    for (const t of [...preceding, { spanId: targetSpanId, parts }]) {
-      const found = t.parts.find((p) => p.part === 'system_prompt' && p.text !== '')
-      if (found) {
-        sharedContext = {
-          text: found.text,
-          spanId: t.spanId,
-          seenBefore: earlierHashes.get('system_prompt')?.has(sha256Hex(found.text)) ?? false,
-        }
-        break
+    if (sharedCandidates.length > 0) {
+      sharedContext = {
+        parts: sharedCandidates,
+        seenBefore: sharedCandidates.some(
+          (c) => preceding.digests.get('system_prompt')?.has(sha256Hex(c.text)) ?? false,
+        ),
       }
     }
 
@@ -1925,6 +1979,18 @@ export class KyberBridge {
         part.totalLength = part.text.length
         part.text = part.text.slice(0, budget)
         part.truncated = true
+      }
+    }
+    // Shared context is budgeted and flagged exactly like every other text:
+    // a default response caps each part with explicit markers, while the
+    // explicit lossless path (unbounded budget) returns every byte intact.
+    if (sharedContext) {
+      for (const sharedPart of sharedContext.parts) {
+        if (sharedPart.text.length > budget) {
+          sharedPart.totalLength = sharedPart.text.length
+          sharedPart.text = sharedPart.text.slice(0, budget)
+          sharedPart.truncated = true
+        }
       }
     }
 
@@ -2065,25 +2131,23 @@ export class KyberBridge {
   }
 
   /**
-   * One ordered pool of turn-resolution entries (explicit 0-based identity
-   * plus `llm.invoke`-preferred span order) shared by the target lookup and
-   * the preceding-turn reads below. Same entries, same `resolveTurnEntry`
-   * rule as the previous inline code — explicit identity first, array
-   * position only for rows carrying neither.
+   * Normalized turn-resolution row: the span an index resolves to plus its
+   * explicit 0-based identity (`undefined` for position-only rows).
    */
-  private loadTurnResolutionEntries(
+  private loadTurnResolutionPool(
     sessionId: string,
     db: DatabaseSync | undefined,
-  ): TurnResolutionEntry[] | null {
+  ): TurnResolutionPool | null {
     if (this.store) {
       const records = this.store.recordsForSession(sessionId)
       const turnRecords = records.filter((r) => r.op === 'llm.invoke')
       const pool = turnRecords.length > 0 ? turnRecords : records
-      return pool.map((r) => ({
+      const entries = pool.map((r) => ({
         spanId: r.spanId,
         model: (r as CanonicalRecord & TurnDescriptor).model ?? r.name,
         identity: turnTransportIndexOf(r as CanonicalRecord & TurnDescriptor),
       }))
+      return { entries, byIdentity: buildTransportIndex(entries, (e) => e.identity) }
     }
     if (this.hasTable(db, 'records')) {
       try {
@@ -2095,7 +2159,7 @@ export class KyberBridge {
         // DB rows predate the descriptor shape: `index` may arrive as a
         // numeric string, and a null/empty index is no identity (unlike
         // `Number(null)`, which coerces to 0 and would hijack turn 0).
-        return pool.map((r) => {
+        const entries = pool.map((r) => {
           const rawIndex: unknown = r.index
           const index =
             rawIndex === null || rawIndex === undefined || rawIndex === '' ? undefined : Number(rawIndex)
@@ -2108,6 +2172,7 @@ export class KyberBridge {
             }),
           }
         })
+        return { entries, byIdentity: buildTransportIndex(entries, (e) => e.identity) }
       } catch {
         return null
       }
@@ -2116,42 +2181,46 @@ export class KyberBridge {
   }
 
   /**
-   * Mapped parts for every captured turn before `turnIndex`, in turn order.
-   * Resolution prefers explicit payload identities (no record reads); only
-   * turns the payload cannot name fall back to the shared ordered pool, and
-   * content itself is read with single-span gets — never a full-session
-   * content walk. Cost scales with the number of preceding turns; each read
-   * is one indexed span fetch plus its part mapping.
+   * Recurrence evidence for every captured turn before `turnIndex`: per-kind
+   * digest sets plus the system-prompt candidate texts in turn order.
+   * Resolution reuses the caller's one-pass payload index and the shared
+   * pool (loaded at most once per response); content itself is read with
+   * single-span gets — never a full-session content walk. Each preceding
+   * part is hashed and released immediately: only digests and prompt texts
+   * are retained, so prefix cost is one small digest per earlier part.
+   * Comparisons stay exact and follow the same identity rules as the target
+   * lookup (issue #184).
    */
-  private loadPrecedingTurnParts(
+  private loadPrecedingTurnDigests(
     sessionId: string,
     turnIndex: number,
     payloadTurns: TurnDescriptor[],
-    db: DatabaseSync | undefined,
-  ): Array<{ spanId: string; parts: TurnContentPart[] }> {
-    const preceding: Array<{ spanId: string; parts: TurnContentPart[] }> = []
-    if (turnIndex <= 0) return preceding
-    const payloadHasIdentity = payloadTurns.some((t) => turnTransportIndexOf(t) !== undefined)
-    let entries: TurnResolutionEntry[] | null | undefined
+    payloadByIdentity: Map<number, TurnDescriptor>,
+    getPool: () => TurnResolutionPool | null,
+  ): {
+    digests: Map<string, Set<string>>
+    prompts: Array<{ text: string; spanId: string }>
+  } {
+    const digests = new Map<string, Set<string>>()
+    const prompts: Array<{ text: string; spanId: string }> = []
+    if (turnIndex <= 0) return { digests, prompts }
     const spans: string[] = []
     for (let i = 0; i < turnIndex; i++) {
       let span: string | undefined
       if (payloadTurns.length > 0) {
-        const item = resolveTurn(payloadTurns, i, turnTransportIndexOf)
+        const item = lookupTransport(payloadTurns, payloadByIdentity, turnTransportIndexOf, i)
         if (item && typeof item.spanId === 'string') {
           span = item.spanId
-        } else if (payloadHasIdentity) {
+        } else if (payloadByIdentity.size > 0) {
           // An identity-bearing payload that names no turn i contributes
           // nothing for i — same guard as the target lookup (issue #184).
           continue
         }
       }
       if (span === undefined) {
-        if (entries === undefined) entries = this.loadTurnResolutionEntries(sessionId, db)
-        if (entries) {
-          const found = resolveTurnEntry(entries, i)
-          if (found) span = found.spanId
-        }
+        const pool = getPool()
+        const found = lookupTransport(pool?.entries, pool?.byIdentity, (e) => e.identity, i)
+        if (found) span = found.spanId
       }
       if (span !== undefined) spans.push(span)
     }
@@ -2161,9 +2230,41 @@ export class KyberBridge {
       seen.add(span)
       const records = this.loadContentRecords(sessionId, span)
       const raw: ContentPart[] = records[0]?.parts ?? []
-      preceding.push({ spanId: span, parts: this.mapTurnContentParts(raw, span) })
+      for (const p of this.mapTurnContentParts(raw, span)) {
+        const set = digests.get(p.part) ?? new Set<string>()
+        set.add(sha256Hex(p.text))
+        digests.set(p.part, set)
+        // System-prompt texts alone are retained (shared-context
+        // candidates); every other part releases its text after hashing.
+        if (p.part === 'system_prompt' && p.text !== '') {
+          prompts.push({ text: p.text, spanId: span })
+        }
+      }
     }
-    return preceding
+    return { digests, prompts }
+  }
+
+  /**
+   * Session-wide fallback for the shared system prompt: every captured
+   * `system_prompt` part outside `excludeSpan`, in session order. Runs only
+   * when the turn spans yielded no prompt (e.g. a prompt living on a
+   * non-`llm.invoke` span), and retains system prompts alone — never the
+   * surrounding content.
+   */
+  private loadSessionSystemPrompts(
+    sessionId: string,
+    excludeSpan?: string,
+  ): Array<{ text: string; spanId?: string }> {
+    const out: Array<{ text: string; spanId?: string }> = []
+    for (const record of this.loadContentRecords(sessionId)) {
+      if (excludeSpan !== undefined && record.spanId === excludeSpan) continue
+      for (const piece of record.parts) {
+        if (piece.part === 'system_prompt' && piece.text !== '') {
+          out.push({ text: piece.text, spanId: record.spanId })
+        }
+      }
+    }
+    return out
   }
 
 

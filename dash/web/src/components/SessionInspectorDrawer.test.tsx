@@ -1462,11 +1462,13 @@ describe('SessionInspectorDrawer: whole-turn full context', () => {
   function seedTurn(
     qc: QueryClient,
     body: KyberTurnContentResult,
-    shared: { text: string; seenBefore: boolean } | null = { text: SHARED_PROMPT, seenBefore: false },
+    shared: { texts: string[]; seenBefore: boolean } | null = { texts: [SHARED_PROMPT], seenBefore: false },
   ) {
     qc.setQueryData(TURN_KEY, {
       ...body,
-      sharedContext: shared ? { text: shared.text, spanId: 'span-turn-0', seenBefore: shared.seenBefore } : null,
+      sharedContext: shared
+        ? { parts: shared.texts.map((text, i) => ({ text, spanId: `span-turn-0-${i}` })), seenBefore: shared.seenBefore }
+        : null,
     } satisfies KyberTurnContentResult)
   }
 
@@ -1544,11 +1546,12 @@ describe('SessionInspectorDrawer: whole-turn full context', () => {
     expect(html).toContain('Session-level system content')
     expect(text).toContain(SHARED_PROMPT)
     expect(text).toContain('SHARED_PROMPT_TAIL_3f9c')
-    // Fresh shared content carries its own New badge, independent of the
-    // session-level label — never a cache claim.
-    expect(html).toContain('data-testid="shared-session-context-recurrence-new"')
-    expect(html).toContain('New this turn')
+    // Fresh shared content shows no recurrence badge: without earlier-turn
+    // evidence the view must not claim "new" (first capture outside turn
+    // spans is unverifiable) — the session-level label stands on its own.
     expect(html).not.toContain('data-testid="shared-session-context-recurrence-seen"')
+    expect(html).not.toContain('data-testid="shared-session-context-recurrence-new"')
+    expect(html).not.toContain('New this turn')
     // Exact raw bytes stay one toggle away with their own copy action.
     expect(html).toContain('data-testid="shared-session-context-part-0-view-raw"')
     expect(html).toContain('data-testid="copy-shared-session-context-0"')
@@ -1568,7 +1571,7 @@ describe('SessionInspectorDrawer: whole-turn full context', () => {
 
     // An exact duplicate already among the turn's parts is not shown twice.
     const dupQc = createTestQueryClient()
-    seedTurn(dupQc, buildTurnFixture(), { text: OWN_SYSTEM_PROMPT, seenBefore: true })
+    seedTurn(dupQc, buildTurnFixture(), { texts: [OWN_SYSTEM_PROMPT], seenBefore: true })
     const dupHtml = renderHtml(
       <QueryClientProvider client={dupQc}>
         <TurnFullContentPanel
@@ -1642,7 +1645,7 @@ describe('SessionInspectorDrawer: whole-turn full context', () => {
         blocks,
         parts,
         assembledText: blocks.map((b) => b.text).join('\n\n'),
-        sharedContext: { text: SHARED_PROMPT, spanId: 'span-r0', seenBefore: true },
+        sharedContext: { parts: [{ text: SHARED_PROMPT, spanId: 'span-r0' }], seenBefore: true },
       } as KyberTurnContentResult
     }
 
@@ -1695,6 +1698,77 @@ describe('SessionInspectorDrawer: whole-turn full context', () => {
       expect(copy).toContain('=== SHARED SESSION CONTEXT ===')
       expect(copy).toContain(SHARED_PROMPT)
       expect(copy).toContain(MYSTERY_TEXT)
+    })
+
+    it('renders every shared part without a recurrence badge when evidence is absent', () => {
+      const qc = createTestQueryClient()
+      seedTurn(qc, buildTurnFixture(), { texts: [SHARED_PROMPT, 'SECOND_SHARED_PROMPT_BODY_7c'], seenBefore: false })
+      const html = renderPanel(qc)
+      const text = unescapeHtml(html)
+      expect(html).toContain('data-testid="shared-session-context"')
+      expect(html).toContain('data-testid="shared-session-context-part-0"')
+      expect(html).toContain('data-testid="shared-session-context-part-1"')
+      expect(text).toContain(SHARED_PROMPT)
+      expect(text).toContain('SECOND_SHARED_PROMPT_BODY_7c')
+      // No badge either way: no evidence, no claim.
+      expect(html).not.toContain('shared-session-context-recurrence-seen')
+      expect(html).not.toContain('shared-session-context-recurrence-new')
+    })
+  })
+
+  describe('whole-turn view controls and access', () => {
+    it('keeps one toggle and one Copy per section for nested JSON content', () => {
+      const qc = createTestQueryClient()
+      // buildTurnFixture: 4 blocks (tool_definitions holds JSON) + 1 orphan part.
+      seedTurn(qc, buildTurnFixture(), null)
+      const html = renderPanel(qc)
+      // One outer Formatted/Raw/Copy control set per toggle section…
+      expect(html.match(/>Formatted<\/button>/g)?.length).toBe(5)
+      expect(html.match(/>Raw<\/button>/g)?.length).toBe(5)
+      expect(html.match(/>Copy<\/span>/g)?.length).toBe(5)
+      // …with no second copy affordance from the nested JSON view.
+      expect(html.match(/>Copy<\/button>/g)).toBeNull()
+      // …while the nested JSON view keeps its readable content and descriptor.
+      expect(html).toContain('data-testid="json-string-view"')
+      expect(html).toContain('zeta_tool')
+      // The nested switch is suppressed: no second raw/copy affordance.
+      expect(html).not.toContain('data-testid="json-raw"')
+    })
+
+    it('labels view-control groups with pressed state and announces copies', () => {
+      const qc = createTestQueryClient()
+      seedTurn(qc, buildTurnFixture(), null)
+      const html = renderPanel(qc)
+      // Group label names the section; pressed state marks the active view.
+      expect(html).toContain('role="group"')
+      expect(html).toContain('formatted or raw view')
+      expect(html).toContain('data-testid="turn-block-system_prompt-view-formatted"')
+      expect(html).toContain('aria-pressed="true"')
+      expect(html).toContain('aria-pressed="false"')
+      // Copy success regions announce politely for assistive tech.
+      expect(html).toContain('aria-live="polite"')
+      // Recurrence badges are text, never color alone.
+      expect(html).not.toContain('aria-hidden="true">New this turn')
+    })
+
+    it('preserves exact whitespace in whole-turn copy', () => {
+      const padded = '  padded content with spaces  '
+      const gap = '\n   \n'
+      const body = buildTurnFixture()
+      const wsPart = { id: 'part-ws-9', spanId: 'span-turn-1', part: 'tool_result_content', label: 'Tool Results', text: padded }
+      const gapPart = { id: 'part-gap-10', spanId: 'span-turn-1', part: 'tool_result_content', label: 'Tool Results', text: gap }
+      const wsBlock = { key: 'ws_block', label: 'Whitespace block', parts: [wsPart, gapPart], text: `${padded}\n\n${gap}` }
+      const withWs = {
+        ...body,
+        blocks: [...body.blocks, wsBlock],
+        parts: [...body.parts, wsPart, gapPart],
+      } as KyberTurnContentResult
+      const copy = buildWholeTurnCopyText(withWs, [])
+      // Leading/trailing and whitespace-only source bytes survive verbatim.
+      expect(copy).toContain('=== WHITESPACE BLOCK ===')
+      expect(copy).toContain(padded)
+      expect(copy).toContain(gap)
+      expect(copy).toContain(`=== WHITESPACE BLOCK ===\n${padded}\n\n${gap}`)
     })
   })
 
