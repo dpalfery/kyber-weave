@@ -5,13 +5,14 @@ doc-type: onboarding
 component: KyberSquad
 source-root: src/KyberWeave.Core/Squad
 owner: dpalfery
-last-reviewed: 2026-10-09
+last-reviewed: 2026-10-10
 status: current
 decided-by:
   - adr/0019-pi-native-subagents-and-primary-lowering
   - adr/0022-antigravity-native-agents
   - adr/0025-devin-native-agents-and-skill-lowering
   - adr/0028-devin-target-scoped-authoring-capability-profiles
+  - adr/0034-factory-droid-entry-point-skill
 code-refs:
   - SquadDeploymentPlan
 ---
@@ -231,6 +232,14 @@ Factory custom droids are Markdown files under `.factory/droids/` (project) and
 `.factory/skills/<name>/SKILL.md` and `~/.factory/skills/<name>/SKILL.md`. Squad does not
 write `.factory/agents/` or the compatibility trees `~/.agents/skills/` and
 `~/.agent/skills/`.
+
+**Entry point:** the Factory app dispatches droids as subagents and has no session-parent
+selector ([ADR 0034](../adr/0034-factory-droid-entry-point-skill.md)), so the conductor also
+renders as an entry-point skill at `.factory/skills/conductor/SKILL.md` (personal
+`~/.factory/skills/conductor/SKILL.md`) carrying the canonical agent body verbatim. Invoke
+the conductor through that skill; the droid at `.factory/droids/conductor.md` is kept for
+Task dispatch. The skill runs under the session's permissions — the droid's explicit tools
+allow-list and `mcpServers: []` do not apply to it.
 
 **Override:** when a project droid or skill shares a name with a personal one, the project
 `.factory/` definition wins (docs.factory.ai, 2026-09-16). There is no documented environment

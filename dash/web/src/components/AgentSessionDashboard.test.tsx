@@ -433,6 +433,8 @@ describe('AgentSessionDashboard: Assembly and Subpanels', () => {
     expect(html).toContain('$0.42')
 
     expect(html.indexOf('Session Overview')).toBeLessThan(html.indexOf('Token Spend per Turn'))
+    expect(html.indexOf('Underlying Token Totals')).toBeGreaterThan(html.indexOf('Session Overview'))
+    expect(html.indexOf('Underlying Token Totals')).toBeLessThan(html.indexOf('Token Spend per Turn'))
     expect(html.indexOf('Token Spend per Turn')).toBeLessThan(html.indexOf('Context Composition'))
     expect(html.indexOf('Context Composition')).toBeLessThan(
       html.indexOf('3 · Tool &amp; Schema Cost Ranking')
@@ -496,6 +498,36 @@ describe('AgentSessionDashboard: Assembly and Subpanels', () => {
     expect(html).toContain('Tools Offered')
     expect(html).toContain('3')
     expect(html).toContain('1 never called')
+  })
+
+  it('renders Underlying Token Totals inside Session Overview, above later detail sections, with no lower duplicate', () => {
+    const html = renderHtml(<AgentSessionDashboard session={sampleSession} />)
+
+    // The moved section renders with its existing labels and figures.
+    expect(html).toContain('Underlying Token Totals')
+    expect(html).toContain('data-testid="cost-tokens-section"')
+    expect(html).toContain('data-testid="token-total-input"')
+
+    const overviewStart = html.indexOf('data-testid="overview-strip-section"')
+    const overviewEnd = html.indexOf('data-testid="spend-composition-section"')
+    const totalsIndex = html.indexOf('data-testid="cost-tokens-section"')
+    expect(overviewStart).toBeGreaterThan(-1)
+    expect(overviewEnd).toBeGreaterThan(-1)
+    expect(totalsIndex).toBeGreaterThan(-1)
+    // Inside the Session Overview grouping, before the later detail sections.
+    expect(totalsIndex).toBeGreaterThan(overviewStart)
+    expect(totalsIndex).toBeLessThan(overviewEnd)
+    expect(totalsIndex).toBeLessThan(html.indexOf('data-testid="tool-schema-section"'))
+    expect(totalsIndex).toBeLessThan(html.indexOf('data-testid="execution-timeline-section"'))
+
+    // Moved, not duplicated: exactly one totals section, and the lower cost
+    // panel keeps its cost content without a second copy.
+    expect(html.split('data-testid="cost-tokens-section"')).toHaveLength(2)
+    const costPanelIndex = html.indexOf('data-testid="session-cost-panel"')
+    expect(costPanelIndex).toBeGreaterThan(-1)
+    expect(costPanelIndex).toBeGreaterThan(totalsIndex)
+    expect(html.slice(costPanelIndex)).not.toContain('data-testid="cost-tokens-section"')
+    expect(html.slice(costPanelIndex)).toContain('Session Cost &amp; Token Accounting')
   })
 
   it('marks an unreported tool-call counter unavailable instead of rendering zero', () => {
@@ -1040,16 +1072,21 @@ describe('AgentSessionDashboard: Interaction & Drawer Integration', () => {
       expect(spendChartsEl).not.toBeNull()
 
       // 0-based transport lookup: index 0 is the human-facing Turn 1 (issue #184).
+      // A plain turn selection opens the whole-turn lossless view (not the
+      // payload row alone): the drawer resolves the exact zero-based index
+      // through the turn-content endpoint.
       ;(spendChartsEl!.props as { onSelectTurn: (i: number, b?: string) => void }).onSelectTurn(0)
       expect(capturedOpen).toBe(true)
-      expect(capturedTitle).toBe('Turn 1')
-      expect((capturedContent as { spanId?: string }).spanId).toBe('turn-span-1')
+      expect(capturedTitle).toBe('Turn 1 · Full context')
+      expect((capturedContent as { turnIndex?: number }).turnIndex).toBe(0)
+      expect((capturedContent as { turn?: { spanId?: string } }).turn?.spanId).toBe('turn-span-1')
 
       // 0-based transport lookup: index 1 is Turn 2.
       ;(spendChartsEl!.props as { onSelectTurn: (i: number, b?: string) => void }).onSelectTurn(1)
       expect(capturedOpen).toBe(true)
-      expect(capturedTitle).toBe('Turn 2')
-      expect((capturedContent as { spanId?: string }).spanId).toBe('turn-span-2')
+      expect(capturedTitle).toBe('Turn 2 · Full context')
+      expect((capturedContent as { turnIndex?: number }).turnIndex).toBe(1)
+      expect((capturedContent as { turn?: { spanId?: string } }).turn?.spanId).toBe('turn-span-2')
 
       // 0-based turn lookup with bucket: tool_definitions
       ;(spendChartsEl!.props as { onSelectTurn: (i: number, b?: string) => void }).onSelectTurn(0, 'tool_definitions')
@@ -1558,5 +1595,170 @@ describe('AgentSessionDashboard cache tiles (issue #185)', () => {
     expect(html).not.toContain('on 0 turns')
     // The ratio tile falls back to its honest dash without a served ratio.
     expect(html).toContain('Cache Hit Ratio')
+  })
+})
+
+describe('AgentSessionDashboard: session-level system_prompt request', () => {
+  it('omits the turn span for system_prompt but keeps it for other buckets', () => {
+    const internals = internalsOf()
+    const originalUseState = internals?.H?.useState
+    const state: unknown[] = []
+    let stateCursor = 0
+
+    const renderWithState = (initialTimelineTab?: 'tree' | 'bars') => {
+      stateCursor = 0
+      return AgentSessionContent({ session: sampleSession, initialTimelineTab })
+    }
+
+    const drawerFrom = (node: unknown): React.ReactElement | null => {
+      if (node == null) return null
+      if (Array.isArray(node)) {
+        for (const child of node) {
+          const found = drawerFrom(child)
+          if (found) return found
+        }
+        return null
+      }
+      if (!React.isValidElement(node)) return null
+      if (node.type === SessionInspectorDrawer) return node
+      return drawerFrom((node.props as { children?: unknown }).children)
+    }
+
+    if (internals?.H) {
+      internals.H.useState = (initial: unknown) => {
+        const index = stateCursor++
+        if (!(index in state)) {
+          state[index] = typeof initial === 'function' ? (initial as () => unknown)() : initial
+        }
+        return [
+          state[index],
+          (next: unknown) => {
+            state[index] = typeof next === 'function' ? (next as (s: unknown) => unknown)(state[index]) : next
+          },
+        ]
+      }
+    }
+
+    try {
+      const turnTree = renderWithState()
+      let spendCharts: React.ReactElement | null = null
+      const findSpendCharts = (node: unknown): void => {
+        if (!React.isValidElement(node) || spendCharts) return
+        const props = node.props as Record<string, unknown> | undefined
+        if (props?.onSelectTurn && props?.session) {
+          spendCharts = node
+          return
+        }
+        if (props?.children) {
+          React.Children.forEach(props.children, findSpendCharts)
+        }
+      }
+      findSpendCharts(turnTree)
+      expect(spendCharts).not.toBeNull()
+
+      // The session-level system prompt must not carry the turn span: the
+      // first turn span holds no prompt, so a span-scoped request 404s.
+      ;(spendCharts!.props as { onSelectTurn: (i: number, b?: string) => void }).onSelectTurn(0, 'system_prompt')
+      const systemRequest = (drawerFrom(renderWithState())!.props as { contentRequest?: Record<string, unknown> }).contentRequest
+      expect(systemRequest).toEqual({ sessionId: 'sess-abc-123', part: 'system_prompt' })
+      expect(systemRequest).not.toHaveProperty('span')
+
+      // Normal per-turn buckets keep their prior span behavior.
+      ;(spendCharts!.props as { onSelectTurn: (i: number, b?: string) => void }).onSelectTurn(0, 'tool_definitions')
+      expect((drawerFrom(renderWithState())!.props as { contentRequest?: unknown }).contentRequest).toEqual({
+        sessionId: 'sess-abc-123',
+        span: 'turn-span-1',
+        part: 'tool_definitions',
+      })
+    } finally {
+      if (internals?.H) {
+        internals.H.useState = originalUseState
+      }
+    }
+  })
+})
+
+describe('AgentSessionDashboard: whole-turn selection', () => {
+  it('opens a lossless whole-turn view with the exact zero-based turn index', () => {
+    const internals = internalsOf()
+    const originalUseState = internals?.H?.useState
+    const state: unknown[] = []
+    let stateCursor = 0
+
+    const renderWithState = (initialTimelineTab?: 'tree' | 'bars') => {
+      stateCursor = 0
+      return AgentSessionContent({ session: sampleSession, initialTimelineTab })
+    }
+
+    const drawerFrom = (node: unknown): React.ReactElement | null => {
+      if (node == null) return null
+      if (Array.isArray(node)) {
+        for (const child of node) {
+          const found = drawerFrom(child)
+          if (found) return found
+        }
+        return null
+      }
+      if (!React.isValidElement(node)) return null
+      if (node.type === SessionInspectorDrawer) return node
+      return drawerFrom((node.props as { children?: unknown }).children)
+    }
+
+    if (internals?.H) {
+      internals.H.useState = (initial: unknown) => {
+        const index = stateCursor++
+        if (!(index in state)) {
+          state[index] = typeof initial === 'function' ? (initial as () => unknown)() : initial
+        }
+        return [
+          state[index],
+          (next: unknown) => {
+            state[index] = typeof next === 'function' ? (next as (s: unknown) => unknown)(state[index]) : next
+          },
+        ]
+      }
+    }
+
+    try {
+      const turnTree = renderWithState()
+      let spendCharts: React.ReactElement | null = null
+      const findSpendCharts = (node: unknown): void => {
+        if (!React.isValidElement(node) || spendCharts) return
+        const props = node.props as Record<string, unknown> | undefined
+        if (props?.onSelectTurn && props?.session) {
+          spendCharts = node
+          return
+        }
+        if (props?.children) {
+          React.Children.forEach(props.children, findSpendCharts)
+        }
+      }
+      findSpendCharts(turnTree)
+      expect(spendCharts).not.toBeNull()
+
+      // A plain turn selection (no bucket) opens the whole-turn view backed
+      // by the turn-content endpoint with the exact zero-based index and the
+      // explicit lossless path — never a span or bucket request.
+      ;(spendCharts!.props as { onSelectTurn: (i: number, b?: string) => void }).onSelectTurn(1)
+      const drawer = drawerFrom(renderWithState())!
+      expect(drawer.props as Record<string, unknown>).toMatchObject({ title: 'Turn 2 · Full context' })
+      expect((drawer.props as { contentRequest?: unknown }).contentRequest).toEqual({
+        sessionId: 'sess-abc-123',
+        turnIndex: 1,
+        full: true,
+      })
+
+      // Turn 0 resolves to transport 0, the first turn span — not a neighbor.
+      ;(spendCharts!.props as { onSelectTurn: (i: number, b?: string) => void }).onSelectTurn(0)
+      expect((drawerFrom(renderWithState())!.props as { contentRequest?: unknown }).contentRequest).toEqual({
+        sessionId: 'sess-abc-123',
+        turnIndex: 0,
+        full: true,
+      })
+    } finally {
+      if (internals?.H) {
+        internals.H.useState = originalUseState
+      }
+    }
   })
 })

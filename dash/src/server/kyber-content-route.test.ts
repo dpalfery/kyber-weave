@@ -30,6 +30,10 @@ describe('Backend Contract Tests: GET /api/kyber/session/:id/content', () => {
   const TOOL_DEFINITION = '{"name":"read_file","description":"Read a file from the workspace"}'
   const CONVERSATION = 'user: why is the inspector showing a stub mid-sentence?'
   const HUGE_TOOL_RESULT = 'R'.repeat(CONTENT_RESPONSE_BUDGET + 50_000)
+  // Longer than the session-content default response budget: the shared
+  // session-level system prompt the whole-turn view reads losslessly.
+  const HUGE_SYSTEM_PROMPT =
+    'HUGE_SHARED_PROMPT_HEAD_7d2a\n' + 'S'.repeat(CONTENT_RESPONSE_BUDGET + 1_000) + '\nHUGE_SHARED_PROMPT_TAIL_c814'
   // Issue #216: Claude Desktop synth spans — conversation text the inspector must surface.
   const DESKTOP_CONVERSATION =
     'user: why are Claude Desktop inspector blocks empty?\nassistant: capture should attach parts.'
@@ -123,6 +127,152 @@ describe('Backend Contract Tests: GET /api/kyber/session/:id/content', () => {
       harness: 'copilot',
       label: 'Content drill-down',
       payload: { id: 'sess-content-001', harness: 'copilot' },
+    })
+    // Session-level system prompt longer than the session-content default
+    // budget: the shared-context reader's lossless contract fixture.
+    store.upsertMany([
+      turn('span-huge-prompt', [{ part: 'system_prompt', text: HUGE_SYSTEM_PROMPT, tokens: 999 }], {
+        sessionId: 'sess-huge-001',
+        traceId: 'trace-huge-001',
+        timestamp: '2026-09-03T10:00:00.000Z',
+      }),
+    ])
+    store.upsertSession({
+      sessionId: 'sess-huge-001',
+      harness: 'copilot',
+      label: 'Huge shared prompt',
+      payload: { id: 'sess-huge-001', harness: 'copilot' },
+    })
+    // Captured-context recurrence: three turns sharing some exact part
+    // texts while changing others, with explicit 0-based descriptors.
+    const REC_SHARED = 'SHARED_PROMPT_REC_aaa'
+    const recHistory = (user: string, assistant: string) =>
+      JSON.stringify([
+        { role: 'user', content: user },
+        { role: 'assistant', content: assistant },
+      ])
+    store.upsertMany([
+      turn(
+        'span-r0',
+        [
+          { part: 'system_prompt', text: REC_SHARED, tokens: 10 },
+          { part: 'conversation_history', text: recHistory('USER_Q_REC', 'ASSIST_A0_REC') },
+          { part: 'tool_result_content', text: 'RESULT_R0_REC' },
+          { part: 'custom_skill', text: 'SKILL_ALPHA_REC' } as unknown as ContentPart,
+        ],
+        { sessionId: 'sess-rec-001', traceId: 'trace-rec-001', timestamp: '2026-09-03T15:00:00.000Z' },
+      ),
+      turn(
+        'span-r1',
+        [
+          { part: 'system_prompt', text: REC_SHARED, tokens: 10 },
+          { part: 'tool_definitions', text: '{"name":"zeta_tool"}' },
+          { part: 'conversation_history', text: recHistory('USER_Q_REC', 'ASSIST_A1_NEW') },
+          { part: 'tool_result_content', text: 'RESULT_R1_NEW' },
+          { part: 'custom_skill', text: 'SKILL_ALPHA_REC' } as unknown as ContentPart,
+        ],
+        { sessionId: 'sess-rec-001', traceId: 'trace-rec-001', timestamp: '2026-09-03T15:01:00.000Z' },
+      ),
+      turn(
+        'span-r2',
+        [
+          { part: 'system_prompt', text: 'PROMPT_V2_NEW', tokens: 11 },
+          { part: 'conversation_history', text: recHistory('USER_Q2_NEW', 'ASSIST_A2_NEW') },
+        ],
+        { sessionId: 'sess-rec-001', traceId: 'trace-rec-001', timestamp: '2026-09-03T15:02:00.000Z' },
+      ),
+    ])
+    store.upsertSession({
+      sessionId: 'sess-rec-001',
+      harness: 'copilot',
+      label: 'Recurrence labels',
+      payload: {
+        id: 'sess-rec-001',
+        harness: 'copilot',
+        turns: [
+          { index: 0, spanId: 'span-r0', model: 'm' },
+          { index: 1, spanId: 'span-r1', model: 'm' },
+          { index: 2, spanId: 'span-r2', model: 'm' },
+        ],
+      },
+    })
+    // Session prompt living outside any turn span: the turn spans carry no
+    // system prompt, so shared context must come from the session-wide
+    // fallback scan — every matching part, in session order.
+    const LONG_SESSION_PROMPT = 'SESSION_SCOPE_PROMPT_HEAD_1a2b\n' + 'P'.repeat(200) + '\nSESSION_SCOPE_PROMPT_TAIL_9e8f'
+    store.upsertMany([
+      turn(
+        'span-f0',
+        [{ part: 'tool_result_content', text: 'fallback turn output' }],
+        { sessionId: 'sess-rec-fallback-001', traceId: 'trace-rec-fallback-001', timestamp: '2026-09-03T16:00:00.000Z' },
+      ),
+      turn(
+        'span-f-session-a',
+        [{ part: 'system_prompt', text: 'SESSION_SCOPE_PROMPT_ALPHA', tokens: 5 }] as unknown as ContentPart[],
+        {
+          sessionId: 'sess-rec-fallback-001',
+          traceId: 'trace-rec-fallback-001',
+          op: 'session.start',
+          name: 'session_scope',
+          timestamp: '2026-09-03T15:59:00.000Z',
+        },
+      ),
+      turn(
+        'span-f-session-b',
+        [{ part: 'system_prompt', text: LONG_SESSION_PROMPT, tokens: 6 }] as unknown as ContentPart[],
+        {
+          sessionId: 'sess-rec-fallback-001',
+          traceId: 'trace-rec-fallback-001',
+          op: 'session.start',
+          name: 'session_scope',
+          timestamp: '2026-09-03T15:59:30.000Z',
+        },
+      ),
+    ])
+    store.upsertSession({
+      sessionId: 'sess-rec-fallback-001',
+      harness: 'copilot',
+      label: 'Session-scope prompt fallback',
+      payload: {
+        id: 'sess-rec-fallback-001',
+        harness: 'copilot',
+        turns: [{ index: 0, spanId: 'span-f0', model: 'm' }],
+      },
+    })
+    // Mixed session and turn prompts: the turn span carries its own system
+    // prompt while non-turn session spans carry theirs — the reader must
+    // keep both, in capture order, with no text deduplication.
+    store.upsertMany([
+      turn(
+        'span-g0',
+        [{ part: 'system_prompt', text: 'TURN_PROMPT_MIXED_ROUTE', tokens: 7 }] as unknown as ContentPart[],
+        {
+          sessionId: 'sess-rec-mixed-001',
+          traceId: 'trace-rec-mixed-001',
+          timestamp: '2026-09-03T16:00:00.000Z',
+        },
+      ),
+      turn(
+        'span-g-session-a',
+        [{ part: 'system_prompt', text: 'SESSION_PROMPT_MIXED_ROUTE', tokens: 5 }] as unknown as ContentPart[],
+        {
+          sessionId: 'sess-rec-mixed-001',
+          traceId: 'trace-rec-mixed-001',
+          op: 'session.start',
+          name: 'session_scope',
+          timestamp: '2026-09-03T15:59:00.000Z',
+        },
+      ),
+    ])
+    store.upsertSession({
+      sessionId: 'sess-rec-mixed-001',
+      harness: 'copilot',
+      label: 'Mixed session and turn prompts',
+      payload: {
+        id: 'sess-rec-mixed-001',
+        harness: 'copilot',
+        turns: [{ index: 0, spanId: 'span-g0', model: 'm' }],
+      },
     })
     // Session whose payload carries explicit turn descriptors: one current
     // 0-based `index` row and one legacy 1-based `turn` row (issue #184).
@@ -448,6 +598,44 @@ describe('Backend Contract Tests: GET /api/kyber/session/:id/content', () => {
       expect(part.text).toBe(HUGE_TOOL_RESULT.slice(0, CONTENT_RESPONSE_BUDGET))
       expect(part.tokens).toBeUndefined()
     })
+
+    describe('explicit lossless session-content path (?full=true)', () => {
+      it('keeps the default capped behavior for existing callers', async () => {
+        expect(HUGE_SYSTEM_PROMPT.length).toBeGreaterThan(CONTENT_RESPONSE_BUDGET)
+
+        const res = await fetch(`${base}/api/kyber/session/sess-huge-001/content?part=system_prompt`)
+        expect(res.status).toBe(200)
+        assertStandardKyberHeaders(res)
+
+        const body = (await res.json()) as SessionContentResult
+        expect(body.parts).toHaveLength(1)
+        const part = body.parts[0]
+        expect(part.part).toBe('system_prompt')
+        expect(part.truncated).toBe(true)
+        expect(part.totalLength).toBe(HUGE_SYSTEM_PROMPT.length)
+        expect(part.text.length).toBe(CONTENT_RESPONSE_BUDGET)
+        expect(part.text).toBe(HUGE_SYSTEM_PROMPT.slice(0, CONTENT_RESPONSE_BUDGET))
+      })
+
+      it('returns an over-budget system prompt exact with no truncation flags', async () => {
+        expect(HUGE_SYSTEM_PROMPT.length).toBeGreaterThan(CONTENT_RESPONSE_BUDGET)
+
+        const res = await fetch(`${base}/api/kyber/session/sess-huge-001/content?part=system_prompt&full=true`)
+        expect(res.status).toBe(200)
+        assertStandardKyberHeaders(res)
+
+        const body = (await res.json()) as SessionContentResult
+        expect(body.parts).toHaveLength(1)
+        const part = body.parts[0]
+        expect(part.part).toBe('system_prompt')
+        expect(part.text).toBe(HUGE_SYSTEM_PROMPT)
+        expect(part.text).toContain('HUGE_SHARED_PROMPT_HEAD_7d2a')
+        expect(part.text).toContain('HUGE_SHARED_PROMPT_TAIL_c814')
+        expect(part.truncated).toBeUndefined()
+        expect(part.totalLength).toBeUndefined()
+        expect(part.tokens).toBe(999)
+      })
+    })
   })
 
   describe('Edge cases and error handling', () => {
@@ -610,6 +798,242 @@ describe('Backend Contract Tests: GET /api/kyber/session/:id/content', () => {
       expect(body.truncated).toBe(true)
       expect(body.totalLength).toBeGreaterThan(100)
       expect(body.assembledText.length).toBeLessThanOrEqual(100)
+    })
+
+    it('ignores a negative or non-numeric budget instead of slicing from the end', async () => {
+      const baseline = await fetch(`${base}/api/kyber/session/sess-content-001/turn/2/content`)
+      const baselineBody = (await baseline.json()) as TurnContentResult
+
+      for (const query of ['budget=-1', 'budget=-100', 'budget=abc']) {
+        for (const path of [
+          `/api/kyber/session/sess-content-001/turn/2/content?${query}`,
+          `/api/kyber/session/sess-content-001/content?turn=2&${query}`,
+        ]) {
+          const res = await fetch(`${base}${path}`)
+          expect(res.status).toBe(200)
+          const body = (await res.json()) as TurnContentResult
+          expect(body.truncated).toBe(true)
+          expect(body.assembledText.length).toBe(baselineBody.assembledText.length)
+          expect(body.assembledText).toBe(baselineBody.assembledText)
+        }
+      }
+    })
+
+    describe('explicit lossless full-content path (?full=true)', () => {
+      it('truncates over-budget content by default', async () => {
+        expect(HUGE_TOOL_RESULT.length).toBeGreaterThan(CONTENT_RESPONSE_BUDGET)
+
+        const res = await fetch(`${base}/api/kyber/session/sess-content-001/turn/2/content`)
+        expect(res.status).toBe(200)
+        assertStandardKyberHeaders(res)
+
+        const body = (await res.json()) as TurnContentResult
+        // The assembled turn text wraps the block with a section header, so
+        // the total exceeds the raw part by exactly that header length.
+        const header = '=== TOOL RESULTS ===\n'
+        expect(body.truncated).toBe(true)
+        expect(body.totalLength).toBe(HUGE_TOOL_RESULT.length + header.length)
+        expect(body.assembledText.length).toBe(CONTENT_RESPONSE_BUDGET)
+        expect(body.assembledText).toBe((header + HUGE_TOOL_RESULT).slice(0, CONTENT_RESPONSE_BUDGET))
+      })
+
+      it('returns over-budget source text intact with ?full=true', async () => {
+        expect(HUGE_TOOL_RESULT.length).toBeGreaterThan(CONTENT_RESPONSE_BUDGET)
+
+        const res = await fetch(`${base}/api/kyber/session/sess-content-001/turn/2/content?full=true`)
+        expect(res.status).toBe(200)
+        assertStandardKyberHeaders(res)
+
+        const body = (await res.json()) as TurnContentResult
+        expect(body.truncated).toBeUndefined()
+        expect(body.totalLength).toBeUndefined()
+        expect(body.assembledText).toBe(`=== TOOL RESULTS ===\n${HUGE_TOOL_RESULT}`)
+        expect(body.assembledText).toContain(HUGE_TOOL_RESULT)
+        const toolBlock = body.blocks.find((b) => b.key === 'tool_result_content')
+        expect(toolBlock?.truncated).toBeUndefined()
+        expect(toolBlock?.text).toBe(HUGE_TOOL_RESULT)
+      })
+
+      it('supports ?full=1 and the ?turn= alias lossless path', async () => {
+        const direct = await fetch(`${base}/api/kyber/session/sess-content-001/turn/2/content?full=1`)
+        expect(direct.status).toBe(200)
+        const directBody = (await direct.json()) as TurnContentResult
+        expect(directBody.assembledText).toContain(HUGE_TOOL_RESULT)
+        expect(directBody.truncated).toBeUndefined()
+
+        const alias = await fetch(`${base}/api/kyber/session/sess-content-001/content?turn=2&full=true`)
+        expect(alias.status).toBe(200)
+        assertStandardKyberHeaders(alias)
+        const aliasBody = (await alias.json()) as TurnContentResult
+        expect(aliasBody.turnIndex).toBe(2)
+        expect(aliasBody.assembledText).toContain(HUGE_TOOL_RESULT)
+        expect(aliasBody.truncated).toBeUndefined()
+      })
+    })
+
+    describe('captured-context recurrence (exact whole-part text)', () => {
+      async function turnBody(index: number): Promise<TurnContentResult> {
+        const res = await fetch(`${base}/api/kyber/session/sess-rec-001/turn/${index}/content?full=true`)
+        expect(res.status).toBe(200)
+        assertStandardKyberHeaders(res)
+        return (await res.json()) as TurnContentResult
+      }
+
+      function blockOf(body: TurnContentResult, key: string) {
+        const block = body.blocks.find((b) => b.key === key)
+        expect(block).toBeDefined()
+        return block!
+      }
+
+      it('marks every part new on the first turn with earliest shared context', async () => {
+        const body = await turnBody(0)
+        expect(body.spanId).toBe('span-r0')
+        for (const part of body.parts) {
+          expect(part.recurrence).toEqual({ seenBefore: false })
+        }
+        for (const block of body.blocks) {
+          if (block.parts.length > 0) {
+            expect(block.recurrence).toEqual({ newThisTurn: true, seenBefore: false })
+          }
+        }
+        expect(body.sharedContext).toEqual({
+          parts: [{ text: 'SHARED_PROMPT_REC_aaa', spanId: 'span-r0', turnIndex: 0 }],
+          seenBefore: false,
+        })
+      })
+
+      it('marks a repeated-only block seen with no new claim', async () => {
+        const body = await turnBody(1)
+        const sys = blockOf(body, 'system_prompt')
+        expect(sys.text).toBe('SHARED_PROMPT_REC_aaa')
+        expect(sys.recurrence).toEqual({ newThisTurn: false, seenBefore: true })
+        expect(sys.parts).toHaveLength(1)
+        expect(sys.parts[0].recurrence).toEqual({ seenBefore: true })
+      })
+
+      it('marks a changed same-kind part new without calling it cached', async () => {
+        const body = await turnBody(1)
+        const results = blockOf(body, 'tool_result_content')
+        expect(results.text).toBe('RESULT_R1_NEW')
+        expect(results.recurrence).toEqual({ newThisTurn: true, seenBefore: false })
+        // Recurrence never converts into a cache claim anywhere in the body.
+        const serialized = JSON.stringify(body)
+        expect(serialized).not.toContain('cached')
+        expect(serialized).not.toContain('cache_read')
+        expect(serialized).not.toContain('"cache"')
+      })
+
+      it('treats a part kind absent from earlier turns as new, not repeated', async () => {
+        const body = await turnBody(1)
+        const tools = blockOf(body, 'tool_definitions')
+        expect(tools.text).toBe('{"name":"zeta_tool"}')
+        expect(tools.recurrence).toEqual({ newThisTurn: true, seenBefore: false })
+      })
+
+      it('shows both labels on one block mixing new and repeated parts', async () => {
+        const body = await turnBody(1)
+        const history = blockOf(body, 'conversation_history')
+        const kinds = history.parts.map((p) => p.part).sort()
+        expect(kinds).toEqual(['assistant_turns', 'user_messages'])
+        const user = history.parts.find((p) => p.part === 'user_messages')!
+        const assistant = history.parts.find((p) => p.part === 'assistant_turns')!
+        expect(user.text).toBe('USER_Q_REC')
+        expect(user.recurrence).toEqual({ seenBefore: true })
+        expect(assistant.text).toBe('ASSIST_A1_NEW')
+        expect(assistant.recurrence).toEqual({ seenBefore: false })
+        expect(history.recurrence).toEqual({ newThisTurn: true, seenBefore: true })
+      })
+
+      it('passes unknown part kinds through with recurrence', async () => {
+        const body = await turnBody(1)
+        const skill = body.parts.find((p) => p.part === 'custom_skill')
+        expect(skill).toBeDefined()
+        expect(skill!.text).toBe('SKILL_ALPHA_REC')
+        expect(skill!.recurrence).toEqual({ seenBefore: true })
+      })
+
+      it('reports shared context with its own earlier-turn recurrence', async () => {
+        const first = await turnBody(1)
+        // Every matching part is preserved: turn 0's prompt plus the turn's
+        // own identical prompt, each with its contributing turnIndex. The
+        // client suppresses only the selected-turn occurrence from display.
+        expect(first.sharedContext).toEqual({
+          parts: [
+            { text: 'SHARED_PROMPT_REC_aaa', spanId: 'span-r0', turnIndex: 0 },
+            { text: 'SHARED_PROMPT_REC_aaa', spanId: 'span-r1', turnIndex: 1 },
+          ],
+          seenBefore: true,
+        })
+        // The earliest prompt stays shared even after a turn carries its own.
+        const second = await turnBody(2)
+        expect(second.sharedContext?.parts).toEqual([
+          { text: 'SHARED_PROMPT_REC_aaa', spanId: 'span-r0', turnIndex: 0 },
+          { text: 'SHARED_PROMPT_REC_aaa', spanId: 'span-r1', turnIndex: 1 },
+          { text: 'PROMPT_V2_NEW', spanId: 'span-r2', turnIndex: 2 },
+        ])
+        expect(second.sharedContext?.seenBefore).toBe(true)
+        const own = blockOf(second, 'system_prompt')
+        expect(own.text).toBe('PROMPT_V2_NEW')
+        expect(own.recurrence).toEqual({ newThisTurn: true, seenBefore: false })
+      })
+
+      it('preserves every session-scope prompt part via the non-turn fallback', async () => {
+        const res = await fetch(`${base}/api/kyber/session/sess-rec-fallback-001/turn/0/content?full=true`)
+        expect(res.status).toBe(200)
+        assertStandardKyberHeaders(res)
+        const body = (await res.json()) as TurnContentResult
+        expect(body.spanId).toBe('span-f0')
+        // Both session-scope prompts survive in session order — none dropped.
+        expect(body.sharedContext?.parts.map((p) => p.spanId)).toEqual(['span-f-session-a', 'span-f-session-b'])
+        expect(body.sharedContext?.parts[0].text).toBe('SESSION_SCOPE_PROMPT_ALPHA')
+        expect(body.sharedContext?.parts[1].text).toContain('SESSION_SCOPE_PROMPT_HEAD_1a2b')
+        expect(body.sharedContext?.parts[1].text).toContain('SESSION_SCOPE_PROMPT_TAIL_9e8f')
+        expect(body.sharedContext?.seenBefore).toBe(false)
+        expect(body.truncated).toBeUndefined()
+        // The turn's own non-prompt content is unaffected.
+        expect(body.assembledText).toContain('fallback turn output')
+      })
+
+      it('keeps mixed session and turn prompts together in capture order', async () => {
+        const res = await fetch(`${base}/api/kyber/session/sess-rec-mixed-001/turn/0/content?full=true`)
+        expect(res.status).toBe(200)
+        assertStandardKyberHeaders(res)
+        const body = (await res.json()) as TurnContentResult
+        expect(body.spanId).toBe('span-g0')
+        // The non-turn session prompt is not dropped merely because the
+        // turn span carries its own prompt: both render, in capture order,
+        // with exact texts and distinct span ids.
+        expect(body.sharedContext?.parts).toEqual([
+          { text: 'SESSION_PROMPT_MIXED_ROUTE', spanId: 'span-g-session-a' },
+          { text: 'TURN_PROMPT_MIXED_ROUTE', spanId: 'span-g0', turnIndex: 0 },
+        ])
+        expect(body.sharedContext?.seenBefore).toBe(false)
+        expect(body.blocks.find((b) => b.key === 'system_prompt')?.text).toBe('TURN_PROMPT_MIXED_ROUTE')
+        expect(body.truncated).toBeUndefined()
+      })
+
+      it('budgets shared parts truthfully by default and exactly when full', async () => {
+        const capped = await fetch(`${base}/api/kyber/session/sess-rec-fallback-001/turn/0/content?budget=10`)
+        expect(capped.status).toBe(200)
+        const cappedBody = (await capped.json()) as TurnContentResult
+        expect(cappedBody.truncated).toBe(true)
+        expect(cappedBody.sharedContext).toBeDefined()
+        expect(cappedBody.sharedContext!.parts).toHaveLength(2)
+        expect(cappedBody.sharedContext!.parts[0].text).toBe('SESSION_SC')
+        expect(cappedBody.sharedContext!.parts[0].truncated).toBe(true)
+        expect(cappedBody.sharedContext!.parts[0].totalLength).toBe('SESSION_SCOPE_PROMPT_ALPHA'.length)
+        expect(cappedBody.sharedContext!.parts[1].truncated).toBe(true)
+        expect(cappedBody.sharedContext!.parts[1].totalLength).toBeGreaterThan(200)
+
+        const full = await fetch(`${base}/api/kyber/session/sess-rec-fallback-001/turn/0/content?full=true`)
+        expect(full.status).toBe(200)
+        const fullBody = (await full.json()) as TurnContentResult
+        expect(fullBody.sharedContext?.parts[0].text).toBe('SESSION_SCOPE_PROMPT_ALPHA')
+        expect(fullBody.sharedContext?.parts[0].truncated).toBeUndefined()
+        expect(fullBody.sharedContext?.parts[1].text).toContain('SESSION_SCOPE_PROMPT_TAIL_9e8f')
+        expect(fullBody.sharedContext?.parts[1].truncated).toBeUndefined()
+        expect(fullBody.sharedContext?.parts[1].totalLength).toBeUndefined()
+      })
     })
 
     describe('claude-desktop synth parts (issue #216)', () => {

@@ -438,3 +438,32 @@ describe('startOtlpCollectorService ingest_log', () => {
     }
   })
 })
+
+describe('startOtlpCollectorService persistence-failure logging', () => {
+  it('logs the error object itself, so the stack survives', async () => {
+    const service = await startOtlpCollectorService({ port: 0, dbPath: ':memory:' })
+    const logged: unknown[][] = []
+    const spy = vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+      logged.push(args)
+    })
+    try {
+      vi.spyOn(service.canon, 'upsertMany').mockImplementation(() => {
+        throw new Error('store refused the batch')
+      })
+      // A full batch (64) makes the writer flush on its own, which is the path that
+      // reports through onError rather than rejecting a caller.
+      service.writer.write(Array.from({ length: 64 }, (_, i) => claimableSpan({ spanId: `fail-span-${i}` })))
+      await vi.waitFor(() => expect(logged.length).toBeGreaterThan(0))
+
+      const entry = logged.find((args) => String(args[0]).includes('persistence failed'))
+      expect(entry).toBeDefined()
+      const error = entry!.find((arg): arg is Error => arg instanceof Error)
+      expect(error?.message).toBe('store refused the batch')
+      expect(error?.stack).toContain('store refused the batch')
+    } finally {
+      spy.mockRestore()
+      vi.restoreAllMocks()
+      await service.close().catch(() => undefined)
+    }
+  })
+})

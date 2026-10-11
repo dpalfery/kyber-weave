@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 
-import { CanonStore, SCHEMA_VERSION, compressRaw } from './store.js'
+import { CanonStore, SCHEMA_VERSION, compressRaw, systemPromptTextsFromContentColumns } from './store.js'
 import type { Finding } from '../analysis/findings.js'
 import type { RecordProvenance, SourceCheckpoint } from './source-state.js'
 import { TOKEN_SUM_MISMATCH, notMeasurable, type CanonicalRecord, type CostBlock, type TokenUsage } from './types.js'
@@ -1921,5 +1921,17 @@ describe('CanonStore quarantine evidence metadata (plan 2026-10-10, B7/B10)', ()
     } finally {
       db.close()
     }
+  })
+})
+
+describe('systemPromptTextsFromContentColumns', () => {
+  it('drops system_prompt parts whose text is missing or not a string (corrupt blob)', () => {
+    const parts = [
+      { part: 'system_prompt', order: 0 },
+      { part: 'system_prompt', order: 1, text: 42 },
+      { part: 'system_prompt', order: 2, text: '' },
+      { part: 'system_prompt', order: 3, text: 'kept' },
+    ]
+    expect(systemPromptTextsFromContentColumns(null, compressRaw(parts))).toEqual(['kept'])
   })
 })

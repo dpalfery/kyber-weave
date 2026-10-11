@@ -1,11 +1,16 @@
 // Database clean control for the Context Doctor ingest panel (issue #312).
 //
-// A "Clean database" button opens a confirmation dialog — scope (one or more
+// A "Wipe database" button opens a confirmation dialog — scope (one or more
 // harnesses, or all), record/session counts, and the fixed disclosures: no
 // backup is taken, the wipe cannot be undone, and OTLP-collected records have
 // no source logs to re-ingest from. Confirming POSTs the bounded
 // `cleanDatabase` client; the status line is built from counts and scope only,
 // never from a server error string (the `refreshModelWindows` convention).
+//
+// The button is named "Wipe database" rather than "Clean database" because it
+// renders in the Maintenance panel beside "Refresh data now": "clean" beside
+// a refresh reads as the same kind of action, and it is not. The endpoint,
+// request body and dialog are unchanged.
 //
 // Issue #319: re-ingest is now an explicit operator choice. The dialog carries
 // an UNCHECKED "import folder history" box and a weeks window (1..52, default
@@ -22,6 +27,15 @@ import {
   type CleanDatabaseResult,
   type KyberHarnessSummary,
 } from '../../lib/kyberApi.js'
+import {
+  ACTION_BUTTON,
+  CHECKBOX,
+  DESTRUCTIVE_BUTTON,
+  FIELD_LABEL,
+  HELPER_TEXT,
+  INSET_FIELD,
+  NUMBER_FIELD,
+} from './controls.js'
 
 export interface CleanDatabaseControlProps {
   harnesses: KyberHarnessSummary[]
@@ -115,9 +129,13 @@ export function CleanDatabaseControl({ harnesses }: CleanDatabaseControlProps) {
   }
 
   return (
-    <div className="mt-density-cluster">
+    // Its own tinted block, away from the catalog refresh above it: the one
+    // control here that cannot be undone must not share a row with a control
+    // that can.
+    <div className="mt-density-stack rounded-md border border-red-500/30 bg-red-500/5 p-chrome-sm dark:border-red-500/30 dark:bg-red-500/10">
       <button
         type="button"
+        className={DESTRUCTIVE_BUTTON}
         data-testid="clean-database-button"
         disabled={phase === 'in-flight'}
         onClick={() => {
@@ -129,10 +147,10 @@ export function CleanDatabaseControl({ harnesses }: CleanDatabaseControlProps) {
           setPhase('confirm')
         }}
       >
-        Clean database
+        Wipe database
       </button>
       {status !== null && phase === 'done' && (
-        <p data-testid="clean-database-status" className="text-density-xs text-muted-foreground mt-density-hair">
+        <p data-testid="clean-database-status" className={`${HELPER_TEXT} mt-density-hair`}>
           {status}
         </p>
       )}
@@ -142,35 +160,39 @@ export function CleanDatabaseControl({ harnesses }: CleanDatabaseControlProps) {
           aria-modal="true"
           aria-label="Confirm database clean"
           data-testid="clean-database-dialog"
-          className="rounded-lg border border-border bg-card p-chrome mt-density-cluster"
+          className="mt-density-cluster flex flex-col gap-density-cluster rounded-md border border-border bg-card p-chrome"
         >
-          <h4 className="text-density-xs font-semibold">Confirm database clean</h4>
-          <p className="text-density-xs text-muted-foreground mt-density-hair leading-density">
+          <h4 className="text-density-xs font-semibold uppercase tracking-density text-heading">
+            Confirm database clean
+          </h4>
+          <p className={HELPER_TEXT}>
             This wipes stored telemetry and cannot be undone. No backup is taken. OTLP-collected
             records have no source logs and will not come back; file-backed harnesses can import
             folder history again, but only for the window you choose below.
           </p>
-          <fieldset className="mt-density-cluster">
-            <legend className="text-density-xs font-semibold">Scope</legend>
-            <label className="flex items-center gap-density-hair text-density-xs mt-density-hair">
+          <fieldset className={INSET_FIELD}>
+            <legend className="px-chrome-xs text-density-xs font-semibold text-heading">Scope</legend>
+            <label className="flex items-start gap-density-hair text-density-xs">
               <input
                 type="checkbox"
+                className={`${CHECKBOX} mt-px`}
                 data-testid="clean-database-wipe-all"
                 checked={wipeAll}
                 disabled={phase === 'in-flight'}
                 onChange={(event) => setWipeAll(event.target.checked)}
               />
-              Wipe all harnesses
+              <span>Wipe all harnesses</span>
             </label>
             {!wipeAll && (
-              <div className="mt-density-hair flex flex-col gap-density-hair">
+              <div className="flex flex-col gap-density-hair">
                 {observed.map((entry) => (
                   <label
                     key={entry.harness}
-                    className="flex items-center gap-density-hair text-density-xs"
+                    className="flex items-start gap-density-hair text-density-xs"
                   >
                     <input
                       type="checkbox"
+                      className={`${CHECKBOX} mt-px`}
                       data-testid={`clean-database-harness-${entry.harness}`}
                       checked={selected.includes(entry.harness)}
                       disabled={phase === 'in-flight'}
@@ -182,28 +204,35 @@ export function CleanDatabaseControl({ harnesses }: CleanDatabaseControlProps) {
                         )
                       }}
                     />
-                    {harnessLabel(entry)} ({entry.sampleCount} samples)
+                    <span>
+                      {harnessLabel(entry)} ({entry.sampleCount} samples)
+                    </span>
                   </label>
                 ))}
               </div>
             )}
           </fieldset>
-          <fieldset className="mt-density-cluster">
-            <legend className="text-density-xs font-semibold">Import folder history (optional)</legend>
-            <label className="flex items-center gap-density-hair text-density-xs mt-density-hair">
+          <fieldset className={INSET_FIELD}>
+            <legend className="px-chrome-xs text-density-xs font-semibold text-heading">
+              Import folder history (optional)
+            </legend>
+            <label className="flex items-start gap-density-hair text-density-xs">
               <input
                 type="checkbox"
+                className={`${CHECKBOX} mt-px`}
                 data-testid="clean-database-import-history"
                 checked={importHistory}
                 disabled={phase === 'in-flight'}
                 onChange={(event) => setImportHistory(event.target.checked)}
               />
-              Import folder history after the wipe
+              <span>Import folder history after the wipe</span>
             </label>
-            <label className="flex items-center gap-density-hair text-density-xs mt-density-hair">
-              Weeks
+            <label className={FIELD_LABEL} htmlFor="clean-database-import-weeks-field">
+              <span className="text-muted-foreground">Weeks</span>
               <input
+                id="clean-database-import-weeks-field"
                 type="number"
+                className={NUMBER_FIELD}
                 data-testid="clean-database-import-weeks"
                 value={reingestWeeks}
                 min={MIN_REINGEST_WEEKS}
@@ -212,15 +241,16 @@ export function CleanDatabaseControl({ harnesses }: CleanDatabaseControlProps) {
                 onChange={(event) => setReingestWeeks(event.target.value)}
               />
             </label>
-            <p className="text-density-xs text-muted-foreground mt-density-hair">
+            <p className={HELPER_TEXT}>
               {importHistory && weeks === null
                 ? `Choose a whole number of weeks from ${MIN_REINGEST_WEEKS} to ${MAX_REINGEST_WEEKS} to confirm.`
                 : `Leave unticked to wipe without importing folder history. A window is ${MIN_REINGEST_WEEKS}–${MAX_REINGEST_WEEKS} weeks.`}
             </p>
           </fieldset>
-          <div className="mt-density-cluster flex gap-density-cluster">
+          <div className="flex flex-wrap gap-density-cluster">
             <button
               type="button"
+              className={DESTRUCTIVE_BUTTON}
               data-testid="clean-database-confirm"
               disabled={!canConfirm || phase === 'in-flight'}
               onClick={confirmClean}
@@ -229,6 +259,7 @@ export function CleanDatabaseControl({ harnesses }: CleanDatabaseControlProps) {
             </button>
             <button
               type="button"
+              className={ACTION_BUTTON}
               data-testid="clean-database-cancel"
               disabled={phase === 'in-flight'}
               onClick={closeDialog}

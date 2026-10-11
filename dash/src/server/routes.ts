@@ -19,7 +19,9 @@ import {
   type ReportSection,
 } from '../analysis/report/types.js'
 import { createRequire } from 'node:module'
-import { harnessFamily, normalizeHarnessName } from '../canon/measurability.js'
+import { harnessFamily, normalizeHarnessName, parseHarnessFilter } from '../canon/measurability.js'
+import type { ReceiverState } from '../jobs/receiver-host.js'
+import { SETTING_KEYS, readSetting } from '../settings/shared-settings.js'
 import { resolveHarnessScope } from '../refresh/registry.js'
 import type { SourceCheckpoint } from '../canon/source-state.js'
 import type { CleanRequest } from '../clean/clean.js'
@@ -110,25 +112,44 @@ function parseSpanAttributesPath(pathname: string): string | null {
 }
 
 /**
- * `/api/kyber/quarantine/:spanId` — one quarantined span's audit row plus
- * the packet it kept (plan 2026-10-10, B7). Everything after the prefix is
- * the id; `null` means the detail route does not own the path, so the bare
- * list path and anything nested fall through to their own answers. An empty
- * or whitespace id still resolves here (as '') so the route answers the
- * caller-error 400 rather than the catch-all 404.
+ * Decode and trim one percent-encoded path segment, or `null` when it is malformed
+ * (a stray `%` makes `decodeURIComponent` throw a `URIError`, which would otherwise
+ * surface as a 500 instead of the client error it is).
  */
-function parseQuarantineDetailPath(pathname: string): string | null {
-  const prefix = '/api/kyber/quarantine/'
-  if (!pathname.startsWith(prefix)) return null
-  const id = pathname.slice(prefix.length)
-  if (id.includes('/')) return null
-  return decodeURIComponent(id).trim()
+function decodePathId(raw: string): string | null {
+  try {
+    return decodeURIComponent(raw).trim()
+  } catch (err) {
+    if (err instanceof URIError) return null
+    throw err
+  }
+}
+
+/**
+ * A `?budget=` value usable as a character budget: a finite, non-negative integer.
+ * Anything else (blank, NaN, negative, infinite) is ignored, so the default budget
+ * applies. A negative budget must never reach `slice(0, -n)`, which would return
+ * nearly the whole text while the flags claim a budget was honored.
+ */
+function parseContentBudget(param: string | null): number | undefined {
+  if (!param) return undefined
+  const budget = parseInt(param, 10)
+  return Number.isFinite(budget) && budget >= 0 ? budget : undefined
 }
 
 /**
  * `/api/kyber/session/:id/turn/:index/content` — returns unclipped assembled context
  * for a specific turn index (Task G1 / Decision D14).
+ *
+ * Explicit lossless path: `?full=true` (or `?full=1`) bypasses
+ * `CONTENT_RESPONSE_BUDGET` so the full source text returns intact. A
+ * large-number `budget` is not a substitute — it still truncates past its
+ * value and is undocumented for lossless use.
  */
+function isFullContentRequest(params: URLSearchParams): boolean {
+  const full = params.get('full')
+  return full === 'true' || full === '1'
+}
 function parseTurnContentPath(pathname: string): { sessionId: string; turnIndex: number } | null {
   const prefix = '/api/kyber/session/'
   const suffix = '/content'
@@ -465,6 +486,12 @@ export type KyberRouteDeps = {
    * server that is right there as one that does not exist.
    */
   readonly jobHost?: Pick<JobHost, 'getStatus' | 'runNow' | 'runJob'>
+  /**
+   * The receiver host the coverage route reads fresh receiver state from. Absent in
+   * tests that drive the routes without a host pair — coverage then reports the
+   * receiver as unknown (never fabricated) with the enabled flag read off the store.
+   */
+  readonly receiverHost?: Pick<import('../jobs/receiver-host.js').ReceiverHost, 'getStatus' | 'getReceiverState'>
 }
 
 /** Fixed error strings: a failure body must never carry a key, a path or a host error. */
@@ -804,9 +831,18 @@ export function handleKyberRequest(
       sendKyberJson(res, 400, { error: 'Missing session id' })
       return true
     }
-    const budgetParam = url.searchParams.get('budget')
-    const budget = budgetParam ? parseInt(budgetParam, 10) : undefined
-    const body = bridge.assembleTurnContent(sessionId, turnIndex, budget && !isNaN(budget) ? budget : undefined)
+    const budget = parseContentBudget(url.searchParams.get('budget'))
+    // Explicit lossless path first: `?full=true` maps to an unbounded
+    // budget so over-budget source text returns intact with no truncation
+    // flags. A plain `budget` number still truncates past its value.
+    const full = isFullContentRequest(url.searchParams)
+    let effectiveBudget: number | undefined
+    if (full) {
+      effectiveBudget = Number.POSITIVE_INFINITY
+    } else if (budget !== undefined) {
+      effectiveBudget = budget
+    }
+    const body = bridge.assembleTurnContent(sessionId, turnIndex, effectiveBudget)
     if (!body) {
       sendKyberJson(res, 404, { error: 'Turn content not found' })
       return true
@@ -831,9 +867,15 @@ export function handleKyberRequest(
     if (turnParam !== null && turnParam.trim() !== '') {
       const turnIndex = parseInt(turnParam, 10)
       if (!isNaN(turnIndex)) {
-        const budgetParam = url.searchParams.get('budget')
-        const budget = budgetParam ? parseInt(budgetParam, 10) : undefined
-        const turnBody = bridge.assembleTurnContent(contentSessionId, turnIndex, budget && !isNaN(budget) ? budget : undefined)
+        const budget = parseContentBudget(url.searchParams.get('budget'))
+        const full = isFullContentRequest(url.searchParams)
+        let effectiveBudget: number | undefined
+        if (full) {
+          effectiveBudget = Number.POSITIVE_INFINITY
+        } else if (budget !== undefined) {
+          effectiveBudget = budget
+        }
+        const turnBody = bridge.assembleTurnContent(contentSessionId, turnIndex, effectiveBudget)
         if (!turnBody) {
           sendKyberJson(res, 404, { error: 'Turn content not found' })
           return true
@@ -844,7 +886,13 @@ export function handleKyberRequest(
     }
     const span = (url.searchParams.get('span') ?? '').trim() || undefined
     const part = (url.searchParams.get('part') ?? '').trim() || undefined
-    const body = bridge.getSessionContent(contentSessionId, { spanId: span, part })
+    // Explicit lossless path (`?full=true`) for over-budget session content
+    // on this route. The whole-turn shared-context reader is served by the
+    // turn-content endpoint above (`/api/kyber/session/:id/turn/:index/content`),
+    // not here — this flag only widens this session-content response.
+    // Existing callers without `full` keep the capped behavior unchanged.
+    const full = isFullContentRequest(url.searchParams)
+    const body = bridge.getSessionContent(contentSessionId, { spanId: span, part, ...(full ? { full: true as const } : {}) })
     if (!body) {
       sendKyberJson(res, 404, { error: 'Session not found' })
       return true
@@ -921,14 +969,28 @@ export function handleKyberRequest(
     return true
   }
 
+  // Quarantine and problems share one harness-filter contract (measurability.ts): absent
+  // or `all` is the backwards-compatible unfiltered list; `unknown` keeps unattributed
+  // rows only; a concrete id keeps its scope; anything else is a 400, never silently
+  // unfiltered (a typo scoping to everything would hide the rows being looked for).
+  // Lists stay metadata-only and bounded; the stored raw payload / exception stack ride
+  // on the detail routes below.
   if (url.pathname === '/api/kyber/quarantine') {
     if (req.method !== 'GET') {
       sendKyberJson(res, 405, { error: 'Method Not Allowed' })
       return true
     }
+    const filter = parseHarnessFilter(url.searchParams.get('harness'))
+    if (filter.kind === 'invalid') {
+      sendKyberJson(res, 400, {
+        error: `invalid harness filter ${JSON.stringify(filter.raw)}: expected all, unknown, or a known harness id`,
+      })
+      return true
+    }
+    const scope = filter.kind === 'all' ? undefined : filter.kind === 'unknown' ? 'unknown' : filter.id
     const { limit, offset, page } = parsePaginationParams(url, 200)
-    const entries = bridge.getQuarantine(limit, offset)
-    const total = bridge.getQuarantineCount()
+    const entries = bridge.getQuarantine(limit, offset, scope)
+    const total = bridge.getQuarantineCount(scope)
     sendKyberJson(res, 200, {
       entries,
       data: entries,
@@ -939,22 +1001,23 @@ export function handleKyberRequest(
     return true
   }
 
-  // One quarantined span's evidence (B7). Registered after the exact list
-  // match so `/api/kyber/quarantine` still answers the page; the detail
-  // path — including a bare trailing slash — is owned here, never by the
-  // catch-all. This is the only route that serves a stored packet; the list
-  // stays light by the same contract.
-  const quarantineSpanId = parseQuarantineDetailPath(url.pathname)
-  if (quarantineSpanId !== null) {
+  // One quarantined span with its incoming evidence (v18+ rows). Older rows read
+  // `rawPayload: null, evidenceAvailable: false` — explicitly unavailable, never invented.
+  if (url.pathname.startsWith('/api/kyber/quarantine/')) {
     if (req.method !== 'GET') {
       sendKyberJson(res, 405, { error: 'Method Not Allowed' })
       return true
     }
-    if (!quarantineSpanId) {
-      sendKyberJson(res, 400, { error: 'Missing span id' })
+    const spanId = decodePathId(url.pathname.slice('/api/kyber/quarantine/'.length))
+    if (spanId === null) {
+      sendKyberJson(res, 400, { error: 'Malformed quarantine span id' })
       return true
     }
-    const entry = bridge.getQuarantineEntry(quarantineSpanId)
+    if (!spanId) {
+      sendKyberJson(res, 400, { error: 'Missing quarantine span id' })
+      return true
+    }
+    const entry = bridge.getQuarantineEntry(spanId)
     if (!entry) {
       sendKyberJson(res, 404, { error: 'Quarantine entry not found' })
       return true
@@ -968,9 +1031,17 @@ export function handleKyberRequest(
       sendKyberJson(res, 405, { error: 'Method Not Allowed' })
       return true
     }
+    const filter = parseHarnessFilter(url.searchParams.get('harness'))
+    if (filter.kind === 'invalid') {
+      sendKyberJson(res, 400, {
+        error: `invalid harness filter ${JSON.stringify(filter.raw)}: expected all, unknown, or a known harness id`,
+      })
+      return true
+    }
+    const scope = filter.kind === 'all' ? undefined : filter.kind === 'unknown' ? 'unknown' : filter.id
     const { limit, offset, page } = parsePaginationParams(url, 200)
-    const problems = bridge.getProblems(limit, offset)
-    const total = bridge.getProblemCount()
+    const problems = bridge.getProblems(limit, offset, scope)
+    const total = bridge.getProblemCount(scope)
     sendKyberJson(res, 200, {
       problems,
       data: problems,
@@ -978,6 +1049,32 @@ export function handleKyberRequest(
       page,
       limit,
     })
+    return true
+  }
+
+  // One recorded problem with its exception evidence. `message` is the exact stored
+  // message; `stack` is null unless the problem came from a throw. Singular `problem`
+  // so the detail route cannot swallow the plural list route.
+  if (url.pathname.startsWith('/api/kyber/problem/')) {
+    if (req.method !== 'GET') {
+      sendKyberJson(res, 405, { error: 'Method Not Allowed' })
+      return true
+    }
+    const rawId = decodePathId(url.pathname.slice('/api/kyber/problem/'.length))
+    if (rawId === null) {
+      sendKyberJson(res, 400, { error: 'Malformed problem id' })
+      return true
+    }
+    if (!rawId) {
+      sendKyberJson(res, 400, { error: 'Missing problem id' })
+      return true
+    }
+    const problem = bridge.getProblemEntry(rawId)
+    if (!problem) {
+      sendKyberJson(res, 404, { error: 'Problem not found' })
+      return true
+    }
+    sendKyberJson(res, 200, problem)
     return true
   }
 
@@ -999,8 +1096,15 @@ export function handleKyberRequest(
 
   // Ingest coverage (plan docs/plans/2026-09-30-issues-189-198-199 T5,
   // issues #189/#198/#199). Refresh window, receiver activity, quarantine
-  // reasons, and checkpoint statuses in one read-only payload — every count
-  // comes from a row that exists, and anything unrecorded reads as unknown.
+  // reasons, checkpoint statuses, and fresh receiver state in one read-only payload —
+  // every count comes from a row that exists, and anything unrecorded reads as unknown.
+  //
+  // `ingest` separates transport from corpus on purpose: `ingestedCount` is received
+  // OTLP span/log volume as the collector tallied it on arrival (quarantined spans
+  // included), while `recordCount` is canonical records stored. `ingestedCount > 0`
+  // beside every `recordCount === 0` is quarantine, not silence — and `receiver`
+  // (below) says whether the collector is even accepting. Nothing here lets
+  // quarantined data read as accepted canonical records.
   if (url.pathname === '/api/kyber/coverage') {
     if (req.method !== 'GET') {
       sendKyberJson(res, 405, { error: 'Method Not Allowed' })
@@ -1017,7 +1121,26 @@ export function handleKyberRequest(
     // the checkpoint status is not observable from this page, [] means the
     // read succeeded and zero units exist (genuine zero).
     const checkpoints = bridge.getSourceCheckpointStatuses()
-    sendKyberJson(res, 200, { refresh, ingest, quarantineByReason, checkpoints })
+    // Fresh receiver state from the host's 10-second poll (the receiver is a separate
+    // process; this is its propagated `/healthz`, never a guess). Without a host —
+    // tests driving the routes bare — the receiver reads as unknown with the enabled
+    // flag off the store, and `healthy: false`: unobserved is never green.
+    const receiver: ReceiverState = deps?.receiverHost?.getReceiverState() ?? {
+      enabled: deps?.store !== undefined && readSetting(deps.store, SETTING_KEYS.receiverHosted) === 'on',
+      endpoint: null,
+      status: 'unknown',
+      listening: null,
+      hostedByUs: null,
+      paused: null,
+      checkedAt: null,
+      lastAcceptedAt: null,
+      failures5m: null,
+      lastError: null,
+      lastCode: null,
+      lastErrorAt: null,
+      healthy: false,
+    }
+    sendKyberJson(res, 200, { refresh, ingest, quarantineByReason, checkpoints, receiver })
     return true
   }
 

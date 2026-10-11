@@ -199,10 +199,29 @@ export async function startOtlpCollectorService(opts: CollectorOptions = {}): Pr
     },
   }
 
-  const writer = new IngestWriter(toCanon, { batchSize: 64, flushIntervalMs: 2000 })
+  // The receiver is created after the writer (it needs the writer as its store), so the
+  // persistence evidence flows through this holder: flush failures enter the receiver's
+  // five-minute error window, and a committed batch moves `lastAcceptedAt`. The fenced
+  // audit-log write stays out of the window — it is tallied console noise, not a failed
+  // OTLP request — while a sink refusal is a persistence failure even though the exporter
+  // already got its 200.
+  const receiverHolder: { current: OtlpReceiver | null } = { current: null }
+  const writer = new IngestWriter(toCanon, {
+    batchSize: 64,
+    flushIntervalMs: 2000,
+    onError: (error) => {
+      // Replaces the writer's default rethrow-on-next-turn: a collector that crashes on a
+      // transient store failure drops everything behind it, so the failure is recorded in
+      // the receiver's error window and logged for the operator instead.
+      receiverHolder.current?.recordPersistenceFailure(error instanceof Error ? error.message : String(error))
+      console.error(chalk.red('[ingest] persistence failed; batch re-queued:'), error)
+    },
+  })
   await writer.start()
 
   const receiver = new OtlpReceiver({ port, host, store: writer })
+  receiverHolder.current = receiver
+  writer.setPersistedHook(() => receiver.markPersisted())
   let pendingReconcileTimer: ReturnType<typeof setInterval> | null = null
 
   try {

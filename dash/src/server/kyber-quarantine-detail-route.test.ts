@@ -126,16 +126,27 @@ describe('GET /api/kyber/quarantine/:spanId', () => {
 
   it('400s with the missing-id JSON error for an empty or whitespace id, never the catch-all 404', async () => {
     // B7: an empty id is a caller error, not an unknown row. The precedence
-    // guard at routes.ts:1693 answers every unhandled /api/kyber/* path with
+    // guard at routes.ts answers every unhandled /api/kyber/* path with
     // `{"error":"Not found"}` (404), so asserting the body — not just the
     // status — proves the detail route owns this answer rather than the
-    // catch-all. Same shape as the span-attributes route's 'Missing span id'.
+    // catch-all.
     for (const path of ['/api/kyber/quarantine/', '/api/kyber/quarantine/%20']) {
       const res = await fetch(`${base}${path}`)
       expect(res.status).toBe(400)
       const body = (await res.json()) as { error: string }
-      expect(body).toEqual({ error: 'Missing span id' })
+      expect(body).toEqual({ error: 'Missing quarantine span id' })
     }
+  })
+
+  it('400s a malformed percent-encoding as a caller error, never a 500', async () => {
+    // A stray `%` makes decodeURIComponent throw a URIError; the route must
+    // answer the client error that is, not the 500 an uncaught throw would
+    // produce. Distinct from the missing-id 400: what arrived was unreadable,
+    // not absent.
+    const res = await fetch(`${base}/api/kyber/quarantine/%zz`)
+    expect(res.status).toBe(400)
+    const body = (await res.json()) as { error: string }
+    expect(body).toEqual({ error: 'Malformed quarantine span id' })
   })
 
   it('leaves the list route light: entries carry no payload', async () => {

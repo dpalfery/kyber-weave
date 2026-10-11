@@ -17,8 +17,8 @@ use anyhow::{anyhow, bail, Result};
 use serde_json::{json, Value};
 
 use crate::api::{
-    self, LoopbackClient, Method, CLEAN_PATH, IMPORT_HISTORY_PATH, JOBS_PATH, REFRESH_PATH,
-    SETTINGS_PATH,
+    self, LoopbackClient, Method, CLEAN_PATH, COVERAGE_PATH, IMPORT_HISTORY_PATH, JOBS_PATH,
+    REFRESH_PATH, SETTINGS_PATH,
 };
 use crate::cli::{self, Resolution, SetupReason, SetupState};
 use crate::ipc::{self, ViewState};
@@ -175,6 +175,9 @@ struct ReportCacheState {
     report: api::ReportCache,
     jobs: Option<Value>,
     shared_settings: Option<Value>,
+    /// Shared coverage (`GET /api/kyber/coverage`), carried verbatim like
+    /// `jobs`: the tray renders only its `receiver` key for the saber.
+    coverage: Option<Value>,
 }
 
 impl Runtime {
@@ -304,6 +307,7 @@ impl Runtime {
             &self.cache.report,
             self.cache.jobs.clone(),
             self.cache.shared_settings.clone(),
+            self.cache.coverage.clone(),
             &self.settings,
         )
     }
@@ -597,6 +601,9 @@ impl Runtime {
         // leaving old (or inventing default) job and settings state on screen.
         self.cache.jobs = self.fetch_document(&server_url, JOBS_PATH);
         self.cache.shared_settings = self.fetch_document(&server_url, SETTINGS_PATH);
+        // Same rule for coverage: the saber reads it on the existing poll
+        // loop, and a failed read renders red rather than a stale green.
+        self.cache.coverage = self.fetch_document(&server_url, COVERAGE_PATH);
     }
 
     fn fetch_document(&mut self, server_url: &str, path: &str) -> Option<Value> {

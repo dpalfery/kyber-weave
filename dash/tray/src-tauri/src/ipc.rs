@@ -52,6 +52,10 @@ pub struct ViewState {
     pub jobs: Option<serde_json::Value>,
     /// The server-owned settings (`GET /api/kyber/settings`), same rule.
     pub shared_settings: Option<serde_json::Value>,
+    /// Shared coverage (`GET /api/kyber/coverage`), carried verbatim. The
+    /// native saber and the popover read only its `receiver` key; `None`
+    /// means the fetch failed and renders red/unknown, never a default.
+    pub coverage: Option<serde_json::Value>,
     /// Tray-local display preferences only.
     pub settings: TraySettings,
 }
@@ -68,6 +72,7 @@ pub fn view_state(
     cache: &ReportCache,
     jobs: Option<serde_json::Value>,
     shared_settings: Option<serde_json::Value>,
+    coverage: Option<serde_json::Value>,
     settings: &TraySettings,
 ) -> ViewState {
     let phase = match (&setup, server) {
@@ -86,6 +91,7 @@ pub fn view_state(
         error: cache.error.clone(),
         jobs,
         shared_settings,
+        coverage,
         settings: settings.clone(),
     }
 }
@@ -208,7 +214,15 @@ mod tests {
     }
 
     fn state(setup: Option<SetupState>, server: ServerPhase, cache: &ReportCache) -> ViewState {
-        view_state(setup, server, cache, None, None, &TraySettings::default())
+        view_state(
+            setup,
+            server,
+            cache,
+            None,
+            None,
+            None,
+            &TraySettings::default(),
+        )
     }
 
     /// The design's ViewState, by its own field names.
@@ -226,6 +240,10 @@ mod tests {
             "unknown jobs are null, not a default"
         );
         assert!(json["sharedSettings"].is_null());
+        assert!(
+            json["coverage"].is_null(),
+            "unknown coverage is null, not a default"
+        );
         assert!(json.get("refresh").is_none() && json.get("receiver").is_none());
         assert_eq!(json["settings"]["harness"], "all");
         assert!(json.get("setup").is_none(), "absent unless in setup");
@@ -283,18 +301,21 @@ mod tests {
     fn jobs_and_shared_settings_are_carried_verbatim() {
         let jobs = json!({ "refresh": { "state": "failed", "lastFailure": "canon.db is locked" } });
         let shared = json!({ "refreshMinutes": 15, "hostReceiver": true });
+        let coverage = json!({ "receiver": { "healthy": true } });
         let json = serde_json::to_value(view_state(
             None,
             ServerPhase::Ready,
             &cache_with_report(),
             Some(jobs.clone()),
             Some(shared.clone()),
+            Some(coverage.clone()),
             &TraySettings::default(),
         ))
         .unwrap();
 
         assert_eq!(json["jobs"], jobs);
         assert_eq!(json["sharedSettings"], shared);
+        assert_eq!(json["coverage"], coverage);
     }
 
     /// The tray matches the same table the CLI and the web router match.

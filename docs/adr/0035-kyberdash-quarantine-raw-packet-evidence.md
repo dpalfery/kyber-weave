@@ -1,5 +1,5 @@
 ---
-id: adr/0034-kyberdash-quarantine-raw-packet-evidence
+id: adr/0035-kyberdash-quarantine-raw-packet-evidence
 title: Quarantine Raw-Packet Evidence and Harness-Scoped Wipes; Amend ADR 0032's Per-Harness Quarantine Consequence
 doc-type: adr
 status: current
@@ -7,7 +7,7 @@ owner: dpalfery
 last-reviewed: 2026-10-10
 ---
 
-# ADR 0034: Quarantine Raw-Packet Evidence and Harness-Scoped Wipes; Amend ADR 0032's Per-Harness Quarantine Consequence
+# ADR 0035: Quarantine Raw-Packet Evidence and Harness-Scoped Wipes; Amend ADR 0032's Per-Harness Quarantine Consequence
 
 ## Status
 

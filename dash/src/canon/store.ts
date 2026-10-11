@@ -13,7 +13,7 @@
 // deflate-compressed rather than stored verbatim (R12.4) — the measured cost
 // of not doing so is 2.9 GB for 37,623 records, roughly 78 KB per span.
 
-import { FILE_SOURCE_PREFIX, SessionIdentities, canonicalHarnessId, normalizeHarnessName } from './measurability.js'
+import { FILE_SOURCE_PREFIX, QUARANTINE_UNKNOWN_SOURCES, SessionIdentities, canonicalHarnessId, normalizeHarnessName, sourceSpellingsForHarness } from './measurability.js'
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { createRequire } from 'node:module'
@@ -327,7 +327,8 @@ CREATE TABLE IF NOT EXISTS problems (
   location TEXT,
   session_id TEXT,
   harness TEXT,
-  timestamp TEXT
+  timestamp TEXT,
+  stack TEXT
 );
 CREATE UNIQUE INDEX IF NOT EXISTS problems_by_identity ON problems (problem_key);
 CREATE TABLE IF NOT EXISTS ingest_log (
@@ -737,29 +738,43 @@ export const MIGRATIONS: Record<number, (db: Database) => void> = {
       }
     }
   },
-  // v17 -> v18: the quarantine row keeps the sender's decoded packet (plan
-  // 2026-10-10, B7/B10). A quarantined span is held out of the corpus — for
-  // a Claude interaction span, the only copy of the prompt would otherwise
-  // leave with the deleted row, which is why the turn inspector renders
-  // empty. The ADD COLUMN is presence-guarded for F9: the live canon.db was
-  // stamped 18 by an off-main build that already added `raw_payload`, and an
-  // unguarded ALTER would die on "duplicate column" against exactly the
-  // store whose packets must survive.
+  // v17 -> v18: incoming-evidence columns. quarantine gains raw_payload —
+  // the sender's decoded packet, the evidence the detail route serves (plan
+  // 2026-10-10, B7/B10): a quarantined span is held out of the corpus, and
+  // for a Claude interaction span this packet is the only surviving copy of
+  // the prompt. problems gains stack (the exception stack when a problem came
+  // from a throw, null otherwise). Both nullable so existing rows keep
+  // reading as "no stored evidence" rather than being backfilled with a
+  // guess — backfilling would invent a message or stack those rows never
+  // carried. Every ADD COLUMN is presence-guarded for F9: a live canon.db
+  // can be stamped 18 by an off-main build that already added `raw_payload`,
+  // and an unguarded ALTER would die on "duplicate column" against exactly
+  // the store whose packets must survive.
   17: (db) => {
     const hasQuarantine = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='quarantine'").get()
-    if (!hasQuarantine) return
-    const qCols = (db.prepare('PRAGMA table_info(quarantine)').all() as { name: string }[]).map((c) => c.name)
-    if (!qCols.includes('raw_payload')) {
-      db.exec('ALTER TABLE quarantine ADD COLUMN raw_payload TEXT')
+    if (hasQuarantine) {
+      const qCols = (db.prepare('PRAGMA table_info(quarantine)').all() as { name: string }[]).map((c) => c.name)
+      if (!qCols.includes('raw_payload')) {
+        db.exec('ALTER TABLE quarantine ADD COLUMN raw_payload TEXT')
+      }
+    }
+    const hasProblems = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='problems'").get()
+    if (hasProblems) {
+      const pCols = (db.prepare('PRAGMA table_info(problems)').all() as { name: string }[]).map((c) => c.name)
+      if (!pCols.includes('stack')) {
+        db.exec('ALTER TABLE problems ADD COLUMN stack TEXT')
+      }
     }
   },
   // v18 -> v19: the harness a quarantined span or held log row is scoped to,
   // so a per-harness wipe can key its audit rows rather than scanning
   // payloads. `quarantine` gains the column beside `raw_payload`; the two
-  // log tables gain it for the same scoping. Every ADD COLUMN is
-  // presence-guarded for the same F9 reason as the step above — a live
-  // store stamped 18 by the off-main build must still reach the identical
-  // final shape, and a table missing entirely is skipped, not altered.
+  // log tables gain it for the same scoping. "Stamped 18" became ambiguous
+  // once off-main builds (raw_payload, no stack) and main (raw_payload plus
+  // stack) disagreed about what 18 means, so this step presence-guards every
+  // column the v18 shape promises, not only its own: each column is added
+  // only when missing, and a table missing entirely is skipped, not altered —
+  // every stamped-18 store must reach the identical final shape.
   18: (db) => {
     for (const table of ['quarantine', 'pending_logs', 'quarantined_logs'] as const) {
       const hasTable = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?").get(table)
@@ -767,6 +782,13 @@ export const MIGRATIONS: Record<number, (db: Database) => void> = {
       const cols = (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((c) => c.name)
       if (!cols.includes('harness')) {
         db.exec(`ALTER TABLE ${table} ADD COLUMN harness TEXT`)
+      }
+    }
+    const hasProblems = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='problems'").get()
+    if (hasProblems) {
+      const pCols = (db.prepare('PRAGMA table_info(problems)').all() as { name: string }[]).map((c) => c.name)
+      if (!pCols.includes('stack')) {
+        db.exec('ALTER TABLE problems ADD COLUMN stack TEXT')
       }
     }
   },
@@ -823,6 +845,12 @@ export type SpanProblem = Problem & {
   sessionId?: string | null
   harness?: string | null
   timestamp?: string | null
+  /**
+   * The exception stack when the problem came from a throw (v18+ rows). Null/absent
+   * otherwise — never synthesized. A validation problem that was computed, not thrown,
+   * has a message but no stack, and must not claim one.
+   */
+  stack?: string | null
 }
 
 /** One entry of the ingest audit log. */
@@ -842,7 +870,13 @@ export type QuarantineEntry = {
   timestamp?: string
   /** The harness attribution named for the row; absent on rows that predate v19. */
   harness?: string | null
-  /** The sender's decoded packet, when the row kept it as evidence (B7). */
+  /**
+   * The exact incoming span JSON stored at quarantine time (v18+ rows). Absent for
+   * older rows — unknown, never reconstructed from the records table (that row, when
+   * one exists, is the normalized record, not the incoming payload, and mislabeling
+   * it as the original message is forbidden). The sender's decoded packet, kept
+   * beside the audit row as evidence (B7).
+   */
   rawPayload?: string | null
 }
 
@@ -919,8 +953,167 @@ export function decompressRaw(blob: Uint8Array): unknown {
   return JSON.parse(inflateSync(Buffer.from(blob)).toString('utf8'))
 }
 
+/**
+ * Session-scope system-prompt texts hiding in one records row's content
+ * columns, without touching anything else on the row.
+ *
+ * <remarks>
+ * Why this shape: the turn-content fallback only needs `system_prompt`
+ * texts, so it must not pay for full records. `content_json` is plain text
+ * and filters with a parse; `parts_json` is deflated with no expression
+ * index into it, so a parts-carrying row still inflates to filter — a true
+ * indexed pre-filter would need a schema migration (a generated column over
+ * the inflated parts), deliberately out of scope. Semantics match the
+ * bridge's `partsFromRow`: parts win when present and non-empty (even when
+ * `content_json` carries something else), otherwise `content_json` decides.
+ * Both callers (the store method below and the store-less bridge path) read
+ * through here so the two seams cannot diverge.
+ * </remarks>
+ */
+export function systemPromptTextsFromContentColumns(
+  contentJson: unknown,
+  partsJson: unknown,
+): string[] {
+  if (partsJson !== null && partsJson !== undefined) {
+    try {
+      const parts = decompressRaw(partsJson as Uint8Array) as ContentPart[]
+      if (Array.isArray(parts) && parts.length > 0) {
+        return [...parts]
+          .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+          .filter((part) => part.part === 'system_prompt' && typeof part.text === 'string' && part.text !== '')
+          .map((part) => part.text)
+      }
+    } catch {
+      // A corrupt blob falls through to content_json — same as partsFromRow.
+    }
+  }
+  if (typeof contentJson === 'string' && contentJson !== '' && contentJson !== '{}') {
+    try {
+      const content = JSON.parse(contentJson) as Partial<Record<string, unknown>>
+      const text = content.system_prompt
+      if (typeof text === 'string' && text !== '') return [text]
+    } catch {
+      return []
+    }
+  }
+  return []
+}
+
 function text(value: unknown): string {
   return value as string
+}
+
+/**
+ * Map a problems row out of SQLite's column names. `stack` is present only when the row
+ * stored one; a computed validation problem has a message and no stack.
+ */
+function toSpanProblem(row: {
+  span_id: unknown
+  severity: unknown
+  code: unknown
+  message: unknown
+  location: unknown
+  session_id: unknown
+  harness: unknown
+  timestamp: unknown
+  stack: unknown
+}): SpanProblem {
+  const p: SpanProblem = {
+    spanId: text(row.span_id),
+    severity: text(row.severity) as Problem['severity'],
+    code: text(row.code),
+    message: text(row.message),
+  }
+  if (row.location !== null && row.location !== undefined) {
+    p.location = text(row.location)
+  }
+  if (row.session_id !== null && row.session_id !== undefined) {
+    p.sessionId = text(row.session_id)
+  }
+  if (row.harness !== null && row.harness !== undefined) {
+    p.harness = text(row.harness)
+  }
+  if (row.timestamp !== null && row.timestamp !== undefined) {
+    p.timestamp = text(row.timestamp)
+  }
+  if (row.stack !== null && row.stack !== undefined) {
+    p.stack = text(row.stack)
+  }
+  return p
+}
+
+type QuarantineRowShape = {
+  span_id: unknown
+  namespaces: unknown
+  reason: unknown
+  source: unknown
+  name: unknown
+  timestamp: unknown
+  raw_payload: unknown
+}
+
+/**
+ * Map a quarantine row out of SQLite's column names. `raw_payload` is present only when
+ * the row stored one (v18+ writes); older rows read without it — absent, never invented.
+ */
+function toQuarantineEntry(row: QuarantineRowShape): QuarantineEntry {
+  const entry: QuarantineEntry = {
+    spanId: text(row.span_id),
+    namespaces: JSON.parse(text(row.namespaces)) as string[],
+    reason: text(row.reason),
+  }
+  if (row.source !== null && row.source !== undefined) {
+    entry.source = text(row.source)
+  }
+  if (row.name !== null && row.name !== undefined) {
+    entry.name = text(row.name)
+  }
+  if (row.timestamp !== null && row.timestamp !== undefined) {
+    entry.timestamp = text(row.timestamp)
+  }
+  if (row.raw_payload !== null && row.raw_payload !== undefined) {
+    entry.rawPayload = text(row.raw_payload)
+  }
+  return entry
+}
+
+/**
+ * The `WHERE` fragment scoping quarantine rows to one harness filter, with its bound
+ * parameters. `undefined` is unfiltered. `'unknown'` matches unattributed sources —
+ * null, blank, or the neutral grouping keys — and a canonical id matches every stored
+ * spelling normalizing to it (case-insensitive), so twin front-ends scope together.
+ */
+export function quarantineHarnessWhere(harness: string | undefined): { where: string; params: Array<string | number> } {
+  if (harness === undefined) return { where: '', params: [] }
+  if (harness === 'unknown') {
+    const keys = QUARANTINE_UNKNOWN_SOURCES.map((key) => key.toLowerCase())
+    const placeholders = keys.map(() => '?').join(', ')
+    return {
+      where: ` WHERE source IS NULL OR TRIM(COALESCE(source, '')) = '' OR LOWER(source) IN (${placeholders})`,
+      params: keys,
+    }
+  }
+  const spellings = sourceSpellingsForHarness(harness)
+  // An id with no known spelling matches nothing; `IN ()` is not portable SQL.
+  if (spellings.length === 0) return { where: ' WHERE 1 = 0', params: [] }
+  const placeholders = spellings.map(() => '?').join(', ')
+  return { where: ` WHERE LOWER(source) IN (${placeholders})`, params: spellings }
+}
+
+/**
+ * The `WHERE` fragment scoping problem rows to one harness filter. Problems carry the
+ * attributed harness id, matched case-insensitively against the same spelling expansion
+ * the quarantine filter uses (so `?harness=copilot-chat` finds the twin front-end's rows
+ * in both lists); `unknown` is a null or blank harness.
+ */
+export function problemsHarnessWhere(harness: string | undefined): { where: string; params: Array<string | number> } {
+  if (harness === undefined) return { where: '', params: [] }
+  if (harness === 'unknown') {
+    return { where: ` WHERE harness IS NULL OR TRIM(COALESCE(harness, '')) = ''`, params: [] }
+  }
+  const spellings = new Set([harness.toLowerCase(), ...sourceSpellingsForHarness(harness)])
+  const placeholders = [...spellings].map(() => '?').join(', ')
+  return { where: ` WHERE LOWER(harness) IN (${placeholders})`, params: [...spellings] }
 }
 
 function nullableText(value: unknown): string | null {
@@ -2132,6 +2325,58 @@ export class CanonStore {
   }
 
   /**
+   * Non-turn session-scope system prompts for the shared-context reader,
+   * without materializing full records.
+   *
+   * <remarks>
+   * The projection selects only the prompt-bearing content columns plus the
+   * span timestamp in session order, so `raw` (the largest blob per span),
+   * tokens, cost, and measurability never leave SQLite, and no
+   * `CanonicalRecord` is built — unrelated rows contribute nothing but
+   * their two content cells plus a short timestamp. Capture order, exact
+   * texts, span ids, and per-row timestamps are preserved; budgeting and
+   * truncation stay with the caller. The timestamp lets the caller keep only
+   * prompts captured at or before the turn being shown: a prompt captured
+   * after the selected turn must not be presented as part of what that
+   * earlier turn saw. Rows with a missing or unparseable timestamp stay
+   * included — the caller cannot prove they are future evidence, and
+   * dropping them would invent a claim the store cannot support.
+   * Turn spans are excluded by their canonical operation (`llm.invoke`, the
+   * same predicate `isTurn` in `canon/sessions.ts` uses): a turn-derived
+   * prompt missing from the payload turn list must never masquerade as an
+   * unindexed session-scope prompt, and identity is never inferred from
+   * text. The `excludeSpanId` filter stays as defense for turn spans the
+   * caller already resolved.
+   * </remarks>
+   */
+  systemPromptPartsForSession(
+    sessionId: string,
+    excludeSpanId?: string | Set<string>,
+  ): Array<{ spanId: string; text: string; timestamp?: string }> {
+    if (!sessionId) return []
+    const rows = this.db
+      .prepare(
+        // Turn spans (`llm.invoke`) are skipped in SQL, so their (largest) parts blobs are
+        // never read or inflated; a row cap would silently drop session prompts instead.
+        `SELECT span_id, op, timestamp, content_json, parts_json FROM records
+         WHERE COALESCE(session_id, trace_id) = ? AND COALESCE(op, '') <> 'llm.invoke'
+         ORDER BY timestamp`,
+      )
+      .all(sessionId) as { span_id: unknown; op: unknown; timestamp: unknown; content_json: unknown; parts_json: unknown }[]
+    const out: Array<{ spanId: string; text: string; timestamp?: string }> = []
+    for (const row of rows) {
+      if (row.op === 'llm.invoke') continue
+      const spanId = String(row.span_id)
+      if (typeof excludeSpanId === 'string' ? spanId === excludeSpanId : excludeSpanId?.has(spanId) === true) continue
+      const timestamp = row.timestamp === null || row.timestamp === undefined ? undefined : String(row.timestamp)
+      for (const text of systemPromptTextsFromContentColumns(row.content_json, row.parts_json)) {
+        out.push(timestamp === undefined ? { spanId, text } : { spanId, text, timestamp })
+      }
+    }
+    return out
+  }
+
+  /**
    * The persisted id of every canonical-harness share of every session key in
    * the store. `buildSessions`, `buildRuns` and `buildFindings` each take it
    * from here, so a session row, its execution and its findings agree on one
@@ -3126,7 +3371,11 @@ export class CanonStore {
     return row === undefined ? null : row.bytes
   }
 
-  /** Hold a span out of the corpus; re-quarantining the same span replaces the entry. */
+  /**
+   * Hold a span out of the corpus; re-quarantining the same span replaces the entry.
+   * `metadata.rawPayload` carries the exact incoming span JSON for the detail route;
+   * omit it only when there is no incoming payload to keep (never a reconstruction).
+   */
   quarantine(
     spanId: string,
     namespaces: readonly string[],
@@ -3178,7 +3427,7 @@ export class CanonStore {
   getQuarantine(spanId: string): QuarantineEntry | undefined {
     const row = this.db
       .prepare(
-        'SELECT span_id, namespaces, reason, source, name, timestamp FROM quarantine WHERE span_id = ?',
+        'SELECT span_id, namespaces, reason, source, name, timestamp, raw_payload FROM quarantine WHERE span_id = ?',
       )
       .get(spanId) as
       | {
@@ -3188,24 +3437,11 @@ export class CanonStore {
           source: unknown
           name: unknown
           timestamp: unknown
+          raw_payload: unknown
         }
       | undefined
     if (row === undefined) return undefined
-    const entry: QuarantineEntry = {
-      spanId: text(row.span_id),
-      namespaces: JSON.parse(text(row.namespaces)) as string[],
-      reason: text(row.reason),
-    }
-    if (row.source !== null && row.source !== undefined) {
-      entry.source = text(row.source)
-    }
-    if (row.name !== null && row.name !== undefined) {
-      entry.name = text(row.name)
-    }
-    if (row.timestamp !== null && row.timestamp !== undefined) {
-      entry.timestamp = text(row.timestamp)
-    }
-    return entry
+    return toQuarantineEntry(row)
   }
 
   /**
@@ -3252,7 +3488,7 @@ export class CanonStore {
   listQuarantine(): QuarantineEntry[] {
     const rows = this.db
       .prepare(
-        'SELECT span_id, namespaces, reason, source, name, timestamp FROM quarantine ORDER BY span_id',
+        'SELECT span_id, namespaces, reason, source, name, timestamp, raw_payload FROM quarantine ORDER BY span_id',
       )
       .all() as {
       span_id: unknown
@@ -3261,24 +3497,40 @@ export class CanonStore {
       source: unknown
       name: unknown
       timestamp: unknown
+      raw_payload: unknown
     }[]
-    return rows.map((row) => {
-      const entry: QuarantineEntry = {
-        spanId: text(row.span_id),
-        namespaces: JSON.parse(text(row.namespaces)) as string[],
-        reason: text(row.reason),
-      }
-      if (row.source !== null && row.source !== undefined) {
-        entry.source = text(row.source)
-      }
-      if (row.name !== null && row.name !== undefined) {
-        entry.name = text(row.name)
-      }
-      if (row.timestamp !== null && row.timestamp !== undefined) {
-        entry.timestamp = text(row.timestamp)
-      }
-      return entry
-    })
+    return rows.map(toQuarantineEntry)
+  }
+
+  /**
+   * Quarantine rows under one harness scope, paged. `harness` is a canonical id from
+   * `parseHarnessFilter` (or `'unknown'` for unattributed sources); `undefined` means
+   * unfiltered. Scoping matches the stored source grouping — the `service.name` the
+   * export carried — never attribution, because quarantined spans have no harness by
+   * construction. Ordered by span id, like `listQuarantine`.
+   */
+  listQuarantineFiltered(options: { harness?: string; limit: number; offset: number }): QuarantineEntry[] {
+    const { where, params } = quarantineHarnessWhere(options.harness)
+    const rows = this.db
+      .prepare(
+        `SELECT span_id, namespaces, reason, source, name, timestamp, raw_payload FROM quarantine${where} ORDER BY span_id LIMIT ? OFFSET ?`,
+      )
+      .all(...params, options.limit, options.offset) as {
+      span_id: unknown
+      namespaces: unknown
+      reason: unknown
+      source: unknown
+      name: unknown
+      timestamp: unknown
+      raw_payload: unknown
+    }[]
+    return rows.map(toQuarantineEntry)
+  }
+
+  /** Quarantine row count under one harness scope, without materializing rows. */
+  countQuarantineFiltered(harness?: string): number {
+    const { where, params } = quarantineHarnessWhere(harness)
+    return (this.db.prepare(`SELECT COUNT(*) AS n FROM quarantine${where}`).get(...params) as { n: number }).n
   }
 
   /** Total quarantined span count, without materializing the row list. */
@@ -3320,13 +3572,17 @@ export class CanonStore {
     return counts
   }
 
-  /** Record a surfaced failure the system declines to guess about. */
+  /**
+   * Record a surfaced failure the system declines to guess about. `problem.stack` persists
+   * only when the caller carried one (a throw); computed validation problems carry a
+   * message and no stack, and must not claim one.
+   */
   recordProblem(problem: SpanProblem): void {
     const problemKey = problemIdentity(problem.spanId, problem.code, problem.location ?? null)
     this.db
       .prepare(
-        `INSERT INTO problems (span_id, problem_key, severity, code, message, location, session_id, harness, timestamp)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO problems (span_id, problem_key, severity, code, message, location, session_id, harness, timestamp, stack)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(problem_key) DO UPDATE SET
            span_id = excluded.span_id,
            severity = excluded.severity,
@@ -3335,7 +3591,8 @@ export class CanonStore {
            location = excluded.location,
            session_id = excluded.session_id,
            harness = excluded.harness,
-           timestamp = excluded.timestamp`,
+           timestamp = excluded.timestamp,
+           stack = excluded.stack`,
       )
       .run(
         problem.spanId,
@@ -3347,6 +3604,7 @@ export class CanonStore {
         problem.sessionId ?? null,
         problem.harness ?? null,
         problem.timestamp ?? null,
+        problem.stack ?? null,
       )
   }
 
@@ -3356,15 +3614,16 @@ export class CanonStore {
       spanId === undefined
         ? this.db
             .prepare(
-              'SELECT span_id, severity, code, message, location, session_id, harness, timestamp FROM problems',
+              'SELECT id, span_id, severity, code, message, location, session_id, harness, timestamp, stack FROM problems',
             )
             .all()
         : this.db
             .prepare(
-              'SELECT span_id, severity, code, message, location, session_id, harness, timestamp FROM problems WHERE span_id = ?',
+              'SELECT id, span_id, severity, code, message, location, session_id, harness, timestamp, stack FROM problems WHERE span_id = ?',
             )
             .all(spanId)
     ) as {
+      id: unknown
       span_id: unknown
       severity: unknown
       code: unknown
@@ -3373,28 +3632,64 @@ export class CanonStore {
       session_id: unknown
       harness: unknown
       timestamp: unknown
+      stack: unknown
     }[]
-    return rows.map((row) => {
-      const p: SpanProblem = {
-        spanId: text(row.span_id),
-        severity: text(row.severity) as Problem['severity'],
-        code: text(row.code),
-        message: text(row.message),
-      }
-      if (row.location !== null && row.location !== undefined) {
-        p.location = text(row.location)
-      }
-      if (row.session_id !== null && row.session_id !== undefined) {
-        p.sessionId = text(row.session_id)
-      }
-      if (row.harness !== null && row.harness !== undefined) {
-        p.harness = text(row.harness)
-      }
-      if (row.timestamp !== null && row.timestamp !== undefined) {
-        p.timestamp = text(row.timestamp)
-      }
-      return p
-    })
+    return rows.map(toSpanProblem)
+  }
+
+  /** One recorded problem by its row id; absent id gives undefined (the detail route's 404). */
+  getProblem(id: number): (SpanProblem & { id: number }) | undefined {
+    const row = this.db
+      .prepare(
+        'SELECT id, span_id, severity, code, message, location, session_id, harness, timestamp, stack FROM problems WHERE id = ?',
+      )
+      .get(id) as
+      | {
+          id: unknown
+          span_id: unknown
+          severity: unknown
+          code: unknown
+          message: unknown
+          location: unknown
+          session_id: unknown
+          harness: unknown
+          timestamp: unknown
+          stack: unknown
+        }
+      | undefined
+    if (row === undefined) return undefined
+    return { ...toSpanProblem(row), id: Number(row.id) }
+  }
+
+  /**
+   * Recorded problems under one harness scope, newest first. `harness` is a canonical id
+   * from `parseHarnessFilter` (or `'unknown'`); `undefined` means unfiltered.
+   */
+  listProblemsFiltered(options: { harness?: string; limit: number; offset: number }): (SpanProblem & { id: number })[] {
+    const { where, params } = problemsHarnessWhere(options.harness)
+    const rows = this.db
+      .prepare(
+        `SELECT id, span_id, severity, code, message, location, session_id, harness, timestamp, stack FROM problems${where} ORDER BY id DESC LIMIT ? OFFSET ?`,
+      )
+      .all(...params, options.limit, options.offset) as {
+      id: unknown
+      span_id: unknown
+      severity: unknown
+      code: unknown
+      message: unknown
+      location: unknown
+      session_id: unknown
+      harness: unknown
+      timestamp: unknown
+      stack: unknown
+    }[]
+    return rows.map((row) => ({ ...toSpanProblem(row), id: Number(row.id) }))
+  }
+
+  /** Recorded problem count under one harness scope, without materializing rows. */
+  countProblemsFiltered(harness?: string): number {
+    const { where, params } = problemsHarnessWhere(harness)
+    return (this.db.prepare(`SELECT COUNT(*) AS n FROM problems${where}`).get(...params) as { n: number }).n
   }
 
   /** Total recorded problem count, without loading problem details. */

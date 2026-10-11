@@ -32,7 +32,7 @@ budget. Gates: typecheck, lint, full test suite (346 files / 5226 tests), check:
 real-world `api_request_body` shape remains documented-but-unverified; everything else is
 verified against synthetic OTLP shaped from Anthropic's documented event format. Decisions
 Q1–Q4 and B1–B10 are recorded below and harvested into
-[ADR 0034](../adr/0034-kyberdash-quarantine-raw-packet-evidence.md) plus the dash docs.
+[ADR 0035](../adr/0035-kyberdash-quarantine-raw-packet-evidence.md) plus the dash docs.
 Archived per KW-DOC-LIFECYCLE-003.
 
 - **Date:** 2026-10-10

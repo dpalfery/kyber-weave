@@ -528,7 +528,9 @@ describe('projectCanonicalStore: projection-time repricing (issue #186, U9)', ()
 
   // U9: the pricing change itself adds no migration. The pin moved past 17
   // with the 2026-10-10 plan's quarantine evidence and log-row harness
-  // columns (B10); none of the steps since is a pricing migration.
+  // columns (B10), and main's incoming-evidence step (17→18, quarantine
+  // raw_payload + problems stack) merged underneath — none of the steps since
+  // 16 is a pricing migration.
   it('pins SCHEMA_VERSION at 19 (quarantine evidence and harness columns; still no pricing migration)', () => {
     expect(SCHEMA_VERSION).toBe(19)
   })

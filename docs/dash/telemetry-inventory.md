@@ -152,7 +152,7 @@ sender has exercised it on this checkout, so the sender side is
 **Retention.** Assembled turn text is purged after 14 days. The raw packet keeps exactly what
 the sender sent until you wipe the `claude-code` harness or the whole database
 ([ADR 0018](../adr/0018-kyberdash-content-retention-purge.md),
-[ADR 0034](../adr/0034-kyberdash-quarantine-raw-packet-evidence.md)). The 14-day window is not
+[ADR 0035](../adr/0035-kyberdash-quarantine-raw-packet-evidence.md)). The 14-day window is not
 "all prompt text expires" — raw packets outlive it by design.
 
 ### Enabling Claude Code content on the sender (Q2)

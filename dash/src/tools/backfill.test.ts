@@ -84,6 +84,8 @@ describe('renormalizeRecords — retained raw evidence', () => {
       source: 'historical-export',
       name: 'GlobalHttpApi.health',
       timestamp: '2026-01-01T00:00:00.000Z',
+      // Reclassification stores the incoming span JSON as quarantine evidence (v18).
+      rawPayload: expect.any(String),
     })
     // Noise is gone, and the retained span is now attributed from its Copilot
     // evidence. The copilot-misattributed session built before reclassify is

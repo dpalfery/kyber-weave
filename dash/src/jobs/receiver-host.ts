@@ -20,7 +20,74 @@ export type ReceiverProbe = 'kyberdash-receiver' | 'other-service' | 'refused' |
 
 export type ReceiverStatus = 'hosted' | 'reachable' | 'port-held-by-other' | 'not-reachable' | 'unknown'
 
-export type ReceiverProber = { probe(url: string): Promise<ReceiverProbe> }
+export type ReceiverProber = {
+  probe(url: string): Promise<ReceiverProbe>
+  /**
+   * The same probe with the receiver's own health body attached, when the prober speaks
+   * the extended `/healthz` contract. Absent on test fakes that only answer the enum —
+   * the host then reports the detail fields as unknown rather than fabricating them.
+   */
+  probeHealth?(url: string): Promise<{ probe: ReceiverProbe; health: ReceiverHealthDetail | null }>
+}
+
+/**
+ * The `/healthz` fields the coverage indicator reads. Every field is nullable because an
+ * older receiver (or a stranger on the port) answers fewer of them — unknown stays
+ * unknown, never a default that would read as healthy.
+ */
+export type ReceiverHealthDetail = {
+  endpoint?: unknown
+  listening?: unknown
+  paused?: unknown
+  checkedAt?: unknown
+  lastAcceptedAt?: unknown
+  failures5m?: unknown
+  lastError?: unknown
+  lastCode?: unknown
+  lastErrorAt?: unknown
+}
+
+/**
+ * Fresh receiver state for `GET /api/kyber/coverage`, preserving every existing coverage
+ * property (the receiver object is additive). `healthy` is the one engine-computed
+ * boolean behind the approved rule: green only when the receiver is enabled, answering as
+ * ours or reachable, explicitly not paused, and with zero failures in the rolling
+ * five-minute window. `not-reachable`, `port-held-by-other`, and `unknown` are never
+ * green, and neither is any state whose paused flag or error window is unobservable —
+ * "no failures seen" is not "no failures" when nothing reported the window.
+ */
+export type ReceiverState = {
+  /** The `settings.receiver.hosted` switch, as the poll read it. */
+  enabled: boolean
+  /** Where the receiver listens, from its own `/healthz`, or null when unobserved. */
+  endpoint: string | null
+  status: ReceiverStatus
+  /** True while the receiver socket is bound; null when no probe said. */
+  listening: boolean | null
+  /** True when this process started the answering receiver; null when indeterminable. */
+  hostedByUs: boolean | null
+  /** The receiver's own paused flag; null when no health body said. */
+  paused: boolean | null
+  /** ISO time of this poll; null only before the first poll. */
+  checkedAt: string | null
+  /** ISO time of the last persisted batch, from the receiver; null when unobserved. */
+  lastAcceptedAt: string | null
+  /** OTLP/persistence failures in the rolling five minutes; null when unobserved. */
+  failures5m: number | null
+  lastError: string | null
+  lastCode: string | null
+  lastErrorAt: string | null
+  healthy: boolean
+}
+
+/** The approved indicator rule, in one place so every surface shares it. */
+export function isReceiverHealthy(state: Omit<ReceiverState, 'healthy'>): boolean {
+  if (!state.enabled) return false
+  if (state.status !== 'hosted' && state.status !== 'reachable') return false
+  if (state.paused !== false) return false
+  if (state.failures5m !== 0) return false
+  return true
+}
 
 export type ReceiverHostOptions = {
   readonly store: CanonStore
@@ -47,16 +114,32 @@ export function restartDelayMs(consecutiveFailures: number): number {
  */
 export const fetchProber: ReceiverProber = {
   async probe(url) {
+    return (await fetchProber.probeHealth!(url)).probe
+  },
+  async probeHealth(url) {
     try {
       const response = await fetch(url, { signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) })
-      if (response.status !== 200) return 'other-service'
-      const body = (await response.json().catch(() => null)) as { service?: unknown } | null
-      return body?.service === RECEIVER_SERVICE ? 'kyberdash-receiver' : 'other-service'
+      if (response.status !== 200) return { probe: 'other-service' as const, health: null }
+      const body = (await response.json().catch(() => null)) as (ReceiverHealthDetail & { service?: unknown }) | null
+      if (body?.service !== RECEIVER_SERVICE) return { probe: 'other-service' as const, health: null }
+      return { probe: 'kyberdash-receiver' as const, health: body }
     } catch (err) {
       const code = ((err as { cause?: { code?: string } }).cause)?.code
-      return code === 'ECONNREFUSED' ? 'refused' : 'indeterminate'
+      return { probe: (code === 'ECONNREFUSED' ? 'refused' : 'indeterminate') as ReceiverProbe, health: null }
     }
   },
+}
+
+function textOrNull(value: unknown): string | null {
+  return typeof value === 'string' && value !== '' ? value : null
+}
+
+function booleanOrNull(value: unknown): boolean | null {
+  return typeof value === 'boolean' ? value : null
+}
+
+function countOrNull(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? Math.floor(value) : null
 }
 
 function statusFor(probe: ReceiverProbe, hostedByUs: boolean): ReceiverStatus {
@@ -78,6 +161,9 @@ export class ReceiverHost {
   private child: JobChild | null = null
   private failures = 0
   private status: ReceiverStatus = 'unknown'
+  private enabled = false
+  private lastHealth: ReceiverHealthDetail | null = null
+  private lastCheckedAt: string | null = null
   private wasEnabled = false
   /** Latched when a stranger holds the port, so we do not retry in a loop until it changes. */
   private portHeldByOther = false
@@ -93,6 +179,39 @@ export class ReceiverHost {
   getStatus(): ReceiverStatus { return this.status }
 
   /**
+   * The fresh receiver state the coverage route serves. Every detail field is null until a
+   * real `/healthz` body supplies it — the host never fabricates endpoint, paused, or
+   * window facts from the probe enum alone.
+   */
+  getReceiverState(): ReceiverState {
+    const health = this.lastHealth
+    const withoutHealthy = {
+      enabled: this.enabled,
+      endpoint: textOrNull(health?.endpoint),
+      status: this.status,
+      listening: this.status === 'hosted' || this.status === 'reachable'
+        ? true
+        : this.status === 'not-reachable'
+          ? false
+          : booleanOrNull(health?.listening),
+      // Attributes the answering receiver only: `hosted` (our child answered) proves
+      // hosted-by-us and `reachable` (a receiver answered with no child of ours) proves
+      // hosted elsewhere. Any other status means nothing answers, so there is no receiver
+      // to attribute — null, even when a child we spawned is still starting up. Claiming
+      // a silent port as hosted-by-us would contradict `listening: false` one line above.
+      hostedByUs: this.status === 'hosted' ? true : this.status === 'reachable' ? false : null,
+      paused: booleanOrNull(health?.paused),
+      checkedAt: this.lastCheckedAt,
+      lastAcceptedAt: textOrNull(health?.lastAcceptedAt),
+      failures5m: countOrNull(health?.failures5m),
+      lastError: textOrNull(health?.lastError),
+      lastCode: textOrNull(health?.lastCode),
+      lastErrorAt: textOrNull(health?.lastErrorAt),
+    }
+    return { ...withoutHealthy, healthy: isReceiverHealthy(withoutHealthy) }
+  }
+
+  /**
    * Probes, updates the status, and starts or stops the receiver as the setting says.
    * Returns the delay owed before the next hosting attempt, or null when none is pending -
    * which makes "not retrying in a loop" observable.
@@ -105,9 +224,24 @@ export class ReceiverHost {
       this.failures = 0
       this.wasEnabled = enabled
     }
+    this.enabled = enabled
     if (!enabled) this.stopChild()
 
-    const probe = await this.prober.probe(healthzUrl())
+    // One fetch when the prober speaks the health contract, so the enum and the detail
+    // always describe the same response; fakes that only answer the enum keep working.
+    let probe: ReceiverProbe
+    let health: ReceiverHealthDetail | null = null
+    if (this.prober.probeHealth !== undefined) {
+      const answer = await this.prober.probeHealth(healthzUrl())
+      probe = answer.probe
+      health = answer.health
+    } else {
+      probe = await this.prober.probe(healthzUrl())
+    }
+    // A non-receiver answer carries no receiver facts: keep a stranger's body (or a
+    // previous receiver's) from posing as current state.
+    this.lastHealth = probe === 'kyberdash-receiver' ? health : null
+    this.lastCheckedAt = new Date().toISOString()
 
     if (probe === 'other-service') {
       this.portHeldByOther = true

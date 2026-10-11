@@ -306,30 +306,52 @@ fn apply_status_item(app: &AppHandle, state: &ipc::ViewState) {
     let Some(tray) = app.tray_by_id("tray") else {
         return;
     };
-    let item = status_item::status_item(
+    // The saber is green/red from the shared coverage API only — no local
+    // receiver heuristic. Unavailable or stale coverage renders red. The
+    // pressure title/tooltip below are preserved; only the icon colour
+    // follows the collector.
+    let stale = matches!(state.phase, ipc::Phase::Stale);
+    let item = status_item::status_item_with_coverage(
         state.report.as_ref(),
+        state.coverage.as_ref(),
         &state.settings.thresholds(),
-        matches!(state.phase, ipc::Phase::Stale),
+        stale,
         SystemTime::now(),
     );
     let _ = tray.set_title(item.title.as_deref());
     let _ = tray.set_tooltip(Some(&item.tooltip));
+    let live = item.collector == status_item::CollectorState::Live;
 
     #[cfg(target_os = "windows")]
     {
-        let badge = item.title.as_deref().unwrap_or("—");
-        let _ = tray.set_icon(Some(tray_badge::render(
-            badge,
-            tray_badge::small_icon_size(),
-            false,
-        )));
+        // Pressure badge preserved; the collector colour rides the tooltip
+        // and the popover on Windows, where the small-icon badge has no
+        // room for a second glyph. A down collector replaces the badge
+        // with a red dot so the state is still glanceable.
+        if live {
+            let badge = item.title.as_deref().unwrap_or("—");
+            let _ = tray.set_icon(Some(tray_badge::render(
+                badge,
+                tray_badge::small_icon_size(),
+                false,
+            )));
+        } else {
+            let _ = tray.set_icon(Some(tray_badge::render_status_dot(
+                false,
+                tray_badge::small_icon_size(),
+            )));
+        }
     }
 
     #[cfg(not(target_os = "windows"))]
-    if let Ok(icon) = template_icon() {
-        // macOS switches the monochrome asset between menu-bar appearances.
-        // The coloured bundle icon remains the app/package icon.
-        let _ = tray.set_icon_with_as_template(Some(icon), true);
+    {
+        // Coloured status glyph, template treatment OFF: the previous
+        // monochrome template asset (`icon_as_template = true`) let macOS
+        // tint the icon and destroyed any colour. A dynamically rendered
+        // green/red dot presented with `as_template = false` keeps its
+        // colour on both light and dark menu bars.
+        let icon = tray_badge::render_status_dot(live, tray_badge::small_icon_size());
+        let _ = tray.set_icon_with_as_template(Some(icon), false);
     }
 }
 

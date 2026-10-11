@@ -11,8 +11,32 @@
  */
 
 import type { ContextReport } from '../../../../src/analysis/report/types.ts'
-import type { ReceiverStatus, RefreshInfo } from '../viewState'
+import type { CoverageDoc, ReceiverStatus, RefreshInfo } from '../viewState'
 import { formatAge, formatMeasured } from '../format'
+
+/** How long a successful probe stays trustworthy without a fresh check. */
+export const COLLECTOR_STALE_AFTER_MS = 120_000
+
+/**
+ * Green/red collector saber from the shared coverage API — the same verdict
+ * the native status item renders. `healthy` is authoritative; anything else
+ * (including absent coverage) is down. Unknown is red.
+ */
+export function collectorLive(coverage: CoverageDoc | null | undefined, now: Date): boolean {
+  const receiver = coverage?.receiver ?? null
+  if (receiver === null || receiver === undefined) return false
+  if (receiver.enabled !== true) return false
+  if (receiver.healthy !== true) return false
+  if (receiver.paused !== false) return false
+  if (receiver.listening !== true) return false
+  if ((receiver.failures5m ?? null) !== 0) return false
+  if (typeof receiver.checkedAt !== 'string') return false
+  const checked = Date.parse(receiver.checkedAt)
+  if (!Number.isFinite(checked)) return false
+  const age = now.getTime() - checked
+  if (age < 0 || age > COLLECTOR_STALE_AFTER_MS) return false
+  return true
+}
 
 const RECEIVER_LABELS: Record<ReceiverStatus, string> = {
   reachable: 'receiver reachable',
@@ -34,11 +58,15 @@ type Props = {
    */
   refresh: RefreshInfo | null
   receiver: ReceiverStatus
+  /** Shared coverage; the collector saber reads only its `receiver` key. */
+  coverage?: CoverageDoc | null
   now: Date
 }
 
-export function HealthFooter({ report, refresh, receiver, now }: Props) {
-  const coverage = report?.coverage
+export function HealthFooter({ report, refresh, receiver, coverage = null, now }: Props) {
+  const coverageAvailable = coverage !== null && coverage !== undefined
+  const live = collectorLive(coverage, now)
+  const coverageDoc = report?.coverage
   const cost = report?.cost ?? []
 
   return (
@@ -72,8 +100,18 @@ export function HealthFooter({ report, refresh, receiver, now }: Props) {
         {RECEIVER_LABELS[receiver]}
       </p>
 
+      <p
+        className="health-footer__line"
+        data-testid="collector-status"
+        data-state={live ? 'live' : 'down'}
+        role="status"
+      >
+        {live ? 'Collector live — receiver accepting' : 'Collector down'}
+        {!coverageAvailable && ' — receiver health unavailable'}
+      </p>
+
       <p className="health-footer__line" data-testid="store-counts">
-        {coverage?.quarantineCount ?? '—'} quarantined · {coverage?.problemCount ?? '—'} problems
+        {coverageDoc?.quarantineCount ?? '—'} quarantined · {coverageDoc?.problemCount ?? '—'} problems
       </p>
 
       {cost.length > 0 && (

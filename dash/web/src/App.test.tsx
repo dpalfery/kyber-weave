@@ -3,6 +3,12 @@ import * as React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
+// No DashboardTools mock: PI's panels are mounted for real, because this suite
+// asserts where the operator tools sit in the shell. It renders its two
+// triggers and only queries once a panel is opened, so mounting it costs no
+// data fetching — and a stubbed empty div could never have shown a tool that a
+// responsive header squeezed out of the group.
+
 import {
   App,
   harnessTabsFrom,
@@ -102,15 +108,15 @@ describe('App: Top Navigation Refactoring', () => {
     clearHooks()
   })
 
-  it('exports exactly the 3 header navigation tabs in NAV_TABS (requirement 2.9)', () => {
-    expect(NAV_TABS).toHaveLength(3)
+  it('exports exactly the header navigation tabs in NAV_TABS (requirement 2.9)', () => {
+    expect(NAV_TABS).toHaveLength(5)
     const keys = NAV_TABS.map((t) => t.key)
-    expect(keys).toEqual(['context-doctor', 'quarantine', 'problems'])
+    expect(keys).toEqual(['context-doctor', 'sessions', 'compare', 'quarantine', 'problems'])
     const labels = NAV_TABS.map((t) => t.label)
-    expect(labels).toEqual(['Context Doctor', 'Quarantine', 'Problems'])
+    expect(labels).toEqual(['Context Doctor', 'Sessions', 'Compare', 'Quarantine', 'Problems'])
   })
 
-  it('renders exactly the 3 header tabs and spine rail destinations, excluding Compare as a peer tab', () => {
+  it('renders every destination as a header tab, with the rail gone rather than emptied', () => {
     const qc = createTestQueryClient()
     const html = renderHtml(
       <QueryClientProvider client={qc}>
@@ -120,9 +126,10 @@ describe('App: Top Navigation Refactoring', () => {
 
     expect(html).toContain('data-testid="nav-tab-context-doctor"')
     expect(html).not.toContain('data-testid="nav-tab-usage"')
+    expect(html).toContain('data-testid="nav-tab-sessions"')
+    expect(html).toContain('data-testid="nav-tab-compare"')
     expect(html).toContain('data-testid="nav-tab-quarantine"')
     expect(html).toContain('data-testid="nav-tab-problems"')
-    expect(html).not.toContain('data-testid="nav-tab-compare"')
     expect(html).not.toContain('data-testid="nav-tab-context"')
     expect(html).not.toContain('data-testid="nav-tab-schema"')
     expect(html).not.toContain('data-testid="nav-tab-timeline"')
@@ -130,12 +137,110 @@ describe('App: Top Navigation Refactoring', () => {
     expect(html).not.toContain('data-testid="nav-tab-kyber-context"')
 
     const navTabsMatch = html.match(/data-testid="nav-tab-[^"]+"/g)
-    expect(navTabsMatch).toHaveLength(3)
+    expect(navTabsMatch).toHaveLength(5)
 
-    expect(html).toContain('data-testid="nav-rail-context-doctor"')
-    expect(html).toContain('data-testid="nav-rail-sessions"')
-    expect(html).toContain('data-testid="nav-rail-compare"')
+    // Compare moved up into the header rather than being copied into it, so the
+    // rail is deleted whole: no rail destination, no off-canvas drawer, no
+    // hamburger that opened one and no backdrop behind it. An empty rail is
+    // still a rail, and a second copy of a destination is a duplicate.
+    expect(html).not.toMatch(/data-testid="nav-rail-[^"]+"/)
+    expect(html).not.toContain('dashboard-sidebar')
+    expect(html).not.toContain('aria-label="Open menu"')
+    expect(html).not.toContain('aria-label="Close menu"')
     expect((html.match(/data-testid="harness-selector"/g) ?? [])).toHaveLength(1)
+  })
+
+  it('mounts one header action group and one navigation row, in either layout', () => {
+    const qc = createTestQueryClient()
+    const html = renderHtml(
+      <QueryClientProvider client={qc}>
+        <App initialPage="context-doctor" />
+      </QueryClientProvider>
+    )
+
+    // Below the wide breakpoint the navigation is a second header row rather
+    // than a second set of tabs, so neither group may be duplicated to make
+    // room: one action group, one navigation row, one harness scope.
+    expect((html.match(/data-testid="header-actions"/g) ?? [])).toHaveLength(1)
+    expect((html.match(/data-testid="nav-tabs"/g) ?? [])).toHaveLength(1)
+
+    // Both operator tools and the theme toggle are in the shell. The trigger
+    // labels are asserted because a responsive header that drops or collapses
+    // one of them is the defect this guards, not a detail.
+    expect(html).toContain('data-testid="dashboard-tools-status-button"')
+    expect(html).toContain('data-testid="dashboard-tools-maintenance-button"')
+    expect(html).toContain('aria-label="Switch to')
+  })
+
+  it('gives the header two rows below the wide breakpoint and one row at or above it', () => {
+    const qc = createTestQueryClient()
+    const html = renderHtml(
+      <QueryClientProvider client={qc}>
+        <App initialPage="context-doctor" />
+      </QueryClientProvider>
+    )
+    const header = html.match(/<header[^>]*data-testid="app-header"[^>]*>/)?.[0]
+    expect(header, 'the shell renders one header').toBeDefined()
+
+    // Below the breakpoint the row wraps, so the navigation moves to a row of
+    // its own; the header is padded rather than fixed-height, because a fixed
+    // 48px is what clipped the two rows into each other at 768.
+    expect(header).toContain('flex-wrap')
+    expect(header).toContain('py-2')
+
+    // At and above the wide breakpoint the same children are one 48px row.
+    expect(header).toContain('lg:flex-nowrap')
+    expect(header).toContain('lg:h-12')
+    expect(header).toContain('lg:py-0')
+  })
+
+  it('scrolls the navigation row sideways instead of widening the page', () => {
+    const qc = createTestQueryClient()
+    const html = renderHtml(
+      <QueryClientProvider client={qc}>
+        <App initialPage="context-doctor" />
+      </QueryClientProvider>
+    )
+    const nav = html.match(/<div[^>]*data-testid="nav-tabs"[^>]*>/)?.[0]
+    expect(nav, 'the shell renders one navigation row').toBeDefined()
+
+    // The whole second row below the breakpoint (its own basis, and last in the
+    // wrapped row, so it sits under the action group rather than beside it),
+    // scrolling inside it, with a zero minimum width so the row scrolls rather
+    // than forcing the row — and the page — wider.
+    expect(nav).toContain('max-lg:order-last')
+    expect(nav).toContain('max-lg:basis-full')
+    expect(nav).toContain('min-w-0')
+    expect(nav).toContain('overflow-x-auto')
+
+    // Back to a share of the one desktop row at the breakpoint and above.
+    expect(nav).toContain('lg:order-none')
+    expect(nav).toContain('lg:basis-auto')
+
+    // Every tab keeps its own width: a shrunken label wraps to two lines inside
+    // a row with no height for them.
+    for (const tab of ['context-doctor', 'sessions', 'compare', 'quarantine', 'problems']) {
+      const button = html.match(new RegExp(`<button[^>]*data-testid="nav-tab-${tab}"[^>]*>`))?.[0]
+      expect(button).toContain('shrink-0')
+      expect(button).toContain('whitespace-nowrap')
+    }
+  })
+
+  it('never compresses or scrolls the action group out of reach', () => {
+    const qc = createTestQueryClient()
+    const html = renderHtml(
+      <QueryClientProvider client={qc}>
+        <App initialPage="context-doctor" />
+      </QueryClientProvider>
+    )
+    const actions = html.match(/<div[^>]*data-testid="header-actions"[^>]*>/)?.[0]
+    expect(actions, 'the shell renders one header action group').toBeDefined()
+
+    // Status and Maintenance wrap inside their own group, so a group that can be
+    // squeezed is a group that splits them onto two lines — and one that scrolls
+    // is a group that puts them past the edge of the screen.
+    expect(actions).toContain('shrink-0')
+    expect(actions).not.toContain('overflow')
   })
 
   it('applies active styling to the currently active page tab and inactive to others', () => {
@@ -154,9 +259,9 @@ describe('App: Top Navigation Refactoring', () => {
     expect(doctorBtnFromQuarantine).not.toContain('bg-active-primary')
   })
 
-  it('updates active page styling for Context Doctor, quarantine, and problems tabs', () => {
+  it('updates active page styling for Context Doctor, sessions, quarantine, and problems tabs', () => {
     const qc = createTestQueryClient()
-    const pages: KyberPage[] = ['context-doctor', 'quarantine', 'problems']
+    const pages: KyberPage[] = ['context-doctor', 'sessions', 'quarantine', 'problems']
 
     for (const page of pages) {
       clearHooks()
@@ -190,12 +295,13 @@ describe('App: Harness selector storage filters', () => {
       { harness: 'cursor', name: 'Cursor' },
       { harness: 'codex', name: 'Codex' },
       { harness: 'claude-code', name: 'Claude Code' },
+      { harness: 'unknown', name: 'Unknown' },
     ])
   })
 
   it('leaves out surveyed harnesses that recorded nothing', () => {
     const tabs = harnessTabsFrom([summary('copilot', 56), summary('windsurf', 0)])
-    expect(tabs.map((t) => t.harness)).toEqual(['all', 'copilot'])
+    expect(tabs.map((t) => t.harness)).toEqual(['all', 'copilot', 'unknown'])
   })
 
   it('uses each live canonical harness ID exactly once', () => {
@@ -204,8 +310,14 @@ describe('App: Harness selector storage filters', () => {
   })
 
   it('falls back to All Harnesses alone when nothing has been collected', () => {
-    expect(harnessTabsFrom([])).toEqual([{ harness: 'all', name: 'All Harnesses' }])
-    expect(harnessTabsFrom(undefined)).toEqual([{ harness: 'all', name: 'All Harnesses' }])
+    expect(harnessTabsFrom([])).toEqual([
+      { harness: 'all', name: 'All Harnesses' },
+      { harness: 'unknown', name: 'Unknown' },
+    ])
+    expect(harnessTabsFrom(undefined)).toEqual([
+      { harness: 'all', name: 'All Harnesses' },
+      { harness: 'unknown', name: 'Unknown' },
+    ])
   })
 })
 
@@ -250,12 +362,15 @@ describe('App: Page Switching & Title Rendering', () => {
     expect(html).toContain('data-testid="page-compare"')
     expect(html).toContain('Run Comparison Workspace')
     expect(html).toContain('data-testid="compare-empty"')
-    expect(html).not.toContain('data-testid="nav-tab-compare"')
-    const compareRail = html.match(/<button[^>]*data-testid="nav-rail-compare"[^>]*>/)?.[0]
-    expect(compareRail).toContain('bg-interactive-secondary')
+    // Compare is a header tab now, and this page marks that tab active — the one
+    // place its destination is offered, since the rail that used to carry it is gone.
+    expect(html).not.toContain('data-testid="nav-rail-compare"')
+    const compareTab = html.match(/<button[^>]*data-testid="nav-tab-compare"[^>]*>/)?.[0]
+    expect(compareTab).toBeDefined()
+    expect(compareTab).toContain('bg-active-primary')
   })
 
-  it('renders the Sessions page from the spine rail destination', () => {
+  it('renders the Sessions page from the header navigation', () => {
     const qc = createTestQueryClient()
     const html = renderHtml(
       <QueryClientProvider client={qc}>
@@ -266,8 +381,11 @@ describe('App: Page Switching & Title Rendering', () => {
     expect(html).toContain('Sessions')
     expect(html).toContain('data-testid="page-sessions"')
     expect(html).not.toContain('data-testid="nav-tab-context"')
-    const sessionsRail = html.match(/<button[^>]*data-testid="nav-rail-sessions"[^>]*>/)?.[0]
-    expect(sessionsRail).toContain('bg-interactive-secondary')
+    const sessionsTab = html.match(/<button[^>]*data-testid="nav-tab-sessions"[^>]*>/)?.[0]
+    expect(sessionsTab).toContain('bg-active-primary')
+    // One destination, one place: the rail that used to hold a second copy of
+    // Sessions is gone rather than emptied.
+    expect(html).not.toContain('data-testid="nav-rail-sessions"')
   })
 
   it('shows no Share or device controls on any page (requirement 2.9)', () => {
