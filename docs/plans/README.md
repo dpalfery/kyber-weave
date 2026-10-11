@@ -29,7 +29,7 @@ Closeout explicitly distinguishes between two waiver categories:
 
 | Plan | Status | Date | Development mode | Goal |
 |---|---|---|---|---|---|
-| _None._ | — | — | — | No plan is currently active. A plan is open only while it is built; the PR that finishes one archives it (see [Archived Plans](#archived-plans) below). |
+| [2026-10-10-kyberdash-claude-code-turn-content.md](2026-10-10-kyberdash-claude-code-turn-content.md) | Ready; decision-complete (Q1–Q4 answered 2026-10-10); approve-and-execute granted 2026-10-10 | 2026-10-10 | test-first | Make KyberDash keep Claude Code turn content when the sender opts in: the interaction-span `user_prompt`, the `api_request_body` log (record-name and attribute-key fixes), request-body `messages`, and per-turn measurability. Build what `origin/main` lacks for viewing raw packets: `quarantine.raw_payload`, `GET /api/kyber/quarantine/:spanId`, and turn-view packet links. Make the per-harness wipe scope quarantine and Claude log rows (schema v19). Correct the fictional test fixtures. Work on a new branch from `origin/main` in this checkout. |
 
 Earlier history: pipeline T9 and spine S-docs harvested 2026-09-13 into [dash/architecture.md](../dash/architecture.md), [dash/runbook.md](../dash/runbook.md), [dash/telemetry-inventory.md](../dash/telemetry-inventory.md), [ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md), and [ADR 0018](../adr/0018-kyberdash-content-retention-purge.md). ADRs 0012–0015 remain the spine harvest (0014 notes that `kyber purge-content` was not shipped). Residual risks (T8 live-source coverage, findings client-side harness filter) live on the archived plans — they are not shipped claims.
 
