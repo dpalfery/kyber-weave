@@ -54,7 +54,7 @@ export type CaptureRouteSettings = {
 
 /** The body helpers routes.ts already owns, handed in so this module never imports it at runtime. */
 export type CaptureRouteIo = {
-  sendJson: (res: ServerResponse, status: number, body: unknown) => void
+  sendJson: (res: ServerResponse, status: number, body: unknown, headers?: Record<string, string>) => void
   requireJsonContentType: (req: IncomingMessage) => boolean
   serveJsonObjectBody: (
     req: IncomingMessage,
@@ -248,7 +248,7 @@ export function handleCaptureRequest(
     return true
   }
   if (req.method !== 'GET' && req.method !== 'POST') {
-    io.sendJson(res, 405, { error: ERR_METHOD })
+    io.sendJson(res, 405, { error: ERR_METHOD }, { Allow: 'GET, POST' })
     return true
   }
   const settings: CaptureRouteSettings = deps?.capture ?? { homeDir: homedir() }
