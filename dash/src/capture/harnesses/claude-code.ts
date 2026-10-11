@@ -7,7 +7,7 @@
 // a present endpoint (including `http://localhost:4318`) out of the receipt.
 // Beta-detailed keys are omitted from both maps, so enable cannot write them.
 
-import { pjoin, type PathEnv } from '../paths.js'
+import { envJoin, type PathEnv } from '../paths.js'
 
 import type { ManagedHarnessWriter } from './registry.js'
 
@@ -30,7 +30,7 @@ export const claudeCodeHarness: ManagedHarnessWriter = {
   // D14: joined through the platform seam so win32 resolves with win32
   // separators from any host; darwin and linux strings are unchanged.
   resolvePath: (home: string, env?: PathEnv) =>
-    pjoin(env?.platform ?? process.platform, home, '.claude', 'settings.json'),
+    envJoin(env, home, '.claude', 'settings.json'),
   format: 'json',
   desiredKeys: () =>
     claudeEnv({

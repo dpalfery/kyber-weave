@@ -5,7 +5,7 @@
 // they must not add an `[otel]` table. `status` reports that contract through
 // `reason` — coverage comes from session files, not from an exporter we turn on.
 
-import { pjoin, type PathEnv } from '../paths.js'
+import { envJoin, type PathEnv } from '../paths.js'
 
 import type { PendingHarnessWriter } from './registry.js'
 
@@ -17,6 +17,6 @@ export const codexHarness: PendingHarnessWriter = {
   // D14: a pending harness still resolves a win32 path from the same
   // segments instead of throwing, because `status` must report on Windows.
   resolvePath: (home: string, env?: PathEnv) =>
-    pjoin(env?.platform ?? process.platform, home, '.codex', 'config.toml'),
+    envJoin(env, home, '.codex', 'config.toml'),
   format: 'toml',
 }

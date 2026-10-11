@@ -7,7 +7,7 @@
 // or a shell rc. Status also notes upstream #13438 and the non-model span
 // volume; those are observations, not keys the receipt restores.
 
-import { pjoin, type PathEnv } from '../paths.js'
+import { envJoin, type PathEnv } from '../paths.js'
 
 import type { ManagedHarnessWriter } from './registry.js'
 
@@ -28,7 +28,7 @@ export const opencodeHarness: ManagedHarnessWriter = {
   // D14: win32 keeps the .config root — the seam changes the separators,
   // not the root, because OpenCode reads this location on every OS.
   resolvePath: (home: string, env?: PathEnv) =>
-    pjoin(env?.platform ?? process.platform, home, '.config', 'opencode', 'opencode.jsonc'),
+    envJoin(env, home, '.config', 'opencode', 'opencode.jsonc'),
   // The endpoint argument is the receiver origin. OpenCode does not store it
   // in opencode.jsonc, so the declaration ignores it.
   desiredKeys: () => ({

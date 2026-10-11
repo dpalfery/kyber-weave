@@ -9,7 +9,7 @@
 // variables are deliberately not consulted here: every harness keeps
 // resolving from the HOME it is given on every OS.
 
-import { posix, win32 } from 'node:path'
+import { join as hostJoin, posix, win32 } from 'node:path'
 
 /**
  * The path environment a harness resolves its config path against. The
@@ -38,4 +38,14 @@ export function pjoin(platform: NodeJS.Platform, ...segments: string[]): string 
     .filter((segment) => segment !== '')
     .map((segment) => segment.replace(/[\\/]+$/, ''))
   return parts.join(sep)
+}
+
+/**
+ * Join for a harness `resolvePath`. With an explicit path environment the
+ * named platform's rules apply (`pjoin`); without one the host's own
+ * `node:path` join applies, exactly as before the platform seam existed, so
+ * callers that never inject an environment keep host-native paths.
+ */
+export function envJoin(env: PathEnv | undefined, ...segments: string[]): string {
+  return env ? pjoin(env.platform, ...segments) : hostJoin(...segments)
 }

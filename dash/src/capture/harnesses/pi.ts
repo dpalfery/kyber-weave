@@ -8,7 +8,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { pjoin, type PathEnv } from '../paths.js'
+import { envJoin, type PathEnv } from '../paths.js'
 
 import type { PendingHarnessWriter } from './registry.js'
 
@@ -66,7 +66,7 @@ export const piHarness: PendingHarnessWriter = {
   // instead of throwing; describeStatus keeps the host join because its
   // reads are status-only and follow the real filesystem.
   resolvePath: (home: string, env?: PathEnv) =>
-    pjoin(env?.platform ?? process.platform, home, '.pi', 'agent', 'settings.json'),
+    envJoin(env, home, '.pi', 'agent', 'settings.json'),
   format: 'json',
   describeStatus: describePiStatus,
 }

@@ -7,11 +7,11 @@
 // `disable` write nothing: agents never edit that script, and KyberDash does
 // not invent a window the user has not declared.
 
-import { existsSync, readFileSync, statSync } from 'node:fs'
+import { closeSync, existsSync, fstatSync, openSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { parse, type ParseError } from 'jsonc-parser'
 
-import { pjoin, type PathEnv } from '../paths.js'
+import { envJoin, type PathEnv } from '../paths.js'
 
 import type { PendingHarnessWriter } from './registry.js'
 
@@ -36,7 +36,7 @@ export const antigravityHarness: PendingHarnessWriter = {
   // instead of throwing; describeStatus keeps the host join because its
   // reads are status-only and follow the real filesystem.
   resolvePath: (home: string, env?: PathEnv) =>
-    pjoin(env?.platform ?? process.platform, home, '.gemini', 'antigravity-cli', 'settings.json'),
+    envJoin(env, home, '.gemini', 'antigravity-cli', 'settings.json'),
   format: 'json',
   describeStatus: antigravityStatusDetail,
 }
@@ -86,11 +86,16 @@ function readStatusLineCommand(settingsPath: string): string | undefined {
  * read and never executed. A missing or unreadable path is absence, not an error.
  */
 function readBridgeScript(command: string): string | undefined {
+  let fd: number | undefined
   try {
-    const info = statSync(command)
+    // Open once and inspect the descriptor, so the file checked is the file read.
+    fd = openSync(command, 'r')
+    const info = fstatSync(fd)
     if (!info.isFile() || info.size > MAX_BRIDGE_SCRIPT_BYTES) return undefined
-    return readFileSync(command, 'utf8')
+    return readFileSync(fd, 'utf8')
   } catch {
     return undefined
+  } finally {
+    if (fd !== undefined) closeSync(fd)
   }
 }
