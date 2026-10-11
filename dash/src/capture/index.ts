@@ -30,6 +30,7 @@ import {
   probeReceiver,
   RECEIVER_DOWN_REMEDY,
   type HealthFetcher,
+  type ReceiverProbeResult,
 } from './probe.js'
 import {
   loadCaptureReceipt,
@@ -81,6 +82,12 @@ export type CaptureRunOptions = {
   writers?: CaptureHarnessWriter[]
   /** Deadline for the receiver liveness probe; defaults to the probe's own 5s. */
   probeTimeoutMs?: number
+  /**
+   * A liveness probe the caller already started, awaited instead of probing again. The
+   * structured action starts it before taking the capture mutex so overlapping requests
+   * probe side by side; the probe never rejects, so passing it unawaited is safe.
+   */
+  receiverProbe?: Promise<ReceiverProbeResult>
   /**
    * Decides, per declared file, whether this call touches it (D19). The CLI
    * passes none and so keeps writing every declared file; the settings route
@@ -145,7 +152,7 @@ export type CaptureRunResult = {
 const USAGE_EXIT = 2
 const REFUSAL_EXIT = 1
 
-function isOtlpHttpEndpoint(endpoint: string): boolean {
+export function isOtlpHttpEndpoint(endpoint: string): boolean {
   if (!/^https?:\/\//i.test(endpoint)) return false
   try {
     const url = new URL(endpoint)
@@ -353,7 +360,8 @@ export async function runCapture(
     .map((id) => writers.find((writer) => writer.id === id))
     .filter((writer): writer is CaptureHarnessWriter => writer !== undefined)
 
-  const probe = await probeReceiver(endpoint, options.fetchHealth, options.probeTimeoutMs)
+  const probe = await (options.receiverProbe ??
+    probeReceiver(endpoint, options.fetchHealth, options.probeTimeoutMs))
 
   if (action === 'status') {
     out.push(...statusLines(selected, home, pathEnv, endpoint))

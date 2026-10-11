@@ -12,13 +12,14 @@
 import { classifyFsError, type FsErrorReason } from './errno.js'
 import {
   DEFAULT_CAPTURE_ENDPOINT,
+  isOtlpHttpEndpoint,
   runCapture,
   type CaptureEvent,
   type CaptureFileFilter,
   partialEventsOf,
 } from './index.js'
 import { withCaptureLock } from './lock.js'
-import type { HealthFetcher } from './probe.js'
+import { probeReceiver, type HealthFetcher } from './probe.js'
 import { CAPTURE_HARNESS_REGISTRY } from './harnesses/registry.js'
 
 export type CaptureActionOutcome = 'previewed' | 'wrote' | 'noop' | 'refused'
@@ -64,13 +65,21 @@ export async function runCaptureAction(request: CaptureActionRequest): Promise<C
   if (!CAPTURE_HARNESS_REGISTRY.some((writer) => writer.id === request.harnessId)) {
     throw new Error(`kyberdash capture: unknown harness "${request.harnessId}"`)
   }
+  const endpoint = request.endpoint ?? DEFAULT_CAPTURE_ENDPOINT
+  // The probe is read-only and only feeds text this front door discards, so it runs before
+  // the lock: overlapping requests probe side by side instead of queueing N round trips
+  // behind the mutex. A usage failure (bad endpoint) is refused without probing, as before.
+  const receiverProbe = isOtlpHttpEndpoint(endpoint)
+    ? probeReceiver(endpoint, request.fetchHealth, request.probeTimeoutMs)
+    : undefined
   return withCaptureLock(async () => {
     try {
       const result = await runCapture(request.action, {
+        ...(receiverProbe === undefined ? {} : { receiverProbe }),
         harnessIds: [request.harnessId],
         dryRun: request.dryRun,
         homeDir: request.homeDir,
-        endpoint: request.endpoint ?? DEFAULT_CAPTURE_ENDPOINT,
+        endpoint,
         ...(request.platform === undefined ? {} : { platform: request.platform }),
         ...(request.appDataDir === undefined ? {} : { appDataDir: request.appDataDir }),
         ...(request.fetchHealth === undefined ? {} : { fetchHealth: request.fetchHealth }),
