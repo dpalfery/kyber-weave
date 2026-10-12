@@ -26,6 +26,7 @@ import {
   prettyPrintJsonNested,
   prettyPrintJsonLinesNested,
   TurnFullContentPanel,
+  narrowToolDefinitions,
   ToggleRawView,
   CopyExactButton,
   isTurnFullContentRequest,
@@ -1158,6 +1159,7 @@ const contentQueryKey = [
   contentRequest.sessionId,
   contentRequest.span,
   contentRequest.part,
+  'full',
 ]
 
 function renderDrawerWithQuery(
@@ -1456,6 +1458,20 @@ describe('SessionInspectorDrawer: Copilot turn readability', () => {
     expect(formatted).not.toContain('9007199254740992')
     expect(formatted).toContain('data-testid="json-item-0"')
     expect(formatted).toContain('data-testid="json-item-1"')
+  })
+
+  it('wraps the formatted JSON view instead of scrolling it horizontally', () => {
+    const html = renderHtml(React.createElement(JsonStringView, { text: COPILOT_TOOL_DEFINITIONS_RAW }))
+    const single = renderHtml(React.createElement(JsonStringView, { text: '{"role":"system","content":"hello"}' }))
+    for (const markup of [html, single]) {
+      const pres = markup.match(/<pre[^>]*data-testid="json-(?:item-\d+|formatted)"/g) ?? []
+      expect(pres.length).toBeGreaterThan(0)
+      for (const pre of pres) {
+        expect(pre).toContain('whitespace-pre-wrap')
+        expect(pre).toContain('break-words')
+        expect(pre).not.toMatch(/whitespace-pre(?!-)/)
+      }
+    }
   })
 
   it('routes JSON strings to the structured view and prose to folded text', () => {
@@ -2707,5 +2723,27 @@ describe('SessionInspectorDrawer: lossless request builders', () => {
     } finally {
       restore()
     }
+  })
+})
+
+describe('narrowToolDefinitions', () => {
+  const blob = JSON.stringify([
+    { type: 'function', name: 'apply_patch' },
+    { type: 'function', function: { name: 'read_file' } },
+    { type: 'function', name: 'grep' },
+  ])
+
+  it('keeps only the clicked tool', () => {
+    expect(JSON.parse(narrowToolDefinitions(blob, 'apply_patch'))).toEqual({ type: 'function', name: 'apply_patch' })
+    expect(JSON.parse(narrowToolDefinitions(blob, 'read_file'))).toEqual({
+      type: 'function',
+      function: { name: 'read_file' },
+    })
+  })
+
+  it('returns the text untouched when nothing matches, no name is given, or it is not JSON', () => {
+    expect(narrowToolDefinitions(blob, 'missing')).toBe(blob)
+    expect(narrowToolDefinitions(blob, undefined)).toBe(blob)
+    expect(narrowToolDefinitions('not json', 'grep')).toBe('not json')
   })
 })

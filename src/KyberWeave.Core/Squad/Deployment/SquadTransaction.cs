@@ -65,6 +65,13 @@ internal interface ISquadTransactionCheckpointObserver : ISquadTransactionObserv
 /// </remarks>
 public sealed class SquadTransaction
 {
+    /// <summary>
+    /// Whether journal, restore, and artifact writes are forced to stable storage. Always
+    /// <see langword="true"/> in production; the test assembly turns it off because a full
+    /// device flush costs milliseconds per file on macOS and the tests never power-cycle.
+    /// </summary>
+    internal static bool SyncToDisk { get; set; } = true;
+
     private const string IntentFileName = "intent.json";
     private const string IntentSchema = "kyber-squad.transaction/v1";
     private static readonly JsonSerializerOptions IntentJsonOptions = CreateIntentJsonOptions();
@@ -1579,10 +1586,13 @@ public sealed class SquadTransaction
                            targetPath,
                            FileMode.CreateNew,
                            FileAccess.Write,
-                           FileShare.None))
+                           FileShare.None,
+                           bufferSize: 4096,
+                           SyncToDisk ? FileOptions.WriteThrough : FileOptions.None))
                 {
                     stream.Write(payload.Content.Span);
-                    stream.Flush(flushToDisk: true);
+                    if (SyncToDisk)
+                        stream.Flush(flushToDisk: true);
                 }
                 break;
             case OriginalEntryKind.Directory:
@@ -2283,10 +2293,11 @@ public sealed class SquadTransaction
                 FileAccess.Write,
                 FileShare.None,
                 bufferSize: 4096,
-                FileOptions.WriteThrough))
+                SyncToDisk ? FileOptions.WriteThrough : FileOptions.None))
             {
                 stream.Write(content);
-                stream.Flush(flushToDisk: true);
+                if (SyncToDisk)
+                    stream.Flush(flushToDisk: true);
             }
 
             File.Move(temporaryPath, destinationPath, overwrite);

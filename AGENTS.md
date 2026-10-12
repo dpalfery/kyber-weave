@@ -6,7 +6,25 @@ working in the code.
 
 ## Commands
 
-Before opening a PR, run the local equivalents of the required CI gates, plus the
+### The inner loop
+
+While iterating, run `scripts/fast-loop.sh` rather than the full gate suite. It builds
+Release with warnings-as-errors and analyzers on, runs the fast test tier, runs
+`docs validate`, and checks formatting — in a fraction of the time the declared
+suite takes, because it drops coverage collection, the `Category=Scale` envelope, and the
+slowest classes by measured cost. The fast tier is the list in
+`scripts/fast-loop-classes.txt` (everything else is excluded), regenerated with
+`scripts/fast-loop.sh --regenerate`. Of the declared gates it runs only `docs validate` and the
+whitespace formatting check.
+
+It is **not** evidence and must never be cited as such. It answers "did this edit break
+something"; the declared suite below answers "may this change be committed", and a
+review citing a hand-picked subset is citing evidence it selected
+([ADR 0005](docs/adr/0005-task-level-fast-review.md)). Run `--full` before pushing.
+
+### Before opening a PR
+
+Run the local equivalents of the required CI gates, plus the
 CodeGraph-backed documentation drift check:
 
 ```bash

@@ -12,6 +12,7 @@ const DEFAULTS = {
   jobsPaused: false,
   refreshCadenceMinutes: 5,
   receiverHosted: false,
+  dashboardPort: 4747,
 }
 
 describe('GET /api/kyber/settings', () => {
@@ -28,12 +29,14 @@ describe('GET /api/kyber/settings', () => {
     writeSetting(deps.store, SETTING_KEYS.refreshCadenceMinutes, 30)
     writeSetting(deps.store, SETTING_KEYS.receiverHosted, 'on')
     writeSetting(deps.store, SETTING_KEYS.folderImportScheduled, 'on')
+    writeSetting(deps.store, SETTING_KEYS.dashboardPort, 4848)
     const { body } = await callRoute('GET', '/api/kyber/settings', { deps })
     expect(body).toEqual({
       folderImportScheduled: true,
       jobsPaused: true,
       refreshCadenceMinutes: 30,
       receiverHosted: true,
+      dashboardPort: 4848,
     })
   })
 })
@@ -58,6 +61,7 @@ describe('PUT /api/kyber/settings', () => {
       jobsPaused: true,
       refreshCadenceMinutes: 1440,
       receiverHosted: true,
+      dashboardPort: 4848,
     }
     const { status, body } = await callRoute('PUT', '/api/kyber/settings', { deps, payload: next })
     expect(status).toBe(200)
@@ -83,6 +87,11 @@ describe('PUT /api/kyber/settings', () => {
     ['cadence above a day', { refreshCadenceMinutes: 1441 }],
     ['a fractional cadence', { refreshCadenceMinutes: 2.5 }],
     ['a negative cadence', { refreshCadenceMinutes: -5 }],
+    ['a zero port', { dashboardPort: 0 }],
+    ['a port above 65535', { dashboardPort: 65536 }],
+    ['a negative port', { dashboardPort: -1 }],
+    ['a fractional port', { dashboardPort: 47.5 }],
+    ['a string port', { dashboardPort: '4747' }],
     ['an array body', [{ jobsPaused: true }]],
     ['malformed JSON', '{not json'],
   ])('rejects %s with 400 and writes nothing', async (_label, payload) => {
@@ -102,6 +111,30 @@ describe('PUT /api/kyber/settings', () => {
     })
     expect(status).toBe(400)
     expect(readSetting(deps.store, SETTING_KEYS.jobsPaused)).toBe('off')
+  })
+
+  it('applies none of a body when the port in it is invalid (all-or-nothing)', async () => {
+    const deps = makeDeps()
+    const { status } = await callRoute('PUT', '/api/kyber/settings', {
+      deps,
+      payload: { jobsPaused: true, dashboardPort: 0 },
+    })
+    expect(status).toBe(400)
+    expect(readSetting(deps.store, SETTING_KEYS.jobsPaused)).toBe('off')
+    expect(readSetting(deps.store, SETTING_KEYS.dashboardPort)).toBe(4747)
+  })
+
+  it('persists a port at both ends of its range and reads it back', async () => {
+    const deps = makeDeps()
+    for (const port of [1, 65535]) {
+      const { status, body } = await callRoute('PUT', '/api/kyber/settings', {
+        deps,
+        payload: { dashboardPort: port },
+      })
+      expect(status).toBe(200)
+      expect(body).toMatchObject({ dashboardPort: port })
+      expect(readSetting(deps.store, SETTING_KEYS.dashboardPort)).toBe(port)
+    }
   })
 
   it.each(['POST', 'DELETE', 'PATCH'])('rejects %s with 405', async (method) => {

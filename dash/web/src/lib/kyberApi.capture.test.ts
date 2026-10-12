@@ -19,6 +19,7 @@ import {
   postKyberCapture,
   type KyberCaptureResult,
   type KyberCaptureRefusal,
+  type KyberCaptureEvent,
 } from './kyberApi.js'
 
 type FetchCall = { url: string; init: RequestInit | undefined }
@@ -202,6 +203,57 @@ describe('postKyberCapture', () => {
     const sent = JSON.parse(String(calls[0]!.init?.body)) as Record<string, unknown>
     expect(Object.keys(sent).sort()).toEqual(['action', 'dryRun', 'harness'])
     expect(sent).toEqual({ action: 'enable', harness: 'claude-code', dryRun: true })
+  })
+
+  it('forwards the Settings-only manual-key opt-in on disable, and only then', async () => {
+    const calls = stubFetch(200, postPreviewEnable)
+
+    await postKyberCapture({ action: 'disable', harness: 'claude-code', dryRun: true, removeUnreceiptedKeys: true })
+
+    expect(JSON.parse(String(calls[0]!.init?.body))).toEqual({
+      action: 'disable',
+      harness: 'claude-code',
+      dryRun: true,
+      removeUnreceiptedKeys: true,
+    })
+
+    const enableCalls = stubFetch(200, postPreviewEnable)
+    await postKyberCapture({ action: 'enable', harness: 'claude-code', dryRun: true })
+
+    expect(JSON.parse(String(enableCalls[0]!.init?.body))).toEqual({
+      action: 'enable',
+      harness: 'claude-code',
+      dryRun: true,
+    })
+  })
+
+  it('sends the exact preview with a confirmed manual-key removal', async () => {
+    const calls = stubFetch(200, postPreviewEnable)
+    const expectedPreviewEvents: KyberCaptureEvent[] = [
+      {
+        kind: 'would-restore',
+        harness: 'claude-code',
+        fileId: 'claude-settings',
+        path: '/home/dave/.claude/settings.json',
+        changes: [{ key: 'env.OTEL_LOGS_EXPORTER', before: 'otlp' }],
+      },
+    ]
+
+    await postKyberCapture({
+      action: 'disable',
+      harness: 'claude-code',
+      dryRun: false,
+      removeUnreceiptedKeys: true,
+      expectedPreviewEvents,
+    })
+
+    expect(JSON.parse(String(calls[0]!.init?.body))).toEqual({
+      action: 'disable',
+      harness: 'claude-code',
+      dryRun: false,
+      removeUnreceiptedKeys: true,
+      expectedPreviewEvents,
+    })
   })
 
   it('does not forward extra keys a caller smuggles in', async () => {

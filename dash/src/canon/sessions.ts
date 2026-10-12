@@ -54,9 +54,29 @@ function attributeOf(record: CanonicalRecord, keys: readonly string[]): string |
   return undefined
 }
 
-/** A turn is a model call. Tool and structural spans are not turns. */
-function isTurn(record: CanonicalRecord): boolean {
-  return record.op === 'llm.invoke'
+/**
+ * A harness roll-up span: Copilot's `invoke_agent`, which carries the Σ of its
+ * child `chat` calls. New ingests label it `agent.invoke`; records stored
+ * before that still say `llm.invoke`, so the operation attribute is read too.
+ */
+function isRollup(record: CanonicalRecord): boolean {
+  if (record.op === 'agent.invoke') return true
+  return record.op === 'llm.invoke' && attributeOf(record, ['gen_ai.operation.name']) === 'invoke_agent'
+}
+
+/**
+ * The session's turns: its model calls. A roll-up is not one while the calls it
+ * summarises exist -- charting both double-counts every total and puts the
+ * whole loop's input ahead of the real, growing calls. A session holding only
+ * roll-ups (the child spans never arrived) keeps them as its turns rather than
+ * emptying. Tool and structural spans are never turns.
+ */
+function turnsOf(records: readonly CanonicalRecord[]): CanonicalRecord[] {
+  const calls = records.filter((record) => record.op === 'llm.invoke' && !isRollup(record))
+  if (calls.length > 0) return calls
+  return records.filter(
+    (record) => isRollup(record) && (measuredInput(record.tokens) > 0 || record.tokens.output > 0),
+  )
 }
 
 /**
@@ -279,7 +299,7 @@ function hasEvidence(records: readonly CanonicalRecord[]): boolean {
   // tokens and no content, which grouped by trace into 44 rows that looked
   // like sessions and were not. Requiring a turn is what distinguishes an
   // agent session from ambient telemetry that happened to share a trace.
-  const turns = records.filter(isTurn)
+  const turns = turnsOf(records)
   if (turns.length === 0) return false
 
   return turns.some(
@@ -375,7 +395,7 @@ export type AsadSessionPayload = {
 function repriceTurns(store: CanonStore, records: CanonicalRecord[]): CanonicalRecord[] {
   const changes: Array<{ spanId: string; cost: CostBlock }> = []
   const repriced = records.map((record) => {
-    if (record.op !== 'llm.invoke') return record
+    if (record.op !== 'llm.invoke' && !isRollup(record)) return record
     const model = attributeOf(record, MODEL_KEYS)
     let next: CostBlock
     if (isPublishedTableHarness(record.harness)) {
@@ -470,7 +490,7 @@ export function buildSessionRow(
   countTokens: (text: string) => number,
   store?: CanonStore,
 ): SessionRow {
-  const turnRecords = records.filter(isTurn)
+  const turnRecords = turnsOf(records)
   const first = records[0]!
   // The canonical harness, not the provider entry the record arrived under.
   // `run`, `execution` and `listHarnesses` are all keyed canonically, and
@@ -489,11 +509,21 @@ export function buildSessionRow(
   // omission is stated rather than hidden.
   const measuredTurns = turnRecords.filter((record) => measuredInput(record.tokens) > 0)
   const unmeasuredTurns = turnRecords.length - measuredTurns.length
-  const contextTurns: ContextTurn[] = measuredTurns.map((record) => ({
-    parts: partsOf(record),
-    inputTokens: measuredInput(record.tokens),
-    freshInput: record.tokens.freshInput,
-  }))
+  // Some harnesses (Copilot) send the system prompt on the first request only,
+  // yet every later request still carries it in its input. The last one seen
+  // stands in for turns that report none; a turn's own always wins. Done here,
+  // not in `analyzeContext`, which stays a pure per-turn bucketing.
+  let lastSystem: ContextPart[] = []
+  const contextTurns: ContextTurn[] = measuredTurns.map((record) => {
+    const parts = partsOf(record)
+    const own = parts.filter((part) => part.part === 'system_prompt')
+    if (own.length > 0) lastSystem = own
+    return {
+      parts: own.length > 0 ? parts : [...lastSystem, ...parts],
+      inputTokens: measuredInput(record.tokens),
+      freshInput: record.tokens.freshInput,
+    }
+  })
 
   // Same rule the finding detector uses (`contextLimitOf`): first turn record
   // to name a window wins, default otherwise, so a session row and a
@@ -841,7 +871,7 @@ export function buildSessionRow(
       .map((record) => ({
         request: record.spanId,
         timestamp: typeof record.timestamp === 'string' ? record.timestamp : record.timestamp.toISOString(),
-        turns: record.op === 'llm.invoke' ? 1 : 0,
+        turns: turnRecords.includes(record) ? 1 : 0,
         model: attributeOf(record, MODEL_KEYS) ?? null,
       })),
     servers,

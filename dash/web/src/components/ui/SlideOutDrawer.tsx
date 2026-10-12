@@ -77,6 +77,8 @@ export function SlideOutDrawer({
   // wrapper) as a plain function under a test hook dispatcher that provides
   // only useEffect/useState/useMemo, so a useRef here would crash them.
   const [trackedOpen, setTrackedOpen] = useState(open)
+  const [panelWidth, setPanelWidth] = useState<number | null>(null)
+  const [dragging, setDragging] = useState(false)
   const [restoreFocusTo, setRestoreFocusTo] = useState<HTMLElement | null>(null)
 
   // Capture what holds focus during the render that opens the drawer, not in
@@ -87,6 +89,9 @@ export function SlideOutDrawer({
   // branch, so SSR and the characterization harnesses are unaffected.
   if (open !== trackedOpen) {
     setTrackedOpen(open)
+    // Each open starts at the default width.
+    setPanelWidth(null)
+    setDragging(false)
     if (open && manageFocus) {
       setRestoreFocusTo(
         typeof document !== 'undefined' && document.activeElement instanceof HTMLElement
@@ -103,6 +108,43 @@ export function SlideOutDrawer({
     restoreFocusTo.focus()
     setRestoreFocusTo(null)
   }, [open, manageFocus, restoreFocusTo])
+
+  // Drag the left edge to widen the panel so long text stays readable. The
+  // window listeners live in an effect so they are removed on unmount.
+  const startResize = (e: { preventDefault: () => void }) => {
+    e.preventDefault()
+    setDragging(true)
+  }
+  useEffect(() => {
+    if (!dragging || typeof window === 'undefined') return
+    const resizeTo = (clientX: number) =>
+      setPanelWidth(Math.min(window.innerWidth, Math.max(320, window.innerWidth - clientX)))
+    const onMouseMove = (ev: MouseEvent) => resizeTo(ev.clientX)
+    const onTouchMove = (ev: TouchEvent) => {
+      const t = ev.touches[0]
+      if (t !== undefined) resizeTo(t.clientX)
+    }
+    const stop = () => setDragging(false)
+    window.addEventListener('mousemove', onMouseMove)
+    window.addEventListener('mouseup', stop)
+    window.addEventListener('touchmove', onTouchMove)
+    window.addEventListener('touchend', stop)
+    return () => {
+      window.removeEventListener('mousemove', onMouseMove)
+      window.removeEventListener('mouseup', stop)
+      window.removeEventListener('touchmove', onTouchMove)
+      window.removeEventListener('touchend', stop)
+    }
+  }, [dragging])
+
+  const maxWidth = typeof window === 'undefined' ? 1024 : window.innerWidth
+  const currentWidth = panelWidth ?? Math.min(maxWidth, 672)
+  const resizeByKey = (e: { key: string; preventDefault: () => void }) => {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
+    e.preventDefault()
+    const delta = e.key === 'ArrowLeft' ? 40 : -40
+    setPanelWidth(Math.min(maxWidth, Math.max(320, currentWidth + delta)))
+  }
 
   // Registered last on purpose: the characterization harnesses invoke this
   // component as a plain function, keep the last effect, and run it to assert
@@ -171,6 +213,7 @@ export function SlideOutDrawer({
           'animate-in slide-in-from-right duration-200 ease-in-out',
           panelClassName,
         )}
+        style={panelWidth === null ? undefined : { width: panelWidth, maxWidth: '100vw' }}
         onClick={(e) => e.stopPropagation()}
         data-testid={panelTestId ?? `${testIdPrefix}-panel`}
       >
@@ -215,6 +258,20 @@ export function SlideOutDrawer({
           </div>
         </div>
 
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize panel"
+          aria-valuenow={Math.round(currentWidth)}
+          aria-valuemin={320}
+          aria-valuemax={Math.round(maxWidth)}
+          tabIndex={0}
+          onMouseDown={startResize}
+          onTouchStart={startResize}
+          onKeyDown={resizeByKey}
+          className="absolute left-0 top-0 bottom-0 w-1.5 -translate-x-1/2 cursor-col-resize hover:bg-border active:bg-border z-10"
+          data-testid={`${testIdPrefix}-resize-handle`}
+        />
         {/* Scrollable Body */}
         <div
           className={cn('flex-1 overflow-y-auto p-5 space-y-4 text-xs', bodyClassName)}

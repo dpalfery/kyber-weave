@@ -123,15 +123,20 @@ public sealed class DevinRendererContractTests : IDisposable
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
         HashSet<string> sharedIdentities = SharedIdentities(source);
+        HashSet<string> suppressedSkillIdentities = SuppressedSkillIdentities(source);
 
         SquadRenderResult result = await RenderDevinAsync(ProductRoot);
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
-        int suppressedSkillCount = source.Skills.Count(skill => sharedIdentities.Contains(skill.Name));
+        // A primary shared identity contributes no agent principal: its canonical skill is the
+        // entry point and is counted with the skills.
+        int sharedPrimaries = source.Agents.Count(agent =>
+            agent.Invocation == SquadInvocation.Primary && sharedIdentities.Contains(agent.Name));
+        int suppressedSkillCount = source.Skills.Count(skill => suppressedSkillIdentities.Contains(skill.Name));
         int expectedFileCount =
-            source.Agents.Count + source.Agents.Sum(agent => agent.Resources.Count)
+            source.Agents.Count - sharedPrimaries + source.Agents.Sum(agent => agent.Resources.Count)
             + source.Skills.Count - suppressedSkillCount
-            + source.Skills.Where(skill => !sharedIdentities.Contains(skill.Name))
+            + source.Skills.Where(skill => !suppressedSkillIdentities.Contains(skill.Name))
                 .Sum(skill => skill.Resources.Count);
 
         Assert.Equal(expectedFileCount, result.Files.Count);
@@ -210,7 +215,6 @@ public sealed class DevinRendererContractTests : IDisposable
 
     [Theory]
     [InlineData("architect")]
-    [InlineData("product-owner")]
     public async Task RenderAsync_Devin_AuthoringRolesReceiveExecutionTools(string agentName)
     {
         SquadRenderResult result = await RenderDevinAsync(ProductRoot);
@@ -236,12 +240,12 @@ public sealed class DevinRendererContractTests : IDisposable
     }
 
     /// <summary>
-    /// Both Devin authoring roles hold <c>process.execute: allow</c> and must carry the
-    /// harness-neutral initialise-before-edit sentence. <c>architect</c> owns it in
-    /// <c>plan-authoring</c>; <c>product-owner</c> carries it in the agent body and the
-    /// skill's <c>spec-authoring</c> reference, because a same-named skill already occupies
-    /// the ZCode skills directory an agent sidecar would need. The conductor pre-creates a
-    /// missing destination only as fallback.
+    /// The Devin authoring role that remains a subagent holds <c>process.execute: allow</c> and
+    /// must carry the harness-neutral initialise-before-edit sentence. <c>architect</c> owns it in
+    /// <c>plan-authoring</c>. <c>product-owner</c> was the other such role, but it is now a primary
+    /// shared identity: Devin lowers it to its canonical skill, a Devin skill carries no
+    /// <c>allowed-tools</c>, and the sentence lives in the skill's <c>spec-authoring</c> reference
+    /// instead of an agent body. The conductor pre-creates a missing destination only as fallback.
     /// </summary>
     [Fact]
     public async Task RenderAsync_Devin_AuthoringRolesCarryInitialiseBeforeEditInstruction()
@@ -257,8 +261,8 @@ public sealed class DevinRendererContractTests : IDisposable
         Assert.Contains(initialiseInstruction, planAuthoring.Content, StringComparison.Ordinal);
 
         SquadAgent productOwner = Assert.Single(source.Agents, a => a.Name == "product-owner");
+        Assert.Equal(SquadInvocation.Primary, productOwner.Invocation);
         Assert.Empty(productOwner.Resources);
-        Assert.Contains(initialiseInstruction, productOwner.InstructionBody, StringComparison.Ordinal);
 
         SquadSkill productOwnerSkill = Assert.Single(source.Skills, s => s.Name == "product-owner");
         SquadResource specAuthoring = Assert.Single(
@@ -277,13 +281,11 @@ public sealed class DevinRendererContractTests : IDisposable
             Encoding.UTF8.GetString(architectFile.Content.Span),
             StringComparison.Ordinal);
 
-        SquadDeploymentFile productOwnerAgent = Assert.Single(
+        // product-owner is lowered to its canonical skill: no agent directory, and the sentence
+        // reaches Devin through the skill's own reference closure.
+        Assert.DoesNotContain(
             result.Files,
-            f => f.RelativePath == ".devin/agents/product-owner/AGENT.md");
-        Assert.Contains(
-            initialiseInstruction,
-            Encoding.UTF8.GetString(productOwnerAgent.Content.Span),
-            StringComparison.Ordinal);
+            f => f.RelativePath.StartsWith(".devin/agents/product-owner/", StringComparison.Ordinal));
 
         SquadDeploymentFile productOwnerSkillFile = Assert.Single(
             result.Files,
@@ -333,7 +335,7 @@ public sealed class DevinRendererContractTests : IDisposable
         SquadRenderResult result = await RenderDevinAsync(ProductRoot);
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
-        SquadAgent conductor = Assert.Single(source.Agents, a => a.Invocation == SquadInvocation.Primary);
+        SquadAgent conductor = Assert.Single(source.Agents, a => a.Name == "conductor");
 
         Assert.DoesNotContain(
             result.Files,
@@ -363,8 +365,11 @@ public sealed class DevinRendererContractTests : IDisposable
     public async Task RenderAsync_Devin_SkillsNeverCarryToolOrPermissionKeys()
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        // Only the non-shared primaries are lowered to a Devin skill; a primary shared identity
+        // reuses its canonical skill, which carries the approved skill key set instead.
+        HashSet<string> sharedIdentities = SharedIdentities(source);
         HashSet<string> loweredIdentities = source.Agents
-            .Where(a => a.Invocation == SquadInvocation.Primary)
+            .Where(a => a.Invocation == SquadInvocation.Primary && !sharedIdentities.Contains(a.Name))
             .Select(a => a.Name)
             .ToHashSet(StringComparer.Ordinal);
 
@@ -588,7 +593,7 @@ public sealed class DevinRendererContractTests : IDisposable
     public async Task RenderAsync_Devin_OrchestrationProfileEmitsNoModel()
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
-        SquadAgent conductor = Assert.Single(source.Agents, a => a.Invocation == SquadInvocation.Primary);
+        SquadAgent conductor = Assert.Single(source.Agents, a => a.Name == "conductor");
         Assert.Equal("orchestration", conductor.ModelProfile);
 
         SquadRenderResult result = await RenderDevinAsync(ProductRoot);
@@ -607,7 +612,7 @@ public sealed class DevinRendererContractTests : IDisposable
     public async Task RenderAsync_Devin_ThrowsWhenACanonicalSkillOccupiesTheLoweredPrimaryIdentity()
     {
         SquadSource baseline = SquadSourceLoader.Load(ProductRoot);
-        SquadAgent primary = Assert.Single(baseline.Agents, a => a.Invocation == SquadInvocation.Primary);
+        SquadAgent primary = Assert.Single(baseline.Agents, a => a.Name == "conductor");
 
         using PiPrimaryIdentityCollisionFixture fixture = PiPrimaryIdentityCollisionFixture.Create(primary.Name);
 
@@ -632,6 +637,14 @@ public sealed class DevinRendererContractTests : IDisposable
         source.FallbackProfiles.Profiles.Values
             .SelectMany(profile => profile.SharedIdentities)
             .ToHashSet(StringComparer.Ordinal);
+
+    /// <summary>
+    /// The shared identities whose canonical skill is suppressed: those carried by a subagent.
+    /// A primary shared identity reuses its canonical skill as the entry point, so it is
+    /// emitted. Delegated to the renderer's own resolver so the test cannot drift.
+    /// </summary>
+    private static HashSet<string> SuppressedSkillIdentities(SquadSource source) =>
+        SquadSharedIdentityProjection.SuppressedSkillIdentities(source, SharedIdentities(source));
 
     private static IReadOnlyList<string> ComputeExpectedBuiltInTools(SquadCapabilityProfile profile)
     {

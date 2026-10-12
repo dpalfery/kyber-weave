@@ -12,6 +12,7 @@ internal static class CopilotToolCatalog
     internal static IReadOnlyList<string> OrderedTools { get; } =
     [
         "vscode",
+        "tool_search",
         "read",
         "todo",
         "codegraph/*",
@@ -55,6 +56,10 @@ internal static class CopilotToolCatalog
         new Dictionary<string, string?>(StringComparer.Ordinal)
         {
             ["vscode"] = null,
+            // tool_search only surfaces definitions for tools the agent's allow-list
+            // already grants (Copilot groups it under the vscode tool set), so it
+            // confers no new capability and stays ungoverned like vscode and todo.
+            ["tool_search"] = null,
             ["read"] = "filesystem.read",
             ["todo"] = null,
             ["codegraph/*"] = "filesystem.read",
@@ -70,7 +75,7 @@ internal static class CopilotToolCatalog
             ["edit/editFiles"] = "filesystem.write",
             ["edit/rename"] = "filesystem.write",
             ["vscodeGeneral/rename"] = "filesystem.write",
-            ["vscode/runCommand"] = null,
+            ["vscode/runCommand"] = "process.execute",
             ["vscode/toolSearch"] = null,
             ["vscode/askQuestions"] = null,
             ["execute/getTerminalOutput"] = "process.execute",
@@ -89,7 +94,7 @@ internal static class CopilotToolCatalog
             ["vscodeTasks/createAndRunTask"] = "process.execute",
             ["vscodeTasks/runTask"] = "process.execute",
             ["vscodeTasks/getTaskOutput"] = "process.execute",
-            ["vscodeTasks/problems"] = "process.execute",
+            ["vscodeTasks/problems"] = "filesystem.read",
             ["vscodeGeneral/toolSearch"] = null,
             ["vscodeGeneral/testFailure"] = "process.execute"
         };

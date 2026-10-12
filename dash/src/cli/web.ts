@@ -17,6 +17,7 @@ import {
 } from '../server/routes.js'
 import { CanonStore } from '../canon/store.js'
 import { resolveCanonDbPath } from '../canon/paths.js'
+import { readSetting, SETTING_KEYS } from '../settings/shared-settings.js'
 import { JobHost, type JobSpawner } from '../jobs/host.js'
 import { ReceiverHost, type ReceiverProber } from '../jobs/receiver-host.js'
 import { runMaintenancePass } from '../refresh/folder-import.js'
@@ -209,6 +210,94 @@ function openBrowser(url: string): void {
   } catch {
     /* user can open it manually */
   }
+}
+
+/**
+ * A refused start on a configured dashboard port. The server never falls back to a
+ * random free port: the tray attaches by the configured URL, bookmarks point at it, and
+ * a server that quietly started elsewhere would leave both aimed at a refusal. Every
+ * subclass therefore names the port and the remedies in its message.
+ */
+export class DashboardPortRefusedError extends Error {
+  readonly port: number
+
+  constructor(port: number, detail: string) {
+    super(detail)
+    this.name = 'DashboardPortRefusedError'
+    this.port = port
+  }
+}
+
+/**
+ * A configured dashboard port that is already taken. The message names the port and the
+ * remedies — stop the occupant, pass an explicit `--port` for this run, or persist
+ * another `dashboard.port` and restart.
+ */
+export class DashboardPortOccupiedError extends DashboardPortRefusedError {
+  constructor(port: number) {
+    super(
+      port,
+      `port ${port} is already in use. ` +
+        `Stop the process holding it, start this run with --port <free port>, ` +
+        `or persist another port with 'kyberdash dash settings set dashboard.port <port>' ` +
+        `and restart. The dashboard did not start on a different port.`
+    )
+    this.name = 'DashboardPortOccupiedError'
+  }
+}
+
+/**
+ * A configured dashboard port the process is not permitted to bind, or that the socket
+ * layer rejects outright. The common case is a privileged port (< 1024) persisted as
+ * `dashboard.port` and restarted as a non-root user: without this the operator gets a
+ * raw EACCES traceback instead of the same actionable refusal an occupied port produces.
+ */
+export class DashboardPortUnavailableError extends DashboardPortRefusedError {
+  constructor(port: number, code: string) {
+    // The privilege hint applies only to low ports: a socket-layer rejection on a
+    // high port (e.g. ERR_SOCKET_BAD_PORT on 70000) lectured about sub-1024 privilege
+    // reads like the wrong remedy. Keep the same remedies in both wordings.
+    const reason =
+      port < 1024
+        ? `A port below 1024 needs privilege to bind; `
+        : `The socket layer rejected the port; `
+    super(
+      port,
+      `port ${port} could not be bound (${code}). ` +
+        reason +
+        `start this run with --port <free port>, ` +
+        `or persist another port with 'kyberdash dash settings set dashboard.port <port>' ` +
+        `and restart. The dashboard did not start on a different port.`
+    )
+    this.name = 'DashboardPortUnavailableError'
+  }
+}
+
+/**
+ * Which port the dashboard binds, in precedence order: an explicit CLI `--port` for
+ * this run, else the persisted `settings.dashboard.port` shared by every surface, else
+ * the 4747 default the codec reads for a store that never recorded a choice. An
+ * explicit 0 keeps its in-process meaning ("bind ephemeral", used by the suites that
+ * share one machine); 0 is never a storable choice, so the codec refuses it and this
+ * function never has to.
+ */
+export function resolveDashboardPort(explicitPort: number | undefined, store: CanonStore): number {
+  if (explicitPort !== undefined) return explicitPort
+  return readSetting(store, SETTING_KEYS.dashboardPort)
+}
+
+/**
+ * The refused-start error for a failed bind, or undefined when the caller should surface
+ * the raw socket error. `EADDRINUSE` and the permission/socket-layer codes are the two
+ * ways a configured port fails to bind; both must read like the feature rather than a
+ * traceback. An ephemeral bind (port 0) is never a configured choice, so it keeps the
+ * raw error. Extracted so the mapping is testable without forcing a real EACCES.
+ */
+export function portRefusalFor(port: number, code: string | undefined): Error | undefined {
+  if (port === 0) return undefined
+  if (code === 'EADDRINUSE') return new DashboardPortOccupiedError(port)
+  if (code === 'EACCES' || code === 'ERR_SOCKET_BAD_PORT') return new DashboardPortUnavailableError(port, code)
+  return undefined
 }
 
 export class UnknownViewError extends Error {
@@ -486,6 +575,25 @@ function resolveHostStore(injected: CanonStore | undefined): CanonStore {
 }
 
 /**
+ * Closes the process-singleton default store after a start that never bound, but only
+ * when it is provably unused: an injected store is never ours to close, and a
+ * singleton a live pair (published or still starting) may be reading is left to that
+ * pair's own release path, which closes it with the last share. A passive sqlite
+ * handle left open is reclaimed on process exit or reused by the next resolve, so the
+ * conservative branch leaks nothing that matters.
+ */
+function closeDefaultStoreIfUnused(injected: CanonStore | undefined): void {
+  if (injected !== undefined || defaultStore === null) return
+  if (hostedServicesStarting.size > 0) return
+  for (const services of hostedServices.values()) {
+    if (services.seams.store === defaultStore) return
+  }
+  const unused = defaultStore
+  defaultStore = null
+  unused.close()
+}
+
+/**
  * A poll that reports a backoff delay schedules its own retry, so a receiver that keeps
  * failing to start is not retried on every tick. Exactly one retry is ever pending.
  */
@@ -670,7 +778,13 @@ function buildServices(stateDir: string, seams: HostedSeams): HostedServices {
 }
 
 export async function runWebDashboard(opts: WebDashboardServices & {
-  port: number
+  /**
+   * The port for this run. `undefined` resolves from the persisted
+   * `settings.dashboard.port` (default 4747); 0 binds an ephemeral loopback port for
+   * the in-process suites. Any other value is fixed: when it is taken the start
+   * rejects with a `DashboardPortOccupiedError` rather than moving elsewhere.
+   */
+  port?: number
   open: boolean
   view?: string
   kyberBridge?: KyberBridge
@@ -827,21 +941,52 @@ export async function runWebDashboard(opts: WebDashboardServices & {
     }
   })
 
+  // Precedence is explicit `--port` > persisted `settings.dashboard.port` > 4747, and it
+  // is resolved here in the engine rather than in the CLI surface: the store behind it
+  // is the same handle the settings routes serve, so the number below is always the one
+  // the operator last persisted. Changing the setting later never rebinds this process;
+  // the new port applies on the next startup.
+  //
+  // Resolved inside its own cleanup: `readSetting` reaches sqlite through a bare
+  // `prepare().get()`, which throws on a locked or corrupt store. That throw must not
+  // leak the bridge and default store this start already opened, so it takes the same
+  // close path a bind failure takes below.
+  let requestedPort: number
+  try {
+    requestedPort = resolveDashboardPort(opts.port, store)
+  } catch (err) {
+    bridge.close()
+    closeDefaultStoreIfUnused(opts.store)
+    throw err
+  }
   const port = await new Promise<number>((resolve, reject) => {
     server.once('error', (err: NodeJS.ErrnoException) => {
-      if (err.code === 'EADDRINUSE') {
-        server.listen(0, '127.0.0.1', () => resolve((server.address() as AddressInfo).port))
+      // A configured port that fails to bind is a refused start, never a quiet move or a
+      // raw traceback: the tray attaches by the configured URL and a fallback would
+      // strand it, and an occupied port, a privileged port restarted as non-root, and a
+      // socket the layer rejects all deserve the same actionable refusal. Close the
+      // failed socket before rejecting so a retry can bind; nothing is published (the
+      // listening line and server.json below only happen after a bind) and no host pair
+      // is taken (that happens further below too).
+      const refusal = portRefusalFor(requestedPort, err.code)
+      if (refusal !== undefined) {
+        server.close(() => reject(refusal))
       } else {
         reject(err)
       }
     })
-    server.listen(opts.port, '127.0.0.1', () => resolve((server.address() as AddressInfo).port))
+    server.listen(requestedPort, '127.0.0.1', () => resolve((server.address() as AddressInfo).port))
     // A server that never bound never served, so it must not keep a host pair alive: the
     // share taken above goes back rather than leaving a lease held by a process with no
     // dashboard.
   }).catch((err: unknown) => {
     // Nothing was bound, so nothing was ever holding a host pair: there is no share to
-    // give back yet (the pair is taken below, after the bind).
+    // give back yet (the pair is taken below, after the bind). The bridge above still
+    // needs closing when the caller injected none: it opened its own sqlite handle, and
+    // a failed start must not leak it. close() only drops what the bridge opened itself —
+    // an injected store's handle is detached, never closed — so this is safe either way.
+    bridge.close()
+    closeDefaultStoreIfUnused(opts.store)
     throw err
   })
   // Durable handler so a post-bind socket error never crashes the process.

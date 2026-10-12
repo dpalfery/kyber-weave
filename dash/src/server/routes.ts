@@ -1644,8 +1644,8 @@ export function handleKyberRequest(
     })
   }
 
-  // Shared settings (rule R1): the tray and the web UI read and write the same four
-  // switches, so both go through this one route. Storage and the on/off encoding stay in
+  // Shared settings (rule R1): the tray and the web UI read and write the same shared
+  // settings, so both go through this one route. Storage and the value encoding stay in
   // shared-settings.ts; this is only the JSON view over it.
   if (url.pathname === '/api/kyber/settings') {
     // No store means this process does not host the shared settings (see KyberRouteDeps):

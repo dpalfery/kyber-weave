@@ -85,7 +85,7 @@ Kyber-Squad declares twelve coding-harness targets:
 **Renderer coverage today**: this is the declared roster, not the set that currently installs.
 Rendering canonical source into a harness's native files is Kyber-Weave's own code (see
 [architecture.md](architecture.md#8-rendering)) — as of this writing `claude` (native subagents with primary-agent entry-point skill), `copilot` (native), `cursor` (native),
-`codex` (native), `antigravity` (native: `.agents/agents/<name>/agent.md` + `.agents/skills/<name>/SKILL.md`, [ADR 0022](../adr/0022-antigravity-native-agents.md)), `opencode` (native), `kilo` (native), `pi` (native subagents with primary-agent lowering), `factory` (native), `warp` (fallback role-skill lowering to `.warp/skills/`), `zcode` (native subagents and skills, with the primary agent lowered to a slash command), and `devin` (native subagents and skills, with the primary agent lowered to a skill) have renderers. All twelve declared targets are covered. `kyber-weave squad doctor` reports current coverage.
+`codex` (native), `antigravity` (native: `.agents/agents/<name>/agent.md` + `.agents/skills/<name>/SKILL.md`, [ADR 0022](../adr/0022-antigravity-native-agents.md)), `opencode` (native), `kilo` (native), `pi` (native subagents with primary-agent lowering), `factory` (native), `warp` (fallback role-skill lowering to `.warp/skills/`), `zcode` (native subagents and skills, with primary agents lowered to slash commands), and `devin` (native subagents and skills, with primary agents lowered to a skill) have renderers. All twelve declared targets are covered. `kyber-weave squad doctor` reports current coverage.
 
 ### Detection Rules
 
@@ -101,9 +101,11 @@ Rendering canonical source into a harness's native files is Kyber-Weave's own co
 
 ### Claude notes
 
-Claude renders the primary `conductor` agent as both a subagent (for enforced invocation) and an
-entry-point skill (for main-thread access). The following operational details ensure correct
-deployment and use:
+Claude renders each primary agent as both a subagent (for enforced invocation) and an
+entry-point skill (for main-thread access). The `conductor` derives its entry-point skill from the
+agent body; the two root wrappers `product-owner` and `bug-crusher` reuse their canonical skill as
+the entry point instead ([ADR 0036](../adr/0036-primary-agent-canonical-skill-entry-point.md)). The
+following operational details ensure correct deployment and use:
 
 **Three ways to run the conductor:**
 
@@ -234,10 +236,12 @@ write `.factory/agents/` or the compatibility trees `~/.agents/skills/` and
 `~/.agent/skills/`.
 
 **Entry point:** the Factory app dispatches droids as subagents and has no session-parent
-selector ([ADR 0034](../adr/0034-factory-droid-entry-point-skill.md)), so the conductor also
-renders as an entry-point skill at `.factory/skills/conductor/SKILL.md` (personal
-`~/.factory/skills/conductor/SKILL.md`) carrying the canonical agent body verbatim. Invoke
-the conductor through that skill; the droid at `.factory/droids/conductor.md` is kept for
+selector ([ADR 0034](../adr/0034-factory-droid-entry-point-skill.md)), so each primary agent also
+renders as an entry-point skill under `.factory/skills/<name>/SKILL.md` (personal
+`~/.factory/skills/<name>/SKILL.md`). The `conductor` derives its entry-point skill from the agent
+body; the two root wrappers `product-owner` and `bug-crusher` reuse their canonical skill
+([ADR 0036](../adr/0036-primary-agent-canonical-skill-entry-point.md)). Invoke a primary agent
+through its skill; the droid at `.factory/droids/<name>.md` is kept for
 Task dispatch. The skill runs under the session's permissions — the droid's explicit tools
 allow-list and `mcpServers: []` do not apply to it.
 
@@ -334,8 +338,10 @@ fails on a missing file, create the empty file and re-run the request — the co
 fallback when the harness withholds file creation from subagents. See
 [ADR 0028](../adr/0028-devin-target-scoped-authoring-capability-profiles.md).
 
-**Conductor and delegation**: Devin has no primary-agent primitive, so the conductor is
-deployed as the skill `conductor` — invoke it as `/conductor` — and runs in the main Devin Local
+**Conductor and delegation**: Devin has no primary-agent primitive, so each primary agent is
+deployed as a skill — the `conductor` as the skill `conductor`, invoked as `/conductor`, and the
+two root wrappers `product-owner` and `bug-crusher` through their own canonical skills
+([ADR 0036](../adr/0036-primary-agent-canonical-skill-entry-point.md)) — and runs in the main Devin Local
 session, which dispatches the specialists as subagents. Its orchestrator boundary — no searching, editing, running commands,
 or reading the web — is instruction-only on Devin, as on Pi. Subagents cannot delegate further
 on Devin: Devin cannot limit nested delegation to a roster, so Squad

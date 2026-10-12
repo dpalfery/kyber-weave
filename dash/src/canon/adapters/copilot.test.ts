@@ -4,6 +4,8 @@ import { AdapterRegistry } from './registry.js'
 import { rawSpan } from './testing.js'
 import { TOKEN_NEGATIVE_FRESH, TOKEN_SUM_MISMATCH } from '../types.js'
 import {
+  canonicalOp,
+  canonicalParts,
   canonicalSessionId,
   convertInclusiveCounts,
   copilotAdapter,
@@ -405,5 +407,37 @@ describe('the ported adapters under AdapterRegistry (R6.2)', () => {
     })
     expect(copilotAdapter.detect(span)).toBe(0.4)
     expect(registry.attribute([span]).has('a')).toBe(false)
+  })
+})
+
+describe('canonicalOp — the invoke_agent roll-up', () => {
+  it('does not label an invoke_agent roll-up an llm.invoke turn, though it carries usage', () => {
+    const attributes = { 'gen_ai.operation.name': 'invoke_agent', ...copilotCounts() }
+    expect(canonicalOp(attributes)).toBe('agent.invoke')
+  })
+
+  it('still labels a chat span carrying usage an llm.invoke turn', () => {
+    const attributes = { 'gen_ai.operation.name': 'chat', ...copilotCounts() }
+    expect(canonicalOp(attributes)).toBe('llm.invoke')
+  })
+})
+
+describe('canonicalParts — structured system_instructions', () => {
+  it('stores the text of a [{type, content}] array as the plain-text system prompt', () => {
+    const parts = canonicalParts({
+      'gen_ai.system_instructions': JSON.stringify([
+        { type: 'text', content: 'You are an architect.' },
+        { type: 'text', content: 'Be concise.' },
+      ]),
+    })
+    const system = parts.find((part) => part.part === 'system_prompt')
+    expect(system?.text).toBe('You are an architect.\n\nBe concise.')
+  })
+
+  it('keeps an already-decoded array and a plain string as they are', () => {
+    const decoded = canonicalParts({ 'gen_ai.system_instructions': [{ type: 'text', text: 'Hi' }] })
+    expect(decoded.find((part) => part.part === 'system_prompt')?.text).toBe('Hi')
+    const plain = canonicalParts({ 'gen_ai.system_instructions': 'plain prose' })
+    expect(plain.find((part) => part.part === 'system_prompt')?.text).toBe('plain prose')
   })
 })

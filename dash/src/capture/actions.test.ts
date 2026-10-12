@@ -270,6 +270,197 @@ describe('runCaptureAction: disable', () => {
     expect(result.events[0]).toMatchObject({ kind: 'refused', reason: 'unparseable' })
     expect(readFileSync(claudePath(home), 'utf8')).toBe('{not json')
   })
+
+  it('without the opt-in a disable with no receipt stays a noop, even for manual keys', async () => {
+    const home = makeHome()
+    writeConfig(
+      claudePath(home),
+      `${JSON.stringify({ env: { OTEL_LOGS_EXPORTER: 'otlp', ownerKey: 'keep' } }, null, 2)}\n`,
+    )
+    const before = readFileSync(claudePath(home), 'utf8')
+
+    const result = await runCaptureAction(request(home, 'claude-code', 'disable'))
+
+    expect(result.outcome).toBe('noop')
+    expect(result.events).toEqual([
+      { kind: 'noop', harness: 'claude-code', fileId: 'claude-settings', path: claudePath(home) },
+    ])
+    expect(readFileSync(claudePath(home), 'utf8')).toBe(before)
+  })
+
+  it('a corrupt receipt is not absence: a plain disable refuses too, without writing', async () => {
+    // Enable-refuses / disable-noops was a split personality: a corrupt receipt masked as
+    // absence would report "nothing to do" (exit 0) while the prior values are unknowable.
+    const home = makeHome()
+    writeConfig(claudePath(home), '{}\n')
+    await runCaptureAction(request(home, 'claude-code', 'enable'))
+    const enabled = readFileSync(claudePath(home), 'utf8')
+    writeConfig(receiptPathForHome(home), '{not json')
+
+    const result = await runCaptureAction(request(home, 'claude-code', 'disable'))
+
+    expect(result.outcome).toBe('refused')
+    expect(result.reason).toBe('unparseable')
+    expect(result.events[0]).toMatchObject({ kind: 'refused', fileId: 'receipt', reason: 'unparseable' })
+    expect(readFileSync(claudePath(home), 'utf8')).toBe(enabled)
+  })
+})
+
+describe('runCaptureAction: disable with removeUnreceiptedKeys (Settings-only)', () => {
+  const manualClaude = {
+    env: {
+      OTEL_LOGS_EXPORTER: 'otlp',
+      OTEL_LOG_USER_PROMPTS: '1',
+      UNRELATED_OWNER_KEY: 'keep-me',
+    },
+  }
+
+  it('previews the exact removals on dry run and writes nothing', async () => {
+    const home = makeHome()
+    const seed = `${JSON.stringify(manualClaude, null, 2)}\n`
+    writeConfig(claudePath(home), seed)
+
+    const preview = await runCaptureAction(
+      request(home, 'claude-code', 'disable', { dryRun: true, removeUnreceiptedKeys: true }),
+    )
+    expect(preview.outcome).toBe('previewed')
+    expect(preview.events).toHaveLength(1)
+    expect(preview.events[0]).toMatchObject({ kind: 'would-restore', fileId: 'claude-settings' })
+    const keys = preview.events[0]!.changes!.map((change) => change.key).sort()
+    expect(keys).toEqual(['env.OTEL_LOGS_EXPORTER', 'env.OTEL_LOG_USER_PROMPTS'])
+    expect(preview.events[0]!.changes!.find((change) => change.key === 'env.OTEL_LOGS_EXPORTER')).toEqual({
+      key: 'env.OTEL_LOGS_EXPORTER',
+      before: 'otlp',
+    })
+    expect(readFileSync(claudePath(home), 'utf8')).toBe(seed)
+    expect(existsSync(receiptPathForHome(home))).toBe(false)
+  })
+
+  it('removes only declared keys and preserves unrelated owner keys', async () => {
+    const home = makeHome()
+    writeConfig(claudePath(home), `${JSON.stringify(manualClaude, null, 2)}\n`)
+    const preview = await runCaptureAction(
+      request(home, 'claude-code', 'disable', { dryRun: true, removeUnreceiptedKeys: true }),
+    )
+
+    const result = await runCaptureAction(
+      request(home, 'claude-code', 'disable', {
+        removeUnreceiptedKeys: true,
+        expectedPreviewEvents: preview.events,
+      }),
+    )
+
+    expect(result.outcome).toBe('wrote')
+    expect(result.events[0]).toMatchObject({ kind: 'restored', fileId: 'claude-settings' })
+    const doc = JSON.parse(readFileSync(claudePath(home), 'utf8')) as { env: Record<string, unknown> }
+    expect(doc.env['OTEL_LOGS_EXPORTER']).toBeUndefined()
+    expect(doc.env['OTEL_LOG_USER_PROMPTS']).toBeUndefined()
+    expect(doc.env['UNRELATED_OWNER_KEY']).toBe('keep-me')
+  })
+
+  it('refuses a confirmed removal when the settings changed since the preview', async () => {
+    const home = makeHome()
+    writeConfig(claudePath(home), `${JSON.stringify(manualClaude, null, 2)}\n`)
+    const preview = await runCaptureAction(
+      request(home, 'claude-code', 'disable', { dryRun: true, removeUnreceiptedKeys: true }),
+    )
+    const changed = `${JSON.stringify({ ...manualClaude, env: { ...manualClaude.env, OTEL_LOGS_EXPORTER: 'console' } }, null, 2)}\n`
+    writeConfig(claudePath(home), changed)
+
+    const result = await runCaptureAction(
+      request(home, 'claude-code', 'disable', {
+        removeUnreceiptedKeys: true,
+        expectedPreviewEvents: preview.events,
+      }),
+    )
+
+    expect(result.outcome).toBe('refused')
+    expect(result.reason).toBe('drift')
+    expect(result.events.at(-1)).toMatchObject({ kind: 'refused', code: 'PREVIEW_CHANGED' })
+    expect(readFileSync(claudePath(home), 'utf8')).toBe(changed)
+  })
+
+  it('reports noop when no declared keys are present', async () => {
+    const home = makeHome()
+    writeConfig(claudePath(home), `${JSON.stringify({ env: { UNRELATED_OWNER_KEY: 'keep-me' } }, null, 2)}\n`)
+    const preview = await runCaptureAction(
+      request(home, 'claude-code', 'disable', { dryRun: true, removeUnreceiptedKeys: true }),
+    )
+
+    const result = await runCaptureAction(
+      request(home, 'claude-code', 'disable', {
+        removeUnreceiptedKeys: true,
+        expectedPreviewEvents: preview.events,
+      }),
+    )
+
+    expect(result.outcome).toBe('noop')
+  })
+
+  it('names a preview that could not be produced, not an unreadable config', async () => {
+    // A bad endpoint makes the preview run itself fail with no events. Reusing the empty
+    // event list as the refusal made refusalReason([]) fall back to 'unreadable', so the
+    // route reported "config could not be read" for a config nobody read.
+    const home = makeHome()
+    writeConfig(claudePath(home), `${JSON.stringify(manualClaude, null, 2)}\n`)
+
+    const result = await runCaptureAction(
+      request(home, 'claude-code', 'disable', {
+        removeUnreceiptedKeys: true,
+        expectedPreviewEvents: [],
+        endpoint: 'ftp://not-otlp.example',
+      }),
+    )
+
+    expect(result.outcome).toBe('refused')
+    expect(result.events).toHaveLength(1)
+    expect(result.events[0]).toMatchObject({ kind: 'refused', code: 'PREVIEW_UNAVAILABLE' })
+  })
+
+  it('a corrupt receipt is not absence: refuses without writing', async () => {
+    const home = makeHome()
+    const seed = `${JSON.stringify(manualClaude, null, 2)}\n`
+    writeConfig(claudePath(home), seed)
+    writeConfig(receiptPathForHome(home), '{not json')
+
+    const result = await runCaptureAction(
+      request(home, 'claude-code', 'disable', { dryRun: true, removeUnreceiptedKeys: true }),
+    )
+
+    expect(result.outcome).toBe('refused')
+    expect(result.reason).toBe('unparseable')
+    expect(result.events[0]).toMatchObject({ kind: 'refused', fileId: 'receipt', reason: 'unparseable' })
+    expect(readFileSync(claudePath(home), 'utf8')).toBe(seed)
+  })
+
+  it('refuses a malformed config without writing', async () => {
+    const home = makeHome()
+    writeConfig(claudePath(home), '{not json')
+
+    const result = await runCaptureAction(
+      request(home, 'claude-code', 'disable', { dryRun: true, removeUnreceiptedKeys: true }),
+    )
+
+    expect(result.outcome).toBe('refused')
+    expect(result.reason).toBe('unparseable')
+    expect(readFileSync(claudePath(home), 'utf8')).toBe('{not json')
+  })
+
+  it('preflights every file: one bad target refuses the whole action with no partial writes', async () => {
+    const home = makeHome()
+    writeConfig(stablePath(home), `${JSON.stringify({ github: { copilot: { chat: { otel: { enabled: true } } } } }, null, 2)}\n`)
+    writeConfig(insidersPath(home), '{not json')
+    const stableBefore = readFileSync(stablePath(home), 'utf8')
+
+    const result = await runCaptureAction(
+      request(home, 'copilot', 'disable', { dryRun: true, removeUnreceiptedKeys: true }),
+    )
+
+    expect(result.outcome).toBe('refused')
+    expect(result.events.some((event) => event.kind === 'refused')).toBe(true)
+    expect(readFileSync(stablePath(home), 'utf8')).toBe(stableBefore)
+    expect(readFileSync(insidersPath(home), 'utf8')).toBe('{not json')
+  })
 })
 
 describe('runCaptureAction: shape', () => {

@@ -5,7 +5,7 @@ description: "Writes technical documentation: READMEs, API docs, ADRs, runbooks,
 invocation: subagent
 model-profile: fast
 capability-profile: documentation
-copilot-tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, agent, edit/createFile, edit/editFiles, edit/rename, search, vscodeTasks/createAndRunTask, vscodeTasks/runTask, vscodeTasks/getTaskOutput, vscodeTasks/problems, vscodeGeneral/rename, vscodeGeneral/toolSearch, vscodeGeneral/testFailure, todo, "codegraph/*", "kyber-weave/*", "context7/*"]
+copilot-tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, edit/createFile, edit/editFiles, edit/rename, search, vscodeGeneral/rename, vscodeGeneral/toolSearch, todo, "codegraph/*", "kyber-weave/*", "context7/*"]
 delegates-to: []
 fallback: role-skill
 aliases: []

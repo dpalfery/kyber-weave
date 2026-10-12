@@ -136,15 +136,24 @@ Targets without native agent primitives use **agent-to-role-skill lowering**, go
 this projection; Antigravity was previously classified as fallback and has been reclassified to native
 ([ADR 0022](../adr/0022-antigravity-native-agents.md)).
 
-The current canonical agent and skill namespaces intersect at exactly seven names. Every
-intersection is a distinct-body collision; the product declares no shared identities:
+The current canonical agent and skill namespaces intersect at eight names. Two of those
+intersections — `product-owner` and `bug-crusher` — are **primary shared identities**: root agents
+whose body is a thin wrapper pointing at the same-name canonical skill, which carries the role
+([ADR 0036](../adr/0036-primary-agent-canonical-skill-entry-point.md)). The remaining six are
+distinct-body collisions. The primary shared identities reuse the canonical skill as their entry
+point, so no `role-` projection is generated for them:
 
 ```mermaid
 flowchart TD
     Intersection{"Agent & Skill Name\nIntersection Check"}
-    
-    Intersection -->|"Seven Distinct-Body Collisions\n(csharp-dev, dal-dev, etc.)"| CollisionPath["Distinct Workflows & Roles"]
-    Intersection -->|"No Skill Collision\n(including conductors)"| UnoccupiedPath["Unoccupied Identity"]
+
+    Intersection -->|"Two Primary Shared Identities\n(product-owner, bug-crusher)"| SharedPath["Thin Wrapper: Canonical Skill\nIs the Entry Point"]
+    Intersection -->|"Six Distinct-Body Collisions\n(csharp-dev, dal-dev, etc.)"| CollisionPath["Distinct Workflows & Roles"]
+    Intersection -->|"No Skill Collision\n(conductor)"| UnoccupiedPath["Unoccupied Identity"]
+
+    SharedPath --> SharedCheck{"Target Native\nAgent Support?"}
+    SharedCheck -->|"Yes"| SharedNative["Emit Native Agent + Canonical Skill\n(Entry Point; No Duplicate)"]
+    SharedCheck -->|"No"| SharedLower["Reuse Canonical Skill as Entry Point"]
 
     CollisionPath --> FallbackCheck{"Target has Native\nAgent Support?"}
     FallbackCheck -->|"Yes"| NativeBoth["Emit Native Agent + Canonical Skill\n(Different Namespaces)"]
@@ -157,26 +166,37 @@ flowchart TD
 
 ### Resolution Rules
 
-1. **Distinct-Body Collisions (`csharp-dev`, `dal-dev`, `github-devops`, `maui-dev`, `product-owner`, `python-dev`, `test-dev`)**:
+1. **Primary Shared Identities (`product-owner`, `bug-crusher`)**:
+   - The agent body is a thin wrapper that loads and follows the same-name canonical skill; the
+     skill carries the role. The two bodies differ by design, and the source validator permits
+     that only for a `primary`-invocation shared identity.
+   - The canonical skill is the entry point and is always emitted. A target that renders a primary
+     through an additional entry-point form (Claude, Factory) emits the agent file plus the
+     canonical skill and no duplicate; a target that lowers a primary onto a skill or command
+     (Cursor, Pi, ZCode, Devin, Warp) reuses the canonical skill and emits no projection of its own.
+   - No `role-<name>` projection is generated, and no skill projection is suppressed.
+2. **Distinct-Body Collisions (`csharp-dev`, `dal-dev`, `github-devops`, `maui-dev`, `python-dev`, `test-dev`)**:
    - The canonical skill and agent serve distinct functions.
    - On fallback targets, the canonical skill stays at `<name>`, and the agent instruction body is projected to `role-<name>`.
    - `role-` is reserved exclusively for generated projections; no canonical source file may use the `role-` prefix.
-2. **Unoccupied Identities**:
+3. **Unoccupied Identities**:
    - Agents with no matching skill name lower directly to `<name>` as a skill on fallback targets.
    - `conductor` follows this rule because it has no canonical skill. The fallback profile's
-     `shared-identities` list is empty, and the canonical catalog carries no version aliases.
+     `shared-identities` list names only the two primary shared identities above, and the canonical
+     catalog carries no version aliases.
 
 ### Native Branch: Pi with Primary-Agent Lowering
 
 Pi is a native agent target ([ADR 0019](../adr/0019-pi-native-subagents-and-primary-lowering.md))
-that projects subagents natively but lowers its one primary-invocation
-agent (`conductor`) to a skill, per its fallback profile's `no-primary-agent: skill` value. Pi
+that projects subagents natively but lowers its primary-invocation
+agents to a skill, per the fallback profile's `no-primary-agent: skill` value. Pi
 core has no primary-agent primitive: `.pi/SYSTEM.md` or `--system-prompt` replaces the whole
 session prompt. Rendering `conductor` as a subagent instead would place it at depth 1, pushing its
 delegated specialists to depth 2 — where Pi's default `maxSubagentDepth: 2` removes the nested
 delegation that `architect` and `code-reviewer` need. Lowering it to a top-level skill keeps it at
 depth 0, where the extension's `Agent` tool is available, and its specialists' nested rosters
-still work.
+still work. The two primary shared identities lower the same way, except that their canonical skill
+already exists and is reused as the entry point rather than a lowered copy being emitted.
 
 ### Native Branch: Claude with a Primary-Agent Entry-Point Skill
 
@@ -188,10 +208,18 @@ is ignored and the Agent tool may be unavailable (spawn depth 1 in cloud session
 
 When a primary agent's fallback profile declares `no-primary-agent: skill`, Claude renders **both**
 the subagent at `.claude/agents/<name>.md` (kept for enforced invocation) **and** an entry-point
-skill at `.claude/skills/<name>/SKILL.md`, invoked as `/<name>` in the main conversation. The skill
-is byte-identical to the subagent body and carries exactly three frontmatter keys: `name`,
-`description` (collapsed to one line), and `license: MIT`. Its resources project beside it as with
-other skills.
+skill at `.claude/skills/<name>/SKILL.md`, invoked as `/<name>` in the main conversation. For a
+non-shared primary the entry-point skill is derived from the agent: it is byte-identical to the
+subagent body and carries exactly three frontmatter keys — `name`, `description` (collapsed to one
+line), and `license: MIT`. Its resources project beside it as with other skills.
+
+**A primary shared identity reuses its canonical skill as the entry point.** For `product-owner`
+and `bug-crusher` the canonical skill already occupies `.claude/skills/<name>/SKILL.md` and carries
+the role, so the renderer emits the subagent file plus the canonical skill and does **not** emit a
+duplicate entry-point skill ([ADR 0036](../adr/0036-primary-agent-canonical-skill-entry-point.md)).
+Emitting both would project one identity twice and would overwrite the role-carrying skill with the
+wrapper body. The canonical skill's body differs from the subagent body by design here — the
+wrapper points at the skill — so the "byte-identical" rule applies only to a derived entry point.
 
 The skill's description stays in Claude's context, so Claude may auto-load `/<name>` into the main
 conversation without the user typing it. The degradation records account for this unenforced
@@ -203,12 +231,15 @@ Claude is the first native target where a single agent emits two distinct princi
 entry-point skill). Under `no-primary-agent: omit`, no entry-point skill is emitted and the agent's
 records remain unchanged.
 
-**Fail-closed on canonical skill collision.** If a canonical skill occupies the entry-point
-identity, the render fails with a `SquadRenderValidationException` rather than resolving the
-collision through role-prefixing. The canonical skill and entry-point skill would both claim
-`.claude/skills/<name>/SKILL.md`. Separately, Claude resolves personal skills before project
-skills but project agents before user agents, so mixed-scope installs can expose `/<name>` and
-`@agent-<name>` from different versions.
+**Fail-closed on an unresolvable canonical skill collision.** If a canonical skill occupies the
+entry-point identity and the agent is **not** a declared shared identity, the render fails with a
+`SquadRenderValidationException` rather than resolving the collision through role-prefixing. The
+canonical skill and the derived entry-point skill would both claim
+`.claude/skills/<name>/SKILL.md`, and a native target has no role-prefixed escape hatch. A declared
+shared identity is the resolvable case: the canonical skill is the entry point and no duplicate is
+emitted. Separately, Claude resolves personal skills before project skills but project agents
+before user agents, so mixed-scope installs can expose `/<name>` and `@agent-<name>` from different
+versions.
 
 **Rejected alternatives:**
 - Legacy `.claude/commands/conductor.md` command: Claude Code registers files under
@@ -356,12 +387,12 @@ and validates.
   `PiRenderer` for native subagent projection to `.pi/agents/*.md` and `.pi/skills/*/SKILL.md` with primary-agent lowering ([ADR 0019](../adr/0019-pi-native-subagents-and-primary-lowering.md)),
   `FactoryRenderer` for `.factory/droids/*.md` and `.factory/skills/*/SKILL.md`,
   `WarpRenderer` for fallback role-skill lowering to `.warp/skills/*/SKILL.md`,
-  `ZCodeRenderer` for `.zcode/agents/*.md` and `.zcode/skills/*/SKILL.md` with the primary agent lowered to a slash command at `.zcode/commands/*.md` ([ADR 0021](../adr/0021-zcode-command-lowering-and-resource-relocation.md)),
-  and `DevinRenderer` for Devin Desktop's local agent: per-agent directories at `.devin/agents/*/AGENT.md` and skills at `.devin/skills/*/SKILL.md`, with the primary agent lowered to a skill ([ADR 0025](../adr/0025-devin-native-agents-and-skill-lowering.md)).
+  `ZCodeRenderer` for `.zcode/agents/*.md` and `.zcode/skills/*/SKILL.md` with primary agents lowered to slash commands at `.zcode/commands/*.md` ([ADR 0021](../adr/0021-zcode-command-lowering-and-resource-relocation.md)),
+  and `DevinRenderer` for Devin Desktop's local agent: per-agent directories at `.devin/agents/*/AGENT.md` and skills at `.devin/skills/*/SKILL.md`, with primary agents lowered to a skill ([ADR 0025](../adr/0025-devin-native-agents-and-skill-lowering.md)).
 
 | Target | Renderer | Agent Output | Skill Output | Kind |
 |---|---|---|---|---|
-| `claude` | `ClaudeRenderer` | `.claude/agents/<name>.md`; primary agent also at `.claude/skills/<name>/SKILL.md` | `.claude/skills/<name>/SKILL.md` | Native |
+| `claude` | `ClaudeRenderer` | `.claude/agents/<name>.md`; primary agents also at `.claude/skills/<name>/SKILL.md` | `.claude/skills/<name>/SKILL.md` | Native |
 | `copilot` | `CopilotRenderer` | `.github/agents/<name>.agent.md` | `.github/skills/<name>/SKILL.md` | Native |
 | `cursor` | `CursorRenderer` | `.cursor/agents/<name>.md` | `.cursor/skills/<name>/SKILL.md` | Native |
 | `codex` | `CodexRenderer` | `.codex/agents/<name>.toml` | `.codex/skills/<name>/SKILL.md` | Native |
@@ -371,7 +402,7 @@ and validates.
 | `pi` | `PiRenderer` | `.pi/agents/<name>.md` | `.pi/skills/<name>/SKILL.md` (conductor lowered here) | Native |
 | `factory` | `FactoryRenderer` | `.factory/droids/<name>.md` | `.factory/skills/<name>/SKILL.md` | Native |
 | `warp` | `WarpRenderer` | `.warp/skills/role-<name>/SKILL.md` (lowered; see [§3](#3-role-skill-lowering-and-namespace-resolution)) | `.warp/skills/<name>/SKILL.md` | Fallback |
-| `zcode` | `ZCodeRenderer` | `.zcode/agents/<name>.md`; the primary agent lowers to `.zcode/commands/<name>.md` | `.zcode/skills/<name>/SKILL.md` | Native |
+| `zcode` | `ZCodeRenderer` | `.zcode/agents/<name>.md`; primary agents lower to `.zcode/commands/<name>.md` | `.zcode/skills/<name>/SKILL.md` | Native |
 | `devin` | `DevinRenderer` | `.devin/agents/<name>/AGENT.md` | `.devin/skills/<name>/SKILL.md` (conductor lowered here) | Native |
 
 - **Target-scoped projection inputs**: each canonical agent declares exact `copilot-tools`, and may
@@ -389,7 +420,7 @@ and validates.
   ([ADR 0028](../adr/0028-devin-target-scoped-authoring-capability-profiles.md)).
 - **Copilot tool order ([ADR 0017](../adr/0017-copilot-deterministic-tool-order.md))**:
   `CopilotRenderer` emits `CopilotToolCatalog.Normalize(agent.CopilotTools)` — membership from
-  the agent, order from one global catalog sequence (`vscode`, `read`, `todo`, MCP wildcards,
+  the agent, order from one global catalog sequence (`vscode`, `tool_search`, `read`, `todo`, MCP wildcards,
   then search/execute/web/edit/agent and the granular edit tools). Normalization never adds a
   tool the agent omitted and never reorders per agent. Capability bindings are an upper bound
   at load/validation time, not a second membership source. Wildcards remain single-quoted in
@@ -540,7 +571,7 @@ and validates.
 - **Generated-output boundary**: target-rendered `.github` files are deployment output, not
   canonical product or package source, and this synchronization does not add a generated target
   tree to `products/kyber-squad/`.
-- **Coverage today**: `claude` (native subagents with primary-agent entry-point skill), `copilot` (native), `cursor` (native), `codex` (native: `.codex/agents/*.toml` + `.codex/skills/*/SKILL.md`), `antigravity` (native: `.agents/agents/*/agent.md` + `.agents/skills/*/SKILL.md`, [ADR 0022](../adr/0022-antigravity-native-agents.md)), `opencode` (native: `.opencode/agents/*.md` + `.opencode/skills/*/SKILL.md`), `kilo` (native: `.kilo/agents/*.md` + `.kilo/skills/*/SKILL.md`), `pi` (native subagents with primary-agent lowering to `.pi/agents/*.md` and `.pi/skills/*/SKILL.md`), `factory` (native: `.factory/droids/*.md` + `.factory/skills/*/SKILL.md`, with the primary agent additionally exposed as an entry-point skill, [ADR 0034](../adr/0034-factory-droid-entry-point-skill.md)), `warp` (fallback role-skill lowering to `.warp/skills/`), `zcode` (native: `.zcode/agents/*.md` + `.zcode/skills/*/SKILL.md`, with the primary agent lowered to `.zcode/commands/*.md`), and `devin` (native: `.devin/agents/*/AGENT.md` + `.devin/skills/*/SKILL.md`, with the primary agent lowered to a skill) are implemented and registered. All twelve declared targets are covered. `kyber-weave squad doctor` reports which
+- **Coverage today**: `claude` (native subagents with primary-agent entry-point skill), `copilot` (native), `cursor` (native), `codex` (native: `.codex/agents/*.toml` + `.codex/skills/*/SKILL.md`), `antigravity` (native: `.agents/agents/*/agent.md` + `.agents/skills/*/SKILL.md`, [ADR 0022](../adr/0022-antigravity-native-agents.md)), `opencode` (native: `.opencode/agents/*.md` + `.opencode/skills/*/SKILL.md`), `kilo` (native: `.kilo/agents/*.md` + `.kilo/skills/*/SKILL.md`), `pi` (native subagents with primary-agent lowering to `.pi/agents/*.md` and `.pi/skills/*/SKILL.md`), `factory` (native: `.factory/droids/*.md` + `.factory/skills/*/SKILL.md`, with the primary agent additionally exposed as an entry-point skill, [ADR 0034](../adr/0034-factory-droid-entry-point-skill.md)), `warp` (fallback role-skill lowering to `.warp/skills/`), `zcode` (native: `.zcode/agents/*.md` + `.zcode/skills/*/SKILL.md`, with primary agents lowered to `.zcode/commands/*.md`), and `devin` (native: `.devin/agents/*/AGENT.md` + `.devin/skills/*/SKILL.md`, with primary agents lowered to a skill) are implemented and registered. All twelve declared targets are covered. `kyber-weave squad doctor` reports which
   targets are covered.
 - **Authority and self-deployment boundary**: `products/kyber-squad/` is canonical and package
   authority. Root `.github/agents/`, `.github/skills/`, `.kyber-weave/squad.lock.yml`, and
