@@ -1005,10 +1005,12 @@ function parseTypedTextBlocks(text: string): Array<{ type: string; body: string 
   return blocks
 }
 
-function hasUnsafeNumber(value: unknown): boolean {
+function hasUnsafeNumber(value: unknown, depth = 0): boolean {
   if (typeof value === 'number') return Number.isInteger(value) && !Number.isSafeInteger(value)
-  if (Array.isArray(value)) return value.some(hasUnsafeNumber)
-  if (isRecord(value)) return Object.values(value).some(hasUnsafeNumber)
+  // Past the render depth cap nothing is structured-rendered, so stop walking.
+  if (depth > MAX_STRUCTURED_DEPTH) return false
+  if (Array.isArray(value)) return value.some((v) => hasUnsafeNumber(v, depth + 1))
+  if (isRecord(value)) return Object.values(value).some((v) => hasUnsafeNumber(v, depth + 1))
   return false
 }
 
@@ -2375,6 +2377,11 @@ export function narrowToolDefinitions(text: string, toolName: string | undefined
   }
 }
 
+function NarrowedInspectorContent({ text, toolName }: { text: string; toolName: string | undefined }) {
+  const narrowed = React.useMemo(() => narrowToolDefinitions(text, toolName), [text, toolName])
+  return <InspectorContent data={narrowed} />
+}
+
 /**
  * Whole-turn lossless request: the exact zero-based transport turn index the
  * turn-content route resolves (issue #184), always via the explicit `full`
@@ -3102,7 +3109,7 @@ function FullContentPanel({
             data-testid="drawer-content-scroll"
           >
             <div className="p-3">
-              <InspectorContent data={narrowToolDefinitions(part.text, request.toolName)} />
+              <NarrowedInspectorContent text={part.text} toolName={request.toolName} />
             </div>
           </div>
         </div>

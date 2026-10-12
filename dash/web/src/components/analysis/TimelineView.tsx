@@ -61,6 +61,9 @@ function NodeRow({
   // the row, its internal helper calls stay out of the primary tree.
   const collapsible = node.spanId === AUXILIARY_GROUP_ID && node.children.length > 0
   const [collapsed, setCollapsed] = React.useState(collapsible)
+  React.useEffect(() => {
+    setCollapsed(collapsible)
+  }, [collapsible])
   return (
     <>
       <div
