@@ -340,7 +340,7 @@ control; the tray reaches the same route from its popover.
 
 ### 2d. Shared settings and Pause
 
-Four settings, stored in `canon.db` metadata (`dash/src/settings/shared-settings.ts`), so a
+Five settings, stored in `canon.db` metadata (`dash/src/settings/shared-settings.ts`), so a
 change made in one place is the change every other surface sees. Reads fail closed: an
 unrecognised stored value reads as the default rather than being coerced, and an
 unrecognised value is refused before anything is written.
@@ -351,6 +351,7 @@ node dash/dist/cli.js dash settings show --json
 node dash/dist/cli.js dash settings set folder_import.scheduled on
 node dash/dist/cli.js dash settings set jobs.paused off
 node dash/dist/cli.js dash settings set jobs.refresh_cadence_minutes 10
+node dash/dist/cli.js dash settings set dashboard.port 4848
 ```
 
 | Setting (short form) | Metadata key | Default | Effect |
@@ -359,15 +360,28 @@ node dash/dist/cli.js dash settings set jobs.refresh_cadence_minutes 10
 | `jobs.paused` | `settings.jobs.paused` | `off` | Pauses the scheduled jobs — see below. |
 | `jobs.refresh_cadence_minutes` | `settings.jobs.refresh_cadence_minutes` | `5` | How often the job host looks for work; a whole number of minutes, 1 to 1440. |
 | `receiver.hosted` | `settings.receiver.hosted` | `off` | Whether the `kyberdash web` server runs the OTLP receiver child. |
+| `dashboard.port` | `settings.dashboard.port` | `4747` | The loopback port `kyberdash web` listens on. Takes effect on the next engine restart — see below. |
 
 Both spellings are accepted on input — the short name and the `settings.`-prefixed key — and
 `show` reports the short name. A usage error on either leaf exits **2** before the store is
 opened, so a refused value leaves the filesystem as it found it.
 
-Over HTTP the same four switches are `GET /api/kyber/settings` and `PUT /api/kyber/settings`,
-with the JSON keys `folderImportScheduled`, `jobsPaused`, `refreshCadenceMinutes`, and
-`receiverHosted`. A `PUT` is partial — a body naming one switch leaves the other three
-untouched — and a body with an unknown key or a value of the wrong type is refused whole.
+Over HTTP the same five settings are `GET /api/kyber/settings` and `PUT /api/kyber/settings`,
+with the JSON keys `folderImportScheduled`, `jobsPaused`, `refreshCadenceMinutes`,
+`receiverHosted`, and `dashboardPort`. A `PUT` is partial — a body naming one setting leaves
+the other four untouched — and a body with an unknown key or a value of the wrong type is
+refused whole.
+
+**The dashboard port applies on the next engine restart.** Saving `dashboard.port` — from
+`dash settings set`, the web Settings drawer, or `PUT /api/kyber/settings` — never rebinds
+the running server: the current process keeps serving its port, and the next `kyberdash web`
+start binds the persisted one. Precedence at startup is an explicit `--port` for that run,
+then the persisted `dashboard.port`, then `4747`. A persisted port must be a TCP port,
+1 to 65535: `0` and anything outside the range are refused, because a stored `0` would land
+every later startup somewhere unannounced. When the configured port is already taken, the
+start is refused with an error naming the port and the remedy (stop the holder, pass `--port`
+for this run, or persist another port and restart) — the server never slides silently onto a
+random port, which would strand the tray and every bookmark aimed at the configured URL.
 
 **Pause covers scheduled jobs only.** `jobs.paused` stops the job host from scheduling: no
 scheduled refresh runs while it is set. Manual **Refresh**, **Import folder history**, and
@@ -500,6 +514,15 @@ to render the popover. It holds no scheduler, no cadence setting, no receiver, a
 argv; `JobHost` and `ReceiverHost` live in the engine and are hosted by that server. The
 webview holds no network permission and no analysis logic of its own
 ([`rules/kyberdash-display-layer`](../rules/kyberdash-display-layer.md)).
+
+The macOS menu bar and Windows notification area show one diagonal lightsaber, with
+its handle at the bottom left and blade pointing to the top right. The blade is green
+only when the shared coverage API reports a healthy, enabled, listening, unpaused
+collector with no recent failures and a current health check. Otherwise it is red,
+including startup before coverage is available. Both colours use the same silver
+handle and silhouette; macOS template tinting is disabled to preserve the colour.
+Windows shows the saber instead of a pressure number or status dot; pressure remains
+available in the tooltip and popover. Flat fills keep the icon legible at small sizes.
 
 #### Native development prerequisites
 
@@ -642,7 +665,7 @@ To run the complete production bundle served directly by the KyberDash CLI engin
    ```
 
    **Supported CLI Options & Environment Variables**:
-   - `--port <number>`: Target HTTP port (default: `4747`, falling back to a free port if taken).
+   - `--port <number>`: HTTP port for this run only (overrides the persisted `dashboard.port`; default `4747`). A taken port refuses the start with an actionable error — it never falls back to a random port.
    - `--period <today|week|month|all>`: Pre-filter metrics and cost aggregations.
    - `KYBER_CANON_DB`: Path to the canonical store (default: `~/.kyberdash/canon.db`).
 
@@ -997,9 +1020,12 @@ here.
 
 ### 2. Port Collisions (`5173`, `4747`, `4318`)
 - **Port 5173**: Used by default for the web dashboard's Vite development server. If occupied, pass `--port <number>` to Vite or kill the stale process.
-- **Port 4747**: The `kyberdash web` server. The tray attaches to whatever server
-  `~/.kyberdash/server.json` names and starts its own only when none is live. Ensure no
-  stale server holds it (`lsof -i :4747`).
+- **Port 4747**: The default `kyberdash web` port (persisted as `settings.dashboard.port`;
+  override per run with `web --port`). The tray attaches to whatever server
+  `~/.kyberdash/server.json` names and starts its own only when none is live. A start that
+  reports the port is already in use means exactly that — stop the holder, pass `--port`
+  for this run, or persist another `dashboard.port` and restart (`lsof -i :4747` names the
+  holder). The server never moves to a random port on its own.
 - **Port 4318**: Standard OTLP HTTP receiver port. Ensure no conflicting OpenTelemetry collectors or Aspire instances hold this port exclusively.
 
 ### 3. Tauri / Rust Build Errors on Windows or macOS

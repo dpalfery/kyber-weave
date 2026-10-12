@@ -31,6 +31,7 @@ public sealed class CopilotRendererTests
         Assert.Equal(
             [
                 "vscode",
+                "tool_search",
                 "read",
                 "todo",
                 "codegraph/*",
@@ -179,27 +180,28 @@ public sealed class CopilotRendererTests
     }
 
     [Theory]
-    [InlineData("architect", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, web, agent, edit/createDirectory, edit/createFile, edit/editFiles, edit/rename, vscodeGeneral/rename]")]
-    [InlineData("azure-reader", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, web]")]
-    [InlineData("bug-crusher-investigator", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, web]")]
-    [InlineData("code-reviewer", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, web, agent]")]
-    [InlineData("conductor", "tools: [vscode, read, todo, agent]")]
-    [InlineData("csharp-dev", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, edit]")]
-    [InlineData("dal-dev", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, edit]")]
-    [InlineData("docs-dev", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, edit]")]
-    [InlineData("github-devops", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, web, edit]")]
-    [InlineData("maui-dev", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, edit]")]
-    [InlineData("product-owner", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, web, edit, agent]")]
-    [InlineData("pulumi-dev", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, edit]")]
-    [InlineData("python-dev", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, edit]")]
-    [InlineData("react-dev", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, edit]")]
-    [InlineData("research-agent", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, web]")]
-    [InlineData("review-lens", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, web]")]
-    [InlineData("review-triage", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, web]")]
-    [InlineData("sql-database-architect", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, edit]")]
-    [InlineData("task-reviewer", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, web]")]
-    [InlineData("tauri-dev", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, edit]")]
-    [InlineData("test-dev", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, edit]")]
+    [InlineData("architect", "tools: [vscode, tool_search, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, edit, agent]")]
+    [InlineData("azure-reader", "tools: [vscode, tool_search, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, web]")]
+    [InlineData("bug-crusher", "tools: [vscode, tool_search, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, edit, agent]")]
+    [InlineData("bug-crusher-investigator", "tools: [vscode, tool_search, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, web]")]
+    [InlineData("code-reviewer", "tools: [vscode, tool_search, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, web, agent]")]
+    [InlineData("conductor", "tools: [vscode, tool_search, read, todo, agent]")]
+    [InlineData("csharp-dev", "tools: [vscode, tool_search, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, edit]")]
+    [InlineData("dal-dev", "tools: [vscode, tool_search, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, edit]")]
+    [InlineData("docs-dev", "tools: [vscode, tool_search, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, edit]")]
+    [InlineData("github-devops", "tools: [vscode, tool_search, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, web, edit]")]
+    [InlineData("maui-dev", "tools: [vscode, tool_search, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, edit]")]
+    [InlineData("product-owner", "tools: [vscode, tool_search, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, web, edit, agent]")]
+    [InlineData("pulumi-dev", "tools: [vscode, tool_search, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, edit]")]
+    [InlineData("python-dev", "tools: [vscode, tool_search, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, edit]")]
+    [InlineData("react-dev", "tools: [vscode, tool_search, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, edit]")]
+    [InlineData("research-agent", "tools: [vscode, tool_search, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, web]")]
+    [InlineData("review-lens", "tools: [vscode, tool_search, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, web]")]
+    [InlineData("review-triage", "tools: [vscode, tool_search, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, web]")]
+    [InlineData("sql-database-architect", "tools: [vscode, tool_search, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, edit]")]
+    [InlineData("task-reviewer", "tools: [vscode, tool_search, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, web]")]
+    [InlineData("tauri-dev", "tools: [vscode, tool_search, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, edit]")]
+    [InlineData("test-dev", "tools: [vscode, tool_search, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, edit]")]
     public async Task RenderAsync_EmitsDeterministicCanonicalToolOrdering(string agentName, string expectedToolsLine)
     {
         SquadRendererRegistry registry = new([new CopilotRenderer()]);
@@ -574,12 +576,11 @@ public sealed class CopilotRendererTests
     /// with an empty roster — delegation that looks configured and silently does nothing.
     /// This holds for primary agents too: GitHub Copilot does not grant a primary agent
     /// the full roster automatically, so a delegating primary declares its roster exactly
-    /// like a subagent does.
+    /// like a subagent does — but stays user-invocable (asserted separately).
     /// </summary>
     [Theory]
     [InlineData("architect", "agents: ['azure-reader', 'research-agent']")]
     [InlineData("code-reviewer", "agents: ['azure-reader', 'review-lens', 'review-triage']")]
-    [InlineData("product-owner", "agents: ['research-agent']")]
     public async Task RenderAsync_DeclaresDelegationRosterForDelegatingSubagents(
         string agentName,
         string expectedAgentsLine)
@@ -599,24 +600,29 @@ public sealed class CopilotRendererTests
     /// The real product conductor is a primary agent with a delegation roster. GitHub
     /// Copilot does not grant it the full roster automatically, so it declares its roster
     /// exactly like a subagent does — but stays user-invocable, since it is the default
-    /// entry point a human chooses directly.
+    /// entry point a human chooses directly. The two root wrappers follow the same rule.
     /// </summary>
-    [Fact]
-    public async Task RenderAsync_DeclaresDelegationRosterForDelegatingPrimaryConductor()
+    [Theory]
+    [InlineData(
+        "conductor",
+        "agents: ['architect', 'azure-reader', 'bug-crusher-investigator', 'code-reviewer', " +
+        "'csharp-dev', 'dal-dev', 'docs-dev', 'github-devops', 'maui-dev', 'product-owner', " +
+        "'pulumi-dev', 'python-dev', 'react-dev', 'research-agent', 'sql-database-architect', " +
+        "'task-reviewer', 'tauri-dev', 'test-dev']")]
+    [InlineData("product-owner", "agents: ['research-agent']")]
+    [InlineData("bug-crusher", "agents: ['bug-crusher-investigator']")]
+    public async Task RenderAsync_DeclaresDelegationRosterForDelegatingPrimaryAgents(
+        string agentName,
+        string expectedAgentsLine)
     {
-        string frontmatter = await RenderFrontmatterAsync("conductor");
+        string frontmatter = await RenderFrontmatterAsync(agentName);
 
         string? actual = frontmatter
             .Split('\n')
             .FirstOrDefault(l => l.StartsWith("agents:", StringComparison.Ordinal))
             ?.Trim();
 
-        Assert.Equal(
-            "agents: ['architect', 'azure-reader', 'bug-crusher-investigator', 'code-reviewer', " +
-            "'csharp-dev', 'dal-dev', 'docs-dev', 'github-devops', 'maui-dev', 'product-owner', " +
-            "'pulumi-dev', 'python-dev', 'react-dev', 'research-agent', 'sql-database-architect', " +
-            "'task-reviewer', 'tauri-dev', 'test-dev']",
-            actual);
+        Assert.Equal(expectedAgentsLine, actual);
         Assert.DoesNotContain(
             frontmatter.Split('\n'),
             l => l.StartsWith("user-invocable:", StringComparison.Ordinal));

@@ -5,7 +5,7 @@ description: "Implements the Rust/Tauri v2 desktop core: commands, the IPC contr
 invocation: subagent
 model-profile: general
 capability-profile: worker
-copilot-tools: [vscode, execute, read, codegraph/*, kyber-weave/*, context7/*, edit, search, todo]
+copilot-tools: [vscode, tool_search, execute, read, codegraph/*, kyber-weave/*, context7/*, edit, search, todo]
 delegates-to: []
 fallback: role-skill
 aliases: []

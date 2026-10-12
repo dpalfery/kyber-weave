@@ -5,7 +5,7 @@ description: "Reviews a change by fanning out a council of review lenses, runnin
 invocation: subagent
 model-profile: reviewer
 capability-profile: reviewer
-copilot-tools: [vscode, execute, read, codegraph/*, kyber-weave/*, context7/*, search, agent, web, todo]
+copilot-tools: [vscode, tool_search, execute, read, codegraph/*, kyber-weave/*, context7/*, search, agent, web, todo]
 delegates-to: [azure-reader, review-lens, review-triage]
 fallback: role-skill
 aliases: []

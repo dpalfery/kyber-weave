@@ -5,7 +5,7 @@ description: "Implements React UI: components, hooks, client-side state, styling
 invocation: subagent
 model-profile: fast
 capability-profile: worker
-copilot-tools: [vscode, execute, read, codegraph/*, kyber-weave/*, context7/*, edit, search, todo]
+copilot-tools: [vscode, tool_search, execute, read, codegraph/*, kyber-weave/*, context7/*, edit, search, todo]
 delegates-to: []
 fallback: role-skill
 aliases: []

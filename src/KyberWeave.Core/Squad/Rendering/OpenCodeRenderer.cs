@@ -159,6 +159,14 @@ public sealed class OpenCodeRenderer : ISquadRenderer
             .SelectMany(profile => profile.SharedIdentities)
             .ToHashSet(StringComparer.Ordinal);
 
+        // A subagent shared identity is suppressed because the agent file carries the identical
+        // body; a primary shared identity is the thin wrapper whose canonical skill IS the entry
+        // point. Only a suppressed identity withholds the KyberWeave MCP permission: the primary
+        // wrappers edit files and run commands, so withholding it would strip the tools their
+        // role exists to use.
+        HashSet<string> suppressedSkillIdentities =
+            SquadSharedIdentityProjection.SuppressedSkillIdentities(source, sharedIdentities);
+
         List<SquadDeploymentFile> files = [];
         List<SquadDegradationRecord> degradations = [];
 
@@ -168,7 +176,7 @@ public sealed class OpenCodeRenderer : ISquadRenderer
                 agent,
                 source.ModelProfiles.Profiles,
                 source.CapabilityProfiles.Profiles,
-                sharedIdentities,
+                suppressedSkillIdentities,
                 request.Scope);
             files.Add(principal);
             SquadResourceProjection.Append(files, principal, agent.Resources);
@@ -180,8 +188,9 @@ public sealed class OpenCodeRenderer : ISquadRenderer
         {
             // A profile-declared shared identity has one canonical projection. Resolve the
             // set from source so removing or adding a shared identity never requires a
-            // renderer-local roster change.
-            if (sharedIdentities.Contains(skill.Name))
+            // renderer-local roster change. A primary shared identity is the exception: its
+            // canonical skill is the entry point and must be emitted.
+            if (suppressedSkillIdentities.Contains(skill.Name))
             {
                 continue;
             }
@@ -198,7 +207,7 @@ public sealed class OpenCodeRenderer : ISquadRenderer
         SquadAgent agent,
         IReadOnlyDictionary<string, SquadModelProfile> modelProfiles,
         IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
-        IReadOnlySet<string> sharedIdentities,
+        IReadOnlySet<string> suppressedSkillIdentities,
         SquadDeploymentScope scope)
     {
         Dictionary<string, object?> frontmatter = new(StringComparer.Ordinal)
@@ -215,7 +224,7 @@ public sealed class OpenCodeRenderer : ISquadRenderer
         }
 
         // Always emit permission map: omitting it inherits ambient tool access (widening).
-        frontmatter["permission"] = ResolvePermissions(agent, capabilityProfiles, sharedIdentities);
+        frontmatter["permission"] = ResolvePermissions(agent, capabilityProfiles, suppressedSkillIdentities);
 
         string content;
         lock (SerializerLock)
@@ -286,7 +295,7 @@ public sealed class OpenCodeRenderer : ISquadRenderer
     private static Dictionary<string, object> ResolvePermissions(
         SquadAgent agent,
         IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
-        IReadOnlySet<string> sharedIdentities)
+        IReadOnlySet<string> suppressedSkillIdentities)
     {
         HashSet<string> granted = new(BaseUngovernedPermissions, StringComparer.Ordinal);
         object? taskPermissionValue = null;
@@ -313,7 +322,7 @@ public sealed class OpenCodeRenderer : ISquadRenderer
                 StringComparison.Ordinal);
 
             if (!isPureOrchestrator &&
-                !sharedIdentities.Contains(agent.Name) &&
+                !suppressedSkillIdentities.Contains(agent.Name) &&
                 profile.Permissions.TryGetValue("filesystem.read", out SquadPermissionDecision readDecision) &&
                 readDecision == SquadPermissionDecision.Allow)
             {

@@ -146,14 +146,17 @@ public sealed class WarpRenderer : ISquadRenderer
                 // emitting a role-prefixed duplicate would violate the single-projection
                 // rule the registry enforces. Reuse is only correct while the canonical
                 // skill actually exists; otherwise the agent falls through to the
-                // unoccupied-identity lowering.
+                // unoccupied-identity lowering. This covers both shapes: a subagent shared
+                // identity whose body is identical to the skill's, and a primary shared
+                // identity whose body is the thin wrapper pointing at it.
                 degradations.Add(new SquadDegradationRecord(
                     Target: "warp",
                     CanonicalIdentity: agent.Name,
                     OutputIdentity: agent.Name,
                     Code: "role-skill-fallback",
                     InstructionDigest: agent.BodyDigest,
-                    Details: "Reused identical shared canonical skill; agent primitive lowered to skill."));
+                    Details: "Reused the same-name canonical skill as the entry point; no separate " +
+                        "agent projection is emitted on a target with no agent primitive."));
                 loweredAgents.Add((agent, agent.Name));
             }
             else if (occupiedIdentities.Contains(agent.Name) &&

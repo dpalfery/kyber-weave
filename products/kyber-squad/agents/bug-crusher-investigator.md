@@ -5,7 +5,7 @@ description: "Diagnoses a reported defect: reproduces the failure, finds root ca
 invocation: subagent
 model-profile: deep-planning
 capability-profile: investigator
-copilot-tools: [vscode, execute, read, codegraph/*, kyber-weave/*, context7/*, search, web, todo]
+copilot-tools: [vscode, tool_search, execute, read, codegraph/*, kyber-weave/*, context7/*, search, web, todo]
 delegates-to: []
 fallback: role-skill
 aliases: []

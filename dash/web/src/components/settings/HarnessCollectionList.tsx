@@ -1,6 +1,3 @@
-import { useEffect, useRef } from 'react'
-
-import { cn } from '../../lib/utils.js'
 import type {
   KyberCaptureAction,
   KyberCaptureHarness,
@@ -20,53 +17,64 @@ export interface HarnessCollectionListProps {
   alerts: Readonly<Record<string, HarnessRowAlert>>
   /** The row's own harness id and the action the click means. */
   onToggle: (harnessId: string, action: KyberCaptureAction) => void
+  /** Reapplies KyberDash settings for an enabled harness via the shared enable path. */
+  onReset: (harnessId: string) => void
 }
 
 export interface RowDecision {
-  /** The action a click requests, or `null` when the row cannot be switched. */
-  action: KyberCaptureAction | null
-  /** Why the row is disabled; absent when it is switchable. */
+  /** The actions a click may request; empty when the row cannot be switched. */
+  actions: KyberCaptureAction[]
+  /** Why the row offers no action; absent when it is switchable. */
   reason?: string
 }
 
 /**
- * Whether a managed row can be switched, derived only from what the server
- * reported. WHY these refusals: an unknown state is not "off" (switching it
- * would write on a guess); an `on` state without a receipt means the keys were
- * set outside KyberDash, so a disable would have nothing to restore; and a
- * harness the server did not detect is not offered, unless KyberDash recorded a
- * receipt, in which case switching it OFF must stay possible.
+ * Which actions a managed row offers, derived only from what the server
+ * reported. WHY the rules: `on` offers Disable (receipt-gated restore, or the
+ * user-authorized manual-key removal with no receipt) plus Reset elsewhere;
+ * `partial` offers Enable to complete setup and Disable to turn collection
+ * off under the same receipt/manual-key rules; an unknown state is not "off"
+ * (switching it would write on a guess); a harness the server did not detect,
+ * or could not inspect, is not offered an action unless KyberDash recorded a
+ * receipt, in which case switching it stays possible.
  */
 export function decideRow(harness: KyberCaptureHarness): RowDecision {
-  if (harness.mode !== 'managed') return { action: null }
+  if (harness.mode !== 'managed') return { actions: [] }
   if (harness.state === 'unknown' || harness.state === 'not-applicable') {
     return {
-      action: null,
+      actions: [],
       reason: 'State unknown: KyberDash could not read this harness\'s configuration, so it will not change it.',
     }
   }
-  if (harness.state === 'on') {
-    return harness.receipt === 'recorded'
-      ? { action: 'disable' }
-      : {
-          action: null,
-          reason:
-            'Collection keys are set, but not by KyberDash (no receipt was recorded), so there is nothing to restore.',
-        }
-  }
+  // These guards sit above the state branches so a `partial` (or `on`) harness the server
+  // did not detect, with no receipt, obeys the same rule as `off`: no action without a
+  // receipt. Below the state branches, a half-configured ghost was offered Enable and
+  // Disable while `off` was not.
   if (harness.installed === 'not-detected' && harness.receipt === 'absent') {
-    return { action: null, reason: 'Not detected on this machine.' }
+    return { actions: [], reason: 'Not detected on this machine.' }
   }
   if (harness.installed === 'unknown' && harness.receipt === 'absent') {
-    return { action: null, reason: 'Install state unknown: KyberDash could not inspect this harness\'s files.' }
+    return { actions: [], reason: 'Install state unknown: KyberDash could not inspect this harness\'s files.' }
   }
-  return { action: 'enable' }
+  if (harness.state === 'on') return { actions: ['disable'] }
+  if (harness.state === 'partial') return { actions: ['enable', 'disable'] }
+  return { actions: ['enable'] }
+}
+
+/**
+ * Reset is shown only while managed collection is fully enabled. It re-runs
+ * the shared engine enable path for that harness: missing or drifted managed
+ * keys are rewritten, unrelated keys are left alone, and the engine's own
+ * refusals (conflict, unparseable, unreadable) still apply.
+ */
+export function canReset(harness: KyberCaptureHarness): boolean {
+  return harness.mode === 'managed' && harness.state === 'on'
 }
 
 const STATE_LABEL: Record<KyberCaptureState, string> = {
-  on: 'On',
-  off: 'Off',
-  partial: 'Partly on',
+  on: 'Enabled',
+  off: 'Disabled',
+  partial: 'Needs setup',
   unknown: 'Unknown',
   'not-applicable': 'Read-only',
 }
@@ -76,44 +84,6 @@ const INSTALLED_LABEL = {
   'not-detected': 'Not detected',
   unknown: 'Install state unknown',
 } as const
-
-/**
- * A checkbox that can show the third, mixed state. `indeterminate` is a DOM
- * property with no JSX attribute, so it is applied after render.
- */
-function CollectionCheckbox({
-  harness,
-  checked,
-  mixed,
-  disabled,
-  describedBy,
-  onChange,
-}: {
-  harness: KyberCaptureHarness
-  checked: boolean
-  mixed: boolean
-  disabled: boolean
-  describedBy?: string
-  onChange: () => void
-}) {
-  const ref = useRef<HTMLInputElement | null>(null)
-  useEffect(() => {
-    if (ref.current !== null) ref.current.indeterminate = mixed
-  }, [mixed])
-  return (
-    <input
-      ref={ref}
-      type="checkbox"
-      data-testid={`settings-harness-checkbox-${harness.id}`}
-      className="h-4 w-4 shrink-0 accent-primary disabled:cursor-not-allowed"
-      checked={checked}
-      aria-checked={mixed ? 'mixed' : checked}
-      aria-describedby={describedBy}
-      disabled={disabled}
-      onChange={onChange}
-    />
-  )
-}
 
 function DriftList({ drift }: { drift: ReadonlyArray<{ key: string; written: unknown; current: unknown }> }) {
   return (
@@ -151,21 +121,107 @@ function RowAlert({ harnessId, alert }: { harnessId: string; alert: HarnessRowAl
   )
 }
 
+function RowDetails({ harness }: { harness: KyberCaptureHarness }) {
+  const applicableFiles = harness.files.filter((file) => file.applicable)
+  return (
+    <details data-testid={`settings-harness-details-${harness.id}`} className="mt-1.5 text-xs text-muted-foreground">
+      <summary className="cursor-pointer text-[11px]">Configuration details</summary>
+      <div className="mt-1 space-y-1.5">
+        <p className="text-[11px]">{INSTALLED_LABEL[harness.installed]}</p>
+
+        {applicableFiles.length > 0 && (
+          <ul className="space-y-0.5 text-[11px]">
+            {applicableFiles.map((file) => (
+              <li key={file.id} className="break-all">
+                {file.path}
+                {file.exists === null
+                  ? ' (could not be inspected)'
+                  : ` (${file.presentKeys.length} of ${file.expectedKeys.length} keys set)`}
+                {file.drift && file.drift.length > 0 && <DriftList drift={file.drift} />}
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {harness.warnings.map((warning, index) => (
+          <p key={`${warning.code}-${warning.text}-${index}`} className="text-xs text-foreground">
+            <span className="font-semibold">Warning ({warning.code}):</span> {warning.text}
+          </p>
+        ))}
+
+        {harness.statusLines.length > 0 && (
+          <ul data-testid={`settings-harness-status-lines-${harness.id}`} className="space-y-0.5">
+            {harness.statusLines.map((line, index) => (
+              <li key={`${line}-${index}`}>{line}</li>
+            ))}
+          </ul>
+        )}
+
+        {harness.manualSteps.length > 0 && (
+          <div data-testid={`settings-harness-manual-${harness.id}`} className="space-y-1">
+            {harness.manualSteps.map((step) => (
+              <div key={step.id}>
+                <p>{step.text}</p>
+                {step.env && (
+                  <p className="mt-0.5">
+                    Variable <code>{step.env.name}</code>; value to use: <code>{step.env.value}</code>. KyberDash cannot
+                    see the environment this harness is launched from, so it does not know whether this has been done.
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </details>
+  )
+}
+
+function ToggleButton({
+  harnessId,
+  action,
+  busy,
+  onToggle,
+  testId,
+}: {
+  harnessId: string
+  action: KyberCaptureAction
+  busy: boolean
+  onToggle: HarnessCollectionListProps['onToggle']
+  testId: string
+}) {
+  return (
+    <button
+      type="button"
+      data-testid={testId}
+      className="rounded-md border border-border px-2.5 py-1 text-xs font-medium text-foreground hover:bg-interactive-secondary disabled:cursor-not-allowed disabled:opacity-60"
+      disabled={busy}
+      onClick={() => {
+        if (!busy) onToggle(harnessId, action)
+      }}
+    >
+      {action === 'enable' ? 'Enable' : 'Disable'}
+    </button>
+  )
+}
+
 function HarnessRow({
   harness,
   busy,
   alert,
   onToggle,
+  onReset,
 }: {
   harness: KyberCaptureHarness
   busy: boolean
   alert: HarnessRowAlert | undefined
   onToggle: HarnessCollectionListProps['onToggle']
+  onReset: HarnessCollectionListProps['onReset']
 }) {
   const decision = decideRow(harness)
   const managed = harness.mode === 'managed'
   const reasonId = `settings-harness-reason-${harness.id}`
-  const applicableFiles = harness.files.filter((file) => file.applicable)
+  const resettable = canReset(harness)
 
   return (
     <li
@@ -173,79 +229,48 @@ function HarnessRow({
       className="rounded-md border border-border bg-card px-3 py-2.5"
     >
       <div className="flex items-center gap-2.5">
-        {managed && (
-          <CollectionCheckbox
-            harness={harness}
-            checked={harness.state === 'on'}
-            mixed={harness.state === 'partial'}
-            disabled={busy || decision.action === null}
-            describedBy={decision.reason ? reasonId : undefined}
-            onChange={() => {
-              if (!busy && decision.action !== null) onToggle(harness.id, decision.action)
-            }}
-          />
-        )}
-        <span className="min-w-0 flex-1 text-sm font-medium text-foreground">{harness.displayName}</span>
-        <span
-          data-testid={`settings-harness-state-${harness.id}`}
-          className={cn(
-            'rounded-full border border-border px-2 py-0.5 text-[11px]',
-            harness.state === 'on' ? 'text-primary' : 'text-muted-foreground',
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm font-medium text-foreground">{harness.displayName}</span>
+          <span
+            data-testid={`settings-harness-state-${harness.id}`}
+            className={harness.state === 'on' ? 'mt-0.5 block text-[11px] text-primary' : 'mt-0.5 block text-[11px] text-muted-foreground'}
+          >
+            {managed ? STATE_LABEL[harness.state] : 'Read-only'}
+          </span>
+        </span>
+        <span className="flex shrink-0 gap-2">
+          {resettable && (
+            <button
+              type="button"
+              data-testid={`settings-harness-reset-${harness.id}`}
+              className="rounded-md border border-border px-2.5 py-1 text-xs font-medium text-muted-foreground hover:bg-interactive-secondary disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={busy}
+              onClick={() => {
+                if (!busy) onReset(harness.id)
+              }}
+            >
+              Reset
+            </button>
           )}
-        >
-          {managed ? STATE_LABEL[harness.state] : 'Read-only'}
+          {decision.actions.map((action) => (
+            <ToggleButton
+              key={action}
+              harnessId={harness.id}
+              action={action}
+              busy={busy}
+              onToggle={onToggle}
+              testId={action === 'enable' ? `settings-harness-enable-${harness.id}` : `settings-harness-disable-${harness.id}`}
+            />
+          ))}
         </span>
       </div>
-      <p className="mt-1 text-[11px] text-muted-foreground">{INSTALLED_LABEL[harness.installed]}</p>
       {decision.reason && (
         <p id={reasonId} data-testid={reasonId} className="mt-1 text-xs text-muted-foreground">
           {decision.reason}
         </p>
       )}
 
-      {managed && applicableFiles.length > 0 && (
-        <ul className="mt-1.5 space-y-0.5 text-[11px] text-muted-foreground">
-          {applicableFiles.map((file) => (
-            <li key={file.id} className="break-all">
-              {file.path}
-              {file.exists === null
-                ? ' (could not be inspected)'
-                : ` (${file.presentKeys.length} of ${file.expectedKeys.length} keys set)`}
-              {file.drift && file.drift.length > 0 && <DriftList drift={file.drift} />}
-            </li>
-          ))}
-        </ul>
-      )}
-
-      {harness.warnings.map((warning, index) => (
-        <p key={`${warning.code}-${warning.text}-${index}`} className="mt-1.5 text-xs text-foreground">
-          <span className="font-semibold">Warning ({warning.code}):</span> {warning.text}
-        </p>
-      ))}
-
-      {harness.statusLines.length > 0 && (
-        <ul data-testid={`settings-harness-status-lines-${harness.id}`} className="mt-1.5 space-y-0.5 text-xs text-muted-foreground">
-          {harness.statusLines.map((line, index) => (
-            <li key={`${line}-${index}`}>{line}</li>
-          ))}
-        </ul>
-      )}
-
-      {harness.manualSteps.length > 0 && (
-        <div data-testid={`settings-harness-manual-${harness.id}`} className="mt-1.5 space-y-1 text-xs text-muted-foreground">
-          {harness.manualSteps.map((step) => (
-            <div key={step.id}>
-              <p>{step.text}</p>
-              {step.env && (
-                <p className="mt-0.5">
-                  Variable <code>{step.env.name}</code>; value to use: <code>{step.env.value}</code>. KyberDash cannot
-                  see the environment this harness is launched from, so it does not know whether this has been done.
-                </p>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
+      <RowDetails harness={harness} />
 
       {alert && <RowAlert harnessId={harness.id} alert={alert} />}
     </li>
@@ -253,15 +278,16 @@ function HarnessRow({
 }
 
 /**
- * One row per harness, in the order the server sent. Rendering only: which row
- * is switchable, and in which direction, is `decideRow`'s reading of the
- * server's own report, and the click is handed upward.
+ * One row per harness, in the order the server sent. Rendering only: which
+ * actions a row offers is `decideRow`'s reading of the server's own report,
+ * and the click is handed upward. Reset re-runs enable for an `on` row
+ * through the same preview-then-confirm path.
  */
-export function HarnessCollectionList({ harnesses, busy, alerts, onToggle }: HarnessCollectionListProps) {
+export function HarnessCollectionList({ harnesses, busy, alerts, onToggle, onReset }: HarnessCollectionListProps) {
   return (
     <ul data-testid="settings-harness-list" className="space-y-2">
       {harnesses.map((harness) => (
-        <HarnessRow key={harness.id} harness={harness} busy={busy} alert={alerts[harness.id]} onToggle={onToggle} />
+        <HarnessRow key={harness.id} harness={harness} busy={busy} alert={alerts[harness.id]} onToggle={onToggle} onReset={onReset} />
       ))}
     </ul>
   )

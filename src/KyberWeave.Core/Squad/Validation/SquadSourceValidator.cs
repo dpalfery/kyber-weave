@@ -421,7 +421,14 @@ public static class SquadSourceValidator
                         "Declare the same canonical identity as both an agent and a skill, or remove it from shared-identities.");
                 }
 
-                if (!string.Equals(agent.InstructionBody, skill.InstructionBody, StringComparison.Ordinal))
+                // A subagent shared identity collapses to one projection on a native target:
+                // the agent file is emitted and the canonical skill is suppressed, so the two
+                // bodies must be identical or the suppressed body's content is silently lost.
+                // A primary shared identity is the thin-wrapper shape instead — the canonical
+                // skill is the entry point and the agent file is only a pointer at it — so the
+                // two bodies are complementary by design and are allowed to differ.
+                if (agent.Invocation != SquadInvocation.Primary &&
+                    !string.Equals(agent.InstructionBody, skill.InstructionBody, StringComparison.Ordinal))
                 {
                     Throw(
                         $"Fallback profile '{profileName}' declares shared identity '{name}' with different instruction bodies.",

@@ -13,6 +13,7 @@ import {
   type KyberCaptureResult,
   type KyberCaptureValue,
 } from '../../lib/kyberApi.js'
+import { DashboardPortSetting } from './DashboardPortSetting.js'
 import { HarnessCollectionList, type HarnessRowAlert } from './HarnessCollectionList.js'
 
 export interface SettingsDrawerProps {
@@ -51,6 +52,7 @@ function PreviewPanel({
   request,
   result,
   displayName,
+  reset,
   busy,
   onConfirm,
   onCancel,
@@ -58,11 +60,13 @@ function PreviewPanel({
   request: KyberCaptureRequest
   result: KyberCaptureResult
   displayName: string
+  /** A reset re-runs enable to reapply KyberDash settings; unrelated keys are preserved. */
+  reset: boolean
   busy: boolean
   onConfirm: () => void
   onCancel: () => void
 }) {
-  const verb = request.action === 'enable' ? 'Turn on' : 'Turn off'
+  const verb = reset ? 'Reset' : request.action === 'enable' ? 'Turn on' : 'Turn off'
   const changed = result.events.some((event) => event.changes && event.changes.length > 0)
   return (
     <section
@@ -125,6 +129,8 @@ function PreviewPanel({
 interface PendingPreview {
   request: KyberCaptureRequest
   result: KyberCaptureResult
+  /** A reset re-runs enable; the confirm wording says so. */
+  reset: boolean
 }
 
 /**
@@ -165,9 +171,16 @@ function SettingsContent() {
       return rest
     })
 
-  const requestPreview = (harnessId: string, action: KyberCaptureAction): void => {
+  const requestPreview = (harnessId: string, action: KyberCaptureAction, reset = false): void => {
     if (busy) return
-    const request: KyberCaptureRequest = { action, harness: harnessId, dryRun: true }
+    // The user authorized the Settings Disable to remove manually-set OTEL
+    // keys when no KyberDash receipt exists; the opt-in rides both the
+    // dry-run preview and the confirmed write, scoped to that harness's
+    // declared keys by the engine. Every other action omits it.
+    const request: KyberCaptureRequest =
+      action === 'disable'
+        ? { action, harness: harnessId, dryRun: true, removeUnreceiptedKeys: true }
+        : { action, harness: harnessId, dryRun: true }
     clearAlert(harnessId)
     setResultText(null)
     setReceiverStays(false)
@@ -178,7 +191,7 @@ function SettingsContent() {
           setAlerts((current) => ({ ...current, [harnessId]: { kind: 'refused', refusal: outcome } }))
           return
         }
-        setPreview({ request, result: outcome })
+        setPreview({ request, result: outcome, reset })
       },
       onError: () => {
         setPreview(null)
@@ -190,9 +203,18 @@ function SettingsContent() {
     })
   }
 
+  /** Reset re-runs the shared enable path for one enabled harness, previewed first like any write. */
+  const requestReset = (harnessId: string): void => {
+    requestPreview(harnessId, 'enable', true)
+  }
+
   const confirm = (): void => {
     if (busy || preview === null) return
-    const request: KyberCaptureRequest = { ...preview.request, dryRun: false }
+    const request: KyberCaptureRequest = {
+      ...preview.request,
+      dryRun: false,
+      ...(preview.request.removeUnreceiptedKeys === true ? { expectedPreviewEvents: preview.result.events } : {}),
+    }
     const harnessId = request.harness
     capture.mutate(request, {
       onSuccess: (outcome) => {
@@ -200,7 +222,7 @@ function SettingsContent() {
         if (outcome.outcome === 'refused') {
           setAlerts((current) => ({ ...current, [harnessId]: { kind: 'refused', refusal: outcome } }))
         } else {
-          const verb = request.action === 'enable' ? 'turned on' : 'turned off'
+          const verb = preview.reset ? 'reapplied' : request.action === 'enable' ? 'turned on' : 'turned off'
           setResultText(
             outcome.receiver.enableFailed
               ? {
@@ -231,57 +253,74 @@ function SettingsContent() {
     })
   }
 
+  const managedOn = harnesses.filter((h) => h.mode === 'managed' && h.state === 'on').length
+
   return (
     <>
-      <section aria-label="Harness telemetry collection" className="space-y-2">
-        <div className="flex items-start justify-between gap-3">
-          <p className="text-xs text-muted-foreground">
-            Switch OpenTelemetry collection on or off for each installed harness. Each change is previewed before
-            anything is written.
-          </p>
-          <button
-            type="button"
-            data-testid="settings-refresh-status-button"
-            className="shrink-0 rounded-md border border-border px-2.5 py-1 text-xs font-medium text-foreground hover:bg-interactive-secondary disabled:cursor-not-allowed disabled:opacity-60"
-            disabled={status.isFetching}
-            onClick={() => void status.refetch()}
-          >
-            Refresh status
-          </button>
+      <details data-testid="settings-harness-group" open className="rounded-md border border-border bg-card px-3 py-2.5">
+        <summary className="cursor-pointer text-sm font-medium text-foreground">
+          Harness collection{' '}
+          <span data-testid="settings-harness-enabled-count" className="font-normal text-muted-foreground">
+            {managedOn} enabled
+          </span>
+        </summary>
+        <div className="mt-2 space-y-2">
+          <div className="flex items-start justify-between gap-3">
+            <p className="text-xs text-muted-foreground">
+              OpenTelemetry collection per harness. Reset reapplies KyberDash settings for an enabled harness and
+              preserves unrelated preferences. Each change is previewed before anything is written.
+            </p>
+            <button
+              type="button"
+              data-testid="settings-refresh-status-button"
+              className="shrink-0 rounded-md border border-border px-2.5 py-1 text-xs font-medium text-foreground hover:bg-interactive-secondary disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={status.isFetching}
+              onClick={() => void status.refetch()}
+            >
+              Refresh status
+            </button>
+          </div>
+
+          {status.isError && (
+            <p role="alert" data-testid="settings-load-error" className="text-xs text-foreground">
+              The collection status could not be read, so no controls are shown. Use Refresh status to try again.
+            </p>
+          )}
+          {status.isPending && <p className="text-xs text-muted-foreground">Reading collection status…</p>}
+
+          {status.data && (
+            <HarnessCollectionList
+              harnesses={harnesses}
+              busy={busy}
+              alerts={alerts}
+              onToggle={requestPreview}
+              onReset={requestReset}
+            />
+          )}
+
+          {preview && (
+            <PreviewPanel
+              request={preview.request}
+              result={preview.result}
+              displayName={nameOf(preview.request.harness)}
+              reset={preview.reset}
+              busy={busy}
+              onConfirm={confirm}
+              onCancel={() => setPreview(null)}
+            />
+          )}
+
+          {resultText && (
+            <p
+              data-testid="settings-result"
+              role={resultText.error ? 'alert' : 'status'}
+              className="text-xs text-foreground"
+            >
+              {resultText.text}
+            </p>
+          )}
         </div>
-
-        {status.isError && (
-          <p role="alert" data-testid="settings-load-error" className="text-xs text-foreground">
-            The collection status could not be read, so no controls are shown. Use Refresh status to try again.
-          </p>
-        )}
-        {status.isPending && <p className="text-xs text-muted-foreground">Reading collection status…</p>}
-
-        {status.data && (
-          <HarnessCollectionList harnesses={harnesses} busy={busy} alerts={alerts} onToggle={requestPreview} />
-        )}
-
-        {preview && (
-          <PreviewPanel
-            request={preview.request}
-            result={preview.result}
-            displayName={nameOf(preview.request.harness)}
-            busy={busy}
-            onConfirm={confirm}
-            onCancel={() => setPreview(null)}
-          />
-        )}
-
-        {resultText && (
-          <p
-            data-testid="settings-result"
-            role={resultText.error ? 'alert' : 'status'}
-            className="text-xs text-foreground"
-          >
-            {resultText.text}
-          </p>
-        )}
-      </section>
+      </details>
 
       {status.data && (
         <section
@@ -321,6 +360,8 @@ function SettingsContent() {
           </p>
         </section>
       )}
+
+      <DashboardPortSetting />
     </>
   )
 }
@@ -339,7 +380,7 @@ export function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
       testIdPrefix="settings-drawer"
       manageFocus
       title="Settings"
-      subtitle="OpenTelemetry collection per harness"
+      subtitle="Collection, receiver and dashboard port"
     >
       <SettingsContent />
     </SlideOutDrawer>

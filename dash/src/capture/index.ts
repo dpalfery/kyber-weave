@@ -24,8 +24,8 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname } from 'node:path'
 
-import { applyBlockEdits, readBlockKeys, revertBlockEdits } from './edit-block.js'
-import { applyJsonEdits, readJsonKeys, revertJsonEdits, type JsonScalar } from './edit-json.js'
+import { applyBlockEdits, findBlockConflict, readBlockKeys, revertBlockEdits } from './edit-block.js'
+import { applyJsonEdits, jsonParseRefusal, readJsonKeys, revertJsonEdits, type JsonScalar } from './edit-json.js'
 import {
   probeReceiver,
   RECEIVER_DOWN_REMEDY,
@@ -65,6 +65,12 @@ export type CaptureRunOptions = {
   endpoint?: string
   /** Print the exact per-file change and write nothing. */
   dryRun?: boolean
+  /**
+   * Settings-only opt-in for disable with no receipt: remove only this call's
+   * harness's declared OTEL keys that are present. Defaults to false; unset
+   * keeps the receipt-only disable every other caller relies on.
+   */
+  removeUnreceiptedKeys?: boolean
   /** HOME to resolve every path from; defaults to the real one at call time. */
   homeDir?: string
   /** Platform override; defaults to `process.platform` at call time. */
@@ -388,7 +394,16 @@ export async function runCapture(
         options.fileFilter,
       )
     }
-    return await runDisable(events, selected, home, pathEnv, options.dryRun ?? false, options.fileFilter)
+    return await runDisable(
+      events,
+      selected,
+      home,
+      pathEnv,
+      options.dryRun ?? false,
+      options.fileFilter,
+      endpoint,
+      options.removeUnreceiptedKeys ?? false,
+    )
   } catch (error) {
     if (typeof error === 'object' && error !== null) {
       partialEvents.set(error, [...events])
@@ -931,6 +946,215 @@ function driftLinesFor(
   return { lines, events }
 }
 
+/**
+ * The opt-in only ever authorizes one harness's own disable: the route and
+ * the structured action already scope to a single id, and this guard keeps a
+ * future multi-harness caller from inheriting the removal.
+ */
+function requestIsSingleHarnessRemoval(
+  writers: readonly CaptureHarnessWriter[],
+  writer: CaptureHarnessWriter,
+): boolean {
+  return writers.length === 1 && writers[0]?.id === writer.id
+}
+
+type DeclaredRemoval = { out: string[]; err: string[]; events: CaptureEvent[]; exitCode: number }
+
+/**
+ * Remove only the declared OTEL keys this harness's file actually holds, for
+ * a Settings-authorized disable with no receipt. JSON keys the owner set are
+ * listed individually with their current values (the preview shows exactly
+ * what leaves); a managed TOML/YAML block is removed whole, refusing on a
+ * conflicting owner key outside it like enable does. Unreadable or
+ * unparseable files refuse with no writes, and unrelated keys are never
+ * touched.
+ */
+function removeDeclaredKeys(
+  writer: ManagedHarnessWriter,
+  file: ResolvedConfigFile,
+  endpoint: string,
+  dryRun: boolean,
+): DeclaredRemoval {
+  const out: string[] = []
+  const err: string[] = []
+  const events: CaptureEvent[] = []
+  const path = file.path
+  const read = readTextIfPresent(path)
+  if (read.error !== undefined) {
+    err.push(`harness ${writer.id}: cannot read ${path}: ${read.error}; leaving file unchanged`)
+    events.push(readRefusal(writer, file, read.thrown))
+    return { out, err, events, exitCode: REFUSAL_EXIT }
+  }
+  if (!read.found) {
+    out.push(`harness ${writer.id}: no record for ${path}; nothing to do`)
+    events.push(eventFor('noop', writer, file))
+    return { out, err, events, exitCode: 0 }
+  }
+  const declared = Object.keys(file.desiredKeys(endpoint))
+  if (file.format === 'json' || file.format === 'jsonc') {
+    // A malformed document must refuse like every other disable path: the
+    // key reader reports absent keys for unparseable text, which would
+    // otherwise look like "nothing to remove".
+    const parseRefusal = jsonParseRefusal(read.content)
+    if (parseRefusal !== undefined) {
+      err.push(`harness ${writer.id}: ${path}: ${parseRefusal}; leaving file unchanged`)
+      events.push(eventFor('refused', writer, file, { reason: 'unparseable' }))
+      return { out, err, events, exitCode: REFUSAL_EXIT }
+    }
+    const present = readJsonKeys(read.content, declared)
+    const owned: Record<string, { written: unknown; prior: { present: false } }> = {}
+    for (const key of declared) {
+      const current = present[key]
+      if (current?.present === true) owned[key] = { written: current.value, prior: { present: false } }
+    }
+    if (Object.keys(owned).length === 0) {
+      out.push(`harness ${writer.id}: no record for ${path}; nothing to do`)
+      events.push(eventFor('noop', writer, file))
+      return { out, err, events, exitCode: 0 }
+    }
+    const reverted = revertJsonEdits(read.content, owned)
+    if (reverted.refused !== undefined) {
+      err.push(`harness ${writer.id}: ${path}: ${reverted.refused}; leaving file unchanged`)
+      events.push(eventFor('refused', writer, file, { reason: 'unparseable' }))
+      return { out, err, events, exitCode: REFUSAL_EXIT }
+    }
+    const changes = Object.entries(owned).map(([key, entry]) => ({ key, before: entry.written }))
+    if (dryRun) {
+      out.push(`dry-run: ${path} would remove ${Object.keys(owned).join(', ')}`)
+      events.push(eventFor('would-restore', writer, file, { changes }))
+      return { out, err, events, exitCode: 0 }
+    }
+    writeText(path, reverted.content)
+    out.push(`harness ${writer.id}: disabled: ${path} (removed unreceipted keys)`)
+    events.push(eventFor('restored', writer, file, { changes }))
+    return { out, err, events, exitCode: 0 }
+  }
+  const block = readBlockKeys(read.content)
+  const held = declared.filter((key) => block[key] !== undefined)
+  if (held.length === 0) {
+    out.push(`harness ${writer.id}: no record for ${path}; nothing to do`)
+    events.push(eventFor('noop', writer, file))
+    return { out, err, events, exitCode: 0 }
+  }
+  // Mirror enable's conflict guard: an owner key outside the block that this
+  // removal does not own must refuse rather than rewrite around it.
+  const conflict = findBlockConflict(read.content, declared)
+  if (conflict !== null) {
+    err.push(
+      `harness ${writer.id}: refusing ${path}: conflicting key "${conflict.key}" outside the managed block`,
+    )
+    err.push(conflict.snippet)
+    events.push(eventFor('refused', writer, file, { reason: 'conflict' }))
+    return { out, err, events, exitCode: REFUSAL_EXIT }
+  }
+  const records: Record<string, { written: unknown; prior: { present: false } }> = {}
+  for (const key of held) records[key] = { written: block[key], prior: { present: false } }
+  const reverted = revertBlockEdits(read.content, records, file.format)
+  if (reverted.drift.length > 0) {
+    for (const entry of reverted.drift) {
+      err.push(
+        `harness ${writer.id}: drift: ${path} key "${entry.key}": written "${String(entry.written)}", current "${entry.current === undefined ? '(absent)' : String(entry.current)}"; leaving file unchanged`,
+      )
+    }
+    events.push(eventFor('refused', writer, file, { reason: 'drift', drift: driftEntries(reverted.drift) }))
+    return { out, err, events, exitCode: REFUSAL_EXIT }
+  }
+  const changes = held.map((key) => ({ key, before: block[key] }))
+  if (dryRun) {
+    out.push(`dry-run: ${path} would remove ${held.join(', ')}`)
+    events.push(eventFor('would-restore', writer, file, { changes }))
+    return { out, err, events, exitCode: 0 }
+  }
+  writeText(path, reverted.content)
+  out.push(`harness ${writer.id}: disabled: ${path} (removed unreceipted keys)`)
+  events.push(eventFor('restored', writer, file, { changes }))
+  return { out, err, events, exitCode: 0 }
+}
+
+/**
+ * The declared keys a file currently holds — or null when the document does
+ * not parse. Shared by the preflight plan and the apply-time verification so
+ * both read the same bytes.
+ */
+function readCurrentRemovalKeys(
+  file: ResolvedConfigFile,
+  content: string,
+  endpoint: string,
+): { keys: string[]; values: Record<string, unknown> } | null {
+  const declared = Object.keys(file.desiredKeys(endpoint))
+  if (file.format === 'json' || file.format === 'jsonc') {
+    if (jsonParseRefusal(content) !== undefined) return null
+    const present = readJsonKeys(content, declared)
+    const values: Record<string, unknown> = {}
+    for (const key of declared) {
+      const current = present[key]
+      if (current?.present === true) values[key] = current.value
+    }
+    return { keys: Object.keys(values), values }
+  }
+  const block = readBlockKeys(content)
+  const values: Record<string, unknown> = {}
+  for (const key of declared) {
+    if (block[key] !== undefined) values[key] = block[key]
+  }
+  return { keys: Object.keys(values), values }
+}
+
+/**
+ * Apply a preflighted removal plan. The file is re-read and the planned
+ * changes are verified against its current bytes: a concurrent edit between
+ * the preflight and this write refuses the whole action instead of stranding
+ * a partial removal. Unreadable or unparseable files refuse the same way.
+ */
+function applyPlannedRemoval(
+  writer: ManagedHarnessWriter,
+  file: ResolvedConfigFile,
+  planned: DeclaredRemoval,
+  endpoint: string,
+): DeclaredRemoval {
+  const out: string[] = []
+  const err: string[] = []
+  const events: CaptureEvent[] = []
+  const path = file.path
+  const plannedChanges = planned.events.flatMap((event) => event.changes ?? [])
+  const read = readTextIfPresent(path)
+  if (read.error !== undefined) {
+    err.push(`harness ${writer.id}: cannot read ${path}: ${read.error}; leaving files unchanged`)
+    events.push(readRefusal(writer, file, read.thrown))
+    return { out, err, events, exitCode: REFUSAL_EXIT }
+  }
+  if (!read.found) {
+    err.push(`harness ${writer.id}: drift: ${path} is missing since preview; leaving files unchanged`)
+    events.push(eventFor('refused', writer, file, { reason: 'drift', code: 'ENOENT' }))
+    return { out, err, events, exitCode: REFUSAL_EXIT }
+  }
+  const current = readCurrentRemovalKeys(file, read.content, endpoint)
+  if (current === null) {
+    err.push(`harness ${writer.id}: ${path}: config could not be parsed; leaving files unchanged`)
+    events.push(eventFor('refused', writer, file, { reason: 'unparseable' }))
+    return { out, err, events, exitCode: REFUSAL_EXIT }
+  }
+  const plannedKeys = plannedChanges.map((change) => change.key).sort()
+  const currentKeys = [...current.keys].sort()
+  const sameKeys = plannedKeys.length === currentKeys.length && plannedKeys.every((key, index) => key === currentKeys[index])
+  const sameValues =
+    sameKeys &&
+    plannedChanges.every((change) => {
+      const value = current.values[change.key]
+      return JSON.stringify(value === undefined ? undefined : value) === JSON.stringify(change.before)
+    })
+  if (!sameKeys || !sameValues) {
+    err.push(`harness ${writer.id}: drift: ${path} changed since preview; leaving files unchanged`)
+    events.push(eventFor('refused', writer, file, { reason: 'drift' }))
+    return { out, err, events, exitCode: REFUSAL_EXIT }
+  }
+  const applied = removeDeclaredKeys(writer, file, endpoint, false)
+  out.push(...applied.out)
+  err.push(...applied.err)
+  events.push(...applied.events)
+  return { out, err, events, exitCode: applied.exitCode }
+}
+
 async function runDisable(
   events: CaptureEvent[],
   writers: readonly CaptureHarnessWriter[],
@@ -938,11 +1162,25 @@ async function runDisable(
   env: PathEnv,
   dryRun: boolean,
   fileFilter: CaptureFileFilter | undefined,
+  endpoint: string,
+  removeUnreceiptedKeys: boolean,
 ): Promise<CaptureRunResult> {
   const out: string[] = []
   const err: string[] = []
   let exitCode = 0
-  const receipt = loadReceiptLenient(home)
+  const receiptState = loadReceiptState(home)
+  // A present but corrupt receipt is not absence: the prior values disable would restore
+  // from are unknowable, so refuse without writing rather than treating the harness as
+  // never-enabled. This holds for every disable path, not only the Settings opt-in — a
+  // plain disable that noops past a corrupt receipt would report "nothing to do" (exit 0)
+  // and mask the corruption, while enable already refuses it.
+  if (receiptState.corrupt) {
+    const harness = writers[0]?.id ?? ''
+    err.push(`kyberdash capture: refusing to disable: the capture receipt is unparseable (${receiptPathForHome(home)})`)
+    events.push({ kind: 'refused', harness, fileId: 'receipt', path: receiptPathForHome(home), reason: 'unparseable' })
+    return { exitCode: REFUSAL_EXIT, stdout: '', stderr: `${err.join('\n')}\n`, events }
+  }
+  const receipt = receiptState.receipt
   const revertedPaths: string[] = []
 
   for (const writer of writers) {
@@ -962,16 +1200,68 @@ async function runDisable(
       events.push(...drifted.events)
       continue
     }
+    // The Settings-only opt-in preflights every applicable no-receipt file
+    // before any removal writes: one unreadable, malformed, or conflicting
+    // target refuses the whole action with no partial writes.
+    const removals = files.flatMap((file) => {
+      if (receipt?.files.some((entry) => entry.path === file.path) === true) return []
+      if (fileFilter?.({ harnessId: writer.id, fileId: file.id, path: file.path }) === false) return []
+      if (!(removeUnreceiptedKeys && requestIsSingleHarnessRemoval(writers, writer))) return []
+      return [{ file, planned: removeDeclaredKeys(writer, file, endpoint, true) }]
+    })
+    if (removals.length > 0) {
+      const failed = removals.filter(({ planned }) => planned.exitCode !== 0)
+      if (failed.length > 0) {
+        exitCode = REFUSAL_EXIT
+        for (const { planned } of failed) {
+          err.push(...planned.err)
+          events.push(...planned.events)
+        }
+        continue
+      }
+      if (dryRun) {
+        for (const { planned } of removals) {
+          out.push(...planned.out)
+          events.push(...planned.events)
+        }
+      } else {
+        // The confirmed write re-checks each target against its preview plan:
+        // every file preflighted clean above, so a concurrent edit between
+        // preview and write is refused rather than silently removed.
+        for (const { file, planned } of removals) {
+          if (planned.events.every((event) => event.kind === 'noop')) {
+            out.push(...planned.out)
+            events.push(...planned.events)
+            continue
+          }
+          const applied = applyPlannedRemoval(writer, file, planned, endpoint)
+          out.push(...applied.out)
+          err.push(...applied.err)
+          events.push(...applied.events)
+          if (applied.exitCode !== 0) {
+            exitCode = applied.exitCode
+            break
+          }
+        }
+        if (exitCode !== 0) break
+      }
+    }
     for (const file of files) {
       const path = file.path
       const record = receipt?.files.find((entry) => entry.path === path)
       if (record === undefined) {
         // A file this harness never wrote and the filter rules out (an absent
         // Insiders profile) is not worth a "nothing to do" line in a report.
-        if (fileFilter?.({ harnessId: writer.id, fileId: file.id, path }) !== false) {
-          out.push(`harness ${writer.id}: no record for ${path}; nothing to do`)
-          events.push(eventFor('noop', writer, file))
+        if (fileFilter?.({ harnessId: writer.id, fileId: file.id, path }) === false) {
+          continue
         }
+        if (removeUnreceiptedKeys && requestIsSingleHarnessRemoval(writers, writer)) {
+          // This file was already included in the all-files preflight above.
+          // Its preview or confirmed removal event is already in the result.
+          continue
+        }
+        out.push(`harness ${writer.id}: no record for ${path}; nothing to do`)
+        events.push(eventFor('noop', writer, file))
         continue
       }
       const read = readTextIfPresent(path)
