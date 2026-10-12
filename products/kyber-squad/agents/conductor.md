@@ -5,7 +5,7 @@ description: "Primary orchestrator and default entry point: accepts a plan, spec
 invocation: primary
 model-profile: orchestration
 capability-profile: orchestrator
-copilot-tools: [vscode, read, agent, todo]
+copilot-tools: [vscode, tool_search, read, agent, todo]
 delegates-to: [architect, azure-reader, bug-crusher-investigator, code-reviewer, csharp-dev, dal-dev, docs-dev, github-devops, maui-dev, product-owner, pulumi-dev, python-dev, react-dev, research-agent, sql-database-architect, task-reviewer, tauri-dev, test-dev]
 fallback: role-skill
 aliases: []
