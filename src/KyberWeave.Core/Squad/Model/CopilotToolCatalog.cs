@@ -26,7 +26,29 @@ internal static class CopilotToolCatalog
         "edit/createFile",
         "edit/editFiles",
         "edit/rename",
-        "vscodeGeneral/rename"
+        "vscodeGeneral/rename",
+        "vscode/runCommand",
+        "vscode/toolSearch",
+        "vscode/askQuestions",
+        "execute/getTerminalOutput",
+        "execute/killTerminal",
+        "execute/sendToTerminal",
+        "execute/runTask",
+        "execute/createAndRunTask",
+        "execute/runInTerminal",
+        "execute/testFailure",
+        "read/problems",
+        "read/readFile",
+        "read/viewImage",
+        "read/terminalSelection",
+        "read/terminalLastCommand",
+        "read/getTaskOutput",
+        "vscodeTasks/createAndRunTask",
+        "vscodeTasks/runTask",
+        "vscodeTasks/getTaskOutput",
+        "vscodeTasks/problems",
+        "vscodeGeneral/toolSearch",
+        "vscodeGeneral/testFailure"
     ];
 
     internal static IReadOnlyDictionary<string, string?> RequiredCapabilities { get; } =
@@ -47,7 +69,29 @@ internal static class CopilotToolCatalog
             ["edit/createFile"] = "filesystem.write",
             ["edit/editFiles"] = "filesystem.write",
             ["edit/rename"] = "filesystem.write",
-            ["vscodeGeneral/rename"] = "filesystem.write"
+            ["vscodeGeneral/rename"] = "filesystem.write",
+            ["vscode/runCommand"] = null,
+            ["vscode/toolSearch"] = null,
+            ["vscode/askQuestions"] = null,
+            ["execute/getTerminalOutput"] = "process.execute",
+            ["execute/killTerminal"] = "process.execute",
+            ["execute/sendToTerminal"] = "process.execute",
+            ["execute/runTask"] = "process.execute",
+            ["execute/createAndRunTask"] = "process.execute",
+            ["execute/runInTerminal"] = "process.execute",
+            ["execute/testFailure"] = "process.execute",
+            ["read/problems"] = "filesystem.read",
+            ["read/readFile"] = "filesystem.read",
+            ["read/viewImage"] = "filesystem.read",
+            ["read/terminalSelection"] = "filesystem.read",
+            ["read/terminalLastCommand"] = "filesystem.read",
+            ["read/getTaskOutput"] = "filesystem.read",
+            ["vscodeTasks/createAndRunTask"] = "process.execute",
+            ["vscodeTasks/runTask"] = "process.execute",
+            ["vscodeTasks/getTaskOutput"] = "process.execute",
+            ["vscodeTasks/problems"] = "process.execute",
+            ["vscodeGeneral/toolSearch"] = null,
+            ["vscodeGeneral/testFailure"] = "process.execute"
         };
 
     internal static IReadOnlyList<string> Normalize(IEnumerable<string> tools)
