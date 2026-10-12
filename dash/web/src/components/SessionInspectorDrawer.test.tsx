@@ -1458,6 +1458,20 @@ describe('SessionInspectorDrawer: Copilot turn readability', () => {
     expect(formatted).toContain('data-testid="json-item-1"')
   })
 
+  it('wraps the formatted JSON view instead of scrolling it horizontally', () => {
+    const html = renderHtml(React.createElement(JsonStringView, { text: COPILOT_TOOL_DEFINITIONS_RAW }))
+    const single = renderHtml(React.createElement(JsonStringView, { text: '{"role":"system","content":"hello"}' }))
+    for (const markup of [html, single]) {
+      const pres = markup.match(/<pre[^>]*data-testid="json-(?:item-\d+|formatted)"/g) ?? []
+      expect(pres.length).toBeGreaterThan(0)
+      for (const pre of pres) {
+        expect(pre).toContain('whitespace-pre-wrap')
+        expect(pre).toContain('break-words')
+        expect(pre).not.toMatch(/whitespace-pre(?!-)/)
+      }
+    }
+  })
+
   it('routes JSON strings to the structured view and prose to folded text', () => {
     const jsonHtml = renderHtml(
       React.createElement(InspectorContent, { data: '{"role":"system","content":"hello"}' })

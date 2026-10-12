@@ -971,20 +971,21 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
         }
     }
 
+    // Polls rather than watching. A FileSystemWatcher created after the existence check misses a
+    // file that appears while the watcher is still starting (slow on macOS), so the wait then ran
+    // out its whole timeout and passed on the final check: a 30 second stall in a passing test.
     private static bool WaitForFile(string path, TimeSpan timeout)
     {
-        if (File.Exists(path))
-            return true;
+        System.Diagnostics.Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
+        while (!File.Exists(path))
+        {
+            if (clock.Elapsed >= timeout)
+                return false;
 
-        string directory = Path.GetDirectoryName(path) ?? string.Empty;
-        if (directory.Length == 0 || !Directory.Exists(directory))
-            return false;
+            Thread.Sleep(20);
+        }
 
-        using FileSystemWatcher watcher = new(directory, Path.GetFileName(path));
-        using ManualResetEventSlim signal = new(false);
-        watcher.Created += (_, _) => signal.Set();
-        watcher.EnableRaisingEvents = true;
-        return signal.Wait(timeout) || File.Exists(path);
+        return true;
     }
 
     private static string ToNative(string relativePath)

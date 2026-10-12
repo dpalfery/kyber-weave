@@ -5,7 +5,7 @@ source-commit: 677c3a876ba9c62f1083608596b238c9deaff167
 selected-baseline: .github/agents/product-owner.agent.md
 sources:
   .github/agents/product-owner.agent.md: 5193d5e0bdabec19ceb33a646ab1120362e8705dec1bfe5da7af23a361c5d76e
-final-body-sha256: fe520d955766d53b652df0aec8f641e189af50274230bb7b0a61535b4c902df1
+final-body-sha256: e773dc4e7e868f45b2fdba66210057525180c5cfec807e944834fb5e7989614b
 ---
 # product-owner migration
 

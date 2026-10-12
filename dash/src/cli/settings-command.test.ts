@@ -33,10 +33,11 @@ const ON_OFF: readonly { short: string; key: SettingKey; other: 'on' | 'off' }[]
 // A loop over an empty array asserts nothing and still reports success, so the
 // coverage counts are pinned: these tables only claim to cover what they list here.
 describe('dash settings: the coverage tables are not silently empty', () => {
-  it('lists the three on/off keys and the four defaults', () => {
+  it('lists the three on/off keys and the five defaults', () => {
     expect(ON_OFF).toHaveLength(3)
-    expect(Object.keys(DEFAULTS)).toHaveLength(4)
+    expect(Object.keys(DEFAULTS)).toHaveLength(5)
     expect(DEFAULTS[CADENCE.short]).toBeDefined()
+    expect(DEFAULTS[PORT.short]).toBeDefined()
   })
 })
 
@@ -44,12 +45,17 @@ const CADENCE: { short: string; key: SettingKey } = {
   short: 'jobs.refresh_cadence_minutes',
   key: SETTING_KEYS.refreshCadenceMinutes,
 }
+const PORT: { short: string; key: SettingKey } = {
+  short: 'dashboard.port',
+  key: SETTING_KEYS.dashboardPort,
+}
 /** Defaults as `shared-settings.ts` defines them: the switch is opt-in. */
 const DEFAULTS: Record<string, string | number> = {
   'folder_import.scheduled': 'off',
   'jobs.paused': 'off',
   'jobs.refresh_cadence_minutes': 5,
   'receiver.hosted': 'off',
+  'dashboard.port': 4747,
 }
 
 const roots: string[] = []
@@ -185,7 +191,7 @@ describe('dash settings: registration', () => {
 })
 
 describe('dash settings show', () => {
-  it('prints all four keys with their defaults when nothing is stored', async () => {
+  it('prints all five keys with their defaults when nothing is stored', async () => {
     const harness = createHarness()
 
     const result = await harness.run('show')
@@ -202,7 +208,7 @@ describe('dash settings show', () => {
     }
   })
 
-  it('reports the same four defaults as a JSON object under --json', async () => {
+  it('reports the same five defaults as a JSON object under --json', async () => {
     const harness = createHarness()
 
     const result = await harness.run('show', '--json')
@@ -262,7 +268,7 @@ describe('dash settings set', () => {
     expect(jsonValueFor(entries, name)).toBe(value)
   })
 
-  it('leaves the other three settings untouched when one is set', async () => {
+  it('leaves the other four settings untouched when one is set', async () => {
     const harness = createHarness()
 
     await harness.run('set', 'jobs.paused', 'on')
@@ -273,6 +279,34 @@ describe('dash settings set', () => {
       if (entry.short !== 'jobs.paused') expect(jsonValueFor(entries, entry.short)).toBe(DEFAULTS[entry.short])
     }
     expect(jsonValueFor(entries, CADENCE.short)).toBe(DEFAULTS[CADENCE.short])
+    expect(jsonValueFor(entries, PORT.short)).toBe(DEFAULTS[PORT.short])
+  })
+
+  it.each([1, 4747, 4848, 65535])('stores %s = %d', async (value) => {
+    const harness = createHarness()
+
+    const result = await harness.run('set', PORT.short, String(value))
+
+    expect(result.exitCode).toBe(0)
+    expect(readBack(harness.db, PORT.key)).toBe(value)
+  })
+
+  it.each([1, 4848, 65535])('stores the prefixed port key %s = %d', async (value) => {
+    const harness = createHarness()
+
+    const result = await harness.run('set', PORT.key, String(value))
+
+    expect(result.exitCode).toBe(0)
+    expect(readBack(harness.db, PORT.key)).toBe(value)
+  })
+
+  it('reads a stored port back through show --json', async () => {
+    const harness = createHarness()
+    expect((await harness.run('set', PORT.short, '4848')).exitCode).toBe(0)
+
+    const entries = jsonEntries((await harness.run('show', '--json')).stdout)
+
+    expect(jsonValueFor(entries, PORT.short)).toBe(4848)
   })
 
   // `05` is accepted because the cadence parser is digits-only and range-checked, and
@@ -308,10 +342,27 @@ describe('dash settings: rejected input exits 2 and writes nothing', () => {
     const result = await harness.run('set', name, 'on')
 
     expect(result.exitCode).toBe(2)
-    for (const entry of [...ON_OFF, CADENCE]) {
+    for (const entry of [...ON_OFF, CADENCE, PORT]) {
       expect(rawMetadata(harness.db, entry.key), entry.short).toBeUndefined()
     }
   })
+
+  // 0 is refused even though it binds: a persisted 0 would land every later startup
+  // somewhere unannounced, which is the silent-fallback defect this setting ends.
+  it.each(['0', '65536', 'abc', '-1', '47.5', ''])(
+    'rejects the port value %j without overwriting a stored one',
+    async (value) => {
+      const harness = createHarness()
+      await harness.run('set', PORT.short, '4848')
+      expect(readBack(harness.db, PORT.key)).toBe(4848)
+
+      const result = await harness.run('set', PORT.short, value)
+
+      expect(result.exitCode).toBe(2)
+      expect(readBack(harness.db, PORT.key)).toBe(4848)
+      expect(rawMetadata(harness.db, PORT.key)).toBe('4848')
+    },
+  )
 
   it.each(['0', '1441', 'abc', '-5', '1.5', ''])(
     'rejects the cadence value %j without overwriting a stored one',

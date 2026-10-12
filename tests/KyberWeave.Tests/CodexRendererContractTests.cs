@@ -35,6 +35,15 @@ public sealed class CodexRendererContractTests : IDisposable
             .SelectMany(profile => profile.SharedIdentities)
             .ToHashSet(StringComparer.Ordinal);
 
+    /// <summary>
+    /// The shared identities whose canonical skill is suppressed: those carried by a subagent,
+    /// whose file already holds the identical body. A primary shared identity reuses its
+    /// canonical skill as the entry point, so it is emitted. Delegated to the renderer's own
+    /// resolver so the test cannot drift from the contract.
+    /// </summary>
+    private static HashSet<string> SuppressedSkillIdentities(SquadSource source) =>
+        SquadSharedIdentityProjection.SuppressedSkillIdentities(source, SharedIdentities(source));
+
     private readonly TempDirectory _temp = new();
 
     public void Dispose() => _temp.Dispose();
@@ -81,6 +90,7 @@ public sealed class CodexRendererContractTests : IDisposable
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
         HashSet<string> sharedIdentities = SharedIdentities(source);
+        HashSet<string> suppressedSkillIdentities = SuppressedSkillIdentities(source);
         SquadRendererRegistry registry = new([new CodexRenderer()]);
         SquadRenderRequest request = new(
             SourceDirectory: ProductRoot,
@@ -91,14 +101,14 @@ public sealed class CodexRendererContractTests : IDisposable
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
-        int suppressedSkillCount = source.Skills.Count(skill => sharedIdentities.Contains(skill.Name));
+        int suppressedSkillCount = source.Skills.Count(skill => suppressedSkillIdentities.Contains(skill.Name));
         int expectedSkillCount = source.Skills.Count - suppressedSkillCount;
 
         // C3: every rendered owner also projects its validated resource closure beside its
         // principal output, so the corpus count is principals plus emitted closures.
         int expectedFileCount = source.Agents.Count + source.Agents.Sum(agent => agent.Resources.Count)
             + expectedSkillCount
-            + source.Skills.Where(skill => !sharedIdentities.Contains(skill.Name))
+            + source.Skills.Where(skill => !suppressedSkillIdentities.Contains(skill.Name))
                 .Sum(skill => skill.Resources.Count);
         Assert.Equal(expectedFileCount, result.Files.Count);
 
@@ -154,15 +164,24 @@ public sealed class CodexRendererContractTests : IDisposable
         foreach (string sharedIdentity in sharedIdentities)
         {
             Assert.Contains(result.Files, f => f.RelativePath == $".codex/agents/{sharedIdentity}.toml");
-            Assert.DoesNotContain(result.Files, f => f.RelativePath == $".codex/skills/{sharedIdentity}/SKILL.md");
+            string sharedSkillPath = $".codex/skills/{sharedIdentity}/SKILL.md";
+            if (suppressedSkillIdentities.Contains(sharedIdentity))
+            {
+                Assert.DoesNotContain(result.Files, f => f.RelativePath == sharedSkillPath);
+            }
+            else
+            {
+                // Primary shared identity: the canonical skill is the entry point and ships.
+                Assert.Single(result.Files, f => f.RelativePath == sharedSkillPath);
+            }
         }
 
         // Skills verification
         foreach (SquadSkill skill in source.Skills)
         {
-            bool isSharedIdentity = sharedIdentities.Contains(skill.Name);
+            bool isSuppressedSharedIdentity = suppressedSkillIdentities.Contains(skill.Name);
             string path = $".codex/skills/{skill.Name}/SKILL.md";
-            if (isSharedIdentity)
+            if (isSuppressedSharedIdentity)
             {
                 Assert.DoesNotContain(result.Files, f => f.RelativePath == path);
                 continue;

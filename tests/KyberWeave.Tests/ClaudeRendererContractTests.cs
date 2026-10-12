@@ -104,6 +104,15 @@ public sealed class ClaudeRendererContractTests : IDisposable
             .SelectMany(profile => profile.SharedIdentities)
             .ToHashSet(StringComparer.Ordinal);
 
+    /// <summary>
+    /// The shared identities whose canonical skill Claude suppresses: those carried by a
+    /// subagent, whose file already holds the identical body. A primary shared identity reuses
+    /// its canonical skill as the entry point, so it is emitted. Delegated to the renderer's own
+    /// resolver so the test cannot drift from the contract.
+    /// </summary>
+    private static HashSet<string> SuppressedSkillIdentities(SquadSource source) =>
+        SquadSharedIdentityProjection.SuppressedSkillIdentities(source, SharedIdentities(source));
+
     public void Dispose()
     {
         // No disposable state: the suite only reads the checked-in corpus. IDisposable is
@@ -152,6 +161,7 @@ public sealed class ClaudeRendererContractTests : IDisposable
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
         HashSet<string> sharedIdentities = SharedIdentities(source);
+        HashSet<string> suppressedSkillIdentities = SuppressedSkillIdentities(source);
         SquadRendererRegistry registry = new([new ClaudeRenderer()]);
         SquadRenderRequest request = new(
             SourceDirectory: ProductRoot,
@@ -162,20 +172,22 @@ public sealed class ClaudeRendererContractTests : IDisposable
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
-        int suppressedSkillCount = source.Skills.Count(skill => sharedIdentities.Contains(skill.Name));
+        int suppressedSkillCount = source.Skills.Count(skill => suppressedSkillIdentities.Contains(skill.Name));
 
         // C3: every rendered owner also projects its validated resource closure beside its
         // principal output, so the corpus count is principals plus emitted closures.
         // A primary agent with no-primary-agent: skill contributes an entry-point skill
-        // (1 + its resource closure) in addition to the agent file.
-        SquadAgent primaryAgent = Assert.Single(source.Agents,
-            a => a.Invocation == SquadInvocation.Primary);
-        int primaryAgentSkillContribution = 1 + primaryAgent.Resources.Count;
+        // (1 + its resource closure) in addition to the agent file — except a primary shared
+        // identity, whose canonical skill already IS the entry point and is counted with the
+        // skills.
+        int primaryAgentSkillContribution = source.Agents
+            .Where(agent => agent.Invocation == SquadInvocation.Primary && !sharedIdentities.Contains(agent.Name))
+            .Sum(agent => 1 + agent.Resources.Count);
 
         int expectedFileCount =
             source.Agents.Count + source.Agents.Sum(agent => agent.Resources.Count)
             + source.Skills.Count - suppressedSkillCount
-            + source.Skills.Where(skill => !sharedIdentities.Contains(skill.Name))
+            + source.Skills.Where(skill => !suppressedSkillIdentities.Contains(skill.Name))
                 .Sum(skill => skill.Resources.Count)
             + primaryAgentSkillContribution;
         Assert.Equal(expectedFileCount, result.Files.Count);
@@ -318,15 +330,24 @@ public sealed class ClaudeRendererContractTests : IDisposable
         foreach (string sharedIdentity in sharedIdentities)
         {
             Assert.Contains(result.Files, f => f.RelativePath == $".claude/agents/{sharedIdentity}.md");
-            Assert.DoesNotContain(result.Files, f => f.RelativePath == $".claude/skills/{sharedIdentity}/SKILL.md");
+            string sharedSkillPath = $".claude/skills/{sharedIdentity}/SKILL.md";
+            if (suppressedSkillIdentities.Contains(sharedIdentity))
+            {
+                Assert.DoesNotContain(result.Files, f => f.RelativePath == sharedSkillPath);
+            }
+            else
+            {
+                // Primary shared identity: the canonical skill is the entry point and ships.
+                Assert.Single(result.Files, f => f.RelativePath == sharedSkillPath);
+            }
         }
 
         // Skills verification
         foreach (SquadSkill skill in source.Skills)
         {
-            bool isSharedIdentity = sharedIdentities.Contains(skill.Name);
+            bool isSuppressedSharedIdentity = suppressedSkillIdentities.Contains(skill.Name);
             string path = $".claude/skills/{skill.Name}/SKILL.md";
-            if (isSharedIdentity)
+            if (isSuppressedSharedIdentity)
             {
                 Assert.DoesNotContain(result.Files, f => f.RelativePath == path);
                 continue;
@@ -643,6 +664,7 @@ public sealed class ClaudeRendererContractTests : IDisposable
         HashSet<string> fastAgentPaths = new(StringComparer.Ordinal)
         {
             ".claude/agents/azure-reader.md",
+            ".claude/agents/bug-crusher.md",
             ".claude/agents/csharp-dev.md",
             ".claude/agents/docs-dev.md",
             ".claude/agents/maui-dev.md",
@@ -685,7 +707,7 @@ public sealed class ClaudeRendererContractTests : IDisposable
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
         SquadAgent primaryAgent = Assert.Single(source.Agents,
-            a => a.Invocation == SquadInvocation.Primary);
+            a => a.Name == "conductor");
 
         SquadRendererRegistry registry = new([new ClaudeRenderer()]);
         SquadRenderRequest request = new(
@@ -824,7 +846,7 @@ public sealed class ClaudeRendererContractTests : IDisposable
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
         SquadAgent primaryAgent = Assert.Single(source.Agents,
-            a => a.Invocation == SquadInvocation.Primary);
+            a => a.Name == "conductor");
 
         SquadRendererRegistry registry = new([new ClaudeRenderer()]);
         SquadRenderRequest request = new(
@@ -868,7 +890,7 @@ public sealed class ClaudeRendererContractTests : IDisposable
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
         SquadAgent primaryAgent = Assert.Single(source.Agents,
-            a => a.Invocation == SquadInvocation.Primary);
+            a => a.Name == "conductor");
 
         SquadRendererRegistry registry = new([new ClaudeRenderer()]);
 
@@ -953,7 +975,7 @@ public sealed class ClaudeRendererContractTests : IDisposable
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
         SquadAgent primaryAgent = Assert.Single(source.Agents,
-            a => a.Invocation == SquadInvocation.Primary);
+            a => a.Name == "conductor");
 
         using (var collisionFixture = PiPrimaryIdentityCollisionFixture.Create(primaryAgent.Name))
         {

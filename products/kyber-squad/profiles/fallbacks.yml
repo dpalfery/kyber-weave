@@ -9,4 +9,13 @@ profiles:
       shared: reuse-skill
       collision: role-prefixed-agent-name
       prefix: role-
-    shared-identities: []
+    # Shared identities are agent/skill pairs that are one identity, not two. Their canonical
+    # skill is reused as the entry point wherever a target would otherwise lower the primary
+    # agent onto that identity, so the two projections never double-emit. `product-owner` and
+    # `bug-crusher` are the root wrappers: their agent body is a thin pointer at the same-name
+    # skill, which carries the instructions. The agent and skill bodies therefore differ by
+    # design — the source validator requires identical bodies only for the subagent shared
+    # identities, where one projection is dropped and reuse has to be lossless.
+    shared-identities:
+      - product-owner
+      - bug-crusher

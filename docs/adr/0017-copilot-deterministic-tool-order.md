@@ -4,7 +4,7 @@ title: Exact Copilot Tool Membership with One Cross-Agent Emission Order
 doc-type: adr
 status: current
 owner: dpalfery
-last-reviewed: 2026-09-12
+last-reviewed: 2026-10-12
 ---
 
 # ADR 0017: Exact Copilot Tool Membership with One Cross-Agent Emission Order
@@ -30,6 +30,7 @@ The approved order is:
 
 ```text
 vscode
+tool_search
 read
 todo
 codegraph/*
@@ -46,6 +47,25 @@ edit/editFiles
 edit/rename
 vscodeGeneral/rename
 ```
+
+## Amendment 2026-10-12: `tool_search`
+
+`tool_search` is Copilot's built-in tool-discovery tool (upstream `ToolName.ToolSearch`,
+grouped under the `vscode` tool set): it surfaces definitions for tools the agent's
+allow-list already grants, so an agent with an explicit `tools` list cannot discover
+tools without naming it. It slots directly after `vscode` and binds to no capability
+(`null`, like `vscode` and `todo`): discovery over the already-allowed set confers no new
+grant, so no capability profile changes. Per the consequences above, the slot, the binding,
+and the golden membership update (`PostGoldenToolAdditions` in the golden contract tests;
+the SHA-pinned manifest itself stays historical) landed together, and every canonical
+agent declares it.
+
+Architect membership note (same date): the architect's `copilot-tools` moved from the
+granular `edit/*` ids plus `web` to broad `edit` without `web`, so it now reads
+`vscode, tool_search, read, todo`, the MCP wildcards, `search, execute, edit, agent`.
+The catalog keeps the granular ids (history still names them); the architect was their
+only canonical member. The rejected alternative below still describes the adoption-time
+reasoning and is left intact.
 
 ## Alternatives Considered
 

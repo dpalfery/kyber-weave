@@ -56,6 +56,10 @@ larger budget worthwhile.
 Adding a tool means adding an `[McpServerTool]` method with a `[Description]` written as
 routing metadata: a capability clause, then the conditions that should fire it. Only the
 broadest tool in the set carries an exclusion; the rest state their territory positively.
+Write descriptions in the requester's words ("runbook", "how to run"), not the project's
+("governed corpus", "code joins"). The documentation-first rule also lives in
+`DocsServerInstructions`, which clients load before the model weighs any tool; keep the two
+consistent.
 Every tool response must also lead with the shared provenance header — the absolute root,
 short HEAD revision with dirty marker, and live document count — so a caller can tell which
 corpus answered. `CorpusProvenance` formats it, `docs_status` returns it alone, and the

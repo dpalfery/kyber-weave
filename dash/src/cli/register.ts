@@ -28,7 +28,7 @@ import {
 import { SETTING_KEYS, readSetting, writeSetting, type OnOff, type SettingKey } from '../settings/shared-settings.js'
 
 /**
- * The four shared settings in the order `dash settings show` prints them, keyed by the
+ * The five shared settings in the order `dash settings show` prints them, keyed by the
  * short name an operator types. Both spellings are accepted on input -- the short form
  * from the tray, the `settings.`-prefixed form pasted from the HTTP API -- but the short
  * name is what this command reports, because that is what the operator typed.
@@ -38,6 +38,7 @@ const DISPLAY_SETTINGS: readonly { readonly short: string; readonly key: Setting
   { short: 'jobs.paused', key: SETTING_KEYS.jobsPaused },
   { short: 'jobs.refresh_cadence_minutes', key: SETTING_KEYS.refreshCadenceMinutes },
   { short: 'receiver.hosted', key: SETTING_KEYS.receiverHosted },
+  { short: 'dashboard.port', key: SETTING_KEYS.dashboardPort },
 ]
 
 const SETTING_NAMES: Readonly<Record<string, SettingKey>> = Object.fromEntries(
@@ -54,6 +55,17 @@ const SETTING_NAMES: Readonly<Record<string, SettingKey>> = Object.fromEntries(
  */
 function parseOnOffSetting(raw: string): OnOff | undefined {
   return raw === 'on' || raw === 'off' ? raw : undefined
+}
+
+/**
+ * Digits only, within the TCP port range. 0 is refused even though it binds: a
+ * persisted 0 would land every later startup somewhere unannounced, which is the
+ * silent-fallback defect the dashboard port setting exists to end.
+ */
+function parsePortSetting(raw: string): number | undefined {
+  if (!/^[0-9]+$/.test(raw)) return undefined
+  const port = Number(raw)
+  return Number.isSafeInteger(port) && port >= 1 && port <= 65535 ? port : undefined
 }
 
 /** Digits only, within the one-day ceiling a cadence is useful within (A1). */
@@ -107,7 +119,12 @@ export function alreadyPrinted(tail: string, message: string): boolean {
 }
 
 function invalidSettingValueMessage(name: string, key: SettingKey): string {
-  const expected = key === SETTING_KEYS.refreshCadenceMinutes ? 'a whole number of minutes, 1 to 1440' : 'on or off'
+  const expected =
+    key === SETTING_KEYS.refreshCadenceMinutes
+      ? 'a whole number of minutes, 1 to 1440'
+      : key === SETTING_KEYS.dashboardPort
+        ? 'a TCP port, 1 to 65535'
+        : 'on or off'
   return `'${name}' expects ${expected}`
 }
 
@@ -686,7 +703,7 @@ export function registerKyberCommands(program: Command, dependencies: KyberComma
     .command('set')
     .description('Set one shared setting')
     .argument('<key>', 'Setting name, with or without the settings. prefix')
-    .argument('<value>', 'on or off, or a whole number of minutes for jobs.refresh_cadence_minutes')
+    .argument('<value>', 'on or off, a whole number of minutes for jobs.refresh_cadence_minutes, or a TCP port for dashboard.port')
     .option('--db <path>', 'Custom path for canon.db SQLite database')
     .exitOverride(settingsUsageExit)
     .action((key: string, value: string, opts: { db?: string }) => {
@@ -708,13 +725,21 @@ export function registerKyberCommands(program: Command, dependencies: KyberComma
               }
               return minutes
             })()
-          : (() => {
-              const onOff = parseOnOffSetting(value)
-              if (onOff === undefined) {
-                throw new CommanderError(2, 'commander.invalidArgument', invalidSettingValueMessage(key, settingKey))
-              }
-              return onOff
-            })()
+          : settingKey === SETTING_KEYS.dashboardPort
+            ? (() => {
+                const port = parsePortSetting(value)
+                if (port === undefined) {
+                  throw new CommanderError(2, 'commander.invalidArgument', invalidSettingValueMessage(key, settingKey))
+                }
+                return port
+              })()
+            : (() => {
+                const onOff = parseOnOffSetting(value)
+                if (onOff === undefined) {
+                  throw new CommanderError(2, 'commander.invalidArgument', invalidSettingValueMessage(key, settingKey))
+                }
+                return onOff
+              })()
       const store = createStore(resolveDbPath(opts.db))
       try {
         writeSetting(store, settingKey, parsed)

@@ -57,6 +57,10 @@ public sealed class SquadRenderingContractTests
         HashSet<string> sharedIdentities = source.FallbackProfiles.Profiles.Values
             .SelectMany(profile => profile.SharedIdentities)
             .ToHashSet(StringComparer.Ordinal);
+        // Only a subagent shared identity suppresses its canonical skill (the agent file carries
+        // the identical body). A primary shared identity is the thin wrapper whose canonical
+        // skill IS the entry point, so it is emitted.
+        HashSet<string> suppressedSkillIdentities = SuppressedSkillIdentities(source);
         SquadRendererRegistry registry = new([new CopilotRenderer()]);
         SquadRenderRequest request = new(
             SourceDirectory: ProductRoot,
@@ -67,14 +71,14 @@ public sealed class SquadRenderingContractTests
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
-        int suppressedSkillCount = source.Skills.Count(skill => sharedIdentities.Contains(skill.Name));
+        int suppressedSkillCount = source.Skills.Count(skill => suppressedSkillIdentities.Contains(skill.Name));
 
         // C3: every rendered owner also projects its validated resource closure beside its
         // principal output, so the corpus count is principals plus emitted closures.
         int expectedFileCount =
             source.Agents.Count + source.Agents.Sum(agent => agent.Resources.Count)
             + source.Skills.Count - suppressedSkillCount
-            + source.Skills.Where(skill => !sharedIdentities.Contains(skill.Name))
+            + source.Skills.Where(skill => !suppressedSkillIdentities.Contains(skill.Name))
                 .Sum(skill => skill.Resources.Count);
         Assert.Equal(expectedFileCount, result.Files.Count);
         Assert.All(result.Files, f => Assert.Equal("copilot", f.Target));
@@ -111,14 +115,23 @@ public sealed class SquadRenderingContractTests
         foreach (string sharedIdentity in sharedIdentities)
         {
             Assert.Contains(result.Files, f => f.RelativePath == $".github/agents/{sharedIdentity}.agent.md");
-            Assert.DoesNotContain(result.Files, f => f.RelativePath == $".github/skills/{sharedIdentity}/SKILL.md");
+            string sharedSkillPath = $".github/skills/{sharedIdentity}/SKILL.md";
+            if (suppressedSkillIdentities.Contains(sharedIdentity))
+            {
+                Assert.DoesNotContain(result.Files, f => f.RelativePath == sharedSkillPath);
+            }
+            else
+            {
+                // Primary shared identity: the canonical skill is the entry point and ships.
+                Assert.Single(result.Files, f => f.RelativePath == sharedSkillPath);
+            }
         }
 
         foreach (SquadSkill skill in source.Skills)
         {
-            bool isSharedIdentity = sharedIdentities.Contains(skill.Name);
+            bool isSuppressedSharedIdentity = suppressedSkillIdentities.Contains(skill.Name);
             string path = $".github/skills/{skill.Name}/SKILL.md";
-            if (isSharedIdentity)
+            if (isSuppressedSharedIdentity)
             {
                 Assert.DoesNotContain(result.Files, f => f.RelativePath == path);
                 continue;
@@ -244,6 +257,23 @@ public sealed class SquadRenderingContractTests
         YamlNode value = node.Children[new YamlScalarNode(key)];
         return Assert.IsType<YamlScalarNode>(value).Value
             ?? throw new InvalidOperationException($"Key '{key}' has a null scalar value.");
+    }
+
+    /// <summary>
+    /// The shared identities whose canonical skill a renderer suppresses: those carried by a
+    /// subagent agent, whose file already holds the identical body. A primary shared identity is
+    /// the thin wrapper whose skill is the entry point, so it is not suppressed.
+    /// </summary>
+    private static HashSet<string> SuppressedSkillIdentities(SquadSource source)
+    {
+        HashSet<string> shared = source.FallbackProfiles.Profiles.Values
+            .SelectMany(profile => profile.SharedIdentities)
+            .ToHashSet(StringComparer.Ordinal);
+        HashSet<string> primary = source.Agents
+            .Where(agent => agent.Invocation == SquadInvocation.Primary && shared.Contains(agent.Name))
+            .Select(agent => agent.Name)
+            .ToHashSet(StringComparer.Ordinal);
+        return shared.Except(primary, StringComparer.Ordinal).ToHashSet(StringComparer.Ordinal);
     }
 }
 

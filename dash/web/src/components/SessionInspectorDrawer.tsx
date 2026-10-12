@@ -1211,7 +1211,7 @@ export function JsonStringView({
                   </div>
                 ) : (
                   <pre
-                    className="text-xs font-mono p-2.5 overflow-auto whitespace-pre text-foreground max-h-[400px]"
+                    className="text-xs font-mono p-2.5 overflow-auto whitespace-pre-wrap break-words text-foreground max-h-[400px]"
                     data-testid={`json-item-${idx}`}
                   >
                     {pretty}
@@ -1222,7 +1222,7 @@ export function JsonStringView({
           </div>
         ) : (
           <pre
-            className="text-xs font-mono p-2.5 overflow-auto whitespace-pre rounded border border-border bg-muted/40 text-foreground max-h-[400px]"
+            className="text-xs font-mono p-2.5 overflow-auto whitespace-pre-wrap break-words rounded border border-border bg-muted/40 text-foreground max-h-[400px]"
             data-testid="json-formatted"
           >
             {single ?? lines ?? text}
@@ -1230,7 +1230,7 @@ export function JsonStringView({
         )
       ) : (
         <pre
-          className="text-xs font-mono p-2.5 overflow-auto whitespace-pre rounded border border-border bg-muted/40 text-foreground max-h-[400px]"
+          className="text-xs font-mono p-2.5 overflow-auto whitespace-pre-wrap break-words rounded border border-border bg-muted/40 text-foreground max-h-[400px]"
           data-testid="json-raw"
         >
           {text}

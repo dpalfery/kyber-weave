@@ -48,25 +48,26 @@ public sealed class DocsTools(DocumentIndexHost host)
 
     [McpServerTool(Name = "docs_explore", ReadOnly = true, OpenWorld = false)]
     [Description("""
-        Searches the governed repository documentation corpus. Returns ranked documents
-        with their frontmatter identity, the most relevant '##' sections, and each
-        document's resolved code joins as symbol -> file:line.
+        Finds and reads this repository's written documentation: guides, runbooks, decision
+        records, and design notes. Returns the most relevant sections of each matching
+        document, ranked, plus the code files and symbols they refer to as symbol -> file:line.
 
-        Use when a question is about this repository's own documented behaviour: how a
-        feature or subsystem works, what a CLI command, flag, or rule id means, how to run
-        or configure something, or whether a subject is documented at all. Use also when
-        starting a task that a design document, runbook, or governance page would inform, and
-        when an answer must reflect current guidance, since superseded documents are
-        outside the corpus.
+        Use when asked how something in this repository works, how to install, run, or
+        configure it, what a command, flag, or rule id means, why a design decision was made,
+        or whether something is documented at all. Try it before grepping or reading files
+        under docs/ or other markdown, since the answer is usually already written down. Use
+        also when starting a task that a runbook, design note, or decision record might cover,
+        and when the answer must reflect current guidance, since retired and archived pages
+        are left out.
 
-        A miss is reported explicitly with the number of documents considered, indicating
-        the subject is likely undocumented.
+        A miss reports how many documents were searched and means the subject is likely
+        undocumented.
 
-        Do not use when the answer must come from what the code currently does rather than
-        from what the documentation claims about it.
+        Do not use when the answer depends on what the code does right now rather than on
+        what the documentation says.
         """)]
     public string Explore(
-        [Description("A question, or a command, rule id, feature name, component, or document id.")] string query,
+        [Description("The question in plain words, or a command, flag, rule id, feature or component name, or document id.")] string query,
         [Description("""
             Maximum documents to return (1-20). Defaults to 5. Lowering this deepens each
             result rather than merely shortening the list, because charBudget is shared

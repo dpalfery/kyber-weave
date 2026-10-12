@@ -86,6 +86,58 @@ public class McpPackagingTests
     }
 
     /// <summary>
+    /// Models pick tools by the words a request uses. <c>docs_explore</c> lost to grep while
+    /// it described itself in the project's own vocabulary, so the description must keep the
+    /// requester's words and must say it comes before a file search.
+    /// </summary>
+    [Fact]
+    public void DocsExploreDescriptionUsesRequesterVocabularyAndPrecedesFileSearch()
+    {
+        string description = McpToolMethod("docs_explore")
+            .GetCustomAttribute<DescriptionAttribute>()!.Description;
+
+        foreach (string jargon in new[] { "governed", "corpus", "frontmatter", "code joins" })
+        {
+            Assert.DoesNotContain(jargon, description, StringComparison.OrdinalIgnoreCase);
+        }
+
+        foreach (string phrase in new[] { "how to", "runbook", "before grepping", "docs/" })
+        {
+            Assert.Contains(phrase, description, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    /// <summary>
+    /// A tool description is read only once the model is already weighing tools. The server
+    /// instructions are read before that, so the documentation-first rule lives there too.
+    /// </summary>
+    [Fact]
+    public void ServerInstructionsTellModelsToTryDocsExploreBeforeFileSearch()
+    {
+        string text = DocsServerInstructions.Text;
+
+        Assert.Contains("docs_explore", text, StringComparison.Ordinal);
+        Assert.Contains("before grepping", text, StringComparison.Ordinal);
+        foreach (string tool in new[] { "docs_for_symbol", "docs_glossary", "docs_analysis_candidates", "docs_status" })
+        {
+            Assert.Contains(tool, text, StringComparison.Ordinal);
+        }
+
+        ModelContextProtocol.Server.McpServerOptions options = new();
+        DocsServerInstructions.Configure(options);
+        Assert.Equal(text, options.ServerInstructions);
+    }
+
+    [Fact]
+    public void McpServerHostRegistersTheDocumentationInstructions()
+    {
+        string program = File.ReadAllText(
+            Path.Combine(Path.GetDirectoryName(KyberWeaveTestPaths.McpDocsToolsSourcePath)!, "Program.cs"));
+
+        Assert.Contains("AddMcpServer(DocsServerInstructions.Configure)", program, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// Exclusions must be asymmetric: when two tools share a boundary the broader one
     /// yields and the narrower states its territory positively. If every description
     /// disclaimed the overlap, requests in the middle would match nothing — so only

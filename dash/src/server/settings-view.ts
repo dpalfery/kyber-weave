@@ -1,9 +1,10 @@
 // The typed view of the shared settings over the ONE API (architecture rule R1).
 //
-// The tray, the web UI and the CLI all read and write the same four switches through
-// `settings/shared-settings.ts`, which owns the storage and the on/off encoding. This
-// module is only the JSON shape: JSON booleans in, `on`/`off` metadata rows out. Keeping
-// the mapping here means the route holds no settings knowledge of its own.
+// The tray, the web UI and the CLI all read and write the same shared settings through
+// `settings/shared-settings.ts`, which owns the storage and the value encoding. This
+// module is only the JSON shape: JSON booleans and numbers in, `on`/`off` and digit
+// metadata rows out. Keeping the mapping here means the route holds no settings
+// knowledge of its own.
 
 import type { CanonStore } from '../canon/store.js'
 import type { SettingKey } from '../settings/shared-settings.js'
@@ -14,6 +15,7 @@ export type SettingsView = {
   jobsPaused: boolean
   refreshCadenceMinutes: number
   receiverHosted: boolean
+  dashboardPort: number
 }
 
 type SettingKeyName = keyof SettingsView
@@ -24,6 +26,7 @@ const KEYS: ReadonlyArray<readonly [SettingKeyName, SettingKey]> = [
   ['jobsPaused', SETTING_KEYS.jobsPaused],
   ['refreshCadenceMinutes', SETTING_KEYS.refreshCadenceMinutes],
   ['receiverHosted', SETTING_KEYS.receiverHosted],
+  ['dashboardPort', SETTING_KEYS.dashboardPort],
 ]
 
 /**
@@ -35,6 +38,15 @@ const KEYS: ReadonlyArray<readonly [SettingKeyName, SettingKey]> = [
 const CADENCE_MIN_MINUTES = 1
 const CADENCE_MAX_MINUTES = 1440
 
+/**
+ * A TCP port is 1..65535. 0 is refused even though it binds ("pick a free port"): a
+ * persisted 0 would land every later startup somewhere unannounced. Repeated rather
+ * than imported because the codec is private to the settings module; a value that
+ * slips past this check is still refused by `writeSetting` itself.
+ */
+const PORT_MIN = 1
+const PORT_MAX = 65535
+
 export function readSettings(store: CanonStore): SettingsView {
   // Read per key rather than through the KEYS table so each read keeps the type its own
   // codec returns: a `SettingKey`-wide read is `on | off | number`, which is the storage
@@ -44,6 +56,7 @@ export function readSettings(store: CanonStore): SettingsView {
     jobsPaused: readSetting(store, SETTING_KEYS.jobsPaused) === 'on',
     refreshCadenceMinutes: readSetting(store, SETTING_KEYS.refreshCadenceMinutes),
     receiverHosted: readSetting(store, SETTING_KEYS.receiverHosted) === 'on',
+    dashboardPort: readSetting(store, SETTING_KEYS.dashboardPort),
   }
 }
 
@@ -58,8 +71,21 @@ export function parseSettingsPatch(body: Readonly<Record<string, unknown>>): Set
     jobsPaused: false,
     refreshCadenceMinutes: 0,
     receiverHosted: false,
+    dashboardPort: 0,
   }
   for (const [name, raw] of Object.entries(body)) {
+    if (name === 'dashboardPort') {
+      if (
+        typeof raw !== 'number' ||
+        !Number.isInteger(raw) ||
+        raw < PORT_MIN ||
+        raw > PORT_MAX
+      ) {
+        return undefined
+      }
+      patch.dashboardPort = raw
+      continue
+    }
     if (name === 'refreshCadenceMinutes') {
       if (
         typeof raw !== 'number' ||
@@ -83,8 +109,8 @@ export function parseSettingsPatch(body: Readonly<Record<string, unknown>>): Set
 
 /**
  * Apply only the keys the body actually carried, then answer the full object. Separate
- * from `parseSettingsPatch` because a PUT is partial: a body naming one switch must leave
- * the other three exactly as they were.
+ * from `parseSettingsPatch` because a PUT is partial: a body naming one setting must leave
+ * the others exactly as they were.
  */
 export function applyPartialSettings(
   store: CanonStore,
@@ -95,6 +121,8 @@ export function applyPartialSettings(
     if (!(name in body)) continue
     if (name === 'refreshCadenceMinutes') {
       writeSetting(store, key, validated.refreshCadenceMinutes)
+    } else if (name === 'dashboardPort') {
+      writeSetting(store, key, validated.dashboardPort)
     } else {
       writeSetting(store, key, validated[name] ? 'on' : 'off')
     }

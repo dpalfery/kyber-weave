@@ -866,13 +866,23 @@ row, and prints a skip line naming the command that turns it on. A terminal `das
 so does `POST /api/kyber/import-history` / `dash import-history`, which never reads or
 changes the setting.
 
-The four shared settings live in `canon.db` metadata
+The five shared settings live in `canon.db` metadata
 (`dash/src/settings/shared-settings.ts`), so all surfaces see one answer: reads fail closed
 to the default on an unrecognised stored value, writes refuse an unrecognised one, and a
 wipe-all leaves them alone because they describe how the operator wants the tool to behave,
 not the captured data. **Pause** (`settings.jobs.paused`) stops the host scheduling and
 nothing else: manual refresh, import and clean, the receiver's continued ingest, and the
 retention purge all continue.
+
+**The dashboard port is a persisted setting, not a fallback.** `settings.dashboard.port`
+(default `4747`) is what `kyberdash web` binds unless that run passed an explicit `--port`,
+which wins for the run only and is never stored. Saving the setting never rebinds the
+running server; the next startup takes the persisted value. When the configured port is
+taken, the start fails with a `DashboardPortOccupiedError` naming the port and the remedy
+instead of sliding onto a random port — a silent move would strand the tray, which attaches
+by the configured URL, and every bookmark aimed at it. The bind, the `server.json` attach
+point, and the listening line all happen only after a successful bind, so a refused start
+publishes nothing for a tray to chase.
 
 ### Web Dashboard (dash/web/)
 

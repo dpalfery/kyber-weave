@@ -5,7 +5,7 @@ description: "Audits one completed task in either test-first or standard mode, c
 invocation: subagent
 model-profile: reviewer
 capability-profile: investigator
-copilot-tools: [vscode, execute, read, codegraph/*, kyber-weave/*, context7/*, search, web, todo]
+copilot-tools: [vscode, tool_search, execute, read, codegraph/*, kyber-weave/*, context7/*, search, web, todo]
 delegates-to: []
 fallback: role-skill
 aliases: []
