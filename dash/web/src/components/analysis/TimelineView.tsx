@@ -25,6 +25,9 @@ export type TimelineNode = {
   cost: CostBlock
 }
 
+/** Synthetic id of the auxiliary group (mirrors AUXILIARY_GROUP_ID in the analysis layer). */
+const AUXILIARY_GROUP_ID = '(auxiliary)'
+
 function CostBadge({ cost }: { cost: CostBlock }) {
   if (cost.value === undefined || cost.value === null) {
     return <span className="text-xs text-tertiary-foreground">{cost.status}</span>
@@ -54,6 +57,10 @@ function NodeRow({
   selectedId?: string
 }) {
   const isSelected = node.spanId === selectedId
+  // The synthetic auxiliary group starts collapsed: its cost stays visible on
+  // the row, its internal helper calls stay out of the primary tree.
+  const collapsible = node.spanId === AUXILIARY_GROUP_ID && node.children.length > 0
+  const [collapsed, setCollapsed] = React.useState(collapsible)
   return (
     <>
       <div
@@ -64,10 +71,27 @@ function NodeRow({
         role={onSelect ? 'button' : undefined}
         tabIndex={onSelect ? 0 : undefined}
       >
+        {collapsible && (
+          <button
+            type="button"
+            aria-expanded={!collapsed}
+            aria-label={collapsed ? 'Expand auxiliary activity' : 'Collapse auxiliary activity'}
+            className="shrink-0 text-xs text-tertiary-foreground"
+            onClick={(e) => {
+              e.stopPropagation()
+              setCollapsed((c) => !c)
+            }}
+          >
+            {collapsed ? '▸' : '▾'}
+          </button>
+        )}
         <span className="shrink-0 font-mono text-[11px] text-tertiary-foreground">{node.kind}</span>
         <span className="min-w-0 flex-1 truncate font-medium">{formatSpanLabel(node.name)}</span>
         {node.isSubagent && (
           <span className="shrink-0 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">subagent</span>
+        )}
+        {collapsible && collapsed && (
+          <span className="shrink-0 text-[10px] text-tertiary-foreground">{node.children.length} hidden</span>
         )}
         {node.isAuxiliary && (
           <span className="shrink-0 rounded bg-violet-500/15 px-1.5 py-0.5 text-[10px] font-medium text-violet-700">auxiliary</span>
@@ -93,7 +117,7 @@ function NodeRow({
         <span className="shrink-0 tabular-nums text-xs text-tertiary-foreground">{formatDuration(node.durationMs)}</span>
         <CostBadge cost={node.cost} />
       </div>
-      {node.children.map((child) => (
+      {!collapsed && node.children.map((child) => (
         <NodeRow key={child.spanId} node={child} depth={depth + 1} onSelect={onSelect} selectedId={selectedId} />
       ))}
     </>

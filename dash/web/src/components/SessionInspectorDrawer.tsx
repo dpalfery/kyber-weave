@@ -2351,6 +2351,28 @@ export interface SessionContentRequest {
   sessionId: string
   span?: string
   part?: string
+  /** Narrow a `tool_definitions` blob to the one tool with this name. */
+  toolName?: string
+}
+
+/**
+ * Keep only the definition named `toolName` from a tool-definitions blob.
+ * Returns the original text when the blob is not a JSON array or nothing
+ * matches, so the panel never hides content it cannot attribute.
+ */
+export function narrowToolDefinitions(text: string, toolName: string | undefined): string {
+  if (!toolName) return text
+  try {
+    const parsed: unknown = JSON.parse(text)
+    if (!Array.isArray(parsed)) return text
+    const matches = parsed.filter((d) => {
+      const def = d as { name?: unknown; function?: { name?: unknown } } | null
+      return def?.name === toolName || def?.function?.name === toolName
+    })
+    return matches.length > 0 ? JSON.stringify(matches.length === 1 ? matches[0] : matches, null, 2) : text
+  } catch {
+    return text
+  }
 }
 
 /**
@@ -3080,7 +3102,7 @@ function FullContentPanel({
             data-testid="drawer-content-scroll"
           >
             <div className="p-3">
-              <InspectorContent data={part.text} />
+              <InspectorContent data={narrowToolDefinitions(part.text, request.toolName)} />
             </div>
           </div>
         </div>

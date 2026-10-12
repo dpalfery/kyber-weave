@@ -48,23 +48,20 @@ public sealed class DocsTools(DocumentIndexHost host)
 
     [McpServerTool(Name = "docs_explore", ReadOnly = true, OpenWorld = false)]
     [Description("""
-        Finds and reads this repository's written documentation: guides, runbooks, decision
-        records, and design notes. Returns the most relevant sections of each matching
-        document, ranked, plus the code files and symbols they refer to as symbol -> file:line.
+        DOCS FIRST — call before grepping or reading anything under docs/ or other markdown.
+        Searches this repository's guides, runbooks, decision records, and design notes and
+        returns the best-matching sections of each document in ONE call, ranked, plus the code
+        they reference as symbol -> file:line. Treat the returned sections as already read; do
+        NOT reopen those files. Retired and archived pages are excluded, so the answer is
+        current guidance.
 
-        Use when asked how something in this repository works, how to install, run, or
-        configure it, what a command, flag, or rule id means, why a design decision was made,
-        or whether something is documented at all. Try it before grepping or reading files
-        under docs/ or other markdown, since the answer is usually already written down. Use
-        also when starting a task that a runbook, design note, or decision record might cover,
-        and when the answer must reflect current guidance, since retired and archived pages
-        are left out.
+        Use for: how X works, how to install/run/configure it, what a command, flag, or rule
+        id means, why a design decision was made, is X documented, and before starting a task
+        a runbook or design note might cover. Query is a plain question or a name: command,
+        flag, rule id, component, or doc id.
 
-        A miss reports how many documents were searched and means the subject is likely
-        undocumented.
-
-        Do not use when the answer depends on what the code does right now rather than on
-        what the documentation says.
+        A miss says how many documents were searched: the subject is undocumented, so grep
+        is now fine. For what the code does right now, read the code instead.
         """)]
     public string Explore(
         [Description("The question in plain words, or a command, flag, rule id, feature or component name, or document id.")] string query,
@@ -125,18 +122,13 @@ public sealed class DocsTools(DocumentIndexHost host)
 
     [McpServerTool(Name = "docs_for_symbol", ReadOnly = true, OpenWorld = false)]
     [Description("""
-        Finds the documents that formally claim a code symbol in their 'code-refs'
-        frontmatter, and returns each document's identity and resolved code joins.
+        Call BEFORE renaming, moving, deleting, or changing the signature of a class, method,
+        property, or endpoint. Returns every document that claims the symbol in its
+        'code-refs' frontmatter, with each document's identity and code joins as
+        symbol -> file:line: exactly the docs you must update with the change. Also use
+        after a change to find stale docs, or to check whether a symbol is documented.
 
-        Use when a class, method, property, or endpoint is about to be renamed, moved,
-        deleted, or have its signature changed, to find the documentation that must change
-        with it. Use also when a symbol change is already made and its documentation impact
-        is unknown, when deciding whether a symbol is documented anywhere, and when a
-        rename may have left documentation that still reads correctly but names something
-        that no longer exists.
-
-        An empty result means no document declares the symbol: it is either undocumented,
-        or mentioned in prose without any document claiming ownership of it.
+        Empty result: no document claims it, so nothing to update.
         """)]
     public string ForSymbol(
         [Description("A bare or fully qualified symbol name, e.g. 'DataProtectionHealthCheck' or 'KyberWeave.Core.Docs.Search.DocumentIndex'. Both forms resolve.")] string symbol)
@@ -169,17 +161,14 @@ public sealed class DocsTools(DocumentIndexHost host)
 
     [McpServerTool(Name = "docs_analysis_candidates", ReadOnly = true, OpenWorld = false)]
     [Description("""
-        Returns repeated claims, potential contradictions, and ambiguous terminology found
-        across the repository documentation, as a stable paged list of candidates with
-        line-addressable evidence and local cost metrics.
+        Documentation quality audit. Returns a paged list of duplicate claims, conflicting
+        statements, and ambiguous terms across the docs, each with line-addressable evidence.
 
-        Use when documentation may contradict itself or state the same requirement in
-        several places, when consolidating or deduplicating pages, when deciding which of
-        two competing statements should be canonical, and when auditing documentation
-        quality before a release or a large edit.
+        Use when docs may contradict themselves, when consolidating or deduplicating pages,
+        when choosing which of two statements is canonical, or before a release or large
+        docs edit. Not for answering questions: use docs_explore.
 
-        Candidates are evidence for review and are never applied automatically. An empty
-        result means nothing is currently pending for the requested kind.
+        Candidates are review evidence only; nothing is applied. Empty: nothing pending.
         """)]
     public string AnalysisCandidates(
         [Description("Limits results to one kind of finding: 'duplicate', 'conflict', or 'terminology'. Omit to return every kind.")] string? kind = null,
@@ -283,17 +272,14 @@ public sealed class DocsTools(DocumentIndexHost host)
 
     [McpServerTool(Name = "docs_glossary", ReadOnly = true, OpenWorld = false)]
     [Description("""
-        Looks up one term in the repository's managed glossary and returns its proposed,
-        approved, and rejected senses with their definitions, scopes, and aliases.
+        Looks up ONE term in the managed glossary: its approved, proposed, and rejected
+        senses with definitions, scopes, and aliases.
 
-        Use when a term is overloaded or its meaning in this codebase is not obvious, when
-        the same word appears to mean different things in different components, before
-        naming a new component or introducing vocabulary, and when writing documentation
-        that must match established wording. Use also when a request uses a domain word
-        that could denote more than one concept.
+        Call when a word is overloaded or unclear in this codebase, before naming a new
+        component or introducing vocabulary, and when writing docs that must match
+        established wording. Pass the term alone, not a sentence.
 
-        An unknown term is an ordinary empty result rather than an error, meaning no sense
-        has been declared for it.
+        Unknown term: empty result, no sense declared.
         """)]
     public string Glossary(
         [Description("A single glossary term, matched case-insensitively. Pass the term alone, not a sentence.")] string term)
@@ -372,18 +358,14 @@ public sealed class DocsTools(DocumentIndexHost host)
     /// </summary>
     [McpServerTool(Name = "docs_status", ReadOnly = true, OpenWorld = false)]
     [Description("""
-        Reports the provenance of the documentation corpus this server is answering from:
-        the absolute repository root, the short HEAD revision with a dirty marker, and the
-        live document count.
+        Which repository is this server answering from? Returns one line: absolute repo
+        root, short HEAD revision (with dirty marker), and document count. No arguments.
 
-        Use when starting a documentation task, before trusting an answer from the other
-        docs tools, when a response names a file that does not exist in the checkout being
-        edited, or when several servers could be bound to different repositories and the
-        active corpus must be confirmed. It takes no arguments and always returns the
-        header line that the docs tools lead with.
+        Call when a docs answer names a file missing from your checkout, or when several
+        servers may be bound to different repositories. Not needed otherwise: every docs
+        tool already leads with this line.
 
-        An empty corpus is not a failure: the line still reports the root, a document count
-        of zero, and revision markers of unavailable when Git cannot be read.
+        Zero documents is not an error; the line still reports the root.
         """)]
     public string DocsStatus()
     {

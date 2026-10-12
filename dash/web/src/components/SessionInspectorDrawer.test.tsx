@@ -26,6 +26,7 @@ import {
   prettyPrintJsonNested,
   prettyPrintJsonLinesNested,
   TurnFullContentPanel,
+  narrowToolDefinitions,
   ToggleRawView,
   CopyExactButton,
   isTurnFullContentRequest,
@@ -2722,5 +2723,27 @@ describe('SessionInspectorDrawer: lossless request builders', () => {
     } finally {
       restore()
     }
+  })
+})
+
+describe('narrowToolDefinitions', () => {
+  const blob = JSON.stringify([
+    { type: 'function', name: 'apply_patch' },
+    { type: 'function', function: { name: 'read_file' } },
+    { type: 'function', name: 'grep' },
+  ])
+
+  it('keeps only the clicked tool', () => {
+    expect(JSON.parse(narrowToolDefinitions(blob, 'apply_patch'))).toEqual({ type: 'function', name: 'apply_patch' })
+    expect(JSON.parse(narrowToolDefinitions(blob, 'read_file'))).toEqual({
+      type: 'function',
+      function: { name: 'read_file' },
+    })
+  })
+
+  it('returns the text untouched when nothing matches, no name is given, or it is not JSON', () => {
+    expect(narrowToolDefinitions(blob, 'missing')).toBe(blob)
+    expect(narrowToolDefinitions(blob, undefined)).toBe(blob)
+    expect(narrowToolDefinitions('not json', 'grep')).toBe('not json')
   })
 })

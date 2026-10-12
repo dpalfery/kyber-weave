@@ -200,7 +200,7 @@ export type DrawerContent =
   | {
       tool: ToolRow
       definition: KyberToolDefinitionShadow | null
-      contentRequest: { span?: string; part: string }
+      contentRequest: { span?: string; part: string; toolName?: string }
     }
   | string
   | {
@@ -604,6 +604,7 @@ export function AgentSessionContent({
         contentRequest: {
           span: typeof turnWithDefs?.spanId === 'string' ? turnWithDefs.spanId : undefined,
           part: 'tool_definitions',
+          toolName: tool.name,
         },
       })
       setDrawerOpen(true)
@@ -678,7 +679,7 @@ export function AgentSessionContent({
       return { sessionId: String(sessionId), turnIndex: (drawerContent as { turnIndex: number }).turnIndex, full: true as const }
     }
     if (drawerContent && typeof drawerContent === 'object' && 'contentRequest' in drawerContent) {
-      return { sessionId: String(sessionId), ...(drawerContent.contentRequest as { span?: string; part: string }) }
+      return { sessionId: String(sessionId), ...(drawerContent.contentRequest as { span?: string; part: string; toolName?: string }) }
     }
     if (
       drawerContent &&

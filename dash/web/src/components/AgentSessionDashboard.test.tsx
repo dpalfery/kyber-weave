@@ -946,6 +946,7 @@ describe('AgentSessionDashboard: Interaction & Drawer Integration', () => {
         sessionId: 'sess-abc-123',
         span: 'turn-span-1',
         part: 'tool_definitions',
+        toolName: 'read_file',
       })
 
       const spanTree = renderWithState('bars')
