@@ -469,11 +469,12 @@ export interface KyberSessionContentResult {
 
 export function fetchKyberSessionContent(
   sessionId: string,
-  opts?: { span?: string; part?: string },
+  opts?: { span?: string; part?: string; full?: boolean },
 ): Promise<KyberSessionContentResult> {
   const params = new URLSearchParams()
   if (opts?.span) params.set('span', opts.span)
   if (opts?.part) params.set('part', opts.part)
+  if (opts?.full) params.set('full', 'true')
   const qs = params.toString()
   const path = `/api/kyber/session/${encodeURIComponent(sessionId)}/content${qs ? `?${qs}` : ''}`
   return fetchJson<KyberSessionContentResult>(path)

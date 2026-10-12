@@ -77,6 +77,7 @@ export function SlideOutDrawer({
   // wrapper) as a plain function under a test hook dispatcher that provides
   // only useEffect/useState/useMemo, so a useRef here would crash them.
   const [trackedOpen, setTrackedOpen] = useState(open)
+  const [panelWidth, setPanelWidth] = useState<number | null>(null)
   const [restoreFocusTo, setRestoreFocusTo] = useState<HTMLElement | null>(null)
 
   // Capture what holds focus during the render that opens the drawer, not in
@@ -103,6 +104,22 @@ export function SlideOutDrawer({
     restoreFocusTo.focus()
     setRestoreFocusTo(null)
   }, [open, manageFocus, restoreFocusTo])
+
+  // Drag the left edge to widen the panel so long text stays readable. A plain
+  // function, not useCallback: the characterization harnesses provide no
+  // other hooks than useEffect/useState/useMemo.
+  const startResize = (e: { preventDefault: () => void }) => {
+    e.preventDefault()
+    const onMove = (ev: MouseEvent) => {
+      setPanelWidth(Math.min(window.innerWidth, Math.max(320, window.innerWidth - ev.clientX)))
+    }
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }
 
   // Registered last on purpose: the characterization harnesses invoke this
   // component as a plain function, keep the last effect, and run it to assert
@@ -171,9 +188,18 @@ export function SlideOutDrawer({
           'animate-in slide-in-from-right duration-200 ease-in-out',
           panelClassName,
         )}
+        style={panelWidth === null ? undefined : { width: panelWidth, maxWidth: '100vw' }}
         onClick={(e) => e.stopPropagation()}
         data-testid={panelTestId ?? `${testIdPrefix}-panel`}
       >
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize panel"
+          onMouseDown={startResize}
+          className="absolute left-0 top-0 bottom-0 w-1.5 -translate-x-1/2 cursor-col-resize hover:bg-border active:bg-border z-10"
+          data-testid={`${testIdPrefix}-resize-handle`}
+        />
         {/* Header */}
         <div
           className={cn('flex items-center justify-between border-b border-border px-5 py-3.5 shrink-0 bg-card', headerClassName)}
