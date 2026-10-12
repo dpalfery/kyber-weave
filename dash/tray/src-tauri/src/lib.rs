@@ -298,10 +298,6 @@ impl Opener for TauriOpener {
     }
 }
 
-fn template_icon() -> tauri::Result<tauri::image::Image<'static>> {
-    tauri::image::Image::from_bytes(include_bytes!("../icons/tray-template.png"))
-}
-
 fn apply_status_item(app: &AppHandle, state: &ipc::ViewState) {
     let Some(tray) = app.tray_by_id("tray") else {
         return;
@@ -322,39 +318,11 @@ fn apply_status_item(app: &AppHandle, state: &ipc::ViewState) {
     let _ = tray.set_tooltip(Some(&item.tooltip));
     let live = item.collector == status_item::CollectorState::Live;
 
-    #[cfg(target_os = "windows")]
-    {
-        // Pressure badge preserved; the collector colour rides the tooltip
-        // and the popover on Windows, where the small-icon badge has no
-        // room for a second glyph. A down collector replaces the badge
-        // with a red dot so the state is still glanceable. The menu-bar
-        // saber is deliberately not attempted here: a 16px slot cannot
-        // carry a blade, a hilt and the pressure number at once.
-        if live {
-            let badge = item.title.as_deref().unwrap_or("—");
-            let _ = tray.set_icon(Some(tray_badge::render(
-                badge,
-                tray_badge::small_icon_size(),
-                false,
-            )));
-        } else {
-            let _ = tray.set_icon(Some(tray_badge::render_status_dot(
-                false,
-                tray_badge::small_icon_size(),
-            )));
-        }
-    }
-
-    #[cfg(not(target_os = "windows"))]
-    {
-        // The KyberDash lightsaber with a green or red blade, template treatment OFF. The
-        // previous monochrome template asset (`icon_as_template = true`) let macOS tint the
-        // icon to the menu bar and destroyed any colour; a dynamically drawn saber
-        // presented with `as_template = false` keeps its blade colour on both light and
-        // dark menu bars.
-        let icon = tray_badge::render_lightsaber(live, tray_badge::small_icon_size());
-        let _ = tray.set_icon_with_as_template(Some(icon), false);
-    }
+    // Both platforms use the same status glyph. Windows retains pressure in the
+    // tooltip/popover; replacing the saber with a number would hide collector health.
+    // Template treatment must stay off so macOS preserves the red/green blade.
+    let icon = tray_badge::render_lightsaber(live, tray_badge::small_icon_size());
+    let _ = tray.set_icon_with_as_template(Some(icon), false);
 }
 
 fn runtime_dependencies(app: AppHandle, leading_args: Vec<String>) -> Result<RuntimeDependencies> {
@@ -496,10 +464,12 @@ pub fn run() {
                 }
             });
 
-            let icon = template_icon()?;
+            // No shared health response yet: start red rather than briefly showing
+            // a monochrome or healthy icon before the first status update.
+            let icon = tray_badge::render_lightsaber(false, tray_badge::small_icon_size());
             TrayIconBuilder::with_id("tray")
                 .icon(icon)
-                .icon_as_template(true)
+                .icon_as_template(false)
                 .tooltip("KyberDash")
                 .on_tray_icon_event(|tray, event| {
                     if let TrayIconEvent::Click {

@@ -515,6 +515,15 @@ argv; `JobHost` and `ReceiverHost` live in the engine and are hosted by that ser
 webview holds no network permission and no analysis logic of its own
 ([`rules/kyberdash-display-layer`](../rules/kyberdash-display-layer.md)).
 
+The macOS menu bar and Windows notification area show one diagonal lightsaber, with
+its handle at the bottom left and blade pointing to the top right. The blade is green
+only when the shared coverage API reports a healthy, enabled, listening, unpaused
+collector with no recent failures and a current health check. Otherwise it is red,
+including startup before coverage is available. Both colours use the same silver
+handle and silhouette; macOS template tinting is disabled to preserve the colour.
+Windows shows the saber instead of a pressure number or status dot; pressure remains
+available in the tooltip and popover. Flat fills keep the icon legible at small sizes.
+
 #### Native development prerequisites
 
 The released tray needs no Rust installation. To build or test `dash/tray/`, install
