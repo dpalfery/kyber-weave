@@ -420,7 +420,7 @@ and validates.
   ([ADR 0028](../adr/0028-devin-target-scoped-authoring-capability-profiles.md)).
 - **Copilot tool order ([ADR 0017](../adr/0017-copilot-deterministic-tool-order.md))**:
   `CopilotRenderer` emits `CopilotToolCatalog.Normalize(agent.CopilotTools)` — membership from
-  the agent, order from one global catalog sequence (`vscode`, `read`, `todo`, MCP wildcards,
+  the agent, order from one global catalog sequence (`vscode`, `tool_search`, `read`, `todo`, MCP wildcards,
   then search/execute/web/edit/agent and the granular edit tools). Normalization never adds a
   tool the agent omitted and never reorders per agent. Capability bindings are an upper bound
   at load/validation time, not a second membership source. Wildcards remain single-quoted in

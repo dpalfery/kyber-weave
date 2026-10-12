@@ -5,7 +5,7 @@ description: "Writes technical documentation: READMEs, API docs, ADRs, runbooks,
 invocation: subagent
 model-profile: fast
 capability-profile: documentation
-copilot-tools: [vscode, read, codegraph/*, kyber-weave/*, context7/*, edit, search, todo]
+copilot-tools: [vscode, tool_search, read, codegraph/*, kyber-weave/*, context7/*, edit, search, todo]
 delegates-to: []
 fallback: role-skill
 aliases: []

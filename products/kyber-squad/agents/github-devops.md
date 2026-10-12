@@ -5,7 +5,7 @@ description: "Owns CI/CD: GitHub Actions workflows, Docker build configuration, 
 invocation: subagent
 model-profile: general
 capability-profile: publishing-worker
-copilot-tools: [vscode, execute, read, codegraph/*, kyber-weave/*, context7/*, edit, search, web, todo]
+copilot-tools: [vscode, tool_search, execute, read, codegraph/*, kyber-weave/*, context7/*, edit, search, web, todo]
 delegates-to: []
 fallback: role-skill
 aliases: []

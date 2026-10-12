@@ -12,6 +12,7 @@ internal static class CopilotToolCatalog
     internal static IReadOnlyList<string> OrderedTools { get; } =
     [
         "vscode",
+        "tool_search",
         "read",
         "todo",
         "codegraph/*",
@@ -33,6 +34,10 @@ internal static class CopilotToolCatalog
         new Dictionary<string, string?>(StringComparer.Ordinal)
         {
             ["vscode"] = null,
+            // tool_search only surfaces definitions for tools the agent's allow-list
+            // already grants (Copilot groups it under the vscode tool set), so it
+            // confers no new capability and stays ungoverned like vscode and todo.
+            ["tool_search"] = null,
             ["read"] = "filesystem.read",
             ["todo"] = null,
             ["codegraph/*"] = "filesystem.read",

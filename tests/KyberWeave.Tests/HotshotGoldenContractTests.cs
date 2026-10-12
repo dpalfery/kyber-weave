@@ -138,6 +138,16 @@ public sealed partial class HotshotGoldenContractTests
         "vscodeGeneral/rename"
     ];
 
+    /// <summary>
+    /// Copilot tools added to the catalog after the Hotshot golden snapshot. The manifest
+    /// above stays historical (SHA-pinned), so the render comparison strips these declared
+    /// additions from the actual tools before comparing: anything else added or removed
+    /// still mismatches. <c>tool_search</c> is Copilot's built-in tool-discovery tool
+    /// (upstream <c>ToolName.ToolSearch</c>, grouped under the vscode tool set); agents
+    /// with an explicit allow-list cannot discover tools without naming it.
+    /// </summary>
+    private static readonly string[] PostGoldenToolAdditions = ["tool_search"];
+
     private static readonly string[] ExpectedCollisionIdentities =
     [
         "csharp-dev",
@@ -714,11 +724,19 @@ public sealed partial class HotshotGoldenContractTests
             {
                 HashSet<string> membership = RequireJsonStrings(expected, "tools").ToHashSet(StringComparer.Ordinal);
                 string[] normalizedTools = approvedToolOrder.Where(membership.Contains).ToArray();
+                // Post-golden catalog additions are a declared delta, not drift: strip them
+                // from the actual render before comparing, so any other membership change
+                // still mismatches. The addition itself is pinned per agent in
+                // CopilotRendererTests.RenderAsync_EmitsDeterministicCanonicalToolOrdering.
+                string[] actualTools = RequireYamlSequence(actualValue, "tools").Children
+                    .Select(RequireYamlScalar)
+                    .Where(tool => !PostGoldenToolAdditions.Contains(tool, StringComparer.Ordinal))
+                    .ToArray();
                 AddSequenceMismatch(
                     mismatches,
                     $"{path} tools",
                     normalizedTools,
-                    RequireYamlSequence(actualValue, "tools").Children.Select(RequireYamlScalar));
+                    actualTools);
                 continue;
             }
 
