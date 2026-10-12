@@ -40,12 +40,3 @@
   background-repeat: no-repeat;
   animation: shimmer 1.6s ease-in-out infinite;
 }
-
-::highlight(search-match) {
-  background-color: rgb(250 204 21 / 0.35);
-  color: inherit;
-}
-::highlight(search-current) {
-  background-color: rgb(249 115 22 / 0.65);
-  color: inherit;
-}

@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { formatDuration } from '../lib/labels.js'
 import { cn, usd, fmtTokens } from '../lib/utils.js'
@@ -2610,58 +2610,7 @@ export function ToggleRawView({
   defaultView?: TurnContentViewMode
 }) {
   const [view, setView] = useState<TurnContentViewMode>(defaultView)
-  const [query, setQuery] = useState('')
-  const [matchCount, setMatchCount] = useState(0)
-  const [current, setCurrent] = useState(0)
-  const bodyRef = useRef<HTMLDivElement>(null)
-  const rangesRef = useRef<Range[]>([])
   const groupLabel = `${label ?? 'Content'}: formatted or raw view`
-
-  // Find matches in whatever text is currently rendered (formatted or raw) and
-  // mark them with the CSS Custom Highlight API so rendering stays untouched.
-  useEffect(() => {
-    const root = bodyRef.current
-    const needle = query.toLowerCase()
-    const ranges: Range[] = []
-    if (root && needle) {
-      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
-      for (let n = walker.nextNode(); n; n = walker.nextNode()) {
-        const hay = (n.nodeValue ?? '').toLowerCase()
-        for (let i = hay.indexOf(needle); i !== -1; i = hay.indexOf(needle, i + needle.length)) {
-          const r = document.createRange()
-          r.setStart(n, i)
-          r.setEnd(n, i + needle.length)
-          ranges.push(r)
-        }
-      }
-    }
-    rangesRef.current = ranges
-    setMatchCount(ranges.length)
-    setCurrent(0)
-  }, [query, view, text])
-
-  useEffect(() => {
-    const ranges = rangesRef.current
-    const registry = (globalThis as { CSS?: { highlights?: Map<string, unknown> } }).CSS?.highlights
-    const HighlightCtor = (globalThis as { Highlight?: new (...r: Range[]) => unknown }).Highlight
-    if (registry && HighlightCtor) {
-      registry.set('search-match', new HighlightCtor(...ranges))
-      const active = ranges[current]
-      if (active) registry.set('search-current', new HighlightCtor(active))
-      else registry.delete('search-current')
-    }
-    ranges[current]?.startContainer.parentElement?.scrollIntoView?.({ block: 'center' })
-    return () => {
-      registry?.delete('search-match')
-      registry?.delete('search-current')
-    }
-  }, [matchCount, current, query, view])
-
-  const step = (delta: number) => {
-    if (matchCount === 0) return
-    setCurrent((c) => (c + delta + matchCount) % matchCount)
-  }
-
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between gap-2" role="group" aria-label={groupLabel}>
@@ -2691,46 +2640,18 @@ export function ToggleRawView({
             Raw
           </button>
         </div>
-        <div className="flex items-center gap-1.5">
-          <input
-            type="search"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault()
-                step(e.shiftKey ? -1 : 1)
-              }
-            }}
-            placeholder="Search…"
-            aria-label={`${label ?? 'Content'}: search text`}
-            data-testid={`${viewPrefix}-search`}
-            className="h-6 w-32 rounded border border-border bg-card px-2 text-xs text-foreground placeholder:text-muted-foreground"
-          />
-          {query ? (
-            <>
-              <span className="text-[11px] font-mono text-tertiary-foreground tabular-nums" data-testid={`${viewPrefix}-search-count`}>
-                {matchCount === 0 ? '0/0' : `${current + 1}/${matchCount}`}
-              </span>
-              <button type="button" onClick={() => step(-1)} disabled={matchCount === 0} aria-label="Previous match" className="px-1 text-xs text-muted-foreground hover:text-foreground disabled:opacity-40">↑</button>
-              <button type="button" onClick={() => step(1)} disabled={matchCount === 0} aria-label="Next match" className="px-1 text-xs text-muted-foreground hover:text-foreground disabled:opacity-40">↓</button>
-            </>
-          ) : null}
-          <CopyExactButton text={text} testId={copyTestId} label="Copy" />
-        </div>
+        <CopyExactButton text={text} testId={copyTestId} label="Copy" />
       </div>
-      <div ref={bodyRef}>
-        {view === 'formatted' ? (
-          <InspectorContent data={text} suppressJsonControls />
-        ) : (
-          <pre
-            className="text-xs font-mono p-2.5 overflow-auto whitespace-pre-wrap break-words rounded border border-border bg-muted/40 text-foreground max-h-[400px]"
-            data-testid={rawTestId}
-          >
-            {text}
-          </pre>
-        )}
-      </div>
+      {view === 'formatted' ? (
+        <InspectorContent data={text} suppressJsonControls />
+      ) : (
+        <pre
+          className="text-xs font-mono p-2.5 overflow-auto whitespace-pre-wrap break-words rounded border border-border bg-muted/40 text-foreground max-h-[400px]"
+          data-testid={rawTestId}
+        >
+          {text}
+        </pre>
+      )}
     </div>
   )
 }
