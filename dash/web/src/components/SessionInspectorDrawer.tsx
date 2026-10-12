@@ -1100,37 +1100,49 @@ export function JsonStringView({
   const [viewMode, setViewMode] = useState<'formatted' | 'raw'>(defaultView)
   const [copied, setCopied] = useState(false)
 
-  // Recurse into JSON-encoded string values so nested Copilot context stays
-  // readable; the nested printer copies every literal byte-for-byte and only
-  // changes indentation plus string expansion. Raw and copy below still use
-  // the exact original `text`.
-  const singleNested = prettyPrintJsonNested(text)
-  const single = singleNested ?? prettyPrintJson(text)
-  const lines = single === null ? prettyPrintJsonLinesNested(text) ?? prettyPrintJsonLines(text) : null
-  if (single === null && lines === null) {
+  // Everything derived from `text` is memoized: the parsers below are
+  // O(payload) and payloads can be megabytes, so toggling Raw/Formatted or
+  // clicking Copy must not re-run them. Recurse into JSON-encoded string
+  // values so nested Copilot context stays readable; the nested printer
+  // copies every literal byte-for-byte. Raw and copy use the exact `text`.
+  const derived = useMemo(() => {
+    const singleNested = prettyPrintJsonNested(text)
+    const single = singleNested ?? prettyPrintJson(text)
+    const lines = single === null ? prettyPrintJsonLinesNested(text) ?? prettyPrintJsonLines(text) : null
+    if (single === null && lines === null) return null
+
+    const typedBlocks = parseTypedTextBlocks(text)
+    const split = single !== null ? splitTopLevelArrayItems(text) : null
+    const multiItems = split !== null && split.length > 1 ? split : null
+    // One JSON.parse per item. Numbers outside the safe range would be rounded
+    // by JSON.parse; those items stay on the byte-exact pretty-printed text.
+    const structuredItems = multiItems !== null
+      ? multiItems.map((item) => {
+          try {
+            const v: unknown = JSON.parse(item)
+            return isRecord(v) && !hasUnsafeNumber(v) ? v : undefined
+          } catch {
+            return undefined
+          }
+        })
+      : null
+    // Pretty text is only needed for items without a structured view, but
+    // every item must still be printable for the multi-item view to apply.
+    const multiPretty = multiItems !== null && structuredItems !== null
+      ? multiItems.map((item, idx) =>
+          structuredItems[idx] !== undefined ? '' : prettyPrintJsonNested(item) ?? prettyPrintJson(item),
+        )
+      : null
+    const showItems = multiPretty !== null && multiPretty.every((part): part is string => part !== null)
+    return { single, lines, typedBlocks, multiItems, multiPretty, showItems, structuredItems: showItems ? structuredItems : null }
+  }, [text])
+
+  if (derived === null) {
     // Shaped like JSON but not valid JSON — show the text as-is so nothing
     // is dropped; the structured view simply has nothing to add.
     return <XmlFoldedText text={text} />
   }
-
-  const typedBlocks = parseTypedTextBlocks(text)
-  const split = single !== null ? splitTopLevelArrayItems(text) : null
-  const multiItems = split !== null && split.length > 1 ? split : null
-  const multiPretty = multiItems !== null ? multiItems.map((item) => prettyPrintJsonNested(item) ?? prettyPrintJson(item)) : null
-  const showItems = multiPretty !== null && multiPretty.every((part): part is string => part !== null)
-
-  const structuredItems = showItems && multiItems !== null
-    ? multiItems.map((item) => {
-        try {
-          const v: unknown = JSON.parse(item)
-          // Numbers outside the safe range would be rounded by JSON.parse; keep
-          // those items on the byte-exact pretty-printed text instead.
-          return isRecord(v) && !hasUnsafeNumber(v) ? v : undefined
-        } catch {
-          return undefined
-        }
-      })
-    : null
+  const { single, lines, typedBlocks, multiItems, multiPretty, showItems, structuredItems } = derived
 
   const nonBlankLines = text.split('\n').filter((line) => line.trim() !== '').length
   const descriptor = typedBlocks !== null
