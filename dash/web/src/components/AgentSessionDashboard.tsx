@@ -596,7 +596,10 @@ export function AgentSessionContent({
           ? (turnWithDefs.content as KyberTurnContentShadow)
           : undefined
       const defs = contentObj?.tool_definitions ?? []
-      const def = defs.find((d) => (d.name || d.function?.name) === tool.name)
+      // Nameless rows cannot be matched to a definition; show the full blob instead.
+      const def = tool.name
+        ? defs.find((d) => (d.name || d.function?.name) === tool.name)
+        : undefined
 
       setDrawerContent({
         tool,
