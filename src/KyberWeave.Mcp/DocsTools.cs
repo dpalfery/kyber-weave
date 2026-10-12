@@ -49,8 +49,8 @@ public sealed class DocsTools(DocumentIndexHost host)
     [McpServerTool(Name = "docs_explore", ReadOnly = true, OpenWorld = false)]
     [Description("""
         DOCS FIRST — call before grepping or reading anything under docs/ or other markdown.
-        Searches this repository's guides, runbooks, decision records, and design notes and
-        returns the best-matching sections of each document in ONE call, ranked, plus the code
+        Searches this repository documentation (guides, runbooks, decision records, design
+        notes) and returns the best-matching sections of each document in ONE call, ranked, plus the code
         they reference as symbol -> file:line. Treat the returned sections as already read; do
         NOT reopen those files. Retired and archived pages are excluded, so the answer is
         current guidance.
@@ -61,7 +61,7 @@ public sealed class DocsTools(DocumentIndexHost host)
         flag, rule id, component, or doc id.
 
         A miss says how many documents were searched: the subject is undocumented, so grep
-        is now fine. For what the code does right now, read the code instead.
+        is now fine. Do not use for what the code does right now; read the code instead.
         """)]
     public string Explore(
         [Description("The question in plain words, or a command, flag, rule id, feature or component name, or document id.")] string query,
@@ -122,8 +122,8 @@ public sealed class DocsTools(DocumentIndexHost host)
 
     [McpServerTool(Name = "docs_for_symbol", ReadOnly = true, OpenWorld = false)]
     [Description("""
-        Call BEFORE renaming, moving, deleting, or changing the signature of a class, method,
-        property, or endpoint. Returns every document that claims the symbol in its
+        Use when about to rename, move, delete, or change the signature of a class, method,
+        property, or endpoint: call BEFORE the change. Returns every document that claims the symbol in its
         'code-refs' frontmatter, with each document's identity and code joins as
         symbol -> file:line: exactly the docs you must update with the change. Also use
         after a change to find stale docs, or to check whether a symbol is documented.
@@ -166,7 +166,7 @@ public sealed class DocsTools(DocumentIndexHost host)
 
         Use when docs may contradict themselves, when consolidating or deduplicating pages,
         when choosing which of two statements is canonical, or before a release or large
-        docs edit. Not for answering questions: use docs_explore.
+        docs edit. To answer a question, call docs_explore instead.
 
         Candidates are review evidence only; nothing is applied. Empty: nothing pending.
         """)]
@@ -275,7 +275,7 @@ public sealed class DocsTools(DocumentIndexHost host)
         Looks up ONE term in the managed glossary: its approved, proposed, and rejected
         senses with definitions, scopes, and aliases.
 
-        Call when a word is overloaded or unclear in this codebase, before naming a new
+        Use when a word is overloaded or unclear in this codebase, before naming a new
         component or introducing vocabulary, and when writing docs that must match
         established wording. Pass the term alone, not a sentence.
 
@@ -361,7 +361,7 @@ public sealed class DocsTools(DocumentIndexHost host)
         Which repository is this server answering from? Returns one line: absolute repo
         root, short HEAD revision (with dirty marker), and document count. No arguments.
 
-        Call when a docs answer names a file missing from your checkout, or when several
+        Use when a docs answer names a file missing from your checkout, or when several
         servers may be bound to different repositories. Not needed otherwise: every docs
         tool already leads with this line.
 
