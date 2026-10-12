@@ -81,7 +81,7 @@ public sealed class SquadSourceTests
     [Theory]
     [InlineData("architect", "claude", "opus")]
     [InlineData("architect", "codex", "gpt-6.1-sol")]
-    [InlineData("architect", "copilot", "GPT-6.1 Sol (copilot)")]
+    [InlineData("architect", "copilot", "Claude Sonnet 5.5 (copilot)")]
     [InlineData("architect", "cursor", "claude-sonnet-5-5[effort=high]")]
     [InlineData("architect", "kilo", "kilo/deepseek/deepseek-v4-pro-0813")]
     [InlineData("architect", "opencode", "zai-coding-plan/glm-5.3")]
@@ -89,7 +89,7 @@ public sealed class SquadSourceTests
     [InlineData("architect", "devin", "claude-opus-5-5-high")]
     [InlineData("deep-planning", "claude", "opus")]
     [InlineData("deep-planning", "codex", "gpt-6.1-sol")]
-    [InlineData("deep-planning", "copilot", "GPT-6.1 Sol (copilot)")]
+    [InlineData("deep-planning", "copilot", "GPT-5.6 Sol (copilot)")]
     [InlineData("deep-planning", "cursor", "claude-sonnet-5-5[effort=high]")]
     [InlineData("deep-planning", "kilo", "kilo/deepseek/deepseek-v4-pro-0813")]
     [InlineData("deep-planning", "opencode", "zai-coding-plan/glm-5.3")]
@@ -105,7 +105,7 @@ public sealed class SquadSourceTests
     [InlineData("fast", "devin", "deepseek-v4-1-flash-high")]
     [InlineData("general", "claude", "claude-sonnet-5-5")]
     [InlineData("general", "codex", "gpt-5.6-terra")]
-    [InlineData("general", "copilot", "Claude Haiku 5.5 (copilot)")]
+    [InlineData("general", "copilot", "Grok 4.7 (copilot)")]
     [InlineData("general", "cursor", "grok-4.7[]")]
     [InlineData("general", "kilo", "muse-spark1.3 contributor")]
     [InlineData("general", "opencode", "opencode/muse-spark-1.3-contributor-free")]
@@ -113,7 +113,7 @@ public sealed class SquadSourceTests
     [InlineData("general", "devin", "swe-2-high")]
     [InlineData("reviewer", "claude", "sonnet")]
     [InlineData("reviewer", "codex", "gpt-5.6-terra")]
-    [InlineData("reviewer", "copilot", "Grok 4.7 (copilot)")]
+    [InlineData("reviewer", "copilot", "Gemini 3.8 Flash (copilot)")]
     [InlineData("reviewer", "cursor", "kimi-k2.7-code[]")]
     [InlineData("reviewer", "kilo", "kimi k2.7 code")]
     [InlineData("reviewer", "opencode", "opencode-go/kimi-k2.7-code")]
@@ -381,7 +381,7 @@ public sealed class SquadSourceTests
 
         Assert.Contains("known tool catalog", diagnostic.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("vscode", diagnostic.Hint!, StringComparison.Ordinal);
-        Assert.Contains("vscodeGeneral/rename", diagnostic.Hint!, StringComparison.Ordinal);
+        Assert.Contains("edit/rename", diagnostic.Hint!, StringComparison.Ordinal);
     }
 
     [Fact]

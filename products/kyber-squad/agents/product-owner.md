@@ -11,7 +11,7 @@ capability-profile: product-planning
 # is now primary, and validation rejects a Devin profile on a primary agent: Devin lowers a
 # primary to a skill, and a Devin skill carries no `allowed-tools`. The lowered entry point is
 # the canonical `product-owner` skill, so the profile has nothing left to widen.
-copilot-tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, agent, edit/createFile, edit/editFiles, edit/rename, search, vscodeGeneral/rename, vscodeGeneral/toolSearch, web, todo, "codegraph/*", "kyber-weave/*", "context7/*"]
+copilot-tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, "codegraph/*", "kyber-weave/*", "context7/resolve-library-id", "context7/query-docs", search, edit/createFile, edit/editFiles, edit/rename, web, agent]
 # Kept because the loaded skill still delegates: the requirements phase hands external facts
 # to research-agent "when available". The roster is what makes that reachable while this
 # wrapper runs as the enforced subagent, and clearing it would widen rather than narrow the

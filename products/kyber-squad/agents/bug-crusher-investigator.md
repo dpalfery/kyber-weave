@@ -5,7 +5,7 @@ description: "Diagnoses a reported defect: reproduces the failure, finds root ca
 invocation: subagent
 model-profile: deep-planning
 capability-profile: investigator
-copilot-tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, search, vscodeTasks/createAndRunTask, vscodeTasks/runTask, vscodeTasks/getTaskOutput, vscodeTasks/problems, vscodeGeneral/toolSearch, vscodeGeneral/testFailure, web, todo, "codegraph/*", "kyber-weave/*", "context7/*"]
+copilot-tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, "codegraph/*", "kyber-weave/*", "context7/resolve-library-id", "context7/query-docs", search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, web]
 delegates-to: []
 fallback: role-skill
 aliases: []

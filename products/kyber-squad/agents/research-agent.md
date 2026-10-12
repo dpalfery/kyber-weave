@@ -5,7 +5,7 @@ description: "Finds and verifies authoritative external technical facts: vendor 
 invocation: subagent
 model-profile: fast
 capability-profile: read-only
-copilot-tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, search, vscodeGeneral/toolSearch, web, todo, "codegraph/*", "kyber-weave/*", "context7/*"]
+copilot-tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, "codegraph/*", "kyber-weave/*", "context7/resolve-library-id", "context7/query-docs", search, web]
 delegates-to: []
 fallback: role-skill
 aliases: []

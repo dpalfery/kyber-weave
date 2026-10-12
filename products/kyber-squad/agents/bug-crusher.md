@@ -5,7 +5,7 @@ description: "Triage and fix one concrete defect: a failing test, a build or com
 invocation: primary
 model-profile: fast
 capability-profile: root-fixer
-copilot-tools: [vscode, tool_search, read, todo, codegraph/*, kyber-weave/*, context7/*, search, execute, edit, agent]
+copilot-tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, "codegraph/*", "kyber-weave/*", "context7/resolve-library-id", "context7/query-docs", search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename, agent]
 # The skill dispatches bug-crusher-investigator as its first act on every defect, so the
 # roster has to permit it. `root-fixer` grants `delegate` for exactly this; the roster is
 # what keeps the grant scoped to the one agent the skill names.

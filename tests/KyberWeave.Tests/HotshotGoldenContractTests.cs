@@ -65,20 +65,19 @@ public sealed partial class HotshotGoldenContractTests
     private static readonly string[] ModelEvolvedAgentIdentities =
     [
         "azure-reader",       // fast: GPT-5.6 Luna → MAI-Code-1.1-Flash (copilot)
-        "bug-crusher-investigator", // deep-planning: GPT-5.6 Sol → GPT-6.1 Sol (copilot)
-        "code-reviewer",      // reviewer: Grok 4.5 → Grok 4.7 (copilot)
+        "code-reviewer",      // reviewer: Grok 4.5 → Gemini 3.8 Flash (copilot)
         "csharp-dev",         // fast: GPT-5.6 Luna → MAI-Code-1.1-Flash (copilot)
-        "dal-dev",            // general: Grok 4.5 → Claude Haiku 5.5 (copilot)
+        "dal-dev",            // general: Grok 4.5 → Grok 4.7 (copilot)
         "docs-dev",           // fast: GPT-5.6 Luna → MAI-Code-1.1-Flash (copilot)
-        "github-devops",      // general: Grok 4.5 → Claude Haiku 5.5 (copilot)
+        "github-devops",      // general: Grok 4.5 → Grok 4.7 (copilot)
         "maui-dev",           // fast: GPT-5.6 Luna → MAI-Code-1.1-Flash (copilot)
-        "pulumi-dev",         // general: Grok 4.5 → Claude Haiku 5.5 (copilot)
+        "pulumi-dev",         // general: Grok 4.5 → Grok 4.7 (copilot)
         "python-dev",         // fast: GPT-5.6 Luna → MAI-Code-1.1-Flash (copilot)
         "react-dev",          // fast: GPT-5.6 Luna → MAI-Code-1.1-Flash (copilot)
         "research-agent",     // fast: GPT-5.6 Luna → MAI-Code-1.1-Flash (copilot)
-        "review-lens",        // reviewer: Grok 4.5 → Grok 4.7 (copilot)
-        "review-triage",      // reviewer: GPT-5.6 Luna → Grok 4.7 (copilot)
-        "tauri-dev"           // general: Grok 4.5 → Claude Haiku 5.5 (copilot)
+        "review-lens",        // reviewer: Grok 4.5 → Gemini 3.8 Flash (copilot)
+        "review-triage",      // reviewer: GPT-5.6 Luna → Gemini 3.8 Flash (copilot)
+        "tauri-dev"           // general: Grok 4.5 → Grok 4.7 (copilot)
     ];
 
     private static readonly string[] EvolvedSkillIdentities =
@@ -755,6 +754,11 @@ public sealed partial class HotshotGoldenContractTests
     /// </summary>
     private static string CollapseGranularCopilotTool(string tool)
     {
+        if (tool.StartsWith("context7/", StringComparison.Ordinal))
+        {
+            return "context7/*";
+        }
+
         int slash = tool.IndexOf('/', StringComparison.Ordinal);
         if (slash < 0 || tool.EndsWith("/*", StringComparison.Ordinal))
         {

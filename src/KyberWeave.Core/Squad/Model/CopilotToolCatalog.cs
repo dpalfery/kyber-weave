@@ -9,28 +9,27 @@ namespace KyberWeave.Core.Squad.Model;
 /// </remarks>
 internal static class CopilotToolCatalog
 {
+    // Shared tools lead so every agent's tools list shares the longest possible prefix
+    // (prompt-cache friendly). Order: vscode, read, todo, MCP, search, execute, edit, web, agent.
+    // The coarse tool-set names at the end remain valid for agents not yet narrowed to
+    // explicit tools; they sort after every explicit entry.
     internal static IReadOnlyList<string> OrderedTools { get; } =
     [
-        "vscode",
-        "tool_search",
-        "read",
-        "todo",
-        "codegraph/*",
-        "kyber-weave/*",
-        "context7/*",
-        "search",
-        "execute",
-        "web",
-        "edit",
-        "agent",
-        "edit/createDirectory",
-        "edit/createFile",
-        "edit/editFiles",
-        "edit/rename",
-        "vscodeGeneral/rename",
         "vscode/runCommand",
         "vscode/toolSearch",
         "vscode/askQuestions",
+        "read/problems",
+        "read/readFile",
+        "read/viewImage",
+        "read/terminalSelection",
+        "read/terminalLastCommand",
+        "read/getTaskOutput",
+        "todo",
+        "codegraph/*",
+        "kyber-weave/*",
+        "context7/resolve-library-id",
+        "context7/query-docs",
+        "search",
         "execute/getTerminalOutput",
         "execute/killTerminal",
         "execute/sendToTerminal",
@@ -38,18 +37,18 @@ internal static class CopilotToolCatalog
         "execute/createAndRunTask",
         "execute/runInTerminal",
         "execute/testFailure",
-        "read/problems",
-        "read/readFile",
-        "read/viewImage",
-        "read/terminalSelection",
-        "read/terminalLastCommand",
-        "read/getTaskOutput",
-        "vscodeTasks/createAndRunTask",
-        "vscodeTasks/runTask",
-        "vscodeTasks/getTaskOutput",
-        "vscodeTasks/problems",
-        "vscodeGeneral/toolSearch",
-        "vscodeGeneral/testFailure"
+        "edit/createDirectory",
+        "edit/createFile",
+        "edit/editFiles",
+        "edit/rename",
+        "web",
+        "agent",
+        "vscode",
+        "tool_search",
+        "read",
+        "context7/*",
+        "execute",
+        "edit"
     ];
 
     internal static IReadOnlyDictionary<string, string?> RequiredCapabilities { get; } =
@@ -65,6 +64,8 @@ internal static class CopilotToolCatalog
             ["codegraph/*"] = "filesystem.read",
             ["kyber-weave/*"] = "filesystem.read",
             ["context7/*"] = "filesystem.read",
+            ["context7/resolve-library-id"] = "filesystem.read",
+            ["context7/query-docs"] = "filesystem.read",
             ["search"] = "filesystem.search",
             ["execute"] = "process.execute",
             ["web"] = "network.read",
@@ -74,7 +75,6 @@ internal static class CopilotToolCatalog
             ["edit/createFile"] = "filesystem.write",
             ["edit/editFiles"] = "filesystem.write",
             ["edit/rename"] = "filesystem.write",
-            ["vscodeGeneral/rename"] = "filesystem.write",
             ["vscode/runCommand"] = "process.execute",
             ["vscode/toolSearch"] = null,
             ["vscode/askQuestions"] = null,
@@ -90,13 +90,7 @@ internal static class CopilotToolCatalog
             ["read/viewImage"] = "filesystem.read",
             ["read/terminalSelection"] = "filesystem.read",
             ["read/terminalLastCommand"] = "filesystem.read",
-            ["read/getTaskOutput"] = "filesystem.read",
-            ["vscodeTasks/createAndRunTask"] = "process.execute",
-            ["vscodeTasks/runTask"] = "process.execute",
-            ["vscodeTasks/getTaskOutput"] = "process.execute",
-            ["vscodeTasks/problems"] = "filesystem.read",
-            ["vscodeGeneral/toolSearch"] = null,
-            ["vscodeGeneral/testFailure"] = "process.execute"
+            ["read/getTaskOutput"] = "filesystem.read"
         };
 
     internal static IReadOnlyList<string> Normalize(IEnumerable<string> tools)
