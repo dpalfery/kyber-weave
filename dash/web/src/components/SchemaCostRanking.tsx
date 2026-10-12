@@ -79,6 +79,8 @@ type DisplayTool = {
   /** Absent when the payload did not carry a resident cost — never coerced to 0. */
   cost?: number
   invoked: boolean
+  /** Absent when the payload carried no count — never coerced to 0 for an invoked tool. */
+  invocations?: number
 }
 
 const BUILTIN_LABEL = 'Built-in'
@@ -203,7 +205,14 @@ export function SchemaCostRanking({ schema, tools, onSelectTool, className }: Sc
     )
   }
 
-  const ranked = displayToolsOf(schema, tools)
+  const invocationsByName = new Map<string, number>()
+  for (const row of tools ?? []) {
+    if (typeof row.invocations === 'number') invocationsByName.set(row.name, row.invocations)
+  }
+  const ranked = displayToolsOf(schema, tools).map((tool) => {
+    const count = invocationsByName.get(tool.name) ?? (tool.invoked ? undefined : 0)
+    return count === undefined ? tool : { ...tool, invocations: count }
+  })
   const neverInvoked = neverInvokedOf(schema, ranked)
   const unusedCost = unusedResidentCost(schema, neverInvoked)
 
@@ -366,10 +375,19 @@ export function SchemaCostRanking({ schema, tools, onSelectTool, className }: Sc
                   <span className="shrink-0 text-tertiary-foreground">
                     {tool.server ?? BUILTIN_LABEL}
                   </span>
-                  {never && (
+                  {never ? (
                     <span className="shrink-0 rounded border border-amber-500/30 bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-300">
                       0 calls · never called
                     </span>
+                  ) : (
+                    tool.invocations !== undefined && (
+                      <span
+                        data-testid={`tool-calls-${tool.name}`}
+                        className="shrink-0 rounded border border-emerald-500/30 bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 dark:text-emerald-300"
+                      >
+                        {tool.invocations} {tool.invocations === 1 ? 'call' : 'calls'}
+                      </span>
+                    )
                   )}
                 </div>
                 <span className="shrink-0 font-semibold tabular-nums text-foreground">
