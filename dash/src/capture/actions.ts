@@ -9,6 +9,8 @@
 // The whole call runs under the capture mutex (D12) so two overlapping requests cannot
 // interleave their read-modify-write of a config file or the receipt.
 
+import { isDeepStrictEqual } from 'node:util'
+
 import { classifyFsError, type FsErrorReason } from './errno.js'
 import {
   DEFAULT_CAPTURE_ENDPOINT,
@@ -28,6 +30,14 @@ export type CaptureActionRequest = {
   action: 'enable' | 'disable'
   harnessId: string
   dryRun: boolean
+  /**
+   * Settings-only opt-in for disable with no receipt: remove only this
+   * harness's declared OTEL keys that are present, leaving every unrelated
+   * key alone. Defaults to false; the CLI never sets it.
+   */
+  removeUnreceiptedKeys?: boolean
+  /** Exact preview shown by Settings; the locked write refuses if it changed. */
+  expectedPreviewEvents?: CaptureEvent[]
   homeDir: string
   platform?: NodeJS.Platform
   appDataDir?: string
@@ -50,6 +60,24 @@ function refusalReason(events: readonly CaptureEvent[]): FsErrorReason {
   return refused?.reason ?? 'unreadable'
 }
 
+/**
+ * The client's read shape (`readEvent`/`readEvents` in `kyberApi.ts`): at most 64 events,
+ * each carrying at most 64 changes. The confirm echo is bounded to that shape, so the
+ * engine's fresh preview must be bounded the same way before comparison — otherwise a
+ * preview with more changes than the client keeps can never equal its own echo, and every
+ * confirm of a large preview ends in a spurious PREVIEW_CHANGED.
+ */
+const PREVIEW_EVENTS_MAX = 64
+const PREVIEW_CHANGES_MAX = 64
+
+function boundedPreviewEvents(events: readonly CaptureEvent[]): CaptureEvent[] {
+  return events.slice(0, PREVIEW_EVENTS_MAX).map((event) =>
+    event.changes === undefined
+      ? { ...event }
+      : { ...event, changes: event.changes.slice(0, PREVIEW_CHANGES_MAX) },
+  )
+}
+
 function outcomeOf(events: readonly CaptureEvent[], dryRun: boolean): CaptureActionOutcome {
   if (events.some((event) => event.kind === 'refused' || event.kind === 'error')) return 'refused'
   if (events.some((event) => event.kind === 'would-write' || event.kind === 'would-restore')) {
@@ -65,6 +93,33 @@ export async function runCaptureAction(request: CaptureActionRequest): Promise<C
   if (!CAPTURE_HARNESS_REGISTRY.some((writer) => writer.id === request.harnessId)) {
     throw new Error(`kyberdash capture: unknown harness "${request.harnessId}"`)
   }
+  if (
+    request.action === 'disable' &&
+    request.removeUnreceiptedKeys === true &&
+    !request.dryRun &&
+    request.expectedPreviewEvents === undefined
+  ) {
+    return {
+      outcome: 'refused',
+      reason: 'drift',
+      events: [
+        {
+          kind: 'refused',
+          harness: request.harnessId,
+          fileId: 'preview',
+          path: '',
+          reason: 'drift',
+          code: 'PREVIEW_REQUIRED',
+        },
+      ],
+    }
+  }
+  if (
+    request.expectedPreviewEvents !== undefined &&
+    (request.action !== 'disable' || request.removeUnreceiptedKeys !== true || request.dryRun)
+  ) {
+    throw new Error('kyberdash capture: expected preview events are only valid on a confirmed Settings disable')
+  }
   const endpoint = request.endpoint ?? DEFAULT_CAPTURE_ENDPOINT
   // The probe is read-only and only feeds text this front door discards, so it runs before
   // the lock: overlapping requests probe side by side instead of queueing N round trips
@@ -74,10 +129,10 @@ export async function runCaptureAction(request: CaptureActionRequest): Promise<C
     : undefined
   return withCaptureLock(async () => {
     try {
-      const result = await runCapture(request.action, {
+      const runOptions = {
         ...(receiverProbe === undefined ? {} : { receiverProbe }),
         harnessIds: [request.harnessId],
-        dryRun: request.dryRun,
+        removeUnreceiptedKeys: request.removeUnreceiptedKeys,
         homeDir: request.homeDir,
         endpoint,
         ...(request.platform === undefined ? {} : { platform: request.platform }),
@@ -85,6 +140,54 @@ export async function runCaptureAction(request: CaptureActionRequest): Promise<C
         ...(request.fetchHealth === undefined ? {} : { fetchHealth: request.fetchHealth }),
         ...(request.probeTimeoutMs === undefined ? {} : { probeTimeoutMs: request.probeTimeoutMs }),
         ...(request.fileFilter === undefined ? {} : { fileFilter: request.fileFilter }),
+      }
+      if (request.expectedPreviewEvents !== undefined) {
+        const preview = await runCapture('disable', { ...runOptions, dryRun: true })
+        if (preview.exitCode !== 0 && preview.events.length === 0) {
+          // The preview run failed before it could describe anything (a usage failure
+          // such as a bad endpoint). That is neither drift nor an unreadable config, so
+          // name it rather than let the empty event list wear the 'unreadable' costume
+          // and report "config could not be read" for a config nobody read.
+          return {
+            outcome: 'refused',
+            reason: 'unreadable',
+            events: [
+              {
+                kind: 'refused',
+                harness: request.harnessId,
+                fileId: 'preview',
+                path: '',
+                reason: 'unreadable',
+                code: 'PREVIEW_UNAVAILABLE',
+              },
+            ],
+          }
+        }
+        if (
+          preview.exitCode !== 0 ||
+          !isDeepStrictEqual(boundedPreviewEvents(preview.events), request.expectedPreviewEvents)
+        ) {
+          const events = [...preview.events]
+          if (preview.exitCode === 0) {
+            events.push({
+              kind: 'refused',
+              harness: request.harnessId,
+              fileId: 'preview',
+              path: '',
+              reason: 'drift',
+              code: 'PREVIEW_CHANGED',
+            })
+          }
+          return {
+            outcome: 'refused',
+            reason: refusalReason(events),
+            events,
+          }
+        }
+      }
+      const result = await runCapture(request.action, {
+        ...runOptions,
+        dryRun: request.dryRun,
       })
       // A usage failure (bad endpoint, unknown harness) exits non-zero with no events: no
       // event can say it, so it must not fall through to a serene `noop`.

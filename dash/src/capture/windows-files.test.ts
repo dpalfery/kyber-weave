@@ -11,7 +11,7 @@ import { dirname, join } from 'node:path'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { applyJsonEdits, readJsonKeys, revertJsonEdits } from './edit-json.js'
+import { applyJsonEdits, jsonParseRefusal, readJsonKeys, revertJsonEdits } from './edit-json.js'
 import { runCapture } from './index.js'
 import type { CaptureHarnessWriter } from './harnesses/registry.js'
 
@@ -54,6 +54,13 @@ function makeHome(): string {
 function expectCrlfOnly(text: string): void {
   expect(text).toContain('\r\n')
   expect(text.replace(/\r\n/g, '')).not.toMatch(/[\r\n]/)
+}
+
+/** The numeric offset named by a `did not parse at offset N` refusal. */
+function refusalOffset(refusal: string): number {
+  const match = /at offset (\d+)/.exec(refusal)
+  expect(match).not.toBeNull()
+  return Number((match as RegExpExecArray)[1])
 }
 
 function seedWindowsFile(path: string, content: string): Buffer {
@@ -122,6 +129,20 @@ describe('edit-json with Windows-authored documents (BOM + CRLF)', () => {
     expect(reverted.drift).toEqual([])
     expect(reverted.changed).toBe(true)
     expect(reverted.content).toBe(JSONC_INITIAL)
+  })
+
+  it('reports a parse-fault offset in the original content, not the BOM-stripped body', () => {
+    // The parse runs on the BOM-stripped body, so a raw jsonc-parser offset would
+    // name a position one character left of the fault in a BOM'd file — the very
+    // files this path exists to handle. The refusal must re-base onto the content
+    // the operator is looking at, where the BOM occupies the first character.
+    const broken = '{\r\n  "theme": "dark",\r\n'
+    const bare = jsonParseRefusal(broken)
+    const bommed = jsonParseRefusal(UTF8_BOM + broken)
+
+    expect(bare).toMatch(/at offset \d+/)
+    expect(bommed).toMatch(/at offset \d+/)
+    expect(refusalOffset(bommed as string)).toBe(refusalOffset(bare as string) + 1)
   })
 })
 

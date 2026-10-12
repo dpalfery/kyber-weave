@@ -21,7 +21,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 
 import { runCaptureAction, type CaptureActionResult } from '../capture/actions.js'
 import { CAPTURE_HARNESS_REGISTRY } from '../capture/harnesses/registry.js'
-import { DEFAULT_CAPTURE_ENDPOINT } from '../capture/index.js'
+import { DEFAULT_CAPTURE_ENDPOINT, type CaptureEvent } from '../capture/index.js'
 import { probeReceiver, type HealthFetcher } from '../capture/probe.js'
 import {
   buildCaptureStatus,
@@ -95,19 +95,85 @@ async function receiverView(
   return { hosted, liveness: probe.state, detail: probe.detail }
 }
 
-type CaptureRequest = { action: 'enable' | 'disable'; harness: string; dryRun: boolean }
+type CaptureRequest = {
+  action: 'enable' | 'disable'
+  harness: string
+  dryRun: boolean
+  removeUnreceiptedKeys: boolean
+  expectedPreviewEvents?: CaptureEvent[]
+}
 
-/** Exactly `{ action, harness, dryRun }`: every key required, none extra, a managed harness only. */
+function isPreviewEvents(value: unknown): value is CaptureEvent[] {
+  if (!Array.isArray(value) || value.length > 64) return false
+  return value.every((item) => {
+    if (typeof item !== 'object' || item === null || Array.isArray(item)) return false
+    const event = item as Record<string, unknown>
+    if (Object.keys(event).some((key) => !['kind', 'harness', 'fileId', 'path', 'changes'].includes(key))) return false
+    if (!['would-restore', 'noop'].includes(String(event['kind']))) return false
+    if (
+      typeof event['harness'] !== 'string' ||
+      typeof event['fileId'] !== 'string' ||
+      typeof event['path'] !== 'string'
+    ) return false
+    if (event['changes'] === undefined) return true
+    // Bounded at the same 64 the client keeps (`CAPTURE_MAX_CHANGES` in kyberApi.ts).
+    // A larger bound here would accept an echo the client cannot produce, while the
+    // engine's own preview could still carry more — see the comparison in actions.ts.
+    if (!Array.isArray(event['changes']) || event['changes'].length > 64) return false
+    return event['changes'].every((change) => {
+      if (typeof change !== 'object' || change === null || Array.isArray(change)) return false
+      const values = change as Record<string, unknown>
+      if (Object.keys(values).some((key) => !['key', 'before', 'after'].includes(key))) return false
+      if (typeof values['key'] !== 'string') return false
+      return ['before', 'after'].every((key) => {
+        const value = values[key]
+        return value === undefined || value === null || ['string', 'number', 'boolean'].includes(typeof value)
+      })
+    })
+  })
+}
+
+/**
+ * Exactly `{ action, harness, dryRun }`, plus the optional Settings-only
+ * removal opt-in and its exact preview on a confirmed disable. No other
+ * fields are accepted, and the harness must be managed.
+ */
 function parseCaptureRequest(body: Record<string, unknown>): CaptureRequest | undefined {
-  const keys = Object.keys(body).sort()
-  if (keys.length !== 3 || keys[0] !== 'action' || keys[1] !== 'dryRun' || keys[2] !== 'harness') {
-    return undefined
+  const { action, harness, dryRun, removeUnreceiptedKeys, expectedPreviewEvents } = body
+  for (const key of Object.keys(body)) {
+    if (
+      key !== 'action' &&
+      key !== 'dryRun' &&
+      key !== 'harness' &&
+      key !== 'removeUnreceiptedKeys' &&
+      key !== 'expectedPreviewEvents'
+    ) {
+      return undefined
+    }
   }
-  const { action, harness, dryRun } = body
   if (action !== 'enable' && action !== 'disable') return undefined
   if (typeof harness !== 'string' || !MANAGED_IDS.includes(harness)) return undefined
   if (typeof dryRun !== 'boolean') return undefined
-  return { action, harness, dryRun }
+  if (removeUnreceiptedKeys !== undefined && removeUnreceiptedKeys !== true && removeUnreceiptedKeys !== false) {
+    return undefined
+  }
+  // The opt-in only ever authorizes a disable to remove manually-set keys;
+  // any other combination is rejected rather than silently ignored.
+  if (removeUnreceiptedKeys === true && action !== 'disable') return undefined
+  if (expectedPreviewEvents !== undefined) {
+    if (removeUnreceiptedKeys !== true || action !== 'disable' || dryRun || !isPreviewEvents(expectedPreviewEvents)) {
+      return undefined
+    }
+  } else if (removeUnreceiptedKeys === true && action === 'disable' && !dryRun) {
+    return undefined
+  }
+  return {
+    action,
+    harness,
+    dryRun,
+    removeUnreceiptedKeys: removeUnreceiptedKeys === true,
+    ...(expectedPreviewEvents === undefined ? {} : { expectedPreviewEvents }),
+  }
 }
 
 const REFUSAL_WORDING: Record<string, string> = {
@@ -119,6 +185,15 @@ const REFUSAL_WORDING: Record<string, string> = {
 }
 
 function refusalMessage(request: CaptureRequest, result: CaptureActionResult): string {
+  // PREVIEW_REQUIRED is not handled here: `parseCaptureRequest` rejects a confirm that
+  // omits its preview as a malformed request (400) before this runs, so the 409 wording
+  // would be unreachable. The action layer still raises it for direct callers.
+  if (result.events.some((event) => event.code === 'PREVIEW_CHANGED')) {
+    return `disable refused: ${request.harness} settings changed since preview; no files were changed`
+  }
+  if (result.events.some((event) => event.code === 'PREVIEW_UNAVAILABLE')) {
+    return `disable refused: ${request.harness} preview could not be produced; no files were changed`
+  }
   const partial = result.events.some((event) => event.kind === 'wrote' || event.kind === 'restored')
   if (partial) {
     return `${request.action} refused: ${request.harness} stopped partway; some files were already changed`
@@ -155,6 +230,8 @@ async function answerPost(
     action: request.action,
     harnessId: request.harness,
     dryRun: request.dryRun,
+    removeUnreceiptedKeys: request.removeUnreceiptedKeys,
+    ...(request.expectedPreviewEvents === undefined ? {} : { expectedPreviewEvents: request.expectedPreviewEvents }),
     homeDir: settings.homeDir,
     platform: ctx.env.platform,
     ...(settings.appDataDir === undefined ? {} : { appDataDir: settings.appDataDir }),

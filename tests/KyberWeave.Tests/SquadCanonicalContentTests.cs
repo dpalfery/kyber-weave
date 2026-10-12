@@ -76,7 +76,7 @@ public sealed class SquadCanonicalContentTests
     /// Review-council workers are canonical-only roles and are deliberately excluded from
     /// Hotshot migration provenance.
     /// </summary>
-    private static readonly string[] ExpectedNewAgents = ["review-lens", "review-triage"];
+    private static readonly string[] ExpectedNewAgents = ["bug-crusher", "review-lens", "review-triage"];
 
     private static readonly string[] ExpectedAgents =
         [.. ExpectedMigratedAgents.Concat(ExpectedNewAgents).Order(StringComparer.Ordinal)];
@@ -109,8 +109,15 @@ public sealed class SquadCanonicalContentTests
         "test-dev"
     ];
 
+    /// <summary>
+    /// Every identity carried by both an agent and a canonical skill. `product-owner` and
+    /// `bug-crusher` are the primary shared identities (thin wrappers reusing the canonical
+    /// skill as their entry point); the rest are distinct-body collisions lowered to a
+    /// role-prefixed skill on a fallback target.
+    /// </summary>
     private static readonly string[] ExpectedAgentSkillIntersections =
     [
+        "bug-crusher",
         "csharp-dev",
         "dal-dev",
         "github-devops",
@@ -120,16 +127,24 @@ public sealed class SquadCanonicalContentTests
         "test-dev"
     ];
 
+    /// <summary>
+    /// The intersections whose agent and skill bodies differ AND are not declared shared
+    /// identities, so a fallback target must project the agent to <c>role-&lt;name&gt;</c>.
+    /// The two primary shared identities are excluded: their canonical skill is the entry point,
+    /// so no role-prefixed duplicate is generated.
+    /// </summary>
     private static readonly string[] DistinctBodyAgentSkillCollisions =
     [
         "csharp-dev",
         "dal-dev",
         "github-devops",
         "maui-dev",
-        "product-owner",
         "python-dev",
         "test-dev"
     ];
+
+    /// <summary>The primary shared identities declared by the <c>role-skill</c> profile.</summary>
+    private static readonly string[] ExpectedSharedIdentities = ["bug-crusher", "product-owner"];
 
     private static readonly IReadOnlyDictionary<string, string> ExpectedBaselines =
         ExpectedMigratedAgents.ToDictionary(
@@ -182,7 +197,7 @@ public sealed class SquadCanonicalContentTests
         Assert.Equal("reuse-skill", profile.SharedIdentity);
         Assert.Equal("role-prefixed-agent-name", profile.CollisionIdentity);
         Assert.Equal("role-", profile.Prefix);
-        Assert.Empty(profile.SharedIdentities);
+        Assert.Equal(ExpectedSharedIdentities, profile.SharedIdentities.Order(StringComparer.Ordinal));
     }
 
     [Fact]
@@ -219,7 +234,11 @@ public sealed class SquadCanonicalContentTests
 
         Assert.Single(source.Agents, agent => agent.Name == "conductor");
         Assert.DoesNotContain(source.Skills, skill => skill.Name == "conductor");
-        Assert.Empty(source.FallbackProfiles.Profiles["role-skill"].SharedIdentities);
+        // conductor is unoccupied; the declared shared identities are the two root wrappers,
+        // each of which is a primary agent reusing its canonical skill as the entry point.
+        Assert.Equal(
+            ExpectedSharedIdentities,
+            source.FallbackProfiles.Profiles["role-skill"].SharedIdentities.Order(StringComparer.Ordinal));
     }
 
     [Fact]
@@ -388,11 +407,11 @@ public sealed class SquadCanonicalContentTests
 
         Assert.DoesNotContain("ask, verbatim", productOwner.InstructionBody, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("GATE 1", productOwner.InstructionBody, StringComparison.Ordinal);
-        Assert.Contains("Invoke the `product-owner` skill", productOwner.InstructionBody, StringComparison.Ordinal);
-        Assert.Contains(
-            "initialize the file via shell (for example, `touch <file>`) before editing.",
-            productOwner.InstructionBody,
-            StringComparison.Ordinal);
+        // The root agent is a thin wrapper: the role contract lives in the canonical skill, and
+        // the agent body only points at it. Both facts are pinned so the wrapper cannot quietly
+        // grow a second copy of the role.
+        Assert.Contains("Load the `product-owner` skill", productOwner.InstructionBody, StringComparison.Ordinal);
+        Assert.DoesNotContain("STATUS: PHASE_APPROVED", productOwner.InstructionBody, StringComparison.Ordinal);
         Assert.Empty(productOwner.Resources);
         SquadSkill productOwnerSkill = Assert.Single(source.Skills, skill => skill.Name == "product-owner");
         SquadResource specAuthoring = Assert.Single(

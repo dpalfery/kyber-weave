@@ -31,11 +31,13 @@ describe('shared settings: storage keys', () => {
     writeSetting(store, SETTING_KEYS.jobsPaused, 'on')
     writeSetting(store, SETTING_KEYS.refreshCadenceMinutes, 30)
     writeSetting(store, SETTING_KEYS.receiverHosted, 'on')
+    writeSetting(store, SETTING_KEYS.dashboardPort, 4848)
 
     expect(store.getMetadata('settings.folder_import.scheduled')).toBe('on')
     expect(store.getMetadata('settings.jobs.paused')).toBe('on')
     expect(store.getMetadata('settings.jobs.refresh_cadence_minutes')).toBe('30')
     expect(store.getMetadata('settings.receiver.hosted')).toBe('on')
+    expect(store.getMetadata('settings.dashboard.port')).toBe('4848')
   })
 })
 
@@ -47,6 +49,7 @@ describe('shared settings: defaults', () => {
     expect(readSetting(store, SETTING_KEYS.jobsPaused)).toBe('off')
     expect(readSetting(store, SETTING_KEYS.refreshCadenceMinutes)).toBe(5)
     expect(readSetting(store, SETTING_KEYS.receiverHosted)).toBe('off')
+    expect(readSetting(store, SETTING_KEYS.dashboardPort)).toBe(4747)
   })
 })
 
@@ -72,6 +75,16 @@ describe('shared settings: round trip', () => {
     writeSetting(store, SETTING_KEYS.refreshCadenceMinutes, 1440)
     expect(readSetting(store, SETTING_KEYS.refreshCadenceMinutes)).toBe(1440)
   })
+
+  it('round-trips a dashboard port at both ends of its range', () => {
+    const store = openStore()
+
+    writeSetting(store, SETTING_KEYS.dashboardPort, 1)
+    expect(readSetting(store, SETTING_KEYS.dashboardPort)).toBe(1)
+
+    writeSetting(store, SETTING_KEYS.dashboardPort, 65535)
+    expect(readSetting(store, SETTING_KEYS.dashboardPort)).toBe(65535)
+  })
 })
 
 describe('shared settings: validation on write', () => {
@@ -84,6 +97,21 @@ describe('shared settings: validation on write', () => {
       expect(() => writeSetting(store, SETTING_KEYS.refreshCadenceMinutes, minutes)).toThrow()
 
       expect(readSetting(store, SETTING_KEYS.refreshCadenceMinutes)).toBe(15)
+    },
+  )
+
+  // 0 is refused even though it binds ("pick a free port"): a persisted 0 would land
+  // every later startup somewhere unannounced, which is the silent-fallback defect the
+  // dashboard port setting exists to end.
+  it.each([0, -1, 65536, 47.5, Number.NaN, Number.POSITIVE_INFINITY])(
+    'rejects dashboard port %s and leaves the stored value unchanged',
+    (port) => {
+      const store = openStore()
+      writeSetting(store, SETTING_KEYS.dashboardPort, 4848)
+
+      expect(() => writeSetting(store, SETTING_KEYS.dashboardPort, port)).toThrow()
+
+      expect(readSetting(store, SETTING_KEYS.dashboardPort)).toBe(4848)
     },
   )
 
@@ -141,6 +169,16 @@ describe('shared settings: fail-closed reads of malformed stored values', () => 
       expect(readSetting(store, SETTING_KEYS.refreshCadenceMinutes)).toBe(5)
     },
   )
+
+  it.each(['0', '65536', '-1', '47.5', 'eighty', '', 'NaN'])(
+    'reads a stored dashboard port of %j as 4747',
+    (raw) => {
+      const store = openStore()
+      store.setMetadata('settings.dashboard.port', raw)
+
+      expect(readSetting(store, SETTING_KEYS.dashboardPort)).toBe(4747)
+    },
+  )
 })
 
 describe('shared settings: survive a wipe-all', () => {
@@ -150,6 +188,7 @@ describe('shared settings: survive a wipe-all', () => {
     writeSetting(store, SETTING_KEYS.jobsPaused, 'on')
     writeSetting(store, SETTING_KEYS.refreshCadenceMinutes, 60)
     writeSetting(store, SETTING_KEYS.receiverHosted, 'on')
+    writeSetting(store, SETTING_KEYS.dashboardPort, 4848)
 
     store.wipeAll()
 
@@ -157,5 +196,6 @@ describe('shared settings: survive a wipe-all', () => {
     expect(readSetting(store, SETTING_KEYS.jobsPaused)).toBe('on')
     expect(readSetting(store, SETTING_KEYS.refreshCadenceMinutes)).toBe(60)
     expect(readSetting(store, SETTING_KEYS.receiverHosted)).toBe('on')
+    expect(readSetting(store, SETTING_KEYS.dashboardPort)).toBe(4848)
   })
 })

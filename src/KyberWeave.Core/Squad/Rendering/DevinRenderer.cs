@@ -224,6 +224,12 @@ public sealed class DevinRenderer : ISquadRenderer
             .SelectMany(profile => profile.SharedIdentities)
             .ToHashSet(StringComparer.Ordinal);
 
+        // A subagent shared identity is suppressed because the agent file carries the identical
+        // body; a primary shared identity is the thin wrapper whose canonical skill IS the entry
+        // point, so suppressing it would leave the wrapper pointing at nothing.
+        HashSet<string> suppressedSkillIdentities =
+            SquadSharedIdentityProjection.SuppressedSkillIdentities(source, sharedIdentities);
+
         // Read upfront so the primary-agent fail-closed check can see whether a canonical
         // skill already occupies the lowered identity, whichever loop reaches it first.
         HashSet<string> skillIdentities = source.Skills
@@ -266,6 +272,20 @@ public sealed class DevinRenderer : ISquadRenderer
             {
                 if (skillIdentities.Contains(agent.Name))
                 {
+                    if (sharedIdentities.Contains(agent.Name))
+                    {
+                        // The canonical skill is the entry point and is emitted by the skill
+                        // loop, so no lowered skill is emitted here; one identity, one
+                        // projection.
+                        degradations.AddRange(BuildPrimaryAgentDegradations(
+                            agent,
+                            fallbackProfile,
+                            source.CapabilityProfiles.Profiles,
+                            capabilityVocabulary,
+                            reusedCanonicalSkill: true));
+                        continue;
+                    }
+
                     throw new SquadRenderValidationException(
                         $"Cannot lower primary agent '{agent.Name}' to a Devin skill: a canonical " +
                         $"skill named '{agent.Name}' already occupies that identity. Devin keeps " +
@@ -311,8 +331,9 @@ public sealed class DevinRenderer : ISquadRenderer
         foreach (SquadSkill skill in source.Skills)
         {
             // A profile-declared shared identity has one canonical projection, per the same
-            // rule ClaudeRenderer follows.
-            if (sharedIdentities.Contains(skill.Name))
+            // rule ClaudeRenderer follows. A primary shared identity is the exception: its
+            // canonical skill is the entry point and must be emitted.
+            if (suppressedSkillIdentities.Contains(skill.Name))
             {
                 continue;
             }
@@ -567,8 +588,14 @@ public sealed class DevinRenderer : ISquadRenderer
         SquadAgent agent,
         SquadFallbackProfile fallbackProfile,
         IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
-        IReadOnlyList<string> capabilityVocabulary)
+        IReadOnlyList<string> capabilityVocabulary,
+        bool reusedCanonicalSkill = false)
     {
+        string projectionText = reusedCanonicalSkill
+            ? "this agent reuses the same-name canonical skill as its entry point, because the " +
+                "canonical skill already occupies that identity; no separate lowered skill is emitted"
+            : "this agent renders as a Devin skill instead of a '.devin/agents/' profile";
+
         yield return new SquadDegradationRecord(
             Target: TargetToken,
             CanonicalIdentity: agent.Name,
@@ -578,7 +605,7 @@ public sealed class DevinRenderer : ISquadRenderer
             Details: "Devin has no primary-agent primitive: Devin Local is the only top-level " +
                 "agent, and a custom profile is always dispatched as a subagent. Fallback profile " +
                 $"'{agent.Fallback}' declares no-primary-agent: {fallbackProfile.NoPrimaryAgent}, " +
-                "so this agent renders as a Devin skill instead of a '.devin/agents/' profile.");
+                "so " + projectionText + ".");
 
         string rosterText = agent.DelegatesTo.Count > 0
             ? string.Join(", ", agent.DelegatesTo)

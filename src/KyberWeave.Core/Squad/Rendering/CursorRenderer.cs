@@ -112,6 +112,12 @@ public sealed class CursorRenderer : ISquadRenderer
             .SelectMany(profile => profile.SharedIdentities)
             .ToHashSet(StringComparer.Ordinal);
 
+        // A subagent shared identity is suppressed because the agent file carries the identical
+        // body; a primary shared identity is the thin wrapper whose canonical skill IS the entry
+        // point, so suppressing it would leave the wrapper pointing at nothing.
+        HashSet<string> suppressedSkillIdentities =
+            SquadSharedIdentityProjection.SuppressedSkillIdentities(source, sharedIdentities);
+
         // Read upfront so the primary-agent fail-closed check can see whether a
         // canonical skill already occupies the lowered identity before any file is built,
         // regardless of which loop encounters the collision first.
@@ -153,6 +159,20 @@ public sealed class CursorRenderer : ISquadRenderer
             {
                 if (skillIdentities.Contains(agent.Name))
                 {
+                    if (sharedIdentities.Contains(agent.Name))
+                    {
+                        // The canonical skill is the entry point and is emitted by the skill
+                        // loop, so no lowered skill is emitted here; one identity, one
+                        // projection.
+                        degradations.Add(BuildPrimaryAgentDegradation(
+                            agent,
+                            fallbackProfile,
+                            source.CapabilityProfiles.Profiles,
+                            capabilityVocabulary,
+                            reusedCanonicalSkill: true));
+                        continue;
+                    }
+
                     throw new SquadRenderValidationException(
                         $"Cannot lower primary agent '{agent.Name}' to a Cursor skill: a canonical " +
                         $"skill named '{agent.Name}' already occupies that identity. Cursor has " +
@@ -197,8 +217,9 @@ public sealed class CursorRenderer : ISquadRenderer
         {
             // A profile-declared shared identity has one canonical projection. Resolve the
             // set from source so removing or adding a shared identity never requires a
-            // renderer-local roster change.
-            if (sharedIdentities.Contains(skill.Name))
+            // renderer-local roster change. A primary shared identity is the exception: its
+            // canonical skill is the entry point and must be emitted.
+            if (suppressedSkillIdentities.Contains(skill.Name))
             {
                 continue;
             }
@@ -376,11 +397,17 @@ public sealed class CursorRenderer : ISquadRenderer
         SquadAgent agent,
         SquadFallbackProfile fallbackProfile,
         IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
-        IReadOnlyList<string> capabilityVocabulary)
+        IReadOnlyList<string> capabilityVocabulary,
+        bool reusedCanonicalSkill = false)
     {
         string rosterText = agent.DelegatesTo.Count > 0
             ? string.Join(", ", agent.DelegatesTo)
             : "(none declared)";
+
+        string projectionText = reusedCanonicalSkill
+            ? "this agent reuses the same-name canonical skill as its entry point, because the " +
+                "canonical skill already occupies that identity; no separate agent file is emitted"
+            : "this agent renders as a top-level Cursor skill instead of a '.cursor/agents/' file";
 
         return new SquadDegradationRecord(
             Target: "cursor",
@@ -389,9 +416,8 @@ public sealed class CursorRenderer : ISquadRenderer
             Code: "permission-not-expressible",
             InstructionDigest: agent.BodyDigest,
             Details: "Cursor has no primary-agent selection primitive, so fallback profile " +
-            $"'{agent.Fallback}' declares no-primary-agent: {fallbackProfile.NoPrimaryAgent} " +
-            "and this agent renders as a top-level Cursor skill instead of a " +
-            "'.cursor/agents/' file. Capability decisions " +
+            $"'{agent.Fallback}' declares no-primary-agent: {fallbackProfile.NoPrimaryAgent} and " +
+            projectionText + ". Capability decisions " +
             $"({CapabilityDegradations.DescribeCapabilityDecisions(agent, capabilityProfiles, capabilityVocabulary)}) " +
             "are not enforced: a top-level Cursor skill runs under the harness default tool " +
             "set, not the canonical capability lattice, and its delegates-to roster " +

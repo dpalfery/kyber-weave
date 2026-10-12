@@ -5,7 +5,7 @@ description: "Designs SQL Server / Azure SQL schema: tables, T-SQL, indexing, se
 invocation: subagent
 model-profile: deep-planning
 capability-profile: worker
-copilot-tools: [vscode, execute, read, codegraph/*, kyber-weave/*, context7/*, edit, search, todo]
+copilot-tools: [vscode, tool_search, execute, read, codegraph/*, kyber-weave/*, context7/*, edit, search, todo]
 delegates-to: []
 fallback: role-skill
 aliases: []

@@ -102,6 +102,15 @@ public sealed partial class HotshotGoldenContractTests
     /// </summary>
     private static readonly string[] CanonicalOnlySkillIdentities = ["code-review-loop"];
 
+    /// <summary>
+    /// Agents authored in Kyber-Squad have no Hotshot baseline, so the golden manifest cannot
+    /// name them. <c>bug-crusher</c> is the root wrapper for the pre-existing <c>bug-crusher</c>
+    /// skill ([ADR 0036](../adr/0036-primary-agent-canonical-skill-entry-point.md)); like a
+    /// canonical-only skill it adds a canonical identity the golden tree never had, without
+    /// altering historical golden bytes.
+    /// </summary>
+    private static readonly string[] CanonicalOnlyAgentIdentities = ["bug-crusher"];
+
     private static readonly string[] RetiredAgentIdentities =
     [
         "architect-v3",
@@ -128,6 +137,16 @@ public sealed partial class HotshotGoldenContractTests
         "edit/rename",
         "vscodeGeneral/rename"
     ];
+
+    /// <summary>
+    /// Copilot tools added to the catalog after the Hotshot golden snapshot. The manifest
+    /// above stays historical (SHA-pinned), so the render comparison strips these declared
+    /// additions from the actual tools before comparing: anything else added or removed
+    /// still mismatches. <c>tool_search</c> is Copilot's built-in tool-discovery tool
+    /// (upstream <c>ToolName.ToolSearch</c>, grouped under the vscode tool set); agents
+    /// with an explicit allow-list cannot discover tools without naming it.
+    /// </summary>
+    private static readonly string[] PostGoldenToolAdditions = ["tool_search"];
 
     private static readonly string[] ExpectedCollisionIdentities =
     [
@@ -276,6 +295,7 @@ public sealed partial class HotshotGoldenContractTests
         string[] expectedAgents = manifest.Agents
             .Select(entry => AgentName(entry.Path))
             .Except(RetiredAgentIdentities, StringComparer.Ordinal)
+            .Concat(CanonicalOnlyAgentIdentities)
             .Order(StringComparer.Ordinal)
             .ToArray();
         string[] expectedSkills = manifest.Skills
@@ -382,7 +402,14 @@ public sealed partial class HotshotGoldenContractTests
             .Intersect(source.Skills.Select(skill => skill.Name), StringComparer.Ordinal)
             .Order(StringComparer.Ordinal)
             .ToArray();
-        AddSequenceMismatch(mismatches, "canonical collision identities", ExpectedCollisionIdentities, actualCollisions);
+        // The golden list is the baseline intersection set; a canonical-only agent that also has a
+        // canonical skill adds one more intersection the golden tree never had.
+        string[] expectedCollisions = ExpectedCollisionIdentities
+            .Concat(CanonicalOnlyAgentIdentities.Where(name =>
+                source.Skills.Any(skill => string.Equals(skill.Name, name, StringComparison.Ordinal))))
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+        AddSequenceMismatch(mismatches, "canonical collision identities", expectedCollisions, actualCollisions);
 
         Assert.True(
             mismatches.Count == 0,
@@ -697,11 +724,19 @@ public sealed partial class HotshotGoldenContractTests
             {
                 HashSet<string> membership = RequireJsonStrings(expected, "tools").ToHashSet(StringComparer.Ordinal);
                 string[] normalizedTools = approvedToolOrder.Where(membership.Contains).ToArray();
+                // Post-golden catalog additions are a declared delta, not drift: strip them
+                // from the actual render before comparing, so any other membership change
+                // still mismatches. The addition itself is pinned per agent in
+                // CopilotRendererTests.RenderAsync_EmitsDeterministicCanonicalToolOrdering.
+                string[] actualTools = RequireYamlSequence(actualValue, "tools").Children
+                    .Select(RequireYamlScalar)
+                    .Where(tool => !PostGoldenToolAdditions.Contains(tool, StringComparer.Ordinal))
+                    .ToArray();
                 AddSequenceMismatch(
                     mismatches,
                     $"{path} tools",
                     normalizedTools,
-                    RequireYamlSequence(actualValue, "tools").Children.Select(RequireYamlScalar));
+                    actualTools);
                 continue;
             }
 
