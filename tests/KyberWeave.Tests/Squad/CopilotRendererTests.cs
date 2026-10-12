@@ -180,7 +180,7 @@ public sealed class CopilotRendererTests
     }
 
     [Theory]
-    [InlineData("architect", "tools: [vscode, tool_search, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, web, agent, edit/createDirectory, edit/createFile, edit/editFiles, edit/rename, vscodeGeneral/rename]")]
+    [InlineData("architect", "tools: [vscode, tool_search, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, edit, agent]")]
     [InlineData("azure-reader", "tools: [vscode, tool_search, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, web]")]
     [InlineData("bug-crusher", "tools: [vscode, tool_search, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, edit, agent]")]
     [InlineData("bug-crusher-investigator", "tools: [vscode, tool_search, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, web]")]

@@ -60,6 +60,13 @@ and the golden membership update (`PostGoldenToolAdditions` in the golden contra
 the SHA-pinned manifest itself stays historical) landed together, and every canonical
 agent declares it.
 
+Architect membership note (same date): the architect's `copilot-tools` moved from the
+granular `edit/*` ids plus `web` to broad `edit` without `web`, so it now reads
+`vscode, tool_search, read, todo`, the MCP wildcards, `search, execute, edit, agent`.
+The catalog keeps the granular ids (history still names them); the architect was their
+only canonical member. The rejected alternative below still describes the adoption-time
+reasoning and is left intact.
+
 ## Alternatives Considered
 
 - **Capability-to-tool map as the allow-list.** Rejected. It cannot preserve architect granular-edit tools or golden per-agent sets.
