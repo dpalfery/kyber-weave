@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { formatDuration } from '../lib/labels.js'
 import { cn, usd, fmtTokens } from '../lib/utils.js'
@@ -2588,6 +2588,8 @@ export function buildWholeTurnCopyText(
 
 export type TurnContentViewMode = 'formatted' | 'raw'
 
+const MAX_SEARCH_MATCHES = 1000
+
 /**
  * Formatted-by-default content with exact raw one toggle away. Only one
  * rendering prints at a time so large content is not duplicated in the DOM
@@ -2611,23 +2613,39 @@ export function ToggleRawView({
 }) {
   const [view, setView] = useState<TurnContentViewMode>(defaultView)
   const [query, setQuery] = useState('')
+  const [debouncedQuery, setDebouncedQuery] = useState('')
   const [matchCount, setMatchCount] = useState(0)
+  const [capped, setCapped] = useState(false)
   const [current, setCurrent] = useState(0)
   const bodyRef = useRef<HTMLDivElement>(null)
   const rangesRef = useRef<Range[]>([])
   const groupLabel = `${label ?? 'Content'}: formatted or raw view`
+  // Several instances coexist in one drawer, so highlight names must be unique per instance.
+  const searchId = useId().replace(/[^a-zA-Z0-9_-]/g, '')
+  const matchName = `search-match-${searchId}`
+  const currentName = `search-current-${searchId}`
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedQuery(query), query ? 150 : 0)
+    return () => clearTimeout(t)
+  }, [query])
 
   // Find matches in whatever text is currently rendered (formatted or raw) and
   // mark them with the CSS Custom Highlight API so rendering stays untouched.
   useEffect(() => {
     const root = bodyRef.current
-    const needle = query.toLowerCase()
+    const needle = debouncedQuery.toLowerCase()
     const ranges: Range[] = []
+    let overflow = false
     if (root && needle) {
       const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
-      for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+      scan: for (let n = walker.nextNode(); n; n = walker.nextNode()) {
         const hay = (n.nodeValue ?? '').toLowerCase()
         for (let i = hay.indexOf(needle); i !== -1; i = hay.indexOf(needle, i + needle.length)) {
+          if (ranges.length >= MAX_SEARCH_MATCHES) {
+            overflow = true
+            break scan
+          }
           const r = document.createRange()
           r.setStart(n, i)
           r.setEnd(n, i + needle.length)
@@ -2637,25 +2655,33 @@ export function ToggleRawView({
     }
     rangesRef.current = ranges
     setMatchCount(ranges.length)
+    setCapped(overflow)
     setCurrent(0)
-  }, [query, view, text])
+  }, [debouncedQuery, view, text])
 
   useEffect(() => {
     const ranges = rangesRef.current
     const registry = (globalThis as { CSS?: { highlights?: Map<string, unknown> } }).CSS?.highlights
     const HighlightCtor = (globalThis as { Highlight?: new (...r: Range[]) => unknown }).Highlight
     if (registry && HighlightCtor) {
-      registry.set('search-match', new HighlightCtor(...ranges))
+      registry.set(matchName, new HighlightCtor(...ranges))
       const active = ranges[current]
-      if (active) registry.set('search-current', new HighlightCtor(active))
-      else registry.delete('search-current')
+      if (active) registry.set(currentName, new HighlightCtor(active))
+      else registry.delete(currentName)
     }
-    ranges[current]?.startContainer.parentElement?.scrollIntoView?.({ block: 'center' })
+    const active = ranges[current]
+    if (active) {
+      // Reveal the match if it sits inside a collapsed fold.
+      for (let el = active.startContainer.parentElement; el && el !== bodyRef.current; el = el.parentElement) {
+        if (el instanceof HTMLDetailsElement && !el.open) el.open = true
+      }
+      active.startContainer.parentElement?.scrollIntoView?.({ block: 'center' })
+    }
     return () => {
-      registry?.delete('search-match')
-      registry?.delete('search-current')
+      registry?.delete(matchName)
+      registry?.delete(currentName)
     }
-  }, [matchCount, current, query, view])
+  }, [matchCount, current, debouncedQuery, view, text, matchName, currentName])
 
   const step = (delta: number) => {
     if (matchCount === 0) return
@@ -2664,6 +2690,7 @@ export function ToggleRawView({
 
   return (
     <div className="space-y-2">
+      <style>{`::highlight(${matchName}){background-color:rgb(250 204 21 / 0.35);color:inherit}::highlight(${currentName}){background-color:rgb(249 115 22 / 0.65);color:inherit}`}</style>
       <div className="flex items-center justify-between gap-2" role="group" aria-label={groupLabel}>
         <div className="flex rounded border border-border bg-interactive-secondary p-0.5 text-xs">
           <button
@@ -2709,8 +2736,8 @@ export function ToggleRawView({
           />
           {query ? (
             <>
-              <span className="text-[11px] font-mono text-tertiary-foreground tabular-nums" data-testid={`${viewPrefix}-search-count`}>
-                {matchCount === 0 ? '0/0' : `${current + 1}/${matchCount}`}
+              <span aria-live="polite" className="text-[11px] font-mono text-tertiary-foreground tabular-nums" data-testid={`${viewPrefix}-search-count`}>
+                {matchCount === 0 ? '0/0' : `${current + 1}/${matchCount}${capped ? '+' : ''}`}
               </span>
               <button type="button" onClick={() => step(-1)} disabled={matchCount === 0} aria-label="Previous match" className="px-1 text-xs text-muted-foreground hover:text-foreground disabled:opacity-40">↑</button>
               <button type="button" onClick={() => step(1)} disabled={matchCount === 0} aria-label="Next match" className="px-1 text-xs text-muted-foreground hover:text-foreground disabled:opacity-40">↓</button>
