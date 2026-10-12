@@ -1158,6 +1158,7 @@ const contentQueryKey = [
   contentRequest.sessionId,
   contentRequest.span,
   contentRequest.part,
+  'full',
 ]
 
 function renderDrawerWithQuery(

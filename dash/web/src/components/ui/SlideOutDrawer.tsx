@@ -78,6 +78,7 @@ export function SlideOutDrawer({
   // only useEffect/useState/useMemo, so a useRef here would crash them.
   const [trackedOpen, setTrackedOpen] = useState(open)
   const [panelWidth, setPanelWidth] = useState<number | null>(null)
+  const [dragging, setDragging] = useState(false)
   const [restoreFocusTo, setRestoreFocusTo] = useState<HTMLElement | null>(null)
 
   // Capture what holds focus during the render that opens the drawer, not in
@@ -88,6 +89,9 @@ export function SlideOutDrawer({
   // branch, so SSR and the characterization harnesses are unaffected.
   if (open !== trackedOpen) {
     setTrackedOpen(open)
+    // Each open starts at the default width.
+    setPanelWidth(null)
+    setDragging(false)
     if (open && manageFocus) {
       setRestoreFocusTo(
         typeof document !== 'undefined' && document.activeElement instanceof HTMLElement
@@ -105,20 +109,41 @@ export function SlideOutDrawer({
     setRestoreFocusTo(null)
   }, [open, manageFocus, restoreFocusTo])
 
-  // Drag the left edge to widen the panel so long text stays readable. A plain
-  // function, not useCallback: the characterization harnesses provide no
-  // other hooks than useEffect/useState/useMemo.
+  // Drag the left edge to widen the panel so long text stays readable. The
+  // window listeners live in an effect so they are removed on unmount.
   const startResize = (e: { preventDefault: () => void }) => {
     e.preventDefault()
-    const onMove = (ev: MouseEvent) => {
-      setPanelWidth(Math.min(window.innerWidth, Math.max(320, window.innerWidth - ev.clientX)))
+    setDragging(true)
+  }
+  useEffect(() => {
+    if (!dragging || typeof window === 'undefined') return
+    const resizeTo = (clientX: number) =>
+      setPanelWidth(Math.min(window.innerWidth, Math.max(320, window.innerWidth - clientX)))
+    const onMouseMove = (ev: MouseEvent) => resizeTo(ev.clientX)
+    const onTouchMove = (ev: TouchEvent) => {
+      const t = ev.touches[0]
+      if (t !== undefined) resizeTo(t.clientX)
     }
-    const onUp = () => {
-      window.removeEventListener('mousemove', onMove)
-      window.removeEventListener('mouseup', onUp)
+    const stop = () => setDragging(false)
+    window.addEventListener('mousemove', onMouseMove)
+    window.addEventListener('mouseup', stop)
+    window.addEventListener('touchmove', onTouchMove)
+    window.addEventListener('touchend', stop)
+    return () => {
+      window.removeEventListener('mousemove', onMouseMove)
+      window.removeEventListener('mouseup', stop)
+      window.removeEventListener('touchmove', onTouchMove)
+      window.removeEventListener('touchend', stop)
     }
-    window.addEventListener('mousemove', onMove)
-    window.addEventListener('mouseup', onUp)
+  }, [dragging])
+
+  const maxWidth = typeof window === 'undefined' ? 1024 : window.innerWidth
+  const currentWidth = panelWidth ?? Math.min(maxWidth, 672)
+  const resizeByKey = (e: { key: string; preventDefault: () => void }) => {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
+    e.preventDefault()
+    const delta = e.key === 'ArrowLeft' ? 40 : -40
+    setPanelWidth(Math.min(maxWidth, Math.max(320, currentWidth + delta)))
   }
 
   // Registered last on purpose: the characterization harnesses invoke this
@@ -192,14 +217,6 @@ export function SlideOutDrawer({
         onClick={(e) => e.stopPropagation()}
         data-testid={panelTestId ?? `${testIdPrefix}-panel`}
       >
-        <div
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="Resize panel"
-          onMouseDown={startResize}
-          className="absolute left-0 top-0 bottom-0 w-1.5 -translate-x-1/2 cursor-col-resize hover:bg-border active:bg-border z-10"
-          data-testid={`${testIdPrefix}-resize-handle`}
-        />
         {/* Header */}
         <div
           className={cn('flex items-center justify-between border-b border-border px-5 py-3.5 shrink-0 bg-card', headerClassName)}
@@ -241,6 +258,20 @@ export function SlideOutDrawer({
           </div>
         </div>
 
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize panel"
+          aria-valuenow={Math.round(currentWidth)}
+          aria-valuemin={320}
+          aria-valuemax={Math.round(maxWidth)}
+          tabIndex={0}
+          onMouseDown={startResize}
+          onTouchStart={startResize}
+          onKeyDown={resizeByKey}
+          className="absolute left-0 top-0 bottom-0 w-1.5 -translate-x-1/2 cursor-col-resize hover:bg-border active:bg-border z-10"
+          data-testid={`${testIdPrefix}-resize-handle`}
+        />
         {/* Scrollable Body */}
         <div
           className={cn('flex-1 overflow-y-auto p-5 space-y-4 text-xs', bodyClassName)}

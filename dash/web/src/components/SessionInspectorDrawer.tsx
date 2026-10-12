@@ -1018,6 +1018,8 @@ function hasUnsafeNumber(value: unknown): boolean {
  * nested objects/arrays indent beneath their label. Display only — Raw and
  * Copy keep the exact source text.
  */
+const MAX_STRUCTURED_DEPTH = 8
+
 function StructuredValue({ value, label, depth = 0 }: { value: unknown; label?: string; depth?: number }) {
   const heading = label ? (
     <h4 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{humanizeContentKey(label)}</h4>
@@ -1028,6 +1030,17 @@ function StructuredValue({ value, label, depth = 0 }: { value: unknown; label?: 
         {heading}
         <pre className="text-xs font-mono p-2 overflow-auto whitespace-pre-wrap break-words rounded border border-border bg-muted/40 text-foreground max-h-[60vh]">
           {value === '' ? '(empty string)' : value}
+        </pre>
+      </div>
+    )
+  }
+  if (depth >= MAX_STRUCTURED_DEPTH && (Array.isArray(value) || isRecord(value))) {
+    // Bound recursion and DOM size on deeply nested payloads.
+    return (
+      <div className="space-y-1">
+        {heading}
+        <pre className="text-xs font-mono p-2 overflow-auto whitespace-pre-wrap break-words rounded border border-border bg-muted/40 text-foreground max-h-[60vh]">
+          {JSON.stringify(value, null, 2)}
         </pre>
       </div>
     )
@@ -2992,7 +3005,7 @@ function FullContentPanel({
   fallback: unknown
 }) {
   const { data, isError } = useQuery({
-    queryKey: ['kyber-session-content', request.sessionId, request.span, request.part],
+    queryKey: ['kyber-session-content', request.sessionId, request.span, request.part, 'full'],
     queryFn: () =>
       fetchKyberSessionContent(request.sessionId, {
         span: request.span,
