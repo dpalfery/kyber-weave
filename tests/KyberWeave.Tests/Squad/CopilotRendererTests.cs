@@ -22,7 +22,7 @@ public sealed class CopilotRendererTests
     private static readonly Regex ToolsFlowSequenceRegex =
         new(@"^tools:\s*\[(?<items>.*)\]$", RegexOptions.Compiled | RegexOptions.Multiline);
 
-    private static readonly string[] McpWildcardTrio =
+    private static readonly string[] McpServerTools =
         ["'codegraph/*'", "'kyber-weave/*'", "context7/resolve-library-id", "context7/query-docs"];
 
     [Fact]
@@ -157,7 +157,7 @@ public sealed class CopilotRendererTests
         string architectFrontmatter = ExtractFrontmatterText(architectContent);
         string architectToolsLine = ExtractToolsLine(architectFrontmatter);
 
-        foreach (string wildcard in McpWildcardTrio)
+        foreach (string wildcard in McpServerTools)
         {
             Assert.Contains(wildcard, architectToolsLine, StringComparison.Ordinal);
         }
@@ -166,6 +166,9 @@ public sealed class CopilotRendererTests
         Assert.DoesNotContain("codegraph/*,", architectToolsLine.Replace("'codegraph/*'", string.Empty, StringComparison.Ordinal), StringComparison.Ordinal);
         Assert.DoesNotContain("\"codegraph/*\"", architectToolsLine, StringComparison.Ordinal);
         Assert.DoesNotContain("\"kyber-weave/*\"", architectToolsLine, StringComparison.Ordinal);
+
+        // context7 is granted as explicit tools; the coarse wildcard must never render alongside them.
+        Assert.DoesNotContain("context7/*", architectToolsLine, StringComparison.Ordinal);
     }
 
     [Fact]
