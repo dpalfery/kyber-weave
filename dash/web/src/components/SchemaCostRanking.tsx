@@ -228,7 +228,7 @@ export function SchemaCostRanking({ schema, tools, onSelectTool, className }: Sc
 
   const invocationCounts = new Map<string, number>()
   for (const row of tools ?? []) {
-    if (typeof row.invocations === 'number') invocationCounts.set(row.name, row.invocations)
+    if (typeof row.invocations === 'number' && Number.isFinite(row.invocations) && row.invocations >= 0) invocationCounts.set(row.name, row.invocations)
   }
 
   const measuredCosts = ranked.map((tool) => tool.cost).filter((cost): cost is number => cost !== undefined)
@@ -341,6 +341,7 @@ export function SchemaCostRanking({ schema, tools, onSelectTool, className }: Sc
       <div data-testid="tools-ranking-table" className="mt-4 space-y-2">
         {ranked.map((tool) => {
           const never = !tool.invoked
+          const callCount = invocationCounts.get(tool.name)
           const hasCost = tool.cost !== undefined
           const pct = hasCost && maxCost !== undefined && maxCost > 0 ? (tool.cost! / maxCost) * 100 : undefined
 
@@ -371,9 +372,9 @@ export function SchemaCostRanking({ schema, tools, onSelectTool, className }: Sc
                   <span className="shrink-0 text-tertiary-foreground">
                     {tool.server ?? BUILTIN_LABEL}
                   </span>
-                  {!never && invocationCounts.has(tool.name) && (
+                  {!never && callCount !== undefined && (
                     <span className="shrink-0 rounded border border-emerald-500/30 bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 dark:text-emerald-300">
-                      {invocationCounts.get(tool.name)} {invocationCounts.get(tool.name) === 1 ? 'call' : 'calls'}
+                      {callCount} {callCount === 1 ? 'call' : 'calls'}
                     </span>
                   )}
                   {never && (
