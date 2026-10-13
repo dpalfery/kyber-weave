@@ -507,7 +507,7 @@
     { "path": ".github/skills/pr-review-fix-comments/SKILL.md", "file_sha256": "c9deed7dbc6e9e85d2c6097602e3956c0b107fcd8c3f5175e887141533a3c94a" },
     { "path": ".github/skills/product-owner/SKILL.md", "file_sha256": "0226bbde6bb2461e85ee843e3ea3cbf26d5c34c199915a480baf6c838a7abcb7" },
     { "path": ".github/skills/python-dev/SKILL.md", "file_sha256": "110c2cbfda093c6a71c419b2bb192b7a3293568426d869855a0f6a4513f56e96" },
-    { "path": ".github/skills/resharper-clt/SKILL.md", "file_sha256": "f6d5a1591f056a48ae52bdfb11de4312817e2a50c46c1c2b1eb650df4c9f1d83" },
+    { "path": ".github/skills/resharper-clt/SKILL.md", "file_sha256": "ae8123b9c39f680ad4fb905a65485396f5374b33047268ebd7209b4f1efa7518" },
     { "path": ".github/skills/second-brain/SKILL.md", "file_sha256": "7ed8fa9aef8cc03e7ac5a857175c3e7be78585fb35945ff458a05bd71a2247fc" },
     { "path": ".github/skills/security-review/SKILL.md", "file_sha256": "23e7e70a8163019bad2a933ae1d129a8a571d570b4dbe87ed2c0640ad6ab4c5d" },
     { "path": ".github/skills/setup-dev-environment/SKILL.md", "file_sha256": "5409aa5f3231b84136a0f000a24c01136693cd52dc247926a03b99cb95011a42" },
