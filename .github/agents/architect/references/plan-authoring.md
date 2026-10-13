@@ -22,10 +22,10 @@ Every plan contains:
 - investigation findings;
 - the mode-specific Test contract or verification contract;
 - dispatchable tasks with objective, exact files or symbols, acceptance criteria, dependencies, and required skills;
-- a dependency graph and `MAX_CONCURRENCY` audit;
+- a dependency graph and a parallelism audit that splits work into the finest disjoint-scope tasks and keeps dependencies to genuine data flow;
 - risks, out-of-scope boundaries, verification gates, review, and `docs-dev` closeout.
 
-Name required skills, not owning agents. The conductor maps skills to the live specialist inventory. Declare a dependency only when a task consumes another task's concrete output or their file scopes cannot safely overlap. Component labels and table order do not create scheduling barriers.
+Name required skills, not owning agents. The conductor maps skills to the live specialist inventory. Declare a dependency only when a task consumes another task's concrete output or their file scopes cannot safely overlap. Component labels and table order do not create scheduling barriers. Optimize for maximum concurrency and err on the side of risk: split work into many small tasks, prefer optimistic file scopes, and add a dependency only for a real consumed output or a certain file overlap. Do not set or report a concurrency limit; the harness runs as many workers as are ready.
 
 ## Decisions
 
@@ -59,7 +59,6 @@ Return `PLAN_READY` only when the saved Draft has no open decisions (all rows in
 STATUS: PLAN_READY
 PLAN_FILE: <saved path>
 OPEN_DECISIONS: none
-MAX_CONCURRENCY: <n>
 DOCS_VALIDATE: pass
 DOCS_DRIFT: pass
 ```

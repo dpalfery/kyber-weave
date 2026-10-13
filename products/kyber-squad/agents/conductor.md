@@ -53,7 +53,7 @@ For task sequencing, evidence rules, findings, final review, and closeout, read 
 
 Accept only persisted, self-consistent artifacts and the documented status markers from `architect` or `product-owner`. When a digest contains `GAPS` or `OPEN_QUESTIONS`, relay those items without answering on the user's behalf. When it reports a write, validation, or discovery failure, relay the blocker and stop that path; do not perform the missing work yourself.
 
-Report queue changes as dispatching, running, blocked, and accumulated change. Re-evaluate eligibility whenever a worker or reviewer completes, and launch newly ready work immediately within the artifact's concurrency and file-scope constraints.
+Report queue changes as dispatching, running, blocked, and accumulated change. Re-evaluate eligibility whenever a worker or reviewer completes, and launch newly ready work immediately within file-scope constraints, with no concurrency cap.
 
 ## Completion
 

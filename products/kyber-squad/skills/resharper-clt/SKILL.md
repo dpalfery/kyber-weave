@@ -45,7 +45,7 @@ version nobody pinned. A floating analyzer version makes every later report inco
 ## Commands
 
 Resolve the solution path from the repository rather than assuming one, and write reports to
-the path declared as **<agent-scratchpad>** where the repository declares one. Substitute
+the path declared as **.agent_scratchpad** where the repository declares one. Substitute
 `<solution>` and `<scratchpad>` below.
 
 | Purpose | Command |
@@ -205,9 +205,9 @@ A change adds a service that filters an `IEnumerable<Load>` and iterates the res
 
 ```bash
 dotnet format Hauling.sln --include 2-Application/Hauling.Application/Dispatch/LoadPlanner.cs \
-  -p:BaseIntermediateOutputPath=.agents-scratchpad/T3/artifacts/obj/
+  -p:BaseIntermediateOutputPath=.agent_scratchpad/T3/artifacts/obj/
 dotnet format Hauling.sln analyzers --include 2-Application/Hauling.Application/Dispatch/LoadPlanner.cs \
-  -p:BaseIntermediateOutputPath=.agents-scratchpad/T3/artifacts/obj/
+  -p:BaseIntermediateOutputPath=.agent_scratchpad/T3/artifacts/obj/
 dotnet jb cleanupcode Hauling.sln --profile="<cleanup profile>" --include="2-Application/Hauling.Application/Dispatch/LoadPlanner.cs"
 ```
 
@@ -215,7 +215,7 @@ Formatting, redundant qualifiers, and unused usings are gone. The multiple enume
 no formatter can decide that materializing the sequence is the right fix. The worker reports:
 
 ```text
-DIAGNOSTICS: clean on 2-Application/Hauling.Application/Dispatch/LoadPlanner.cs | fix pass: format, format analyzers, cleanupcode — all applied | artifacts: .agents-scratchpad/T3/artifacts | baseline: .agents-scratchpad/T3/diagnostics-baseline.md | remaining: none
+DIAGNOSTICS: clean on 2-Application/Hauling.Application/Dispatch/LoadPlanner.cs | fix pass: format, format analyzers, cleanupcode — all applied | artifacts: .agent_scratchpad/T3/artifacts | baseline: .agent_scratchpad/T3/diagnostics-baseline.md | remaining: none
 ```
 
 **At the end of the run.** The `inspectcode` gate runs once over the whole solution:

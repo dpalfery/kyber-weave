@@ -45,7 +45,7 @@ version nobody pinned. A floating analyzer version makes every later report inco
 ## Commands
 
 Resolve the solution path from the repository rather than assuming one, and write reports to
-the path declared as **<agent-scratchpad>** where the repository declares one. Substitute
+the path declared as **.agent_scratchpad** where the repository declares one. Substitute
 `<solution>` and `<scratchpad>` below.
 
 | Purpose | Command |
