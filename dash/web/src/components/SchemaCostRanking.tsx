@@ -226,6 +226,11 @@ export function SchemaCostRanking({ schema, tools, onSelectTool, className }: Sc
     )
   }
 
+  const invocationCounts = new Map<string, number>()
+  for (const row of tools ?? []) {
+    if (typeof row.invocations === 'number') invocationCounts.set(row.name, row.invocations)
+  }
+
   const measuredCosts = ranked.map((tool) => tool.cost).filter((cost): cost is number => cost !== undefined)
   const maxCost = measuredCosts.length > 0 ? Math.max(...measuredCosts) : undefined
 
@@ -366,6 +371,11 @@ export function SchemaCostRanking({ schema, tools, onSelectTool, className }: Sc
                   <span className="shrink-0 text-tertiary-foreground">
                     {tool.server ?? BUILTIN_LABEL}
                   </span>
+                  {!never && invocationCounts.has(tool.name) && (
+                    <span className="shrink-0 rounded border border-emerald-500/30 bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 dark:text-emerald-300">
+                      {invocationCounts.get(tool.name)} {invocationCounts.get(tool.name) === 1 ? 'call' : 'calls'}
+                    </span>
+                  )}
                   {never && (
                     <span className="shrink-0 rounded border border-amber-500/30 bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-300">
                       0 calls · never called
