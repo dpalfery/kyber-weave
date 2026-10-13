@@ -4,7 +4,7 @@ This contract is shared by Ready plans and Ready specification task artifacts.
 
 ## Ready queue
 
-A task is ready only when its declared dependencies are complete, its file or symbol scope does not overlap work in flight, and its development-mode gate is satisfied. Launch every ready task immediately with no concurrency cap; when file scope is uncertain, favor parallelism and accept the conflict risk. Re-evaluate the queue after every completion. Component labels and table order are not barriers.
+A task is ready only when its declared dependencies are complete, its file or symbol scope does not overlap work in flight, and its development-mode gate is satisfied. Launch every ready task immediately up to the artifact's concurrency bound. Re-evaluate the queue after every completion. Component labels and table order are not barriers.
 
 Track one cold invocation per unit of work. Rework uses the same queue and the same dependency and scope rules.
 
