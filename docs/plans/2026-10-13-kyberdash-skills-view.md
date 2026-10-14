@@ -21,7 +21,13 @@ The approval also covers D4, D5 and the Test contract in [section 7](#7-test-con
 
 The conductor reruns `docs validate` and `docs drift`, because the architect harness has no shell.
 
-T3 and T5 can start now. T1, and every task after it, waits for the owner capture gate G0 ([section 8](#8-tasks)).
+**Progress.** T3 and T5 are done and passed task review (`fd54843`).
+
+**Amendment AP2 (2026-10-13).** The user approved folding the T5 reviewer's findings F1–F4 into the remaining tasks, so the plan stays Ready:
+
+- T2 is now the engine side only, including F1's served headline counts.
+- T9 is new and carries the web follow-on: F1–F4.
+- T9 can start now. T1, T2, T4 and the tasks after them wait for the owner capture gate G0 ([section 8](#8-tasks)).
 
 **Development mode:** `test-first`. The user did not opt out, so the default is persisted (D4). Every implementation task has a Test-contract row in [section 7](#7-test-contract-test-first).
 
@@ -126,6 +132,7 @@ Facts were read from the tree at `plan/dash-skills-view` HEAD `1f1769f`. Discove
 | D4 | Development mode | `test-first` | The user did not opt out. | ANSWERED — default per architect contract; confirmed by the user's approval 2026-10-13 ("approve", test-first) |
 | D5 | Where do the user's captures go, and what is each harness's capture? | The root is **`dash/src/canon/fixtures/skills/`**, with one subdirectory per harness. The user drops sanitized originals as `capture.*` in each subdirectory, and the T1 worker derives trimmed test fixtures beside them. The contents per harness are in [section 8, gate G0](#8-tasks). | It sits beside the existing `dash/src/canon/fixtures/pi-collector/`, under the dash test tree, so `npm --prefix dash run test` picks it up. One directory per harness keeps the captures for each harness separate and reviewable. | ANSWERED — chosen by the architect at the user's request in Q7, 2026-10-13; approved by the user's approval 2026-10-13 |
 | AP1 | Approve and execute? | **Approved.** The plan is Ready for execution in `test-first` mode. | The approval covers Q1–Q10, D1–D5, the section 7 Test contract and the section 8 task graph. Execution of T1 and every task after it is still gated on the owner captures (G0). | APPROVED — user "approve" 2026-10-13 (conductor relay) |
+| AP2 | Should the T5 task-review findings F1–F4 be folded into the remaining work? | **Yes.** Folded as follows, with no existing task renumbered.<br>**F1, served headline counts.** The engine adds `skills.listed_count` and `skills.listed_uninvoked_count` (section 5). The web renders those values instead of counting rows.<br>**F2, skill pane.** A skill-specific pane in `SessionInspectorDrawer.tsx` for `{skill: row}` drawer content.<br>**F3, unused export.** Remove the `KyberSessionTurnSkills` export unless the new code uses it.<br>**F4, empty headline.** Hide the headline when `rows` is empty, keeping the line "No skill was recorded for this session."<br>T2 keeps the engine side (F1 projection). A new task, T9, takes the web side (F1 render, F2, F3, F4). | T2 originally gained web scope as well, which no longer fit one worker. Its engine part (projection, headline counts, turn-content entry in `sessions.ts` and `bridge.ts`) and its web part (`SkillsPanel`, a new drawer pane, fixture and types) are each large enough for a separate worker. Their file scopes do not overlap. They run in parallel because section 5 now pins both new fields: the headline counts and the turn-content `skills` entry. T9 extends the T5 fixture to that shape. | APPROVED — user "fold the findings in" 2026-10-13 (conductor relay) |
 
 Open decisions: **none**.
 
@@ -171,6 +178,9 @@ Open decisions: **none**.
   "skills": {
     "measurable": true,
     "reported_skill_tokens": 1040,            // absent unless the harness reported it
+    "listed_count": 3,                        // AP2/F1: rows with listed === true; absent when the listing side is not measured
+    "listed_uninvoked_count": 1,              // AP2/F1: rows with listed === true AND invocations === 0 (a number);
+                                              // absent when either side is not measured; an unmeasured row never counts
     "rows": [
       { "name": "docs", "listed": true, "invocations": 2,
         "turns_listed": [0, 1, 2], "derived_tokens": 38 }
@@ -184,6 +194,22 @@ Open decisions: **none**.
 
 - **Rows stored before this change** have no `skills` key. The UI reads a missing key as "not yet projected", never as "no skills".
 - **Turn indices** in `turns_listed` follow the 0-based transport convention (issue #184).
+- **Headline counts (AP2/F1).** The web renders the headline "X of Y listed skills had no observed invocation" only from `listed_uninvoked_count` (X) and `listed_count` (Y), and only when both are present. If either is absent, the headline states that it is not measurable. The browser never counts rows. If `rows` is empty, the headline is hidden and the line "No skill was recorded for this session." is shown (F4).
+
+**Turn-content `skills` entry (AP2/F2)** in `GET /api/kyber/session/:id/turn/:index/content` is additive. Existing blocks are unchanged:
+
+```jsonc
+{
+  "skills": {
+    "listed": [ { "name": "docs", "text": "docs: Answer questions from the repo docs …" } ],  // "text" absent when the listing carried no description
+    "invoked": ["docs"]                                       // names invoked in this turn; [] is a measured "none"
+    // either side may instead be {"availability":"not_measurable","reason":"…"}
+  }
+  // or: "skills": { "availability": "not_measurable", "reason": "…" }
+}
+```
+
+The skill drawer pane (T9) reads the listing text for a skill from the first turn in that row's `turns_listed`, through this entry.
 
 ## 6. Constraints that bind every task
 
@@ -200,10 +226,11 @@ Every dash row runs its file first, then `npm --prefix dash run typecheck lint t
 | Task | Test project or file | Runner command | Observable behavior | RED evidence required | GREEN acceptance |
 |---|---|---|---|---|---|
 | T1 | `dash/src/canon/skills.test.ts` (new), over trimmed fixtures in `dash/src/canon/fixtures/skills/<harness>/` derived from the G0 captures | `cd dash && npx vitest run src/canon/skills.test.ts` | **Listed:** for each of the six harnesses, listed names are extracted exactly from its capture; a harness whose capture has no listing gives `not_measurable` with a reason naming the absent source; rule text in `instruction_context` is never reported as a skill. **Invoked:** names come from `Skill`/`skill` arguments and `kyber.skills.invoked`, never from tool names, with no double count. **Other cases:** an unrecognised shape gives `not_measurable`, never `[]`; derived tokens are labelled derived; the reported `skill_tokens` is carried and never split. | Module absent, or assertions fail | All pass |
-| T2 | `dash/src/canon/sessions.skills.test.ts` (new), `dash/src/server/kyber-content-route.test.ts` (additions) | `cd dash && npx vitest run src/canon/sessions.skills.test.ts src/canon/sessions.test.ts src/server/kyber-content-route.test.ts` | **Payload:** `skills`, `summary.skills_*` and `turns[].skills_listed` follow section 5. **Unmeasured:** a harness with no source gives `not_measurable` and no `summary.skills_*` keys. **Turn content:** it lists that turn's skills or a reason, and existing block bytes are unchanged. **Regression:** existing suites pass unmodified. | New keys or entry absent | All pass; existing suites unchanged |
+| T2 | `dash/src/canon/sessions.skills.test.ts` (new), `dash/src/server/kyber-content-route.test.ts` (additions) | `cd dash && npx vitest run src/canon/sessions.skills.test.ts src/canon/sessions.test.ts src/server/kyber-content-route.test.ts` | **Payload:** `skills`, `summary.skills_*` and `turns[].skills_listed` follow section 5. **Unmeasured:** a harness with no source gives `not_measurable` and no `summary.skills_*` keys. **Headline counts (AP2/F1):** `listed_count` and `listed_uninvoked_count` are correct. Both are absent when the listing side is not measured. `listed_uninvoked_count` is absent when invocations are not measured. A row with an unmeasured side never counts as uninvoked. **Turn content:** the `skills` entry follows section 5, carrying listed names with text and invoked names, or a reason. Existing block bytes are unchanged. **Regression:** existing suites pass unmodified. | New keys or entry absent | All pass; existing suites unchanged |
 | T3 | `dash/src/synth/synth.skills.test.ts` (new) | `cd dash && npx vitest run src/synth/synth.skills.test.ts src/synth/synth.test.ts` | A `ParsedProviderCall` with `skills` gives a turn record with `raw['kyber.skills.invoked']` equal to those names. Without `skills`, the key is absent. Every bumped `parserContractVersion` is greater than its previous value. | Attribute absent | All pass |
 | T4 | `dash/src/analysis/signals.test.ts`, `dash/src/analysis/findings.test.ts` (additions) | `cd dash && npx vitest run src/analysis/signals.test.ts src/analysis/findings.test.ts` | A `Skill` call loading `docs` credits `docs`, not `Skill`. A listed-not-invoked skill drives `inactive-skill-reference` at low confidence, ranked last, with no deletion phrasing. `DETECTOR_VERSION` is incremented. | The new assertions fail on the current tool-name crediting and regex input | All pass, the existing D16 assertions included |
 | T5 | `dash/web/src/components/SkillsPanel.test.tsx` (new), `dash/web/src/components/AgentSessionDashboard.test.tsx` (additions); payload fixture `dash/web/src/components/fixtures/skills-payload.json` (new) | `cd dash && npx vitest run web/src/components/SkillsPanel.test.tsx web/src/components/AgentSessionDashboard.test.tsx src/architecture/display-layer.test.ts` | Rows render from the fixture, with listed and invoked badges and turns listed. Tokens are labelled derived. The reported aggregate shows where present, with no currency anywhere. The Not measurable card shows its reason. A missing `skills` key renders "not yet projected". No "waste" wording. The tiles render, and a row click opens the skill drawer. The section headings read "4 · Skills" and "5 · Execution Timeline". The display-layer guard passes. | Component absent | All pass |
+| T9 (AP2) | `dash/web/src/components/SkillsPanel.test.tsx`, `dash/web/src/components/AgentSessionDashboard.test.tsx` (additions as needed), `dash/web/src/components/SessionInspectorDrawer.test.tsx` (additions) | `cd dash && npx vitest run web/src/components/SkillsPanel.test.tsx web/src/components/AgentSessionDashboard.test.tsx web/src/components/SessionInspectorDrawer.test.tsx src/architecture/display-layer.test.ts` | **F1:** the headline renders the served `listed_uninvoked_count` and `listed_count`. A fixture whose counts deliberately differ from a row count proves no counting in the browser. With either count absent, the headline says "not measurable". **F4:** empty `rows` hides the headline and keeps "No skill was recorded for this session." **F2:** a `{skill: row}` drawer shows listed and invoked state, turns listed (1-based display), and the listing text from the turn-content `skills` entry. A not-measurable listing shows its reason, not an empty pane. **F3:** `KyberSessionTurnSkills` is either removed or used. **Regression:** the display-layer guard passes. | The new assertions fail on the T5 code (headline counted from rows; no skill pane) | All pass, with the T5 assertions still green |
 | T6 | No-test task: documentation | `dotnet run --project src/KyberWeave.Cli -- docs validate .` and `docs drift .` | Architecture, telemetry inventory and runbook describe the final behavior | N/A | Zero findings |
 | T7 | No-test task: whole-change review | `code-review` skill, then `review gates` | Council verdict | N/A | Approve, or findings fixed and re-checked |
 | T8 | No-test task: closeout | Docs commands with `--merge-ready` after archiving | Plan archived, index updated, closeout mapping written | N/A | Zero findings |
@@ -233,7 +260,19 @@ Sanitize prompts and paths before committing. Keep skill names and descriptions,
 - **Files:** `dash/src/canon/sessions.ts` (`buildSessionRow`, `AsadSessionPayload`, summary, turn rows), `dash/src/canon/sessions.skills.test.ts` (new), `dash/src/server/bridge.ts` (turn-content assembly only), `dash/src/server/kyber-content-route.test.ts` (additions).
 - **Depends on:** T1.
 
-**T3 — Carry parsed skills through synth.** Skills: TypeScript engine work; `test-dev`.
+*AP2 scope note for T2:* T2 also projects `skills.listed_count` and `skills.listed_uninvoked_count` (F1), and its turn-content entry follows the pinned section 5 shape (F2). T2 touches no `dash/web` file.
+
+**T9 — Web follow-on from T5 review (AP2).** Skills: `react-dev`, `test-dev` (RED first).
+- **Objective:** F1 render the served headline counts, F2 skill drawer pane, F3 remove the unused export, F4 empty-state headline.
+- **Files:**
+  - `dash/web/src/components/SkillsPanel.tsx`, `SkillsPanel.test.tsx`;
+  - `dash/web/src/components/AgentSessionDashboard.tsx`, its test (only where it computes or passes the headline);
+  - `dash/web/src/components/SessionInspectorDrawer.tsx`, `SessionInspectorDrawer.test.tsx`;
+  - `dash/web/src/components/fixtures/skills-payload.json`: add the two counts and a turn-content `skills` sample;
+  - `dash/web/src/lib/kyberApi.ts`: types for the counts and the turn-content `skills` entry; remove `KyberSessionTurnSkills` unless used.
+- **Depends on:** T5 (done). It runs in parallel with T1, T2 and T4, because section 5 pins the shapes.
+
+**T3 — Carry parsed skills through synth.** **Done:** passed task review, `fd54843`. Skills: TypeScript engine work; `test-dev`.
 - **Files:** `dash/src/synth/synth.ts`; the `parserContractVersion` entries in `dash/src/refresh/registry.ts` for providers that fill `skills` (Claude family, Codex, Pi, Copilot, OpenCode/Kilo, Cline, CodeWhale, OpenClaude, DSH); `dash/src/synth/synth.skills.test.ts` (new).
 - **Depends on:** none.
 
@@ -241,13 +280,13 @@ Sanitize prompts and paths before committing. Keep skill names and descriptions,
 - **Files:** `dash/src/analysis/signals.ts`, `dash/src/analysis/findings.ts`, `dash/src/canon/store.ts` (`DETECTOR_VERSION` only), and their tests.
 - **Depends on:** T1.
 
-**T5 — Web skills section.** Skills: `react-dev`, `test-dev`.
+**T5 — Web skills section.** **Done:** passed task review, `fd54843`. The reviewer's findings F1–F4 moved to T2 and T9 under AP2. Skills: `react-dev`, `test-dev`.
 - **Files:** `dash/web/src/lib/kyberApi.ts` (types, append only), `dash/web/src/components/SkillsPanel.tsx` (new), `dash/web/src/components/AgentSessionDashboard.tsx` (section, tiles, drawer handler, timeline renumber), `dash/web/src/components/fixtures/skills-payload.json` (new, authored from section 5), and the tests.
 - **Depends on:** none. The fixture pins section 5, so GREEN does not need T2.
 
 **T6 — Documentation.** Skill: `docs-dev`.
 - **Files:** `docs/dash/architecture.md`: the session payload `skills` contract, the turn-content skills entry, the web dashboard section list, and the analysis-layer skill inputs. `docs/dash/telemetry-inventory.md`: a new "Skill availability by harness" table with listed and invoked status for each of the six harnesses plus the invoked-only ones, the enabling settings, and the G0 verification status. `docs/dash/runbook.md`: the Sessions skills section and the capture fixtures location.
-- **Depends on:** T2, T3, T4, T5.
+- **Depends on:** T2, T3, T4, T5, T9.
 
 **T7 — Whole-change review.** Skill: `code-review`.
 - **Depends on:** T6.
@@ -263,27 +302,28 @@ Sanitize prompts and paths before committing. Keep skill names and descriptions,
 ```text
 G0 (owner captures) ──► T1 ──┬──► T2 ──┐
                              └──► T4 ──┤
-T3 ────────────────────────────────────┼──► T6 ──► T7 ──► T8
-T5 ────────────────────────────────────┘
+T3 (done fd54843) ─────────────────────┤
+T5 (done fd54843) ──► T9 ──────────────┼──► T6 ──► T7 ──► T8
 ```
 
-- **Ready at start:** T3 and T5, which need no captures; plus G0, the owner's capture step.
+- **Done:** T3 and T5 (`fd54843`, task review PASS).
+- **Ready now:** T9, plus G0, the owner's capture step.
 - **After G0:** T1.
-- **After T1:** T2 and T4 run in parallel.
+- **After T1:** T2 and T4 run in parallel. Both also run alongside T9.
 - **File scopes are disjoint.**
   - T1: `canon/skills.ts` and its fixtures.
-  - T2: `canon/sessions.ts` and `server/bridge.ts`.
-  - T3: `synth/synth.ts` and `refresh/registry.ts`.
+  - T2: `canon/sessions.ts` and `server/bridge.ts`, plus their tests. No web files.
   - T4: `analysis/*` and one constant in `canon/store.ts`.
-  - T5: `dash/web/**`.
+  - T9: the `dash/web` files listed for T9.
+  - T3 and T5 are done; their files now belong to T9 where it lists them.
 - **No concurrency cap** is set.
-- **Sizing.** Fixture curation is folded into T1, and the turn-content change into T2, to avoid splitting work that is too small for its own worker. Each task is sized for one worker.
+- **Sizing.** Fixture curation is folded into T1, to avoid a task too small for its own worker. Under AP2, the turn-content change stays in T2. The web follow-on is its own task, T9: the engine and web parts are each a full worker's load and do not overlap, and section 5 pins the shapes they share, so they run in parallel.
 
 ## 10. Verification gates
 
 - **Dash:** `npm --prefix dash run typecheck`, `lint`, `test` (includes the display-layer guard), and `check:reachable`.
 - **Docs:** `dotnet run --project src/KyberWeave.Cli --no-build -c Release -- docs validate . --merge-ready` and `docs drift .`.
-- **This Draft:** the architect harness had no shell. The conductor runs `docs validate` and `docs drift` on this plan and its index row before presenting the approval gate.
+- **This plan:** the architect harness has no shell. The conductor runs `docs validate` and `docs drift` on this plan and its index row after each plan edit.
 - **Owner gates:**
   - G0 captures exist before T1.
   - After merge, one live session per in-scope harness shows the section populated, or shows the stated not-measurable reason.
