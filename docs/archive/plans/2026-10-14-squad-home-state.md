@@ -2,7 +2,7 @@
 id: plans/2026-10-14-squad-home-state
 title: "Relocate Kyber-Squad lock and receipt state to ~/.kyber-weave/squad"
 doc-type: plan
-status: current
+status: complete
 component: KyberSquad
 owner: dpalfery
 last-reviewed: 2026-10-14
@@ -11,8 +11,10 @@ development-mode: test-first
 
 # Relocate Kyber-Squad lock and receipt state to ~/.kyber-weave/squad
 
-**Status: Ready.** The user approved execution in advance, and the conductor relayed that
-approval on 2026-10-14. Branch: `feat/squad-home-state`, cut from `main`.
+**Status: Complete 2026-10-14.** Executed through T10 on branch `feat/squad-home-state`; see
+[section 10](#10-review-and-closeout) for the closeout. Originally **Ready 2026-10-14**: the user
+approved execution in advance, and the conductor relayed that approval on 2026-10-14. Branch:
+`feat/squad-home-state`, cut from `main`.
 
 **Development mode:** `test-first`. Each behaviour scope has a RED task that writes
 failing contract tests. The GREEN task that follows makes those tests pass without
@@ -405,3 +407,32 @@ The legacy directory must stay intact.
 - The whole change gets a `code-reviewer` council before the PR.
 - The `docs-dev` closeout (T10) maps D1–D17 into ADR 0037 and `docs/kyber-squad/*`, then
   archives this plan per KW-DOC-LIFECYCLE-003.
+
+### Closeout
+
+**Outcome.** T1–T9 were delivered in development mode `test-first`, and T10 archived this plan. The
+home-state store, registry, global anchor, migration with its ledger, the `--projects` contract, and the
+picker all exist on the branch. No decision was left open. ADR 0037 is Accepted.
+
+**Durable decisions and where they now live.**
+
+| Decision | Destination |
+|---|---|
+| D1, D2, D3 (home state root, global anchor, physical root in `targetRoot`) | [ADR 0037](../../adr/0037-squad-state-in-user-home.md) decisions 1–3; [kyber-squad/architecture.md](../../kyber-squad/architecture.md) "State Location and Layout"; [kyber-squad/onboarding.md](../../kyber-squad/onboarding.md) "Deployment Scopes" |
+| D4 (registry contract, stale flags, reconciliation) | ADR 0037 decision 4; [kyber-squad/architecture.md](../../kyber-squad/architecture.md) "Registry"; [kyber-squad/onboarding.md](../../kyber-squad/onboarding.md) "Registered projects" |
+| D5 (sibling global receipts retired), D13 (path under `--global` is named and ignored) | ADR 0037 decisions 2 and 5; [kyber-squad/onboarding.md](../../kyber-squad/onboarding.md) "2. Global Scope (`--global`)" |
+| D6, D7, D8 (migration rules, import, timing under `--dry-run`) | ADR 0037 decisions 6–7; [kyber-squad/architecture.md](../../kyber-squad/architecture.md) "Migration from earlier layouts"; [kyber-squad/onboarding.md](../../kyber-squad/onboarding.md) "Migration from earlier layouts" |
+| Migration ledger (one-shot per source; not in the D-list, added during review) | ADR 0037 decision 9; [kyber-squad/architecture.md](../../kyber-squad/architecture.md) "Migration ledger" |
+| D9, D10, D11, D12 (picker, `--projects`, per-project update, `--replace-managed` at global scope) | [kyber-squad/onboarding.md](../../kyber-squad/onboarding.md) "Updating global and registered projects" and "Replacing managed files in global scope" |
+| D14 (status, doctor, and uninstall at global scope) | [kyber-squad/onboarding.md](../../kyber-squad/onboarding.md) "Doctor findings" |
+| D15 (tests never touch the real home) | Documentation waiver: test-fixture scoped. The invariant is pinned by the guard test that asserts each fake home resolves under the temporary directory. |
+| D16 (lock and receipt no longer committed; tracked legacy files untouched) | [kyber-squad/requirements.md](../../kyber-squad/requirements.md) (legacy in-repo state) and ADR 0037 decision 7 |
+| D17 (ADR 0037, and ADR 0024 amended in place) | [ADR 0037](../../adr/0037-squad-state-in-user-home.md); [ADR 0024](../../adr/0024-squad-global-receipt-layout-marker.md) amendment note |
+| D18, AP1 (development mode, execution approval) | Documentation waiver: process record with no surviving architectural invariant. |
+
+**ADR waiver.** Not claimed. ADR 0037 is the decision record for this change.
+
+**Known limit, stated in the docs.** A stale registry entry whose directory is gone stays flagged until the
+path returns. No command clears it: uninstall requires an existing project directory, and the doctor hint says
+so. The registry write is not locked across roots, so a concurrent update can lose one registry row; the
+receipt under `projects/<root-key>/` is authoritative and `squad status --global` rebuilds the row.

@@ -28,6 +28,7 @@ keywords:
   - home-state
   - registry
   - migration
+  - migration-ledger
 code-refs:
   - SquadTransaction
   - SquadStateStore
@@ -288,6 +289,7 @@ Lock and receipt state no longer lives in the repository. It lives under the use
 flowchart LR
     subgraph Home["~/.kyber-weave/squad/"]
         Registry["registry.json\n(kyber-squad.registry/v1)"]
+        Ledger["migration-ledger.json\n(kyber-squad.migration-ledger/v1)"]
         Global["global/\nsquad.lock.yml\nsquad.receipt.json"]
         Projects["projects/root-key/\nsquad.lock.yml\nsquad.receipt.json"]
     end
@@ -295,6 +297,7 @@ flowchart LR
     Legacy -.->|"migrated, never deleted"| Global
     Legacy -.->|"migrated, never deleted"| Projects
     Projects -->|"indexed by root key"| Registry
+    Legacy -.->|"recorded once per source"| Ledger
 ```
 
 - **Home state root**: `<home>/.kyber-weave/squad/`, where `<home>` is `ISquadUserPaths.HomeDirectory`
@@ -330,8 +333,16 @@ holds the physical path, the last update time in UTC, and the targets deployed.
   the path is missing, the physical key no longer matches the path, or the receipt under
   `projects/<root-key>/` is missing. It also rebuilds an entry for any receipt under `projects/<root-key>/`
   that has no registry row. A deployment is never read from the registry alone.
+- **Reconciliation**: `ListProjects` persists the rebuilt registry only when a caller lists it through
+  the persisting path. In the CLI that is `squad status --global`, `squad update --global` (including
+  resolving a named `--projects` path), and `squad doctor`. No other verb reconciles it. Migration's
+  single-root binding lookup reads the registry without writing it (`ListProjectsWithoutRebuild`).
+- **Stale entries**: no command unregisters an entry. `SquadStateStore.UnregisterProject` is called only
+  by project uninstall, so an entry whose directory no longer exists stays flagged until that path
+  returns. `squad update --global --projects` warns about and skips a stale named path.
 - **Write failure**: a registry write that fails after the transaction has committed produces a
-  warning that names the remedy, rerunning `kyber-weave squad status`. The transaction is not failed.
+  warning that names the remedy, rerunning `kyber-weave squad status --global`. The transaction is not
+  failed.
 
 ### Lock and Receipt Files
 
@@ -370,8 +381,34 @@ no file, and running it again after it has succeeded changes nothing.
   and lock are imported, `targetRoot` is set, and `R` is registered. The in-repo files are left untouched.
   Home state takes precedence from then on, and `doctor` warns that the retained in-repo state should
   be removed from version control.
-- **Dry run**: under `--dry-run` nothing is written. The run reports that the legacy state at each
-  path will be migrated on the next invocation without `--dry-run`.
+- **Dry run**: under `--dry-run` nothing is written, including the ledger. The run reports that the legacy
+  state at each path will be migrated on the next invocation without `--dry-run`. Install, update, and
+  uninstall stop after that report.
+- **Lease**: every copy and import runs under the transaction lease for the root. A busy lease writes
+  nothing, reports a warning, and leaves the legacy files in place for the next run.
+- **Write order**: a global copy writes the lock and then the receipt, which is the completion marker.
+  A lock with no receipt is completed on the next run when the home lock is byte-identical to the source
+  lock; a different home lock blocks the copy and is reported.
+- **Doctor writes**: `squad doctor` runs the same migration as the other verbs, so it can write.
+
+#### Migration ledger
+
+`<home>/.kyber-weave/squad/migration-ledger.json` (schema `kyber-squad.migration-ledger/v1`) records each
+completed global copy and project import, so migration is one-shot per source:
+
+```json
+{ "globalMigratedFrom": ["<legacy-root-key>"], "projectsImported": ["<root-key>"] }
+```
+
+- A global copy records its legacy root key after the receipt is written. A project import records the
+  project's root key inside the lease that writes its state.
+- A recorded source is never copied or imported again. An uninstall of migrated state therefore stays
+  uninstalled while the legacy files it was copied from are retained. Doctor lists such a global root
+  among the unmigrated legacy roots, with the reason that it was already migrated.
+- The ledger gates only legacy copies and imports. Every verb runs migration first, but home state is
+  never blocked by the ledger, so a fresh install after an uninstall is unaffected.
+- A malformed or unreadable ledger is treated as empty, and a warning says so. The next successful write
+  replaces it with a valid one.
 
 ---
 

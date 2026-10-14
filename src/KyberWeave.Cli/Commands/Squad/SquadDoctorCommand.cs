@@ -353,8 +353,8 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
             {
                 SquadCommandComposition.WriteLine(
                     $"  [yellow]warn[/] registered project '{Markup.Escape(project.Path)}' is stale " +
-                    $"({Markup.Escape(project.StaleReason ?? "unknown")}); global updates skip it. " +
-                    "Reinstall it there, or uninstall it to remove the entry.");
+                    $"({Markup.Escape(project.StaleReason ?? "unknown")}); " +
+                    "global updates skip it until its path is restored or its receipt is reinstalled.");
                 continue;
             }
 

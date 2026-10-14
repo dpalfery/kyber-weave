@@ -135,8 +135,8 @@ non-policy content stays in its skill directory as its durable home, portable po
 synchronization. The repository's own `.kyber-weave/squad.lock.yml` and
 `.kyber-weave/squad.receipt.json` are legacy in-repo state from before
 [ADR 0037](../adr/0037-squad-state-in-user-home.md): Squad no longer writes lock or receipt files
-into the repository, and these two files are retained for rollback rather than committed as current
-state. All four paths remain untouched until a human refreshes them after a fresh release candidate.
+into the repository, and these two files are retained for rollback. They are not current state. All four
+paths remain untouched until a human refreshes them after a fresh release candidate.
 
 ---
 

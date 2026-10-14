@@ -6,6 +6,9 @@ status: current
 owner: dpalfery
 last-reviewed: 2026-10-14
 component: KyberSquad
+code-refs:
+  - SquadStateStore
+  - SquadStateMigration
 ---
 
 # ADR 0037: Squad Lock and Receipt State Moves to the User Home, with a Registry and a Global Anchor
@@ -46,10 +49,18 @@ where it is version-controlled alongside the project it describes.
    spellings of one directory therefore share one entry. The application-data directory is no
    longer a state location. It is read only as the legacy migration source.
 
-2. **Global scope has one anchor, the home directory.** Under `--global`, the positional path,
-   `--path`, and the invoking directory are ignored. A path supplied with `--global` produces a
-   warning and the command continues. The global mutex is keyed by the physical home, and the
-   global transaction work directory and journal are `<home>/.kyber-weave/.squad-transaction`.
+2. **Global scope has one anchor, the home directory, with one exception.** Under `--global`, the
+   positional path, `--path`, and the invoking directory are ignored. A path supplied with
+   `--global` produces a warning and the command continues; the warning is not printed when the
+   supplied path is `.`. The exception is a legacy pre-existing single-root global receipt. Its
+   relative paths are not portable, so after migration (decision 6) the anchor is the absolute
+   `targetRoot` that migration recorded, not the home and not the invoking directory. Migration runs
+   first and the anchor is chosen second, so every later run of that deployment anchors on the same
+   root. For that case the warning still prints when a path is supplied, and it names the recorded
+   root in place of the home. A legacy receipt that records no absolute root keeps the operator's
+   path, or the process directory when none is given, as its anchor, and prints no such warning. The
+   global mutex is keyed by the physical home, and the global transaction work directory and journal
+   are `<home>/.kyber-weave/.squad-transaction`.
 
 3. **Receipts record the physical root.** A project receipt's `targetRoot`, previously `"."`,
    stores the canonical absolute physical root. A global receipt stores the home anchor, or, for
@@ -67,6 +78,14 @@ where it is version-controlled alongside the project it describes.
    has a receipt under `projects/<root-key>/` but no registry row. A failed registry write after
    a committed transaction produces a warning that names the remedy, rerunning `squad status`, and
    does not fail the transaction. Global state is not registered.
+
+   The registry is reconciled when `squad status --global`, `squad update --global`, or
+   `squad doctor` lists it, and when `squad update --global --projects` resolves a named path. No
+   other verb rebuilds it, so a rebuilt entry can lag a project install until one of those runs. A
+   failed write after a committed transaction warns, "Run `squad status --global` to rebuild the
+   registry". There is no command that unregisters a stale entry: an entry whose directory no longer
+   exists stays flagged until that path returns. Project uninstall removes the entry it names, but only
+   while that directory exists, because uninstall requires an existing project root.
 
 5. **One global receipt.** Sibling global receipts are retired. `global/squad.receipt.json` is
    the only global receipt. Legacy global roots that have not been migrated are reported by
@@ -89,8 +108,17 @@ where it is version-controlled alongside the project it describes.
      has no receipt, and `R/.kyber-weave/squad.receipt.json` exists, the receipt and lock are
      imported, `targetRoot` is set, and R is registered. The in-repository files are untouched.
      Home state wins from then on.
-   - Under `--dry-run` nothing is written. The run reports that the legacy state at each path will
-     be migrated on the next invocation without `--dry-run`.
+   - Under `--dry-run` nothing is written, and the ledger is not written either. The run reports that
+     the legacy state at each path will be migrated on the next invocation without `--dry-run`.
+     Install, update, and uninstall stop after that report, so they never plan against state the
+     real run has not yet moved.
+   - Every copy or import runs under the same transaction lease an install takes for the root. A busy
+     lease writes nothing and warns; the legacy files stay in place and the next run retries.
+   - A global copy writes the lock first and the receipt last, and the receipt is the completion
+     marker. A crash that leaves a home lock with no receipt is completed on the next run when that
+     lock is byte-identical to the source lock. A home lock that differs blocks the copy and is
+     reported.
+   - `squad doctor` runs this migration as a verb, so it writes as well as reports.
 
 7. **Legacy in-repository files are retained.** Migration never deletes a file. The legacy
    `.kyber-weave/squad.lock.yml` and `squad.receipt.json` in a host repository remain on disk for
@@ -100,6 +128,23 @@ where it is version-controlled alongside the project it describes.
 8. **Mutex and transaction work directory stay per physical root.** Only the receipt and lock
    move. A project installed at the home directory resolves to the same physical root as the
    global anchor, so it contends for the same mutex and uses the same work directory.
+
+9. **A migration ledger makes each migration one-shot per source.** The ledger is
+   `<home>/.kyber-weave/squad/migration-ledger.json`, schema `kyber-squad.migration-ledger/v1`, with
+   two arrays of root keys:
+
+   ```json
+   { "globalMigratedFrom": ["<legacy-root-key>"], "projectsImported": ["<root-key>"] }
+   ```
+
+   A global copy adds its legacy root key to `globalMigratedFrom`, after the receipt is written. An
+   import adds the project's root key to `projectsImported`, in the same lease as its writes. Once a
+   key is recorded, the legacy files are not copied or imported again. That is the point of the
+   ledger: an uninstall of migrated state is not undone by the legacy copy that decision 7 keeps.
+   Only migration reads the ledger, so a fresh install after an uninstall is not blocked by it. A
+   dry run never writes the ledger. A ledger that does not parse, or does not match the schema, is
+   read as empty and reported as a warning; the next successful write replaces it. No command edits or
+   removes ledger entries.
 
 ## Alternatives Considered
 
@@ -134,6 +179,24 @@ where it is version-controlled alongside the project it describes.
   its `targetRoot` records; the layout rules of ADR 0024 apply to migrated receipts as they do to
   any other.
 - Tests inject the home directory and never touch the real home directory.
+- **Placement trade-off of decision 1 and 8.** The global transaction work directory, journal,
+  staging, and backups live under `<home>/.kyber-weave/.squad-transaction`. A project's lock and
+  receipt are published into the home store, while the project's journal stays beside the project
+  root. When the destination is on a different volume from the home, placement is not an atomic
+  rename: files are copied and then deleted, and directory moves fail closed and roll back. Operators
+  who relocate a tool directory with `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, or a similar override should
+  keep that directory on the home volume.
+- **Downgrade limit.** The intent journal gains an additive `home` value in its created-directory
+  `area` field. An older CLI that recovers a journal containing that value fails closed with
+  `InvalidDataException` rather than recovering it wrongly. Older CLIs still read the legacy
+  locations and files, as decision 7 requires. Only a journal that records a home-area directory
+  triggers the fail-closed refusal; an interrupted transaction from the new CLI that has none is
+  recovered as before.
+- **Registry updates are not locked across roots.** The registry's read-modify-write is not held
+  under a lock that spans different roots' leases, so two projects updated at the same moment can
+  lose one registry update. The receipt under `projects/<root-key>/` is the authority, so a lost
+  entry is recovered by `squad status --global` or `squad doctor`, which rebuild the registry from
+  those receipts.
 
 ## Related
 

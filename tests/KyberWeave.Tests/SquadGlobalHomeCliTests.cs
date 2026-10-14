@@ -473,6 +473,8 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
             .Execute(null!, new SquadDoctorSettings { Path = fleet.Anchor, Global = true }));
 
         Assert.Contains("is stale (", execution.Output, StringComparison.Ordinal);
+        Assert.Contains("until its path is restored", execution.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain("uninstall it", execution.Output, StringComparison.OrdinalIgnoreCase);
         Assert.Contains(fleet.Stale.Physical, execution.Output, StringComparison.Ordinal);
         Assert.Contains("legacy-alpha", execution.Output, StringComparison.Ordinal);
         Assert.Contains("legacy-beta", execution.Output, StringComparison.Ordinal);
