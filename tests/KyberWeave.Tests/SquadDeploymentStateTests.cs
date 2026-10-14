@@ -3286,6 +3286,8 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     public void ResolveFileWindowsCaseSensitiveSiblingSymlinkEscapeIsRejected()
     {
         using TempDirectory fixture = new TempDirectory();
+        AssertHomeStoreSymlinkEscapesAreRejected(fixture.Path);
+
         string caseSensitiveParent = Path.Combine(fixture.Path, "case-sensitive-parent");
         Directory.CreateDirectory(caseSensitiveParent);
         if (OperatingSystem.IsWindows() &&
@@ -3340,15 +3342,66 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         Directory.Delete(Path.Combine(upperRoot, ".kyber-weave"));
         Directory.CreateSymbolicLink(Path.Combine(upperRoot, ".kyber-weave"), lowerRoot);
 
+        // Project state lives under the home store, so the in-root link is reached only through the
+        // project transaction directory: the journal and its work directory beside the root.
+        SquadStateStore projectStore = Store(Path.Combine(fixture.Path, "application-data"));
         Assert.Throws<SquadPathContainmentException>(() =>
             Transaction(upperRoot).Execute(plan));
         Assert.Throws<SquadPathContainmentException>(() =>
-            Store(Path.Combine(fixture.Path, "application-data")).ResolveReceiptPath(
-                upperRoot,
-                SquadDeploymentScope.Project));
+            projectStore.ResolveTransactionDirectory(upperRoot, SquadDeploymentScope.Project));
+        Assert.Throws<SquadPathContainmentException>(() =>
+            projectStore.ResolveTransactionWorkDirectory(upperRoot, SquadDeploymentScope.Project));
         Assert.Throws<SquadPathContainmentException>(() =>
             Transaction(upperRoot).Recover(upperRoot, SquadDeploymentScope.Project));
         AssertTreesEqual(outsideBefore, CaptureTree(lowerRoot));
+    }
+
+    /// <summary>
+    /// A symlink planted inside the home store that leads out of the home must stop every home-store
+    /// resolution it sits on. Planted at <c>.kyber-weave</c> it covers the state files and the global
+    /// journal, which lives beside <c>squad</c>. Planted at <c>.kyber-weave/squad</c> it covers the
+    /// state files only, so the journal is not asserted to reject there. Nothing here depends on
+    /// letter case, so it runs on every filesystem.
+    /// </summary>
+    private static void AssertHomeStoreSymlinkEscapesAreRejected(string workspace)
+    {
+        const string canaryRelativePath = "outside-canary.txt";
+        string project = Path.Combine(workspace, "home-escape-project");
+        Directory.CreateDirectory(project);
+        (string Label, string LinkRelativePath, bool JournalOnPath)[] plants =
+        [
+            ("kyber-weave", ".kyber-weave", true),
+            ("squad", Path.Combine(".kyber-weave", "squad"), false),
+        ];
+
+        foreach ((string label, string linkRelativePath, bool journalOnPath) in plants)
+        {
+            string applicationData = Path.Combine(workspace, $"home-escape-{label}");
+            string home = Path.Combine(applicationData, "home");
+            string outside = Path.Combine(workspace, $"home-outside-{label}");
+            Directory.CreateDirectory(Path.Combine(home, Path.GetDirectoryName(linkRelativePath)!));
+            Directory.CreateDirectory(outside);
+            Write(outside, canaryRelativePath, "outside canary");
+            SortedDictionary<string, TreeEntry> outsideBefore = CaptureTree(outside);
+            Directory.CreateSymbolicLink(Path.Combine(home, linkRelativePath), outside);
+
+            SquadStateStore store = Store(applicationData);
+            Assert.Throws<SquadPathContainmentException>(() =>
+                store.ResolveReceiptPath(project, SquadDeploymentScope.Project));
+            Assert.Throws<SquadPathContainmentException>(() =>
+                store.ResolveLockPath(project, SquadDeploymentScope.Project));
+            Assert.Throws<SquadPathContainmentException>(() =>
+                store.ResolveReceiptPath(project, SquadDeploymentScope.Global));
+            Assert.Throws<SquadPathContainmentException>(() =>
+                store.ResolveLockPath(project, SquadDeploymentScope.Global));
+            if (journalOnPath)
+            {
+                Assert.Throws<SquadPathContainmentException>(() =>
+                    store.ResolveTransactionDirectory(project, SquadDeploymentScope.Global));
+            }
+
+            AssertTreesEqual(outsideBefore, CaptureTree(outside));
+        }
     }
 
     [Fact]
