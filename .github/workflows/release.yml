@@ -220,7 +220,7 @@ jobs:
           ls -la dist/
 
       - name: Upload RID archives
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: binaries-${{ matrix.rid }}
           path: dist/*
@@ -435,7 +435,7 @@ jobs:
           cat "${BIN_DIR}/SHA256SUMS.txt"
 
       - name: Upload KyberDash archives
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: binaries-kyberdash-${{ matrix.rid }}
           path: |
@@ -476,7 +476,7 @@ jobs:
           squad pack --format all --out ./dist-squad --version "${VERSION}"
 
       - name: Upload Squad archives
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: squad-archives
           path: |
@@ -678,7 +678,7 @@ jobs:
           cp "$SETUP" "dist-tray/${{ matrix.asset }}"
 
       - name: Upload the tray asset
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: tray-${{ matrix.rid }}
           path: dist-tray/${{ matrix.asset }}
