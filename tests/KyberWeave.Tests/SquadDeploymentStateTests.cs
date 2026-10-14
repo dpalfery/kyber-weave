@@ -210,9 +210,63 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         Assert.Contains(invalidField.Split('-')[0], exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// A receipt records the canonical physical root it was written against, so an absolute root is the
+    /// normal form and must survive a round trip. It was once rejected, which predates recording roots.
+    /// </summary>
+    [Fact]
+    public void ReceiptRecordsAbsolutePhysicalRootAndRoundTrips()
+    {
+        using TempDirectory fixture = new TempDirectory();
+        SquadStateStore store = Store(fixture.Path);
+        string physicalRoot = Path.Combine(fixture.Path, "physical-root");
+        SquadOwnedFile validFile = new SquadOwnedFile(
+            ".codex/agents/conductor.toml",
+            Digest("conductor"),
+            "codex",
+            false);
+        SquadReceipt receipt = Receipt(validFile) with { TargetRoot = physicalRoot };
+
+        SquadReceipt restored = store.DeserializeReceipt(store.SerializeReceipt(receipt));
+
+        Assert.Equal(physicalRoot, restored.TargetRoot);
+    }
+
+    /// <summary>
+    /// Only an absolute physical root or the legacy <c>.</c> marker is a valid target root. A relative root
+    /// is not a location and would be resolved against whatever directory later reads it.
+    /// </summary>
+    [Theory]
+    [InlineData("relative/root")]
+    [InlineData("../escape")]
+    public void ReceiptRejectsRelativeTargetRootOtherThanTheLegacyMarker(string targetRoot)
+    {
+        using TempDirectory fixture = new TempDirectory();
+        SquadStateStore store = Store(fixture.Path);
+        SquadReceipt invalid = Receipt(new SquadOwnedFile(
+            ".codex/agents/conductor.toml",
+            Digest("conductor"),
+            "codex",
+            false)) with
+        {
+            TargetRoot = targetRoot
+        };
+
+        InvalidDataException serialized = Assert.Throws<InvalidDataException>(() => store.SerializeReceipt(invalid));
+        Assert.Contains("target root", serialized.Message, StringComparison.OrdinalIgnoreCase);
+        string json = store.SerializeReceipt(Receipt(new SquadOwnedFile(
+            ".codex/agents/conductor.toml",
+            Digest("conductor"),
+            "codex",
+            false)));
+        string invalidJson = json.Replace("\"targetRoot\": \".\"", $"\"targetRoot\": \"{targetRoot}\"", StringComparison.Ordinal);
+
+        InvalidDataException deserialized = Assert.Throws<InvalidDataException>(() => store.DeserializeReceipt(invalidJson));
+        Assert.Contains("target root", deserialized.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
     [Theory]
     [InlineData("schema")]
-    [InlineData("absolute-root")]
     [InlineData("absolute-path")]
     [InlineData("file-digest")]
     public void SerializeReceiptInvalidSchemaRootPathOrDigestIsRejected(string invalidField)
@@ -228,7 +282,6 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         SquadReceipt invalid = invalidField switch
         {
             "schema" => valid with { Schema = "kyber-squad.receipt/v999" },
-            "absolute-root" => valid with { TargetRoot = "/private/operator/root" },
             "absolute-path" => valid with
             {
                 Files = [validFile with { RelativePath = "/private/conductor.toml" }]
@@ -247,7 +300,6 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
 
     [Theory]
     [InlineData("schema")]
-    [InlineData("absolute-root")]
     [InlineData("absolute-path")]
     [InlineData("file-digest")]
     public void DeserializeReceiptInvalidSchemaRootPathOrDigestIsRejected(string invalidField)
@@ -264,10 +316,6 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             "schema" => json.Replace(
                 "kyber-squad.receipt/v1",
                 "kyber-squad.receipt/v999",
-                StringComparison.Ordinal),
-            "absolute-root" => json.Replace(
-                "\"targetRoot\": \".\"",
-                "\"targetRoot\": \"/private/operator/root\"",
                 StringComparison.Ordinal),
             "absolute-path" => json.Replace(
                 ".codex/agents/conductor.toml",
@@ -306,6 +354,11 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             adopt: false,
             new FixedTimeProvider(InstalledAt));
         string physicalHome = SquadPhysicalRootIdentity.Resolve(home).PhysicalPath;
+
+        // The planner cannot know the home anchor, so it records the unanchored marker. The transaction
+        // stamps the physical home on the plan as it writes, which is what this test asserts afterwards.
+        Assert.Equal(SquadStateStore.UnanchoredTargetRoot, plan.Receipt.TargetRoot);
+        new SquadTransaction(store).Execute(plan);
 
         string stateDirectory = store.ResolveStateDirectory(
             fixture.Path,
@@ -578,7 +631,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     }
 
     [Fact]
-    public void ExecuteGlobalScopeKeepsDurableIntentInJournalAndStagesAndBackupsOnDestinationFilesystem()
+    public void ExecuteGlobalScopeKeepsIntentStagesAndBackupsInHomeJournalNotBesideTargetOrInState()
     {
         using TempDirectory fixture = new TempDirectory();
         string applicationData = Path.Combine(fixture.Path, "application-data");
@@ -615,8 +668,9 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         new SquadTransaction(store, observer).Execute(plan);
 
         Assert.True(observer.SawDurableIntentInJournal);
-        Assert.True(observer.SawStagingOnTargetFilesystem);
-        Assert.True(observer.SawBackupOnTargetFilesystem);
+        Assert.True(observer.SawStagingInJournal);
+        Assert.True(observer.SawBackupInJournal);
+        Assert.False(observer.SawStagingOrBackupOnTargetRoot);
         Assert.False(observer.SawStagingOrBackupInState);
         Assert.Equal("updated body", Read(targetRoot, ".codex/agents/conductor.toml"));
     }
@@ -2161,9 +2215,12 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             [],
             adopt: false,
             new FixedTimeProvider(InstalledAt));
+        // Project scope, not global: the lease of a project is its physical root, so a case alias of that
+        // root contends. Global state is leased on the home, which this root is not, so a global alias
+        // would correctly not contend with a project at an unrelated root.
         SquadDeploymentPlan aliasPlan = SquadDeploymentPlan.CreateInstall(
             caseAlias,
-            SquadDeploymentScope.Global,
+            SquadDeploymentScope.Project,
             Lock(),
             [Rendered(".warp/roles/alias.md", "alias", "warp")],
             [],
@@ -2841,7 +2898,14 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         Assert.False(
             observer.SawLeafOrStateMutation,
             "Closed artifact verification must run before an active transition, leaf claim, or state mutation.");
-        AssertTreesEqual(before, CaptureTreeWithoutTransactionEvidence(fixturePath));
+        // The retained journal creates <root>/.kyber-weave before verification runs. Its evidence is
+        // excluded from the comparison, so the directory itself is the only expected addition, and no
+        // leaf artifact may differ.
+        SortedDictionary<string, TreeEntry> expectedAfterRejection = new(before, StringComparer.Ordinal)
+        {
+            [".kyber-weave"] = new TreeEntry(TreeEntryKind.Directory, null, null)
+        };
+        AssertTreesEqual(expectedAfterRejection, CaptureTreeWithoutTransactionEvidence(fixturePath));
         Assert.True(
             Directory.Exists(Path.Combine(
                 fixturePath,
@@ -6288,8 +6352,8 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
 
     /// <summary>
     /// Records where the durable intent, the staged bytes and the backups live while a global
-    /// transaction runs. The intent belongs in the home-anchored journal, and staging and backups
-    /// belong on the destination filesystem, never in the portable global state directory.
+    /// transaction runs. The intent, staging and backups all belong in the home journal, never beside the
+    /// target root and never in the portable global state directory.
     /// </summary>
     private sealed class GlobalTransactionLocationObserver(
         string targetRoot,
@@ -6298,9 +6362,11 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     {
         public bool SawDurableIntentInJournal { get; private set; }
 
-        public bool SawStagingOnTargetFilesystem { get; private set; }
+        public bool SawStagingInJournal { get; private set; }
 
-        public bool SawBackupOnTargetFilesystem { get; private set; }
+        public bool SawBackupInJournal { get; private set; }
+
+        public bool SawStagingOrBackupOnTargetRoot { get; private set; }
 
         public bool SawStagingOrBackupInState { get; private set; }
 
@@ -6313,13 +6379,15 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
                     SearchOption.AllDirectories).Any();
             if (step.Kind == SquadTransactionStepKind.FileStaged)
             {
-                SawStagingOnTargetFilesystem |= HasDirectoryNamed(targetRoot, "staging");
+                SawStagingInJournal |= HasDirectoryNamed(journalDirectory, "staging");
+                SawStagingOrBackupOnTargetRoot |= HasDirectoryNamed(targetRoot, "staging");
                 SawStagingOrBackupInState |= HasDirectoryNamed(stateDirectory, "staging");
             }
 
             if (step.Kind == SquadTransactionStepKind.FileBackedUp)
             {
-                SawBackupOnTargetFilesystem |= HasDirectoryNamed(targetRoot, "backups");
+                SawBackupInJournal |= HasDirectoryNamed(journalDirectory, "backups");
+                SawStagingOrBackupOnTargetRoot |= HasDirectoryNamed(targetRoot, "backups");
                 SawStagingOrBackupInState |= HasDirectoryNamed(stateDirectory, "backups");
             }
         }

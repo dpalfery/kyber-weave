@@ -335,7 +335,8 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         try
         {
             SquadReceipt? receipt = stateStore.ReadReceipt(workingDirectory, SquadDeploymentScope.Global);
-            IReadOnlyList<SquadReceipt> siblingReceipts = stateStore.ListOtherGlobalReceipts(workingDirectory);
+            // Global state is one home-anchored receipt, so there is no sibling receipt to collide with.
+            IReadOnlyList<SquadReceipt> siblingReceipts = [];
 
             foreach (SquadTarget target in renderer.SupportedTargets)
             {

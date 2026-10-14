@@ -177,11 +177,32 @@ public sealed class SquadHomeStateStoreTests
     }
 
     /// <summary>
-    /// A project lease and a global lease on one physical root are independent, because the global
-    /// journal is anchored on the home. Before this, the two scopes shared one lease on one root.
+    /// A project installed at the home root and global state share one lease, because global state is
+    /// anchored on the home and the two use one transaction directory there. Global state is leased per
+    /// home, so a project whose physical root is the home must contend with it.
     /// </summary>
     [Fact]
-    public async Task ProjectAndGlobalTransactionsOnOnePhysicalRootHoldIndependentLeases()
+    public async Task ProjectAtHomeRootAndGlobalTransactionContendForOneLease()
+    {
+        using TempDirectory fixture = new TempDirectory();
+        string home = CreateHome(fixture);
+        SquadStateStore store = StoreFor(home);
+
+        Exception? contention = await ExecuteWhileLeaseIsHeld(
+            store,
+            Install(home, SquadDeploymentScope.Project, AgentFile(SquadDeploymentScope.Project, "project.toml", "project")),
+            Install(home, SquadDeploymentScope.Global, AgentFile(SquadDeploymentScope.Global, "global.toml", "global")));
+
+        AssertActiveLeaseConflict(contention);
+        Assert.False(File.Exists(FileAt(home, AgentRelativePath(SquadDeploymentScope.Global, "global.toml"))));
+    }
+
+    /// <summary>
+    /// A project installed at a root other than the home holds its own lease and does not contend with
+    /// global state, which is leased on the home. Only a root that is the home shares that lease.
+    /// </summary>
+    [Fact]
+    public async Task ProjectAtUnrelatedRootAndGlobalTransactionHoldIndependentLeases()
     {
         using TempDirectory fixture = new TempDirectory();
         string home = CreateHome(fixture);

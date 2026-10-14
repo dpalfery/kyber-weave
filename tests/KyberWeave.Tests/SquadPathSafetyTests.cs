@@ -465,7 +465,11 @@ public sealed class SquadPathSafetyTests : IDisposable
         Assert.Contains(successfulMutation, normalized, StringComparison.Ordinal);
         if (verb == "install")
         {
-            Assert.True(Directory.Exists(Path.Combine(targetDir, ".kyber-weave")));
+            // Project state lives in the home store, so the project carries no in-repo squad state. The
+            // transaction journal may still sit beside the root, which is why only the squad state
+            // directory is asserted absent.
+            Assert.NotNull(stateStore.ReadLock(targetDir, SquadDeploymentScope.Project));
+            Assert.False(Directory.Exists(Path.Combine(targetDir, ".kyber-weave", "squad")));
         }
     }
 
