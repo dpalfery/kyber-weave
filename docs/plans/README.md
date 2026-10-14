@@ -28,7 +28,8 @@ Closeout explicitly distinguishes between two waiver categories:
 ## Active Plans
 
 | Plan | Status | Date | Development mode | Goal |
-|---|---|---|---|---|---|
+|---|---|---|---|---|
+| [2026-10-14-squad-home-state.md](2026-10-14-squad-home-state.md) | Ready | 2026-10-14 | test-first | Move all Kyber-Squad lock and receipt state (global and project) to `~/.kyber-weave/squad/` (`global/`, `projects/<root-key>/`, `registry.json`), so `squad update --global` gives the same result from any directory. Adds a post-run project picker (All/None/select) and `--projects <all\|none\|path...>`, `--global --replace-managed` coverage, and non-destructive, idempotent migration of legacy app-data global receipts and in-repo `.kyber-weave/squad.*`. Mutex and transaction work dir stay per physical root. ADR 0037. |
 
 Earlier history: pipeline T9 and spine S-docs harvested 2026-09-13 into [dash/architecture.md](../dash/architecture.md), [dash/runbook.md](../dash/runbook.md), [dash/telemetry-inventory.md](../dash/telemetry-inventory.md), [ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md), and [ADR 0018](../adr/0018-kyberdash-content-retention-purge.md). ADRs 0012–0015 remain the spine harvest (0014 notes that `kyber purge-content` was not shipped). Residual risks (T8 live-source coverage, findings client-side harness filter) live on the archived plans — they are not shipped claims.
 
