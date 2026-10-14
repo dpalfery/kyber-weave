@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { formatDuration } from '../lib/labels.js'
 import { cn, usd, fmtTokens } from '../lib/utils.js'
@@ -14,6 +14,9 @@ import type {
 import type { DrawerContent, SessionTimelineNode } from './AgentSessionDashboard.js'
 import { Skeleton } from './ui/skeleton.js'
 import { SlideOutDrawer } from './ui/SlideOutDrawer.js'
+import { CopyExactButton, SearchableContentView, type ContentViewMode } from './ContentViewToolbar.js'
+
+export { CopyExactButton }
 
 export interface XmlFoldChunk {
   type: 'text' | 'tag'
@@ -256,6 +259,16 @@ export function containsReadableXmlTag(value: string): boolean {
  * recursive rendering. Literal `<`/`>` that never parsed as a tag stays as
  * escaped literal text. Raw and copy paths elsewhere keep the exact source.
  */
+/**
+ * Brings a section into view when it opens. The expansion renders below its
+ * summary, and inside a max-height scroll box a section lower down would
+ * otherwise reveal its text below the clipped area. `nearest` moves the
+ * scroll position only as far as needed.
+ */
+function revealOpenedSection(event: { currentTarget: { open: boolean; scrollIntoView?: (options: ScrollIntoViewOptions) => void } }) {
+  if (event.currentTarget.open) event.currentTarget.scrollIntoView?.({ block: 'nearest' })
+}
+
 export function XmlFoldedText({ text, className }: { text: string; className?: string }) {
   if (!text) return null
   const chunks = parseReadableXmlChunks(text)
@@ -279,7 +292,7 @@ export function XmlFoldedText({ text, className }: { text: string; className?: s
             return (
               <div
                 key={i}
-                className="whitespace-pre-wrap break-words leading-relaxed text-foreground/90 my-1"
+                className="whitespace-pre-wrap break-words leading-none text-foreground/90 my-0 h-2 overflow-hidden"
                 data-testid="xml-folded-whitespace"
                 aria-label="whitespace-only separator between sections"
               >
@@ -339,6 +352,7 @@ export function XmlFoldedText({ text, className }: { text: string; className?: s
             key={i}
             className="group border border-border rounded my-1 bg-card/60 overflow-hidden"
             data-testid={`folded-tag-${chunk.tag}`}
+            onToggle={revealOpenedSection}
           >
             <summary className="cursor-pointer px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground flex items-center gap-2 select-none hover:bg-interactive-secondary/50 transition-colors">
               <span className="shrink-0 rounded bg-amber-500/15 border border-amber-500/30 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-amber-600 dark:text-amber-400">
@@ -1099,8 +1113,7 @@ export function JsonStringView({
    */
   controls?: 'full' | 'minimal'
 }) {
-  const [viewMode, setViewMode] = useState<'formatted' | 'raw'>(defaultView)
-  const [copied, setCopied] = useState(false)
+  const [viewMode, setViewMode] = useState<ContentViewMode>(defaultView)
 
   // Everything derived from `text` is memoized: the parsers below are
   // O(payload) and payloads can be megabytes, so toggling Raw/Formatted or
@@ -1155,63 +1168,18 @@ export function JsonStringView({
       ? `JSON lines · ${nonBlankLines} lines`
       : text.trim().startsWith('{') ? 'Object' : 'Value'
 
-  const copyExact = () => {
-    try {
-      void navigator.clipboard.writeText(text)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    } catch {
-      // ignore
-    }
-  }
+  const leading = (
+    <>
+      {label ? (
+        <span className="text-xs font-semibold text-foreground">{label}</span>
+      ) : null}
+      <span className="rounded bg-muted border border-border px-1.5 py-0.5 font-mono text-[10px] text-tertiary-foreground">
+        {descriptor}
+      </span>
+    </>
+  )
 
-  return (
-    <div className="space-y-2" data-testid="json-string-view">
-      <div className="flex items-center justify-between gap-2 flex-wrap">
-        <div className="flex items-center gap-2 min-w-0">
-          {label ? (
-            <span className="text-xs font-semibold text-foreground">{label}</span>
-          ) : null}
-          <span className="rounded bg-muted border border-border px-1.5 py-0.5 font-mono text-[10px] text-tertiary-foreground">
-            {descriptor}
-          </span>
-        </div>
-        {controls === 'full' ? (
-          <div className="flex items-center gap-1.5">
-            <div className="flex rounded border border-border bg-interactive-secondary p-0.5 text-xs">
-              <button
-                type="button"
-                onClick={() => setViewMode('formatted')}
-                className={cn(
-                  'px-2.5 py-1 rounded-[4px] font-medium transition-colors',
-                  viewMode === 'formatted' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
-                )}
-              >
-                Formatted
-              </button>
-              <button
-                type="button"
-                onClick={() => setViewMode('raw')}
-                className={cn(
-                  'px-2.5 py-1 rounded-[4px] font-medium transition-colors',
-                  viewMode === 'raw' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
-                )}
-              >
-                Raw
-              </button>
-            </div>
-            <button
-              type="button"
-              onClick={copyExact}
-              className="rounded border border-border px-2 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-interactive-secondary transition-colors"
-            >
-              {copied ? 'Copied!' : 'Copy'}
-            </button>
-          </div>
-        ) : null}
-      </div>
-      {viewMode === 'formatted' ? (
-        typedBlocks !== null ? (
+  const formatted = typedBlocks !== null ? (
           <div className="space-y-3" data-testid="json-text-blocks">
             {typedBlocks.map((block, idx) => (
               <div key={idx} className="space-y-1">
@@ -1255,14 +1223,30 @@ export function JsonStringView({
             {single ?? lines ?? text}
           </pre>
         )
-      ) : (
-        <pre
-          className="text-xs font-mono p-2.5 overflow-auto whitespace-pre-wrap break-words rounded border border-border bg-muted/40 text-foreground max-h-[400px]"
-          data-testid="json-raw"
-        >
-          {text}
-        </pre>
-      )}
+
+  const raw = (
+    <pre
+      className="text-xs font-mono p-2.5 overflow-auto whitespace-pre-wrap break-words rounded border border-border bg-muted/40 text-foreground max-h-[400px]"
+      data-testid="json-raw"
+    >
+      {text}
+    </pre>
+  )
+
+  return (
+    <div className="space-y-2" data-testid="json-string-view">
+      <SearchableContentView
+        view={viewMode}
+        onViewChange={setViewMode}
+        text={text}
+        label={label}
+        viewPrefix="json-string-view"
+        leading={leading}
+        controls={controls}
+        copy={{ text, testId: 'json-string-view-copy' }}
+        formatted={formatted}
+        raw={raw}
+      />
     </div>
   )
 }
@@ -2233,8 +2217,7 @@ export function InspectorContent({
    */
   suppressJsonControls?: boolean
 }) {
-  const [viewMode, setViewMode] = useState<'formatted' | 'raw'>('formatted')
-  const [copied, setCopied] = useState(false)
+  const [viewMode, setViewMode] = useState<ContentViewMode>('formatted')
 
   if (data === null || data === undefined) {
     return <div className="text-xs text-tertiary-foreground italic py-4 text-center">No data to display.</div>
@@ -2291,60 +2274,31 @@ export function InspectorContent({
     )
   }
 
-  // Handle generic object or array with formatted & raw tabs
-  const copyJson = () => {
-    try {
-      void navigator.clipboard.writeText(JSON.stringify(data, null, 2))
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    } catch {
-      // ignore
-    }
-  }
+  // Handle generic object or array with formatted & raw views. The raw text is
+  // the pretty-printed JSON, which is also what Copy writes.
+  const json = JSON.stringify(data, null, 2)
 
   return (
     <div className="space-y-3" data-testid="inspector-content">
-      <div className="flex items-center justify-between border-b border-border pb-2">
-        <div className="flex rounded border border-border bg-interactive-secondary p-0.5 text-xs">
-          <button
-            type="button"
-            onClick={() => setViewMode('formatted')}
-            className={cn(
-              'px-2.5 py-1 rounded-[4px] font-medium transition-colors',
-              viewMode === 'formatted' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
-            )}
-          >
-            Formatted
-          </button>
-          <button
-            type="button"
-            onClick={() => setViewMode('raw')}
-            className={cn(
-              'px-2.5 py-1 rounded-[4px] font-medium transition-colors',
-              viewMode === 'raw' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
-            )}
-          >
-            Raw JSON
-          </button>
-        </div>
-        <button
-          type="button"
-          onClick={copyJson}
-          className="rounded border border-border px-2 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-interactive-secondary transition-colors"
-        >
-          {copied ? 'Copied!' : 'Copy JSON'}
-        </button>
-      </div>
-
-      {viewMode === 'formatted' ? (
-        <div className="rounded border border-border bg-card p-3 overflow-hidden">
-          <KeyValueList data={data} />
-        </div>
-      ) : (
-        <pre className="text-xs font-mono p-3 overflow-auto rounded border border-border bg-muted/40 text-foreground max-h-[500px]">
-          {JSON.stringify(data, null, 2)}
-        </pre>
-      )}
+      <SearchableContentView
+        view={viewMode}
+        onViewChange={setViewMode}
+        text={json}
+        label="JSON"
+        viewPrefix="inspector-content"
+        controls={suppressJsonControls === true ? 'minimal' : 'full'}
+        copy={{ text: json, testId: 'inspector-content-copy' }}
+        formatted={
+          <div className="rounded border border-border bg-card p-3 overflow-hidden">
+            <KeyValueList data={data} />
+          </div>
+        }
+        raw={
+          <pre className="text-xs font-mono p-3 overflow-auto rounded border border-border bg-muted/40 text-foreground max-h-[500px]">
+            {json}
+          </pre>
+        }
+      />
     </div>
   )
 }
@@ -2377,9 +2331,18 @@ export function narrowToolDefinitions(text: string, toolName: string | undefined
   }
 }
 
-function NarrowedInspectorContent({ text, toolName }: { text: string; toolName: string | undefined }) {
+function NarrowedInspectorContent({
+  text,
+  toolName,
+  suppressJsonControls,
+}: {
+  text: string
+  toolName: string | undefined
+  /** Set when an outer toolbar already provides the Formatted/Raw switch, search and Copy. */
+  suppressJsonControls?: boolean
+}) {
   const narrowed = React.useMemo(() => narrowToolDefinitions(text, toolName), [text, toolName])
-  return <InspectorContent data={narrowed} />
+  return <InspectorContent data={narrowed} suppressJsonControls={suppressJsonControls} />
 }
 
 /**
@@ -2402,33 +2365,6 @@ export type DrawerContentRequest = SessionContentRequest | TurnFullContentReques
 export function isTurnFullContentRequest(request: unknown): request is TurnFullContentRequest {
   if (request === null || typeof request !== 'object') return false
   return typeof (request as { turnIndex?: unknown }).turnIndex === 'number'
-}
-
-/**
- * Exact-bytes copy button: writes `text` verbatim to the clipboard. Every
- * turn-content block and part gets one so raw access never depends on the
- * formatted view above it.
- */
-export function CopyExactButton({ text, testId, label = 'Copy' }: { text: string; testId: string; label?: string }) {
-  const [copied, setCopied] = useState(false)
-  return (
-    <button
-      type="button"
-      onClick={() => {
-        try {
-          void navigator.clipboard.writeText(text)
-          setCopied(true)
-          setTimeout(() => setCopied(false), 2000)
-        } catch {
-          // ignore
-        }
-      }}
-      className="rounded border border-border px-2 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-interactive-secondary transition-colors"
-      data-testid={testId}
-    >
-      <span aria-live="polite">{copied ? 'Copied!' : label}</span>
-    </button>
-  )
 }
 
 /**
@@ -2586,15 +2522,14 @@ export function buildWholeTurnCopyText(
   return sections.join('\n\n')
 }
 
-export type TurnContentViewMode = 'formatted' | 'raw'
-
-const MAX_SEARCH_MATCHES = 1000
+export type TurnContentViewMode = ContentViewMode
 
 /**
  * Formatted-by-default content with exact raw one toggle away. Only one
  * rendering prints at a time so large content is not duplicated in the DOM
  * by default; the formatted view never trims (readable structure only) and
- * the raw view is the exact source bytes with its own copy button.
+ * the raw view is the exact source bytes with its own copy button. The
+ * toolbar and search come from the shared `SearchableContentView`.
  */
 export function ToggleRawView({
   text,
@@ -2612,153 +2547,24 @@ export function ToggleRawView({
   defaultView?: TurnContentViewMode
 }) {
   const [view, setView] = useState<TurnContentViewMode>(defaultView)
-  const [query, setQuery] = useState('')
-  const [debouncedQuery, setDebouncedQuery] = useState('')
-  const [matchCount, setMatchCount] = useState(0)
-  const [capped, setCapped] = useState(false)
-  const [current, setCurrent] = useState(0)
-  const bodyRef = useRef<HTMLDivElement>(null)
-  const rangesRef = useRef<Range[]>([])
-  const groupLabel = `${label ?? 'Content'}: formatted or raw view`
-  // Several instances coexist in one drawer, so highlight names must be unique per instance.
-  const searchId = useId().replace(/[^a-zA-Z0-9_-]/g, '')
-  const matchName = `search-match-${searchId}`
-  const currentName = `search-current-${searchId}`
-
-  useEffect(() => {
-    const t = setTimeout(() => setDebouncedQuery(query), query ? 150 : 0)
-    return () => clearTimeout(t)
-  }, [query])
-
-  // Find matches in whatever text is currently rendered (formatted or raw) and
-  // mark them with the CSS Custom Highlight API so rendering stays untouched.
-  useEffect(() => {
-    const root = bodyRef.current
-    const needle = debouncedQuery.toLowerCase()
-    const ranges: Range[] = []
-    let overflow = false
-    if (root && needle) {
-      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
-      scan: for (let n = walker.nextNode(); n; n = walker.nextNode()) {
-        const hay = (n.nodeValue ?? '').toLowerCase()
-        for (let i = hay.indexOf(needle); i !== -1; i = hay.indexOf(needle, i + needle.length)) {
-          if (ranges.length >= MAX_SEARCH_MATCHES) {
-            overflow = true
-            break scan
-          }
-          const r = document.createRange()
-          r.setStart(n, i)
-          r.setEnd(n, i + needle.length)
-          ranges.push(r)
-        }
-      }
-    }
-    rangesRef.current = ranges
-    setMatchCount(ranges.length)
-    setCapped(overflow)
-    setCurrent(0)
-  }, [debouncedQuery, view, text])
-
-  useEffect(() => {
-    const ranges = rangesRef.current
-    const registry = (globalThis as { CSS?: { highlights?: Map<string, unknown> } }).CSS?.highlights
-    const HighlightCtor = (globalThis as { Highlight?: new (...r: Range[]) => unknown }).Highlight
-    if (registry && HighlightCtor) {
-      registry.set(matchName, new HighlightCtor(...ranges))
-      const active = ranges[current]
-      if (active) registry.set(currentName, new HighlightCtor(active))
-      else registry.delete(currentName)
-    }
-    const active = ranges[current]
-    if (active) {
-      // Reveal the match if it sits inside a collapsed fold.
-      for (let el = active.startContainer.parentElement; el && el !== bodyRef.current; el = el.parentElement) {
-        if (el instanceof HTMLDetailsElement && !el.open) el.open = true
-      }
-      active.startContainer.parentElement?.scrollIntoView?.({ block: 'center' })
-    }
-    return () => {
-      registry?.delete(matchName)
-      registry?.delete(currentName)
-    }
-  }, [matchCount, current, debouncedQuery, view, text, matchName, currentName])
-
-  const step = (delta: number) => {
-    if (matchCount === 0) return
-    setCurrent((c) => (c + delta + matchCount) % matchCount)
-  }
-
   return (
-    <div className="space-y-2">
-      <style>{`::highlight(${matchName}){background-color:rgb(250 204 21 / 0.35);color:inherit}::highlight(${currentName}){background-color:rgb(249 115 22 / 0.65);color:inherit}`}</style>
-      <div className="flex items-center justify-between gap-2" role="group" aria-label={groupLabel}>
-        <div className="flex rounded border border-border bg-interactive-secondary p-0.5 text-xs">
-          <button
-            type="button"
-            onClick={() => setView('formatted')}
-            data-testid={`${viewPrefix}-view-formatted`}
-            aria-pressed={view === 'formatted'}
-            className={cn(
-              'px-2 py-0.5 rounded-[4px] font-medium transition-colors',
-              view === 'formatted' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
-            )}
-          >
-            Formatted
-          </button>
-          <button
-            type="button"
-            onClick={() => setView('raw')}
-            data-testid={`${viewPrefix}-view-raw`}
-            aria-pressed={view === 'raw'}
-            className={cn(
-              'px-2 py-0.5 rounded-[4px] font-medium transition-colors',
-              view === 'raw' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
-            )}
-          >
-            Raw
-          </button>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <input
-            type="search"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault()
-                step(e.shiftKey ? -1 : 1)
-              }
-            }}
-            placeholder="Search…"
-            aria-label={`${label ?? 'Content'}: search text`}
-            data-testid={`${viewPrefix}-search`}
-            className="h-6 w-32 rounded border border-border bg-card px-2 text-xs text-foreground placeholder:text-muted-foreground"
-          />
-          {query ? (
-            <>
-              <span aria-live="polite" className="text-[11px] font-mono text-tertiary-foreground tabular-nums" data-testid={`${viewPrefix}-search-count`}>
-                {matchCount === 0 ? '0/0' : `${current + 1}/${matchCount}${capped ? '+' : ''}`}
-              </span>
-              <button type="button" onClick={() => step(-1)} disabled={matchCount === 0} aria-label="Previous match" className="px-1 text-xs text-muted-foreground hover:text-foreground disabled:opacity-40">↑</button>
-              <button type="button" onClick={() => step(1)} disabled={matchCount === 0} aria-label="Next match" className="px-1 text-xs text-muted-foreground hover:text-foreground disabled:opacity-40">↓</button>
-            </>
-          ) : null}
-          <CopyExactButton text={text} testId={copyTestId} label="Copy" />
-        </div>
-      </div>
-      <div ref={bodyRef}>
-        {view === 'formatted' ? (
-          <InspectorContent data={text} suppressJsonControls />
-        ) : (
-          <pre
-            className="text-xs font-mono p-2.5 overflow-auto whitespace-pre-wrap break-words rounded border border-border bg-muted/40 text-foreground max-h-[400px]"
-            data-testid={rawTestId}
-          >
-            {text}
-          </pre>
-        )}
-      </div>
-    </div>
+    <SearchableContentView
+      view={view}
+      onViewChange={setView}
+      text={text}
+      label={label}
+      viewPrefix={viewPrefix}
+      copy={{ text, testId: copyTestId }}
+      formatted={<InspectorContent data={text} suppressJsonControls />}
+      raw={
+        <pre
+          className="text-xs font-mono p-2.5 overflow-auto whitespace-pre-wrap break-words rounded border border-border bg-muted/40 text-foreground max-h-[400px]"
+          data-testid={rawTestId}
+        >
+          {text}
+        </pre>
+      }
+    />
   )
 }
 
@@ -3183,14 +2989,11 @@ function FullContentPanel({
           Showing truncated payload text — full content could not be loaded.
         </p>
         {fallback != null && fallback !== '' && (
-          <div
-            className="max-h-[min(60vh,32rem)] min-h-0 overflow-auto rounded border border-border"
-            data-testid="drawer-content-scroll"
-          >
-            <div className="p-3">
-              <InspectorContent data={fallback} />
-            </div>
-          </div>
+          <ScrollableContentPanel
+            viewPrefix="drawer-fallback"
+            text={typeof fallback === 'string' ? fallback : (JSON.stringify(fallback, null, 2) ?? '')}
+            formattedContent={<InspectorContent data={fallback} suppressJsonControls />}
+          />
         )}
       </div>
     )
@@ -3198,8 +3001,8 @@ function FullContentPanel({
 
   return (
     <div className="space-y-3">
-      {data.parts.map((part, idx) => (
-        <div key={`${part.spanId}-${part.part}-${idx}`} className="space-y-2">
+      {groupIdenticalParts(data.parts).map(({ part, index, count }) => (
+        <div key={`${part.spanId}-${part.part}-${index}`} className="space-y-2">
           {part.truncated === true && (
             <p
               className="rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300"
@@ -3210,18 +3013,87 @@ function FullContentPanel({
                 : `showing ${part.text.length} characters (total length not measurable)`}
             </p>
           )}
-          <div
-            className="max-h-[min(60vh,32rem)] min-h-0 overflow-auto rounded border border-border"
-            data-testid="drawer-content-scroll"
-          >
-            <div className="p-3">
-              <NarrowedInspectorContent text={part.text} toolName={request.toolName} />
-            </div>
-          </div>
+          {count > 1 ? (
+            <p className="text-[11px] font-mono text-tertiary-foreground" data-testid="drawer-content-duplicate-note">
+              {`Identical in ${count} captured spans`}
+            </p>
+          ) : null}
+          {/* One toolbar per rendered block: a collapsed group shows its single text once. */}
+          <ScrollableContentPanel
+            viewPrefix={`drawer-content-${index}`}
+            text={part.text}
+            formattedContent={<NarrowedInspectorContent text={part.text} toolName={request.toolName} suppressJsonControls />}
+          />
         </div>
       ))}
     </div>
   )
+}
+
+/**
+ * A bounded, scrollable block with the shared Formatted/Raw toolbar, search
+ * and exact Copy. Formatted is the caller's readable rendering; Raw and Copy
+ * are the exact `text`. Both views scroll inside the same bounded box.
+ */
+function ScrollableContentPanel({
+  viewPrefix,
+  text,
+  formattedContent,
+}: {
+  viewPrefix: string
+  text: string
+  formattedContent: React.ReactNode
+}) {
+  const [view, setView] = useState<ContentViewMode>('formatted')
+  const scrollClass = 'max-h-[min(60vh,32rem)] min-h-0 overflow-auto rounded border border-border'
+  return (
+    <SearchableContentView
+      view={view}
+      onViewChange={setView}
+      text={text}
+      label="Captured content"
+      viewPrefix={viewPrefix}
+      copy={{ text, testId: `copy-${viewPrefix}` }}
+      formatted={
+        <div className={scrollClass} data-testid="drawer-content-scroll">
+          <div className="p-3">{formattedContent}</div>
+        </div>
+      }
+      raw={
+        <div className={scrollClass} data-testid="drawer-content-scroll">
+          <pre className="p-3 text-xs font-mono whitespace-pre-wrap break-words text-foreground">{text}</pre>
+        </div>
+      }
+    />
+  )
+}
+
+/** The part fields that decide whether two captured parts render as one block. */
+interface IdentifiablePart {
+  spanId?: string
+  part?: string
+  text: string
+  truncated?: boolean
+  totalLength?: number
+}
+
+/**
+ * Collapses parts whose text is byte-identical into one group, kept at the
+ * position of its first occurrence and in capture order. Truncation state is
+ * part of the key, so a clipped copy never folds into a complete one; each
+ * group keeps its first part, which carries the truncation banner.
+ */
+function groupIdenticalParts<T extends IdentifiablePart>(
+  parts: readonly T[],
+): Array<{ part: T; index: number; count: number }> {
+  const groups = new Map<string, { part: T; index: number; count: number }>()
+  parts.forEach((part, index) => {
+    const key = `${part.truncated === true ? 1 : 0}|${part.totalLength ?? ''}|${part.text}`
+    const existing = groups.get(key)
+    if (existing) existing.count += 1
+    else groups.set(key, { part, index, count: 1 })
+  })
+  return [...groups.values()].sort((a, b) => a.index - b.index)
 }
 
 /**

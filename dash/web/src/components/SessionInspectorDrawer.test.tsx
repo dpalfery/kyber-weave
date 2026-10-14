@@ -37,6 +37,7 @@ import {
 } from './SessionInspectorDrawer.js'
 
 import { renderToStaticMarkup } from 'react-dom/server'
+import { SearchableContentView } from './ContentViewToolbar.js'
 import type { KyberSessionContentResult, KyberTurnContentResult } from '../lib/kyberApi.js'
 import { fetchKyberSessionContent, fetchTurnContentFull } from '../lib/kyberApi.js'
 
@@ -1290,6 +1291,139 @@ describe('SessionInspectorDrawer: Full-content endpoint', () => {
   })
 })
 
+describe('SessionInspectorDrawer: identical captured parts in the bucket drill-down', () => {
+  it('renders byte-identical parts once with a count note and keeps distinct parts in capture order', () => {
+    const qc = createTestQueryClient()
+    const sharedPrompt = 'DEDUP_SHARED_PROMPT_8f3a. You are a coding agent. Follow every repository rule.'
+    const distinct = 'DEDUP_DISTINCT_PART_2b7c. A different context body.'
+    const body: KyberSessionContentResult = {
+      sessionId: contentRequest.sessionId,
+      spanId: contentRequest.span,
+      parts: [
+        { spanId: 'span-a', part: 'system_prompt', text: sharedPrompt },
+        { spanId: 'span-b', part: 'system_prompt', text: distinct },
+        { spanId: 'span-c', part: 'system_prompt', text: sharedPrompt },
+        { spanId: 'span-d', part: 'system_prompt', text: sharedPrompt },
+      ],
+    }
+    qc.setQueryData(contentQueryKey, body)
+
+    const html = unescapeHtml(renderDrawerWithQuery(qc))
+
+    // The shared prompt prints once, not once per captured span.
+    expect(html.split('DEDUP_SHARED_PROMPT_8f3a').length - 1).toBe(1)
+    expect(html).toContain('Identical in 3 captured spans')
+    expect(html.split('data-testid="drawer-content-duplicate-note"').length - 1).toBe(1)
+    // One shared toolbar per rendered block: three identical parts share one, the distinct part gets its own.
+    expect(html.split('-view-formatted"').length - 1).toBe(2)
+    expect(html.split('data-testid="drawer-content-0-view-formatted"').length - 1).toBe(1)
+    // The distinct part still renders, once, after the collapsed group it followed.
+    expect(html.split('DEDUP_DISTINCT_PART_2b7c').length - 1).toBe(1)
+    expect(html.indexOf('DEDUP_SHARED_PROMPT_8f3a')).toBeLessThan(html.indexOf('DEDUP_DISTINCT_PART_2b7c'))
+  })
+
+  it('keeps a truncated copy separate from a complete copy of the same text', () => {
+    const qc = createTestQueryClient()
+    const text = 'DEDUP_TRUNCATION_KEY_41e0. Shared body.'
+    const body: KyberSessionContentResult = {
+      sessionId: contentRequest.sessionId,
+      spanId: contentRequest.span,
+      parts: [
+        { spanId: 'span-a', part: 'system_prompt', text },
+        { spanId: 'span-b', part: 'system_prompt', text, truncated: true, totalLength: 900_000 },
+      ],
+    }
+    qc.setQueryData(contentQueryKey, body)
+
+    const html = unescapeHtml(renderDrawerWithQuery(qc))
+
+    expect(html.split('DEDUP_TRUNCATION_KEY_41e0').length - 1).toBe(2)
+    expect(html).not.toContain('data-testid="drawer-content-duplicate-note"')
+    expect(html).toContain('data-testid="drawer-content-truncated"')
+  })
+})
+
+describe('SessionInspectorDrawer: expansion placement and separators', () => {
+  it('scrolls a section into view when it opens, and not when it closes', () => {
+    const raw = '<system>Section body alpha.</system><context>Section body beta.</context>'
+    const tree = XmlFoldedText({ text: raw })
+    const details = findElementByTestId(tree, 'folded-tag-context')
+    expect(details?.type).toBe('details')
+
+    const onToggle = (details!.props as { onToggle: (event: unknown) => void }).onToggle
+    const scrollIntoView = vi.fn()
+    onToggle({ currentTarget: { open: true, scrollIntoView } })
+    expect(scrollIntoView).toHaveBeenCalledTimes(1)
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' })
+
+    const onClose = vi.fn()
+    onToggle({ currentTarget: { open: false, scrollIntoView: onClose } })
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it('compacts whitespace-only separators to a fixed short box without changing their text', () => {
+    const separator = '\n  \n\n  \n'
+    const raw = `<system>Section body alpha.</system>${separator}<context>Section body beta.</context>`
+    const html = renderHtml(React.createElement(XmlFoldedText, { text: raw }))
+
+    const openTag = html.match(/<div[^>]*data-testid="xml-folded-whitespace"[^>]*>/)?.[0] ?? ''
+    expect(openTag).not.toBe('')
+    const classes = (openTag.match(/class="([^"]*)"/)?.[1] ?? '').split(/\s+/)
+    expect(classes).toEqual(expect.arrayContaining(['h-2', 'overflow-hidden']))
+    expect(classes).not.toContain('my-1')
+    // The text node keeps every original code point.
+    expect(unescapeHtml(html)).toContain(separator)
+  })
+})
+
+describe('SessionInspectorDrawer: shared Formatted/Raw toolbar', () => {
+  it('offers search and exact Copy with the same labels on every full toolbar', () => {
+    const generic = renderHtml(React.createElement(InspectorContent, { data: { alpha: 'one', beta: 2 } }))
+    expect(generic).toContain('data-testid="inspector-content-search"')
+    expect(generic).toContain('data-testid="inspector-content-copy"')
+    expect(generic).toContain('>Formatted</button>')
+    expect(generic).toContain('>Raw</button>')
+    expect(generic).not.toContain('Raw JSON')
+    expect(generic).not.toContain('Copy JSON')
+
+    const json = renderHtml(React.createElement(JsonStringView, { text: COPILOT_TOOL_DEFINITIONS_RAW }))
+    expect(json).toContain('data-testid="json-string-view-search"')
+    expect(json).toContain('data-testid="json-string-view-copy"')
+    expect(json).toContain('>Formatted</button>')
+    expect(json).toContain('>Raw</button>')
+  })
+
+  it('keeps minimal embeddings free of a second toggle, search or Copy', () => {
+    const html = renderHtml(React.createElement(InspectorContent, { data: { alpha: 'one' }, suppressJsonControls: true }))
+    expect(html).not.toContain('inspector-content-search')
+    expect(html).not.toContain('inspector-content-copy')
+    expect(html).not.toContain('>Raw</button>')
+    expect(html).toContain('data-testid="inspector-content"')
+  })
+})
+
+/**
+ * Walks a directly-called element tree for the shared toolbar's copy source,
+ * resolved to the exact string the Copy button would write.
+ */
+function findCopySource(node: unknown): string | null {
+  if (node == null) return null
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const found = findCopySource(child)
+      if (found !== null) return found
+    }
+    return null
+  }
+  if (!React.isValidElement(node)) return null
+  const props = node.props as { copy?: { text: string | (() => string) }; children?: unknown }
+  if (node.type === SearchableContentView && props.copy) {
+    const source = props.copy.text
+    return typeof source === 'function' ? source() : source
+  }
+  return findCopySource(props.children)
+}
+
 function unescapeHtml(html: string): string {
   return html
     .replace(/&lt;/g, '<')
@@ -1765,43 +1899,10 @@ describe('SessionInspectorDrawer: nested JSON readability', () => {
     expect(unescapeHtml(rawHtml)).toContain(padded)
     expect(rawHtml).toContain('data-testid="json-raw"')
 
-    // Copy writes the exact original string, not the formatted expansion.
-    const written: string[] = []
-    const nav = (globalThis as { navigator?: unknown }).navigator
-    const hadNavigator = nav !== undefined
-    Object.defineProperty(globalThis, 'navigator', {
-      value: { clipboard: { writeText: (s: string) => { written.push(s); return Promise.resolve() } } },
-      configurable: true,
-    })
-    try {
-      const tree = React.createElement(JsonStringView, { text: padded, defaultView: 'raw' })
-      const rendered = (JsonStringView as (p: unknown) => unknown)({ text: padded, defaultView: 'raw' })
-      void tree
-      const buttons: React.ReactElement[] = []
-      const walk = (node: unknown): void => {
-        if (node == null) return
-        if (Array.isArray(node)) {
-          node.forEach(walk)
-          return
-        }
-        if (React.isValidElement(node)) {
-          const props = node.props as Record<string, unknown>
-          if (node.type === 'button' && props['children'] === 'Copy') buttons.push(node as React.ReactElement)
-          walk(props['children'])
-        }
-      }
-      walk(rendered)
-      expect(buttons.length).toBeGreaterThan(0)
-      ;(buttons[0]!.props as { onClick: () => void }).onClick()
-      expect(written).toEqual([padded])
-    } finally {
-      if (hadNavigator) {
-        Object.defineProperty(globalThis, 'navigator', { value: nav, configurable: true })
-      } else {
-        const g = globalThis as { navigator?: unknown }
-        delete g.navigator
-      }
-    }
+    // Copy is supplied by the shared toolbar with the exact original string,
+    // not the formatted expansion.
+    const rendered = (JsonStringView as (p: unknown) => unknown)({ text: padded, defaultView: 'raw' })
+    expect(findCopySource(rendered)).toBe(padded)
   })
 
   it('formats nested JSON-lines without losing any line', () => {
@@ -2641,41 +2742,9 @@ describe('SessionInspectorDrawer: root-encoded JSON strings', () => {
     expect(unescapeHtml(rawHtml)).toContain(ROOT_ENCODED)
     expect(rawHtml).toContain('data-testid="json-raw"')
 
-    // Copy writes the exact original outer text, not the expansion.
-    const written: string[] = []
-    const nav = (globalThis as { navigator?: unknown }).navigator
-    const hadNavigator = nav !== undefined
-    Object.defineProperty(globalThis, 'navigator', {
-      value: { clipboard: { writeText: (s: string) => { written.push(s); return Promise.resolve() } } },
-      configurable: true,
-    })
-    try {
-      const rendered = (JsonStringView as (p: unknown) => unknown)({ text: ROOT_ENCODED, defaultView: 'raw' })
-      const buttons: React.ReactElement[] = []
-      const walk = (node: unknown): void => {
-        if (node == null) return
-        if (Array.isArray(node)) {
-          node.forEach(walk)
-          return
-        }
-        if (React.isValidElement(node)) {
-          const props = node.props as Record<string, unknown>
-          if (node.type === 'button' && props['children'] === 'Copy') buttons.push(node as React.ReactElement)
-          walk(props['children'])
-        }
-      }
-      walk(rendered)
-      expect(buttons.length).toBeGreaterThan(0)
-      ;(buttons[0]!.props as { onClick: () => void }).onClick()
-      expect(written).toEqual([ROOT_ENCODED])
-    } finally {
-      if (hadNavigator) {
-        Object.defineProperty(globalThis, 'navigator', { value: nav, configurable: true })
-      } else {
-        const g = globalThis as { navigator?: unknown }
-        delete g.navigator
-      }
-    }
+    // Copy is supplied by the shared toolbar with the exact original outer text.
+    const rendered = (JsonStringView as (p: unknown) => unknown)({ text: ROOT_ENCODED, defaultView: 'raw' })
+    expect(findCopySource(rendered)).toBe(ROOT_ENCODED)
   })
 
   it('routes root-encoded strings to the structured view, prose stays folded', () => {
