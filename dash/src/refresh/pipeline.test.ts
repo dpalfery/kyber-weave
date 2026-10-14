@@ -290,22 +290,22 @@ describe('refresh pipeline: parser contract version & checkpoint invalidation', 
       store.close()
     }
   })
-  it("scopes parserContractVersion bumps to Claude (5), Codex/Kilo/Cursor/Pi (2), and leaves others at 1", () => {
+  it("scopes parserContractVersion bumps to Claude (6), Codex/Kilo/Pi/Copilot (3/3/3/2), Cursor (2), and leaves others at 1", () => {
     const claudeCli = descriptorFor("claude-cli")
     const claudeDesktop = descriptorFor("claude-desktop")
-    expect(claudeCli?.parserContractVersion).toBe("5")
-    expect(claudeDesktop?.parserContractVersion).toBe("5")
+    expect(claudeCli?.parserContractVersion).toBe("6")
+    expect(claudeDesktop?.parserContractVersion).toBe("6")
 
     const codex = descriptorFor("codex-cli")
     const kilo = descriptorFor("kilo-shared-runtime")
     const cursor = descriptorFor("cursor")
     const pi = descriptorFor("pi")
     const copilot = descriptorFor("copilot-cli")
-    expect(codex?.parserContractVersion).toBe("2")
-    expect(kilo?.parserContractVersion).toBe("2")
+    expect(codex?.parserContractVersion).toBe("3")
+    expect(kilo?.parserContractVersion).toBe("3")
     expect(cursor?.parserContractVersion).toBe("2")
-    expect(pi?.parserContractVersion).toBe("2")
-    expect(copilot?.parserContractVersion).toBe("1")
+    expect(pi?.parserContractVersion).toBe("3")
+    expect(copilot?.parserContractVersion).toBe("2")
   })
 
   it("re-reads transcript files and advances parserContractVersion from 2 to 5 for claude-desktop (#232)", async () => {
@@ -411,7 +411,7 @@ describe('refresh pipeline: parser contract version & checkpoint invalidation', 
       })
 
       const updatedCheckpoint = store.getSourceCheckpoint('claude-desktop', sourceKey)
-      expect(updatedCheckpoint?.parserContractVersion).toBe('5')
+      expect(updatedCheckpoint?.parserContractVersion).toBe('6')
       expect(updatedCheckpoint?.lastStatus).toBe('ok')
 
       const claudeRow = report.rows.find((r) => r.harnessId === 'claude-desktop')
@@ -521,7 +521,7 @@ describe('refresh pipeline: parser contract version & checkpoint invalidation', 
 
       const descriptor = descriptorFor('claude-desktop')
       expect(descriptor).toBeDefined()
-      expect(descriptor!.parserContractVersion).toBe('5')
+      expect(descriptor!.parserContractVersion).toBe('6')
 
       const provider = fixtureProvider('claude', [sessionSource], (s) => loadClaudeCalls(s.path))
       // Version-repair must widen before the concurrent first pass so the
@@ -544,7 +544,7 @@ describe('refresh pipeline: parser contract version & checkpoint invalidation', 
       )
 
       const updatedCheckpoint = store.getSourceCheckpoint('claude-desktop', sourceKey)
-      expect(updatedCheckpoint?.parserContractVersion).toBe('5')
+      expect(updatedCheckpoint?.parserContractVersion).toBe('6')
       expect(updatedCheckpoint?.lastStatus).toBe('ok')
       // Checkpoint keeps the claimed prior floor; the parse slice is clamped to
       // the content-retention window (#276).
@@ -1037,7 +1037,7 @@ describe('refresh pipeline: parser contract version & checkpoint invalidation', 
       const sourceKey = sourceKeyFor('kilo-shared-runtime', kiloSession!)
       const descriptor = descriptorFor('kilo-shared-runtime')
       expect(descriptor).toBeDefined()
-      expect(descriptor?.parserContractVersion).toBe('2')
+      expect(descriptor?.parserContractVersion).toBe('3')
 
       // Pre-seed a stale checkpoint with legacy contract version '1' and 3 claimed records
       // but 0 actual records in the database (reproducing the issue #227 state).
@@ -1079,7 +1079,7 @@ describe('refresh pipeline: parser contract version & checkpoint invalidation', 
       })
 
       const updatedCheckpoint = store.getSourceCheckpoint('kilo-shared-runtime', sourceKey)
-      expect(updatedCheckpoint?.parserContractVersion).toBe('2')
+      expect(updatedCheckpoint?.parserContractVersion).toBe('3')
       expect(updatedCheckpoint?.lastStatus).toBe('ok')
       expect(updatedCheckpoint?.recordCount).toBe(1)
 

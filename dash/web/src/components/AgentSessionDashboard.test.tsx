@@ -15,6 +15,7 @@ import { findContextTurn, findTurnByTransport } from '../lib/kyberApi.js'
 import { SessionInspectorDrawer } from './SessionInspectorDrawer.js'
 import type { TimelineNode } from './analysis/TimelineView.js'
 import type { KyberSessionContext } from '../lib/kyberApi.js'
+import skillsFixtures from './fixtures/skills-payload.json'
 
 // Set up React 19 test hook dispatcher so components using hooks can be rendered in tests
 type ReactInternals = {
@@ -724,7 +725,7 @@ describe('AgentSessionDashboard: Assembly and Subpanels', () => {
   it('renders Execution Timeline with call tree and duration bars toggle', () => {
     const html = renderHtml(<AgentSessionDashboard session={sampleSession} />)
     expect(html).toContain('data-testid="execution-timeline-section"')
-    expect(html).toContain('4 · Execution Timeline &amp; Call Tree')
+    expect(html).toContain('5 · Execution Timeline &amp; Call Tree')
     expect(html).toContain('data-testid="timeline-tab-tree"')
     expect(html).toContain('data-testid="timeline-tab-bars"')
     expect(html).toContain('data-testid="timeline-tree-view"')
@@ -1759,6 +1760,94 @@ describe('AgentSessionDashboard: whole-turn selection', () => {
     } finally {
       if (internals?.H) {
         internals.H.useState = originalUseState
+      }
+    }
+  })
+})
+
+/** The markup from one section's test id up to the next section's test id. */
+function sectionOf(html: string, fromTestId: string, toTestId: string): string {
+  const start = html.indexOf(`data-testid="${fromTestId}"`)
+  const end = html.indexOf(`data-testid="${toTestId}"`)
+  expect(start).toBeGreaterThan(-1)
+  expect(end).toBeGreaterThan(start)
+  return html.slice(start, end)
+}
+
+describe('AgentSessionDashboard: Skills section (4 · Skills)', () => {
+  // The fixture's summary and skills blocks are merged onto the existing B1-shaped
+  // session. Its turns array is left alone: it is the per-turn spend list the rest
+  // of the dashboard already reads.
+  const realistic = skillsFixtures.realistic
+  const skillsSession = {
+    ...sampleSession,
+    summary: { ...sampleSession.summary, ...realistic.summary },
+    skills: realistic.skills,
+  } as unknown as AgentSessionPayload
+
+  it('numbers the skills section 4 and renumbers the execution timeline to 5', () => {
+    const html = renderHtml(<AgentSessionDashboard session={skillsSession} />)
+    expect(html).toContain('4 · Skills')
+    expect(html).toContain('5 · Execution Timeline &amp; Call Tree')
+    expect(html).not.toContain('4 · Execution Timeline')
+    expect(html.indexOf('3 · Tool &amp; Schema Cost Ranking')).toBeLessThan(html.indexOf('4 · Skills'))
+    expect(html.indexOf('4 · Skills')).toBeLessThan(html.indexOf('5 · Execution Timeline &amp; Call Tree'))
+  })
+
+  it('renders the skills-listed and skills-invoked tiles inside the skills section', () => {
+    const html = renderHtml(<AgentSessionDashboard session={skillsSession} />)
+    const section = sectionOf(html, 'skills-section', 'execution-timeline-section')
+    expect(section).toContain('data-testid="skills-tile-listed"')
+    expect(section).toContain('data-testid="skills-tile-invoked"')
+    expect(section).toContain('data-testid="skill-row-docs"')
+  })
+
+  it('reads a session with no skills key as not yet projected, never as no skills', () => {
+    const html = renderHtml(<AgentSessionDashboard session={sampleSession} />)
+    const section = sectionOf(html, 'skills-section', 'execution-timeline-section')
+    expect(section).toContain('not yet projected')
+    expect(section).not.toMatch(/no skills/i)
+  })
+
+  it('keeps the skills section free of currency figures and waste wording', () => {
+    const html = renderHtml(<AgentSessionDashboard session={skillsSession} />)
+    const section = sectionOf(html, 'skills-section', 'execution-timeline-section')
+    expect(section).not.toMatch(/[$€£¥]/)
+    expect(section).not.toMatch(/waste/i)
+  })
+
+  it('opens the skill drawer when a skill row is clicked', () => {
+    let capturedOpen = false
+    let capturedTitle = ''
+    let capturedContent: unknown = null
+
+    const reactInternals = internalsOf()
+    const origState = reactInternals?.H?.useState
+    if (reactInternals?.H) {
+      reactInternals.H.useState = (initial: unknown) => {
+        if (typeof initial === 'boolean') {
+          return [capturedOpen, (v: boolean) => { capturedOpen = v }]
+        }
+        if (initial === '') {
+          return [capturedTitle, (t: string) => { capturedTitle = t }]
+        }
+        return [capturedContent, (c: unknown) => { capturedContent = c }]
+      }
+    }
+
+    try {
+      const tree = AgentSessionDashboard({ session: skillsSession })
+      const skillRow = findElementByTestId(tree, 'skill-row-docs')
+      expect(skillRow).not.toBeNull()
+      expect((skillRow!.props as { onClick?: unknown }).onClick).toBeTypeOf('function')
+
+      ;(skillRow!.props as { onClick: () => void }).onClick()
+      expect(capturedOpen).toBe(true)
+      expect(capturedTitle).toBe('Skill: docs')
+      expect((capturedContent as { skill: { name: string } }).skill.name).toBe('docs')
+    } finally {
+      if (reactInternals?.H) {
+        reactInternals.H.useState = origState
       }
     }
   })

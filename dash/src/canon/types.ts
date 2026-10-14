@@ -194,6 +194,13 @@ export type CanonicalRecord = {
   raw?: unknown
 }
 
+/**
+ * The `raw` key a turn record carries the skills it invoked under: an array of
+ * skill names in first-seen order with repeats collapsed. Absent (never `[]`)
+ * when the turn invoked none. The synthesizer writes it; the skills module reads it.
+ */
+export const SKILLS_INVOKED_KEY = 'kyber.skills.invoked' as const
+
 /** Problem codes emitted by `validateTokens`. */
 export const TOKEN_NEGATIVE_FRESH = 'TOKEN_NEGATIVE_FRESH'
 export const TOKEN_NEGATIVE_CLASS = 'TOKEN_NEGATIVE_CLASS'
