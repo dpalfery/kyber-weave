@@ -61,6 +61,38 @@ public sealed class SquadStateStore
         };
     }
 
+    /// <summary>
+    /// Returns the home-level Squad state directory, <c>&lt;HomeDirectory&gt;/.kyber-weave/squad</c>,
+    /// which holds <c>global/</c>, <c>projects/&lt;root-key&gt;/</c> and <c>registry.json</c>.
+    /// </summary>
+    /// <remarks>
+    /// Seam only: the layout is not yet written by any code path. Until it is, global state keeps
+    /// resolving through <see cref="ResolveStateDirectory"/>.
+    /// </remarks>
+    /// <exception cref="NotImplementedException">Always, until the home-state task lands.</exception>
+    public string ResolveHomeStateDirectory() =>
+        throw new NotImplementedException("Home-level Squad state is not implemented yet.");
+
+    /// <summary>Lists every project registered in the home-level Squad registry.</summary>
+    /// <exception cref="NotImplementedException">Always, until the home-state task lands.</exception>
+    public IReadOnlyList<SquadProjectRegistryEntry> ListProjects() =>
+        throw new NotImplementedException("The Squad project registry is not implemented yet.");
+
+    /// <summary>Registers, or refreshes, a project root in the home-level Squad registry.</summary>
+    /// <param name="root">The project root to register.</param>
+    /// <param name="targets">The harness targets deployed beneath that root.</param>
+    /// <param name="now">The instant recorded as the entry's last update.</param>
+    /// <exception cref="NotImplementedException">Always, until the home-state task lands.</exception>
+    public void RegisterProject(string root, IReadOnlyList<string> targets, DateTimeOffset now) =>
+        throw new NotImplementedException("The Squad project registry is not implemented yet.");
+
+    /// <summary>Removes a project root from the home-level Squad registry.</summary>
+    /// <param name="root">The project root to remove.</param>
+    /// <returns><see langword="true"/> when an entry was removed; <see langword="false"/> when none existed.</returns>
+    /// <exception cref="NotImplementedException">Always, until the home-state task lands.</exception>
+    public bool UnregisterProject(string root) =>
+        throw new NotImplementedException("The Squad project registry is not implemented yet.");
+
     /// <summary>Serializes a lock using stable, portable YAML field ordering.</summary>
     public string SerializeLock(SquadLock squadLock)
     {

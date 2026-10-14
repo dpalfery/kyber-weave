@@ -6152,6 +6152,8 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     private sealed class FakeSquadUserPaths(string applicationDataDirectory) : ISquadUserPaths
     {
         public string ApplicationDataDirectory { get; } = applicationDataDirectory;
+
+        public string HomeDirectory => Path.Combine(ApplicationDataDirectory, "home");
     }
 
     private sealed class FakeGlobalRootResolver(IReadOnlyDictionary<SquadTarget, string> roots)

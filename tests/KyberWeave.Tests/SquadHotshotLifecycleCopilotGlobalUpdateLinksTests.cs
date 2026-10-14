@@ -118,5 +118,7 @@ public sealed class SquadHotshotLifecycleCopilotGlobalUpdateLinksTests : IDispos
     private sealed class FakeUserPaths(string appDataDirectory) : ISquadUserPaths
     {
         public string ApplicationDataDirectory { get; } = appDataDirectory;
+
+        public string HomeDirectory => Path.Combine(ApplicationDataDirectory, "home");
     }
 }

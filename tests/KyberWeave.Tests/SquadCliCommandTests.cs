@@ -1856,6 +1856,8 @@ public sealed class SquadCliCommandTests : IDisposable
     private sealed class FakeUserPaths(string appDataDirectory) : ISquadUserPaths
     {
         public string ApplicationDataDirectory { get; } = appDataDirectory;
+
+        public string HomeDirectory => Path.Combine(ApplicationDataDirectory, "home");
     }
 
     private sealed class FakeGlobalRootResolver(SquadTarget target, string root)

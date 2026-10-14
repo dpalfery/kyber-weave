@@ -20,6 +20,8 @@ public sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
     private readonly ISquadRenderer? _renderer;
     private readonly bool? _isInteractive;
     private readonly Func<string, bool>? _readAnswer;
+    private readonly ISquadGlobalRootResolver? _globalRoots;
+    private readonly ISquadProjectPicker? _picker;
 
     /// <summary>Creates a new update command using default dependencies.</summary>
     public SquadUpdateCommand()
@@ -39,7 +41,9 @@ public sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
         ISquadReleaseSource? releaseSource = null,
         ISquadRenderer? renderer = null,
         bool? isInteractive = null,
-        Func<string, bool>? readAnswer = null)
+        Func<string, bool>? readAnswer = null,
+        ISquadGlobalRootResolver? globalRoots = null,
+        ISquadProjectPicker? picker = null)
     {
         _userPaths = userPaths;
         _stateStore = stateStore;
@@ -47,6 +51,8 @@ public sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
         _renderer = renderer;
         _isInteractive = isInteractive;
         _readAnswer = readAnswer;
+        _globalRoots = globalRoots;
+        _picker = picker;
     }
 
     /// <inheritdoc />

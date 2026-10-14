@@ -22,6 +22,7 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
     private readonly string? _workingDirectory;
     private readonly ISquadGlobalRootResolver? _globalRoots;
     private readonly ISquadRenderer? _renderer;
+    private readonly ISquadProjectPicker? _picker;
 
     /// <summary>Creates a new doctor command using default dependencies.</summary>
     public SquadDoctorCommand()
@@ -35,7 +36,8 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         string? workingDirectory = null,
         ISquadGlobalRootResolver? globalRoots = null,
         ISquadRenderer? renderer = null,
-        SquadStateStore? stateStore = null)
+        SquadStateStore? stateStore = null,
+        ISquadProjectPicker? picker = null)
     {
         _userPaths = userPaths;
         _stateStore = stateStore;
@@ -43,6 +45,7 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         _workingDirectory = workingDirectory;
         _globalRoots = globalRoots;
         _renderer = renderer;
+        _picker = picker;
     }
 
     /// <inheritdoc />

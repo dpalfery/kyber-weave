@@ -112,6 +112,17 @@ public sealed class SquadUpdateSettings : CommandSettings
     [CommandOption("-v|--version <VERSION>")]
     [Description("Pin the Kyber-Squad release version to update to (X.Y.Z or X.Y.Z-prerelease; a leading 'v' and '+build' metadata are accepted and stripped). Defaults to the running CLI's own version.")]
     public string? Version { get; set; }
+
+    /// <summary>
+    /// Which registered projects a <c>--global</c> update reaches: <c>all</c>, <c>none</c>, or one
+    /// or more project paths. Repeatable. Ignored without <c>--global</c>.
+    /// </summary>
+    [CommandOption("--projects <PROJECTS>")]
+    [Description("With --global, which registered projects to update: all, none, or project path(s). Repeatable.")]
+    [SuppressMessage(
+        "Performance", "CA1819:Properties should not return arrays",
+        Justification = "Spectre.Console.Cli binds repeated options to arrays.")]
+    public string[]? Projects { get; set; }
 }
 
 /// <summary>Settings for the <c>squad uninstall</c> command.</summary>

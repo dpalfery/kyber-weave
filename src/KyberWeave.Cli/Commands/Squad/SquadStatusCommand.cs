@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Squad.Deployment;
 using Spectre.Console;
 using Spectre.Console.Cli;
@@ -13,6 +14,7 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
     private readonly ISquadUserPaths? _userPaths;
     private readonly SquadStateStore? _stateStore;
     private readonly ISquadGlobalRootResolver? _globalRoots;
+    private readonly ISquadProjectPicker? _picker;
 
     /// <summary>Creates a new status command using default system paths.</summary>
     public SquadStatusCommand()
@@ -23,11 +25,13 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
     internal SquadStatusCommand(
         ISquadUserPaths? userPaths = null,
         SquadStateStore? stateStore = null,
-        ISquadGlobalRootResolver? globalRoots = null)
+        ISquadGlobalRootResolver? globalRoots = null,
+        ISquadProjectPicker? picker = null)
     {
         _userPaths = userPaths;
         _stateStore = stateStore;
         _globalRoots = globalRoots;
+        _picker = picker;
     }
 
     /// <inheritdoc />
