@@ -313,10 +313,15 @@ export function loadClaudeCalls(filePath: string): ParsedProviderCall[] {
   let pendingListing: SkillListing | undefined
 
   for (const rawLine of lines) {
+    // Only a line that really is a listing attachment is consumed here. The
+    // substring alone is not enough: an assistant turn can carry the quoted text
+    // inside a tool input and still be a call with usage, so it falls through.
     if (rawLine.includes(`"${SKILL_LISTING_ATTACHMENT_TYPE}"`)) {
       const listing = claudeSkillListingOf(rawLine)
-      if (listing !== undefined) pendingListing = listing
-      continue
+      if (listing !== undefined) {
+        pendingListing = listing
+        continue
+      }
     }
     const usage = claudeUsageOf(rawLine)
     if (usage === undefined) continue

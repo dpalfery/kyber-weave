@@ -107,7 +107,11 @@ export function extractListedSkills(record: CanonicalRecord): ListedResult {
 
 export function extractInvokedSkills(records: readonly CanonicalRecord[]): InvokedResult {
   const hasInvocationSource = records.some(
-    (record) => isClaudeFamily(record) || isSkillToolCall(record) || SKILLS_INVOKED_KEY in rawOf(record),
+    // An invoked key counts as a measured source only when it holds an array, `[]`
+    // included (measured, none invoked). A null, string, number or object under the
+    // key is corrupt and is never read as a measured zero.
+    (record) =>
+      isClaudeFamily(record) || isSkillToolCall(record) || Array.isArray(rawOf(record)[SKILLS_INVOKED_KEY]),
   )
   if (!hasInvocationSource) {
     return notMeasurable(

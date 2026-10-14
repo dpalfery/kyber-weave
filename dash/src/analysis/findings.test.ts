@@ -1661,8 +1661,11 @@ describe('Detector 7: inactive-skill-reference & Decision D16 Compliance', () =>
   })
 
   it('does NOT fabricate 120 tokens when skill-block size cannot be derived, marking estimatedWasteTokens undefined and measurementClass coverage-gap', () => {
+    // One recorded turn makes the finding attributable; the expectations below are unchanged.
+    const recordedTurn = makeMockRecord({ spanId: 'turn-fabricate-1', op: 'llm.invoke', sessionId: 'session-1' })
     const findings = detectInactiveSkillReference({
       sessionId: 'session-1',
+      records: [recordedTurn],
       referencedSkills: ['docker_deploy'],
       executedSkills: [],
     })
@@ -2119,6 +2122,84 @@ describe('Detector 7 (T4 RED review pass 1): unmeasured skill finding states onl
     expect(wouldRaise, 'whatWouldRaiseIt must name measuring the listed skill context size').toMatch(
       /context size of the listed skill/i,
     )
+  })
+})
+
+// ---------------------------------------------------------------------------
+// T4 RED (PR #351 finding 3): with zero recorded turns nothing is attributable. The detector
+// must emit no finding rather than synthetic evidence span ids (turn-skill-inject-0,
+// turn-skill-uncalled-N) that point at no span. The max(turns, 3) floor in the measured
+// branch is unchanged; this pins only the zero-turn case.
+// ---------------------------------------------------------------------------
+
+describe('Detector 7 (T4 RED PR #351 finding 3): no finding without recorded turns', () => {
+  it('emits no finding for explicit referenced skills when there are no records', () => {
+    const findings = detectInactiveSkillReference({ referencedSkills: ['x'], executedSkills: [] })
+
+    expect(findings, 'with no recorded turn there is no span to carry the evidence').toEqual([])
+  })
+
+  it('emits no finding for explicit referenced skills with a measured size when there are no records', () => {
+    const findings = detectInactiveSkillReference({
+      referencedSkills: ['x'],
+      executedSkills: [],
+      skillTokens: { x: 50 },
+    })
+
+    expect(findings, 'a measured size does not create turns to attribute the skill to').toEqual([])
+  })
+
+  it('emits no finding from a listing carried only by a rollup span with no model turns (documented guard)', () => {
+    // Passes today for the right output: with no explicit skills and no llm.invoke prompt, the
+    // detector has no referenced skill to attribute, so the zero-turn fallback is never reached.
+    const records = [
+      makeMockRecord({
+        spanId: 'rollup-1',
+        op: 'agent.invoke',
+        name: 'agent',
+        harness: 'copilot',
+        raw: { 'kyber.skills.listed': T4_LINT_LISTING },
+      }),
+    ]
+
+    const findings = detectInactiveSkillReference({ records })
+
+    expect(findings, 'a rollup with no llm.invoke turn has no turn to attribute the listing to').toEqual([])
+  })
+
+  it('emits no finding for an explicit skill when the only recorded span is a Copilot rollup with a listing', () => {
+    // Reaches the zero-turn fallback today: the explicit skill makes a finding, and no turn exists.
+    const records = [
+      makeMockRecord({
+        spanId: 'rollup-copilot-1',
+        op: 'agent.invoke',
+        name: 'invoke_agent',
+        harness: 'copilot',
+        raw: { 'github.copilot.context.skills': '["lint"]' },
+      }),
+    ]
+
+    const findings = detectInactiveSkillReference({
+      records,
+      referencedSkills: ['lint'],
+      executedSkills: [],
+    })
+
+    expect(findings, 'a rollup span is not a model turn, so the finding has nothing to cite').toEqual([])
+  })
+
+  it('keeps the finding for a listed, never-invoked skill when turns are recorded, citing only real span ids', () => {
+    const records = t4ListedTurns(2)
+
+    const findings = detectInactiveSkillReference({ records })
+
+    expect(t4FlaggedSkills(findings), 'lint is listed and never invoked across two recorded turns').toEqual(['lint'])
+    const recordedSpanIds = new Set(records.map((record) => record.spanId))
+    const finding = findings[0]
+    expect(finding?.evidenceLinks.length, 'the finding keeps its evidence links').toBeGreaterThan(0)
+    for (const link of finding?.evidenceLinks ?? []) {
+      expect(recordedSpanIds.has(link.spanId), `evidence span ${link.spanId} must be a recorded span`).toBe(true)
+    }
   })
 })
 

@@ -1592,6 +1592,11 @@ export function detectInactiveSkillReference(input: InactiveSkillReferenceInput)
   for (const skill of referenced) {
     if (executedSet.has(skill)) continue
 
+    // With no recorded llm.invoke turn there is no span to carry the evidence, so the
+    // skill is not attributable and no finding is emitted (no synthetic span ids).
+    const firstTurn = turnRecords[0]
+    if (firstTurn === undefined) continue
+
     const tokensPerTurn = skillTokensMap[skill]
     const measured = tokensPerTurn !== undefined && tokensPerTurn > 0
     // Measured: a resident size applied across at least three turns (the arithmetic below).
@@ -1600,10 +1605,9 @@ export function detectInactiveSkillReference(input: InactiveSkillReferenceInput)
     const turnsCount = measured ? Math.max(recordedTurns, 3) : recordedTurns
     const estimatedWasteTokens = measured ? tokensPerTurn * turnsCount : undefined
 
-    const firstSpanId = turnRecords[0]?.spanId ?? 'turn-skill-inject-0'
-    const lastTurnIndex = Math.max(recordedTurns - 1, 0)
-    const lastSpanId =
-      turnRecords[lastTurnIndex]?.spanId ?? `turn-skill-uncalled-${measured ? turnsCount - 1 : lastTurnIndex}`
+    const firstSpanId = firstTurn.spanId
+    const lastTurnIndex = recordedTurns - 1
+    const lastSpanId = (turnRecords[lastTurnIndex] ?? firstTurn).spanId
 
     const evidenceLinks: FindingEvidenceLink[] = measured
       ? [
