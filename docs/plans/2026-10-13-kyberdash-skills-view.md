@@ -27,7 +27,15 @@ The conductor reruns `docs validate` and `docs drift`, because the architect har
 
 - T2 is now the engine side only, including F1's served headline counts.
 - T9 is new and carries the web follow-on: F1–F4.
-- T9 can start now. T1, T2, T4 and the tasks after them wait for the owner capture gate G0 ([section 8](#8-tasks)).
+- T9 can start now.
+
+**Amendment AP3 (2026-10-13).** G0 is done (`53c08a1`). The user chose to have the conductor extract the captures read-only from the user's local KyberDash store and transcripts. The real data contradicts parts of the original design, so this amendment changes the plan:
+
+- **Claude Code:** the skill listing comes from transcript `skill_listing` attachments, not OTLP. Reading them is new ingestion work, done by a new task, T10.
+- **Copilot Chat:** the listing key is `github.copilot.context.skills`, plus an `<available_skills>` block in the system prompt.
+- **Pi, OpenCode and Copilot CLI:** their listings ship as not measurable.
+
+T1 and T10 can start now. T2 and T4 follow T1.
 
 **Development mode:** `test-first`. The user did not opt out, so the default is persisted (D4). Every implementation task has a Test-contract row in [section 7](#7-test-contract-test-first).
 
@@ -110,7 +118,25 @@ Facts were read from the tree at `plan/dash-skills-view` HEAD `1f1769f`. Discove
     - **No new ingestion.** Copilot Chat, Antigravity and Pi need none. Claude Code OTLP and OpenCode OTLP need new extraction only.
     - **Ingestion change.** Invoked skills from file-ingested harnesses need `synth.ts` to carry `ParsedProviderCall.skills`, plus parser-contract bumps (Q8).
     - **No `canon.db` schema bump.** `DETECTOR_VERSION` (`store.ts:184`) is bumped by Q9.
-13. **Unverified wire formats (self-gathered).** No real capture in the repository pins any of these: the listing text for Claude Code (an `<available_skills>` block in the `Skill` tool description, or a system-reminder message, depending on version), the shape of Copilot `gen_ai.skills`, the Antigravity `skill_name` prefix, the OpenCode `skill` tool description, or any Copilot CLI listing. The repository fixtures hold synthetic placeholders. The user will supply sanitized captures (Q7, D5, gate G0).
+13. **Unverified wire formats (self-gathered).** No real capture in the repository pins any of these: the listing text for Claude Code (an `<available_skills>` block in the `Skill` tool description, or a system-reminder message, depending on version), the shape of Copilot `gen_ai.skills`, the Antigravity `skill_name` prefix, the OpenCode `skill` tool description, or any Copilot CLI listing. The repository fixtures hold synthetic placeholders. The user will supply sanitized captures (Q7, D5, gate G0). *Superseded by findings 14–17 (AP3).*
+14. **Claude Code, from the G0 captures** (`dash/src/canon/fixtures/skills/claude-code/`).
+    - **Listing.** It is a transcript `attachment` entry: `{"type":"attachment","attachment":{"type":"skill_listing","content":"- name: description\n…","skillCount":N,"isInitial":true,"names":[…]}}`. It is in the session JSONL that the existing Claude provider ingests, not in OTLP.
+    - **Invocation.** An assistant `tool_use` named `Skill` with `input.skill`. `extractSkillNames` already parses this (`dash/src/ingest/parser.ts:1117`), and T3 carries it.
+    - **Not yet ingested.** In the local store, the Claude Code records carry no skill attributes on `raw` and no listing in parts.
+    - **Precedent.** The parser already reads one attachment type, `deferred_tools_delta`, through `extractLargeAddedNames` and `extractMcpInventory` (`parser.ts:483–490, 612–614, 984–993, 1670–1686`). That is the pattern for `skill_listing`.
+    - **Contract version.** `CLAUDE_PARSER_CONTRACT_VERSION` is `'6'` (`dash/src/refresh/registry.ts:29`). `SKILLS_INVOKED_KEY` is at `dash/src/canon/types.ts:202`.
+    - **Unverified.** Only `isInitial: true` was captured, so whether a later listing (`isInitial: false`) is a full list or a delta is not known.
+15. **Copilot Chat, from the G0 captures** (`copilot-chat/`).
+    - **Listing names.** The real key is `github.copilot.context.skills`, a JSON-array string of names, on `invoke_agent` spans (source `github-copilot`, harness `copilot`).
+    - **Descriptions.** The system-prompt part also holds an `<available_skills><skill><name/><description/><location/></skill>…</available_skills>` block.
+    - **What the adapter does today.** The adapter reads `gen_ai.skills` only (`copilot.ts:428`), which this capture does not carry. It does nothing with `github.copilot.context.skills`. That key survives only because `baseRecord` keeps every attribute on `raw` (`copilot.ts:688`).
+    - **Rollup, not turn.** `invoke_agent` is a rollup record, not a turn, when its child calls exist (`sessions.ts:62–80`). The listing must therefore be attributed to the turns of that agent invocation.
+    - **Invocations.** The store has no Copilot skill invocation span; only `view`, `task`, `bash` and `edit` tool spans exist.
+16. **Antigravity** matches the plan.
+    - `gen_ai.skills` is one string, `"Active Skills: a, b, c, d"`, and `github.copilot.tool.parameters.skill_name` duplicates it.
+    - `gen_ai.usage.skill_tokens` is the harness-reported total.
+    - No activation record exists.
+17. **Pi, OpenCode and Copilot CLI.** The user's store holds no Pi or OpenCode data. Copilot CLI cannot be told apart from Copilot Chat in the store: both arrive as source `github-copilot`. No captures exist. See the READMEs under each fixtures directory.
 
 ## 3. Decisions
 
@@ -133,6 +159,7 @@ Facts were read from the tree at `plan/dash-skills-view` HEAD `1f1769f`. Discove
 | D5 | Where do the user's captures go, and what is each harness's capture? | The root is **`dash/src/canon/fixtures/skills/`**, with one subdirectory per harness. The user drops sanitized originals as `capture.*` in each subdirectory, and the T1 worker derives trimmed test fixtures beside them. The contents per harness are in [section 8, gate G0](#8-tasks). | It sits beside the existing `dash/src/canon/fixtures/pi-collector/`, under the dash test tree, so `npm --prefix dash run test` picks it up. One directory per harness keeps the captures for each harness separate and reviewable. | ANSWERED — chosen by the architect at the user's request in Q7, 2026-10-13; approved by the user's approval 2026-10-13 |
 | AP1 | Approve and execute? | **Approved.** The plan is Ready for execution in `test-first` mode. | The approval covers Q1–Q10, D1–D5, the section 7 Test contract and the section 8 task graph. Execution of T1 and every task after it is still gated on the owner captures (G0). | APPROVED — user "approve" 2026-10-13 (conductor relay) |
 | AP2 | Should the T5 task-review findings F1–F4 be folded into the remaining work? | **Yes.** Folded as follows, with no existing task renumbered.<br>**F1, served headline counts.** The engine adds `skills.listed_count` and `skills.listed_uninvoked_count` (section 5). The web renders those values instead of counting rows.<br>**F2, skill pane.** A skill-specific pane in `SessionInspectorDrawer.tsx` for `{skill: row}` drawer content.<br>**F3, unused export.** Remove the `KyberSessionTurnSkills` export unless the new code uses it.<br>**F4, empty headline.** Hide the headline when `rows` is empty, keeping the line "No skill was recorded for this session."<br>T2 keeps the engine side (F1 projection). A new task, T9, takes the web side (F1 render, F2, F3, F4). | T2 originally gained web scope as well, which no longer fit one worker. Its engine part (projection, headline counts, turn-content entry in `sessions.ts` and `bridge.ts`) and its web part (`SkillsPanel`, a new drawer pane, fixture and types) are each large enough for a separate worker. Their file scopes do not overlap. They run in parallel because section 5 now pins both new fields: the headline counts and the turn-content `skills` entry. T9 extends the T5 fixture to that shape. | APPROVED — user "fold the findings in" 2026-10-13 (conductor relay) |
+| AP3 | Captures exist (G0). How does the design change to match the real formats? | **G0 route:** the conductor extracted sanitized captures read-only from the user's local store and transcripts into `dash/src/canon/fixtures/skills/` (`53c08a1`). Design changes (findings 14–17):<br>**(1) Claude Code listing.** It comes from the transcript `attachment` entry `{type:'skill_listing', content, skillCount, isInitial, names}`, not from OTLP. New task T10 makes the Claude parser read it, carries it onto the turn record as `raw['kyber.skills.listed']` (constant `SKILLS_LISTED_KEY` in `dash/src/canon/types.ts`), and bumps `CLAUDE_PARSER_CONTRACT_VERSION`. T1's Claude extractor reads that attribute. Invocations are `Skill` `tool_use` blocks with `input.skill`, already carried by T3.<br>**(2) Copilot Chat listing.** Names come from `raw['github.copilot.context.skills']` (a JSON-array string on `invoke_agent` rollup spans). Descriptions come from the `<available_skills>` XML block in the `system_prompt` part, when present. Not from `gen_ai.skills`. Invoked is not measurable unless a `skill` tool record is present.<br>**(3) Antigravity.** As planned: the `gen_ai.skills` string with the "Active Skills:" prefix, and the reported total `gen_ai.usage.skill_tokens`. Invoked is not measurable (no activation record exists).<br>**(4) Pi, OpenCode, Copilot CLI.** No captures were possible. Each listing side ships `not_measurable`, naming the absent source. Invoked comes only from what the parsers already provide (T3). No wire format is invented, and the `pi.skills` extractor is out of scope. | Real data overrides the unverified formats of finding 13. A Claude listing from transcripts covers file-ingested sessions without the `OTEL_LOG_RAW_API_BODIES` opt-in, and it lives on `raw`, so it survives the 14-day purge. The example reason in Q6 ("Claude Code session files do not carry the skill listing…") is superseded and must not be used as copy. The user confirmed that the conductor may relay these format findings. | APPROVED — user approved the G0 route 2026-10-13 (conductor relay) |
 
 Open decisions: **none**.
 
@@ -140,13 +167,16 @@ Open decisions: **none**.
 
 - **Engine module `dash/src/canon/skills.ts`** (pure, no I/O).
   - `extractListedSkills(record)` returns `{name, description?, sourceKey}[]`, or `NotMeasurable` with a reason. There is one extractor per harness, each pinned to the G0 captures:
-    - **Pi:** `pi.skills` JSON.
-    - **Copilot Chat and Antigravity:** `gen_ai.skills` text and `github.copilot.tool.parameters.skill_name`.
-    - **Claude Code:** the `Skill` tool definition text, and/or the skills-listing message text.
-    - **OpenCode:** the `skill` tool definition text in `tool_definitions`.
-    - **Copilot CLI:** whatever G0 shows. If G0 shows no listing, the extractor returns `NotMeasurable`, naming the absent source.
+    *Amended by AP3. The capture-pinned extractors are:*
+    - **Claude Code:** reads `raw['kyber.skills.listed']`, written by T10. It does not read OTLP text.
+    - **Copilot Chat:** names come from `raw['github.copilot.context.skills']` on `invoke_agent` records. A string that does not parse as a JSON array gives `NotMeasurable`. Descriptions come from the `<available_skills>` block in the same trace's `system_prompt` part, when present; after the purge, names remain and descriptions are absent.
+    - **Antigravity:** reads `gen_ai.skills` with the `Active Skills:` prefix removed, split on commas. `github.copilot.tool.parameters.skill_name` is the fallback when `gen_ai.skills` is absent.
 
-    An unrecognised shape returns `NotMeasurable`, never `[]`.
+    *Not measurable, with the absent source named:* the listing for Pi, OpenCode and Copilot CLI (finding 17), and the listing for any other harness. An unrecognised shape also returns `NotMeasurable`, never `[]`.
+
+    *Listing carry-forward, which T1 applies across a session's turns:*
+    - **Claude.** An `isInitial: true` listing replaces the effective list. A non-initial listing is unioned into it. That is an assumption, pinned by a test and listed as a risk (finding 14).
+    - **Copilot.** An `invoke_agent` listing applies to every turn record under that invocation (same trace, at or after the rollup).
   - `extractInvokedSkills(records)` reads two sources:
     - `raw['kyber.skills.invoked']` on turn records (Q8);
     - `tool.invoke` records named `Skill` or `skill`, using `raw.arguments.skill` or `raw.arguments.name`. These are de-duplicated per call id against the Q8 attribute, so nothing is counted twice.
@@ -159,7 +189,16 @@ Open decisions: **none**.
   - `turns[i].skills_listed`, present only when that turn's listing is measured;
   - a merged `measurability.skills` reason.
 - **Turn content (`bridge.ts`).** The turn-content response gains a `skills` entry: that turn's listed names, or a reason. It is a list, not a content block, so existing block bytes are unchanged.
-- **Synth (`synth.ts`, Q8).** The turn record built from a `ParsedProviderCall` carrying `skills` gains `raw['kyber.skills.invoked']`. The affected harness-source `parserContractVersion` values are bumped.
+- **Synth (`synth.ts`, Q8).** The turn record built from a `ParsedProviderCall` carrying `skills` gains `raw['kyber.skills.invoked']`. The affected harness-source `parserContractVersion` values are bumped. This is done in T3.
+- **Claude listing ingestion (T10, AP3).**
+  - **Parser.** The Claude parser reads `attachment.type === 'skill_listing'` entries, both in the small-file path and the large-file path in `parser.ts`, following the `deferred_tools_delta` precedent. It parses `content` lines of the form `- name: description` into descriptions keyed by `names[]`.
+  - **Attaching to calls.** The parser puts the listing on the first `ParsedProviderCall` after each attachment, as a new optional field `skillsListed`.
+  - **Writing to `raw`.** `synth.ts` writes `raw[SKILLS_LISTED_KEY]`, where `SKILLS_LISTED_KEY = 'kyber.skills.listed'`, as `{ isInitial: boolean, skills: [{ name, description? }] }`. A name with no matching content line has no description.
+  - **Contract version.** `CLAUDE_PARSER_CONTRACT_VERSION` goes from `'6'` to `'7'`.
+- **Invoked side by harness (AP3).**
+  - **Measured:** Claude, from `Skill` calls and `kyber.skills.invoked`, and the file-ingested harnesses that carry `kyber.skills.invoked`.
+  - **Copilot Chat and Copilot CLI:** measured only when a `skill` `tool.invoke` record or `kyber.skills.invoked` is present. Otherwise `not_measurable` with the reason "no skill invocation record observed for this harness".
+  - **Antigravity:** always `not_measurable`.
 - **Analysis (Q9).** `signals.ts` and `findings.ts` take their listed and invoked sets from `skills.ts`. `DETECTOR_VERSION` is bumped. Confidence stays low and the findings stay ranked last.
 - **Web.**
   - `dash/web/src/lib/kyberApi.ts`: the payload types.
@@ -225,7 +264,8 @@ Every dash row runs its file first, then `npm --prefix dash run typecheck lint t
 
 | Task | Test project or file | Runner command | Observable behavior | RED evidence required | GREEN acceptance |
 |---|---|---|---|---|---|
-| T1 | `dash/src/canon/skills.test.ts` (new), over trimmed fixtures in `dash/src/canon/fixtures/skills/<harness>/` derived from the G0 captures | `cd dash && npx vitest run src/canon/skills.test.ts` | **Listed:** for each of the six harnesses, listed names are extracted exactly from its capture; a harness whose capture has no listing gives `not_measurable` with a reason naming the absent source; rule text in `instruction_context` is never reported as a skill. **Invoked:** names come from `Skill`/`skill` arguments and `kyber.skills.invoked`, never from tool names, with no double count. **Other cases:** an unrecognised shape gives `not_measurable`, never `[]`; derived tokens are labelled derived; the reported `skill_tokens` is carried and never split. | Module absent, or assertions fail | All pass |
+| T1 (amended AP3) | `dash/src/canon/skills.test.ts` (new), over canonical-record fixtures built from the G0 captures in `dash/src/canon/fixtures/skills/<harness>/` | `cd dash && npx vitest run src/canon/skills.test.ts` | **Claude:** a record whose `raw['kyber.skills.listed']` holds the `claude-code/capture-listing.jsonl` listing yields exactly `app-docs-standard`, `architecture-decision-record` and `azure-cli`, with their descriptions. A non-initial listing unions into the effective list and an initial one replaces it. **Copilot:** `raw['github.copilot.context.skills']` from `copilot-chat/capture-listing.json` yields its six names. Descriptions come from `capture-listing-system-prompt.xml` when a `system_prompt` part holds it; without the part, the names remain and the descriptions are absent. A malformed JSON string gives `not_measurable`. A rollup's listing applies to the turns under it. **Antigravity:** `antigravity/capture-listing.json` yields the names after the `Active Skills:` prefix, and `reported_skill_tokens` equals `gen_ai.usage.skill_tokens`, never split. **Not measurable:** the listing for Pi, OpenCode, Copilot CLI and any unknown harness is `not_measurable` with a reason naming the absent source, never `[]`. **Invoked:** names come from `Skill`/`skill` arguments and `kyber.skills.invoked`, never from tool names, with no double count. Copilot without a skill record is `not_measurable`. Antigravity is `not_measurable`. **Other:** rule text in `instruction_context` is never a skill, and derived tokens are labelled derived. | Module absent, or assertions fail | All pass |
+| T10 (AP3) | `dash/src/ingest/parser.skill-listing.test.ts` (new), `dash/src/synth/synth.skills.test.ts` (additions) | `cd dash && npx vitest run src/ingest/parser.skill-listing.test.ts src/ingest/parser.test.ts src/synth/synth.skills.test.ts src/synth/synth.test.ts src/refresh/registry.test.ts` | **Parsing:** `claude-code/capture-listing.jsonl` followed by an assistant turn yields a `ParsedProviderCall.skillsListed` with `isInitial: true` and three `{name, description}` entries, the descriptions matching the content lines exactly. Both the small-file and the large-file parse paths give the same result. **No listing:** a transcript with no listing leaves the field absent. **Synth:** the field becomes `raw['kyber.skills.listed']`. **Contract:** `CLAUDE_PARSER_CONTRACT_VERSION` is greater than `'6'`. **Regression:** existing parser and synth suites pass unmodified. | Field and attribute absent | All pass |
 | T2 | `dash/src/canon/sessions.skills.test.ts` (new), `dash/src/server/kyber-content-route.test.ts` (additions) | `cd dash && npx vitest run src/canon/sessions.skills.test.ts src/canon/sessions.test.ts src/server/kyber-content-route.test.ts` | **Payload:** `skills`, `summary.skills_*` and `turns[].skills_listed` follow section 5. **Unmeasured:** a harness with no source gives `not_measurable` and no `summary.skills_*` keys. **Headline counts (AP2/F1):** `listed_count` and `listed_uninvoked_count` are correct. Both are absent when the listing side is not measured. `listed_uninvoked_count` is absent when invocations are not measured. A row with an unmeasured side never counts as uninvoked. **Turn content:** the `skills` entry follows section 5, carrying listed names with text and invoked names, or a reason. Existing block bytes are unchanged. **Regression:** existing suites pass unmodified. | New keys or entry absent | All pass; existing suites unchanged |
 | T3 | `dash/src/synth/synth.skills.test.ts` (new) | `cd dash && npx vitest run src/synth/synth.skills.test.ts src/synth/synth.test.ts` | A `ParsedProviderCall` with `skills` gives a turn record with `raw['kyber.skills.invoked']` equal to those names. Without `skills`, the key is absent. Every bumped `parserContractVersion` is greater than its previous value. | Attribute absent | All pass |
 | T4 | `dash/src/analysis/signals.test.ts`, `dash/src/analysis/findings.test.ts` (additions) | `cd dash && npx vitest run src/analysis/signals.test.ts src/analysis/findings.test.ts` | A `Skill` call loading `docs` credits `docs`, not `Skill`. A listed-not-invoked skill drives `inactive-skill-reference` at low confidence, ranked last, with no deletion phrasing. `DETECTOR_VERSION` is incremented. | The new assertions fail on the current tool-name crediting and regex input | All pass, the existing D16 assertions included |
@@ -254,7 +294,20 @@ Sanitize prompts and paths before committing. Keep skill names and descriptions,
 - **Objective:** trim the G0 captures into test fixtures and implement `skills.ts` per section 4.
 - **Files:** `dash/src/canon/fixtures/skills/<harness>/*` (derived fixtures beside the captures), `dash/src/canon/skills.ts` (new), `dash/src/canon/skills.test.ts` (new).
 - **Shared constant:** the attribute name `kyber.skills.invoked` is fixed here, so T1 and T3 do not wait for each other.
-- **Depends on:** G0.
+- **AP3 scope:** the extractors are as amended in section 4. Only the Claude, Copilot Chat and Antigravity extractors are pinned by captures. `dash/src/canon/types.ts` gets one pinned line beside `SKILLS_INVOKED_KEY`: `export const SKILLS_LISTED_KEY = 'kyber.skills.listed' as const`. T10 adds the same line. Whichever task lands first adds it, and the other's merge is a no-op, so T1 and T10 stay parallel.
+- **Depends on:** G0 (done, `53c08a1`). It does not depend on T10, because tests build records carrying the attribute directly.
+
+**T10 — Claude Code skill-listing ingestion (AP3).** Skills: TypeScript engine work in `dash/src`; `test-dev` writes RED.
+- **Objective:** section 4, "Claude listing ingestion".
+- **Files:**
+  - `dash/src/ingest/parser.ts`: the `skill_listing` attachment in both parse paths, beside `deferred_tools_delta`, and placing it on the following call;
+  - `dash/src/providers/types.ts`: optional `skillsListed` on `ParsedProviderCall`;
+  - `dash/src/providers/claude.ts`: only if the call hand-off needs it;
+  - `dash/src/synth/synth.ts`: write `raw[SKILLS_LISTED_KEY]` beside `SKILLS_INVOKED_KEY`;
+  - `dash/src/canon/types.ts`: the pinned constant line;
+  - `dash/src/refresh/registry.ts`: `CLAUDE_PARSER_CONTRACT_VERSION` only;
+  - tests: `dash/src/ingest/parser.skill-listing.test.ts` (new) and `dash/src/synth/synth.skills.test.ts` (additions).
+- **Depends on:** G0 (done). It runs in parallel with T1, T9, and T2 and T4 once they start. T3, which touched `synth.ts` and `registry.ts`, is already done.
 
 **T2 — Projection, payload and turn content.** Skills: TypeScript engine work; `test-dev`.
 - **Files:** `dash/src/canon/sessions.ts` (`buildSessionRow`, `AsadSessionPayload`, summary, turn rows), `dash/src/canon/sessions.skills.test.ts` (new), `dash/src/server/bridge.ts` (turn-content assembly only), `dash/src/server/kyber-content-route.test.ts` (additions).
@@ -286,7 +339,10 @@ Sanitize prompts and paths before committing. Keep skill names and descriptions,
 
 **T6 — Documentation.** Skill: `docs-dev`.
 - **Files:** `docs/dash/architecture.md`: the session payload `skills` contract, the turn-content skills entry, the web dashboard section list, and the analysis-layer skill inputs. `docs/dash/telemetry-inventory.md`: a new "Skill availability by harness" table with listed and invoked status for each of the six harnesses plus the invoked-only ones, the enabling settings, and the G0 verification status. `docs/dash/runbook.md`: the Sessions skills section and the capture fixtures location.
-- **Depends on:** T2, T3, T4, T5, T9.
+- **AP3 additions:**
+  - `telemetry-inventory.md`: the Claude listing comes from transcript `skill_listing` attachments, with no OTLP opt-in. Copilot Chat uses `github.copilot.context.skills` and `<available_skills>`. Antigravity uses `gen_ai.skills` and `skill_tokens`. Pi, OpenCode and Copilot CLI are not measurable and unverified.
+  - The Claude file-synth row: session files now carry the skill listing, and still do not carry `system_prompt` or `tool_definitions`.
+- **Depends on:** T2, T3, T4, T5, T9, T10.
 
 **T7 — Whole-change review.** Skill: `code-review`.
 - **Depends on:** T6.
@@ -300,24 +356,25 @@ Sanitize prompts and paths before committing. Keep skill names and descriptions,
 ## 9. Dependency graph
 
 ```text
-G0 (owner captures) ──► T1 ──┬──► T2 ──┐
-                             └──► T4 ──┤
-T3 (done fd54843) ─────────────────────┤
-T5 (done fd54843) ──► T9 ──────────────┼──► T6 ──► T7 ──► T8
+G0 (done 53c08a1) ──► T1 ──┬──► T2 ──┐
+                   │        └──► T4 ──┤
+                   └──► T10 ──────────┤
+T3 (done fd54843) ────────────────────┤
+T5 (done fd54843) ──► T9 ─────────────┼──► T6 ──► T7 ──► T8
 ```
 
-- **Done:** T3 and T5 (`fd54843`, task review PASS).
-- **Ready now:** T9, plus G0, the owner's capture step.
-- **After G0:** T1.
-- **After T1:** T2 and T4 run in parallel. Both also run alongside T9.
-- **File scopes are disjoint.**
+- **Done:** T3 and T5 (`fd54843`, task review PASS) and G0 (`53c08a1`).
+- **Ready now:** T1, T10 and T9, in parallel.
+- **After T1:** T2 and T4 run in parallel, alongside T10 and T9.
+- **File scopes are disjoint.** The only exception is one identical pinned line in `canon/types.ts`, shared by T1 and T10 (see T1).
   - T1: `canon/skills.ts` and its fixtures.
+  - T10: `ingest/parser.ts`, `providers/types.ts`, `providers/claude.ts`, `synth/synth.ts`, and the Claude contract constant in `refresh/registry.ts`.
   - T2: `canon/sessions.ts` and `server/bridge.ts`, plus their tests. No web files.
   - T4: `analysis/*` and one constant in `canon/store.ts`.
   - T9: the `dash/web` files listed for T9.
   - T3 and T5 are done; their files now belong to T9 where it lists them.
 - **No concurrency cap** is set.
-- **Sizing.** Fixture curation is folded into T1, to avoid a task too small for its own worker. Under AP2, the turn-content change stays in T2. The web follow-on is its own task, T9: the engine and web parts are each a full worker's load and do not overlap, and section 5 pins the shapes they share, so they run in parallel.
+- **Sizing.** Fixture curation is folded into T1, to avoid a task too small for its own worker. Under AP2, the turn-content change stays in T2. The web follow-on is its own task, T9: the engine and web parts are each a full worker's load and do not overlap, and section 5 pins the shapes they share, so they run in parallel. Under AP3, the Claude ingestion work is its own task, T10. It spans the parser's two paths, the call hand-off, synth and the contract bump, which is a full worker's load, and its files do not overlap T1's extraction module. T1 stays one worker: three capture-pinned extractors, the not-measurable cases, and the view builder.
 
 ## 10. Verification gates
 
@@ -332,9 +389,11 @@ T5 (done fd54843) ──► T9 ──────────────┼─�
 
 **Risks.**
 
-- **Format drift.** Listing text is prose inside other content for Claude Code and OpenCode. A harness update can move it, and the view then degrades to not measurable, never to a false empty list. G0 pins today's formats.
-- **No Copilot CLI listing.** Copilot CLI may expose no listing at all (finding 4). It then ships invoked-only, which is honest but less than "exactly as tools".
-- **Uncollected OpenCode OTLP.** OpenCode OTLP collection is not owner-verified (finding 5). Without it, OpenCode is invoked-only.
+- **Format drift.** A Claude Code or Copilot update can rename `skill_listing` or `github.copilot.context.skills`. The view then degrades to not measurable, never to a false empty list. G0 pins today's formats (AP3).
+- **Claude non-initial listings.** Only `isInitial: true` was captured. Treating a later listing as a union is an assumption (finding 14). If later listings turn out to be full replacements, a removed skill would still show as listed. That would show up in a live check, and the fix would be a one-line change in T1.
+- **Copilot descriptions are purged.** Copilot descriptions come from the system-prompt part and are lost after the 14-day purge. The names survive on `raw`.
+- **Unverified harnesses (AP3).** Pi, OpenCode and Copilot CLI have no captures (finding 17). Their listings ship as not measurable, and their invoked sides come only from existing parsers. No wire format was invented for them. They need a capture before any listing support is added (follow-up, not in this plan). Copilot CLI cannot be told apart from Copilot Chat in the store.
+- **Claude re-synthesis window.** The T10 contract bump re-synthesizes Claude units only inside the 14-day window. Older Claude sessions have no listing until their files are re-imported.
 - **Shared bucket.** Rules and skills share `instruction_context` (D2). Extraction keys on `raw` attributes, not on bucket membership.
 - **Content purge.** Part-only listings are lost after the 14-day purge (Q10).
 - **Re-synthesis window.** Parser-contract bumps (Q8) re-synthesize only units inside the 14-day window. Older invoked skills appear only where `tool.invoke` arguments exist.
