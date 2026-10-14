@@ -14,7 +14,6 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
     private readonly ISquadUserPaths? _userPaths;
     private readonly SquadStateStore? _stateStore;
     private readonly ISquadGlobalRootResolver? _globalRoots;
-    private readonly ISquadProjectPicker? _picker;
 
     /// <summary>Creates a new status command using default system paths.</summary>
     public SquadStatusCommand()
@@ -25,13 +24,11 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
     internal SquadStatusCommand(
         ISquadUserPaths? userPaths = null,
         SquadStateStore? stateStore = null,
-        ISquadGlobalRootResolver? globalRoots = null,
-        ISquadProjectPicker? picker = null)
+        ISquadGlobalRootResolver? globalRoots = null)
     {
         _userPaths = userPaths;
         _stateStore = stateStore;
         _globalRoots = globalRoots;
-        _picker = picker;
     }
 
     /// <inheritdoc />
@@ -56,16 +53,18 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
 
         SquadDeploymentScope scope = SquadCommandComposition.ResolveScope(settings.Global);
 
-        // A --global status reads the one home-level receipt, so it is anchored at the home directory
-        // whatever the working directory is. State is migrated before the receipt is read.
-        string targetRoot = scope == SquadDeploymentScope.Global
-            ? SquadCommandComposition.ResolveGlobalAnchorRoot(stateStore, effectivePath, dryRun: false)
-            : SquadCommandComposition.ResolveTargetRoot(effectivePath);
+        // State is migrated before the receipt is read, and the anchor is chosen after the migration. A --global
+        // status reads the one home-level receipt, so it is anchored at the home directory whatever the working
+        // directory is, or at the recorded root of a legacy single-root receipt the migration has just copied.
+        string projectRoot = SquadCommandComposition.ResolveTargetRoot(effectivePath);
         SquadCommandComposition.WriteMigrationNotes(SquadCommandComposition.EnsureStateMigrated(
             stateStore,
             Environment.CurrentDirectory,
-            projectRoot: scope == SquadDeploymentScope.Project ? targetRoot : null,
+            projectRoot: scope == SquadDeploymentScope.Project ? projectRoot : null,
             dryRun: false));
+        string targetRoot = scope == SquadDeploymentScope.Global
+            ? SquadCommandComposition.ResolveGlobalAnchorRoot(stateStore, effectivePath, dryRun: false)
+            : projectRoot;
         ISquadGlobalRootResolver globalRoots = _globalRoots ?? SquadCommandComposition.ResolveGlobalRoots();
 
         SquadReceipt? receipt = stateStore.ReadReceipt(targetRoot, scope);

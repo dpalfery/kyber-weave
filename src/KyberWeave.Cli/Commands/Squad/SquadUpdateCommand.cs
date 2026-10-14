@@ -103,9 +103,7 @@ public sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
             return 2;
         }
 
-        string targetRoot = scope == SquadDeploymentScope.Global
-            ? SquadCommandComposition.ResolveGlobalAnchorRoot(stateStore, effectivePath, dryRun: settings.DryRun)
-            : SquadCommandComposition.ResolveTargetRoot(effectivePath);
+        string projectRoot = SquadCommandComposition.ResolveTargetRoot(effectivePath);
 
         // A named project that cannot be resolved is refused before any global work, so a typo costs
         // nothing: no migration, no receipt read, no write.
@@ -133,13 +131,18 @@ public sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
         SquadMigrationReport migration = SquadCommandComposition.EnsureStateMigrated(
             stateStore,
             Environment.CurrentDirectory,
-            projectRoot: scope == SquadDeploymentScope.Project ? targetRoot : null,
+            projectRoot: scope == SquadDeploymentScope.Project ? projectRoot : null,
             dryRun: settings.DryRun);
         SquadCommandComposition.WriteMigrationNotes(migration);
         if (SquadCommandComposition.IsPendingDryRunMigration(migration, settings.DryRun))
         {
             return 0;
         }
+
+        // Chosen after the migration, so a legacy receipt the migration has just copied is anchored on its recorded root.
+        string targetRoot = scope == SquadDeploymentScope.Global
+            ? SquadCommandComposition.ResolveGlobalAnchorRoot(stateStore, effectivePath, dryRun: settings.DryRun)
+            : projectRoot;
 
         SquadLifecycleService lifecycleService = SquadCommandComposition.CreateLifecycleService(
             userPaths: _userPaths,
@@ -412,7 +415,7 @@ public sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
         }
     }
 
-    /// <inheritdoc />
+    /// <summary>Runs the update without a cancellation token, for callers that have none to pass.</summary>
     public int Execute(CommandContext context, SquadUpdateSettings settings) => Execute(context, settings, CancellationToken.None);
 
     /// <summary>One deployment update: the root it writes, what it targets, and what consent it carries.</summary>

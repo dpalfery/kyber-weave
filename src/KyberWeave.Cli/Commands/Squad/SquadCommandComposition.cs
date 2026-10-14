@@ -404,26 +404,30 @@ internal static class SquadCommandComposition
     /// Surfaces the warnings a committed transaction raised after its commit point. The deployment itself
     /// succeeded, so the command still exits 0, but the operator must learn that the registry is behind.
     /// </summary>
+    /// <remarks>
+    /// Each warning already names the command that rebuilds the registry, so it is printed as written rather
+    /// than with a second instruction appended to it.
+    /// </remarks>
     public static void WriteTransactionWarnings(IReadOnlyList<string>? warnings)
     {
         foreach (string warning in warnings ?? [])
         {
-            WriteLine(
-                $"[yellow]warning:[/] {Markup.Escape(warning)} " +
-                "Rerun [bold]kyber-weave squad status[/] to reconcile the project registry.");
+            WriteLine($"[yellow]warning:[/] {Markup.Escape(warning)}");
         }
     }
 
     /// <summary>
-    /// Anchors a <c>--global</c> run at the home directory. Global state is one home-level record, so
-    /// where the operator launched from does not change where it lives; a path supplied with the run is
-    /// named and ignored rather than silently honoured.
+    /// Anchors a <c>--global</c> run. Global state is one home-level record, so where the operator launched
+    /// from does not change where it lives; a path supplied with the run is named and ignored rather than
+    /// silently honoured. A pre-#91 legacy single-root receipt is the exception: its files live beneath the
+    /// one root it was bound to, so that recorded root is the anchor.
     /// </summary>
     /// <remarks>
-    /// The one exception is a pre-#91 legacy single-root global receipt. Its files live beneath the
-    /// directory its install used, which only the operator can name, so that directory stays the anchor
-    /// for it and the home is not substituted. Anchoring it at home would verify, and could remove, files
-    /// under the wrong root.
+    /// The anchor reads the home receipt, so it must be chosen after <see cref="EnsureStateMigrated"/>. Before the
+    /// migration a legacy receipt is not yet in the home, and the home would be chosen for it, which is the wrong
+    /// root. Once the migration has copied the receipt, its target root is the absolute binding root the copy
+    /// recorded. Every later run then anchors on that same root, whatever directory it starts from. Anchoring on
+    /// the launch directory instead would verify, and could remove, files beneath the wrong root.
     /// </remarks>
     /// <param name="stateStore">The store the global receipt is read from. Its user paths name the home.</param>
     /// <param name="suppliedPath">The path the operator gave, or null when none was given.</param>
@@ -433,8 +437,23 @@ internal static class SquadCommandComposition
         ArgumentNullException.ThrowIfNull(stateStore);
 
         string home = Path.GetFullPath(stateStore.UserPaths.HomeDirectory);
-        if (IsLegacySingleRootGlobalReceipt(stateStore, home))
+        SquadReceipt? legacy = TryReadLegacySingleRootHomeReceipt(stateStore, home);
+        if (legacy is not null)
         {
+            if (Path.IsPathFullyQualified(legacy.TargetRoot))
+            {
+                if (suppliedPath is not null && !string.Equals(suppliedPath, ".", StringComparison.Ordinal))
+                {
+                    WriteLine(
+                        $"[yellow]warning:[/] the path '{Markup.Escape(suppliedPath)}' is ignored under --global; " +
+                        $"this legacy single-root deployment is anchored at its recorded root '{Markup.Escape(legacy.TargetRoot)}'.");
+                }
+
+                return legacy.TargetRoot;
+            }
+
+            // A legacy receipt that records no absolute root names no root of its own, so the operator's path, or
+            // the process directory when none is given, stays the anchor, as it was before the migration recorded one.
             return ResolveTargetRoot(suppliedPath);
         }
 
@@ -456,20 +475,20 @@ internal static class SquadCommandComposition
     }
 
     /// <summary>
-    /// True when the home global receipt is a pre-#91 single-root receipt, whose files resolve beneath the
-    /// directory they were installed to rather than beneath each target's own global root.
+    /// The home global receipt when it is a pre-#91 single-root receipt, whose files resolve beneath the one
+    /// root it records rather than beneath each target's own global root. Null when there is no such receipt.
     /// </summary>
-    private static bool IsLegacySingleRootGlobalReceipt(SquadStateStore stateStore, string home)
+    private static SquadReceipt? TryReadLegacySingleRootHomeReceipt(SquadStateStore stateStore, string home)
     {
         try
         {
             SquadReceipt? receipt = stateStore.ReadReceipt(home, SquadDeploymentScope.Global);
-            return receipt is not null && SquadDeploymentPlan.IsLegacySingleRootReceipt(receipt);
+            return receipt is not null && SquadDeploymentPlan.IsLegacySingleRootReceipt(receipt) ? receipt : null;
         }
         catch (Exception ex) when (ex is InvalidDataException or ArgumentException or IOException or UnauthorizedAccessException)
         {
             // A corrupt or blank receipt is reported by the command that reads it; it does not pick an anchor here.
-            return false;
+            return null;
         }
     }
 
@@ -554,6 +573,8 @@ internal static class SquadCommandComposition
     /// Imports one project's in-repo state into the home registry when its home state is absent. A project
     /// whose home receipt already exists is left alone, because the home receipt is the authority.
     /// </summary>
+    /// <param name="stateStore">The home state store whose registry the import updates.</param>
+    /// <param name="root">The project root whose in-repo state may be imported.</param>
     /// <param name="dryRun">Whether the run only plans. A dry run writes nothing and reports the import it would make.</param>
     public static SquadMigrationReport ImportProjectIfHomeStateAbsent(SquadStateStore stateStore, string root, bool dryRun)
     {

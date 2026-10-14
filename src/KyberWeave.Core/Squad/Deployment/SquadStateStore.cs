@@ -750,7 +750,7 @@ public sealed class SquadStateStore
             {
                 ["path"] = entry.Value.Path,
                 ["lastUpdatedUtc"] = entry.Value.LastUpdatedUtc.UtcDateTime.ToString("O", CultureInfo.InvariantCulture),
-                ["targets"] = new JsonArray(entry.Value.Targets.Select(target => (JsonNode)JsonValue.Create(target)!).ToArray())
+                ["targets"] = new JsonArray(entry.Value.Targets.Select(target => (JsonNode)JsonValue.Create(target)).ToArray())
             };
         }
 

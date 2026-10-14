@@ -462,6 +462,169 @@ public sealed class SquadStateMigrationTests
         DirectoryTreeSnapshot.AssertTreeUnchanged(fixture.Path, fixtureBefore);
     }
 
+    /// <summary>
+    /// A crash between the lock copy and the receipt copy leaves a home lock with no home receipt. The receipt
+    /// is the completion marker, so that state is an interrupted copy, not a conflict. A home lock byte-identical
+    /// to the legacy lock is the copy's own write, so the next run must finish the copy rather than block on it.
+    /// </summary>
+    [Fact]
+    public void InterruptedGlobalCopyLeavingAnIdenticalHomeLockIsCompletedByTheNextRun()
+    {
+        using TempDirectory fixture = new TempDirectory();
+        MigrationScenario scenario = CreateScenario(fixture);
+        string root = Path.Combine(fixture.Path, "customer-alpha");
+        Directory.CreateDirectory(root);
+        WriteLegacyGlobal(scenario, root, PerTargetRootsReceipt(), Lock("1.2.3"));
+        byte[] legacyLock = File.ReadAllBytes(Path.Combine(LegacyGlobalDirectory(scenario, root), "squad.lock.yml"));
+        Directory.CreateDirectory(HomeGlobalDirectory(scenario));
+        File.WriteAllBytes(Path.Combine(HomeGlobalDirectory(scenario), "squad.lock.yml"), legacyLock);
+
+        SquadMigrationReport report = scenario.Migration.MigrateGlobal(invokingCwd: null);
+
+        Assert.NotEmpty(report.MigratedItems);
+        Assert.Empty(report.UnmigratedLegacyRoots);
+        Assert.Equal(
+            PhysicalPathOf(scenario.Home),
+            ReadTargetRoot(Path.Combine(HomeGlobalDirectory(scenario), "squad.receipt.json")));
+        Assert.Equal(legacyLock, File.ReadAllBytes(Path.Combine(HomeGlobalDirectory(scenario), "squad.lock.yml")));
+    }
+
+    /// <summary>
+    /// A home lock that differs from the legacy lock, with no home receipt, is not an interrupted copy of this
+    /// legacy root. It may belong to another deployment, so the copy stays blocked and the lock is left as it is.
+    /// </summary>
+    [Fact]
+    public void HomeLockThatDiffersFromTheLegacyLockStillBlocksTheGlobalCopy()
+    {
+        using TempDirectory fixture = new TempDirectory();
+        MigrationScenario scenario = CreateScenario(fixture);
+        string root = Path.Combine(fixture.Path, "customer-alpha");
+        Directory.CreateDirectory(root);
+        WriteLegacyGlobal(scenario, root, PerTargetRootsReceipt(), Lock("1.2.3"));
+        WriteFile(Path.Combine(HomeGlobalDirectory(scenario), "squad.lock.yml"), scenario.Store.SerializeLock(Lock("9.9.9")));
+        byte[] lockBefore = File.ReadAllBytes(Path.Combine(HomeGlobalDirectory(scenario), "squad.lock.yml"));
+
+        SquadMigrationReport report = scenario.Migration.MigrateGlobal(invokingCwd: null);
+
+        Assert.Empty(report.MigratedItems);
+        Assert.False(
+            File.Exists(Path.Combine(HomeGlobalDirectory(scenario), "squad.receipt.json")),
+            "A blocked copy must not write a home receipt.");
+        SquadUnmigratedLegacyRoot entry = Assert.Single(report.UnmigratedLegacyRoots);
+        Assert.False(string.IsNullOrWhiteSpace(entry.Guidance), "A blocked copy must say what the operator should do next.");
+        Assert.Equal(lockBefore, File.ReadAllBytes(Path.Combine(HomeGlobalDirectory(scenario), "squad.lock.yml")));
+    }
+
+    /// <summary>
+    /// The same crash window in the project import: a home lock identical to the in-repo lock, with no home
+    /// receipt, is an interrupted import. The next run completes it instead of warning and stopping.
+    /// </summary>
+    [Fact]
+    public void InterruptedProjectImportLeavingAnIdenticalHomeLockIsCompletedByTheNextRun()
+    {
+        using TempDirectory fixture = new TempDirectory();
+        MigrationScenario scenario = CreateScenario(fixture);
+        string repo = Path.Combine(fixture.Path, "repo");
+        Directory.CreateDirectory(repo);
+        WriteInRepoState(scenario, repo, Lock("1.2.3"));
+        byte[] inRepoLock = File.ReadAllBytes(Path.Combine(repo, ".kyber-weave", "squad.lock.yml"));
+        string projectDirectory = HomeProjectDirectory(scenario, repo);
+        Directory.CreateDirectory(projectDirectory);
+        File.WriteAllBytes(Path.Combine(projectDirectory, "squad.lock.yml"), inRepoLock);
+        TreeSnapshot repoBefore = DirectoryTreeSnapshot.SnapshotTree(repo);
+
+        SquadMigrationReport report = scenario.Migration.ImportProject(repo);
+
+        Assert.Single(report.ImportedProjects);
+        Assert.Empty(report.Warnings);
+        Assert.Equal(PhysicalPathOf(repo), ReadTargetRoot(Path.Combine(projectDirectory, "squad.receipt.json")));
+        Assert.Equal(inRepoLock, File.ReadAllBytes(Path.Combine(projectDirectory, "squad.lock.yml")));
+        DirectoryTreeSnapshot.AssertTreeUnchanged(repo, repoBefore);
+    }
+
+    /// <summary>
+    /// The project import keeps its block when the home lock differs from the in-repo lock: the home record
+    /// may belong to another state, so nothing is imported and the operator is told which lock to inspect.
+    /// </summary>
+    [Fact]
+    public void ProjectImportStillWarnsWhenTheHomeLockDiffersFromTheInRepoLock()
+    {
+        using TempDirectory fixture = new TempDirectory();
+        MigrationScenario scenario = CreateScenario(fixture);
+        string repo = Path.Combine(fixture.Path, "repo");
+        Directory.CreateDirectory(repo);
+        WriteInRepoState(scenario, repo, Lock("1.2.3"));
+        string projectDirectory = HomeProjectDirectory(scenario, repo);
+        WriteFile(Path.Combine(projectDirectory, "squad.lock.yml"), scenario.Store.SerializeLock(Lock("9.9.9")));
+
+        SquadMigrationReport report = scenario.Migration.ImportProject(repo);
+
+        Assert.Empty(report.ImportedProjects);
+        Assert.Contains(report.Warnings, warning => warning.Contains("home lock", StringComparison.Ordinal));
+        Assert.False(File.Exists(Path.Combine(projectDirectory, "squad.receipt.json")));
+    }
+
+    /// <summary>
+    /// The global copy writes under the home deployment lease that installs take. While another transaction holds
+    /// that lease, the copy must write nothing and report why, and the next run after release must complete it.
+    /// </summary>
+    [Fact]
+    public void GlobalCopyWritesNothingWhileAnotherTransactionHoldsTheHomeLease()
+    {
+        using TempDirectory fixture = new TempDirectory();
+        MigrationScenario scenario = CreateScenario(fixture);
+        string root = Path.Combine(fixture.Path, "customer-alpha");
+        Directory.CreateDirectory(root);
+        WriteLegacyGlobal(scenario, root, PerTargetRootsReceipt(), Lock("1.2.3"));
+        string leaseKey = scenario.Store.ResolveLeaseIdentity(scenario.Home, SquadDeploymentScope.Global);
+
+        SquadMigrationReport whileHeld;
+        using (SquadTransaction.TransactionLease held = SquadTransaction.AcquireLease(leaseKey))
+        {
+            whileHeld = scenario.Migration.MigrateGlobal(invokingCwd: null);
+        }
+
+        Assert.Empty(whileHeld.MigratedItems);
+        Assert.False(
+            File.Exists(Path.Combine(HomeGlobalDirectory(scenario), "squad.receipt.json")),
+            "A copy that cannot take the lease must not write the home receipt.");
+        Assert.Single(whileHeld.UnmigratedLegacyRoots);
+
+        SquadMigrationReport afterRelease = scenario.Migration.MigrateGlobal(invokingCwd: null);
+
+        Assert.NotEmpty(afterRelease.MigratedItems);
+        Assert.True(File.Exists(Path.Combine(HomeGlobalDirectory(scenario), "squad.receipt.json")));
+    }
+
+    /// <summary>
+    /// The project import writes under the same project lease an install takes. Held by another transaction, it
+    /// imports nothing and warns, and it completes once the lease is released.
+    /// </summary>
+    [Fact]
+    public void ProjectImportWritesNothingWhileAnotherTransactionHoldsTheProjectLease()
+    {
+        using TempDirectory fixture = new TempDirectory();
+        MigrationScenario scenario = CreateScenario(fixture);
+        string repo = Path.Combine(fixture.Path, "repo");
+        Directory.CreateDirectory(repo);
+        WriteInRepoState(scenario, repo, Lock("1.2.3"));
+        string leaseKey = scenario.Store.ResolveLeaseIdentity(repo, SquadDeploymentScope.Project);
+
+        SquadMigrationReport whileHeld;
+        using (SquadTransaction.TransactionLease held = SquadTransaction.AcquireLease(leaseKey))
+        {
+            whileHeld = scenario.Migration.ImportProject(repo);
+        }
+
+        Assert.Empty(whileHeld.ImportedProjects);
+        Assert.Contains(whileHeld.Warnings, warning => warning.Contains("transaction", StringComparison.OrdinalIgnoreCase));
+        Assert.False(File.Exists(Path.Combine(HomeProjectDirectory(scenario, repo), "squad.receipt.json")));
+
+        SquadMigrationReport afterRelease = scenario.Migration.ImportProject(repo);
+
+        Assert.Single(afterRelease.ImportedProjects);
+    }
+
     private sealed record MigrationScenario(
         string Home,
         string ApplicationData,

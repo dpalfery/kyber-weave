@@ -70,23 +70,26 @@ public sealed class SquadUninstallCommand : Command<SquadUninstallSettings>
 
         SquadDeploymentScope scope = SquadCommandComposition.ResolveScope(settings.Global);
 
-        // A --global uninstall touches the home-level global deployment only: it is anchored at the home
-        // directory whatever the working directory is, and it never reads or changes a project or the registry.
-        string targetRoot = scope == SquadDeploymentScope.Global
-            ? SquadCommandComposition.ResolveGlobalAnchorRoot(stateStore, effectivePath, dryRun: settings.DryRun)
-            : SquadCommandComposition.ResolveTargetRoot(effectivePath);
+        string projectRoot = SquadCommandComposition.ResolveTargetRoot(effectivePath);
 
         // Legacy state is migrated before the uninstall reads the receipt it removes.
         SquadMigrationReport migration = SquadCommandComposition.EnsureStateMigrated(
             stateStore,
             Environment.CurrentDirectory,
-            projectRoot: scope == SquadDeploymentScope.Project ? targetRoot : null,
+            projectRoot: scope == SquadDeploymentScope.Project ? projectRoot : null,
             dryRun: settings.DryRun);
         SquadCommandComposition.WriteMigrationNotes(migration);
         if (SquadCommandComposition.IsPendingDryRunMigration(migration, settings.DryRun))
         {
             return 0;
         }
+
+        // A --global uninstall touches the home-level global deployment only: it is anchored at the home directory
+        // whatever the working directory is, or at the recorded root of a legacy single-root receipt. It never reads
+        // or changes a project or the registry. Chosen after the migration, so the receipt it removes is the migrated one.
+        string targetRoot = scope == SquadDeploymentScope.Global
+            ? SquadCommandComposition.ResolveGlobalAnchorRoot(stateStore, effectivePath, dryRun: settings.DryRun)
+            : projectRoot;
 
         SquadLifecycleService lifecycleService = _lifecycleService ?? SquadCommandComposition.CreateLifecycleService(
             userPaths: _userPaths,

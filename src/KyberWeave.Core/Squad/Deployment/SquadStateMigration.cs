@@ -33,6 +33,12 @@ public sealed class SquadStateMigration
         "Keep exactly one legacy global receipt. Move the others aside after verifying them, then run the migration " +
         "again. Nothing was copied, so the home store is unchanged.";
 
+    private const string LeaseBusyReason =
+        "Another Squad transaction holds the lease for this root, so nothing was written.";
+
+    private const string LeaseBusyGuidance =
+        "Run the migration again once that transaction finishes. The legacy files were left in place.";
+
     private static readonly JsonSerializerOptions RewriteOptions = new JsonSerializerOptions
     {
         WriteIndented = true,
@@ -70,6 +76,7 @@ public sealed class SquadStateMigration
     {
         List<string> migrated = [];
         List<SquadUnmigratedLegacyRoot> unmigrated = [];
+        List<string> warnings = [];
 
         string homeGlobalDirectory = _stateStore.ResolveStateDirectory(
             _stateStore.ResolveHomeRoot(),
@@ -107,10 +114,28 @@ public sealed class SquadStateMigration
                     }
                     else
                     {
-                        ApplyGlobalCopy(plan);
-                        migrated.Add(
-                            $"Copied the legacy global receipt and lock from '{plan.LegacyDirectory}' to " +
-                            $"'{plan.HomeDirectory}'. The legacy files were left in place.");
+                        switch (ApplyGlobalCopy(plan))
+                        {
+                            case CopyOutcome.Copied:
+                                migrated.Add(
+                                    $"Copied the legacy global receipt and lock from '{plan.LegacyDirectory}' to " +
+                                    $"'{plan.HomeDirectory}'. The legacy files were left in place.");
+                                break;
+                            case CopyOutcome.LeaseBusy:
+                                // Reported twice on purpose: the unmigrated entry is what doctor lists, and the
+                                // warning is what every verb prints, since it prints no unmigrated roots.
+                                unmigrated.Add(new SquadUnmigratedLegacyRoot(
+                                    plan.LegacyDirectory,
+                                    LeaseBusyReason,
+                                    LeaseBusyGuidance));
+                                warnings.Add(
+                                    $"The legacy global state at '{plan.LegacyDirectory}' was not copied. {LeaseBusyReason} " +
+                                    LeaseBusyGuidance);
+                                break;
+                            case CopyOutcome.AlreadyPresent:
+                                // A home receipt appeared after the plan. It is the authority, so nothing is copied.
+                                break;
+                        }
                     }
                 }
             }
@@ -128,7 +153,7 @@ public sealed class SquadStateMigration
             }
         }
 
-        return new SquadMigrationReport(migrated, unmigrated, [], []);
+        return new SquadMigrationReport(migrated, unmigrated, [], warnings);
     }
 
     /// <summary>Imports one project's legacy state into the home-level registry.</summary>
@@ -163,7 +188,7 @@ public sealed class SquadStateMigration
                 warnings.Add(
                     $"The in-repo receipt at '{inRepoReceiptPath}' has no lock beside it, so it was not imported.");
             }
-            else if (File.Exists(Path.Combine(projectDirectory, LockFileName)))
+            else if (HomeLockBlocksCopy(Path.Combine(projectDirectory, LockFileName), File.ReadAllBytes(inRepoLockPath)))
             {
                 warnings.Add(
                     $"A home lock already exists for '{identity.PhysicalPath}' without a receipt, so nothing was " +
@@ -224,8 +249,28 @@ public sealed class SquadStateMigration
             return;
         }
 
-        WriteAtomically(Path.Combine(projectDirectory, LockFileName), File.ReadAllBytes(inRepoLockPath));
-        WriteAtomically(Path.Combine(projectDirectory, ReceiptFileName), new UTF8Encoding(false).GetBytes(rewritten));
+        string leaseIdentity = _stateStore.ResolveLeaseIdentity(identity.PhysicalPath, SquadDeploymentScope.Project);
+        string projectReceiptPath = Path.Combine(projectDirectory, ReceiptFileName);
+        byte[] inRepoLock = File.ReadAllBytes(inRepoLockPath);
+        CopyOutcome outcome = WriteUnderLease(
+            leaseIdentity,
+            projectReceiptPath,
+            () =>
+            {
+                WriteAtomically(Path.Combine(projectDirectory, LockFileName), inRepoLock);
+                WriteAtomically(projectReceiptPath, new UTF8Encoding(false).GetBytes(rewritten));
+            });
+        if (outcome == CopyOutcome.LeaseBusy)
+        {
+            warnings.Add(
+                $"The in-repo state at '{Path.GetDirectoryName(inRepoReceiptPath)}' was not imported. {LeaseBusyReason} " +
+                LeaseBusyGuidance);
+        }
+
+        if (outcome != CopyOutcome.Copied)
+        {
+            return;
+        }
 
         // The target roots a project deploys to come from the receipt itself, so the registry entry
         // describes the same files the receipt owns.
@@ -296,11 +341,12 @@ public sealed class SquadStateMigration
                 "matched, or register that root and run it again. Nothing was moved.");
         }
 
-        if (File.Exists(Path.Combine(homeGlobalDirectory, LockFileName)))
+        byte[] lockBytes = File.ReadAllBytes(lockPath);
+        if (HomeLockBlocksCopy(Path.Combine(homeGlobalDirectory, LockFileName), lockBytes))
         {
             return new SquadUnmigratedLegacyRoot(
                 legacyDirectory,
-                "A home global lock already exists without a home global receipt.",
+                "A home global lock already exists without a home global receipt, and it differs from the legacy lock.",
                 "Inspect the home global lock, then remove it or restore its receipt, and run the migration again. " +
                 "Nothing was overwritten.");
         }
@@ -308,7 +354,7 @@ public sealed class SquadStateMigration
         plan = new GlobalCopyPlan(
             legacyDirectory,
             homeGlobalDirectory,
-            File.ReadAllBytes(lockPath),
+            lockBytes,
             RewriteTargetRoot(receiptText, targetRoot));
         return null;
     }
@@ -351,10 +397,77 @@ public sealed class SquadStateMigration
         return null;
     }
 
-    private void ApplyGlobalCopy(GlobalCopyPlan plan)
+    /// <summary>
+    /// Copies the lock, then the receipt. The receipt is written last because it is the completion marker: a crash
+    /// between the two leaves a lock with no receipt, which the next run completes (see
+    /// <see cref="HomeLockBlocksCopy"/>), and never a receipt without its lock.
+    /// </summary>
+    private CopyOutcome ApplyGlobalCopy(GlobalCopyPlan plan)
     {
-        WriteAtomically(Path.Combine(plan.HomeDirectory, LockFileName), plan.LockBytes);
-        WriteAtomically(Path.Combine(plan.HomeDirectory, ReceiptFileName), new UTF8Encoding(false).GetBytes(plan.ReceiptText));
+        string leaseIdentity = _stateStore.ResolveLeaseIdentity(_stateStore.ResolveHomeRoot(), SquadDeploymentScope.Global);
+        return WriteUnderLease(
+            leaseIdentity,
+            Path.Combine(plan.HomeDirectory, ReceiptFileName),
+            () =>
+            {
+                WriteAtomically(Path.Combine(plan.HomeDirectory, LockFileName), plan.LockBytes);
+                WriteAtomically(Path.Combine(plan.HomeDirectory, ReceiptFileName), new UTF8Encoding(false).GetBytes(plan.ReceiptText));
+            });
+    }
+
+    /// <summary>
+    /// Runs a state write under the same lease an install takes for the root, so a copy cannot interleave with a
+    /// transaction. The home receipt is checked again once the lease is held: a receipt that appeared since the
+    /// plan was made is authoritative, and the write is skipped rather than overwriting it.
+    /// </summary>
+    [SuppressMessage(
+        "Reliability",
+        "CA2000:Dispose objects before losing scope",
+        Justification = "The lease is acquired inside the try and disposed by the using statement that follows; a busy root returns before any lease exists.")]
+    private static CopyOutcome WriteUnderLease(string leaseIdentity, string homeReceiptPath, Action write)
+    {
+        SquadTransaction.TransactionLease lease;
+        try
+        {
+            lease = SquadTransaction.AcquireLease(leaseIdentity);
+        }
+        catch (InvalidOperationException)
+        {
+            // AcquireLease refuses only when a transaction is active for the root, in this process or another.
+            return CopyOutcome.LeaseBusy;
+        }
+
+        using (lease)
+        {
+            if (File.Exists(homeReceiptPath))
+            {
+                return CopyOutcome.AlreadyPresent;
+            }
+
+            write();
+            return CopyOutcome.Copied;
+        }
+    }
+
+    /// <summary>
+    /// Whether a lock already at <paramref name="homeLockPath"/> blocks a copy of the source lock. Only a lock that
+    /// differs blocks. One byte-identical to the source is what an interrupted copy leaves behind, so the copy
+    /// finishes it. A different lock may belong to another deployment, so it is never overwritten.
+    /// </summary>
+    private static bool HomeLockBlocksCopy(string homeLockPath, byte[] sourceLock) =>
+        File.Exists(homeLockPath) && !File.ReadAllBytes(homeLockPath).AsSpan().SequenceEqual(sourceLock);
+
+    /// <summary>The outcome of a state copy that ran under the lease.</summary>
+    private enum CopyOutcome
+    {
+        /// <summary>The copy wrote the home state.</summary>
+        Copied,
+
+        /// <summary>Another transaction held the lease, so nothing was written.</summary>
+        LeaseBusy,
+
+        /// <summary>A home receipt appeared after the plan, so it is authoritative and nothing was written.</summary>
+        AlreadyPresent,
     }
 
     /// <summary>

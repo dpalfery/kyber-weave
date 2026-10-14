@@ -21,7 +21,6 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
     private readonly bool? _isInteractive;
     private readonly Func<string, bool>? _readAnswer;
     private readonly ISquadGlobalRootResolver? _globalRoots;
-    private readonly ISquadProjectPicker? _picker;
 
     /// <summary>Creates a new install command using default dependencies.</summary>
     public SquadInstallCommand()
@@ -42,8 +41,7 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
         ISquadRenderer? renderer = null,
         bool? isInteractive = null,
         Func<string, bool>? readAnswer = null,
-        ISquadGlobalRootResolver? globalRoots = null,
-        ISquadProjectPicker? picker = null)
+        ISquadGlobalRootResolver? globalRoots = null)
     {
         _userPaths = userPaths;
         _stateStore = stateStore;
@@ -52,7 +50,6 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
         _isInteractive = isInteractive;
         _readAnswer = readAnswer;
         _globalRoots = globalRoots;
-        _picker = picker;
     }
 
     /// <inheritdoc />
@@ -86,23 +83,26 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
             return 2;
         }
 
-        // A --global install is anchored at the home directory whatever the working directory is.
-        string targetRoot = scope == SquadDeploymentScope.Global
-            ? SquadCommandComposition.ResolveGlobalAnchorRoot(stateStore, effectivePath, dryRun: settings.DryRun)
-            : SquadCommandComposition.ResolveTargetRoot(effectivePath);
+        string projectRoot = SquadCommandComposition.ResolveTargetRoot(effectivePath);
 
         // Legacy state is migrated before the install reads any of it. A dry run reports what the next
         // real run would move, and stops without reading a deployment it has not yet moved.
         SquadMigrationReport migration = SquadCommandComposition.EnsureStateMigrated(
             stateStore,
             Environment.CurrentDirectory,
-            projectRoot: scope == SquadDeploymentScope.Project ? targetRoot : null,
+            projectRoot: scope == SquadDeploymentScope.Project ? projectRoot : null,
             dryRun: settings.DryRun);
         SquadCommandComposition.WriteMigrationNotes(migration);
         if (SquadCommandComposition.IsPendingDryRunMigration(migration, settings.DryRun))
         {
             return 0;
         }
+
+        // A --global install is anchored at the home directory whatever the working directory is, or at the
+        // recorded root of a legacy single-root receipt the migration has just copied. Chosen after the migration.
+        string targetRoot = scope == SquadDeploymentScope.Global
+            ? SquadCommandComposition.ResolveGlobalAnchorRoot(stateStore, effectivePath, dryRun: settings.DryRun)
+            : projectRoot;
 
         // Load configuration if present
         KyberWeaveConfigLoadResult configResult = KyberWeaveConfigLoader.TryLoad(targetRoot);

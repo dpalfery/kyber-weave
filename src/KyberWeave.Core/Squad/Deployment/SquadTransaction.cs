@@ -2218,7 +2218,7 @@ public sealed class SquadTransaction
         "Reliability",
         "CA2000:Dispose objects before losing scope",
         Justification = "A successful TransactionLease takes ownership of the mutex; the catch path disposes it.")]
-    private static TransactionLease AcquireLease(string rootKey)
+    internal static TransactionLease AcquireLease(string rootKey)
     {
         if (!ActiveLeases.TryAdd(rootKey, 0))
         {
@@ -3282,7 +3282,7 @@ public sealed class SquadTransaction
             _warnings.Add(
                 $"The Squad project registry was not updated for '{plan.PhysicalRootPath}' " +
                 $"({exception.Message}). The deployment itself is committed. " +
-                "Run 'squad status' to rebuild the registry entry.");
+                "Run `squad status --global` to rebuild the registry.");
         }
     }
 
@@ -3427,7 +3427,7 @@ public sealed class SquadTransaction
         Home
     }
 
-    private sealed class TransactionLease(string identity, Mutex mutex) : IDisposable
+    internal sealed class TransactionLease(string identity, Mutex mutex) : IDisposable
     {
         private bool _disposed;
         private FileStream? _journal;
