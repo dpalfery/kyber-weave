@@ -50,6 +50,9 @@ export type SkillRow = {
   listed: boolean
   /** Absent when the invocation source is not measurable, never zero. */
   invocations?: number
+  /** The spanIds of the turns the skill was listed on, in `turnRecords` order. */
+  turnSpanIds: string[]
+  /** `turnSpanIds.length`. */
   turnsListed: number
   /** Tokens counted from the description through the injected `countTokens`. */
   derivedTokens?: number
@@ -163,23 +166,21 @@ export function buildSkillsView(
     return notMeasurable('No model turns were recorded, so skills listed cannot be attributed to any turn.')
   }
 
-  const { sessionEvents, rollups } = collectListings(all)
+  const byTurn = effectiveListingsOf(all, turns)
 
-  const listedByName = new Map<string, { turnsListed: number; description?: string }>()
-  let turnsWithListing = 0
+  const listedByName = new Map<string, { turnSpanIds: string[]; description?: string }>()
   for (const turn of turns) {
-    const effective = effectiveListing(turn, sessionEvents, rollups)
+    const effective = byTurn.get(turn.spanId)
     if (effective === undefined) continue
-    turnsWithListing++
     for (const [name, description] of effective) {
-      const row = listedByName.get(name) ?? { turnsListed: 0 }
-      row.turnsListed++
+      const row = listedByName.get(name) ?? { turnSpanIds: [] }
+      row.turnSpanIds.push(turn.spanId)
       row.description = description ?? row.description
       listedByName.set(name, row)
     }
   }
 
-  if (turnsWithListing === 0) {
+  if (byTurn.size === 0) {
     return notMeasurable(firstListingReason(turns))
   }
 
@@ -202,7 +203,8 @@ export function buildSkillsView(
   const names = new Set<string>([...listedByName.keys(), ...invocationCounts.keys()])
   const rows: SkillRow[] = [...names].map((name) => {
     const listed = listedByName.get(name)
-    const row: SkillRow = { name, listed: listed !== undefined, turnsListed: listed?.turnsListed ?? 0 }
+    const turnSpanIds = listed?.turnSpanIds ?? []
+    const row: SkillRow = { name, listed: listed !== undefined, turnSpanIds, turnsListed: turnSpanIds.length }
     if (invocationsAvailability === undefined) row.invocations = invocationCounts.get(name) ?? 0
     if (listed?.description !== undefined) row.derivedTokens = countTokens(listed.description)
     return row
@@ -213,6 +215,33 @@ export function buildSkillsView(
   if (reportedSkillTokens !== undefined) view.reportedSkillTokens = reportedSkillTokens
   if (invocationsAvailability !== undefined) view.invocationsAvailability = invocationsAvailability
   return view
+}
+
+/**
+ * Each turn's EFFECTIVE listing with descriptions, keyed by the turn's spanId.
+ * A turn no measured listing applies to has no entry (`has` is false), never an
+ * empty map: an empty map would read as "measured, none". Entries map each
+ * effective skill to its last description, or undefined when no listing gave one.
+ */
+export function listedByTurn(
+  records: readonly CanonicalRecord[],
+  turnRecords: readonly CanonicalRecord[],
+): Map<string, Map<string, string | undefined>> {
+  return effectiveListingsOf(uniqueBySpan([...records, ...turnRecords]), uniqueBySpan(turnRecords))
+}
+
+/** The shared fold behind `listedByTurn` and `buildSkillsView`. */
+function effectiveListingsOf(
+  all: readonly CanonicalRecord[],
+  turns: readonly CanonicalRecord[],
+): Map<string, Map<string, string | undefined>> {
+  const { sessionEvents, rollups } = collectListings(all)
+  const byTurn = new Map<string, Map<string, string | undefined>>()
+  for (const turn of turns) {
+    const effective = effectiveListing(turn, sessionEvents, rollups)
+    if (effective !== undefined) byTurn.set(turn.spanId, effective)
+  }
+  return byTurn
 }
 
 // ---------------------------------------------------------------------------

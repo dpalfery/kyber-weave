@@ -26,6 +26,7 @@ import { buildFindings } from './findings.js'
 import { buildHarnessRollup } from './harnesses.js'
 import { buildRuns } from './runs.js'
 import { CanonStore, type SessionRow } from './store.js'
+import { buildSkillsView, extractInvokedSkills, listedByTurn, type SkillsView } from './skills.js'
 import { activeTokenizer, createCachedCounter, loadO200kCounter } from './tokens.js'
 import { notMeasurable, type CanonicalRecord, type CostBlock, type Measurability, type MetricAvailability, type NotMeasurable } from './types.js'
 
@@ -347,6 +348,37 @@ export type AsadServer = {
   unused_cost: number
 }
 
+/**
+ * One skill on the session's skills view. `turns_listed` holds the payload
+ * turn indices (0-based) the skill was listed on. `invocations` is declared
+ * not measurable, never zero, when the harness has no invocation source.
+ */
+export type AsadSkillRow = {
+  name: string
+  listed: boolean
+  invocations: number | NotMeasurable
+  turns_listed: number[]
+  /** The first listing text observed for the skill in the session; absent when none carried one. */
+  description?: string
+  /** Tokens of `description` through the injected counter; absent with no description. */
+  derived_tokens?: number
+}
+
+/**
+ * The session's skills view. `reported_skill_tokens` is the harness's per-turn
+ * resident figure, never summed. The listed and uninvoked counts are each
+ * absent when the side they depend on is not measured.
+ */
+export type AsadSkillsPayload =
+  | {
+      measurable: true
+      reported_skill_tokens?: number
+      listed_count?: number
+      listed_uninvoked_count?: number
+      rows: AsadSkillRow[]
+    }
+  | NotMeasurable
+
 export type AsadSessionPayload = {
   id: string
   session_id: string
@@ -373,6 +405,11 @@ export type AsadSessionPayload = {
    * which a display layer must read as "unknown", never as "no mismatch".
    */
   costBasisMismatch: CostBasisMismatch | null
+  /**
+   * The skills view. Absent only on a row stored before this field existed,
+   * which a display layer must read as "unknown", never as "no skills".
+   */
+  skills?: AsadSkillsPayload
   requests: Array<Record<string, unknown>>
   servers: AsadServer[]
   coverage: Record<string, number>
@@ -806,6 +843,16 @@ export function buildSessionRow(
       ? turnRecords.filter((record) => record.tokens.cacheCreation > 0).length
       : undefined
 
+  // The skills view (T2). The engine decides what is listed and invoked; this
+  // only maps it onto the payload, numbering turns by their payload index.
+  const skillsView = buildSkillsView(records, turnRecords, measurability ?? {}, countTokens)
+  const skillsListed = 'availability' in skillsView ? undefined : listedByTurn(records, turnRecords)
+  const skillsInvoked =
+    'availability' in skillsView || skillsView.invocationsAvailability !== undefined
+      ? undefined
+      : invokedByTurnOf(records)
+  const skills = skillsPayloadOf(skillsView, firstDescriptionsOf(skillsListed, turnRecords), countTokens, turnRecords)
+
   const payload: AsadSessionPayload = {
     id: sessionId,
     session_id: sessionId,
@@ -832,6 +879,7 @@ export function buildSessionRow(
       ...(toolCalls !== undefined ? { tool_calls: toolCalls } : {}),
       ...(toolsInvoked !== undefined ? { tools_invoked: toolsInvoked } : {}),
       ...(toolsOffered !== undefined ? { tools_offered: toolsOffered } : {}),
+      ...skillsSummaryOf(skillsView),
     },
     // The analysis output, verbatim. `toolDefinitionsByServer` is a Map, which
     // JSON.stringify would silently render as {} — convert it explicitly so a
@@ -861,6 +909,8 @@ export function buildSessionRow(
       cache_read: record.tokens.cacheRead,
       cache_creation: record.tokens.cacheCreation,
       reasoning: record.tokens.reasoning ?? null,
+      ...skillsListedOnTurn(skillsListed?.get(record.spanId)),
+      ...skillsInvokedOnTurn(skillsInvoked, record.spanId),
     })),
     // ASAD renders the session root's children; the synthetic root is an
     // analysis detail and is not part of the wire contract. The attribute maps
@@ -892,7 +942,10 @@ export function buildSessionRow(
     })),
     subagents: subagentSessions(timeline),
     auxiliary: auxiliarySpend(timeline),
-    measurability: measurability ?? {},
+    skills,
+    // A declared skills verdict is merged here with its reason, so the
+    // measurability map states why the skills view is absent.
+    measurability: { ...(measurability ?? {}), ...('availability' in skills ? { skills } : {}) },
   }
 
   const parentSessionAttr =
@@ -915,6 +968,101 @@ export function buildSessionRow(
     summary: payload.summary,
     payload,
   }
+}
+
+const byCodeUnit = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0)
+
+/**
+ * The first listing text observed for each skill, walking the turns in order.
+ * A later, different description never replaces it; a name no listing described
+ * is absent. Empty when the listing side is not measured.
+ */
+function firstDescriptionsOf(
+  listed: Map<string, Map<string, string | undefined>> | undefined,
+  turnRecords: readonly CanonicalRecord[],
+): Map<string, string> {
+  const first = new Map<string, string>()
+  if (listed === undefined) return first
+  for (const turn of turnRecords) {
+    for (const [name, description] of listed.get(turn.spanId) ?? []) {
+      if (description !== undefined && !first.has(name)) first.set(name, description)
+    }
+  }
+  return first
+}
+
+/** The distinct names each turn invoked, keyed by turn spanId. */
+function invokedByTurnOf(records: readonly CanonicalRecord[]): Map<string, string[]> | undefined {
+  const result = extractInvokedSkills(records)
+  if ('availability' in result) return undefined
+  const byTurn = new Map<string, Set<string>>()
+  for (const invocation of result.invocations) {
+    const names = byTurn.get(invocation.turnSpanId) ?? new Set<string>()
+    names.add(invocation.name)
+    byTurn.set(invocation.turnSpanId, names)
+  }
+  return new Map([...byTurn].map(([spanId, names]) => [spanId, [...names].sort(byCodeUnit)]))
+}
+
+/** A turn's `skills_invoked`: names it invoked, `[]` when measured and none. Absent when not measured. */
+function skillsInvokedOnTurn(invoked: Map<string, string[]> | undefined, spanId: string): { skills_invoked?: string[] } {
+  if (invoked === undefined) return {}
+  return { skills_invoked: invoked.get(spanId) ?? [] }
+}
+
+/** The engine's skills view on the payload: rows by name, turns as payload indices. */
+function skillsPayloadOf(
+  view: SkillsView,
+  firstDescriptions: ReadonlyMap<string, string>,
+  countTokens: (text: string) => number,
+  turnRecords: readonly CanonicalRecord[],
+): AsadSkillsPayload {
+  if ('availability' in view) return view
+  const indexBySpan = new Map<string, number>()
+  turnRecords.forEach((record, index) => {
+    if (!indexBySpan.has(record.spanId)) indexBySpan.set(record.spanId, index)
+  })
+  const rows: AsadSkillRow[] = [...view.rows]
+    .sort((a, b) => byCodeUnit(a.name, b.name))
+    .map((row) => {
+      const description = firstDescriptions.get(row.name)
+      return {
+        name: row.name,
+        listed: row.listed,
+        invocations: row.invocations ?? view.invocationsAvailability ?? notMeasurable('Skill invocations are not measurable.'),
+        turns_listed: row.turnSpanIds.flatMap((spanId) => indexBySpan.get(spanId) ?? []),
+        ...(description !== undefined ? { description, derived_tokens: countTokens(description) } : {}),
+      }
+    })
+  return {
+    measurable: true,
+    ...(view.reportedSkillTokens !== undefined ? { reported_skill_tokens: view.reportedSkillTokens } : {}),
+    listed_count: rows.filter((row) => row.listed).length,
+    // Counted only when both sides are measured: an unmeasured invocation side
+    // makes "listed and never invoked" unknowable, so it is not reported as zero.
+    ...(view.invocationsAvailability === undefined
+      ? { listed_uninvoked_count: rows.filter((row) => row.listed && row.invocations === 0).length }
+      : {}),
+    rows,
+  }
+}
+
+/** The summary's skill names: listed names always, invoked names only when measured. */
+function skillsSummaryOf(view: SkillsView): { skills_listed?: string[]; skills_invoked?: string[] } {
+  if ('availability' in view) return {}
+  const skillsListed = view.rows.filter((row) => row.listed).map((row) => row.name).sort(byCodeUnit)
+  if (view.invocationsAvailability !== undefined) return { skills_listed: skillsListed }
+  const skillsInvoked = view.rows
+    .filter((row) => row.invocations !== undefined && row.invocations > 0)
+    .map((row) => row.name)
+    .sort(byCodeUnit)
+  return { skills_listed: skillsListed, skills_invoked: skillsInvoked }
+}
+
+/** A turn's `skills_listed`, present only when that turn's listing is measured. */
+function skillsListedOnTurn(listed: Map<string, string | undefined> | undefined): { skills_listed?: string[] } {
+  if (listed === undefined) return {}
+  return { skills_listed: [...listed.keys()].sort(byCodeUnit) }
 }
 
 /**

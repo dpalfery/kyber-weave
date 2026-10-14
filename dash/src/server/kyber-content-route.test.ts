@@ -4,6 +4,7 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 import { DatabaseSync } from 'node:sqlite'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { vi } from 'vitest'
 
 import { runWebDashboard } from '../cli/web.js'
 import {
@@ -1165,5 +1166,358 @@ describe('Backend Contract Tests: GET /api/kyber/session/:id/content', () => {
         expect(body.parentSpanId).toBe(CLAUDE_BARE_INTERACTION_SPAN)
       })
     })
+  })
+})
+
+// T2 (RED): the turn content route gains an additive `skills` entry. It is the
+// skills the turn had access to (`listed`, with each description as `text`
+// where the listing carried one) and the skills it invoked (`invoked`). Either
+// side may instead be declared not measurable; the whole entry is declared when
+// the harness has no skill source. Existing blocks are unchanged.
+describe('GET /api/kyber/session/:id/turn/:index/content: skills entry (T2)', () => {
+  let server: Server
+  let base: string
+  let store: CanonStore
+
+  const LISTED_KEY = 'kyber.skills.listed'
+  const INVOKED_KEY = 'kyber.skills.invoked'
+  const AZURE = 'use the Azure CLI to interact with Azure resources.'
+  const TURN_TIME = '2026-10-14T10:00:00.000Z'
+  const LISTING = {
+    isInitial: true,
+    skills: [{ name: 'azure-cli', description: AZURE }, { name: 'app-docs-standard' }],
+  }
+
+  type NotMeasurableShape = { availability: 'not_measurable'; reason: string }
+  type SkillsEntry =
+    | {
+        listed: Array<{ name: string; text?: string }> | NotMeasurableShape
+        invoked: string[] | NotMeasurableShape
+      }
+    | NotMeasurableShape
+  type TurnContentWithSkills = TurnContentResult & { skills?: SkillsEntry }
+
+  function turnRecord(
+    spanId: string,
+    sessionId: string,
+    over: Partial<CanonicalRecord> = {},
+  ): CanonicalRecord {
+    return {
+      spanId,
+      traceId: `trace-${sessionId}`,
+      parentSpanId: null,
+      source: 'claude-code',
+      harness: 'claude-code',
+      sessionId,
+      name: 'llm_request',
+      op: 'llm.invoke',
+      kind: 'client',
+      timestamp: TURN_TIME,
+      durationMs: 100,
+      status: 'ok',
+      tokens: { freshInput: 1000, cacheRead: 0, cacheCreation: 0, output: 100, reportedInput: 1000, reportedOutput: 100 },
+      content: {},
+      parts: [],
+      cost: { basis: 'unknown', status: 'no_rate' },
+      ...over,
+    }
+  }
+
+  beforeAll(async () => {
+    store = new CanonStore(':memory:')
+
+    // Claude Code: turn 0 lists two skills and invokes one; turn 1 lists them
+    // again and invokes none, so `invoked` is a measured empty list there.
+    store.upsertMany([
+      turnRecord('span-skills-claude-1', 'sess-skills-claude', {
+        timestamp: '2026-10-14T10:00:00.000Z',
+        raw: { [LISTED_KEY]: LISTING, [INVOKED_KEY]: ['azure-cli'] },
+      }),
+      turnRecord('span-skills-claude-2', 'sess-skills-claude', {
+        timestamp: '2026-10-14T10:01:00.000Z',
+        raw: { [LISTED_KEY]: LISTING },
+      }),
+    ])
+    store.upsertSession({
+      sessionId: 'sess-skills-claude',
+      harness: 'claude-code',
+      label: 'Claude skills turn content',
+      payload: {
+        id: 'sess-skills-claude',
+        harness: 'claude-code',
+        // As the engine stores it: `rows[].description` is the first listing text
+        // seen for the skill, and `turns[i].skills_invoked` is measured per turn.
+        skills: {
+          measurable: true,
+          listed_count: 2,
+          listed_uninvoked_count: 1,
+          rows: [
+            { name: 'app-docs-standard', listed: true, invocations: 0, turns_listed: [0, 1] },
+            { name: 'azure-cli', listed: true, invocations: 1, turns_listed: [0, 1], description: AZURE },
+          ],
+        },
+        turns: [
+          {
+            index: 0,
+            spanId: 'span-skills-claude-1',
+            skills_listed: ['app-docs-standard', 'azure-cli'],
+            skills_invoked: ['azure-cli'],
+          },
+          {
+            index: 1,
+            spanId: 'span-skills-claude-2',
+            skills_listed: ['app-docs-standard', 'azure-cli'],
+            skills_invoked: [],
+          },
+        ],
+      },
+    })
+
+    // Antigravity: a listing with names only, and no invocation source.
+    store.upsertMany([
+      turnRecord('span-skills-agy-1', 'sess-skills-agy', {
+        harness: 'antigravity',
+        source: 'antigravity',
+        raw: { 'gen_ai.skills': 'Active Skills: agy-customizations, antigravity-guide' },
+      }),
+    ])
+    store.upsertSession({
+      sessionId: 'sess-skills-agy',
+      harness: 'antigravity',
+      label: 'Antigravity skills turn content',
+      payload: {
+        id: 'sess-skills-agy',
+        harness: 'antigravity',
+        skills: {
+          measurable: true,
+          listed_count: 2,
+          rows: [
+            {
+              name: 'agy-customizations',
+              listed: true,
+              invocations: { availability: 'not_measurable', reason: 'No invocation source.' },
+              turns_listed: [0],
+            },
+            {
+              name: 'antigravity-guide',
+              listed: true,
+              invocations: { availability: 'not_measurable', reason: 'No invocation source.' },
+              turns_listed: [0],
+            },
+          ],
+        },
+        // No `skills_invoked` key: invocations are not measured for this harness.
+        turns: [
+          {
+            index: 0,
+            spanId: 'span-skills-agy-1',
+            skills_listed: ['agy-customizations', 'antigravity-guide'],
+          },
+        ],
+      },
+    })
+
+    // Copilot: the listing's description comes from the turn's own system prompt.
+    store.upsertMany([
+      turnRecord('span-skills-copilot-1', 'sess-skills-copilot', {
+        harness: 'github-copilot',
+        source: 'github-copilot',
+        parts: [
+          {
+            part: 'system_prompt',
+            text: '<skill><name>architect</name><description>Design systems.</description></skill>',
+          },
+        ],
+        raw: { 'github.copilot.context.skills': '["architect"]' },
+      }),
+    ])
+    store.upsertSession({
+      sessionId: 'sess-skills-copilot',
+      harness: 'github-copilot',
+      label: 'Copilot skills turn content',
+      payload: {
+        id: 'sess-skills-copilot',
+        harness: 'github-copilot',
+        skills: {
+          measurable: true,
+          listed_count: 1,
+          rows: [
+            {
+              name: 'architect',
+              listed: true,
+              invocations: { availability: 'not_measurable', reason: 'No invocation source.' },
+              turns_listed: [0],
+              description: 'Design systems.',
+            },
+          ],
+        },
+        turns: [{ index: 0, spanId: 'span-skills-copilot-1', skills_listed: ['architect'] }],
+      },
+    })
+
+    // A harness with no skill source at all.
+    store.upsertMany([turnRecord('span-skills-pi-1', 'sess-skills-pi', { harness: 'pi', source: 'pi' })])
+    store.upsertSession({
+      sessionId: 'sess-skills-pi',
+      harness: 'pi',
+      label: 'Pi turn content',
+      payload: {
+        id: 'sess-skills-pi',
+        harness: 'pi',
+        skills: {
+          availability: 'not_measurable',
+          reason: 'No skill listing source is recorded for harness pi.',
+        },
+        turns: [{ index: 0, spanId: 'span-skills-pi-1' }],
+      },
+    })
+
+    // Projected before skills existed: no `skills` key on the payload at all.
+    store.upsertMany([
+      turnRecord('span-skills-unprojected-1', 'sess-skills-unprojected', {
+        raw: { [LISTED_KEY]: LISTING },
+      }),
+    ])
+    store.upsertSession({
+      sessionId: 'sess-skills-unprojected',
+      harness: 'claude-code',
+      label: 'Unprojected session',
+      payload: {
+        id: 'sess-skills-unprojected',
+        harness: 'claude-code',
+        turns: [{ index: 0, spanId: 'span-skills-unprojected-1' }],
+      },
+    })
+
+    // Listing projected, but the turn carries no `skills_invoked` key.
+    store.upsertMany([
+      turnRecord('span-skills-partial-1', 'sess-skills-partial', {
+        raw: { [LISTED_KEY]: LISTING },
+      }),
+    ])
+    store.upsertSession({
+      sessionId: 'sess-skills-partial',
+      harness: 'claude-code',
+      label: 'Partly projected session',
+      payload: {
+        id: 'sess-skills-partial',
+        harness: 'claude-code',
+        skills: {
+          measurable: true,
+          listed_count: 1,
+          rows: [{ name: 'azure-cli', listed: true, invocations: 0, turns_listed: [0], description: AZURE }],
+        },
+        turns: [{ index: 0, spanId: 'span-skills-partial-1', skills_listed: ['azure-cli'] }],
+      },
+    })
+
+    const canonDb = new DatabaseSync(':memory:')
+    const bridge = new KyberBridge({
+      store,
+      canonDb,
+      ratesPath: join(tmpdir(), 'nonexistent-rates.json'),
+    })
+    server = await runWebDashboard({ port: 0, open: false, kyberBridge: bridge, writeStdout: () => {} })
+    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
+  })
+
+  afterAll(async () => {
+    await new Promise<void>((resolve) => server.close(() => resolve()))
+    store.close()
+  })
+
+  async function turnContent(sessionId: string, index: number): Promise<TurnContentWithSkills> {
+    const res = await fetch(`${base}/api/kyber/session/${sessionId}/turn/${index}/content`)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as TurnContentWithSkills
+    expect(body, 'turn content must carry a skills entry').toHaveProperty('skills')
+    return body
+  }
+
+  it('lists the skills a Claude turn had access to, with the description as text where the listing gave one', async () => {
+    const body = await turnContent('sess-skills-claude', 0)
+    const skills = body.skills as Exclude<SkillsEntry, NotMeasurableShape>
+
+    expect(skills).not.toHaveProperty('availability')
+    const listed = skills.listed as Array<{ name: string; text?: string }>
+    expect(listed.map((skill) => skill.name).sort()).toEqual(['app-docs-standard', 'azure-cli'])
+    expect(listed.find((skill) => skill.name === 'azure-cli')?.text).toBe(AZURE)
+    // The listing carried no description for this skill: text is absent, not empty.
+    expect(listed.find((skill) => skill.name === 'app-docs-standard')).not.toHaveProperty('text')
+  })
+
+  it('names the skills a turn invoked, and reports an empty list when it invoked none', async () => {
+    const invoking = (await turnContent('sess-skills-claude', 0)).skills as Exclude<SkillsEntry, NotMeasurableShape>
+    const idle = (await turnContent('sess-skills-claude', 1)).skills as Exclude<SkillsEntry, NotMeasurableShape>
+
+    expect(invoking.invoked).toEqual(['azure-cli'])
+    expect(idle.invoked).toEqual([])
+  })
+
+  it('keeps the skills entry out of the existing content blocks', async () => {
+    const body = await turnContent('sess-skills-claude', 0)
+
+    expect(body.blocks.map((block) => block.key)).not.toContain('skills')
+  })
+
+  it('declares invocations not measurable when the harness has no invocation source', async () => {
+    const body = await turnContent('sess-skills-agy', 0)
+    const skills = body.skills as Exclude<SkillsEntry, NotMeasurableShape>
+
+    expect((skills.listed as Array<{ name: string }>).map((skill) => skill.name).sort()).toEqual([
+      'agy-customizations',
+      'antigravity-guide',
+    ])
+    expect(skills.invoked).toStrictEqual({ availability: 'not_measurable', reason: expect.any(String) })
+  })
+
+  it('takes a Copilot listing description from the turn system prompt', async () => {
+    const body = await turnContent('sess-skills-copilot', 0)
+    const skills = body.skills as Exclude<SkillsEntry, NotMeasurableShape>
+
+    expect(skills.listed).toEqual([{ name: 'architect', text: 'Design systems.' }])
+  })
+
+  it('declares the whole skills entry not measurable, with a reason, for a harness with no skill source', async () => {
+    const body = await turnContent('sess-skills-pi', 0)
+
+    expect(body.skills).toStrictEqual({ availability: 'not_measurable', reason: expect.any(String) })
+  })
+
+  it('declares the whole skills entry not measurable, with the projection reason, when the payload has no skills key', async () => {
+    const body = await turnContent('sess-skills-unprojected', 0)
+
+    expect(body.skills).toStrictEqual({
+      availability: 'not_measurable',
+      reason: 'session not yet projected with skills',
+    })
+  })
+
+  it('serves the listed skills and declares invocations not measurable when the turn has no skills_invoked key', async () => {
+    const body = await turnContent('sess-skills-partial', 0)
+    const skills = body.skills as Exclude<SkillsEntry, NotMeasurableShape>
+
+    expect(skills.listed).toEqual([{ name: 'azure-cli', text: AZURE }])
+    expect(skills.invoked).toStrictEqual({ availability: 'not_measurable', reason: expect.any(String) })
+  })
+
+  it('reads the skills entry from the loaded payload without walking the session records', async () => {
+    const recordsForSession = vi.spyOn(store, 'recordsForSession')
+    const get = vi.spyOn(store, 'get')
+    try {
+      const body = await turnContent('sess-skills-claude', 0)
+      const skills = body.skills as Exclude<SkillsEntry, NotMeasurableShape>
+
+      expect(skills.invoked).toEqual(['azure-cli'])
+      // The full-session walk is what the payload seam replaces.
+      expect(recordsForSession).not.toHaveBeenCalled()
+      // At most the target span is fetched by id, never one get per row.
+      const fetched = get.mock.calls.map((call) => call[0])
+      expect(fetched.length).toBeLessThanOrEqual(1)
+      expect(fetched.every((spanId) => spanId === 'span-skills-claude-1')).toBe(true)
+    } finally {
+      recordsForSession.mockRestore()
+      get.mockRestore()
+    }
   })
 })
