@@ -2,7 +2,7 @@
 id: plans/2026-10-13-kyberdash-skills-view
 title: "KyberDash skills view: the skills a turn or session had access to"
 doc-type: plan
-status: draft
+status: current
 component: KyberDash
 owner: dpalfery
 last-reviewed: 2026-10-13
@@ -11,14 +11,17 @@ development-mode: test-first
 
 # KyberDash skills view: the skills a turn or session had access to
 
-**Status: Draft 2026-10-13. Every decision is answered.** The user answered Q1–Q10 on 2026-10-13 through the conductor relay, and approved D1–D3 in the same relay. D4 is the default development mode. D5 is the fixtures path, which the architect chose because the user's Q7 answer asked for it.
+**Status: Ready 2026-10-13.** The user chose "approve" (approve and execute) on 2026-10-13 through the conductor relay, with development mode `test-first`. Before that approval:
 
-The plan still waits on two things:
+- The user answered Q1–Q10 on 2026-10-13 and approved D1–D3 in the same relay.
+- D4 is the default development mode.
+- D5 is the fixtures path, which the architect chose because the user's Q7 answer asked for it.
 
-- **Documentation checks.** The conductor runs `docs validate` and `docs drift`, because the architect harness has no shell.
-- **Approve and execute.** The user's approve-and-execute gate.
+The approval also covers D4, D5 and the Test contract in [section 7](#7-test-contract-test-first). No decision is open.
 
-Execution cannot start until the owner capture gate G0 is met ([section 8](#8-tasks)).
+The conductor reruns `docs validate` and `docs drift`, because the architect harness has no shell.
+
+T3 and T5 can start now. T1, and every task after it, waits for the owner capture gate G0 ([section 8](#8-tasks)).
 
 **Development mode:** `test-first`. The user did not opt out, so the default is persisted (D4). Every implementation task has a Test-contract row in [section 7](#7-test-contract-test-first).
 
@@ -120,8 +123,9 @@ Facts were read from the tree at `plan/dash-skills-view` HEAD `1f1769f`. Discove
 | D1 | Where is the logic, and how is it served? | All extraction, joining and token attribution live in a new engine module, `dash/src/canon/skills.ts`, called from `buildSessionRow`. Results ride in the existing session payload (`skills`, `summary.skills_listed/skills_invoked`, `turns[].skills_listed`, `measurability.skills`). No new route is added. The web dashboard renders only. | Required by ADR 0033 and the display-layer rule. It mirrors how `tools` and `schema` ship. | APPROVED — user 2026-10-13 (conductor relay) |
 | D2 | Should skills keep sharing the `instruction_context` bucket? | `CANONICAL_CONTENT_KEYS` is unchanged. Skill identity is read from `raw` attributes and from part text by the skills module. Composition charts are not re-bucketed. | Splitting the bucket would change ADR 0011 payload buckets and every chart. | APPROVED — user 2026-10-13 (conductor relay) |
 | D3 | How are never-invoked skills worded? | Evidence-of-use labels only: "listed, no invocation observed" and "invoked N times". No "waste", "unused cost" or deletion language. Recommendations prefer progressive disclosure. | ADR 0013 D8/D15/D16 and [relocation over deletion](../rules/relocation-over-deletion.md). The `findings.ts:249` guard rejects deletion phrasing. | APPROVED — user 2026-10-13 (conductor relay) |
-| D4 | Development mode | `test-first` | The user did not opt out. | ANSWERED — default per architect contract |
-| D5 | Where do the user's captures go, and what is each harness's capture? | The root is **`dash/src/canon/fixtures/skills/`**, with one subdirectory per harness. The user drops sanitized originals as `capture.*` in each subdirectory, and the T1 worker derives trimmed test fixtures beside them. The contents per harness are in [section 8, gate G0](#8-tasks). | It sits beside the existing `dash/src/canon/fixtures/pi-collector/`, under the dash test tree, so `npm --prefix dash run test` picks it up. One directory per harness keeps the captures for each harness separate and reviewable. | ANSWERED — chosen by the architect at the user's request in Q7, 2026-10-13 |
+| D4 | Development mode | `test-first` | The user did not opt out. | ANSWERED — default per architect contract; confirmed by the user's approval 2026-10-13 ("approve", test-first) |
+| D5 | Where do the user's captures go, and what is each harness's capture? | The root is **`dash/src/canon/fixtures/skills/`**, with one subdirectory per harness. The user drops sanitized originals as `capture.*` in each subdirectory, and the T1 worker derives trimmed test fixtures beside them. The contents per harness are in [section 8, gate G0](#8-tasks). | It sits beside the existing `dash/src/canon/fixtures/pi-collector/`, under the dash test tree, so `npm --prefix dash run test` picks it up. One directory per harness keeps the captures for each harness separate and reviewable. | ANSWERED — chosen by the architect at the user's request in Q7, 2026-10-13; approved by the user's approval 2026-10-13 |
+| AP1 | Approve and execute? | **Approved.** The plan is Ready for execution in `test-first` mode. | The approval covers Q1–Q10, D1–D5, the section 7 Test contract and the section 8 task graph. Execution of T1 and every task after it is still gated on the owner captures (G0). | APPROVED — user "approve" 2026-10-13 (conductor relay) |
 
 Open decisions: **none**.
 
