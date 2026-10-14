@@ -271,15 +271,15 @@ describe('HarnessSourceRegistry', () => {
     })).toBe('1')
   })
 
-  it('assigns claude contract version 6 by named harness or claude provider, not a claude- prefix', () => {
+  it('assigns claude contract version 7 by named harness or claude provider, not a claude- prefix', () => {
     expect(parserContractVersionFor({
       providerName: 'claude',
       harnessId: 'claude-cli',
-    })).toBe('6')
+    })).toBe('7')
     expect(parserContractVersionFor({
       providerName: 'other',
       harnessId: 'claude-desktop',
-    })).toBe('6')
+    })).toBe('7')
     expect(parserContractVersionFor({
       providerName: 'claude-experimental',
       harnessId: 'claude-something-else',

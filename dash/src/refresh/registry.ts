@@ -26,7 +26,10 @@ const DEFAULT_PARSER_CONTRACT_VERSION = '1'
 // checkpoints must be re-read, or file rows stay without the join key.
 // v6: invoked skill names onto turn records (`kyber.skills.invoked`). Stale
 // checkpoints are re-read so the skill names upsert over the stale rows.
-const CLAUDE_PARSER_CONTRACT_VERSION = '6'
+// v7: the session's skill listing (`skill_listing` attachment) onto the following
+// call and turn record (`kyber.skills.listed`). Stale checkpoints are re-read so
+// the listing upserts over the stale rows.
+const CLAUDE_PARSER_CONTRACT_VERSION = '7'
 // v2: issue #189 / PR #264 — Codex camelCase token usage and Kilo flat
 // tokens_input/tokens_output fallbacks. Old zero-record checkpoints under v1
 // must not be reused or previously dropped sessions stay missing after upgrade.

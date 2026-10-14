@@ -28,9 +28,9 @@ describe('loadClaudeCalls stamps transcript requestId (P2.0)', () => {
 })
 
 describe('Claude parser contract version 5 re-reads stale checkpoints (P2.0)', () => {
-  it('declares parser contract version 6 for Claude harnesses', () => {
-    expect(parserContractVersionFor({ providerName: 'claude', harnessId: 'claude-code' })).toBe('6')
-    expect(parserContractVersionFor({ providerName: 'other', harnessId: 'claude-desktop' })).toBe('6')
+  it('declares parser contract version 7 for Claude harnesses', () => {
+    expect(parserContractVersionFor({ providerName: 'claude', harnessId: 'claude-code' })).toBe('7')
+    expect(parserContractVersionFor({ providerName: 'other', harnessId: 'claude-desktop' })).toBe('7')
   })
 
   it('re-reads a claude-desktop source left on contract 4 after the bump', async () => {
@@ -97,7 +97,7 @@ describe('Claude parser contract version 5 re-reads stale checkpoints (P2.0)', (
       })
 
       const updated = store.getSourceCheckpoint('claude-desktop', sourceKey)
-      expect(updated?.parserContractVersion).toBe('6')
+      expect(updated?.parserContractVersion).toBe('7')
       expect(updated?.lastStatus).toBe('ok')
       expect(report.rows.find((row) => row.harnessId === 'claude-desktop')?.changed).toBeGreaterThan(0)
     } finally {

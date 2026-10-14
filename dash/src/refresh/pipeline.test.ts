@@ -290,11 +290,11 @@ describe('refresh pipeline: parser contract version & checkpoint invalidation', 
       store.close()
     }
   })
-  it("scopes parserContractVersion bumps to Claude (6), Codex/Kilo/Pi/Copilot (3/3/3/2), Cursor (2), and leaves others at 1", () => {
+  it("scopes parserContractVersion bumps to Claude (7), Codex/Kilo/Pi/Copilot (3/3/3/2), Cursor (2), and leaves others at 1", () => {
     const claudeCli = descriptorFor("claude-cli")
     const claudeDesktop = descriptorFor("claude-desktop")
-    expect(claudeCli?.parserContractVersion).toBe("6")
-    expect(claudeDesktop?.parserContractVersion).toBe("6")
+    expect(claudeCli?.parserContractVersion).toBe("7")
+    expect(claudeDesktop?.parserContractVersion).toBe("7")
 
     const codex = descriptorFor("codex-cli")
     const kilo = descriptorFor("kilo-shared-runtime")
@@ -411,7 +411,7 @@ describe('refresh pipeline: parser contract version & checkpoint invalidation', 
       })
 
       const updatedCheckpoint = store.getSourceCheckpoint('claude-desktop', sourceKey)
-      expect(updatedCheckpoint?.parserContractVersion).toBe('6')
+      expect(updatedCheckpoint?.parserContractVersion).toBe('7')
       expect(updatedCheckpoint?.lastStatus).toBe('ok')
 
       const claudeRow = report.rows.find((r) => r.harnessId === 'claude-desktop')
@@ -521,7 +521,7 @@ describe('refresh pipeline: parser contract version & checkpoint invalidation', 
 
       const descriptor = descriptorFor('claude-desktop')
       expect(descriptor).toBeDefined()
-      expect(descriptor!.parserContractVersion).toBe('6')
+      expect(descriptor!.parserContractVersion).toBe('7')
 
       const provider = fixtureProvider('claude', [sessionSource], (s) => loadClaudeCalls(s.path))
       // Version-repair must widen before the concurrent first pass so the
@@ -544,7 +544,7 @@ describe('refresh pipeline: parser contract version & checkpoint invalidation', 
       )
 
       const updatedCheckpoint = store.getSourceCheckpoint('claude-desktop', sourceKey)
-      expect(updatedCheckpoint?.parserContractVersion).toBe('6')
+      expect(updatedCheckpoint?.parserContractVersion).toBe('7')
       expect(updatedCheckpoint?.lastStatus).toBe('ok')
       // Checkpoint keeps the claimed prior floor; the parse slice is clamped to
       // the content-retention window (#276).

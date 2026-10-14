@@ -149,3 +149,100 @@ describe('parserContractVersion bump for skill-filling harness sources', () => {
     expect(skillFilling).toEqual(Object.keys(RECORDED_CONTRACT_VERSIONS).sort())
   })
 })
+
+// ---------------------------------------------------------------------------
+// The skill listing (kyber.skills.listed), T10
+// ---------------------------------------------------------------------------
+//
+//   * Claude Code's `skill_listing` attachment lands on the call that follows
+//     it as `ParsedProviderCall.skillsListed` = { isInitial, skills:[{name,
+//     description?}] }. The synthesizer carries that object onto the turn's
+//     raw map under the fixed key `kyber.skills.listed`, unchanged.
+//   * It is independent of the invoked-skills key: a listing never adds to
+//     `kyber.skills.invoked`, and an invocation never adds to the listing.
+//   * A call with no listing carries no key at all: absent, not an empty object.
+
+const LISTED_KEY = 'kyber.skills.listed'
+
+describe('skill listing on the turn record (kyber.skills.listed)', () => {
+  it('carries the listing onto raw under the fixed key, isInitial and entries intact', () => {
+    const raw = rawOf({
+      skillsListed: {
+        isInitial: true,
+        skills: [
+          { name: 'app-docs-standard', description: 'Apply the repository documentation standard.' },
+          { name: 'azure-cli', description: 'use the Azure CLI to interact with Azure resources.' },
+        ],
+      },
+    })
+
+    expect(raw[LISTED_KEY]).toEqual({
+      isInitial: true,
+      skills: [
+        { name: 'app-docs-standard', description: 'Apply the repository documentation standard.' },
+        { name: 'azure-cli', description: 'use the Azure CLI to interact with Azure resources.' },
+      ],
+    })
+  })
+
+  it('carries isInitial false verbatim for a later, non-initial listing', () => {
+    const raw = rawOf({
+      skillsListed: {
+        isInitial: false,
+        skills: [{ name: 'release-notes', description: 'Draft release notes.' }],
+      },
+    })
+
+    expect(raw[LISTED_KEY]).toEqual({
+      isInitial: false,
+      skills: [{ name: 'release-notes', description: 'Draft release notes.' }],
+    })
+  })
+
+  it('keeps an entry with no description as a name-only entry', () => {
+    const raw = rawOf({
+      skillsListed: { isInitial: true, skills: [{ name: 'azure-cli' }] },
+    })
+
+    expect(raw[LISTED_KEY]).toEqual({ isInitial: true, skills: [{ name: 'azure-cli' }] })
+  })
+
+  it('omits the key entirely when the parser reported no skillsListed', () => {
+    const raw = rawOf({ skillsListed: undefined })
+
+    expect(Object.keys(raw)).not.toContain(LISTED_KEY)
+  })
+
+  it('leaves the invoked-skills key untouched by a listing, and the listing untouched by invocations', () => {
+    const raw = rawOf({
+      skills: ['docs'],
+      skillsListed: { isInitial: true, skills: [{ name: 'docs', description: 'Write docs.' }] },
+    })
+
+    expect(raw[SKILLS_KEY]).toEqual(['docs'])
+    expect(raw[LISTED_KEY]).toEqual({ isInitial: true, skills: [{ name: 'docs', description: 'Write docs.' }] })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// parserContractVersion bump for the skill listing (Claude harnesses)
+// ---------------------------------------------------------------------------
+
+/**
+ * The Claude parser contract version before the skill listing lands. The
+ * listing changes what the Claude parser emits, so every Claude harness source
+ * must be re-read: its registry version must be strictly greater than this.
+ */
+const CLAUDE_CONTRACT_VERSION_BEFORE_LISTING = 6
+
+describe('Claude parserContractVersion bump for the skill listing', () => {
+  it.each(['claude-cli', 'claude-desktop', 'claude-unclassified'])(
+    '%s parserContractVersion is greater than the recorded value 6',
+    (harnessId) => {
+      const descriptor = HARNESS_DESCRIPTORS.find((d) => d.harnessId === harnessId)
+      expect(descriptor, `no registry descriptor for ${harnessId}`).toBeDefined()
+
+      expect(Number(descriptor!.parserContractVersion)).toBeGreaterThan(CLAUDE_CONTRACT_VERSION_BEFORE_LISTING)
+    },
+  )
+})
