@@ -2,7 +2,7 @@
 id: plans/2026-10-13-kyberdash-skills-view
 title: "KyberDash skills view: the skills a turn or session had access to"
 doc-type: plan
-status: current
+status: complete
 component: KyberDash
 owner: dpalfery
 last-reviewed: 2026-10-14
@@ -11,7 +11,7 @@ development-mode: test-first
 
 # KyberDash skills view: the skills a turn or session had access to
 
-**Status: Ready 2026-10-13.** The user chose "approve" (approve and execute) on 2026-10-13 through the conductor relay, with development mode `test-first`. Before that approval:
+**Status: Complete 2026-10-14.** The user chose "approve" (approve and execute) on 2026-10-13 through the conductor relay, with development mode `test-first`. All tasks are done and the whole-change review returned APPROVE. [Section 12](#12-closeout) records the verification, the decision harvest and the follow-ups. Archived per KW-DOC-LIFECYCLE-003. Before that approval:
 
 - The user answered Q1–Q10 on 2026-10-13 and approved D1–D3 in the same relay.
 - D4 is the default development mode.
@@ -21,7 +21,7 @@ The approval also covers D4, D5 and the Test contract in [section 7](#7-test-con
 
 The conductor reruns `docs validate` and `docs drift`, because the architect harness has no shell.
 
-**Progress.** T3 and T5 are done and passed task review (`fd54843`).
+**Progress.** Complete. T3 and T5 passed task review in `fd54843`. The other tasks and their commits are listed in [section 8](#8-tasks) and [section 12](#12-closeout).
 
 **Amendment AP2 (2026-10-13).** The user approved folding the T5 reviewer's findings F1–F4 into the remaining tasks, so the plan stays Ready:
 
@@ -79,7 +79,7 @@ Facts were read from the tree at `plan/dash-skills-view` HEAD `1f1769f`. Discove
    - **Copilot Chat and Antigravity OTLP.** `gen_ai.skills` text and the reported `gen_ai.usage.skill_tokens` map to an `instruction_context` part (`copilot.ts:167, 187, 428–437`). Rules (`gen_ai.rules`) go to the same bucket (417–426). The Antigravity fixture also carries `github.copilot.tool.parameters.skill_name: "Active Skills: a, b, c, d"` (`dash/src/canon/adapters/__fixtures__/antigravity-span.json:29`). That key is unread and survives only on `raw`.
    - **Pi collector.** `pi.skills` is structured JSON of the form `[{"name","path"}]`, mapped to `instruction_context` (`dash/src/canon/adapters/pi.ts:46`; fixture `dash/src/canon/fixtures/pi-collector/collector-request.json:8`).
    - **Claude Code OTLP** (needs the owner opt-in `OTEL_LOG_RAW_API_BODIES=1`). The request body is parsed into `tool_definitions` (this includes the `Skill` tool and its description) and `conversation_history` (`claude-code.ts:49–59`). Any skill listing sits inside that text, and nothing extracts it.
-   - **Claude Code and Claude Desktop file-synth.** No system prompt and no tool definitions are captured ([telemetry inventory](../dash/telemetry-inventory.md#claude-desktop-and-cli-file-synth-parts-issue-216)). Invocations are present: a `Skill` call becomes a `tool.invoke` record with `raw.arguments.skill`.
+   - **Claude Code and Claude Desktop file-synth.** No system prompt and no tool definitions are captured ([telemetry inventory](../../dash/telemetry-inventory.md#claude-desktop-and-cli-file-synth-parts-issue-216)). Invocations are present: a `Skill` call becomes a `tool.invoke` record with `raw.arguments.skill`.
 4. **Copilot CLI (newly in scope).** Two sources exist.
    - **Context rows.** `~/.copilot/data.db` rows are read by `loadCopilotCliCalls` (`dash/src/synth/readers/copilot.ts:1–75`). They carry only `context_system_tokens`, `context_conversation_tokens`, `context_tool_definitions_tokens`, `context_mcp_tools_tokens`, `context_buffer_tokens` and `context_tier`. There is no skill column and no skill text.
    - **Session-state events.** `~/.copilot/session-state/<sid>/events.jsonl` is parsed by `dash/src/providers/copilot.ts`. It extracts invoked skills from `skill` tool requests (`arguments.skill`, lines 1051–1056) into `ParsedProviderCall.skills`.
@@ -87,7 +87,7 @@ Facts were read from the tree at `plan/dash-skills-view` HEAD `1f1769f`. Discove
 5. **OpenCode (newly in scope).** Two sources exist.
    - **OTLP adapter.** `dash/src/canon/adapters/opencode.ts` maps the legacy AI SDK keys `ai.prompt.messages`, `ai.prompt.tools` and `ai.toolCall.result` (55–57, 140–162), and `gen_ai.*` parts, into content buckets. A listing carried in a `skill` tool description would arrive inside `tool_definitions` text, as it does for Claude Code. Nothing extracts it.
    - **File and SQLite path.** `dash/src/providers/session-message.ts:137–141` extracts invoked skill names from `skill` tool parts (`state.input.name`) into `ParsedProviderCall.skills`, and `dash/src/providers/opencode.ts:20` maps `skill` to `Skill`.
-   - **Collection status.** OpenCode OTLP collection is not owner-verified ([telemetry inventory](../dash/telemetry-inventory.md#verified-harness-outcomes)): the endpoint must be set in the environment.
+   - **Collection status.** OpenCode OTLP collection is not owner-verified ([telemetry inventory](../../dash/telemetry-inventory.md#verified-harness-outcomes)): the endpoint must be set in the environment.
    - **Result.** Invoked skills are reachable through Q8, and the listing through OTLP once a capture confirms its shape.
 6. **Invoked-skill names are parsed, then dropped.** Many provider parsers already fill `ParsedProviderCall.skills` (`dash/src/providers/types.ts:61–63`):
    - Claude: the `Skill` tool (`dash/src/ingest/parser.ts:1117`);
@@ -101,19 +101,19 @@ Facts were read from the tree at `plan/dash-skills-view` HEAD `1f1769f`. Discove
    - **Wrong pattern.** "Referenced" skills come from the regexes `<skill name="…">` and `skill: name`, applied to `system_prompt` only (`signals.ts:901–902, 1155`). No adapter writes that shape.
    - **Wrong name.** "Executed" skills come from tool record names (`signals.ts:1156`), so a `Skill` call credits a skill called `Skill`.
    - **Hard-coded unmeasurable.** The harness rollup always reports `skillUtilisation` as unmeasurable (`dash/src/analysis/scorecard.ts:79, 161`).
-8. **Retention.** `purgeExpiredContent` empties `content_json` and `parts_json` after 14 days and never touches `raw` (`dash/src/canon/retention.ts`, [ADR 0018](../adr/0018-kyberdash-content-retention-purge.md)).
+8. **Retention.** `purgeExpiredContent` empties `content_json` and `parts_json` after 14 days and never touches `raw` (`dash/src/canon/retention.ts`, [ADR 0018](../../adr/0018-kyberdash-content-retention-purge.md)).
    - **Survives.** Skill names on `raw` survive the purge: `gen_ai.skills`, `skill_name`, `pi.skills`, `raw.arguments`, and the Q8 attribute.
    - **Lost.** Listings derived from parts (Claude Code and OpenCode OTLP) are lost on the next projection after the purge. That matches the tools view (Q10).
-9. **The display-layer rule** (root `AGENTS.md`, [rule](../rules/kyberdash-display-layer.md), [ADR 0033](../adr/0033-kyberdash-surfaces-are-display-layers.md), and the guard `dash/src/architecture/display-layer.test.ts`). Extraction, the join and token attribution live in `dash/src` and are served over `/api/kyber/*`. `dash/web` renders only.
+9. **The display-layer rule** (root `AGENTS.md`, [rule](../../rules/kyberdash-display-layer.md), [ADR 0033](../../adr/0033-kyberdash-surfaces-are-display-layers.md), and the guard `dash/src/architecture/display-layer.test.ts`). Extraction, the join and token attribution live in `dash/src` and are served over `/api/kyber/*`. `dash/web` renders only.
 10. **Honesty and wording rules.**
-    - [Honest unobservability](../rules/honest-unobservability.md) R1 and R2 forbid zero coercion and empty-list coercion.
-    - [ADR 0013](../adr/0013-telemetry-grounded-finding-contracts-and-waste-ranking.md) D8, D15 and D16, with [relocation over deletion](../rules/relocation-over-deletion.md), require evidence-of-use labels. A skill is never called "waste", never recommended for deletion, and skill signals rank last.
+    - [Honest unobservability](../../rules/honest-unobservability.md) R1 and R2 forbid zero coercion and empty-list coercion.
+    - [ADR 0013](../../adr/0013-telemetry-grounded-finding-contracts-and-waste-ranking.md) D8, D15 and D16, with [relocation over deletion](../../rules/relocation-over-deletion.md), require evidence-of-use labels. A skill is never called "waste", never recommended for deletion, and skill signals rank last.
     - **Consequence for copy.** The tools copy "a never-invoked tool is pure waste" (`SchemaCostRanking.tsx:337`) is not reused.
 11. **Governing documentation.**
-    - [dash/architecture.md](../dash/architecture.md): the Surface Layer, the Web Dashboard and the Backend REST API Contract;
-    - [dash/telemetry-inventory.md](../dash/telemetry-inventory.md);
-    - [dash/runbook.md](../dash/runbook.md);
-    - [ADR 0011](../adr/0011-asad-only-context-view-and-payload-contract.md): the payload comes from `canon.db`, and harnesses report reasons, not zeros.
+    - [dash/architecture.md](../../dash/architecture.md): the Surface Layer, the Web Dashboard and the Backend REST API Contract;
+    - [dash/telemetry-inventory.md](../../dash/telemetry-inventory.md);
+    - [dash/runbook.md](../../dash/runbook.md);
+    - [ADR 0011](../../adr/0011-asad-only-context-view-and-payload-contract.md): the payload comes from `canon.db`, and harnesses report reasons, not zeros.
 12. **Ingestion and schema impact.**
     - **No new ingestion.** Copilot Chat, Antigravity and Pi need none. Claude Code OTLP and OpenCode OTLP need new extraction only.
     - **Ingestion change.** Invoked skills from file-ingested harnesses need `synth.ts` to carry `ParsedProviderCall.skills`, plus parser-contract bumps (Q8).
@@ -147,14 +147,14 @@ Facts were read from the tree at `plan/dash-skills-view` HEAD `1f1769f`. Discove
 | Q3 | What does "had access to" mean? | **(c) Listed and invoked, joined per skill**, like offered vs invoked tools. A side the harness does not expose is `not_measurable` with a reason, never `false` or `0`. | Alternatives: listed only; invoked only. | ANSWERED — user decision 2026-10-13 (conductor relay) |
 | Q4 | Tokens or cost per skill? | **(b) Tokens, no money.** A per-skill token estimate from the skill's listing (description) text, using the o200k counter and labelled *derived*. The harness-reported aggregate `skill_tokens` is shown where exported (Copilot Chat, Antigravity), never divided across skills. **No money figure** and no unused-cost range. | Rejected: names only; a money "unused cost" range like the tools table, which conflicts with ADR 0013 D15/D16 (D3). | ANSWERED — user decision 2026-10-13 (conductor relay) |
 | Q5 | Where does it live in the UI? | **(a) A new section "4 · Skills"** in the session dashboard (`AgentSessionDashboard.tsx`) between Tool & Schema and the execution timeline, which becomes "5 ·". Tiles "Skills Listed" and "Skills Invoked". A skill drawer drill-in that mirrors the tool drawer. | Rejected: a sub-tab in section 3; a cross-session top-nav tab; the inspector drawer only. | ANSWERED — user decision 2026-10-13 (conductor relay) |
-| Q6 | Harnesses with no measurable skill data? | **(a) An honest "Not measurable" card with the reason** for each harness and side (for example, "Claude Code session files do not carry the skill listing; enable `OTEL_LOG_RAW_API_BODIES=1`"). | Required by the [honest-unobservability rule](../rules/honest-unobservability.md) R1 and ADR 0011. | ANSWERED — user decision 2026-10-13 (conductor relay) |
+| Q6 | Harnesses with no measurable skill data? | **(a) An honest "Not measurable" card with the reason** for each harness and side (for example, "Claude Code session files do not carry the skill listing; enable `OTEL_LOG_RAW_API_BODIES=1`"). | Required by the [honest-unobservability rule](../../rules/honest-unobservability.md) R1 and ADR 0011. | ANSWERED — user decision 2026-10-13 (conductor relay) |
 | Q7 | Real captures? | **(a) The user supplies sanitized real captures for each harness**, in the repository folder named by D5. The first implementation task (T1) depends on them existing (gate G0). | Synthetic-only fixtures were rejected because a parser that misses the real format ships a view that is always empty. | ANSWERED — user decision 2026-10-13 (conductor relay) |
 | Q8 | Carry the skill names the parsers already extract into canonical records? | **(a) Yes.** `synth.ts` copies `ParsedProviderCall.skills` onto the turn record's `raw` as `kyber.skills.invoked` (a string array). The affected parser-contract versions are bumped so that units inside the 14-day window re-synthesize. | Rejected: reading `tool.invoke` arguments only, which misses Codex and Pi `SKILL.md` reads. `raw` survives the content purge. | ANSWERED — user decision 2026-10-13 (conductor relay) |
 | Q9 | Rewire the existing skill signal and detector? | **(a) Rewire** `skillUtilisation` and `inactive-skill-reference` to the new listed and invoked sets, and bump `DETECTOR_VERSION`. Keep D16 low confidence and ranked last. | Rejected: leaving them as they are, which lets the scorecard and the view disagree; deferring to a todo. | ANSWERED — user decision 2026-10-13 (conductor relay) |
 | Q10 | Should skill names survive the 14-day content purge? | **(a) Same as tools.** Names are derived from parts and `raw`. Part-only listings (Claude Code and OpenCode OTLP) are lost after the purge. No change to ADR 0018. | Rejected: writing names to `raw` at ingest, which would amend ADR 0018. | ANSWERED — user decision 2026-10-13 (conductor relay) |
 | D1 | Where is the logic, and how is it served? | All extraction, joining and token attribution live in a new engine module, `dash/src/canon/skills.ts`, called from `buildSessionRow`. Results ride in the existing session payload (`skills`, `summary.skills_listed/skills_invoked`, `turns[].skills_listed`, `measurability.skills`). No new route is added. The web dashboard renders only. | Required by ADR 0033 and the display-layer rule. It mirrors how `tools` and `schema` ship. | APPROVED — user 2026-10-13 (conductor relay) |
 | D2 | Should skills keep sharing the `instruction_context` bucket? | `CANONICAL_CONTENT_KEYS` is unchanged. Skill identity is read from `raw` attributes and from part text by the skills module. Composition charts are not re-bucketed. | Splitting the bucket would change ADR 0011 payload buckets and every chart. | APPROVED — user 2026-10-13 (conductor relay) |
-| D3 | How are never-invoked skills worded? | Evidence-of-use labels only: "listed, no invocation observed" and "invoked N times". No "waste", "unused cost" or deletion language. Recommendations prefer progressive disclosure. | ADR 0013 D8/D15/D16 and [relocation over deletion](../rules/relocation-over-deletion.md). The `findings.ts:249` guard rejects deletion phrasing. | APPROVED — user 2026-10-13 (conductor relay) |
+| D3 | How are never-invoked skills worded? | Evidence-of-use labels only: "listed, no invocation observed" and "invoked N times". No "waste", "unused cost" or deletion language. Recommendations prefer progressive disclosure. | ADR 0013 D8/D15/D16 and [relocation over deletion](../../rules/relocation-over-deletion.md). The `findings.ts:249` guard rejects deletion phrasing. | APPROVED — user 2026-10-13 (conductor relay) |
 | D4 | Development mode | `test-first` | The user did not opt out. | ANSWERED — default per architect contract; confirmed by the user's approval 2026-10-13 ("approve", test-first) |
 | D5 | Where do the user's captures go, and what is each harness's capture? | The root is **`dash/src/canon/fixtures/skills/`**, with one subdirectory per harness. The user drops sanitized originals as `capture.*` in each subdirectory, and the T1 worker derives trimmed test fixtures beside them. The contents per harness are in [section 8, gate G0](#8-tasks). | It sits beside the existing `dash/src/canon/fixtures/pi-collector/`, under the dash test tree, so `npm --prefix dash run test` picks it up. One directory per harness keeps the captures for each harness separate and reviewable. | ANSWERED — chosen by the architect at the user's request in Q7, 2026-10-13; approved by the user's approval 2026-10-13 |
 | AP1 | Approve and execute? | **Approved.** The plan is Ready for execution in `test-first` mode. | The approval covers Q1–Q10, D1–D5, the section 7 Test contract and the section 8 task graph. Execution of T1 and every task after it is still gated on the owner captures (G0). | APPROVED — user "approve" 2026-10-13 (conductor relay) |
@@ -303,14 +303,14 @@ Every dash row runs its file first, then `npm --prefix dash run typecheck lint t
 
 Sanitize prompts and paths before committing. Keep skill names and descriptions, which are what the tests assert on.
 
-**T1 — Fixtures and skills extraction module.** Skills: TypeScript engine work in `dash/src` (no dedicated role; the conductor assigns the closest implementer); `test-dev` writes RED.
+**T1 — Fixtures and skills extraction module.** **Done:** `326178f`. Skills: TypeScript engine work in `dash/src` (no dedicated role; the conductor assigns the closest implementer); `test-dev` writes RED.
 - **Objective:** trim the G0 captures into test fixtures and implement `skills.ts` per section 4.
 - **Files:** `dash/src/canon/fixtures/skills/<harness>/*` (derived fixtures beside the captures), `dash/src/canon/skills.ts` (new), `dash/src/canon/skills.test.ts` (new).
 - **Shared constant:** the attribute name `kyber.skills.invoked` is fixed here, so T1 and T3 do not wait for each other.
 - **AP3 scope:** the extractors are as amended in section 4. Only the Claude, Copilot Chat and Antigravity extractors are pinned by captures. `dash/src/canon/types.ts` gets one pinned line beside `SKILLS_INVOKED_KEY`: `export const SKILLS_LISTED_KEY = 'kyber.skills.listed' as const`. T10 adds the same line. Whichever task lands first adds it, and the other's merge is a no-op, so T1 and T10 stay parallel.
 - **Depends on:** G0 (done, `53c08a1`). It does not depend on T10, because tests build records carrying the attribute directly.
 
-**T10 — Claude Code skill-listing ingestion (AP3).** Skills: TypeScript engine work in `dash/src`; `test-dev` writes RED.
+**T10 — Claude Code skill-listing ingestion (AP3).** **Done:** `e097106`. Skills: TypeScript engine work in `dash/src`; `test-dev` writes RED.
 - **Objective:** section 4, "Claude listing ingestion".
 - **Files:**
   - `dash/src/ingest/parser.ts`: the `skill_listing` attachment in both parse paths, beside `deferred_tools_delta`, and placing it on the following call;
@@ -322,7 +322,7 @@ Sanitize prompts and paths before committing. Keep skill names and descriptions,
   - tests: `dash/src/ingest/parser.skill-listing.test.ts` (new) and `dash/src/synth/synth.skills.test.ts` (additions).
 - **Depends on:** G0 (done). It runs in parallel with T1, T9, and T2 and T4 once they start. T3, which touched `synth.ts` and `registry.ts`, is already done.
 
-**T2 — Projection, payload and turn content.** Skills: TypeScript engine work; `test-dev`.
+**T2 — Projection, payload and turn content.** **Done:** `e2b5a51`. Skills: TypeScript engine work; `test-dev`.
 - **Files:** `dash/src/canon/sessions.ts` (`buildSessionRow`, `AsadSessionPayload`, summary, turn rows), `dash/src/canon/sessions.skills.test.ts` (new), `dash/src/server/bridge.ts` (turn-content assembly only), `dash/src/server/kyber-content-route.test.ts` (additions).
 - **Depends on:** T1.
 
@@ -335,7 +335,7 @@ Sanitize prompts and paths before committing. Keep skill names and descriptions,
 
 *AP2 scope note for T2:* T2 also projects `skills.listed_count` and `skills.listed_uninvoked_count` (F1), and its turn-content entry follows the pinned section 5 shape (F2). T2 touches no `dash/web` file.
 
-**T9 — Web follow-on from T5 review (AP2).** Skills: `react-dev`, `test-dev` (RED first).
+**T9 — Web follow-on from T5 review (AP2).** **Done:** `af92ef6`. Skills: `react-dev`, `test-dev` (RED first).
 - **Objective:** F1 render the served headline counts, F2 skill drawer pane, F3 remove the unused export, F4 empty-state headline.
 - **Files:**
   - `dash/web/src/components/SkillsPanel.tsx`, `SkillsPanel.test.tsx`;
@@ -349,7 +349,7 @@ Sanitize prompts and paths before committing. Keep skill names and descriptions,
 - **Files:** `dash/src/synth/synth.ts`; the `parserContractVersion` entries in `dash/src/refresh/registry.ts` for providers that fill `skills` (Claude family, Codex, Pi, Copilot, OpenCode/Kilo, Cline, CodeWhale, OpenClaude, DSH); `dash/src/synth/synth.skills.test.ts` (new).
 - **Depends on:** none.
 
-**T4 — Rewire the skill signal and detector.** Skills: TypeScript engine work; `test-dev`.
+**T4 — Rewire the skill signal and detector.** **Done:** `45f6ace`. Skills: TypeScript engine work; `test-dev`.
 - **Files:** `dash/src/analysis/signals.ts`, `dash/src/analysis/findings.ts`, `dash/src/canon/store.ts` (`DETECTOR_VERSION` only), and their tests.
 - **Depends on:** T1.
 
@@ -357,17 +357,17 @@ Sanitize prompts and paths before committing. Keep skill names and descriptions,
 - **Files:** `dash/web/src/lib/kyberApi.ts` (types, append only), `dash/web/src/components/SkillsPanel.tsx` (new), `dash/web/src/components/AgentSessionDashboard.tsx` (section, tiles, drawer handler, timeline renumber), `dash/web/src/components/fixtures/skills-payload.json` (new, authored from section 5), and the tests.
 - **Depends on:** none. The fixture pins section 5, so GREEN does not need T2.
 
-**T6 — Documentation.** Skill: `docs-dev`.
+**T6 — Documentation.** **Done:** `4613349`. Skill: `docs-dev`.
 - **Files:** `docs/dash/architecture.md`: the session payload `skills` contract, the turn-content skills entry, the web dashboard section list, and the analysis-layer skill inputs. `docs/dash/telemetry-inventory.md`: a new "Skill availability by harness" table with listed and invoked status for each of the six harnesses plus the invoked-only ones, the enabling settings, and the G0 verification status. `docs/dash/runbook.md`: the Sessions skills section and the capture fixtures location.
 - **AP3 additions:**
   - `telemetry-inventory.md`: the Claude listing comes from transcript `skill_listing` attachments, with no OTLP opt-in. Copilot Chat uses `github.copilot.context.skills` and `<available_skills>`. Antigravity uses `gen_ai.skills` and `skill_tokens`. Pi, OpenCode and Copilot CLI are not measurable and unverified.
   - The Claude file-synth row: session files now carry the skill listing, and still do not carry `system_prompt` or `tool_definitions`.
 - **Depends on:** T2, T3, T4, T5, T9, T10.
 
-**T7 — Whole-change review.** Skill: `code-review`.
+**T7 — Whole-change review.** **Done:** council returned APPROVE after two blockers were fixed (Claude family invocation measurability and the single-pass listing fold) in `c7df451`, with integration and scale tests. Skill: `code-review`.
 - **Depends on:** T6.
 
-**T8 — `docs-dev` closeout (mandatory).** Skill: `docs-dev`.
+**T8 — `docs-dev` closeout (mandatory).** **Done:** this closeout, 2026-10-14. Skill: `docs-dev`.
 - **Steps:** archive this plan to `docs/archive/plans/`, move its row to Archived in `docs/plans/README.md`, and write the closeout mapping.
 - **ADR:** none expected. ADR waiver: this refines the existing session payload and analysis architecture under ADRs 0011, 0013 and 0033, and ADR 0018 is unchanged (Q10).
 - **Checks:** run `docs validate . --merge-ready` and `docs drift .`.
@@ -395,6 +395,7 @@ T5 (done fd54843) ──► T9 ─────────────┼──�
   - T3 and T5 are done; their files now belong to T9 where it lists them.
 - **No concurrency cap** is set.
 - **Sizing.** Fixture curation is folded into T1, to avoid a task too small for its own worker. Under AP2, the turn-content change stays in T2. The web follow-on is its own task, T9: the engine and web parts are each a full worker's load and do not overlap, and section 5 pins the shapes they share, so they run in parallel. Under AP3, the Claude ingestion work is its own task, T10. It spans the parser's two paths, the call hand-off, synth and the contract bump, which is a full worker's load, and its files do not overlap T1's extraction module. T1 stays one worker: three capture-pinned extractors, the not-measurable cases, and the view builder.
+- **Closeout.** All tasks are done at closeout. See [section 12](#12-closeout).
 
 ## 10. Verification gates
 
@@ -430,4 +431,70 @@ T5 (done fd54843) ──► T9 ─────────────┼──�
 
 **Review.** T7 runs a code-review council over the whole change.
 
-**Closeout.** T8, by `docs-dev`. The harvest destinations are listed in T6.
+**Closeout.** T8, by `docs-dev`. The harvest destinations are listed in [section 12](#12-closeout).
+
+## 12. Closeout
+
+### Outcome
+
+The plan was delivered in development mode `test-first`. Tasks G0, T1 to T10 (T8 being this closeout) are done, and the plan amendments are committed as AP2 in `ea5e8b2` and AP3 in `948e260`, with AP4 committed together with T6 in `4613349`. The whole-change review (T7) returned APPROVE after two blockers were fixed in `c7df451`: Claude family invocation measurability and the single-pass listing fold, with integration and scale tests. The owner's G0 capture gate was satisfied from real data on the owner's machine, and that route is recorded as AP3.
+
+Commits, by task:
+
+| Task | Status | Commit |
+|---|---|---|
+| G0 owner captures | Done | `53c08a1` |
+| T1 fixtures and extraction module | Done | `326178f` |
+| T2 projection, payload and turn content | Done | `e2b5a51` |
+| T3 carry parsed skills through synth | Done | `fd54843` |
+| T4 rewire skill signal and detector | Done | `45f6ace` |
+| T5 web skills section | Done | `fd54843` |
+| T6 documentation (with AP4) | Done | `4613349` |
+| T7 whole-change review | APPROVE after blocker fixes | `c7df451` |
+| T9 web follow-on (AP2) | Done | `af92ef6` |
+| T10 Claude skill-listing ingestion (AP3) | Done | `e097106` |
+| T8 closeout | Done | this archive |
+
+### Verification
+
+- **Acceptance.** Every task in section 8 is done, and the review verdict is APPROVE. The per-task RED and GREEN evidence is in the commit history and the task reviews. The per-task reviews and the whole-change council on 2026-10-14 ran the test suites: dash typecheck, lint, test (392 files, 6098 tests), check:reachable and build all passed. The closeout itself did not re-run them.
+- **Documentation gates.** `docs validate . --merge-ready` and `docs drift .` were run at closeout on 2026-10-14, with 0 findings each (critical, error, warning and info all 0).
+- **Not yet verified.** The Skills section has not been checked in a live dashboard session for every state. The component tests and the bundle build cover it. This is a non-blocking follow-up, recorded below.
+
+### Decision-to-canonical mapping
+
+Harvested means the decision's content is in the named canonical document. Waivers follow the plan index's two categories.
+
+| ID | Decision (short form) | Destination in canonical docs | Status |
+|---|---|---|---|
+| Q1 | Scope: session and per-turn listing | [dash/architecture.md, Skills view contract](../../dash/architecture.md#skills-view-contract): session payload and `turns[i].skills_listed` | Harvested |
+| Q2 | Harnesses in scope; invoked-only coverage for other file-ingested harnesses | [dash/telemetry-inventory.md, Skill availability by harness](../../dash/telemetry-inventory.md#skill-availability-by-harness) | Harvested |
+| Q3 | Listed and invoked joined per skill; an unmeasured side is never false or 0 | [architecture.md, Skills view contract](../../dash/architecture.md#skills-view-contract), Measurability | Harvested |
+| Q4 | Derived tokens, reported aggregate, no money figure | [architecture.md, Skills view contract](../../dash/architecture.md#skills-view-contract) (`reported_skill_tokens`, `derived_tokens`) | Harvested |
+| Q5 | Section "4 · Skills" and its tiles and drawer | [architecture.md, Skills view contract](../../dash/architecture.md#skills-view-contract) (Web); [runbook section 2g](../../dash/runbook.md#2g-skills-view-rebuild-and-capture-fixtures) | Harvested |
+| Q6 | Honest not-measurable card with the reason | [telemetry-inventory.md, Skill availability by harness](../../dash/telemetry-inventory.md#skill-availability-by-harness); [architecture.md, Measurability](../../dash/architecture.md#measurability-and-honest-unobservability) | Harvested |
+| Q7 | Sanitized real captures in the fixtures folder | [runbook section 2g](../../dash/runbook.md#2g-skills-view-rebuild-and-capture-fixtures) (Capture fixtures) | Harvested |
+| Q8 | Invoked names carried to raw `kyber.skills.invoked`; parser-contract bumps | [telemetry-inventory.md, Skill availability by harness](../../dash/telemetry-inventory.md#skill-availability-by-harness); [runbook section 2g](../../dash/runbook.md#2g-skills-view-rebuild-and-capture-fixtures) | Harvested |
+| Q9 | Rewire `skillUtilisation` and `inactive-skill-reference`; `DETECTOR_VERSION` 4 | [architecture.md, Skills view contract](../../dash/architecture.md#skills-view-contract) (Analysis inputs, Detector version) | Harvested |
+| Q10 | Names survive the purge as tools do; ADR 0018 unchanged | [architecture.md, Skills view contract](../../dash/architecture.md#skills-view-contract) (Known limits) | Harvested |
+| D1 | Engine in `dash/src/canon/skills.ts`; results ride in the existing payload; no new route | [architecture.md, Skills view contract](../../dash/architecture.md#skills-view-contract) | Harvested |
+| D2 | Skills keep sharing `instruction_context`; `CANONICAL_CONTENT_KEYS` unchanged | [architecture.md, Skills view contract](../../dash/architecture.md#skills-view-contract) (one sentence added at closeout) | Harvested |
+| D3 | Evidence-of-use wording only, per ADR 0013 D15/D16 | [architecture.md, Skills view contract](../../dash/architecture.md#skills-view-contract) (Analysis inputs) | Harvested |
+| D4 | Development mode `test-first` | Plan frontmatter and Status line | Documentation waiver: process metadata of this change, transient, with no surviving architectural, operational or behavioural invariant |
+| D5 | Fixtures root `dash/src/canon/fixtures/skills/`, one folder per harness | [runbook section 2g](../../dash/runbook.md#2g-skills-view-rebuild-and-capture-fixtures) (Capture fixtures) | Harvested |
+| AP1 | Approve and execute, 2026-10-13 | Plan Status line | Documentation waiver: historical approval provenance, transient, with no surviving invariant |
+| AP2 | Fold T5 findings F1–F4 into T2 and T9 | F1 and F4: [architecture.md, Skills view contract](../../dash/architecture.md#skills-view-contract) (headline counts, Web). F2: the same section (drawer). F3: dead export removal, code hygiene | F1, F2 and F4 harvested. F3 is a documentation waiver: a transient code-hygiene item with no surviving invariant |
+| AP3 | Real-format routing: Claude transcript listing, Copilot `github.copilot.context.skills`, Antigravity, and Pi, OpenCode and Copilot CLI not measurable | [telemetry-inventory.md, Skill availability by harness](../../dash/telemetry-inventory.md#skill-availability-by-harness); [runbook section 2g](../../dash/runbook.md#2g-skills-view-rebuild-and-capture-fixtures) | Harvested |
+| AP4 | Turn-content `skills` entry served from the stored payload; `rows[].description` and `turns[i].skills_invoked` | [architecture.md, Skills view contract](../../dash/architecture.md#skills-view-contract) (Session payload, Turn content) | Harvested |
+
+### ADR waiver
+
+no ADR — ADR waiver: refines the existing session payload and analysis architecture under ADRs 0011, 0013 and 0033 (ADR 0018 unchanged, Q10).
+
+### Canonical documentation changed at closeout
+
+- [dash/architecture.md](../../dash/architecture.md), Skills view contract: one sentence stating that skills share the `instruction_context` bucket and that `CANONICAL_CONTENT_KEYS` is unchanged (D2).
+
+### Follow-ups
+
+Non-blocking items are recorded in [todo/kyberdash-skills-view-follow-ups.md](../../todo/kyberdash-skills-view-follow-ups.md): inactive-skill finding volume, listing-delta payload growth, missing captures for Pi, OpenCode, Copilot CLI and Claude Desktop, the live visual check, and small cleanups.

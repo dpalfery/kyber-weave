@@ -493,6 +493,8 @@ optional `derivedTokens`), and `listedByTurn` gives the per-turn listing. `build
 `dash/src`; the web renders the served values only ([ADR 0033](../adr/0033-kyberdash-surfaces-are-display-layers.md)),
 and no value is counted in the browser.
 
+Skills share the `instruction_context` content bucket. `CANONICAL_CONTENT_KEYS` is unchanged, and skill identity comes from raw attributes and part text, not from bucket membership.
+
 There is no `canon.db` schema change. The session payload is a JSON blob that is rebuilt on
 projection, so a session row stored before this change has no `skills` key and renders
 "not yet projected" until it is rebuilt ([runbook §2g](runbook.md#2g-skills-view-rebuild-and-capture-fixtures)).
