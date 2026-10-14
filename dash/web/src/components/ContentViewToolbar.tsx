@@ -7,6 +7,15 @@ export type ContentViewMode = 'formatted' | 'raw'
 /** Upper bound on highlighted matches per body; past it the count reads "N+". */
 const MAX_SEARCH_MATCHES = 1000
 
+/** Fallback marking attributes, set on elements that hold a match when the CSS Highlight API is absent. */
+const HIT_ATTR = 'data-search-hit'
+const ACTIVE_ATTR = 'data-search-active'
+
+/** Escapes a user query so it matches literally inside a RegExp. */
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
 /** Copy source: the exact text, or a thunk so large values stringify only on click. */
 export type CopySource = string | (() => string)
 
@@ -25,13 +34,23 @@ export function CopyExactButton({ text, testId, label = 'Copy' }: { text: CopySo
     <button
       type="button"
       onClick={() => {
+        const clipboard = typeof navigator === 'undefined' ? undefined : navigator.clipboard
+        if (!clipboard || typeof clipboard.writeText !== 'function') return
+        let pending: Promise<void>
         try {
-          void navigator.clipboard.writeText(resolveCopySource(text))
-          setCopied(true)
-          setTimeout(() => setCopied(false), 2000)
+          pending = Promise.resolve(clipboard.writeText(resolveCopySource(text)))
         } catch {
-          // ignore
+          return
         }
+        // A rejected write (permission denied, no focus) must not surface as an
+        // unhandled rejection, and must not claim success.
+        pending.then(
+          () => {
+            setCopied(true)
+            setTimeout(() => setCopied(false), 2000)
+          },
+          () => {},
+        )
       }}
       className="rounded border border-border px-2 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-interactive-secondary transition-colors"
       data-testid={testId}
@@ -78,21 +97,30 @@ export function useContentSearch(view: ContentViewMode, text: string, enabled: b
   useEffect(() => {
     if (!enabled) return
     const root = bodyRef.current
-    const needle = debouncedQuery.toLowerCase()
     const ranges: Range[] = []
     let overflow = false
-    if (root && needle) {
+    if (root && debouncedQuery) {
+      // Match against the original text, never a lowercased copy: some
+      // characters change length when lowercased (e.g. U+0130), which would
+      // shift every offset that followed. A case-insensitive RegExp keeps the
+      // offsets in the same string the Range is set on.
+      const pattern = new RegExp(escapeRegExp(debouncedQuery), 'gi')
       const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
       scan: for (let n = walker.nextNode(); n; n = walker.nextNode()) {
-        const hay = (n.nodeValue ?? '').toLowerCase()
-        for (let i = hay.indexOf(needle); i !== -1; i = hay.indexOf(needle, i + needle.length)) {
+        const hay = n.nodeValue ?? ''
+        pattern.lastIndex = 0
+        for (let m = pattern.exec(hay); m !== null; m = pattern.exec(hay)) {
+          if (m[0].length === 0) {
+            pattern.lastIndex += 1
+            continue
+          }
           if (ranges.length >= MAX_SEARCH_MATCHES) {
             overflow = true
             break scan
           }
           const r = document.createRange()
-          r.setStart(n, i)
-          r.setEnd(n, i + needle.length)
+          r.setStart(n, m.index)
+          r.setEnd(n, m.index + m[0].length)
           ranges.push(r)
         }
       }
@@ -106,34 +134,64 @@ export function useContentSearch(view: ContentViewMode, text: string, enabled: b
   useEffect(() => {
     if (!enabled) return
     const ranges = rangesRef.current
+    const active = ranges[current]
     const registry = (globalThis as { CSS?: { highlights?: Map<string, unknown> } }).CSS?.highlights
     const HighlightCtor = (globalThis as { Highlight?: new (...r: Range[]) => unknown }).Highlight
+    const marked = new Set<HTMLElement>()
+    const activeEl = active?.startContainer.parentElement ?? null
     if (registry && HighlightCtor) {
       registry.set(matchName, new HighlightCtor(...ranges))
-      const active = ranges[current]
       if (active) registry.set(currentName, new HighlightCtor(active))
       else registry.delete(currentName)
+    } else {
+      // No CSS Custom Highlight API (older browsers): mark the element holding
+      // each match with a data attribute, styled by highlightCss. Attributes
+      // leave React-rendered text nodes untouched.
+      for (const r of ranges) {
+        const el = r.startContainer.parentElement
+        if (el && !marked.has(el)) {
+          el.setAttribute(HIT_ATTR, searchId)
+          marked.add(el)
+        }
+      }
+      if (activeEl) {
+        activeEl.setAttribute(ACTIVE_ATTR, searchId)
+        marked.add(activeEl)
+      }
     }
-    const active = ranges[current]
     if (active) {
-      // Reveal the match if it sits inside a collapsed fold.
-      for (let el = active.startContainer.parentElement; el && el !== bodyRef.current; el = el.parentElement) {
+      // Reveal the match if it sits inside a collapsed fold, then bring it into
+      // view. scrollIntoView scrolls every scrolling ancestor as needed, so the
+      // match's nearest bounded box (the drawer's content scroller, a panel, or
+      // the page) moves to show it.
+      for (let el = activeEl; el && el !== bodyRef.current; el = el.parentElement) {
         if (el instanceof HTMLDetailsElement && !el.open) el.open = true
       }
-      active.startContainer.parentElement?.scrollIntoView?.({ block: 'center' })
+      activeEl?.scrollIntoView?.({ block: 'center', inline: 'nearest' })
     }
     return () => {
       registry?.delete(matchName)
       registry?.delete(currentName)
+      for (const el of marked) {
+        el.removeAttribute(HIT_ATTR)
+        el.removeAttribute(ACTIVE_ATTR)
+      }
     }
-  }, [enabled, matchCount, current, debouncedQuery, view, text, matchName, currentName])
+  }, [enabled, matchCount, current, debouncedQuery, view, text, matchName, currentName, searchId])
 
   const step = (delta: number) => {
     if (matchCount === 0) return
     setCurrent((c) => (c + delta + matchCount) % matchCount)
   }
 
-  const highlightCss = `::highlight(${matchName}){background-color:rgb(250 204 21 / 0.35);color:inherit}::highlight(${currentName}){background-color:rgb(249 115 22 / 0.65);color:inherit}`
+  // The ::highlight rules serve browsers with the CSS Custom Highlight API; the
+  // attribute rules are the fallback marking for everywhere else.
+  const highlightCss = [
+    `::highlight(${matchName}){background-color:rgb(250 204 21 / 0.35);color:inherit}`,
+    `::highlight(${currentName}){background-color:rgb(249 115 22 / 0.65);color:inherit}`,
+    `[${HIT_ATTR}="${searchId}"]{background-color:rgb(250 204 21 / 0.35)}`,
+    `[${ACTIVE_ATTR}="${searchId}"]{background-color:rgb(249 115 22 / 0.45);outline:2px solid rgb(249 115 22);outline-offset:1px}`,
+  ].join('')
 
   return {
     bodyRef,
@@ -179,13 +237,13 @@ export function ContentViewToolbar({
   const showRight = showToggle || Boolean(search) || Boolean(copy)
   return (
     <div
-      className="flex items-center justify-between gap-2 flex-wrap"
+      className="flex items-center justify-between gap-2 flex-wrap min-w-0 max-w-full"
       role={showToggle ? 'group' : undefined}
       aria-label={showToggle ? groupLabel : undefined}
     >
       {leading ? <div className="flex items-center gap-2 min-w-0">{leading}</div> : null}
       {showRight ? (
-        <div className="flex items-center gap-1.5 ml-auto">
+        <div className="flex flex-wrap items-center justify-end gap-1.5 min-w-0 max-w-full ml-auto">
           {showToggle ? (
             <div className="flex rounded border border-border bg-interactive-secondary p-0.5 text-xs">
               <button
@@ -239,17 +297,18 @@ function SearchControls({ search, viewPrefix, label }: { search: ContentSearch; 
         placeholder="Search…"
         aria-label={`${label ?? 'Content'}: search text`}
         data-testid={`${viewPrefix}-search`}
-        className="h-6 w-32 rounded border border-border bg-card px-2 text-xs text-foreground placeholder:text-muted-foreground"
+        className="h-6 w-28 min-w-[5rem] shrink rounded border border-border bg-card px-2 text-xs text-foreground placeholder:text-muted-foreground"
       />
-      {query ? (
-        <>
-          <span aria-live="polite" className="text-[11px] font-mono text-tertiary-foreground tabular-nums" data-testid={`${viewPrefix}-search-count`}>
-            {matchCount === 0 ? '0/0' : `${current + 1}/${matchCount}${capped ? '+' : ''}`}
-          </span>
-          <button type="button" onClick={() => step(-1)} disabled={matchCount === 0} aria-label="Previous match" className="px-1 text-xs text-muted-foreground hover:text-foreground disabled:opacity-40">↑</button>
-          <button type="button" onClick={() => step(1)} disabled={matchCount === 0} aria-label="Next match" className="px-1 text-xs text-muted-foreground hover:text-foreground disabled:opacity-40">↓</button>
-        </>
-      ) : null}
+      {/* Always rendered, so the position of the count never depends on the query. */}
+      <span
+        aria-live="polite"
+        className="shrink-0 whitespace-nowrap min-w-[3rem] text-right text-[11px] font-mono text-foreground tabular-nums"
+        data-testid={`${viewPrefix}-search-count`}
+      >
+        {matchCount === 0 ? '0/0' : `${current + 1}/${matchCount}${capped ? '+' : ''}`}
+      </span>
+      <button type="button" onClick={() => step(-1)} disabled={matchCount === 0} aria-label="Previous match" className="shrink-0 px-1 text-xs text-muted-foreground hover:text-foreground disabled:opacity-40">↑</button>
+      <button type="button" onClick={() => step(1)} disabled={matchCount === 0} aria-label="Next match" className="shrink-0 px-1 text-xs text-muted-foreground hover:text-foreground disabled:opacity-40">↓</button>
     </>
   )
 }

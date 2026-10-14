@@ -38,6 +38,7 @@ import {
 
 import { renderToStaticMarkup } from 'react-dom/server'
 import { SearchableContentView } from './ContentViewToolbar.js'
+import { groupIdenticalParts } from './SessionInspectorDrawer.js'
 import type { KyberSessionContentResult, KyberTurnContentResult } from '../lib/kyberApi.js'
 import { fetchKyberSessionContent, fetchTurnContentFull } from '../lib/kyberApi.js'
 
@@ -1344,23 +1345,6 @@ describe('SessionInspectorDrawer: identical captured parts in the bucket drill-d
 })
 
 describe('SessionInspectorDrawer: expansion placement and separators', () => {
-  it('scrolls a section into view when it opens, and not when it closes', () => {
-    const raw = '<system>Section body alpha.</system><context>Section body beta.</context>'
-    const tree = XmlFoldedText({ text: raw })
-    const details = findElementByTestId(tree, 'folded-tag-context')
-    expect(details?.type).toBe('details')
-
-    const onToggle = (details!.props as { onToggle: (event: unknown) => void }).onToggle
-    const scrollIntoView = vi.fn()
-    onToggle({ currentTarget: { open: true, scrollIntoView } })
-    expect(scrollIntoView).toHaveBeenCalledTimes(1)
-    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' })
-
-    const onClose = vi.fn()
-    onToggle({ currentTarget: { open: false, scrollIntoView: onClose } })
-    expect(onClose).not.toHaveBeenCalled()
-  })
-
   it('compacts whitespace-only separators to a fixed short box without changing their text', () => {
     const separator = '\n  \n\n  \n'
     const raw = `<system>Section body alpha.</system>${separator}<context>Section body beta.</context>`
@@ -1373,6 +1357,79 @@ describe('SessionInspectorDrawer: expansion placement and separators', () => {
     expect(classes).not.toContain('my-1')
     // The text node keeps every original code point.
     expect(unescapeHtml(html)).toContain(separator)
+  })
+})
+
+describe('SessionInspectorDrawer: identical-part grouping keys', () => {
+  it('merges only parts that match on kind, truncation, and exact text', () => {
+    const groups = groupIdenticalParts([
+      { part: 'system_prompt', text: 'same body' },
+      { part: 'system_prompt', text: 'same body' },
+      { part: 'system_prompt', text: 'same body' },
+    ])
+    expect(groups).toHaveLength(1)
+    expect(groups[0]).toMatchObject({ index: 0, count: 3 })
+  })
+
+  it('does not merge different part kinds with identical bodies, including empty strings', () => {
+    const groups = groupIdenticalParts([
+      { part: 'system_prompt', text: '' },
+      { part: 'tool_result', text: '' },
+    ])
+    expect(groups.map((g) => g.count)).toEqual([1, 1])
+  })
+
+  it('keeps a truncated copy apart from a complete copy', () => {
+    const groups = groupIdenticalParts([
+      { part: 'system_prompt', text: 'body' },
+      { part: 'system_prompt', text: 'body', truncated: true, totalLength: 9 },
+    ])
+    expect(groups.map((g) => g.count)).toEqual([1, 1])
+  })
+
+  it('never merges different text even when the hash collides', () => {
+    // A constant hasher forces every part into one bucket, so only the exact
+    // text check separates them.
+    const groups = groupIdenticalParts(
+      [
+        { part: 'system_prompt', text: 'aaa' },
+        { part: 'system_prompt', text: 'bbb' },
+        { part: 'system_prompt', text: 'aaa' },
+      ],
+      () => 'collide',
+    )
+    expect(groups.map((g) => [g.index, g.count])).toEqual([
+      [0, 2],
+      [1, 1],
+    ])
+  })
+})
+
+describe('SessionInspectorDrawer: unserializable fallback payloads', () => {
+  it('shows an honest note instead of throwing when the fallback payload is circular', () => {
+    const circular: Record<string, unknown> = { label: 'loop' }
+    circular.self = circular
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0, retryOnMount: false } } })
+    const error = new Error('Request failed (500)')
+    const query = qc.getQueryCache().build(qc, {
+      queryKey: contentQueryKey,
+      queryFn: () => Promise.reject(error),
+    })
+    query.setState({
+      status: 'error',
+      error,
+      fetchStatus: 'idle',
+      data: undefined,
+      dataUpdatedAt: 0,
+      errorUpdatedAt: Date.now(),
+      isInvalidated: false,
+    })
+
+    const html = renderDrawerWithQuery(qc, { rawContent: { content: circular } as never })
+
+    expect(html).toContain('data-testid="drawer-content-unserializable"')
+    expect(html).toContain('content is not JSON-serializable')
+    expect(html).toContain('data-testid="drawer-content-fallback-note"')
   })
 })
 

@@ -259,14 +259,34 @@ export function containsReadableXmlTag(value: string): boolean {
  * recursive rendering. Literal `<`/`>` that never parsed as a tag stays as
  * escaped literal text. Raw and copy paths elsewhere keep the exact source.
  */
+/** The nearest ancestor that scrolls its content, or null when none does. */
+function nearestScrollContainer(el: HTMLElement): HTMLElement | null {
+  for (let p = el.parentElement; p; p = p.parentElement) {
+    const overflowY = getComputedStyle(p).overflowY
+    if (overflowY === 'auto' || overflowY === 'scroll') return p
+  }
+  return null
+}
+
 /**
- * Brings a section into view when it opens. The expansion renders below its
- * summary, and inside a max-height scroll box a section lower down would
- * otherwise reveal its text below the clipped area. `nearest` moves the
- * scroll position only as far as needed.
+ * Keeps an opened section's revealed body on screen. The body renders below
+ * its summary; inside a max-height scroll box a section lower down can reveal
+ * its text below the clipped area. The body is scrolled into view only when it
+ * overflows the nearest scroll container, with `nearest` alignment so the
+ * scroll moves no further than needed. Otherwise nothing moves.
  */
-function revealOpenedSection(event: { currentTarget: { open: boolean; scrollIntoView?: (options: ScrollIntoViewOptions) => void } }) {
-  if (event.currentTarget.open) event.currentTarget.scrollIntoView?.({ block: 'nearest' })
+function revealOpenedSection(event: { currentTarget: HTMLDetailsElement }) {
+  const details = event.currentTarget
+  if (!details.open) return
+  const body = Array.from(details.children).find((child): child is HTMLElement => child instanceof HTMLElement && child.tagName === 'DIV')
+  if (!body) return
+  const container = nearestScrollContainer(details)
+  if (!container) return
+  const bodyRect = body.getBoundingClientRect()
+  const containerRect = container.getBoundingClientRect()
+  if (bodyRect.top < containerRect.top || bodyRect.bottom > containerRect.bottom) {
+    body.scrollIntoView?.({ block: 'nearest' })
+  }
 }
 
 export function XmlFoldedText({ text, className }: { text: string; className?: string }) {
@@ -2276,7 +2296,14 @@ export function InspectorContent({
 
   // Handle generic object or array with formatted & raw views. The raw text is
   // the pretty-printed JSON, which is also what Copy writes.
-  const json = JSON.stringify(data, null, 2)
+  const json = safeJsonStringify(data)
+  if (json === null) {
+    return (
+      <p className="text-xs italic text-tertiary-foreground" data-testid="inspector-content-unserializable">
+        {UNSERIALIZABLE_NOTE}
+      </p>
+    )
+  }
 
   return (
     <div className="space-y-3" data-testid="inspector-content">
@@ -2988,13 +3015,7 @@ function FullContentPanel({
         >
           Showing truncated payload text — full content could not be loaded.
         </p>
-        {fallback != null && fallback !== '' && (
-          <ScrollableContentPanel
-            viewPrefix="drawer-fallback"
-            text={typeof fallback === 'string' ? fallback : (JSON.stringify(fallback, null, 2) ?? '')}
-            formattedContent={<InspectorContent data={fallback} suppressJsonControls />}
-          />
-        )}
+        {fallback != null && fallback !== '' && <FallbackContentPanel fallback={fallback} />}
       </div>
     )
   }
@@ -3038,10 +3059,13 @@ function FullContentPanel({
 function ScrollableContentPanel({
   viewPrefix,
   text,
+  copyText,
   formattedContent,
 }: {
   viewPrefix: string
   text: string
+  /** Lazy copy source; defaults to `text`. Read only when Copy is clicked. */
+  copyText?: () => string
   formattedContent: React.ReactNode
 }) {
   const [view, setView] = useState<ContentViewMode>('formatted')
@@ -3053,7 +3077,7 @@ function ScrollableContentPanel({
       text={text}
       label="Captured content"
       viewPrefix={viewPrefix}
-      copy={{ text, testId: `copy-${viewPrefix}` }}
+      copy={{ text: copyText ?? text, testId: `copy-${viewPrefix}` }}
       formatted={
         <div className={scrollClass} data-testid="drawer-content-scroll">
           <div className="p-3">{formattedContent}</div>
@@ -3064,6 +3088,50 @@ function ScrollableContentPanel({
           <pre className="p-3 text-xs font-mono whitespace-pre-wrap break-words text-foreground">{text}</pre>
         </div>
       }
+    />
+  )
+}
+
+/**
+ * Pretty JSON for display and copy, or null when the value cannot be
+ * serialized (a circular or otherwise unserializable payload).
+ */
+function safeJsonStringify(value: unknown): string | null {
+  try {
+    const out = JSON.stringify(value, null, 2)
+    return typeof out === 'string' ? out : null
+  } catch {
+    return null
+  }
+}
+
+const UNSERIALIZABLE_NOTE = 'content is not JSON-serializable'
+
+/**
+ * The clipped payload shown when full content could not load. The text is
+ * serialized once per fallback value; Copy reads that memo through a thunk.
+ */
+function FallbackContentPanel({ fallback }: { fallback: unknown }) {
+  const serialized = useMemo(
+    () => (typeof fallback === 'string' ? fallback : safeJsonStringify(fallback)),
+    [fallback],
+  )
+  if (serialized === null) {
+    return (
+      <p
+        className="rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300"
+        data-testid="drawer-content-unserializable"
+      >
+        {UNSERIALIZABLE_NOTE}
+      </p>
+    )
+  }
+  return (
+    <ScrollableContentPanel
+      viewPrefix="drawer-fallback"
+      text={serialized}
+      copyText={() => serialized}
+      formattedContent={<InspectorContent data={fallback} suppressJsonControls />}
     />
   )
 }
@@ -3085,16 +3153,50 @@ interface IdentifiablePart {
  */
 function groupIdenticalParts<T extends IdentifiablePart>(
   parts: readonly T[],
+  hash: (text: string) => string = fnv1aHash,
 ): Array<{ part: T; index: number; count: number }> {
-  const groups = new Map<string, { part: T; index: number; count: number }>()
+  // Buckets are keyed on cheap fields plus a hash, never on the full text. A
+  // hash hit is only a candidate: the representative must match on every field
+  // and on the exact text, so a collision can never merge different content.
+  const buckets = new Map<string, Array<{ part: T; index: number; count: number }>>()
+  const groups: Array<{ part: T; index: number; count: number }> = []
   parts.forEach((part, index) => {
-    const key = `${part.truncated === true ? 1 : 0}|${part.totalLength ?? ''}|${part.text}`
-    const existing = groups.get(key)
-    if (existing) existing.count += 1
-    else groups.set(key, { part, index, count: 1 })
+    const key = `${part.part ?? ''}|${part.truncated === true ? 1 : 0}|${part.totalLength ?? ''}|${part.text.length}|${hash(part.text)}`
+    const bucket = buckets.get(key) ?? []
+    const existing = bucket.find((group) => sameBlock(group.part, part))
+    if (existing) {
+      existing.count += 1
+      return
+    }
+    const group = { part, index, count: 1 }
+    bucket.push(group)
+    buckets.set(key, bucket)
+    groups.push(group)
   })
-  return [...groups.values()].sort((a, b) => a.index - b.index)
+  return groups
 }
+
+/** True when two parts render as one block: same kind, truncation, and exact text. */
+function sameBlock(a: IdentifiablePart, b: IdentifiablePart): boolean {
+  return (
+    a.part === b.part &&
+    (a.truncated === true) === (b.truncated === true) &&
+    a.totalLength === b.totalLength &&
+    a.text === b.text
+  )
+}
+
+/** FNV-1a over UTF-16 code units, as an unsigned 32-bit hex string. */
+function fnv1aHash(text: string): string {
+  let h = 0x811c9dc5
+  for (let i = 0; i < text.length; i += 1) {
+    h ^= text.charCodeAt(i)
+    h = Math.imul(h, 0x01000193)
+  }
+  return (h >>> 0).toString(16)
+}
+
+export { groupIdenticalParts }
 
 /**
  * The drawer's own content union, shared with the dashboard that assembles
