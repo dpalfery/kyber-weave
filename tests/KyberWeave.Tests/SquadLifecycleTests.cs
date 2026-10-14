@@ -17,6 +17,15 @@ public sealed class SquadLifecycleTests : IDisposable
 
     public void Dispose() => _temp.Dispose();
 
+    /// <summary>The home-level state directory for a project, keyed by its physical root.</summary>
+    private static string HomeProjectStateDirectory(ISquadUserPaths userPaths, string projectRoot) =>
+        Path.Combine(
+            userPaths.HomeDirectory,
+            ".kyber-weave",
+            "squad",
+            "projects",
+            SquadPhysicalRootIdentity.Resolve(projectRoot).Key);
+
     #region Install Lifecycle Contracts
 
     [Fact]
@@ -51,9 +60,9 @@ public sealed class SquadLifecycleTests : IDisposable
         Assert.True(File.Exists(Path.Combine(targetRoot, ".codex", "agents", "architect.toml")));
         Assert.True(File.Exists(Path.Combine(targetRoot, ".claude", "agents", "architect.md")));
 
-        // Verify state files exist in .kyber-weave
-        string lockPath = Path.Combine(targetRoot, ".kyber-weave", "squad.lock.yml");
-        string receiptPath = Path.Combine(targetRoot, ".kyber-weave", "squad.receipt.json");
+        // Verify state files exist beneath the home store, keyed by the project's physical root
+        string lockPath = Path.Combine(HomeProjectStateDirectory(userPaths, targetRoot), "squad.lock.yml");
+        string receiptPath = Path.Combine(HomeProjectStateDirectory(userPaths, targetRoot), "squad.receipt.json");
         Assert.True(File.Exists(lockPath));
         Assert.True(File.Exists(receiptPath));
 
@@ -221,7 +230,7 @@ public sealed class SquadLifecycleTests : IDisposable
 
         // Verify all target files rolled back (no partial writes left behind)
         Assert.False(File.Exists(Path.Combine(targetRoot, ".codex", "agents", "architect.toml")));
-        Assert.False(File.Exists(Path.Combine(targetRoot, ".kyber-weave", "squad.receipt.json")));
+        Assert.False(File.Exists(Path.Combine(HomeProjectStateDirectory(userPaths, targetRoot), "squad.receipt.json")));
 
         // Verify lease was released by running a clean install immediately
         SquadLifecycleService cleanService = new(releaseSource, renderer, stateStore);
@@ -318,7 +327,9 @@ public sealed class SquadLifecycleTests : IDisposable
 
         // State files are stored in isolated user data directory
         string globalStateDir = stateStore.ResolveStateDirectory(targetRoot, SquadDeploymentScope.Global);
-        Assert.StartsWith(Path.GetFullPath(isolatedUserData), Path.GetFullPath(globalStateDir), StringComparison.Ordinal);
+        Assert.Equal(
+            Path.GetFullPath(Path.Combine(userPaths.HomeDirectory, ".kyber-weave", "squad", "global")),
+            Path.GetFullPath(globalStateDir));
         Assert.True(File.Exists(stateStore.ResolveLockPath(targetRoot, SquadDeploymentScope.Global)));
         Assert.True(File.Exists(stateStore.ResolveReceiptPath(targetRoot, SquadDeploymentScope.Global)));
 
@@ -422,7 +433,7 @@ public sealed class SquadLifecycleTests : IDisposable
             Targets: [SquadTarget.Codex],
             Version: "1.2.3"));
 
-        string receiptBefore = await File.ReadAllTextAsync(Path.Combine(targetRoot, ".kyber-weave", "squad.receipt.json"));
+        string receiptBefore = await File.ReadAllTextAsync(Path.Combine(HomeProjectStateDirectory(userPaths, targetRoot), "squad.receipt.json"));
 
         // Act: Update in dry-run mode
         SquadUpdateRequest dryRunRequest = new(
@@ -439,7 +450,7 @@ public sealed class SquadLifecycleTests : IDisposable
         Assert.NotNull(result.Plan);
 
         // State receipt must be completely unchanged
-        string receiptAfter = await File.ReadAllTextAsync(Path.Combine(targetRoot, ".kyber-weave", "squad.receipt.json"));
+        string receiptAfter = await File.ReadAllTextAsync(Path.Combine(HomeProjectStateDirectory(userPaths, targetRoot), "squad.receipt.json"));
         Assert.Equal(receiptBefore, receiptAfter);
     }
 
