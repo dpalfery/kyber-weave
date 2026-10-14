@@ -44,7 +44,7 @@ Break prose into the smallest independently verifiable statements. Split compoun
 - canonical-source and navigation claims;
 - version, command, route, configuration, and dependency claims.
 
-Do not report claims that are confirmed and need no user decision. Keep internal notes in the conversation context or the repository's declared agent scratchpad, never in `<docs-root>`.
+Do not report claims that are confirmed and need no user decision. Keep internal notes in the conversation context or the repository's declared `.agent_scratchpad`, never in `<docs-root>`.
 
 ## Approval gate
 

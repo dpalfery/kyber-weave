@@ -12,7 +12,7 @@ import { DERIVED_HARNESSES, USER_CANON } from './refresh-filters-world.js'
  */
 const specDir = fileURLToPath(new URL('.', import.meta.url))
 const dashRoot = dirname(specDir)
-const scratch = join(dashRoot, '..', '.agents-scratchpad', 'refresh-T8')
+const scratch = join(dashRoot, '..', '.agent_scratchpad', 'refresh-T8')
 const dashDist = join(dashRoot, 'dash', 'dist', 'index.html')
 
 let child: ChildProcess | undefined
