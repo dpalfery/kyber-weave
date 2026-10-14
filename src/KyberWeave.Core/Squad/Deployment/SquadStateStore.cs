@@ -78,7 +78,11 @@ public sealed class SquadStateStore
         _userPaths = userPaths;
     }
 
-    internal ISquadUserPaths UserPaths => _userPaths;
+    /// <summary>
+    /// The user paths this store was built over. Every Squad state read and migration takes its locations
+    /// from here, so a store built over a fake home never reaches the real profile.
+    /// </summary>
+    public ISquadUserPaths UserPaths => _userPaths;
 
     /// <summary>Returns the state directory for the requested deployment scope.</summary>
     public string ResolveStateDirectory(string targetRoot, SquadDeploymentScope scope)
@@ -112,6 +116,20 @@ public sealed class SquadStateStore
     /// </remarks>
     /// <exception cref="InvalidDataException">The registry file exists but is not a valid registry.</exception>
     public IReadOnlyList<SquadProjectRegistryEntry> ListProjects() => ListProjects(persistRebuild: true);
+
+    /// <summary>
+    /// Returns the registry entry for one project root, matched by the root's canonical identity, so an
+    /// alias, a symbolic link, or a path whose directory has since been removed still finds its entry.
+    /// </summary>
+    /// <param name="root">The project root to look up. It may no longer exist.</param>
+    /// <returns>The entry, or <see langword="null"/> when the root is not registered.</returns>
+    public SquadProjectRegistryEntry? FindProject(string root)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(root);
+
+        string key = SquadPhysicalRootIdentity.KeyOf(SquadPhysicalRootIdentity.CanonicalizeAllowingMissing(root));
+        return ListProjects().FirstOrDefault(entry => string.Equals(entry.RootKey, key, StringComparison.Ordinal));
+    }
 
     /// <summary>
     /// Lists the registry exactly as <see cref="ListProjects()"/> does, but never writes the rebuilt registry

@@ -23,6 +23,12 @@ public sealed class SquadStateMigration
     private const string InRepoStateDirectoryName = ".kyber-weave";
     private const string LegacyRootsRelativeDirectory = "KyberWeave/squad/roots";
 
+    private const string HomeAuthorityReason =
+        "The home global receipt is authoritative, so this legacy root is not read.";
+
+    private const string HomeAuthorityGuidance =
+        "It is left in place for an older CLI. Remove it once no older CLI needs it.";
+
     private const string AmbiguousGuidance =
         "Keep exactly one legacy global receipt. Move the others aside after verifying them, then run the migration " +
         "again. Nothing was copied, so the home store is unchanged.";
@@ -97,8 +103,7 @@ public sealed class SquadStateMigration
                     if (dryRun)
                     {
                         migrated.Add(
-                            $"Dry run: legacy global state at '{plan.LegacyDirectory}' will be migrated to " +
-                            $"'{plan.HomeDirectory}' on the next non-dry-run invocation.");
+                            $"legacy state at '{plan.LegacyDirectory}' will be migrated on the next non-dry-run invocation.");
                     }
                     else
                     {
@@ -108,6 +113,18 @@ public sealed class SquadStateMigration
                             $"'{plan.HomeDirectory}'. The legacy files were left in place.");
                     }
                 }
+            }
+        }
+        else
+        {
+            // The home receipt is the authority, so nothing is copied. Each legacy root that remains is still
+            // reported: doctor must be able to say it is on disk and is no longer read.
+            foreach (string legacyDirectory in FindNonEmptyLegacyRootDirectories())
+            {
+                unmigrated.Add(new SquadUnmigratedLegacyRoot(
+                    legacyDirectory,
+                    HomeAuthorityReason,
+                    HomeAuthorityGuidance));
             }
         }
 

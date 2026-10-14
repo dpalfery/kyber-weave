@@ -74,6 +74,15 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         string workingDirectory = SquadCommandComposition.ResolveTargetRoot(
             effectivePath is null or "." ? _workingDirectory : effectivePath);
 
+        // Doctor reads home-level state, so it resolves the store once. A --global doctor is anchored at the
+        // home directory whatever the working directory is, and a path given with it is named and ignored.
+        // Doctor writes nothing itself, so the anchor is resolved as a dry run and never creates the home.
+        SquadStateStore homeStateStore = _stateStore ?? SquadCommandComposition.ResolveStateStore(_userPaths);
+        if (settings.Global)
+        {
+            _ = SquadCommandComposition.ResolveGlobalAnchorRoot(homeStateStore, effectivePath, dryRun: true);
+        }
+
         AnsiConsole.MarkupLine("[bold]Kyber-Squad Doctor[/]");
         AnsiConsole.WriteLine();
 
@@ -145,6 +154,24 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         // 5. Devin duplicate imports. Runs without canonical source, because the duplicates it
         // looks for are what an installed workspace holds, not what the source would render.
         ReportDevinImportOverlap(workingDirectory);
+
+        // 6. Home state: the migration the other verbs run, then the registry and any retained in-repo state.
+        SquadMigrationReport migration = SquadCommandComposition.EnsureStateMigrated(
+            homeStateStore,
+            Environment.CurrentDirectory,
+            projectRoot: settings.Global ? null : workingDirectory,
+            dryRun: false);
+        SquadCommandComposition.WriteMigrationNotes(migration, includeRetainedLegacyRoots: true);
+        try
+        {
+            ReportHomeState(homeStateStore);
+        }
+        catch (InvalidDataException ex)
+        {
+            SquadCommandComposition.WriteLine(
+                $"  [red]fail[/] Squad project registry is unreadable: {Markup.Escape(ex.Message)}");
+            hasIssues = true;
+        }
 
         if (settings.Global &&
             ReportGlobalCollisions(workingDirectory, canonicalSourcePath, canonicalSourceValid))
@@ -300,6 +327,47 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
                 : $"         Set \"read_config_from\": {{ \"{Markup.Escape(overlap.ImportSetting)}\": false }} " +
                     "in .devin/config.json to stop the import (it also drops everything else that " +
                     "import brings), or deploy only one of the two targets.");
+        }
+    }
+
+    /// <summary>
+    /// Reports the home-level registry: each stale entry, and each project whose in-repo Squad state was
+    /// imported but is still present in its repository.
+    /// </summary>
+    /// <remarks>
+    /// Warnings rather than failures. A stale entry is harmless to the rest of the home, and retained in-repo
+    /// state is kept on purpose by the migration; both need the operator's decision, not a failing exit code.
+    /// The retained-state warning is only raised for a project still registered as live, because a stale
+    /// project's home state is already gone and there is nothing to be authoritative over.
+    /// </remarks>
+    private static void ReportHomeState(SquadStateStore stateStore)
+    {
+        IReadOnlyList<SquadProjectRegistryEntry> projects = stateStore.ListProjects();
+        if (projects.Count == 0)
+        {
+            SquadCommandComposition.WriteLine("  [grey]info[/] Registered Squad projects: none");
+            return;
+        }
+
+        foreach (SquadProjectRegistryEntry project in projects)
+        {
+            if (project.Stale)
+            {
+                SquadCommandComposition.WriteLine(
+                    $"  [yellow]warn[/] registered project '{Markup.Escape(project.Path)}' is stale " +
+                    $"({Markup.Escape(project.StaleReason ?? "unknown")}); global updates skip it. " +
+                    "Reinstall it there, or uninstall it to remove the entry.");
+                continue;
+            }
+
+            string inRepoState = Path.Combine(project.Path, ".kyber-weave");
+            if (File.Exists(Path.Combine(inRepoState, "squad.receipt.json")) ||
+                File.Exists(Path.Combine(inRepoState, "squad.lock.yml")))
+            {
+                SquadCommandComposition.WriteLine(
+                    $"  [yellow]warn[/] in-repo Squad state at '{Markup.Escape(inRepoState)}' is retained after its import. " +
+                    "The home record is now authoritative, so remove that directory from version control.");
+            }
         }
     }
 

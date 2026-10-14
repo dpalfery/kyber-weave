@@ -115,10 +115,13 @@ public sealed class SquadUpdateSettings : CommandSettings
 
     /// <summary>
     /// Which registered projects a <c>--global</c> update reaches: <c>all</c>, <c>none</c>, or one
-    /// or more project paths. Repeatable. Ignored without <c>--global</c>.
+    /// or more project paths. Repeatable. Requires <c>--global</c>. When omitted on an interactive
+    /// console the update prompts for the projects; when omitted otherwise, no project is updated.
     /// </summary>
     [CommandOption("--projects <PROJECTS>")]
-    [Description("With --global, which registered projects to update: all, none, or project path(s). Repeatable.")]
+    [Description(
+        "With --global, which registered projects to update: all, none, or project path(s). Repeatable. " +
+        "Omit it on an interactive console to be asked; without it, no project is updated.")]
     [SuppressMessage(
         "Performance", "CA1819:Properties should not return arrays",
         Justification = "Spectre.Console.Cli binds repeated options to arrays.")]

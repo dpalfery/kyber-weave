@@ -61,6 +61,7 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
         ArgumentNullException.ThrowIfNull(settings);
 
         SquadStateStore stateStore = _stateStore ?? SquadCommandComposition.ResolveStateStore(_userPaths);
+        SquadDeploymentScope scope = SquadCommandComposition.ResolveScope(settings.Global);
 
         // Coalesce the positional path with --path and validate explicit targets,
         // exclusions, and the pinned version; invalid client input returns exit code 2
@@ -85,13 +86,29 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
             return 2;
         }
 
-        string targetRoot = SquadCommandComposition.ResolveTargetRoot(effectivePath);
+        // A --global install is anchored at the home directory whatever the working directory is.
+        string targetRoot = scope == SquadDeploymentScope.Global
+            ? SquadCommandComposition.ResolveGlobalAnchorRoot(stateStore, effectivePath, dryRun: settings.DryRun)
+            : SquadCommandComposition.ResolveTargetRoot(effectivePath);
+
+        // Legacy state is migrated before the install reads any of it. A dry run reports what the next
+        // real run would move, and stops without reading a deployment it has not yet moved.
+        SquadMigrationReport migration = SquadCommandComposition.EnsureStateMigrated(
+            stateStore,
+            Environment.CurrentDirectory,
+            projectRoot: scope == SquadDeploymentScope.Project ? targetRoot : null,
+            dryRun: settings.DryRun);
+        SquadCommandComposition.WriteMigrationNotes(migration);
+        if (SquadCommandComposition.IsPendingDryRunMigration(migration, settings.DryRun))
+        {
+            return 0;
+        }
 
         // Load configuration if present
         KyberWeaveConfigLoadResult configResult = KyberWeaveConfigLoader.TryLoad(targetRoot);
         if (!configResult.Success)
         {
-            AnsiConsole.MarkupLine($"[red]kyber-weave squad: error: {Markup.Escape(configResult.Error ?? "Failed to load configuration.")}[/]");
+            SquadCommandComposition.WriteClientInputError(configResult.Error ?? "Failed to load configuration.");
             return 1;
         }
 
@@ -121,21 +138,20 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
             return decision.ExitCode ?? 2;
         }
 
-        SquadDeploymentScope scope = SquadCommandComposition.ResolveScope(settings.Global);
-
         // A --global run writes beneath each selected target's own physical global root,
-        // not beneath targetRoot — the state anchor. Resolve the roots the way the
-        // lifecycle's plan will, so the confirmation names the real destinations.
+        // not beneath the home anchor. The same injected resolver the lifecycle plans with
+        // names the roots, so the confirmation shows the real destinations.
         IReadOnlyList<(SquadTarget Target, string GlobalRoot)>? globalTargetRoots =
             scope == SquadDeploymentScope.Global
-                ? SquadCommandComposition.ResolveGlobalTargetRoots(decision.Targets)
+                ? SquadCommandComposition.ResolveGlobalTargetRoots(decision.Targets, _globalRoots)
                 : null;
 
         SquadLifecycleService lifecycleService = SquadCommandComposition.CreateLifecycleService(
             userPaths: _userPaths,
             stateStore: stateStore,
             releaseSource: _releaseSource,
-            renderer: _renderer);
+            renderer: _renderer,
+            globalRoots: _globalRoots);
 
         SquadInstallRequest installRequest = new(
             TargetRoot: targetRoot,
@@ -170,13 +186,16 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
                 if (settings.DryRun)
                 {
                     int fileCount = result.Receipt?.Files.Count ?? 0;
-                    AnsiConsole.MarkupLine($"[bold]Dry-run:[/] planned {fileCount} deployed files for [bold]{Markup.Escape(targetRoot)}[/].");
+                    SquadCommandComposition.WriteLine(
+                        $"[bold]Dry-run:[/] planned {fileCount} deployed files for [bold]{Markup.Escape(targetRoot)}[/].");
                 }
                 else
                 {
-                    AnsiConsole.MarkupLine($"[green]Successfully installed Kyber-Squad to [bold]{Markup.Escape(targetRoot)}[/].[/]");
+                    SquadCommandComposition.WriteLine(
+                        $"[green]Successfully installed Kyber-Squad to [bold]{Markup.Escape(targetRoot)}[/].[/]");
                 }
 
+                SquadCommandComposition.WriteTransactionWarnings(result.Warnings);
                 return 0;
             }
 
@@ -184,7 +203,7 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
             {
                 foreach (string error in result.Errors)
                 {
-                    AnsiConsole.MarkupLine($"[red]kyber-weave squad: error: {Markup.Escape(error)}[/]");
+                    SquadCommandComposition.WriteClientInputError(error);
                 }
             }
 
@@ -192,12 +211,12 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
         }
         catch (SquadDeploymentConflictException ex)
         {
-            AnsiConsole.MarkupLine($"[red]kyber-weave squad: error: {Markup.Escape(ex.Message)}[/]");
+            SquadCommandComposition.WriteClientInputError(ex.Message);
             return 1;
         }
         catch (Exception ex)
         {
-            AnsiConsole.MarkupLine($"[red]kyber-weave squad: error: {Markup.Escape(ex.Message)}[/]");
+            SquadCommandComposition.WriteClientInputError(ex.Message);
             return 1;
         }
     }

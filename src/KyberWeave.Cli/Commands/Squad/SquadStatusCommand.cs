@@ -54,8 +54,18 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
             return 2;
         }
 
-        string targetRoot = SquadCommandComposition.ResolveTargetRoot(effectivePath);
         SquadDeploymentScope scope = SquadCommandComposition.ResolveScope(settings.Global);
+
+        // A --global status reads the one home-level receipt, so it is anchored at the home directory
+        // whatever the working directory is. State is migrated before the receipt is read.
+        string targetRoot = scope == SquadDeploymentScope.Global
+            ? SquadCommandComposition.ResolveGlobalAnchorRoot(stateStore, effectivePath, dryRun: false)
+            : SquadCommandComposition.ResolveTargetRoot(effectivePath);
+        SquadCommandComposition.WriteMigrationNotes(SquadCommandComposition.EnsureStateMigrated(
+            stateStore,
+            Environment.CurrentDirectory,
+            projectRoot: scope == SquadDeploymentScope.Project ? targetRoot : null,
+            dryRun: false));
         ISquadGlobalRootResolver globalRoots = _globalRoots ?? SquadCommandComposition.ResolveGlobalRoots();
 
         SquadReceipt? receipt = stateStore.ReadReceipt(targetRoot, scope);
@@ -118,6 +128,11 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
             AnsiConsole.MarkupLine(StatusLine("green", "ok", file, scope));
         }
 
+        if (scope == SquadDeploymentScope.Global)
+        {
+            WriteRegisteredProjects(stateStore);
+        }
+
         if (hasIssues)
         {
             AnsiConsole.WriteLine();
@@ -131,6 +146,34 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
         AnsiConsole.WriteLine();
         AnsiConsole.MarkupLine("[green]All deployed files match the recorded receipt.[/]");
         return 0;
+    }
+
+    /// <summary>
+    /// Lists the projects registered with the home-level registry, flagging each stale one with its reason.
+    /// A global deployment is the home's to report, and the registry is the list of projects that depend on
+    /// it, so the operator sees both in one place.
+    /// </summary>
+    /// <remarks>
+    /// Each project is one unfolded line, so its path can be copied straight from the output.
+    /// </remarks>
+    private static void WriteRegisteredProjects(SquadStateStore stateStore)
+    {
+        IReadOnlyList<SquadProjectRegistryEntry> projects = stateStore.ListProjects();
+        AnsiConsole.WriteLine();
+        if (projects.Count == 0)
+        {
+            SquadCommandComposition.WriteLine("[grey]No projects are registered.[/]");
+            return;
+        }
+
+        SquadCommandComposition.WriteLine("Registered projects:");
+        foreach (SquadProjectRegistryEntry project in projects)
+        {
+            string line = project.Stale
+                ? $"  [yellow]stale[/] {Markup.Escape(project.Path)} (stale: {Markup.Escape(project.StaleReason ?? "unknown")})"
+                : $"  [green]ok[/]    {Markup.Escape(project.Path)}";
+            SquadCommandComposition.WriteLine(line);
+        }
     }
 
     /// <summary>
