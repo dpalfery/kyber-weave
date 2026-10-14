@@ -26,7 +26,8 @@ const BADGE_OK = `${BADGE} border-emerald-500/30 bg-emerald-500/15 text-emerald-
 const BADGE_WARN = `${BADGE} border-amber-500/30 bg-amber-500/15 text-amber-700 dark:text-amber-300`
 const BADGE_MUTED = `${BADGE} border-border text-muted-foreground`
 
-function unmeasured(value: unknown): value is KyberSkillAvailability {
+/** True when a served value is a not-measurable verdict rather than a measured value. */
+export function unmeasured(value: unknown): value is KyberSkillAvailability {
   return (
     typeof value === 'object' &&
     value !== null &&
@@ -35,12 +36,13 @@ function unmeasured(value: unknown): value is KyberSkillAvailability {
   )
 }
 
-function reasonOf(value: KyberSkillAvailability): string {
+/** The harness's own reason, shown verbatim; a fixed fallback only when the reason is missing. */
+export function reasonOf(value: KyberSkillAvailability): string {
   return typeof value.reason === 'string' && value.reason.length > 0 ? value.reason : 'not exported by this harness'
 }
 
 /** Transport turn indices are 0-based; the screen shows 1-based turn numbers. */
-function turnLabel(turnsListed: number[]): string {
+export function skillTurnLabel(turnsListed: number[]): string {
   const shown = turnsListed.map((index) => index + 1).join(', ')
   return turnsListed.length === 1 ? `Listed in turn ${shown}` : `Listed in turns ${shown}`
 }
@@ -108,7 +110,7 @@ function renderRow(row: KyberSkillRow, onSelectSkill?: (skill: KyberSkillRow) =>
       </div>
 
       {listed && row.turns_listed.length > 0 && (
-        <p className="mt-1.5 text-[11px] text-tertiary-foreground">{turnLabel(row.turns_listed)}</p>
+        <p className="mt-1.5 text-[11px] text-tertiary-foreground">{skillTurnLabel(row.turns_listed)}</p>
       )}
       {unmeasured(row.listed) && (
         <p className="mt-1.5 text-[11px] text-amber-700 dark:text-amber-300">{reasonOf(row.listed)}</p>
@@ -154,13 +156,18 @@ export function SkillsPanel({ skills, summary, onSelectSkill, className }: Skill
   }
 
   const rows = skills.rows ?? []
-  const listedRows = rows.filter((row) => row.listed === true)
-  const noObservedInvocation = listedRows.filter((row) => row.invocations === 0).length
-  const listingUnmeasured = rows.filter((row) => unmeasured(row.listed)).length
-  const invocationsUnmeasured = listedRows.filter((row) => unmeasured(row.invocations)).length
 
   const listedCount = Array.isArray(summary?.skills_listed) ? summary.skills_listed.length : undefined
   const invokedCount = Array.isArray(summary?.skills_invoked) ? summary.skills_invoked.length : undefined
+
+  // The headline reads the served pair only. The browser never counts rows: if
+  // either served count is absent, the figure is stated as not measurable.
+  const uninvokedServed = skills.listed_uninvoked_count
+  const listedServed = skills.listed_count
+  const headline =
+    typeof uninvokedServed === 'number' && typeof listedServed === 'number'
+      ? `${uninvokedServed} of ${listedServed} listed skills had no observed invocation`
+      : 'The number of listed skills with no observed invocation is not measurable.'
 
   return (
     <div data-testid="skills-panel" className={cn(rootClass, 'space-y-4')}>
@@ -170,14 +177,9 @@ export function SkillsPanel({ skills, summary, onSelectSkill, className }: Skill
       </div>
 
       <div className="border-b border-border pb-3">
-        <p data-testid="skills-headline" className="text-sm font-medium text-foreground">
-          {noObservedInvocation} of {listedRows.length} listed skills had no observed invocation
-        </p>
-        {(listingUnmeasured > 0 || invocationsUnmeasured > 0) && (
-          <p className="mt-1 text-xs text-muted-foreground">
-            {listingUnmeasured > 0 && `${listingUnmeasured} with a listing that is not measurable is not counted. `}
-            {invocationsUnmeasured > 0 &&
-              `${invocationsUnmeasured} listed with invocations not measurable cannot be counted as uninvoked.`}
+        {rows.length > 0 && (
+          <p data-testid="skills-headline" className="text-sm font-medium text-foreground">
+            {headline}
           </p>
         )}
         {typeof skills.reported_skill_tokens === 'number' && (

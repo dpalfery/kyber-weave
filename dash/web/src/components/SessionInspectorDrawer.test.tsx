@@ -41,6 +41,8 @@ import { SearchableContentView } from './ContentViewToolbar.js'
 import { groupIdenticalParts } from './SessionInspectorDrawer.js'
 import type { KyberSessionContentResult, KyberTurnContentResult } from '../lib/kyberApi.js'
 import { fetchKyberSessionContent, fetchTurnContentFull } from '../lib/kyberApi.js'
+import type { KyberSkillRow } from '../lib/kyberApi.js'
+import skillsFixtures from './fixtures/skills-payload.json'
 
 // Set up React 19 test hook dispatcher so components using hooks can be rendered in tests
 const reactInternals = (
@@ -2850,6 +2852,184 @@ describe('SessionInspectorDrawer: lossless request builders', () => {
       restore()
     }
   })
+})
+
+describe('SessionInspectorDrawer: skill pane (F2)', () => {
+  const SKILL_SESSION_ID = 'sess-skill-1'
+  const skillTurnKey = (turnIndex: number) => ['kyber-turn-content-full', SKILL_SESSION_ID, turnIndex]
+  const docsRow = { name: 'docs', listed: true, invocations: 5, turns_listed: [0, 1], derived_tokens: 38 }
+
+  // Visible text only, so assertions read what the operator reads.
+  const textOf = (html: string): string => html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ')
+
+  function seedSkillTurn(qc: QueryClient, turnIndex: number, skills: Record<string, unknown>) {
+    qc.setQueryData(skillTurnKey(turnIndex), {
+      sessionId: SKILL_SESSION_ID,
+      turnIndex,
+      blocks: [],
+      parts: [],
+      assembledText: '',
+      ...skills,
+    } as unknown as KyberTurnContentResult)
+  }
+
+  function renderSkillDrawer(
+    row: unknown,
+    options: { qc?: QueryClient; contentRequest?: { sessionId: string; turnIndex: number; full: true } } = {},
+  ): string {
+    return renderHtml(
+      <QueryClientProvider client={options.qc ?? createTestQueryClient()}>
+        <SessionInspectorDrawer
+          open={true}
+          onClose={() => {}}
+          title="Skill: docs"
+          rawContent={{ skill: row as KyberSkillRow }}
+          contentRequest={options.contentRequest}
+        />
+      </QueryClientProvider>,
+    )
+  }
+
+  it('shows the listed state, the invocation count, and the listed turns as 1-based numbers', () => {
+    const html = renderSkillDrawer(docsRow)
+    expect(html).toContain('data-testid="skill-drawer-pane"')
+    const text = textOf(html)
+    expect(text).toMatch(/listed/i)
+    expect(text).toMatch(/\b5\b/)
+    expect(text).toMatch(/1\D+2\b/)
+    expect(text).not.toMatch(/\b0\b/)
+    expect(html).not.toContain('turns_listed')
+  })
+
+  it('shows a row whose listing is not measurable as the reason, never as not listed', () => {
+    const row = {
+      ...docsRow,
+      listed: { availability: 'not_measurable', reason: 'LISTED_UNMEASURED_REASON_3a7f' },
+      turns_listed: [],
+    }
+    const html = renderSkillDrawer(row)
+    expect(html).toContain('data-testid="skill-drawer-pane"')
+    expect(textOf(html)).toContain('LISTED_UNMEASURED_REASON_3a7f')
+    expect(textOf(html)).not.toMatch(/not listed/i)
+  })
+
+  it('shows a row whose invocations are not measurable as the reason, never as never invoked', () => {
+    const row = {
+      ...docsRow,
+      invocations: { availability: 'not_measurable', reason: 'INVOCATION_UNMEASURED_REASON_8c2d' },
+    }
+    const html = renderSkillDrawer(row)
+    expect(html).toContain('data-testid="skill-drawer-pane"')
+    expect(textOf(html)).toContain('INVOCATION_UNMEASURED_REASON_8c2d')
+    expect(textOf(html)).not.toMatch(/never invoked|\b0\b/i)
+  })
+
+  it('shows the listing text from the turn-content skills entry for the listed skill', () => {
+    const qc = createTestQueryClient()
+    seedSkillTurn(qc, 0, skillsFixtures.turnContentSkills.listedWithText)
+    const html = renderSkillDrawer(docsRow, {
+      qc,
+      contentRequest: { sessionId: SKILL_SESSION_ID, turnIndex: 0, full: true },
+    })
+    expect(html).toContain('data-testid="skill-drawer-pane"')
+    expect(textOf(html)).toContain('DOCS_LISTING_TEXT: Use when writing or revising documentation.')
+    expect(textOf(html)).not.toContain('DEPLOY_LISTING_TEXT')
+  })
+
+  it('shows the reason when the turn-content listing is not measurable, not an empty pane', () => {
+    const qc = createTestQueryClient()
+    seedSkillTurn(qc, 0, skillsFixtures.turnContentSkills.listingNotMeasurable)
+    const html = renderSkillDrawer(docsRow, {
+      qc,
+      contentRequest: { sessionId: SKILL_SESSION_ID, turnIndex: 0, full: true },
+    })
+    expect(html).toContain('data-testid="skill-drawer-pane"')
+    expect(textOf(html)).toContain('the harness did not export the listing text for this turn')
+  })
+
+  it('shows the reason when the whole turn-content skills entry is not measurable', () => {
+    const qc = createTestQueryClient()
+    // Served shape: GET .../turn/:index/content => { skills: <entry> }, where the
+    // whole entry is the not-measurable verdict.
+    seedSkillTurn(qc, 0, { skills: skillsFixtures.turnContentSkills.entryNotMeasurable })
+    const html = renderSkillDrawer(docsRow, {
+      qc,
+      contentRequest: { sessionId: SKILL_SESSION_ID, turnIndex: 0, full: true },
+    })
+    expect(html).toContain('data-testid="skill-drawer-pane"')
+    expect(textOf(html)).toContain('skill listings were not exported for this session')
+  })
+
+  it('does not leave the pane silent when the listing text is missing', () => {
+    // The wording for a missing text is not pinned; the pane must say something
+    // about the listing rather than render nothing.
+    const qc = createTestQueryClient()
+    seedSkillTurn(qc, 0, skillsFixtures.turnContentSkills.textMissing)
+    const html = renderSkillDrawer(docsRow, {
+      qc,
+      contentRequest: { sessionId: SKILL_SESSION_ID, turnIndex: 0, full: true },
+    })
+    expect(html).toContain('data-testid="skill-drawer-pane"')
+    expect(textOf(html)).toMatch(/not (?:exported|available|recorded|measurable)/i)
+  })
+
+  // The served entry is not validated by the transport. A malformed entry must not
+  // take the drawer down, and must never be read as "not listed" or "never invoked".
+  const NEUTRAL_LISTING_NOTE = 'Listing text is not available for this turn.'
+  const malformedListingCases: Array<{
+    label: string
+    skills: Record<string, unknown>
+    listingNote: boolean
+    invokedLine: boolean
+    listingText?: string
+  }> = [
+    { label: 'an empty entry', skills: {}, listingNote: true, invokedLine: false },
+    {
+      label: 'listed undefined with a valid invoked array',
+      skills: { listed: undefined, invoked: ['docs'] },
+      listingNote: true,
+      invokedLine: true,
+    },
+    { label: 'listed and invoked both null', skills: { listed: null, invoked: null }, listingNote: true, invokedLine: false },
+    { label: 'listed a string and invoked a number', skills: { listed: 'docs', invoked: 5 }, listingNote: true, invokedLine: false },
+    {
+      label: 'a valid listed array with invoked missing',
+      skills: { listed: [{ name: 'docs', text: 'MALFORMED_CASE_LISTING_TEXT' }] },
+      listingNote: false,
+      invokedLine: false,
+      listingText: 'MALFORMED_CASE_LISTING_TEXT',
+    },
+    {
+      label: 'a valid listed array with invoked a string',
+      skills: { listed: [{ name: 'docs', text: 'STRING_INVOKED_LISTING_TEXT' }], invoked: 'docs' },
+      listingNote: false,
+      invokedLine: false,
+      listingText: 'STRING_INVOKED_LISTING_TEXT',
+    },
+  ]
+
+  it.each(malformedListingCases)(
+    'renders the pane without throwing for $label, and never coerces it to not listed or never invoked',
+    ({ skills, listingNote, invokedLine, listingText }) => {
+      const qc = createTestQueryClient()
+      seedSkillTurn(qc, 0, { skills })
+      let html = ''
+      expect(() => {
+        html = renderSkillDrawer(docsRow, {
+          qc,
+          contentRequest: { sessionId: SKILL_SESSION_ID, turnIndex: 0, full: true },
+        })
+      }).not.toThrow()
+      expect(html).toContain('data-testid="skill-drawer-pane"')
+      const text = textOf(html)
+      expect(text.includes(NEUTRAL_LISTING_NOTE)).toBe(listingNote)
+      expect(text.includes('Invoked in this turn.')).toBe(invokedLine)
+      if (listingText !== undefined) {
+        expect(text).toContain(listingText)
+      }
+      expect(text).not.toMatch(/never invoked|not listed/i)
+    },
+  )
 })
 
 describe('narrowToolDefinitions', () => {

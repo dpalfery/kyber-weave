@@ -117,6 +117,46 @@ describe('SkillsPanel: tiles and headline', () => {
   })
 })
 
+describe('SkillsPanel: headline is read from the served counts, never counted from rows', () => {
+  it('states the served counts even when they differ from what counting the rows would give', () => {
+    // The rows give 2 of 3 (docs was invoked; deploy and lint were not). The server
+    // served 5 of 7. The browser must show what it was served.
+    const { container } = mount('servedCountsDifferFromRows')
+    const headline = screen.getByTestId('skills-headline')
+    expect(headline.textContent).toContain('5 of 7 listed skills had no observed invocation')
+    expect(headline.textContent).not.toContain('2 of 3')
+    expect(container.textContent?.replace(/\s+/g, ' ')).not.toContain('2 of 3 listed skills')
+  })
+
+  it('states the headline from the served pair on the realistic payload', () => {
+    mount('realistic')
+    expect(screen.getByTestId('skills-headline').textContent).toBe(
+      '2 of 3 listed skills had no observed invocation',
+    )
+  })
+
+  it.each(['listedNotMeasurableRow', 'invocationsNotMeasurableRow', 'onlyListedCountServed'] as const)(
+    'says the headline is not measurable, and counts no rows, when a served count is absent (%s)',
+    (name) => {
+      mount(name)
+      const headline = screen.getByTestId('skills-headline')
+      expect(headline.textContent).toMatch(/not measurable/i)
+      expect(headline.textContent).not.toMatch(/had no observed invocation/i)
+      expect(headline.textContent).not.toMatch(/\d+ of \d+/)
+    },
+  )
+})
+
+describe('SkillsPanel: empty rows keep the no-skill line and drop the headline', () => {
+  it('hides the headline when the payload is measurable with no rows, and keeps the no-skill line', () => {
+    const { container } = mount('noRecordedSkills')
+    expect(screen.queryByTestId('skills-headline')).toBeNull()
+    expect(container.textContent).toContain('No skill was recorded for this session.')
+    expect(container.textContent).not.toMatch(/had no observed invocation/i)
+    expect(container.querySelector('[data-testid^="skill-row-"]')).toBeNull()
+  })
+})
+
 describe('SkillsPanel: reported aggregate and derived labelling', () => {
   it('shows the harness-reported skill token aggregate, labelled as reported', () => {
     const { container } = mount('realistic')
@@ -197,6 +237,9 @@ describe('SkillsPanel: display rules', () => {
     'invocationsNotMeasurableRow',
     'panelNotMeasurable',
     'legacyNoSkills',
+    'servedCountsDifferFromRows',
+    'onlyListedCountServed',
+    'noRecordedSkills',
   ] as const
 
   it.each(fixtureNames)('shows no currency symbol or money figure for the %s payload', (name) => {

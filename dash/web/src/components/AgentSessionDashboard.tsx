@@ -693,6 +693,14 @@ export function AgentSessionContent({
     const sessionId = session.id ?? session.session_id
     if (!sessionId) return undefined
     if (selectedSpanId) return { sessionId: String(sessionId), span: selectedSpanId }
+    if (drawerContent && typeof drawerContent === 'object' && 'skill' in drawerContent) {
+      // Skill drawer: the listing text comes from the first turn that listed the
+      // skill (the served 0-based index). A skill no turn lists has no request.
+      const firstListedTurn = (drawerContent as { skill: KyberSkillRow }).skill.turns_listed[0]
+      return typeof firstListedTurn === 'number'
+        ? { sessionId: String(sessionId), turnIndex: firstListedTurn, full: true as const }
+        : undefined
+    }
     if (
       drawerContent &&
       typeof drawerContent === 'object' &&

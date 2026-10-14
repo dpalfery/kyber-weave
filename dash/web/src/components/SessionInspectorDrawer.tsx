@@ -2,16 +2,18 @@ import * as React from 'react'
 import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { formatDuration } from '../lib/labels.js'
-import { cn, usd, fmtTokens } from '../lib/utils.js'
+import { cn, usd, fmtNum, fmtTokens } from '../lib/utils.js'
 import { fetchKyberSessionContent, fetchSpanAttributes, fetchTurnContentFull } from '../lib/kyberApi.js'
 import type {
   KyberMessageLike,
+  KyberSkillRow,
   KyberTurnContentBlock,
   KyberTurnContentPart,
   KyberTurnContentResult,
   KyberTurnContentShadow,
 } from '../lib/kyberApi.js'
 import type { DrawerContent, SessionTimelineNode } from './AgentSessionDashboard.js'
+import { reasonOf, skillTurnLabel, unmeasured } from './SkillsPanel.js'
 import { Skeleton } from './ui/skeleton.js'
 import { SlideOutDrawer } from './ui/SlideOutDrawer.js'
 import { CopyExactButton, SearchableContentView, type ContentViewMode } from './ContentViewToolbar.js'
@@ -3204,6 +3206,134 @@ export { groupIdenticalParts }
  */
 export type { DrawerContent }
 
+/** A not-measurable verdict rendered as the harness's own reason, never as a value. */
+function NotMeasurableNote({ reason }: { reason: string }) {
+  return <p className="text-xs text-amber-700 dark:text-amber-300">{reason}</p>
+}
+
+/**
+ * The served listing element for `skillName`. Elements that are not objects,
+ * or that do not carry the name, are skipped rather than read.
+ */
+function listingNamed(listed: unknown[], skillName: string): { text?: unknown } | undefined {
+  for (const item of listed) {
+    if (typeof item === 'object' && item !== null && (item as { name?: unknown }).name === skillName) {
+      return item as { text?: unknown }
+    }
+  }
+  return undefined
+}
+
+/**
+ * The listing text for the skill in one turn, read from the turn-content
+ * `skills` entry. Uses the same query as the whole-turn panel so both share
+ * the cached response.
+ */
+function SkillListingSection({ skillName, request }: { skillName: string; request: TurnFullContentRequest }) {
+  const turnQuery = useQuery({
+    queryKey: ['kyber-turn-content-full', request.sessionId, request.turnIndex],
+    queryFn: () => fetchTurnContentFull(request.sessionId, request.turnIndex),
+  })
+
+  if (turnQuery.isError) {
+    return <p className="text-xs text-tertiary-foreground">The listing text for this turn could not be loaded.</p>
+  }
+  const data = turnQuery.data
+  if (data === undefined) {
+    return <p className="text-xs text-tertiary-foreground">Loading the listing text for this turn…</p>
+  }
+
+  // The served entry is untrusted at runtime: either side may be missing or
+  // malformed. Only a real array is read; anything else is never coerced into
+  // "not listed" or "never invoked".
+  const entry: unknown = data.skills
+  if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
+    return <p className="text-xs text-tertiary-foreground">Listing text is not available for this turn.</p>
+  }
+  if (unmeasured(entry)) {
+    return <NotMeasurableNote reason={reasonOf(entry)} />
+  }
+
+  const listedSide: unknown = (entry as { listed?: unknown }).listed
+  const invokedSide: unknown = (entry as { invoked?: unknown }).invoked
+
+  let listingBody: React.ReactNode
+  if (unmeasured(listedSide)) {
+    listingBody = <NotMeasurableNote reason={reasonOf(listedSide)} />
+  } else if (!Array.isArray(listedSide)) {
+    listingBody = <p className="text-xs text-tertiary-foreground">Listing text is not available for this turn.</p>
+  } else {
+    const listing = listingNamed(listedSide, skillName)
+    if (listing === undefined) {
+      listingBody = <p className="text-xs text-tertiary-foreground">This turn&apos;s listing does not name {skillName}.</p>
+    } else if (typeof listing.text !== 'string' || listing.text.length === 0) {
+      listingBody = (
+        <p className="text-xs text-tertiary-foreground">The listing text for this skill was not recorded in this turn.</p>
+      )
+    } else {
+      listingBody = (
+        <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-muted/40 p-2 font-mono text-[11px] text-foreground">
+          {listing.text}
+        </pre>
+      )
+    }
+  }
+
+  let invokedBody: React.ReactNode = null
+  if (unmeasured(invokedSide)) {
+    invokedBody = <NotMeasurableNote reason={`Invocations in this turn: ${reasonOf(invokedSide)}`} />
+  } else if (Array.isArray(invokedSide) && invokedSide.includes(skillName)) {
+    invokedBody = <p className="text-xs text-foreground">Invoked in this turn.</p>
+  }
+
+  return (
+    <div className="space-y-2">
+      <h4 className="text-[11px] uppercase tracking-wider text-tertiary-foreground">Listing text</h4>
+      {listingBody}
+      {invokedBody}
+    </div>
+  )
+}
+
+/**
+ * The skill drawer pane (F2). Every value is the served row or the served
+ * turn-content entry. A not-measurable side shows its own reason, never
+ * "not listed" or "never invoked".
+ */
+function SkillDrawerPane({ row, request }: { row: KyberSkillRow; request: TurnFullContentRequest | null }) {
+  const listedReason = unmeasured(row.listed) ? reasonOf(row.listed) : null
+  const invocationsReason = unmeasured(row.invocations) ? reasonOf(row.invocations) : null
+  const hasTurns = row.turns_listed.length > 0
+
+  const listedState = row.listed === true ? 'Listed' : row.listed === false ? 'Not listed' : 'Listing not measurable'
+
+  return (
+    <div data-testid="skill-drawer-pane" className="space-y-4 text-sm">
+      <dl className="grid grid-cols-2 gap-3 text-xs">
+        <div>
+          <dt className="text-[11px] uppercase tracking-wider text-tertiary-foreground">Listed</dt>
+          <dd className="mt-1 font-semibold text-foreground">{listedState}</dd>
+        </div>
+        <div>
+          <dt className="text-[11px] uppercase tracking-wider text-tertiary-foreground">Invocations</dt>
+          <dd className="mt-1 font-semibold tabular-nums text-foreground">
+            {typeof row.invocations === 'number' ? fmtNum(row.invocations) : 'Not measurable'}
+          </dd>
+        </div>
+      </dl>
+
+      {listedReason !== null && <NotMeasurableNote reason={listedReason} />}
+      {invocationsReason !== null && <NotMeasurableNote reason={invocationsReason} />}
+      {hasTurns && <p className="text-xs text-muted-foreground">{skillTurnLabel(row.turns_listed)}</p>}
+
+      {request !== null && hasTurns && <SkillListingSection skillName={row.name} request={request} />}
+      {!hasTurns && row.listed === true && (
+        <p className="text-xs text-tertiary-foreground">No turn lists this skill, so there is no listing text to read.</p>
+      )}
+    </div>
+  )
+}
+
 export interface SessionInspectorDrawerProps {
   open: boolean
   onClose: () => void
@@ -3236,7 +3366,10 @@ export function SessionInspectorDrawer({
   // 2000-char stub renders next to (or instead of) the text this route exists for.
   const rawRecord =
     rawContent !== null && rawContent !== undefined && typeof rawContent === 'object' ? rawContent : null
-  const turnRequest = isTurnFullContentRequest(contentRequest) ? contentRequest : null
+  // A skill row carries its own pane: the served row and the first listed
+  // turn's `skills` entry. It never shows the raw row or the whole-turn panel.
+  const skillRow = rawRecord !== null && 'skill' in rawRecord ? (rawRecord as { skill: KyberSkillRow }).skill : null
+  const turnRequest = skillRow === null && isTurnFullContentRequest(contentRequest) ? contentRequest : null
   // A whole-turn request carries its own panel (with the turn row as the
   // measured-totals source); the clipped payload row must not render
   // alongside the lossless content.
@@ -3245,7 +3378,11 @@ export function SessionInspectorDrawer({
       ? (rawRecord as { turn?: TurnFullContentTurn }).turn ?? undefined
       : undefined
   const inspectorData =
-    turnRequest !== null ? null : contentRequest && rawRecord ? { ...rawRecord, content: undefined } : rawContent
+    skillRow !== null || turnRequest !== null
+      ? null
+      : contentRequest && rawRecord
+        ? { ...rawRecord, content: undefined }
+        : rawContent
   const fallbackContent = rawRecord && 'content' in rawRecord ? rawRecord.content : undefined
 
   // Invoked as a function rather than returned as JSX on purpose: the
@@ -3268,13 +3405,19 @@ export function SessionInspectorDrawer({
     children: (
       <>
         {children}
+        {skillRow !== null && (
+          <SkillDrawerPane
+            row={skillRow}
+            request={isTurnFullContentRequest(contentRequest) ? contentRequest : null}
+          />
+        )}
         {inspectorData !== undefined && inspectorData !== null && (
           <InspectorContent data={inspectorData} />
         )}
         {turnRequest !== null ? (
           <TurnFullContentPanel request={turnRequest} turn={turnFallback} />
         ) : null}
-        {contentRequest && !isTurnFullContentRequest(contentRequest) && (
+        {skillRow === null && contentRequest && !isTurnFullContentRequest(contentRequest) && (
           <FullContentPanel request={contentRequest} fallback={fallbackContent} />
         )}
         {!children && (rawContent === undefined || rawContent === null) && !contentRequest && (
