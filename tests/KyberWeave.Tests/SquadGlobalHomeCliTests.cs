@@ -60,7 +60,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         using Harness h = NewHarness("global-with-path");
         ScriptedAgentRenderer renderer = new("architect");
         string anchor = h.MakeDirectory("anchor");
-        string named = h.MakeDirectory("named-but-ignored");
+        string named = h.MakeDirectory("elsewhere");
         InstallGlobal(h, anchor, renderer, SquadTarget.Codex);
 
         CommandExecution execution = Capture(() =>
@@ -68,7 +68,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
                 .Execute(null!, GlobalUpdate(named)));
 
         AssertExit(execution, 0);
-        Assert.Contains("ignored", execution.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("is ignored under --global", execution.Output, StringComparison.Ordinal);
         Assert.Contains(named, execution.Output, StringComparison.Ordinal);
         Assert.Equal(UpdatedVersion, VersionOf(GlobalLockPath(h)));
     }
@@ -237,8 +237,51 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
                 .Execute(null!, GlobalUpdate(fleet.Anchor, [fleet.Stale.Root])));
 
         AssertExit(execution, 0);
-        Assert.Contains("stale", execution.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("skipping stale project", execution.Output, StringComparison.Ordinal);
         AssertUnchanged(staleLockBefore, fleet.Stale.LockPath);
+    }
+
+    /// <summary>
+    /// A dry run plans and never writes. A global dry run that names an unregistered project with
+    /// in-repo state must not import it: the home project state and the registry stay as they were, the
+    /// in-repo files stay byte-identical, and the project is reported as skipped, so the exit stays 0.
+    /// </summary>
+    [Fact]
+    public void GlobalDryRunNamingAnImportableProjectWritesNothingAndSkipsIt()
+    {
+        using Harness h = NewHarness("dry-run-import");
+        ScriptedAgentRenderer renderer = new("architect");
+        string anchor = h.MakeDirectory("global-anchor");
+        InstallGlobal(h, anchor, renderer, SquadTarget.Codex);
+        string importable = h.MakeDirectory("importable");
+        WriteInRepoLegacyState(h, importable);
+        string inRepoReceipt = Path.Combine(importable, ".kyber-weave", "squad.receipt.json");
+        string inRepoLock = Path.Combine(importable, ".kyber-weave", "squad.lock.yml");
+        string homeProjectState = Path.Combine(
+            h.Home,
+            ".kyber-weave",
+            "squad",
+            "projects",
+            SquadPhysicalRootIdentity.Resolve(importable).Key);
+        byte[]? receiptBefore = Snapshot(inRepoReceipt);
+        byte[]? lockBefore = Snapshot(inRepoLock);
+        byte[]? globalLockBefore = Snapshot(GlobalLockPath(h));
+        byte[]? registryBefore = Snapshot(RegistryPath(h));
+        SquadUpdateSettings settings = GlobalUpdate(anchor, [importable]);
+        settings.DryRun = true;
+
+        CommandExecution execution = Capture(() =>
+            UpdateCommand(h, renderer, new RecordingProjectPicker(NoProjects), isInteractive: false)
+                .Execute(null!, settings));
+
+        AssertExit(execution, 0);
+        Assert.Contains("on the next non-dry-run invocation", execution.Output, StringComparison.Ordinal);
+        Assert.Contains("0 updated, 0 failed, 1 skipped", execution.Output, StringComparison.Ordinal);
+        Assert.False(Directory.Exists(homeProjectState), "A dry run must not create the home project state.");
+        Assert.Equal(registryBefore, Snapshot(RegistryPath(h)));
+        AssertUnchanged(receiptBefore, inRepoReceipt);
+        AssertUnchanged(lockBefore, inRepoLock);
+        AssertUnchanged(globalLockBefore, GlobalLockPath(h));
     }
 
     /// <summary>
@@ -400,7 +443,8 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         string alphaLine = LineContaining(execution.Output, fleet.Alpha.Physical);
         string staleLine = LineContaining(execution.Output, fleet.Stale.Physical);
         Assert.DoesNotContain("stale", alphaLine, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("stale", staleLine, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("(stale:", alphaLine, StringComparison.Ordinal);
+        Assert.Contains("(stale:", staleLine, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -429,7 +473,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
                 picker: new RecordingProjectPicker(NoProjects))
             .Execute(null!, new SquadDoctorSettings { Path = fleet.Anchor, Global = true }));
 
-        Assert.Contains("stale", execution.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("is stale (", execution.Output, StringComparison.Ordinal);
         Assert.Contains(fleet.Stale.Physical, execution.Output, StringComparison.Ordinal);
         Assert.Contains("legacy-alpha", execution.Output, StringComparison.Ordinal);
         Assert.Contains("legacy-beta", execution.Output, StringComparison.Ordinal);
@@ -545,12 +589,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     private static SquadLifecycleResult RunInstall(Harness h, ISquadRenderer renderer, SquadInstallRequest request) =>
         h.Lifecycle(renderer).InstallAsync(request).GetAwaiter().GetResult();
 
-    /// <summary>
-    /// Builds the update command over the injected seams. <c>SquadUpdateCommand</c> does not yet
-    /// hand its <c>globalRoots</c> to the lifecycle or to the global confirmation echo, so a
-    /// <c>--global</c> run still reaches the real per-target roots. Until that wiring lands, the
-    /// RED run is made under a scratch HOME (see the report); the tests themselves inject correctly.
-    /// </summary>
+    /// <summary>Builds the update command over the injected seams, so no run reaches a real harness directory.</summary>
     private static SquadUpdateCommand UpdateCommand(
         Harness h,
         ISquadRenderer renderer,

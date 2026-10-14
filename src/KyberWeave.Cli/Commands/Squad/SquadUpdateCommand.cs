@@ -222,8 +222,15 @@ public sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
                 continue;
             }
 
-            SquadMigrationReport import = SquadCommandComposition.ImportProjectIfHomeStateAbsent(stateStore, path);
+            SquadMigrationReport import = SquadCommandComposition.ImportProjectIfHomeStateAbsent(stateStore, path, settings.DryRun);
             SquadCommandComposition.WriteMigrationNotes(import);
+            if (settings.DryRun && import.ImportedProjects.Count > 0)
+            {
+                // A dry run imports nothing, so the project has no home state yet and a plan against it would
+                // describe a run the real update never makes. The next non-dry-run invocation imports and updates it.
+                outcomes.Add(new ProjectOutcome(path, ProjectState.Skipped));
+                continue;
+            }
 
             UpdateRun projectRun = new(
                 TargetRoot: path,

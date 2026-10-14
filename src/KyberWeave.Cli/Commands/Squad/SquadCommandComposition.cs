@@ -554,7 +554,8 @@ internal static class SquadCommandComposition
     /// Imports one project's in-repo state into the home registry when its home state is absent. A project
     /// whose home receipt already exists is left alone, because the home receipt is the authority.
     /// </summary>
-    public static SquadMigrationReport ImportProjectIfHomeStateAbsent(SquadStateStore stateStore, string root)
+    /// <param name="dryRun">Whether the run only plans. A dry run writes nothing and reports the import it would make.</param>
+    public static SquadMigrationReport ImportProjectIfHomeStateAbsent(SquadStateStore stateStore, string root, bool dryRun)
     {
         ArgumentNullException.ThrowIfNull(stateStore);
 
@@ -563,7 +564,7 @@ internal static class SquadCommandComposition
             return new SquadMigrationReport([], [], [], []);
         }
 
-        return new SquadStateMigration(stateStore, stateStore.UserPaths).ImportProject(root);
+        return new SquadStateMigration(stateStore, stateStore.UserPaths).ImportProject(root, dryRun);
     }
 
     /// <summary>

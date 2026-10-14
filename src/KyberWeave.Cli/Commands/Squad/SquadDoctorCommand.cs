@@ -76,7 +76,8 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
 
         // Doctor reads home-level state, so it resolves the store once. A --global doctor is anchored at the
         // home directory whatever the working directory is, and a path given with it is named and ignored.
-        // Doctor writes nothing itself, so the anchor is resolved as a dry run and never creates the home.
+        // The anchor resolves as a dry run, so doctor never creates the home directory. Doctor is not read-only:
+        // the migration below runs with dryRun: false and may move legacy state into the home.
         SquadStateStore homeStateStore = _stateStore ?? SquadCommandComposition.ResolveStateStore(_userPaths);
         if (settings.Global)
         {
