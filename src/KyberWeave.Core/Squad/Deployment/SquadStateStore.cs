@@ -111,7 +111,15 @@ public sealed class SquadStateStore
     /// than dropped, so an operator can see what was registered before choosing to unregister it.
     /// </remarks>
     /// <exception cref="InvalidDataException">The registry file exists but is not a valid registry.</exception>
-    public IReadOnlyList<SquadProjectRegistryEntry> ListProjects()
+    public IReadOnlyList<SquadProjectRegistryEntry> ListProjects() => ListProjects(persistRebuild: true);
+
+    /// <summary>
+    /// Lists the registry exactly as <see cref="ListProjects()"/> does, but never writes the rebuilt registry
+    /// back. A read-only caller, such as a migration dry run, must not change the home to answer a question.
+    /// </summary>
+    internal IReadOnlyList<SquadProjectRegistryEntry> ListProjectsWithoutRebuild() => ListProjects(persistRebuild: false);
+
+    private IReadOnlyList<SquadProjectRegistryEntry> ListProjects(bool persistRebuild)
     {
         Dictionary<string, RegistryRecord> registry = ReadRegistry();
         bool rebuilt = false;
@@ -133,7 +141,7 @@ public sealed class SquadStateStore
             rebuilt = true;
         }
 
-        if (rebuilt)
+        if (rebuilt && persistRebuild)
             WriteRegistry(registry);
 
         return registry

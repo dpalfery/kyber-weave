@@ -224,6 +224,30 @@ public sealed class SquadStateMigrationTests
     }
 
     /// <summary>
+    /// A single-root legacy receipt with no absolute target root and no key match against the home or the
+    /// invoking directory binds to the registry entry whose root key is the legacy directory's key. The
+    /// registry is the record of which projects this home knows, so it can name the root a receipt was written for.
+    /// </summary>
+    [Fact]
+    public void SingleRootLegacyReceiptMigratesToTheRegistryRootWhoseKeyMatchesItsDirectory()
+    {
+        using TempDirectory fixture = new TempDirectory();
+        MigrationScenario scenario = CreateScenario(fixture);
+        string registered = Path.Combine(fixture.Path, "registered-target");
+        Directory.CreateDirectory(registered);
+        scenario.Store.RegisterProject(registered, ["codex"], InstalledAt);
+        WriteLegacyGlobal(scenario, registered, SingleRootReceipt(), Lock("1.2.3"));
+
+        SquadMigrationReport report = scenario.Migration.MigrateGlobal(invokingCwd: null);
+
+        Assert.NotEmpty(report.MigratedItems);
+        Assert.Empty(report.UnmigratedLegacyRoots);
+        Assert.Equal(
+            PhysicalPathOf(registered),
+            ReadTargetRoot(Path.Combine(HomeGlobalDirectory(scenario), "squad.receipt.json")));
+    }
+
+    /// <summary>
     /// A single-root legacy receipt that matches neither the home nor the invoking directory has no root it
     /// can be bound to. Guessing one would attach ownership to the wrong place, so it stays where it is and
     /// is reported.
@@ -407,15 +431,35 @@ public sealed class SquadStateMigrationTests
     /// a move of their global state before committing to it.
     /// </summary>
     /// <remarks>
-    /// Not expressible yet: <see cref="SquadStateMigration.MigrateGlobal"/> has no dry-run parameter, and
-    /// <see cref="SquadStateMigration.ImportProject"/> has none either. The intended contract is that with
-    /// dry-run set, nothing is written beneath the home store, the legacy files are unchanged, and the report
-    /// says the legacy state at its path will be migrated on the next non-dry-run invocation. The body stays
-    /// empty until a parameter is decided, so the gap stays visible in the suite rather than being hidden.
+    /// The whole fixture tree is snapshotted, so a write anywhere under it (the home store, the registry, a
+    /// directory created for a project, or a change to the legacy or in-repo files) fails the test. The report
+    /// must still name the legacy state at its path, so the operator can see what the next run will move.
     /// </remarks>
-    [Fact(Skip = "SquadStateMigration has no dry-run parameter yet; see the remarks for the intended contract.")]
+    [Fact]
     public void DryRunReportsPendingMigrationAndWritesNothing()
     {
+        using TempDirectory fixture = new TempDirectory();
+        MigrationScenario scenario = CreateScenario(fixture);
+        string root = Path.Combine(fixture.Path, "customer-alpha");
+        Directory.CreateDirectory(root);
+        WriteLegacyGlobal(scenario, root, PerTargetRootsReceipt(), Lock("1.2.3"));
+        string legacyDirectory = LegacyGlobalDirectory(scenario, root);
+        string repo = Path.Combine(fixture.Path, "repo");
+        Directory.CreateDirectory(repo);
+        WriteInRepoState(scenario, repo, Lock("1.2.3"));
+        TreeSnapshot fixtureBefore = DirectoryTreeSnapshot.SnapshotTree(fixture.Path);
+
+        SquadMigrationReport globalReport = scenario.Migration.MigrateGlobal(invokingCwd: null, dryRun: true);
+        SquadMigrationReport projectReport = scenario.Migration.ImportProject(repo, dryRun: true);
+
+        Assert.Contains(
+            globalReport.MigratedItems,
+            item => item.Contains(legacyDirectory, StringComparison.Ordinal));
+        Assert.NotEmpty(projectReport.ImportedProjects);
+        Assert.False(
+            Directory.Exists(Path.Combine(scenario.Home, ".kyber-weave")),
+            "A dry run must not create the home state directory.");
+        DirectoryTreeSnapshot.AssertTreeUnchanged(fixture.Path, fixtureBefore);
     }
 
     private sealed record MigrationScenario(
