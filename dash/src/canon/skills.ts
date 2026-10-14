@@ -16,6 +16,7 @@
 //     reported once, from the latest turn, carried whole and never split across rows.
 //   - Everything else: the listing is not measurable, with a reason.
 
+import { harnessFamily } from './measurability.js'
 import { SKILLS_INVOKED_KEY, SKILLS_LISTED_KEY, isNotMeasurable, notMeasurable } from './types.js'
 import type { CanonicalRecord, Measurability, NotMeasurable } from './types.js'
 
@@ -27,7 +28,11 @@ const ANTIGRAVITY_LISTING_PREFIX = 'Active Skills: '
 /** Harness per-turn resident skill-token counter; never summed, never split across skills. */
 const ANTIGRAVITY_SKILL_TOKENS_KEY = 'gen_ai.usage.skill_tokens'
 
-const CLAUDE_HARNESS = 'claude-code'
+/**
+ * The Claude family's display id. Ingest stamps records `claude-cli` or
+ * `claude-desktop`; `harnessFamily` folds every Claude front-end onto this id.
+ */
+const CLAUDE_FAMILY = 'claude-code'
 const SKILL_TOOL_NAMES: ReadonlySet<string> = new Set(['Skill', 'skill'])
 const SKILL_TOOL_OP = 'tool.invoke'
 const AGENT_ROLLUP_OP = 'agent.invoke'
@@ -102,7 +107,7 @@ export function extractListedSkills(record: CanonicalRecord): ListedResult {
 
 export function extractInvokedSkills(records: readonly CanonicalRecord[]): InvokedResult {
   const hasInvocationSource = records.some(
-    (record) => record.harness === CLAUDE_HARNESS || isSkillToolCall(record) || SKILLS_INVOKED_KEY in rawOf(record),
+    (record) => isClaudeFamily(record) || isSkillToolCall(record) || SKILLS_INVOKED_KEY in rawOf(record),
   )
   if (!hasInvocationSource) {
     return notMeasurable(
@@ -157,17 +162,57 @@ export function buildSkillsView(
   measurability: Measurability,
   countTokens: (text: string) => number,
 ): SkillsView {
+  return skillsForSession(records, turnRecords, measurability, countTokens).view
+}
+
+/** A session's skills view and its per-turn listing, produced by one shared fold. */
+export type SessionSkills = {
+  view: SkillsView
+  /**
+   * Each turn's effective listing, exactly as `listedByTurn` returns it. Set
+   * exactly when `view` is measurable; absent otherwise.
+   */
+  listed: Map<string, Map<string, string | undefined>> | undefined
+}
+
+/**
+ * `buildSkillsView` and `listedByTurn` from a single fold over the session. A
+ * caller that needs both (the session payload) calls this once, not twice.
+ */
+export function skillsForSession(
+  records: readonly CanonicalRecord[],
+  turnRecords: readonly CanonicalRecord[],
+  measurability: Measurability,
+  countTokens: (text: string) => number,
+): SessionSkills {
   const declaredListing = measurability.skills_listed
-  if (declaredListing !== undefined && isNotMeasurable(declaredListing)) return declaredListing
+  if (declaredListing !== undefined && isNotMeasurable(declaredListing)) return { view: declaredListing, listed: undefined }
 
   const all = uniqueBySpan([...records, ...turnRecords])
   const turns = uniqueBySpan(turnRecords)
   if (turns.length === 0) {
-    return notMeasurable('No model turns were recorded, so skills listed cannot be attributed to any turn.')
+    return {
+      view: notMeasurable('No model turns were recorded, so skills listed cannot be attributed to any turn.'),
+      listed: undefined,
+    }
   }
 
   const byTurn = effectiveListingsOf(all, turns)
+  if (byTurn.size === 0) {
+    return { view: notMeasurable(firstListingReason(turns)), listed: undefined }
+  }
 
+  return { view: measuredView(all, turns, byTurn, measurability, countTokens), listed: byTurn }
+}
+
+/** The measured view, given a session's effective listing per turn. */
+function measuredView(
+  all: readonly CanonicalRecord[],
+  turns: readonly CanonicalRecord[],
+  byTurn: ReadonlyMap<string, Map<string, string | undefined>>,
+  measurability: Measurability,
+  countTokens: (text: string) => number,
+): MeasuredSkillsView {
   const listedByName = new Map<string, { turnSpanIds: string[]; description?: string }>()
   for (const turn of turns) {
     const effective = byTurn.get(turn.spanId)
@@ -178,10 +223,6 @@ export function buildSkillsView(
       row.description = description ?? row.description
       listedByName.set(name, row)
     }
-  }
-
-  if (byTurn.size === 0) {
-    return notMeasurable(firstListingReason(turns))
   }
 
   const declaredInvoked = measurability.skills_invoked
@@ -230,18 +271,81 @@ export function listedByTurn(
   return effectiveListingsOf(uniqueBySpan([...records, ...turnRecords]), uniqueBySpan(turnRecords))
 }
 
-/** The shared fold behind `listedByTurn` and `buildSkillsView`. */
+/**
+ * The shared fold behind `listedByTurn`, `buildSkillsView` and `skillsForSession`.
+ *
+ * One time-ordered pass per session carries the running effective listing, so the
+ * cost is linear in turns and events (plus one copy per listed turn), not turns x
+ * events. Rules: an initial listing replaces the running list and a non-initial one
+ * unions in; a turn sees the session-level events at or before its time; a turn
+ * whose time cannot be parsed sees none of them; a rollup listing applies to its
+ * direct children on top of the running list. A turn no measured listing applies
+ * to has no entry.
+ */
 function effectiveListingsOf(
   all: readonly CanonicalRecord[],
   turns: readonly CanonicalRecord[],
 ): Map<string, Map<string, string | undefined>> {
   const { sessionEvents, rollups } = collectListings(all)
-  const byTurn = new Map<string, Map<string, string | undefined>>()
+
+  const eventsBySession = new Map<string, ListingEvent[]>()
+  for (const event of sessionEvents) {
+    const list = eventsBySession.get(event.sessionKey) ?? []
+    list.push(event)
+    eventsBySession.set(event.sessionKey, list)
+  }
+
+  const placedBySession = new Map<string, Array<{ turn: CanonicalRecord; time: number }>>()
+  const unplaced: CanonicalRecord[] = []
   for (const turn of turns) {
-    const effective = effectiveListing(turn, sessionEvents, rollups)
-    if (effective !== undefined) byTurn.set(turn.spanId, effective)
+    const time = timeOf(turn)
+    if (Number.isNaN(time)) {
+      unplaced.push(turn)
+      continue
+    }
+    const key = sessionKeyOf(turn)
+    const list = placedBySession.get(key) ?? []
+    list.push({ turn, time })
+    placedBySession.set(key, list)
+  }
+
+  const byTurn = new Map<string, Map<string, string | undefined>>()
+  for (const [sessionKey, placed] of placedBySession) {
+    // Stable sort: turns sharing a time keep their input order.
+    placed.sort((a, b) => a.time - b.time)
+    const events = eventsBySession.get(sessionKey) ?? []
+    const running = new Map<string, string | undefined>()
+    let next = 0
+    let sessionApplied = false
+    for (const { turn, time } of placed) {
+      for (let event = events[next]; event !== undefined && event.time <= time; event = events[next]) {
+        next++
+        sessionApplied = true
+        if (event.listing.isInitial) running.clear()
+        applySkills(running, event.listing.skills)
+      }
+      const parent = parentSkills(turn, rollups)
+      if (!sessionApplied && parent === undefined) continue
+      const effective = new Map(running)
+      if (parent !== undefined) applySkills(effective, parent)
+      byTurn.set(turn.spanId, effective)
+    }
+  }
+
+  for (const turn of unplaced) {
+    const parent = parentSkills(turn, rollups)
+    if (parent === undefined) continue
+    const effective = new Map<string, string | undefined>()
+    applySkills(effective, parent)
+    byTurn.set(turn.spanId, effective)
   }
   return byTurn
+}
+
+/** The skills a rollup listing gives its direct children, or undefined when the turn has none. */
+function parentSkills(turn: CanonicalRecord, rollups: ReadonlyMap<string, RollupListing>): ListedSkill[] | undefined {
+  if (turn.parentSpanId === null) return undefined
+  return rollups.get(turn.parentSpanId)?.listing.skills
 }
 
 // ---------------------------------------------------------------------------
@@ -358,41 +462,6 @@ function collectListings(records: readonly CanonicalRecord[]): {
   return { sessionEvents, rollups }
 }
 
-/**
- * The skills a turn had access to, with the description last given for each,
- * or undefined when no listing applies to the turn at all.
- */
-function effectiveListing(
-  turn: CanonicalRecord,
-  sessionEvents: readonly ListingEvent[],
-  rollups: ReadonlyMap<string, RollupListing>,
-): Map<string, string | undefined> | undefined {
-  const effective = new Map<string, string | undefined>()
-  let applies = false
-  const sessionKey = sessionKeyOf(turn)
-  const time = timeOf(turn)
-
-  // A turn whose time cannot be parsed cannot be placed against a session-level
-  // listing, so no session-level listing is shown to apply to it. Rollup listings
-  // below do not depend on time and still apply.
-  if (!Number.isNaN(time)) {
-    for (const event of sessionEvents) {
-      if (event.sessionKey !== sessionKey || event.time > time) continue
-      applies = true
-      if (event.listing.isInitial) effective.clear()
-      applySkills(effective, event.listing.skills)
-    }
-  }
-
-  const parent = turn.parentSpanId === null ? undefined : rollups.get(turn.parentSpanId)
-  if (parent !== undefined) {
-    applies = true
-    applySkills(effective, parent.listing.skills)
-  }
-
-  return applies ? effective : undefined
-}
-
 function applySkills(effective: Map<string, string | undefined>, skills: readonly ListedSkill[]): void {
   for (const skill of skills) effective.set(skill.name, skill.description ?? effective.get(skill.name))
 }
@@ -452,6 +521,11 @@ function skillArgument(args: unknown): string | undefined {
 // ---------------------------------------------------------------------------
 // Shared helpers
 // ---------------------------------------------------------------------------
+
+/** True for every Claude front-end identity (`claude-code`, `claude-cli`, `claude-desktop`, ...). */
+function isClaudeFamily(record: CanonicalRecord): boolean {
+  return harnessFamily(record.harness) === CLAUDE_FAMILY
+}
 
 function rawOf(record: CanonicalRecord): Record<string, unknown> {
   return isObject(record.raw) ? record.raw : {}

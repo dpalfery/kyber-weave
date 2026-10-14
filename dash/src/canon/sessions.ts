@@ -26,7 +26,7 @@ import { buildFindings } from './findings.js'
 import { buildHarnessRollup } from './harnesses.js'
 import { buildRuns } from './runs.js'
 import { CanonStore, type SessionRow } from './store.js'
-import { buildSkillsView, extractInvokedSkills, listedByTurn, type SkillsView } from './skills.js'
+import { extractInvokedSkills, skillsForSession, type SkillsView } from './skills.js'
 import { activeTokenizer, createCachedCounter, loadO200kCounter } from './tokens.js'
 import { notMeasurable, type CanonicalRecord, type CostBlock, type Measurability, type MetricAvailability, type NotMeasurable } from './types.js'
 
@@ -845,8 +845,13 @@ export function buildSessionRow(
 
   // The skills view (T2). The engine decides what is listed and invoked; this
   // only maps it onto the payload, numbering turns by their payload index.
-  const skillsView = buildSkillsView(records, turnRecords, measurability ?? {}, countTokens)
-  const skillsListed = 'availability' in skillsView ? undefined : listedByTurn(records, turnRecords)
+  // One fold yields both the view and the per-turn listing (T7 blocker 2).
+  const { view: skillsView, listed: skillsListed } = skillsForSession(
+    records,
+    turnRecords,
+    measurability ?? {},
+    countTokens,
+  )
   const skillsInvoked =
     'availability' in skillsView || skillsView.invocationsAvailability !== undefined
       ? undefined
