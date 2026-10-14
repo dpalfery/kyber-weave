@@ -4,7 +4,7 @@ title: Kyber-Squad — Multi-Harness Agent & Skill Deployment Control Plane
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-04
+last-reviewed: 2026-10-14
 ---
 
 # Kyber-Squad — Multi-Harness Agent & Skill Deployment Control Plane
@@ -40,7 +40,7 @@ Modifying local developer environments or repository-level agent configurations 
 | Capability | How It Solves the Problem | Command |
 |---|---|---|
 | **Canonical AgentIR Compilation** | Compiles 21 canonical agents and 24 skills — each projecting its validated resource closure beside the rendered principal — for all twelve registered renderers while retaining a governed twelve-target catalog. | `kyber-weave squad install` |
-| **Transactional Engine & Atomic Rollback** | Creates pre-execution rollback manifests and tracks deployed files in `.kyber-weave/squad.receipt.json` and `squad.lock.yml`—restores clean state on any failure. | `kyber-weave squad install` · `uninstall` |
+| **Transactional Engine & Atomic Rollback** | Creates pre-execution rollback manifests and tracks deployed files in the lock and receipt under `~/.kyber-weave/squad/` (never committed to the repository), with a registry of project installs—restores clean state on any failure. | `kyber-weave squad install` · `uninstall` |
 | **Capability Lattice & Degradation** | Intelligently maps subagent hierarchies, permissions, and tool access to each harness's exact feature set, emitting structured degradation warnings when a feature is unsupported. | `kyber-weave squad doctor` |
 | **Distributed Concurrency Leases** | Uses cross-process mutex leasing to ensure concurrent CI jobs or IDE instances cannot corrupt deployment state. | Integrated in all `squad` verbs |
 | **Portable Offline Packaging** | Bundles all canonical agents, skills, resources, and schemas into self-contained APM and Agent Plugins archives for air-gapped or CI distribution. | `kyber-weave squad pack` |
@@ -75,7 +75,7 @@ remains a deployment artifact rather than canonical product source.
 
 `products/kyber-squad/` is the canonical and package authority. The repository root
 `.github/agents/` and `.github/skills/` trees are an intentional stale Copilot self-deployment;
-their tracked `.kyber-weave/squad.lock.yml` and `.kyber-weave/squad.receipt.json` state is stale
+their legacy in-repo `.kyber-weave/squad.lock.yml` and `.kyber-weave/squad.receipt.json` state is stale
 with them. Those four root paths are outside this synchronization, remain untouched, and will be
 refreshed by a human after a fresh Kyber-Weave release candidate exists.
 
@@ -85,7 +85,7 @@ refreshed by a human after a fresh Kyber-Weave release candidate exists.
 
 Explore the full Kyber-Squad documentation suite:
 
-* **[Adoption & Usage Guide](onboarding.md)** — Installing, updating, scoping (`--global`), targeting specific harnesses, and running health checks.
+* **[Adoption & Usage Guide](onboarding.md)** — Installing, updating, scoping (`--global`), updating registered projects (`--projects`), targeting specific harnesses, migrating from earlier state locations, and running health checks.
 * **[Architecture](architecture.md)** — AgentIR intermediate representation, role-skill lowering pipeline, capability lattice, state store, transaction engine, and conductor execution circuit-breaker.
 * **[Requirements & Degradation Matrix](requirements.md)** — Detailed KS-001 through KS-008 specifications, harness feature matrices, degradation taxonomy, and the circuit-breaker harvest.
 * **[Skill-Resource Dispositions](skill-resource-dispositions.md)** — The content-preservation audit and policy-line ledger for every retained skill resource.
