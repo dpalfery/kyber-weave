@@ -285,11 +285,17 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         Assert.Contains(invalidField.Split('-')[^1], exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// Global state lives beneath the injected home at <c>.kyber-weave/squad/global</c>, not beneath
+    /// the platform application data directory, and the receipt names the home as its anchor.
+    /// </summary>
     [Fact]
-    public void ResolveStateGlobalScopeUsesInjectedUserPathAndClock()
+    public void ResolveStateGlobalScopeLivesUnderHomeAnchoredSquadState()
     {
         using TempDirectory fixture = new TempDirectory();
         string applicationData = Path.Combine(fixture.Path, "application-data");
+        string home = Path.Combine(applicationData, "home");
+        Directory.CreateDirectory(home);
         SquadStateStore store = Store(applicationData);
         SquadDeploymentPlan plan = SquadDeploymentPlan.CreateInstall(
             fixture.Path,
@@ -299,26 +305,33 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             [],
             adopt: false,
             new FixedTimeProvider(InstalledAt));
+        string physicalHome = SquadPhysicalRootIdentity.Resolve(home).PhysicalPath;
 
         string stateDirectory = store.ResolveStateDirectory(
             fixture.Path,
             SquadDeploymentScope.Global);
 
-        Assert.Equal(
-            Path.Combine(applicationData, "KyberWeave", "squad"),
+        AssertSameLocation(
+            Path.Combine(physicalHome, ".kyber-weave", "squad", "global"),
             stateDirectory);
         Assert.Equal(InstalledAt, plan.Receipt.InstalledAtUtc);
-        Assert.Equal(".", plan.Receipt.TargetRoot);
+        Assert.Equal(physicalHome, plan.Receipt.TargetRoot);
         string receiptJson = store.SerializeReceipt(plan.Receipt);
         Assert.Contains("\"scope\": \"global\"", receiptJson, StringComparison.Ordinal);
-        Assert.DoesNotContain(applicationData, receiptJson, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// Global state is one machine-wide record anchored on the home, so two unrelated target roots
+    /// address the same lock and receipt rather than each keeping a private binding and a sibling
+    /// receipt. The sibling-ownership check that used to read those siblings is retired with it.
+    /// </summary>
     [Fact]
-    public void GlobalStateTwoTargetRootsSharingOneStateDirectoryRemainPrivatelyBoundToTheirOwnReceipts()
+    public void GlobalStateForUnrelatedTargetRootsSharesOneHomeAnchoredReceipt()
     {
         using TempDirectory fixture = new TempDirectory();
         string applicationData = Path.Combine(fixture.Path, "application-data");
+        string home = Path.Combine(applicationData, "home");
+        Directory.CreateDirectory(home);
         string firstRoot = Path.Combine(fixture.Path, "customer-alpha");
         string secondRoot = Path.Combine(fixture.Path, "customer-beta");
         Directory.CreateDirectory(firstRoot);
@@ -337,34 +350,34 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             [],
             adopt: false,
             new FixedTimeProvider(InstalledAt));
-        SquadDeploymentPlan secondPlan = SquadDeploymentPlan.CreateInstall(
-            secondRoot,
-            SquadDeploymentScope.Global,
-            Lock(),
-            [Rendered("agents/second.toml", "second")],
-            [],
-            adopt: false,
-            new FixedTimeProvider(InstalledAt.AddMinutes(1)));
 
         new SquadTransaction(store).Execute(firstPlan);
-        new SquadTransaction(store).Execute(secondPlan);
 
         SquadReceipt firstReceipt = Assert.IsType<SquadReceipt>(store.ReadReceipt(
             firstRoot,
             SquadDeploymentScope.Global));
-        SquadReceipt secondReceipt = Assert.IsType<SquadReceipt>(store.ReadReceipt(
+        SquadReceipt sharedReceipt = Assert.IsType<SquadReceipt>(store.ReadReceipt(
             secondRoot,
             SquadDeploymentScope.Global));
         Assert.Equal("agents/first.toml", Assert.Single(firstReceipt.Files).RelativePath);
-        Assert.Equal("agents/second.toml", Assert.Single(secondReceipt.Files).RelativePath);
-        Assert.NotEqual(firstReceipt.InstalledAtUtc, secondReceipt.InstalledAtUtc);
+        Assert.Equal(firstReceipt.InstalledAtUtc, sharedReceipt.InstalledAtUtc);
+        Assert.Equal("agents/first.toml", Assert.Single(sharedReceipt.Files).RelativePath);
 
-        string stateDirectory = store.ResolveStateDirectory(firstRoot, SquadDeploymentScope.Global);
+        string globalState = Path.Combine(
+            SquadPhysicalRootIdentity.Resolve(home).PhysicalPath,
+            ".kyber-weave",
+            "squad",
+            "global");
+        AssertSameLocation(globalState, store.ResolveStateDirectory(firstRoot, SquadDeploymentScope.Global));
+        AssertSameLocation(globalState, store.ResolveStateDirectory(secondRoot, SquadDeploymentScope.Global));
+        Assert.False(
+            Directory.Exists(Path.Combine(Path.GetDirectoryName(globalState)!, "roots")),
+            "A per-root binding directory must not exist once global state is home-anchored.");
         string[] statePaths = Directory.EnumerateFileSystemEntries(
-                stateDirectory,
+                globalState,
                 "*",
                 SearchOption.AllDirectories)
-            .Select(path => Path.GetRelativePath(stateDirectory, path).Replace(
+            .Select(path => Path.GetRelativePath(globalState, path).Replace(
                 Path.DirectorySeparatorChar,
                 '/'))
             .ToArray();
@@ -375,7 +388,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             Assert.DoesNotContain("customer-beta", relativePath, StringComparison.OrdinalIgnoreCase);
         });
         Assert.DoesNotContain(firstRoot, Store(applicationData).SerializeReceipt(firstReceipt), StringComparison.Ordinal);
-        Assert.DoesNotContain(secondRoot, Store(applicationData).SerializeReceipt(secondReceipt), StringComparison.Ordinal);
+        Assert.DoesNotContain(secondRoot, Store(applicationData).SerializeReceipt(sharedReceipt), StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -565,10 +578,11 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     }
 
     [Fact]
-    public void ExecuteGlobalScopeKeepsDurableIntentInStateAndStagesAndBackupsOnDestinationFilesystem()
+    public void ExecuteGlobalScopeKeepsDurableIntentInJournalAndStagesAndBackupsOnDestinationFilesystem()
     {
         using TempDirectory fixture = new TempDirectory();
         string applicationData = Path.Combine(fixture.Path, "application-data");
+        Directory.CreateDirectory(Path.Combine(applicationData, "home"));
         string targetRoot = Path.Combine(fixture.Path, "global-target");
         Directory.CreateDirectory(targetRoot);
         Write(targetRoot, ".codex/agents/conductor.toml", "installed body");
@@ -595,11 +609,12 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         SquadStateStore store = Store(applicationData);
         GlobalTransactionLocationObserver observer = new GlobalTransactionLocationObserver(
             targetRoot,
-            store.ResolveStateDirectory(targetRoot, SquadDeploymentScope.Global));
+            store.ResolveStateDirectory(targetRoot, SquadDeploymentScope.Global),
+            store.ResolveTransactionDirectory(targetRoot, SquadDeploymentScope.Global));
 
         new SquadTransaction(store, observer).Execute(plan);
 
-        Assert.True(observer.SawDurableIntentInState);
+        Assert.True(observer.SawDurableIntentInJournal);
         Assert.True(observer.SawStagingOnTargetFilesystem);
         Assert.True(observer.SawBackupOnTargetFilesystem);
         Assert.False(observer.SawStagingOrBackupInState);
@@ -1415,11 +1430,13 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         bool heldExclusiveLease;
         try
         {
-            string stateDirectory = Store(fixture.Path).ResolveStateDirectory(
+            // The lease lives in the project journal beside the root, not in the home-anchored
+            // state directory, so that is where an exclusive hold must be observable.
+            string leaseDirectory = Store(fixture.Path).ResolveTransactionDirectory(
                 fixture.Path,
                 SquadDeploymentScope.Project);
             heldExclusiveLease = Directory.EnumerateFiles(
-                    stateDirectory,
+                    leaseDirectory,
                     "*",
                     SearchOption.AllDirectories)
                 .Any(IsHeldWithExclusiveFileShare);
@@ -1830,14 +1847,22 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     }
 
     [Theory]
-    [InlineData(SquadDeploymentScope.Project, SquadDeploymentScope.Global, false)]
-    [InlineData(SquadDeploymentScope.Global, SquadDeploymentScope.Project, false)]
-    [InlineData(SquadDeploymentScope.Project, SquadDeploymentScope.Global, true)]
-    [InlineData(SquadDeploymentScope.Global, SquadDeploymentScope.Project, true)]
-    public async Task ExecuteProjectAndGlobalSamePhysicalRootContendForOneLease(
+    // A project lease is keyed by the physical root, a global lease by the home. So a project and
+    // a global transaction on one root hold independent leases, while two transactions of the same
+    // scope contend when they reach the same key, through a symlink alias or directly.
+    [InlineData(SquadDeploymentScope.Project, SquadDeploymentScope.Global, false, false)]
+    [InlineData(SquadDeploymentScope.Global, SquadDeploymentScope.Project, false, false)]
+    [InlineData(SquadDeploymentScope.Project, SquadDeploymentScope.Global, true, false)]
+    [InlineData(SquadDeploymentScope.Global, SquadDeploymentScope.Project, true, false)]
+    [InlineData(SquadDeploymentScope.Project, SquadDeploymentScope.Project, false, true)]
+    [InlineData(SquadDeploymentScope.Project, SquadDeploymentScope.Project, true, true)]
+    [InlineData(SquadDeploymentScope.Global, SquadDeploymentScope.Global, false, true)]
+    [InlineData(SquadDeploymentScope.Global, SquadDeploymentScope.Global, true, true)]
+    public async Task ExecuteActiveLeaseOnOnePhysicalRootContendsOnlyWithItsOwnScope(
         SquadDeploymentScope activeScope,
         SquadDeploymentScope contenderScope,
-        bool useSymlinkAlias)
+        bool useSymlinkAlias,
+        bool expectContention)
     {
         using TempDirectory fixture = new TempDirectory();
         string targetRoot = Path.Combine(fixture.Path, "target");
@@ -1850,16 +1875,17 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             targetRoot,
             activeScope,
             Lock(),
-            [Rendered(".codex/agents/active.toml", "active")],
+            [Rendered(AgentRelativePath(activeScope, "active.toml"), "active")],
             [],
             adopt: false,
             new FixedTimeProvider(InstalledAt));
         string contenderRoot = useSymlinkAlias ? aliasRoot : targetRoot;
+        string contenderFile = AgentRelativePath(contenderScope, "contender.toml");
         SquadDeploymentPlan contenderPlan = SquadDeploymentPlan.CreateInstall(
             contenderRoot,
             contenderScope,
             Lock(),
-            [Rendered(".warp/roles/contender.md", "contender", "warp")],
+            [Rendered(contenderFile, "contender")],
             [],
             adopt: false,
             new FixedTimeProvider(InstalledAt));
@@ -1872,15 +1898,19 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             "The active transaction did not acquire its lease before contention was tested.");
         SortedDictionary<string, TreeEntry> beforeContention = CaptureTree(fixture.Path);
 
-        Exception? recoveryException;
+        Exception? recoveryException = null;
         Exception? executeException;
         IReadOnlyDictionary<string, TreeEntry>? afterContention;
         try
         {
             SquadTransaction storeTransaction = new SquadTransaction(store);
-            recoveryException = Record.Exception(() => storeTransaction.Recover(
-                contenderRoot,
-                contenderScope));
+            if (expectContention)
+            {
+                recoveryException = Record.Exception(() => storeTransaction.Recover(
+                    contenderRoot,
+                    contenderScope));
+            }
+
             executeException = Record.Exception(() =>
                 storeTransaction.Execute(contenderPlan));
             afterContention = CaptureTree(fixture.Path);
@@ -1891,14 +1921,20 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         }
 
         await activeExecution;
-        AssertActiveLeaseConflict(recoveryException);
-        AssertActiveLeaseConflict(executeException);
-        AssertTreesEqual(
-            beforeContention,
-            Assert.IsAssignableFrom<IReadOnlyDictionary<string, TreeEntry>>(afterContention));
-        Assert.False(File.Exists(ToPlatformPath(
-            targetRoot,
-            ".warp/roles/contender.md")));
+        if (expectContention)
+        {
+            AssertActiveLeaseConflict(recoveryException);
+            AssertActiveLeaseConflict(executeException);
+            AssertTreesEqual(
+                beforeContention,
+                Assert.IsAssignableFrom<IReadOnlyDictionary<string, TreeEntry>>(afterContention));
+            Assert.False(File.Exists(ToPlatformPath(targetRoot, contenderFile)));
+        }
+        else
+        {
+            Assert.Null(executeException);
+            Assert.Equal("contender", Read(targetRoot, contenderFile));
+        }
     }
 
     [Theory]
@@ -1915,10 +1951,11 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             string targetRoot = Path.Combine(fixture.Path, "target");
             string applicationData = Path.Combine(fixture.Path, "application-data");
             Directory.CreateDirectory(targetRoot);
+            Directory.CreateDirectory(Path.Combine(applicationData, "home"));
             if (preserveSharedApplicationData)
             {
-                Write(applicationData, "KyberWeave/shared.keep", "shared parent");
-                Write(applicationData, "KyberWeave/squad/shared.keep", "shared squad");
+                Write(applicationData, "home/.kyber-weave/shared.keep", "shared home store");
+                Write(applicationData, "home/.kyber-weave/squad/shared.keep", "shared squad");
             }
 
             SquadStateStore store = Store(applicationData);
@@ -1943,29 +1980,55 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         }
     }
 
+    /// <summary>
+    /// Global state no longer keys on the target root at all. Lexical, symlink and unrelated roots
+    /// all resolve to the one home-anchored lock, receipt and journal, so the alias and binding
+    /// machinery that used to keep them apart has nothing left to decide.
+    /// </summary>
     [Fact]
-    public void ResolveGlobalStateLexicalAliasesSharePhysicalRootBinding()
+    public void ResolveGlobalStateIgnoresTargetRootAndAnchorsOnHomeForEveryAlias()
     {
         using TempDirectory fixture = new TempDirectory();
         string targetRoot = Path.Combine(fixture.Path, "target");
         string aliasRoot = Path.Combine(fixture.Path, "target-alias");
+        string unrelatedRoot = Path.Combine(fixture.Path, "unrelated");
+        string applicationData = Path.Combine(fixture.Path, "application-data");
+        string home = Path.Combine(applicationData, "home");
         Directory.CreateDirectory(targetRoot);
+        Directory.CreateDirectory(unrelatedRoot);
+        Directory.CreateDirectory(home);
         Directory.CreateSymbolicLink(aliasRoot, targetRoot);
-        SquadStateStore store = Store(Path.Combine(fixture.Path, "application-data"));
+        SquadStateStore store = Store(applicationData);
+        string globalState = Path.Combine(
+            SquadPhysicalRootIdentity.Resolve(home).PhysicalPath,
+            ".kyber-weave",
+            "squad",
+            "global");
 
+        AssertSameLocation(
+            Path.Combine(globalState, "squad.lock.yml"),
+            store.ResolveLockPath(targetRoot, SquadDeploymentScope.Global));
         Assert.Equal(
             store.ResolveLockPath(targetRoot, SquadDeploymentScope.Global),
             store.ResolveLockPath(aliasRoot, SquadDeploymentScope.Global));
         Assert.Equal(
-            store.ResolveReceiptPath(targetRoot, SquadDeploymentScope.Global),
-            store.ResolveReceiptPath(Path.Combine(targetRoot, "."), SquadDeploymentScope.Global));
-        Assert.Equal(
             store.ResolveTransactionDirectory(targetRoot, SquadDeploymentScope.Global),
             store.ResolveTransactionDirectory(aliasRoot, SquadDeploymentScope.Global));
+        AssertSameLocation(
+            Path.Combine(globalState, "squad.receipt.json"),
+            store.ResolveReceiptPath(unrelatedRoot, SquadDeploymentScope.Global));
+        Assert.Equal(
+            store.ResolveReceiptPath(targetRoot, SquadDeploymentScope.Global),
+            store.ResolveReceiptPath(Path.Combine(targetRoot, "."), SquadDeploymentScope.Global));
     }
 
+    /// <summary>
+    /// On a case-insensitive filesystem the two spellings name one directory, so they must resolve to
+    /// the same home-anchored receipt. On a case-sensitive filesystem the probe cannot be built and the
+    /// test returns without asserting; that case is covered by the Windows sibling test.
+    /// </summary>
     [Fact]
-    public void ResolveGlobalStateCaseAliasesShareBindingOnCaseInsensitiveFilesystem()
+    public void ResolveGlobalStateCaseAliasesShareHomeAnchoredReceiptOnCaseInsensitiveFilesystem()
     {
         using TempDirectory fixture = new TempDirectory();
         string targetRoot = Path.Combine(fixture.Path, "CaseSensitiveProbe");
@@ -1974,11 +2037,19 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         if (!Directory.Exists(caseAlias))
             return;
 
-        SquadStateStore store = Store(Path.Combine(fixture.Path, "application-data"));
+        string applicationData = Path.Combine(fixture.Path, "application-data");
+        string home = Path.Combine(applicationData, "home");
+        Directory.CreateDirectory(home);
+        SquadStateStore store = Store(applicationData);
+        string expected = Path.Combine(
+            SquadPhysicalRootIdentity.Resolve(home).PhysicalPath,
+            ".kyber-weave",
+            "squad",
+            "global",
+            "squad.receipt.json");
 
-        Assert.Equal(
-            store.ResolveReceiptPath(targetRoot, SquadDeploymentScope.Global),
-            store.ResolveReceiptPath(caseAlias, SquadDeploymentScope.Global));
+        AssertSameLocation(expected, store.ResolveReceiptPath(targetRoot, SquadDeploymentScope.Global));
+        AssertSameLocation(expected, store.ResolveReceiptPath(caseAlias, SquadDeploymentScope.Global));
     }
 
     [Fact]
@@ -2008,14 +2079,14 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         Assert.NotEqual(upperIdentity.PhysicalPath, lowerIdentity.PhysicalPath);
         Assert.NotEqual(upperIdentity.Key, lowerIdentity.Key);
         Assert.NotEqual(
-            store.ResolveTransactionDirectory(upperRoot, SquadDeploymentScope.Global),
-            store.ResolveTransactionDirectory(lowerRoot, SquadDeploymentScope.Global));
+            store.ResolveTransactionDirectory(upperRoot, SquadDeploymentScope.Project),
+            store.ResolveTransactionDirectory(lowerRoot, SquadDeploymentScope.Project));
         Assert.Equal(upperIdentity, symlinkIdentity);
 
         using BlockingObserver blocker = new BlockingObserver(SquadTransactionStepKind.IntentWritten);
         SquadDeploymentPlan activePlan = SquadDeploymentPlan.CreateInstall(
             upperRoot,
-            SquadDeploymentScope.Global,
+            SquadDeploymentScope.Project,
             Lock(),
             [Rendered(".codex/agents/upper.toml", "upper")],
             [],
@@ -2023,7 +2094,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             new FixedTimeProvider(InstalledAt));
         SquadDeploymentPlan siblingPlan = SquadDeploymentPlan.CreateInstall(
             lowerRoot,
-            SquadDeploymentScope.Global,
+            SquadDeploymentScope.Project,
             Lock(),
             [Rendered(".codex/agents/lower.toml", "lower")],
             [],
@@ -2980,7 +3051,9 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
 
         Assert.NotEqual(upperIdentity.PhysicalPath, lowerIdentity.PhysicalPath);
         Assert.NotEqual(upperIdentity.Key, lowerIdentity.Key);
-        Assert.NotEqual(
+        // Global state is home-anchored, so case-distinct roots share one global receipt. The
+        // project leases below still separate them, which is the part this test pins.
+        Assert.Equal(
             store.ResolveReceiptPath(upperRoot, SquadDeploymentScope.Global),
             store.ResolveReceiptPath(lowerRoot, SquadDeploymentScope.Global));
 
@@ -3511,8 +3584,12 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         string liveRelativePath = subject switch
         {
             "target" => fixture.RelativePath,
-            "lock" => ".kyber-weave/squad.lock.yml",
-            "receipt" => ".kyber-weave/squad.receipt.json",
+            "lock" => StateRelativePath(
+                fixture.Path,
+                store.ResolveLockPath(fixture.Path, SquadDeploymentScope.Project)),
+            "receipt" => StateRelativePath(
+                fixture.Path,
+                store.ResolveReceiptPath(fixture.Path, SquadDeploymentScope.Project)),
             _ => throw new ArgumentOutOfRangeException(nameof(subject), subject, null)
         };
         TreeEntry originalLiveEntry = CaptureTree(fixture.Path)[liveRelativePath];
@@ -4735,13 +4812,13 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             "lock-original" => (
                 SquadTransactionStepKind.LockApplied,
                 Path.Combine(transactionDirectory, "state-originals", "lock"),
-                ".kyber-weave/squad.lock.yml",
+                StateRelativePath(root, store.ResolveLockPath(root, SquadDeploymentScope.Project)),
                 Encoding.UTF8.GetBytes(store.SerializeLock(
                     plan.Lock ?? throw new InvalidOperationException("The update plan has no lock.")))),
             "receipt-original" => (
                 SquadTransactionStepKind.ReceiptApplied,
                 Path.Combine(transactionDirectory, "state-originals", "receipt"),
-                ".kyber-weave/squad.receipt.json",
+                StateRelativePath(root, store.ResolveReceiptPath(root, SquadDeploymentScope.Project)),
                 Encoding.UTF8.GetBytes(store.SerializeReceipt(plan.Receipt))),
             _ => throw new ArgumentOutOfRangeException(
                 nameof(artifactRole), artifactRole, "Unknown restore artifact role.")
@@ -5855,20 +5932,59 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             root,
             relativePath.Replace('/', Path.DirectorySeparatorChar)));
 
+    /// <summary>
+    /// Writes a project's committed lock and receipt where the store resolves them, so a fixture
+    /// stays correct when the state layout moves rather than pinning the layout it was born with.
+    /// </summary>
     private static void WriteState(string root, SquadLock squadLock, SquadReceipt receipt)
     {
-        string stateDirectory = Path.Combine(root, ".kyber-weave");
-        Directory.CreateDirectory(stateDirectory);
         SquadStateStore store = Store(root);
-        File.WriteAllText(
-            Path.Combine(stateDirectory, "squad.lock.yml"),
-            store.SerializeLock(squadLock),
-            new UTF8Encoding(false));
-        File.WriteAllText(
-            Path.Combine(stateDirectory, "squad.receipt.json"),
-            store.SerializeReceipt(receipt),
-            new UTF8Encoding(false));
+        string lockPath = store.ResolveLockPath(root, SquadDeploymentScope.Project);
+        string receiptPath = store.ResolveReceiptPath(root, SquadDeploymentScope.Project);
+        Directory.CreateDirectory(Path.GetDirectoryName(lockPath)!);
+        File.WriteAllText(lockPath, store.SerializeLock(squadLock), new UTF8Encoding(false));
+        File.WriteAllText(receiptPath, store.SerializeReceipt(receipt), new UTF8Encoding(false));
     }
+
+    /// <summary>
+    /// Expresses a store-resolved state file as the '/'-separated key <see cref="CaptureTree"/> uses,
+    /// measured from the physical root. Both sides are canonical so a symlinked temp root still matches.
+    /// </summary>
+    private static string StateRelativePath(string root, string statePath) =>
+        Path.GetRelativePath(SquadPhysicalRootIdentity.Resolve(root).PhysicalPath, statePath)
+            .Replace(Path.DirectorySeparatorChar, '/');
+
+    /// <summary>
+    /// Compares two locations by where they physically are. A path may legitimately be spelled through
+    /// a symlinked temp root (<c>/tmp</c> resolving to <c>/private/tmp</c>) and still name one place, so
+    /// the comparison is on the canonical form rather than the spelling.
+    /// </summary>
+    private static void AssertSameLocation(string expected, string actual) =>
+        Assert.Equal(CanonicalLocation(expected), CanonicalLocation(actual));
+
+    private static string CanonicalLocation(string path)
+    {
+        string existing = Path.GetFullPath(path);
+        List<string> unresolved = [];
+        while (!Directory.Exists(existing))
+        {
+            unresolved.Insert(0, Path.GetFileName(existing));
+            existing = Path.GetDirectoryName(existing)!;
+        }
+
+        return unresolved.Aggregate(
+            SquadPhysicalRootIdentity.Resolve(existing).PhysicalPath,
+            (accumulated, part) => Path.Combine(accumulated, part));
+    }
+
+    /// <summary>
+    /// The harness-relative path a fixture renders a single agent to. A global install renders relative
+    /// to its target's global root, so it takes a bare path; a project install keeps the target directory.
+    /// </summary>
+    private static string AgentRelativePath(SquadDeploymentScope scope, string fileName) =>
+        scope == SquadDeploymentScope.Global
+            ? $"agents/{fileName}"
+            : $".codex/agents/{fileName}";
 
     private static SortedDictionary<string, byte[]> Snapshot(string root)
     {
@@ -6170,11 +6286,17 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         public override DateTimeOffset GetUtcNow() => value;
     }
 
+    /// <summary>
+    /// Records where the durable intent, the staged bytes and the backups live while a global
+    /// transaction runs. The intent belongs in the home-anchored journal, and staging and backups
+    /// belong on the destination filesystem, never in the portable global state directory.
+    /// </summary>
     private sealed class GlobalTransactionLocationObserver(
         string targetRoot,
-        string stateDirectory) : ISquadTransactionObserver
+        string stateDirectory,
+        string journalDirectory) : ISquadTransactionObserver
     {
-        public bool SawDurableIntentInState { get; private set; }
+        public bool SawDurableIntentInJournal { get; private set; }
 
         public bool SawStagingOnTargetFilesystem { get; private set; }
 
@@ -6184,9 +6306,9 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
 
         public void AfterStep(SquadTransactionStep step)
         {
-            SawDurableIntentInState |= Directory.Exists(stateDirectory) &&
+            SawDurableIntentInJournal |= Directory.Exists(journalDirectory) &&
                 Directory.EnumerateFiles(
-                    stateDirectory,
+                    journalDirectory,
                     "intent.json",
                     SearchOption.AllDirectories).Any();
             if (step.Kind == SquadTransactionStepKind.FileStaged)
