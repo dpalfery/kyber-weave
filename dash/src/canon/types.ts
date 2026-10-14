@@ -200,6 +200,7 @@ export type CanonicalRecord = {
  * when the turn invoked none. The synthesizer writes it; the skills module reads it.
  */
 export const SKILLS_INVOKED_KEY = 'kyber.skills.invoked' as const
+export const SKILLS_LISTED_KEY = 'kyber.skills.listed' as const
 
 /** Problem codes emitted by `validateTokens`. */
 export const TOKEN_NEGATIVE_FRESH = 'TOKEN_NEGATIVE_FRESH'
