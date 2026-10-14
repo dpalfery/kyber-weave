@@ -625,6 +625,158 @@ public sealed class SquadStateMigrationTests
         Assert.Single(afterRelease.ImportedProjects);
     }
 
+    /// <summary>
+    /// A successful global copy records the legacy root's key in the migration ledger beside the home state. The
+    /// ledger is what keeps a later run from copying the same legacy root again once the home copy is uninstalled.
+    /// </summary>
+    [Fact]
+    public void SuccessfulGlobalCopyRecordsTheLegacyKeyInTheLedger()
+    {
+        using TempDirectory fixture = new TempDirectory();
+        MigrationScenario scenario = CreateScenario(fixture);
+        string root = Path.Combine(fixture.Path, "customer-alpha");
+        Directory.CreateDirectory(root);
+        WriteLegacyGlobal(scenario, root, PerTargetRootsReceipt(), Lock("1.2.3"));
+
+        scenario.Migration.MigrateGlobal(invokingCwd: null);
+
+        JsonNode ledger = ReadLedger(scenario);
+        Assert.Equal("kyber-squad.migration-ledger/v1", ledger["schema"]!.GetValue<string>());
+        Assert.Equal(new[] { SquadPhysicalRootIdentity.Resolve(root).Key }, ReadStrings(ledger, "globalMigratedFrom"));
+        Assert.Empty(ReadStrings(ledger, "projectsImported"));
+        Assert.Empty(TemporaryFilesBeside(LedgerPath(scenario)));
+    }
+
+    /// <summary>
+    /// A successful project import records the root key in the same ledger, so a later run cannot import the
+    /// in-repo state a second time after the project's home state is uninstalled.
+    /// </summary>
+    [Fact]
+    public void SuccessfulProjectImportRecordsTheRootKeyInTheLedger()
+    {
+        using TempDirectory fixture = new TempDirectory();
+        MigrationScenario scenario = CreateScenario(fixture);
+        string repo = Path.Combine(fixture.Path, "repo");
+        Directory.CreateDirectory(repo);
+        WriteInRepoState(scenario, repo, Lock("1.2.3"));
+
+        scenario.Migration.ImportProject(repo);
+
+        JsonNode ledger = ReadLedger(scenario);
+        Assert.Equal(new[] { SquadPhysicalRootIdentity.Resolve(repo).Key }, ReadStrings(ledger, "projectsImported"));
+        Assert.Empty(ReadStrings(ledger, "globalMigratedFrom"));
+    }
+
+    /// <summary>
+    /// A dry run reports what it would do and must leave no ledger behind, because the ledger records work that
+    /// was actually done.
+    /// </summary>
+    [Fact]
+    public void DryRunNeverWritesTheLedger()
+    {
+        using TempDirectory fixture = new TempDirectory();
+        MigrationScenario scenario = CreateScenario(fixture);
+        string root = Path.Combine(fixture.Path, "customer-alpha");
+        Directory.CreateDirectory(root);
+        WriteLegacyGlobal(scenario, root, PerTargetRootsReceipt(), Lock("1.2.3"));
+        string repo = Path.Combine(fixture.Path, "repo");
+        Directory.CreateDirectory(repo);
+        WriteInRepoState(scenario, repo, Lock("1.2.3"));
+
+        scenario.Migration.MigrateGlobal(invokingCwd: null, dryRun: true);
+        scenario.Migration.ImportProject(repo, dryRun: true);
+
+        Assert.False(File.Exists(LedgerPath(scenario)), "A dry run must not write the migration ledger.");
+    }
+
+    /// <summary>
+    /// A global copy whose legacy root is already in the ledger is not copied again, even though the home receipt
+    /// is gone. The legacy root is still reported, so doctor can say it is on disk and no longer read.
+    /// </summary>
+    [Fact]
+    public void GlobalCopyIsNotRepeatedAfterTheHomeGlobalReceiptIsRemoved()
+    {
+        using TempDirectory fixture = new TempDirectory();
+        MigrationScenario scenario = CreateScenario(fixture);
+        string root = Path.Combine(fixture.Path, "customer-alpha");
+        Directory.CreateDirectory(root);
+        WriteLegacyGlobal(scenario, root, PerTargetRootsReceipt(), Lock("1.2.3"));
+        scenario.Migration.MigrateGlobal(invokingCwd: null);
+        string homeDirectory = HomeGlobalDirectory(scenario);
+        File.Delete(Path.Combine(homeDirectory, "squad.receipt.json"));
+        File.Delete(Path.Combine(homeDirectory, "squad.lock.yml"));
+
+        SquadMigrationReport again = scenario.Migration.MigrateGlobal(invokingCwd: null);
+
+        Assert.Empty(again.MigratedItems);
+        Assert.False(
+            File.Exists(Path.Combine(homeDirectory, "squad.receipt.json")),
+            "A migrated and then uninstalled global receipt must not come back from the legacy copy.");
+        Assert.False(
+            File.Exists(Path.Combine(homeDirectory, "squad.lock.yml")),
+            "A migrated and then uninstalled global lock must not come back from the legacy copy.");
+        Assert.Single(again.UnmigratedLegacyRoots);
+    }
+
+    /// <summary>
+    /// A project import whose root is in the ledger is not repeated after the home project receipt is removed,
+    /// so the in-repo state the operator kept cannot resurrect an uninstalled project.
+    /// </summary>
+    [Fact]
+    public void ProjectImportIsNotRepeatedAfterTheHomeProjectReceiptIsRemoved()
+    {
+        using TempDirectory fixture = new TempDirectory();
+        MigrationScenario scenario = CreateScenario(fixture);
+        string repo = Path.Combine(fixture.Path, "repo");
+        Directory.CreateDirectory(repo);
+        WriteInRepoState(scenario, repo, Lock("1.2.3"));
+        scenario.Migration.ImportProject(repo);
+        string projectDirectory = HomeProjectDirectory(scenario, repo);
+        File.Delete(Path.Combine(projectDirectory, "squad.receipt.json"));
+        File.Delete(Path.Combine(projectDirectory, "squad.lock.yml"));
+
+        SquadMigrationReport again = scenario.Migration.ImportProject(repo);
+
+        Assert.Empty(again.ImportedProjects);
+        Assert.False(
+            File.Exists(Path.Combine(projectDirectory, "squad.receipt.json")),
+            "An imported and then uninstalled project receipt must not come back from the in-repo copy.");
+    }
+
+    /// <summary>
+    /// A ledger that does not parse, or does not match its schema, is treated as empty and reported. It must never
+    /// crash a command, and the next successful write replaces it with a valid ledger.
+    /// </summary>
+    [Theory]
+    [InlineData("{ this is not json")]
+    [InlineData("[]")]
+    [InlineData("{\"schema\":\"kyber-squad.migration-ledger/v0\",\"globalMigratedFrom\":[],\"projectsImported\":[]}")]
+    [InlineData("{\"schema\":\"kyber-squad.migration-ledger/v1\",\"globalMigratedFrom\":\"not-a-list\",\"projectsImported\":[]}")]
+    public void MalformedLedgerIsTreatedAsEmptyWithAWarningAndNeverCrashes(string ledgerText)
+    {
+        using TempDirectory fixture = new TempDirectory();
+        MigrationScenario scenario = CreateScenario(fixture);
+        string root = Path.Combine(fixture.Path, "customer-alpha");
+        Directory.CreateDirectory(root);
+        WriteLegacyGlobal(scenario, root, PerTargetRootsReceipt(), Lock("1.2.3"));
+        string repo = Path.Combine(fixture.Path, "repo");
+        Directory.CreateDirectory(repo);
+        WriteInRepoState(scenario, repo, Lock("1.2.3"));
+        WriteFile(LedgerPath(scenario), ledgerText);
+
+        SquadMigrationReport globalReport = scenario.Migration.MigrateGlobal(invokingCwd: null);
+        SquadMigrationReport projectReport = scenario.Migration.ImportProject(repo);
+
+        Assert.NotEmpty(globalReport.MigratedItems);
+        Assert.Single(projectReport.ImportedProjects);
+        Assert.Contains(
+            globalReport.Warnings.Concat(projectReport.Warnings),
+            warning => warning.Contains("migration ledger", StringComparison.OrdinalIgnoreCase));
+        JsonNode ledger = ReadLedger(scenario);
+        Assert.Equal(new[] { SquadPhysicalRootIdentity.Resolve(root).Key }, ReadStrings(ledger, "globalMigratedFrom"));
+        Assert.Equal(new[] { SquadPhysicalRootIdentity.Resolve(repo).Key }, ReadStrings(ledger, "projectsImported"));
+    }
+
     private sealed record MigrationScenario(
         string Home,
         string ApplicationData,
@@ -756,6 +908,18 @@ public sealed class SquadStateMigrationTests
 
     private static string ReadTargetRoot(string receiptPath) =>
         JsonNode.Parse(File.ReadAllText(receiptPath, Encoding.UTF8))!.AsObject()["targetRoot"]!.GetValue<string>();
+
+    private static string LedgerPath(MigrationScenario scenario) =>
+        Path.Combine(PhysicalPathOf(scenario.Home), ".kyber-weave", "squad", "migration-ledger.json");
+
+    private static JsonNode ReadLedger(MigrationScenario scenario) =>
+        JsonNode.Parse(File.ReadAllText(LedgerPath(scenario), Encoding.UTF8))!;
+
+    private static string[] ReadStrings(JsonNode ledger, string property) =>
+        ledger[property]!.AsArray().Select(node => node!.GetValue<string>()).ToArray();
+
+    private static string[] TemporaryFilesBeside(string path) =>
+        Directory.EnumerateFiles(Path.GetDirectoryName(path)!, "*.tmp").ToArray();
 
     private static string ReadFilesJson(string receiptPath) =>
         JsonNode.Parse(File.ReadAllText(receiptPath, Encoding.UTF8))!.AsObject()["files"]!.ToJsonString();

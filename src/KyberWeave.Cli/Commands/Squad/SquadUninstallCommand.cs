@@ -16,7 +16,6 @@ public sealed class SquadUninstallCommand : Command<SquadUninstallSettings>
     private readonly bool? _isInteractive;
     private readonly Func<string, bool>? _readAnswer;
     private readonly ISquadGlobalRootResolver? _globalRoots;
-    private readonly ISquadProjectPicker? _picker;
 
     /// <summary>Creates a new uninstall command using default user paths.</summary>
     public SquadUninstallCommand()
@@ -36,8 +35,7 @@ public sealed class SquadUninstallCommand : Command<SquadUninstallSettings>
         SquadLifecycleService? lifecycleService = null,
         bool? isInteractive = null,
         Func<string, bool>? readAnswer = null,
-        ISquadGlobalRootResolver? globalRoots = null,
-        ISquadProjectPicker? picker = null)
+        ISquadGlobalRootResolver? globalRoots = null)
     {
         _userPaths = userPaths;
         _stateStore = stateStore;
@@ -45,7 +43,6 @@ public sealed class SquadUninstallCommand : Command<SquadUninstallSettings>
         _isInteractive = isInteractive;
         _readAnswer = readAnswer;
         _globalRoots = globalRoots;
-        _picker = picker;
     }
 
     /// <inheritdoc />

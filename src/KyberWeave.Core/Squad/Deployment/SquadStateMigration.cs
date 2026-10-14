@@ -14,6 +14,8 @@ namespace KyberWeave.Core.Squad.Deployment;
 /// still reads the per-user location must keep working during a rollback. Nothing is overwritten: a home
 /// receipt is the authority once it exists, and a migration that finds one is a no-op. Writes go through a
 /// temporary file and a rename, so a reader sees the prior file or the new one, never a partial one.
+/// Each successful copy or import is also recorded in the migration ledger beside the home registry, so the
+/// migration is one-shot per source: an uninstall of migrated state is not undone by the legacy copy that is kept.
 /// </remarks>
 public sealed class SquadStateMigration
 {
@@ -28,6 +30,9 @@ public sealed class SquadStateMigration
 
     private const string HomeAuthorityGuidance =
         "It is left in place for an older CLI. Remove it once no older CLI needs it.";
+
+    private const string AlreadyMigratedReason =
+        "This legacy root was already migrated into the home. Its home copy has since been removed, so it is not copied again.";
 
     private const string AmbiguousGuidance =
         "Keep exactly one legacy global receipt. Move the others aside after verifying them, then run the migration " +
@@ -93,6 +98,14 @@ public sealed class SquadStateMigration
                         "More than one legacy global receipt exists, so none can be chosen safely.",
                         AmbiguousGuidance));
                 }
+            }
+            else if (legacyDirectories.Count == 1 && LedgerRecordsGlobalMigration(legacyDirectories[0], warnings))
+            {
+                // Copied once already. The home copy may have been uninstalled on purpose, so it is not copied again.
+                unmigrated.Add(new SquadUnmigratedLegacyRoot(
+                    legacyDirectories[0],
+                    AlreadyMigratedReason,
+                    HomeAuthorityGuidance));
             }
             else if (legacyDirectories.Count == 1)
             {
@@ -181,7 +194,7 @@ public sealed class SquadStateMigration
         string inRepoLockPath = Path.Combine(inRepoDirectory, LockFileName);
 
         bool homeReceiptExists = File.Exists(Path.Combine(projectDirectory, ReceiptFileName));
-        if (!homeReceiptExists && File.Exists(inRepoReceiptPath))
+        if (!homeReceiptExists && File.Exists(inRepoReceiptPath) && !ReadLedger(warnings).HasProjectImport(identity.Key))
         {
             if (!File.Exists(inRepoLockPath))
             {
@@ -259,6 +272,7 @@ public sealed class SquadStateMigration
             {
                 WriteAtomically(Path.Combine(projectDirectory, LockFileName), inRepoLock);
                 WriteAtomically(projectReceiptPath, new UTF8Encoding(false).GetBytes(rewritten));
+                RecordInLedger(ledger => ledger.WithProjectImport(identity.Key));
             });
         if (outcome == CopyOutcome.LeaseBusy)
         {
@@ -355,7 +369,8 @@ public sealed class SquadStateMigration
             legacyDirectory,
             homeGlobalDirectory,
             lockBytes,
-            RewriteTargetRoot(receiptText, targetRoot));
+            RewriteTargetRoot(receiptText, targetRoot),
+            Path.GetFileName(legacyDirectory));
         return null;
     }
 
@@ -412,6 +427,8 @@ public sealed class SquadStateMigration
             {
                 WriteAtomically(Path.Combine(plan.HomeDirectory, LockFileName), plan.LockBytes);
                 WriteAtomically(Path.Combine(plan.HomeDirectory, ReceiptFileName), new UTF8Encoding(false).GetBytes(plan.ReceiptText));
+                // Recorded after the receipt, the completion marker, so a copy is never counted before it has finished.
+                RecordInLedger(ledger => ledger.WithGlobalMigration(plan.LegacyKey));
             });
     }
 
@@ -552,10 +569,46 @@ public sealed class SquadStateMigration
         }
     }
 
+    /// <summary>
+    /// Reads the migration ledger for a decision. A ledger that cannot be read counts as empty, and the reason is
+    /// added to <paramref name="warnings"/>, so the operator sees it rather than a command failing on it.
+    /// </summary>
+    private SquadMigrationLedger ReadLedger(List<string> warnings)
+    {
+        string path = LedgerPath();
+        SquadMigrationLedger ledger = SquadMigrationLedger.Read(path, out string? unreadableReason);
+        if (unreadableReason is not null)
+        {
+            warnings.Add(
+                $"The migration ledger at '{path}' is unreadable ({unreadableReason}), so it was treated as empty. " +
+                "The next successful migration rewrites it.");
+        }
+
+        return ledger;
+    }
+
+    private bool LedgerRecordsGlobalMigration(string legacyDirectory, List<string> warnings) =>
+        ReadLedger(warnings).HasGlobalMigration(Path.GetFileName(legacyDirectory));
+
+    /// <summary>
+    /// Adds one entry to the ledger. It runs inside the lease the copy holds, and it re-reads the ledger first, so
+    /// an entry written for another root is kept rather than overwritten.
+    /// </summary>
+    private void RecordInLedger(Func<SquadMigrationLedger, SquadMigrationLedger> record)
+    {
+        string path = LedgerPath();
+        SquadMigrationLedger current = SquadMigrationLedger.Read(path, out _);
+        WriteAtomically(path, new UTF8Encoding(false).GetBytes(record(current).Serialize()));
+    }
+
+    private string LedgerPath() =>
+        Path.Combine(_stateStore.ResolveHomeStateDirectory(), SquadMigrationLedger.FileName);
+
     /// <summary>A validated global copy, ready to be applied or reported as pending.</summary>
     private sealed record GlobalCopyPlan(
         string LegacyDirectory,
         string HomeDirectory,
         byte[] LockBytes,
-        string ReceiptText);
+        string ReceiptText,
+        string LegacyKey);
 }

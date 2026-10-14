@@ -469,8 +469,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
                 workingDirectory: fleet.Anchor,
                 globalRoots: fleet.Harness.GlobalRoots,
                 renderer: renderer,
-                stateStore: fleet.Harness.Store,
-                picker: new RecordingProjectPicker(NoProjects))
+                stateStore: fleet.Harness.Store)
             .Execute(null!, new SquadDoctorSettings { Path = fleet.Anchor, Global = true }));
 
         Assert.Contains("is stale (", execution.Output, StringComparison.Ordinal);
@@ -500,8 +499,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
             lifecycleService: fleet.Harness.Lifecycle(fleet.Renderer),
             isInteractive: false,
             readAnswer: null,
-            globalRoots: fleet.Harness.GlobalRoots,
-            picker: picker);
+            globalRoots: fleet.Harness.GlobalRoots);
 
         CommandExecution execution = Capture(() =>
             command.Execute(null!, new SquadUninstallSettings { Path = fleet.Anchor, Global = true, Yes = true }));
@@ -512,6 +510,104 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         AssertUnchanged(alphaLockBefore, fleet.Alpha.LockPath);
         AssertUnchanged(alphaReceiptBefore, fleet.Alpha.ReceiptPath);
         AssertUnchanged(registryBefore, registry);
+    }
+
+    /// <summary>
+    /// A migrated global deployment that was uninstalled must stay uninstalled. The migration keeps the legacy copy
+    /// for an older CLI, so the command that runs after the uninstall must not copy it back into the home.
+    /// </summary>
+    [Fact]
+    public void UninstallOfMigratedGlobalStateIsNotUndoneByTheNextCommand()
+    {
+        using Harness h = NewHarness("uninstall-migrated-global");
+        ScriptedAgentRenderer renderer = new("architect");
+        string anchor = h.MakeDirectory("global-anchor");
+        InstallGlobal(h, anchor, renderer, SquadTarget.Codex);
+        MoveGlobalStateToLegacyRoot(h, anchor);
+
+        AssertExit(Uninstall(h, renderer, anchor, global: true), 0);
+        Assert.False(File.Exists(GlobalReceiptPath(h)), "Global uninstall must remove the global receipt.");
+
+        CommandExecution status = Status(h, anchor, global: true);
+
+        AssertExit(status, 1);
+        Assert.Contains("No Kyber-Squad deployment found", status.Output, StringComparison.Ordinal);
+        Assert.False(
+            File.Exists(GlobalReceiptPath(h)),
+            "The command after an uninstall must not re-create the global receipt from the legacy copy.");
+        Assert.False(
+            File.Exists(GlobalLockPath(h)),
+            "The command after an uninstall must not re-create the global lock from the legacy copy.");
+    }
+
+    /// <summary>
+    /// Project state imported from the repository must not come back after the project is uninstalled. The in-repo
+    /// copy is kept on purpose, so the next touch would import it again unless the import is recorded as done.
+    /// </summary>
+    [Fact]
+    public void UninstallOfImportedProjectStateIsNotUndoneByTheNextTouch()
+    {
+        using Harness h = NewHarness("uninstall-imported-project");
+        ScriptedAgentRenderer renderer = new("architect");
+        Project alpha = InstallProject(h, "alpha", renderer);
+        MoveProjectStateInRepo(h, alpha);
+        new SquadStateMigration(h.Store, h.UserPaths).ImportProject(alpha.Root);
+        Assert.True(File.Exists(alpha.ReceiptPath), "The import must restore the home project receipt before the uninstall.");
+
+        AssertExit(Uninstall(h, renderer, alpha.Root, global: false), 0);
+        Assert.False(File.Exists(alpha.ReceiptPath), "Project uninstall must remove the home project receipt.");
+        Assert.True(
+            File.Exists(Path.Combine(alpha.Root, ".kyber-weave", "squad.receipt.json")),
+            "Project uninstall keeps the in-repo state, so the next touch has something to re-import.");
+
+        CommandExecution touch = Status(h, alpha.Root, global: false);
+
+        AssertExit(touch, 1);
+        Assert.Contains("No Kyber-Squad deployment found", touch.Output, StringComparison.Ordinal);
+        Assert.False(
+            File.Exists(alpha.ReceiptPath),
+            "The next touch must not re-import the in-repo state after the project was uninstalled.");
+        Assert.DoesNotContain(
+            h.Store.ListProjects(),
+            entry => string.Equals(entry.Path, alpha.Physical, StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// After a migrated global uninstall, an explicit fresh install is not blocked by the migration record. It writes
+    /// new home state, and the status that follows reads that state back.
+    /// </summary>
+    [Fact]
+    public void FreshGlobalInstallAfterUninstallOfMigratedStateWritesNewHomeState()
+    {
+        using Harness h = NewHarness("fresh-install-after-uninstall");
+        ScriptedAgentRenderer renderer = new("architect");
+        string anchor = h.MakeDirectory("global-anchor");
+        InstallGlobal(h, anchor, renderer, SquadTarget.Codex);
+        MoveGlobalStateToLegacyRoot(h, anchor);
+        AssertExit(Uninstall(h, renderer, anchor, global: true), 0);
+
+        CommandExecution install = Capture(() => new SquadInstallCommand(
+            userPaths: h.UserPaths,
+            stateStore: h.Store,
+            releaseSource: h.ReleaseSource,
+            renderer: renderer,
+            isInteractive: false,
+            readAnswer: null,
+            globalRoots: h.GlobalRoots)
+            .Execute(null!, new SquadInstallSettings
+            {
+                Path = anchor,
+                Global = true,
+                Targets = ["codex"],
+                Version = InstalledVersion,
+                Yes = true
+            }));
+
+        AssertExit(install, 0);
+        Assert.True(File.Exists(GlobalReceiptPath(h)), "A fresh global install must write new home global state.");
+        CommandExecution status = Status(h, anchor, global: true);
+        AssertExit(status, 0);
+        Assert.Contains("All deployed files match", status.Output, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -674,6 +770,54 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
             h.Store.SerializeLock(LockFor(InstalledVersion)),
             Encoding.UTF8);
     }
+
+    /// <summary>
+    /// Moves the home global receipt and lock into the legacy per-user root, the layout a pre-home install left
+    /// behind, so the next migration has a legacy copy to copy. The installed files stay where they were.
+    /// </summary>
+    private static void MoveGlobalStateToLegacyRoot(Harness h, string anchor)
+    {
+        string legacyDirectory = Path.Combine(
+            h.ApplicationData,
+            "KyberWeave",
+            "squad",
+            "roots",
+            SquadPhysicalRootIdentity.Resolve(anchor).Key);
+        Directory.CreateDirectory(legacyDirectory);
+        File.Move(GlobalReceiptPath(h), Path.Combine(legacyDirectory, "squad.receipt.json"));
+        File.Move(GlobalLockPath(h), Path.Combine(legacyDirectory, "squad.lock.yml"));
+        Directory.Delete(GlobalStateDirectory(h));
+    }
+
+    /// <summary>
+    /// Moves a project's home state into the repository, the layout a pre-home install left behind, so the next
+    /// touch imports it. The project's installed files stay where they were.
+    /// </summary>
+    private static void MoveProjectStateInRepo(Harness h, Project project)
+    {
+        string inRepo = Path.Combine(project.Root, ".kyber-weave");
+        Directory.CreateDirectory(inRepo);
+        File.Move(project.ReceiptPath, Path.Combine(inRepo, "squad.receipt.json"));
+        File.Move(project.LockPath, Path.Combine(inRepo, "squad.lock.yml"));
+        Directory.Delete(project.StateDirectory);
+    }
+
+    private static CommandExecution Uninstall(Harness h, ISquadRenderer renderer, string path, bool global) =>
+        Capture(() => new SquadUninstallCommand(
+            userPaths: h.UserPaths,
+            stateStore: h.Store,
+            lifecycleService: h.Lifecycle(renderer),
+            isInteractive: false,
+            readAnswer: null,
+            globalRoots: h.GlobalRoots)
+            .Execute(null!, new SquadUninstallSettings { Path = path, Global = global, Yes = true }));
+
+    private static CommandExecution Status(Harness h, string path, bool global) =>
+        Capture(() => new SquadStatusCommand(
+            userPaths: h.UserPaths,
+            stateStore: h.Store,
+            globalRoots: h.GlobalRoots)
+            .Execute(null!, new SquadStatusSettings { Path = path, Global = global }));
 
     private static SquadLock LockFor(string version) => new(
         Schema: "kyber-squad.lock/v1",

@@ -518,7 +518,14 @@ internal static class SquadCommandComposition
         {
             SquadMigrationReport project = migration.ImportProject(projectRoot, dryRun);
             imported.AddRange(project.ImportedProjects);
-            warnings.AddRange(project.Warnings);
+            // Both steps read the migration ledger, so an unreadable ledger would otherwise be reported twice.
+            foreach (string warning in project.Warnings)
+            {
+                if (!warnings.Contains(warning))
+                {
+                    warnings.Add(warning);
+                }
+            }
         }
 
         return new SquadMigrationReport(global.MigratedItems, global.UnmigratedLegacyRoots, imported, warnings);
