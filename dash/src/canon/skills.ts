@@ -14,11 +14,13 @@
 //     No invocation source. The harness skill-token counter is a per-turn
 //     resident size (the listing's size in context, not an increment): it is
 //     reported once, from the latest turn, carried whole and never split across rows.
+//   - No listing key but a `<skills>`/`<available_skills>` block in the system prompt
+//     (VS Code Copilot): the listing is read from that block.
 //   - Everything else: the listing is not measurable, with a reason.
 
 import { harnessFamily } from './measurability.js'
 import { SKILLS_INVOKED_KEY, SKILLS_LISTED_KEY, isNotMeasurable, notMeasurable } from './types.js'
-import type { CanonicalRecord, Measurability, NotMeasurable } from './types.js'
+import type { CanonicalRecord, ContentPart, Measurability, NotMeasurable } from './types.js'
 
 /** Copilot's listing: a JSON-array string of skill names on the rollup span. */
 const COPILOT_LISTING_KEY = 'github.copilot.context.skills'
@@ -361,6 +363,8 @@ function readListing(record: CanonicalRecord): ListingResult {
   if (raw[SKILLS_LISTED_KEY] !== undefined) return readClaudeListing(record, raw[SKILLS_LISTED_KEY])
   if (raw[COPILOT_LISTING_KEY] !== undefined) return readCopilotListing(record, raw[COPILOT_LISTING_KEY])
   if (raw[ANTIGRAVITY_LISTING_KEY] !== undefined) return readAntigravityListing(record, raw[ANTIGRAVITY_LISTING_KEY])
+  const fromPrompt = readSystemPromptListing(record)
+  if (fromPrompt !== undefined) return fromPrompt
   return notMeasurable(
     `No skill listing source is recorded for harness ${record.harness}: the record carries none of ${SKILLS_LISTED_KEY}, ${COPILOT_LISTING_KEY} or ${ANTIGRAVITY_LISTING_KEY}, so the skills listed are not measurable.`,
   )
@@ -417,6 +421,19 @@ function readAntigravityListing(record: CanonicalRecord, value: unknown): Listin
   return { measurable: true, isInitial: true, skills: uniqueByName(skills) }
 }
 
+/**
+ * The listing as the system prompt itself states it, for a record with no
+ * listing key (VS Code Copilot sends a `<skills>` block). It is what the model was
+ * given, so it is measured; a prompt with no such block says nothing either way.
+ */
+function readSystemPromptListing(record: CanonicalRecord): ListingResult | undefined {
+  // Parts are the source of truth when present; the flat `content` is only for records without them.
+  const text = record.parts !== undefined ? partsSystemPrompt(record.parts) : systemPromptText(record)
+  if (!/<(?:available_)?skills>/.test(text)) return undefined
+  const skills = [...xmlDescriptions(text)].map(([name, description]) => listedSkill(record, name, description))
+  return { measurable: true, isInitial: true, skills: uniqueByName(skills) }
+}
+
 /** `<skill><name/><description/>` pairs from the system prompt's XML block. */
 function xmlDescriptions(text: string): Map<string, string> {
   const found = new Map<string, string>()
@@ -428,11 +445,15 @@ function xmlDescriptions(text: string): Map<string, string> {
 }
 
 /** The system prompt text: the `system_prompt` parts when present, else the flat bucket. */
-function systemPromptText(record: CanonicalRecord): string {
-  const fromParts = (record.parts ?? [])
+function partsSystemPrompt(parts: readonly ContentPart[]): string {
+  return parts
     .filter((part) => part.part === 'system_prompt')
     .map((part) => part.text)
     .join('\n')
+}
+
+function systemPromptText(record: CanonicalRecord): string {
+  const fromParts = partsSystemPrompt(record.parts ?? [])
   if (fromParts !== '') return fromParts
   return record.content.system_prompt ?? ''
 }

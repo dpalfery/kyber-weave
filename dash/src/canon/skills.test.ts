@@ -485,6 +485,40 @@ describe('extractListedSkills, harnesses with no listing source', () => {
   )
 })
 
+describe('extractListedSkills, system prompt <skills> block without a listing key', () => {
+  const prompt = [
+    '<skills>',
+    'Here is a list of skills.',
+    '<skill>',
+    '<name>app-docs-standard</name>',
+    '<description>Apply the documentation standard.</description>',
+    '<file>/x/SKILL.md</file>',
+    '</skill>',
+    '</skills>',
+  ].join('\n')
+
+  it('reads the listing from the prompt block', () => {
+    const record = modelTurn('copilot', 'vscode-turn', {
+      source: 'copilot',
+      raw: {},
+      ...withParts([{ part: 'system_prompt', text: prompt }]),
+    })
+    expect(extractListedSkills(record)).toMatchObject({
+      measurable: true,
+      skills: [{ name: 'app-docs-standard', description: 'Apply the documentation standard.' }],
+    })
+  })
+
+  it('stays not measurable when the prompt has no skills block', () => {
+    const record = modelTurn('copilot', 'vscode-turn-2', {
+      source: 'copilot',
+      raw: {},
+      ...withParts([{ part: 'system_prompt', text: 'No block here' }]),
+    })
+    expect(extractListedSkills(record)).toMatchObject({ availability: 'not_measurable' })
+  })
+})
+
 // ---------------------------------------------------------------------------
 // extractInvokedSkills
 // ---------------------------------------------------------------------------
