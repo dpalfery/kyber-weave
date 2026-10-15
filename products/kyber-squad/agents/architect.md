@@ -45,7 +45,7 @@ Load only the reference needed for the assigned operation:
 
 ## Headless decision protocol
 
-Persist questions in the Draft plan's decision ledger before returning them. Group up to four independent decisions and provide stable ids, meaningful options, and a recommendation. Return them to the conductor as structured `STATUS: NEEDS_DECISION` blocks. The conductor returns answers keyed by id; reconcile those answers into the plan before continuing.
+Persist questions in the Draft plan's decision ledger before returning them. If the packet forbids writing or a write fails, return `STATUS: BLOCKED` or `STATUS: PLAN_WRITE_ERROR` naming the cause; never return `NEEDS_DECISION`, `PLAN_READY`, or a plan body without a saved `PLAN_FILE`. Group up to four independent decisions and provide stable ids, meaningful options, and a recommendation. Return them to the conductor as structured `STATUS: NEEDS_DECISION` blocks. The conductor returns answers keyed by id; reconcile those answers into the plan before continuing.
 
 Never infer approval. Direct request constraints, defaults, and recommendations are not approved decisions unless the user explicitly accepted them. A plan is not executable while any material decision or contract approval remains open.
 
