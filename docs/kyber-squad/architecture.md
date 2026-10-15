@@ -692,11 +692,9 @@ and validates.
 - **Coverage today**: `claude` (native subagents with primary-agent entry-point skill), `copilot` (native), `cursor` (native), `codex` (native: `.codex/agents/*.toml` + `.codex/skills/*/SKILL.md`), `antigravity` (native: `.agents/agents/*/agent.md` + `.agents/skills/*/SKILL.md`, [ADR 0022](../adr/0022-antigravity-native-agents.md)), `opencode` (native: `.opencode/agents/*.md` + `.opencode/skills/*/SKILL.md`), `kilo` (native: `.kilo/agents/*.md` + `.kilo/skills/*/SKILL.md`), `pi` (native subagents with primary-agent lowering to `.pi/agents/*.md` and `.pi/skills/*/SKILL.md`), `factory` (native: `.factory/droids/*.md` + `.factory/skills/*/SKILL.md`, with the primary agent additionally exposed as an entry-point skill, [ADR 0034](../adr/0034-factory-droid-entry-point-skill.md)), `warp` (fallback role-skill lowering to `.warp/skills/`), `zcode` (native: `.zcode/agents/*.md` + `.zcode/skills/*/SKILL.md`, with primary agents lowered to `.zcode/commands/*.md`), and `devin` (native: `.devin/agents/*/AGENT.md` + `.devin/skills/*/SKILL.md`, with primary agents lowered to a skill) are implemented and registered. All twelve declared targets are covered. `kyber-weave squad doctor` reports which
   targets are covered.
 - **Authority and self-deployment boundary**: `products/kyber-squad/` is canonical and package
-  authority. Root `.github/agents/`, `.github/skills/`, and this repository's own legacy in-repo
-  `.kyber-weave/squad.lock.yml` and `.kyber-weave/squad.receipt.json` are an intentional stale
-  self-deployment, not inputs to source loading or packaging. The two `.kyber-weave/` files are legacy
-  in-repo state from before [ADR 0037](../adr/0037-squad-state-in-user-home.md); Squad no longer writes
-  them. They remain untouched until a human refreshes them after a fresh release candidate.
+  authority. The repository carries no project-level self-deployment: root `.github/agents/`,
+  `.github/skills/`, `.kyber-weave/squad.lock.yml`, and `.kyber-weave/squad.receipt.json` were
+  removed.
 
 ---
 

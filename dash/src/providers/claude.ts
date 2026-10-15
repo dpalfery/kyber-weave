@@ -10,6 +10,7 @@ import { getShortModelName } from '../pricing/models.js'
 import { readConfig } from '../config.js'
 import { FS_SCAN_CONCURRENCY, mapWithConcurrency } from '../ingest/fs-utils.js'
 import { extractBashCommands } from '../ingest/bash-utils.js'
+import { SKILL_LISTING_ATTACHMENT_TYPE, skillListingFromAttachment, type SkillListing } from '../ingest/skill-listing.js'
 
 export type ClaudeConfigSource = {
   id: string
@@ -308,8 +309,20 @@ export function loadClaudeCalls(filePath: string): ParsedProviderCall[] {
   const nativeMessageIds: Array<string | undefined> = []
   const fileStem = basename(filePath, extname(filePath))
   let index = 0
+  // A skill listing is not a turn. It waits for the next call that is pushed.
+  let pendingListing: SkillListing | undefined
 
   for (const rawLine of lines) {
+    // Only a line that really is a listing attachment is consumed here. The
+    // substring alone is not enough: an assistant turn can carry the quoted text
+    // inside a tool input and still be a call with usage, so it falls through.
+    if (rawLine.includes(`"${SKILL_LISTING_ATTACHMENT_TYPE}"`)) {
+      const listing = claudeSkillListingOf(rawLine)
+      if (listing !== undefined) {
+        pendingListing = listing
+        continue
+      }
+    }
     const usage = claudeUsageOf(rawLine)
     if (usage === undefined) continue
 
@@ -420,12 +433,28 @@ export function loadClaudeCalls(filePath: string): ParsedProviderCall[] {
       }
       prevCall.webSearchRequests = Math.max(prevCall.webSearchRequests, newCall.webSearchRequests)
     } else {
+      if (pendingListing !== undefined) {
+        newCall.skillsListed = pendingListing
+        pendingListing = undefined
+      }
       calls.push(newCall)
       nativeMessageIds.push(nativeMessageId)
     }
   }
 
   return calls
+}
+
+/** The skill listing a transcript line carries, or undefined for any other line. */
+function claudeSkillListingOf(rawLine: string): SkillListing | undefined {
+  let record: unknown
+  try {
+    record = JSON.parse(rawLine)
+  } catch {
+    return undefined
+  }
+  if (record === null || typeof record !== 'object' || Array.isArray(record)) return undefined
+  return skillListingFromAttachment((record as Record<string, unknown>)['attachment'])
 }
 
 function isContiguousPair(

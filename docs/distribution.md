@@ -125,10 +125,9 @@ content stays in its skill directory as its durable home, portable policy lives 
 exact 24-file Copilot golden skill surface of the pinned Hotshot fixture is not a package
 contract.
 
-`products/kyber-squad/` is canonical and package authority. The root `.github/agents/`,
-`.github/skills/`, `.kyber-weave/squad.lock.yml`, and `.kyber-weave/squad.receipt.json` are an
-intentional stale self-deployment and its tracked state, not release-package inputs. This work
-leaves them untouched for a human refresh after a fresh Kyber-Weave release candidate.
+`products/kyber-squad/` is canonical and package authority. The repository no longer carries a
+project-level self-deployment: the root `.github/agents/`, `.github/skills/`,
+`.kyber-weave/squad.lock.yml`, and `.kyber-weave/squad.receipt.json` were removed.
 
 ### Version lockstep and toolchain validation
 

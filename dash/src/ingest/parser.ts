@@ -66,6 +66,7 @@ import type {
 import { classifyTurn, BASH_TOOLS, EDIT_TOOLS } from '../metrics/classifier.js'
 import { extractBashCommands } from './bash-utils.js'
 import { isTrustedAbsoluteWorkingDirectory } from './path-privacy.js'
+import { SKILL_LISTING_ATTACHMENT_TYPE, skillListingFromAttachment } from './skill-listing.js'
 
 function unsanitizePath(dirName: string): string {
   return dirName.replace(/-/g, '/')
@@ -480,16 +481,14 @@ function extractLargeUserText(source: JsonSource, contentBounds: JsonValueBounds
   return text || undefined
 }
 
-function extractLargeAddedNames(source: JsonSource, attachmentBounds: JsonValueBounds | null): string[] {
-  if (!attachmentBounds || attachmentBounds.kind !== 'object') return []
-  const attachmentType = readJsonString(source, findObjectFieldValue(source, attachmentBounds.start, attachmentBounds.end, 'type'))
-  if (attachmentType !== 'deferred_tools_delta') return []
-  const addedNames = findObjectFieldValue(source, attachmentBounds.start, attachmentBounds.end, 'addedNames')
-  if (!addedNames || addedNames.kind !== 'array') return []
+// The string elements of a JSON array, at most `max` of them, each read capped at
+// `cap` characters. Empty and non-string elements are skipped.
+function readLargeStringArray(source: JsonSource, arrayBounds: JsonValueBounds | null, max: number, cap: number): string[] {
+  if (!arrayBounds || arrayBounds.kind !== 'array') return []
   const names: string[] = []
-  let i = addedNames.start + 1
-  while (i < addedNames.end - 1 && names.length < MAX_ADDED_NAMES) {
-    i = skipJsonWhitespace(source, i, addedNames.end)
+  let i = arrayBounds.start + 1
+  while (i < arrayBounds.end - 1 && names.length < max) {
+    i = skipJsonWhitespace(source, i, arrayBounds.end)
     if (jsonCharCodeAt(source, i) === 0x2c) {
       i++
       continue
@@ -498,13 +497,40 @@ function extractLargeAddedNames(source: JsonSource, attachmentBounds: JsonValueB
       i++
       continue
     }
-    const end = findJsonStringEnd(source, i, addedNames.end)
+    const end = findJsonStringEnd(source, i, arrayBounds.end)
     if (end === -1) break
-    const name = readJsonString(source, { start: i, end: end + 1, kind: 'string' }, 500)
+    const name = readJsonString(source, { start: i, end: end + 1, kind: 'string' }, cap)
     if (name) names.push(name)
     i = end + 1
   }
   return names
+}
+
+function extractLargeAddedNames(source: JsonSource, attachmentBounds: JsonValueBounds | null): string[] {
+  if (!attachmentBounds || attachmentBounds.kind !== 'object') return []
+  const attachmentType = readJsonString(source, findObjectFieldValue(source, attachmentBounds.start, attachmentBounds.end, 'type'))
+  if (attachmentType !== 'deferred_tools_delta') return []
+  const addedNames = findObjectFieldValue(source, attachmentBounds.start, attachmentBounds.end, 'addedNames')
+  return readLargeStringArray(source, addedNames, MAX_ADDED_NAMES, 500)
+}
+
+// A `skill_listing` attachment, read in place. The content and names are read
+// uncapped so the result equals what JSON.parse would give, and the same
+// normalizer compactEntry uses narrows it. Undefined for any other attachment.
+function extractLargeSkillListing(source: JsonSource, attachmentBounds: JsonValueBounds | null): unknown {
+  if (!attachmentBounds || attachmentBounds.kind !== 'object') return undefined
+  const field = (name: string) => findObjectFieldValue(source, attachmentBounds.start, attachmentBounds.end, name)
+  const attachmentType = readJsonString(source, field('type'))
+  if (attachmentType !== SKILL_LISTING_ATTACHMENT_TYPE) return undefined
+  const isInitial = field('isInitial')
+  const listing = skillListingFromAttachment({
+    type: attachmentType,
+    isInitial: isInitial?.kind === 'scalar' && source.slice(isInitial.start, isInitial.end) === 'true',
+    content: readJsonString(source, field('content')),
+    names: readLargeStringArray(source, field('names'), Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY),
+  })
+  if (listing === undefined) return undefined
+  return { type: SKILL_LISTING_ATTACHMENT_TYPE, isInitial: listing.isInitial, skills: listing.skills }
 }
 
 // Does the raw key bytes/chars at [keyStart, keyEnd) equal one of `fields`? This
@@ -612,6 +638,10 @@ function parseLargeJsonl(line: string | Buffer): JournalEntry | null {
   const addedNames = extractLargeAddedNames(source, root['attachment'])
   if (addedNames.length > 0) {
     ;(entry as Record<string, unknown>)['attachment'] = { type: 'deferred_tools_delta', addedNames }
+  }
+  const skillListing = extractLargeSkillListing(source, root['attachment'])
+  if (skillListing !== undefined) {
+    ;(entry as Record<string, unknown>)['attachment'] = skillListing
   }
 
   const message = root['message']
@@ -991,6 +1021,16 @@ export function compactEntry(raw: JournalEntry): JournalEntry {
         if (typeof n === 'string') names.push(n)
       }
       ;(entry as Record<string, unknown>)['attachment'] = { type: 'deferred_tools_delta', addedNames: names }
+    }
+    if (a['type'] === SKILL_LISTING_ATTACHMENT_TYPE) {
+      const listing = skillListingFromAttachment(a)
+      if (listing !== undefined) {
+        ;(entry as Record<string, unknown>)['attachment'] = {
+          type: SKILL_LISTING_ATTACHMENT_TYPE,
+          isInitial: listing.isInitial,
+          skills: listing.skills,
+        }
+      }
     }
   }
 

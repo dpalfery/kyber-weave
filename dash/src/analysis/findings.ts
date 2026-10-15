@@ -12,7 +12,13 @@
 // 5. Decision D16: skill utilisation findings are stamped at low confidence ('heuristic') and ranked last.
 
 import crypto from 'node:crypto'
-import { normalizeWhitespace, hashNormalized } from './signals.js'
+import {
+  normalizeWhitespace,
+  hashNormalized,
+  readInvokedSkillNames,
+  readListedSkillNames,
+  type SkillNamesRead,
+} from './signals.js'
 import { contextLimitOf, isUnnamedContextWindow, type ContextWindow } from '../canon/context-window.js'
 import { canonicalHarnessId, normalizeHarnessName, type SessionIdentities } from '../canon/measurability.js'
 import type { CanonicalRecord } from '../canon/types.js'
@@ -158,7 +164,7 @@ export function deriveOutcomeRiskCaveat(
   if (contextNote) return contextNote
 
   if (detectorId === 'inactive-skill-reference') {
-    return 'Skill activation is not exported by harness telemetry (D16); unexercised skill instructions may still provide latent domain guidance.'
+    return 'Skill activation is inferred from Skill tool calls and the invoked key (D16); a listed skill that was never loaded may still provide latent domain guidance.'
   }
 
   if (!outcome || outcome.status === 'not_measurable') {
@@ -1543,18 +1549,19 @@ export type InactiveSkillReferenceInput = {
   runId?: string
   sessionId?: string
   records?: readonly CanonicalRecord[]
+  /** Listed skill names; when given, replaces the listing read from `records`. */
   referencedSkills?: readonly string[]
+  /** Invoked skill names; when given, replaces the invocations read from `records`. */
   executedSkills?: readonly string[]
   skillTokens?: Record<string, number>
   outcome?: OutcomeBlock
 }
 
-const SKILL_TAG_REGEX = /<skill\s+name=["']([^"']+)["']/gi
-const SKILL_COLON_REGEX = /(?:skill|tool_skill):\s*([a-zA-Z0-9_-]+)/gi
-
 /**
  * Detector 7: inactive-skill-reference
- * Skill prompt blocks in context with 0 executions (ranked last, low confidence per D16).
+ * A skill the harness listed that no Skill call or invoked key loaded (ranked last,
+ * low confidence per D16). Silent when the harness exports no measurable listing or
+ * invocation source: an unmeasured skill is never reported as unused.
  */
 export function detectInactiveSkillReference(input: InactiveSkillReferenceInput): Finding[] {
   const findings: Finding[] = []
@@ -1564,64 +1571,69 @@ export function detectInactiveSkillReference(input: InactiveSkillReferenceInput)
   const outcome = input.outcome
   const discount = calculateOutcomeRiskDiscount(outcome, 'inactive-skill-reference')
 
-  let referenced: string[] = input.referencedSkills ? [...input.referencedSkills] : []
   const turnRecords = records.filter((r) => r.op === 'llm.invoke')
-  const toolRecords = records.filter((r) => r.op === 'tool.invoke')
 
-  if (referenced.length === 0 && turnRecords.length > 0) {
-    const seen = new Set<string>()
-    for (const turn of turnRecords) {
-      const text = turn.content.system_prompt ?? ''
-      SKILL_TAG_REGEX.lastIndex = 0
-      for (const match of text.matchAll(SKILL_TAG_REGEX)) {
-        if (match[1]) seen.add(match[1].trim())
-      }
-      SKILL_COLON_REGEX.lastIndex = 0
-      for (const match of text.matchAll(SKILL_COLON_REGEX)) {
-        if (match[1]) seen.add(match[1].trim())
-      }
-    }
-    referenced = [...seen]
-  }
+  const listed: SkillNamesRead =
+    input.referencedSkills !== undefined
+      ? { measurable: true, names: [...input.referencedSkills] }
+      : readListedSkillNames(records)
+  const invoked: SkillNamesRead =
+    input.executedSkills !== undefined
+      ? { measurable: true, names: [...input.executedSkills] }
+      : readInvokedSkillNames(records)
+  if (!listed.measurable || !invoked.measurable) return findings
 
+  const referenced = [...new Set(listed.names.map((s) => s.trim()).filter((s) => s !== ''))]
   if (referenced.length === 0) return findings
 
-  const executedSet = new Set(
-    input.executedSkills ??
-      toolRecords.map((t) => {
-        const name =
-          attributeOf(t, ['gen_ai.tool.name', 'tool.name']) ??
-          (t.name !== 'tool.invoke' ? t.name : '')
-        return (name || t.name).trim()
-      }),
-  )
+  const executedSet = new Set(invoked.names.map((s) => s.trim()))
   const skillTokensMap = input.skillTokens ?? {}
 
   for (const skill of referenced) {
     if (executedSet.has(skill)) continue
 
+    // With no recorded llm.invoke turn there is no span to carry the evidence, so the
+    // skill is not attributable and no finding is emitted (no synthetic span ids).
+    const firstTurn = turnRecords[0]
+    if (firstTurn === undefined) continue
+
     const tokensPerTurn = skillTokensMap[skill]
     const measured = tokensPerTurn !== undefined && tokensPerTurn > 0
-    const turnsCount = Math.max(turnRecords.length, 3)
+    // Measured: a resident size applied across at least three turns (the arithmetic below).
+    // Unmeasured: only the turns actually recorded are reported; none are invented.
+    const recordedTurns = turnRecords.length
+    const turnsCount = measured ? Math.max(recordedTurns, 3) : recordedTurns
     const estimatedWasteTokens = measured ? tokensPerTurn * turnsCount : undefined
 
-    const firstSpanId = turnRecords[0]?.spanId ?? 'turn-skill-inject-0'
-    const lastSpanId = turnRecords[turnRecords.length - 1]?.spanId ?? `turn-skill-uncalled-${turnsCount - 1}`
+    const firstSpanId = firstTurn.spanId
+    const lastTurnIndex = recordedTurns - 1
+    const lastSpanId = (turnRecords[lastTurnIndex] ?? firstTurn).spanId
 
-    const evidenceLinks: FindingEvidenceLink[] = [
-      {
-        spanId: firstSpanId,
-        turnIndex: 0,
-        description: measured
-          ? `Skill instructions for "${skill}" loaded into prompt context (${tokensPerTurn} tokens/turn).`
-          : `Skill instructions for "${skill}" loaded into prompt context (size unmeasured).`,
-      },
-      {
-        spanId: lastSpanId,
-        turnIndex: turnsCount - 1,
-        description: `Turn ${turnsCount - 1} completed with skill "${skill}" resident in prompt across ${turnsCount} turns without activation.`,
-      },
-    ]
+    const evidenceLinks: FindingEvidenceLink[] = measured
+      ? [
+          {
+            spanId: firstSpanId,
+            turnIndex: 0,
+            description: `Skill instructions for "${skill}" loaded into prompt context (${tokensPerTurn} tokens/turn).`,
+          },
+          {
+            spanId: lastSpanId,
+            turnIndex: turnsCount - 1,
+            description: `Turn ${turnsCount - 1} completed with skill "${skill}" resident in prompt across ${turnsCount} turns without activation.`,
+          },
+        ]
+      : [
+          {
+            spanId: firstSpanId,
+            turnIndex: 0,
+            description: `Skill "${skill}" listed (size unmeasured).`,
+          },
+          {
+            spanId: lastSpanId,
+            turnIndex: lastTurnIndex,
+            description: `Turn ${lastTurnIndex} is the last of ${recordedTurns} recorded ${recordedTurns === 1 ? 'turn' : 'turns'}; skill "${skill}" was listed and not invoked in any of them.`,
+          },
+        ]
 
     const recommendation = `Relocate skill instructions for "${skill}" to on-demand progressive disclosure, loading skill prompt blocks dynamically only when matching task intents occur.`
     const outcomeRiskCaveat = deriveOutcomeRiskCaveat(
@@ -1635,10 +1647,10 @@ export function detectInactiveSkillReference(input: InactiveSkillReferenceInput)
     findings.push({
       id: `finding-inactive-skill-${skill}-${sessionId ?? 'session'}`,
       detectorId: 'inactive-skill-reference',
-      title: `Inactive Skill Reference: Skill "${skill}" loaded in context with 0 executions`,
+      title: `Inactive Skill Reference: Skill "${skill}" listed with 0 invocations`,
       mechanism: measured
         ? `Skill instruction block for "${skill}" remained resident in prompt context across ${turnsCount} turns (${tokensPerTurn} tokens/turn), accumulating ${estimatedWasteTokens} tokens without explicit execution or activation.`
-        : `Skill instruction block for "${skill}" remained resident in prompt context across ${turnsCount} turns at an unmeasured size without explicit execution or activation.`,
+        : `Skill "${skill}" was listed in the session's ${recordedTurns} recorded ${recordedTurns === 1 ? 'turn' : 'turns'} with 0 invocations; its context size was not measured.`,
       evidenceLinks,
       confidence: 'heuristic',
       ...(measured
@@ -1656,10 +1668,10 @@ export function detectInactiveSkillReference(input: InactiveSkillReferenceInput)
       sessionId,
       rankScore,
       measurementClass: measured ? 'inferred' : 'coverage-gap',
-      confidenceBasis: 'Decision D16: Stamped at low confidence (heuristic) because agent harnesses do not export explicit skill activation telemetry.',
+      confidenceBasis: 'Decision D16: Stamped at low confidence (heuristic) because a listed skill that is never loaded may still shape output, so activation is inferred from Skill calls and the invoked key.',
       whatWouldRaiseIt: measured
-        ? 'Harness export of discrete skill activation spans or tool routing telemetry.'
-        : 'Reported skill-block token sizes would let the unused instruction cost be measured. Harness export of discrete skill activation spans would also raise confidence.',
+        ? 'Harness export of skill activation spans for skills applied without a Skill tool call.'
+        : 'Reported skill-block token sizes would let the context size of the listed skill be measured. Harness export of discrete skill activation spans would also raise confidence.',
     })
   }
 

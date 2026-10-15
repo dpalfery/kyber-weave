@@ -751,11 +751,9 @@ its skill directory as its durable home, portable policy lives in the
 Rendered `.github` trees are deployment output and are not added to the canonical product tree by
 `squad pack` or the golden synchronization.
 
-`products/kyber-squad/` is the canonical and package authority. The repository root
-`.github/agents/`, `.github/skills/`, and this repository's own legacy in-repo
-`.kyber-weave/squad.lock.yml` and `.kyber-weave/squad.receipt.json` form an intentional stale self-deployment.
-Squad no longer writes the lock and receipt into the repository ([ADR 0037](../adr/0037-squad-state-in-user-home.md)). This synchronization
-leaves them untouched; a human will refresh them after a fresh Kyber-Weave release candidate.
+`products/kyber-squad/` is the canonical and package authority. The repository no longer carries a
+project-level self-deployment: the root `.github/agents/`, `.github/skills/`,
+`.kyber-weave/squad.lock.yml`, and `.kyber-weave/squad.receipt.json` were removed.
 
 ---
 

@@ -51,6 +51,8 @@ export type { ParsedProviderCall } from '../providers/types.js'
 import {
   contentFromParts,
   notMeasurable,
+  SKILLS_INVOKED_KEY,
+  SKILLS_LISTED_KEY,
   type CanonicalRecord,
   type ContentPart,
   type CostBlock,
@@ -441,6 +443,33 @@ export function isCopilotOutputAbsent(call: ParsedProviderCall): boolean {
   return copilotAbsentOutputReason(call) !== undefined
 }
 
+/**
+ * The skill names a parsed call invoked, in first-seen order with repeats
+ * collapsed. Undefined when there are none, so the caller omits the key rather
+ * than storing an empty list. Names are only ever the parser's own reports.
+ */
+export function invokedSkillsOf(call: ParsedProviderCall): string[] | undefined {
+  if (call.skills === undefined || call.skills.length === 0) return undefined
+  return Array.from(new Set(call.skills))
+}
+
+/**
+ * The skill listing the call carried from the transcript's `skill_listing`
+ * attachment, copied with `description` present only where the parser gave one.
+ * Undefined when the call carried no listing, so the caller omits the key.
+ */
+export function listedSkillsOf(
+  call: ParsedProviderCall,
+): { isInitial: boolean; skills: { name: string; description?: string }[] } | undefined {
+  const listed = call.skillsListed
+  if (listed === undefined || listed.skills.length === 0) return undefined
+  return {
+    isInitial: listed.isInitial,
+    skills: listed.skills.map(({ name, description }) =>
+      description === undefined ? { name } : { name, description }),
+  }
+}
+
 export function synthesizeCall(
   call: ParsedProviderCall,
   conventions: ReadonlyMap<string, TokenConvention> = PROVIDER_CONVENTIONS,
@@ -487,6 +516,8 @@ export function synthesizeCall(
         ...(readerTurn.isCorrection !== undefined ? { isCorrection: readerTurn.isCorrection, correctionRule: readerTurn.correctionRule } : {}),
       }
 
+  const invokedSkills = invokedSkillsOf(call)
+  const listedSkills = listedSkillsOf(call)
   const absentOutputReason = copilotAbsentOutputReason(call)
   const measurability = {
     ...measurabilityFor(call.provider),
@@ -520,7 +551,12 @@ export function synthesizeCall(
     ...(readerTurn !== undefined ? { parts: readerTurn.parts } : {}),
     cost: costBlockFor(call),
     measurability,
-    raw: { ...rawCall, provenance },
+    raw: {
+      ...rawCall,
+      provenance,
+      ...(invokedSkills !== undefined ? { [SKILLS_INVOKED_KEY]: invokedSkills } : {}),
+      ...(listedSkills !== undefined ? { [SKILLS_LISTED_KEY]: listedSkills } : {}),
+    },
   }
 }
 
@@ -911,12 +947,19 @@ function mergeParsedCalls(keeper: ParsedProviderCall, donor: ParsedProviderCall)
   const tools = Array.from(new Set([...(keeper.tools ?? []), ...(donor.tools ?? [])]))
   const bashCommands = Array.from(new Set([...(keeper.bashCommands ?? []), ...(donor.bashCommands ?? [])]))
   const toolSequence = [...(keeper.toolSequence ?? []), ...(donor.toolSequence ?? [])]
+  // A twin collapse keeps the donor's invoked skills too, so the merged turn
+  // does not lose a skill only one of the two sessions files recorded.
+  const skills = Array.from(new Set([...(keeper.skills ?? []), ...(donor.skills ?? [])]))
+  // The listing is kept whole: the keeper's when it has one, else the donor's.
+  const skillsListed = keeper.skillsListed ?? donor.skillsListed
 
   return {
     ...keeper,
     tools,
     bashCommands,
     ...(toolSequence.length > 0 ? { toolSequence } : {}),
+    ...(skills.length > 0 ? { skills } : {}),
+    ...(skillsListed !== undefined ? { skillsListed } : {}),
     webSearchRequests: Math.max(keeper.webSearchRequests ?? 0, donor.webSearchRequests ?? 0),
     activeDurationMs: Math.max(keeper.activeDurationMs ?? 0, donor.activeDurationMs ?? 0),
   }

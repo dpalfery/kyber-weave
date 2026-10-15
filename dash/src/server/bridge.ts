@@ -68,6 +68,8 @@ import {
   type ExecutionRow,
   type ExecutionTreeNode,
   type HarnessRollupRow,
+  type NotMeasurable,
+  notMeasurable,
 } from '../canon/types.js'
 import type { CostBasisMismatch } from '../canon/cost.js'
 import {
@@ -696,6 +698,12 @@ export type TurnContentResult = {
    */
   rawPacket: { spanAttributesPath: string; interactionPath?: string }
   sharedContext?: TurnContentSharedContext | null
+  /**
+   * The skills this turn had access to and invoked. Not a content block: it
+   * sits beside `blocks` and leaves them unchanged. The whole entry is declared
+   * not measurable when the session's payload carries no skills view.
+   */
+  skills?: TurnSkillsContent | NotMeasurable
 }
 
 /**
@@ -823,6 +831,9 @@ type TurnDescriptor = {
   turn?: unknown
   spanId?: string
   model?: string
+  /** The projected skills of this turn (names); read by the skills entry, never trusted blind. */
+  skills_listed?: unknown
+  skills_invoked?: unknown
 }
 
 /**
@@ -835,6 +846,64 @@ function turnTransportIndexOf(item: TurnDescriptor): number | undefined {
   if (typeof item.index === 'number' && Number.isFinite(item.index)) return item.index
   if (typeof item.turn === 'number' && Number.isFinite(item.turn)) return item.turn - 1
   return undefined
+}
+
+/** The turn's skills entry for the content route (T2), as one turn of the content response. */
+export type TurnSkillsContent = {
+  /** What the turn had access to; each with its row's first observed description as `text` when one exists. */
+  listed: Array<{ name: string; text?: string }> | NotMeasurable
+  /** The distinct skills the turn itself invoked; `[]` is a measured none. */
+  invoked: string[] | NotMeasurable
+}
+
+const isRecordValue = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+
+const isStringArray = (value: unknown): value is string[] =>
+  Array.isArray(value) && value.every((item) => typeof item === 'string')
+
+/**
+ * A turn's skills entry, read from the already-loaded session payload only.
+ * The narrow turn-content seam must not walk session records, so the payload
+ * carries what the projection already derived: `skills.rows[].description`
+ * and each turn's `skills_listed` / `skills_invoked`. A payload projected
+ * before skills existed has no `skills` key and is declared so.
+ *
+ * Known limit (accepted): `text` is the skill's first observed description in
+ * the session. A later listing that changes the description does not alter the
+ * text served for earlier turns.
+ */
+function skillsContentFromPayload(
+  payload: SessionPayload | null | undefined,
+  turn: TurnDescriptor | undefined,
+): TurnSkillsContent | NotMeasurable {
+  const skills = payload?.skills
+  if (!isRecordValue(skills)) return notMeasurable('session not yet projected with skills')
+  if (skills.availability === 'not_measurable') {
+    return notMeasurable(typeof skills.reason === 'string' ? skills.reason : 'Skills are not measurable for this session.')
+  }
+
+  const descriptions = new Map<string, string>()
+  if (Array.isArray(skills.rows)) {
+    for (const row of skills.rows) {
+      if (isRecordValue(row) && typeof row.name === 'string' && typeof row.description === 'string') {
+        descriptions.set(row.name, row.description)
+      }
+    }
+  }
+
+  const listed: TurnSkillsContent['listed'] = isStringArray(turn?.skills_listed)
+    ? turn.skills_listed.map((name) => {
+        const text = descriptions.get(name)
+        return text === undefined ? { name } : { name, text }
+      })
+    : notMeasurable('This turn has no skill listing in the projected session, so the skills it had access to are not measurable.')
+
+  const invoked: TurnSkillsContent['invoked'] = isStringArray(turn?.skills_invoked)
+    ? [...turn.skills_invoked]
+    : notMeasurable('Skill invocations are not measured for this session, so the skills this turn invoked are not measurable.')
+
+  return { listed, invoked }
 }
 
 /**
@@ -1850,9 +1919,11 @@ export class KyberBridge {
       ? (payload.turns as TurnDescriptor[])
       : []
     const payloadByIdentity = buildTransportIndex(turns, turnTransportIndexOf)
+    let payloadTurn: TurnDescriptor | undefined
     if (turns.length > 0) {
       const turnItem = lookupTransport(turns, payloadByIdentity, turnTransportIndexOf, turnIndex)
       if (turnItem) {
+        payloadTurn = turnItem
         if (typeof turnItem.spanId === 'string') targetSpanId = turnItem.spanId
         if (typeof turnItem.model === 'string') model = turnItem.model
       } else if (payloadByIdentity.size > 0) {
@@ -2129,6 +2200,7 @@ export class KyberBridge {
       rawPacket,
       ...(truncated ? { truncated, totalLength } : {}),
       sharedContext,
+      skills: skillsContentFromPayload(payload, payloadTurn),
     }
 
     return result

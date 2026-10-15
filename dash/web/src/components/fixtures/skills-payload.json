@@ -1,0 +1,217 @@
+{
+  "realistic": {
+    "summary": {
+      "skills_listed": ["docs", "deploy", "lint"],
+      "skills_invoked": ["docs", "release-notes"]
+    },
+    "skills": {
+      "measurable": true,
+      "reported_skill_tokens": 1040,
+      "listed_count": 3,
+      "listed_uninvoked_count": 2,
+      "rows": [
+        { "name": "docs", "listed": true, "invocations": 2, "turns_listed": [0, 1, 2], "derived_tokens": 38 },
+        { "name": "deploy", "listed": true, "invocations": 0, "turns_listed": [0, 1, 2], "derived_tokens": 52 },
+        { "name": "lint", "listed": true, "invocations": 0, "turns_listed": [0], "derived_tokens": 19 },
+        { "name": "release-notes", "listed": false, "invocations": 1, "turns_listed": [], "derived_tokens": 0 }
+      ]
+    },
+    "turns": [
+      { "index": 0, "skills_listed": ["docs", "deploy", "lint"] },
+      { "index": 1, "skills_listed": ["docs", "deploy"] },
+      { "index": 2, "skills_listed": ["docs", "deploy"] }
+    ]
+  },
+
+  "noReportedTokens": {
+    "summary": {
+      "skills_listed": ["docs", "deploy", "lint"],
+      "skills_invoked": ["docs", "release-notes"]
+    },
+    "skills": {
+      "measurable": true,
+      "listed_count": 3,
+      "listed_uninvoked_count": 2,
+      "rows": [
+        { "name": "docs", "listed": true, "invocations": 2, "turns_listed": [0, 1, 2], "derived_tokens": 38 },
+        { "name": "deploy", "listed": true, "invocations": 0, "turns_listed": [0, 1, 2], "derived_tokens": 52 },
+        { "name": "lint", "listed": true, "invocations": 0, "turns_listed": [0], "derived_tokens": 19 },
+        { "name": "release-notes", "listed": false, "invocations": 1, "turns_listed": [], "derived_tokens": 0 }
+      ]
+    },
+    "turns": [
+      { "index": 0, "skills_listed": ["docs", "deploy", "lint"] },
+      { "index": 1, "skills_listed": ["docs", "deploy"] },
+      { "index": 2, "skills_listed": ["docs", "deploy"] }
+    ]
+  },
+
+  "allInvoked": {
+    "summary": {
+      "skills_listed": ["docs", "deploy"],
+      "skills_invoked": ["docs", "deploy"]
+    },
+    "skills": {
+      "measurable": true,
+      "reported_skill_tokens": 90,
+      "listed_count": 2,
+      "listed_uninvoked_count": 0,
+      "rows": [
+        { "name": "docs", "listed": true, "invocations": 2, "turns_listed": [0, 1], "derived_tokens": 38 },
+        { "name": "deploy", "listed": true, "invocations": 1, "turns_listed": [0, 1], "derived_tokens": 52 }
+      ]
+    },
+    "turns": [
+      { "index": 0, "skills_listed": ["docs", "deploy"] },
+      { "index": 1, "skills_listed": ["docs", "deploy"] }
+    ]
+  },
+
+  "servedCountsDifferFromRows": {
+    "summary": {
+      "skills_listed": ["docs", "deploy", "lint"],
+      "skills_invoked": ["docs", "release-notes"]
+    },
+    "skills": {
+      "measurable": true,
+      "listed_count": 7,
+      "listed_uninvoked_count": 5,
+      "rows": [
+        { "name": "docs", "listed": true, "invocations": 2, "turns_listed": [0, 1, 2], "derived_tokens": 38 },
+        { "name": "deploy", "listed": true, "invocations": 0, "turns_listed": [0, 1, 2], "derived_tokens": 52 },
+        { "name": "lint", "listed": true, "invocations": 0, "turns_listed": [0], "derived_tokens": 19 },
+        { "name": "release-notes", "listed": false, "invocations": 1, "turns_listed": [], "derived_tokens": 0 }
+      ]
+    },
+    "turns": [
+      { "index": 0, "skills_listed": ["docs", "deploy", "lint"] },
+      { "index": 1, "skills_listed": ["docs", "deploy"] },
+      { "index": 2, "skills_listed": ["docs", "deploy"] }
+    ]
+  },
+
+  "onlyListedCountServed": {
+    "summary": {
+      "skills_listed": ["docs", "deploy", "lint"],
+      "skills_invoked": ["docs", "release-notes"]
+    },
+    "skills": {
+      "measurable": true,
+      "listed_count": 3,
+      "rows": [
+        { "name": "docs", "listed": true, "invocations": 2, "turns_listed": [0, 1, 2], "derived_tokens": 38 },
+        { "name": "deploy", "listed": true, "invocations": 0, "turns_listed": [0, 1, 2], "derived_tokens": 52 },
+        { "name": "lint", "listed": true, "invocations": 0, "turns_listed": [0], "derived_tokens": 19 },
+        { "name": "release-notes", "listed": false, "invocations": 1, "turns_listed": [], "derived_tokens": 0 }
+      ]
+    },
+    "turns": [
+      { "index": 0, "skills_listed": ["docs", "deploy", "lint"] },
+      { "index": 1, "skills_listed": ["docs", "deploy"] },
+      { "index": 2, "skills_listed": ["docs", "deploy"] }
+    ]
+  },
+
+  "noRecordedSkills": {
+    "summary": {
+      "skills_listed": [],
+      "skills_invoked": []
+    },
+    "skills": {
+      "measurable": true,
+      "listed_count": 0,
+      "listed_uninvoked_count": 0,
+      "rows": []
+    },
+    "turns": [{ "index": 0, "skills_listed": [] }]
+  },
+
+  "listedNotMeasurableRow": {
+    "summary": {
+      "skills_invoked": ["docs"]
+    },
+    "skills": {
+      "measurable": true,
+      "rows": [
+        {
+          "name": "docs",
+          "listed": { "availability": "not_measurable", "reason": "the harness did not export the skill listing for this session" },
+          "invocations": 2,
+          "turns_listed": [],
+          "derived_tokens": 38
+        },
+        { "name": "deploy", "listed": true, "invocations": 0, "turns_listed": [0, 1], "derived_tokens": 52 }
+      ]
+    },
+    "turns": [
+      { "index": 0, "skills_listed": ["deploy"] },
+      { "index": 1, "skills_listed": ["deploy"] }
+    ]
+  },
+
+  "invocationsNotMeasurableRow": {
+    "summary": {
+      "skills_listed": ["docs", "deploy"]
+    },
+    "skills": {
+      "measurable": true,
+      "rows": [
+        {
+          "name": "docs",
+          "listed": true,
+          "invocations": { "availability": "not_measurable", "reason": "invocation events were not exported by this harness" },
+          "turns_listed": [0, 1, 2],
+          "derived_tokens": 38
+        },
+        { "name": "deploy", "listed": true, "invocations": 0, "turns_listed": [0, 1], "derived_tokens": 52 }
+      ]
+    },
+    "turns": [
+      { "index": 0, "skills_listed": ["docs", "deploy"] },
+      { "index": 1, "skills_listed": ["docs", "deploy"] },
+      { "index": 2, "skills_listed": ["docs"] }
+    ]
+  },
+
+  "panelNotMeasurable": {
+    "summary": {},
+    "skills": {
+      "availability": "not_measurable",
+      "reason": "the harness exported no skill listing for this session"
+    },
+    "turns": [{ "index": 0 }]
+  },
+
+  "legacyNoSkills": {
+    "summary": {},
+    "turns": [{ "index": 0 }]
+  },
+
+  "turnContentSkills": {
+    "listedWithText": {
+      "skills": {
+        "listed": [
+          { "name": "docs", "text": "DOCS_LISTING_TEXT: Use when writing or revising documentation." },
+          { "name": "deploy", "text": "DEPLOY_LISTING_TEXT: Ship a release to production." }
+        ],
+        "invoked": ["docs"]
+      }
+    },
+    "listingNotMeasurable": {
+      "skills": {
+        "listed": { "availability": "not_measurable", "reason": "the harness did not export the listing text for this turn" },
+        "invoked": ["docs"]
+      }
+    },
+    "entryNotMeasurable": {
+      "availability": "not_measurable",
+      "reason": "skill listings were not exported for this session"
+    },
+    "textMissing": {
+      "skills": {
+        "listed": [{ "name": "docs" }],
+        "invoked": ["docs"]
+      }
+    }
+  }
+}

@@ -73,11 +73,9 @@ non-policy content stays in its skill directory as its durable home, portable po
 `products/kyber-squad/standards/` templates, and nothing was deleted. Generated `.github` output
 remains a deployment artifact rather than canonical product source.
 
-`products/kyber-squad/` is the canonical and package authority. The repository root
-`.github/agents/` and `.github/skills/` trees are an intentional stale Copilot self-deployment;
-their legacy in-repo `.kyber-weave/squad.lock.yml` and `.kyber-weave/squad.receipt.json` state is stale
-with them. Those four root paths are outside this synchronization, remain untouched, and will be
-refreshed by a human after a fresh Kyber-Weave release candidate exists.
+`products/kyber-squad/` is the canonical and package authority. The repository no longer carries
+a project-level self-deployment: the root `.github/agents/` and `.github/skills/` trees and the
+tracked `.kyber-weave/squad.lock.yml` and `.kyber-weave/squad.receipt.json` state were removed.
 
 ---
 

@@ -61,6 +61,11 @@ export type ParsedProviderCall = {
   // Skill names invoked in this call (e.g. 'commit'). Feeds the Skills & Agents
   // breakdown; optional since most providers don't expose it.
   skills?: string[]
+  // Skills Claude Code listed as available to the session, from the
+  // `skill_listing` attachment written just before this call. Present only on the
+  // call that follows a listing (never empty). `isInitial` marks the session's
+  // first listing; whether a later listing replaces or unions is decided downstream.
+  skillsListed?: { isInitial: boolean; skills: { name: string; description?: string }[] }
   timestamp: string
   speed: 'standard' | 'fast'
   deduplicationKey: string

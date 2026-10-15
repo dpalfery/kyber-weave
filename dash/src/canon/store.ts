@@ -179,9 +179,10 @@ export const SCHEMA_VERSION = 19
  * a store file that predates a generation keeps its old stamp until its
  * derived tables are rebuilt. Bump it whenever detector semantics change
  * and say so in the PR, so the stamp stays a truthful witness instead of a
- * forgotten counter.
+ * forgotten counter. 4 reads skill listings and invocations from canon/skills.ts
+ * (Skill tool calls and the invoked key) instead of prompt-text regexes and tool names.
  */
-export const DETECTOR_VERSION = 3
+export const DETECTOR_VERSION = 4
 
 /**
  * The whole schema, as code. `CREATE ... IF NOT EXISTS` throughout so
