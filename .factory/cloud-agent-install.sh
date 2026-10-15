@@ -3,7 +3,8 @@
 # .NET 10 engine, the KyberDash TypeScript surfaces, and the harness CLI/MCP/Squad
 # tooling. Mirrors .cursor/cloud-agent-install.sh for use as a Factory Environment
 # "Repository setup script" — runs in the repository directory after Factory's
-# global setup, so REPO_ROOT=cwd is correct.
+# global setup. REPO_ROOT is derived from this script's own location, so it
+# holds even when the script is invoked from another directory.
 #
 # Factory Environment build semantics: "Build scripts run with Bash and stop on
 # command failures." This script therefore runs with `set -Eeuo pipefail` and
@@ -12,14 +13,34 @@
 
 set -Eeuo pipefail
 
-REPO_ROOT="$(pwd)"
+# Piping this script on stdin leaves BASH_SOURCE unset, which under set -u
+# silently resolves REPO_ROOT to "/"; sourcing it would run the whole install
+# inside the caller's shell (errexit included). BASH_SOURCE differs from $0
+# only when sourced, so both mis-invocations fail loudly — the script works
+# only executed from its file inside the repository.
+if [ -z "${BASH_SOURCE[0]:-}" ] || [ "${BASH_SOURCE[0]}" != "$0" ]; then
+  echo "error: run this script from its file (bash .factory/cloud-agent-install.sh), not piped or sourced" >&2
+  exit 2
+fi
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Anchor the rest of the script to the repository root so relative paths
+# (KyberWeave.sln, the local tool manifest) resolve regardless of the
+# caller's working directory.
+cd "$REPO_ROOT"
 
 # Droid Environments typically run scripts as root; tolerate non-root by routing
-# privileged writes through sudo. /opt/dotnet, /usr/local/bin, and npm's global
-# prefix all prefer root, so this lets the same script run in either case.
+# privileged writes through sudo. /opt/dotnet and apt's system locations prefer
+# root, so this lets the same script run in either case.
 is_root() { [ "$(id -u)" -eq 0 ]; }
 run_privileged() {
   if is_root; then "$@"; else sudo "$@"; fi
+}
+
+# A fresh Factory image ships a cold apt cache, so installing without an update
+# first can fail on a stale package index. Every apt install chains the update
+# rather than assuming the image warmed the cache.
+apt_install() {
+  run_privileged apt-get update -qq && run_privileged apt-get install -y "$@"
 }
 
 export DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1
@@ -27,6 +48,13 @@ export TERM=dumb NO_COLOR=1 COLUMNS=200 DEBIAN_FRONTEND=noninteractive
 LOG="${TMPDIR:-/tmp}/kyber-weave-droid-setup.log"
 
 log() { echo "[install] $*"; }
+
+# --- Prerequisites (curl/git) ------------------------------------------------
+# curl feeds the .NET and nvm installers below and git the nvm one; a cold
+# image may ship neither, so they install before their first use rather than
+# inside the nvm branch, where the .NET step would already have needed curl.
+command -v curl >/dev/null 2>&1 || apt_install curl
+command -v git  >/dev/null 2>&1 || apt_install git
 
 # --- .NET 10 SDK (repo build/test) ------------------------------------------
 # Factory-managed sources ship without a usable .NET runtime, so install from
@@ -54,7 +82,7 @@ export PATH="$HOME/.local/bin:$PATH"
 # Deliberate trade in AGENTS.md: the read-only adapter avoids
 # Microsoft.Data.Sqlite's unresolved advisory. Ubuntu's archive ships
 # libsqlite3-0; the CLI lives in a separate package.
-command -v sqlite3 >/dev/null 2>&1 || run_privileged apt-get install -y sqlite3
+command -v sqlite3 >/dev/null 2>&1 || apt_install sqlite3
 
 # --- Node 24 (dash/.nvmrc: node:sqlite parity) ------------------------------
 # bash -lc passes NVM_DIR but nvm itself keys on the source-able script; source
@@ -64,9 +92,10 @@ export NVM_DIR="$HOME/.nvm"
 if ! command -v nvm >/dev/null 2>&1; then
   if [ ! -s "$NVM_DIR/nvm.sh" ]; then
     log "installing nvm -> $NVM_DIR"
-    command -v curl >/dev/null 2>&1 || run_privileged apt-get install -y curl
-    command -v git  >/dev/null 2>&1 || run_privileged apt-get install -y git
-    run_privileged mkdir -p "$NVM_DIR"
+    # $NVM_DIR lives under $HOME, so a plain mkdir keeps it user-owned; a
+    # privileged mkdir would recreate the root-owned-dir bug fixed for
+    # /opt/dotnet above, blocking the unprivileged nvm installer.
+    mkdir -p "$NVM_DIR"
     curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
   fi
   # shellcheck disable=SC1091
@@ -88,7 +117,13 @@ nvm use "$NODE_VERSION" >/dev/null
 NODE_BIN="$(dirname "$(nvm which "$NODE_VERSION")")"
 mkdir -p "$HOME/.local/bin"
 for b in node npm npx corepack; do
-  [ -e "$NODE_BIN/$b" ] && ln -sf "$NODE_BIN/$b" "$HOME/.local/bin/$b"
+  # An absent binary is expected (a Node build may ship no corepack), so the
+  # guard skips it; a failing ln stays fatal. Errexit does not fire on the
+  # non-final command of an AND list, so the old `[ -e ] && ln` form was
+  # already safe — this is the explicit form of the same behavior.
+  if [ -e "$NODE_BIN/$b" ]; then
+    ln -sf "$NODE_BIN/$b" "$HOME/.local/bin/$b"
+  fi
 done
 export PATH="$HOME/.local/bin:$PATH"
 hash -r 2>/dev/null || true
