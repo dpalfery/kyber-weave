@@ -225,6 +225,7 @@ references that belong to this repository.
 - **<adr-index>**: `docs/adr/README.md`
 - **<rules-index>**: `docs/rules/README.md`
 - **<reference-index>**: `docs/reference/README.md`
+- **<review-guidance>**: `REVIEW.md`
 
 Skills and other portable instruction files SHALL reference these paths by the
 property name above — "the path declared as **<component-catalog>**
