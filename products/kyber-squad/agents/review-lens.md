@@ -33,7 +33,7 @@ and stop. Skipping is a first-class, expected outcome, not a failure and not a s
 
 A diff shows changed lines, not their meaning. Before reporting anything, open the files the change touches and read enough of the surrounding code to know whether the change is actually wrong. A finding derived only from the `+` lines, with no knowledge of the caller, the base class, or the existing pattern, is the single largest source of false positives in automated review.
 
-Where the lens names a project standard, read the standard rather than inferring it. Where the change follows an existing pattern in the same file or module, that pattern is evidence about intent — say so rather than reporting the pattern as a novel defect.
+Read the sections of [`REVIEW.md`](../../../REVIEW.md) its lens map assigns to your lens: they hold the defect classes that recurred in past reviews and the findings not worth raising. Where the lens names a project standard, read the standard rather than inferring it. Where the change follows an existing pattern in the same file or module, that pattern is evidence about intent — say so rather than reporting the pattern as a novel defect.
 
 # 3. Report in one schema
 

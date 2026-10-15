@@ -37,7 +37,7 @@ Establish the scoped change with status, diff, and narrow file reads. Do not run
 
 1. Check every acceptance criterion against the current artifact and name the path or line that proves it. Unlocatable evidence is unmet.
 2. Confirm every path and claim in the completion digest against the tree. Unsupported is not the same as false, but both require correction before PASS.
-3. Read the nearest governing instructions and standards for the changed scope. Report only human-judgment deviations; mechanical formatting and analyzer issues mean the worker's deterministic completion gate did not run.
+3. Read the nearest governing instructions and standards for the changed scope, and the sections of [`REVIEW.md`](../../REVIEW.md) that match the changed paths. Report only human-judgment deviations; mechanical formatting and analyzer issues mean the worker's deterministic completion gate did not run.
 4. Reject demonstrably incomplete work and change outside the task's authorized scope.
 5. Record serious out-of-scope council concerns as `ESCALATION: end-of-run` without attempting a full security, performance, dependency, or cross-system analysis.
 
