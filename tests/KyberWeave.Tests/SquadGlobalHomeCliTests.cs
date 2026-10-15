@@ -448,6 +448,27 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     }
 
     /// <summary>
+    /// A registry the status command cannot parse is named and fails the run, the way doctor reports it, rather than
+    /// crashing or listing nothing and succeeding. The status read is not a repair, so the corrupt file is left as found.
+    /// </summary>
+    [Fact]
+    public void StatusGlobalNamesAnUnreadableRegistryAndFailsWithoutRewritingIt()
+    {
+        using Harness h = NewHarness("status-global-corrupt-registry");
+        ScriptedAgentRenderer renderer = new("architect");
+        string anchor = h.MakeDirectory("global-anchor");
+        InstallGlobal(h, anchor, renderer, SquadTarget.Codex);
+        const string corrupt = "{ this registry is corrupt \n";
+        File.WriteAllText(RegistryPath(h), corrupt, new UTF8Encoding(false));
+
+        CommandExecution status = Status(h, anchor, global: true);
+
+        AssertExit(status, 1);
+        Assert.Contains("registry is unreadable", status.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(corrupt, File.ReadAllText(RegistryPath(h), Encoding.UTF8));
+    }
+
+    /// <summary>
     /// Doctor is the one place an operator sees the state the migration and registry left behind,
     /// so each category must be named: a stale registry entry, a legacy global root the migration
     /// could not move, and in-repo legacy state that was imported but kept.

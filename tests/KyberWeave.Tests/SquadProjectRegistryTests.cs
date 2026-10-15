@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.RegularExpressions;
 using KyberWeave.Core.Squad.Deployment;
 using Xunit;
 
@@ -283,6 +284,79 @@ public sealed class SquadProjectRegistryTests
         Assert.Null(failure);
         Assert.Equal("alpha", File.ReadAllText(Path.Combine(root, ".codex", "agents", "alpha.toml")));
         Assert.NotNull(store.ReadReceipt(root, SquadDeploymentScope.Project));
+    }
+
+    /// <summary>
+    /// A lookup is a read. When the registry has lost an entry, <see cref="SquadStateStore.FindProject"/> may answer
+    /// from per-project state, but it must not write the rebuilt registry back, because the registry is the index
+    /// and a lookup is not one of the write paths that own it.
+    /// </summary>
+    [Fact]
+    public void FindProjectAnswersFromProjectStateWithoutWritingTheRegistry()
+    {
+        using TempDirectory fixture = new TempDirectory();
+        string home = CreateHome(fixture);
+        string root = Path.Combine(fixture.Path, "project");
+        Directory.CreateDirectory(root);
+        SquadStateStore store = StoreFor(home);
+        new SquadTransaction(store).Execute(Install(root, SquadDeploymentScope.Project));
+        File.Delete(RegistryPath(home));
+
+        SquadProjectRegistryEntry? entry = store.FindProject(root);
+
+        Assert.NotNull(entry);
+        Assert.Equal(SquadPhysicalRootIdentity.Resolve(root).Key, entry.RootKey);
+        Assert.False(File.Exists(RegistryPath(home)), "A lookup must not recreate the registry it read from.");
+    }
+
+    /// <summary>
+    /// A corrupt receipt beneath one project's state must not hide every other project. The corrupt entry is left
+    /// out of the listing, and the registry rebuild carries on with the receipts that do parse.
+    /// </summary>
+    [Fact]
+    public void CorruptReceiptDuringRegistryRebuildDoesNotAbortTheListing()
+    {
+        using TempDirectory fixture = new TempDirectory();
+        string home = CreateHome(fixture);
+        string corruptRoot = Path.Combine(fixture.Path, "project-alpha");
+        string healthyRoot = Path.Combine(fixture.Path, "project-beta");
+        Directory.CreateDirectory(corruptRoot);
+        Directory.CreateDirectory(healthyRoot);
+        SquadStateStore store = StoreFor(home);
+        new SquadTransaction(store).Execute(Install(corruptRoot, SquadDeploymentScope.Project));
+        new SquadTransaction(store).Execute(Install(healthyRoot, SquadDeploymentScope.Project));
+        File.Delete(RegistryPath(home));
+        File.WriteAllText(store.ResolveReceiptPath(corruptRoot, SquadDeploymentScope.Project), "{ corrupt receipt \n");
+
+        SquadProjectRegistryEntry entry = Assert.Single(store.ListProjects());
+
+        Assert.Equal(SquadPhysicalRootIdentity.Resolve(healthyRoot).PhysicalPath, entry.Path);
+        Assert.Null(store.FindProject(corruptRoot));
+    }
+
+    /// <summary>
+    /// A registry entry whose <c>lastUpdatedUtc</c> is not a timestamp is an unreadable registry. The error names the
+    /// entry so the operator can find it, and it is the same error a malformed registry raises everywhere else.
+    /// </summary>
+    [Fact]
+    public void RegistryEntryWithAMalformedTimestampIsRejectedAsUnreadable()
+    {
+        using TempDirectory fixture = new TempDirectory();
+        string home = CreateHome(fixture);
+        string root = Path.Combine(fixture.Path, "project");
+        Directory.CreateDirectory(root);
+        SquadStateStore store = StoreFor(home);
+        new SquadTransaction(store).Execute(Install(root, SquadDeploymentScope.Project));
+        string registry = File.ReadAllText(RegistryPath(home), Encoding.UTF8);
+        File.WriteAllText(
+            RegistryPath(home),
+            Regex.Replace(registry, "\"lastUpdatedUtc\"\\s*:\\s*\"[^\"]*\"", "\"lastUpdatedUtc\": \"not-a-timestamp\""),
+            new UTF8Encoding(false));
+
+        InvalidDataException failure = Assert.Throws<InvalidDataException>(() => store.ListProjects());
+
+        Assert.Contains("lastUpdatedUtc", failure.Message, StringComparison.Ordinal);
+        Assert.Contains(SquadPhysicalRootIdentity.Resolve(root).Key, failure.Message, StringComparison.Ordinal);
     }
 
     private static string CreateHome(TempDirectory fixture, string name = "home")

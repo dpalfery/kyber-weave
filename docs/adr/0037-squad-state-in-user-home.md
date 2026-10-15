@@ -76,12 +76,13 @@ where it is version-controlled alongside the project it describes.
    atomically through a temporary file and a rename. `ListProjects` marks an entry stale with a
    reason (path missing, physical key mismatch, or receipt missing) and rebuilds an entry that
    has a receipt under `projects/<root-key>/` but no registry row. A failed registry write after
-   a committed transaction produces a warning that names the remedy, rerunning `squad status`, and
+   a committed transaction produces a warning that names the remedy, rerunning `squad status --global`, and
    does not fail the transaction. Global state is not registered.
 
    The registry is reconciled when `squad status --global`, `squad update --global`, or
-   `squad doctor` lists it, and when `squad update --global --projects` resolves a named path. No
-   other verb rebuilds it, so a rebuilt entry can lag a project install until one of those runs. A
+   `squad doctor` lists it, and when `squad update --global --projects` reports an unknown path. A
+   lookup of one named path reads the registry without writing it. No other verb rebuilds it, so a
+   rebuilt entry can lag a project install until one of those runs. A
    failed write after a committed transaction warns, "Run `squad status --global` to rebuild the
    registry". There is no command that unregisters a stale entry: an entry whose directory no longer
    exists stays flagged until that path returns. Project uninstall removes the entry it names, but only

@@ -334,9 +334,12 @@ holds the physical path, the last update time in UTC, and the targets deployed.
   `projects/<root-key>/` is missing. It also rebuilds an entry for any receipt under `projects/<root-key>/`
   that has no registry row. A deployment is never read from the registry alone.
 - **Reconciliation**: `ListProjects` persists the rebuilt registry only when a caller lists it through
-  the persisting path. In the CLI that is `squad status --global`, `squad update --global` (including
-  resolving a named `--projects` path), and `squad doctor`. No other verb reconciles it. Migration's
-  single-root binding lookup reads the registry without writing it (`ListProjectsWithoutRebuild`).
+  the persisting path. In the CLI that is `squad status --global`, `squad update --global` (when it lists
+  projects for its picker), and `squad doctor`. No other verb reconciles it. Lookups never write:
+  resolving a named `--projects` path uses `FindProject`, and migration's single-root binding lookup uses
+  `ListProjectsWithoutRebuild`. A receipt that does not parse is left out of the rebuild, so the other
+  projects still list. An unreadable registry file makes `squad status --global` and `squad doctor` fail
+  and name it.
 - **Stale entries**: no command unregisters an entry. `SquadStateStore.UnregisterProject` is called only
   by project uninstall, so an entry whose directory no longer exists stays flagged until that path
   returns. `squad update --global --projects` warns about and skips a stale named path.

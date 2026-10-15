@@ -272,6 +272,7 @@ public sealed class SquadStateMigration
             {
                 WriteAtomically(Path.Combine(projectDirectory, LockFileName), inRepoLock);
                 WriteAtomically(projectReceiptPath, new UTF8Encoding(false).GetBytes(rewritten));
+                // Recorded after the receipt, the completion marker, so an import is never counted before it has finished.
                 RecordInLedger(ledger => ledger.WithProjectImport(identity.Key));
             });
         if (outcome == CopyOutcome.LeaseBusy)

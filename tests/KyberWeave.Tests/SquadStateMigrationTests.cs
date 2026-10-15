@@ -777,6 +777,38 @@ public sealed class SquadStateMigrationTests
         Assert.Equal(new[] { SquadPhysicalRootIdentity.Resolve(repo).Key }, ReadStrings(ledger, "projectsImported"));
     }
 
+    /// <summary>
+    /// A ledger the process cannot open is the same situation as one it cannot parse: it is read as empty with a
+    /// reason, so the migration reports it as a warning. An access denial must not escape as an unhandled exception.
+    /// </summary>
+    [Fact]
+    public void LedgerThatCannotBeOpenedIsReadAsEmptyWithAReason()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using TempDirectory fixture = new TempDirectory();
+        MigrationScenario scenario = CreateScenario(fixture);
+        string path = LedgerPath(scenario);
+        WriteFile(path, "{\"schema\":\"kyber-squad.migration-ledger/v1\",\"globalMigratedFrom\":[],\"projectsImported\":[]}");
+        UnixFileMode original = File.GetUnixFileMode(path);
+        File.SetUnixFileMode(path, UnixFileMode.None);
+        try
+        {
+            SquadMigrationLedger ledger = SquadMigrationLedger.Read(path, out string? unreadableReason);
+
+            Assert.NotNull(unreadableReason);
+            Assert.Empty(ledger.GlobalMigratedFrom);
+            Assert.Empty(ledger.ProjectsImported);
+        }
+        finally
+        {
+            File.SetUnixFileMode(path, original);
+        }
+    }
+
     private sealed record MigrationScenario(
         string Home,
         string ApplicationData,

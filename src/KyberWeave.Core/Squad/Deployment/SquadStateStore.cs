@@ -108,7 +108,8 @@ public sealed class SquadStateStore
     /// Lists every project in the home-level registry, with a stale flag and reason for each entry
     /// that no longer matches the state on disk. A project whose receipt sits under
     /// <c>projects/&lt;key&gt;</c> but has no registry entry is rebuilt from that receipt, and the
-    /// rebuilt registry is written back. A failed write surfaces to the caller rather than being hidden.
+    /// rebuilt registry is written back. A failed write surfaces to the caller rather than being hidden. A receipt
+    /// that does not parse is left out of the listing, and the other projects are still listed.
     /// </summary>
     /// <remarks>
     /// The registry is an index, never the authority for ownership. A stale entry is reported rather
@@ -123,12 +124,18 @@ public sealed class SquadStateStore
     /// </summary>
     /// <param name="root">The project root to look up. It may no longer exist.</param>
     /// <returns>The entry, or <see langword="null"/> when the root is not registered.</returns>
+    /// <remarks>
+    /// A lookup is a read. A registry that has lost this entry is answered from per-project state in memory, and the
+    /// rebuilt registry is left for an explicit write path to persist.
+    /// </remarks>
+    /// <exception cref="InvalidDataException">The registry file exists but is not a valid registry.</exception>
     public SquadProjectRegistryEntry? FindProject(string root)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
 
         string key = SquadPhysicalRootIdentity.KeyOf(SquadPhysicalRootIdentity.CanonicalizeAllowingMissing(root));
-        return ListProjects().FirstOrDefault(entry => string.Equals(entry.RootKey, key, StringComparison.Ordinal));
+        return ListProjectsWithoutRebuild()
+            .FirstOrDefault(entry => string.Equals(entry.RootKey, key, StringComparison.Ordinal));
     }
 
     /// <summary>
@@ -151,7 +158,18 @@ public sealed class SquadStateStore
             if (!File.Exists(receiptPath))
                 continue;
 
-            SquadReceipt receipt = DeserializeReceipt(File.ReadAllText(receiptPath, Encoding.UTF8));
+            SquadReceipt receipt;
+            try
+            {
+                receipt = DeserializeReceipt(File.ReadAllText(receiptPath, Encoding.UTF8));
+            }
+            catch (InvalidDataException)
+            {
+                // One corrupt receipt must not hide every other project. It has no readable path or target list
+                // to describe it by, so it is left out of the index and the rebuild carries on with the rest.
+                continue;
+            }
+
             registry[key] = new RegistryRecord(
                 receipt.TargetRoot,
                 receipt.InstalledAtUtc,
@@ -713,11 +731,10 @@ public sealed class SquadStateStore
 
                 string registeredPath = project["path"]?.GetValue<string>()
                     ?? throw new InvalidDataException($"Squad registry entry '{entry.Key}' has no path.");
-                DateTimeOffset lastUpdated = DateTimeOffset.Parse(
+                DateTimeOffset lastUpdated = ParseRegistryTimestamp(
+                    entry.Key,
                     project["lastUpdatedUtc"]?.GetValue<string>()
-                        ?? throw new InvalidDataException($"Squad registry entry '{entry.Key}' has no lastUpdatedUtc."),
-                    CultureInfo.InvariantCulture,
-                    DateTimeStyles.RoundtripKind);
+                        ?? throw new InvalidDataException($"Squad registry entry '{entry.Key}' has no lastUpdatedUtc."));
                 IReadOnlyList<string> targets = project["targets"] is JsonArray targetArray
                     ? targetArray.Select(node => node?.GetValue<string>() ?? throw new InvalidDataException(
                         $"Squad registry entry '{entry.Key}' has a null target.")).ToArray()
@@ -732,6 +749,19 @@ public sealed class SquadStateStore
         }
 
         return registry;
+    }
+
+    /// <summary>
+    /// Parses a registry timestamp as <see cref="WriteRegistry"/> writes it: an ISO 8601 round-trip string. Invariant
+    /// culture keeps the reading independent of the machine's locale, and round-trip kind keeps the UTC offset. A value
+    /// that is not a timestamp is reported against its entry, rather than leaking a parser message.
+    /// </summary>
+    private static DateTimeOffset ParseRegistryTimestamp(string key, string text)
+    {
+        if (!DateTimeOffset.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out DateTimeOffset value))
+            throw new InvalidDataException($"Squad registry entry '{key}' has an invalid lastUpdatedUtc '{text}'.");
+
+        return value;
     }
 
     /// <summary>

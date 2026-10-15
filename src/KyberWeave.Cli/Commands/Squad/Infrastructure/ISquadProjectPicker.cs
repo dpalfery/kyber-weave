@@ -13,7 +13,7 @@ namespace KyberWeave.Cli.Commands.Squad.Infrastructure;
 /// </remarks>
 internal interface ISquadProjectPicker
 {
-    /// <summary>Returns the selected entries' root keys or paths.</summary>
+    /// <summary>Returns the physical paths of the selected entries.</summary>
     /// <param name="projects">The registered projects to choose from.</param>
     IReadOnlyList<string> Pick(IReadOnlyList<SquadProjectRegistryEntry> projects);
 }

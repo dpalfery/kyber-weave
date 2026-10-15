@@ -3277,7 +3277,7 @@ public sealed class SquadTransaction
                 plan.Receipt.InstalledAtUtc);
         }
         catch (Exception exception) when (
-            exception is IOException or UnauthorizedAccessException or InvalidDataException)
+            exception is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException)
         {
             _warnings.Add(
                 $"The Squad project registry was not updated for '{plan.PhysicalRootPath}' " +

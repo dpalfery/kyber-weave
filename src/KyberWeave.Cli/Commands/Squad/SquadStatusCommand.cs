@@ -127,10 +127,7 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
             AnsiConsole.MarkupLine(StatusLine("green", "ok", file, scope));
         }
 
-        if (scope == SquadDeploymentScope.Global)
-        {
-            WriteRegisteredProjects(stateStore);
-        }
+        bool registryUnreadable = scope == SquadDeploymentScope.Global && !WriteRegisteredProjects(stateStore);
 
         if (hasIssues)
         {
@@ -139,6 +136,13 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
                 ? "Drift or missing files detected in Kyber-Squad deployment."
                 : "Drift detected in Kyber-Squad deployment.";
             AnsiConsole.MarkupLine($"[red]{summary}[/]");
+            return 1;
+        }
+
+        if (registryUnreadable)
+        {
+            AnsiConsole.WriteLine();
+            AnsiConsole.MarkupLine("[red]The Kyber-Squad project registry is unreadable.[/]");
             return 1;
         }
 
@@ -153,16 +157,32 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
     /// it, so the operator sees both in one place.
     /// </summary>
     /// <remarks>
-    /// Each project is one unfolded line, so its path can be copied straight from the output.
+    /// Each project is one unfolded line, so its path can be copied straight from the output. An unreadable registry
+    /// is named the way doctor names it, and the result is false so the run fails. Status does not repair a corrupt
+    /// file. The registry is rebuildable from per-project state, so removing an unreadable file lets the next listing
+    /// rebuild it.
     /// </remarks>
-    private static void WriteRegisteredProjects(SquadStateStore stateStore)
+    /// <returns><see langword="false"/> when the registry could not be read; otherwise <see langword="true"/>.</returns>
+    private static bool WriteRegisteredProjects(SquadStateStore stateStore)
     {
-        IReadOnlyList<SquadProjectRegistryEntry> projects = stateStore.ListProjects();
+        IReadOnlyList<SquadProjectRegistryEntry> projects;
+        try
+        {
+            projects = stateStore.ListProjects();
+        }
+        catch (InvalidDataException ex)
+        {
+            AnsiConsole.WriteLine();
+            SquadCommandComposition.WriteLine(
+                $"  [red]fail[/] Squad project registry is unreadable: {Markup.Escape(ex.Message)}");
+            return false;
+        }
+
         AnsiConsole.WriteLine();
         if (projects.Count == 0)
         {
             SquadCommandComposition.WriteLine("[grey]No projects are registered.[/]");
-            return;
+            return true;
         }
 
         SquadCommandComposition.WriteLine("Registered projects:");
@@ -173,6 +193,8 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
                 : $"  [green]ok[/]    {Markup.Escape(project.Path)}";
             SquadCommandComposition.WriteLine(line);
         }
+
+        return true;
     }
 
     /// <summary>
