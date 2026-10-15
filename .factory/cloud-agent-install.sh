@@ -29,20 +29,26 @@ LOG="${TMPDIR:-/tmp}/kyber-weave-droid-setup.log"
 log() { echo "[install] $*"; }
 
 # --- .NET 10 SDK (repo build/test) ------------------------------------------
-# Factory-managed sources ship without a usable .NET runtime, so install from the
-# scripts index that global.json's latestFeature roll-forward accepts. We use
-# /opt/dotnet rather than ~/.dotnet to keep the toolchain identifiable and the
-# PATH pin minimal for any MCP-launched process.
+# Factory-managed sources ship without a usable .NET runtime, so install from
+# the scripts index that global.json's latestFeature roll-forward accepts.
+# Droid Environments run the script as a non-root user with passwordless sudo;
+# mkdir alone does not make /opt/dotnet writable for the user that then tries
+# to cp into it, so chown -R takes ownership of the dir-tree first. We keep the
+# install location at /opt/dotnet (cluster-identifiable) and surface the binary
+# through ~/.local/bin so MCP-launched, $PATH-from-shell commands find dotnet
+# without needing a /usr/local/bin write.
 if ! /opt/dotnet/dotnet --version >/dev/null 2>&1; then
   log "installing .NET 10 SDK -> /opt/dotnet"
   run_privileged mkdir -p /opt/dotnet
+  run_privileged chown -R "$(id -u):$(id -g)" /opt/dotnet
   curl -fsSL https://dot.net/v1/dotnet-install.sh \
     | bash -s -- --channel 10.0 --install-dir /opt/dotnet
 else
   log ".NET SDK already present: $(/opt/dotnet/dotnet --version)"
 fi
-run_privileged ln -sf /opt/dotnet/dotnet /usr/local/bin/dotnet
-export PATH="/opt/dotnet:$PATH"
+mkdir -p "$HOME/.local/bin"
+ln -sf /opt/dotnet/dotnet "$HOME/.local/bin/dotnet"
+export PATH="$HOME/.local/bin:$PATH"
 
 # --- sqlite3 (docs drift reads the CodeGraph index via the CLI) -------------
 # Deliberate trade in AGENTS.md: the read-only adapter avoids
