@@ -93,7 +93,7 @@ jobs:
 
       - name: Upload test results
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: test-results
           path: TestResults/
@@ -108,7 +108,7 @@ jobs:
           -o ./artifacts/nupkg
 
       - name: Upload pack artifacts
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: nupkg-artifacts
           path: artifacts/nupkg/
@@ -181,7 +181,7 @@ jobs:
 
       - name: Upload RID smoke artifacts
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: rid-smoke-linux-x64
           path: |
@@ -220,7 +220,7 @@ jobs:
       # downloads from nodejs.org at the version in dash/.nvmrc; this setup only has to
       # run npm and tsup, so it reads the same file.
       - name: Setup Node
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: dash/.nvmrc
           cache: npm
@@ -505,7 +505,7 @@ jobs:
       # ~350 MB built-in cache keyed on dash/package-lock.json so a cold
       # runner is the only cold one.
       - name: Setup Node
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: dash/.nvmrc
           cache: npm
@@ -584,7 +584,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Setup Node
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: dash/.nvmrc
           cache: npm
@@ -621,7 +621,7 @@ jobs:
 
       - name: Setup Node for Linux tray build
         if: runner.os == 'Linux'
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: dash/.nvmrc
           cache: npm
@@ -638,7 +638,7 @@ jobs:
       # not the action rev — dtolnay/rust-toolchain treats @rev as a rustc
       # version unless toolchain is set explicitly.
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # v1
+        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
         with:
           toolchain: stable
           components: rustfmt, clippy
@@ -751,7 +751,7 @@ jobs:
           cat results.md
 
       - name: Upload gate results
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         if: always()
         with:
           name: ci-results

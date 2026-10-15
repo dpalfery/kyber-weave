@@ -14,7 +14,7 @@ public sealed class ReviewVerdictCommand : Command<ReviewVerdictSettings>
     private const string Verdict = "KW-REVIEW-024";
 
     /// <inheritdoc />
-    protected override int Execute(CommandContext context, ReviewVerdictSettings settings, CancellationToken cancellationToken)
+    public override int Execute(CommandContext context, ReviewVerdictSettings settings, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
 

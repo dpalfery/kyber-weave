@@ -12,7 +12,7 @@ public sealed class UpdateCommand : Command<UpdateSettings>
 
     internal Func<string, string?>? ReadEnvironment { get; init; }
 
-    protected override int Execute(CommandContext context, UpdateSettings settings, CancellationToken cancellationToken)
+    public override int Execute(CommandContext context, UpdateSettings settings, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
 

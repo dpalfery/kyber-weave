@@ -29,7 +29,7 @@ public sealed class DocsIntegrityCheckCommand : Command<DocsIntegrityCheckSettin
     internal DocsIntegrityCheckCommand(IDocsAnalysisCommandService service) =>
         _service = service ?? throw new ArgumentNullException(nameof(service));
 
-    protected override int Execute(CommandContext context, DocsIntegrityCheckSettings settings, CancellationToken cancellationToken)
+    public override int Execute(CommandContext context, DocsIntegrityCheckSettings settings, CancellationToken cancellationToken)
     {
         try
         {
@@ -77,7 +77,7 @@ public sealed class DocsReviewExportCommand : Command<DocsReviewExportSettings>
     internal DocsReviewExportCommand(IDocsAnalysisCommandService service) =>
         _service = service ?? throw new ArgumentNullException(nameof(service));
 
-    protected override int Execute(CommandContext context, DocsReviewExportSettings settings, CancellationToken cancellationToken)
+    public override int Execute(CommandContext context, DocsReviewExportSettings settings, CancellationToken cancellationToken)
     {
         try
         {
@@ -117,7 +117,7 @@ public sealed class DocsReviewImportCommand : Command<DocsReviewImportSettings>
     internal DocsReviewImportCommand(IDocsAnalysisCommandService service) =>
         _service = service ?? throw new ArgumentNullException(nameof(service));
 
-    protected override int Execute(CommandContext context, DocsReviewImportSettings settings, CancellationToken cancellationToken)
+    public override int Execute(CommandContext context, DocsReviewImportSettings settings, CancellationToken cancellationToken)
     {
         try
         {
@@ -149,7 +149,7 @@ public sealed class DocsGlossaryCommand : Command<DocsGlossarySettings>
     internal DocsGlossaryCommand(IDocsAnalysisCommandService service) =>
         _service = service ?? throw new ArgumentNullException(nameof(service));
 
-    protected override int Execute(CommandContext context, DocsGlossarySettings settings, CancellationToken cancellationToken)
+    public override int Execute(CommandContext context, DocsGlossarySettings settings, CancellationToken cancellationToken)
     {
         try
         {
