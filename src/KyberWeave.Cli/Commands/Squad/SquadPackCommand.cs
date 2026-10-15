@@ -29,7 +29,7 @@ public sealed class SquadPackCommand : Command<SquadPackSettings>
     }
 
     /// <inheritdoc />
-    protected override int Execute(CommandContext context, SquadPackSettings settings, CancellationToken cancellationToken)
+    public override int Execute(CommandContext context, SquadPackSettings settings, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
 

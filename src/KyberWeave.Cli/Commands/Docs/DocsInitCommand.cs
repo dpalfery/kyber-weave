@@ -22,7 +22,7 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
     private const string SkillPackage = "dpalfery/kyber-weave";
 
     /// <inheritdoc />
-    protected override int Execute(CommandContext context, DocsInitSettings settings, CancellationToken cancellationToken)
+    public override int Execute(CommandContext context, DocsInitSettings settings, CancellationToken cancellationToken)
     {
         (int ExitCode, ScaffoldResult? Result, string? Error) attempt = TryScaffold(settings);
         if (attempt.ExitCode != 0)

@@ -50,7 +50,7 @@ public sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
     }
 
     /// <inheritdoc />
-    protected override int Execute(CommandContext context, SquadUpdateSettings settings, CancellationToken cancellationToken)
+    public override int Execute(CommandContext context, SquadUpdateSettings settings, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
 

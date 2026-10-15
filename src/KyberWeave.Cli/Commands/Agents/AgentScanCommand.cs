@@ -12,7 +12,7 @@ namespace KyberWeave.Cli.Commands.Agents;
 public sealed class AgentScanCommand : Command<AgentScanSettings>
 {
     /// <inheritdoc />
-    protected override int Execute(CommandContext context, AgentScanSettings settings, CancellationToken cancellationToken)
+    public override int Execute(CommandContext context, AgentScanSettings settings, CancellationToken cancellationToken)
     {
         DiagnosticReport report = new DiagnosticReport();
 
