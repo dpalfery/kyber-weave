@@ -331,9 +331,11 @@ describe('AgentSessionRow parent navigation', () => {
     const links = nodes(tree, (node) => node.props['data-testid'] === 'parent-session-link')
     expect(links).toHaveLength(1)
     expect(links[0].props.title).toBe('Parent session: sess-parent-001')
-    const stopPropagation = vi.fn()
-    links[0].props.onClick!({ stopPropagation })
-    expect(stopPropagation).toHaveBeenCalledOnce()
+    // The link is a sibling of the row button, not inside it, so a click cannot reach onToggle.
+    const rowButton = nodes(tree, (node) => node.props['data-testid'] === 'agent-session-row-sess-claude-code')
+    expect(rowButton).toHaveLength(1)
+    expect(nodes(rowButton[0] as unknown as React.ReactElement, (node) => node.props['data-testid'] === 'parent-session-link')).toHaveLength(0)
+    links[0].props.onClick!({})
     expect(onSelectSession).toHaveBeenCalledExactlyOnceWith('sess-parent-001')
     expect(onToggle).not.toHaveBeenCalled()
   })
@@ -434,7 +436,6 @@ interface SessionRollup {
   total_output?: number | null
   tokens?: number | null
   cost_usd?: number | null
-  cost?: { basis: string; status: string; value?: number; currency?: string }
 }
 
 interface HierarchicalSessionSummary extends KyberSessionSummary {
@@ -490,7 +491,6 @@ const sampleParentWithSubagents: HierarchicalSessionSummary = {
     total_output: 16000,
     tokens: 93000,
     cost_usd: 0.37,
-    cost: { basis: 'published', status: 'priced', value: 0.37, currency: 'USD' },
   },
   subagents: [sampleChild1, sampleChild2],
 }
@@ -614,6 +614,31 @@ describe('hierarchical subagent tree and dual spend (Task T3.1)', () => {
     const child2CostMatch = /data-testid="(?:agent-session-row|subagent-row)-sess-child-002"[\s\S]*?data-testid="agent-session-cost"[^>]*>([\s\S]*?)<\/span>/.exec(expandedMarkup)
     expect(child2CostMatch, 'Child 2 row must render cost cell').not.toBeNull()
     expect(child2CostMatch![1]).toContain('$0.12')
+  })
+
+  it('renders the parent cost from the rollup wire shape (cost_usd) beside the rolled-up turns', async () => {
+    mockSessions([sampleParentWithSubagents])
+    const tree = await loadExplorer({ sessions: [sampleParentWithSubagents] } as ExplorerProps & { sessions?: KyberSessionSummary[] })
+    const markup = html(tree)
+
+    expect(markup).toContain('25 turns')
+    const cost = /data-testid="agent-session-row-sess-parent-001"[\s\S]*?data-testid="agent-session-cost"[^>]*>([\s\S]*?)<\/span>/.exec(markup)
+    expect(cost![1]).toContain('$0.37')
+  })
+
+  it('never nests a button inside a button, and the subagent toggle reports its state', async () => {
+    mockSessions([sampleParentWithSubagents])
+    const tree = await loadExplorer({ sessions: [sampleParentWithSubagents] } as ExplorerProps & { sessions?: KyberSessionSummary[] })
+    const markup = html(tree)
+
+    let depth = 0
+    let deepest = 0
+    for (const tag of markup.match(/<\/?button\b/g) ?? []) {
+      depth += tag.startsWith('</') ? -1 : 1
+      deepest = Math.max(deepest, depth)
+    }
+    expect(deepest, 'a <button> must never contain another <button>').toBe(1)
+    expect(markup).toMatch(/data-testid="subagent-toggle-sess-parent-001"[^>]*aria-expanded="false"|aria-expanded="false"[^>]*data-testid="subagent-toggle-sess-parent-001"/)
   })
 
   it('renders title as "<agent name> · <task summary>" with a tooltip displaying the raw sessionId', async () => {

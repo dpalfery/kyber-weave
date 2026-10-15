@@ -94,45 +94,30 @@ export function AgentSessionRow({
   const isSubagent = Boolean(s.is_subagent || s.isSubagent || isChild)
   const parentSession = s.parent_session || s.parentSession || null
   const turnCount = (!isChild && s.rollup?.turn_count != null) ? s.rollup.turn_count : (s.turn_count ?? s.turnCount ?? null)
-  const effectiveCost = (!isChild && s.rollup?.cost) ? s.rollup.cost : s.cost
-  const effectiveCostUsd = (!isChild && s.rollup?.cost_usd != null) ? s.rollup.cost_usd : (s.cost_usd ?? s.costUsd ?? null)
+  // The wire rollup carries a summed `cost_usd` and no pricing block. When it has a figure the
+  // cell shows it (beside the rolled-up turns); with none, the session's own cost block says why.
+  const rolledCostUsd = !isChild && s.rollup?.cost_usd != null ? s.rollup.cost_usd : null
+  const ownCostUsd = s.cost_usd ?? s.costUsd ?? null
   const hasSubagents = Boolean(s.subagents && s.subagents.length > 0)
 
   return (
     <div className={cn('border-t border-border first:border-t-0', open && 'bg-interactive-secondary/30')}>
-      <button
-        type="button"
-        onClick={onToggle}
+      {/* The row is a flex strip of sibling controls: the subagent toggle and the parent link
+          are never inside the row button, so no button contains another. */}
+      <div
         className={cn(
-          'flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-interactive-secondary/50',
-          isChild && 'pl-8'
+          'flex w-full items-center transition-colors hover:bg-interactive-secondary/50',
+          isChild && 'pl-5'
         )}
-        data-testid={`agent-session-row-${sessionId}`}
       >
-        <svg
-          viewBox="0 0 16 16"
-          width="10"
-          height="10"
-          className={cn('shrink-0 text-tertiary-foreground transition-transform', open && 'rotate-90')}
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <path d="M6 3l5 5-5 5" />
-        </svg>
-
         {hasSubagents && (
           <button
             type="button"
             data-testid={`subagent-toggle-${sessionId}`}
             aria-label={`Toggle subagents for ${sessionId}`}
-            onClick={(e) => {
-              e.stopPropagation()
-              onToggleSubagents?.(e)
-            }}
-            className="p-1 -ml-1 text-tertiary-foreground hover:text-foreground transition-colors shrink-0"
+            aria-expanded={subagentsExpanded}
+            onClick={(e) => onToggleSubagents?.(e)}
+            className="ml-3 shrink-0 p-1 text-tertiary-foreground transition-colors hover:text-foreground"
           >
             <svg
               viewBox="0 0 16 16"
@@ -150,81 +135,106 @@ export function AgentSessionRow({
           </button>
         )}
 
-        <span className="shrink-0 font-mono text-xs text-primary" title={sessionId}>
-          {formatSessionId(sessionId)}
-        </span>
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-expanded={open}
+          className="flex min-w-0 flex-1 items-center gap-3 px-4 py-2.5 text-left"
+          data-testid={`agent-session-row-${sessionId}`}
+        >
+          <svg
+            viewBox="0 0 16 16"
+            width="10"
+            height="10"
+            className={cn('shrink-0 text-tertiary-foreground transition-transform', open && 'rotate-90')}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M6 3l5 5-5 5" />
+          </svg>
 
-        <span className="min-w-0 flex-1 truncate text-[13px] text-foreground flex items-center gap-2">
-          <span title={sessionId}>
-            {formatSessionTitle({
-              label: s.label,
-              sessionId,
-              agentName: s.agent_name ?? s.agentName,
-              taskSummary: s.task_summary ?? s.taskSummary,
-              harness: s.harness,
-            }) || <span className="text-tertiary-foreground">untitled session</span>}
+          <span className="shrink-0 font-mono text-xs text-primary" title={sessionId}>
+            {formatSessionId(sessionId)}
           </span>
-          {isSubagent && (
-            <span
-              data-testid="subagent-indicator"
-              className="rounded bg-interactive-secondary px-1.5 py-0.5 text-[10px] text-tertiary-foreground font-mono"
-            >
-              subagent
+
+          <span className="min-w-0 flex-1 truncate text-[13px] text-foreground flex items-center gap-2">
+            <span title={sessionId}>
+              {formatSessionTitle({
+                label: s.label,
+                sessionId,
+                agentName: s.agent_name ?? s.agentName,
+                taskSummary: s.task_summary ?? s.taskSummary,
+                harness: s.harness,
+              }) || <span className="text-tertiary-foreground">untitled session</span>}
             </span>
-          )}
-        </span>
+            {isSubagent && (
+              <span
+                data-testid="subagent-indicator"
+                className="rounded bg-interactive-secondary px-1.5 py-0.5 text-[10px] text-tertiary-foreground font-mono"
+              >
+                subagent
+              </span>
+            )}
+          </span>
+
+          {/* Harness badge */}
+          <span
+            className={cn(
+              'shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium border capitalize',
+              s.harness === 'copilot'
+                ? 'bg-blue-500/10 text-blue-500 border-blue-500/20'
+                : s.harness === 'gemini'
+                  ? 'bg-purple-500/10 text-purple-500 border-purple-500/20'
+                  : s.harness === 'pi'
+                    ? 'bg-amber-500/10 text-amber-500 border-amber-500/20'
+                    : 'bg-interactive-secondary text-foreground border-border'
+            )}
+            data-testid="agent-harness-badge"
+          >
+            {s.harness}
+          </span>
+
+          {/* Turn count */}
+          <span className="w-16 shrink-0 text-right text-xs tabular-nums text-tertiary-foreground">
+            {turnCount != null ? `${turnCount} turns` : '—'}
+          </span>
+
+          {/* Cost: word statuses from formatCostFigure need ~97px at text-xs; w-20 (80px) wraps. */}
+          <span
+            data-testid="agent-session-cost"
+            title={rolledCostUsd != null ? 'Cost including subagents' : s.cost ? `Cost basis: ${s.cost.basis}` : undefined}
+            className="w-28 shrink-0 whitespace-nowrap text-right text-xs tabular-nums text-foreground font-medium"
+          >
+            {rolledCostUsd != null
+              ? usd(rolledCostUsd)
+              : s.cost
+                ? formatCostFigure(normalizeCostBlock(s.cost))
+                : ownCostUsd != null
+                  ? usd(ownCostUsd)
+                  : '—'}
+          </span>
+
+          {/* Timestamp */}
+          <span className="w-16 shrink-0 text-right text-xs tabular-nums text-tertiary-foreground">
+            {formatSessionTime(s.started)}
+          </span>
+        </button>
 
         {parentSession && (
           <button
             type="button"
             data-testid="parent-session-link"
-            onClick={(e) => {
-              e.stopPropagation()
-              onSelectSession(parentSession)
-            }}
-            className="shrink-0 text-xs text-primary hover:underline font-mono"
+            onClick={() => onSelectSession(parentSession)}
+            className="mr-4 shrink-0 text-xs text-primary hover:underline font-mono"
             title={`Parent session: ${parentSession}`}
           >
             parent: {formatSessionId(parentSession)}
           </button>
         )}
-
-        {/* Harness badge */}
-        <span
-          className={cn(
-            'shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium border capitalize',
-            s.harness === 'copilot'
-              ? 'bg-blue-500/10 text-blue-500 border-blue-500/20'
-              : s.harness === 'gemini'
-                ? 'bg-purple-500/10 text-purple-500 border-purple-500/20'
-                : s.harness === 'pi'
-                  ? 'bg-amber-500/10 text-amber-500 border-amber-500/20'
-                  : 'bg-interactive-secondary text-foreground border-border'
-          )}
-          data-testid="agent-harness-badge"
-        >
-          {s.harness}
-        </span>
-
-        {/* Turn count */}
-        <span className="w-16 shrink-0 text-right text-xs tabular-nums text-tertiary-foreground">
-          {turnCount != null ? `${turnCount} turns` : '—'}
-        </span>
-
-        {/* Cost: word statuses from formatCostFigure need ~97px at text-xs; w-20 (80px) wraps. */}
-        <span
-          data-testid="agent-session-cost"
-          title={effectiveCost ? `Cost basis: ${effectiveCost.basis}` : undefined}
-          className="w-28 shrink-0 whitespace-nowrap text-right text-xs tabular-nums text-foreground font-medium"
-        >
-          {effectiveCost ? formatCostFigure(normalizeCostBlock(effectiveCost)) : effectiveCostUsd != null ? usd(effectiveCostUsd) : '—'}
-        </span>
-
-        {/* Timestamp */}
-        <span className="w-16 shrink-0 text-right text-xs tabular-nums text-tertiary-foreground">
-          {formatSessionTime(s.started)}
-        </span>
-      </button>
+      </div>
 
       {open && (
         <div className="border-t border-border">

@@ -150,11 +150,11 @@ export async function fetchProblemDetail(id: string): Promise<KyberProblemDetail
 
 export interface SessionRollup {
   turn_count?: number | null
+  request_count?: number | null
   total_input?: number | null
   total_output?: number | null
   tokens?: number | null
   cost_usd?: number | null
-  cost?: { basis: string; status: string; value?: number; currency?: string }
 }
 
 export interface KyberSessionSummary {
