@@ -7,10 +7,12 @@ const SPAN_OP_RE = /\.(llm_request|llm_invoke|generate|completion)$/i
 const GENAI_OP_SPAN_RE = /^(?:invoke_agent|execute_tool|text_completion|generate_content|create_agent)(?:\s|$)/i
 /**
  * `chat` and `embeddings` are also ordinary words, so `chat <target>` is a span name only when
- * the target looks like a model (`gpt-4o-mini`, `Claude Sonnet 5.5`): it carries a digit or a
- * `-_.:/`. `Chat about the login form` stays a human title.
+ * the target looks like a model: its first token has `_ . : /`, a hyphen before a digit, or a
+ * letter and digit side by side (`gpt-4o-mini`, `gpt-6-luna`, `o1`), or it carries a version
+ * (`Claude Sonnet 5.5`). A bare count or hyphenated word (`Chat about 2 features`,
+ * `Chat kick-off meeting`) stays a human title.
  */
-const GENAI_MODEL_SPAN_RE = /^(?:chat|embeddings)\s+(?=\S*[\d\-_.:/]|.*\d)/i
+const GENAI_MODEL_SPAN_RE = /^(?:chat|embeddings)\s+(?:\S*(?:[_.:/]|-\d|[A-Za-z]\d|\d[A-Za-z])|.*\d\.\d)/i
 /** A readable id (`sessions-subagents-and-names`, `session-2024-10-15`): hyphen-joined, with a real word in it. */
 const SLUG_ID_RE = /^[a-z0-9]+(?:-[a-z0-9]+)+$/i
 const WORD_SEGMENT_RE = /^[a-z]{3,}$/i

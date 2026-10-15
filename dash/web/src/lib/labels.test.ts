@@ -85,7 +85,15 @@ describe('formatSessionTitle, review edge cases', () => {
     expect(formatSessionTitle({ label: 'Embeddings cleanup plan', harness: 'copilot' })).toBe('Embeddings cleanup plan')
   })
 
+  it('keeps human chat titles that carry a count or a hyphenated word', () => {
+    expect(formatSessionTitle({ label: 'Chat about 2 new features', harness: 'copilot' })).toBe('Chat about 2 new features')
+    expect(formatSessionTitle({ label: 'Chat kick-off meeting', harness: 'copilot' })).toBe('Chat kick-off meeting')
+  })
+
   it('still treats model-shaped chat spans as machine labels', () => {
+    expect(isMachineLabel('chat gpt-6-luna')).toBe(true)
+    expect(isMachineLabel('chat o1')).toBe(true)
+
     expect(isMachineLabel('chat gpt-4o-mini-2024-07-18')).toBe(true)
     expect(isMachineLabel('chat Claude Sonnet 5.5 (Medium)')).toBe(true)
     expect(isMachineLabel('chat Gemini 3.8 Flash (High)')).toBe(true)
