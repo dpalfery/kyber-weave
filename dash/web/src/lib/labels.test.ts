@@ -79,6 +79,30 @@ describe('formatSessionTitle, agent and session name', () => {
   })
 })
 
+describe('formatSessionTitle, review edge cases', () => {
+  it('keeps a human title that merely starts with chat or embeddings', () => {
+    expect(formatSessionTitle({ label: 'Chat about the login form', harness: 'copilot' })).toBe('Chat about the login form')
+    expect(formatSessionTitle({ label: 'Embeddings cleanup plan', harness: 'copilot' })).toBe('Embeddings cleanup plan')
+  })
+
+  it('still treats model-shaped chat spans as machine labels', () => {
+    expect(isMachineLabel('chat gpt-4o-mini-2024-07-18')).toBe(true)
+    expect(isMachineLabel('chat Claude Sonnet 5.5 (Medium)')).toBe(true)
+    expect(isMachineLabel('chat Gemini 3.8 Flash (High)')).toBe(true)
+  })
+
+  it('accepts readable ids with digits or capitals, but not uuids or tool-call ids', () => {
+    expect(formatSessionTitle({ sessionId: 'session-2024-10-15', harness: 'antigravity' })).toBe('session-2024-10-15')
+    expect(formatSessionTitle({ sessionId: 'Sessions-Subagents', harness: 'antigravity' })).toBe('Sessions-Subagents')
+    expect(formatSessionTitle({ sessionId: '728380ff-c64a-4c31-8d9e-bdcf6a5c6ce6', harness: 'copilot' })).toBe('Copilot session')
+    expect(formatSessionTitle({ sessionId: 'toolu_01Fx1LciXhDzP3h8JRSudYb3', harness: 'copilot' })).toBe('Copilot session')
+  })
+
+  it('does not repeat the agent when the session name differs only by case', () => {
+    expect(formatSessionTitle({ label: 'Architect', agentName: 'architect', harness: 'copilot' })).toBe('architect')
+  })
+})
+
 describe('formatModelLabel / formatSpanLabel', () => {
   it('replaces synthetic and unknown placeholders', () => {
     expect(formatModelLabel('claude:<synthetic>')).toBe('Claude (unspecified)')
