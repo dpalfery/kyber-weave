@@ -962,7 +962,7 @@ public sealed class SquadPathSafetyTests : IDisposable
     private sealed class PathBindingStubCommand : Command<SquadInstallSettings>
     {
         internal static SquadInstallSettings? Captured { get; set; }
-        protected override int Execute(CommandContext context, SquadInstallSettings settings, CancellationToken cancellationToken)
+        public override int Execute(CommandContext context, SquadInstallSettings settings, CancellationToken cancellationToken)
         {
             Captured = settings;
             return 0;

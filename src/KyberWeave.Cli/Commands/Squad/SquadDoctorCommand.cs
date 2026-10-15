@@ -46,7 +46,7 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
     }
 
     /// <inheritdoc />
-    protected override int Execute(CommandContext context, SquadDoctorSettings settings, CancellationToken cancellationToken)
+    public override int Execute(CommandContext context, SquadDoctorSettings settings, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
 

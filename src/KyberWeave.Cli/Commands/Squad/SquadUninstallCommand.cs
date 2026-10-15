@@ -46,7 +46,7 @@ public sealed class SquadUninstallCommand : Command<SquadUninstallSettings>
     }
 
     /// <inheritdoc />
-    protected override int Execute(CommandContext context, SquadUninstallSettings settings, CancellationToken cancellationToken)
+    public override int Execute(CommandContext context, SquadUninstallSettings settings, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
 

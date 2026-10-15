@@ -15,7 +15,7 @@ public sealed class DocsValidateCommand : Command<DocsValidateSettings>
     /// Runs every frontmatter and inventory validator, and the open-work gate when
     /// <see cref="DocsValidateSettings.MergeReady"/> is set. Exits 1 on any error.
     /// </summary>
-    protected override int Execute(CommandContext context, DocsValidateSettings settings, CancellationToken cancellationToken)
+    public override int Execute(CommandContext context, DocsValidateSettings settings, CancellationToken cancellationToken)
     {
         DiagnosticReport report = new DiagnosticReport();
         if (!DocsCommandComposition.TryResolveConfig(settings, report, out KyberWeaveConfig config, out OntologyConfig ontology))

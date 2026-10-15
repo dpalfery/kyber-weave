@@ -53,7 +53,7 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
     }
 
     /// <inheritdoc />
-    protected override int Execute(CommandContext context, SquadInstallSettings settings, CancellationToken cancellationToken)
+    public override int Execute(CommandContext context, SquadInstallSettings settings, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
 

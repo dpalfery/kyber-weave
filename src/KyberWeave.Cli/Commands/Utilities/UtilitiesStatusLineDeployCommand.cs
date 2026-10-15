@@ -34,7 +34,7 @@ public sealed class UtilitiesStatusLineDeployCommand : Command<UtilitiesStatusLi
     }
 
     /// <inheritdoc />
-    protected override int Execute(
+    public override int Execute(
         CommandContext context,
         UtilitiesStatusLineDeploySettings settings,
         CancellationToken cancellationToken)

@@ -13,7 +13,7 @@ namespace KyberWeave.Cli.Commands.Docs;
 /// <summary>Emits the documentation graph as newline-delimited JSON.</summary>
 public sealed class DocsExportGraphCommand : Command<DocsExportGraphSettings>
 {
-    protected override int Execute(CommandContext context, DocsExportGraphSettings settings, CancellationToken cancellationToken)
+    public override int Execute(CommandContext context, DocsExportGraphSettings settings, CancellationToken cancellationToken)
     {
         DiagnosticReport report = new();
         if (!DocsCommandComposition.TryCreateLoader(
