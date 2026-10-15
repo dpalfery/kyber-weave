@@ -37,6 +37,7 @@ describe('GET /api/kyber/jobs', () => {
       paused: true,
       hostedElsewhere: false,
       lastMaintenanceFailure: 'disk full',
+      lastSyncFailure: null,
     }
     const { status, body } = await callRoute('GET', '/api/kyber/jobs', { deps })
     expect(status).toBe(200)

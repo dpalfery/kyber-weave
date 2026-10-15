@@ -34,6 +34,7 @@ export class FakeJobHost {
     paused: false,
     hostedElsewhere: false,
     lastMaintenanceFailure: null,
+    lastSyncFailure: null,
   }
   readonly runNowCalls: ManualTrigger[] = []
   readonly runJobCalls: Array<{ kind: JobKind; args: readonly string[] }> = []
