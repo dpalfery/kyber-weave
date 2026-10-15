@@ -86,7 +86,7 @@ describe('a corrupt or missing timestamp is not the epoch', () => {
     ])
     await buildSessions(store)
 
-    const sub = store.getSession('agent-a1b2c3d4e5f6a7b8c')
+    const sub = store.getSession('claude-sess-ts#agent-a1b2c3d4e5f6a7b8c')
     expect(sub?.started).toBe('2026-10-14T10:00:05.000Z')
     expect(sub?.ended).toBe('2026-10-14T10:00:09.000Z')
     store.close()
@@ -100,7 +100,7 @@ describe('projected subagents are marked as included in their parent', () => {
       span('copilot', 'inv', 'root', 'agent.invoke', 'invoke_agent architect', id, { 'gen_ai.agent.name': 'architect' }),
       span('copilot', 'child', 'inv', 'llm.invoke', 'chat gpt-4o', id),
     ]],
-    ['claude-code', 'claude-sess-inc', 'agent-a1b2c3d4e5f6a7b8c', (id: string) => {
+    ['claude-code', 'claude-sess-inc', 'claude-sess-inc#agent-a1b2c3d4e5f6a7b8c', (id: string) => {
       const agent = { agent_id: 'a1b2c3d4e5f6a7b8c' }
       return [
         span('claude-code', 'root', null, 'llm.invoke', 'chat claude', id),
@@ -128,5 +128,56 @@ describe('projected subagents are marked as included in their parent', () => {
     bridge.close?.()
     store.close()
     rmSync(dir, { recursive: true, force: true })
+  })
+})
+
+describe('Claude subagent ids are scoped by parent', () => {
+  const sharedAgent = { agent_id: 'researcher-001' }
+  const family = (sessionId: string, suffix: string): CanonicalRecord[] => [
+    span('claude-code', `root-${suffix}`, null, 'llm.invoke', 'chat claude', sessionId),
+    span('claude-code', `spawn-${suffix}`, `root-${suffix}`, 'agent.invoke', 'Task', sessionId, {
+      ...sharedAgent,
+      description: `work for ${suffix}`,
+    }),
+    span('claude-code', `chat-${suffix}`, `spawn-${suffix}`, 'llm.invoke', 'chat claude', sessionId, sharedAgent),
+  ]
+
+  it('keeps one row per parent when two parents reuse the same agent id', async () => {
+    const store = new CanonStore(':memory:')
+    store.upsertMany([...family('parent-one', 'one'), ...family('parent-two', 'two')])
+    await buildSessions(store)
+
+    const one = store.getSession('parent-one#agent-researcher-001')
+    const two = store.getSession('parent-two#agent-researcher-001')
+    expect(one?.parentSession).toBe('parent-one')
+    expect(two?.parentSession).toBe('parent-two')
+    expect(one?.label).toContain('work for one')
+    expect(two?.label).toContain('work for two')
+    expect(store.getSession('agent-researcher-001')).toBeUndefined()
+    store.close()
+  })
+
+  it('does not double the agent- prefix when the id already carries it', async () => {
+    const sessionId = 'parent-prefixed'
+    const store = new CanonStore(':memory:')
+    store.upsertMany([
+      span('claude-code', 'root', null, 'llm.invoke', 'chat claude', sessionId),
+      span('claude-code', 'spawn', 'root', 'agent.invoke', 'Task', sessionId, { agent_id: 'agent-a1b2c3d4' }),
+      span('claude-code', 'chat', 'spawn', 'llm.invoke', 'chat claude', sessionId, { agent_id: 'agent-a1b2c3d4' }),
+    ])
+    await buildSessions(store)
+
+    expect(subagentIds(store)).toEqual([`${sessionId}#agent-a1b2c3d4`])
+    store.close()
+  })
+
+  it('does not project a subagent row as a parent of its own subagents', async () => {
+    const store = new CanonStore(':memory:')
+    store.upsertMany(family('parent-once', 'once'))
+    await buildSessions(store)
+    await buildSessions(store)
+
+    expect(store.builtSessionIds().sort()).toEqual(['parent-once', 'parent-once#agent-researcher-001'])
+    store.close()
   })
 })

@@ -54,10 +54,10 @@ function claudeSpan(
 }
 
 describe('Claude subagent session projection and task naming (Contract T2.2)', () => {
-  it('projects Claude subagent span into a distinct subagent session row with deterministic ID agent-<agentId>, parent_session, is_subagent, and agent_name', async () => {
+  it('projects Claude subagent span into a distinct subagent session row with deterministic ID <parent>#agent-<agentId>, parent_session, is_subagent, and agent_name', async () => {
     const parentSessionId = 'claude-parent-sess-001'
     const subagentAgentId = 'researcher-001'
-    const expectedSubagentId = `agent-${subagentAgentId}`
+    const expectedSubagentId = `${parentSessionId}#agent-${subagentAgentId}`
     const spawnSpanId = 'subagent-spawn-span-1'
 
     const parentTurn = claudeSpan(
@@ -150,7 +150,7 @@ describe('Claude subagent session projection and task naming (Contract T2.2)', (
     expect(parentDbRow?.is_subagent).toBe(0)
     expect(parentDbRow?.parent_session).toBeNull()
 
-    // 2. Verify subagent session row projected into session table with agent-<agentId>
+    // 2. Verify subagent session row projected into session table with <parent>#agent-<agentId>
     const subagentSession = store.getSession(expectedSubagentId)
     expect(subagentSession, `Subagent session row must exist for ${expectedSubagentId}`).toBeDefined()
     expect(subagentSession?.sessionId).toBe(expectedSubagentId)
@@ -187,7 +187,7 @@ describe('Claude subagent session projection and task naming (Contract T2.2)', (
   it('projects Claude subagent from sidechain records with agent_id and description', async () => {
     const parentSessionId = 'claude-parent-sess-002'
     const sidechainAgentId = 'analyzer-002'
-    const expectedSubagentId = `agent-${sidechainAgentId}`
+    const expectedSubagentId = `${parentSessionId}#agent-${sidechainAgentId}`
 
     const parentTurn = claudeSpan(
       'parent-root-span-2',
@@ -260,8 +260,8 @@ describe('Claude subagent session projection and task naming (Contract T2.2)', (
     const parentSessionId = 'claude-parent-sess-003'
     const agentId1 = 'planner-003'
     const agentId2 = 'testdev-004'
-    const expectedSubagentId1 = `agent-${agentId1}`
-    const expectedSubagentId2 = `agent-${agentId2}`
+    const expectedSubagentId1 = `${parentSessionId}#agent-${agentId1}`
+    const expectedSubagentId2 = `${parentSessionId}#agent-${agentId2}`
     const spawnSpan1 = 'spawn-span-planner'
     const spawnSpan2 = 'spawn-span-testdev'
 
@@ -356,7 +356,7 @@ describe('Claude subagent session projection and task naming (Contract T2.2)', (
   it('guarantees identical Claude subagent projection via projectCanonicalStore', async () => {
     const parentSessionId = 'claude-parent-sess-004'
     const subagentAgentId = 'dal-dev-005'
-    const expectedSubagentId = `agent-${subagentAgentId}`
+    const expectedSubagentId = `${parentSessionId}#agent-${subagentAgentId}`
     const spawnSpanId = 'spawn-span-dal'
 
     const parentTurn = claudeSpan(

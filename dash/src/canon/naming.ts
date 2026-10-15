@@ -42,6 +42,13 @@ export function formatSessionId(id: string | null | undefined): string {
   if (trimmed === '') return 'Session'
   let rest = trimmed.replace(SYNTH_PREFIX_RE, '')
   rest = rest.replace(SYNTH_PREFIX_RE, '')
+  // A scoped subagent id, `<parent>#<child>`: shorten each side so the child stays distinguishable
+  // from its parent (the parent's uuid alone would render identically for every child).
+  const scope = rest.indexOf('#')
+  if (scope > 0) {
+    const child = rest.slice(scope + 1)
+    return `${formatSessionId(rest.slice(0, scope))}#${child.length > 14 ? `${child.slice(0, 14)}\u2026` : child}`
+  }
   const uuid = rest.match(UUID_RE)
   if (uuid !== null) {
     const u = uuid[0]

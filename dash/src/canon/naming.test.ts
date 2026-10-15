@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { formatSessionTitle, isMachineLabel } from './naming.js'
+import { formatSessionId, formatSessionTitle, isMachineLabel } from './naming.js'
 
 describe('isMachineLabel', () => {
   it('identifies exact claude_code.llm_request as a machine label', () => {
@@ -151,5 +151,18 @@ describe('formatSessionTitle', () => {
     const harnessOnlyTitle = formatSessionTitle({ harness: 'claude-code' })
     expect(harnessOnlyTitle).not.toContain('Agent')
     expect(harnessOnlyTitle).not.toContain('Prompt')
+  })
+})
+
+describe('formatSessionId, scoped subagent ids', () => {
+  it('keeps a scoped subagent id distinguishable from its parent', () => {
+    const parent = '728380ff-c64a-4c31-8d9e-bdcf6a5c6ce6'
+    const claude = formatSessionId(`${parent}#agent-a4b10a0830747b668`)
+    const copilot = formatSessionId(`${parent}#invoke-agent-span-1`)
+    expect(claude).not.toBe(formatSessionId(parent))
+    expect(copilot).not.toBe(formatSessionId(parent))
+    expect(claude).toContain('#agent-a4b10a08')
+    expect(claude).toContain(formatSessionId(parent))
+    expect(claude).not.toBe(formatSessionId(`${parent}#agent-b9c20b1941858c779`))
   })
 })

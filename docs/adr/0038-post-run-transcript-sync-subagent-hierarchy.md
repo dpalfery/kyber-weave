@@ -37,7 +37,7 @@ The system required a unified architecture that:
 ### D1: Stable-Identity Subagent Session Hierarchy
 
 Subagents are projected during session build (`dash/src/canon/sessions.ts`) into distinct rows in the `session` table with deterministic, stable session identifiers:
-- **Claude Code subagents:** Use the deterministic format `agent-<agentId>` (e.g. `agent-researcher-001`), normalizing any existing `agent-` prefix.
+- **Claude Code subagents:** Use `<parentSessionId>#agent-<agentId>` (e.g. `claude-sess-001#agent-researcher-001`), not doubling an `agent-` prefix already on the id. The id is scoped by the parent as Copilot's is: an agent id is only unique within what the harness recorded, and an unscoped `agent-<agentId>` would let two parents that carry the same id upsert one row, the last writer erasing the first subagent. Amended 2026-10-15 from the unscoped form after review. A native sidechain session that is itself keyed `agent-…` is not projected again.
 - **Copilot subagents:** Use `<parentSessionId>#<invoke_agent_span_id>` (e.g. `copilot-sess-001#invoke-agent-span-1`).
 - Each subagent session explicitly records `is_subagent = 1`, `parent_session = <parentSessionId>`, and `agent_name = <agentName>` in the `session` table.
 - Subagent turn records are rooted with `parentSpanId = null` at their earliest invoke span, with child spans reparented beneath it, ensuring valid timeline graphs in ASAD session payloads.

@@ -486,8 +486,8 @@ honest title formatting, and background transcript synchronization
 
 Subagents spawn with stable session IDs derived from their harness telemetry:
 - Primary Claude sessions: `claude-code/<session-id>`
-- Subagents with known agent ID: `agent-<agentId>`
-- Fallback subagents: `<parent-session-id>#<span-id>`
+- Claude subagents with a known agent ID: `<parent-session-id>#agent-<agentId>`
+- Copilot subagents (and fallbacks): `<parent-session-id>#<span-id>`
 
 The web dashboard Sessions explorer (`page-sessions`) renders subagent sessions nested beneath
 their parent session in a tree hierarchy rather than interleaving them as disconnected top-level

@@ -256,9 +256,16 @@ function extractClaudeAgentId(record: CanonicalRecord): string | undefined {
   return undefined
 }
 
-function normalizeClaudeSubagentId(agentId: string): string {
+/**
+ * A Claude subagent's session id: `<parent session>#agent-<agentId>`, scoped by the session it
+ * ran under exactly as Copilot's `<parent>#<span>` is. An agent id is only unique within what
+ * the harness recorded, so an unscoped `agent-<id>` would let two parents that carry the same
+ * id upsert one row, last writer winning. A leading `agent-` on the id is not doubled.
+ */
+function claudeSubagentSessionId(parentSessionId: string, agentId: string): string {
   const trimmed = agentId.trim()
-  return trimmed.startsWith('agent-') ? trimmed : `agent-${trimmed}`
+  const bare = trimmed.startsWith('agent-') ? trimmed.slice('agent-'.length) : trimmed
+  return `${parentSessionId}#agent-${bare}`
 }
 
 function extractClaudeAgentName(records: readonly CanonicalRecord[]): string | null {
@@ -803,7 +810,8 @@ export async function buildSessions(store: CanonStore): Promise<BuildSessionsRep
 
       // Subagent session projection (Claude - Contract T2.2)
       const isClaude = isClaudeHarness(harness) || merged.some((r) => isClaudeHarness(r.harness))
-      if (isClaude && !sessionId.startsWith("agent-")) {
+      // Not for a native sidechain session (`agent-…`) or a row this projection already scoped (`…#…`).
+      if (isClaude && !sessionId.startsWith("agent-") && !sessionId.includes("#")) {
         const recordAgentMap = new Map<string, string>()
 
         for (const record of merged) {
@@ -829,7 +837,7 @@ export async function buildSessions(store: CanonStore): Promise<BuildSessionsRep
         for (const record of merged) {
           const agentId = recordAgentMap.get(record.spanId)
           if (agentId) {
-            const subagentId = normalizeClaudeSubagentId(agentId)
+            const subagentId = claudeSubagentSessionId(sessionId, agentId)
             const list = subagentGroups.get(subagentId) ?? []
             list.push(record)
             subagentGroups.set(subagentId, list)
