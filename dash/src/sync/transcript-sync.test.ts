@@ -1,11 +1,11 @@
-import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import { CanonStore } from '../canon/store.js'
 import type { CanonicalRecord } from '../canon/types.js'
-import { acquireStoreRefreshLock } from '../refresh/lock.js'
+import { STORE_LOCK_FILE } from '../refresh/lock.js'
 import { runTranscriptSync } from './transcript-sync.js'
 
 const tempDirs: string[] = []
@@ -337,10 +337,10 @@ describe('transcript synchronization engine job (dash/src/sync/transcript-sync.t
       ) VALUES (?, ?, ?, ?, ?, ?)`,
     ).run('sess-locked-1', 'claude-code', transcriptPath, 0, 'pending', '{}')
 
-    // Acquire store refresh lock outside
-    const lockOutcome = await acquireStoreRefreshLock({ directory: dir })
-    expect(lockOutcome.outcome).toBe('acquired')
-    if (lockOutcome.outcome !== 'acquired') throw new Error('Lock acquisition failed')
+    // Another live process (the parent) holds the store refresh lock. A holder in this very
+    // process would queue the sync behind it rather than report busy, so it is not used here.
+    const lockPath = join(dir, STORE_LOCK_FILE)
+    writeFileSync(lockPath, JSON.stringify({ pid: process.ppid, token: 'other', at: Date.now() }))
 
     try {
       // Sync engine job runs while store refresh lock is held -> must yield
@@ -366,7 +366,7 @@ describe('transcript synchronization engine job (dash/src/sync/transcript-sync.t
       expect(rowWhileLocked.sync_status).toBe('pending')
       expect(rowWhileLocked.synced_at).toBeNull()
     } finally {
-      await lockOutcome.handle.release()
+      unlinkSync(lockPath)
     }
 
     // Now that lock is released, sync engine job proceeds cleanly

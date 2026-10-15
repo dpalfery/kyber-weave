@@ -9,7 +9,7 @@ import { closeSync, existsSync, openSync, readSync, statSync } from 'node:fs'
 
 import { CanonStore } from '../canon/store.js'
 import type { CanonicalRecord, ContentPart } from '../canon/types.js'
-import { STORE_LOCK_FILE, readLockHolder, stateDir } from '../refresh/lock.js'
+import { acquireStoreRefreshLock, stateDir } from '../refresh/lock.js'
 
 export type TranscriptSyncClock = {
   now(): number
@@ -188,6 +188,45 @@ interface SessionRow {
   payload: string
 }
 
+/**
+ * Read up to `length` bytes from `position`, looping over short reads. Returns only the bytes
+ * actually read, so a file that shrank mid-read never yields a zero-filled tail.
+ */
+function readBytes(path: string, position: number, length: number): Buffer {
+  const buffer = Buffer.alloc(length)
+  const fd = openSync(path, 'r')
+  try {
+    let filled = 0
+    while (filled < length) {
+      const bytesRead = readSync(fd, buffer, filled, length - filled, position + filled)
+      if (bytesRead === 0) break
+      filled += bytesRead
+    }
+    return buffer.subarray(0, filled)
+  } finally {
+    closeSync(fd)
+  }
+}
+
+/**
+ * The bytes of `bytes` that form whole lines. A trailing fragment with no newline is left for
+ * the next pass (a writer may be mid-line, possibly mid-character), unless it is already a
+ * complete JSON document, as when a transcript's last line is not newline-terminated.
+ */
+function wholeLines(bytes: Buffer): Buffer {
+  const lastNewline = bytes.lastIndexOf(0x0a)
+  const tail = bytes.subarray(lastNewline + 1)
+  if (tail.length > 0) {
+    try {
+      JSON.parse(tail.toString('utf-8'))
+      return bytes
+    } catch {
+      // A torn line: hold it back.
+    }
+  }
+  return bytes.subarray(0, lastNewline + 1)
+}
+
 function syncSessions(store: CanonStore, clock: TranscriptSyncClock): number {
   const db = store.getDatabase()
   const now = clock.now()
@@ -228,44 +267,20 @@ function syncSessions(store: CanonStore, clock: TranscriptSyncClock): number {
     const fileSize = stat.size
     const oldOffset = row.transcript_offset ?? 0
 
-    // 3. Incremental delta parse
-    if (fileSize > oldOffset) {
-      const bytesToRead = fileSize - oldOffset
-      const buffer = Buffer.alloc(bytesToRead)
-      const fd = openSync(row.transcript_path, 'r')
-      try {
-        readSync(fd, buffer, 0, bytesToRead, oldOffset)
-      } finally {
-        closeSync(fd)
-      }
-
-      const deltaText = buffer.toString('utf-8')
-      processDelta(store, row.session_id, deltaText)
+    // 3. Incremental delta parse. The offset advances only over the whole lines that were
+    // actually read, so a short read, a torn trailing line or a crash mid-write is re-read
+    // on the next pass instead of being marked synced.
+    if (fileSize !== oldOffset) {
+      // A smaller file was truncated or rewritten: read it again from the start.
+      const from = fileSize > oldOffset ? oldOffset : 0
+      const consumed = wholeLines(readBytes(row.transcript_path, from, fileSize - from))
+      if (consumed.length > 0) processDelta(store, row.session_id, consumed.toString('utf-8'))
 
       db.prepare(
         `UPDATE session
          SET transcript_offset = ?, synced_at = ?, sync_status = 'synced'
          WHERE session_id = ?`,
-      ).run(fileSize, nowIso, row.session_id)
-      syncedCount++
-    } else if (fileSize < oldOffset) {
-      // Truncated file: re-read full file from offset 0
-      const buffer = Buffer.alloc(fileSize)
-      const fd = openSync(row.transcript_path, 'r')
-      try {
-        readSync(fd, buffer, 0, fileSize, 0)
-      } finally {
-        closeSync(fd)
-      }
-
-      const deltaText = buffer.toString('utf-8')
-      processDelta(store, row.session_id, deltaText)
-
-      db.prepare(
-        `UPDATE session
-         SET transcript_offset = ?, synced_at = ?, sync_status = 'synced'
-         WHERE session_id = ?`,
-      ).run(fileSize, nowIso, row.session_id)
+      ).run(from + consumed.length, nowIso, row.session_id)
       syncedCount++
     } else {
       // fileSize === oldOffset (no new bytes)
@@ -310,15 +325,20 @@ export async function runTranscriptSync(
   const clock = options.clock ?? realClock
   const targetDir = options.stateDir ?? stateDir()
 
-  // Yield if the store refresh lock is held
-  if (readLockHolder(targetDir, STORE_LOCK_FILE) !== null) {
-    return { outcome: 'busy' }
+  // Take the store refresh lock rather than peek at it: acquiring handles a stale or corrupt
+  // lock, cannot race a refresh that starts after a probe, and keeps refresh out while we write.
+  const lock = await acquireStoreRefreshLock({ directory: targetDir, waitMs: 0 })
+  if (lock.outcome === 'unavailable') {
+    return { outcome: 'failed', reason: 'the store refresh lock could not be read or created' }
   }
+  if (lock.outcome !== 'acquired') return { outcome: 'busy' }
 
   try {
     const syncedSessions = syncSessions(store, clock)
     return { outcome: 'completed', syncedSessions }
   } catch (err) {
     return { outcome: 'failed', reason: err instanceof Error ? err.message : String(err) }
+  } finally {
+    await lock.handle.release()
   }
 }
