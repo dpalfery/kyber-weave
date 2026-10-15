@@ -2441,10 +2441,23 @@ export class CanonStore {
   upsertSession(row: SessionRow): void {
     this.db
       .prepare(
-        `INSERT OR REPLACE INTO session (
+        // An upsert, not INSERT OR REPLACE: a replace deletes the row, which would reset the
+        // transcript sync columns (offset, status, settled_at) that the sync job owns.
+        `INSERT INTO session (
            session_id, harness, label, is_subagent, parent_session,
            agent_name, repo, branch, started, ended, payload
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(session_id) DO UPDATE SET
+           harness = excluded.harness,
+           label = excluded.label,
+           is_subagent = excluded.is_subagent,
+           parent_session = excluded.parent_session,
+           agent_name = excluded.agent_name,
+           repo = excluded.repo,
+           branch = excluded.branch,
+           started = excluded.started,
+           ended = excluded.ended,
+           payload = excluded.payload`,
       )
       .run(
         row.sessionId,
