@@ -702,11 +702,11 @@ export async function extractCustomTitle(folderOrFilePath: string): Promise<stri
  * Replaces newlines with space.
  */
 export async function extractFirstPromptFallback(transcriptPath: string): Promise<string | null> {
+  // Hold the stream so it can be destroyed: closing the readline interface alone leaves the
+  // file descriptor open until the stream is collected.
+  const input = createReadStream(transcriptPath, { encoding: 'utf8' })
   try {
-    const rl = createInterface({
-      input: createReadStream(transcriptPath, { encoding: 'utf8' }),
-      crlfDelay: Number.POSITIVE_INFINITY,
-    })
+    const rl = createInterface({ input, crlfDelay: Number.POSITIVE_INFINITY })
     for await (const line of rl) {
       if (!line.trim()) continue
       let entry: Record<string, unknown>
@@ -747,13 +747,16 @@ export async function extractFirstPromptFallback(transcriptPath: string): Promis
         const cleaned = prompt.replace(/\r?\n+/g, ' ').trim()
         if (cleaned.length > 0) {
           rl.close()
-          return cleaned.slice(0, 80)
+          // By code point, so a surrogate pair is never split.
+          return Array.from(cleaned).slice(0, 80).join('')
         }
       }
     }
     return null
   } catch {
     return null
+  } finally {
+    input.destroy()
   }
 }
 
