@@ -435,12 +435,19 @@ function readSystemPromptListing(record: CanonicalRecord): ListingResult | undef
   return { measurable: true, isInitial: true, skills: uniqueByName(skills) }
 }
 
-/** `<skill><name/><description/>` pairs from the system prompt's XML block. */
-function xmlDescriptions(text: string): Map<string, string> {
-  const found = new Map<string, string>()
-  for (const match of text.matchAll(/<skill>\s*<name>([^<]*)<\/name>\s*<description>([^<]*)<\/description>/g)) {
-    const [, name = '', description = ''] = match
-    if (name !== '') found.set(name, description)
+/** Skill names and optional descriptions from the system prompt's `<skill>` XML blocks. */
+function xmlDescriptions(text: string): Map<string, string | undefined> {
+  const found = new Map<string, string | undefined>()
+  for (const match of text.matchAll(/<skill\b[^>]*>([\s\S]*?)<\/skill>/gi)) {
+    const block = match[1] ?? ''
+    const nameMatch = block.match(/<name\b[^>]*>([\s\S]*?)<\/name>/i)
+    if (!nameMatch) continue
+    const name = nameMatch[1]?.trim()
+    if (!name) continue
+
+    const descMatch = block.match(/<description\b[^>]*>([\s\S]*?)<\/description>/i)
+    const description = descMatch !== null ? nonEmptyString(descMatch[1]?.trim()) : undefined
+    found.set(name, description)
   }
   return found
 }

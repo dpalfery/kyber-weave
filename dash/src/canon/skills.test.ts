@@ -535,6 +535,91 @@ describe('extractListedSkills, system prompt <skills> block without a listing ke
       expect(result).not.toHaveProperty('skills')
     }
   })
+
+  describe('readListing from system prompt', () => {
+    it('parses name-only skills, inverted tags, interleaved tags, and empty descriptions', () => {
+      const variedPrompt = [
+        '<skills>',
+        '<skill><name>standalone</name></skill>',
+        '<skill>',
+        '  <description>Inverted description</description>',
+        '  <name>inverted-skill</name>',
+        '</skill>',
+        '<skill>',
+        '  <name>interleaved-skill</name>',
+        '  <file>/x/SKILL.md</file>',
+        '  <description>Interleaved description</description>',
+        '</skill>',
+        '<skill>',
+        '  <name>empty-desc-skill</name>',
+        '  <description></description>',
+        '</skill>',
+        '<skill>',
+        '  <name>whitespace-desc-skill</name>',
+        '  <description>   \n\t   </description>',
+        '</skill>',
+        '</skills>',
+      ].join('\n')
+
+      const record = modelTurn('copilot', 'vscode-turn-varied', {
+        source: 'copilot',
+        raw: {},
+        ...withParts([{ part: 'system_prompt', text: variedPrompt }]),
+      })
+
+      const result = extractListedSkills(record)
+      expect(result).toMatchObject({
+        measurable: true,
+        skills: [
+          { name: 'standalone' },
+          { name: 'inverted-skill', description: 'Inverted description' },
+          { name: 'interleaved-skill', description: 'Interleaved description' },
+          { name: 'empty-desc-skill' },
+          { name: 'whitespace-desc-skill' },
+        ],
+      })
+
+      if ('skills' in result) {
+        expect(result.skills.find((s) => s.name === 'standalone')?.description).toBeUndefined()
+        expect(result.skills.find((s) => s.name === 'inverted-skill')?.description).toBe('Inverted description')
+        expect(result.skills.find((s) => s.name === 'interleaved-skill')?.description).toBe('Interleaved description')
+        expect(result.skills.find((s) => s.name === 'empty-desc-skill')?.description).toBeUndefined()
+        expect(result.skills.find((s) => s.name === 'whitespace-desc-skill')?.description).toBeUndefined()
+      }
+    })
+
+    it('safely skips skill blocks without a name or with empty/whitespace name', () => {
+      const promptWithMalformedSkills = [
+        '<skills>',
+        '<skill><name>valid-before</name><description>Valid before</description></skill>',
+        '<skill><description>No name tag</description></skill>',
+        '<skill><name>   </name><description>Whitespace name</description></skill>',
+        '<skill><name></name><description>Empty name</description></skill>',
+        '<skill><name>valid-after</name><description>Valid after</description></skill>',
+        '</skills>',
+      ].join('\n')
+
+      const record = modelTurn('copilot', 'vscode-turn-malformed-skills', {
+        source: 'copilot',
+        raw: {},
+        ...withParts([{ part: 'system_prompt', text: promptWithMalformedSkills }]),
+      })
+
+      const result = extractListedSkills(record)
+      expect(result).toMatchObject({
+        measurable: true,
+        skills: [
+          { name: 'valid-before', description: 'Valid before' },
+          { name: 'valid-after', description: 'Valid after' },
+        ],
+      })
+
+      if ('skills' in result) {
+        expect(result.skills).toHaveLength(2)
+        expect(result.skills.map((s) => s.name)).toEqual(['valid-before', 'valid-after'])
+      }
+    })
+  })
 })
 
 // ---------------------------------------------------------------------------
