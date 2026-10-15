@@ -111,6 +111,20 @@ describe('formatSessionTitle, review edge cases', () => {
   })
 })
 
+describe('formatSessionTitle, labels the server already titled', () => {
+  it('does not prefix the agent a second time', () => {
+    expect(
+      formatSessionTitle({ label: 'explorer · explore workspace architecture', agentName: 'explorer', harness: 'claude-code' }),
+    ).toBe('explorer · explore workspace architecture')
+  })
+
+  it('still prefixes a plain task label with the agent', () => {
+    expect(
+      formatSessionTitle({ label: 'explore workspace architecture', agentName: 'explorer', harness: 'claude-code' }),
+    ).toBe('explorer · explore workspace architecture')
+  })
+})
+
 describe('formatModelLabel / formatSpanLabel', () => {
   it('replaces synthetic and unknown placeholders', () => {
     expect(formatModelLabel('claude:<synthetic>')).toBe('Claude (unspecified)')
@@ -123,6 +137,16 @@ describe('formatModelLabel / formatSpanLabel', () => {
       'synth:',
     )
     expect(formatSpanLabel('claude_code.llm_request')).toBe('LLM request')
+  })
+
+  it('keeps human labels that start with chat, and still filters model-shaped chat spans', () => {
+    expect(isMachineLabel('chat with team about launch')).toBe(false)
+    expect(isMachineLabel('Chat about 2 new features')).toBe(false)
+    expect(isMachineLabel('Chat kick-off meeting')).toBe(false)
+    expect(isMachineLabel('chat gpt-4o-mini-2024-07-18')).toBe(true)
+    expect(isMachineLabel('chat gpt-6-luna')).toBe(true)
+    expect(isMachineLabel('chat o1')).toBe(true)
+    expect(isMachineLabel('chat Claude Sonnet 5.5 (Medium)')).toBe(true)
   })
 
   it('treats those placeholders as machine labels', () => {
@@ -145,5 +169,18 @@ describe('percent and duration presentation', () => {
     expect(formatDuration(450)).toBe('450ms')
     expect(formatDuration(2500)).toBe('2.5s')
     expect(formatDuration(65000)).toBe('1m 5s')
+  })
+})
+
+describe('formatSessionId, scoped subagent ids', () => {
+  it('keeps a scoped subagent id distinguishable from its parent', () => {
+    const parent = '728380ff-c64a-4c31-8d9e-bdcf6a5c6ce6'
+    const claude = formatSessionId(`${parent}#agent-a4b10a0830747b668`)
+    const copilot = formatSessionId(`${parent}#invoke-agent-span-1`)
+    expect(claude).not.toBe(formatSessionId(parent))
+    expect(copilot).not.toBe(formatSessionId(parent))
+    expect(claude).toContain('#agent-a4b10a08')
+    expect(claude).toContain(formatSessionId(parent))
+    expect(claude).not.toBe(formatSessionId(`${parent}#agent-b9c20b1941858c779`))
   })
 })

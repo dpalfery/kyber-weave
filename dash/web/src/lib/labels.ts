@@ -1,6 +1,7 @@
 import { label } from './utils.js'
 
 const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i
+const UUID_EXACT_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const SYNTH_PREFIX_RE = /^(?:synth|derived):[^:]+:/i
 const SPAN_OP_RE = /\.(llm_request|llm_invoke|generate|completion)$/i
 /** GenAI operations whose span name is `<operation> <target>`, e.g. `invoke_agent architect`. */
@@ -27,11 +28,13 @@ const RATIO_DIMENSIONS = new Set([
 
 /** True when a stored label is an identity or span op, not a human title. */
 export function isMachineLabel(value: string | null | undefined): boolean {
-  const v = value?.trim() ?? ''
+  if (value == null || typeof value !== 'string') return false
+  const v = value.trim()
   if (v === '') return true
   if (/^(?:synth|derived):/i.test(v)) return true
   if (SPAN_OP_RE.test(v)) return true
   if (GENAI_OP_SPAN_RE.test(v) || GENAI_MODEL_SPAN_RE.test(v)) return true
+  if (UUID_EXACT_RE.test(v)) return true
   if (UNSPECIFIED_MODEL_RE.test(v)) return true
   if (UUID_RE.test(v) && v.length > 36) return true
   return false
@@ -46,6 +49,13 @@ export function formatSessionId(id: string | null | undefined): string {
   if (trimmed === '') return 'Unknown session'
   let rest = trimmed.replace(SYNTH_PREFIX_RE, '')
   rest = rest.replace(SYNTH_PREFIX_RE, '')
+  // A scoped subagent id, `<parent>#<child>`: shorten each side so the child stays distinguishable
+  // from its parent (the parent's uuid alone would render identically for every child).
+  const scope = rest.indexOf('#')
+  if (scope > 0) {
+    const child = rest.slice(scope + 1)
+    return `${formatSessionId(rest.slice(0, scope))}#${child.length > 14 ? `${child.slice(0, 14)}\u2026` : child}`
+  }
   const uuid = rest.match(UUID_RE)
   if (uuid !== null) {
     const u = uuid[0]
@@ -122,7 +132,11 @@ export function formatSessionTitle(input: {
   const sessionName = title && !isMachineLabel(title) ? title : id && isReadableId(id) ? id : undefined
   const agentRaw = (input.agentName ?? input.agent_name)?.trim()
   const agent = agentRaw && agentRaw.toLowerCase() !== harness?.toLowerCase() ? agentRaw : undefined
-  if (agent && sessionName && agent.toLowerCase() !== sessionName.toLowerCase()) return `${agent} · ${sessionName}`
+  if (agent && sessionName && agent.toLowerCase() !== sessionName.toLowerCase()) {
+    // A label the server already titled `<agent> · <task>` is not prefixed a second time.
+    if (sessionName.toLowerCase().startsWith(`${agent.toLowerCase()} · `)) return sessionName
+    return `${agent} · ${sessionName}`
+  }
   const part = agent ?? sessionName
   if (part) return part
   if (harness) return `${prettyProvider(harness)} session`

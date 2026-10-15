@@ -10,7 +10,14 @@ import { normalizeContentBlocks, flatSlice, flatString } from './content-utils.j
 import { discoverAllSessions, getProvider } from '../providers/index.js'
 import { flushCodexCache, readCachedCodexResults, withCodexCacheDirectory, writeCachedCodexResults } from './codex-cache.js'
 import { antigravityCascadeIdFromPath, flushAntigravityCache, shouldReparseAntigravitySource } from '../providers/antigravity.js'
-import { getClaudeConfigDirs, getDesktopSessionsDirs } from '../providers/claude.js'
+import { formatSessionTitle } from '../canon/naming.js'
+import {
+  extractCustomTitle,
+  extractFirstPromptFallback,
+  getClaudeConfigDirs,
+  getDesktopSessionsDirs,
+  readSubagentMeta,
+} from '../providers/claude.js'
 import { kimicodeLineageForSource } from '../providers/kimicode.js'
 import { isSqliteBusyError } from './sqlite.js'
 import { getCacheDir } from './cache-dir.js'
@@ -1923,6 +1930,8 @@ export async function collectJsonlFiles(dirPath: string): Promise<string[]> {
 // Claude Code subagent transcripts (`subagents/.../agent-*.jsonl`) have a sibling
 // `.meta.json` carrying the `agentType` (e.g. `workflow-subagent`, `Explore`).
 // Returns undefined for ordinary session files, which carry no agent type.
+export { extractCustomTitle, extractFirstPromptFallback, readSubagentMeta } from '../providers/claude.js'
+
 export async function readAgentType(filePath: string): Promise<string | undefined> {
   if (!/[\\/]subagents[\\/]/.test(filePath)) return undefined
   const metaPath = filePath.replace(/\.jsonl$/, '.meta.json')
@@ -2913,13 +2922,39 @@ export async function parseClaudeFileFull(
 
   const turns = groupIntoTurns(dedupeStreamingMessageIds(entries), seenMsgIds, toolResultMeta)
   const cwd = extractCanonicalCwd(entries)
+  const agentType = await readAgentType(filePath)
+
+  let title: string | undefined
+  if (/[\\/]subagents[\\/]/.test(filePath)) {
+    const subagentMeta = await readSubagentMeta(filePath)
+    if (agentType || subagentMeta?.description) {
+      title = formatSessionTitle({
+        agentName: agentType,
+        taskSummary: subagentMeta?.description,
+      })
+    }
+  }
+  if (!title) {
+    const customTitle = await extractCustomTitle(filePath)
+    if (customTitle) {
+      title = customTitle
+    } else if (sessionMeta.title) {
+      title = sessionMeta.title
+    } else {
+      const fallback = await extractFirstPromptFallback(filePath)
+      if (fallback) {
+        title = fallback
+      }
+    }
+  }
+
   return {
     lastCompleteLineOffset: tracker.lastCompleteLineOffset,
     ...(cwd ? { workingDirectory: cwd } : {}),
     mcpInventory: extractMcpInventory(entries),
     turns: parsedTurnsToCachedTurns(turns),
-    agentType: await readAgentType(filePath),
-    ...(sessionMeta.title ? { title: sessionMeta.title } : {}),
+    agentType,
+    ...(title ? { title } : {}),
     ...(sessionMeta.prLinks.length > 0 ? { prLinks: sessionMeta.prLinks } : {}),
     ...(sessionMeta.isSidechain ? { isSidechain: true } : {}),
     ...(sessionMeta.parentSessionId ? { parentSessionId: sessionMeta.parentSessionId } : {}),
