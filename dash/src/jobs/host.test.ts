@@ -236,6 +236,49 @@ describe('JobHost: pause stops only scheduled jobs', () => {
     expect(maintenanceRuns).toBeGreaterThan(afterStart)
   })
 
+  describe('transcript sync failures', () => {
+    const makeSyncHost = (sync: () => unknown): JobHost => {
+      const host = new JobHost({
+        store,
+        stateDir,
+        program: 'kyberdash',
+        clock,
+        spawner,
+        tickIntervalMs: TICK_MS,
+        maintenance: () => {},
+        sync: sync as () => Promise<void>,
+      })
+      hosts.push(host)
+      return host
+    }
+
+    it('records a thrown sync as lastSyncFailure and clears it after a clean pass', async () => {
+      let fail = true
+      const host = makeSyncHost(() => {
+        if (fail) throw new Error('EACCES: transcript unreadable')
+      })
+      await host.start()
+      await vi.waitFor(() => expect(host.getStatus().lastSyncFailure).toBe('EACCES: transcript unreadable'))
+
+      fail = false
+      await host.tick()
+      await vi.waitFor(() => expect(host.getStatus().lastSyncFailure).toBeNull())
+    })
+
+    it('records a failed outcome from the sync job with its reason', async () => {
+      const host = makeSyncHost(async () => ({ outcome: 'failed', reason: 'disk full' }))
+      await host.start()
+      await vi.waitFor(() => expect(host.getStatus().lastSyncFailure).toBe('disk full'))
+    })
+
+    it('does not treat a busy sync as a failure', async () => {
+      const host = makeSyncHost(async () => ({ outcome: 'busy' }))
+      await host.start()
+      await host.tick()
+      expect(host.getStatus().lastSyncFailure).toBeNull()
+    })
+  })
+
   it.each(['web', 'tray'] as const)('still starts a manual refresh requested by %s', async (trigger) => {
     const host = makeHost()
     await host.start()
