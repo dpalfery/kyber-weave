@@ -50,6 +50,35 @@ describe('formatSessionTitle', () => {
   })
 })
 
+describe('formatSessionTitle, agent and session name', () => {
+  it('leads with the agent and trails the session name', () => {
+    expect(formatSessionTitle({ label: 'Fix the login form', agentName: 'architect', harness: 'copilot' })).toBe(
+      'architect · Fix the login form',
+    )
+  })
+
+  it('never shows a GenAI span name as the title', () => {
+    expect(formatSessionTitle({ label: 'invoke_agent architect', agentName: 'architect', harness: 'copilot' })).toBe(
+      'architect',
+    )
+    expect(formatSessionTitle({ label: 'chat gpt-4o-mini-2024-07-18', sessionId: 'fc98e860', harness: 'copilot' })).toBe(
+      'Copilot session',
+    )
+    expect(formatSessionTitle({ label: 'execute_tool manage_todo_list', harness: 'copilot' })).toBe('Copilot session')
+  })
+
+  it('uses a readable slug id as the session name and ignores an agent that is just the harness', () => {
+    expect(
+      formatSessionTitle({
+        label: 'chat Claude Sonnet 5.5 (Medium)',
+        sessionId: 'sessions-subagents-and-names',
+        agentName: 'antigravity',
+        harness: 'antigravity',
+      }),
+    ).toBe('sessions-subagents-and-names')
+  })
+})
+
 describe('formatModelLabel / formatSpanLabel', () => {
   it('replaces synthetic and unknown placeholders', () => {
     expect(formatModelLabel('claude:<synthetic>')).toBe('Claude (unspecified)')

@@ -3,6 +3,11 @@ import { label } from './utils.js'
 const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i
 const SYNTH_PREFIX_RE = /^(?:synth|derived):[^:]+:/i
 const SPAN_OP_RE = /\.(llm_request|llm_invoke|generate|completion)$/i
+/** GenAI semantic-convention span names: `<operation> <target>`, e.g. `invoke_agent architect`. */
+const GENAI_SPAN_NAME_RE =
+  /^(?:chat|invoke_agent|execute_tool|text_completion|generate_content|embeddings|create_agent)(?:\s|$)/i
+/** A readable slug id (`sessions-subagents-and-names`): a name the harness chose, not a hash or uuid. */
+const SLUG_ID_RE = /^[a-z][a-z0-9]*(?:-[a-z][a-z0-9]*)+$/
 const UNSPECIFIED_MODEL_RE = /<(?:synthetic|unknown|unspecified)>|(?::|<)(?:synthetic|unknown)(?:>|$)/i
 
 const RATIO_DIMENSIONS = new Set([
@@ -18,6 +23,7 @@ export function isMachineLabel(value: string | null | undefined): boolean {
   if (v === '') return true
   if (/^(?:synth|derived):/i.test(v)) return true
   if (SPAN_OP_RE.test(v)) return true
+  if (GENAI_SPAN_NAME_RE.test(v)) return true
   if (UNSPECIFIED_MODEL_RE.test(v)) return true
   if (UUID_RE.test(v) && v.length > 36) return true
   return false
@@ -80,6 +86,15 @@ export function formatSpanLabel(name: string | null | undefined): string {
   return raw
 }
 
+/**
+ * Session title: `<agent> · <session name>`.
+ *
+ * The session name is the stored label when it is a human title, else the session id
+ * when the harness chose a readable one. The agent name is the recorded agent identity;
+ * a name equal to the harness is the harness, not an agent, so it is not repeated. With
+ * neither part, the title is `<Harness> session`. Span names such as `chat gpt-4o-mini`
+ * or `invoke_agent architect` are operations, never titles.
+ */
 export function formatSessionTitle(input: {
   label?: string | null
   sessionId?: string
@@ -88,13 +103,17 @@ export function formatSessionTitle(input: {
   agent_name?: string | null
   harness?: string
 }): string {
-  const title = input.label?.trim()
-  if (title && !isMachineLabel(title)) return title
-  const agent = (input.agentName ?? input.agent_name)?.trim()
-  if (agent) return agent
   const harness = input.harness?.trim()
+  const id = (input.sessionId || input.session_id)?.trim()
+  const title = input.label?.trim()
+  const sessionName = title && !isMachineLabel(title) ? title : id && SLUG_ID_RE.test(id) ? id : undefined
+  const agentRaw = (input.agentName ?? input.agent_name)?.trim()
+  const agent = agentRaw && agentRaw.toLowerCase() !== harness?.toLowerCase() ? agentRaw : undefined
+  if (agent && sessionName && agent !== sessionName) return `${agent} · ${sessionName}`
+  const part = agent ?? sessionName
+  if (part) return part
   if (harness) return `${prettyProvider(harness)} session`
-  return formatSessionId(input.sessionId || input.session_id)
+  return formatSessionId(id)
 }
 
 /** Ratio as a percent, including overflow past 100% (honest pressure). */
