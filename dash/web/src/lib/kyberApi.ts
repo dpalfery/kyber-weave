@@ -168,8 +168,6 @@ export interface KyberSessionSummary {
   parentSession?: string | null
   agent_name?: string | null
   agentName?: string | null
-  task_summary?: string | null
-  taskSummary?: string | null
   repo?: string | null
   branch?: string | null
   started?: string | number | null

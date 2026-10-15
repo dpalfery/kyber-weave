@@ -153,3 +153,7 @@ review:
     max-reviewable-lines: 10000
     major-count-blocks: 3
     min-confidence: 7
+
+# Paths agents resolve by property name instead of a relative link.
+config-reg:
+  review-guidance: REVIEW.md

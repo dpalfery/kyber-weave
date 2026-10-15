@@ -11,7 +11,7 @@ development-mode: test-first
 
 # KyberDash Sessions page subagents and names
 
-**Status: Complete 2026-10-14.** Plan delivered in `test-first` mode across all 9 tasks T0.1–T4.1. Whole-change review council returned APPROVE with 15/15 declared gates passing. Primary architectural decisions (D1–D9, AP1) are harvested into [ADR 0037](../../adr/0037-post-run-transcript-sync-subagent-hierarchy.md), [dash/architecture.md](../../dash/architecture.md), and [dash/runbook.md](../../dash/runbook.md). Archived per KW-DOC-LIFECYCLE-003.
+**Status: Complete 2026-10-14.** Plan delivered in `test-first` mode across all 9 tasks T0.1–T4.1. Whole-change review council returned APPROVE with 15/15 declared gates passing. Primary architectural decisions (D1–D9, AP1) are harvested into [ADR 0038](../../adr/0038-post-run-transcript-sync-subagent-hierarchy.md), [dash/architecture.md](../../dash/architecture.md), and [dash/runbook.md](../../dash/runbook.md). Archived per KW-DOC-LIFECYCLE-003.
 
 Development mode: `test-first`. Persisted per architect protocol. Every implementation task has a test-first contract in [section 7](#7-test-contract-test-first).
 
@@ -33,7 +33,7 @@ The KyberDash Sessions explorer (`dash/web/src/pages/Sessions.tsx` -> `ContextEx
 - Persist stable session identities for subagents in `canon.db`: Claude subagents as `agent-<agentId>` and Copilot subagents deterministically as `<parent>#<invoke_agent_span_id>`.
 - Implement a post-run transcript synchronization engine job in the shared KyberDash engine that incrementally reads transcript files, resolves titles, extracts subagents, and joins with OTel spans via `request_id` (under ADR 0009 and ADR 0029).
 - Enforce the display-layer boundary (root `AGENTS.md`, [rules/kyberdash-display-layer.md](../../rules/kyberdash-display-layer.md), ADR 0033): the web UI and desktop tray are display layers only; all sync scheduling, state tracking, and rollup aggregation reside in the shared engine.
-- Harvest architectural decisions into **ADR 0037: Post-Run Transcript Synchronization and Stable-Identity Subagent Session Hierarchy**.
+- Harvest architectural decisions into **ADR 0038: Post-Run Transcript Synchronization and Stable-Identity Subagent Session Hierarchy**.
 
 ## 2. Investigation findings
 
@@ -78,7 +78,7 @@ Discovery was conducted over the codebase on branch `feat/sessions-subagents-and
 | D6 | How should post-run transcript synchronization operate? | **Engine-hosted background sync job.** Default 2 min cadence (configurable via settings). Stats transcript files (`mtime`/`size`), parses append-only byte offsets, joins with OTel sessions on `request_id` (ADR 0009 / ADR 0029). Marks settled after 30 min inactivity + 2 unchanged passes; marks unavailable after 24h. Yields to store refresh lock. | Avoids heavy repeated full re-scans; respects live process writing; ensures OTel spans and transcript metadata fuse reliably. | APPROVED — user decision 2026-10-14 |
 | D7 | What database changes are required? | **Schema v19 -> v20 migration.** Add to `session` table: `synced_at TEXT`, `sync_status TEXT DEFAULT 'pending'`, `settled_at TEXT`, `transcript_path TEXT`, `transcript_offset INTEGER DEFAULT 0`. Migration 19 is presence-guarded. Update `SCHEMA_VERSION = 20` and `SCHEMA_SQL`. | Preserves backward compatibility with existing databases; enables robust resume and settlement tracking. | APPROVED — user decision 2026-10-14 |
 | D8 | What is the harness rollout order? | **Copilot first, Claude Code second, remaining harnesses afterwards one at a time.** | Phased delivery minimizes risk, verifies the engine hierarchy on Copilot before rolling out Claude transcript file synchronization, followed by other harnesses. | APPROVED — user decision 2026-10-14 |
-| D9 | Does this warrant a new ADR? | **Yes: ADR 0037: Post-Run Transcript Synchronization and Stable-Identity Subagent Session Hierarchy.** Extends ADR 0009 (multi-signal ingestion), ADR 0016 (source refresh), and ADR 0033 (display layers). | Captures lasting architectural commitments: stable subagent identities, read-time rollups, post-run sync job lifecycle, and display-layer boundaries. | APPROVED — user decision 2026-10-14 |
+| D9 | Does this warrant a new ADR? | **Yes: ADR 0038: Post-Run Transcript Synchronization and Stable-Identity Subagent Session Hierarchy.** Extends ADR 0009 (multi-signal ingestion), ADR 0016 (source refresh), and ADR 0033 (display layers). | Captures lasting architectural commitments: stable subagent identities, read-time rollups, post-run sync job lifecycle, and display-layer boundaries. | APPROVED — user decision 2026-10-14 |
 | AP1 | Approve and execute? | **Approved.** The plan is Ready for execution in `test-first` mode. | The approval covers decisions D1–D9, the API and database contracts (section 5), the test-first contract (section 7), and the phased task graph (section 8). | APPROVED — user "approve and execute" 2026-10-14 (conductor relay) |
 
 Open decisions: **none**.
@@ -278,7 +278,7 @@ Every dash task runs its unit/integration test first, followed by the repository
 | T2.2 (Claude Subagent Projection) | `dash/src/canon/claude-subagents.test.ts` (new) | `cd dash && npx vitest run src/canon/claude-subagents.test.ts` | Discovers `subagents/agent-*.jsonl`; projects stable `agent-<agentId>` session rows with parent linkage and `agent_name`. | Subagent files ignored or unlinked | All pass |
 | T2.3 (Transcript Sync Job) | `dash/src/sync/transcript-sync.test.ts` (new) | `cd dash && npx vitest run src/sync/transcript-sync.test.ts` | Incrementally syncs bytes from `transcript_offset`; joins OTel spans on `request_id`; marks `settled` after 30 min inactivity + 2 passes; respects refresh lock. | Module absent or sync logic fails | All pass |
 | T3.1 (Web ContextExplorer Tree) | `dash/web/src/components/ContextExplorer.test.tsx` (additions) | `cd dash && npx vitest run web/src/components/ContextExplorer.test.tsx src/architecture/display-layer.test.ts` | Renders nested child rows under parent with chevron toggle; displays rolled-up spend on parent and own spend on child; tooltip contains raw ID. Passes display-layer guard. | Children rendered flat or missing toggle; display-layer violation | All pass |
-| T4.1 (ADR 0037 & Docs) | Documentation validation | `dotnet run --project src/KyberWeave.Cli -- docs validate . && dotnet run --project src/KyberWeave.Cli -- docs drift .` | Harvests decisions to `docs/adr/0037-post-run-transcript-sync-subagent-hierarchy.md`, updates architecture and runbook. | Fails on broken links or drift | Zero findings |
+| T4.1 (ADR 0038 & Docs) | Documentation validation | `dotnet run --project src/KyberWeave.Cli -- docs validate . && dotnet run --project src/KyberWeave.Cli -- docs drift .` | Harvests decisions to `docs/adr/0038-post-run-transcript-sync-subagent-hierarchy.md`, updates architecture and runbook. | Fails on broken links or drift | Zero findings |
 
 ## 8. Tasks
 
@@ -315,9 +315,9 @@ Every dash task runs its unit/integration test first, followed by the repository
   - Action: Implement expandable chevron rows, dual spend labels, `<agent name> · <task summary>` titles, raw ID tooltips, and verify display-layer guard.
 
 ### Phase 4+: Remaining Harnesses & Closeout
-- **T4.1 — Architectural harvest (ADR 0037) and documentation.**
-  - Files: `docs/adr/0037-post-run-transcript-sync-subagent-hierarchy.md`, `docs/dash/architecture.md`, `docs/dash/runbook.md`, `docs/plans/README.md`
-  - Action: Harvest decisions D1–D9 into ADR 0037, update canonical docs, run validation gates.
+- **T4.1 — Architectural harvest (ADR 0038) and documentation.**
+  - Files: `docs/adr/0038-post-run-transcript-sync-subagent-hierarchy.md`, `docs/dash/architecture.md`, `docs/dash/runbook.md`, `docs/plans/README.md`
+  - Action: Harvest decisions D1–D9 into ADR 0038, update canonical docs, run validation gates.
 
 ## 9. Risk and blast radius analysis
 
@@ -332,7 +332,7 @@ Every dash task runs its unit/integration test first, followed by the repository
 
 ## 10. Governance and ADR recommendation
 
-This plan introduces structural capabilities warranting **ADR 0037: Post-Run Transcript Synchronization and Stable-Identity Subagent Session Hierarchy**:
+This plan introduces structural capabilities warranting **ADR 0038: Post-Run Transcript Synchronization and Stable-Identity Subagent Session Hierarchy**:
 - Formalizes the stable identity format for subagents (`agent-<agentId>`, `<parent>#<spanId>`).
 - Formalizes the post-run transcript synchronization lifecycle (pending -> synced -> settled / unavailable).
 - Defines the dual spend accounting contract (atomic storage, read-time rollup).
@@ -353,7 +353,7 @@ Tasks completed:
 - **T2.2** (Claude subagent projection): Projected `agent-<agentId>` rows into `session` table with parent linkage in `dash/src/canon/sessions.ts`. Verified in `dash/src/canon/claude-subagents.test.ts`.
 - **T2.3** (Background transcript sync job): Implemented `runTranscriptSync` with incremental byte-offset parsing, `request_id` twin-join, 30-min settlement, 24h timeout, and refresh lock arbitration in `dash/src/sync/transcript-sync.ts` and `dash/src/jobs/host.ts`. Verified in `dash/src/sync/transcript-sync.test.ts`.
 - **T3.1** (Web UI hierarchy & visualization): Built expandable chevron tree in `ContextExplorer.tsx`, dual spend display (rolled-up on parent, own on child), and raw ID tooltips in `dash/web/src/components/ContextExplorer.tsx` and `dash/web/src/lib/labels.ts`. Verified in `dash/web/src/components/ContextExplorer.test.tsx` and `dash/src/architecture/display-layer.test.ts`.
-- **T4.1** (Architectural harvest & closeout): Harvested architectural commitments into ADR 0037, updated `docs/dash/architecture.md` and `docs/dash/runbook.md`, and completed plan archival.
+- **T4.1** (Architectural harvest & closeout): Harvested architectural commitments into ADR 0038, updated `docs/dash/architecture.md` and `docs/dash/runbook.md`, and completed plan archival.
 
 ### Verification
 
@@ -364,20 +364,20 @@ Tasks completed:
 
 | ID | Decision (short form) | Destination in canonical docs | Status |
 |---|---|---|---|
-| D1 | Subagents nested under parent session rows in `ContextExplorer.tsx` | [ADR 0037](../../adr/0037-post-run-transcript-sync-subagent-hierarchy.md#d1-stable-identity-subagent-session-hierarchy), [dash/architecture.md](../../dash/architecture.md#subagent-session-hierarchy-and-read-time-spend-rollups-adr-0037), [dash/runbook.md](../../dash/runbook.md#2-subagents-spend-rollups-and-honest-session-titles) | Harvested |
-| D2 | Dual rollup & per-agent spend (atomic storage, read-time rollup in `/api/kyber/sessions`) | [ADR 0037](../../adr/0037-post-run-transcript-sync-subagent-hierarchy.md#d2-dual-spend-accounting-via-read-time-rollup), [dash/architecture.md](../../dash/architecture.md#subagent-session-hierarchy-and-read-time-spend-rollups-adr-0037), [dash/runbook.md](../../dash/runbook.md#2-subagents-spend-rollups-and-honest-session-titles) | Harvested |
-| D3 | Stable subagent session IDs (`agent-<agentId>`, `<parent>#<spanId>`) in `session` table | [ADR 0037](../../adr/0037-post-run-transcript-sync-subagent-hierarchy.md#d1-stable-identity-subagent-session-hierarchy), [dash/architecture.md](../../dash/architecture.md#subagent-session-hierarchy-and-read-time-spend-rollups-adr-0037), [dash/runbook.md](../../dash/runbook.md#2-subagents-spend-rollups-and-honest-session-titles) | Harvested |
-| D4 | Naming convention `<agent name> · <task summary>` with machine-label suppression | [ADR 0037](../../adr/0037-post-run-transcript-sync-subagent-hierarchy.md#d3-honest-session-title-synthesis-agent-name--task-summary), [dash/architecture.md](../../dash/architecture.md#subagent-session-hierarchy-and-read-time-spend-rollups-adr-0037), [dash/runbook.md](../../dash/runbook.md#honest-title-formatting-formatsessiontitle) | Harvested |
+| D1 | Subagents nested under parent session rows in `ContextExplorer.tsx` | [ADR 0038](../../adr/0038-post-run-transcript-sync-subagent-hierarchy.md#d1-stable-identity-subagent-session-hierarchy), [dash/architecture.md](../../dash/architecture.md#subagent-session-hierarchy-and-read-time-spend-rollups-adr-0037), [dash/runbook.md](../../dash/runbook.md#2-subagents-spend-rollups-and-honest-session-titles) | Harvested |
+| D2 | Dual rollup & per-agent spend (atomic storage, read-time rollup in `/api/kyber/sessions`) | [ADR 0038](../../adr/0038-post-run-transcript-sync-subagent-hierarchy.md#d2-dual-spend-accounting-via-read-time-rollup), [dash/architecture.md](../../dash/architecture.md#subagent-session-hierarchy-and-read-time-spend-rollups-adr-0037), [dash/runbook.md](../../dash/runbook.md#2-subagents-spend-rollups-and-honest-session-titles) | Harvested |
+| D3 | Stable subagent session IDs (`agent-<agentId>`, `<parent>#<spanId>`) in `session` table | [ADR 0038](../../adr/0038-post-run-transcript-sync-subagent-hierarchy.md#d1-stable-identity-subagent-session-hierarchy), [dash/architecture.md](../../dash/architecture.md#subagent-session-hierarchy-and-read-time-spend-rollups-adr-0037), [dash/runbook.md](../../dash/runbook.md#2-subagents-spend-rollups-and-honest-session-titles) | Harvested |
+| D4 | Naming convention `<agent name> · <task summary>` with machine-label suppression | [ADR 0038](../../adr/0038-post-run-transcript-sync-subagent-hierarchy.md#d3-honest-session-title-synthesis-agent-name--task-summary), [dash/architecture.md](../../dash/architecture.md#subagent-session-hierarchy-and-read-time-spend-rollups-adr-0037), [dash/runbook.md](../../dash/runbook.md#honest-title-formatting-formatsessiontitle) | Harvested |
 | D5 | Development mode `test-first` | Plan frontmatter and status line | Documentation waiver: transient execution process metadata with no surviving architectural invariant |
-| D6 | Engine-hosted background transcript sync job (30-min settlement, 24h timeout, lock arbitration) | [ADR 0037](../../adr/0037-post-run-transcript-sync-subagent-hierarchy.md#d5-engine-hosted-incremental-transcript-synchronization), [dash/architecture.md](../../dash/architecture.md#post-run-transcript-synchronization-engine-job-adr-0037), [dash/runbook.md](../../dash/runbook.md#engine-hosted-transcript-sync-job-lifecycle-runtranscriptsync) | Harvested |
-| D7 | Database Schema v19 -> v20 migration with presence-guarded columns | [ADR 0037](../../adr/0037-post-run-transcript-sync-subagent-hierarchy.md#d4-schema-migration-v20), [dash/architecture.md](../../dash/architecture.md#store) | Harvested |
+| D6 | Engine-hosted background transcript sync job (30-min settlement, 24h timeout, lock arbitration) | [ADR 0038](../../adr/0038-post-run-transcript-sync-subagent-hierarchy.md#d5-engine-hosted-incremental-transcript-synchronization), [dash/architecture.md](../../dash/architecture.md#post-run-transcript-synchronization-engine-job-adr-0037), [dash/runbook.md](../../dash/runbook.md#engine-hosted-transcript-sync-job-lifecycle-runtranscriptsync) | Harvested |
+| D7 | Database Schema v19 -> v20 migration with presence-guarded columns | [ADR 0038](../../adr/0038-post-run-transcript-sync-subagent-hierarchy.md#d4-schema-migration-v20), [dash/architecture.md](../../dash/architecture.md#store) | Harvested |
 | D8 | Rollout order: Copilot first, Claude Code second, remaining harnesses afterwards | Section 8 execution task graph | Documentation waiver: execution scheduling sequence with no surviving architectural invariant |
-| D9 | Durable architectural decisions captured in ADR 0037 | [ADR 0037](../../adr/0037-post-run-transcript-sync-subagent-hierarchy.md) | Harvested |
+| D9 | Durable architectural decisions captured in ADR 0038 | [ADR 0038](../../adr/0038-post-run-transcript-sync-subagent-hierarchy.md) | Harvested |
 | AP1 | Plan approval and execution authorization | Plan Status line | Documentation waiver: historical approval provenance |
 
 ### ADR waiver
 
-None — all lasting architectural commitments, stable identities, read-time rollups, and sync lifecycle rules are harvested into [ADR 0037](../../adr/0037-post-run-transcript-sync-subagent-hierarchy.md).
+None — all lasting architectural commitments, stable identities, read-time rollups, and sync lifecycle rules are harvested into [ADR 0038](../../adr/0038-post-run-transcript-sync-subagent-hierarchy.md).
 
 ### Documentation waivers
 

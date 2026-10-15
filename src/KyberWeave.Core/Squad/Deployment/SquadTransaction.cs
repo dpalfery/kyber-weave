@@ -81,6 +81,7 @@ public sealed class SquadTransaction
 
     private readonly SquadStateStore _stateStore;
     private readonly ISquadTransactionObserver? _observer;
+    private readonly List<string> _warnings = [];
 
     public SquadTransaction(
         SquadStateStore stateStore,
@@ -90,6 +91,12 @@ public sealed class SquadTransaction
         _stateStore = stateStore;
         _observer = observer;
     }
+
+    /// <summary>
+    /// Warnings raised after a transaction has committed. A committed deployment is never rolled back
+    /// for a warning, so a caller must surface these rather than read the outcome as silent success.
+    /// </summary>
+    public IReadOnlyList<string> Warnings => _warnings;
 
     /// <summary>Executes a plan and rolls it back before propagating any caught failure.</summary>
     public void Execute(SquadDeploymentPlan plan)
@@ -103,28 +110,36 @@ public sealed class SquadTransaction
                 "Squad target root changed physical identity after preflight. Recreate the plan before writing.");
         }
 
-        using TransactionLease lease = AcquireLease(plan.PhysicalRootKey);
+        using TransactionLease lease = AcquireLease(_stateStore.ResolveLeaseIdentity(plan.PhysicalRootPath, plan.Scope));
         string root = plan.PhysicalRootPath;
-        string journalDirectory = _stateStore.ResolveTransactionDirectory(
-            root,
-            plan.Scope);
-        string workDirectory = _stateStore.ResolveTransactionWorkDirectory(
-            root,
-            plan.Scope);
+        string journalDirectory = Physical(_stateStore.ResolveTransactionDirectory(root, plan.Scope));
+        string workDirectory = Physical(_stateStore.ResolveFileWorkDirectory(root, plan.Scope));
         bool sameTransactionDirectory = SquadFileSystemPathSemantics.AreSame(
             journalDirectory,
             workDirectory);
         string intentPath = Path.Combine(journalDirectory, IntentFileName);
         bool workExisted = Directory.Exists(workDirectory);
-        string stateAuthorityRoot = _stateStore.ResolveStateAuthorityRoot(root, plan.Scope);
+        string stateAuthorityRoot = Physical(_stateStore.ResolveStateAuthorityRoot(root, plan.Scope));
+        string lockPath = PhysicalLeaf(_stateStore.ResolveLockPath(root, plan.Scope));
+        string receiptPath = PhysicalLeaf(_stateStore.ResolveReceiptPath(root, plan.Scope));
+        string stateDirectory = Path.GetDirectoryName(lockPath)!;
+        plan.AnchorReceipt(plan.Scope == SquadDeploymentScope.Global
+            ? _stateStore.ResolveHomeRoot()
+            : root);
+        SquadReceipt receipt = plan.Receipt;
+
+        // Every directory this transaction may create is captured before anything is written, so a
+        // failed transaction removes exactly what it created. The state directory lives under the
+        // home for both scopes, so it is captured against the home rather than the journal's authority.
         IReadOnlyList<string> journalDirectoriesCreated = CaptureMissingDirectories(
             journalDirectory,
             stateAuthorityRoot);
         IReadOnlyList<string> workDirectoriesCreated = sameTransactionDirectory
             ? Array.Empty<string>()
             : CaptureMissingDirectories(workDirectory, root);
-
-        Directory.CreateDirectory(journalDirectory);
+        IReadOnlyList<string> stateDirectoriesCreated = CaptureMissingDirectories(
+            stateDirectory,
+            _stateStore.ResolveHomeCreationBoundary());
         bool ownsNewTransaction = false;
         bool retainTransaction = false;
         try
@@ -135,20 +150,30 @@ public sealed class SquadTransaction
                     "An unfinished Squad transaction exists. Recover it before starting another deployment.");
             }
 
+            // Directories are created only once this transaction owns the journal, so a refused start
+            // never leaves a directory behind that no intent accounts for.
             ownsNewTransaction = true;
+            Directory.CreateDirectory(journalDirectory);
             ValidatePreconditions(plan);
             Directory.CreateDirectory(workDirectory);
+            Directory.CreateDirectory(stateDirectory);
 
-            string lockPath = _stateStore.ResolveLockPath(root, plan.Scope);
-            string receiptPath = _stateStore.ResolveReceiptPath(root, plan.Scope);
+            // A global journal sits beneath the home, not the target root, so when it also holds the staged
+            // work its directories are recorded against the state and home authorities alone. Recording them
+            // as target work would relate them to a root they are not beneath. A project journal sits beneath
+            // its root, so it keeps its historical target-work record.
             IntentDocument intent = CaptureIntent(
                 plan,
+                receipt,
                 lockPath,
                 receiptPath,
                 sameTransactionDirectory
-                    ? journalDirectoriesCreated
+                    ? (plan.Scope == SquadDeploymentScope.Project
+                        ? journalDirectoriesCreated
+                        : Array.Empty<string>())
                     : workDirectoriesCreated,
                 journalDirectoriesCreated,
+                stateDirectoriesCreated,
                 stateAuthorityRoot);
             int sequence = 0;
             int checkpointSequence = 0;
@@ -173,6 +198,7 @@ public sealed class SquadTransaction
                     artifacts);
                 PrepareStateFiles(
                     plan,
+                    receipt,
                     intent.TransactionId,
                     journalDirectory,
                     artifacts);
@@ -295,6 +321,7 @@ public sealed class SquadTransaction
 
             lease.ReleaseJournal();
             CleanupOwnedArtifacts(journalDirectory, workDirectory);
+            RecordProjectRegistration(plan, stateDirectory);
         }
         catch
         {
@@ -307,9 +334,12 @@ public sealed class SquadTransaction
         }
         finally
         {
+            // A directory survives only if the committed state is in it, so removal is attempted on
+            // every path and skips anything non-empty. On success that is the state directory itself.
             if (ownsNewTransaction && !retainTransaction)
             {
                 RemoveCreatedDirectories(workDirectoriesCreated);
+                RemoveCreatedDirectories(stateDirectoriesCreated);
                 RemoveCreatedDirectories(journalDirectoriesCreated);
             }
         }
@@ -321,13 +351,13 @@ public sealed class SquadTransaction
         ArgumentException.ThrowIfNullOrWhiteSpace(targetRoot);
 
         SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(targetRoot);
-        using TransactionLease lease = AcquireLease(identity.Key);
+        using TransactionLease lease = AcquireLease(_stateStore.ResolveLeaseIdentity(identity.PhysicalPath, scope));
         string root = identity.PhysicalPath;
-        string journalDirectory = _stateStore.ResolveTransactionDirectory(root, scope);
+        string journalDirectory = Physical(_stateStore.ResolveTransactionDirectory(root, scope));
         if (!Directory.Exists(journalDirectory))
             return;
 
-        string workDirectory = _stateStore.ResolveTransactionWorkDirectory(root, scope);
+        string workDirectory = Physical(_stateStore.ResolveFileWorkDirectory(root, scope));
         bool recoveryCompleted = false;
         IReadOnlyList<CreatedDirectoryAuthority> createdDirectoriesToRemove =
             Array.Empty<CreatedDirectoryAuthority>();
@@ -346,9 +376,11 @@ public sealed class SquadTransaction
                 workDirectory,
                 identity.Key,
                 root,
-                _stateStore.ResolveStateAuthorityRoot(root, scope));
-            string lockPath = _stateStore.ResolveLockPath(root, scope);
-            string receiptPath = _stateStore.ResolveReceiptPath(root, scope);
+                _stateStore.ResolveStateAuthorityRoot(root, scope),
+                _stateStore.ResolveHomeCreationBoundary(),
+                _stateStore.ResolveHomeStateDirectory());
+            string lockPath = PhysicalLeaf(_stateStore.ResolveLockPath(root, scope));
+            string receiptPath = PhysicalLeaf(_stateStore.ResolveReceiptPath(root, scope));
             ResolveActiveClaims(
                 intent,
                 journalDirectory,
@@ -376,17 +408,20 @@ public sealed class SquadTransaction
                 RemoveCreatedDirectories(
                     createdDirectoriesToRemove,
                     root,
-                    _stateStore.ResolveStateAuthorityRoot(root, scope));
+                    _stateStore.ResolveStateAuthorityRoot(root, scope),
+                    _stateStore.ResolveHomeCreationBoundary());
             }
         }
     }
 
     private IntentDocument CaptureIntent(
         SquadDeploymentPlan plan,
+        SquadReceipt receipt,
         string lockPath,
         string receiptPath,
         IReadOnlyList<string> transactionDirectoriesCreated,
         IReadOnlyList<string> journalDirectoriesCreated,
+        IReadOnlyList<string> homeDirectoriesCreated,
         string stateAuthorityRoot)
     {
         IntentFile[] files = plan.FileMutations
@@ -432,7 +467,7 @@ public sealed class SquadTransaction
             receiptKind,
             receiptPath,
             plan.ReceiptMutation == SquadStateMutation.Write
-                ? Encoding.UTF8.GetBytes(_stateStore.SerializeReceipt(plan.Receipt))
+                ? Encoding.UTF8.GetBytes(_stateStore.SerializeReceipt(receipt))
                 : null);
         return new IntentDocument(
             IntentSchema,
@@ -443,8 +478,10 @@ public sealed class SquadTransaction
             CaptureCreatedDirectoryAuthority(
                 transactionDirectoriesCreated,
                 journalDirectoriesCreated,
+                homeDirectoriesCreated,
                 plan.PhysicalRootPath,
-                stateAuthorityRoot),
+                stateAuthorityRoot,
+                _stateStore.ResolveHomeCreationBoundary()),
             lockKind,
             lockAfter.Kind,
             lockAfter.Sha256,
@@ -609,6 +646,7 @@ public sealed class SquadTransaction
 
     private void PrepareStateFiles(
         SquadDeploymentPlan plan,
+        SquadReceipt receipt,
         string transactionId,
         string journalDirectory,
         ICollection<IntentArtifact> artifacts)
@@ -637,7 +675,7 @@ public sealed class SquadTransaction
                 transactionId,
                 "state-staging/receipt",
                 StateStagingPath(journalDirectory, "receipt"),
-                Encoding.UTF8.GetBytes(_stateStore.SerializeReceipt(plan.Receipt)),
+                Encoding.UTF8.GetBytes(_stateStore.SerializeReceipt(receipt)),
                 artifacts);
         }
     }
@@ -2039,8 +2077,10 @@ public sealed class SquadTransaction
     private static IReadOnlyList<CreatedDirectoryAuthority> CaptureCreatedDirectoryAuthority(
         IReadOnlyList<string> transactionDirectories,
         IReadOnlyList<string> journalDirectories,
+        IReadOnlyList<string> homeDirectories,
         string targetRoot,
-        string stateAuthorityRoot)
+        string stateAuthorityRoot,
+        string homeBoundary)
     {
         CreatedDirectoryAuthority[] authorities = transactionDirectories.Select(path =>
                 new CreatedDirectoryAuthority(
@@ -2050,6 +2090,10 @@ public sealed class SquadTransaction
                 new CreatedDirectoryAuthority(
                     CreatedDirectoryArea.State,
                     RelativeAuthorityPath(stateAuthorityRoot, path))))
+            .Concat(homeDirectories.Select(path =>
+                new CreatedDirectoryAuthority(
+                    CreatedDirectoryArea.Home,
+                    RelativeAuthorityPath(homeBoundary, path))))
             .Distinct()
             .OrderByDescending(authority => authority.Path.Count(character => character == '/'))
             .ThenBy(authority => authority.Area)
@@ -2057,6 +2101,21 @@ public sealed class SquadTransaction
             .ToArray();
         return authorities;
     }
+
+    /// <summary>
+    /// The canonical physical spelling of a path. The store returns global state beneath the home as it
+    /// was configured, and project state beneath the canonical root. The transaction compares and records
+    /// paths, so it works in one spelling only, and every path is canonicalized before it is used.
+    /// </summary>
+    private static string Physical(string path) => SquadFileSystemPathSemantics.Canonicalize(path);
+
+    /// <summary>
+    /// Canonicalizes the directory a state file lives in but not the file itself. A state file may be a
+    /// symbolic link, and canonicalizing the leaf would claim the link's target instead of the link, so
+    /// the claim, its link metadata and the restore would all address the wrong node.
+    /// </summary>
+    private static string PhysicalLeaf(string path) =>
+        Path.Combine(Physical(Path.GetDirectoryName(path)!), Path.GetFileName(path));
 
     private static string RelativeAuthorityPath(string authorityRoot, string path)
     {
@@ -2066,8 +2125,12 @@ public sealed class SquadTransaction
                 "Squad created-directory authority escaped its bound root.");
         }
 
+        // Canonical on both sides, so a path spelled through a symlinked home relates to its authority
+        // the same way the canonical spelling does. The recorded relative path is spelling-independent.
         return SquadPathPolicy.NormalizeRelativePath(
-            Path.GetRelativePath(authorityRoot, path)
+            Path.GetRelativePath(
+                    SquadFileSystemPathSemantics.Canonicalize(authorityRoot),
+                    SquadFileSystemPathSemantics.Canonicalize(path))
                 .Replace(Path.DirectorySeparatorChar, '/'));
     }
 
@@ -2080,13 +2143,17 @@ public sealed class SquadTransaction
     private static void RemoveCreatedDirectories(
         IEnumerable<CreatedDirectoryAuthority> directories,
         string targetRoot,
-        string stateAuthorityRoot)
+        string stateAuthorityRoot,
+        string homeBoundary)
     {
         foreach (CreatedDirectoryAuthority authority in directories)
         {
-            string root = authority.Area == CreatedDirectoryArea.Target
-                ? targetRoot
-                : stateAuthorityRoot;
+            string root = authority.Area switch
+            {
+                CreatedDirectoryArea.Target => targetRoot,
+                CreatedDirectoryArea.Home => homeBoundary,
+                _ => stateAuthorityRoot
+            };
             DeleteEmptyDirectory(SquadPathPolicy.ResolveFile(root, authority.Path));
         }
     }
@@ -2151,7 +2218,7 @@ public sealed class SquadTransaction
         "Reliability",
         "CA2000:Dispose objects before losing scope",
         Justification = "A successful TransactionLease takes ownership of the mutex; the catch path disposes it.")]
-    private static TransactionLease AcquireLease(string rootKey)
+    internal static TransactionLease AcquireLease(string rootKey)
     {
         if (!ActiveLeases.TryAdd(rootKey, 0))
         {
@@ -2315,7 +2382,9 @@ public sealed class SquadTransaction
         string workDirectory,
         string expectedRootKey,
         string targetRoot,
-        string stateAuthorityRoot)
+        string stateAuthorityRoot,
+        string homeBoundary,
+        string homeStateDirectory)
     {
         try
         {
@@ -2354,6 +2423,8 @@ public sealed class SquadTransaction
                 intent.CreatedDirectories,
                 targetRoot,
                 stateAuthorityRoot,
+                homeBoundary,
+                homeStateDirectory,
                 journalDirectory,
                 workDirectory);
             if (intent.Phase == TransactionPhase.Prepared)
@@ -2457,7 +2528,7 @@ public sealed class SquadTransaction
             RequireCanonicalJsonEnum(
                 directory,
                 "area",
-                ["target", "state"],
+                ["target", "state", "home"],
                 "transaction created directory");
         }
 
@@ -2976,6 +3047,8 @@ public sealed class SquadTransaction
         IReadOnlyList<CreatedDirectoryAuthority> authorities,
         string targetRoot,
         string stateAuthorityRoot,
+        string homeBoundary,
+        string homeStateDirectory,
         string journalDirectory,
         string workDirectory)
     {
@@ -2994,15 +3067,26 @@ public sealed class SquadTransaction
             }
 
             previousDepth = depth;
-            string authorityRoot = authority.Area == CreatedDirectoryArea.Target
-                ? targetRoot
-                : stateAuthorityRoot;
-            string transactionRoot = authority.Area == CreatedDirectoryArea.Target
-                ? workDirectory
-                : journalDirectory;
+            string authorityRoot = authority.Area switch
+            {
+                CreatedDirectoryArea.Target => targetRoot,
+                CreatedDirectoryArea.Home => homeBoundary,
+                _ => stateAuthorityRoot
+            };
             string directory = SquadPathPolicy.ResolveFile(authorityRoot, normalized);
-            if (!SquadFileSystemPathSemantics.AreSame(directory, transactionRoot) &&
-                !SquadFileSystemPathSemantics.IsWithin(directory, transactionRoot))
+            bool anchored = authority.Area == CreatedDirectoryArea.Home
+                // Home state directories are the ancestors of, or within, the home state tree. A
+                // journal is never under the home state tree, so it cannot be the anchor for these.
+                ? SquadFileSystemPathSemantics.AreSame(directory, homeStateDirectory) ||
+                  SquadFileSystemPathSemantics.IsWithin(directory, homeStateDirectory) ||
+                  SquadFileSystemPathSemantics.IsWithin(homeStateDirectory, directory)
+                : SquadFileSystemPathSemantics.AreSame(
+                      directory,
+                      authority.Area == CreatedDirectoryArea.Target ? workDirectory : journalDirectory) ||
+                  SquadFileSystemPathSemantics.IsWithin(
+                      directory,
+                      authority.Area == CreatedDirectoryArea.Target ? workDirectory : journalDirectory);
+            if (!anchored)
             {
                 throw new InvalidDataException(
                     "Squad created-directory authority is not an ancestor of its transaction tree.");
@@ -3167,6 +3251,41 @@ public sealed class SquadTransaction
         return options;
     }
 
+    /// <summary>
+    /// Keeps the home-level project registry in step with a committed project transaction. A registry
+    /// failure never fails the deployment: the transaction is already durable, and the registry can be
+    /// rebuilt from per-project state. The warning names the repair so the operator is not left guessing.
+    /// </summary>
+    private void RecordProjectRegistration(SquadDeploymentPlan plan, string stateDirectory)
+    {
+        if (plan.Scope != SquadDeploymentScope.Project)
+            return;
+
+        try
+        {
+            if (plan.ReceiptMutation == SquadStateMutation.Delete)
+            {
+                _stateStore.UnregisterProject(plan.PhysicalRootPath);
+                DeleteEmptyDirectory(stateDirectory);
+                return;
+            }
+
+            _stateStore.RegisterProject(
+                plan.PhysicalRootPath,
+                plan.Receipt.Files.Select(file => file.Target).Distinct(StringComparer.Ordinal)
+                    .Order(StringComparer.Ordinal).ToArray(),
+                plan.Receipt.InstalledAtUtc);
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException)
+        {
+            _warnings.Add(
+                $"The Squad project registry was not updated for '{plan.PhysicalRootPath}' " +
+                $"({exception.Message}). The deployment itself is committed. " +
+                "Run `squad status --global` to rebuild the registry.");
+        }
+    }
+
     private void Notify(
         ref int sequence,
         SquadTransactionStepKind kind,
@@ -3296,13 +3415,19 @@ public sealed class SquadTransaction
         PostOperation
     }
 
+    /// <summary>
+    /// Where a created directory sits. <c>Target</c> is beneath the deployment root, <c>State</c> is
+    /// beneath the transaction's state authority, and <c>Home</c> is beneath the home's parent, so the
+    /// home's own <c>.kyber-weave/squad</c> tree is recorded and rolled back like any other state.
+    /// </summary>
     private enum CreatedDirectoryArea
     {
         Target,
-        State
+        State,
+        Home
     }
 
-    private sealed class TransactionLease(string identity, Mutex mutex) : IDisposable
+    internal sealed class TransactionLease(string identity, Mutex mutex) : IDisposable
     {
         private bool _disposed;
         private FileStream? _journal;

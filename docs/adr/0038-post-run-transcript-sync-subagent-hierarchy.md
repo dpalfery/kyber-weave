@@ -1,5 +1,5 @@
 ---
-id: adr/0037-post-run-transcript-sync-subagent-hierarchy
+id: adr/0038-post-run-transcript-sync-subagent-hierarchy
 title: "Post-Run Transcript Synchronization and Stable-Identity Subagent Session Hierarchy"
 doc-type: adr
 status: current
@@ -8,7 +8,7 @@ owner: dpalfery
 last-reviewed: 2026-10-14
 ---
 
-# ADR 0037: Post-Run Transcript Synchronization and Stable-Identity Subagent Session Hierarchy
+# ADR 0038: Post-Run Transcript Synchronization and Stable-Identity Subagent Session Hierarchy
 
 ## Status
 

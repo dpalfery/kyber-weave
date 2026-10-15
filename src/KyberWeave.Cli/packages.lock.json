@@ -19,11 +19,11 @@
       },
       "Spectre.Console.Cli": {
         "type": "Direct",
-        "requested": "[0.55.0, )",
-        "resolved": "0.55.0",
-        "contentHash": "cFJTB1te4eaAICd4Zp+8T/kiRn1ikQxgGqmoNarb1qoQ/7LzHAvVQ62x5U9GW3E0QI7sZLcXIIoq4CpqgTx42Q==",
+        "requested": "[0.57.2, )",
+        "resolved": "0.57.2",
+        "contentHash": "EAiwpJXAAvhyyzH6hljVo7z19ahG7WM+zViKEHtUagyPymYfJrsainXDOHzUakBHj6VYEpuaqPAShgqvs1N9aQ==",
         "dependencies": {
-          "Spectre.Console": "0.55.0"
+          "Spectre.Console": "0.57.2"
         }
       },
       "Markdig": {

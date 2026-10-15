@@ -166,8 +166,7 @@ export function AgentSessionRow({
                 label: s.label,
                 sessionId,
                 agentName: s.agent_name ?? s.agentName,
-                taskSummary: s.task_summary ?? s.taskSummary,
-                harness: s.harness,
+                  harness: s.harness,
               }) || <span className="text-tertiary-foreground">untitled session</span>}
             </span>
             {isSubagent && (

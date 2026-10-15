@@ -21,7 +21,7 @@ decided-by:
   - adr/0018-kyberdash-content-retention-purge
   - adr/0033-kyberdash-surfaces-are-display-layers
   - adr/0035-kyberdash-quarantine-raw-packet-evidence
-  - adr/0037-post-run-transcript-sync-subagent-hierarchy
+  - adr/0038-post-run-transcript-sync-subagent-hierarchy
 keywords:
   - dashboard
   - codeburn
@@ -602,7 +602,7 @@ schema 16 added `history_weeks INTEGER` to `refresh_run`,
 schema 17 added trace metadata columns (`source`, `name`, `timestamp` to `quarantine`; `session_id`, `harness`, `timestamp` to `problems`),
 schema 18 added `quarantine.raw_payload` — the decoded packet a quarantined span is filed with, kept after the record is deleted so the turn inspector can still show what the sender sent ([ADR 0035](../adr/0035-kyberdash-quarantine-raw-packet-evidence.md)),
 schema 19 added a nullable `harness` to `quarantine`, `pending_logs`, and `quarantined_logs`, so a per-harness wipe can scope those rows rather than missing them, and
-schema 20 added sync progress and settling columns (`synced_at TEXT`, `sync_status TEXT DEFAULT 'pending'`, `settled_at TEXT`, `transcript_path TEXT`, `transcript_offset INTEGER DEFAULT 0`) to `session` for post-run transcript synchronization ([ADR 0037](../adr/0037-post-run-transcript-sync-subagent-hierarchy.md)).
+schema 20 added sync progress and settling columns (`synced_at TEXT`, `sync_status TEXT DEFAULT 'pending'`, `settled_at TEXT`, `transcript_path TEXT`, `transcript_offset INTEGER DEFAULT 0`) to `session` for post-run transcript synchronization ([ADR 0038](../adr/0038-post-run-transcript-sync-subagent-hierarchy.md)).
 Every `ADD COLUMN` in those steps is presence-guarded, so a store that already carries the column — such as one stamped by an off-main build — reaches the identical final shape instead of failing on a duplicate column ([ADR 0035](../adr/0035-kyberdash-quarantine-raw-packet-evidence.md)).
 `commitSourceUnit` writes records, provenance, and the unit checkpoint together. The raw
 column is compressed (R12.4); the measured cost of not doing
@@ -620,9 +620,9 @@ The `session` table holds derived sessions, one row per conversation. Each paylo
 running the analysis layer (`analyzeContext`, `rankSchemas`, `buildTimeline`) over the
 records, and the table is a cache: dropping every row and rebuilding loses nothing.
 
-#### Subagent session hierarchy and read-time spend rollups (ADR 0037)
+#### Subagent session hierarchy and read-time spend rollups (ADR 0038)
 
-Subagent executions dispatched by orchestrators are projected during session build (`dash/src/canon/sessions.ts`) into first-class derived session rows with stable, deterministic identities ([ADR 0037](../adr/0037-post-run-transcript-sync-subagent-hierarchy.md)):
+Subagent executions dispatched by orchestrators are projected during session build (`dash/src/canon/sessions.ts`) into first-class derived session rows with stable, deterministic identities ([ADR 0038](../adr/0038-post-run-transcript-sync-subagent-hierarchy.md)):
 - **Identity format**: Claude Code subagents are assigned the deterministic session ID `agent-<agentId>` (e.g. `agent-researcher-001`, normalizing any pre-existing `agent-` prefix from attributes such as `agent_id` or `subagent_id`). Copilot subagent invocations receive `<parentSessionId>#<invoke_agent_span_id>` (e.g. `copilot-sess-001#invoke-agent-span-1`).
 - **Database representation**: Subagent rows in `session` record `is_subagent = 1`, `parent_session = <parentSessionId>` (pointing to the root session), and `agent_name = <agentName>`. Subagent records are reparented under the root invoke span (`parentSpanId = null` for the root invoke span, child spans reparented beneath it), ensuring a clean single-root execution tree in the ASAD payload.
 - **Dual spend accounting and read-time rollups**: Stored session rows persist only their own granular, unaggregated counters (`turn_count`, `request_count`, `total_input`, `total_output`, `cost_usd`) in `payload.summary`. On read (`KyberBridge.listSessions` in `dash/src/server/bridge.ts`), child subagent sessions whose parent exists in the store are omitted from the top-level list and nested into their parent's `subagents` array. The parent session carries a read-time `rollup` object aggregating spend across the orchestrator and all nested children:
@@ -993,9 +993,9 @@ by the configured URL, and every bookmark aimed at it. The bind, the `server.jso
 point, and the listening line all happen only after a successful bind, so a refused start
 publishes nothing for a tray to chase.
 
-#### Post-run transcript synchronization engine job (ADR 0037)
+#### Post-run transcript synchronization engine job (ADR 0038)
 
-Live OpenTelemetry streams frequently capture operational span metrics without complete conversation histories. To reconcile asynchronous on-disk session transcripts with live telemetry, the engine hosts `runTranscriptSync` (`dash/src/sync/transcript-sync.ts`), executed by `JobHost` (`dash/src/jobs/host.ts`) on scheduling ticks ([ADR 0037](../adr/0037-post-run-transcript-sync-subagent-hierarchy.md)):
+Live OpenTelemetry streams frequently capture operational span metrics without complete conversation histories. To reconcile asynchronous on-disk session transcripts with live telemetry, the engine hosts `runTranscriptSync` (`dash/src/sync/transcript-sync.ts`), executed by `JobHost` (`dash/src/jobs/host.ts`) on scheduling ticks ([ADR 0038](../adr/0038-post-run-transcript-sync-subagent-hierarchy.md)):
 - **Delta byte streaming**: The job queries active sessions from `session` (`WHERE sync_status NOT IN ('settled', 'unavailable') OR sync_status IS NULL`). For each session referencing a valid `transcript_path`, it stats the file. If `fileSize > oldOffset`, it reads incremental delta bytes from `transcript_offset` to `fileSize`.
 - **Enrichment by request ID**: Delta bytes are parsed line-by-line as JSONL. Matching lines containing `requestId` and message content enrich canonical records in `records` table by joining on `request_id`, appending conversation history parts into `parts_json` and updating `content_json`. The session is updated with `transcript_offset = fileSize`, `synced_at = nowIso`, and `sync_status = 'synced'`.
 - **Truncation handling**: If a file is truncated (`fileSize < oldOffset`), the job rewinds to offset 0, re-reads the full file from the beginning, updates canonical records, and resets the offset.
@@ -1044,6 +1044,12 @@ The individual views:
   Its section **4 · Skills** shows listed and invoked skills per session and per row
   ([skills view contract](#skills-view-contract)); the Execution Timeline is section
   **5 · Execution Timeline**.
+  A session row's title is `<agent> · <session name>` (`formatSessionTitle`,
+  `dash/web/src/lib/labels.ts`). The agent is the recorded agent identity, omitted when it only
+  repeats the harness. The session name is the stored label when it is a human title, else the
+  session id when the harness chose a readable one. With neither part the title is
+  `<Harness> session`. GenAI span names (`chat gpt-4o-mini`, `invoke_agent architect`,
+  `execute_tool view`) are operations and are never shown as a title.
 - **`HarnessDetail.tsx`**: Per-harness rollups, coverage indicators, labelled grouping basis, and run browser.
 - **`RunDetail.tsx`**: Multi-agent run topology, execution tree, run scorecard, and grouping label.
 - **`FindingDetail.tsx`**: In-depth finding view with evidence table, confidence basis, risk caveats, and calibration summary.
@@ -1279,7 +1285,7 @@ project; the measured rationale the retirement would otherwise take with it is p
 - [ADR 0015](../adr/0015-opt-in-llm-context-review-seam.md) — opt-in LLM context review seam and finding isolation.
 - [ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md) — harness-source jobs, split client identity, schema-11 checkpoints, and `dash refresh`.
 - [ADR 0018](../adr/0018-kyberdash-content-retention-purge.md) — stored content with a 14-day automatic purge after refresh.
-- [ADR 0037](../adr/0037-post-run-transcript-sync-subagent-hierarchy.md) — post-run transcript synchronization, stable-identity subagent session hierarchy, Schema v20, and read-time spend rollups.
+- [ADR 0038](../adr/0038-post-run-transcript-sync-subagent-hierarchy.md) — post-run transcript synchronization, stable-identity subagent session hierarchy, Schema v20, and read-time spend rollups.
 - [Relocation over context deletion standard](../rules/relocation-over-deletion.md) — diagnostic recommendations prioritize moving and progressive disclosure over context removal (D8).
 - [Honest unobservability standard](../rules/honest-unobservability.md) — missing telemetry and coverage gaps are explicit and never coerced to zero.
 - [Secondary cost display standard](../rules/secondary-cost-display.md) — cost is strictly a derived secondary metric behind token and latency health (D9).

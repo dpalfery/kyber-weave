@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Squad.Deployment;
 using Spectre.Console;
 using Spectre.Console.Cli;
@@ -31,7 +32,7 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
     }
 
     /// <inheritdoc />
-    protected override int Execute(CommandContext context, SquadStatusSettings settings, CancellationToken cancellationToken)
+    public override int Execute(CommandContext context, SquadStatusSettings settings, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
 
@@ -50,8 +51,20 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
             return 2;
         }
 
-        string targetRoot = SquadCommandComposition.ResolveTargetRoot(effectivePath);
         SquadDeploymentScope scope = SquadCommandComposition.ResolveScope(settings.Global);
+
+        // State is migrated before the receipt is read, and the anchor is chosen after the migration. A --global
+        // status reads the one home-level receipt, so it is anchored at the home directory whatever the working
+        // directory is, or at the recorded root of a legacy single-root receipt the migration has just copied.
+        string projectRoot = SquadCommandComposition.ResolveTargetRoot(effectivePath);
+        SquadCommandComposition.WriteMigrationNotes(SquadCommandComposition.EnsureStateMigrated(
+            stateStore,
+            Environment.CurrentDirectory,
+            projectRoot: scope == SquadDeploymentScope.Project ? projectRoot : null,
+            dryRun: false));
+        string targetRoot = scope == SquadDeploymentScope.Global
+            ? SquadCommandComposition.ResolveGlobalAnchorRoot(stateStore, effectivePath, dryRun: false)
+            : projectRoot;
         ISquadGlobalRootResolver globalRoots = _globalRoots ?? SquadCommandComposition.ResolveGlobalRoots();
 
         SquadReceipt? receipt = stateStore.ReadReceipt(targetRoot, scope);
@@ -114,6 +127,8 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
             AnsiConsole.MarkupLine(StatusLine("green", "ok", file, scope));
         }
 
+        bool registryUnreadable = scope == SquadDeploymentScope.Global && !WriteRegisteredProjects(stateStore);
+
         if (hasIssues)
         {
             AnsiConsole.WriteLine();
@@ -124,9 +139,62 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
             return 1;
         }
 
+        if (registryUnreadable)
+        {
+            AnsiConsole.WriteLine();
+            AnsiConsole.MarkupLine("[red]The Kyber-Squad project registry is unreadable.[/]");
+            return 1;
+        }
+
         AnsiConsole.WriteLine();
         AnsiConsole.MarkupLine("[green]All deployed files match the recorded receipt.[/]");
         return 0;
+    }
+
+    /// <summary>
+    /// Lists the projects registered with the home-level registry, flagging each stale one with its reason.
+    /// A global deployment is the home's to report, and the registry is the list of projects that depend on
+    /// it, so the operator sees both in one place.
+    /// </summary>
+    /// <remarks>
+    /// Each project is one unfolded line, so its path can be copied straight from the output. An unreadable registry
+    /// is named the way doctor names it, and the result is false so the run fails. Status does not repair a corrupt
+    /// file. The registry is rebuildable from per-project state, so removing an unreadable file lets the next listing
+    /// rebuild it.
+    /// </remarks>
+    /// <returns><see langword="false"/> when the registry could not be read; otherwise <see langword="true"/>.</returns>
+    private static bool WriteRegisteredProjects(SquadStateStore stateStore)
+    {
+        IReadOnlyList<SquadProjectRegistryEntry> projects;
+        try
+        {
+            projects = stateStore.ListProjects();
+        }
+        catch (InvalidDataException ex)
+        {
+            AnsiConsole.WriteLine();
+            SquadCommandComposition.WriteLine(
+                $"  [red]fail[/] Squad project registry is unreadable: {Markup.Escape(ex.Message)}");
+            return false;
+        }
+
+        AnsiConsole.WriteLine();
+        if (projects.Count == 0)
+        {
+            SquadCommandComposition.WriteLine("[grey]No projects are registered.[/]");
+            return true;
+        }
+
+        SquadCommandComposition.WriteLine("Registered projects:");
+        foreach (SquadProjectRegistryEntry project in projects)
+        {
+            string line = project.Stale
+                ? $"  [yellow]stale[/] {Markup.Escape(project.Path)} (stale: {Markup.Escape(project.StaleReason ?? "unknown")})"
+                : $"  [green]ok[/]    {Markup.Escape(project.Path)}";
+            SquadCommandComposition.WriteLine(line);
+        }
+
+        return true;
     }
 
     /// <summary>

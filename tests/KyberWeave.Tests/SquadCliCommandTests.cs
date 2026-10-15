@@ -927,8 +927,8 @@ public sealed class SquadCliCommandTests : IDisposable
 
         string deployedFile1 = Path.Combine(targetDir, "agents", "architect.md");
         string deployedFile2 = Path.Combine(targetDir, "skills", "test-dev", "SKILL.md");
-        string receiptPath = Path.Combine(targetDir, ".kyber-weave", "squad.receipt.json");
-        string lockPath = Path.Combine(targetDir, ".kyber-weave", "squad.lock.yml");
+        string receiptPath = Path.Combine(HomeProjectStateDirectory(userPaths, targetDir), "squad.receipt.json");
+        string lockPath = Path.Combine(HomeProjectStateDirectory(userPaths, targetDir), "squad.lock.yml");
 
         Assert.True(File.Exists(deployedFile1));
         Assert.True(File.Exists(deployedFile2));
@@ -967,7 +967,7 @@ public sealed class SquadCliCommandTests : IDisposable
             ("skills/test-dev/SKILL.md", "Use when writing tests.\n"));
 
         string deployedFile1 = Path.Combine(targetDir, "agents", "architect.md");
-        string receiptPath = Path.Combine(targetDir, ".kyber-weave", "squad.receipt.json");
+        string receiptPath = Path.Combine(HomeProjectStateDirectory(userPaths, targetDir), "squad.receipt.json");
 
         SquadUninstallCommand command = new SquadUninstallCommand(userPaths);
 
@@ -1073,9 +1073,10 @@ public sealed class SquadCliCommandTests : IDisposable
 
         Assert.Equal(0, execution.ExitCode);
         Assert.Contains("Successfully installed", execution.Output, StringComparison.OrdinalIgnoreCase);
-        Assert.True(Directory.Exists(Path.Combine(targetDir, ".kyber-weave")));
-        Assert.True(File.Exists(Path.Combine(targetDir, ".kyber-weave", "squad.lock.yml")));
-        Assert.True(File.Exists(Path.Combine(targetDir, ".kyber-weave", "squad.receipt.json")));
+        string homeState = HomeProjectStateDirectory(userPaths, targetDir);
+        Assert.True(Directory.Exists(homeState));
+        Assert.True(File.Exists(Path.Combine(homeState, "squad.lock.yml")));
+        Assert.True(File.Exists(Path.Combine(homeState, "squad.receipt.json")));
     }
 
     [Fact]
@@ -1743,6 +1744,14 @@ public sealed class SquadCliCommandTests : IDisposable
         return count;
     }
 
+    private static string HomeProjectStateDirectory(ISquadUserPaths userPaths, string projectRoot) =>
+        Path.Combine(
+            userPaths.HomeDirectory,
+            ".kyber-weave",
+            "squad",
+            "projects",
+            SquadPhysicalRootIdentity.Resolve(projectRoot).Key);
+
     private static void SeedDeployment(
         string targetRoot,
         SquadDeploymentScope scope,
@@ -1856,6 +1865,8 @@ public sealed class SquadCliCommandTests : IDisposable
     private sealed class FakeUserPaths(string appDataDirectory) : ISquadUserPaths
     {
         public string ApplicationDataDirectory { get; } = appDataDirectory;
+
+        public string HomeDirectory => Path.Combine(ApplicationDataDirectory, "home");
     }
 
     private sealed class FakeGlobalRootResolver(SquadTarget target, string root)

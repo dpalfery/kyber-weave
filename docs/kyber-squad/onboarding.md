@@ -5,7 +5,7 @@ doc-type: onboarding
 component: KyberSquad
 source-root: src/KyberWeave.Core/Squad
 owner: dpalfery
-last-reviewed: 2026-10-10
+last-reviewed: 2026-10-14
 status: current
 decided-by:
   - adr/0019-pi-native-subagents-and-primary-lowering
@@ -13,8 +13,10 @@ decided-by:
   - adr/0025-devin-native-agents-and-skill-lowering
   - adr/0028-devin-target-scoped-authoring-capability-profiles
   - adr/0034-factory-droid-entry-point-skill
+  - adr/0037-squad-state-in-user-home
 code-refs:
   - SquadDeploymentPlan
+  - SquadStateMigration
 ---
 
 # Kyber-Squad adoption and usage guide
@@ -35,7 +37,7 @@ All squad operations are grouped under the `squad` branch:
 kyber-weave squad install [path] [--target <targets>] [--exclude <targets>] [--global] [--dry-run] [--adopt] [--path <PATH>] [--yes] [--version <VERSION>]
 
 # Update an existing squad deployment
-kyber-weave squad update [path] [--target <targets>] [--exclude <targets>] [--global] [--dry-run] [--replace-managed] [--path <PATH>] [--yes] [--version <VERSION>]
+kyber-weave squad update [path] [--target <targets>] [--exclude <targets>] [--global] [--projects <all|none|PATH>] [--dry-run] [--replace-managed] [--path <PATH>] [--yes] [--version <VERSION>]
 
 # Uninstall squad deployment
 kyber-weave squad uninstall [path] [--global] [--dry-run] [--path <PATH>] [--yes]
@@ -60,6 +62,12 @@ versions. `squad update --version` may pin forward or backward relative to the r
 version — there is no guard; the pinned version is deployed as asked. (`squad pack` carries the
 same `-v|--version`, but there it stamps the package manifests and archives rather than pinning a
 release to deploy.)
+
+**Global scope and projects.** `--global` takes no path: the global anchor is your home directory
+(one legacy single-root case excepted, see [Deployment Scopes](#deployment-scopes)), so a positional path or `--path`
+given with `--global` is ignored with a warning. `--projects` applies to
+`squad update --global` only, and is rejected with **exit code 2** anywhere else. It is covered under
+[Updating global and registered projects](#updating-global-and-registered-projects).
 
 ---
 
@@ -95,7 +103,7 @@ Rendering canonical source into a harness's native files is Kyber-Weave's own co
 - **Interactive fallback**: In an interactive terminal, if no target markers are discovered, `squad install` presents a multi-selection list of all 12 targets.
 - **Non-interactive terminal**: If run without an interactive TTY and without detected or configured targets, `squad install` exits immediately with **exit code 2** and outputs the exact command required (e.g. `kyber-weave squad install --target <target>`).
 - **Target-root echo and confirmation**: Every mutating run (`install`, `update`, `uninstall` without `--dry-run`) prints the resolved absolute target root and its scope (project/global) before any write. An interactive console is then asked to confirm; declining prints `Declined. No changes were made.` and exits with **exit code 2**. `--yes` skips the prompt for automation attached to a terminal; non-interactive consoles (scripts, CI, captured output) echo the root and proceed without prompting.
-- **Deployment root selection**: The root comes from the positional `[path]`, which defaults to the current directory (`.`); `--path <PATH>` wins over that default. Supplying both a non-default positional and `--path` is rejected with **exit code 2** and a hint naming both forms.
+- **Deployment root selection**: The root comes from the positional `[path]`, which defaults to the current directory (`.`); `--path <PATH>` wins over that default. Supplying both a non-default positional and `--path` is rejected with **exit code 2** and a hint naming both forms. Under `--global` the root is the home directory and this selection is ignored, with a warning.
 - **Update**: An explicit `--target` list is the complete desired deployment target set and takes precedence over the existing receipt. When `--target` is omitted, update reuses the receipt roster. Update never auto-detects filesystem markers.
 - **Uninstall**: Uses the recorded target roster from the existing deployment receipt and never performs marker detection.
 
@@ -373,18 +381,36 @@ Kyber-Squad operates across two deployment scopes:
 
 When run without `--global`, `kyber-weave squad` deploys agents and skills directly into the specified workspace root (defaulting to the current directory `.`):
 
-- Deployment state is persisted in project files:
-  - `.kyber-weave/squad.lock.yml` — records bundle versions, toolchain signatures, and target configurations.
-  - `.kyber-weave/squad.receipt.json` — tracks ownership, relative file paths, installation timestamps, and SHA-256 hashes.
-- Lock and receipt files should be committed to version control to maintain team-wide agent synchronization.
+- Deployment state is kept in your home directory, not in the repository, under `~/.kyber-weave/squad/projects/<root-key>/`:
+  - `squad.lock.yml` — records bundle versions, toolchain signatures, and target configurations.
+  - `squad.receipt.json` — tracks ownership, relative file paths, installation timestamps, and SHA-256 hashes.
+- `<root-key>` is the lowercase SHA-256 of the project's canonical physical path. A symbolic link or a
+  differently spelled path to the same directory resolves to the same state.
+- Each project install, update, and import is recorded in the registry, `~/.kyber-weave/squad/registry.json`,
+  which is how a global update finds the project. Uninstalling the project removes its entry. See
+  [Registered projects](#registered-projects).
+- The lock and receipt are no longer committed to version control, and Squad does not write them into the
+  repository. Earlier releases did. Migration imports those files on first use (see
+  [Migration from earlier layouts](#migration-from-earlier-layouts)); the in-repo copies are left in place,
+  and `squad doctor` reports them.
 
 ### 2. Global Scope (`--global`)
 
-Passing `--global` keeps Squad's lock and receipt in the per-user application-data tree
-(`KyberWeave/squad/roots/<root-key>/`) and writes the rendered agents and skills into each
-harness's own global directory — not into the project path and not into a single shared
-"home" folder. `--global` is symmetric across `install`, `update`, `uninstall`, `status`,
-and `doctor`.
+Passing `--global` keeps Squad's lock and receipt in one place, `~/.kyber-weave/squad/global/`, and
+writes the rendered agents and skills into each harness's own global directory — not into the project
+path and not into a single shared "home" folder. `--global` is symmetric across `install`, `update`,
+`uninstall`, `status`, and `doctor`.
+
+The global anchor is your home directory. Under `--global`, a path argument (positional or `--path`) is
+ignored with a warning, and the directory you run from has no effect. The warning is not printed when the
+path is `.`. There is one global receipt, and global state is not listed in the registry.
+
+One legacy case differs. If the home holds a pre-existing single-root global receipt, its relative paths
+belong to one root. Migration runs first and records that root as an absolute `targetRoot`, and then the
+anchor is that recorded root, not your home and not the directory you run from. A path given with
+`--global` still produces a warning in this case, and the warning names the recorded root. A legacy receipt
+that records no absolute root keeps the path you gave, or the current directory when you gave none, and
+prints no such warning. Every later run anchors on the same root.
 
 | Target | Global root (override env var → default) | Global-scope relative paths |
 |---|---|---|
@@ -424,6 +450,136 @@ and `flash` for the remaining profiles. Versioned model ids such as Claude's
 follow the harness's alias resolution. Cursor's planning pin carries `effort=high`.
 
 **Legacy rc.9/rc.10 global recovery.** See [Receipt version and layout contract](architecture.md#receipt-version-and-layout-contract) in the architecture section for layout semantics. If you have a global install from rc.9 or rc.10, `kyber-weave squad status --global` will inspect and flag the legacy layout. To complete migration, run `kyber-weave squad uninstall --global` followed by `kyber-weave squad install --global` with the current CLI.
+
+### Registered projects
+
+The registry at `~/.kyber-weave/squad/registry.json` lists each project install by its physical path, the
+time it was last updated in UTC, and its targets. It is an index, not the authority: a project's receipt
+under `projects/<root-key>/` is what Squad trusts.
+
+`kyber-weave squad status --global` lists each registered project and flags a stale one. A project is stale
+when:
+
+- its path no longer exists, because the repository was moved or deleted;
+- the physical identity of its path no longer matches its key; or
+- its receipt is missing.
+
+A project that has a receipt but no registry entry is added back when Squad next lists the registry. Squad
+lists it, and so rebuilds it, in `kyber-weave squad status --global`, `kyber-weave squad update --global`
+(including when `--projects` names a path), and `kyber-weave squad doctor`. No other command reconciles
+the registry.
+
+If a registry write fails after an install or update has committed, Squad prints a warning that names the
+fix, rerunning `kyber-weave squad status --global`. The transaction is not failed.
+
+No command unregisters a stale entry. An entry whose directory no longer exists stays flagged until that
+path returns, and `squad doctor` reports it as stale.
+
+### Updating global and registered projects
+
+`kyber-weave squad update --global` updates the global deployment. After a successful global update, Squad
+can also update registered projects, so they stay on the same release.
+
+In an **interactive terminal**, a picker opens after the global update succeeds. It lists **All**, **None**,
+then each registered project path. A stale project is shown as `(stale: <reason>)`.
+
+- **All** selects every project that is not stale.
+- **None**, or an empty selection, selects nothing.
+- **None** combined with another choice fails validation, and the picker asks again.
+- A selected stale project is skipped with a warning.
+
+**Without a terminal, or with `--projects`**, the picker does not open. `--projects` accepts `all`, `none`,
+or one or more project paths, and it can be repeated. Without the flag, a non-interactive run updates no
+project.
+
+```bash
+kyber-weave squad update --global --projects all
+kyber-weave squad update --global --projects ~/src/service-a --projects ~/src/service-b
+```
+
+- A named path must be a registered project or hold importable in-repo state. Otherwise the command exits
+  with **exit code 2** before any global work, and the hint names the nearest registered path.
+- A named path that is registered but stale is warned about and skipped.
+- `--projects` is valid only with `squad update --global`. Anywhere else it exits with **exit code 2**.
+
+Each selected project is updated through the same path as `kyber-weave squad update` run in that project:
+
+- It uses that project's own targets and exclusions, from its configuration and receipt.
+- The global run passes `--version` and `--dry-run` through. It does not pass `--target`, `--exclude`, or
+  `--replace-managed`.
+- Selecting a project counts as consent, so the per-project confirmation is not shown.
+- Projects are updated one after another. A failure in one project does not stop the others. A summary is
+  printed, and the command exits with **exit code 1** if any project failed.
+- Under `--dry-run`, a selected project that still needs its in-repo state imported is reported as
+  skipped, with the note that it will be imported on the next run without `--dry-run`. Any other
+  selected project is previewed. Nothing is written either way.
+
+The picker also opens under `--global --dry-run` when the terminal is interactive and `--projects` is
+absent, and the projects you pick are then handled as above.
+
+To overwrite a project's locally edited managed files, run `kyber-weave squad update --replace-managed` in
+that project. A global run never forces an overwrite in a project.
+
+If the global update fails, no picker opens and the command exits with **exit code 1**.
+
+### Replacing managed files in global scope
+
+`kyber-weave squad update --global --target all --replace-managed` overwrites files Squad owns in the global
+deployment, even when you have edited them. It never overwrites a file Squad does not own. If a new path
+collides with a file you wrote by hand, the whole run fails with `UnmanagedCollision` and writes nothing. The
+hint names the two ways forward: `kyber-weave squad install --global --adopt`, when the bytes already match,
+or moving the file aside.
+
+### Migration from earlier layouts
+
+Migration runs automatically before every squad verb (`install`, `update`, `status`, `uninstall`, and
+`doctor`). It never deletes a file, and running it again after it has succeeded changes nothing.
+
+- **Global.** Squad looks for a global deployment in the legacy application-data tree, at
+  `KyberWeave/squad/roots/<root-key>/`, and ignores empty folders. If exactly one non-empty legacy global
+  deployment exists and `~/.kyber-weave/squad/global/` has no receipt, Squad copies its receipt and lock
+  there. The legacy files are left in place. A legacy deployment recorded against a single root needs that
+  root to be found: from its recorded absolute target root, from the registry, or by matching the home
+  directory or the directory you run from. If the root cannot be found, the deployment is reported and not
+  migrated.
+- **More than one** non-empty legacy global deployment: none is migrated. Each is reported with guidance.
+  Squad does not choose one for you.
+- **Projects.** When a project-scope command, or a picker-driven update, reaches a project that has no home
+  state but still has `.kyber-weave/squad.receipt.json` in its repository, Squad imports the receipt and lock
+  into `~/.kyber-weave/squad/projects/<root-key>/` and registers the project. The repository's files are not
+  changed. From then on the home state is authoritative.
+- **Dry run.** With `--dry-run`, nothing is written, and the migration ledger is not written either. The output
+  states that the legacy state at each path will be migrated on the next run without `--dry-run`. Install,
+  update, and uninstall stop after that report.
+- **Locking and interruption.** Each copy or import runs under the same lease an install takes for the root.
+  If another transaction holds it, nothing is written, a warning says so, and the next run retries. A global
+  copy writes the lock first and the receipt last. A crash that leaves a lock with no receipt is completed on
+  the next run, as long as the home lock is byte-identical to the legacy lock. A different home lock blocks the
+  copy and is reported for you to inspect.
+- **Ledger.** Squad records each completed copy and import in `~/.kyber-weave/squad/migration-ledger.json`, so
+  an uninstall of migrated state is not undone when the legacy files are migrated again. A malformed ledger is
+  read as empty, with a warning. Fresh installs are not affected by the ledger.
+
+**Upgrade every machine that runs Squad.** Older CLI versions keep reading the legacy locations, and the legacy
+files are kept so that rolling back to an older CLI still finds state. Once a project has been imported, its
+home state wins, so any change made to its legacy files after import is not seen by the newer CLI.
+
+### Doctor findings
+
+`kyber-weave squad doctor` runs the migration before it reports, so it can write. It is not a read-only check.
+It reports these:
+
+- **Stale registry entries**: a registered project whose path is missing, whose key no longer matches, or whose
+  receipt is missing. Doctor warns that global updates skip it until its path is restored or its receipt is
+  reinstalled. Uninstall cannot clear the entry: it requires an existing project directory, so an entry whose
+  directory is gone stays flagged until that path returns. `squad update --global --projects` skips a stale
+  named path with a warning.
+- **Unmigrated legacy global roots**: a legacy global deployment that was not migrated, with the reason and the
+  guidance for it. This includes the roots that were ambiguous (more than one legacy receipt, none chosen), those
+  whose binding root could not be resolved, and those already migrated, whose home copy was removed on purpose.
+- **Retained in-repo state**: a registered project, still live, that holds `.kyber-weave/squad.lock.yml` or
+  `.kyber-weave/squad.receipt.json` from an earlier release. Squad retained these files, and they should be
+  removed from version control. A stale project is not warned about this way.
 
 ---
 
@@ -511,6 +667,9 @@ Run diagnostic checks on renderer coverage (which of the twelve declared targets
 kyber-weave squad doctor
 ```
 
+Both scopes also report stale registry entries, unmigrated legacy global roots, and in-repo state retained
+from an earlier release. See [Doctor findings](#doctor-findings).
+
 ### Uninstalling
 
 Remove all managed files and deployment state:
@@ -526,6 +685,9 @@ kyber-weave squad uninstall --yes
 ```
 
 Locally modified files are preserved during uninstallation unless explicitly cleaned up by the operator. If no receipt exists, uninstall is a clean no-op.
+
+`kyber-weave squad uninstall --global` removes only global state and files. It opens no picker and changes no
+registered project. A project uninstall also removes that project's registry entry.
 
 ---
 
@@ -600,14 +762,15 @@ project-level self-deployment: the root `.github/agents/`, `.github/skills/`,
 | Exit Code | Meaning |
 |---|---|
 | `0` | Success, healthy/clean status, or successful dry run. |
-| `1` | Configuration error, prerequisite failure, file drift, dirty state, or transactional failure. |
-| `2` | Invalid CLI arguments, unrecognized target/format token, declined write confirmation, or target resolution required in non-interactive mode. |
+| `1` | Configuration error, prerequisite failure, file drift, dirty state, or transactional failure. Also a failed global update, or a `squad update --global --projects` run in which any selected project failed. |
+| `2` | Invalid CLI arguments, unrecognized target/format token, declined write confirmation, or target resolution required in non-interactive mode. Also `--projects` outside `squad update --global`, or a named project path that is neither registered nor holds importable in-repo state. |
 
 ---
 
 ## Related
 
 - [Kyber-Squad architecture](architecture.md) — transaction engine, AgentIR, lowering, state model, and conductor execution circuit-breaker
+- [ADR 0037](../adr/0037-squad-state-in-user-home.md) — why lock and receipt state moved to the user home, with the registry, the global anchor, and migration
 - [Requirements and degradation contract](requirements.md) — KS-001 through KS-008 specifications and the circuit-breaker harvest
 - [Configuration](../configuration.md) — configuring squad settings in `.kyber-weave/kyber-weave.yml`
 - [Distribution and release flow](../distribution.md) — release packaging and artifact verification

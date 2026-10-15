@@ -480,7 +480,7 @@ The per-harness status is in the [telemetry inventory](telemetry-inventory.md#sk
 
 Subagent execution is modeled as a first-class session hierarchy with dual spend accounting,
 honest title formatting, and background transcript synchronization
-([ADR 0037](../adr/0037-post-run-transcript-sync-subagent-hierarchy.md)).
+([ADR 0038](../adr/0038-post-run-transcript-sync-subagent-hierarchy.md)).
 
 #### Subagent session hierarchy and Sessions explorer nesting
 
@@ -807,7 +807,7 @@ filters, so narrowing one page's scope never touches the A/B selectors.
 - **Sessions**: Session explorer (`page-sessions`) wrapping the Agent Session Analysis
   Dashboard from `canon.db` — not a restored Context tab:
   - *Overview Strip*: Spans, turns, total tokens, cache hit ratio, cost USD/credits, exact reconciliation status, and subagent links.
-  - *Subagent Session Hierarchy*: Nested tree display of child subagent sessions underneath parent sessions, with dual spend visibility (rolled-up totals across the delegation tree alongside unaggregated direct parent metrics; see [§2h](#2h-subagent-session-hierarchy-and-post-run-transcript-synchronization) and [ADR 0037](../adr/0037-post-run-transcript-sync-subagent-hierarchy.md)).
+  - *Subagent Session Hierarchy*: Nested tree display of child subagent sessions underneath parent sessions, with dual spend visibility (rolled-up totals across the delegation tree alongside unaggregated direct parent metrics; see [§2h](#2h-subagent-session-hierarchy-and-post-run-transcript-synchronization) and [ADR 0038](../adr/0038-post-run-transcript-sync-subagent-hierarchy.md)).
   - *Per-Turn Spend Chart (`SessionSpendCharts`)*: Stacked token breakdown per turn (fresh input, cache read, cache creation, output).
   - *Context Composition Heatmap & Chart*: Semantic token distribution by part type (`system_prompt`, `instruction_context`, `tool_definitions`, `conversation_history`, `tool_result_content`, `residual`).
   - *Tool & Schema Cost Table*: Ranked tool schema sizes, resident turns, invocations, and unused schema waste range.
@@ -1224,6 +1224,6 @@ here.
 - [KyberDash Architecture](architecture.md) — Telemetry ingest pipeline, canonical store, analyses, and surfaces.
 - [KyberDash display-layer rule](../rules/kyberdash-display-layer.md) — why the tray and the dashboard hold no jobs.
 - [KyberDash Overview](README.md) — Product vision, motivation, and capabilities.
-- [ADR 0037](../adr/0037-post-run-transcript-sync-subagent-hierarchy.md) — Subagent session hierarchy, post-run transcript synchronization, and read-time spend rollups.
+- [ADR 0038](../adr/0038-post-run-transcript-sync-subagent-hierarchy.md) — Subagent session hierarchy, post-run transcript synchronization, and read-time spend rollups.
 - [Feature Local Run and Test Standard](../rules/feature-runbooks.md) — Standards governing local execution runbooks across all features.
 - [Component Catalog](../catalog.md) — Canonical inventory of components and owners.
