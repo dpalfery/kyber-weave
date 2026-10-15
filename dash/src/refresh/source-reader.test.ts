@@ -251,7 +251,7 @@ describe('iterateNativeUnits', () => {
       { path: '/tmp/store.db', project: 'p', provider: 'copilot', sourceType: 'session-store' },
       { path: '/tmp/x.chatSession', project: 'p', provider: 'copilot', sourceType: 'chatsession' },
       { path: '/tmp/t.json', project: 'p', provider: 'copilot', sourceType: 'transcript' },
-      { path: '/tmp/jb', project: 'p', provider: 'copilot', sourceType: 'jetbrains' },
+      { path: '/tmp/nonexistent-jb-test-path', project: 'p', provider: 'copilot', sourceType: 'jetbrains' },
       { path: '/tmp/agent-traces.db', project: 'p', provider: 'copilot', sourceType: 'otel' },
     ]
     const parsed = new Map(sources.map(source => [source.path, [
