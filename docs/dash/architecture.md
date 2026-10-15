@@ -1018,6 +1018,12 @@ The individual views:
   Its section **4 · Skills** shows listed and invoked skills per session and per row
   ([skills view contract](#skills-view-contract)); the Execution Timeline is section
   **5 · Execution Timeline**.
+  A session row's title is `<agent> · <session name>` (`formatSessionTitle`,
+  `dash/web/src/lib/labels.ts`). The agent is the recorded agent identity, omitted when it only
+  repeats the harness. The session name is the stored label when it is a human title, else the
+  session id when the harness chose a readable one. With neither part the title is
+  `<Harness> session`. GenAI span names (`chat gpt-4o-mini`, `invoke_agent architect`,
+  `execute_tool view`) are operations and are never shown as a title.
 - **`HarnessDetail.tsx`**: Per-harness rollups, coverage indicators, labelled grouping basis, and run browser.
 - **`RunDetail.tsx`**: Multi-agent run topology, execution tree, run scorecard, and grouping label.
 - **`FindingDetail.tsx`**: In-depth finding view with evidence table, confidence basis, risk caveats, and calibration summary.
