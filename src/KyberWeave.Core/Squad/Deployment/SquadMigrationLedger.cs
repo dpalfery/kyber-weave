@@ -69,7 +69,7 @@ internal sealed record SquadMigrationLedger(
         }
         catch (Exception exception) when (
             exception is JsonException or InvalidDataException or InvalidOperationException or FormatException
-                or UnauthorizedAccessException)
+                or UnauthorizedAccessException or IOException)
         {
             // An access denial is the same outcome as a parse failure here: the ledger is unusable, so it counts as
             // empty and the caller reports the reason. Letting it escape would fail a command over a warning-level fault.
