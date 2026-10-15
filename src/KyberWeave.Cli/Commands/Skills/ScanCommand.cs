@@ -17,7 +17,7 @@ public sealed class ScanSettings : AnalysisSettings
 public sealed class ScanCommand : Command<ScanSettings>
 {
     /// <inheritdoc />
-    protected override int Execute(CommandContext context, ScanSettings settings, CancellationToken cancellationToken)
+    public override int Execute(CommandContext context, ScanSettings settings, CancellationToken cancellationToken)
     {
         DiagnosticReport report = new DiagnosticReport();
         SkillSet set = CommandHelpers.LoadOrReport(settings.Path, report);

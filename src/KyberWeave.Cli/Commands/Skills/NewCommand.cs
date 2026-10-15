@@ -33,7 +33,7 @@ public sealed class NewSettings : CommandSettings
 public sealed partial class NewCommand : Command<NewSettings>
 {
     /// <inheritdoc />
-    protected override int Execute(CommandContext context, NewSettings settings, CancellationToken cancellationToken)
+    public override int Execute(CommandContext context, NewSettings settings, CancellationToken cancellationToken)
     {
         string name = settings.Name;
         if (!MyRegex().IsMatch(name))
