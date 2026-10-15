@@ -173,6 +173,12 @@ export type SessionSummary = {
   problems: number
   subagents?: SessionSummary[]
   rollup?: SessionRollup
+  /**
+   * Set on a projected subagent row whose records are already inside its parent's own
+   * counters (the projection builds both from one merged record set), so a rollup must not
+   * add it a second time.
+   */
+  included_in_parent?: boolean
 }
 
 /** Cost facts needed by the shared report, read without loading raw span payloads. */
@@ -302,6 +308,7 @@ export type ParsedSummary = {
   schema_tokens_per_turn?: number | null
   cost?: CostBlock | null
   models?: string[] | null
+  included_in_parent?: boolean | null
 }
 
 export type SessionPayload = Record<string, unknown> & {
@@ -1269,26 +1276,30 @@ function buildIngestActivity(
   return { status: 'known', sources, lastReceivedAt }
 }
 
-function computeSessionRollup(
-  session: SessionSummary,
-  children: readonly SessionSummary[] = []
-): SessionRollup {
+/**
+ * A session's own counters plus its descendants', counted once. A child whose records are
+ * already inside this session's counters (`included_in_parent`) adds nothing, and neither
+ * does anything beneath it; every other child contributes its own rollup, leaf-first.
+ * `visiting` guards a malformed parent cycle from recursing forever.
+ */
+function computeSessionRollup(session: SessionSummary, visiting: Set<string> = new Set()): SessionRollup {
+  visiting.add(session.session_id)
   let turnCount = session.turn_count ?? 0
   let requestCount = session.request_count ?? 0
   let totalInput = session.total_input ?? 0
   let totalOutput = session.total_output ?? 0
-
   let costUsdSum: number | null = session.cost_usd != null ? session.cost_usd : null
 
-  for (const child of children) {
-    turnCount += child.turn_count ?? 0
-    requestCount += child.request_count ?? 0
-    totalInput += child.total_input ?? 0
-    totalOutput += child.total_output ?? 0
-    if (child.cost_usd != null) {
-      costUsdSum = (costUsdSum ?? 0) + child.cost_usd
-    }
+  for (const child of session.subagents ?? []) {
+    if (child.included_in_parent === true || visiting.has(child.session_id)) continue
+    const rolled = child.rollup ?? computeSessionRollup(child, visiting)
+    turnCount += rolled.turn_count
+    requestCount += rolled.request_count
+    totalInput += rolled.total_input
+    totalOutput += rolled.total_output
+    if (rolled.cost_usd != null) costUsdSum = (costUsdSum ?? 0) + rolled.cost_usd
   }
+  visiting.delete(session.session_id)
 
   return {
     turn_count: turnCount,
@@ -1671,6 +1682,7 @@ export class KyberBridge {
             models: Array.isArray(summ.models) ? summ.models : [],
             problems: problemsCount,
             subagents: [],
+            ...(summ.included_in_parent === true ? { included_in_parent: true } : {}),
           })
         }
       } catch (err) {
@@ -1684,37 +1696,42 @@ export class KyberBridge {
       sessionMap.set(session.session_id, session)
     }
 
-    // Identify child sessions and attach them to parents
+    // Attach each child to its parent. A child is not attached when that would close a cycle
+    // (the parent is the child or one of its descendants), so malformed ancestry cannot make
+    // sessions vanish from the list.
     const attachedChildIds = new Set<string>()
+    const isAncestorOrSelf = (candidateId: string, ofId: string): boolean => {
+      const seen = new Set<string>()
+      for (let id: string | null | undefined = ofId; id != null && !seen.has(id); id = sessionMap.get(id)?.parent_session) {
+        if (id === candidateId) return true
+        seen.add(id)
+      }
+      return false
+    }
 
     for (const session of rawSessions) {
       const isChild = session.is_subagent || Boolean(session.parent_session)
-      if (isChild && session.parent_session) {
-        const parent = sessionMap.get(session.parent_session)
-        if (parent && parent.session_id !== session.session_id) {
-          parent.subagents = parent.subagents ?? []
-          parent.subagents.push(session)
-          attachedChildIds.add(session.session_id)
-        }
-      }
+      if (!isChild || !session.parent_session) continue
+      const parent = sessionMap.get(session.parent_session)
+      if (parent === undefined || isAncestorOrSelf(session.session_id, parent.session_id)) continue
+      parent.subagents = parent.subagents ?? []
+      parent.subagents.push(session)
+      attachedChildIds.add(session.session_id)
     }
 
-    // Process every session:
-    // - For child sessions inside subagents: ensure subagents: [] and compute child rollup
-    // - For root sessions: compute rollup including their nested children
+    // Every session keeps its own children (a chain A <- B <- C nests two deep), ordered by
+    // start. Rollups are computed leaf-first so a parent folds in already-rolled children.
     for (const session of rawSessions) {
-      if (attachedChildIds.has(session.session_id)) {
-        session.subagents = []
-        session.rollup = computeSessionRollup(session, [])
-      } else {
-        if (session.subagents && session.subagents.length > 0) {
-          session.subagents.sort((a, b) => (a.started ?? '').localeCompare(b.started ?? ''))
-        } else {
-          session.subagents = []
-        }
-        session.rollup = computeSessionRollup(session, session.subagents)
-      }
+      session.subagents = (session.subagents ?? []).sort((a, b) => (a.started ?? '').localeCompare(b.started ?? ''))
     }
+    const rolledUp = new Set<string>()
+    const rollUp = (session: SessionSummary): void => {
+      if (rolledUp.has(session.session_id)) return
+      rolledUp.add(session.session_id)
+      for (const child of session.subagents ?? []) rollUp(child)
+      session.rollup = computeSessionRollup(session)
+    }
+    for (const session of rawSessions) rollUp(session)
 
     // Filter to root sessions only
     const rootSessions = rawSessions.filter((s) => !attachedChildIds.has(s.session_id))

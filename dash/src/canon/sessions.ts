@@ -787,6 +787,7 @@ export async function buildSessions(store: CanonStore): Promise<BuildSessionsRep
             countTokens,
             store,
             {
+              includedInParent: true,
               isSubagent: true,
               parentSession: sessionId,
               agentName,
@@ -907,6 +908,9 @@ export async function buildSessions(store: CanonStore): Promise<BuildSessionsRep
             countTokens,
             store,
             {
+              // Only when the parent is the session these records were merged under; a parent
+              // named by an attribute may be a different session whose counters do not hold them.
+              includedInParent: parentSession === sessionId,
               isSubagent: true,
               parentSession,
               agentName,
@@ -950,6 +954,8 @@ export async function buildSessions(store: CanonStore): Promise<BuildSessionsRep
 }
 
 export type BuildSessionRowOptions = {
+  /** The row's records are a subset of its parent's, so the parent's counters already include it. */
+  includedInParent?: boolean
   isSubagent?: boolean
   parentSession?: string | null
   agentName?: string | null
@@ -1325,6 +1331,7 @@ export function buildSessionRow(
       ...(toolsInvoked !== undefined ? { tools_invoked: toolsInvoked } : {}),
       ...(toolsOffered !== undefined ? { tools_offered: toolsOffered } : {}),
       ...skillsSummaryOf(skillsView),
+      ...(options?.includedInParent ? { included_in_parent: true } : {}),
     },
     // The analysis output, verbatim. `toolDefinitionsByServer` is a Map, which
     // JSON.stringify would silently render as {} — convert it explicitly so a

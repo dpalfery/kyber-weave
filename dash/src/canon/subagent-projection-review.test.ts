@@ -4,6 +4,11 @@
 import { describe, expect, it } from 'vitest'
 
 import { tokens, turn } from './fixtures/records.js'
+import { join } from 'node:path'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+
+import { KyberBridge } from '../server/bridge.js'
 import { buildSessions } from './sessions.js'
 import { CanonStore } from './store.js'
 import type { CanonicalRecord } from './types.js'
@@ -85,5 +90,43 @@ describe('a corrupt or missing timestamp is not the epoch', () => {
     expect(sub?.started).toBe('2026-10-14T10:00:05.000Z')
     expect(sub?.ended).toBe('2026-10-14T10:00:09.000Z')
     store.close()
+  })
+})
+
+describe('projected subagents are marked as included in their parent', () => {
+  it.each([
+    ['copilot', 'copilot-sess-inc', 'copilot-sess-inc#inv', (id: string) => [
+      span('copilot', 'root', null, 'llm.invoke', 'chat gpt-4o', id),
+      span('copilot', 'inv', 'root', 'agent.invoke', 'invoke_agent architect', id, { 'gen_ai.agent.name': 'architect' }),
+      span('copilot', 'child', 'inv', 'llm.invoke', 'chat gpt-4o', id),
+    ]],
+    ['claude-code', 'claude-sess-inc', 'agent-a1b2c3d4e5f6a7b8c', (id: string) => {
+      const agent = { agent_id: 'a1b2c3d4e5f6a7b8c' }
+      return [
+        span('claude-code', 'root', null, 'llm.invoke', 'chat claude', id),
+        span('claude-code', 'spawn', 'root', 'agent.invoke', 'Task', id, agent),
+        span('claude-code', 'child', 'spawn', 'llm.invoke', 'chat claude', id, agent),
+      ]
+    }],
+  ] as const)('%s: the child is flagged, and the parent rollup is not inflated', async (_h, sessionId, childId, records) => {
+    const dir = mkdtempSync(join(tmpdir(), 'kyber-included-'))
+    const store = new CanonStore(join(dir, 'canon.db'))
+    store.upsertMany(records(sessionId))
+    await buildSessions(store)
+
+    const flag = (id: string) =>
+      (store.getSession(id)?.summary as { included_in_parent?: boolean } | undefined)?.included_in_parent
+
+    expect(flag(childId)).toBe(true)
+    expect(flag(sessionId)).toBeUndefined()
+
+    const bridge = new KyberBridge({ store, canonPath: join(dir, 'canon.db') })
+    const [root] = bridge.listSessions()
+    expect(root?.session_id).toBe(sessionId)
+    expect(root?.subagents?.map((s) => s.session_id)).toEqual([childId])
+    expect(root?.rollup?.turn_count).toBe(root?.turn_count)
+    bridge.close?.()
+    store.close()
+    rmSync(dir, { recursive: true, force: true })
   })
 })

@@ -49,6 +49,7 @@ To provide complete spend visibility while strictly preventing double counting:
 - On read (`KyberBridge.listSessions` in `dash/src/server/bridge.ts`), child subagent sessions whose parent exists in the store are omitted from the top-level list and nested into their parent session's `subagents` array.
 - Parent sessions carry a read-time `rollup` object that aggregates spend across the parent and all nested children:
   $$\text{rollup.metric} = \text{parent.metric} + \sum_{c \in \text{subagents}} c\text{.metric}$$
+- The rollup is recursive and leaf-first. The projection builds a subagent row from a subset of the records its parent row is built from, so the parent's counters already contain it: such a row carries `payload.summary.included_in_parent = true` and the rollup does not add it (or anything beneath it) a second time. Only independent children are summed. A parent cycle in stored ancestry is not attached.
 - Both parent and child sessions preserve their own granular, unaggregated counters at their respective levels.
 - Orphan subagents (whose parent session is absent from the store) remain visible at the top level with a self-derived `rollup` object matching their own metrics.
 
