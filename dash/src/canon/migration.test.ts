@@ -727,7 +727,7 @@ describe('schema migration v17/v18 -> v19 (quarantine evidence and harness colum
   it('pins the version above the live codex store and steps through 17 and 18', () => {
     // F9: the operator's live canon.db is stamped 18, so landing at 17 refuses
     // it. B10 lands at 19 and migrates both the v17 and the v18 shape.
-    expect(SCHEMA_VERSION).toBe(19)
+    expect(SCHEMA_VERSION).toBe(20)
     expect(MIGRATIONS[17]).toBeTypeOf('function')
     expect(MIGRATIONS[18]).toBeTypeOf('function')
   })

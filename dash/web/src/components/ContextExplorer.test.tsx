@@ -106,6 +106,7 @@ const sampleSession: KyberSessionSummary = {
  */
 type TestNodeProps = {
   'data-testid'?: string
+  'aria-label'?: string
   children?: React.ReactNode
   onClick?: (event?: unknown) => unknown
   title?: string
@@ -420,5 +421,223 @@ describe('ContextExplorer removed surface', () => {
     const fetchMock = mockSessions()
     await loadExplorer()
     expect(fetchMock.mock.calls.map(([url]) => String(url))).not.toContain('/api/context/tree')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Task T3.1: Hierarchical subagent tree and dual spend contracts
+// ---------------------------------------------------------------------------
+
+interface SessionRollup {
+  turn_count?: number | null
+  total_input?: number | null
+  total_output?: number | null
+  tokens?: number | null
+  cost_usd?: number | null
+  cost?: { basis: string; status: string; value?: number; currency?: string }
+}
+
+interface HierarchicalSessionSummary extends KyberSessionSummary {
+  subagents?: HierarchicalSessionSummary[]
+  rollup?: SessionRollup
+}
+
+const sampleChild1: HierarchicalSessionSummary = {
+  session_id: 'sess-child-001',
+  harness: 'claude-code',
+  label: 'explore workspace architecture',
+  agent_name: 'explorer',
+  is_subagent: true,
+  parent_session: 'sess-parent-001',
+  turn_count: 5,
+  total_input: 12000,
+  total_output: 3000,
+  cost_usd: 0.05,
+  cost: { basis: 'published', status: 'priced', value: 0.05, currency: 'USD' },
+  started: '2026-03-01T12:05:00.000Z',
+}
+
+const sampleChild2: HierarchicalSessionSummary = {
+  session_id: 'sess-child-002',
+  harness: 'claude-code',
+  label: 'run test suite verification',
+  agent_name: 'test-runner',
+  is_subagent: true,
+  parent_session: 'sess-parent-001',
+  turn_count: 8,
+  total_input: 25000,
+  total_output: 5000,
+  cost_usd: 0.12,
+  cost: { basis: 'published', status: 'priced', value: 0.12, currency: 'USD' },
+  started: '2026-03-01T12:10:00.000Z',
+}
+
+const sampleParentWithSubagents: HierarchicalSessionSummary = {
+  session_id: 'sess-parent-001',
+  harness: 'claude-code',
+  label: 'orchestrate multi-agent feature delivery',
+  agent_name: 'lead-orchestrator',
+  is_subagent: false,
+  turn_count: 12,
+  total_input: 40000,
+  total_output: 8000,
+  cost_usd: 0.20,
+  cost: { basis: 'published', status: 'priced', value: 0.20, currency: 'USD' },
+  started: '2026-03-01T12:00:00.000Z',
+  rollup: {
+    turn_count: 25,
+    total_input: 77000,
+    total_output: 16000,
+    tokens: 93000,
+    cost_usd: 0.37,
+    cost: { basis: 'published', status: 'priced', value: 0.37, currency: 'USD' },
+  },
+  subagents: [sampleChild1, sampleChild2],
+}
+
+function findSubagentToggle(tree: React.ReactElement, sessionId: string): TestNode | undefined {
+  const direct = nodes(tree, (node) =>
+    node.props['data-testid'] === `subagent-toggle-${sessionId}` ||
+    node.props['data-testid'] === 'subagent-toggle' ||
+    Boolean(node.props['aria-label']?.toLowerCase().includes('subagent')),
+  )
+  if (direct.length > 0) return direct[0]
+
+  const rows = nodes(tree, (node) => node.type === AgentSessionRow)
+  const row = rows.find((node) => (node.props as { s?: KyberSessionSummary }).s?.session_id === sessionId)
+  if (row) {
+    const rowTree = AgentSessionRow(row.props as Parameters<typeof AgentSessionRow>[0])
+    const inRow = nodes(rowTree, (node) =>
+      node.props['data-testid'] === `subagent-toggle-${sessionId}` ||
+      node.props['data-testid'] === 'subagent-toggle' ||
+      Boolean(node.props['aria-label']?.toLowerCase().includes('subagent')),
+    )
+    if (inRow.length > 0) return inRow[0]
+  }
+  return undefined
+}
+
+describe('hierarchical subagent tree and dual spend (Task T3.1)', () => {
+  it('renders an expand/collapse chevron toggle button on parent sessions with subagents', async () => {
+    mockSessions([sampleParentWithSubagents])
+    const tree = await loadExplorer({ sessions: [sampleParentWithSubagents] } as ExplorerProps & { sessions?: KyberSessionSummary[] })
+    const markup = html(tree)
+
+    expect(markup).toContain('data-testid="agent-session-row-sess-parent-001"')
+
+    const toggle = findSubagentToggle(tree, 'sess-parent-001')
+    expect(toggle, 'Parent row must display an expand/collapse toggle button (chevron) for child subagents').toBeDefined()
+    expect(markup).toMatch(/data-testid="subagent-toggle(?:-sess-parent-001)?"|aria-label="[^"]*subagent[^"]*"/)
+  })
+
+  it('toggles child subagent visibility when clicking the chevron button', async () => {
+    mockSessions([sampleParentWithSubagents])
+    const tree = await loadExplorer({ sessions: [sampleParentWithSubagents] } as ExplorerProps & { sessions?: KyberSessionSummary[] })
+
+    const toggle = findSubagentToggle(tree, 'sess-parent-001')
+    expect(toggle, 'Parent row must have a subagent chevron toggle button').toBeDefined()
+
+    // Initially collapsed: child subagents are not visible
+    const initialHtml = html(tree)
+    expect(initialHtml).not.toContain('sess-child-001')
+    expect(initialHtml).not.toContain('sess-child-002')
+
+    // Click chevron to expand
+    expect(typeof toggle!.props.onClick, 'Chevron toggle must have onClick handler').toBe('function')
+    toggle!.props.onClick!({ stopPropagation: vi.fn() })
+
+    // When expanded, child subagents are visible
+    const expandedTree = renderExplorer({ sessions: [sampleParentWithSubagents] } as ExplorerProps & { sessions?: KyberSessionSummary[] })
+    const expandedHtml = html(expandedTree)
+    expect(expandedHtml).toContain('sess-child-001')
+    expect(expandedHtml).toContain('sess-child-002')
+
+    // Click chevron again to collapse
+    const toggleCollapse = findSubagentToggle(expandedTree, 'sess-parent-001')
+    expect(toggleCollapse, 'Chevron toggle must be available when expanded').toBeDefined()
+    toggleCollapse!.props.onClick!({ stopPropagation: vi.fn() })
+
+    // After collapsing, child subagents are hidden again
+    const collapsedTree = renderExplorer({ sessions: [sampleParentWithSubagents] } as ExplorerProps & { sessions?: KyberSessionSummary[] })
+    const collapsedHtml = html(collapsedTree)
+    expect(collapsedHtml).not.toContain('sess-child-001')
+    expect(collapsedHtml).not.toContain('sess-child-002')
+  })
+
+  it('renders child subagents nested and indented under parent with agent names and subagent indicators when expanded', async () => {
+    mockSessions([sampleParentWithSubagents])
+    const tree = await loadExplorer({ sessions: [sampleParentWithSubagents] } as ExplorerProps & { sessions?: KyberSessionSummary[] })
+
+    const toggle = findSubagentToggle(tree, 'sess-parent-001')
+    expect(toggle, 'Parent row must have a subagent chevron toggle button').toBeDefined()
+    toggle!.props.onClick!({ stopPropagation: vi.fn() })
+
+    const expandedTree = renderExplorer({ sessions: [sampleParentWithSubagents] } as ExplorerProps & { sessions?: KyberSessionSummary[] })
+    const markup = html(expandedTree)
+
+    expect(markup).toContain('sess-child-001')
+    expect(markup).toContain('sess-child-002')
+
+    expect(markup).toContain('explorer')
+    expect(markup).toContain('test-runner')
+
+    const childRowMatch = /data-testid="(?:agent-session-row|subagent-row)-sess-child-001"[\s\S]*?(?:data-testid="subagent-indicator"|<span[^>]*>\s*subagent\s*<\/span>)/.exec(markup)
+    expect(childRowMatch, 'Child subagents must display a subagent indicator').not.toBeNull()
+
+    const hasIndentation =
+      /class="[^"]*\b(?:pl-[4-9]|pl-\d{2}|ml-[4-9]|ml-\d{2}|indent)\b[^"]*"[^>]*data-testid="(?:agent-session-row|subagent-row)-sess-child-001"/.test(markup) ||
+      /data-testid="(?:agent-session-row|subagent-row)-sess-child-001"[^>]*class="[^"]*\b(?:pl-[4-9]|pl-\d{2}|ml-[4-9]|ml-\d{2}|indent)\b[^"]*"/.test(markup) ||
+      /data-testid="(?:subagent-tree|subagent-children|subagent-nesting)"[\s\S]*?sess-child-001/.test(markup)
+    expect(hasIndentation, 'Child subagents must be rendered nested and indented under the parent row').toBe(true)
+  })
+
+  it('displays rolled-up cost from session.rollup on the parent row and granular cost on child rows', async () => {
+    mockSessions([sampleParentWithSubagents])
+    const tree = await loadExplorer({ sessions: [sampleParentWithSubagents] } as ExplorerProps & { sessions?: KyberSessionSummary[] })
+
+    const parentMarkup = html(tree)
+    const parentCostMatch = /data-testid="agent-session-row-sess-parent-001"[\s\S]*?data-testid="agent-session-cost"[^>]*>([\s\S]*?)<\/span>/.exec(parentMarkup)
+    expect(parentCostMatch, 'Parent row must render cost cell').not.toBeNull()
+    expect(parentCostMatch![1]).toContain('$0.37')
+
+    const toggle = findSubagentToggle(tree, 'sess-parent-001')
+    expect(toggle, 'Parent row must have a subagent chevron toggle button').toBeDefined()
+    toggle!.props.onClick!({ stopPropagation: vi.fn() })
+
+    const expandedTree = renderExplorer({ sessions: [sampleParentWithSubagents] } as ExplorerProps & { sessions?: KyberSessionSummary[] })
+    const expandedMarkup = html(expandedTree)
+
+    const child1CostMatch = /data-testid="(?:agent-session-row|subagent-row)-sess-child-001"[\s\S]*?data-testid="agent-session-cost"[^>]*>([\s\S]*?)<\/span>/.exec(expandedMarkup)
+    expect(child1CostMatch, 'Child 1 row must render cost cell').not.toBeNull()
+    expect(child1CostMatch![1]).toContain('$0.05')
+
+    const child2CostMatch = /data-testid="(?:agent-session-row|subagent-row)-sess-child-002"[\s\S]*?data-testid="agent-session-cost"[^>]*>([\s\S]*?)<\/span>/.exec(expandedMarkup)
+    expect(child2CostMatch, 'Child 2 row must render cost cell').not.toBeNull()
+    expect(child2CostMatch![1]).toContain('$0.12')
+  })
+
+  it('renders title as "<agent name> · <task summary>" with a tooltip displaying the raw sessionId', async () => {
+    mockSessions([sampleParentWithSubagents])
+    const tree = await loadExplorer({ sessions: [sampleParentWithSubagents] } as ExplorerProps & { sessions?: KyberSessionSummary[] })
+    const markup = html(tree)
+
+    expect(markup).toContain('lead-orchestrator · orchestrate multi-agent feature delivery')
+
+    const parentTitleWithTooltip = /<span[^>]*title="sess-parent-001"[^>]*>[\s\S]*?lead-orchestrator · orchestrate multi-agent feature delivery[\s\S]*?<\/span>/.test(markup)
+    expect(parentTitleWithTooltip, 'Parent title element must have tooltip displaying raw sessionId').toBe(true)
+
+    const toggle = findSubagentToggle(tree, 'sess-parent-001')
+    expect(toggle, 'Parent row must have a subagent chevron toggle button').toBeDefined()
+    toggle!.props.onClick!({ stopPropagation: vi.fn() })
+
+    const expandedMarkup = html(renderExplorer({ sessions: [sampleParentWithSubagents] } as ExplorerProps & { sessions?: KyberSessionSummary[] }))
+
+    expect(expandedMarkup).toContain('explorer · explore workspace architecture')
+    const child1TitleWithTooltip = /<span[^>]*title="sess-child-001"[^>]*>[\s\S]*?explorer · explore workspace architecture[\s\S]*?<\/span>/.test(expandedMarkup)
+    expect(child1TitleWithTooltip, 'Child 1 title element must have tooltip displaying raw sessionId').toBe(true)
+
+    expect(expandedMarkup).toContain('test-runner · run test suite verification')
+    const child2TitleWithTooltip = /<span[^>]*title="sess-child-002"[^>]*>[\s\S]*?test-runner · run test suite verification[\s\S]*?<\/span>/.test(expandedMarkup)
+    expect(child2TitleWithTooltip, 'Child 2 title element must have tooltip displaying raw sessionId').toBe(true)
   })
 })

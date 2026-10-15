@@ -148,6 +148,15 @@ export async function fetchProblemDetail(id: string): Promise<KyberProblemDetail
   return fetchJson<KyberProblemDetail>(`/api/kyber/problem/${encodeURIComponent(id)}`)
 }
 
+export interface SessionRollup {
+  turn_count?: number | null
+  total_input?: number | null
+  total_output?: number | null
+  tokens?: number | null
+  cost_usd?: number | null
+  cost?: { basis: string; status: string; value?: number; currency?: string }
+}
+
 export interface KyberSessionSummary {
   session_id: string
   sessionId?: string
@@ -159,6 +168,8 @@ export interface KyberSessionSummary {
   parentSession?: string | null
   agent_name?: string | null
   agentName?: string | null
+  task_summary?: string | null
+  taskSummary?: string | null
   repo?: string | null
   branch?: string | null
   started?: string | number | null
@@ -174,6 +185,8 @@ export interface KyberSessionSummary {
   cost?: { basis: string; status: string; value?: number; currency?: string }
   models?: string[]
   problems?: number
+  subagents?: KyberSessionSummary[]
+  rollup?: SessionRollup
 }
 
 /**

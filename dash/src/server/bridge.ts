@@ -14,6 +14,7 @@ import {
 } from '../canon/measurability.js'
 import { dedupeTwinTurns } from '../canon/twin-dedupe.js'
 import { refreshProcessIsAlive } from '../canon/refresh-run.js'
+import { formatSessionTitle } from '../canon/naming.js'
 import {
   CanonStore,
   decompressRaw,
@@ -141,6 +142,14 @@ export type ComparisonTableResult = {
   problems: Array<{ severity: string; code: string; message: string }>
 }
 
+export type SessionRollup = {
+  turn_count: number
+  request_count: number
+  total_input: number
+  total_output: number
+  cost_usd: number | null
+}
+
 export type SessionSummary = {
   session_id: string
   harness: string
@@ -162,6 +171,8 @@ export type SessionSummary = {
   cost: { basis: string; status: string; value?: number; currency?: string }
   models: string[]
   problems: number
+  subagents?: SessionSummary[]
+  rollup?: SessionRollup
 }
 
 /** Cost facts needed by the shared report, read without loading raw span payloads. */
@@ -1258,6 +1269,36 @@ function buildIngestActivity(
   return { status: 'known', sources, lastReceivedAt }
 }
 
+function computeSessionRollup(
+  session: SessionSummary,
+  children: readonly SessionSummary[] = []
+): SessionRollup {
+  let turnCount = session.turn_count ?? 0
+  let requestCount = session.request_count ?? 0
+  let totalInput = session.total_input ?? 0
+  let totalOutput = session.total_output ?? 0
+
+  let costUsdSum: number | null = session.cost_usd != null ? session.cost_usd : null
+
+  for (const child of children) {
+    turnCount += child.turn_count ?? 0
+    requestCount += child.request_count ?? 0
+    totalInput += child.total_input ?? 0
+    totalOutput += child.total_output ?? 0
+    if (child.cost_usd != null) {
+      costUsdSum = (costUsdSum ?? 0) + child.cost_usd
+    }
+  }
+
+  return {
+    turn_count: turnCount,
+    request_count: requestCount,
+    total_input: totalInput,
+    total_output: totalOutput,
+    cost_usd: costUsdSum,
+  }
+}
+
 export class KyberBridge {
   private canonDb?: DatabaseSync
   private readonly store?: CanonStore
@@ -1529,10 +1570,12 @@ export class KyberBridge {
 
   /**
    * List all available sessions from the canonical store, sorted by started DESC.
+   * Child subagent sessions are hierarchically nested under their parent session,
+   * with read-time spend and counters rolled up to the parent.
    */
   listSessions(limit?: number): SessionSummary[] {
     const db = this.getDb()
-    const list: SessionSummary[] = []
+    const rawSessions: SessionSummary[] = []
 
     // The canonical derived `session` cache is the only reporting authority.
     // Raw `records` are never synthesized into sessions here: projection
@@ -1593,10 +1636,22 @@ export class KyberBridge {
                   ...(typeof block.currency === 'string' ? { currency: block.currency } : {}),
                 }
               : { basis: 'unknown', status: 'no_rate' }
-          list.push({
+
+          const rawLabel = row.label ?? null
+          const label =
+            rawLabel && rawLabel.trim() !== ''
+              ? rawLabel
+              : formatSessionTitle({
+                  sessionId: row.session_id,
+                  agentName: row.agent_name,
+                  harness: row.harness,
+                  rawLabel: row.label,
+                })
+
+          rawSessions.push({
             session_id: row.session_id,
             harness: row.harness,
-            label: row.label ?? null,
+            label,
             is_subagent: Boolean(row.is_subagent),
             parent_session: row.parent_session ?? null,
             agent_name: row.agent_name ?? null,
@@ -1615,6 +1670,7 @@ export class KyberBridge {
             cost,
             models: Array.isArray(summ.models) ? summ.models : [],
             problems: problemsCount,
+            subagents: [],
           })
         }
       } catch (err) {
@@ -1622,13 +1678,54 @@ export class KyberBridge {
       }
     }
 
+    // Index all sessions by session_id for fast parent lookup
+    const sessionMap = new Map<string, SessionSummary>()
+    for (const session of rawSessions) {
+      sessionMap.set(session.session_id, session)
+    }
+
+    // Identify child sessions and attach them to parents
+    const attachedChildIds = new Set<string>()
+
+    for (const session of rawSessions) {
+      const isChild = session.is_subagent || Boolean(session.parent_session)
+      if (isChild && session.parent_session) {
+        const parent = sessionMap.get(session.parent_session)
+        if (parent && parent.session_id !== session.session_id) {
+          parent.subagents = parent.subagents ?? []
+          parent.subagents.push(session)
+          attachedChildIds.add(session.session_id)
+        }
+      }
+    }
+
+    // Process every session:
+    // - For child sessions inside subagents: ensure subagents: [] and compute child rollup
+    // - For root sessions: compute rollup including their nested children
+    for (const session of rawSessions) {
+      if (attachedChildIds.has(session.session_id)) {
+        session.subagents = []
+        session.rollup = computeSessionRollup(session, [])
+      } else {
+        if (session.subagents && session.subagents.length > 0) {
+          session.subagents.sort((a, b) => (a.started ?? '').localeCompare(b.started ?? ''))
+        } else {
+          session.subagents = []
+        }
+        session.rollup = computeSessionRollup(session, session.subagents)
+      }
+    }
+
+    // Filter to root sessions only
+    const rootSessions = rawSessions.filter((s) => !attachedChildIds.has(s.session_id))
+
     // Sort globally by started DESC
-    list.sort((a, b) => (b.started ?? '').localeCompare(a.started ?? ''))
+    rootSessions.sort((a, b) => (b.started ?? '').localeCompare(a.started ?? ''))
 
     if (typeof limit === 'number' && limit > 0) {
-      return list.slice(0, Math.floor(limit))
+      return rootSessions.slice(0, Math.floor(limit))
     }
-    return list
+    return rootSessions
   }
 
   /**

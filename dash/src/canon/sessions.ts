@@ -22,6 +22,7 @@ import { contextLimitOf, DEFAULT_CONTEXT_LIMIT } from './context-window.js'
 import { catalogWindowForRecords } from './model-window-catalog.js'
 import { groupByCanonicalHarness, harnessExportsCacheCounter, normalizeHarnessName, surveyFamily } from './measurability.js'
 import { dedupeTwinTurns } from './twin-dedupe.js'
+import { formatSessionTitle } from './naming.js'
 import { buildFindings } from './findings.js'
 import { buildHarnessRollup } from './harnesses.js'
 import { buildRuns } from './runs.js'
@@ -43,6 +44,141 @@ const REPO_KEYS = ['vcs.repository.name', 'repo'] as const
 const BRANCH_KEYS = ['vcs.ref.head.name', 'branch'] as const
 const MODEL_KEYS = ['gen_ai.response.model', 'gen_ai.request.model', 'model'] as const
 
+function isInvokeAgentSpan(record: CanonicalRecord): boolean {
+  if (record.op === "agent.invoke") return true
+  const opName = attributeOf(record, ["gen_ai.operation.name"])
+  if (opName === "invoke_agent") return true
+  if (record.name.startsWith("invoke_agent")) return true
+  const toolName = attributeOf(record, ["gen_ai.tool.name", "tool.name"])
+  if (toolName === "invoke_agent") return true
+  return false
+}
+
+function collectDescendantRecords(
+  rootSpanId: string,
+  records: readonly CanonicalRecord[],
+): CanonicalRecord[] {
+  const childrenByParent = new Map<string, CanonicalRecord[]>()
+  for (const record of records) {
+    if (record.parentSpanId) {
+      const list = childrenByParent.get(record.parentSpanId) ?? []
+      list.push(record)
+      childrenByParent.set(record.parentSpanId, list)
+    }
+  }
+
+  const result: CanonicalRecord[] = []
+  const queue = [rootSpanId]
+  const seen = new Set<string>([rootSpanId])
+
+  while (queue.length > 0) {
+    const currentId = queue.shift()!
+    const children = childrenByParent.get(currentId) ?? []
+    for (const child of children) {
+      if (!seen.has(child.spanId)) {
+        seen.add(child.spanId)
+        result.push(child)
+        if (!isInvokeAgentSpan(child)) {
+          queue.push(child.spanId)
+        }
+      }
+    }
+  }
+
+  return result
+}
+
+function extractAgentName(invokeSpan: CanonicalRecord): string | null {
+  const attr = attributeOf(invokeSpan, AGENT_NAME_KEYS)
+  if (attr && attr.trim()) return attr.trim()
+  if (invokeSpan.name.startsWith("invoke_agent ")) {
+    const candidate = invokeSpan.name.slice("invoke_agent ".length).trim()
+    if (candidate) return candidate
+  }
+  return null
+}
+
+function extractTaskSummary(subagentRecords: readonly CanonicalRecord[]): string | undefined {
+  for (const record of subagentRecords) {
+    const toolName = attributeOf(record, ["gen_ai.tool.name", "tool.name"]) ?? record.name
+    const nameLower = toolName.toLowerCase()
+    if (nameLower === "task" || nameLower.endsWith(".task")) {
+      const raw = record.raw as Record<string, unknown> | null
+      const argsRaw =
+        raw?.["arguments"] ??
+        raw?.["gen_ai.tool.arguments"] ??
+        raw?.["tool.arguments"] ??
+        raw?.["tool_arguments"] ??
+        raw?.["parameters"]
+      let argsObj: Record<string, unknown> | null = null
+      if (typeof argsRaw === "string") {
+        try {
+          argsObj = JSON.parse(argsRaw)
+        } catch {
+          if (argsRaw.trim()) return argsRaw.trim()
+        }
+      } else if (argsRaw !== null && typeof argsRaw === "object") {
+        argsObj = argsRaw as Record<string, unknown>
+      }
+
+      if (argsObj !== null && typeof argsObj === "object") {
+        const desc =
+          argsObj["description"] ??
+          argsObj["task"] ??
+          argsObj["prompt"] ??
+          argsObj["task_description"] ??
+          argsObj["summary"]
+        if (typeof desc === "string" && desc.trim()) {
+          return desc.trim()
+        }
+      }
+    }
+  }
+
+  for (const record of subagentRecords) {
+    if (isInvokeAgentSpan(record)) {
+      const raw = record.raw as Record<string, unknown> | null
+      const argsRaw = raw?.["arguments"] ?? raw?.["gen_ai.agent.arguments"] ?? raw?.["task.description"]
+      if (typeof argsRaw === "string") {
+        try {
+          const parsed = JSON.parse(argsRaw) as Record<string, unknown> | null
+          const desc = parsed?.description ?? parsed?.task ?? parsed?.prompt
+          if (typeof desc === "string" && desc.trim()) return desc.trim()
+        } catch {
+          if (argsRaw.trim()) return argsRaw.trim()
+        }
+      } else if (argsRaw !== null && typeof argsRaw === "object") {
+        const desc =
+          (argsRaw as Record<string, unknown>)["description"] ?? (argsRaw as Record<string, unknown>)["task"]
+        if (typeof desc === "string" && desc.trim()) return desc.trim()
+      }
+    }
+  }
+
+  for (const record of subagentRecords) {
+    const promptAttr = attributeOf(record, ["gen_ai.prompt", "prompt"])
+    if (promptAttr && promptAttr.trim()) {
+      return promptAttr.trim()
+    }
+    if (record.parts && record.parts.length > 0) {
+      for (const part of record.parts) {
+        if (part.part === "conversation_history" && part.text && part.text.trim()) {
+          return part.text.trim()
+        }
+      }
+    }
+    if (
+      record.content &&
+      typeof record.content["conversation_history"] === "string" &&
+      record.content["conversation_history"].trim()
+    ) {
+      return record.content["conversation_history"].trim()
+    }
+  }
+
+  return undefined
+}
+
 function attributeOf(record: CanonicalRecord, keys: readonly string[]): string | undefined {
   const raw = record.raw
   if (raw === null || typeof raw !== 'object') return undefined
@@ -54,6 +190,93 @@ function attributeOf(record: CanonicalRecord, keys: readonly string[]): string |
   }
   return undefined
 }
+
+function parseTimestamp(ts: string | Date | unknown): number {
+  if (ts instanceof Date) return ts.getTime()
+  if (typeof ts === 'string') {
+    const parsed = Date.parse(ts)
+    if (Number.isFinite(parsed)) return parsed
+  }
+  return 0
+}
+
+function isClaudeHarness(harness: string): boolean {
+  const norm = normalizeHarnessName(harness)
+  return norm === 'claude' || norm === 'claude-code' || surveyFamily(harness) === 'claude-code'
+}
+
+function extractClaudeAgentId(record: CanonicalRecord): string | undefined {
+  const raw = record.raw as Record<string, unknown> | null
+  if (raw && typeof raw === 'object') {
+    const candidates = [
+      raw['agent_id'],
+      raw['agentId'],
+      raw['subagent_id'],
+      raw['subagentId'],
+      raw['agent.id'],
+      raw['gen_ai.agent.id'],
+    ]
+    for (const c of candidates) {
+      if (typeof c === 'string' && c.trim()) return c.trim()
+      if (typeof c === 'number') return String(c)
+    }
+  }
+  if (record.spanId.startsWith('agent-')) {
+    return record.spanId
+  }
+  return undefined
+}
+
+function normalizeClaudeSubagentId(agentId: string): string {
+  const trimmed = agentId.trim()
+  return trimmed.startsWith('agent-') ? trimmed : `agent-${trimmed}`
+}
+
+function extractClaudeAgentName(records: readonly CanonicalRecord[]): string | null {
+  for (const record of records) {
+    const raw = record.raw as Record<string, unknown> | null
+    if (!raw || typeof raw !== 'object') continue
+    const candidates = [
+      raw['agent_type'],
+      raw['agentType'],
+      raw['gen_ai.agent.name'],
+      raw['gen_ai.agent.type'],
+      raw['agent_name'],
+      raw['agentName'],
+      raw['agent.name'],
+      raw['agent'],
+    ]
+    for (const c of candidates) {
+      if (typeof c === 'string' && c.trim()) return c.trim()
+    }
+  }
+  for (const record of records) {
+    const extracted = extractAgentName(record)
+    if (extracted) return extracted
+  }
+  return null
+}
+
+function extractClaudeDescription(records: readonly CanonicalRecord[]): string | undefined {
+  for (const record of records) {
+    const raw = record.raw as Record<string, unknown> | null
+    if (!raw || typeof raw !== 'object') continue
+    const candidates = [
+      raw['description'],
+      raw['task_description'],
+      raw['taskDescription'],
+      raw['task'],
+      raw['gen_ai.agent.description'],
+      raw['summary'],
+      raw['prompt'],
+    ]
+    for (const c of candidates) {
+      if (typeof c === 'string' && c.trim()) return c.trim()
+    }
+  }
+  return extractTaskSummary(records)
+}
+
 
 /**
  * A harness roll-up span: Copilot's `invoke_agent`, which carries the Σ of its
@@ -487,9 +710,182 @@ export async function buildSessions(store: CanonStore): Promise<BuildSessionsRep
         continue
       }
       const sessionId = identities.claim(key.key, harness)
-      store.upsertSession(buildSessionRow(sessionId, merged, countTokens, store))
+      const parentRow = buildSessionRow(sessionId, merged, countTokens, store, {
+        isSubagent: false,
+        parentSession: null,
+      })
+      store.upsertSession(parentRow)
       built.add(sessionId)
       report.built += 1
+
+      // Subagent session projection (Contract T1.1)
+      const isCopilot = isCopilotHarness(harness) || harness === "copilot"
+      if (isCopilot && !sessionId.includes("#")) {
+        const invokeSpans = merged.filter((r) => isInvokeAgentSpan(r) && r.spanId !== sessionId)
+        for (const invokeSpan of invokeSpans) {
+          const subagentId = `${sessionId}#${invokeSpan.spanId}`
+          const descendants = collectDescendantRecords(invokeSpan.spanId, merged)
+          const rootInvokeSpan: CanonicalRecord = {
+            ...invokeSpan,
+            parentSpanId: null,
+          }
+          const sortedDescendants = [...descendants].sort((a, b) => {
+            const tA = a.timestamp instanceof Date ? a.timestamp.getTime() : Date.parse(String(a.timestamp))
+            const tB = b.timestamp instanceof Date ? b.timestamp.getTime() : Date.parse(String(b.timestamp))
+            return (Number.isFinite(tA) ? tA : 0) - (Number.isFinite(tB) ? tB : 0)
+          })
+          if (sortedDescendants.length > 0) {
+            let earliest = rootInvokeSpan.timestamp
+            for (const d of sortedDescendants) {
+              const tD = d.timestamp instanceof Date ? d.timestamp.getTime() : Date.parse(String(d.timestamp))
+              const tE = earliest instanceof Date ? earliest.getTime() : Date.parse(String(earliest))
+              if (Number.isFinite(tD) && Number.isFinite(tE) && tD < tE) {
+                earliest = d.timestamp
+              }
+            }
+            rootInvokeSpan.timestamp = earliest
+          }
+          const subagentRecords = [rootInvokeSpan, ...sortedDescendants]
+
+          const agentName = extractAgentName(invokeSpan)
+          const taskSummary = extractTaskSummary(subagentRecords)
+          const label = formatSessionTitle({
+            agentName: agentName ?? undefined,
+            taskSummary,
+            sessionId: subagentId,
+            harness,
+          })
+
+          const subagentRow = buildSessionRow(
+            subagentId,
+            subagentRecords,
+            countTokens,
+            store,
+            {
+              isSubagent: true,
+              parentSession: sessionId,
+              agentName,
+              label,
+            },
+          )
+
+          store.upsertSession(subagentRow)
+          built.add(subagentId)
+          report.built += 1
+        }
+      }
+
+      // Subagent session projection (Claude - Contract T2.2)
+      const isClaude = isClaudeHarness(harness) || merged.some((r) => isClaudeHarness(r.harness))
+      if (isClaude && !sessionId.startsWith("agent-")) {
+        const recordAgentMap = new Map<string, string>()
+
+        for (const record of merged) {
+          const agentId = extractClaudeAgentId(record)
+          if (agentId) {
+            recordAgentMap.set(record.spanId, agentId)
+          }
+        }
+
+        for (const record of merged) {
+          const agentId = recordAgentMap.get(record.spanId)
+          if (agentId) {
+            const descendants = collectDescendantRecords(record.spanId, merged)
+            for (const desc of descendants) {
+              if (!recordAgentMap.has(desc.spanId)) {
+                recordAgentMap.set(desc.spanId, agentId)
+              }
+            }
+          }
+        }
+
+        const subagentGroups = new Map<string, CanonicalRecord[]>()
+        for (const record of merged) {
+          const agentId = recordAgentMap.get(record.spanId)
+          if (agentId) {
+            const subagentId = normalizeClaudeSubagentId(agentId)
+            const list = subagentGroups.get(subagentId) ?? []
+            list.push(record)
+            subagentGroups.set(subagentId, list)
+          }
+        }
+
+        for (const [subagentId, groupRecords] of subagentGroups) {
+          if (groupRecords.length === 0) continue
+
+          const subagentSpanIds = new Set(groupRecords.map((r) => r.spanId))
+          const preparedRecords = groupRecords.map((r) => {
+            if (r.parentSpanId === null || !subagentSpanIds.has(r.parentSpanId)) {
+              return { ...r, parentSpanId: null }
+            }
+            return { ...r }
+          })
+
+          let rootIndex = preparedRecords.findIndex((r) => isInvokeAgentSpan(r) || r.op === 'agent.invoke')
+          if (rootIndex === -1 && preparedRecords.length > 0) {
+            rootIndex = 0
+          }
+          if (rootIndex >= 0) {
+            const rootSpanId = preparedRecords[rootIndex]!.spanId
+            for (let i = 0; i < preparedRecords.length; i++) {
+              const rec = preparedRecords[i]!
+              if (rec.spanId === rootSpanId) {
+                preparedRecords[i] = { ...rec, parentSpanId: null }
+              } else if (rec.parentSpanId === null || !subagentSpanIds.has(rec.parentSpanId)) {
+                preparedRecords[i] = { ...rec, parentSpanId: rootSpanId }
+              }
+            }
+            const earliestTimestamp = preparedRecords[0]!.timestamp
+            const currentRoot = preparedRecords.find((r) => r.spanId === rootSpanId)!
+            if (parseTimestamp(earliestTimestamp) < parseTimestamp(currentRoot.timestamp)) {
+              currentRoot.timestamp = earliestTimestamp
+            }
+          }
+
+          preparedRecords.sort((a, b) => parseTimestamp(a.timestamp) - parseTimestamp(b.timestamp))
+
+          const agentName = extractClaudeAgentName(preparedRecords)
+          const taskSummary = extractClaudeDescription(preparedRecords)
+          const label = formatSessionTitle({
+            agentName: agentName ?? undefined,
+            taskSummary,
+            sessionId: subagentId,
+            harness,
+          })
+
+          let parentSession = sessionId
+          for (const r of preparedRecords) {
+            const p = attributeOf(r, [
+              'parent_session_id',
+              'parent_session',
+              'parentSessionId',
+              'parentSession',
+              'gen_ai.parent_session_id',
+            ])
+            if (p && p.trim()) {
+              parentSession = p.trim()
+              break
+            }
+          }
+
+          const subagentRow = buildSessionRow(
+            subagentId,
+            preparedRecords,
+            countTokens,
+            store,
+            {
+              isSubagent: true,
+              parentSession,
+              agentName,
+              label,
+            },
+          )
+
+          store.upsertSession(subagentRow)
+          built.add(subagentId)
+          report.built += 1
+        }
+      }
     }
   }
 
@@ -520,12 +916,20 @@ export async function buildSessions(store: CanonStore): Promise<BuildSessionsRep
   return report
 }
 
+export type BuildSessionRowOptions = {
+  isSubagent?: boolean
+  parentSession?: string | null
+  agentName?: string | null
+  label?: string | null
+}
+
 /** Build one session row from its records. Pure — exported for testing. */
 export function buildSessionRow(
   sessionId: string,
   records: readonly CanonicalRecord[],
   countTokens: (text: string) => number,
   store?: CanonStore,
+  options?: BuildSessionRowOptions,
 ): SessionRow {
   const turnRecords = turnsOf(records)
   const first = records[0]!
@@ -858,12 +1262,16 @@ export function buildSessionRow(
       : invokedByTurnOf(records)
   const skills = skillsPayloadOf(skillsView, firstDescriptionsOf(skillsListed, turnRecords), countTokens, turnRecords)
 
+  const rawAgentName = attributeOf(first, AGENT_NAME_KEYS) ?? null
+  const agentName = options?.agentName !== undefined ? options.agentName : rawAgentName
+  const label = options?.label !== undefined && options.label !== null ? options.label : first.name
+
   const payload: AsadSessionPayload = {
     id: sessionId,
     session_id: sessionId,
     harness,
-    label: first.name,
-    agent_name: attributeOf(first, AGENT_NAME_KEYS) ?? null,
+    label,
+    agent_name: agentName,
     repo: attributeOf(first, REPO_KEYS) ?? null,
     branch: attributeOf(first, BRANCH_KEYS) ?? null,
     span_count: records.length,
@@ -956,16 +1364,19 @@ export function buildSessionRow(
   const parentSessionAttr =
     attributeOf(first, ['parent_session', 'parent_session_id', 'gen_ai.parent_session_id', 'parentSession']) ?? null
   const isSubagent =
-    parentSessionAttr !== null ||
-    Boolean(attributeOf(first, ['gen_ai.is_subagent', 'is_subagent']))
+    options?.isSubagent !== undefined
+      ? options.isSubagent
+      : (parentSessionAttr !== null || Boolean(attributeOf(first, ['gen_ai.is_subagent', 'is_subagent'])))
+  const parentSession =
+    options?.parentSession !== undefined ? options.parentSession : parentSessionAttr
 
   return {
     sessionId,
     harness,
-    label: first.name,
+    label,
     isSubagent,
-    parentSession: parentSessionAttr,
-    agentName: attributeOf(first, AGENT_NAME_KEYS) ?? null,
+    parentSession,
+    agentName,
     repo: attributeOf(first, REPO_KEYS) ?? null,
     branch: attributeOf(first, BRANCH_KEYS) ?? null,
     started: typeof started === 'string' ? started : started.toISOString(),

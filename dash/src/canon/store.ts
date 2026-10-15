@@ -161,7 +161,7 @@ import {
  * corpus is the expensive thing here and re-collecting it is not always
  * possible.
  */
-export const SCHEMA_VERSION = 19
+export const SCHEMA_VERSION = 20
 
 /**
  * Version of the diagnostic signal and finding detector suite (Decision D17).
@@ -250,6 +250,11 @@ CREATE TABLE IF NOT EXISTS session (
   branch TEXT,
   started TEXT,
   ended TEXT,
+  synced_at TEXT,
+  sync_status TEXT DEFAULT 'pending',
+  settled_at TEXT,
+  transcript_path TEXT,
+  transcript_offset INTEGER DEFAULT 0,
   payload TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS session_by_started ON session (started);
@@ -791,6 +796,30 @@ export const MIGRATIONS: Record<number, (db: Database) => void> = {
       if (!pCols.includes('stack')) {
         db.exec('ALTER TABLE problems ADD COLUMN stack TEXT')
       }
+    }
+  },
+  // v19 -> v20: session sync progress and settling columns.
+  // Adds synced_at, sync_status, settled_at, transcript_path, transcript_offset.
+  // Each ADD COLUMN is presence-guarded so re-running migration 19 is idempotent
+  // and stores with pre-existing columns or missing tables don't throw.
+  19: (db: Database) => {
+    const hasSession = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='session'").get()
+    if (!hasSession) return
+    const cols = (db.prepare('PRAGMA table_info(session)').all() as { name: string }[]).map((c) => c.name)
+    if (!cols.includes('synced_at')) {
+      db.exec('ALTER TABLE session ADD COLUMN synced_at TEXT')
+    }
+    if (!cols.includes('sync_status')) {
+      db.exec("ALTER TABLE session ADD COLUMN sync_status TEXT DEFAULT 'pending'")
+    }
+    if (!cols.includes('settled_at')) {
+      db.exec('ALTER TABLE session ADD COLUMN settled_at TEXT')
+    }
+    if (!cols.includes('transcript_path')) {
+      db.exec('ALTER TABLE session ADD COLUMN transcript_path TEXT')
+    }
+    if (!cols.includes('transcript_offset')) {
+      db.exec('ALTER TABLE session ADD COLUMN transcript_offset INTEGER DEFAULT 0')
     }
   },
 }

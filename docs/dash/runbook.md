@@ -11,6 +11,8 @@ code-refs:
   - registerKyberCommands
   - refreshHarnessSources
   - purgeExpiredContent
+  - runTranscriptSync
+  - formatSessionTitle
 ---
 
 # KyberDash runbook — Local development, execution, and testing
@@ -474,6 +476,74 @@ Copilot CLI, Pi, or OpenCode skill records. The captures are sanitized: ids, pat
 are replaced. The Claude `skill_listing` parser test reads `claude-code/capture-listing.jsonl`.
 The per-harness status is in the [telemetry inventory](telemetry-inventory.md#skill-availability-by-harness).
 
+### 2h. Subagent session hierarchy and post-run transcript synchronization
+
+Subagent execution is modeled as a first-class session hierarchy with dual spend accounting,
+honest title formatting, and background transcript synchronization
+([ADR 0037](../adr/0037-post-run-transcript-sync-subagent-hierarchy.md)).
+
+#### Subagent session hierarchy and Sessions explorer nesting
+
+Subagents spawn with stable session IDs derived from their harness telemetry:
+- Primary Claude sessions: `claude-code/<session-id>`
+- Subagents with known agent ID: `agent-<agentId>`
+- Fallback subagents: `<parent-session-id>#<span-id>`
+
+The web dashboard Sessions explorer (`page-sessions`) renders subagent sessions nested beneath
+their parent session in a tree hierarchy rather than interleaving them as disconnected top-level
+sessions.
+
+#### Dual spend accounting via read-time rollups
+
+KyberDash maintains dual spend visibility across the delegation tree:
+- **Direct unaggregated metrics**: The parent session row in SQLite (`canon.db`) preserves its own
+  unaggregated `turn_count`, `request_count`, `total_input`, `total_output`, and `cost_usd`. This
+  ensures direct parent execution work is not overwritten or inflated in the raw store.
+- **Read-time rollup object**: When parent sessions are queried over `/api/kyber/sessions` or
+  `/api/kyber/session/:sessionId`, the API dynamically calculates a `rollup` summary aggregating
+  turns, requests, token counts, and cost USD across the parent and all nested subagent children.
+- Both surfaces (Web and Tray) display the rolled-up totals alongside direct metrics without
+  double-counting.
+
+#### Honest title formatting (`formatSessionTitle`)
+
+Session titles in the explorer are synthesized via `formatSessionTitle` (`dash/src/canon/naming.ts`
+and `dash/web/src/lib/labels.ts`), adhering to honest unobservability:
+- **Title format**: `<agent name> · <task summary>` when both are available from telemetry.
+- **Machine-label suppression**: `isMachineLabel` detects and suppresses raw telemetry identities
+  (such as span operations like `.llm_request`, model labels like `chat claude-3-5-sonnet`, raw
+  UUID strings, `synth:` prefixes, and `<synthetic>` or `<unknown>` model tags) so they never
+  masquerade as human titles.
+- **Fallbacks**: If task summary is absent or machine-generated, the title falls back to
+  `<agent name> · session`, `<task summary>`, `<human label>`, `<harness> session`, or shortened
+  session ID (`formatSessionId`). When telemetry is completely absent, it renders a clean fallback
+  rather than fabricating prompt summaries or fake agent identities.
+
+#### Engine-hosted transcript sync job lifecycle (`runTranscriptSync`)
+
+For harnesses where subagent turns and spend are recorded in secondary transcript files on disk
+(e.g., Claude Code subagent JSONL transcripts), the CLI engine runs an incremental synchronization
+job (`dash/src/sync/transcript-sync.ts`):
+
+- **Job lifecycle and state machine**:
+  1. `pending`: A new session with a transcript path is registered awaiting ingestion.
+  2. `synced`: `runTranscriptSync` reads newly appended bytes from `transcript_offset`, parses
+     turns with `processDelta`, updates `transcript_offset = fileSize`, `synced_at = nowIso`, and
+     recalculates session spend.
+  3. `settled`: If no new bytes are appended and the session has been inactive for >= 30 minutes
+     (`(now - lastActivity) >= 30 * 60_000`), the session transitions to `settled` with `settled_at`
+     stamped. Settled sessions are bypassed on future sync passes.
+  4. `unavailable`: If the transcript file is missing or unreadable and more than 24 hours have elapsed
+     since session start/end, `sync_status` transitions to `unavailable`.
+- **Lock arbitration**: Before starting a sync pass, `runTranscriptSync` inspects `STORE_LOCK_FILE`
+  (`~/.kyberdash/canon.lock`). If the store lock is held by `dash clean`, `dash refresh`, or manual
+  rebuild (`readLockHolder !== null`), `runTranscriptSync` yields immediately with `{ outcome: 'busy' }`.
+  It never attempts to force a lock, wait indefinitely, or block user operations.
+- **Display layer boundary**: Following [ADR 0033](../adr/0033-kyberdash-surfaces-are-display-layers.md),
+  the sync job runs exclusively inside the CLI engine's `JobHost` under `kyberdash web`. The tray and
+  the web dashboard contain no job runners or schedulers; they query the resulting sessions and rollups
+  via `/api/kyber/*`.
+
 ### 3. Raw Content Backfill and Re-normalization
 
 ```bash
@@ -737,6 +807,7 @@ filters, so narrowing one page's scope never touches the A/B selectors.
 - **Sessions**: Session explorer (`page-sessions`) wrapping the Agent Session Analysis
   Dashboard from `canon.db` — not a restored Context tab:
   - *Overview Strip*: Spans, turns, total tokens, cache hit ratio, cost USD/credits, exact reconciliation status, and subagent links.
+  - *Subagent Session Hierarchy*: Nested tree display of child subagent sessions underneath parent sessions, with dual spend visibility (rolled-up totals across the delegation tree alongside unaggregated direct parent metrics; see [§2h](#2h-subagent-session-hierarchy-and-post-run-transcript-synchronization) and [ADR 0037](../adr/0037-post-run-transcript-sync-subagent-hierarchy.md)).
   - *Per-Turn Spend Chart (`SessionSpendCharts`)*: Stacked token breakdown per turn (fresh input, cache read, cache creation, output).
   - *Context Composition Heatmap & Chart*: Semantic token distribution by part type (`system_prompt`, `instruction_context`, `tool_definitions`, `conversation_history`, `tool_result_content`, `residual`).
   - *Tool & Schema Cost Table*: Ranked tool schema sizes, resident turns, invocations, and unused schema waste range.
@@ -1153,5 +1224,6 @@ here.
 - [KyberDash Architecture](architecture.md) — Telemetry ingest pipeline, canonical store, analyses, and surfaces.
 - [KyberDash display-layer rule](../rules/kyberdash-display-layer.md) — why the tray and the dashboard hold no jobs.
 - [KyberDash Overview](README.md) — Product vision, motivation, and capabilities.
+- [ADR 0037](../adr/0037-post-run-transcript-sync-subagent-hierarchy.md) — Subagent session hierarchy, post-run transcript synchronization, and read-time spend rollups.
 - [Feature Local Run and Test Standard](../rules/feature-runbooks.md) — Standards governing local execution runbooks across all features.
 - [Component Catalog](../catalog.md) — Canonical inventory of components and owners.

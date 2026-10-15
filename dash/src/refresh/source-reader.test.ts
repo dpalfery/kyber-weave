@@ -247,12 +247,12 @@ describe('iterateNativeUnits', () => {
 
   it('splits Copilot by sourceType', async () => {
     const sources: SessionSource[] = [
-      { path: '/tmp/.copilot/a.jsonl', project: 'p', provider: 'copilot', sourceType: 'jsonl' },
-      { path: '/tmp/store.db', project: 'p', provider: 'copilot', sourceType: 'session-store' },
-      { path: '/tmp/x.chatSession', project: 'p', provider: 'copilot', sourceType: 'chatsession' },
-      { path: '/tmp/t.json', project: 'p', provider: 'copilot', sourceType: 'transcript' },
-      { path: '/tmp/jb', project: 'p', provider: 'copilot', sourceType: 'jetbrains' },
-      { path: '/tmp/agent-traces.db', project: 'p', provider: 'copilot', sourceType: 'otel' },
+      { path: '/native/copilot/a.jsonl', project: 'p', provider: 'copilot', sourceType: 'jsonl' },
+      { path: '/native/copilot/store.db', project: 'p', provider: 'copilot', sourceType: 'session-store' },
+      { path: '/native/copilot/x.chatSession', project: 'p', provider: 'copilot', sourceType: 'chatsession' },
+      { path: '/native/copilot/t.json', project: 'p', provider: 'copilot', sourceType: 'transcript' },
+      { path: '/native/copilot/jb', project: 'p', provider: 'copilot', sourceType: 'jetbrains' },
+      { path: '/native/copilot/agent-traces.db', project: 'p', provider: 'copilot', sourceType: 'otel' },
     ]
     const parsed = new Map(sources.map(source => [source.path, [
       call({ provider: 'copilot', sessionId: source.path, timestamp: '2026-09-06T00:00:00.000Z' }),

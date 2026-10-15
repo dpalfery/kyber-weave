@@ -1675,7 +1675,7 @@ describe('store migrations v17: quarantine and problems schema upgrade', () => {
   it('initializes a fresh database at the current schema with the v17 quarantine and problems columns', () => {
     // Plan 2026-10-10 (B10) moves the schema past the live codex store's 18, so
     // the version pin here tracks SCHEMA_VERSION rather than a fixed 17.
-    expect(SCHEMA_VERSION).toBe(19)
+    expect(SCHEMA_VERSION).toBe(20)
 
     const path = tempStorePath()
     const store = new CanonStore(path)

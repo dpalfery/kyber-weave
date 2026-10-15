@@ -4,7 +4,7 @@ title: Architecture decision records
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-10
+last-reviewed: 2026-10-14
 ---
 
 # Architecture decision records
@@ -52,6 +52,7 @@ a new ADR that supersedes the old one.
 | [0034](0034-factory-droid-entry-point-skill.md) | [Factory Keeps the Conductor Droid and Adds an Entry-Point Skill](0034-factory-droid-entry-point-skill.md) | Accepted | 2026-10-10 | The Factory app has no session-parent selector, so `FactoryRenderer` additionally renders a primary agent as an entry-point skill at `.factory/skills/<name>/SKILL.md` carrying the canonical agent body verbatim with its resource closure, recorded as `role-skill-fallback`; the droid is kept for Task dispatch, the skill runs under session permissions so the droid's tools allow-list does not apply to it, and a canonical skill occupying the entry-point identity fails closed. |
 | [0035](0035-kyberdash-quarantine-raw-packet-evidence.md) | [Quarantine Raw-Packet Evidence and Harness-Scoped Wipes](0035-kyberdash-quarantine-raw-packet-evidence.md) | Accepted | 2026-10-10 | A quarantined span keeps the sender's decoded packet (`quarantine.raw_payload`), served one row at a time by `GET /api/kyber/quarantine/:spanId` and linked from the turn view via `TurnContentResult.rawPacket`; a nullable `harness` column on `quarantine`/`pending_logs`/`quarantined_logs` (schema v19) lets a per-harness wipe scope those rows, while NULL-harness rows still need the complete wipe. No time-based scrub of raw packets; amends ADR 0032's per-harness quarantine consequence and leaves ADR 0018 unchanged. |
 | [0036](0036-primary-agent-canonical-skill-entry-point.md) | [A Primary Agent Sharing a Canonical Skill Identity Reuses the Skill as Its Entry Point](0036-primary-agent-canonical-skill-entry-point.md) | Accepted | 2026-10-11 | A **primary shared identity** (`product-owner`, `bug-crusher`) is a root agent whose body is a thin pointer at the same-name canonical skill; the canonical skill is the entry point and is emitted on every target, never suppressed. Claude and Factory emit the agent file plus the canonical skill and no duplicate entry-point skill; Cursor, Pi, ZCode, Devin, and Warp reuse it instead of lowering. The fail-closed throw is retained for a canonical skill occupying a non-shared primary identity, and the source validator permits differing bodies only for a `primary` shared identity. |
+| [0037](0037-post-run-transcript-sync-subagent-hierarchy.md) | [Post-Run Transcript Synchronization and Stable-Identity Subagent Session Hierarchy](0037-post-run-transcript-sync-subagent-hierarchy.md) | Accepted | 2026-10-14 | Stable subagent session IDs (`agent-<agentId>`, `<parent>#<spanId>`), read-time spend rollups with granular counter preservation, honest `<agent name> · <task summary>` title synthesis, Schema v20, and engine-hosted post-run transcript synchronization with 30-min settlement, 24h timeout, and refresh lock arbitration. |
 
 ## Writing one
 

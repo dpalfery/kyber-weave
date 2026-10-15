@@ -1,8 +1,10 @@
 import { label } from './utils.js'
 
 const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i
+const UUID_EXACT_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const SYNTH_PREFIX_RE = /^(?:synth|derived):[^:]+:/i
-const SPAN_OP_RE = /\.(llm_request|llm_invoke|generate|completion)$/i
+const SPAN_OP_RE = /\.(?:llm_request|llm_invoke|generate|completion)$/i
+const CHAT_MODEL_RE = /^chat\s+\S+/i
 const UNSPECIFIED_MODEL_RE = /<(?:synthetic|unknown|unspecified)>|(?::|<)(?:synthetic|unknown)(?:>|$)/i
 
 const RATIO_DIMENSIONS = new Set([
@@ -14,10 +16,13 @@ const RATIO_DIMENSIONS = new Set([
 
 /** True when a stored label is an identity or span op, not a human title. */
 export function isMachineLabel(value: string | null | undefined): boolean {
-  const v = value?.trim() ?? ''
+  if (value == null || typeof value !== 'string') return false
+  const v = value.trim()
   if (v === '') return true
   if (/^(?:synth|derived):/i.test(v)) return true
   if (SPAN_OP_RE.test(v)) return true
+  if (CHAT_MODEL_RE.test(v)) return true
+  if (UUID_EXACT_RE.test(v)) return true
   if (UNSPECIFIED_MODEL_RE.test(v)) return true
   if (UUID_RE.test(v) && v.length > 36) return true
   return false
@@ -80,21 +85,53 @@ export function formatSpanLabel(name: string | null | undefined): string {
   return raw
 }
 
-export function formatSessionTitle(input: {
-  label?: string | null
-  sessionId?: string
-  session_id?: string
+export interface FormatSessionTitleInput {
   agentName?: string | null
   agent_name?: string | null
-  harness?: string
-}): string {
-  const title = input.label?.trim()
-  if (title && !isMachineLabel(title)) return title
-  const agent = (input.agentName ?? input.agent_name)?.trim()
-  if (agent) return agent
+  taskSummary?: string | null
+  task_summary?: string | null
+  rawLabel?: string | null
+  label?: string | null
+  harness?: string | null
+  sessionId?: string | null
+  session_id?: string | null
+}
+
+export function formatSessionTitle(input: FormatSessionTitleInput = {}): string {
+  const agent = (input.agentName ?? input.agent_name)?.trim() || undefined
+  const task = (input.taskSummary ?? input.task_summary)?.trim() || undefined
+  const raw = (input.rawLabel ?? input.label)?.trim() || undefined
+  const humanLabel = raw && !isMachineLabel(raw) ? raw : undefined
+
+  if (agent) {
+    if (task) {
+      return `${agent} · ${task}`
+    }
+    if (humanLabel) {
+      return `${agent} · ${humanLabel}`
+    }
+    return `${agent} · session`
+  }
+
+  if (task) {
+    return task
+  }
+
+  if (humanLabel) {
+    return humanLabel
+  }
+
   const harness = input.harness?.trim()
-  if (harness) return `${prettyProvider(harness)} session`
-  return formatSessionId(input.sessionId || input.session_id)
+  if (harness) {
+    return `${prettyProvider(harness)} session`
+  }
+
+  const sid = (input.sessionId ?? input.session_id)?.trim()
+  if (sid) {
+    return formatSessionId(sid)
+  }
+
+  return ''
 }
 
 /** Ratio as a percent, including overflow past 100% (honest pressure). */
