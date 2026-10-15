@@ -517,6 +517,24 @@ describe('extractListedSkills, system prompt <skills> block without a listing ke
     })
     expect(extractListedSkills(record)).toMatchObject({ availability: 'not_measurable' })
   })
+
+  it('stays not measurable when the skills block is empty or unparsable', () => {
+    for (const emptyOrUnparsable of [
+      '<skills></skills>',
+      '<skills>some prose</skills>',
+      '<available_skills></available_skills>',
+      '<available_skills>some prose</available_skills>',
+    ]) {
+      const record = modelTurn('copilot', 'vscode-turn-empty', {
+        source: 'copilot',
+        raw: {},
+        ...withParts([{ part: 'system_prompt', text: emptyOrUnparsable }]),
+      })
+      const result = extractListedSkills(record)
+      expect(result).toMatchObject({ availability: 'not_measurable' })
+      expect(result).not.toHaveProperty('skills')
+    }
+  })
 })
 
 // ---------------------------------------------------------------------------

@@ -431,6 +431,7 @@ function readSystemPromptListing(record: CanonicalRecord): ListingResult | undef
   const text = record.parts !== undefined ? partsSystemPrompt(record.parts) : systemPromptText(record)
   if (!/<(?:available_)?skills>/.test(text)) return undefined
   const skills = [...xmlDescriptions(text)].map(([name, description]) => listedSkill(record, name, description))
+  if (skills.length === 0) return undefined
   return { measurable: true, isInitial: true, skills: uniqueByName(skills) }
 }
 
