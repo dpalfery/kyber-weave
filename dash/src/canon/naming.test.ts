@@ -29,6 +29,16 @@ describe('isMachineLabel', () => {
     expect(isMachineLabel('00000000-0000-0000-0000-000000000000')).toBe(true)
   })
 
+  it('keeps human labels that start with chat, and still filters model-shaped chat spans', () => {
+    expect(isMachineLabel('chat with team about launch')).toBe(false)
+    expect(isMachineLabel('Chat about 2 new features')).toBe(false)
+    expect(isMachineLabel('Chat kick-off meeting')).toBe(false)
+    expect(isMachineLabel('chat gpt-4o-mini-2024-07-18')).toBe(true)
+    expect(isMachineLabel('chat gpt-6-luna')).toBe(true)
+    expect(isMachineLabel('chat o1')).toBe(true)
+    expect(isMachineLabel('chat Claude Sonnet 5.5 (Medium)')).toBe(true)
+  })
+
   it('does not classify human task descriptions, titles, or branch names as machine labels', () => {
     expect(isMachineLabel('Implement subagent hierarchy')).toBe(false)
     expect(isMachineLabel('Fix migration v20 column order')).toBe(false)

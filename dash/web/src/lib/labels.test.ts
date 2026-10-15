@@ -64,6 +64,16 @@ describe('formatModelLabel / formatSpanLabel', () => {
     expect(formatSpanLabel('claude_code.llm_request')).toBe('LLM request')
   })
 
+  it('keeps human labels that start with chat, and still filters model-shaped chat spans', () => {
+    expect(isMachineLabel('chat with team about launch')).toBe(false)
+    expect(isMachineLabel('Chat about 2 new features')).toBe(false)
+    expect(isMachineLabel('Chat kick-off meeting')).toBe(false)
+    expect(isMachineLabel('chat gpt-4o-mini-2024-07-18')).toBe(true)
+    expect(isMachineLabel('chat gpt-6-luna')).toBe(true)
+    expect(isMachineLabel('chat o1')).toBe(true)
+    expect(isMachineLabel('chat Claude Sonnet 5.5 (Medium)')).toBe(true)
+  })
+
   it('treats those placeholders as machine labels', () => {
     expect(isMachineLabel('claude:<synthetic>')).toBe(true)
     expect(isMachineLabel('Fix login')).toBe(false)

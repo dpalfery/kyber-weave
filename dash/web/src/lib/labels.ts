@@ -4,7 +4,13 @@ const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i
 const UUID_EXACT_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const SYNTH_PREFIX_RE = /^(?:synth|derived):[^:]+:/i
 const SPAN_OP_RE = /\.(?:llm_request|llm_invoke|generate|completion)$/i
-const CHAT_MODEL_RE = /^chat\s+\S+/i
+/**
+ * `chat <target>` is a span name only when the target looks like a model: its first token has
+ * `_ . : /`, a hyphen before a digit, or a letter and digit side by side (`gpt-4o-mini`,
+ * `gpt-6-luna`, `o1`), or it carries a version (`Claude Sonnet 5.5`). `chat with team about
+ * launch` is a human title. Keep in step with `src/canon/naming.ts` / `web/src/lib/labels.ts`.
+ */
+const CHAT_MODEL_RE = /^chat\s+(?:\S*(?:[_.:/]|-\d|[A-Za-z]\d|\d[A-Za-z])|.*\d\.\d)/i
 const UNSPECIFIED_MODEL_RE = /<(?:synthetic|unknown|unspecified)>|(?::|<)(?:synthetic|unknown)(?:>|$)/i
 
 const RATIO_DIMENSIONS = new Set([
