@@ -44,11 +44,14 @@ const REPO_KEYS = ['vcs.repository.name', 'repo'] as const
 const BRANCH_KEYS = ['vcs.ref.head.name', 'branch'] as const
 const MODEL_KEYS = ['gen_ai.response.model', 'gen_ai.request.model', 'model'] as const
 
+/** `invoke_agent`, optionally followed by a space or colon and a target; never `invoke_agent_foo`. */
+const INVOKE_AGENT_NAME_RE = /^invoke_agent(?:[ :]|$)/
+
 function isInvokeAgentSpan(record: CanonicalRecord): boolean {
   if (record.op === "agent.invoke") return true
   const opName = attributeOf(record, ["gen_ai.operation.name"])
   if (opName === "invoke_agent") return true
-  if (record.name.startsWith("invoke_agent")) return true
+  if (INVOKE_AGENT_NAME_RE.test(record.name)) return true
   const toolName = attributeOf(record, ["gen_ai.tool.name", "tool.name"])
   if (toolName === "invoke_agent") return true
   return false
@@ -191,13 +194,39 @@ function attributeOf(record: CanonicalRecord, keys: readonly string[]): string |
   return undefined
 }
 
+/** Epoch ms, or NaN when the timestamp is absent or unparseable. Absent is never the epoch. */
 function parseTimestamp(ts: string | Date | unknown): number {
   if (ts instanceof Date) return ts.getTime()
-  if (typeof ts === 'string') {
-    const parsed = Date.parse(ts)
-    if (Number.isFinite(parsed)) return parsed
-  }
+  if (typeof ts === 'string') return Date.parse(ts)
+  return Number.NaN
+}
+
+/** Ascending by time; records with no usable timestamp sort after every timed record. */
+function compareTimestamps(a: unknown, b: unknown): number {
+  const tA = parseTimestamp(a)
+  const tB = parseTimestamp(b)
+  const aOk = Number.isFinite(tA)
+  const bOk = Number.isFinite(tB)
+  if (aOk && bOk) return tA - tB
+  if (aOk) return -1
+  if (bOk) return 1
   return 0
+}
+
+/** First and last timestamps by time, ignoring records without a usable one. */
+function timestampBounds(records: readonly CanonicalRecord[]): {
+  started: string | Date
+  ended: string | Date
+} {
+  let min: CanonicalRecord['timestamp'] | undefined
+  let max: CanonicalRecord['timestamp'] | undefined
+  for (const record of records) {
+    const t = parseTimestamp(record.timestamp)
+    if (!Number.isFinite(t)) continue
+    if (min === undefined || t < parseTimestamp(min)) min = record.timestamp
+    if (max === undefined || t >= parseTimestamp(max)) max = record.timestamp
+  }
+  return { started: min ?? records[0]!.timestamp, ended: max ?? records[records.length - 1]!.timestamp }
 }
 
 function isClaudeHarness(harness: string): boolean {
@@ -729,11 +758,7 @@ export async function buildSessions(store: CanonStore): Promise<BuildSessionsRep
             ...invokeSpan,
             parentSpanId: null,
           }
-          const sortedDescendants = [...descendants].sort((a, b) => {
-            const tA = a.timestamp instanceof Date ? a.timestamp.getTime() : Date.parse(String(a.timestamp))
-            const tB = b.timestamp instanceof Date ? b.timestamp.getTime() : Date.parse(String(b.timestamp))
-            return (Number.isFinite(tA) ? tA : 0) - (Number.isFinite(tB) ? tB : 0)
-          })
+          const sortedDescendants = [...descendants].sort((a, b) => compareTimestamps(a.timestamp, b.timestamp))
           if (sortedDescendants.length > 0) {
             let earliest = rootInvokeSpan.timestamp
             for (const d of sortedDescendants) {
@@ -835,14 +860,22 @@ export async function buildSessions(store: CanonStore): Promise<BuildSessionsRep
                 preparedRecords[i] = { ...rec, parentSpanId: rootSpanId }
               }
             }
-            const earliestTimestamp = preparedRecords[0]!.timestamp
             const currentRoot = preparedRecords.find((r) => r.spanId === rootSpanId)!
-            if (parseTimestamp(earliestTimestamp) < parseTimestamp(currentRoot.timestamp)) {
-              currentRoot.timestamp = earliestTimestamp
+            // The true earliest of the records that carry a usable timestamp, not whichever
+            // record happens to be first; a root with no usable timestamp takes it as well.
+            const earliest = preparedRecords
+              .filter((r) => Number.isFinite(parseTimestamp(r.timestamp)))
+              .sort((a, b) => compareTimestamps(a.timestamp, b.timestamp))[0]
+            if (
+              earliest !== undefined &&
+              !(parseTimestamp(currentRoot.timestamp) <= parseTimestamp(earliest.timestamp))
+            ) {
+              currentRoot.timestamp =
+                earliest.timestamp instanceof Date ? new Date(earliest.timestamp) : earliest.timestamp
             }
           }
 
-          preparedRecords.sort((a, b) => parseTimestamp(a.timestamp) - parseTimestamp(b.timestamp))
+          preparedRecords.sort((a, b) => compareTimestamps(a.timestamp, b.timestamp))
 
           const agentName = extractClaudeAgentName(preparedRecords)
           const taskSummary = extractClaudeDescription(preparedRecords)
@@ -1177,8 +1210,7 @@ export function buildSessionRow(
   )
 
   const models = [...new Set(turnRecords.map((r) => attributeOf(r, MODEL_KEYS)).filter(Boolean))]
-  const started = records[0]!.timestamp
-  const ended = records[records.length - 1]!.timestamp
+  const { started, ended } = timestampBounds(records)
 
   let toolCalls: number | undefined = undefined
   let toolsInvoked: string[] | undefined = undefined
