@@ -29,11 +29,11 @@ standards: [`AGENTS.md`](AGENTS.md), [`docs/standards/`](docs/standards/README.m
 5. **Don't ask for scope creep.** Unrelated refactors, renames, and new features are
    out of bounds for a review. Equally, flag unrelated edits *in* the diff (see
    [Scope discipline](#scope-discipline)).
-6. **Style and wording nits are Trivial** and never block. Comment typos, capitalisation, and
+6. **Style and wording nits are minor** and never block. Comment typos, capitalisation, and
    alignment belong in a single batched note, not one comment each.
 7. **Severity follows consequence**: data loss, wrong figures shown to the user, silent failure,
-   or a crash path → Major. Wrong only in an edge case with a visible failure → Minor.
-   Cosmetic → Trivial.
+   or a crash path → critical when it ships silently or corrupts data, otherwise major. Wrong only
+   in an edge case with a visible failure → minor. Cosmetic → minor, and never blocks.
 
 ## Recurring defect classes
 
@@ -162,7 +162,7 @@ Governing rules: [display layer](docs/rules/kyberdash-display-layer.md),
 
 ### 9. .NET / C# renderers and tool catalogs
 
-Governing standards: [`docs/standards/csharp`](docs/standards/csharp) and the
+Governing standards: [`docs/standards/csharp`](docs/standards/csharp/README.md) and the
 `code-review` skill's C# reference.
 
 - Renderers must escape or quote values that can carry YAML/Markdown/JSON metacharacters
@@ -235,6 +235,7 @@ Governing standards: [`docs/standards/csharp`](docs/standards/csharp) and the
 | react / UI | 8 |
 | csharp / renderers | 9 |
 | ci / scripts | 7 |
+| every other lens | Ground rules and *What not to flag* only; take a section only when the diff touches its pattern |
 
 `task-reviewer` applies sections 1–3 and 10 to the task's own files and the section matching
 its paths; everything else is council-owned.
@@ -242,7 +243,7 @@ its paths; everything else is council-owned.
 ## Finding format
 
 ```text
-SEVERITY  Major | Minor | Trivial
+SEVERITY  critical | major | minor
 WHERE     <file>:<line> — quoted excerpt
 CLASS     <section number and name>
 FAILS     <input or state> → <wrong behaviour>
