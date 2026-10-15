@@ -1,0 +1,149 @@
+#!/usr/bin/env bash
+# Kyber-Weave Factory (Droid) Environment install: idempotent repo setup for the
+# .NET 10 engine, the KyberDash TypeScript surfaces, and the harness CLI/MCP/Squad
+# tooling. Mirrors .cursor/cloud-agent-install.sh for use as a Factory Environment
+# "Repository setup script" — runs in the repository directory after Factory's
+# global setup, so REPO_ROOT=cwd is correct.
+#
+# Factory Environment build semantics: "Build scripts run with Bash and stop on
+# command failures." This script therefore runs with `set -Eeuo pipefail` and
+# explicitly wraps best-effort network steps in `|| echo warn` rather than
+# silently swallowing them, so a real failure is visible in the build log.
+
+set -Eeuo pipefail
+
+REPO_ROOT="$(pwd)"
+
+# Droid Environments typically run scripts as root; tolerate non-root by routing
+# privileged writes through sudo. /opt/dotnet, /usr/local/bin, and npm's global
+# prefix all prefer root, so this lets the same script run in either case.
+is_root() { [ "$(id -u)" -eq 0 ]; }
+run_privileged() {
+  if is_root; then "$@"; else sudo "$@"; fi
+}
+
+export DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1
+export TERM=dumb NO_COLOR=1 COLUMNS=200 DEBIAN_FRONTEND=noninteractive
+LOG="${TMPDIR:-/tmp}/kyber-weave-droid-setup.log"
+
+log() { echo "[install] $*"; }
+
+# --- .NET 10 SDK (repo build/test) ------------------------------------------
+# Factory-managed sources ship without a usable .NET runtime, so install from the
+# scripts index that global.json's latestFeature roll-forward accepts. We use
+# /opt/dotnet rather than ~/.dotnet to keep the toolchain identifiable and the
+# PATH pin minimal for any MCP-launched process.
+if ! /opt/dotnet/dotnet --version >/dev/null 2>&1; then
+  log "installing .NET 10 SDK -> /opt/dotnet"
+  run_privileged mkdir -p /opt/dotnet
+  curl -fsSL https://dot.net/v1/dotnet-install.sh \
+    | bash -s -- --channel 10.0 --install-dir /opt/dotnet
+else
+  log ".NET SDK already present: $(/opt/dotnet/dotnet --version)"
+fi
+run_privileged ln -sf /opt/dotnet/dotnet /usr/local/bin/dotnet
+export PATH="/opt/dotnet:$PATH"
+
+# --- sqlite3 (docs drift reads the CodeGraph index via the CLI) -------------
+# Deliberate trade in AGENTS.md: the read-only adapter avoids
+# Microsoft.Data.Sqlite's unresolved advisory. Ubuntu's archive ships
+# libsqlite3-0; the CLI lives in a separate package.
+command -v sqlite3 >/dev/null 2>&1 || run_privileged apt-get install -y sqlite3
+
+# --- Node 24 (dash/.nvmrc: node:sqlite parity) ------------------------------
+# bash -lc passes NVM_DIR but nvm itself keys on the source-able script; source
+# it before checking which/nvm so the rest of the step is unconditional.
+export NVM_DIR="$HOME/.nvm"
+# shellcheck disable=SC1091
+if ! command -v nvm >/dev/null 2>&1; then
+  if [ ! -s "$NVM_DIR/nvm.sh" ]; then
+    log "installing nvm -> $NVM_DIR"
+    command -v curl >/dev/null 2>&1 || run_privileged apt-get install -y curl
+    command -v git  >/dev/null 2>&1 || run_privileged apt-get install -y git
+    run_privileged mkdir -p "$NVM_DIR"
+    curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
+  fi
+  # shellcheck disable=SC1091
+  . "$NVM_DIR/nvm.sh"
+fi
+NODE_VERSION="$(cat "$REPO_ROOT/dash/.nvmrc" 2>/dev/null || echo 24.21.0)"
+if ! nvm which "$NODE_VERSION" >/dev/null 2>&1; then
+  log "installing Node $NODE_VERSION"
+  nvm install "$NODE_VERSION"
+fi
+nvm alias default "$NODE_VERSION" >/dev/null
+nvm use "$NODE_VERSION" >/dev/null
+
+# Pin node/npm/npx/corepack links into ~/.local/bin. The MCP servers in
+# .factory/mcp.json are launched with PATH-from-shell, and the MCP launcher's
+# environment may not source nvm; ~/.local/bin sits ahead of /usr/bin on PATH
+# in both direct and login shells, so the absolute-path links win for every
+# command Droid runs.
+NODE_BIN="$(dirname "$(nvm which "$NODE_VERSION")")"
+mkdir -p "$HOME/.local/bin"
+for b in node npm npx corepack; do
+  [ -e "$NODE_BIN/$b" ] && ln -sf "$NODE_BIN/$b" "$HOME/.local/bin/$b"
+done
+export PATH="$HOME/.local/bin:$PATH"
+hash -r 2>/dev/null || true
+log "node: $(node --version)  npm: $(npm --version)  (via $(command -v node))"
+
+# --- .NET restore + pinned tools (ReSharper CLT for InspectCode) ------------
+dotnet tool restore
+dotnet restore KyberWeave.sln
+
+# --- KyberDash TypeScript deps (root + web dashboard) -----------------------
+# Node 24 picks up node:sqlite natively; the dash parse-workers and report
+# exit-codes need that parity, and the .tsbuildinfo cache is invalidated by
+# the rm below when global.json tooling changes.
+rm -f "$REPO_ROOT/dash/.tsbuildinfo" "$REPO_ROOT/dash/web/.tsbuildinfo" 2>/dev/null || true
+npm --prefix "$REPO_ROOT/dash" ci --no-audit --no-fund
+npm --prefix "$REPO_ROOT/dash/web" ci --no-audit --no-fund
+
+# --- Kyber-Weave CLI + MCP (latest RC) -> ~/.local/bin ----------------------
+CLI="$HOME/.local/bin/kyber-weave"
+if ! "$CLI" --version >/dev/null 2>&1; then
+  log "installing kyber-weave CLI + MCP (prerelease)"
+  curl -fsSL https://raw.githubusercontent.com/dpalfery/kyber-weave/main/scripts/install.sh \
+    | sh -s -- --prerelease --no-kyberdash --install-dir "$HOME/.local/bin" \
+        >>"$LOG" 2>&1 \
+    || log "kyber-weave install FAILED - see $LOG"
+else
+  log "kyber-weave CLI already present: $("$CLI" --version 2>/dev/null)"
+fi
+
+# --- CodeGraph MCP (code exploration + docs drift index) --------------------
+# Install under $HOME/.local so the binary path is known and stable; the Cursor
+# install relied on npm's default /usr/local prefix, which a non-root Droid
+# Environment cannot write. Re-running install must skip the symlink-from-self
+# branch, so resolve the global with ~/.local/bin pulled out of the lookup.
+CG_LINK="$HOME/.local/bin/codegraph"
+if ! command -v codegraph >/dev/null 2>&1; then
+  log "installing CodeGraph MCP into ~/.local"
+  npm i -g --prefix "$HOME/.local" @colbymchenry/codegraph >>"$LOG" 2>&1 \
+    || log "codegraph install FAILED - see $LOG"
+else
+  CG_REAL="$(PATH="$NODE_BIN:/usr/local/bin:/usr/bin:/bin" command -v codegraph 2>/dev/null || true)"
+  if [ -n "$CG_REAL" ] && [ "$CG_REAL" != "$CG_LINK" ]; then
+    ln -sf "$CG_REAL" "$CG_LINK"
+  fi
+fi
+"$CG_LINK" telemetry off >/dev/null 2>&1 || true
+if [ ! -f "$REPO_ROOT/.codegraph/codegraph.db" ]; then
+  log "building CodeGraph index"
+  "$CG_LINK" init "$REPO_ROOT" >>"$LOG" 2>&1 \
+    || log "codegraph init FAILED - see $LOG"
+fi
+
+# --- Kyber-Squad agents + skills for Factory Droid -> ~/.factory ------------
+# The global receipt lives under the .NET ApplicationData folder, which fails
+# every --global command when ~/.config does not exist yet. install creates a
+# fresh deployment; update refreshes an existing one and preserves any local
+# edits. squad status is no probe for "no deployment": it exits non-zero even
+# when installed.
+mkdir -p "${XDG_CONFIG_HOME:-$HOME/.config}"
+"$CLI" squad install "$HOME" --global --target factory </dev/null >>"$LOG" 2>&1 \
+  || "$CLI" squad update "$HOME" --global --target factory --replace-managed </dev/null >>"$LOG" 2>&1 \
+  || log "kyber-squad install FAILED - see $LOG"
+
+log "install complete"
