@@ -545,6 +545,8 @@ export interface KyberTurnContentResult {
     parts: Array<{ text: string; spanId?: string; turnIndex?: number; truncated?: boolean; totalLength?: number }>
     seenBefore: boolean
   } | null
+  /** The skills this turn listed and invoked; absent on a turn that predates the skills projection. */
+  skills?: KyberTurnSkillsEntry
 }
 
 export function fetchTurnContent(
@@ -1873,3 +1875,66 @@ export async function postKyberCapture(
   if (!res.ok) throw new KyberApiError(res.status, CAPTURE_PATH)
   return parseCaptureResult(await res.json().catch(() => null), res.status)
 }
+
+// ---------------------------------------------------------------------------
+// Skills (session payload section "4 · Skills")
+// ---------------------------------------------------------------------------
+
+/**
+ * A value the harness did not export. The reason is the harness's own
+ * explanation, shown verbatim; a panel never turns it into a 0 or an empty list.
+ */
+export type KyberSkillAvailability = {
+  availability: 'not_measurable'
+  reason: string
+}
+
+/** One skill from the session's `skills.rows`. `turns_listed` is 0-based transport indices. */
+export type KyberSkillRow = {
+  name: string
+  listed: boolean | KyberSkillAvailability
+  invocations: number | KyberSkillAvailability
+  turns_listed: number[]
+  /** Engine-derived token estimate; labelled as derived wherever it is shown. */
+  derived_tokens?: number
+}
+
+/** The session payload's `skills` block: measured rows, or a whole-block not-measurable verdict. */
+export type KyberSkillsBlock =
+  | {
+      measurable: true
+      /** Harness-reported aggregate for skill listings; absent when the harness did not report one. */
+      reported_skill_tokens?: number
+      /** Served count of skills listed to the agent; absent when not measured. The browser never counts rows. */
+      listed_count?: number
+      /** Served count of listed skills with no observed invocation; absent when not measured. */
+      listed_uninvoked_count?: number
+      rows: KyberSkillRow[]
+    }
+  | KyberSkillAvailability
+
+/**
+ * The skills fields the session summary carries. Each array is absent when
+ * that fact was not measured, and absence is never read as an empty list.
+ */
+export type KyberSkillsSummary = {
+  skills_listed?: string[] | null
+  skills_invoked?: string[] | null
+}
+
+/** One skill listed in a turn, with the listing text the harness exported (absent when not recorded). */
+export type KyberTurnSkillListing = {
+  name: string
+  text?: string
+}
+
+/**
+ * A turn's `skills` entry on the turn-content route. Either side may be a
+ * not-measurable verdict, and the whole entry may be one.
+ */
+export type KyberTurnSkillsEntry =
+  | {
+      listed: KyberTurnSkillListing[] | KyberSkillAvailability
+      invoked: string[] | KyberSkillAvailability
+    }
+  | KyberSkillAvailability

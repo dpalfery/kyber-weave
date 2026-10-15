@@ -1562,24 +1562,31 @@ describe('Detector 6: unbounded-delegation', () => {
 
 describe('Detector 7: inactive-skill-reference & Decision D16 Compliance', () => {
   it('flags skill prompt blocks in context with 0 executions as low confidence / heuristic', () => {
+    const listing = {
+      isInitial: true,
+      skills: [{ name: 'docker_deploy', description: 'Deploy containers to swarm' }],
+    }
     const turn1 = makeMockRecord({
       spanId: 'turn-skill-1',
       op: 'llm.invoke',
-      content: {
-        system_prompt: '<skill name="docker_deploy">Deploy containers to swarm</skill>',
-      },
+      raw: { 'kyber.skills.listed': listing },
     })
     const turn2 = makeMockRecord({
       spanId: 'turn-skill-2',
       op: 'llm.invoke',
-      content: {
-        system_prompt: '<skill name="docker_deploy">Deploy containers to swarm</skill>',
-      },
+      raw: { 'kyber.skills.listed': listing },
+    })
+    // Another skill is loaded; docker_deploy is listed and still never invoked.
+    const loadsOtherSkill = makeMockRecord({
+      spanId: 'call-write-file',
+      op: 'tool.invoke',
+      name: 'Skill',
+      parentSpanId: 'turn-skill-2',
+      raw: { arguments: { skill: 'write_file' } },
     })
 
     const findings = detectInactiveSkillReference({
-      records: [turn1, turn2],
-      executedSkills: ['read_file', 'write_file'],
+      records: [turn1, turn2, loadsOtherSkill],
     })
 
     expect(findings.length).toBe(1)
@@ -1592,25 +1599,73 @@ describe('Detector 7: inactive-skill-reference & Decision D16 Compliance', () =>
   })
 
   it('does NOT flag skills that were executed', () => {
+    const listing = {
+      isInitial: true,
+      skills: [{ name: 'build_artifact', description: 'Compile binaries' }],
+    }
     const turn1 = makeMockRecord({
       spanId: 'turn-skill-1',
       op: 'llm.invoke',
-      content: {
-        system_prompt: '<skill name="build_artifact">Compile binaries</skill>',
+      raw: { 'kyber.skills.listed': listing },
+    })
+    const loadsSkill = makeMockRecord({
+      spanId: 'call-build-artifact',
+      op: 'tool.invoke',
+      name: 'Skill',
+      parentSpanId: 'turn-skill-1',
+      raw: { arguments: { skill: 'build_artifact' } },
+    })
+
+    const findings = detectInactiveSkillReference({
+      records: [turn1, loadsSkill],
+    })
+
+    expect(findings.length, 'a listed skill loaded by a Skill call must not be flagged').toBe(0)
+  })
+
+  it('does NOT flag a listed skill that the invoked key reports as executed', () => {
+    const turn1 = makeMockRecord({
+      spanId: 'turn-skill-1',
+      op: 'llm.invoke',
+      raw: {
+        'kyber.skills.listed': {
+          isInitial: true,
+          skills: [{ name: 'build_artifact', description: 'Compile binaries' }],
+        },
+        'kyber.skills.invoked': ['build_artifact'],
       },
     })
 
-    const findings = detectInactiveSkillReference({
-      records: [turn1],
-      executedSkills: ['build_artifact'],
+    const findings = detectInactiveSkillReference({ records: [turn1] })
+
+    expect(findings.length, 'the raw invoked key reports build_artifact as executed').toBe(0)
+  })
+
+  it('flags the same listed skill when nothing invokes it, so the invoked cases above have teeth', () => {
+    const turn1 = makeMockRecord({
+      spanId: 'turn-skill-1',
+      op: 'llm.invoke',
+      raw: {
+        'kyber.skills.listed': {
+          isInitial: true,
+          skills: [{ name: 'build_artifact', description: 'Compile binaries' }],
+        },
+      },
     })
 
-    expect(findings.length).toBe(0)
+    const findings = detectInactiveSkillReference({ records: [turn1] })
+
+    expect(t4FlaggedSkills(findings), 'the same listing without an invocation must be flagged').toEqual([
+      'build_artifact',
+    ])
   })
 
   it('does NOT fabricate 120 tokens when skill-block size cannot be derived, marking estimatedWasteTokens undefined and measurementClass coverage-gap', () => {
+    // One recorded turn makes the finding attributable; the expectations below are unchanged.
+    const recordedTurn = makeMockRecord({ spanId: 'turn-fabricate-1', op: 'llm.invoke', sessionId: 'session-1' })
     const findings = detectInactiveSkillReference({
       sessionId: 'session-1',
+      records: [recordedTurn],
       referencedSkills: ['docker_deploy'],
       executedSkills: [],
     })
@@ -1624,15 +1679,19 @@ describe('Detector 7: inactive-skill-reference & Decision D16 Compliance', () =>
   })
 
   it('multiplies a measured skill-block size across resident turns', () => {
+    const listing = {
+      isInitial: true,
+      skills: [{ name: 'docker_deploy', description: 'Deploy containers to swarm' }],
+    }
     const turn1 = makeMockRecord({
       spanId: 'turn-skill-1',
       op: 'llm.invoke',
-      content: { system_prompt: '<skill name="docker_deploy">Deploy containers to swarm</skill>' },
+      raw: { 'kyber.skills.listed': listing },
     })
     const turn2 = makeMockRecord({
       spanId: 'turn-skill-2',
       op: 'llm.invoke',
-      content: { system_prompt: '<skill name="docker_deploy">Deploy containers to swarm</skill>' },
+      raw: { 'kyber.skills.listed': listing },
     })
 
     const findings = detectInactiveSkillReference({
@@ -1785,7 +1844,8 @@ describe('Decision D8 Recommendation Relocation Lint', () => {
           spanId: 't1',
           op: 'llm.invoke',
           parts: [{ part: 'tool_definitions', text: JSON.stringify([{ name: 'unused' }]) }],
-          content: { system_prompt: '<skill name="unused_skill">foo</skill>' },
+          content: { system_prompt: 'foo' },
+          raw: { 'kyber.skills.listed': { isInitial: true, skills: [{ name: 'unused_skill' }] } },
           tokens: { freshInput: 185_000, cacheRead: 0, cacheCreation: 0, output: 50, reportedInput: 185_000, reportedOutput: 50 },
         }),
         makeMockRecord({
@@ -1825,6 +1885,320 @@ describe('Decision D8 Recommendation Relocation Lint', () => {
       const lint = lintRecommendationD8(finding.recommendation)
       expect(lint.valid).toBe(true)
       expect(lint.errors).toEqual([])
+    }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// T4 RED: inactive-skill-reference takes its listed and invoked sets from canon/skills.ts.
+// Today it reads referenced skills from `<skill name=...>` system-prompt regexes (no adapter
+// writes them) and credits executed skills from TOOL NAMES, so a Skill tool call credits a
+// skill called "Skill" and never the skill it loads.
+//
+// Inputs assumed (the minimal contract these tests pin):
+//   - listing: raw['kyber.skills.listed'] = { isInitial, skills: [{ name, description? }] }
+//     on the llm.invoke turn, read per record by extractListedSkills.
+//   - invocation: a tool.invoke named `Skill` whose raw.arguments.skill names the loaded skill,
+//     parentSpanId = the turn; and raw['kyber.skills.invoked'] string[] on a record.
+//   - entry point: detectInactiveSkillReference({ records }) and detectFindings({ records }).
+// ---------------------------------------------------------------------------
+
+const T4_DOCS_AND_LINT_LISTING = {
+  isInitial: true,
+  skills: [
+    { name: 'docs', description: 'Project documentation conventions' },
+    { name: 'lint', description: 'Lint and format a changed file' },
+  ],
+}
+
+/** Words the D15/D16 relocation-over-deletion rule keeps out of a skill finding. */
+const T4_DELETION_WORDING = /\b(?:delet\w*|remov\w*|prun\w*|wast\w*|drop|erase\w*)\b/gi
+
+/** The skill names flagged by inactive-skill-reference, read from the finding titles. */
+function t4FlaggedSkills(findings: readonly Finding[]): string[] {
+  return findings
+    .filter((finding) => finding.detectorId === 'inactive-skill-reference')
+    .map((finding) => /Skill "([^"]+)"/.exec(finding.title)?.[1] ?? finding.title)
+    .sort()
+}
+
+describe('Detector 7 (T4 RED): inactive-skill-reference from the listed and invoked sets', () => {
+  it('credits the skill a Skill tool call loads and flags only the listed skill never invoked', () => {
+    const records = [
+      makeMockRecord({ spanId: 'turn-1', op: 'llm.invoke', raw: { 'kyber.skills.listed': T4_DOCS_AND_LINT_LISTING } }),
+      makeMockRecord({ spanId: 'turn-2', op: 'llm.invoke', raw: { 'kyber.skills.listed': T4_DOCS_AND_LINT_LISTING } }),
+      makeMockRecord({
+        spanId: 'call-1',
+        op: 'tool.invoke',
+        name: 'Skill',
+        parentSpanId: 'turn-1',
+        raw: { arguments: { skill: 'docs' } },
+      }),
+    ]
+
+    const findings = detectInactiveSkillReference({ records })
+
+    expect(
+      t4FlaggedSkills(findings),
+      'docs was loaded by the Skill call; lint was listed and never invoked; no skill may be named Skill',
+    ).toEqual(['lint'])
+  })
+
+  it('treats a raw kyber.skills.invoked entry as an invocation, so that skill is not flagged', () => {
+    const records = [
+      makeMockRecord({
+        spanId: 'turn-1',
+        op: 'llm.invoke',
+        raw: { 'kyber.skills.listed': T4_DOCS_AND_LINT_LISTING, 'kyber.skills.invoked': ['docs'] },
+      }),
+    ]
+
+    const findings = detectInactiveSkillReference({ records })
+
+    expect(t4FlaggedSkills(findings), 'docs is reported invoked by the raw key').toEqual(['lint'])
+  })
+
+  it('gives the listed-but-never-invoked skill heuristic (low) confidence', () => {
+    const records = [
+      makeMockRecord({ spanId: 'turn-1', op: 'llm.invoke', raw: { 'kyber.skills.listed': T4_DOCS_AND_LINT_LISTING } }),
+      makeMockRecord({
+        spanId: 'call-1',
+        op: 'tool.invoke',
+        name: 'Skill',
+        parentSpanId: 'turn-1',
+        raw: { arguments: { skill: 'docs' } },
+      }),
+    ]
+
+    const lint = detectInactiveSkillReference({ records }).find((finding) => finding.title.includes('"lint"'))
+
+    expect(lint, 'lint is listed and never invoked, so it must be flagged').toBeDefined()
+    expect(lint?.confidence, 'D16: skill activation is inferred, so confidence is low').toBe('heuristic')
+  })
+
+  it('ranks the uninvoked listed skill last, with no deletion or removal wording (D15/D16)', () => {
+    const records = [
+      makeMockRecord({ spanId: 'turn-1', op: 'llm.invoke', raw: { 'kyber.skills.listed': T4_DOCS_AND_LINT_LISTING } }),
+      makeMockRecord({
+        spanId: 'call-1',
+        op: 'tool.invoke',
+        name: 'Skill',
+        parentSpanId: 'turn-1',
+        raw: { arguments: { skill: 'docs' } },
+      }),
+    ]
+
+    const ranked = detectFindings({
+      records,
+      unboundedDelegation: { rootTokens: 10_000, subagentTokens: 90_000 },
+    })
+
+    const skill = ranked.find((finding) => finding.detectorId === 'inactive-skill-reference')
+    expect(skill, 'lint must be flagged before its rank can be judged').toBeDefined()
+
+    expect(
+      ranked.some((finding) => finding.detectorId !== 'inactive-skill-reference'),
+      'a competing finding must exist, or last place proves nothing',
+    ).toBe(true)
+    expect(ranked[ranked.length - 1]?.detectorId, 'D16: the skill finding ranks last').toBe('inactive-skill-reference')
+
+    if (skill) {
+      const wording = [
+        skill.title,
+        skill.mechanism,
+        skill.recommendation,
+        skill.outcomeRiskCaveat,
+        skill.confidenceBasis,
+        skill.whatWouldRaiseIt,
+        ...skill.evidenceLinks.map((link) => link.description),
+      ].join(' ')
+      expect(wording.match(T4_DELETION_WORDING) ?? [], 'deletion or removal phrasing in the skill finding').toEqual([])
+      expect(lintRecommendationD8(skill.recommendation).valid, skill.recommendation).toBe(true)
+    }
+  })
+
+  it.each(['pi', 'opencode', 'unknown-harness'])(
+    'raises no inactive-skill finding for %s, which exports no measurable skill listing',
+    (harness) => {
+      const records = [
+        makeMockRecord({
+          spanId: 'turn-1',
+          op: 'llm.invoke',
+          harness,
+          content: { system_prompt: '<skill name="docs">Docs</skill>' },
+        }),
+        makeMockRecord({
+          spanId: 'call-1',
+          op: 'tool.invoke',
+          name: 'Skill',
+          harness,
+          parentSpanId: 'turn-1',
+          raw: { arguments: { skill: 'docs' } },
+        }),
+      ]
+
+      const findings = detectInactiveSkillReference({ records })
+
+      expect(t4FlaggedSkills(findings), `${harness} has no listing source, so nothing may be flagged`).toEqual([])
+    },
+  )
+})
+
+// ---------------------------------------------------------------------------
+// T4 RED (review pass 1): an unmeasured listed-never-invoked skill must say only what is
+// observed. Without a measured size (no skillTokens entry), the finding may state that the
+// skill was LISTED, that the session has 0 invocations, and how many turns were RECORDED.
+// It must not claim the skill's instruction block was resident in prompt context, and it
+// must not invent turns (no minimum of three in this branch). Token-residency wording belongs
+// only to the measured branch, where skillTokens supplies a size.
+// ---------------------------------------------------------------------------
+
+const T4_RESIDENCY_CLAIM = /resident|remained|loaded|prompt context|instruction block|skill body|in context/i
+
+const T4_LINT_LISTING = {
+  isInitial: true,
+  skills: [{ name: 'lint', description: 'Lint and format a changed file' }],
+}
+
+/** `count` llm.invoke turns, each carrying the lint listing and no invocation. */
+function t4ListedTurns(count: number): CanonicalRecord[] {
+  return Array.from({ length: count }, (_, index) =>
+    makeMockRecord({
+      spanId: `turn-listed-${index}`,
+      op: 'llm.invoke',
+      raw: { 'kyber.skills.listed': T4_LINT_LISTING },
+    }),
+  )
+}
+
+/** The unmeasured lint finding, or undefined when none is raised. */
+function t4LintFinding(records: readonly CanonicalRecord[]): Finding | undefined {
+  return detectInactiveSkillReference({ records }).find(
+    (finding) => finding.detectorId === 'inactive-skill-reference' && finding.title.includes('"lint"'),
+  )
+}
+
+describe('Detector 7 (T4 RED review pass 1): unmeasured skill finding states only what is observed', () => {
+  it('makes no residency claim in the title, mechanism or evidence when the skill size is unmeasured', () => {
+    const finding = t4LintFinding(t4ListedTurns(1))
+    expect(finding, 'lint is listed and never invoked, so it must be flagged').toBeDefined()
+
+    const text = finding
+      ? [finding.title, finding.mechanism, ...finding.evidenceLinks.map((link) => link.description)].join(' | ')
+      : ''
+    expect(
+      text.match(T4_RESIDENCY_CLAIM) ?? [],
+      'unmeasured size: the finding must say listed and not invoked, not that the instruction block was resident in context',
+    ).toEqual([])
+  })
+
+  it('states listed, 0 invocations and the actual recorded turn count in the mechanism, with the last evidence on turn 0', () => {
+    const finding = t4LintFinding(t4ListedTurns(1))
+    expect(finding, 'lint is listed and never invoked, so it must be flagged').toBeDefined()
+
+    expect(finding?.mechanism ?? '', 'the mechanism must say the skill was listed').toMatch(/listed/i)
+    expect(finding?.mechanism ?? '', 'the mechanism must state 0 invocations').toMatch(/0 invocations/)
+    expect(finding?.mechanism ?? '', 'one recorded turn must be reported as 1, not 3').toMatch(/\b1 recorded turn\b/)
+    expect(finding?.evidenceLinks.at(-1)?.turnIndex, 'the last evidence turn is the only recorded turn').toBe(0)
+  })
+
+  it('counts the real recorded turns, not a minimum of three, in the mechanism and the evidence', () => {
+    const finding = t4LintFinding(t4ListedTurns(2))
+    expect(finding, 'lint is listed and never invoked, so it must be flagged').toBeDefined()
+
+    expect(finding?.mechanism ?? '', 'two recorded turns must be reported as 2').toMatch(/\b2 recorded turns\b/)
+    expect(finding?.mechanism ?? '', 'no turns may be invented to reach three').not.toMatch(/\b3 turns\b/)
+    expect(finding?.evidenceLinks.at(-1)?.turnIndex, 'the last evidence turn is the second recorded turn').toBe(1)
+  })
+
+  it('frames the unmeasured case as measuring the listed skill context size, not as unused cost or waste', () => {
+    const finding = t4LintFinding(t4ListedTurns(1))
+    expect(finding, 'lint is listed and never invoked, so it must be flagged').toBeDefined()
+
+    const wouldRaise = finding?.whatWouldRaiseIt ?? ''
+    expect(wouldRaise, 'whatWouldRaiseIt must not frame the listing as unused cost or waste').not.toMatch(
+      /unused|waste|cost of|delete|remove|prune|drop|erase/i,
+    )
+    expect(wouldRaise, 'whatWouldRaiseIt must name measuring the listed skill context size').toMatch(
+      /context size of the listed skill/i,
+    )
+  })
+})
+
+// ---------------------------------------------------------------------------
+// T4 RED (PR #351 finding 3): with zero recorded turns nothing is attributable. The detector
+// must emit no finding rather than synthetic evidence span ids (turn-skill-inject-0,
+// turn-skill-uncalled-N) that point at no span. The max(turns, 3) floor in the measured
+// branch is unchanged; this pins only the zero-turn case.
+// ---------------------------------------------------------------------------
+
+describe('Detector 7 (T4 RED PR #351 finding 3): no finding without recorded turns', () => {
+  it('emits no finding for explicit referenced skills when there are no records', () => {
+    const findings = detectInactiveSkillReference({ referencedSkills: ['x'], executedSkills: [] })
+
+    expect(findings, 'with no recorded turn there is no span to carry the evidence').toEqual([])
+  })
+
+  it('emits no finding for explicit referenced skills with a measured size when there are no records', () => {
+    const findings = detectInactiveSkillReference({
+      referencedSkills: ['x'],
+      executedSkills: [],
+      skillTokens: { x: 50 },
+    })
+
+    expect(findings, 'a measured size does not create turns to attribute the skill to').toEqual([])
+  })
+
+  it('emits no finding from a listing carried only by a rollup span with no model turns (documented guard)', () => {
+    // Passes today for the right output: with no explicit skills and no llm.invoke prompt, the
+    // detector has no referenced skill to attribute, so the zero-turn fallback is never reached.
+    const records = [
+      makeMockRecord({
+        spanId: 'rollup-1',
+        op: 'agent.invoke',
+        name: 'agent',
+        harness: 'copilot',
+        raw: { 'kyber.skills.listed': T4_LINT_LISTING },
+      }),
+    ]
+
+    const findings = detectInactiveSkillReference({ records })
+
+    expect(findings, 'a rollup with no llm.invoke turn has no turn to attribute the listing to').toEqual([])
+  })
+
+  it('emits no finding for an explicit skill when the only recorded span is a Copilot rollup with a listing', () => {
+    // Reaches the zero-turn fallback today: the explicit skill makes a finding, and no turn exists.
+    const records = [
+      makeMockRecord({
+        spanId: 'rollup-copilot-1',
+        op: 'agent.invoke',
+        name: 'invoke_agent',
+        harness: 'copilot',
+        raw: { 'github.copilot.context.skills': '["lint"]' },
+      }),
+    ]
+
+    const findings = detectInactiveSkillReference({
+      records,
+      referencedSkills: ['lint'],
+      executedSkills: [],
+    })
+
+    expect(findings, 'a rollup span is not a model turn, so the finding has nothing to cite').toEqual([])
+  })
+
+  it('keeps the finding for a listed, never-invoked skill when turns are recorded, citing only real span ids', () => {
+    const records = t4ListedTurns(2)
+
+    const findings = detectInactiveSkillReference({ records })
+
+    expect(t4FlaggedSkills(findings), 'lint is listed and never invoked across two recorded turns').toEqual(['lint'])
+    const recordedSpanIds = new Set(records.map((record) => record.spanId))
+    const finding = findings[0]
+    expect(finding?.evidenceLinks.length, 'the finding keeps its evidence links').toBeGreaterThan(0)
+    for (const link of finding?.evidenceLinks ?? []) {
+      expect(recordedSpanIds.has(link.spanId), `evidence span ${link.spanId} must be a recorded span`).toBe(true)
     }
   })
 })

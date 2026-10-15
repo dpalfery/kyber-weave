@@ -1,0 +1,17 @@
+<available_skills>
+<skill>
+  <name>app-docs-standard</name>
+  <description>Apply the repository documentation standard when creating or updating application, service, tool, or system documentation.</description>
+  <location>project</location>
+</skill>
+<skill>
+  <name>architecture-decision-record</name>
+  <description>Capture an architectural decision as an ADR once it has been reached — a choice that constrains future work, had viable alternatives that were rejected, and would be expensive to revisit. Use when a design discussion has converged on such a decision, when the user asks for an ADR, or when a decision needs superseding. Do NOT use for reversible implementation choices, library picks with no lasting constraint, or to minute a discussion that has not concluded.</description>
+  <location>project</location>
+</skill>
+<skill>
+  <name>azure-cli</name>
+  <description>use the Azure CLI to interact with Azure resources.</description>
+  <location>project</location>
+</skill>
+</available_skills>

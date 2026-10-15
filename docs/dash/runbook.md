@@ -6,7 +6,7 @@ status: current
 component: KyberDash
 source-root: dash
 owner: dpalfery
-last-reviewed: 2026-10-11
+last-reviewed: 2026-10-14
 code-refs:
   - registerKyberCommands
   - refreshHarnessSources
@@ -439,6 +439,41 @@ non-GET method, and 400 `{ error: 'Missing span id' }` for an empty id. A row th
 payload column reads `rawPayload: null, evidenceAvailable: false` — never an invented packet.
 The quarantine **list** stays light and never serves payloads.
 
+### 2g. Skills view: rebuild and capture fixtures
+
+The Sessions **4 · Skills** section reads the `skills` block of the session payload. That block
+is built on projection and stored in the derived `session` row
+([skills view contract](architecture.md#skills-view-contract)). The skills work set
+`DETECTOR_VERSION` to **4** (`dash/src/canon/store.ts`). A store stamped with generation **3**
+reports its findings as outdated until they are rebuilt. A session row stored before the change
+has no `skills` key, so it renders "not yet projected".
+
+Run the rebuild once against the store:
+
+```bash
+node dash/dist/cli.js kyber build --db ~/.kyberdash/canon.db
+```
+
+`kyber build` re-projects the derived rows from the stored records, so the `skills` block and
+the new finding stamps are written without re-ingesting. It cannot add data that the stored
+records never held. The Claude `skill_listing` listing (`kyber.skills.listed`) and the invoked
+names (`kyber.skills.invoked`) reach a record only when `dash refresh` re-synthesizes its unit,
+which the parser-contract bumps trigger for the affected harnesses. Whether older sessions gain
+those attributes after a refresh is **unverified**. Prefer a temporary `--db` when you want to
+validate before touching the live store:
+
+```bash
+node dash/dist/cli.js kyber build --db /tmp/canon.db
+```
+
+**Capture fixtures.** The sanitized G0 captures live in `dash/src/canon/fixtures/skills/<harness>/`,
+one folder for each of `claude-code`, `copilot-chat`, `copilot-cli`, `antigravity`, `pi`, and
+`opencode`. Each folder has a README stating what was found or not found. The `copilot-cli`,
+`pi`, and `opencode` folders hold only the README, because the owner's store had no separate
+Copilot CLI, Pi, or OpenCode skill records. The captures are sanitized: ids, paths, and timestamps
+are replaced. The Claude `skill_listing` parser test reads `claude-code/capture-listing.jsonl`.
+The per-harness status is in the [telemetry inventory](telemetry-inventory.md#skill-availability-by-harness).
+
 ### 3. Raw Content Backfill and Re-normalization
 
 ```bash
@@ -705,7 +740,16 @@ filters, so narrowing one page's scope never touches the A/B selectors.
   - *Per-Turn Spend Chart (`SessionSpendCharts`)*: Stacked token breakdown per turn (fresh input, cache read, cache creation, output).
   - *Context Composition Heatmap & Chart*: Semantic token distribution by part type (`system_prompt`, `instruction_context`, `tool_definitions`, `conversation_history`, `tool_result_content`, `residual`).
   - *Tool & Schema Cost Table*: Ranked tool schema sizes, resident turns, invocations, and unused schema waste range.
-  - *Execution Timeline / Call Tree*: Hierarchical span call tree with duration, status badges, and auxiliary flags.
+  - *Skills (`4 · Skills`)*: Two tiles (skills listed, skills invoked) and a headline,
+    "X of Y listed skills had no observed invocation", rendered from the served counts. The
+    headline reads "not measurable" when either count is absent and is hidden when there are
+    no skill rows. Each row shows listed and invoked badges, the turns listed (1-based), and
+    derived tokens labelled as derived. A "Not measurable" card shows the reason when a side is
+    unmeasured. Clicking a row opens a drawer with the listed and invoked state and the listing
+    text for the first turn listed. Per-harness availability is in the
+    [telemetry inventory](telemetry-inventory.md#skill-availability-by-harness); the payload is in
+    the [skills view contract](architecture.md#skills-view-contract).
+  - *Execution Timeline / Call Tree* (`5 · Execution Timeline`): Hierarchical span call tree with duration, status badges, and auxiliary flags.
   - *Inspector Drawer (`SessionInspectorDrawer`)*: Slide-out drawer with XML tag folding (`<instructions>`, `<environment_info>`, `<context>`) and formatted tool call/result trees.
 - **Compare**: Phase-aligned run comparison (`page-compare`), reached from the top
   navigation or its own URL. Navigate directly to
