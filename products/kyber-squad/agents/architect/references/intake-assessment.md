@@ -2,6 +2,10 @@
 
 Assess a todo or open request without creating a delivery artifact. The conductor uses this digest to help the user choose the path.
 
+## Intent check
+
+Before classifying, check whether the packet already states the user's choice of plan or spec. If it does, do not assess: return `STATUS: BLOCKED` naming that the conductor should dispatch Draft plan creation instead. If it is a defect report, say so in `RATIONALE` and recommend the conductor use `bug-crusher-investigator`.
+
 ## Classification
 
 Recommend **PLAN** when the work is a bounded change or smaller feature in an existing product and the requirements and architecture are established enough to decompose directly.

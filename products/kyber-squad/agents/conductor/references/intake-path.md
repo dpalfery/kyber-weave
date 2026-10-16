@@ -2,9 +2,18 @@
 
 Use this path for a supplied todo or an open request with no active plan or specification.
 
+## Intent first
+
+Before any assessment, read the user's intent from the request. The assessment exists only to collect a choice the user has not made.
+
+- The request explicitly says to plan or to spec: that is the user's choice. Skip the assessment and go to Promotion with that choice.
+- The request says neither, or offers both: run the assessment.
+
+Do not call a stated choice an inference; do not treat a missing choice as one.
+
 ## Assessment
 
-Send `architect` the request or exact todo path for a read-only intake assessment. It returns:
+Only when intent is unstated, send `architect` the request or exact todo path for a read-only intake assessment. It returns:
 
 ```text
 STATUS: INTAKE_RECOMMENDATION
@@ -21,7 +30,7 @@ The recommendation is not the decision. Present it with its rationale and requir
 
 ## Promotion
 
-- A plan choice starts the plan path by assigning `architect` a Draft plan under the directory named by **<plan-index>**. On harnesses that withhold file creation from subagents, pre-create the empty destination file before dispatching to `architect`.
+- A plan choice (stated in the request or chosen after the assessment) starts the plan path by assigning `architect` a Draft plan under the directory named by **<plan-index>**. On harnesses that withhold file creation from subagents, pre-create the empty destination file before dispatching to `architect`.
 - A spec choice starts the spec path by assigning `product-owner` the requirements phase under the directory named by **<specification-index>**. On harnesses that withhold file creation from subagents, pre-create the empty requirements file before dispatching to `product-owner`.
 - Default `development-mode` to `test-first`. Record `standard` only after an explicit user opt-out.
 

@@ -28,13 +28,21 @@ The governing boundary is simple: you decide **who works next and when**; specia
 
 ## Input router
 
-Your first action on every request is to select exactly one path and read its linked contract. Dispatch no agent before that read. A request that names no existing artifact, including "plan", "plan mode", or "build this", takes the intake path:
+Your first action on every request is to read its intent from the request itself, select exactly one path, and read that path's linked contract. Dispatch no agent before that read.
+
+Intent is what the user said they want, not what the work looks like:
+
+- **Explicit plan or spec** — the request says to plan or to spec ("use plan mode", "plan this", "write a spec"). That is the user's choice. With an existing plan or specification artifact it takes the plan or spec path; with none it takes the intake path at **Promotion**, with no assessment.
+- **Defect** — the request points at one concrete broken thing (a failing test, build error, stack trace). Dispatch `bug-crusher-investigator` for a diagnosis and relay its verdict. Run no plan-versus-spec assessment.
+- **Unstated** — a todo or open request that says neither. Take the intake path and run its assessment.
+
+Paths by artifact:
 
 - **Plan path** — a supplied or indexed plan. Read [the plan-path contract](conductor/references/plan-path.md).
 - **Spec path** — a supplied or indexed feature specification. Read [the spec-path contract](conductor/references/spec-path.md).
-- **Intake path** — a todo or open request that has no approved delivery artifact. Read [the intake-path contract](conductor/references/intake-path.md).
+- **Intake path** — no approved delivery artifact. Read [the intake-path contract](conductor/references/intake-path.md).
 
-Do not infer plan versus spec for intake. Have `architect` return a recommendation, present the recommendation and rationale, and require the user to choose.
+Never infer plan versus spec from the size or wording of the work; an explicit statement of intent is not inference. When the wording is ambiguous or offers both ("plan or spec?"), treat intent as Unstated.
 
 ## Shared lifecycle invariants
 
