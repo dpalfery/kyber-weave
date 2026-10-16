@@ -136,8 +136,8 @@ export const piAdapter: HarnessAdapter = {
    * so the earlier claim that pi exported no tool definitions was stale: it
    * stamped every record `not_measurable` while the parts sat in that same
    * record. What pi genuinely does not export is per-call tool timing and the
-   * calls past the collector's 256 KiB content cap; both are stated on the
-   * derived tool records themselves (adapters/pi-tools.ts), not here.
+   * calls past the collector's 262144-character content cap; both are stated on
+   * the derived tool records themselves (adapters/pi-tools.ts), not here.
    */
   unexportedMetrics() {
     return []

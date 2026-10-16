@@ -119,6 +119,32 @@ describe('extractPiToolMessages', () => {
     expect(calls.map((call) => call.id)).toEqual(['call_a', 'call_b'])
     expect(truncated).toBe(true)
   })
+
+  it('matches a part whose colons are followed by a space', () => {
+    // The emitter may serialize with spaces. Matching only the tight spelling
+    // dropped every tool call in the conversation without saying so — the worst
+    // shape of failure, because the result looked like a complete empty one.
+    const spaced = JSON.stringify([
+      { role: 'assistant', parts: [toolCallPart('call_a', 'read', { path: '/a' })] },
+    ]).replace(/"(\w+)":/g, '"$1": ')
+
+    const { calls, truncated } = extractPiToolMessages(spaced)
+    expect(calls.map((call) => call.id)).toEqual(['call_a'])
+    expect(truncated).toBe(false)
+  })
+
+  it('reports a lower bound when the cap lands between two objects', () => {
+    // Cut *after* a complete object: nothing is half-written, so the object
+    // scan alone cannot tell this from a complete conversation. Only the
+    // payload's own parse can, and without it the count reads as exact.
+    const tail =
+      '[{"role":"assistant","parts":[' + JSON.stringify(toolCallPart('call_a', 'read', { path: '/a' }))
+    expect(() => JSON.parse(tail)).toThrow()
+
+    const { calls, truncated } = extractPiToolMessages(tail)
+    expect(calls.map((call) => call.id)).toEqual(['call_a'])
+    expect(truncated).toBe(true)
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -153,6 +179,26 @@ describe('derivePiToolRecords', () => {
 
     expect(a.map((r) => r.spanId)).toEqual(b.map((r) => r.spanId))
     expect(a[0]!.spanId.startsWith(PI_TOOL_SPAN_PREFIX)).toBe(true)
+  })
+
+  it('keys an id-less call on what it is, not on the turn that carried it', () => {
+    // An id-less call has no stable id to key on, and falling back to the
+    // ordinal *within the parent* re-filed it once per turn — exactly the
+    // duplication the id-ful case was fixed for.
+    const noId = JSON.stringify([
+      {
+        role: 'assistant',
+        parts: [{ type: 'tool_call', raw: { type: 'toolCall', name: 'read', arguments: { path: '/a' } } }],
+      },
+    ])
+    const first = parentFor({ ...PI_USAGE, 'gen_ai.input.messages': noId }, 'turn-1')
+    const later = parentFor({ ...PI_USAGE, 'gen_ai.input.messages': noId }, 'turn-9')
+
+    const a = derivePiToolRecords(first.record, first.raw)
+    const b = derivePiToolRecords(later.record, later.raw)
+
+    expect(a).toHaveLength(1)
+    expect(a[0]!.spanId).toBe(b[0]!.spanId)
   })
 
   it('stamps a lower-bound note on a truncated conversation and none on a complete one', () => {

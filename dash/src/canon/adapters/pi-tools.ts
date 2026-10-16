@@ -48,11 +48,15 @@ export type PiToolScan = {
 /**
  * Recover the `tool_call` and `tool_result` pieces from a Pi conversation.
  *
- * Once the conversation passes the collector's cap the text is no longer
- * valid JSON, so a whole-string `JSON.parse` cannot be used. Anchoring on the
- * part marker (`{"type":"tool_call","raw":{`) rather than the bare type
- * string, then brace-matching from there, recovers every object written in
- * full and stops honestly at the first one that was not. Escaped quotes inside
+ * The extraction is marker-anchored rather than a whole-string parse: past the
+ * collector's cap the text is no longer valid JSON, so a whole-string
+ * `JSON.parse` could not be used to read it. Anchoring on the part marker and
+ * brace-matching from there recovers every object written in full and stops
+ * honestly at the first one that was not — and whitespace after a colon is
+ * tolerated, so a payload that emits `{"type": "tool_call", …}` is not misread
+ * as a conversation with no tool calls at all. Completeness is decided
+ * separately, by the whole-payload parse below, because a cut that lands
+ * *between* two objects leaves no half object behind to notice. Escaped quotes inside
  * result text, and the words `tool_call` / `tool_result` inside a result,
  * cannot be mistaken for a real part: inside a JSON string the quotes are
  * escaped, so the unescaped marker can only be a part boundary.
@@ -62,9 +66,13 @@ export function extractPiToolMessages(messages: string): PiToolScan {
   const results: ReaderToolResult[] = []
   let truncated = false
 
-  // Optional whitespace after `"raw":` tolerates a pretty-printed variant of
-  // the collector's payload without weakening the anchor.
-  const marker = /\{"type":"(tool_call|tool_result)","raw":\s*\{/g
+  // Whitespace is tolerated after every colon, not only after `"raw":`. A
+  // payload that emits `{"type": "tool_call", "raw": {…}}` is the same part,
+  // and matching only the tight spelling dropped every tool call in the
+  // conversation without ever saying so. The anchor is still the unescaped
+  // marker, which inside a JSON string cannot appear — the quotes are escaped
+  // there — so it can only be a part boundary.
+  const marker = /\{\s*"type"\s*:\s*"(tool_call|tool_result)"\s*,\s*"raw"\s*:\s*\{/g
   let match: RegExpExecArray | null
   while ((match = marker.exec(messages)) !== null) {
     const kind = match[1]
@@ -96,7 +104,22 @@ export function extractPiToolMessages(messages: string): PiToolScan {
     marker.lastIndex = objectStart + object.length
   }
 
-  return { calls, results, truncated }
+  // The scan can only prove what it read. A cap that lands *between* two
+  // objects leaves every object it covered intact, so the loop above finds
+  // them all and never meets a cut one — indistinguishable from a complete
+  // conversation. The payload is the only witness: if the whole thing is not
+  // valid JSON, the emitter truncated it, and the list is a lower bound.
+  return { calls, results, truncated: truncated || !isCompleteJson(messages) }
+}
+
+/** True when `text` parses as one whole JSON document. */
+function isCompleteJson(text: string): boolean {
+  try {
+    JSON.parse(text)
+    return true
+  } catch {
+    return false
+  }
 }
 
 /** The balanced `{…}` object starting at `start`, or undefined when it never closes. */
@@ -152,9 +175,15 @@ export function derivePiToolRecords(parent: CanonicalRecord, raw: RawSpan): Cano
   const seen = new Set<string>()
   const records: CanonicalToolRecord[] = []
   calls.forEach((call, index) => {
-    // A call with no id cannot be deduplicated across turns; fall back to the
-    // (parent-scoped) ordinal so at least the same turn does not double it.
-    const identity = call.id !== '' ? call.id : `${parent.spanId}#${index}`
+    // Identity must not depend on the parent. Every turn span of a session
+    // repeats the same conversation prefix, so a parent-scoped identity filed
+    // one copy of an id-less call per turn — the exact duplication this
+    // derivation exists to prevent. What the call *is* (name, arguments) plus
+    // its position in the prefix is stable, because the prefix is.
+    const identity =
+      call.id !== ''
+        ? call.id
+        : `${call.name}\u0000${JSON.stringify(call.arguments ?? {})}\u0000${index}`
     if (seen.has(identity)) return
     seen.add(identity)
 
