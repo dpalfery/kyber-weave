@@ -5,7 +5,7 @@
 // stop and replaced, because an engine that outlives an upgrade keeps running old parsing
 // and old receiver code. If none holds it, the caller's own executable starts one.
 
-import { spawn as nodeSpawn } from 'child_process'
+import { spawn } from 'child_process'
 
 import { queryEngine, requestEngineShutdown, type EngineRecord } from './instance.js'
 
@@ -34,13 +34,22 @@ export type EngineEnsureOptions = {
   sleep?: (ms: number) => Promise<void>
 }
 
-function defaultStart(program: string, args: readonly string[]): void {
-  // `program` is the caller's own executable (process.execPath or the tray's resolved binary), never
-  // user input, and no shell is involved: arguments go straight to execve.
-  // nosemgrep: javascript.lang.security.detect-child-process.detect-child-process
-  const child = nodeSpawn(program, [...args], { detached: true, stdio: 'ignore' })
-  child.on('error', () => { /* surfaced as a start timeout */ })
-  child.unref()
+/**
+ * Starts the engine as a detached child with no shell: the program and its arguments go straight to
+ * execve. The program is the caller's own executable (process.execPath or the tray's resolved binary),
+ * never user input.
+ */
+class DetachedLauncher {
+  constructor(
+    private readonly program: string,
+    private readonly programArgs: readonly string[],
+  ) {}
+
+  start(args: readonly string[]): void {
+    const child = spawn(this.program, [...this.programArgs, ...args], { detached: true, stdio: 'ignore' })
+    child.on('error', () => { /* surfaced as a start timeout */ })
+    child.unref()
+  }
 }
 
 const delay = (ms: number): Promise<void> => new Promise((resolve) => { setTimeout(resolve, ms) })
@@ -94,7 +103,12 @@ export async function ensureEngine(options: EngineEnsureOptions): Promise<Engine
     if (gone === null) return { outcome: 'failed', reason: `engine ${live.version} (pid ${live.pid}) did not stop within ${stopTimeoutMs}ms` }
   }
 
-  ;(options.startEngine ?? defaultStart)(options.program, [...(options.programArgs ?? []), 'web', '--no-open'])
+  const engineArgs = ['web', '--no-open']
+  if (options.startEngine !== undefined) {
+    options.startEngine(options.program, [...(options.programArgs ?? []), ...engineArgs])
+  } else {
+    new DetachedLauncher(options.program, options.programArgs ?? []).start(engineArgs)
+  }
   const started = await waitFor(async () => {
     const record = await query(options.stateDir)
     return record !== null && record !== 'unresponsive' && record.url !== undefined ? record : null
