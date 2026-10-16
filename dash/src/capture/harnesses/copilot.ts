@@ -75,19 +75,43 @@ function envTruthy(value: string | undefined): boolean {
 
 /**
  * The exporter VS Code Copilot will actually use, from the values `status`
- * observes plus the capture process environment. The extension keeps its OTel
- * pipeline off — feeding the SDK a file exporter pointed at os.devNull —
- * unless the settings keys and the `COPILOT_OTEL_ENABLED` override are all in
+ * observes plus the environment the caller can vouch for. The extension keeps
+ * its OTel pipeline off — feeding the SDK a file exporter pointed at os.devNull
+ * — unless the settings keys and the `COPILOT_OTEL_ENABLED` override are all in
  * place. This is the check the old status lacked: it reported key presence, so
  * "keys present but the pipeline is off" read as a pass.
+ *
+ * `processEnv` is omitted when the caller cannot see the environment that
+ * decides. The server-side status route runs under this machine's web process,
+ * not the editor's, so it reports the override as unverified rather than
+ * absent: reading `process.env` unconditionally made the API warn about a GUI
+ * launch that was actually configured correctly.
  */
 export function resolveCopilotExporter(input: CaptureExporterInput): CaptureExporterResolution {
   const value = (leaf: string): unknown => input.observed[`${OTEL_PROPERTY}.${leaf}`]
+  const protocol = value('exporterType')
+  const envKnown = input.processEnv !== undefined
+  const envReady = envTruthy(input.processEnv?.['COPILOT_OTEL_ENABLED'])
+
+  // A protocol Copilot is set to use that KyberDash does not receive. This is
+  // not the dev-null case — spans do leave the editor, they just do not arrive
+  // here — so naming the exporter is the honest answer. The existing
+  // `statusWarningsFor` gRPC entries already say this about this value.
+  if (typeof protocol === 'string' && protocol !== '' && protocol !== 'otlp-http') {
+    return {
+      exporter: protocol,
+      delivering: false,
+      line: `exporter: ${protocol} — not KyberDash's OTLP/HTTP receiver`,
+      warning:
+        `Copilot is configured to export over "${protocol}"; KyberDash receives OTLP/HTTP only. ` +
+        'Run "kyberdash kyber capture enable" for copilot to write the values KyberDash reads.',
+    }
+  }
+
   const settingsReady =
     value('enabled') === true &&
     value('dbSpanExporter.enabled') === true &&
-    value('exporterType') === 'otlp-http'
-  const envReady = envTruthy(input.processEnv.COPILOT_OTEL_ENABLED)
+    protocol === 'otlp-http'
   if (settingsReady && envReady) {
     return {
       exporter: 'otlp-http',
@@ -96,21 +120,40 @@ export function resolveCopilotExporter(input: CaptureExporterInput): CaptureExpo
       warning: '',
     }
   }
+
+  const remedy =
+    'Run "kyberdash kyber capture enable" for copilot, and on macOS hand a GUI-launched VS Code the override with ' +
+    '"launchctl setenv COPILOT_OTEL_ENABLED true" (and OTEL_EXPORTER_OTLP_ENDPOINT), then fully quit and relaunch it.'
+
+  // Settings in order, environment not this process's to read. The status
+  // route runs under the web process, not the editor's, so it cannot judge the
+  // override: it withholds the verdict and says so on its line rather than
+  // warning about an environment it never saw. `delivering` stays false —
+  // delivery is unconfirmed, not confirmed — but an empty warning raises
+  // nothing, and the CLI, which can see a shell's environment, still diagnoses
+  // the override by name.
+  if (settingsReady && !envKnown) {
+    return {
+      exporter: 'otlp-http',
+      delivering: false,
+      line: "exporter: otlp-http (settings at the values enable writes; the editor's environment is not visible from here)",
+      warning: '',
+    }
+  }
+
   const reasons: string[] = []
   if (!settingsReady) {
     reasons.push('the github.copilot.chat.otel settings keys are not all at the values enable writes')
   }
-  if (!envReady) {
+  // Only a caller that can see the environment may report the override missing.
+  if (envKnown && !envReady) {
     reasons.push('COPILOT_OTEL_ENABLED is missing from the environment this command sees')
   }
   return {
     exporter: 'file',
     delivering: false,
     line: 'exporter: file (dev-null) — Copilot discards every span',
-    warning:
-      `exporter resolves to file (dev-null): ${reasons.join('; ')}. ` +
-      'Run "kyber capture enable" for copilot, and on macOS hand a GUI-launched VS Code the override with ' +
-      '"launchctl setenv COPILOT_OTEL_ENABLED true" (and OTEL_EXPORTER_OTLP_ENDPOINT), then fully quit and relaunch it.',
+    warning: `exporter resolves to file (dev-null): ${reasons.join('; ')}. ${remedy}`,
   }
 }
 

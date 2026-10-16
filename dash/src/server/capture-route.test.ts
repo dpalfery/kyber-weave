@@ -355,10 +355,14 @@ describe('GET /api/kyber/capture', () => {
       state: 'partial',
       receipt: 'absent',
       manualSteps: [],
-      statusLines: [],
+      // The resolved exporter rides the line as well as the warning: a resolver
+      // that withholds a verdict it cannot make still has to say what it
+      // resolved.
+      statusLines: ['exporter: file (dev-null) — Copilot discards every span'],
     })
-    // Three of six keys present and no env override: the resolved exporter is `file`,
-    // which must read as a failure even though some keys look present.
+    // Three of six keys present, so the resolved exporter is `file`, which must
+    // read as a failure even though some keys look present. The environment is
+    // not this route's to judge, so the warning names the settings alone.
     expect(harnessById(body, 'copilot').warnings).toEqual([
       {
         code: 'exporter-not-delivering',

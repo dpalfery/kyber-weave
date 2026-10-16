@@ -498,11 +498,12 @@ function appendFileStatus(
   if (unexpected.length > 0) lines.push(`  extra otel keys: ${unexpected.join(', ')}`)
   // The resolved exporter, not merely key presence: keys can be present and
   // correct while the harness still discards every span (Copilot's dev-null
-  // file exporter). A `file` resolution is a warning, not a pass.
-  const resolution = exporterResolutionFor(file, present)
+  // file exporter). A `file` resolution is a warning, not a pass. This is the
+  // text surface, so it hands over the shell's environment.
+  const resolution = exporterResolutionFor(file, present, process.env)
   if (resolution !== undefined) {
     lines.push(`  ${resolution.line}`)
-    if (!resolution.delivering) lines.push(`  warn: ${resolution.warning}`)
+    if (!resolution.delivering && resolution.warning !== '') lines.push(`  warn: ${resolution.warning}`)
   }
   const record = receipt?.files.find((entry) => entry.path === path)
   if (record === undefined) {
@@ -543,16 +544,24 @@ export function presentKeys(
 }
 
 /**
- * The exporter a file's harness will actually resolve, from the declared
- * values just read plus this process's environment — the only environment
- * status may read (opening a shell rc would both touch the user's files and
- * report a value this process was never started with).
+ * The exporter a file's harness will actually resolve, from the declared values
+ * just read plus the environment the caller can vouch for.
+ *
+ * The environment is a parameter rather than `process.env` read here, because
+ * the two callers run in different processes: the CLI runs in the user's shell
+ * and can hand over its own environment, while the status route runs under this
+ * machine's web process, which is not the editor's. A caller that cannot see
+ * the deciding environment passes nothing, and the resolution says the override
+ * is unverified instead of reporting it absent — reading `process.env`
+ * unconditionally made the API warn about a GUI launch that was configured
+ * correctly.
  */
 export function exporterResolutionFor(
   file: ResolvedConfigFile,
   observed: Readonly<Record<string, unknown>>,
+  processEnv?: Readonly<Record<string, string | undefined>>,
 ): CaptureExporterResolution | undefined {
-  return file.exporterResolution?.({ observed, processEnv: process.env })
+  return file.exporterResolution?.({ observed, ...(processEnv === undefined ? {} : { processEnv }) })
 }
 
 export function statusWarningLines(writer: ManagedHarnessWriter, home: string, env: PathEnv): string[] {

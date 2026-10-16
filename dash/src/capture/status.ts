@@ -172,6 +172,13 @@ type FileAnalysis = {
    * extension still uses the dev-null file exporter.
    */
   exporterWarning?: CaptureStatusWarning
+  /**
+   * The line naming the exporter this file's harness will resolve, surfaced
+   * even when it raises no warning. A resolver that cannot judge a factor it
+   * needs (Copilot's environment override, invisible to the status route)
+   * withholds the verdict here rather than inventing one.
+   */
+  exporterLine?: string
 }
 
 function analyseManagedFile(
@@ -237,14 +244,18 @@ function analyseManagedFile(
       }))
     }
   }
+  // A resolution may withhold a verdict it cannot make (the status route
+  // cannot see the editor's environment), and it then carries no warning text:
+  // a warning with nothing to say is not a warning.
   const resolution = exporterResolutionFor(file, present)
   const exporterWarning =
-    resolution !== undefined && !resolution.delivering
+    resolution !== undefined && !resolution.delivering && resolution.warning !== ''
       ? { code: 'exporter-not-delivering', text: resolution.warning }
       : undefined
   return {
     status: { ...base, presentKeys: presentList, missingKeys: missing, drift },
     state,
+    exporterLine: resolution?.line,
     exporterWarning,
   }
 }
@@ -355,6 +366,13 @@ function buildOne(
     .filter(
       (warning, index, all) => all.findIndex((other) => other.text === warning.text) === index,
     )
+  // The resolved exporter belongs on the line even when it raises no warning:
+  // a resolver that withholds a verdict it cannot make (the status route
+  // cannot see the editor's environment) still has to say what it resolved, or
+  // the dashboard would show nothing about the exporter at all.
+  const exporterLines = analyses
+    .flatMap((analysis) => (analysis.exporterLine === undefined ? [] : [analysis.exporterLine]))
+    .filter((line, index, all) => all.indexOf(line) === index)
   return {
     id: writer.id,
     displayName: writer.displayName,
@@ -366,7 +384,7 @@ function buildOne(
     files: analyses.map((analysis) => analysis.status),
     warnings: [...endpointWarnings(files, analyses, ctx), ...configWarnings, ...exporterWarnings],
     manualSteps: manualStepsFor(writer, ctx.endpoint),
-    statusLines: [],
+    statusLines: exporterLines,
   }
 }
 

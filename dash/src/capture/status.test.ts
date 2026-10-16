@@ -202,23 +202,27 @@ describe('buildCaptureStatus over a temporary home', () => {
     expect(copilot.state).toBe('off')
   })
 
-  it('warns that the exporter resolves to file while the Copilot env override is absent', async () => {
+  it("does not judge the editor's environment: the settings resolve, the override is withheld", async () => {
     const home = makeHome()
     writeConfig(stablePath(home), '{}\n')
     await enableViaEngine(home, ['copilot'])
-    // Empty rather than unset: the report must not depend on the host environment.
+    // The status route runs under the web process, not the editor's, so this
+    // value must not change the answer: neither an empty override nor a set one
+    // is visible here, and warning about the one this process was never started
+    // with flagged GUI launches that were configured correctly.
     vi.stubEnv('COPILOT_OTEL_ENABLED', '')
 
     const copilot = byId(buildCaptureStatus(ctxFor(home)), 'copilot')
-    // Every managed key is at its value, so the file reads `on`; the resolved exporter is
-    // still `file` without the environment override, and that has to surface as a warning.
     expect(copilot.files[0]!.missingKeys).toEqual([])
-    expect(copilot.warnings.map((warning) => warning.code)).toContain('exporter-not-delivering')
-    expect(copilot.warnings.map((warning) => warning.text).join('\n')).toContain('COPILOT_OTEL_ENABLED')
+    expect(copilot.warnings.map((warning) => warning.code)).not.toContain('exporter-not-delivering')
+    // The resolved exporter is still reported — on the line, not as a warning.
+    expect(copilot.statusLines.join('\n')).toMatch(/exporter: otlp-http/)
+    expect(copilot.statusLines.join('\n')).toMatch(/not visible from here/)
 
     vi.stubEnv('COPILOT_OTEL_ENABLED', 'true')
     const withOverride = byId(buildCaptureStatus(ctxFor(home)), 'copilot')
     expect(withOverride.warnings).toEqual([])
+    expect(withOverride.statusLines).toEqual(copilot.statusLines)
   })
 
   it('reports unknown for an unreadable config and an unparseable one, and downgrades install', () => {

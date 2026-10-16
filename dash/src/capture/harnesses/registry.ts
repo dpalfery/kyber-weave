@@ -49,12 +49,15 @@ export type PendingHarnessWriter = {
 /**
  * The live state of one declared file, handed to a harness's exporter
  * resolver. `observed` carries only the keys the harness declares, mapped to
- * their live value (absent keys are `undefined`); `processEnv` is the capture
- * command's own environment, the only environment status may read.
+ * their live value (absent keys are `undefined`); `processEnv` is the
+ * environment the *caller* can legitimately vouch for, and is omitted when the
+ * caller cannot see the one that decides — the server-side status route cannot
+ * see a GUI-launched editor's environment, so it passes nothing and the
+ * resolution says so instead of reporting an override as absent.
  */
 export type CaptureExporterInput = {
   observed: Readonly<Record<string, unknown>>
-  processEnv: Readonly<Record<string, string | undefined>>
+  processEnv?: Readonly<Record<string, string | undefined>>
 }
 
 /**
