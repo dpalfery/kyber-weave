@@ -3914,10 +3914,18 @@ export class CanonStore {
    * planner reads statistics next time instead of guessing from a table's
    * declared shape. It is cheap and self-limiting (`analysis_limit`), and it is
    * the reason a post-import read does not pay for the import's index churn.
+   *
+   * The optimize cannot stand between the handle and its close: if the stats
+   * pass throws — a locked store, an I/O hiccup — the close still has to run,
+   * or the caller leaks the handle it was getting rid of. Hence the `finally`,
+   * not a plain sequence.
    */
   close(): void {
-    this.db.exec('PRAGMA optimize')
-    this.db.close()
+    try {
+      this.db.exec('PRAGMA optimize')
+    } finally {
+      this.db.close()
+    }
   }
 }
 

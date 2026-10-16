@@ -2007,16 +2007,22 @@ describe('systemPromptTextsFromContentColumns', () => {
 describe('connection pragmas for bulk writes', () => {
   it('syncs at NORMAL and bounds the write-ahead log', () => {
     const store = new CanonStore(tempStorePath())
-    const db = store.getDatabase()
-    // 1 = NORMAL. The default for a WAL database here is FULL, which fsyncs the
-    // sidecar on every commit — what a per-source-unit folder import pays for.
-    expect((db.prepare('PRAGMA synchronous').get() as { synchronous: number }).synchronous).toBe(1)
-    // Without a limit a checkpoint reclaims nothing on disk: the sidecar keeps
-    // the high-water mark a burst reached for the life of the database.
-    expect(
-      (db.prepare('PRAGMA journal_size_limit').get() as { journal_size_limit: number })
-        .journal_size_limit,
-    ).toBe(WAL_SIZE_LIMIT_BYTES)
-    store.close()
+    // The handle is released even when an assertion fails, so a red run cannot
+    // leave a live file handle for the cleanup hook to fight (an EBUSY-shaped
+    // problem on Windows).
+    try {
+      const db = store.getDatabase()
+      // 1 = NORMAL. The default for a WAL database here is FULL, which fsyncs the
+      // sidecar on every commit — what a per-source-unit folder import pays for.
+      expect((db.prepare('PRAGMA synchronous').get() as { synchronous: number }).synchronous).toBe(1)
+      // Without a limit a checkpoint reclaims nothing on disk: the sidecar keeps
+      // the high-water mark a burst reached for the life of the database.
+      expect(
+        (db.prepare('PRAGMA journal_size_limit').get() as { journal_size_limit: number })
+          .journal_size_limit,
+      ).toBe(WAL_SIZE_LIMIT_BYTES)
+    } finally {
+      store.close()
+    }
   })
 })
