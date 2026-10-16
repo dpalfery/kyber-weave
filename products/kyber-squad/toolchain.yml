@@ -8,9 +8,16 @@ required-features: []
 # means a rename is a one-line source edit, and means the renderer and `squad doctor` read
 # the same list instead of two copies that can disagree.
 #
-# Verified 2026-09-21 by listing each server's tools over MCP: codegraph (`codegraph serve
-# --mcp`), context7 4.1.1 (https://mcp.context7.com/mcp), and kyber-weave
-# (src/KyberWeave.Mcp/DocsTools.cs).
+# Verified 2026-09-21 by listing each server's tools over MCP — codegraph (`codegraph serve
+# --mcp`) and context7 4.1.1 (https://mcp.context7.com/mcp). That listing did not cover the
+# kyber-weave roster below, whose newest entries (`agent_coding_standards`, `docs_status`)
+# post-date it, so it still speaks for those two servers and not for this one. kyber-weave is
+# pinned mechanically instead, by
+# SquadToolchainRosterGuardTests.ShippedToolchainRosterGrantsEveryToolTheKyberWeaveMcpServerExposes
+# in tests/KyberWeave.Tests/SquadToolchainRosterGuardTests.cs: the guard reads the exposed
+# `[McpServerTool]` names off DocsTools and fails when any of them is missing here. A roster
+# that is merely short reports nothing on its own, which is why the absence of `docs_status`
+# went unnoticed until the guard existed.
 required-mcp-tools:
   codegraph:
     - codegraph_explore
@@ -18,8 +25,10 @@ required-mcp-tools:
     - resolve-library-id
     - query-docs
   kyber-weave:
+    - agent_coding_standards
     - docs_analysis_candidates
     - docs_explore
     - docs_for_symbol
     - docs_glossary
+    - docs_status
 validated-release: null

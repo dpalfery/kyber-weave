@@ -63,8 +63,9 @@ public sealed class McpDocsProvenanceTests : IDisposable
         string symbolMiss = tools.ForSymbol("NoSuchSymbolXyz");
         string glossaryMiss = tools.Glossary("no-such-term-xyz");
         string analysis = tools.AnalysisCandidates(kind: null, cursor: null, limit: 20, charBudget: 4000);
+        string standardsMiss = AgentCodingStandardsMiss(tools);
 
-        foreach (string response in new[] { miss, symbolMiss, glossaryMiss, analysis })
+        foreach (string response in new[] { miss, symbolMiss, glossaryMiss, analysis, standardsMiss })
         {
             ProvenanceLine line = ParseProvenance(response);
             Assert.Equal(Path.GetFullPath(rootA), Path.GetFullPath(line.Root));
@@ -174,7 +175,20 @@ public sealed class McpDocsProvenanceTests : IDisposable
         yield return tools.ForSymbol("NoSuchSymbolXyz");
         yield return tools.Glossary("documentation");
         yield return tools.AnalysisCandidates(kind: null, cursor: null, limit: 20, charBudget: 4000);
+        // Direct, like the four calls above. Reflection exists in this file for the tests whose
+        // subject is a tool's declared metadata — docs_status's shape — and this one's subject
+        // is the response, which a call returns without asking the metadata a question.
+        yield return AgentCodingStandardsMiss(tools);
     }
+
+    /// <summary>
+    /// The standard lookup's miss for a technology no corpus declares. Called directly rather
+    /// than through the <c>[McpServerTool]</c> metadata <see cref="FindMcpTool"/> reads: the
+    /// optional arguments a reflective call has to pass by hand are the ones a direct call
+    /// already applies, so the metadata lookup would add an indirection that asserts nothing.
+    /// </summary>
+    private static string AgentCodingStandardsMiss(DocsTools tools) =>
+        tools.AgentCodingStandards("zzz-no-such-technology-zzz");
 
     private static void IsolateFromParentGit(string root) =>
         File.WriteAllText(

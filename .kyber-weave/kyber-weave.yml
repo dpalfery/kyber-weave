@@ -37,8 +37,13 @@ review:
     - id: format-style
       run: [dotnet, format, KyberWeave.sln, style, --verify-no-changes, --severity, warn, -v, minimal]
       blocking: true
+    # `--no-incremental` because coverlet.MTP instruments `bin/Release` in place: an
+    # interrupted coverage run leaves the test assembly and the libraries it loads rewritten
+    # with the instrumenting session's temp path baked in, and an incremental build cannot
+    # tell those survivors from fresh outputs. Forcing a rebuild here keeps the `--no-build`
+    # test gate that follows it from running against binaries no longer executable.
     - id: build
-      run: [dotnet, build, KyberWeave.sln, -c, Release]
+      run: [dotnet, build, KyberWeave.sln, -c, Release, --no-incremental]
       blocking: true
     # coverlet.MTP writes Cobertura under artifacts/coverage so GateRunner can populate
     # the coverage floor. xUnit 4 uses Microsoft Testing Platform, whose coverage
