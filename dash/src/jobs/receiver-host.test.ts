@@ -95,7 +95,7 @@ describe('ReceiverHost: opt-in hosting', () => {
 
     expect(spawner.children).toHaveLength(1)
     expect(spawner.last.program).toBe('kyberdash')
-    expect(spawner.last.args).toEqual(['otel'])
+    expect(spawner.last.args).toEqual(['otel', '--serve'])
     expect(delay).toBe(0)
   })
 

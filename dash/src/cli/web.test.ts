@@ -187,7 +187,7 @@ describe('kyberdash web hosts the background services', () => {
   it('starts the ReceiverHost, which launches the otel receiver when hosting is on and the port is free', async () => {
     const h = await start({ receiverHosted: true, probe: 'refused' })
     await waitFor(() => h.receiverSpawner.children.length > 0, 'the otel receiver child')
-    expect(h.receiverSpawner.argv()).toEqual(['otel'])
+    expect(h.receiverSpawner.argv()).toEqual(['otel --serve'])
   })
 
   it('does not launch the receiver when hosting is off', async () => {

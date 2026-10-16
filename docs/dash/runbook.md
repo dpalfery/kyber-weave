@@ -133,22 +133,28 @@ KyberDash maintains all normalized data in SQLite at `~/.kyberdash/canon.db` ([A
 
 ### 1. Starting the OTLP Ingest Receiver
 
-The web dashboard does not start the collector automatically. Ingest is a separate command
-that listens for OTLP over HTTP on `127.0.0.1:4318` at `POST /v1/traces` and `POST /v1/logs`,
-then persists to `canon.db`. Logs enrich their correlated span-shaped record ([ADR 0009](../adr/0009-multi-signal-ingestion-span-shaped-record.md)):
+There is exactly one KyberDash engine per user ([ADR 0039](../adr/0039-single-instance-engine.md)),
+and the OTLP receiver is its child, listening for OTLP over HTTP on `127.0.0.1:4318` at
+`POST /v1/traces` and `POST /v1/logs`, then persisting to `canon.db`. Logs enrich their
+correlated span-shaped record ([ADR 0009](../adr/0009-multi-signal-ingestion-span-shaped-record.md)).
+
+The engine holds a local IPC endpoint (`~/.kyberdash/engine.sock`, a named pipe on Windows)
+and records itself in `~/.kyberdash/engine.json` (pid, executable, version, URL). The CLI and
+the tray both ensure-or-attach through it, from the same executable:
 
 ```bash
-# Start receiver via the kyber command group
-node dash/dist/cli.js kyber otel --port 4318 --host 127.0.0.1
+# Start the engine, or attach to the one that is running (exit 0 either way)
+kyberdash web --no-open
 
-# Backward-compatible alias
-node dash/dist/cli.js otel --port 4318
+# Turn the hosted receiver on and ensure the engine; never binds a second receiver
+kyberdash otel
 ```
 
-Run that command when you want a standalone collector. When a `kyberdash web` server is
-running, `ReceiverHost` (`dash/src/jobs/receiver-host.ts`) hosts the same receiver as a child
-of that server instead, and `settings.receiver.hosted` ([§2d](#2d-shared-settings-and-pause))
-records which of the two the current setup uses.
+A second `kyberdash web` attaches to the running engine instead of starting another. An
+engine from a different build is asked to shut down and replaced by the newer one. A custom
+`--port` or `--host` on `kyberdash otel` is refused: the receiver is `127.0.0.1:4318`.
+`kyberdash otel --serve` is the internal form the engine uses for its receiver child; do not
+start it by hand.
 
 ### 1a. Enabling Claude Code content on the sender
 

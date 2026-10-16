@@ -1,6 +1,6 @@
 import { Command } from 'commander'
 import { allProviderNames } from '../providers/index.js'
-import { DashboardPortRefusedError, runWebDashboard, UnknownViewError } from './web.js'
+import { DashboardPortRefusedError, EngineAlreadyRunningError, joinViewUrl, openBrowser, runWebDashboard, UnknownViewError } from './web.js'
 import { resolveCliName } from '../brand-overlay.js'
 import { registerKyberCommands } from './register.js'
 import { registerReportCommand } from './report.js'
@@ -112,6 +112,7 @@ export function buildProgram(): Command {
       try {
         await runWebDashboard({
           ...(opts.port === undefined ? {} : { port: opts.port }),
+          singleInstance: true,
           open: opts.open,
           view: opts.view,
         })
@@ -121,6 +122,14 @@ export function buildProgram(): Command {
           // refusing would leave the tray holding a listener it did not ask for.
           process.stderr.write(`kyberdash web: ${err.message}\n`)
           process.exit(2)
+        }
+        if (err instanceof EngineAlreadyRunningError) {
+          // Exactly one engine per user: attach rather than start a second. Exit 0 - the
+          // dashboard the caller asked for is running.
+          process.stdout.write(`${JSON.stringify({ event: 'kyberdash.web.attached', ...err.record })}\n`)
+          process.stdout.write(`\n  ${err.message}\n`)
+          if (opts.open && err.record.url !== undefined) openBrowser(joinViewUrl(err.record.url, opts.view))
+          process.exit(0)
         }
         if (err instanceof DashboardPortRefusedError) {
           // A configured port that is taken, or that this process may not bind, is a

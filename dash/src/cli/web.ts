@@ -19,13 +19,14 @@ import { CanonStore } from '../canon/store.js'
 import { resolveCanonDbPath } from '../canon/paths.js'
 import { readSetting, SETTING_KEYS } from '../settings/shared-settings.js'
 import { JobHost, type JobSpawner } from '../jobs/host.js'
+import { acquireEngine, queryEngine, requestEngineShutdown, type EngineAttached, type EngineOwner, type EngineRecord } from '../engine/instance.js'
 import { ReceiverHost, type ReceiverProber } from '../jobs/receiver-host.js'
 import { runMaintenancePass } from '../refresh/folder-import.js'
 import type { CaptureRouteSettings } from '../server/capture-routes.js'
 import { formatValidViewForms, matchesViewPath } from '../server/view-paths.js'
 import { currentSpawnRuntime, resolveJobSpawnTarget } from './spawn-target.js'
 
-const KYBERDASH_VERSION = String(
+export const KYBERDASH_VERSION = String(
   (createRequire(import.meta.url)('../../package.json') as { version?: string }).version ?? '0.0.0',
 )
 
@@ -189,7 +190,7 @@ const SEA_NOT_BUILT_HINT_HTML =
 const DEV_NOT_BUILT_HINT_TEXT = 'Dashboard UI is not built. Run: cd dash && npm install && npm run build'
 const SEA_NOT_BUILT_HINT_TEXT = 'Dashboard UI is not embedded in this build. Install a release that includes it.'
 
-function openBrowser(url: string): void {
+export function openBrowser(url: string): void {
   // execFile, not exec: the arguments go to the process as an argv array, so no
   // shell parses them and there is no command string for a URL to break out of.
   // This matters because the URL is no longer purely internal — `--view` puts a
@@ -310,7 +311,7 @@ export class UnknownViewError extends Error {
   }
 }
 
-function joinViewUrl(origin: string, view: string | undefined): string {
+export function joinViewUrl(origin: string, view: string | undefined): string {
   if (view === undefined || view.trim() === '' || view.trim() === '/') return origin
   return `${origin}/${view.trim().replace(/^\/+/, '')}`
 }
@@ -777,6 +778,43 @@ function buildServices(stateDir: string, seams: HostedSeams): HostedServices {
   }
 }
 
+/**
+ * A live engine already holds this state dir. The caller attaches to it instead of
+ * starting a second one - there is exactly one engine per user.
+ */
+export class EngineAlreadyRunningError extends Error {
+  readonly record: EngineRecord
+  constructor(record: EngineRecord) {
+    super(`KyberDash is already running (pid ${record.pid}, version ${record.version}${record.url === undefined ? '' : `, ${record.url}`})`)
+    this.name = 'EngineAlreadyRunningError'
+    this.record = record
+  }
+}
+
+/** How long a newer engine waits for an older one to let go of the endpoint. */
+const ENGINE_HANDOFF_TIMEOUT_MS = 10_000
+
+async function takeEngine(
+  stateDir: string,
+  onShutdownRequested: () => void,
+): Promise<EngineOwner> {
+  const take = (): Promise<EngineOwner | EngineAttached> =>
+    acquireEngine({ stateDir, version: KYBERDASH_VERSION, onShutdownRequested })
+  let taken = await take()
+  if (taken.kind === 'attached' && taken.record.version !== KYBERDASH_VERSION && taken.record.pid > 0) {
+    // An engine from another build outlives its install. Replace it: the newer binary wins.
+    if (await requestEngineShutdown(stateDir)) {
+      const deadline = Date.now() + ENGINE_HANDOFF_TIMEOUT_MS
+      while (Date.now() < deadline && (await queryEngine(stateDir)) !== null) {
+        await new Promise<void>((resolve) => { setTimeout(resolve, 100) })
+      }
+      taken = await take()
+    }
+  }
+  if (taken.kind === 'attached') throw new EngineAlreadyRunningError(taken.record)
+  return taken
+}
+
 export async function runWebDashboard(opts: WebDashboardServices & {
   /**
    * The port for this run. `undefined` resolves from the persisted
@@ -786,6 +824,12 @@ export async function runWebDashboard(opts: WebDashboardServices & {
    */
   port?: number
   open: boolean
+  /**
+   * Enforce one engine per state dir: a live engine makes this start throw
+   * `EngineAlreadyRunningError`, and an older-version engine is replaced. Off for the
+   * in-process suites, which start several servers over temporary state dirs.
+   */
+  singleInstance?: boolean
   view?: string
   kyberBridge?: KyberBridge
   openUrl?: (url: string) => void
@@ -824,6 +868,13 @@ export async function runWebDashboard(opts: WebDashboardServices & {
   // Best-effort: a directory we cannot create is reported once, and the server still runs
   // (the lease takes the same directory and degrades to hosting no jobs if it cannot).
   const stateDirProblem = ensureStateDir(stateDir)
+  // One engine per user, enforced by the OS (a bound local endpoint), before anything else
+  // binds or writes. `requestStop` is late-bound: a peer's shutdown request can only arrive
+  // after the server below exists.
+  let requestStop = (): void => {}
+  const engine: EngineOwner | null = opts.singleInstance === true && stateDirProblem === null
+    ? await takeEngine(stateDir, () => { requestStop() })
+    : null
   // Read-write: the hosts write settings, and the maintenance pass purges and reprojects.
   // The store is resolved up front (it is one handle per process, shared by every server),
   // so the settings routes work from the first accepted connection.
@@ -955,6 +1006,7 @@ export async function runWebDashboard(opts: WebDashboardServices & {
   try {
     requestedPort = resolveDashboardPort(opts.port, store)
   } catch (err) {
+    await engine?.release()
     bridge.close()
     closeDefaultStoreIfUnused(opts.store)
     throw err
@@ -979,7 +1031,9 @@ export async function runWebDashboard(opts: WebDashboardServices & {
     // A server that never bound never served, so it must not keep a host pair alive: the
     // share taken above goes back rather than leaving a lease held by a process with no
     // dashboard.
-  }).catch((err: unknown) => {
+  }).catch(async (err: unknown) => {
+    // The engine endpoint was taken above; a server that never bound must give it back.
+    await engine?.release()
     // Nothing was bound, so nothing was ever holding a host pair: there is no share to
     // give back yet (the pair is taken below, after the bind). The bridge above still
     // needs closing when the caller injected none: it opened its own sqlite handle, and
@@ -997,6 +1051,19 @@ export async function runWebDashboard(opts: WebDashboardServices & {
   // against `/meta`, so a tray can decide whether it understands this server before it
   // renders anything.
   const url = `http://127.0.0.1:${port}`
+  if (engine !== null) {
+    // A kill the process cannot intercept leaves a stale endpoint, which the next start
+    // clears. Everything the process can intercept (SIGTERM, exit) cleans up after itself.
+    process.once('exit', () => engine.releaseSync())
+    process.once('SIGTERM', () => process.exit(0))
+    engine.update({ url })
+    requestStop = () => {
+      server.closeAllConnections?.()
+      server.close()
+      server.once('close', () => { setImmediate(() => process.exit(0)) })
+      setTimeout(() => process.exit(0), 5_000).unref()
+    }
+  }
   // Publish the attach point. Only over a file that is not a live other server's: the
   // jobs lease stands a second `kyberdash web` process down, but it does not stop that
   // process reaching this line, and a blind overwrite would hand the tray the standing
@@ -1044,6 +1111,7 @@ export async function runWebDashboard(opts: WebDashboardServices & {
   // the other's attach point. An unreadable, missing or foreign body is left alone.
   server.on('close', () => {
     process.off('SIGINT', onSigint)
+    void engine?.release()
     const published = readServerRecord(serverFilePath)
     if (published !== null && published.pid === process.pid && (published.url === undefined || published.url === url)) {
       rmSync(serverFilePath, { force: true })
