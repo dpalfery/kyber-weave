@@ -35,6 +35,9 @@ export type EngineEnsureOptions = {
 }
 
 function defaultStart(program: string, args: readonly string[]): void {
+  // `program` is the caller's own executable (process.execPath or the tray's resolved binary), never
+  // user input, and no shell is involved: arguments go straight to execve.
+  // nosemgrep: javascript.lang.security.detect-child-process.detect-child-process
   const child = nodeSpawn(program, [...args], { detached: true, stdio: 'ignore' })
   child.on('error', () => { /* surfaced as a start timeout */ })
   child.unref()
