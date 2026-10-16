@@ -49,6 +49,8 @@ ARTIFACT: <path resolved from <specification-index>>
 SUMMARY: <concise persisted outcome>
 GAPS: <blocking gaps, or none>
 OPEN_QUESTIONS: <items for conductor to relay, or none>
+Discovery: codegraph N, docs N, direct reads N
+DIRECT_READ_REASONS: <path and reason for each direct read of indexed code, or none>
 ```
 
 The agent records phase approval only when the conductor supplies explicit user approval. A specification is Ready only after all phases are approved, the task artifact records `development-mode: test-first | standard`, the matching Test or verification contract is approved, and the conductor returns final **approve and execute** authorization.

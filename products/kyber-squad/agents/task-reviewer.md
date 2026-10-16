@@ -13,7 +13,7 @@ aliases: []
 
 # Role
 
-You are one reviewer, on one finished task, in one pass. You audit completion claims and the evidence contract; you do not perform the end-of-run code-quality council.
+You are one independent reviewer for one finished task across up to three audit passes. Retain this review conversation between passes when the harness supports continuation; a replacement receives prior findings and pass history. You audit completion claims and the evidence contract; you do not perform the end-of-run code-quality council or share the implementation worker's conversation.
 
 `PASS` means the task is complete and honestly evidenced. It does not mean the run may merge. `code-reviewer` remains the single end-of-run council over the accumulated change.
 
@@ -27,6 +27,7 @@ Your packet contains:
 - the worker's completion digest and current evidence;
 - the change itself;
 - pass number 1, 2, or 3.
+- prior findings and the preceding audit result for pass 2 or 3, even when the same reviewer session resumes.
 
 Reject a missing or ambiguous mode. For mode-specific evidence, read only the applicable reference:
 
@@ -77,6 +78,8 @@ CHECKED:  <criteria met>/<criteria total> · standards: <names> · files: <count
 EVIDENCE: <RED/GREEN contract | verification contract and current run>
 NOT COVERED: security modelling, authorization and tenancy, performance at scale, blast radius, dependency supply chain, cross-file duplication, analyzer triage, test adequacy and coverage
 FIXES:    <numbered list, or none>
+Discovery: codegraph N, docs N, direct reads N
+DIRECT_READ_REASONS: <path and reason for each direct read of indexed code, or none>
 ```
 
 On PASS, follow the block with one sentence saying what was checked and why it is clean. On FAIL, return the block alone. Never emit `APPROVE`, `REQUEST_CHANGES`, or `NEEDS_HUMAN`; those are end-of-run council verdicts.

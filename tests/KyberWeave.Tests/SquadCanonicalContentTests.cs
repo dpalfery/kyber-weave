@@ -22,7 +22,7 @@ public sealed class SquadCanonicalContentTests
         "BLAST_RADIUS_EXCEEDED",
         "INVARIANT_CONTRADICTION",
         "ITERATION_CAP_EXCEEDED",
-        "THRASH_OSCILLATION_DETECTED",
+        "THRASH_OSCILLATION_DETECTED"
     ];
 
     private static readonly Regex CircuitBreakerTriggerEnumeration = new(
@@ -69,7 +69,7 @@ public sealed class SquadCanonicalContentTests
         "sql-database-architect",
         "task-reviewer",
         "tauri-dev",
-        "test-dev",
+        "test-dev"
     ];
 
     /// <summary>
@@ -204,7 +204,8 @@ public sealed class SquadCanonicalContentTests
     public void LoadAgentSkillIntersectionHasPinnedSharedAndPrefixedFallbackIdentities()
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
-        Dictionary<string, SquadSkill> skillsByName = source.Skills.ToDictionary(skill => skill.Name, StringComparer.Ordinal);
+        Dictionary<string, SquadSkill> skillsByName =
+            source.Skills.ToDictionary(skill => skill.Name, StringComparer.Ordinal);
         string[] intersections = source.Agents
             .Where(agent => skillsByName.ContainsKey(agent.Name))
             .Select(agent => agent.Name)
@@ -393,8 +394,98 @@ public sealed class SquadCanonicalContentTests
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
         SquadAgent agent = Assert.Single(source.Agents, a => a.Name == agentName);
 
-        Assert.Contains("codegraph_explore", agent.InstructionBody, StringComparison.Ordinal);
-        Assert.Contains("docs_explore", agent.InstructionBody, StringComparison.Ordinal);
+        AssertDiscoveryContract(agent.InstructionBody, agentName);
+    }
+
+    [Fact]
+    public void ConductorRetainsTaskSessionsForIndependentReviewAndRework()
+    {
+        string contract = ReadAgentContract("conductor");
+
+        Assert.Contains("original worker session", contract, StringComparison.Ordinal);
+        Assert.Contains("worker-session-id", contract, StringComparison.Ordinal);
+        Assert.Contains("reviewer-session-id", contract, StringComparison.Ordinal);
+        Assert.Contains("Resuming a worker counts as a rework dispatch", contract, StringComparison.Ordinal);
+        Assert.Contains("unrelated task", contract, StringComparison.Ordinal);
+        Assert.Contains("continuation is unavailable", contract, StringComparison.Ordinal);
+        Assert.Contains("context is unreliable", contract, StringComparison.Ordinal);
+        Assert.Contains("Keep the reviewer independent", contract, StringComparison.Ordinal);
+        Assert.DoesNotContain("Every worker invocation is cold", contract, StringComparison.Ordinal);
+        Assert.DoesNotContain("any available worker", contract, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ConductorDiagnosesDefectsBeforePromotingExplicitPlanOrSpecIntent()
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadAgent conductor = Assert.Single(source.Agents, agent => agent.Name == "conductor");
+        string contract = ReadAgentContract("conductor");
+        int defect = conductor.InstructionBody.IndexOf("**Defect first**", StringComparison.Ordinal);
+        int explicitChoice = conductor.InstructionBody.IndexOf("**Explicit plan or spec**", StringComparison.Ordinal);
+
+        Assert.True(defect >= 0 && explicitChoice > defect,
+            "Diagnose a concrete failure before routing an explicit artifact choice.");
+        Assert.Contains("conductor/references/intake-path.md", conductor.InstructionBody, StringComparison.Ordinal);
+        Assert.Contains("Read **Defect diagnosis**", conductor.InstructionBody, StringComparison.Ordinal);
+        Assert.Contains("## Defect diagnosis", contract, StringComparison.Ordinal);
+        Assert.Contains("STATUS: INTENT_STATED", contract, StringComparison.Ordinal);
+        Assert.Contains("STATUS: DEFECT", contract, StringComparison.Ordinal);
+        Assert.Contains("CHOICE: PLAN | SPEC | UNSTATED", contract, StringComparison.Ordinal);
+        Assert.Contains("existing Ready", contract, StringComparison.Ordinal);
+        Assert.Contains("diagnosis is attached", contract, StringComparison.Ordinal);
+
+        string assessment =
+            File.ReadAllText(Path.Combine(ProductRoot, "agents", "architect", "references", "intake-assessment.md"));
+        Assert.Contains("STATUS: INTENT_STATED", assessment, StringComparison.Ordinal);
+        Assert.Contains("STATUS: DEFECT", assessment, StringComparison.Ordinal);
+        Assert.DoesNotContain("STATUS: BLOCKED", assessment, StringComparison.Ordinal);
+        Assert.Contains("CHOICE: PLAN | SPEC", assessment, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ReadyTaskDefectsRequiringArchitectureHaveAnExplicitAssessmentHandoff()
+    {
+        string intake =
+            File.ReadAllText(Path.Combine(ProductRoot, "agents", "conductor", "references", "intake-path.md"));
+        string assessment =
+            File.ReadAllText(Path.Combine(ProductRoot, "agents", "architect", "references", "intake-assessment.md"));
+        int ready = intake.IndexOf("For a failure in an existing Ready", StringComparison.Ordinal);
+        int noAuthority = intake.IndexOf("Without existing Ready authority", ready, StringComparison.Ordinal);
+        string readyRoute = intake[ready..noAuthority];
+
+        Assert.Contains("NEEDS_ARCHITECT", readyRoute, StringComparison.Ordinal);
+        Assert.Contains("read-only diagnosed-task assessment", readyRoute, StringComparison.Ordinal);
+        Assert.Contains("TASK_ASSESSED", readyRoute, StringComparison.Ordinal);
+        Assert.Contains("REVISION_REQUIRED", readyRoute, StringComparison.Ordinal);
+        Assert.Contains("original worker", readyRoute, StringComparison.Ordinal);
+        Assert.Contains("reopen the applicable approval gate", readyRoute, StringComparison.Ordinal);
+        Assert.Contains("STATUS: TASK_ASSESSED", assessment, StringComparison.Ordinal);
+        Assert.Contains("CONTRACT: UNCHANGED | REVISION_REQUIRED", assessment, StringComparison.Ordinal);
+        Assert.Contains("Do not change the Ready artifact", assessment, StringComparison.Ordinal);
+        Assert.Contains("do not ask for a new plan/spec choice", assessment, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("review-lens")]
+    [InlineData("review-triage")]
+    public void DiscoveryContractRejectsDirectReadPermissionAfterTheNextRoleHeading(string agentName)
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        string body = Assert.Single(source.Agents, agent => agent.Name == agentName).InstructionBody;
+        string directReadRule = Assert.Single(body.Split('\n'), line =>
+            line.Contains("Read or search a file directly", StringComparison.Ordinal));
+        string misplacedRule = body.Replace(directReadRule, string.Empty, StringComparison.Ordinal) + "\n" +
+                               directReadRule;
+
+        Assert.NotNull(Record.Exception(() => AssertDiscoveryContract(misplacedRule, agentName)));
+    }
+
+    [Fact]
+    public void ProductOwnerReportsDiscoveryInItsStructuredDigest()
+    {
+        string skill = File.ReadAllText(Path.Combine(ProductRoot, "skills", "product-owner", "SKILL.md"));
+        AssertDiscoveryContract(skill, "product-owner");
+        Assert.Contains("\nDiscovery: codegraph N, docs N, direct reads N\n", skill, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -527,7 +618,8 @@ public sealed class SquadCanonicalContentTests
         Assert.Equal(ExpectedMigratedAgents, reportNames);
 
         IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> expectedSources = ParseExpectedSourceHashes();
-        foreach (SquadAgent agent in source.Agents.Where(a => ExpectedMigratedAgents.Contains(a.Name, StringComparer.Ordinal)))
+        foreach (SquadAgent agent in source.Agents.Where(a =>
+                     ExpectedMigratedAgents.Contains(a.Name, StringComparer.Ordinal)))
         {
             string reportPath = Path.Combine(migrationRoot, $"{agent.Name}.md");
             MigrationReport report = ReadMigrationReport(reportPath);
@@ -576,9 +668,11 @@ public sealed class SquadCanonicalContentTests
     private static string ProductRoot =>
         Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
 
-    private static bool IsVersionedIdentity(string name) =>
-        name.EndsWith("-v2", StringComparison.Ordinal) ||
-        name.EndsWith("-v3", StringComparison.Ordinal);
+    private static bool IsVersionedIdentity(string name)
+    {
+        return name.EndsWith("-v2", StringComparison.Ordinal) ||
+               name.EndsWith("-v3", StringComparison.Ordinal);
+    }
 
     private static void AssertClosedCircuitBreakerTriggerSet(string contract)
     {
@@ -592,6 +686,32 @@ public sealed class SquadCanonicalContentTests
             .ToArray();
 
         Assert.Equal(CircuitBreakerTriggerTokens, harvested);
+    }
+
+    private static void AssertDiscoveryContract(string body, string agentName)
+    {
+        int heading = body.IndexOf("## Discovery order", StringComparison.Ordinal);
+        Assert.True(heading >= 0, $"{agentName}: missing Discovery order section.");
+        int nextHeading = body.IndexOf("\n#", heading + 1, StringComparison.Ordinal);
+        string discovery = nextHeading < 0 ? body[heading..] : body[heading..nextHeading];
+        int code = discovery.IndexOf("codegraph_explore", StringComparison.Ordinal);
+        int docs = discovery.IndexOf("docs_explore", StringComparison.Ordinal);
+        int directRead = discovery.IndexOf("Read or search a file directly", StringComparison.Ordinal);
+
+        Assert.True(code >= 0 && docs >= 0 && directRead > code && directRead > docs,
+            $"{agentName}: index discovery must precede direct-read authorization.");
+        Assert.Contains("docs_for_symbol", discovery, StringComparison.Ordinal);
+        Assert.Contains("docs_glossary", discovery, StringComparison.Ordinal);
+        if (agentName is "review-lens" or "review-triage")
+        {
+            Assert.Contains("Discovery reporting is exempt", discovery, StringComparison.Ordinal);
+            Assert.Contains("machine-consumed", discovery, StringComparison.Ordinal);
+        }
+        else
+        {
+            Assert.Contains("Discovery: codegraph N, docs N, direct reads N", discovery, StringComparison.Ordinal);
+            Assert.Contains("reason for each direct read", discovery, StringComparison.Ordinal);
+        }
     }
 
     private static string ReadAgentContract(string name)
@@ -620,7 +740,7 @@ public sealed class SquadCanonicalContentTests
     private static string[] ReadCapabilityProfileTargets()
     {
         string path = Path.Combine(ProductRoot, "profiles", "capabilities.yml");
-        YamlStream yaml = new YamlStream();
+        YamlStream yaml = new();
         yaml.Load(new StringReader(File.ReadAllText(path)));
         YamlMappingNode root = RequireMapping(yaml.Documents.Single().RootNode, "root", path);
         YamlMappingNode profiles = RequireMapping(RequireNode(root, "profiles", path), "profiles", path);
@@ -656,7 +776,7 @@ public sealed class SquadCanonicalContentTests
     private static RoleSkillProfile ReadRoleSkillProfile()
     {
         string path = Path.Combine(ProductRoot, "profiles", "fallbacks.yml");
-        YamlStream yaml = new YamlStream();
+        YamlStream yaml = new();
         yaml.Load(new StringReader(File.ReadAllText(path)));
         YamlMappingNode root = RequireMapping(yaml.Documents.Single().RootNode, "root", path);
         YamlMappingNode profiles = RequireMapping(RequireNode(root, "profiles", path), "profiles", path);
@@ -736,7 +856,7 @@ public sealed class SquadCanonicalContentTests
             throw new InvalidDataException($"Migration report '{path}' has unterminated YAML frontmatter.");
         }
 
-        YamlStream yaml = new YamlStream();
+        YamlStream yaml = new();
         yaml.Load(new StringReader(content[4..end]));
         YamlMappingNode root = RequireMapping(yaml.Documents.Single().RootNode, "frontmatter", path);
         Dictionary<string, string> sources = RequireMapping(RequireNode(root, "sources", path), "sources", path)
@@ -769,21 +889,29 @@ public sealed class SquadCanonicalContentTests
         throw new InvalidDataException($"YAML document '{path}' is missing '{key}'.");
     }
 
-    private static YamlMappingNode RequireMapping(YamlNode node, string field, string path) =>
-        node as YamlMappingNode ??
-        throw new InvalidDataException($"YAML document '{path}' field '{field}' must be a mapping.");
+    private static YamlMappingNode RequireMapping(YamlNode node, string field, string path)
+    {
+        return node as YamlMappingNode ??
+               throw new InvalidDataException($"YAML document '{path}' field '{field}' must be a mapping.");
+    }
 
-    private static YamlSequenceNode RequireSequence(YamlNode node, string field, string path) =>
-        node as YamlSequenceNode ??
-        throw new InvalidDataException($"YAML document '{path}' field '{field}' must be a sequence.");
+    private static YamlSequenceNode RequireSequence(YamlNode node, string field, string path)
+    {
+        return node as YamlSequenceNode ??
+               throw new InvalidDataException($"YAML document '{path}' field '{field}' must be a sequence.");
+    }
 
-    private static string RequireScalar(YamlMappingNode mapping, string key, string path) =>
-        RequireScalar(RequireNode(mapping, key, path), key, path);
+    private static string RequireScalar(YamlMappingNode mapping, string key, string path)
+    {
+        return RequireScalar(RequireNode(mapping, key, path), key, path);
+    }
 
-    private static string RequireScalar(YamlNode node, string field, string path) =>
-        node is YamlScalarNode { Value: not null } scalar
+    private static string RequireScalar(YamlNode node, string field, string path)
+    {
+        return node is YamlScalarNode { Value: not null } scalar
             ? scalar.Value
             : throw new InvalidDataException($"YAML document '{path}' field '{field}' must be a scalar.");
+    }
 
     private sealed record RoleSkillProfile(
         string NoPrimaryAgent,
@@ -804,27 +932,27 @@ public sealed class SquadCanonicalContentTests
         string FinalBodySha256);
 
     private const string ExpectedSourceHashManifest = """
-        .github/agents/architect.agent.md|16afd840a7d528b941e86e4c9c3e050054a8655a423234c0ab484091373bc58c
-        .github/agents/architect-v3.agent.md|5eb0ce098c11a54c9f78f75daaf517d332fedda97f5d9431e6c968b2a9558fcb
-        .github/agents/azure-reader.agent.md|f4f8bf0fe71adc3933808dccf4112a5fa49154069a2ed0977cc92b0d005382ca
-        .github/agents/bug-crusher-investigator.agent.md|e0f68b7e28c9153de337dbb5daba0c756a192714c8906bc5aeb379d54553dbb2
-        .github/agents/code-reviewer.agent.md|98440b62230139ae74e4f1a54d15482db338ab34bf912d98afbc629b249ffd14
-        .github/agents/conductor.agent.md|fe8fa326b83780cafb4a9b8aba06312ddb106eb732de1f7a64f3a88b8fe773c6
-        .github/agents/conductor-v3.agent.md|0392bd1e3dd09ab67f45801cb39aac7d016b5ed43733ee2ae65ac6c5668d7204
-        .github/agents/csharp-dev.agent.md|09cd65841fbb82e81060cbbccdc91c6aac7ee209a84b97e30799cc3281cbe146
-        .github/agents/dal-dev.agent.md|efbd8ed5a6f2f8342a184cf57cba08c3649dba0e736e980257101a1056f3079a
-        .github/agents/docs-dev.agent.md|db63b4d3b09d0d352c5381feb6821e3fb982acdf49ad44f3b5d33861343410b0
-        .github/agents/github-devops.agent.md|52ed73aca2f79ad7f57ccaad94299fa96827f34c5e97133728b037aa3a6d2593
-        .github/agents/maui-dev.agent.md|d275ca8508a007832e6c00bb77f38735f1f849ac4bd8eb7a554ee1b05e371a2f
-        .github/agents/product-owner.agent.md|5193d5e0bdabec19ceb33a646ab1120362e8705dec1bfe5da7af23a361c5d76e
-        .github/agents/pulumi-dev.agent.md|968b2999eb8f998b8fc9863389ddca445661c8c444cecf079b3257dac9ae0040
-        .github/agents/python-dev.agent.md|f058efe4c9f5bd07ff6d908f539265eb5219a59806ac7db8b1be42525eefa944
-        .github/agents/react-dev.agent.md|8c34dadd97cd379d7e7b03c172f297c89ba88d9a540c4d1f0ce43d4cb6018fdd
-        .github/agents/research-agent.agent.md|e0f94800f1c177fec00ff70f977263a61e14b3af1820225b7f7d99f60f66a548
-        .github/agents/sql-database-architect.agent.md|7310fbcad5e1d87b90c9c1d95a031931a028f9a486f8235e52347721e8f74ee6
-        .github/agents/task-reviewer.agent.md|e096cb7d1507f7d6f1bc635dbc893d8f41a0289d105bfa5648bb2db5ba74b61c
-        .github/agents/task-reviewer-v3.agent.md|27bc894fd3ed5b56172d4210d9f2ff3ac716fe7c8d79ee11a15d1d4c4800a1f8
-        .github/agents/tauri-dev.agent.md|30f08182e6c42869088f2df5cc36aa6162182a97fa6576342b9ca2fff47051ad
-        .github/agents/test-dev.agent.md|b461f218e0645748eb5beec7675c3d5908191d6facf2cb19ac0338fdc638e548
-        """;
+                                                      .github/agents/architect.agent.md|16afd840a7d528b941e86e4c9c3e050054a8655a423234c0ab484091373bc58c
+                                                      .github/agents/architect-v3.agent.md|5eb0ce098c11a54c9f78f75daaf517d332fedda97f5d9431e6c968b2a9558fcb
+                                                      .github/agents/azure-reader.agent.md|f4f8bf0fe71adc3933808dccf4112a5fa49154069a2ed0977cc92b0d005382ca
+                                                      .github/agents/bug-crusher-investigator.agent.md|e0f68b7e28c9153de337dbb5daba0c756a192714c8906bc5aeb379d54553dbb2
+                                                      .github/agents/code-reviewer.agent.md|98440b62230139ae74e4f1a54d15482db338ab34bf912d98afbc629b249ffd14
+                                                      .github/agents/conductor.agent.md|fe8fa326b83780cafb4a9b8aba06312ddb106eb732de1f7a64f3a88b8fe773c6
+                                                      .github/agents/conductor-v3.agent.md|0392bd1e3dd09ab67f45801cb39aac7d016b5ed43733ee2ae65ac6c5668d7204
+                                                      .github/agents/csharp-dev.agent.md|09cd65841fbb82e81060cbbccdc91c6aac7ee209a84b97e30799cc3281cbe146
+                                                      .github/agents/dal-dev.agent.md|efbd8ed5a6f2f8342a184cf57cba08c3649dba0e736e980257101a1056f3079a
+                                                      .github/agents/docs-dev.agent.md|db63b4d3b09d0d352c5381feb6821e3fb982acdf49ad44f3b5d33861343410b0
+                                                      .github/agents/github-devops.agent.md|52ed73aca2f79ad7f57ccaad94299fa96827f34c5e97133728b037aa3a6d2593
+                                                      .github/agents/maui-dev.agent.md|d275ca8508a007832e6c00bb77f38735f1f849ac4bd8eb7a554ee1b05e371a2f
+                                                      .github/agents/product-owner.agent.md|5193d5e0bdabec19ceb33a646ab1120362e8705dec1bfe5da7af23a361c5d76e
+                                                      .github/agents/pulumi-dev.agent.md|968b2999eb8f998b8fc9863389ddca445661c8c444cecf079b3257dac9ae0040
+                                                      .github/agents/python-dev.agent.md|f058efe4c9f5bd07ff6d908f539265eb5219a59806ac7db8b1be42525eefa944
+                                                      .github/agents/react-dev.agent.md|8c34dadd97cd379d7e7b03c172f297c89ba88d9a540c4d1f0ce43d4cb6018fdd
+                                                      .github/agents/research-agent.agent.md|e0f94800f1c177fec00ff70f977263a61e14b3af1820225b7f7d99f60f66a548
+                                                      .github/agents/sql-database-architect.agent.md|7310fbcad5e1d87b90c9c1d95a031931a028f9a486f8235e52347721e8f74ee6
+                                                      .github/agents/task-reviewer.agent.md|e096cb7d1507f7d6f1bc635dbc893d8f41a0289d105bfa5648bb2db5ba74b61c
+                                                      .github/agents/task-reviewer-v3.agent.md|27bc894fd3ed5b56172d4210d9f2ff3ac716fe7c8d79ee11a15d1d4c4800a1f8
+                                                      .github/agents/tauri-dev.agent.md|30f08182e6c42869088f2df5cc36aa6162182a97fa6576342b9ca2fff47051ad
+                                                      .github/agents/test-dev.agent.md|b461f218e0645748eb5beec7675c3d5908191d6facf2cb19ac0338fdc638e548
+                                                      """;
 }

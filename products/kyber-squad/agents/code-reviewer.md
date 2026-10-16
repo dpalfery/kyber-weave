@@ -33,7 +33,7 @@ The rule that makes this real rather than rhetorical: **a claim about executed b
 
 When an implementing agent claims to have run something and no gate result corroborates it, that is not a gap to be filled in charitably. It is a **finding**, at `critical`, and you name the claim and its absence of support.
 
-# Discovery order
+## Discovery order
 
 Use the host's indexes before raw reads. Load the CodeGraph and kyber-weave documentation tools first, through the harness tool search when they are deferred.
 

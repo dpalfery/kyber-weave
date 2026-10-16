@@ -30,17 +30,17 @@ The governing boundary is simple: you decide **who works next and when**; specia
 
 Your first action on every request is to read its intent from the request itself, select exactly one path, and read that path's linked contract. Dispatch no agent before that read.
 
-Intent is what the user said they want, not what the work looks like:
+Apply this precedence before routing by artifact. Diagnose a concrete failure first, then honor the user's stated plan or spec choice:
 
-- **Explicit plan or spec** — the request says to plan or to spec ("use plan mode", "plan this", "write a spec"). That is the user's choice. With an existing plan or specification artifact it takes the plan or spec path; with none it takes the intake path at **Promotion**, with no assessment.
-- **Defect** — the request points at one concrete broken thing (a failing test, build error, stack trace). Dispatch `bug-crusher-investigator` for a diagnosis and relay its verdict. Run no plan-versus-spec assessment.
+- **Defect first** — the request points at one concrete broken thing (a failing test, build error, stack trace), even when it also names a plan/spec choice or an existing artifact. Read **Defect diagnosis** in the linked intake-path contract, then dispatch `bug-crusher-investigator`. Preserve that choice and artifact for the post-diagnosis handoff. Run no plan-versus-spec assessment before diagnosis.
+- **Explicit plan or spec** — with no undiagnosed concrete failure, the request says to plan or to spec ("use plan mode", "plan this", "write a spec"). That is the user's choice. With an existing plan or specification artifact it takes the plan or spec path; with none it takes the intake path at **Promotion**, with no assessment.
 - **Unstated** — a todo or open request that says neither. Take the intake path and run its assessment.
 
 Paths by artifact:
 
 - **Plan path** — a supplied or indexed plan. Read [the plan-path contract](conductor/references/plan-path.md).
 - **Spec path** — a supplied or indexed feature specification. Read [the spec-path contract](conductor/references/spec-path.md).
-- **Intake path** — no approved delivery artifact. Read [the intake-path contract](conductor/references/intake-path.md).
+- **Intake path, including defect diagnosis** — no approved delivery artifact, or a concrete failure with or without an artifact. Read [the intake-path contract](conductor/references/intake-path.md); its **Defect diagnosis** section governs investigator dispatch before assessment or Promotion.
 
 Never infer plan versus spec from the size or wording of the work; an explicit statement of intent is not inference. When the wording is ambiguous or offers both ("plan or spec?"), treat intent as Unstated.
 
@@ -50,9 +50,10 @@ Never infer plan versus spec from the size or wording of the work; an explicit s
 - Persist the selected mode in the plan or specification task artifact before approval. A mode change after approval reopens approval of the affected Test contract or verification contract.
 - Ready input begins execution immediately. Draft or partial input resumes from its persisted state and never executes until its final **approve and execute** gate is recorded.
 - Never execute a Draft artifact: dispatch no implementation or test worker until the plan or specification is Ready. An answer to a decision, such as "use recommended", is not the **approve and execute** gate. Never archive a promoted todo until its successor is Ready.
-- Every worker invocation is cold and self-contained. The worker packet — objective, exact files or symbols, acceptance criteria, dependencies, selected development mode, required contract, required skills, and a reminder to follow the worker's Discovery order (indexes before raw reads) and report its discovery counts — is the worker's whole context. A plan or spec path may appear only as routing metadata marked not for reading; never tell a worker to open the plan or spec to learn its task. Deterministic denial of plan/spec reads is Arbiter work (#284).
+- Every worker receives a self-contained task packet: objective, exact files or symbols, acceptance criteria, dependencies, selected development mode, required contract, and required skills. The packet defines authorized scope; retained conversation history supplies context, not additional authority. Follow the worker's **Discovery order** and include `Discovery: codegraph N, docs N, direct reads N` plus a reason for each direct read of indexed code in its completion digest. `review-lens` and `review-triage` are exempt from discovery reporting because their machine-consumed output schemas are fixed. A plan or spec path may appear only as routing metadata marked not for reading; never tell a worker to open the plan or spec to learn its task. Deterministic denial of plan/spec reads is Arbiter work (#284).
+- Retain the original worker session for that task's review, rework, and verification when the harness supports continuation. Keep the reviewer independent of the implementation conversation. Record worker and reviewer session handles and recovery context as specified in the execution-and-review contract; invoking the same role name alone does not resume its session.
 - Every implementation task receives up to three passes from `task-reviewer`. `code-reviewer` is the single end-of-run council, never a per-task reviewer.
-- Iteration circuit-breaker and loop detection: bounded retries apply to every failing fixture and failure cluster (maximum 2 rework dispatches per cluster). The per-cluster dispatch tally lives on the run's persisted execution artifact, or the task artifact until the run writes one, so each cold invocation can read it. If a worker reports regression thrash, invariant contradiction, or exceeded iteration caps, trip the circuit-breaker and escalate rather than thrashing.
+- Iteration circuit-breaker and loop detection: bounded retries apply to every failing fixture and failure cluster (maximum 2 rework dispatches per cluster). The per-cluster dispatch tally lives on the run's persisted execution artifact, or the task artifact until the run writes one, and applies equally to resumed and replacement sessions. If a worker reports regression thrash, invariant contradiction, or exceeded iteration caps, trip the circuit-breaker and escalate rather than thrashing.
 - Every completed plan or specification receives a distinct `docs-dev` closeout task before the objective is reported complete.
 
 For task sequencing, evidence rules, findings, final review, and closeout, read [the execution-and-review contract](conductor/references/execution-and-review.md).
