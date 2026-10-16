@@ -1,6 +1,6 @@
 import { spawn } from 'child_process'
 import { mkdtempSync, rmSync, writeFileSync, existsSync } from 'fs'
-import { createServer, type Socket } from 'net'
+import { createConnection, createServer, type Socket } from 'net'
 import { tmpdir } from 'os'
 import { join } from 'path'
 
@@ -116,6 +116,38 @@ describe('engine instance lock', () => {
 
     expect(acknowledged).toBe(true)
     expect(stop).toHaveBeenCalledTimes(1)
+  })
+
+  it('drops a request whose op is not info or shutdown', async () => {
+    const stop = vi.fn()
+    await own('1.0.0', stop)
+    const path = enginePipePath(stateDir)
+
+    for (const body of ['{"op":"please"}', '42', 'null', '{"op":null}']) {
+      const reply = await new Promise<string>((resolve) => {
+        const socket = createConnection(path, () => socket.write(`${body}\n`))
+        let got = ''
+        socket.on('data', (chunk) => { got += chunk.toString('utf-8') })
+        socket.on('close', () => resolve(got))
+        socket.on('error', () => resolve(got))
+      })
+      expect(reply).toBe('')
+    }
+    expect(stop).not.toHaveBeenCalled()
+  })
+
+  it('rejects an engine.json whose url or startedAt is not a string', () => {
+    const file = join(stateDir, 'engine.json')
+    const base = { pid: 1, version: '1.0.0', exe: '/bin/kd' }
+
+    writeFileSync(file, JSON.stringify({ ...base, url: { toString: 'x' } }))
+    expect(readEngineRecordFile(stateDir)).toBeNull()
+
+    writeFileSync(file, JSON.stringify({ ...base, startedAt: 7 }))
+    expect(readEngineRecordFile(stateDir)).toBeNull()
+
+    writeFileSync(file, JSON.stringify({ ...base, url: 'http://127.0.0.1:1', startedAt: 'now' }))
+    expect(readEngineRecordFile(stateDir)).not.toBeNull()
   })
 
   it('keeps long state-dir paths inside the socket path limit', () => {

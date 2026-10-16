@@ -96,6 +96,9 @@ export function readEngineRecordFile(stateDir: string): EngineRecord | null {
   try {
     const parsed = JSON.parse(readFileSync(recordPath(stateDir), 'utf-8')) as Partial<EngineRecord>
     if (typeof parsed.pid !== 'number' || typeof parsed.version !== 'string' || typeof parsed.exe !== 'string') return null
+    // Optional fields flow into error messages and the browser launch, so a wrong type is a bad record.
+    if (parsed.url !== undefined && typeof parsed.url !== 'string') return null
+    if (parsed.startedAt !== undefined && typeof parsed.startedAt !== 'string') return null
     return parsed as EngineRecord
   } catch {
     return null
@@ -186,8 +189,13 @@ export async function acquireEngine(options: EngineLockOptions): Promise<EngineO
       if (newline === -1) return
       let op: EngineRequest['op'] | null = null
       try {
-        op = (JSON.parse(buffer.slice(0, newline)) as EngineRequest).op
+        const body: unknown = JSON.parse(buffer.slice(0, newline))
+        const candidate = typeof body === 'object' && body !== null ? (body as { op?: unknown }).op : undefined
+        if (candidate === 'info' || candidate === 'shutdown') op = candidate
       } catch {
+        /* malformed: dropped below */
+      }
+      if (op === null) {
         socket.destroy()
         return
       }

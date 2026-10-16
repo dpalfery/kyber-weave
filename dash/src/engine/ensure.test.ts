@@ -113,4 +113,15 @@ describe('ensureEngine', () => {
 
     expect(result.outcome).toBe('failed')
   })
+
+  it('reports a program that cannot be started at once, with the cause', async () => {
+    const result = await ensureEngine({
+      stateDir: '/s', version: '1.0.0', program: '/nonexistent/kyberdash',
+      // The spawn error is an event-loop turn away; a real sleep yields, the test's no-op one does not.
+      query: async () => null, sleep: () => new Promise((resolve) => { setImmediate(resolve) }),
+    })
+
+    expect(result.outcome).toBe('failed')
+    expect(result).toMatchObject({ reason: expect.stringContaining('ENOENT') })
+  })
 })

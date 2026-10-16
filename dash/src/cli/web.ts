@@ -871,7 +871,9 @@ export async function runWebDashboard(opts: WebDashboardServices & {
   // One engine per user, enforced by the OS (a bound local endpoint), before anything else
   // binds or writes. `requestStop` is late-bound: a peer's shutdown request can only arrive
   // after the server below exists.
-  let requestStop = (): void => {}
+  // A request that lands before the server is listening is remembered and honoured the moment it is.
+  let stopRequestedEarly = false
+  let requestStop = (): void => { stopRequestedEarly = true }
   const engine: EngineOwner | null = opts.singleInstance === true && stateDirProblem === null
     ? await takeEngine(stateDir, () => { requestStop() })
     : null
@@ -1055,7 +1057,6 @@ export async function runWebDashboard(opts: WebDashboardServices & {
     // A kill the process cannot intercept leaves a stale endpoint, which the next start
     // clears. Everything the process can intercept (SIGTERM, exit) cleans up after itself.
     process.once('exit', () => engine.releaseSync())
-    process.once('SIGTERM', () => process.exit(0))
     engine.update({ url })
     requestStop = () => {
       server.closeAllConnections?.()
@@ -1063,6 +1064,10 @@ export async function runWebDashboard(opts: WebDashboardServices & {
       server.once('close', () => { setImmediate(() => process.exit(0)) })
       setTimeout(() => process.exit(0), 5_000).unref()
     }
+    // SIGTERM takes the same teardown as a peer's shutdown request: the server's close handler below
+    // gives back the hosts, server.json and the bridge before the process exits.
+    process.once('SIGTERM', () => requestStop())
+    if (stopRequestedEarly) requestStop()
   }
   // Publish the attach point. Only over a file that is not a live other server's: the
   // jobs lease stands a second `kyberdash web` process down, but it does not stop that
@@ -1111,7 +1116,7 @@ export async function runWebDashboard(opts: WebDashboardServices & {
   // the other's attach point. An unreadable, missing or foreign body is left alone.
   server.on('close', () => {
     process.off('SIGINT', onSigint)
-    void engine?.release()
+    void engine?.release().catch(() => {})
     const published = readServerRecord(serverFilePath)
     if (published !== null && published.pid === process.pid && (published.url === undefined || published.url === url)) {
       rmSync(serverFilePath, { force: true })

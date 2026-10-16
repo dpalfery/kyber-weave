@@ -45,9 +45,12 @@ class DetachedLauncher {
     private readonly programArgs: readonly string[],
   ) {}
 
+  /** Set when the OS refuses to start the program (ENOENT, EACCES): reported at once, not as a timeout. */
+  spawnError: Error | null = null
+
   start(args: readonly string[]): void {
     const child = spawn(this.program, [...this.programArgs, ...args], { detached: true, stdio: 'ignore' })
-    child.on('error', () => { /* surfaced as a start timeout */ })
+    child.on('error', (err) => { this.spawnError = err })
     child.unref()
   }
 }
@@ -58,12 +61,13 @@ async function waitFor<T>(
   probe: () => Promise<T | null>,
   timeoutMs: number,
   sleep: (ms: number) => Promise<void>,
+  abort: () => boolean = () => false,
 ): Promise<T | null> {
   let waited = 0
   for (;;) {
     const value = await probe()
     if (value !== null) return value
-    if (waited >= timeoutMs) return null
+    if (abort() || waited >= timeoutMs) return null
     await sleep(POLL_MS)
     waited += POLL_MS
   }
@@ -104,15 +108,20 @@ export async function ensureEngine(options: EngineEnsureOptions): Promise<Engine
   }
 
   const engineArgs = ['web', '--no-open']
+  let launcher: DetachedLauncher | null = null
   if (options.startEngine !== undefined) {
     options.startEngine(options.program, [...(options.programArgs ?? []), ...engineArgs])
   } else {
-    new DetachedLauncher(options.program, options.programArgs ?? []).start(engineArgs)
+    launcher = new DetachedLauncher(options.program, options.programArgs ?? [])
+    launcher.start(engineArgs)
   }
   const started = await waitFor(async () => {
     const record = await query(options.stateDir)
     return record !== null && record !== 'unresponsive' && record.url !== undefined ? record : null
-  }, startTimeoutMs, sleep)
+  }, startTimeoutMs, sleep, () => launcher?.spawnError != null)
+  if (launcher?.spawnError != null) {
+    return { outcome: 'failed', reason: `could not start ${options.program}: ${launcher.spawnError.message}` }
+  }
   if (started === null) return { outcome: 'failed', reason: 'the engine did not start serving in time' }
   return previous === null ? { outcome: 'started', record: started } : { outcome: 'replaced', record: started, previous }
 }
