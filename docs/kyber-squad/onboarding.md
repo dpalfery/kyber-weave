@@ -5,7 +5,7 @@ doc-type: onboarding
 component: KyberSquad
 source-root: src/KyberWeave.Core/Squad
 owner: dpalfery
-last-reviewed: 2026-10-14
+last-reviewed: 2026-10-16
 status: current
 decided-by:
   - adr/0019-pi-native-subagents-and-primary-lowering
@@ -706,8 +706,22 @@ Use `pr-review-fix-comments` when you prefer step-by-step approval for each fix.
 
 ## Delivery circuit-breaker
 
+For delivery intake, a concrete failure is diagnosed before routing by artifact,
+even when the request also names an explicit plan/spec choice or an existing plan.
+The conductor preserves that choice and existing artifact for the post-diagnosis
+handoff. An explicit choice without an undiagnosed failure skips the intake assessment.
+For a nontrivial diagnosed defect in a Ready task, the architect assesses whether the
+approved contract still fits. Required revisions return to the artifact author and
+reopen approval before implementation; unchanged contracts return to the original worker.
+
+The conductor keeps the same developer session for a task's review fixes and
+verification when the harness can resume it. The reviewer remains independent and
+can retain its own review history between passes. Stateless harnesses receive a
+self-contained recovery brief with previous findings, decisions, and failed approaches.
+The conductor records session handles and replacement reasons on the execution artifact.
+
 Deployed `conductor`, `csharp-dev`, `test-dev`, and `github-devops` agents stop
-unbounded test-fix loops: 3 incremental fixes per worker invocation, 2 conductor
+unbounded test-fix loops: 3 incremental fixes per implementation or rework dispatch, 2 conductor
 rework dispatches per failure cluster per run, A→B→A oscillation detection, and
 escalation through `STATUS: ESCALATION` / `ESCALATION: circuit-breaker`. Caps,
 cluster identity, JEV checkpoints, and the closed trigger set are in

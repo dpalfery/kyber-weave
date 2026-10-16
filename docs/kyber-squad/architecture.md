@@ -5,7 +5,7 @@ doc-type: architecture
 component: KyberSquad
 source-root: src/KyberWeave.Core/Squad
 owner: dpalfery
-last-reviewed: 2026-10-14
+last-reviewed: 2026-10-16
 status: current
 decided-by:
   - adr/0017-copilot-deterministic-tool-order
@@ -713,7 +713,7 @@ agent specs. The durable product claim is here.
 ```mermaid
 flowchart TD
     Cluster["Failure cluster\n(first-observed test ID)"]
-    Worker["Worker invocation\n3 incremental fixes"]
+    Worker["Implementation or rework dispatch\n3 incremental fixes"]
     Conductor["Conductor run\n2 rework dispatches"]
     JEV["JEV tripwire or cap"]
     Escalation["STATUS: ESCALATION"]
@@ -735,22 +735,46 @@ A **failure cluster** is keyed by the failing test ID first observed for that cl
 recorded on the execution artifact when the cluster is created (when no test IDs exist,
 the failing subsystem, job, or step label). A newly failing test joins the recorded
 cluster whose key it most recently co-failed with; if it co-fails with none, or with more
-than one, it forms a new cluster keyed by itself. A cold invocation reads the recorded
-key; it does not re-derive one from whatever is failing now. Distinct keys remain
+than one, it forms a new cluster keyed by itself. Every resumed or replacement worker
+receives the recorded key; it does not re-derive one from whatever is failing now. Distinct keys remain
 distinct clusters for A/B oscillation detection.
 
-Every worker invocation is cold. The per-cluster **dispatch tally** therefore lives on
-the run's persisted execution artifact (or the task artifact until the run writes one).
-The conductor increments that tally only when it dispatches a rework worker for the
-cluster. Re-evaluating the queue reads the tally and never increments it. A tally at or
-above the cluster limit trips the breaker before the dispatch. The worker's inner
-3-iteration cap is per invocation and does not persist.
+The per-cluster **dispatch tally** lives on the run's persisted execution artifact
+(or the task artifact until the run writes one), independently of session lifetime.
+The conductor increments it for every rework dispatch, including a follow-up to the
+original worker. Re-evaluating the queue reads the tally and never increments it.
+A tally at or above the cluster limit trips the breaker before the dispatch.
+Resumption, replacement, and compaction never reset the tally or oscillation history.
+The worker's inner 3-iteration cap applies to each implementation or rework dispatch.
+
+### Task session continuity
+
+Each implementation task keeps its original worker session through review fixes and
+verification when the current harness supports continuation. The conductor records
+the task identity, specialist type, actual `worker-session-id`, and a separate
+`reviewer-session-id` on the execution artifact. Calling the same role by name does
+not by itself resume a conversation. The same independent reviewer can continue the
+second and third audit passes with its prior findings and current evidence; it never
+shares the author's conversation.
+
+Self-contained packets define scope and support recovery; they do not require every
+dispatch to discard history. The conductor retains a recovery brief with decisions,
+failed approaches, evidence, findings, and retry tallies. It replaces a session only
+when continuation is unsupported, the session cannot be recovered, or its context is
+unreliable. A busy owner waits in the queue. Unrelated tasks use separate sessions,
+and retained sessions stay available until task audits and run-level findings settle.
+
+Continuation is a harness capability, not a guarantee made by a renderer or model.
+Stateless delegation uses the recovery brief; resumable delegation uses its returned
+session handle. Retaining context can reduce repeated investigation and support
+prompt-cache reuse, but correctness and current verification take priority over
+preserving a cache entry.
 
 ### Two-level caps (Q1)
 
 | Level | Cap | Scope |
 |---|---|---|
-| Worker inner loop | 3 incremental test-fix-verify attempts | Same failing fixture or cluster, one invocation |
+| Worker inner loop | 3 incremental test-fix-verify attempts | Same failing fixture or cluster, one implementation or rework dispatch |
 | Conductor rework | 2 rework dispatches | Same cluster, entire delivery run |
 
 A third unresolved worker attempt, or a third conductor dispatch of the same cluster,
@@ -782,7 +806,7 @@ before and after each fix attempt:
    trips `BLAST_RADIUS_EXCEEDED`.
 2. **Oscillation** — see Q2. Trips `THRASH_OSCILLATION_DETECTED`.
 3. **Invariant consistency** — see Q3. Trips `INVARIANT_CONTRADICTION`.
-4. **Iteration cap** — three attempts on this cluster in this invocation. Trips
+4. **Iteration cap** — three attempts on this cluster in this dispatch. Trips
    `ITERATION_CAP_EXCEEDED`.
 
 Any tripwire emits `STATUS: ESCALATION` with the trigger, failure cluster, contradictory

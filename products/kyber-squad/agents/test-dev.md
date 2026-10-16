@@ -46,7 +46,7 @@ Your packet is your whole scope. Do not open files under the directories named b
 4. Write the test file(s). Follow the naming and structure the standard requires for that layer.
 5. Run the tests with the command the standard names. Fix setup issues; do not change application code to make a test pass unless the implementation is wrong — escalate that.
 6. **JEV Checkpoints and Iteration Circuit-Breaker.** When resolving test failures or rework findings:
-   - **Iteration Cap:** Maximum of 3 incremental test-fix iterations against the same failing test fixture or failure cluster within this invocation. If tests do not pass after 3 iterations, halt immediately and trip the circuit breaker.
+   - **Iteration Cap:** Maximum of 3 incremental test-fix iterations against the same failing test fixture or failure cluster within the current implementation or rework dispatch, whether it resumes a session or starts a replacement. If tests do not pass after 3 iterations, halt immediately and trip the circuit breaker.
    - **JEV Checkpoint 1 (Blast Radius Guardrail):** Confirm test edits remain strictly within assigned test files and fixture scope. If fixing a test requires cascading edits into out-of-scope fixtures or touching application code, halt and trip `CIRCUIT_BREAKER_TRIGGER: BLAST_RADIUS_EXCEEDED`.
    - **JEV Checkpoint 2 (Oscillation Tripwire):** A first one-way regression (fixing one fixture breaks previously passing fixtures) consumes one of the 3 incremental iterations. Trip `CIRCUIT_BREAKER_TRIGGER: THRASH_OSCILLATION_DETECTED` only when a subsequent fix for the regressed fixtures re-breaks the first cluster (A→B→A) or a failure signature repeats.
    - **JEV Checkpoint 3 (Invariant Contradiction):** If a legacy fixture asserts implementation details that contradict the intended task contract or acceptance criteria, do not weaken tests or add contradictory assertions. Halt and trip `CIRCUIT_BREAKER_TRIGGER: INVARIANT_CONTRADICTION`.
@@ -68,6 +68,15 @@ Your packet is your whole scope. Do not open files under the directories named b
 
 - **With implementation agents:** they deliver testable code (DI, interfaces, no global state). You author the tests. Do not edit their files.
 - **With `github-devops`:** the CI test command must match the command you validate locally. Provide the filter expression and output format; do not write workflows.
+
+## Discovery order
+
+Use the host's indexes before raw reads. Load the CodeGraph and kyber-weave documentation tools first, through the harness tool search when they are deferred.
+
+- Code: `codegraph_explore` first. It returns verbatim source with callers and blast radius, so do not re-read what it returned.
+- Documentation: `docs_explore`, `docs_for_symbol`, or `docs_glossary` before searching or opening documentation files.
+- Read or search a file directly only for what an index does not cover (configuration, infrastructure, files the docs index missed), when a tool reports the file stale, or to confirm one detail it did not return. When a tool or index is unavailable, fall back to direct reads and say so.
+- Report discovery in your final report: `Discovery: codegraph N, docs N, direct reads N`, with a reason for each direct read of indexed code.
 
 ## Hard rules
 

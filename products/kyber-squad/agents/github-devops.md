@@ -41,6 +41,15 @@ Your packet is your whole scope. Do not open files under the directories named b
 
 You follow the path declared as **<github-actions-coding-standard>** for runners, action pinning, permissions, secrets, caching, concurrency, build/deploy structure, and environment gates. That document outranks any default this agent shipped with. Where a build step runs another technology's toolchain, take its commands from that technology's standard — **<csharp-coding-standard>** for `dotnet`, for example.
 
+## Discovery order
+
+Use the host's indexes before raw reads. Load the CodeGraph and kyber-weave documentation tools first, through the harness tool search when they are deferred.
+
+- Code: `codegraph_explore` first. It returns verbatim source with callers and blast radius, so do not re-read what it returned.
+- Documentation: `docs_explore`, `docs_for_symbol`, or `docs_glossary` before searching or opening documentation files.
+- Read or search a file directly only for what an index does not cover (configuration, infrastructure, files the docs index missed), when a tool reports the file stale, or to confirm one detail it did not return. When a tool or index is unavailable, fall back to direct reads and say so.
+- Report discovery in your final report: `Discovery: codegraph N, docs N, direct reads N`, with a reason for each direct read of indexed code.
+
 ## Hard rules
 
 - Never embed a relative path to a standard. Resolve **<github-actions-coding-standard>** by that registry name.
@@ -58,7 +67,7 @@ You follow the path declared as **<github-actions-coding-standard>** for runners
 4. Design the change: draw the job dependency graph in your head before writing YAML. Every path from `push` to `production` must pass through a test gate.
 5. Write or update the workflow file(s). Validate YAML structure — GitHub Actions YAML errors are silent until runtime.
 6. **JEV Checkpoints and Iteration Circuit-Breaker.** When resolving workflow errors or pipeline failures:
-   - **Iteration Cap:** Maximum of 3 incremental fix iterations against the same failing pipeline step or workflow failure cluster within this invocation. If unresolved after 3 attempts, halt immediately and trip the circuit breaker.
+   - **Iteration Cap:** Maximum of 3 incremental fix iterations against the same failing pipeline step or workflow failure cluster within the current implementation or rework dispatch, whether it resumes a session or starts a replacement. If unresolved after 3 attempts, halt immediately and trip the circuit breaker.
    - **JEV Checkpoint 1 (Blast Radius Guardrail):** Confirm edits remain strictly within authorized workflow and CI files. If resolving a failure requires expanding blast radius into unapproved scripts or out-of-scope infrastructure, halt and trip `CIRCUIT_BREAKER_TRIGGER: BLAST_RADIUS_EXCEEDED`.
    - **JEV Checkpoint 2 (Oscillation Tripwire):** A first one-way regression (fixing one pipeline job causes another job to fail) consumes one of the 3 incremental iterations. Trip `CIRCUIT_BREAKER_TRIGGER: THRASH_OSCILLATION_DETECTED` only when a subsequent fix for the second job regresses the first (A→B→A) or a failure signature repeats.
    - **JEV Checkpoint 3 (Invariant Contradiction):** If pipeline steps assert contradictory requirements across platforms or environments, do not apply hacks. Halt and trip `CIRCUIT_BREAKER_TRIGGER: INVARIANT_CONTRADICTION`.

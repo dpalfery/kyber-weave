@@ -4,7 +4,7 @@ title: Kyber-Squad requirements and degradation contract
 doc-type: requirements
 component: KyberSquad
 owner: dpalfery
-last-reviewed: 2026-10-14
+last-reviewed: 2026-10-16
 status: current
 decided-by:
   - adr/0019-pi-native-subagents-and-primary-lowering
@@ -42,13 +42,21 @@ Mechanics live in [architecture §9](architecture.md#9-conductor-execution-circu
 
 | Decision | Requirement |
 |---|---|
-| **Q1 — Two-level caps** | A worker may make at most 3 incremental test-fix-verify attempts against the same failing fixture or cluster in one invocation. The conductor may dispatch at most 2 rework workers for that cluster in the run. Cluster identity is the first-observed test ID recorded on the execution artifact. The dispatch tally increments only on rework dispatch. |
+| **Q1 — Two-level caps** | A worker may make at most 3 incremental test-fix-verify attempts against the same failing fixture or cluster in one implementation or rework dispatch. The conductor may dispatch rework at most 2 times for that cluster in the run, including follow-ups to a retained worker. Cluster identity is the first-observed test ID recorded on the execution artifact. The dispatch tally increments only on rework dispatch and never resets on resumption, replacement, or compaction. |
 | **Q2 — Oscillation** | A first one-way regression (A causes B to fail) consumes one worker iteration. `THRASH_OSCILLATION_DETECTED` trips only on A→B→A or a repeating failure signature. |
 | **Q3 — Invariant contradiction** | Workers must not satisfy contradictory invariants. A fixture that asserts obsolete details conflicting with the approved design trips `INVARIANT_CONTRADICTION`. |
 | **Q4 — JEV checkpoints** | Before and after each fix, workers check blast radius, oscillation, invariant consistency, and the 3-iteration cap. The closed trigger set is `ITERATION_CAP_EXCEEDED`, `THRASH_OSCILLATION_DETECTED`, `INVARIANT_CONTRADICTION`, `BLAST_RADIUS_EXCEEDED`. |
 | **Q5 — Escalation** | A trip emits `STATUS: ESCALATION`. The conductor records `ESCALATION: circuit-breaker`, halts rework for that task, and leaves non-dependent work running. The run cannot complete while that finding is unresolved. `architect` mediates at queue drain. |
 
 No ADR: the decisions constrain instruction bodies, not the render or transaction engine.
+
+Implementation ownership remains with the original task session through review fixes
+and verification wherever the harness supports continuation. Review uses a separate
+session; later audit passes preserve prior findings and inspect current evidence.
+Self-contained packets and recovery briefs remain mandatory for unsupported or lost
+sessions and for context that has become unreliable. The conductor records actual
+session handles or the reason they are unavailable; unrelated tasks do not share a
+task session. See [task session continuity](architecture.md#task-session-continuity).
 
 ---
 
