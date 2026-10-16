@@ -25,6 +25,7 @@
           "exists": true,
           "expectedKeys": [
             "github.copilot.chat.otel.enabled",
+            "github.copilot.chat.otel.dbSpanExporter.enabled",
             "github.copilot.chat.otel.exporterType",
             "github.copilot.chat.otel.otlpEndpoint",
             "github.copilot.chat.otel.captureContent",
@@ -36,6 +37,7 @@
             "github.copilot.chat.otel.otlpEndpoint"
           ],
           "missingKeys": [
+            "github.copilot.chat.otel.dbSpanExporter.enabled",
             "github.copilot.chat.otel.captureContent",
             "github.copilot.chat.otel.maxAttributeSizeChars"
           ],
@@ -48,6 +50,7 @@
           "exists": false,
           "expectedKeys": [
             "github.copilot.chat.otel.enabled",
+            "github.copilot.chat.otel.dbSpanExporter.enabled",
             "github.copilot.chat.otel.exporterType",
             "github.copilot.chat.otel.otlpEndpoint",
             "github.copilot.chat.otel.captureContent",
@@ -58,7 +61,12 @@
           "drift": null
         }
       ],
-      "warnings": [],
+      "warnings": [
+        {
+          "code": "exporter-not-delivering",
+          "text": "exporter resolves to file (dev-null): the github.copilot.chat.otel settings keys are not all at the values enable writes; COPILOT_OTEL_ENABLED is missing from the environment this command sees. Run \"kyber capture enable\" for copilot, and on macOS hand a GUI-launched VS Code the override with \"launchctl setenv COPILOT_OTEL_ENABLED true\" (and OTEL_EXPORTER_OTLP_ENDPOINT), then fully quit and relaunch it."
+        }
+      ],
       "manualSteps": [],
       "statusLines": []
     },

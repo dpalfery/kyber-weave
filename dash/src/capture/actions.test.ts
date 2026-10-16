@@ -123,7 +123,7 @@ describe('runCaptureAction: enable', () => {
     const home = makeHome()
     writeConfig(
       stablePath(home),
-      JSON.stringify({ github: { copilot: { chat: { otel: { enabled: false } } } } }),
+      JSON.stringify({ 'github.copilot.chat.otel': { enabled: false } }),
     )
     const result = await runCaptureAction(
       request(home, 'copilot', 'enable', { dryRun: true, fileFilter: createApplicabilityFilter(CAPTURE_HARNESS_REGISTRY) }),

@@ -16,6 +16,10 @@
           "after": true
         },
         {
+          "key": "github.copilot.chat.otel.dbSpanExporter.enabled",
+          "after": true
+        },
+        {
           "key": "github.copilot.chat.otel.exporterType",
           "after": "otlp-http"
         },
@@ -53,6 +57,7 @@
         "exists": true,
         "expectedKeys": [
           "github.copilot.chat.otel.enabled",
+          "github.copilot.chat.otel.dbSpanExporter.enabled",
           "github.copilot.chat.otel.exporterType",
           "github.copilot.chat.otel.otlpEndpoint",
           "github.copilot.chat.otel.captureContent",
@@ -60,6 +65,7 @@
         ],
         "presentKeys": [
           "github.copilot.chat.otel.enabled",
+          "github.copilot.chat.otel.dbSpanExporter.enabled",
           "github.copilot.chat.otel.exporterType",
           "github.copilot.chat.otel.otlpEndpoint",
           "github.copilot.chat.otel.captureContent",
@@ -75,6 +81,7 @@
         "exists": false,
         "expectedKeys": [
           "github.copilot.chat.otel.enabled",
+          "github.copilot.chat.otel.dbSpanExporter.enabled",
           "github.copilot.chat.otel.exporterType",
           "github.copilot.chat.otel.otlpEndpoint",
           "github.copilot.chat.otel.captureContent",
@@ -85,7 +92,12 @@
         "drift": null
       }
     ],
-    "warnings": [],
+    "warnings": [
+      {
+        "code": "exporter-not-delivering",
+        "text": "exporter resolves to file (dev-null): COPILOT_OTEL_ENABLED is missing from the environment this command sees. Run \"kyber capture enable\" for copilot, and on macOS hand a GUI-launched VS Code the override with \"launchctl setenv COPILOT_OTEL_ENABLED true\" (and OTEL_EXPORTER_OTLP_ENDPOINT), then fully quit and relaunch it."
+      }
+    ],
     "manualSteps": [],
     "statusLines": []
   },

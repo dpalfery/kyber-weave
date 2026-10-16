@@ -92,6 +92,58 @@ describe('edit-json (jsonc-parser)', () => {
   })
 })
 
+describe('edit-json literal dotted properties', () => {
+  const PREFIX = 'vendor.tool.otel'
+  const PREFIXES = [PREFIX] as const
+
+  it('creates one literal dotted property instead of a nested tree', () => {
+    const applied = applyJsonEdits('{}\n', { [`${PREFIX}.enabled`]: true }, PREFIXES)
+    expect(applied.refused).toBeUndefined()
+
+    const parsed: unknown = JSON.parse(applied.content)
+    expect(parsed).toEqual({ 'vendor.tool.otel': { enabled: true } })
+    expect(readJsonKeys(applied.content, [`${PREFIX}.enabled`], PREFIXES)[`${PREFIX}.enabled`]).toEqual({
+      present: true,
+      value: true,
+    })
+  })
+
+  it('reads and reverts the literal property, pruning it back to an empty document', () => {
+    const applied = applyJsonEdits('{}\n', { [`${PREFIX}.enabled`]: true }, PREFIXES)
+    const reverted = revertJsonEdits(
+      applied.content,
+      { [`${PREFIX}.enabled`]: { written: true, prior: { present: false } } },
+      PREFIXES,
+    )
+    expect(reverted.drift).toEqual([])
+    expect(JSON.parse(reverted.content)).toEqual({})
+  })
+
+  it('ignores a nested block the same document also holds', () => {
+    const nested = JSON.stringify({ vendor: { tool: { otel: { enabled: true } } } })
+    expect(readJsonKeys(nested, [`${PREFIX}.enabled`], PREFIXES)[`${PREFIX}.enabled`]).toEqual({
+      present: false,
+    })
+  })
+
+  it('refuses to add a literal property beside an existing nested block', () => {
+    // Writing the flat property next to the ignored nested one would "succeed" at the
+    // file level while VS Code keeps reading nothing. Refuse instead.
+    const nested = `{\n  "vendor": {\n    "tool": {\n      "otel": {\n        "enabled": false\n      }\n    }\n  }\n}\n`
+    const applied = applyJsonEdits(nested, { [`${PREFIX}.enabled`]: true }, PREFIXES)
+    expect(applied.changed).toBe(false)
+    expect(applied.content).toBe(nested)
+    expect(applied.refusalKind).toBe('nested-literal')
+    expect(applied.refused).toMatch(/nested/)
+    expect(applied.refused).toContain(PREFIX)
+  })
+
+  it('leaves a document without a declared literal prefix on the nested default', () => {
+    const applied = applyJsonEdits('{}\n', { [`${PREFIX}.enabled`]: true })
+    expect(JSON.parse(applied.content)).toEqual({ vendor: { tool: { otel: { enabled: true } } } })
+  })
+})
+
 describe('edit-block (TOML and YAML managed block)', () => {
   it('appends a marker-delimited block and reads it back', () => {
     const applied = applyBlockEdits('theme = "dark"\n', { 'otel.endpoint': 'http://127.0.0.1:4318' }, 'toml')

@@ -43,6 +43,8 @@ import {
 import {
   CAPTURE_HARNESS_REGISTRY,
   SUPPORTED_CAPTURE_HARNESS_IDS,
+  type CaptureExporterInput,
+  type CaptureExporterResolution,
   type CaptureFileFormat,
   type CaptureHarnessWriter,
   type ManagedHarnessWriter,
@@ -212,6 +214,8 @@ export type ResolvedConfigFile = {
   format: CaptureFileFormat
   desiredKeys: (endpoint: string) => Record<string, JsonScalar>
   ensureIfAbsentKeys?: (endpoint: string) => Record<string, JsonScalar>
+  literalKeyPrefixes?: readonly string[]
+  exporterResolution?: (input: CaptureExporterInput) => CaptureExporterResolution
 }
 
 /**
@@ -249,6 +253,8 @@ export function declaredFiles(
       format: file.format,
       desiredKeys: file.desiredKeys,
       ensureIfAbsentKeys: file.ensureIfAbsentKeys,
+      literalKeyPrefixes: file.literalKeyPrefixes,
+      exporterResolution: file.exporterResolution,
     }))
   }
   return [
@@ -258,6 +264,8 @@ export function declaredFiles(
       format: writer.format,
       desiredKeys: writer.desiredKeys,
       ensureIfAbsentKeys: writer.ensureIfAbsentKeys,
+      literalKeyPrefixes: writer.literalKeyPrefixes,
+      exporterResolution: writer.exporterResolution,
     },
   ]
 }
@@ -291,6 +299,7 @@ function jsonWritesAfterRead(
   content: string,
   always: Record<string, JsonScalar>,
   ensure: Record<string, JsonScalar>,
+  literalPrefixes?: readonly string[],
 ): Record<string, JsonScalar> {
   const writes: Record<string, JsonScalar> = { ...always }
   const candidates: string[] = []
@@ -298,7 +307,7 @@ function jsonWritesAfterRead(
     if (!(key in always)) candidates.push(key)
   }
   if (candidates.length === 0) return writes
-  const found = readJsonKeys(content, candidates)
+  const found = readJsonKeys(content, candidates, literalPrefixes)
   for (const key of candidates) {
     if (!found[key]?.present) writes[key] = ensure[key]!
   }
@@ -487,6 +496,14 @@ function appendFileStatus(
       : `  present keys: ${keys.filter((key) => !missing.includes(key)).join(', ') || 'none'} (missing: ${missing.join(', ')})`,
   )
   if (unexpected.length > 0) lines.push(`  extra otel keys: ${unexpected.join(', ')}`)
+  // The resolved exporter, not merely key presence: keys can be present and
+  // correct while the harness still discards every span (Copilot's dev-null
+  // file exporter). A `file` resolution is a warning, not a pass.
+  const resolution = exporterResolutionFor(file, present)
+  if (resolution !== undefined) {
+    lines.push(`  ${resolution.line}`)
+    if (!resolution.delivering) lines.push(`  warn: ${resolution.warning}`)
+  }
   const record = receipt?.files.find((entry) => entry.path === path)
   if (record === undefined) {
     lines.push('  receipt: no record')
@@ -515,7 +532,7 @@ export function presentKeys(
 ): Record<string, unknown> {
   if (file.format === 'json' || file.format === 'jsonc') {
     const keys = Object.keys(file.desiredKeys(endpoint))
-    const found = readJsonKeys(content, keys)
+    const found = readJsonKeys(content, keys, file.literalKeyPrefixes)
     const result: Record<string, unknown> = {}
     for (const [key, prior] of Object.entries(found)) {
       if (prior.present) result[key] = prior.value
@@ -523,6 +540,19 @@ export function presentKeys(
     return result
   }
   return readBlockKeys(content)
+}
+
+/**
+ * The exporter a file's harness will actually resolve, from the declared
+ * values just read plus this process's environment — the only environment
+ * status may read (opening a shell rc would both touch the user's files and
+ * report a value this process was never started with).
+ */
+export function exporterResolutionFor(
+  file: ResolvedConfigFile,
+  observed: Readonly<Record<string, unknown>>,
+): CaptureExporterResolution | undefined {
+  return file.exporterResolution?.({ observed, processEnv: process.env })
 }
 
 export function statusWarningLines(writer: ManagedHarnessWriter, home: string, env: PathEnv): string[] {
@@ -535,7 +565,7 @@ export function statusWarningLines(writer: ManagedHarnessWriter, home: string, e
     if (file === undefined) continue
     const { found, content, error } = readTextIfPresent(file.resolvePath(home, env))
     if (error !== undefined || !found) continue
-    const observed = observedConfigValue(file.format, content, warning.key)
+    const observed = observedConfigValue(file.format, content, warning.key, file.literalKeyPrefixes)
     if (observed.present && observed.value === warning.whenValue) {
       lines.push(`  warn: ${warning.warnText}`)
     }
@@ -548,9 +578,10 @@ function observedConfigValue(
   format: CaptureFileFormat,
   content: string,
   key: string,
+  literalPrefixes?: readonly string[],
 ): { present: boolean; value?: unknown } {
   if (format === 'json' || format === 'jsonc') {
-    return readJsonKeys(content, [key])[key] ?? { present: false }
+    return readJsonKeys(content, [key], literalPrefixes)[key] ?? { present: false }
   }
   const entries = readBlockKeys(content)
   if (!(key in entries)) return { present: false }
@@ -651,8 +682,9 @@ function enableFile(
       content,
       desired,
       file.ensureIfAbsentKeys?.(endpoint) ?? {},
+      file.literalKeyPrefixes,
     )
-    const current = readJsonKeys(content, Object.keys(desiredWrites))
+    const current = readJsonKeys(content, Object.keys(desiredWrites), file.literalKeyPrefixes)
     const upToDate = Object.entries(desiredWrites).every(([key, value]) =>
       jsonDesiredMatches(current[key], value),
     )
@@ -661,10 +693,16 @@ function enableFile(
       events.push(eventFor('noop', writer, file))
       return { exitCode: 0, out, err, events }
     }
-    const applied = applyJsonEdits(content, desiredWrites)
+    const applied = applyJsonEdits(content, desiredWrites, file.literalKeyPrefixes)
     if (applied.refused !== undefined) {
       err.push(`harness ${writer.id}: ${path}: ${applied.refused}`)
-      events.push(eventFor('refused', writer, file, { reason: 'unparseable' }))
+      events.push(
+        eventFor('refused', writer, file, {
+          // A nested literal block is a config conflict — the same class as a key
+          // outside a TOML/YAML managed block — not a syntax fault.
+          reason: applied.refusalKind === 'nested-literal' ? 'conflict' : 'unparseable',
+        }),
+      )
       return { exitCode: REFUSAL_EXIT, out, err, events }
     }
     if (dryRun) {
@@ -913,7 +951,7 @@ function driftLinesFor(
     if (!read.found) continue
     const content = read.content
     if (file.format === 'json' || file.format === 'jsonc') {
-      const reverted = revertJsonEdits(content, record.keys)
+      const reverted = revertJsonEdits(content, record.keys, file.literalKeyPrefixes)
       if (reverted.refused !== undefined) {
         lines.push(
           `harness ${writer.id}: ${file.path}: ${reverted.refused}; leaving file unchanged`,
@@ -1001,7 +1039,7 @@ function removeDeclaredKeys(
       events.push(eventFor('refused', writer, file, { reason: 'unparseable' }))
       return { out, err, events, exitCode: REFUSAL_EXIT }
     }
-    const present = readJsonKeys(read.content, declared)
+    const present = readJsonKeys(read.content, declared, file.literalKeyPrefixes)
     const owned: Record<string, { written: unknown; prior: { present: false } }> = {}
     for (const key of declared) {
       const current = present[key]
@@ -1012,7 +1050,7 @@ function removeDeclaredKeys(
       events.push(eventFor('noop', writer, file))
       return { out, err, events, exitCode: 0 }
     }
-    const reverted = revertJsonEdits(read.content, owned)
+    const reverted = revertJsonEdits(read.content, owned, file.literalKeyPrefixes)
     if (reverted.refused !== undefined) {
       err.push(`harness ${writer.id}: ${path}: ${reverted.refused}; leaving file unchanged`)
       events.push(eventFor('refused', writer, file, { reason: 'unparseable' }))
@@ -1084,7 +1122,7 @@ function readCurrentRemovalKeys(
   const declared = Object.keys(file.desiredKeys(endpoint))
   if (file.format === 'json' || file.format === 'jsonc') {
     if (jsonParseRefusal(content) !== undefined) return null
-    const present = readJsonKeys(content, declared)
+    const present = readJsonKeys(content, declared, file.literalKeyPrefixes)
     const values: Record<string, unknown> = {}
     for (const key of declared) {
       const current = present[key]
@@ -1288,7 +1326,7 @@ async function runDisable(
         }))
 
       if (file.format === 'json' || file.format === 'jsonc') {
-        const reverted = revertJsonEdits(content, record.keys)
+        const reverted = revertJsonEdits(content, record.keys, file.literalKeyPrefixes)
         if (reverted.refused !== undefined) {
           exitCode = REFUSAL_EXIT
           err.push(`harness ${writer.id}: ${path}: ${reverted.refused}; leaving file unchanged`)

@@ -1,22 +1,47 @@
 // Copilot capture writer (P2.1b).
 //
 // VS Code stores Copilot chat OTel on one settings property whose name
-// contains dots, `github.copilot.chat.otel`. Enable writes the five
-// KyberDash-owned children on Stable and Insiders. `protocol` is omitted
-// from that set so an owner-chosen protocol stays put. `captureIdentity` is
-// never a desired key: status only warns when it is already true, and when
-// the protocol or exporter is gRPC, because KyberDash receives OTLP/HTTP
-// and does not turn identity attributes on. The Copilot CLI is env-only;
-// the snippet is read from this process, and shell rc files are never opened.
+// contains dots, `github.copilot.chat.otel`. Enable writes six
+// KyberDash-owned children on Stable and Insiders, and the property is
+// declared a *literal* prefix so those children land in that one property
+// rather than a nested `github` > `copilot` > `chat` > `otel` tree VS Code
+// never reads (the live defect: keys present, exporter=file, every span
+// discarded). `protocol` is omitted from the set so an owner-chosen protocol
+// stays put. `captureIdentity` is never a desired key: status only warns when
+// it is already true, and when the protocol or exporter is gRPC, because
+// KyberDash receives OTLP/HTTP and does not turn identity attributes on.
+//
+// The Copilot CLI and the extension both also read an environment override,
+// `COPILOT_OTEL_ENABLED`. KyberDash does not write environment: every writer
+// here edits a config file it can receipt per key and restore byte-faithfully,
+// and a GUI session's environment is neither (a shell rc file is not read by
+// Finder-launched VS Code, and `launchctl setenv` is a login-scoped system
+// mutation with no per-key inverse). So the decision is deliberate — enable
+// writes the settings the extension reads, and status *resolves* the exporter
+// it will actually get, warning with the exact `launchctl setenv` remedy when
+// the override is missing. Environment stays the owner's to set.
 
 import type { JsonScalar } from '../edit-json.js'
 import { pjoin, type PathEnv } from '../paths.js'
-import type { CaptureConfigFile, CaptureStatusWarning, ManagedHarnessWriter } from './registry.js'
+import type {
+  CaptureConfigFile,
+  CaptureExporterInput,
+  CaptureExporterResolution,
+  CaptureStatusWarning,
+  ManagedHarnessWriter,
+} from './registry.js'
 
 /** The one settings property Copilot uses for chat OTel. Children hang off it. */
 const OTEL_PROPERTY = 'github.copilot.chat.otel'
 
-/** Env keys the CLI surface reports. Status prints them; enable never writes them. */
+/** VS Code reads these keys only as children of that one dotted property. */
+const OTEL_LITERAL_PREFIXES = [OTEL_PROPERTY] as const
+
+/**
+ * Env keys the CLI surface reports, and the keys `status` reads to resolve the
+ * exporter. `enable` writes none of them: see the module comment for why the
+ * environment is left to the owner.
+ */
 const COPILOT_CLI_ENV_KEYS = [
   'COPILOT_OTEL_ENABLED',
   'OTEL_EXPORTER_OTLP_ENDPOINT',
@@ -30,10 +55,62 @@ const COPILOT_CLI_ENV_KEYS = [
 function copilotDesiredKeys(endpoint: string): Record<string, JsonScalar> {
   return {
     [`${OTEL_PROPERTY}.enabled`]: true,
+    // Forces the pipeline on even when the extension's own `enabledExplicitly`
+    // computes false. Without it Copilot logs `exporter=file` in every session
+    // and hands the SDK a file exporter pointed at os.devNull.
+    [`${OTEL_PROPERTY}.dbSpanExporter.enabled`]: true,
     [`${OTEL_PROPERTY}.exporterType`]: 'otlp-http',
     [`${OTEL_PROPERTY}.otlpEndpoint`]: endpoint,
     [`${OTEL_PROPERTY}.captureContent`]: true,
     [`${OTEL_PROPERTY}.maxAttributeSizeChars`]: 0,
+  }
+}
+
+/** A boolean override is on unless it is blank, `0` or `false`. */
+function envTruthy(value: string | undefined): boolean {
+  if (value === undefined) return false
+  const normalised = value.trim().toLowerCase()
+  return normalised !== '' && normalised !== '0' && normalised !== 'false'
+}
+
+/**
+ * The exporter VS Code Copilot will actually use, from the values `status`
+ * observes plus the capture process environment. The extension keeps its OTel
+ * pipeline off — feeding the SDK a file exporter pointed at os.devNull —
+ * unless the settings keys and the `COPILOT_OTEL_ENABLED` override are all in
+ * place. This is the check the old status lacked: it reported key presence, so
+ * "keys present but the pipeline is off" read as a pass.
+ */
+export function resolveCopilotExporter(input: CaptureExporterInput): CaptureExporterResolution {
+  const value = (leaf: string): unknown => input.observed[`${OTEL_PROPERTY}.${leaf}`]
+  const settingsReady =
+    value('enabled') === true &&
+    value('dbSpanExporter.enabled') === true &&
+    value('exporterType') === 'otlp-http'
+  const envReady = envTruthy(input.processEnv.COPILOT_OTEL_ENABLED)
+  if (settingsReady && envReady) {
+    return {
+      exporter: 'otlp-http',
+      delivering: true,
+      line: 'exporter: otlp-http (Copilot OTLP pipeline on)',
+      warning: '',
+    }
+  }
+  const reasons: string[] = []
+  if (!settingsReady) {
+    reasons.push('the github.copilot.chat.otel settings keys are not all at the values enable writes')
+  }
+  if (!envReady) {
+    reasons.push('COPILOT_OTEL_ENABLED is missing from the environment this command sees')
+  }
+  return {
+    exporter: 'file',
+    delivering: false,
+    line: 'exporter: file (dev-null) — Copilot discards every span',
+    warning:
+      `exporter resolves to file (dev-null): ${reasons.join('; ')}. ` +
+      'Run "kyber capture enable" for copilot, and on macOS hand a GUI-launched VS Code the override with ' +
+      '"launchctl setenv COPILOT_OTEL_ENABLED true" (and OTEL_EXPORTER_OTLP_ENDPOINT), then fully quit and relaunch it.',
   }
 }
 
@@ -73,6 +150,8 @@ function vscodeConfigFile(fileId: string, edition: 'Code' | 'Code - Insiders'): 
     format: 'jsonc',
     resolvePath: (home: string, env?: PathEnv) => vscodeSettingsPath(home, edition, env),
     desiredKeys: copilotDesiredKeys,
+    literalKeyPrefixes: OTEL_LITERAL_PREFIXES,
+    exporterResolution: resolveCopilotExporter,
   }
 }
 

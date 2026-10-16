@@ -176,14 +176,49 @@ describe('buildCaptureStatus over a temporary home', () => {
 
   it('reports partial when only some managed keys are present', () => {
     const home = makeHome()
+    // The flat dotted property VS Code actually reads, with only `enabled` set.
     writeConfig(
       stablePath(home),
-      JSON.stringify({ github: { copilot: { chat: { otel: { enabled: true } } } } }),
+      JSON.stringify({ 'github.copilot.chat.otel': { enabled: true } }),
     )
     const copilot = byId(buildCaptureStatus(ctxFor(home)), 'copilot')
     expect(copilot.state).toBe('partial')
     expect(copilot.files[0]!.presentKeys).toEqual(['github.copilot.chat.otel.enabled'])
-    expect(copilot.files[0]!.missingKeys).toHaveLength(4)
+    expect(copilot.files[0]!.missingKeys).toHaveLength(5)
+  })
+
+  it('ignores a nested github.copilot.chat.otel block, exactly as VS Code does', () => {
+    const home = makeHome()
+    // The extension reads one property named `github.copilot.chat.otel`; a nested tree is
+    // never read, so its keys are absent — not a pass. This is the shape that made Copilot
+    // log `exporter=file` while every key looked present.
+    writeConfig(
+      stablePath(home),
+      JSON.stringify({ github: { copilot: { chat: { otel: { enabled: true, exporterType: 'otlp-http' } } } } }),
+    )
+    const copilot = byId(buildCaptureStatus(ctxFor(home)), 'copilot')
+    expect(copilot.files[0]!.presentKeys).toEqual([])
+    expect(copilot.files[0]!.missingKeys).toHaveLength(6)
+    expect(copilot.state).toBe('off')
+  })
+
+  it('warns that the exporter resolves to file while the Copilot env override is absent', async () => {
+    const home = makeHome()
+    writeConfig(stablePath(home), '{}\n')
+    await enableViaEngine(home, ['copilot'])
+    // Empty rather than unset: the report must not depend on the host environment.
+    vi.stubEnv('COPILOT_OTEL_ENABLED', '')
+
+    const copilot = byId(buildCaptureStatus(ctxFor(home)), 'copilot')
+    // Every managed key is at its value, so the file reads `on`; the resolved exporter is
+    // still `file` without the environment override, and that has to surface as a warning.
+    expect(copilot.files[0]!.missingKeys).toEqual([])
+    expect(copilot.warnings.map((warning) => warning.code)).toContain('exporter-not-delivering')
+    expect(copilot.warnings.map((warning) => warning.text).join('\n')).toContain('COPILOT_OTEL_ENABLED')
+
+    vi.stubEnv('COPILOT_OTEL_ENABLED', 'true')
+    const withOverride = byId(buildCaptureStatus(ctxFor(home)), 'copilot')
+    expect(withOverride.warnings).toEqual([])
   })
 
   it('reports unknown for an unreadable config and an unparseable one, and downgrades install', () => {
@@ -224,11 +259,13 @@ describe('buildCaptureStatus over a temporary home', () => {
     const home = makeHome()
     writeConfig(
       stablePath(home),
-      JSON.stringify({ github: { copilot: { chat: { otel: { captureIdentity: true } } } } }),
+      JSON.stringify({ 'github.copilot.chat.otel': { captureIdentity: true } }),
     )
     const copilot = byId(buildCaptureStatus(ctxFor(home)), 'copilot')
-    expect(copilot.warnings.map((warning) => warning.code)).toEqual(['config-warning'])
-    expect(copilot.warnings[0]!.text).toContain('captureIdentity is true')
+    expect(copilot.warnings.map((warning) => warning.code)).toContain('config-warning')
+    expect(copilot.warnings.find((warning) => warning.code === 'config-warning')!.text).toContain(
+      'captureIdentity is true',
+    )
   })
 
   it('reports status-only harnesses with their lines and no keys', () => {
@@ -321,7 +358,7 @@ describe('parity with the CLI text status', () => {
     writeConfig(
       stablePath(home),
       JSON.stringify({
-        github: { copilot: { chat: { otel: { enabled: true, exporterType: 'otlp-http' } } } },
+        'github.copilot.chat.otel': { enabled: true, exporterType: 'otlp-http' },
       }),
     )
     const text = (
