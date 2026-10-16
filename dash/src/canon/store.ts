@@ -2525,7 +2525,13 @@ export class CanonStore {
    * Delete the whole corpus: every wipe-by-harness row plus quarantine,
    * problems, predictions, and the log-enrichment tables. The operational
    * audit survives: `ingest_log`, `refresh_run`, `metadata` (stamped),
-   * `token_cache`, and the model-window catalog stay.
+   * `token_cache`, and the model-window catalog stay — `refresh_run` because
+   * ADR 0032 D8 keeps pre-wipe rows as audit history, `metadata` because it
+   * holds the shared settings as well as the schema stamps.
+   *
+   * The space is reclaimed after the delete transaction commits. Without it a
+   * wipe empties the tables but leaves the file at whatever size it grew to,
+   * which is what let a wiped store still occupy 442 MB on disk.
    */
   wipeAll(): StoreWipeReport {
     this.db.exec('BEGIN')
@@ -2560,7 +2566,23 @@ export class CanonStore {
       throw err
     }
     this.stampClean(['*'])
+    this.reclaimSpace()
     return report
+  }
+
+  /**
+   * Return the file to the size its contents actually need. `VACUUM` rewrites
+   * the database and cannot run inside a transaction, so it belongs after the
+   * wipe commits. The WAL is truncated on both sides of it: before, so the
+   * rewrite is not replaying a large sidecar; after, because in WAL mode
+   * `VACUUM` writes the rewritten database back *through* the WAL, so the last
+   * word on the sidecar has to come after it or the freed pages simply move
+   * from one file to the other. On a `:memory:` store all three are no-ops.
+   */
+  private reclaimSpace(): void {
+    this.db.exec('PRAGMA wal_checkpoint(TRUNCATE)')
+    this.db.exec('VACUUM')
+    this.db.exec('PRAGMA wal_checkpoint(TRUNCATE)')
   }
 
   /**

@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, it, vi } from 'vitest'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -1406,11 +1406,42 @@ describe('CanonStore wipe (issue #312)', () => {
     expect(store.listSourceCheckpoints()).toHaveLength(0)
     expect(store.countQuarantine()).toBe(0)
     expect(store.getProblems()).toHaveLength(0)
-    // Operational audit survives a wipe-all.
+    // Operational audit survives a wipe-all: `refresh_run` per ADR 0032 D8,
+    // and `metadata` because the shared settings live in it.
     expect(store.getIngestLog()).toHaveLength(1)
     expect(store.getMetadata('schema_version')).toBe(String(SCHEMA_VERSION))
     expect(store.getMetadata('last_clean_at')).toBeDefined()
     store.close()
+  })
+
+  it('wipeAll returns the file to the size its contents need', () => {
+    const path = tempStorePath()
+    const store = new CanonStore(path)
+    // The store runs in WAL mode, so rows a commit wrote can still be sitting
+    // in the sidecar: the size that matters is both files together.
+    const onDiskBytes = (): number => {
+      const main = statSync(path).size
+      const wal = existsSync(`${path}-wal`) ? statSync(`${path}-wal`).size : 0
+      return main + wal
+    }
+    try {
+      // Free pages are what a wipe used to leave behind: grow the file with
+      // rows the wipe deletes, then check it comes back down. Before this
+      // reclamation a wiped store kept every page it had ever allocated.
+      const many: CanonicalRecord[] = []
+      for (let index = 0; index < 200; index += 1) {
+        many.push(record({ spanId: `span-${index}`, content: { system_prompt: 'p'.repeat(50_000) } }))
+      }
+      store.upsertMany(many)
+      const before = onDiskBytes()
+
+      store.wipeAll()
+
+      expect(store.count()).toBe(0)
+      expect(onDiskBytes()).toBeLessThan(before / 2)
+    } finally {
+      store.close()
+    }
   })
 
   it('rolls back the whole wipe when a delete fails', () => {
