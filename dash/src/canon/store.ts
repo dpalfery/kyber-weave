@@ -164,6 +164,16 @@ import {
 export const SCHEMA_VERSION = 20
 
 /**
+ * How much of the write-ahead log the store keeps on disk once a checkpoint
+ * has reset it. SQLite's default (-1) never shrinks the WAL file, so it stays
+ * at whatever high-water mark a burst reached: after one folder import across
+ * 41 providers the sidecar sat at 145 MB beside a 442 MB database and stayed
+ * there. 32 MiB lets a burst ride without a checkpoint while bounding what a
+ * quiet store keeps.
+ */
+export const WAL_SIZE_LIMIT_BYTES = 32 * 1024 * 1024
+
+/**
  * Version of the diagnostic signal and finding detector suite (Decision D17).
  * An informational stamp identifying which detector semantics built a store's
  * derived rows, so tooling and operators can tell a stale finding table from
@@ -1511,6 +1521,14 @@ export class CanonStore {
     // and WAL keeps batch commits cheap.
     this.db.exec('PRAGMA busy_timeout = 5000')
     this.db.exec('PRAGMA journal_mode = WAL')
+    // WAL's own default here is FULL, which fsyncs the sidecar on every commit
+    // — the dominant cost of a folder import, which commits per source unit.
+    // NORMAL is the documented pairing for WAL: a crash can lose the last
+    // commit, it cannot corrupt the database.
+    this.db.exec('PRAGMA synchronous = NORMAL')
+    // Bound the sidecar. Without this a checkpoint reclaims nothing on disk:
+    // the file keeps its high-water mark for the life of the database.
+    this.db.exec(`PRAGMA journal_size_limit = ${WAL_SIZE_LIMIT_BYTES}`)
 
     // Order matters. `SCHEMA_SQL` is every statement in its current shape,
     // and some of them — an index over a column a later version added —
@@ -3890,7 +3908,15 @@ export class CanonStore {
     return this.db
   }
 
+  /**
+   * `PRAGMA optimize` is SQLite's own guidance for the last thing a connection
+   * does: it runs the bounded analysis a bulk import made worthwhile, so the
+   * planner reads statistics next time instead of guessing from a table's
+   * declared shape. It is cheap and self-limiting (`analysis_limit`), and it is
+   * the reason a post-import read does not pay for the import's index churn.
+   */
   close(): void {
+    this.db.exec('PRAGMA optimize')
     this.db.close()
   }
 }
