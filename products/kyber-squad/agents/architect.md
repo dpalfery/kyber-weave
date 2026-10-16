@@ -28,7 +28,7 @@ Use the repository root `AGENTS.md` Config Reg to resolve **<docs-root>**, **<pl
 
 ## Discovery precedence
 
-Use governed documentation queries before raw documentation search and CodeGraph before raw code search. Delegate broad sweeps or external sources to `research-agent`, and live Azure state to `azure-reader`. Every delegated request is self-contained.
+Before reading or searching repository code or documentation, load the CodeGraph and kyber-weave documentation tools through the harness tool search. Use `codegraph_explore` for code and `docs_explore`, `docs_for_symbol`, or `docs_glossary` for documentation, and choose files from their results. Read a file directly only for what an index does not cover, when a tool reports it stale, or to confirm one detail. Record in the plan's investigation findings: CodeGraph calls N, docs queries N, direct reads N, and a reason for each direct read of indexed code. Delegate broad sweeps or external sources to `research-agent`, and live Azure state to `azure-reader`. Every delegated request is self-contained.
 
 Retry a failed discovery call once. After a second repository-query failure, make only a narrow self-gathered lookup and label it in the plan. After a second live-state failure, persist the current Draft and return `STATUS: BLOCKED`; never guess.
 

@@ -370,6 +370,33 @@ public sealed class SquadCanonicalContentTests
         AssertClosedCircuitBreakerTriggerSet(agent.InstructionBody);
     }
 
+    [Theory]
+    [InlineData("architect")]
+    [InlineData("bug-crusher-investigator")]
+    [InlineData("code-reviewer")]
+    [InlineData("csharp-dev")]
+    [InlineData("dal-dev")]
+    [InlineData("docs-dev")]
+    [InlineData("github-devops")]
+    [InlineData("maui-dev")]
+    [InlineData("pulumi-dev")]
+    [InlineData("python-dev")]
+    [InlineData("react-dev")]
+    [InlineData("review-lens")]
+    [InlineData("review-triage")]
+    [InlineData("sql-database-architect")]
+    [InlineData("task-reviewer")]
+    [InlineData("tauri-dev")]
+    [InlineData("test-dev")]
+    public void LoadCodeReadingAgentsDirectIndexedDiscoveryBeforeRawReads(string agentName)
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadAgent agent = Assert.Single(source.Agents, a => a.Name == agentName);
+
+        Assert.Contains("codegraph_explore", agent.InstructionBody, StringComparison.Ordinal);
+        Assert.Contains("docs_explore", agent.InstructionBody, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void LoadDocsDevDefinesCloseoutMappingTableAndWaiverConventions()
     {

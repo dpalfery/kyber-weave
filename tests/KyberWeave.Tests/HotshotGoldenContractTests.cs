@@ -40,6 +40,7 @@ public sealed partial class HotshotGoldenContractTests
     private static readonly string[] EvolvedAgentIdentities =
     [
         "architect",
+        "bug-crusher-investigator", // Discovery order: indexes before raw reads
         "code-reviewer",      // in-process council when the harness gives subagents no agent tool (ADR 0025)
         "conductor",
         "csharp-dev",         // JEV checkpoints and iteration circuit-breaker (issue #249)
@@ -51,6 +52,8 @@ public sealed partial class HotshotGoldenContractTests
         "pulumi-dev",         // Worker-packet scope rule: packet is whole scope (issue #278)
         "python-dev",         // Worker-packet scope rule: packet is whole scope (issue #278)
         "react-dev",          // Worker-packet scope rule: packet is whole scope (issue #278)
+        "review-lens",        // Discovery order: indexes before raw reads
+        "review-triage",      // Discovery order: indexes before raw reads
         "sql-database-architect", // Worker-packet scope rule: packet is whole scope (issue #278)
         "task-reviewer",
         "tauri-dev",          // Worker-packet scope rule: packet is whole scope (issue #278)

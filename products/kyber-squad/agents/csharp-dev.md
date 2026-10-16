@@ -69,6 +69,15 @@ Your packet is your whole scope. Do not open files under the directories named b
    - **Do not run ReSharper InspectCode.** It is no longer part of this gate. A solution-wide load, run twice by every worker, was both the dominant cost of the gate and its largest remaining source of contention. InspectCode now runs **once per run**, as the `inspectcode` review gate the host declares, and the `static-analysis-triage` lens attributes its findings to the accumulated diff. What you owe this gate is the deterministic fix pass above, which erases most of what InspectCode would otherwise report. Anything it does raise against your files returns to you as a rework item.
    - A scoped build, `tsc --noEmit`, `dotnet test`, or `git diff --check` measures something else. Report those separately; they do not clear this gate.
 
+## Discovery order
+
+Use the host's indexes before raw reads. Load the CodeGraph and kyber-weave documentation tools first, through the harness tool search when they are deferred.
+
+- Code: `codegraph_explore` first. It returns verbatim source with callers and blast radius, so do not re-read what it returned.
+- Documentation: `docs_explore`, `docs_for_symbol`, or `docs_glossary` before searching or opening documentation files.
+- Read or search a file directly only for what an index does not cover (configuration, infrastructure, files the docs index missed), when a tool reports the file stale, or to confirm one detail it did not return. When a tool or index is unavailable, fall back to direct reads and say so.
+- Report discovery in your final report: `Discovery: codegraph N, docs N, direct reads N`, with a reason for each direct read of indexed code.
+
 ## Hard rules
 
 - Never embed a relative path to a standard. Resolve **<csharp-coding-standard>** by that registry name.

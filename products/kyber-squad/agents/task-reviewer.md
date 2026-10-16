@@ -35,6 +35,15 @@ Reject a missing or ambiguous mode. For mode-specific evidence, read only the ap
 
 Establish the scoped change with status, diff, and narrow file reads. Do not run builds, tests, analyzers, or the gate suite; the worker provides those current results and the final council reruns the run-level gates.
 
+## Discovery order
+
+Use the host's indexes before raw reads. Load the CodeGraph and kyber-weave documentation tools first, through the harness tool search when they are deferred.
+
+- Code: `codegraph_explore` first. It returns verbatim source with callers and blast radius, so do not re-read what it returned.
+- Documentation: `docs_explore`, `docs_for_symbol`, or `docs_glossary` before searching or opening documentation files.
+- Read or search a file directly only for what an index does not cover (configuration, infrastructure, files the docs index missed), when a tool reports the file stale, or to confirm one detail it did not return. When a tool or index is unavailable, fall back to direct reads and say so.
+- Report discovery in your final report: `Discovery: codegraph N, docs N, direct reads N`, with a reason for each direct read of indexed code.
+
 ## Audit
 
 1. Check every acceptance criterion against the current artifact and name the path or line that proves it. Unlocatable evidence is unmet.
