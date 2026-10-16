@@ -1230,7 +1230,20 @@ export function buildSessionRow(
   let toolsInvoked: string[] | undefined = undefined
 
   if (toolRecords.length > 0) {
-    toolCalls = toolRecords.length
+    // A derived count can be a lower bound. When the collector truncated the
+    // conversation before its end, the tool records say so, and the summary
+    // must not turn that into a bare finite number: the dashboard reads a
+    // finite `tool_calls` as a measured one, and a figure that is not measured
+    // is omitted, never printed as exact — the rule `cache_hit_ratio` and
+    // `cache_creation_coverage` already follow here. The per-record caveat is
+    // where a reader learns why the count is absent.
+    const toolCallsLowerBound = toolRecords.some((record) => {
+      const availability = record.measurability?.tool_calls
+      return typeof availability === 'object' && availability.availability === 'not_measurable'
+    })
+    if (!toolCallsLowerBound) {
+      toolCalls = toolRecords.length
+    }
     toolsInvoked = Array.from(new Set(invocationsOf(records)))
   } else {
     const isClaude = harness === 'claude' || harness === 'claude-code' || surveyFamily(harness) === 'claude-code'

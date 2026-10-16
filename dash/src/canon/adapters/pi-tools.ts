@@ -258,7 +258,10 @@ function toolResultText(content: unknown): string {
       }
       return ''
     })
-    .join('')
+    // Blocks are separate lines, not one glued string: the same choice the
+    // other readers make (synth/readers/claude.ts), so a multi-block result
+    // does not fuse its last word onto its first.
+    .join('\n')
 }
 
 function nonEmptyString(value: unknown): string | undefined {

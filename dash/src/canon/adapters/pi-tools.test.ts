@@ -145,6 +145,32 @@ describe('extractPiToolMessages', () => {
     expect(calls.map((call) => call.id)).toEqual(['call_a'])
     expect(truncated).toBe(true)
   })
+
+  it('keeps a multi-block result on separate lines', () => {
+    // The other readers join result blocks with a newline; gluing them with ''
+    // fuses the last word of one block onto the first of the next.
+    const multi = JSON.stringify([
+      {
+        role: 'toolResult',
+        parts: [
+          {
+            type: 'tool_result',
+            raw: {
+              toolCallId: 'call_a',
+              toolName: 'read',
+              content: [
+                { type: 'text', text: 'first block' },
+                { type: 'text', text: 'second block' },
+              ],
+            },
+          },
+        ],
+      },
+    ])
+
+    const { results } = extractPiToolMessages(multi)
+    expect(results.map((result) => result.content)).toEqual(['first block\nsecond block'])
+  })
 })
 
 // ---------------------------------------------------------------------------

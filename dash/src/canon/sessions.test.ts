@@ -8,7 +8,7 @@ import { CanonStore } from './store.js'
 import { activeTokenizer, cacheKey, approximateO200kBase } from './tokens.js'
 import { buildSessionRow, buildSessions, mergeMeasurability } from './sessions.js'
 import type { AsadSessionPayload } from './sessions.js'
-import type { CanonicalRecord, ContentPart, SessionRow } from './types.js'
+import { notMeasurable, type CanonicalRecord, type ContentPart, type SessionRow } from './types.js'
 
 type SessionPayloadView = AsadSessionPayload & {
   context: AsadSessionPayload['context'] & {
@@ -706,6 +706,39 @@ describe('buildSessionRow', () => {
     expect(session.payload.summary.tool_calls).toBeUndefined()
     expect(session.summary ?? {}).not.toHaveProperty('tools_invoked')
     expect(session.payload.summary).not.toHaveProperty('tools_invoked')
+  })
+
+  it('omits tool_calls when the derived count is a lower bound', () => {
+    // A derived count can be a floor: Pi's collector caps the conversation, so
+    // its tool records say `tool_calls` is not measurable. The dashboard reads a
+    // finite number as a measured one, so the summary must omit it rather than
+    // print the floor as an exact total.
+    const truncated = toolInvoke('tool-1', 'turn-1', 'read', {
+      harness: 'pi',
+      source: 'pi-abc123',
+      sessionId: 'sess-pi-trunc',
+      measurability: { tool_calls: notMeasurable('pi truncated the exported conversation.') },
+    })
+
+    const session = sessionRow(buildSessionRow('sess-pi-trunc', [truncated], approximateO200kBase))
+
+    expect(session.summary?.tool_calls).toBeUndefined()
+    expect(session.payload.summary.tool_calls).toBeUndefined()
+    // The names observed are an observation, not a count, so they stay.
+    expect(session.summary?.tools_invoked).toEqual(['read'])
+  })
+
+  it('keeps tool_calls when every tool record measures it', () => {
+    const measured = toolInvoke('tool-1', 'turn-1', 'read', {
+      harness: 'pi',
+      source: 'pi-abc123',
+      sessionId: 'sess-pi-whole',
+      measurability: { tool_calls: 'measured' },
+    })
+
+    const session = sessionRow(buildSessionRow('sess-pi-whole', [measured], approximateO200kBase))
+
+    expect(session.summary?.tool_calls).toBe(1)
   })
 
   it('preserves empty array tools_offered when empty tool definitions were observed (Thread 4)', () => {
