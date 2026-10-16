@@ -170,15 +170,16 @@ describe('getMeasurability — the OTLP path (R10.1)', () => {
     expectNotMeasurable(measurability['reasoning'])
   })
 
-  it('agrees with the adapter about what the harness does not export', () => {
-    // pi invoked 14 tools across 368 calls while exporting none (R8.5's
-    // measured case): the source-level answer refuses the ranking through
-    // the adapter's declaration, exactly as its records are stamped.
+  it('agrees with the adapter that pi exports its tool definitions', () => {
+    // The collector exports `pi.tools.selected` / `pi.tools.snippets`, which
+    // the adapter maps into `tool_definitions` content, so the adapter
+    // declares no gap and the source-level answer measures the schema exactly
+    // as its records are stamped. The old declaration refused the ranking
+    // while the definitions were present.
     const measurability = getMeasurability(OTLP_SOURCE, 'pi')
-    expectNotMeasurable(measurability['tool_definitions'])
-    expectNotMeasurable(schemaRankingAvailability(measurability))
-    // Structure is pi's telemetry's to supply; only definitions are missing.
+    expect(measurability['tool_definitions']).toBe('measured')
     expect(contextCompositionAvailability(measurability)).toBe('measured')
+    expect(schemaRankingAvailability(measurability)).toBe('measured')
   })
 
   it('declares Antigravity cache_creation not measurable from the adapter, matching the file side', () => {

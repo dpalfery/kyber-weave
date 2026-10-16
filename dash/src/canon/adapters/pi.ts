@@ -130,13 +130,16 @@ export const piAdapter: HarnessAdapter = {
   validate: validateRecordTokens,
 
   /**
-   * pi invokes tools without exporting their definitions — measured at 14
-   * tools across 368 calls with none exported (design.md, "Normalization
-   * layer") — so `tool_definitions` is declared unexported and every record
-   * is stamped `not_measurable` for it: absent is not zero (R7.6, R8.5,
-   * R10.2).
+   * Nothing is unexported. Pi's collector does export the tool inventory —
+   * `pi.tools.selected` and `pi.tools.snippets`, the very keys this adapter
+   * maps into `tool_definitions` content (`PI_TOOL_DEFINITION_KEYS` above) —
+   * so the earlier claim that pi exported no tool definitions was stale: it
+   * stamped every record `not_measurable` while the parts sat in that same
+   * record. What pi genuinely does not export is per-call tool timing and the
+   * calls past the collector's 256 KiB content cap; both are stated on the
+   * derived tool records themselves (adapters/pi-tools.ts), not here.
    */
   unexportedMetrics() {
-    return ['tool_definitions']
+    return []
   },
 }
