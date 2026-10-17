@@ -1,7 +1,7 @@
 # Kyber-Squad Canonical Source Tree
 
 Kyber-Squad is the canonical source tree for unified agent and skill governance and deployment.
-It maintains a target-neutral, declarative catalog of **21 canonical agents** and **24 canonical skills**,
+It maintains a target-neutral, declarative catalog of **22 canonical agents** and **24 canonical skills**,
 governed by explicit schemas, model profiles, semantic capability profiles, and fallback lowering rules.
 
 `products/kyber-squad/` is the canonical and package authority from which target-native agent and
@@ -32,11 +32,12 @@ products/kyber-squad/
 │   ├── models.yml                      # Model tiers, aliases, and temperature parameters
 │   ├── capabilities.yml                # Capability taxonomy and permission assignments
 │   └── fallbacks.yml                   # Lowering rules and collision resolution for fallback harnesses
-├── agents/                             # 21 canonical agent definition files plus owned references
+├── agents/                             # 22 canonical agent definition files plus owned references
 │   ├── architect.md
 │   ├── architect/                      # Progressive-disclosure references (Markdown)
 │   ├── azure-reader.md
 │   ├── bug-crusher-investigator.md
+│   ├── bug-crusher.md
 │   ├── code-reviewer.md
 │   ├── conductor.md
 │   ├── conductor/                      # Progressive-disclosure references (Markdown)
@@ -90,7 +91,7 @@ products/kyber-squad/
 
 ## Canonical Components
 
-### 1. Agents (21 Canonical Roles)
+### 1. Agents (22 Canonical Roles)
 
 Each agent in `agents/<name>.md` contains LF-normalized UTF-8 Markdown with strict YAML frontmatter conforming to `schemas/agent.schema.json`:
 
@@ -134,8 +135,8 @@ workflow for step-by-step approvals.
 
 Renderers project every file an owner's Markdown links reach beside its principal output, with
 authored relative links preserved, so the former dangling-reference defect is closed for every
-linked resource: a fresh Copilot render now emits the 45 principal files plus each owner's linked
-resources (122 files total). Every skill resource reaches every render except
+linked resource: a fresh Copilot render now emits the 46 principal files plus each owner's linked
+resources (123 files total). Every skill resource reaches every render except
 `skills/setup-dev-environment/agents/openai.yaml`, which is packaged-only Codex skill-UI metadata.
 The tracked root `.github/` self-deployment predates resource delivery and remains a stale
 snapshot until a human refreshes it after a release candidate; packages and fresh renders carry
@@ -155,12 +156,15 @@ non-policy content stays in its skill directory as its durable home, portable po
 
 ### 4. Namespace Collision and Fallback Lowering
 
-Agent and skill namespaces intersect at exactly seven names, and all seven are distinct-body
-collisions: `csharp-dev`, `dal-dev`, `github-devops`, `maui-dev`, `product-owner`, `python-dev`,
-and `test-dev`. On fallback harnesses, the canonical skill retains `<name>` and the agent
-projects to `role-<name>`. `role-` is reserved exclusively for generated projections.
+Agent and skill namespaces intersect at exactly eight names. Two — `product-owner` and
+`bug-crusher` — are primary shared identities: root agents whose body is a thin pointer at the
+same-name canonical skill, which carries the role. The remaining six are distinct-body collisions:
+`csharp-dev`, `dal-dev`, `github-devops`, `maui-dev`, `python-dev`, and `test-dev`. On fallback
+harnesses, each distinct-body collision's canonical skill retains `<name>` and the agent projects
+to `role-<name>`, while a primary shared identity reuses its canonical skill as the entry point.
+`role-` is reserved exclusively for generated projections.
 
-There are no shared product identities. `conductor` has no canonical skill, so fallback targets
+`conductor` has no canonical skill, so fallback targets
 lower it through the unoccupied-identity rule to a same-name role skill. `conductor` is the single
 orchestrator: it executes test-first by default with an explicit user opt-out to standard mode,
 and it routes plans, specifications, todos, and open requests through one intake.

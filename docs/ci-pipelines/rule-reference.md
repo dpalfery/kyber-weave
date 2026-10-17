@@ -5,7 +5,7 @@ doc-type: reference
 status: current
 component: CI Pipelines
 owner: dpalfery
-last-reviewed: 2026-09-24
+last-reviewed: 2026-10-16
 ---
 
 # Rule reference
@@ -87,7 +87,7 @@ details.
 | `KW-SKILL-LINT-008` | Routing | Description contains excessive filler phrases or unrouted verbosity (Warning) |
 | `KW-SKILL-LINT-010` | Routing | **Name collision** — the only error in this tier |
 | `KW-SKILL-LINT-011` | Routing | Description overlap between two skills |
-| `KW-SKILL-REVIEW-001` | Review | Skill/agent review verdict payload is malformed or invalid (Error) |
+| `KW-SKILL-REVIEW-001` | Review | Skill/agent review verdict payload is malformed or invalid (Error). Emitted by the review exchange; no CLI verb invokes it today. |
 
 ### Skill security — `skill scan`
 

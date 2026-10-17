@@ -69,6 +69,19 @@ review:
     - id: skill-scan
       run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, scan, .apm/skills/kyber-weave-docs, --fail-on, critical]
       blocking: true
+    # The entry-point skill is a second skill directory, and `skill validate` / `lint` /
+    # `scan` each take one path. The declared suite covers it the same way it covers the
+    # authoring skill — three more gates, one per verb, or the new skill is discoverable
+    # to an agent but never gated.
+    - id: skill-validate-cli
+      run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, validate, .apm/skills/kyber-weave-cli]
+      blocking: true
+    - id: skill-lint-cli
+      run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, lint, .apm/skills/kyber-weave-cli, --min-desc-score, "70"]
+      blocking: true
+    - id: skill-scan-cli
+      run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, scan, .apm/skills/kyber-weave-cli, --fail-on, critical]
+      blocking: true
     - id: docs-validate
       run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, docs, validate, .]
       blocking: true

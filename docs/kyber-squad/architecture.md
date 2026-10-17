@@ -64,7 +64,7 @@ implemented and registered renderers today.
 ```mermaid
 flowchart TD
     subgraph CanonicalSource["Canonical Product Source (products/kyber-squad/)"]
-        Agents["21 Canonical Agents\n(agents/*.md)"]
+        Agents["22 Canonical Agents\n(agents/*.md)"]
         Skills["24 Canonical Skills\n(skills/*)"]
         Profiles["Models, Capabilities, Fallbacks\n(profiles/*.yml)"]
         Schemas["JSON Schemas\n(schemas/*.json)"]
@@ -671,7 +671,7 @@ and validates.
 - **Copilot emit today**: `CopilotRenderer` writes each agent's
   `.github/agents/<name>.agent.md` and each skill's `.github/skills/<name>/SKILL.md`, then
   `SquadResourceProjection.Append` places every file that owner's Markdown links reach beside
-  the principal. A fresh Copilot render is 122 files — 21 agents, 24 skills, plus projected
+  the principal. A fresh Copilot render is 123 files — 22 agents, 24 skills, plus projected
   closures — with authored relative links resolving in the output; every skill resource
   reaches this render except `skills/setup-dev-environment/agents/openai.yaml`, which stays
   packaged-only Codex skill-UI metadata. That count is the current

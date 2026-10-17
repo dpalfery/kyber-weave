@@ -6,7 +6,7 @@ status: current
 component: ContextHygiene
 source-root: src/KyberWeave.Core/Skills
 owner: dpalfery
-last-reviewed: 2026-10-04
+last-reviewed: 2026-10-16
 code-refs:
   - SkillLoader
   - RoutingLinter
@@ -35,14 +35,9 @@ cannot make — whether a skill will actually be selected, and whether it is saf
 | `skill lint` | Will it route, and does it collide with another skill? | fails on **error** |
 | `skill scan` | Is it safe to load into context? | fails on **critical** (configurable) |
 | `skill route` | Which skill fires for this prompt? | fails below `--min-accuracy` |
-| `skill review export` | Export candidate descriptions for semantic review | — |
-| `skill review import` | Import and validate review verdicts | fails on **error** (`KW-SKILL-REVIEW-001`) |
 | `skill catalog` | Inventory with version / owner / score | — |
 | `skill pack` | Bundle into a Copilot Studio–compatible `.zip` | — |
 | `skill new` | Scaffold a spec-correct skill | — |
-
-Agent candidates use `{Harness}:{RoleName}` as `id` so the same role in two harnesses
-stays distinct. Import requires exactly one verdict for every exported candidate.
 
 ## Spec conformance — `KW-SKILL-SPEC-001`…`-012`
 
@@ -107,7 +102,7 @@ password-reset — routing score 100/100
 - `KW-SKILL-LINT-008` (Warning): Description contains excessive filler phrases (`"This skill is designed to..."`, `"allows the user to..."`).
 - `KW-SKILL-LINT-010` (Error): **Name collision** — two skills cannot share a name and both be selectable.
 - `KW-SKILL-LINT-011` (Warning): Description overlap between two skills.
-- `KW-SKILL-REVIEW-001` (Error): Review verdict payload is malformed or invalid during `skill review import`.
+- `KW-SKILL-REVIEW-001` (Error): Review verdict payload is malformed or invalid. Emitted by `SkillReviewExchange`, which no CLI verb invokes today.
 
 ## Routing simulation — `skill route`
 
@@ -148,7 +143,7 @@ layout for each runtime is APM's problem rather than a second copy of that mappi
 While ContextHygiene validates individual skill specifications, scores routing readiness,
 and scans instruction surfaces, **[Kyber-Squad](../kyber-squad/architecture.md)** acts as the
 unified multi-harness deployment control plane. Kyber-Squad maintains 24 canonical skills
-(alongside 21 canonical agent roles and lowering rules) under `products/kyber-squad/` and
+(alongside 22 canonical agent roles and lowering rules) under `products/kyber-squad/` and
 manages their transactional deployment, drift tracking, and lifecycle. Its catalog declares twelve
 harness targets. All twelve renderers are implemented and registered (`copilot`, `cursor`, `claude`,
 `codex`, `antigravity`, `opencode`, `kilo`, `pi`, `factory`, `warp`, `zcode`, and `devin`).
@@ -166,10 +161,12 @@ retained resource has a reviewed disposition in the
 content stays in its skill directory as its durable home, portable policy lives in the
 `products/kyber-squad/standards/` templates, and nothing was deleted.
 
-The agent and skill namespaces intersect at seven names, all distinct-body collisions. No product
-identity is shared. Fallback rendering keeps each colliding skill at `<name>` and lowers its agent
-to `role-<name>`; agents with unoccupied skill identities, including `conductor`, lower to
-same-name role skills.
+The agent and skill namespaces intersect at eight names. Two of those intersections
+(`product-owner` and `bug-crusher`) are primary shared identities whose root-agent body is a thin
+pointer at the same-name canonical skill; the remaining six are distinct-body collisions. Fallback
+rendering keeps each distinct-body collision's skill at `<name>` and lowers its agent to
+`role-<name>`, while a primary shared identity reuses its canonical skill as the entry point;
+agents with unoccupied skill identities, including `conductor`, lower to same-name role skills.
 
 ## Related
 

@@ -2,9 +2,9 @@
 id: dash/telemetry-inventory
 title: Telemetry inventory — harness signal and content availability
 doc-type: reference
-status: draft
+status: current
 owner: dpalfery
-last-reviewed: 2026-10-14
+last-reviewed: 2026-10-16
 ---
 
 # Telemetry inventory — verified harness signal and content availability
@@ -14,7 +14,7 @@ It does not treat an absent source as a zero: unavailable dimensions are
 serialized as `not_measurable` with a source-specific reason.
 
 Local-history ingest is `dash refresh` ([ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md)):
-schema **15** (`source_checkpoint`, `record_provenance`, `refresh_run` with
+schema **20** (`source_checkpoint`, `record_provenance`, `refresh_run` with
 `history_weeks`), UTC `--history-weeks` default 2,
 split client identities, Gemini never a stored harness id. `SURVEYED_HARNESSES` still names
 `gemini` as an E4 **survey family** for cache-counter vocabulary; that is not a coding-harness
