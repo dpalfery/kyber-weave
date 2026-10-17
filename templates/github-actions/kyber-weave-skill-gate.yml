@@ -65,13 +65,18 @@ jobs:
             sarif_file="kyber-weave-sarif/skills-${safe_name}.sarif"
             kyber-weave skill scan "${skills_dir}" --fail-on critical --format sarif \
               > "${sarif_file}" || EXIT_CODE=1
-            # upload-sarif refuses two runs that share one category, so stamp each file
-            # with its own derived from its name. automationDetails.id takes precedence
-            # over the step's `category` input, so the directory upload stays a single run
-            # per category even with several SKILL_DIRS entries.
+            # The CodeQL action refuses one upload carrying two runs in the same category,
+            # so stamp each file with its own. GitHub reads the category from the part of
+            # automationDetails.id before the last `/`: the action itself writes
+            # `<category>/` when it fills the field from a `category:` input, and a value
+            # with no slash is read as an empty category (every skill collapses into one).
+            # Appending the slash keeps one category per directory even with several
+            # SKILL_DIRS entries. A consumer adopting this template has no prior
+            # configuration to preserve, so per-directory categories are safe; a later
+            # second directory adds a category rather than renaming one.
             # A failed stamp removes its temp file: the step uploads the whole directory,
             # and a stray .tmp must not reach the CodeQL action.
-            if jq --arg category "kyber-weave-skills-${safe_name}" \
+            if jq --arg category "kyber-weave-skills-${safe_name}/" \
               '.runs[].automationDetails.id = $category' "${sarif_file}" > "${sarif_file}.tmp"
             then
               mv "${sarif_file}.tmp" "${sarif_file}"
