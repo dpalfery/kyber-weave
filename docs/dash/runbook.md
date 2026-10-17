@@ -250,7 +250,7 @@ Capturable versus inherent-empty Claude buckets are recorded in the
 [telemetry inventory](telemetry-inventory.md#claude-desktop-and-cli-file-synth-parts-issue-216).
 
 Coverage window persistence: every refresh run records its window in
-`refresh_run.history_weeks` (schema 15). The value is the `--history-weeks` argument of
+`refresh_run.history_weeks` (added in schema 16). The value is the `--history-weeks` argument of
 that run (default 2). Rows written before window tracking read as `null`, which surfaces
 render as "coverage window unknown (recorded before window tracking)" — never as 2 and
 never as 0, per [honest unobservability](../rules/honest-unobservability.md). A scoped

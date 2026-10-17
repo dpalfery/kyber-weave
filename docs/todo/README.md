@@ -4,7 +4,7 @@ title: Todos
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-15
+last-reviewed: 2026-10-16
 ---
 
 # Todos
@@ -54,6 +54,7 @@ last-reviewed: YYYY-MM-DD
 | [pi-emitter-tool-spans.md](pi-emitter-tool-spans.md) | KyberDash | draft | Pi's external emitter sends one span per turn and no tool spans, and caps the conversation at 262144 characters, so derived tool counts are a lower bound; decide whether the emitter comes in-repo. |
 | [kyberdash-copilot-env-override-decision.md](kyberdash-copilot-env-override-decision.md) | KyberDash | draft | `enable` writes Copilot's settings but not its `COPILOT_OTEL_ENABLED` override, and the status route cannot see the editor's environment; decide whether to manage it, surface it, or leave the CLI as the diagnostic. |
 | [squad-pack-single-target-render.md](squad-pack-single-target-render.md) | KyberSquad | draft | `kyber-weave squad pack` cannot render a single target to a directory, so the Copilot render total was verified only by invoking `CopilotRenderer` directly from a throwaway program; add single-target render support to `squad pack`. |
+| [adr-0022-conductor-shared-identity-errata.md](adr-0022-conductor-shared-identity-errata.md) | KyberSquad | draft | ADR 0022 decision 1 still calls the conductor a shared identity, but it is unoccupied and the shared list names only `product-owner` and `bug-crusher`; supersede the stale clause, since an accepted ADR is not edited in place. |
 
 Nine earlier open todos moved to GitHub issues #125–#133. The four that those issues
 left listed here while pull requests were open are closed below.

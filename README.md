@@ -163,8 +163,8 @@ profiles, and capability profiles. Generated target trees and APM packages are n
 
 **The compiler & lowering engine.** Normalizes definitions into AgentIR, enforces a semantic
 permission lattice (`deny < ask < allow`), and applies deterministic role-skill lowering (with
-shared conductor identities and prefixed `role-*` collision namespaces) for harnesses without
-native agent primitives.
+shared `product-owner` and `bug-crusher` identities and prefixed `role-*` collision namespaces)
+for harnesses without native agent primitives.
 
 **Transactional deployment.** Atomic, write-ahead deployments with cross-process OS mutex
 leasing (`kyber-weave-squad-<root-key>`), same-filesystem no-overwrite leaf claim/publish,
