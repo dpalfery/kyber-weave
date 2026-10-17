@@ -98,6 +98,18 @@ describe('commandcode provider', () => {
       userMessage: 'fix the bug',
       sessionId: 'sess-001',
     })
+    expect(call?.costIsEstimated).toBeUndefined()
+  })
+
+  it('marks pricing-table cost as estimated when no cost is reported', async () => {
+    await writeSession([
+      header,
+      assistantEntry({ id: 'a1', usage: { inputTokens: 100, outputTokens: 20, cacheReadTokens: 0, cacheWriteTokens: 0 } }),
+    ])
+
+    const [call] = await parseAll()
+
+    expect(call?.costIsEstimated).toBe(true)
   })
 
   it('maps tools, skills, subagents and shell commands', async () => {

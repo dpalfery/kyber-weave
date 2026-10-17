@@ -205,9 +205,8 @@ function createParser(source: SessionSource, seenKeys: Set<string>): SessionPars
         }
 
         const reportedCost = entry.usage.costUsd
-        const costUSD = typeof reportedCost === 'number' && Number.isFinite(reportedCost) && reportedCost > 0
-          ? reportedCost
-          : calculateCost(model, input, output, cacheWrite, cacheRead, 0)
+        const costReported = typeof reportedCost === 'number' && Number.isFinite(reportedCost) && reportedCost > 0
+        const costUSD = costReported ? reportedCost : calculateCost(model, input, output, cacheWrite, cacheRead, 0)
         const timestamp = entry.timestamp || sessionTimestamp
         if (!timestamp) continue
 
@@ -222,6 +221,7 @@ function createParser(source: SessionSource, seenKeys: Set<string>): SessionPars
           reasoningTokens: 0,
           webSearchRequests: 0,
           costUSD,
+          ...(costReported ? {} : { costIsEstimated: true }),
           tools,
           bashCommands,
           skills,
