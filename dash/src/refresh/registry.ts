@@ -119,6 +119,7 @@ export const PROVIDER_DISPOSITIONS: Record<string, ProviderDisposition> = {
   codebuff: job(['codebuff']),
   codex: job(['codex-cli', 'codex-desktop', 'codex-unclassified']),
   copilot: job(['copilot-cli', 'copilot-vscode', 'copilot-jetbrains', 'copilot-agent']),
+  commandcode: job(['commandcode']),
   devin: job(['devin']),
   droid: job(['droid']),
   dsh: job(['dsh']),
@@ -354,6 +355,14 @@ export const HARNESS_DESCRIPTORS: readonly HarnessSourceDescriptor[] = [
     classifier: 'provider-identity',
     sourceRootLabel: '~/.config/manicode',
     nativeFormat: 'native-session',
+  }),
+  descriptor({
+    harnessId: 'commandcode',
+    label: 'Command Code',
+    providerName: 'commandcode',
+    classifier: 'provider-identity',
+    sourceRootLabel: '~/.commandcode/projects',
+    nativeFormat: 'jsonl',
   }),
   descriptor({
     harnessId: 'devin',

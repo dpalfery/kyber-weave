@@ -1149,6 +1149,8 @@ export function harnessDimensionAvailability(
    'kimi-code',
    'kimicode',
    'devin',
+   'commandcode',
+   'command-code',
    'codebuff',
    'codewhale',
  ]

@@ -89,11 +89,12 @@ Kyber-Squad declares twelve coding-harness targets:
 | `factory` | `factory-droids` | `.factory/` | Native droids | Implemented and registered |
 | `zcode` | — | `.zcode/` | Native agents (with conductor lowered to slash command) | Implemented and registered |
 | `devin` | — | `.devin/` | Native agents (directory per agent, with conductor lowered to skill) | Implemented and registered |
+| `commandcode` | `command-code` | `.commandcode/` | Native agents (with conductor also rendered as an entry-point skill) | Implemented and registered |
 
 **Renderer coverage today**: this is the declared roster, not the set that currently installs.
 Rendering canonical source into a harness's native files is Kyber-Weave's own code (see
 [architecture.md](architecture.md#8-rendering)) — as of this writing `claude` (native subagents with primary-agent entry-point skill), `copilot` (native), `cursor` (native),
-`codex` (native), `antigravity` (native: `.agents/agents/<name>/agent.md` + `.agents/skills/<name>/SKILL.md`, [ADR 0022](../adr/0022-antigravity-native-agents.md)), `opencode` (native), `kilo` (native), `pi` (native subagents with primary-agent lowering), `factory` (native), `warp` (fallback role-skill lowering to `.warp/skills/`), `zcode` (native subagents and skills, with primary agents lowered to slash commands), and `devin` (native subagents and skills, with primary agents lowered to a skill) have renderers. All twelve declared targets are covered. `kyber-weave squad doctor` reports current coverage.
+`codex` (native), `antigravity` (native: `.agents/agents/<name>/agent.md` + `.agents/skills/<name>/SKILL.md`, [ADR 0022](../adr/0022-antigravity-native-agents.md)), `opencode` (native), `kilo` (native), `pi` (native subagents with primary-agent lowering), `factory` (native), `warp` (fallback role-skill lowering to `.warp/skills/`), `zcode` (native subagents and skills, with primary agents lowered to slash commands), and `devin` (native subagents and skills, with primary agents lowered to a skill), and `commandcode` (native agents and skills, with primary agents also rendered as an entry-point skill) have renderers. All thirteen declared targets are covered. `kyber-weave squad doctor` reports current coverage.
 
 ### Detection Rules
 
@@ -265,6 +266,26 @@ pinned `model` (Factory ignores it on `inherit`), so leave the suffix off `inher
 
 **Inspect:** in a Factory session, `/droids` lists project and personal droids; `/skills`
 lists discovered skills. Confirm names there after install.
+
+### Command Code notes
+
+Command Code agents are single Markdown files under `.commandcode/agents/` (project) and
+`~/.commandcode/agents/` (personal / `--global`); skills live at
+`.commandcode/skills/<name>/SKILL.md` and `~/.commandcode/skills/<name>/SKILL.md`. Squad does
+not write the `.agents/skills/` tree Command Code also reads. Layout and frontmatter were read
+from the `command-code` npm package 1.84.0.
+
+**Entry point:** Command Code runs custom agents only as subagents, so each primary agent also
+renders as an entry-point skill, the same shape as Factory. Invoke it as `/conductor`.
+
+**Tools:** `tools` lists Command Code's snake_case tool names (`read_file`, `grep`,
+`shell_command`, ...). An omitted `tools` grants nothing in Command Code; Squad always writes the
+list. Subagents never get the `agent` tool, so `delegate` is not expressible, and MCP tools are
+not granted.
+
+**Models:** a `commandcode:` value in `models.yml` may end in `[reasoningEffort=<level>]`, where
+the level is `off`, `low`, `medium`, `high`, `xhigh`, or `max`. No profile pins one yet, so every
+agent inherits the session model.
 
 ### Devin notes
 

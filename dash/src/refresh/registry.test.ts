@@ -47,6 +47,7 @@ const REQUIRED_HARNESS_IDS = [
 const REMAINING_HARNESS_IDS = [
   'codewhale',
   'codebuff',
+  'commandcode',
   'devin',
   'droid',
   'dsh',
@@ -81,6 +82,7 @@ const INVENTORY_PROVIDER_NAMES = [
   'codewhale',
   'codebuff',
   'codex',
+  'commandcode',
   'copilot',
   'devin',
   'droid',
