@@ -459,10 +459,19 @@ jobs:
           skills_dirs=(.apm/skills/kyber-weave-docs .apm/skills/kyber-weave-cli)
           CLI="dotnet run --project src/KyberWeave.Cli --no-build -c ${{ env.CONFIGURATION }} --"
           for skills_dir in "${skills_dirs[@]}"; do
+            skill_name="$(basename "${skills_dir}")"
             $CLI skill validate "${skills_dir}" --format table || EXIT_CODE=1
             $CLI skill lint "${skills_dir}" --min-desc-score 70 --format table || EXIT_CODE=1
+            sarif="kyber-weave-sarif/skills-${skill_name}.sarif"
             $CLI skill scan "${skills_dir}" --fail-on critical --format sarif \
-              > "kyber-weave-sarif/skills-$(basename "${skills_dir}").sarif" || EXIT_CODE=1
+              > "${sarif}" || EXIT_CODE=1
+            # upload-sarif refuses two runs that share one category, so stamp each file
+            # with its own derived from its name. automationDetails.id takes precedence
+            # over the step's `category` input, so the directory upload stays a single run
+            # per category.
+            jq --arg category "kyber-weave-skills-${skill_name}" \
+              '.runs[].automationDetails.id = $category' "${sarif}" > "${sarif}.tmp" \
+              && mv "${sarif}.tmp" "${sarif}" || EXIT_CODE=1
           done
           exit "${EXIT_CODE}"
 
