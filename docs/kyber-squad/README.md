@@ -15,8 +15,8 @@ Engineering teams increasingly operate across heterogeneous AI development tools
 
 **Kyber-Squad** is the unified deployment control plane that compiles canonical agent definitions
 (`AgentIR`) and skill specifications into target-native configurations, backed by atomic
-transactional rollback. The catalog declares twelve harness targets. All twelve renderers are implemented
-and registered today: `copilot`, `cursor`, `claude`, `codex`, `antigravity`, `opencode`, `kilo`, `pi`, `factory`, `warp`, `zcode`, and `devin`.
+transactional rollback. The catalog declares thirteen harness targets. All thirteen renderers are implemented
+and registered today: `copilot`, `cursor`, `claude`, `codex`, `antigravity`, `opencode`, `kilo`, `pi`, `factory`, `warp`, `zcode`, `devin`, and `commandcode`.
 
 ---
 

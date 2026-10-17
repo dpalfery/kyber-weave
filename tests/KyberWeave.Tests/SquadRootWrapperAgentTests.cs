@@ -40,6 +40,7 @@ public sealed class SquadRootWrapperAgentTests
         { SquadTarget.Pi, null, ".pi/skills/{0}/SKILL.md" },
         { SquadTarget.ZCode, null, ".zcode/skills/{0}/SKILL.md" },
         { SquadTarget.Devin, null, ".devin/skills/{0}/SKILL.md" },
+        { SquadTarget.CommandCode, ".commandcode/agents/{0}.md", ".commandcode/skills/{0}/SKILL.md" },
     };
 
     /// <summary>
@@ -289,5 +290,6 @@ public sealed class SquadRootWrapperAgentTests
         new WarpRenderer(),
         new ZCodeRenderer(),
         new DevinRenderer(),
+        new CommandCodeRenderer(),
     ]);
 }

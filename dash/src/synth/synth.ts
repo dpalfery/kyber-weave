@@ -222,6 +222,8 @@ export type TokenConvention = 'exclusive' | 'inclusive'
  *   * pi / omp — `usage.input` excludes cache; `usage.cacheRead` /
  *     `usage.cacheWrite` are separate counters (the same shape the pi
  *     adapter's GenAI evidence records).
+ *   * commandcode — the session's AI SDK `inputTokens` includes both
+ *     cache classes; dash/src/providers/commandcode.ts subtracts them.
  *   * every other provider funnels through the same Anthropic-semantics
  *     normalization before yielding a call.
  */
@@ -235,6 +237,7 @@ export const PROVIDER_CONVENTIONS: ReadonlyMap<string, TokenConvention> = new Ma
       'codebuff',
       'codewhale',
       'codex',
+      'commandcode',
       'copilot',
       // Upstream's three Copilot surface filters. They are the same harness
       // reached through different front ends, so they share Copilot's

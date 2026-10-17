@@ -211,7 +211,8 @@ public sealed class SquadDeploymentPlan
             ["factory"] = ".factory/",
             ["pi"] = ".pi/",
             ["zcode"] = ".zcode/",
-            ["devin"] = ".devin/"
+            ["devin"] = ".devin/",
+            ["commandcode"] = ".commandcode/"
         };
 
     /// <summary>

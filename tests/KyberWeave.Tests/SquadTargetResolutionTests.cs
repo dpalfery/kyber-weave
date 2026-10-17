@@ -9,7 +9,7 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class SquadTargetResolutionTests : IDisposable
 {
-    private static readonly SquadTarget[] TwelveTargets =
+    private static readonly SquadTarget[] ThirteenTargets =
     [
         SquadTarget.Codex,
         SquadTarget.Cursor,
@@ -22,7 +22,8 @@ public sealed class SquadTargetResolutionTests : IDisposable
         SquadTarget.Factory,
         SquadTarget.Pi,
         SquadTarget.ZCode,
-        SquadTarget.Devin
+        SquadTarget.Devin,
+        SquadTarget.CommandCode
     ];
 
     private readonly TempDirectory _temp = new();
@@ -42,19 +43,20 @@ public sealed class SquadTargetResolutionTests : IDisposable
         { ".warp", true, SquadTarget.Warp },
         { ".factory", true, SquadTarget.Factory },
         { ".zcode", true, SquadTarget.ZCode },
-        { ".devin", true, SquadTarget.Devin }
+        { ".devin", true, SquadTarget.Devin },
+        { ".commandcode", true, SquadTarget.CommandCode }
     };
 
     /// <summary>
     /// Receipts persist target tokens, so existing members keep their positions and a new
-    /// target is appended: Pi follows Factory, ZCode follows Pi, and Devin follows ZCode.
+    /// target is appended: Pi follows Factory, ZCode follows Pi, Devin follows ZCode, and Command Code follows Devin.
     /// </summary>
     [Fact]
-    public void CatalogContainsExactlyTwelveTargetsInStableOrder()
+    public void CatalogContainsExactlyThirteenTargetsInStableOrder()
     {
-        Assert.Equal(TwelveTargets, SquadTargetCatalog.All);
+        Assert.Equal(ThirteenTargets, SquadTargetCatalog.All);
         Assert.Equal(
-            ["codex", "cursor", "claude", "copilot", "opencode", "kilo", "antigravity", "warp", "factory", "pi", "zcode", "devin"],
+            ["codex", "cursor", "claude", "copilot", "opencode", "kilo", "antigravity", "warp", "factory", "pi", "zcode", "devin", "commandcode"],
             SquadTargetCatalog.All.Select(SquadTargetCatalog.GetToken));
     }
 
@@ -70,11 +72,11 @@ public sealed class SquadTargetResolutionTests : IDisposable
     }
 
     [Fact]
-    public void ParseAllExpandsToTheApprovedTwelveTargetRoster()
+    public void ParseAllExpandsToTheApprovedThirteenTargetRoster()
     {
         IReadOnlyList<SquadTarget> targets = SquadTargetCatalog.Parse(["all"]);
 
-        Assert.Equal(TwelveTargets, targets);
+        Assert.Equal(ThirteenTargets, targets);
     }
 
     [Theory]
@@ -176,7 +178,8 @@ public sealed class SquadTargetResolutionTests : IDisposable
             SquadTarget.Factory,
             SquadTarget.Pi,
             SquadTarget.ZCode,
-            SquadTarget.Devin);
+            SquadTarget.Devin,
+            SquadTarget.CommandCode);
     }
 
     [Theory]

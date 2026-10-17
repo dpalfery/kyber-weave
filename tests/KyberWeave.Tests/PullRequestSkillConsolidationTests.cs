@@ -385,7 +385,8 @@ public sealed class PullRequestSkillConsolidationTests
         new FactoryRenderer(),
         new WarpRenderer(),
         new ZCodeRenderer(),
-        new DevinRenderer()
+        new DevinRenderer(),
+        new CommandCodeRenderer()
     ];
 
     private static void AssertSectionStates(Section[] sections, string heading, params string[] phrases)

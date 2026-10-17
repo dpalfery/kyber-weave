@@ -28,6 +28,8 @@ public interface ISquadGlobalRootResolver
 /// verified against zai-org/ZCode 3.14.0 on 2026-09-21.
 /// Devin agents and skills live under its user configuration directory — `~/.config/devin`
 /// on macOS and Linux, `%APPDATA%\devin` on Windows — per Devin CLI v3000.x (2026-09-27).
+/// Command Code agents and skills live under `~/.commandcode` with no environment override
+/// (`command-code` npm package 1.84.0, 2026-10-17).
 /// The home directory and every override environment value must be fully qualified:
 /// a relative root would be completed against the process working directory by
 /// <see cref="SquadPathPolicy.ResolveFile"/>.
@@ -67,6 +69,8 @@ public interface ISquadGlobalRootResolver
 ///   root follows the same XDG rule as Kilo; on Windows it is `%APPDATA%`, falling back to
 ///   `AppData\Roaming` under the profile, and `XDG_CONFIG_HOME` is ignored. Devin documents
 ///   no environment override of its own.
+/// - Command Code: `agents/` and `skills/` under `~/.commandcode` (no override; the CLI reads
+///   `HOME`, then `USERPROFILE`).
 /// </remarks>
 public sealed class SquadGlobalRoots : ISquadGlobalRootResolver
 {
@@ -118,6 +122,7 @@ public sealed class SquadGlobalRoots : ISquadGlobalRootResolver
             SquadTarget.Warp => ResolveWithOverride(null, ".warp"),
             SquadTarget.ZCode => ResolveZCodeRoot(),
             SquadTarget.Devin => ResolveDevinRoot(),
+            SquadTarget.CommandCode => ResolveWithOverride(null, ".commandcode"),
             _ => throw new ArgumentOutOfRangeException(
                 nameof(target),
                 target,

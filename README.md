@@ -180,7 +180,7 @@ kyber-weave squad pack --format all --out ./dist # builds APM and Agent Plugins 
 
 | Harness Class | Supported Targets |
 |---|---|
-| Native Agents | Codex (`.codex`), Cursor (`.cursor`), Claude (`.claude`), GitHub Copilot (`.github`), OpenCode (`.opencode`), Kilo (`.kilo`), Antigravity (`.agents/`), Pi (`.pi`), Factory Droids (`.factory`), ZCode (`.zcode`), Devin (`.devin`) |
+| Native Agents | Codex (`.codex`), Cursor (`.cursor`), Claude (`.claude`), GitHub Copilot (`.github`), OpenCode (`.opencode`), Kilo (`.kilo`), Antigravity (`.agents/`), Pi (`.pi`), Factory Droids (`.factory`), ZCode (`.zcode`), Devin (`.devin`), Command Code (`.commandcode`) |
 | Role-Skill Lowering | Warp |
 
 [Adoption & usage guide →](docs/kyber-squad/onboarding.md) · [Architecture →](docs/kyber-squad/architecture.md) · [Requirements & degradation →](docs/kyber-squad/requirements.md)
