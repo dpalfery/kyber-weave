@@ -69,9 +69,16 @@ jobs:
             # with its own derived from its name. automationDetails.id takes precedence
             # over the step's `category` input, so the directory upload stays a single run
             # per category even with several SKILL_DIRS entries.
-            jq --arg category "kyber-weave-skills-${safe_name}" \
-              '.runs[].automationDetails.id = $category' "${sarif_file}" > "${sarif_file}.tmp" \
-              && mv "${sarif_file}.tmp" "${sarif_file}" || EXIT_CODE=1
+            # A failed stamp removes its temp file: the step uploads the whole directory,
+            # and a stray .tmp must not reach the CodeQL action.
+            if jq --arg category "kyber-weave-skills-${safe_name}" \
+              '.runs[].automationDetails.id = $category' "${sarif_file}" > "${sarif_file}.tmp"
+            then
+              mv "${sarif_file}.tmp" "${sarif_file}"
+            else
+              rm -f "${sarif_file}.tmp"
+              EXIT_CODE=1
+            fi
             echo "::endgroup::"
           done
           exit "${EXIT_CODE}"

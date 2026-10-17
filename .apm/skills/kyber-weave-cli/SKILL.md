@@ -43,8 +43,8 @@ unsupported-channel note in `docs/install.md`, and the flag table at
 ## Verify the download
 
 ```bash
-sha256sum -c SHA256SUMS          # Linux
-shasum -a 256 -c SHA256SUMS      # macOS
+sha256sum -c SHA256SUMS.txt          # Linux
+shasum -a 256 -c SHA256SUMS.txt      # macOS
 kyber-weave --version
 kyberdash --version
 ```

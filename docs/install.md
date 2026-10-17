@@ -45,14 +45,14 @@ you are trying to do:
 | **Kyber-Weave** | The `kyber-weave` CLI and `kyber-weave-mcp` server: documentation governance, skill and agent linting, multi-harness deployment, and CI diagnostics. | This page |
 | **KyberDash** | The `kyberdash` binary: local token, cost, and context observability across coding harnesses. | [KyberDash adoption guide](dash/onboarding.md) |
 
-There is one documented install path per platform, and everything else is deliberately
-unsupported:
+There is one documented first-install path per platform; the KyberDash tray is a
+post-install add-on, not a peer path. Everything else is deliberately unsupported:
 
 | Path | Platform | How |
 |---|---|---|
 | Installer script (**the documented path**) | Linux, macOS | the one-liner above |
 | Release `.zip` | Windows | [download and verify](#verifying-a-download) |
-| KyberDash tray | macOS, Windows | `kyberdash menubar`, or `install.sh --with-menubar` on macOS |
+| KyberDash tray (post-install add-on) | macOS, Windows | `kyberdash menubar`, or `install.sh --with-menubar` on macOS |
 
 After installing, run [Verify](#verify), then read [Updating](#updating). Configuration
 splits the same way as the products: [Configuration](configuration.md) for Kyber-Weave, and

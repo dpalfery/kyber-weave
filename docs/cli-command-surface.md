@@ -68,8 +68,8 @@ tray is covered by [the KyberDash tray](install.md#the-kyberdash-tray) and the
 ### Verify the download
 
 ```bash
-sha256sum -c SHA256SUMS          # Linux
-shasum -a 256 -c SHA256SUMS      # macOS
+sha256sum -c SHA256SUMS.txt          # Linux
+shasum -a 256 -c SHA256SUMS.txt      # macOS
 ```
 
 `install.sh` verifies the checksum itself for the one-liner path. For a manual download, see
@@ -113,7 +113,8 @@ kyber-weave docs init . --docs-root docs --target agent-skills
 
 KyberDash shares one settings store across the CLI, the web dashboard, and the tray; read and
 write it with `kyberdash dash settings`. The values are `folder_import.scheduled`,
-`jobs.refresh_cadence_minutes`, and `dashboard.port`. The configure walkthrough is in the
+`jobs.paused`, `jobs.refresh_cadence_minutes`, `receiver.hosted`, and `dashboard.port`. The
+configure walkthrough is in the
 [KyberDash adoption guide](dash/onboarding.md#configure).
 
 ```bash
@@ -137,7 +138,7 @@ curl -fsSL https://raw.githubusercontent.com/dpalfery/kyber-weave/main/scripts/i
 **Verify a manual download** ([Verify the download](#verify-the-download)):
 
 ```bash
-sha256sum -c SHA256SUMS
+sha256sum -c SHA256SUMS.txt
 kyber-weave --version
 kyberdash --version
 ```

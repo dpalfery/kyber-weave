@@ -459,19 +459,28 @@ jobs:
           skills_dirs=(.apm/skills/kyber-weave-docs .apm/skills/kyber-weave-cli)
           CLI="dotnet run --project src/KyberWeave.Cli --no-build -c ${{ env.CONFIGURATION }} --"
           for skills_dir in "${skills_dirs[@]}"; do
-            skill_name="$(basename "${skills_dir}")"
+            # Path-derived, not basename: two skills whose leaf directories share a name
+            # would otherwise collide on one file name and one SARIF category. Matches the
+            # skill-gate template.
+            safe_name="$(echo "${skills_dir}" | tr '/.' '__')"
             $CLI skill validate "${skills_dir}" --format table || EXIT_CODE=1
             $CLI skill lint "${skills_dir}" --min-desc-score 70 --format table || EXIT_CODE=1
-            sarif="kyber-weave-sarif/skills-${skill_name}.sarif"
+            sarif="kyber-weave-sarif/skills-${safe_name}.sarif"
             $CLI skill scan "${skills_dir}" --fail-on critical --format sarif \
               > "${sarif}" || EXIT_CODE=1
             # upload-sarif refuses two runs that share one category, so stamp each file
             # with its own derived from its name. automationDetails.id takes precedence
             # over the step's `category` input, so the directory upload stays a single run
-            # per category.
-            jq --arg category "kyber-weave-skills-${skill_name}" \
-              '.runs[].automationDetails.id = $category' "${sarif}" > "${sarif}.tmp" \
-              && mv "${sarif}.tmp" "${sarif}" || EXIT_CODE=1
+            # per category. A failed stamp removes its temp file: the step uploads the
+            # whole directory, and a stray .tmp must not reach the CodeQL action.
+            if jq --arg category "kyber-weave-skills-${safe_name}" \
+              '.runs[].automationDetails.id = $category' "${sarif}" > "${sarif}.tmp"
+            then
+              mv "${sarif}.tmp" "${sarif}"
+            else
+              rm -f "${sarif}.tmp"
+              EXIT_CODE=1
+            fi
           done
           exit "${EXIT_CODE}"
 
