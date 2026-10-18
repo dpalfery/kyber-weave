@@ -1,6 +1,7 @@
 import type {
   KyberCaptureAction,
   KyberCaptureHarness,
+  KyberCaptureIssue,
   KyberCaptureRefusal,
   KyberCaptureState,
 } from '../../lib/kyberApi.js'
@@ -79,6 +80,62 @@ const STATE_LABEL: Record<KyberCaptureState, string> = {
   'not-applicable': 'Read-only',
 }
 
+/** Shared with the drawer's check summary so "needs attention" is one colour everywhere. */
+export const ATTENTION_TEXT = 'text-amber-700 dark:text-amber-300'
+const OK_TEXT = 'text-primary'
+const MUTED_TEXT = 'text-muted-foreground'
+
+/**
+ * The row's label and colour, read off the server's verdict. WHY `health`
+ * wins over `state`: `state` only says KyberDash's keys are in the file, and a
+ * row whose keys are all present but whose endpoint points elsewhere used to
+ * read a green "Enabled" while nothing arrived. An older server sends no
+ * verdict (`health` null), and the row then shows `state` exactly as before.
+ */
+export function rowStatus(harness: KyberCaptureHarness): { label: string; className: string } {
+  if (harness.mode !== 'managed') return { label: 'Read-only', className: MUTED_TEXT }
+  const health = harness.health ?? null
+  if (health === null) {
+    return { label: STATE_LABEL[harness.state], className: harness.state === 'on' ? OK_TEXT : MUTED_TEXT }
+  }
+  if (health === 'ok') return { label: STATE_LABEL.on, className: OK_TEXT }
+  if (health === 'attention') {
+    const label =
+      harness.state === 'on'
+        ? 'Enabled — needs attention'
+        : harness.state === 'partial'
+          ? 'Needs setup'
+          : 'Unknown — needs attention'
+    return { label, className: ATTENTION_TEXT }
+  }
+  return { label: STATE_LABEL[harness.state], className: MUTED_TEXT }
+}
+
+function IssueList({ harnessId, issues }: { harnessId: string; issues: readonly KyberCaptureIssue[] }) {
+  return (
+    <div
+      data-testid={`settings-harness-issues-${harnessId}`}
+      className="mt-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-2.5 py-2 text-xs text-foreground"
+    >
+      <p className={`font-semibold ${ATTENTION_TEXT}`}>
+        {issues.length === 1 ? '1 issue found' : `${issues.length} issues found`}
+      </p>
+      <ul className="mt-1 space-y-1.5">
+        {issues.map((issue, index) => (
+          <li key={`${issue.code}-${issue.text}-${index}`} data-testid={`settings-harness-issue-${harnessId}-${index}`}>
+            <p className="break-words">
+              <span className="font-semibold">{issue.severity === 'blocking' ? 'Blocking' : 'Warning'}:</span>{' '}
+              {issue.text}
+            </p>
+            {issue.path && <p className="mt-0.5 break-all font-mono text-[11px] text-muted-foreground">{issue.path}</p>}
+            {issue.remedy && <p className="mt-0.5 text-muted-foreground">{issue.remedy}</p>}
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
 const INSTALLED_LABEL = {
   detected: 'Detected',
   'not-detected': 'Not detected',
@@ -143,7 +200,8 @@ function RowDetails({ harness }: { harness: KyberCaptureHarness }) {
           </ul>
         )}
 
-        {harness.warnings.map((warning, index) => (
+        {/* With a verdict, every warning is already an issue in the visible list above. */}
+        {(harness.health ?? null) === null && harness.warnings.map((warning, index) => (
           <p key={`${warning.code}-${warning.text}-${index}`} className="text-xs text-foreground">
             <span className="font-semibold">Warning ({warning.code}):</span> {warning.text}
           </p>
@@ -219,9 +277,10 @@ function HarnessRow({
   onReset: HarnessCollectionListProps['onReset']
 }) {
   const decision = decideRow(harness)
-  const managed = harness.mode === 'managed'
   const reasonId = `settings-harness-reason-${harness.id}`
   const resettable = canReset(harness)
+  const status = rowStatus(harness)
+  const issues = harness.issues ?? []
 
   return (
     <li
@@ -233,9 +292,9 @@ function HarnessRow({
           <span className="block truncate text-sm font-medium text-foreground">{harness.displayName}</span>
           <span
             data-testid={`settings-harness-state-${harness.id}`}
-            className={harness.state === 'on' ? 'mt-0.5 block text-[11px] text-primary' : 'mt-0.5 block text-[11px] text-muted-foreground'}
+            className={`mt-0.5 block text-[11px] ${status.className}`}
           >
-            {managed ? STATE_LABEL[harness.state] : 'Read-only'}
+            {status.label}
           </span>
         </span>
         <span className="flex shrink-0 gap-2">
@@ -269,6 +328,8 @@ function HarnessRow({
           {decision.reason}
         </p>
       )}
+
+      {issues.length > 0 && <IssueList harnessId={harness.id} issues={issues} />}
 
       <RowDetails harness={harness} />
 

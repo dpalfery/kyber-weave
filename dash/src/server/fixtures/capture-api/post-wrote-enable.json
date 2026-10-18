@@ -72,6 +72,7 @@
           "github.copilot.chat.otel.maxAttributeSizeChars"
         ],
         "missingKeys": [],
+        "mismatchedKeys": [],
         "drift": null
       },
       {
@@ -89,6 +90,7 @@
         ],
         "presentKeys": [],
         "missingKeys": [],
+        "mismatchedKeys": [],
         "drift": null
       }
     ],
@@ -96,7 +98,9 @@
     "manualSteps": [],
     "statusLines": [
       "exporter: otlp-http (settings at the values enable writes; the editor's environment is not visible from here)"
-    ]
+    ],
+    "health": "ok",
+    "issues": []
   },
   "receiver": {
     "hosted": true,

@@ -104,12 +104,32 @@
           "env.OTEL_EXPORTER_OTLP_PROTOCOL",
           "env.OTEL_EXPORTER_OTLP_ENDPOINT"
         ],
+        "mismatchedKeys": [
+          "env.OTEL_LOGS_EXPORTER"
+        ],
         "drift": null
       }
     ],
     "warnings": [],
     "manualSteps": [],
-    "statusLines": []
+    "statusLines": [],
+    "health": "attention",
+    "issues": [
+      {
+        "code": "missing-keys",
+        "severity": "blocking",
+        "text": "Missing env.OTEL_LOG_USER_PROMPTS, env.OTEL_LOG_ASSISTANT_RESPONSES, env.OTEL_LOG_TOOL_DETAILS, env.OTEL_LOG_TOOL_CONTENT, env.OTEL_LOG_RAW_API_BODIES, env.CLAUDE_CODE_OTEL_CONTENT_MAX_LENGTH, env.CLAUDE_CODE_ENHANCED_TELEMETRY_BETA, env.OTEL_TRACES_EXPORTER, env.OTEL_EXPORTER_OTLP_PROTOCOL, env.OTEL_EXPORTER_OTLP_ENDPOINT",
+        "path": "/Users/example/.claude/settings.json",
+        "remedy": "Use Enable to write the missing keys (previewed first)."
+      },
+      {
+        "code": "value-mismatch",
+        "severity": "warning",
+        "text": "env.OTEL_LOGS_EXPORTER holds a value other than KyberDash's",
+        "path": "/Users/example/.claude/settings.json",
+        "remedy": "Use Enable to reapply KyberDash's values (previewed first)."
+      }
+    ]
   },
   "receiver": {
     "hosted": true,

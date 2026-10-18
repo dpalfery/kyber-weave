@@ -293,6 +293,7 @@ describe('buildCaptureStatus over a temporary home', () => {
         expectedKeys: [],
         presentKeys: [],
         missingKeys: [],
+        mismatchedKeys: [],
         drift: null,
       },
     ])
