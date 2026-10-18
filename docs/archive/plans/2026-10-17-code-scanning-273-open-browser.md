@@ -11,7 +11,7 @@ development-mode: test-first
 
 # Fix Code Scanning Alert 273: Windows Browser Opener Indirect Command Injection and Parameter Truncation
 
-**Status: Complete 2026-10-18.** Approved by user ("approve") 2026-10-18. Authoritative decisions D1–D4 recorded below under Conductor mandate and user approval. Primary decisions D1, D2, and D4 harvested into [docs/dash/architecture.md](../../dash/architecture.md) per KW-DOC-LIFECYCLE-003. Archived per KW-DOC-LIFECYCLE-003.
+**Status: Complete.** Archived 2026-10-18.
 Development mode: `test-first`.
 
 ---
@@ -192,8 +192,8 @@ The table below records the permanent architectural decisions governing this cha
 - **Objective:** Update canonical documentation in `docs/dash/architecture.md`, record closeout mappings and ADR waivers, update plan status, and verify docs validation and drift checks pass.
 - **Exact files/symbols:**
   - `docs/dash/architecture.md`
-  - `docs/archive/plans/2026-10-17-code-scanning-273-open-browser.md`
   - `docs/plans/README.md`
+  - `docs/archive/plans/2026-10-17-code-scanning-273-open-browser.md`
 - **Work:**
   - Update `docs/dash/architecture.md` (Surface Layer) to document:
     - The browser opener contract on Windows (`rundll32.exe url.dll,FileProtocolHandler`) preventing shell command injection and preserving query parameters.
@@ -239,6 +239,18 @@ T4 (Closeout: docs-dev canonical documentation & drift checks)
 
 ## 8. Closeout Mapping and Waivers
 
-- **D1 (Windows Browser Opener):** Harvested to `docs/dash/architecture.md` (Surface Layer: Browser Opener Contract). No ADR — ADR waiver: security bug fix and Windows opener hardening under existing KyberDash CLI engine architecture.
-- **D2 (Loopback Origin & View URL Validation):** Harvested to `docs/dash/architecture.md` (Surface Layer: Browser Opener Contract). No ADR — ADR waiver: validation refinement aligning CLI browser launch with existing Rust tray display layer invariants under ADR 0033.
-- **Documentation Waiver:** None. Canonical documentation in `docs/dash/architecture.md` is updated in T4.
+- **D1 (Windows Browser Opener):** Harvested to [dash/architecture.md](../../dash/architecture.md) (`### Browser opener and route admission contracts`). No ADR — ADR waiver: security bug fix and Windows opener hardening under existing KyberDash CLI engine architecture.
+- **D2 (Loopback Origin & View URL Validation):** Harvested to [dash/architecture.md](../../dash/architecture.md) (`### Browser opener and route admission contracts`). No ADR — ADR waiver: URL validation refinement aligning CLI browser launch with existing Rust tray display-layer invariants under ADR 0033.
+- **D3 (Test Suite Location):** Implemented in `dash/src/cli/web-open-browser.test.ts` (46 tests). No ADR — ADR waiver: unit test file organization following existing Vitest conventions. Documentation waiver: test-file placement is self-evident from the test tree and carries no separate architectural or operational invariant.
+- **D4 (Validation Helper Architecture):** Harvested to [dash/architecture.md](../../dash/architecture.md) (`### Browser opener and route admission contracts`, documenting `validateDashboardUrl`). No ADR — ADR waiver: module-level validation helper refinement under existing CLI engine architecture.
+- **Documentation Waiver:** None for durable system architecture. Decision D3 carries a scoped documentation waiver for unit test file placement; all durable behavioral and architectural contracts (D1, D2, D4) are harvested to canonical documentation in [dash/architecture.md](../../dash/architecture.md).
+
+---
+
+## 9. Completion Summary
+
+- **T1 (RED):** 42 failing / 4 passing tests in `dash/src/cli/web-open-browser.test.ts` against unpatched `dash/src/cli/web.ts` (Pass 1 `PASS`).
+- **T2 (GREEN):** `validateDashboardUrl`, `openBrowser`, and `joinViewUrl` implemented in `dash/src/cli/web.ts`; 46/46 tests pass in `dash/src/cli/web-open-browser.test.ts` (Pass 1 `PASS`).
+- **T3 (Verification):** 412 test files / 6,362 tests passed in Dash suite; `typecheck`, `lint`, and `check:reachable` exit 0 (Pass 1 `PASS`).
+- **T4 (Documentation):** [dash/architecture.md](../../dash/architecture.md) updated and validated (Pass 1 `PASS`).
+- **End-of-run review council:** `APPROVE` (`KW-REVIEW-024`, 18/18 gates passed, 0 critical, 0 major, 3 minor advisory findings).
