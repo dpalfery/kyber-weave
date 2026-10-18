@@ -402,11 +402,13 @@ export function portRefusalFor(port: number, code: string | undefined): Error | 
 }
 
 export class UnknownViewError extends Error {
+  readonly view: string
   readonly validForms: string
 
   constructor(view: string, validForms: string) {
     super(`unknown view "${view}". Valid forms: ${validForms}`)
     this.name = 'UnknownViewError'
+    this.view = view
     this.validForms = validForms
   }
 }
@@ -414,12 +416,12 @@ export class UnknownViewError extends Error {
 export function joinViewUrl(origin: string, view: string | undefined): string {
   const originMatch = /^http:\/\/127\.0\.0\.1:(\d+)\/?$/.exec(typeof origin === 'string' ? origin.trim() : '')
   if (!originMatch) {
-    throw new UnknownViewError(String(view ?? origin), formatValidViewForms())
+    throw new UnknownViewError(origin, formatValidViewForms())
   }
   const portStr = originMatch[1]!
   const port = Number(portStr)
   if (!Number.isInteger(port) || String(port) !== portStr || port < 1 || port > 65535) {
-    throw new UnknownViewError(String(view ?? origin), formatValidViewForms())
+    throw new UnknownViewError(origin, formatValidViewForms())
   }
   const canonicalOrigin = `http://127.0.0.1:${port}`
 

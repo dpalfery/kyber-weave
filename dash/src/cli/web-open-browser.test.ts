@@ -241,15 +241,71 @@ describe('joinViewUrl view joining and validation', () => {
 
   for (const [description, view] of invalidViews) {
     it(`throws UnknownViewError for ${description} ("${view}")`, () => {
-      expect(() => joinViewUrl('http://127.0.0.1:4747', view)).toThrow(UnknownViewError)
+      try {
+        joinViewUrl('http://127.0.0.1:4747', view)
+        expect.unreachable('expected UnknownViewError to be thrown')
+      } catch (err) {
+        expect(err).toBeInstanceOf(UnknownViewError)
+        const error = err as UnknownViewError
+        expect(error.view).toBe(view)
+        expect(error.message).toContain(`unknown view "${view}"`)
+      }
     })
   }
 
   it('throws UnknownViewError when origin is not a valid loopback origin', () => {
-    expect(() => joinViewUrl('https://evil.com', 'run/abc')).toThrow(UnknownViewError)
-    expect(() => joinViewUrl('http://localhost:4747', 'run/abc')).toThrow(UnknownViewError)
-    expect(() => joinViewUrl('http://127.0.0.1', 'run/abc')).toThrow(UnknownViewError)
-    expect(() => joinViewUrl('http://127.0.0.1:0', 'run/abc')).toThrow(UnknownViewError)
+    const invalidOrigins = [
+      'https://evil.com',
+      'http://localhost:4747',
+      'http://127.0.0.1',
+      'http://127.0.0.1:0',
+      'http://127.0.0.1:65536',
+    ]
+    for (const origin of invalidOrigins) {
+      try {
+        joinViewUrl(origin, 'run/abc')
+        expect.unreachable(`expected UnknownViewError to be thrown for origin ${origin}`)
+      } catch (err) {
+        expect(err).toBeInstanceOf(UnknownViewError)
+        const error = err as UnknownViewError
+        expect(error.view).toBe(origin)
+        expect(error.message).toContain(`unknown view "${origin}"`)
+      }
+    }
+  })
+
+  it('reports origin as offending value when origin validation fails, regardless of view', () => {
+    try {
+      joinViewUrl('https://evil.com', 'problems')
+      expect.unreachable('expected UnknownViewError to be thrown')
+    } catch (err) {
+      expect(err).toBeInstanceOf(UnknownViewError)
+      const error = err as UnknownViewError
+      expect(error.view).toBe('https://evil.com')
+      expect(error.message).toContain('unknown view "https://evil.com"')
+    }
+
+    try {
+      joinViewUrl('https://evil.com', undefined)
+      expect.unreachable('expected UnknownViewError to be thrown')
+    } catch (err) {
+      expect(err).toBeInstanceOf(UnknownViewError)
+      const error = err as UnknownViewError
+      expect(error.view).toBe('https://evil.com')
+      expect(error.message).toContain('unknown view "https://evil.com"')
+    }
+  })
+
+  it('reports view as offending value when origin is valid but view fails validation', () => {
+    try {
+      joinViewUrl('http://127.0.0.1:4747', '../secret')
+      expect.unreachable('expected UnknownViewError to be thrown')
+    } catch (err) {
+      expect(err).toBeInstanceOf(UnknownViewError)
+      const error = err as UnknownViewError
+      expect(error.view).toBe('../secret')
+      expect(error.message).toContain('unknown view "../secret"')
+    }
   })
 })
 
