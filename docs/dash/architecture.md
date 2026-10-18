@@ -729,7 +729,7 @@ KyberDash explicitly rejects composite efficiency scores, letter grades, or sing
 indexes. Agent performance is evaluated across six orthogonal dimensions:
 - **Context Hygiene**: Proportion of context occupied by active instructions vs redundant history.
 - **Cache Efficiency**: Cache read ratio, prefix stability, and cache breakpoint invalidation.
-- **Tool Yield**: Ratio of invoked tool calls to offered tool schemas. Credits on weak evidence, debits only on strong evidence.
+- **Tool Yield**: Ratio of tool invocations producing utilized results vs resident schema weight.
 - **Skill Utilisation**: Empirical invocation frequency of declared capabilities. Listed and invoked skills are measured per harness; where either side is not measurable the dimension says so rather than reporting zero ([skills view contract](#skills-view-contract)).
 - **Delegation Overhead**: Tokens and latency dedicated strictly to orchestrating child handoffs.
 - **Continuity**: Turn-over-turn context stability and retention across compaction events.
