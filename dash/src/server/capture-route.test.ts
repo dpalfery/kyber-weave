@@ -41,6 +41,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { claudeCodeHarness } from '../capture/harnesses/claude-code.js'
+import { DEFAULT_CAPTURE_ENDPOINT } from '../capture/index.js'
 import type { HealthFetcher } from '../capture/probe.js'
 import { receiptPathForHome } from '../capture/receipt.js'
 import { SETTING_KEYS, readSetting, writeSetting } from '../settings/shared-settings.js'
@@ -220,6 +222,8 @@ type CaptureHarnessView = {
   warnings: Array<Record<string, unknown>>
   manualSteps: Array<Record<string, unknown>>
   statusLines: unknown[]
+  health?: unknown
+  issues?: Array<Record<string, unknown>>
 }
 
 type CaptureBodyView = {
@@ -233,6 +237,7 @@ type CaptureBodyView = {
   harnessState?: CaptureHarnessView
   receiver?: Record<string, unknown>
   harnesses?: CaptureHarnessView[]
+  check?: Record<string, unknown>
 }
 
 const asBody = (value: unknown): CaptureBodyView => value as CaptureBodyView
@@ -303,7 +308,7 @@ describe('GET /api/kyber/capture', () => {
 
     const doc = asBody(body)
     expect(doc.platform).toBe('darwin')
-    expect(ownKeys(doc)).toEqual(['harnesses', 'platform', 'receiver'])
+    expect(ownKeys(doc)).toEqual(['check', 'harnesses', 'platform', 'receiver'])
     expect(doc.receiver).toEqual({
       hosted: true,
       liveness: 'kyberdash',
@@ -570,6 +575,63 @@ describe('GET /api/kyber/capture', () => {
 // =========================================================================================
 // POST /api/kyber/capture
 // =========================================================================================
+
+describe('GET /api/kyber/capture: the configuration check', () => {
+  /** Every Claude Code key enable writes, at its values, with the owner's overrides on top. */
+  function claudeEnv(overrides: Record<string, string>): string {
+    const env: Record<string, unknown> = {}
+    for (const [key, value] of Object.entries({
+      ...claudeCodeHarness.desiredKeys(DEFAULT_CAPTURE_ENDPOINT),
+      ...claudeCodeHarness.ensureIfAbsentKeys!(DEFAULT_CAPTURE_ENDPOINT),
+    })) {
+      env[key.replace(/^env\./, '')] = value
+    }
+    return `${JSON.stringify({ env: { ...env, ...overrides } }, null, 2)}\n`
+  }
+
+  it('marks a fully keyed Claude Code row as needing attention when its endpoint is the gRPC port', async () => {
+    const home = makeHome()
+    writeConfig(
+      claudePath(home),
+      claudeEnv({ OTEL_EXPORTER_OTLP_ENDPOINT: 'http://localhost:4317', OTEL_EXPORTER_OTLP_PROTOCOL: 'grpc' }),
+    )
+    const deps = makeCaptureDeps(captureSettings(home, { fetchHealth: KYBERDASH_LISTENER }))
+    writeSetting(deps.store, SETTING_KEYS.receiverHosted, 'on')
+
+    const { status, body } = await callRoute('GET', PATH, { deps })
+    expect(status).toBe(200)
+    const claude = harnessById(body, 'claude-code')
+    expect(claude.state).toBe('on')
+    expect(claude.health).toBe('attention')
+    expect((claude.issues ?? []).map((issue) => issue['code'])).toEqual(['endpoint-differs', 'protocol-differs'])
+    expect(asBody(body).check).toMatchObject({ health: 'attention', enabled: 1, attention: 1, issueCount: 2 })
+    expect(typeof asBody(body).check!['checkedAt']).toBe('string')
+  })
+
+  it('passes the same row once the endpoint and protocol are the receiver\'s', async () => {
+    const home = makeHome()
+    writeConfig(claudePath(home), claudeEnv({}))
+    const deps = makeCaptureDeps(captureSettings(home, { fetchHealth: KYBERDASH_LISTENER }))
+    writeSetting(deps.store, SETTING_KEYS.receiverHosted, 'on')
+
+    const { body } = await callRoute('GET', PATH, { deps })
+    const claude = harnessById(body, 'claude-code')
+    expect(claude.health).toBe('ok')
+    expect(claude.issues).toEqual([])
+    expect(asBody(body).check).toMatchObject({ health: 'ok', enabled: 1, attention: 0, issueCount: 0 })
+  })
+
+  it('blocks an enabled row when this KyberDash does not host the receiver', async () => {
+    const home = makeHome()
+    writeConfig(claudePath(home), claudeEnv({}))
+    const deps = makeCaptureDeps(captureSettings(home))
+
+    const { body } = await callRoute('GET', PATH, { deps })
+    const claude = harnessById(body, 'claude-code')
+    expect(claude.health).toBe('attention')
+    expect((claude.issues ?? []).map((issue) => issue['code'])).toEqual(['receiver-not-hosted'])
+  })
+})
 
 describe('POST /api/kyber/capture', () => {
   const VALID = { action: 'enable', harness: 'opencode', dryRun: false }

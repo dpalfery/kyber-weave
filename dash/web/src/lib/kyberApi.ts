@@ -1539,6 +1539,7 @@ const CAPTURE_MAX_WARNINGS = 16
 const CAPTURE_MAX_STEPS = 16
 const CAPTURE_MAX_EVENTS = 64
 const CAPTURE_MAX_CHANGES = 64
+const CAPTURE_MAX_ISSUES = 32
 
 export type KyberCapturePlatform = 'darwin' | 'linux' | 'win32' | 'unknown'
 export type KyberCaptureLiveness = 'kyberdash' | 'foreign' | 'none' | 'unknown'
@@ -1546,6 +1547,25 @@ export type KyberCaptureMode = 'managed' | 'status-only'
 export type KyberCaptureInstalled = 'detected' | 'not-detected' | 'unknown'
 export type KyberCaptureState = 'on' | 'off' | 'partial' | 'unknown' | 'not-applicable'
 export type KyberCaptureAction = 'enable' | 'disable'
+/** The server's delivery verdict; `attention` renders yellow. */
+export type KyberCaptureHealth = 'ok' | 'attention' | 'off' | 'read-only'
+
+export interface KyberCaptureIssue {
+  code: string
+  severity: 'blocking' | 'warning'
+  text: string
+  path?: string
+  remedy?: string
+}
+
+/** The check's one-line summary. Absent from an older server. */
+export interface KyberCaptureCheck {
+  checkedAt: string
+  health: 'ok' | 'attention' | 'off'
+  enabled: number
+  attention: number
+  issueCount: number
+}
 
 /** A value the server reports for one managed key: a JSON scalar, never an object. */
 export type KyberCaptureValue = string | number | boolean | null
@@ -1566,6 +1586,7 @@ export interface KyberCaptureFile {
   expectedKeys: string[]
   presentKeys: string[]
   missingKeys: string[]
+  mismatchedKeys: string[]
   drift: KyberCaptureDriftEntry[] | null
 }
 
@@ -1587,12 +1608,19 @@ export interface KyberCaptureHarness {
   warnings: Array<{ code: string; text: string }>
   manualSteps: KyberCaptureManualStep[]
   statusLines: string[]
+  /**
+   * `null` when the server sent no verdict (an older server): the row then
+   * falls back to `state` alone rather than claiming a health it was not told.
+   */
+  health: KyberCaptureHealth | null
+  issues: KyberCaptureIssue[]
 }
 
 export interface KyberCaptureStatus {
   platform: KyberCapturePlatform
   receiver: { hosted: boolean; liveness: KyberCaptureLiveness; detail: string }
   harnesses: KyberCaptureHarness[]
+  check: KyberCaptureCheck | null
 }
 
 export type KyberCaptureEventKind =
@@ -1726,6 +1754,7 @@ function readFile(raw: unknown): KyberCaptureFile | null {
     expectedKeys: captureStrings(raw.expectedKeys, CAPTURE_MAX_KEYS, CAPTURE_VALUE_MAX),
     presentKeys: captureStrings(raw.presentKeys, CAPTURE_MAX_KEYS, CAPTURE_VALUE_MAX),
     missingKeys: captureStrings(raw.missingKeys, CAPTURE_MAX_KEYS, CAPTURE_VALUE_MAX),
+    mismatchedKeys: captureStrings(raw.mismatchedKeys, CAPTURE_MAX_KEYS, CAPTURE_VALUE_MAX),
     drift: readDrift(raw.drift),
   }
 }
@@ -1767,6 +1796,38 @@ function readHarness(raw: unknown): KyberCaptureHarness | null {
     ),
     manualSteps: mapBounded(raw.manualSteps, CAPTURE_MAX_STEPS, readManualStep),
     statusLines: captureStrings(raw.statusLines, CAPTURE_MAX_LINES),
+    // An unrecognised verdict is shown as needing attention, never as healthy.
+    health:
+      raw.health === undefined
+        ? null
+        : oneOf<KyberCaptureHealth>(raw.health, ['ok', 'attention', 'off', 'read-only'], 'attention'),
+    issues: mapBounded(raw.issues, CAPTURE_MAX_ISSUES, readIssue),
+  }
+}
+
+function readIssue(raw: unknown): KyberCaptureIssue | null {
+  if (!isRaw(raw) || typeof raw.text !== 'string') return null
+  const issue: KyberCaptureIssue = {
+    code: capText(raw.code, CAPTURE_VALUE_MAX),
+    // An unrecognised severity is the stricter one.
+    severity: oneOf(raw.severity, ['blocking', 'warning'], 'blocking'),
+    text: capText(raw.text),
+  }
+  if (typeof raw.path === 'string') issue.path = capText(raw.path)
+  if (typeof raw.remedy === 'string') issue.remedy = capText(raw.remedy)
+  return issue
+}
+
+function readCheck(raw: unknown): KyberCaptureCheck | null {
+  if (!isRaw(raw) || typeof raw.checkedAt !== 'string') return null
+  const count = (value: unknown): number =>
+    typeof value === 'number' && Number.isInteger(value) && value >= 0 ? Math.min(value, 9999) : 0
+  return {
+    checkedAt: raw.checkedAt.slice(0, 64),
+    health: oneOf(raw.health, ['ok', 'attention', 'off'], 'attention'),
+    enabled: count(raw.enabled),
+    attention: count(raw.attention),
+    issueCount: count(raw.issueCount),
   }
 }
 
@@ -1814,6 +1875,7 @@ function parseCaptureStatus(raw: unknown, status: number): KyberCaptureStatus {
       detail: capText(raw.receiver.detail),
     },
     harnesses: mapBounded(raw.harnesses, CAPTURE_MAX_HARNESSES, readHarness),
+    check: readCheck(raw.check),
   }
 }
 

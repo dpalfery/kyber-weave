@@ -13,6 +13,9 @@ afterEach(cleanup)
 describe('HarnessCollectionList keys', () => {
   it('renders repeated warnings and status lines without duplicate-key warnings', () => {
     const harness = JSON.parse(JSON.stringify(statusMixed.harnesses[0])) as KyberCaptureHarness
+    // An older server sends no verdict, and the details then list the raw warnings.
+    harness.health = null
+    harness.issues = []
     harness.warnings = [
       { code: 'w', text: 'same' },
       { code: 'w', text: 'same' },

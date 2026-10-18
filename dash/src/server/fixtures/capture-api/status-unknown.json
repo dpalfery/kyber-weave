@@ -40,6 +40,7 @@
             "github.copilot.chat.otel.captureContent",
             "github.copilot.chat.otel.maxAttributeSizeChars"
           ],
+          "mismatchedKeys": [],
           "drift": null
         },
         {
@@ -57,6 +58,7 @@
           ],
           "presentKeys": [],
           "missingKeys": [],
+          "mismatchedKeys": [],
           "drift": null
         }
       ],
@@ -68,8 +70,10 @@
       ],
       "manualSteps": [],
       "statusLines": [
-        "exporter: file (dev-null) \u2014 Copilot discards every span"
-      ]
+        "exporter: file (dev-null) — Copilot discards every span"
+      ],
+      "health": "off",
+      "issues": []
     },
     {
       "id": "claude-code",
@@ -103,12 +107,22 @@
           ],
           "presentKeys": [],
           "missingKeys": [],
+          "mismatchedKeys": [],
           "drift": null
         }
       ],
       "warnings": [],
       "manualSteps": [],
-      "statusLines": []
+      "statusLines": [],
+      "health": "attention",
+      "issues": [
+        {
+          "code": "config-unreadable",
+          "severity": "blocking",
+          "text": "KyberDash could not read or parse this harness's configuration, so it cannot tell whether collection works.",
+          "remedy": "Open Configuration details to see which file, fix it, then check again."
+        }
+      ]
     },
     {
       "id": "codex",
@@ -129,6 +143,7 @@
           "expectedKeys": [],
           "presentKeys": [],
           "missingKeys": [],
+          "mismatchedKeys": [],
           "drift": null
         }
       ],
@@ -136,7 +151,9 @@
       "manualSteps": [],
       "statusLines": [
         "no [otel] table is present; coverage comes from session files"
-      ]
+      ],
+      "health": "read-only",
+      "issues": []
     },
     {
       "id": "opencode",
@@ -161,6 +178,7 @@
             "experimental.openTelemetry"
           ],
           "missingKeys": [],
+          "mismatchedKeys": [],
           "drift": null
         }
       ],
@@ -175,7 +193,16 @@
           }
         }
       ],
-      "statusLines": []
+      "statusLines": [],
+      "health": "attention",
+      "issues": [
+        {
+          "code": "receiver-not-hosted",
+          "severity": "blocking",
+          "text": "This KyberDash does not host the OTLP receiver, so nothing this harness exports is collected.",
+          "remedy": "Turn on \"Host the OTLP receiver in this KyberDash\" below."
+        }
+      ]
     },
     {
       "id": "pi",
@@ -197,6 +224,7 @@
           "expectedKeys": [],
           "presentKeys": [],
           "missingKeys": [],
+          "mismatchedKeys": [],
           "drift": null
         }
       ],
@@ -204,7 +232,9 @@
       "manualSteps": [],
       "statusLines": [
         "extension: ObservMe (observme.yaml)"
-      ]
+      ],
+      "health": "read-only",
+      "issues": []
     },
     {
       "id": "antigravity",
@@ -225,6 +255,7 @@
           "expectedKeys": [],
           "presentKeys": [],
           "missingKeys": [],
+          "mismatchedKeys": [],
           "drift": null
         }
       ],
@@ -238,7 +269,16 @@
       "statusLines": [
         "statusline bridge: statusLine.command is not set",
         "declaredContextWindow snippet: span.set_attribute(\"declaredContextWindow\", <positive token count>)"
-      ]
+      ],
+      "health": "read-only",
+      "issues": []
     }
-  ]
+  ],
+  "check": {
+    "checkedAt": "2026-10-18T00:00:00.000Z",
+    "health": "attention",
+    "enabled": 1,
+    "attention": 2,
+    "issueCount": 2
+  }
 }

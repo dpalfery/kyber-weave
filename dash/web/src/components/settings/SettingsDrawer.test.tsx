@@ -239,8 +239,9 @@ describe('SettingsDrawer: rows come only from the server', () => {
     stubFetch({})
     await openedDrawer()
 
-    // Fixture: claude-code is `on`, copilot is `partial`, opencode is `off`.
-    expect(screen.getByTestId('settings-harness-state-claude-code').textContent).toBe('Enabled')
+    // Fixture: claude-code is `on` but its endpoint points elsewhere, copilot is `partial`,
+    // opencode is `off`. An `on` row with issues is not a plain green "Enabled".
+    expect(screen.getByTestId('settings-harness-state-claude-code').textContent).toBe('Enabled — needs attention')
     expect(screen.getByTestId('settings-harness-state-copilot').textContent).toBe('Needs setup')
     expect(screen.getByTestId('settings-harness-state-opencode').textContent).toBe('Disabled')
     expect(screen.getByTestId('settings-harness-state-codex').textContent).toBe('Read-only')
