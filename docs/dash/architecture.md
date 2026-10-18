@@ -6,7 +6,7 @@ component: KyberDash
 source-root: dash
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-14
+last-reviewed: 2026-10-18
 decided-by:
   - adr/0020-kyberdash-one-time-fork
   - adr/0008-kyberdash-single-canonical-store
@@ -729,7 +729,7 @@ KyberDash explicitly rejects composite efficiency scores, letter grades, or sing
 indexes. Agent performance is evaluated across six orthogonal dimensions:
 - **Context Hygiene**: Proportion of context occupied by active instructions vs redundant history.
 - **Cache Efficiency**: Cache read ratio, prefix stability, and cache breakpoint invalidation.
-- **Tool Yield**: Ratio of tool invocations producing utilized results vs resident schema weight.
+- **Tool Yield**: Ratio of invoked tool calls to offered tool schemas. Credits on weak evidence, debits only on strong evidence.
 - **Skill Utilisation**: Empirical invocation frequency of declared capabilities. Listed and invoked skills are measured per harness; where either side is not measurable the dimension says so rather than reporting zero ([skills view contract](#skills-view-contract)).
 - **Delegation Overhead**: Tokens and latency dedicated strictly to orchestrating child handoffs.
 - **Continuity**: Turn-over-turn context stability and retention across compaction events.
@@ -1187,6 +1187,16 @@ All `/api/kyber/*` responses return standard headers (`content-type: application
 `cleanDatabase` (`dash/src/clean/clean.ts`) is the single implementation behind `kyberdash dash clean` and `POST /api/kyber/clean`; a surface asks for it over the API and holds no clean logic of its own. One clean pauses the OTLP receiver (loopback admin routes on `dash/src/otel/receiver.ts`; 503 + Retry-After while paused, `/healthz` stays 200 with `paused`, lease TTL auto-resumes), holds the refresh lock (exit 3 / 409 when busy), wipes the scope in one store transaction — records (fold-expanded to raw front-end names), provenance, checkpoints, and harness-scoped derived caches — projects the derived tables, re-ingests the scope **only when the caller asked for a window** (`--reingest-weeks <n>`, 1–52; absent means none, which is the default), and resumes ingestion in a `finally`. Kept in all cases: `ingest_log`, `refresh_run`, `metadata` (stamped `last_clean_at`/scope), `token_cache`, and the model-window catalog. Wipe-all clears `quarantine` and the log-enrichment tables. A per-harness wipe scopes the `quarantine`, `pending_logs`, and `quarantined_logs` rows whose `harness` matches the wiped raw names — the nullable column schema v19 added for exactly this ([ADR 0035](../adr/0035-kyberdash-quarantine-raw-packet-evidence.md)); a row with no harness is "unknown", never "matches", so unclaimed rows survive a per-harness wipe and are cleared only by the complete wipe. Assembled turn text is purged after 14 days. The raw packet keeps exactly what the sender sent until you wipe the `claude-code` harness or the whole database ([ADR 0018](../adr/0018-kyberdash-content-retention-purge.md)). No backup is taken, by design: the data is ephemeral point-in-time telemetry, re-derivable from source logs except OTLP-collected records, which both confirm surfaces disclose as permanently gone. Nothing re-imports after the clean on its own either: the next scheduled refresh reads folder sources only while `settings.folder_import.scheduled` is `on` ([ADR 0033](../adr/0033-kyberdash-surfaces-are-display-layers.md) decision 6). Automatic paths (refresh, retention purge) keep the ADR 0016/ADR 0018 no-delete contracts; only the confirmed clean deletes rows, and only an explicitly requested re-ingest repopulates from source logs.
 
 Coverage after a wipe: `refresh_run` rows older than the last wipe are ignored when coverage is computed. They are audit history of runs whose records are gone, and counting them would claim coverage the store no longer has.
+
+### Browser opener and route admission contracts
+
+When launching the web dashboard (`kyberdash web`) or navigating to a specific view (`--view <path>`), the engine opens the default system browser via `openBrowser` (`dash/src/cli/web.ts`). Defense in depth requires strict URL validation and shell-free process execution across platforms:
+
+- **Windows browser opener without shell dispatch (D1):** On Windows (`win32`), `openBrowser` launches URLs via `execFile('rundll32.exe', ['url.dll,FileProtocolHandler', safeUrl])`, while macOS uses `open` and Linux uses `xdg-open`. Invoking `rundll32.exe` directly avoids spawning `cmd.exe /c start`, which both eliminates the indirect command-line injection sink (`js/indirect-command-line-injection`) and preserves `&` in multi-parameter query strings (such as `/compare?a=:runId&b=:runId`) that `cmd.exe` would otherwise split as a command separator.
+- **Loopback origin and view route validation (D2, D4):** Before launching a browser (`openBrowser`) or joining a `--view` path (`joinViewUrl`), `validateDashboardUrl` enforces the same loopback and route admission rules as the Rust tray's `open_view_url` / `loopback_origin` (`dash/tray/src-tauri/src/ipc.rs` and `dash/tray/src-tauri/src/api.rs`):
+  - Origin must be strictly `http://127.0.0.1:<port>` with integer port `1..65535` and no credentials (`@`, `\`, `%`).
+  - The relative view (`${pathname}${search}`) must not contain `://` (scheme injection), leading `//` (protocol-relative injection), or `..` traversal segments, and must match a declared route in `dash/src/server/view-paths.json` via `matchesViewPath`.
+  - `openBrowser` refuses any URL that fails `validateDashboardUrl` without invoking `execFile`.
 
 ### The KyberDash Tray (dash/tray/)
 

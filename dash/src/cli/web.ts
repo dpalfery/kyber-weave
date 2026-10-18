@@ -190,20 +190,117 @@ const SEA_NOT_BUILT_HINT_HTML =
 const DEV_NOT_BUILT_HINT_TEXT = 'Dashboard UI is not built. Run: cd dash && npm install && npm run build'
 const SEA_NOT_BUILT_HINT_TEXT = 'Dashboard UI is not embedded in this build. Install a release that includes it.'
 
+/**
+ * Strictly validates and canonicalizes a URL targeting the local dashboard.
+ *
+ * Enforces loopback-only origins (`http://127.0.0.1:<1..65535>`), disallowing userinfo,
+ * fragments, path traversal (`..`), protocol-relative prefixes (`//`), and scheme injections (`://`),
+ * and requires the route to match the registered patterns in `view-paths.json`.
+ *
+ * Returns the canonical URL string (`http://127.0.0.1:<port>` or `http://127.0.0.1:<port>/<route>`),
+ * or `null` if validation fails.
+ */
+export function validateDashboardUrl(rawUrl: string): string | null {
+  if (typeof rawUrl !== 'string') return null
+  if (rawUrl.length === 0) return null
+  if (/\s|[\u0000-\u001f\u007f]/.test(rawUrl)) return null
+  if (rawUrl.includes('#') || rawUrl.includes('\\')) return null
+  if (!rawUrl.startsWith('http://')) return null
+
+  const afterScheme = rawUrl.slice(7)
+  const authorityEndRelative = afterScheme.search(/[/?]/)
+  const authority = authorityEndRelative === -1 ? afterScheme : afterScheme.slice(0, authorityEndRelative)
+  const rawTail = authorityEndRelative === -1 ? '' : afterScheme.slice(authorityEndRelative)
+
+  if (authority.includes('@') || authority.includes('\\') || authority.includes('%')) {
+    return null
+  }
+
+  const portMatch = /^127\.0\.0\.1:(\d+)$/.exec(authority)
+  if (!portMatch) return null
+
+  const portStr = portMatch[1]!
+  const port = Number(portStr)
+  if (!Number.isInteger(port) || String(port) !== portStr || port < 1 || port > 65535) {
+    return null
+  }
+
+  let parsed: URL
+  try {
+    parsed = new URL(rawUrl)
+  } catch {
+    return null
+  }
+
+  if (
+    parsed.protocol !== 'http:' ||
+    parsed.hostname !== '127.0.0.1' ||
+    parsed.username !== '' ||
+    parsed.password !== '' ||
+    parsed.hash !== ''
+  ) {
+    return null
+  }
+
+  if (rawTail === '' || rawTail === '/') {
+    return `http://127.0.0.1:${port}`
+  }
+
+  if (!rawTail.startsWith('/') || rawTail.startsWith('//')) {
+    return null
+  }
+
+  if (rawTail.includes('://')) {
+    return null
+  }
+
+  const qIdx = rawTail.indexOf('?')
+  const rawPath = qIdx === -1 ? rawTail : rawTail.slice(0, qIdx)
+
+  if (rawPath.includes('//')) {
+    return null
+  }
+
+  if (rawPath.split('/').some((segment) => segment === '..' || segment === '.')) {
+    return null
+  }
+
+  const view = `${parsed.pathname}${parsed.search}`
+  if (!matchesViewPath(view)) {
+    return null
+  }
+
+  return `http://127.0.0.1:${port}${view}`
+}
+
+/**
+ * Opens a dashboard URL in the default browser.
+ *
+ * Before dispatching to any system opener, the URL is strictly validated using
+ * `validateDashboardUrl` to ensure it targets a loopback origin (127.0.0.1:<1..65535>)
+ * and a registered route from `view-paths.json`. Any off-route, traversal, non-loopback,
+ * or malformed URL is refused without spawning any process.
+ *
+ * Platform dispatch uses `execFile` directly with argv arguments, avoiding any shell
+ * command parsing sink:
+ * - On macOS: `open <url>`
+ * - On Linux: `xdg-open <url>`
+ * - On Windows: `rundll32.exe url.dll,FileProtocolHandler <url>` rather than `cmd /c start`.
+ *   This eliminates the `cmd.exe` shell interpretation sink (remediating CodeQL alert 273),
+ *   preserves `&` in query parameters (such as `/compare?a=:runId&b=:runId` which `cmd.exe`
+ *   would otherwise interpret as a command separator), and validates the loopback origin
+ *   and route first.
+ */
 export function openBrowser(url: string): void {
-  // execFile, not exec: the arguments go to the process as an argv array, so no
-  // shell parses them and there is no command string for a URL to break out of.
-  // This matters because the URL is no longer purely internal — `--view` puts a
-  // user-supplied path into it (runWebDashboard validates it against
-  // matchesViewPath first, but this must not depend on a check made elsewhere).
-  // On Windows `start` is a cmd builtin rather than an executable, so cmd is the
-  // program; the empty string is the window title `start` expects before a URL.
+  const safeUrl = validateDashboardUrl(url)
+  if (!safeUrl) return
+
   const [program, args] =
     process.platform === 'darwin'
-      ? ['open', [url]]
+      ? ['open', [safeUrl]]
       : process.platform === 'win32'
-        ? ['cmd', ['/c', 'start', '', url]]
-        : ['xdg-open', [url]]
+        ? ['rundll32.exe', ['url.dll,FileProtocolHandler', safeUrl]]
+        : ['xdg-open', [safeUrl]]
   try {
     execFile(program!, args as string[], () => {
       /* a browser that fails to launch is not an error the server should raise */
@@ -312,8 +409,37 @@ export class UnknownViewError extends Error {
 }
 
 export function joinViewUrl(origin: string, view: string | undefined): string {
-  if (view === undefined || view.trim() === '' || view.trim() === '/') return origin
-  return `${origin}/${view.trim().replace(/^\/+/, '')}`
+  const originMatch = /^http:\/\/127\.0\.0\.1:(\d+)\/?$/.exec(typeof origin === 'string' ? origin.trim() : '')
+  if (!originMatch) {
+    throw new UnknownViewError(String(view ?? origin), formatValidViewForms())
+  }
+  const portStr = originMatch[1]!
+  const port = Number(portStr)
+  if (!Number.isInteger(port) || String(port) !== portStr || port < 1 || port > 65535) {
+    throw new UnknownViewError(String(view ?? origin), formatValidViewForms())
+  }
+  const canonicalOrigin = `http://127.0.0.1:${port}`
+
+  if (view === undefined) return canonicalOrigin
+  const trimmedView = view.trim()
+  if (trimmedView === '' || trimmedView === '/') return canonicalOrigin
+
+  if (
+    view.includes('://') ||
+    view.startsWith('//') ||
+    view.includes('\\') ||
+    view.split('/').some((segment) => segment === '..' || segment === '.')
+  ) {
+    throw new UnknownViewError(view, formatValidViewForms())
+  }
+
+  const cleanPath = trimmedView.replace(/^\/+/, '')
+  const candidateUrl = `${canonicalOrigin}/${cleanPath}`
+  const validated = validateDashboardUrl(candidateUrl)
+  if (validated === null) {
+    throw new UnknownViewError(view, formatValidViewForms())
+  }
+  return validated
 }
 
 /**
