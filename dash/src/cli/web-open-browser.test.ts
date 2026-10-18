@@ -8,13 +8,14 @@
 // 3. URLs passed to `openBrowser` and `joinViewUrl` are strictly validated against loopback
 //    origin rules (`http://127.0.0.1:<1..65535>`) and the registered route table in
 //    `dash/src/server/view-paths.json`. Unsafe, off-route, or non-loopback URLs are refused
-//    without spawning any child process, and invalid view joins throw `UnknownViewError`.
+//    without spawning any child process, emitting a one-line warning, and invalid view joins throw `UnknownViewError`.
 // 4. `validateDashboardUrl` enforces loopback origin, port ranges, rejection of traversal
 //    or scheme injections, and canonicalization.
 
 import { execFile } from 'child_process'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { BRAND } from '../brand-overlay.js'
 import {
   UnknownViewError,
   joinViewUrl,
@@ -38,6 +39,7 @@ const validateDashboardUrl = (webModule as {
 }).validateDashboardUrl
 
 let originalPlatformDescriptor: PropertyDescriptor | undefined
+let warnSpy: ReturnType<typeof vi.spyOn>
 
 function withPlatform<T>(platform: NodeJS.Platform, run: () => T): T {
   const currentDescriptor = Object.getOwnPropertyDescriptor(process, 'platform')
@@ -52,6 +54,7 @@ function withPlatform<T>(platform: NodeJS.Platform, run: () => T): T {
 
 beforeEach(() => {
   originalPlatformDescriptor = Object.getOwnPropertyDescriptor(process, 'platform')
+  warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
   vi.clearAllMocks()
 })
 
@@ -59,6 +62,7 @@ afterEach(() => {
   if (originalPlatformDescriptor) {
     Object.defineProperty(process, 'platform', originalPlatformDescriptor)
   }
+  warnSpy.mockRestore()
   vi.clearAllMocks()
 })
 
@@ -74,6 +78,7 @@ describe('openBrowser platform dispatch and CodeQL alert 273 remediation', () =>
       )
       expect(execFileMock).not.toHaveBeenCalledWith('cmd', expect.anything(), expect.anything())
       expect(execFileMock).not.toHaveBeenCalledWith('cmd.exe', expect.anything(), expect.anything())
+      expect(warnSpy).not.toHaveBeenCalled()
     })
   })
 
@@ -91,6 +96,7 @@ describe('openBrowser platform dispatch and CodeQL alert 273 remediation', () =>
       const call = execFileMock.mock.calls.find((c) => c[0] === 'rundll32.exe')
       expect(call).toBeDefined()
       expect(call?.[1]).toEqual(['url.dll,FileProtocolHandler', compareUrl])
+      expect(warnSpy).not.toHaveBeenCalled()
     })
   })
 
@@ -103,6 +109,7 @@ describe('openBrowser platform dispatch and CodeQL alert 273 remediation', () =>
         ['http://127.0.0.1:4747/run/r1'],
         expect.any(Function),
       )
+      expect(warnSpy).not.toHaveBeenCalled()
     })
   })
 
@@ -115,6 +122,7 @@ describe('openBrowser platform dispatch and CodeQL alert 273 remediation', () =>
         ['http://127.0.0.1:4747/problems'],
         expect.any(Function),
       )
+      expect(warnSpy).not.toHaveBeenCalled()
     })
   })
 
@@ -138,6 +146,7 @@ describe('openBrowser platform dispatch and CodeQL alert 273 remediation', () =>
         openBrowser(route)
         expect(execFileMock).toHaveBeenCalledTimes(1)
         expect(execFileMock).toHaveBeenCalledWith('open', [expect.stringMatching(/^http:\/\/127\.0\.0\.1:4747/)], expect.any(Function))
+        expect(warnSpy).not.toHaveBeenCalled()
       }
     })
   })
@@ -163,6 +172,9 @@ describe('openBrowser loopback origin and route validation refusal', () => {
     it(`refuses ${description} (${url}) and does not call execFile`, () => {
       openBrowser(url)
       expect(execFileMock).not.toHaveBeenCalled()
+      expect(warnSpy).toHaveBeenCalledWith(
+        `${BRAND.cliName}: refusing to open a URL outside the loopback dashboard routes`,
+      )
     })
   }
 
@@ -183,8 +195,20 @@ describe('openBrowser loopback origin and route validation refusal', () => {
     it(`refuses ${description} (${url}) and does not call execFile`, () => {
       openBrowser(url)
       expect(execFileMock).not.toHaveBeenCalled()
+      expect(warnSpy).toHaveBeenCalledWith(
+        `${BRAND.cliName}: refusing to open a URL outside the loopback dashboard routes`,
+      )
     })
   }
+
+  it('emits a one-line refusal diagnostic and does not call execFile when URL is refused', () => {
+    openBrowser('https://evil.com')
+    expect(execFileMock).not.toHaveBeenCalled()
+    expect(warnSpy).toHaveBeenCalledTimes(1)
+    expect(warnSpy).toHaveBeenCalledWith(
+      `${BRAND.cliName}: refusing to open a URL outside the loopback dashboard routes`,
+    )
+  })
 })
 
 describe('joinViewUrl view joining and validation', () => {

@@ -293,7 +293,10 @@ export function validateDashboardUrl(rawUrl: string): string | null {
  */
 export function openBrowser(url: string): void {
   const safeUrl = validateDashboardUrl(url)
-  if (!safeUrl) return
+  if (!safeUrl) {
+    console.warn(`${BRAND.cliName}: refusing to open a URL outside the loopback dashboard routes`)
+    return
+  }
 
   const [program, args] =
     process.platform === 'darwin'
