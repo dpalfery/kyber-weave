@@ -28,6 +28,7 @@ public sealed class SquadHotshotLifecycleCopilotGlobalLinksTests : IDisposable
         "spec-path.md",
         "intake-path.md",
         "execution-and-review.md",
+        "autonomy.md",
     ];
 
     private readonly TempDirectory _temp = new();
@@ -150,5 +151,7 @@ public sealed class SquadHotshotLifecycleCopilotGlobalLinksTests : IDisposable
     private sealed class FakeUserPaths(string appDataDirectory) : ISquadUserPaths
     {
         public string ApplicationDataDirectory { get; } = appDataDirectory;
+
+        public string HomeDirectory => Path.Combine(ApplicationDataDirectory, "home");
     }
 }

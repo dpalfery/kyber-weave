@@ -524,9 +524,9 @@ public sealed class SquadGlobalRootTests : IDisposable
             SquadSource source = SquadSourceLoader.Load(productRoot);
             SquadAgent primaryAgent = Assert.Single(source.Agents, a => a.Name == "conductor");
 
-            // The conductor carries plan-path, spec-path, intake-path, and
-            // execution-and-review references; the entry-point skill projects all four.
-            Assert.Equal(4, primaryAgent.Resources.Count);
+            // The conductor carries plan-path, spec-path, intake-path,
+            // execution-and-review, and autonomy references; the entry-point skill projects all five.
+            Assert.Equal(5, primaryAgent.Resources.Count);
             Assert.Single(
                 result.Receipt.Files,
                 f => f.RelativePath == $"skills/{primaryAgent.Name}/SKILL.md");
@@ -949,9 +949,9 @@ public sealed class SquadGlobalRootTests : IDisposable
             SquadSource source = SquadSourceLoader.Load(productRoot);
             SquadAgent primaryAgent = Assert.Single(source.Agents, a => a.Name == "conductor");
 
-            // The conductor carries plan-path, spec-path, intake-path, and
-            // execution-and-review references; the entry-point skill projects all four.
-            Assert.Equal(4, primaryAgent.Resources.Count);
+            // The conductor carries plan-path, spec-path, intake-path,
+            // execution-and-review, and autonomy references; the entry-point skill projects all five.
+            Assert.Equal(5, primaryAgent.Resources.Count);
             Assert.Single(
                 result.Receipt.Files,
                 f => f.RelativePath == $"skills/{primaryAgent.Name}/SKILL.md");

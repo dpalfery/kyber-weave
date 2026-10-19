@@ -22,10 +22,10 @@ Every plan contains:
 - investigation findings;
 - the mode-specific Test contract or verification contract;
 - dispatchable tasks with objective, exact files or symbols, acceptance criteria, dependencies, and required skills;
-- a dependency graph and `MAX_CONCURRENCY` audit;
+- a dependency graph;
 - risks, out-of-scope boundaries, verification gates, review, and `docs-dev` closeout.
 
-Name required skills, not owning agents. The conductor maps skills to the live specialist inventory. Declare a dependency only when a task consumes another task's concrete output or their file scopes cannot safely overlap. Component labels and table order do not create scheduling barriers.
+Name required skills, not owning agents. The conductor maps skills to the live specialist inventory. Declare a dependency only when a task consumes another task's concrete output or their file scopes cannot safely overlap. Component labels and table order do not create scheduling barriers. Maximize parallel execution and err on the side of risk: prefer optimistic file scopes and add a dependency only for a real consumed output or a certain file overlap. Size each task for efficient execution by a single worker; do not split work further just to add parallelism. Four small file edits belong to one worker; changes of substantial size across independent projects belong to separate workers. DAL, React, C#, and DevOps tasks can run at the same time. When C# changes span multiple projects, split them across `csharp-dev` workers only if each project's change is large enough and decoupled enough to justify it. Do not set or report a concurrency limit; the harness runs every ready task. Each task has its own `task-reviewer`, which starts as soon as that task's worker finishes; when a fix is required, the same worker takes it right away.
 
 ## Decisions
 
@@ -47,6 +47,8 @@ OPTIONS: <a> / <b> / ...
 RECOMMENDED: <option> — <reason>
 ```
 
+Under `autonomy: autonomous`, decide per the autonomous-decisions reference and return only impactful escalations. An autonomous impactful escalation uses this NEEDS_DECISION shape PLUS `ESCALATION: impactful`, `SOURCES_SEARCHED`, `COST_OF_WRONG` (and `RECOMMENDED`); see [autonomy-decisions.md](autonomy-decisions.md) for the exact block.
+
 Do not place an unapproved recommendation in the approved answer column until approved. When answered or approved, update the row in place: record the chosen answer, document any mitigating considerations or constraints, and record the explicit approval provenance (for example, `Approved by Hal <date>` or `User decision <date>`).
 
 If no interactive questions were needed during planning, the plan must still carry the permanent `## Decisions` table documenting the baseline choices, assumptions, and constraints that govern the implementation, and `PLAN_READY` includes `NO_QUESTIONS` with the concrete reason the request was already decision-complete. `NO_QUESTIONS` does not bypass authoring the permanent `## Decisions` table.
@@ -59,7 +61,6 @@ Return `PLAN_READY` only when the saved Draft has no open decisions (all rows in
 STATUS: PLAN_READY
 PLAN_FILE: <saved path>
 OPEN_DECISIONS: none
-MAX_CONCURRENCY: <n>
 DOCS_VALIDATE: pass
 DOCS_DRIFT: pass
 ```

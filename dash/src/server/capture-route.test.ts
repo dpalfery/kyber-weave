@@ -41,6 +41,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { claudeCodeHarness } from '../capture/harnesses/claude-code.js'
+import { DEFAULT_CAPTURE_ENDPOINT } from '../capture/index.js'
 import type { HealthFetcher } from '../capture/probe.js'
 import { receiptPathForHome } from '../capture/receipt.js'
 import { SETTING_KEYS, readSetting, writeSetting } from '../settings/shared-settings.js'
@@ -127,21 +129,15 @@ function claudeEnabledConfig(endpoint: string): string {
   )
 }
 
-/** Copilot Stable with three of the five managed keys present — the fixture's "partial". */
+/** Copilot Stable with three of the six managed keys present — the fixture's "partial". */
 function copilotPartialConfig(): string {
   return (
     JSON.stringify(
       {
-        github: {
-          copilot: {
-            chat: {
-              otel: {
-                enabled: true,
-                exporterType: 'otlp-http',
-                otlpEndpoint: 'http://127.0.0.1:4318',
-              },
-            },
-          },
+        'github.copilot.chat.otel': {
+          enabled: true,
+          exporterType: 'otlp-http',
+          otlpEndpoint: 'http://127.0.0.1:4318',
         },
       },
       null,
@@ -226,6 +222,8 @@ type CaptureHarnessView = {
   warnings: Array<Record<string, unknown>>
   manualSteps: Array<Record<string, unknown>>
   statusLines: unknown[]
+  health?: unknown
+  issues?: Array<Record<string, unknown>>
 }
 
 type CaptureBodyView = {
@@ -239,6 +237,7 @@ type CaptureBodyView = {
   harnessState?: CaptureHarnessView
   receiver?: Record<string, unknown>
   harnesses?: CaptureHarnessView[]
+  check?: Record<string, unknown>
 }
 
 const asBody = (value: unknown): CaptureBodyView => value as CaptureBodyView
@@ -290,8 +289,10 @@ describe('GET /api/kyber/capture', () => {
     )
 
     // The manual-step env value is the SUGGESTED origin, never this process's own value —
-    // so give the process a different one and require the suggestion anyway.
+    // so give the process a different one and require the suggestion anyway. The Copilot
+    // override is emptied so the resolved-exporter warning does not depend on the host env.
     vi.stubEnv('OTEL_EXPORTER_OTLP_ENDPOINT', 'http://localhost:9999')
+    vi.stubEnv('COPILOT_OTEL_ENABLED', '')
 
     const fetchUrls: string[] = []
     const recordingListener: HealthFetcher = async (url) => {
@@ -307,7 +308,7 @@ describe('GET /api/kyber/capture', () => {
 
     const doc = asBody(body)
     expect(doc.platform).toBe('darwin')
-    expect(ownKeys(doc)).toEqual(['harnesses', 'platform', 'receiver'])
+    expect(ownKeys(doc)).toEqual(['check', 'harnesses', 'platform', 'receiver'])
     expect(doc.receiver).toEqual({
       hosted: true,
       liveness: 'kyberdash',
@@ -358,10 +359,21 @@ describe('GET /api/kyber/capture', () => {
       installed: 'detected',
       state: 'partial',
       receipt: 'absent',
-      warnings: [],
       manualSteps: [],
-      statusLines: [],
+      // The resolved exporter rides the line as well as the warning: a resolver
+      // that withholds a verdict it cannot make still has to say what it
+      // resolved.
+      statusLines: ['exporter: file (dev-null) — Copilot discards every span'],
     })
+    // Three of six keys present, so the resolved exporter is `file`, which must
+    // read as a failure even though some keys look present. The environment is
+    // not this route's to judge, so the warning names the settings alone.
+    expect(harnessById(body, 'copilot').warnings).toEqual([
+      {
+        code: 'exporter-not-delivering',
+        text: expect.stringContaining('exporter resolves to file'),
+      },
+    ])
     expect(String((harnessById(body, 'copilot').installEvidence as unknown[]).join('\n'))).toContain('not found')
 
     const claude = harnessById(body, 'claude-code')
@@ -564,6 +576,63 @@ describe('GET /api/kyber/capture', () => {
 // POST /api/kyber/capture
 // =========================================================================================
 
+describe('GET /api/kyber/capture: the configuration check', () => {
+  /** Every Claude Code key enable writes, at its values, with the owner's overrides on top. */
+  function claudeEnv(overrides: Record<string, string>): string {
+    const env: Record<string, unknown> = {}
+    for (const [key, value] of Object.entries({
+      ...claudeCodeHarness.desiredKeys(DEFAULT_CAPTURE_ENDPOINT),
+      ...claudeCodeHarness.ensureIfAbsentKeys!(DEFAULT_CAPTURE_ENDPOINT),
+    })) {
+      env[key.replace(/^env\./, '')] = value
+    }
+    return `${JSON.stringify({ env: { ...env, ...overrides } }, null, 2)}\n`
+  }
+
+  it('marks a fully keyed Claude Code row as needing attention when its endpoint is the gRPC port', async () => {
+    const home = makeHome()
+    writeConfig(
+      claudePath(home),
+      claudeEnv({ OTEL_EXPORTER_OTLP_ENDPOINT: 'http://localhost:4317', OTEL_EXPORTER_OTLP_PROTOCOL: 'grpc' }),
+    )
+    const deps = makeCaptureDeps(captureSettings(home, { fetchHealth: KYBERDASH_LISTENER }))
+    writeSetting(deps.store, SETTING_KEYS.receiverHosted, 'on')
+
+    const { status, body } = await callRoute('GET', PATH, { deps })
+    expect(status).toBe(200)
+    const claude = harnessById(body, 'claude-code')
+    expect(claude.state).toBe('on')
+    expect(claude.health).toBe('attention')
+    expect((claude.issues ?? []).map((issue) => issue['code'])).toEqual(['endpoint-differs', 'protocol-differs'])
+    expect(asBody(body).check).toMatchObject({ health: 'attention', enabled: 1, attention: 1, issueCount: 2 })
+    expect(typeof asBody(body).check!['checkedAt']).toBe('string')
+  })
+
+  it('passes the same row once the endpoint and protocol are the receiver\'s', async () => {
+    const home = makeHome()
+    writeConfig(claudePath(home), claudeEnv({}))
+    const deps = makeCaptureDeps(captureSettings(home, { fetchHealth: KYBERDASH_LISTENER }))
+    writeSetting(deps.store, SETTING_KEYS.receiverHosted, 'on')
+
+    const { body } = await callRoute('GET', PATH, { deps })
+    const claude = harnessById(body, 'claude-code')
+    expect(claude.health).toBe('ok')
+    expect(claude.issues).toEqual([])
+    expect(asBody(body).check).toMatchObject({ health: 'ok', enabled: 1, attention: 0, issueCount: 0 })
+  })
+
+  it('blocks an enabled row when this KyberDash does not host the receiver', async () => {
+    const home = makeHome()
+    writeConfig(claudePath(home), claudeEnv({}))
+    const deps = makeCaptureDeps(captureSettings(home))
+
+    const { body } = await callRoute('GET', PATH, { deps })
+    const claude = harnessById(body, 'claude-code')
+    expect(claude.health).toBe('attention')
+    expect((claude.issues ?? []).map((issue) => issue['code'])).toEqual(['receiver-not-hosted'])
+  })
+})
+
 describe('POST /api/kyber/capture', () => {
   const VALID = { action: 'enable', harness: 'opencode', dryRun: false }
 
@@ -763,16 +832,20 @@ describe('POST /api/kyber/capture', () => {
 
     // Only the applicable file was written; Insiders is untouched and still absent.
     expect(existsSync(copilotInsidersPath(home))).toBe(false)
-    const written = JSON.parse(readFileSync(copilotStablePath(home), 'utf8')) as {
-      github?: { copilot?: { chat?: { otel?: Record<string, unknown> } } }
-    }
-    expect(written.github?.copilot?.chat?.otel).toEqual({
+    const written = JSON.parse(readFileSync(copilotStablePath(home), 'utf8')) as Record<
+      string,
+      Record<string, unknown>
+    >
+    // The flat dotted property VS Code reads, never a nested `github` object.
+    expect(written['github.copilot.chat.otel']).toEqual({
       'enabled': true,
+      'dbSpanExporter': { 'enabled': true },
       'exporterType': 'otlp-http',
       'otlpEndpoint': 'http://127.0.0.1:4318',
       'captureContent': true,
       'maxAttributeSizeChars': 0,
     })
+    expect(Object.hasOwn(written, 'github')).toBe(false)
 
     const receipt = JSON.parse(readFileSync(receiptPathForHome(home), 'utf8')) as {
       files: Array<{ path: string; format: string; keys: Record<string, { written: unknown }> }>
@@ -1163,7 +1236,7 @@ describe('POST /api/kyber/capture', () => {
   })
 })
 
-/** Copilot Stable seeded with only `enabled: false` — the fixture's before value. */
+/** Copilot Stable seeded with only `enabled: false` on the flat property — the fixture's before value. */
 function copilotStableBeforeSeed(): string {
-  return `${JSON.stringify({ github: { copilot: { chat: { otel: { enabled: false } } } } }, null, 2)}\n`
+  return `${JSON.stringify({ 'github.copilot.chat.otel': { enabled: false } }, null, 2)}\n`
 }

@@ -12,6 +12,7 @@
 
 import {
   declaredFiles,
+  exporterResolutionFor,
   fileIdFor,
   loadReceiptLenient,
   presentKeys,
@@ -48,6 +49,12 @@ export type CaptureFileStatus = {
   expectedKeys: string[]
   presentKeys: string[]
   missingKeys: string[]
+  /**
+   * Always-written keys that are present but hold a value other than the one
+   * `enable` writes. They are why a file reads `partial` with no missing key,
+   * so the check can name them instead of saying "something differs".
+   */
+  mismatchedKeys: string[]
   drift: CaptureDriftEntry[] | null
 }
 
@@ -164,6 +171,20 @@ type FileAnalysis = {
   /** on/off/partial for an applicable, readable, parseable file; unknown otherwise. */
   state: 'on' | 'off' | 'partial' | 'unknown' | undefined
   unreadable?: { path: string; code: string }
+  /**
+   * The resolved-exporter failure for this file, when its harness declares a
+   * resolver and the exporter it will get does not deliver. Key presence alone
+   * cannot express this: Copilot's keys can be exactly right while the
+   * extension still uses the dev-null file exporter.
+   */
+  exporterWarning?: CaptureStatusWarning
+  /**
+   * The line naming the exporter this file's harness will resolve, surfaced
+   * even when it raises no warning. A resolver that cannot judge a factor it
+   * needs (Copilot's environment override, invisible to the status route)
+   * withholds the verdict here rather than inventing one.
+   */
+  exporterLine?: string
 }
 
 function analyseManagedFile(
@@ -185,6 +206,7 @@ function analyseManagedFile(
     expectedKeys,
     presentKeys: [],
     missingKeys: [],
+    mismatchedKeys: [],
     drift: null,
   }
   if (!base.applicable) return { status: base, state: undefined }
@@ -199,7 +221,7 @@ function analyseManagedFile(
     return { status: { ...base, missingKeys: [...expectedKeys] }, state: 'off' }
   }
   const content = read.content
-  if (!isBlockFormat(file) && revertJsonEdits(content, {}).refused !== undefined) {
+  if (!isBlockFormat(file) && revertJsonEdits(content, {}, file.literalKeyPrefixes).refused !== undefined) {
     return { status: base, state: 'unknown' }
   }
   // The union view: the CLI text status lists only the always-written keys, the
@@ -210,6 +232,9 @@ function analyseManagedFile(
 
   const same = (key: string, value: unknown): boolean =>
     isBlockFormat(file) ? String(value) === String(desired[key]) : value === desired[key]
+  const mismatched = Object.keys(desired).filter(
+    (key) => present[key] !== undefined && !same(key, present[key]),
+  )
   const allOn =
     Object.keys(desired).every((key) => present[key] !== undefined && same(key, present[key])) &&
     Object.keys(ensure).every((key) => key in desired || present[key] !== undefined)
@@ -220,7 +245,7 @@ function analyseManagedFile(
   if (record !== undefined) {
     const entries = isBlockFormat(file)
       ? revertBlockEdits(content, record.keys, file.format as 'toml' | 'yaml').drift
-      : revertJsonEdits(content, record.keys).drift
+      : revertJsonEdits(content, record.keys, file.literalKeyPrefixes).drift
     if (entries.length > 0) {
       drift = entries.map((entry) => ({
         key: entry.key,
@@ -229,9 +254,19 @@ function analyseManagedFile(
       }))
     }
   }
+  // A resolution may withhold a verdict it cannot make (the status route
+  // cannot see the editor's environment), and it then carries no warning text:
+  // a warning with nothing to say is not a warning.
+  const resolution = exporterResolutionFor(file, present)
+  const exporterWarning =
+    resolution !== undefined && !resolution.delivering && resolution.warning !== ''
+      ? { code: 'exporter-not-delivering', text: resolution.warning }
+      : undefined
   return {
-    status: { ...base, presentKeys: presentList, missingKeys: missing, drift },
+    status: { ...base, presentKeys: presentList, missingKeys: missing, mismatchedKeys: mismatched, drift },
     state,
+    exporterLine: resolution?.line,
+    exporterWarning,
   }
 }
 
@@ -244,30 +279,64 @@ function combineStates(states: Array<'on' | 'off' | 'partial' | 'unknown' | unde
   return 'partial'
 }
 
-/** `endpoint-differs`: an owner-set endpoint we kept points somewhere other than the receiver. */
-function endpointWarnings(
+/**
+ * Ensure-if-absent keys the owner had already set to something else. `enable`
+ * keeps such a value by design (it is the owner's, and `disable` must not
+ * touch it), so the file still counts its key as "set" — which is exactly how
+ * a harness can read Enabled while exporting nowhere. Each kept value that
+ * differs is named here:
+ *
+ * - `endpoint-differs`: the endpoint is not the receiver's. Text unchanged
+ *   from the original warning; the CLI and older clients key on it.
+ * - `protocol-differs`: the receiver speaks OTLP/HTTP only, so a `grpc`
+ *   protocol cannot deliver even to the right host.
+ * - `owner-value-differs`: any other kept value (telemetry switched off,
+ *   traces exporter `none`). Compared as strings: a JSON `1` and `"1"` are
+ *   the same setting to the harness.
+ */
+function ownerValueWarnings(
   files: readonly ResolvedConfigFile[],
   analyses: readonly FileAnalysis[],
   ctx: StatusContext,
 ): CaptureStatusWarning[] {
+  // The endpoint leads: it is the one that decides whether anything arrives at all.
+  const endpointFirst: CaptureStatusWarning[] = []
   const warnings: CaptureStatusWarning[] = []
   files.forEach((file, index) => {
     const analysis = analyses[index]!
     if (!analysis.status.applicable || analysis.status.exists !== true || isBlockFormat(file)) return
     const ensure = file.ensureIfAbsentKeys?.(ctx.endpoint) ?? {}
+    const desired = file.desiredKeys(ctx.endpoint)
     const read = readTextIfPresent(file.path)
     const present = presentKeys({ ...file, desiredKeys: () => ensure }, read.content, ctx.endpoint)
     for (const [key, wanted] of Object.entries(ensure)) {
-      if (wanted !== ctx.endpoint || present[key] === undefined) continue
-      if (present[key] !== ctx.endpoint) {
-        warnings.push({
-          code: 'endpoint-differs',
-          text: `${key} is ${String(present[key])}; the KyberDash receiver listens at ${ctx.endpoint}`,
-        })
+      // A key `enable` also always writes is judged by mismatchedKeys instead.
+      if (key in desired || present[key] === undefined) continue
+      const current = present[key]
+      if (wanted === ctx.endpoint) {
+        if (current !== ctx.endpoint) {
+          endpointFirst.push({
+            code: 'endpoint-differs',
+            text: `${key} is ${String(current)}; the KyberDash receiver listens at ${ctx.endpoint}`,
+          })
+        }
+        continue
       }
+      if (String(current) === String(wanted)) continue
+      if (/OTLP_PROTOCOL$/.test(key)) {
+        warnings.push({
+          code: 'protocol-differs',
+          text: `${key} is ${String(current)}; the KyberDash receiver accepts OTLP/HTTP only (${String(wanted)})`,
+        })
+        continue
+      }
+      warnings.push({
+        code: 'owner-value-differs',
+        text: `${key} is ${String(current)}; KyberDash expects ${String(wanted)} (the existing value was kept on enable)`,
+      })
     }
   })
-  return warnings
+  return [...endpointFirst, ...warnings]
 }
 
 function buildOne(
@@ -303,6 +372,7 @@ function buildOne(
           expectedKeys: [],
           presentKeys: [],
           missingKeys: [],
+          mismatchedKeys: [],
           drift: null,
         },
       ],
@@ -335,6 +405,19 @@ function buildOne(
   const configWarnings: CaptureStatusWarning[] = statusWarningLines(writer, ctx.home, ctx.env).map(
     (line) => ({ code: 'config-warning', text: line.replace(/^\s*warn: /, '') }),
   )
+  // Both editions can resolve the same failure; the report names it once.
+  const exporterWarnings = analyses
+    .flatMap((analysis) => (analysis.exporterWarning === undefined ? [] : [analysis.exporterWarning]))
+    .filter(
+      (warning, index, all) => all.findIndex((other) => other.text === warning.text) === index,
+    )
+  // The resolved exporter belongs on the line even when it raises no warning:
+  // a resolver that withholds a verdict it cannot make (the status route
+  // cannot see the editor's environment) still has to say what it resolved, or
+  // the dashboard would show nothing about the exporter at all.
+  const exporterLines = analyses
+    .flatMap((analysis) => (analysis.exporterLine === undefined ? [] : [analysis.exporterLine]))
+    .filter((line, index, all) => all.indexOf(line) === index)
   return {
     id: writer.id,
     displayName: writer.displayName,
@@ -344,9 +427,9 @@ function buildOne(
     state: combineStates(analyses.map((analysis) => analysis.state)),
     receipt: recorded ? 'recorded' : 'absent',
     files: analyses.map((analysis) => analysis.status),
-    warnings: [...endpointWarnings(files, analyses, ctx), ...configWarnings],
+    warnings: [...ownerValueWarnings(files, analyses, ctx), ...configWarnings, ...exporterWarnings],
     manualSteps: manualStepsFor(writer, ctx.endpoint),
-    statusLines: [],
+    statusLines: exporterLines,
   }
 }
 

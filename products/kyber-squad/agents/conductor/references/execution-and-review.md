@@ -4,9 +4,19 @@ This contract is shared by Ready plans and Ready specification task artifacts.
 
 ## Ready queue
 
-A task is ready only when its declared dependencies are complete, its file or symbol scope does not overlap work in flight, and its development-mode gate is satisfied. Launch every ready task immediately up to the artifact's concurrency bound. Re-evaluate the queue after every completion. Component labels and table order are not barriers.
+A task is ready only when its declared dependencies are complete, its file or symbol scope does not overlap work in flight, and its development-mode gate is satisfied. Launch every ready task immediately with no concurrency cap; when file scope is uncertain, favor parallelism and accept the conflict risk. Re-evaluate the queue after every completion. Component labels and table order are not barriers.
 
-Track one cold invocation per unit of work. Rework uses the same queue and the same dependency and scope rules. Each dispatch carries the worker packet as the worker's whole context; a plan or spec path in the packet is routing metadata marked not for reading.
+Track one implementation owner per task. Rework uses the same queue and the same dependency and scope rules. Each dispatch carries a self-contained task packet that defines authorized scope; a plan or spec path in the packet is routing metadata marked not for reading.
+
+## Task session continuity
+
+Record the task id, owning specialist type, `worker-session-id`, and separate `reviewer-session-id` on the execution artifact. Store actual handles returned by the harness; when none is available, record that fact and the reason rather than inventing one. Keep a recovery brief containing the task packet, completion evidence, reviewer findings, decisions, failed approaches, and persisted failure-cluster tallies.
+
+Reuse the original worker session for implementation, review fixes, verification, and any final-council findings in its scope. Use the harness's continuation or follow-up operation with the recorded handle. Append the findings and current scope/evidence updates without rewriting earlier conversation history. A fresh invocation of the same specialist type is a replacement, not continuation. Keep the task session available until its audits and any run-level findings are settled; do not repurpose it for an unrelated task while it awaits review.
+
+Start a replacement only when continuation is unavailable, the original session cannot be recovered, or its context is unreliable (for example, it repeatedly acts on superseded requirements after correction). Record the replacement reason, pass the recovery brief, and update the handle. A busy session is queued, not replaced merely to avoid waiting. Separate unrelated tasks use separate sessions.
+
+Discover continuation support from the current harness's exposed tools; do not assume it from the model, role name, or renderer. VS Code's stateless `runSubagent` path requires recovery briefs; resumable harnesses use their native session handles. Retaining a conversation supports context reuse but does not guarantee a provider cache hit. Avoid keeping a polluted context merely to preserve cached tokens; correctness takes priority.
 
 ## Test-first mode
 
@@ -30,10 +40,10 @@ Changing the verification contract after approval reopens its approval gate.
 
 ## Three-pass task audit
 
-Invoke `task-reviewer` after each worker completion with the mode, pass number, task contract, acceptance criteria, completion digest, current diff, and evidence. A worker may continue with other ready work while the audit runs.
+Invoke `task-reviewer` after each worker completion with the mode, pass number, task contract, acceptance criteria, completion digest, current diff, and evidence. Keep the reviewer independent: it receives review evidence, not the implementation conversation. Reuse its separate reviewer session for passes 2 and 3 when supported, supplying prior findings and the current diff and evidence on every pass. A replacement reviewer receives the same review history. The implementation owner waits for its task's audit; other task sessions may continue with non-overlapping ready work.
 
 - `PASS` completes the task's audit but does not authorize merge.
-- `FAIL` on pass 1 or pass 2 creates a self-contained rework item for any available worker of the owning specialist type. Re-run the relevant contract before the next audit.
+- `FAIL` on pass 1 or pass 2 creates a self-contained rework item for the original worker session. Use the replacement policy above only when needed. Re-run the relevant contract against the current tree before the next audit; remembered results are not current evidence.
 - `FAIL` on pass 3, or any `ESCALATION: end-of-run`, enters the run's findings collection. There is no pass 4.
 
 The reviewer requires matching Test-contract and RED/GREEN evidence only in test-first mode. In standard mode it requires the approved verification contract and current evidence.
@@ -42,9 +52,9 @@ The reviewer requires matching Test-contract and RED/GREEN evidence only in test
 
 The conductor enforces an iteration circuit-breaker to halt thrashing test-fix loops across rework cycles.
 
-A **failure cluster** is keyed by the failing test ID first observed for that cluster, recorded on the execution artifact when the cluster is created (when no test IDs exist, the failing subsystem, job, or step label). A newly failing test joins the recorded cluster whose key it most recently co-failed with; if it co-fails with none, or with more than one, it forms a new cluster keyed by itself. A cold invocation reads the recorded key; it does not re-derive one from whatever is failing now. Distinct keys remain distinct clusters for A/B oscillation detection.
+A **failure cluster** is keyed by the failing test ID first observed for that cluster, recorded on the execution artifact when the cluster is created (when no test IDs exist, the failing subsystem, job, or step label). A newly failing test joins the recorded cluster whose key it most recently co-failed with; if it co-fails with none, or with more than one, it forms a new cluster keyed by itself. Every resumed or replacement worker receives the recorded key; it does not re-derive one from whatever is failing now. Distinct keys remain distinct clusters for A/B oscillation detection.
 
-Every worker invocation is cold and self-contained. The per-cluster **dispatch tally** therefore lives on the run's persisted execution artifact (or the task artifact when the run has not yet written one). Each time the conductor dispatches a rework worker for a failure cluster, it reads that tally, increments it, and writes it back. Re-evaluating the queue reads the tally; it never increments it. A tally at or above the cluster limit trips the breaker before the dispatch, not after it. A cold worker does not keep a private across-run counter; it receives the current tally with the artifact. The worker's inner 3-iteration cap is per invocation and does not persist.
+The per-cluster **dispatch tally** lives on the run's persisted execution artifact (or the task artifact when the run has not yet written one), independently of session lifetime. Each time the conductor dispatches rework for a failure cluster, it reads that tally, increments it, and writes it back. Resuming a worker counts as a rework dispatch just as starting a replacement does. Re-evaluating the queue reads the tally; it never increments it. A tally at or above the cluster limit trips the breaker before the dispatch, not after it. Resumption, replacement, and compaction never reset this tally or oscillation history. The worker's inner 3-iteration cap applies to each implementation or rework dispatch, not the lifetime of the retained session.
 
 - **Cluster-level retry limit:** Maximum of 2 rework dispatches for the same failing fixture or subsystem failure cluster across the run. If a failure cluster persists across 2 rework attempts, the circuit-breaker trips on that cluster.
 - **Oscillation detection:** If a fix for Failure Cluster A causes regression in Failure Cluster B, and a fix for B regresses A (or rework alternates between failure signatures), the loop detector trips immediately.
@@ -55,7 +65,7 @@ Every worker invocation is cold and self-contained. The per-cluster **dispatch t
 
 When the ready queue is empty and every task has left the ladder, drain a non-empty findings collection through `architect`. Any resulting Draft plan goes through its normal user approval gate before execution.
 
-With the collection empty, dispatch `code-reviewer` exactly once over the accumulated run. `REQUEST_CHANGES` follows the repository's bounded remediation loop; `NEEDS_HUMAN` is terminal. Do not commit, push, publish, or open a pull request until the council returns `APPROVE` and all required contract evidence is green.
+With the collection empty, dispatch `code-reviewer` exactly once over the accumulated run. `REQUEST_CHANGES` follows the repository's bounded remediation loop; `NEEDS_HUMAN` is terminal in supervised mode; in autonomous mode follow the [autonomy contract](autonomy.md). Do not commit, push, publish, or open a pull request until the council returns `APPROVE` and all required contract evidence is green.
 
 ## Closeout
 

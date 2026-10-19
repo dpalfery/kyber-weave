@@ -24,12 +24,30 @@ const DEFAULT_PARSER_CONTRACT_VERSION = '1'
 // v5: P2.0 — stamp the transcript's top-level requestId so twin dedupe can
 // join OTel `request_id` to the file row. Same repair contract: stale
 // checkpoints must be re-read, or file rows stay without the join key.
-const CLAUDE_PARSER_CONTRACT_VERSION = '5'
+// v6: invoked skill names onto turn records (`kyber.skills.invoked`). Stale
+// checkpoints are re-read so the skill names upsert over the stale rows.
+// v7: the session's skill listing (`skill_listing` attachment) onto the following
+// call and turn record (`kyber.skills.listed`). Stale checkpoints are re-read so
+// the listing upserts over the stale rows.
+const CLAUDE_PARSER_CONTRACT_VERSION = '7'
 // v2: issue #189 / PR #264 — Codex camelCase token usage and Kilo flat
 // tokens_input/tokens_output fallbacks. Old zero-record checkpoints under v1
 // must not be reused or previously dropped sessions stay missing after upgrade.
-const CODEX_PARSER_CONTRACT_VERSION = '2'
-const KILO_PARSER_CONTRACT_VERSION = '2'
+// v3 (both): invoked skill names onto turn records (`kyber.skills.invoked`).
+const CODEX_PARSER_CONTRACT_VERSION = '3'
+const KILO_PARSER_CONTRACT_VERSION = '3'
+// v2: invoked skill names onto turn records (`kyber.skills.invoked`). Applies
+// to the providers named in SKILLS_CONTRACT_PROVIDER_NAMES; the VS Code
+// `cline` descriptor and hermes do not fill skills and keep their versions.
+const SKILLS_CONTRACT_VERSION = '2'
+const SKILLS_CONTRACT_PROVIDER_NAMES: ReadonlySet<string> = new Set([
+  'copilot',
+  'opencode',
+  'cline-cli',
+  'codewhale',
+  'openclaude',
+  'dsh',
+])
 // v2: token-bubble pairing via pairingId — usage spans now carry the model
 // context of the request they belong to. Stale counters-only checkpoints
 // under v1 must re-synthesize on installs that do not reset the owner's
@@ -39,7 +57,8 @@ const CURSOR_PARSER_CONTRACT_VERSION = '2'
 // v2: declared context window read from models-store.json, scoped to the
 // turn's provider. Version-invalidated checkpoints re-open the unit so the
 // declared-window payload upserts over stale rows (ADR 0016 repair contract).
-const PI_PARSER_CONTRACT_VERSION = '2'
+// v3: invoked skill names onto turn records (`kyber.skills.invoked`).
+const PI_PARSER_CONTRACT_VERSION = '3'
 
 const CLAUDE_HARNESS_IDS = ['claude-cli', 'claude-desktop', 'claude-unclassified'] as const
 const KILO_HARNESS_IDS = ['kilo-shared-runtime', 'kilo-vscode-legacy'] as const
@@ -78,6 +97,9 @@ export function parserContractVersionFor(partial: { providerName: string; harnes
   if (partial.providerName === 'pi' || partial.harnessId === 'pi') {
     return PI_PARSER_CONTRACT_VERSION
   }
+  if (SKILLS_CONTRACT_PROVIDER_NAMES.has(partial.providerName)) {
+    return SKILLS_CONTRACT_VERSION
+  }
   return DEFAULT_PARSER_CONTRACT_VERSION
 }
 
@@ -97,6 +119,7 @@ export const PROVIDER_DISPOSITIONS: Record<string, ProviderDisposition> = {
   codebuff: job(['codebuff']),
   codex: job(['codex-cli', 'codex-desktop', 'codex-unclassified']),
   copilot: job(['copilot-cli', 'copilot-vscode', 'copilot-jetbrains', 'copilot-agent']),
+  commandcode: job(['commandcode']),
   devin: job(['devin']),
   droid: job(['droid']),
   dsh: job(['dsh']),
@@ -332,6 +355,14 @@ export const HARNESS_DESCRIPTORS: readonly HarnessSourceDescriptor[] = [
     classifier: 'provider-identity',
     sourceRootLabel: '~/.config/manicode',
     nativeFormat: 'native-session',
+  }),
+  descriptor({
+    harnessId: 'commandcode',
+    label: 'Command Code',
+    providerName: 'commandcode',
+    classifier: 'provider-identity',
+    sourceRootLabel: '~/.commandcode/projects',
+    nativeFormat: 'jsonl',
   }),
   descriptor({
     harnessId: 'devin',

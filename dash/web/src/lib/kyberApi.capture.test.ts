@@ -128,7 +128,7 @@ describe('fetchKyberCaptureStatus', () => {
 
     const status = await fetchKyberCaptureStatus()
 
-    expect(Object.keys(status).sort()).toEqual(['harnesses', 'platform', 'receiver'])
+    expect(Object.keys(status).sort()).toEqual(['check', 'harnesses', 'platform', 'receiver'])
     expect(Object.keys(status.receiver).sort()).toEqual(['detail', 'hosted', 'liveness'])
     expect(JSON.stringify(status)).not.toContain('sk-do-not-keep')
     expect(JSON.stringify(status)).not.toContain('ANTHROPIC_API_KEY')

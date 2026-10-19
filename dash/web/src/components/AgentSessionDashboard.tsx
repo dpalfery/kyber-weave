@@ -7,6 +7,7 @@ import { Skeleton } from './ui/skeleton.js'
 import { SessionInspectorDrawer } from './SessionInspectorDrawer.js'
 import { SessionSpendCharts, CONTEXT_BUCKET_LABELS } from './SessionSpendCharts.js'
 import { SchemaCostRanking, type SchemaCostAnalysis, type SchemaCostToolRow } from './SchemaCostRanking.js'
+import { SkillsPanel } from './SkillsPanel.js'
 import { TimelineView, type TimelineNode, type CostBlock } from './analysis/TimelineView.js'
 import { SessionCostPanel, SessionTokenTotals } from './SessionCostPanel.js'
 import { findContextTurn, findTurnByTransport } from '../lib/kyberApi.js'
@@ -15,6 +16,8 @@ import type {
   KyberContextTurn,
   KyberSessionContext,
   KyberSessionTurnRow,
+  KyberSkillsBlock,
+  KyberSkillRow,
   KyberToolDefinitionShadow,
   KyberTurnContentShadow,
 } from '../lib/kyberApi.js'
@@ -66,6 +69,10 @@ export interface SessionSummaryPayload {
   tool_calls?: number | null
   tools_invoked?: string[] | number | null
   tools_offered?: string[] | number | null
+  /** Skill names listed to the agent; absent when not measured. */
+  skills_listed?: string[] | null
+  /** Skill names invoked at least once; absent when not measured. */
+  skills_invoked?: string[] | null
   error_count?: number | null
   median_ttft_ms?: number | null
   aux_chat_calls?: number | null
@@ -165,6 +172,8 @@ export interface AgentSessionPayload {
   span_count?: number
   summary?: SessionSummaryPayload
   turns?: KyberSessionTurnRow[]
+  /** Absent on a payload that predates the skills projection. */
+  skills?: KyberSkillsBlock | null
   tools?: ToolRow[]
   servers?: ServerRow[]
   context?: KyberSessionContext
@@ -200,8 +209,9 @@ export type DrawerContent =
   | {
       tool: ToolRow
       definition: KyberToolDefinitionShadow | null
-      contentRequest: { span?: string; part: string }
+      contentRequest: { span?: string; part: string; toolName?: string }
     }
+  | { skill: KyberSkillRow }
   | string
   | {
       turnIndex: number
@@ -596,7 +606,10 @@ export function AgentSessionContent({
           ? (turnWithDefs.content as KyberTurnContentShadow)
           : undefined
       const defs = contentObj?.tool_definitions ?? []
-      const def = defs.find((d) => (d.name || d.function?.name) === tool.name)
+      // Nameless rows cannot be matched to a definition; show the full blob instead.
+      const def = tool.name
+        ? defs.find((d) => (d.name || d.function?.name) === tool.name)
+        : undefined
 
       setDrawerContent({
         tool,
@@ -604,12 +617,27 @@ export function AgentSessionContent({
         contentRequest: {
           span: typeof turnWithDefs?.spanId === 'string' ? turnWithDefs.spanId : undefined,
           part: 'tool_definitions',
+          toolName: tool.name,
         },
       })
       setDrawerOpen(true)
     },
     [session]
   )
+
+  // Skill rows open the same drawer as tools. Content is set after the title and
+  // subtitle so the drawer's pane sees the complete selection.
+  const openDrawerForSkill = useCallback((skill: KyberSkillRow) => {
+    setSelectedSpanId(undefined)
+    setDrawerTitle(`Skill: ${skill.name}`)
+    setDrawerSubtitle(
+      `Listed turns: ${skill.turns_listed.length} · Invocations: ${
+        typeof skill.invocations === 'number' ? skill.invocations : 'not measurable'
+      }`
+    )
+    setDrawerContent({ skill })
+    setDrawerOpen(true)
+  }, [])
 
   // -------------------------------------------------------------------------
   // Render: Empty State
@@ -665,6 +693,14 @@ export function AgentSessionContent({
     const sessionId = session.id ?? session.session_id
     if (!sessionId) return undefined
     if (selectedSpanId) return { sessionId: String(sessionId), span: selectedSpanId }
+    if (drawerContent && typeof drawerContent === 'object' && 'skill' in drawerContent) {
+      // Skill drawer: the listing text comes from the first turn that listed the
+      // skill (the served 0-based index). A skill no turn lists has no request.
+      const firstListedTurn = (drawerContent as { skill: KyberSkillRow }).skill.turns_listed[0]
+      return typeof firstListedTurn === 'number'
+        ? { sessionId: String(sessionId), turnIndex: firstListedTurn, full: true as const }
+        : undefined
+    }
     if (
       drawerContent &&
       typeof drawerContent === 'object' &&
@@ -678,7 +714,7 @@ export function AgentSessionContent({
       return { sessionId: String(sessionId), turnIndex: (drawerContent as { turnIndex: number }).turnIndex, full: true as const }
     }
     if (drawerContent && typeof drawerContent === 'object' && 'contentRequest' in drawerContent) {
-      return { sessionId: String(sessionId), ...(drawerContent.contentRequest as { span?: string; part: string }) }
+      return { sessionId: String(sessionId), ...(drawerContent.contentRequest as { span?: string; part: string; toolName?: string }) }
     }
     if (
       drawerContent &&
@@ -1185,13 +1221,32 @@ export function AgentSessionContent({
       </div>
 
       {/* ---------------------------------------------------------------------
-          Section 4: Execution Timeline / Call Tree
+          Section 4: Skills (listed to the agent vs. invoked)
+      --------------------------------------------------------------------- */}
+      <div className="space-y-3" data-testid="skills-section">
+        <div>
+          <h2 className="text-xs font-semibold uppercase tracking-wider text-heading">
+            4 · Skills
+          </h2>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Skills the harness listed to the agent, and which of them were invoked. Select a skill for its listing detail.
+          </p>
+        </div>
+        <SkillsPanel
+          skills={session.skills}
+          summary={u}
+          onSelectSkill={openDrawerForSkill}
+        />
+      </div>
+
+      {/* ---------------------------------------------------------------------
+          Section 5: Execution Timeline / Call Tree
       --------------------------------------------------------------------- */}
       <div className="space-y-3" data-testid="execution-timeline-section">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <div>
             <h2 className="text-xs font-semibold uppercase tracking-wider text-heading">
-              4 · Execution Timeline & Call Tree
+              5 · Execution Timeline & Call Tree
             </h2>
             <p className="text-xs text-muted-foreground mt-0.5">
               Hierarchical span execution tree. Click any span node or timeline bar to inspect its full attributes and content.

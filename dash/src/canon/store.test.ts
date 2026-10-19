@@ -1,10 +1,16 @@
 import { afterAll, describe, expect, it, vi } from 'vitest'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 
-import { CanonStore, SCHEMA_VERSION, compressRaw, systemPromptTextsFromContentColumns } from './store.js'
+import {
+  CanonStore,
+  SCHEMA_VERSION,
+  WAL_SIZE_LIMIT_BYTES,
+  compressRaw,
+  systemPromptTextsFromContentColumns,
+} from './store.js'
 import type { Finding } from '../analysis/findings.js'
 import type { RecordProvenance, SourceCheckpoint } from './source-state.js'
 import { TOKEN_SUM_MISMATCH, notMeasurable, type CanonicalRecord, type CostBlock, type TokenUsage } from './types.js'
@@ -1406,11 +1412,42 @@ describe('CanonStore wipe (issue #312)', () => {
     expect(store.listSourceCheckpoints()).toHaveLength(0)
     expect(store.countQuarantine()).toBe(0)
     expect(store.getProblems()).toHaveLength(0)
-    // Operational audit survives a wipe-all.
+    // Operational audit survives a wipe-all: `refresh_run` per ADR 0032 D8,
+    // and `metadata` because the shared settings live in it.
     expect(store.getIngestLog()).toHaveLength(1)
     expect(store.getMetadata('schema_version')).toBe(String(SCHEMA_VERSION))
     expect(store.getMetadata('last_clean_at')).toBeDefined()
     store.close()
+  })
+
+  it('wipeAll returns the file to the size its contents need', () => {
+    const path = tempStorePath()
+    const store = new CanonStore(path)
+    // The store runs in WAL mode, so rows a commit wrote can still be sitting
+    // in the sidecar: the size that matters is both files together.
+    const onDiskBytes = (): number => {
+      const main = statSync(path).size
+      const wal = existsSync(`${path}-wal`) ? statSync(`${path}-wal`).size : 0
+      return main + wal
+    }
+    try {
+      // Free pages are what a wipe used to leave behind: grow the file with
+      // rows the wipe deletes, then check it comes back down. Before this
+      // reclamation a wiped store kept every page it had ever allocated.
+      const many: CanonicalRecord[] = []
+      for (let index = 0; index < 200; index += 1) {
+        many.push(record({ spanId: `span-${index}`, content: { system_prompt: 'p'.repeat(50_000) } }))
+      }
+      store.upsertMany(many)
+      const before = onDiskBytes()
+
+      store.wipeAll()
+
+      expect(store.count()).toBe(0)
+      expect(onDiskBytes()).toBeLessThan(before / 2)
+    } finally {
+      store.close()
+    }
   })
 
   it('rolls back the whole wipe when a delete fails', () => {
@@ -1675,7 +1712,7 @@ describe('store migrations v17: quarantine and problems schema upgrade', () => {
   it('initializes a fresh database at the current schema with the v17 quarantine and problems columns', () => {
     // Plan 2026-10-10 (B10) moves the schema past the live codex store's 18, so
     // the version pin here tracks SCHEMA_VERSION rather than a fixed 17.
-    expect(SCHEMA_VERSION).toBe(19)
+    expect(SCHEMA_VERSION).toBe(20)
 
     const path = tempStorePath()
     const store = new CanonStore(path)
@@ -1964,5 +2001,28 @@ describe('systemPromptTextsFromContentColumns', () => {
       { part: 'system_prompt', order: 3, text: 'kept' },
     ]
     expect(systemPromptTextsFromContentColumns(null, compressRaw(parts))).toEqual(['kept'])
+  })
+})
+
+describe('connection pragmas for bulk writes', () => {
+  it('syncs at NORMAL and bounds the write-ahead log', () => {
+    const store = new CanonStore(tempStorePath())
+    // The handle is released even when an assertion fails, so a red run cannot
+    // leave a live file handle for the cleanup hook to fight (an EBUSY-shaped
+    // problem on Windows).
+    try {
+      const db = store.getDatabase()
+      // 1 = NORMAL. The default for a WAL database here is FULL, which fsyncs the
+      // sidecar on every commit — what a per-source-unit folder import pays for.
+      expect((db.prepare('PRAGMA synchronous').get() as { synchronous: number }).synchronous).toBe(1)
+      // Without a limit a checkpoint reclaims nothing on disk: the sidecar keeps
+      // the high-water mark a burst reached for the life of the database.
+      expect(
+        (db.prepare('PRAGMA journal_size_limit').get() as { journal_size_limit: number })
+          .journal_size_limit,
+      ).toBe(WAL_SIZE_LIMIT_BYTES)
+    } finally {
+      store.close()
+    }
   })
 })

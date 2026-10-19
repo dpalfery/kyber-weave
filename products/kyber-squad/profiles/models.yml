@@ -6,7 +6,7 @@ profiles:
     antigravity: pro
     claude: opus
     codex: gpt-6.1-sol
-    copilot: GPT-6.1 Sol (copilot)
+    copilot: Claude Sonnet 5.5 (copilot)
     cursor: claude-sonnet-5-5[effort=high]
     devin: claude-opus-5-5-high
     factory: glm-5.3[reasoningEffort=high]
@@ -19,7 +19,7 @@ profiles:
     antigravity: pro
     claude: opus
     codex: gpt-6.1-sol
-    copilot: GPT-6.1 Sol (copilot)
+    copilot: GPT-5.6 Sol (copilot)
     cursor: claude-sonnet-5-5[effort=high]
     devin: claude-opus-5-5-high
     factory: glm-5.3[reasoningEffort=high]
@@ -45,7 +45,7 @@ profiles:
     antigravity: flash
     claude: claude-sonnet-5-5
     codex: gpt-5.6-terra
-    copilot: Claude Haiku 5.5 (copilot)
+    copilot: Grok 4.7 (copilot)
     cursor: grok-4.7[]
     devin: swe-2-high
     factory: glm-5.3-flash[reasoningEffort=high]
@@ -67,7 +67,7 @@ profiles:
     antigravity: pro
     claude: sonnet
     codex: gpt-5.6-terra
-    copilot: Grok 4.7 (copilot)
+    copilot: Gemini 3.8 Flash (copilot)
     cursor: kimi-k2.7-code[]
     devin: grok-4-7-high
     factory: deepseek-v4-pro[reasoningEffort=high]

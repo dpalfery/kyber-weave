@@ -33,13 +33,14 @@ public sealed partial class HotshotGoldenContractTests
     private const int ExpectedCopilotRenderFileCount = 48;
     private const string ExpectedSchema = "kyber-squad.hotshot-golden/v1";
     private const string ExpectedSourceCommit = "677c3a876ba9c62f1083608596b238c9deaff167";
-    private const string ExpectedManifestSha256 = "6e927ded6de8b86f151d474e84c68056236752c122e164eeb4278b4977a6dda1";
+    private const string ExpectedManifestSha256 = "4007550a5e2e9a4127b481a047faa9d198033f935054cb4833c787695107ef8e";
     private const string ExternalGoldenRootVariable = "KYBER_SQUAD_HOTSHOT_GOLDEN_ROOT";
     private const string MaiCodeCopilotModel = "MAI-Code-1.1-Flash (copilot)";
 
     private static readonly string[] EvolvedAgentIdentities =
     [
         "architect",
+        "bug-crusher-investigator", // Discovery order: indexes before raw reads
         "code-reviewer",      // in-process council when the harness gives subagents no agent tool (ADR 0025)
         "conductor",
         "csharp-dev",         // JEV checkpoints and iteration circuit-breaker (issue #249)
@@ -51,6 +52,8 @@ public sealed partial class HotshotGoldenContractTests
         "pulumi-dev",         // Worker-packet scope rule: packet is whole scope (issue #278)
         "python-dev",         // Worker-packet scope rule: packet is whole scope (issue #278)
         "react-dev",          // Worker-packet scope rule: packet is whole scope (issue #278)
+        "review-lens",        // Discovery order: indexes before raw reads
+        "review-triage",      // Discovery order: indexes before raw reads
         "sql-database-architect", // Worker-packet scope rule: packet is whole scope (issue #278)
         "task-reviewer",
         "tauri-dev",          // Worker-packet scope rule: packet is whole scope (issue #278)
@@ -65,20 +68,19 @@ public sealed partial class HotshotGoldenContractTests
     private static readonly string[] ModelEvolvedAgentIdentities =
     [
         "azure-reader",       // fast: GPT-5.6 Luna → MAI-Code-1.1-Flash (copilot)
-        "bug-crusher-investigator", // deep-planning: GPT-5.6 Sol → GPT-6.1 Sol (copilot)
-        "code-reviewer",      // reviewer: Grok 4.5 → Grok 4.7 (copilot)
+        "code-reviewer",      // reviewer: Grok 4.5 → Gemini 3.8 Flash (copilot)
         "csharp-dev",         // fast: GPT-5.6 Luna → MAI-Code-1.1-Flash (copilot)
-        "dal-dev",            // general: Grok 4.5 → Claude Haiku 5.5 (copilot)
+        "dal-dev",            // general: Grok 4.5 → Grok 4.7 (copilot)
         "docs-dev",           // fast: GPT-5.6 Luna → MAI-Code-1.1-Flash (copilot)
-        "github-devops",      // general: Grok 4.5 → Claude Haiku 5.5 (copilot)
+        "github-devops",      // general: Grok 4.5 → Grok 4.7 (copilot)
         "maui-dev",           // fast: GPT-5.6 Luna → MAI-Code-1.1-Flash (copilot)
-        "pulumi-dev",         // general: Grok 4.5 → Claude Haiku 5.5 (copilot)
+        "pulumi-dev",         // general: Grok 4.5 → Grok 4.7 (copilot)
         "python-dev",         // fast: GPT-5.6 Luna → MAI-Code-1.1-Flash (copilot)
         "react-dev",          // fast: GPT-5.6 Luna → MAI-Code-1.1-Flash (copilot)
         "research-agent",     // fast: GPT-5.6 Luna → MAI-Code-1.1-Flash (copilot)
-        "review-lens",        // reviewer: Grok 4.5 → Grok 4.7 (copilot)
-        "review-triage",      // reviewer: GPT-5.6 Luna → Grok 4.7 (copilot)
-        "tauri-dev"           // general: Grok 4.5 → Claude Haiku 5.5 (copilot)
+        "review-lens",        // reviewer: Grok 4.5 → Gemini 3.8 Flash (copilot)
+        "review-triage",      // reviewer: GPT-5.6 Luna → Gemini 3.8 Flash (copilot)
+        "tauri-dev"           // general: Grok 4.5 → Grok 4.7 (copilot)
     ];
 
     private static readonly string[] EvolvedSkillIdentities =
@@ -137,6 +139,16 @@ public sealed partial class HotshotGoldenContractTests
         "edit/rename",
         "vscodeGeneral/rename"
     ];
+
+    /// <summary>
+    /// Copilot tools added to the catalog after the Hotshot golden snapshot. The manifest
+    /// above stays historical (SHA-pinned), so the render comparison strips these declared
+    /// additions from the actual tools before comparing: anything else added or removed
+    /// still mismatches. <c>tool_search</c> is Copilot's built-in tool-discovery tool
+    /// (upstream <c>ToolName.ToolSearch</c>, grouped under the vscode tool set); agents
+    /// with an explicit allow-list cannot discover tools without naming it.
+    /// </summary>
+    private static readonly string[] PostGoldenToolAdditions = ["tool_search"];
 
     private static readonly string[] ExpectedCollisionIdentities =
     [
@@ -714,11 +726,22 @@ public sealed partial class HotshotGoldenContractTests
             {
                 HashSet<string> membership = RequireJsonStrings(expected, "tools").ToHashSet(StringComparer.Ordinal);
                 string[] normalizedTools = approvedToolOrder.Where(membership.Contains).ToArray();
+                // Post-golden catalog additions are a declared delta, not drift: strip them
+                // from the actual render before comparing, so any other membership change
+                // still mismatches. The addition itself is pinned per agent in
+                // CopilotRendererTests.RenderAsync_EmitsDeterministicCanonicalToolOrdering.
+                string[] actualTools = RequireYamlSequence(actualValue, "tools").Children
+                    .Select(RequireYamlScalar)
+                    .Where(tool => !PostGoldenToolAdditions.Contains(tool, StringComparer.Ordinal))
+                    .Select(CollapseGranularCopilotTool)
+                    .Distinct(StringComparer.Ordinal)
+                    .ToArray();
+                actualTools = approvedToolOrder.Where(actualTools.Contains).ToArray();
                 AddSequenceMismatch(
                     mismatches,
                     $"{path} tools",
                     normalizedTools,
-                    RequireYamlSequence(actualValue, "tools").Children.Select(RequireYamlScalar));
+                    actualTools);
                 continue;
             }
 
@@ -726,6 +749,31 @@ public sealed partial class HotshotGoldenContractTests
             string actualCanonical = CanonicalYaml(actualValue);
             AddMismatch(mismatches, $"{path} frontmatter.{property.Name}", expectedCanonical, actualCanonical);
         }
+    }
+
+    /// <summary>
+    /// Maps a granular Copilot tool back to the coarse tool set the historical golden snapshot
+    /// recorded, so group membership is still compared while granular narrowing is allowed.
+    /// </summary>
+    private static string CollapseGranularCopilotTool(string tool)
+    {
+        if (tool.StartsWith("context7/", StringComparison.Ordinal))
+        {
+            return "context7/*";
+        }
+
+        int slash = tool.IndexOf('/', StringComparison.Ordinal);
+        if (slash < 0 || tool.EndsWith("/*", StringComparison.Ordinal))
+        {
+            return tool;
+        }
+
+        return tool[..slash] switch
+        {
+            "vscodeTasks" => "execute",
+            "vscodeGeneral" => tool == "vscodeGeneral/rename" ? "edit" : tool == "vscodeGeneral/testFailure" ? "execute" : "vscode",
+            var group => group
+        };
     }
 
     private static string CanonicalJson(JsonElement element) => element.ValueKind switch

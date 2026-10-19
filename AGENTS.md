@@ -177,6 +177,7 @@ when the user accepts or explicitly asks to retain it. See the todo index for me
 | Writing C# anywhere in this repository | [`docs/standards/csharp/README.md`](docs/standards/csharp/README.md), the path declared as **<csharp-coding-standard>** below |
 | The engine — parsing, validation, search, export | [`src/KyberWeave.Core/AGENTS.md`](src/KyberWeave.Core/AGENTS.md) |
 | CLI commands and output | [`src/KyberWeave.Cli/AGENTS.md`](src/KyberWeave.Cli/AGENTS.md) |
+| Installing, updating, or configuring Kyber-Weave or KyberDash | [`docs/cli-command-surface.md`](docs/cli-command-surface.md) — every verb and flag, the exit-code contract, and the canonical flows |
 | The MCP server | [`src/KyberWeave.Mcp/AGENTS.md`](src/KyberWeave.Mcp/AGENTS.md) |
 | KyberDash — telemetry ingest, the canonical store, any of the three surfaces | [`docs/dash/architecture.md`](docs/dash/architecture.md) for the boundaries, then [`docs/dash/runbook.md`](docs/dash/runbook.md) to run it. Editing `dash/tray` or `dash/web` — a display layer — also read [`docs/rules/kyberdash-display-layer.md`](docs/rules/kyberdash-display-layer.md) |
 | Tests | The path declared as **<test-coding-standard>** below, then [`tests/KyberWeave.Tests/AGENTS.md`](tests/KyberWeave.Tests/AGENTS.md) for fixtures |
@@ -225,6 +226,8 @@ references that belong to this repository.
 - **<adr-index>**: `docs/adr/README.md`
 - **<rules-index>**: `docs/rules/README.md`
 - **<reference-index>**: `docs/reference/README.md`
+- **<review-guidance>**: `REVIEW.md`
+- **<autonomy>**: `autonomous`
 
 Skills and other portable instruction files SHALL reference these paths by the
 property name above — "the path declared as **<component-catalog>**

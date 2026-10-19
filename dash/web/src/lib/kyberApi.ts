@@ -148,6 +148,15 @@ export async function fetchProblemDetail(id: string): Promise<KyberProblemDetail
   return fetchJson<KyberProblemDetail>(`/api/kyber/problem/${encodeURIComponent(id)}`)
 }
 
+export interface SessionRollup {
+  turn_count?: number | null
+  request_count?: number | null
+  total_input?: number | null
+  total_output?: number | null
+  tokens?: number | null
+  cost_usd?: number | null
+}
+
 export interface KyberSessionSummary {
   session_id: string
   sessionId?: string
@@ -174,6 +183,8 @@ export interface KyberSessionSummary {
   cost?: { basis: string; status: string; value?: number; currency?: string }
   models?: string[]
   problems?: number
+  subagents?: KyberSessionSummary[]
+  rollup?: SessionRollup
 }
 
 /**
@@ -469,11 +480,12 @@ export interface KyberSessionContentResult {
 
 export function fetchKyberSessionContent(
   sessionId: string,
-  opts?: { span?: string; part?: string },
+  opts?: { span?: string; part?: string; full?: boolean },
 ): Promise<KyberSessionContentResult> {
   const params = new URLSearchParams()
   if (opts?.span) params.set('span', opts.span)
   if (opts?.part) params.set('part', opts.part)
+  if (opts?.full) params.set('full', 'true')
   const qs = params.toString()
   const path = `/api/kyber/session/${encodeURIComponent(sessionId)}/content${qs ? `?${qs}` : ''}`
   return fetchJson<KyberSessionContentResult>(path)
@@ -544,6 +556,8 @@ export interface KyberTurnContentResult {
     parts: Array<{ text: string; spanId?: string; turnIndex?: number; truncated?: boolean; totalLength?: number }>
     seenBefore: boolean
   } | null
+  /** The skills this turn listed and invoked; absent on a turn that predates the skills projection. */
+  skills?: KyberTurnSkillsEntry
 }
 
 export function fetchTurnContent(
@@ -1525,6 +1539,7 @@ const CAPTURE_MAX_WARNINGS = 16
 const CAPTURE_MAX_STEPS = 16
 const CAPTURE_MAX_EVENTS = 64
 const CAPTURE_MAX_CHANGES = 64
+const CAPTURE_MAX_ISSUES = 32
 
 export type KyberCapturePlatform = 'darwin' | 'linux' | 'win32' | 'unknown'
 export type KyberCaptureLiveness = 'kyberdash' | 'foreign' | 'none' | 'unknown'
@@ -1532,6 +1547,25 @@ export type KyberCaptureMode = 'managed' | 'status-only'
 export type KyberCaptureInstalled = 'detected' | 'not-detected' | 'unknown'
 export type KyberCaptureState = 'on' | 'off' | 'partial' | 'unknown' | 'not-applicable'
 export type KyberCaptureAction = 'enable' | 'disable'
+/** The server's delivery verdict; `attention` renders yellow. */
+export type KyberCaptureHealth = 'ok' | 'attention' | 'off' | 'read-only'
+
+export interface KyberCaptureIssue {
+  code: string
+  severity: 'blocking' | 'warning'
+  text: string
+  path?: string
+  remedy?: string
+}
+
+/** The check's one-line summary. Absent from an older server. */
+export interface KyberCaptureCheck {
+  checkedAt: string
+  health: 'ok' | 'attention' | 'off'
+  enabled: number
+  attention: number
+  issueCount: number
+}
 
 /** A value the server reports for one managed key: a JSON scalar, never an object. */
 export type KyberCaptureValue = string | number | boolean | null
@@ -1552,6 +1586,7 @@ export interface KyberCaptureFile {
   expectedKeys: string[]
   presentKeys: string[]
   missingKeys: string[]
+  mismatchedKeys: string[]
   drift: KyberCaptureDriftEntry[] | null
 }
 
@@ -1573,12 +1608,19 @@ export interface KyberCaptureHarness {
   warnings: Array<{ code: string; text: string }>
   manualSteps: KyberCaptureManualStep[]
   statusLines: string[]
+  /**
+   * `null` when the server sent no verdict (an older server): the row then
+   * falls back to `state` alone rather than claiming a health it was not told.
+   */
+  health: KyberCaptureHealth | null
+  issues: KyberCaptureIssue[]
 }
 
 export interface KyberCaptureStatus {
   platform: KyberCapturePlatform
   receiver: { hosted: boolean; liveness: KyberCaptureLiveness; detail: string }
   harnesses: KyberCaptureHarness[]
+  check: KyberCaptureCheck | null
 }
 
 export type KyberCaptureEventKind =
@@ -1712,6 +1754,7 @@ function readFile(raw: unknown): KyberCaptureFile | null {
     expectedKeys: captureStrings(raw.expectedKeys, CAPTURE_MAX_KEYS, CAPTURE_VALUE_MAX),
     presentKeys: captureStrings(raw.presentKeys, CAPTURE_MAX_KEYS, CAPTURE_VALUE_MAX),
     missingKeys: captureStrings(raw.missingKeys, CAPTURE_MAX_KEYS, CAPTURE_VALUE_MAX),
+    mismatchedKeys: captureStrings(raw.mismatchedKeys, CAPTURE_MAX_KEYS, CAPTURE_VALUE_MAX),
     drift: readDrift(raw.drift),
   }
 }
@@ -1753,6 +1796,38 @@ function readHarness(raw: unknown): KyberCaptureHarness | null {
     ),
     manualSteps: mapBounded(raw.manualSteps, CAPTURE_MAX_STEPS, readManualStep),
     statusLines: captureStrings(raw.statusLines, CAPTURE_MAX_LINES),
+    // An unrecognised verdict is shown as needing attention, never as healthy.
+    health:
+      raw.health === undefined
+        ? null
+        : oneOf<KyberCaptureHealth>(raw.health, ['ok', 'attention', 'off', 'read-only'], 'attention'),
+    issues: mapBounded(raw.issues, CAPTURE_MAX_ISSUES, readIssue),
+  }
+}
+
+function readIssue(raw: unknown): KyberCaptureIssue | null {
+  if (!isRaw(raw) || typeof raw.text !== 'string') return null
+  const issue: KyberCaptureIssue = {
+    code: capText(raw.code, CAPTURE_VALUE_MAX),
+    // An unrecognised severity is the stricter one.
+    severity: oneOf(raw.severity, ['blocking', 'warning'], 'blocking'),
+    text: capText(raw.text),
+  }
+  if (typeof raw.path === 'string') issue.path = capText(raw.path)
+  if (typeof raw.remedy === 'string') issue.remedy = capText(raw.remedy)
+  return issue
+}
+
+function readCheck(raw: unknown): KyberCaptureCheck | null {
+  if (!isRaw(raw) || typeof raw.checkedAt !== 'string') return null
+  const count = (value: unknown): number =>
+    typeof value === 'number' && Number.isInteger(value) && value >= 0 ? Math.min(value, 9999) : 0
+  return {
+    checkedAt: raw.checkedAt.slice(0, 64),
+    health: oneOf(raw.health, ['ok', 'attention', 'off'], 'attention'),
+    enabled: count(raw.enabled),
+    attention: count(raw.attention),
+    issueCount: count(raw.issueCount),
   }
 }
 
@@ -1800,6 +1875,7 @@ function parseCaptureStatus(raw: unknown, status: number): KyberCaptureStatus {
       detail: capText(raw.receiver.detail),
     },
     harnesses: mapBounded(raw.harnesses, CAPTURE_MAX_HARNESSES, readHarness),
+    check: readCheck(raw.check),
   }
 }
 
@@ -1872,3 +1948,66 @@ export async function postKyberCapture(
   if (!res.ok) throw new KyberApiError(res.status, CAPTURE_PATH)
   return parseCaptureResult(await res.json().catch(() => null), res.status)
 }
+
+// ---------------------------------------------------------------------------
+// Skills (session payload section "4 · Skills")
+// ---------------------------------------------------------------------------
+
+/**
+ * A value the harness did not export. The reason is the harness's own
+ * explanation, shown verbatim; a panel never turns it into a 0 or an empty list.
+ */
+export type KyberSkillAvailability = {
+  availability: 'not_measurable'
+  reason: string
+}
+
+/** One skill from the session's `skills.rows`. `turns_listed` is 0-based transport indices. */
+export type KyberSkillRow = {
+  name: string
+  listed: boolean | KyberSkillAvailability
+  invocations: number | KyberSkillAvailability
+  turns_listed: number[]
+  /** Engine-derived token estimate; labelled as derived wherever it is shown. */
+  derived_tokens?: number
+}
+
+/** The session payload's `skills` block: measured rows, or a whole-block not-measurable verdict. */
+export type KyberSkillsBlock =
+  | {
+      measurable: true
+      /** Harness-reported aggregate for skill listings; absent when the harness did not report one. */
+      reported_skill_tokens?: number
+      /** Served count of skills listed to the agent; absent when not measured. The browser never counts rows. */
+      listed_count?: number
+      /** Served count of listed skills with no observed invocation; absent when not measured. */
+      listed_uninvoked_count?: number
+      rows: KyberSkillRow[]
+    }
+  | KyberSkillAvailability
+
+/**
+ * The skills fields the session summary carries. Each array is absent when
+ * that fact was not measured, and absence is never read as an empty list.
+ */
+export type KyberSkillsSummary = {
+  skills_listed?: string[] | null
+  skills_invoked?: string[] | null
+}
+
+/** One skill listed in a turn, with the listing text the harness exported (absent when not recorded). */
+export type KyberTurnSkillListing = {
+  name: string
+  text?: string
+}
+
+/**
+ * A turn's `skills` entry on the turn-content route. Either side may be a
+ * not-measurable verdict, and the whole entry may be one.
+ */
+export type KyberTurnSkillsEntry =
+  | {
+      listed: KyberTurnSkillListing[] | KyberSkillAvailability
+      invoked: string[] | KyberSkillAvailability
+    }
+  | KyberSkillAvailability

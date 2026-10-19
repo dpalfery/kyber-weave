@@ -6,7 +6,7 @@ component: KyberDash
 source-root: dash
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-11
+last-reviewed: 2026-10-18
 decided-by:
   - adr/0020-kyberdash-one-time-fork
   - adr/0008-kyberdash-single-canonical-store
@@ -21,6 +21,7 @@ decided-by:
   - adr/0018-kyberdash-content-retention-purge
   - adr/0033-kyberdash-surfaces-are-display-layers
   - adr/0035-kyberdash-quarantine-raw-packet-evidence
+  - adr/0038-post-run-transcript-sync-subagent-hierarchy
 keywords:
   - dashboard
   - codeburn
@@ -35,6 +36,7 @@ keywords:
   - sessions
   - tool_yield
   - tool_calls
+  - skills
 code-refs:
   - Synthesizer
   - OtlpReceiver
@@ -66,6 +68,12 @@ code-refs:
   - runCaptureAction
   - handleCaptureRequest
   - buildCaptureStatus
+  - extractListedSkills
+  - extractInvokedSkills
+  - buildSkillsView
+  - listedByTurn
+  - runTranscriptSync
+  - formatSessionTitle
 ---
 
 # KyberDash architecture
@@ -224,7 +232,7 @@ yields no records persists its reason on the checkpoint's `last_error_code` (sta
 `ok`): `window_filtered` when the parser produced calls that all predate the coverage
 window (`sliceCallsToWindow`), `no_recordable_events` when it produced none (for Codex,
 no `token_count` or model events). A unit with records, or with problems, carries no such
-reason. The Codex OTLP adapter (`canon/adapters/codex.ts`) is the sixth fingerprint voter; see the Codex OTLP note in [telemetry-inventory](telemetry-inventory.md). When parser extraction rules change or a parser defect is repaired, bumping the harness descriptor's `parserContractVersion` (e.g. `KILO_PARSER_CONTRACT_VERSION = '2'` in `dash/src/refresh/registry.ts` for `kilo-shared-runtime` and `kilo-vscode-legacy`) invalidates reusable checkpoints without deleting historical metadata, forcing the orchestrator to re-parse units and commit newly extracted records. When a unit's stored `parserContractVersion` differs from the descriptor's, `refreshHarnessSources` rebuilds `recordCount` from live records attributed to that source (`record_provenance` joined to `records`, so quarantined or deleted rows do not count) plus records created in this pass; revision-token and `lastStatus` changes carry the previous count forward (`(previous?.recordCount ?? 0) + created`) because a revision change re-parses within the current window only. Warp's Group Containers
+reason. The Codex OTLP adapter (`canon/adapters/codex.ts`) is the sixth fingerprint voter; see the Codex OTLP note in [telemetry-inventory](telemetry-inventory.md). When parser extraction rules change or a parser defect is repaired, bumping the harness descriptor's `parserContractVersion` (e.g. `KILO_PARSER_CONTRACT_VERSION = '3'` in `dash/src/refresh/registry.ts` for `kilo-shared-runtime` and `kilo-vscode-legacy`) invalidates reusable checkpoints without deleting historical metadata, forcing the orchestrator to re-parse units and commit newly extracted records. When a unit's stored `parserContractVersion` differs from the descriptor's, `refreshHarnessSources` rebuilds `recordCount` from live records attributed to that source (`record_provenance` joined to `records`, so quarantined or deleted rows do not count) plus records created in this pass; revision-token and `lastStatus` changes carry the previous count forward (`(previous?.recordCount ?? 0) + created`) because a revision change re-parses within the current window only. Warp's Group Containers
 sqlite is opened through `openDatabase`. A copyfile(2) `EPERM`/`EACCES` on the cache copy
 falls back to read/write (`copyFileBestEffort`, issue #194 / PR #257), so records are produced whenever the
 bytes are readable. A true source-unreadable denial (typically macOS TCC on Group Containers)
@@ -476,6 +484,94 @@ only when the server sent no cost.
 - *Measured residual and reported_input:* Context composition charts and heatmaps compute residual context as `reported_input - sum(bucketed_tokens)`. The engine emits `reported_input` on serialized context turns (`KyberContextTurn`) to convey the measured input basis. A fully bucketed turn has a measured residual of 0.0%; not-measurable treatment applies only when no measured input basis exists.
 - *Run turns and scorecard:* `KyberBridge.getRunTurns` serves per-turn rows (`RunTurnRow`) with measured model, tokens, pressure, `cacheHitRatio`, timestamp, and per-turn `costUsd` (priced via `createCostBlock`). `KyberBridge.getRunScorecard` derives a run-scoped scorecard by aggregating the run's sessions through the shared harness rollup and dimension calculation machinery.
 
+### Skills view contract
+
+The Sessions page shows which skills a session, and each of its turns, had access to (listed)
+and which were actually invoked. Listed and invoked are joined per skill, the way offered and
+invoked tools are. The engine is `dash/src/canon/skills.ts`, a pure module: `extractListedSkills`
+and `extractInvokedSkills` read the canonical records, `buildSkillsView` joins them into one
+`SkillRow` per skill (`name`, `listed`, `invocations`, `turnsListed`, `turnSpanIds`, and an
+optional `derivedTokens`), and `listedByTurn` gives the per-turn listing. `buildSessionRow`
+(`dash/src/canon/sessions.ts`) projects the result into the session payload. All of this lives in
+`dash/src`; the web renders the served values only ([ADR 0033](../adr/0033-kyberdash-surfaces-are-display-layers.md)),
+and no value is counted in the browser.
+
+Skills share the `instruction_context` content bucket. `CANONICAL_CONTENT_KEYS` is unchanged, and skill identity comes from raw attributes and part text, not from bucket membership.
+
+There is no `canon.db` schema change. The session payload is a JSON blob that is rebuilt on
+projection, so a session row stored before this change has no `skills` key and renders
+"not yet projected" until it is rebuilt ([runbook §2g](runbook.md#2g-skills-view-rebuild-and-capture-fixtures)).
+
+**Measurability.** Listing and invocation are measured separately, and an unmeasured side is
+never reported as zero. It is declared in one of two ways: a key is absent (the `summary` and
+per-turn keys), or it carries `{availability: 'not_measurable', reason}` (the whole `skills`
+view, and each row's `invocations`). `[]` is a measured none. Per-harness sources are in the [telemetry inventory](telemetry-inventory.md#skill-availability-by-harness).
+
+**Session payload** (`GET /api/kyber/session/:id`, additive):
+
+- `summary.skills_listed` and `summary.skills_invoked` are name arrays. Each key is absent when
+  that side is not measured.
+- `skills` is either `{availability: 'not_measurable', reason}`, or
+  `{measurable: true, reported_skill_tokens?, listed_count, listed_uninvoked_count?, rows}`.
+  - `reported_skill_tokens` is a single per-turn resident size, taken from the latest turn that
+    carries it. It is never summed across turns and never split across skills. Antigravity
+    reports it as `gen_ai.usage.skill_tokens`.
+  - `listed_count` is always present when the view is measurable. `listed_uninvoked_count` is
+    absent when invocation is not measured, which is the same case in which every row's
+    `invocations` is the `not_measurable` object. A row is never counted while one of its
+    sides is unmeasured.
+  - `rows` is sorted by name. Each row is `{name, listed, invocations, turns_listed,
+    description?, derived_tokens?}`.
+    - `listed` is always a boolean. It is `true` when a measured listing named the skill on at
+      least one turn, and `false` for a skill that was only invoked.
+    - `invocations` is a number when invocation is measured, and `0` is a measured none. When the
+      harness has no invocation source (Copilot, Antigravity), it is always
+      `{availability: 'not_measurable', reason}`: never omitted, and never `0`.
+    - `turns_listed` holds 0-based transport indices (the issue #184 numbering), and is `[]` when
+      the skill was listed on no turn.
+    - `description` is the first listing text observed for that skill in the session, stored
+      once. `derived_tokens` is estimated from the description and is labelled derived. Both are
+      absent when no listing carried a description.
+- `turns[i].skills_listed` is present only for measured turns. `turns[i].skills_invoked` lists
+  names, with `[]` as a measured none, and is absent when invocation is not measured.
+- `measurability.skills` is set only when the whole `skills` view is `not_measurable`, and then
+  carries that same reason. A partly measured view (Copilot or Antigravity, where invocation is
+  not measurable) leaves `measurability.skills` unset. Its unmeasured side shows per row (the
+  `invocations` object) and by the absent `summary.skills_invoked`, turn `skills_invoked`, and
+  `listed_uninvoked_count` keys.
+
+**Turn content** (`GET /api/kyber/session/:id/turn/:index/content`, additive). The result carries
+a `skills` entry, `{listed: [{name, text?}], invoked: [names]}`. Either side, or the whole entry,
+may be `{availability: 'not_measurable', reason}`. The entry is built only from the stored
+session payload; the narrow turn-content route never walks session records. A payload without
+`skills` gives `not_measurable` with the reason `session not yet projected with skills`.
+
+**Known limits.**
+
+- If a later listing in the same session changes a skill's description, earlier turns still show
+  the first text observed.
+- After the 14-day content purge ([ADR 0018](../adr/0018-kyberdash-content-retention-purge.md)),
+  Claude descriptions survive because they are kept in raw attributes. Copilot descriptions that
+  came from stored system-prompt parts are absent, while the skill names remain.
+
+**Analysis inputs.** The `skillUtilisation` signal and the `inactive-skill-reference` finding take
+their listed and invoked sets from `skills.ts` (see [Pure Signals Engine](#pure-signals-engine-dashsrcanalysissignalsts)).
+Finding detail follows ADR 0013 D15/D16: the wording is "listed with N recorded turns and 0
+invocations", with no deletion or waste claim.
+
+**Detector version.** `DETECTOR_VERSION` is `4` (`dash/src/canon/store.ts`). Stores stamped with
+generation `3` report their findings as outdated and need a rebuild.
+
+**Web.** The Sessions page section **4 · Skills** has two tiles (skills listed, skills invoked) and
+a headline, "X of Y listed skills had no observed invocation". The headline is rendered from the
+served `listed_uninvoked_count` and `listed_count`, and reads "not measurable" when either is
+absent. It is hidden when there are no rows. Each row shows listed and invoked badges and the
+turns listed (displayed 1-based), with derived tokens labelled as derived. The harness-reported
+aggregate appears where present, with no currency. A "Not measurable" card shows the reason. Clicking
+a row opens a skill drawer with the listed and invoked state, the turns listed, and the listing
+text for the first turn listed. The unit tests render these states in a simulated DOM and the
+bundle builds. The states have not yet been checked against a live dashboard session.
+
 ### `Measurability` and honest unobservability
 
 Each source declares per-metric availability independent of value (R10.1). A metric a source
@@ -492,7 +588,7 @@ measured independently from whether individual composition buckets are available
 
 `CanonStore` (`dash/src/canon/store.ts`) is SQLite through the runtime's built-in module —
 upstream already depends on it for two providers, so no new dependency is introduced. The
-schema is a version-controlled constant executed on construction, currently at version 19;
+schema is a version-controlled constant executed on construction, currently at version 20;
 metadata carries the schema version, and a store built by an older version is migrated in
 place on open rather than rebuilt. Idempotent upsert is keyed on the
 record identifier, which makes re-ingest idempotent (R2.5). The tables are `records`,
@@ -504,9 +600,10 @@ schema 12 added `refresh_run`, schema 13 introduced `problem_key` with unique in
 schema 15 made finding estimated waste nullable (`estimated_waste_tokens INTEGER` NULL for coverage-gap findings with unmeasured estimates),
 schema 16 added `history_weeks INTEGER` to `refresh_run`,
 schema 17 added trace metadata columns (`source`, `name`, `timestamp` to `quarantine`; `session_id`, `harness`, `timestamp` to `problems`),
-schema 18 added `quarantine.raw_payload` — the decoded packet a quarantined span is filed with, kept after the record is deleted so the turn inspector can still show what the sender sent ([ADR 0035](../adr/0035-kyberdash-quarantine-raw-packet-evidence.md)), and
-schema 19 added a nullable `harness` to `quarantine`, `pending_logs`, and `quarantined_logs`, so a per-harness wipe can scope those rows rather than missing them.
-Every `ADD COLUMN` in those two steps is presence-guarded, so a store that already carries the column — such as one stamped by an off-main build — reaches the identical final shape instead of failing on a duplicate column ([ADR 0035](../adr/0035-kyberdash-quarantine-raw-packet-evidence.md)).
+schema 18 added `quarantine.raw_payload` — the decoded packet a quarantined span is filed with, kept after the record is deleted so the turn inspector can still show what the sender sent ([ADR 0035](../adr/0035-kyberdash-quarantine-raw-packet-evidence.md)),
+schema 19 added a nullable `harness` to `quarantine`, `pending_logs`, and `quarantined_logs`, so a per-harness wipe can scope those rows rather than missing them, and
+schema 20 added sync progress and settling columns (`synced_at TEXT`, `sync_status TEXT DEFAULT 'pending'`, `settled_at TEXT`, `transcript_path TEXT`, `transcript_offset INTEGER DEFAULT 0`) to `session` for post-run transcript synchronization ([ADR 0038](../adr/0038-post-run-transcript-sync-subagent-hierarchy.md)).
+Every `ADD COLUMN` in those steps is presence-guarded, so a store that already carries the column — such as one stamped by an off-main build — reaches the identical final shape instead of failing on a duplicate column ([ADR 0035](../adr/0035-kyberdash-quarantine-raw-packet-evidence.md)).
 `commitSourceUnit` writes records, provenance, and the unit checkpoint together. The raw
 column is compressed (R12.4); the measured cost of not doing
 so is in the [rationale](../reference/kyberdash-rationale.md).
@@ -522,6 +619,17 @@ so the same text is never stored twice.
 The `session` table holds derived sessions, one row per conversation. Each payload is built by
 running the analysis layer (`analyzeContext`, `rankSchemas`, `buildTimeline`) over the
 records, and the table is a cache: dropping every row and rebuilding loses nothing.
+
+#### Subagent session hierarchy and read-time spend rollups (ADR 0038)
+
+Subagent executions dispatched by orchestrators are projected during session build (`dash/src/canon/sessions.ts`) into first-class derived session rows with stable, deterministic identities ([ADR 0038](../adr/0038-post-run-transcript-sync-subagent-hierarchy.md)):
+- **Identity format**: Claude Code subagents are assigned the deterministic session ID `<parentSessionId>#agent-<agentId>` (e.g. `claude-sess-001#agent-researcher-001`, not doubling an `agent-` prefix already on attributes such as `agent_id` or `subagent_id`), scoped by the parent so two parents reusing an agent id keep separate rows. Copilot subagent invocations receive `<parentSessionId>#<invoke_agent_span_id>` (e.g. `copilot-sess-001#invoke-agent-span-1`).
+- **Database representation**: Subagent rows in `session` record `is_subagent = 1`, `parent_session = <parentSessionId>` (pointing to the root session), and `agent_name = <agentName>`. Subagent records are reparented under the root invoke span (`parentSpanId = null` for the root invoke span, child spans reparented beneath it), ensuring a clean single-root execution tree in the ASAD payload.
+- **Dual spend accounting and read-time rollups**: Stored session rows persist only their own granular, unaggregated counters (`turn_count`, `request_count`, `total_input`, `total_output`, `cost_usd`) in `payload.summary`. On read (`KyberBridge.listSessions` in `dash/src/server/bridge.ts`), child subagent sessions whose parent exists in the store are omitted from the top-level list and nested into their parent's `subagents` array. The parent session carries a read-time `rollup` object aggregating spend across the orchestrator and all nested children:
+  $$\text{rollup.metric} = \text{parent.metric} + \sum_{c \in \text{subagents}} c\text{.metric}$$
+  The sum is recursive and leaf-first (a chain A ← B ← C nests two deep, and B's rollup is B + C). A projected subagent row is built from a subset of the records its parent row is built from, so the parent's own counters already include it; the projection marks such a row `payload.summary.included_in_parent`, and the rollup adds neither it nor anything beneath it. Only an independent child (one whose records are not in the parent) is summed. A parent cycle in stored ancestry is never attached, so no session drops out of the list.
+  Both parent and child sessions preserve their own granular counters unaggregated at their respective levels. Orphan subagent sessions (whose parent session is absent from the store) remain visible at the top level with self-derived rollups.
+- **Honest session title synthesis (`formatSessionTitle`)**: Titles are synthesized following the deterministic precedence ladder: `<agent name> · <task summary>` when both are available; `<agent name> · <human label>` when task summary is absent; `<agent name> · session` when task summary is absent or machine-generated; `<task summary>` when agent name is absent; `<human label>` when both are absent; falling back to `<harness> session` or a shortened session ID. Telemetry machine labels (span operations matching `\.(?:llm_request|llm_invoke|generate|completion)$`, `chat <model>`, exact UUIDs, `synth:`/`derived:` prefixes, and `<synthetic/unknown>` tokens) are rejected by `isMachineLabel`, preventing machine clutter while upholding honest unobservability.
 
 ### Canonical Run and AgentExecution Entities (ADR 0012)
 
@@ -573,7 +681,7 @@ Level 1: All Harnesses (Context Doctor)
           └── Level 3: Run
                  └── Level 4: AgentExecution (Session)
                         └── Level 5: Turn
-                               └── Level 6: ContextItem (Block / Part)
+                                └── Level 6: ContextItem (Block / Part)
 ```
 
 The web app lands on Context Doctor (`App` default `initialPage` / `spineReducer` stack
@@ -622,7 +730,7 @@ indexes. Agent performance is evaluated across six orthogonal dimensions:
 - **Context Hygiene**: Proportion of context occupied by active instructions vs redundant history.
 - **Cache Efficiency**: Cache read ratio, prefix stability, and cache breakpoint invalidation.
 - **Tool Yield**: Ratio of tool invocations producing utilized results vs resident schema weight.
-- **Skill Utilisation**: Empirical invocation frequency of declared capabilities.
+- **Skill Utilisation**: Empirical invocation frequency of declared capabilities. Listed and invoked skills are measured per harness; where either side is not measurable the dimension says so rather than reporting zero ([skills view contract](#skills-view-contract)).
 - **Delegation Overhead**: Tokens and latency dedicated strictly to orchestrating child handoffs.
 - **Continuity**: Turn-over-turn context stability and retention across compaction events.
 
@@ -687,7 +795,8 @@ detector declares its numerator, denominator, measurement class, and explicit un
 - `oversizedResultShare`: Proportion of turn input consumed by large tool output blocks.
 - `compactionPressure`: Rate of context window growth relative to model context limits.
 - `delegationOverhead`: Percentage of run tokens spent on parent-child coordination.
-- `skillUtilisation`: Observed activation frequency of declared skills (ranked last per D16).
+- `skillUtilisation`: Observed activation frequency of declared skills (ranked last per D16). Its listed and invoked sets come from `dash/src/canon/skills.ts`, not from tool names or text matching. A `Skill` tool call credits the skill it loads, never a skill named `Skill`. When invocations are not measurable (Copilot, Antigravity) or no listing is measurable (Pi, OpenCode, unknown harnesses), the signal is reported as not measurable and no finding is raised. See the [skills view contract](#skills-view-contract).
+- `inactive-skill-reference` (finding detector): A listed skill with no observed invocation. It is a low-confidence, heuristic finding ranked last, worded as "listed with N recorded turns and 0 invocations". It states what was observed and does not use deletion or waste wording (ADR 0013 D15/D16). The same measurability rule applies: no finding when either side is not measured.
 
 ### Context-Item Classification (Decision D15)
 
@@ -729,7 +838,7 @@ prefers the fuller row as keeper, and joined counters are never summed. File+fil
 pairs under the folded `cursor` share are admitted, not only OTel+file. Raw ingest rows
 remain provenance; the join applies when derived tables rebuild.
 
-**File-synthesized turn deduplication (issue #232).** For file-synthesized turns (specifically Claude Desktop where request and response halves produce twin lines for one turn), the reader/synth layer (`dash/src/synth/readers/claude.ts`) groups contiguous request/response blocks into a single `ReaderTurn` / `llm.invoke` record. As a derived-layer safeguard, `dedupeTwinTurns` in `dash/src/canon/twin-dedupe.ts` collapses same-turn duplicate file rows for Claude Desktop even when no OTLP mate exists (`otels.length === 0`). Other file sources preserve proximate identical counters as genuine retries per ADR 0009 D4. Distinct parts from both halves are fused (`contentFromParts`, keeper parts first, donor parts merged), preserving prompt/context and tool execution/reply text. Parser contracts use per-harness constants in `dash/src/refresh/registry.ts` (`CLAUDE_PARSER_CONTRACT_VERSION`, `CODEX_PARSER_CONTRACT_VERSION`, `KILO_PARSER_CONTRACT_VERSION`, `DEFAULT_PARSER_CONTRACT_VERSION`): Claude was bumped to 3 in issue #232, and the current Claude contract is `4` (bumped via issue #216 / PR #276 to capture synth parts, alongside Codex and Kilo at 2), invalidating older checkpoints so `dash refresh` cleanly re-synthesizes historical sessions without manual cache deletion.
+**File-synthesized turn deduplication (issue #232).** For file-synthesized turns (specifically Claude Desktop where request and response halves produce twin lines for one turn), the reader/synth layer (`dash/src/synth/readers/claude.ts`) groups contiguous request/response blocks into a single `ReaderTurn` / `llm.invoke` record. As a derived-layer safeguard, `dedupeTwinTurns` in `dash/src/canon/twin-dedupe.ts` collapses same-turn duplicate file rows for Claude Desktop even when no OTLP mate exists (`otels.length === 0`). Other file sources preserve proximate identical counters as genuine retries per ADR 0009 D4. Distinct parts from both halves are fused (`contentFromParts`, keeper parts first, donor parts merged), preserving prompt/context and tool execution/reply text. Parser contracts use per-harness constants in `dash/src/refresh/registry.ts` (`CLAUDE_PARSER_CONTRACT_VERSION`, `CODEX_PARSER_CONTRACT_VERSION`, `KILO_PARSER_CONTRACT_VERSION`, `DEFAULT_PARSER_CONTRACT_VERSION`): Claude was bumped to 3 in issue #232, then to `4` for issue #216 (PR #276, synth parts), and the current Claude contract is `7` (bumped for skill listings; see the [skills view contract](#skills-view-contract)), with Codex and Kilo at `3`, invalidating older checkpoints so `dash refresh` cleanly re-synthesizes historical sessions without manual cache deletion.
 
 Copilot OTLP sessions are excluded from the `tool_yield` digest deliberately. No Copilot
 producer path can yet vouch that tool-call telemetry is complete, so an absent
@@ -848,13 +957,13 @@ handle injected by `kyberdash report`, and a `:memory:` store, are never probed 
 ### Jobs and shared settings (ADR 0033)
 
 The `kyberdash web` server hosts the background work. `JobHost`
-(`dash/src/jobs/host.ts`) runs the scheduled refresh, the maintenance pass, and the
-manual/import/clean children; `ReceiverHost` (`dash/src/jobs/receiver-host.ts`) owns the
-OTLP receiver child. A job is `kyberdash dash refresh …` spawned by the server, so a crash
-or a long import cannot take the server down and the in-child refresh lock
-(`dash/src/refresh/lock.ts`, exit code 3) keeps arbitrating with a terminal-started
-command. Exactly one host schedules: `dash/src/jobs/lease.ts` takes `jobs.lock` in the
-state directory, and a host that cannot take it runs nothing and reports
+(`dash/src/jobs/host.ts`) runs the scheduled refresh, the maintenance pass, the
+manual/import/clean children, and post-run transcript synchronization; `ReceiverHost`
+(`dash/src/jobs/receiver-host.ts`) owns the OTLP receiver child. A job is
+`kyberdash dash refresh …` spawned by the server, so a crash or a long import cannot take the
+server down and the in-child refresh lock (`dash/src/refresh/lock.ts`, exit code 3) keeps
+arbitrating with a terminal-started command. Exactly one host schedules: `dash/src/jobs/lease.ts`
+takes `jobs.lock` in the state directory, and a host that cannot take it runs nothing and reports
 `running-elsewhere`.
 
 **Folder import is opt-in and shared.** `settings.folder_import.scheduled` — off by
@@ -883,6 +992,17 @@ instead of sliding onto a random port — a silent move would strand the tray, w
 by the configured URL, and every bookmark aimed at it. The bind, the `server.json` attach
 point, and the listening line all happen only after a successful bind, so a refused start
 publishes nothing for a tray to chase.
+
+#### Post-run transcript synchronization engine job (ADR 0038)
+
+Live OpenTelemetry streams frequently capture operational span metrics without complete conversation histories. To reconcile asynchronous on-disk session transcripts with live telemetry, the engine hosts `runTranscriptSync` (`dash/src/sync/transcript-sync.ts`), executed by `JobHost` (`dash/src/jobs/host.ts`) on scheduling ticks ([ADR 0038](../adr/0038-post-run-transcript-sync-subagent-hierarchy.md)):
+- **Delta byte streaming**: The job queries active sessions from `session` (`WHERE sync_status NOT IN ('settled', 'unavailable') OR sync_status IS NULL`). For each session referencing a valid `transcript_path`, it stats the file. If `fileSize > oldOffset`, it reads incremental delta bytes from `transcript_offset` to `fileSize`.
+- **Enrichment by request ID**: Delta bytes are parsed line-by-line as JSONL. Matching lines containing `requestId` and message content enrich canonical records in `records` table by joining on `request_id`, appending conversation history parts into `parts_json` and updating `content_json`. The session is updated with `transcript_offset = fileSize`, `synced_at = nowIso`, and `sync_status = 'synced'`.
+- **Truncation handling**: If a file is truncated (`fileSize < oldOffset`), the job rewinds to offset 0, re-reads the full file from the beginning, updates canonical records, and resets the offset.
+- **Inactivity settlement lifecycle**: When file size remains unchanged (`fileSize === oldOffset`) and status is `synced`, the engine checks session inactivity. If at least 30 minutes have elapsed since the session's latest activity (`ended` or `started` timestamp) across unchanged passes (`(now - lastActivity) >= 30 * 60_000`), the session transitions to `sync_status = 'settled'` with `settled_at = nowIso`. Settled sessions are excluded from future sync passes, keeping ticks lightweight.
+- **Missing transcript timeout**: If `transcript_path` is null or missing on disk, and more than 24 hours have elapsed since the session ended or started, the session transitions to `sync_status = 'unavailable'`.
+- **Lock arbitration**: Before delta processing, `runTranscriptSync` probes the store refresh lock (`STORE_LOCK_FILE`, `dash/src/refresh/lock.ts`). If an active store refresh holds the lock, transcript sync yields immediately with `{ outcome: 'busy' }`, avoiding database contention.
+- **Display layer boundary**: Following [ADR 0033](../adr/0033-kyberdash-surfaces-are-display-layers.md), the transcript sync job runs strictly in the engine (`JobHost`), never in the tray or web frontend.
 
 ### Web Dashboard (dash/web/)
 
@@ -921,6 +1041,15 @@ The individual views:
   context item, and into a finding, is unchanged.
 - **`Sessions.tsx`**: Top-navigation destination wrapping `ContextExplorer` (ASAD +
   timeline); not a Context tab, and scoped by the same harness selector as Context Doctor.
+  Its section **4 · Skills** shows listed and invoked skills per session and per row
+  ([skills view contract](#skills-view-contract)); the Execution Timeline is section
+  **5 · Execution Timeline**.
+  A session row's title is `<agent> · <session name>` (`formatSessionTitle`,
+  `dash/web/src/lib/labels.ts`). The agent is the recorded agent identity, omitted when it only
+  repeats the harness. The session name is the stored label when it is a human title, else the
+  session id when the harness chose a readable one. With neither part the title is
+  `<Harness> session`. GenAI span names (`chat gpt-4o-mini`, `invoke_agent architect`,
+  `execute_tool view`) are operations and are never shown as a title.
 - **`HarnessDetail.tsx`**: Per-harness rollups, coverage indicators, labelled grouping basis, and run browser.
 - **`RunDetail.tsx`**: Multi-agent run topology, execution tree, run scorecard, and grouping label.
 - **`FindingDetail.tsx`**: In-depth finding view with evidence table, confidence basis, risk caveats, and calibration summary.
@@ -1027,9 +1156,9 @@ The web dashboard server wires HTTP requests directly to `KyberBridge`:
 | `/api/kyber/runs` | `GET` | `{ runs: RunRow[] }` | List runs newest-first; supports `?harness=`. Each row carries `started`, `harness`, measured `turnCount` when derivable, and optional `label` for Compare inventory labels. |
 | `/api/kyber/run/:id` | `GET` | `{ run, executionTree, executions, findings, turns, scorecard }` | Complete run detail with parent/child execution tree, executions enriched with `turnCount` and `costUsd`, `turns` list (`RunTurnRow[]` with model, tokens, pressure, `cacheHitRatio`, timestamp, and per-turn `costUsd`), and run-scoped `scorecard` (`RunScorecard`). |
 | `/api/kyber/sessions` | `GET` | `{ sessions: SessionSummary[] }` | List sessions; supports `?limit=` and `?harness=`. |
-| `/api/kyber/session/:id` | `GET` | `SessionPayload` | Full session payload with turns, context, tools, and timeline. Summary emits `cache_hit_ratio` and `cache_creation_coverage` from single engine writer. |
+| `/api/kyber/session/:id` | `GET` | `SessionPayload` | Full session payload with turns, context, tools, and timeline. Summary emits `cache_hit_ratio` and `cache_creation_coverage` from single engine writer. Additively carries `summary.skills_listed`, `summary.skills_invoked`, `skills`, and per-turn `turns[i].skills_listed` / `turns[i].skills_invoked` ([skills view contract](#skills-view-contract)). |
 | `/api/kyber/session/:id/content` | `GET` | `SessionContent` | Full canonical content for an inspected session part. |
-| `/api/kyber/session/:id/turn/:index/content` | `GET` | `TurnContentResult` | Full unclipped assembled context for a specific turn ([ADR 0014](../adr/0014-unclipped-turn-inspection-and-copy-out-protocol.md)). Uses 0-based `:index`; strict resolution returns 404 for out-of-bounds turn indices, and 200 with empty parts when the turn exists but recorded no content. `?full=true` is the explicit lossless path — no default-budget truncation, no large-number sentinel — backing the whole-turn inspector; each part annotates recurrence against earlier captured turns by whole-text sha256 with no normalization, and `sharedContext` unions turn-span system prompts with non-turn session prompts, each tagged with its contributing `turnIndex` ([ordered, API-seen turn context](#ordered-api-seen-turn-context)). Additively carries `parentSpanId` and `rawPacket: { spanAttributesPath, interactionPath? }` — the packet pointers the turn view discloses; `interactionPath` is present only when the parent's quarantine row kept a payload ([ADR 0035](../adr/0035-kyberdash-quarantine-raw-packet-evidence.md)). |
+| `/api/kyber/session/:id/turn/:index/content` | `GET` | `TurnContentResult` | Full unclipped assembled context for a specific turn ([ADR 0014](../adr/0014-unclipped-turn-inspection-and-copy-out-protocol.md)). Uses 0-based `:index`; strict resolution returns 404 for out-of-bounds turn indices, and 200 with empty parts when the turn exists but recorded no content. `?full=true` is the explicit lossless path — no default-budget truncation, no large-number sentinel — backing the whole-turn inspector; each part annotates recurrence against earlier captured turns by whole-text sha256 with no normalization, and `sharedContext` unions turn-span system prompts with non-turn session prompts, each tagged with its contributing `turnIndex` ([ordered, API-seen turn context](#ordered-api-seen-turn-context)). Additively carries `parentSpanId` and `rawPacket: { spanAttributesPath, interactionPath? }` — the packet pointers the turn view discloses; `interactionPath` is present only when the parent's quarantine row kept a payload ([ADR 0035](../adr/0035-kyberdash-quarantine-raw-packet-evidence.md)). Additively carries a `skills` entry, `{listed: [{name, text?}], invoked: [names]}`, where either side or the whole entry may be `{availability: 'not_measurable', reason}` ([skills view contract](#skills-view-contract)). |
 | `/api/kyber/findings` | `GET` | `{ findings: Finding[], total, limit, offset, detectorCounts, unknownWindowSessions }` | Ranked findings; supports `?runId=`, `?sessionId=`, `?harness=`, `?detector=`, `?limit=`, `?offset=`. `total` describes the narrowed set; `detectorCounts` cover the run/session/harness scope ignoring paging and the detector filter so filter chips never evaporate; `unknownWindowSessions` counts sessions with an unreported context window in scope. |
 | `/api/kyber/finding/:id` | `GET` | `Finding` | Single finding detail with evidence rows and risk caveats. |
 | `/api/kyber/predictions` | `GET`, `POST` | `{ predictions: Prediction[] }` | Query or record prediction calibration entries. |
@@ -1058,6 +1187,16 @@ All `/api/kyber/*` responses return standard headers (`content-type: application
 `cleanDatabase` (`dash/src/clean/clean.ts`) is the single implementation behind `kyberdash dash clean` and `POST /api/kyber/clean`; a surface asks for it over the API and holds no clean logic of its own. One clean pauses the OTLP receiver (loopback admin routes on `dash/src/otel/receiver.ts`; 503 + Retry-After while paused, `/healthz` stays 200 with `paused`, lease TTL auto-resumes), holds the refresh lock (exit 3 / 409 when busy), wipes the scope in one store transaction — records (fold-expanded to raw front-end names), provenance, checkpoints, and harness-scoped derived caches — projects the derived tables, re-ingests the scope **only when the caller asked for a window** (`--reingest-weeks <n>`, 1–52; absent means none, which is the default), and resumes ingestion in a `finally`. Kept in all cases: `ingest_log`, `refresh_run`, `metadata` (stamped `last_clean_at`/scope), `token_cache`, and the model-window catalog. Wipe-all clears `quarantine` and the log-enrichment tables. A per-harness wipe scopes the `quarantine`, `pending_logs`, and `quarantined_logs` rows whose `harness` matches the wiped raw names — the nullable column schema v19 added for exactly this ([ADR 0035](../adr/0035-kyberdash-quarantine-raw-packet-evidence.md)); a row with no harness is "unknown", never "matches", so unclaimed rows survive a per-harness wipe and are cleared only by the complete wipe. Assembled turn text is purged after 14 days. The raw packet keeps exactly what the sender sent until you wipe the `claude-code` harness or the whole database ([ADR 0018](../adr/0018-kyberdash-content-retention-purge.md)). No backup is taken, by design: the data is ephemeral point-in-time telemetry, re-derivable from source logs except OTLP-collected records, which both confirm surfaces disclose as permanently gone. Nothing re-imports after the clean on its own either: the next scheduled refresh reads folder sources only while `settings.folder_import.scheduled` is `on` ([ADR 0033](../adr/0033-kyberdash-surfaces-are-display-layers.md) decision 6). Automatic paths (refresh, retention purge) keep the ADR 0016/ADR 0018 no-delete contracts; only the confirmed clean deletes rows, and only an explicitly requested re-ingest repopulates from source logs.
 
 Coverage after a wipe: `refresh_run` rows older than the last wipe are ignored when coverage is computed. They are audit history of runs whose records are gone, and counting them would claim coverage the store no longer has.
+
+### Browser opener and route admission contracts
+
+When launching the web dashboard (`kyberdash web`) or navigating to a specific view (`--view <path>`), the engine opens the default system browser via `openBrowser` (`dash/src/cli/web.ts`). Defense in depth requires strict URL validation and shell-free process execution across platforms:
+
+- **Windows browser opener without shell dispatch (D1):** On Windows (`win32`), `openBrowser` launches URLs via `execFile('rundll32.exe', ['url.dll,FileProtocolHandler', safeUrl])`, while macOS uses `open` and Linux uses `xdg-open`. Invoking `rundll32.exe` directly avoids spawning `cmd.exe /c start`, which both eliminates the indirect command-line injection sink (`js/indirect-command-line-injection`) and preserves `&` in multi-parameter query strings (such as `/compare?a=:runId&b=:runId`) that `cmd.exe` would otherwise split as a command separator.
+- **Loopback origin and view route validation (D2, D4):** Before launching a browser (`openBrowser`) or joining a `--view` path (`joinViewUrl`), `validateDashboardUrl` enforces the same loopback and route admission rules as the Rust tray's `open_view_url` / `loopback_origin` (`dash/tray/src-tauri/src/ipc.rs` and `dash/tray/src-tauri/src/api.rs`):
+  - Origin must be strictly `http://127.0.0.1:<port>` with integer port `1..65535` and no credentials (`@`, `\`, `%`).
+  - The relative view (`${pathname}${search}`) must not contain `://` (scheme injection), leading `//` (protocol-relative injection), or `..` traversal segments, and must match a declared route in `dash/src/server/view-paths.json` via `matchesViewPath`.
+  - `openBrowser` refuses any URL that fails `validateDashboardUrl` without invoking `execFile`.
 
 ### The KyberDash Tray (dash/tray/)
 
@@ -1156,6 +1295,7 @@ project; the measured rationale the retirement would otherwise take with it is p
 - [ADR 0015](../adr/0015-opt-in-llm-context-review-seam.md) — opt-in LLM context review seam and finding isolation.
 - [ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md) — harness-source jobs, split client identity, schema-11 checkpoints, and `dash refresh`.
 - [ADR 0018](../adr/0018-kyberdash-content-retention-purge.md) — stored content with a 14-day automatic purge after refresh.
+- [ADR 0038](../adr/0038-post-run-transcript-sync-subagent-hierarchy.md) — post-run transcript synchronization, stable-identity subagent session hierarchy, Schema v20, and read-time spend rollups.
 - [Relocation over context deletion standard](../rules/relocation-over-deletion.md) — diagnostic recommendations prioritize moving and progressive disclosure over context removal (D8).
 - [Honest unobservability standard](../rules/honest-unobservability.md) — missing telemetry and coverage gaps are explicit and never coerced to zero.
 - [Secondary cost display standard](../rules/secondary-cost-display.md) — cost is strictly a derived secondary metric behind token and latency health (D9).

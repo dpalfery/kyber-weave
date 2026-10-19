@@ -37,8 +37,13 @@ review:
     - id: format-style
       run: [dotnet, format, KyberWeave.sln, style, --verify-no-changes, --severity, warn, -v, minimal]
       blocking: true
+    # `--no-incremental` because coverlet.MTP instruments `bin/Release` in place: an
+    # interrupted coverage run leaves the test assembly and the libraries it loads rewritten
+    # with the instrumenting session's temp path baked in, and an incremental build cannot
+    # tell those survivors from fresh outputs. Forcing a rebuild here keeps the `--no-build`
+    # test gate that follows it from running against binaries no longer executable.
     - id: build
-      run: [dotnet, build, KyberWeave.sln, -c, Release]
+      run: [dotnet, build, KyberWeave.sln, -c, Release, --no-incremental]
       blocking: true
     # coverlet.MTP writes Cobertura under artifacts/coverage so GateRunner can populate
     # the coverage floor. xUnit 4 uses Microsoft Testing Platform, whose coverage
@@ -63,6 +68,19 @@ review:
     # later change to the CLI default cannot silently loosen what the gate enforces.
     - id: skill-scan
       run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, scan, .apm/skills/kyber-weave-docs, --fail-on, critical]
+      blocking: true
+    # The entry-point skill is a second skill directory, and `skill validate` / `lint` /
+    # `scan` each take one path. The declared suite covers it the same way it covers the
+    # authoring skill — three more gates, one per verb, or the new skill is discoverable
+    # to an agent but never gated.
+    - id: skill-validate-cli
+      run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, validate, .apm/skills/kyber-weave-cli]
+      blocking: true
+    - id: skill-lint-cli
+      run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, lint, .apm/skills/kyber-weave-cli, --min-desc-score, "70"]
+      blocking: true
+    - id: skill-scan-cli
+      run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, scan, .apm/skills/kyber-weave-cli, --fail-on, critical]
       blocking: true
     - id: docs-validate
       run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, docs, validate, .]
@@ -153,3 +171,12 @@ review:
     max-reviewable-lines: 10000
     major-count-blocks: 3
     min-confidence: 7
+
+# Rendered into the Config Reg block of AGENTS.md as <autonomy>, the only place a portable
+# agent can read it. This repository is built by agent teams working test-first through the
+# gates, so the conductor proceeds without stopping at each checkpoint.
+autonomy: autonomous
+
+# Paths agents resolve by property name instead of a relative link.
+config-reg:
+  review-guidance: REVIEW.md

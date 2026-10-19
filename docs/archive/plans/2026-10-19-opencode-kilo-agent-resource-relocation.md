@@ -229,8 +229,8 @@ the approved answer until the conductor returns an explicit decision.
 | ID | Question | Answer / decision | Mitigating and supporting information | Status / approval provenance |
 |---|---|---|---|---|
 | D1 | Destination layout for agent-owned reference files on `opencode` and `kilo` — **revised after human pushback (§1.4)** to: how do we keep resources co-located beside their owning agent without phantom registration? | **Approved — co-located extension guarding:** agent-owned resources stay exactly where `SquadResourceProjection` puts them today (beside the principal, under `{agents}/<owner>/…`); any agent-owned `.md` resource deploys with a `.markdown` extension; authored links rewritten `.md` → `.markdown` via `SquadResourceLinkRewriter`; non-`.md` resources project verbatim (invisible to both scanners) | Satisfies the human's co-location/ownership constraint verbatim. Source-verified on both harnesses (§2.4): both agent scanners match only `{agent,agents}/**/*.md` with `dot: true`, so `.markdown` is invisible to discovery while the file stays beside its agent and readable by the `read` tool. No content mutation, no registry participation, no version-key semantics. Alternatives rejected on record: (b) frontmatter `disable`/`disabled: true` injection — exists on both (v1 `disable`, v2 `disabled`, both hard-remove from the registry) but mutates every deployed reference with target/version-specific frontmatter and risks schema-warning noise on the wrong line; (c) ZCode-style skills-tree relocation — the revision-1 recommendation, rejected by the human 2026-10-19 ("putting them in a skills folder … makes them hard to find"); (d) status quo — the reported defect | ANSWERED — human decision 2026-10-19 via conductor; matches the recommendation; (b) and (c) rejected on record; **approved for execution ("Approve and execute", 2026-10-19)** |
-| D2 | Scope: only `opencode`+`kilo`, or also the other flat-file agent targets (Claude, Cursor, Copilot, Codex, Pi, Factory, Devin, Antigravity)? | **Approved — `opencode`+`kilo` only, and no `docs/todo` seed** (the human chose the strict-scope option, departing from recommendation (a) of fix-now-plus-todo) | Considered trade-off: per-target misdiscovery is unverified and the right mechanism is source-dependent (extension guard, frontmatter opt-out, relocation — §2.4 inventory), which argued for a deferred-work seed. The human's strict choice means **no deferred-work record is created**; ADR 0037 carries the property-based rule and the three verified mechanisms so any future target can apply it without a seed. Nothing in this plan creates or references a todo artifact | ANSWERED — human decision 2026-10-19 via conductor; departs from recommendation (a); recorded as the governing scope; **approved for execution ("Approve and execute", 2026-10-19)** |
-| D3 | ADR requirements | **Approved — new ADR 0037**, following the ADR 0021 shape: *a target whose agent discovery registers nested markdown under the agents directory must deploy agent-owned markdown resources in a form that scanner ignores, keeping them co-located with their principal; the deviation is recorded as a `resource-links-rewritten` degradation*. Covers opencode+kilo, quoting the verified scanner globs (`"{agent,agents}/**/*.md"` with `dot: true`, on both the v1/Kilo line and opencode v2, §2.4) and the rejected alternatives (frontmatter `disable`/`disabled` injection; skills-tree relocation); states the rule for future targets without creating a deferred-work seed (D2) | Precedent cuts both ways: the 2026-10-10 Copilot-global change took an ADR waiver as a "narrow, target-specific refinement" of a two-exception rule. This change is not narrow — it adds a property-based rule binding every future renderer, revises the "authored links resolve verbatim" rule for a third and fourth target, and is the class's third recurrence (escalation tripwire). Amending ADR 0021 in place was rejected: its Context is a ZCode-source verification record and its decision is specifically about relocation; a waiver under-states a rule change of this reach | ANSWERED — human decision 2026-10-19 via conductor; matches the recommendation; **approved for execution ("Approve and execute", 2026-10-19)** |
+| D2 | Scope: only `opencode`+`kilo`, or also the other flat-file agent targets (Claude, Cursor, Copilot, Codex, Pi, Factory, Devin, Antigravity)? | **Approved — `opencode`+`kilo` only, and no `docs/todo` seed** (the human chose the strict-scope option, departing from recommendation (a) of fix-now-plus-todo) | Considered trade-off: per-target misdiscovery is unverified and the right mechanism is source-dependent (extension guard, frontmatter opt-out, relocation — §2.4 inventory), which argued for a deferred-work seed. The human's strict choice means **no deferred-work record is created**; ADR 0040 carries the property-based rule and the three verified mechanisms so any future target can apply it without a seed. Nothing in this plan creates or references a todo artifact | ANSWERED — human decision 2026-10-19 via conductor; departs from recommendation (a); recorded as the governing scope; **approved for execution ("Approve and execute", 2026-10-19)** |
+| D3 | ADR requirements | **Approved — new ADR 0040**, following the ADR 0021 shape: *a target whose agent discovery registers nested markdown under the agents directory must deploy agent-owned markdown resources in a form that scanner ignores, keeping them co-located with their principal; the deviation is recorded as a `resource-links-rewritten` degradation*. Covers opencode+kilo, quoting the verified scanner globs (`"{agent,agents}/**/*.md"` with `dot: true`, on both the v1/Kilo line and opencode v2, §2.4) and the rejected alternatives (frontmatter `disable`/`disabled` injection; skills-tree relocation); states the rule for future targets without creating a deferred-work seed (D2) | Precedent cuts both ways: the 2026-10-10 Copilot-global change took an ADR waiver as a "narrow, target-specific refinement" of a two-exception rule. This change is not narrow — it adds a property-based rule binding every future renderer, revises the "authored links resolve verbatim" rule for a third and fourth target, and is the class's third recurrence (escalation tripwire). Amending ADR 0021 in place was rejected: its Context is a ZCode-source verification record and its decision is specifically about relocation; a waiver under-states a rule change of this reach | ANSWERED — human decision 2026-10-19 via conductor; matches the recommendation; **approved for execution ("Approve and execute", 2026-10-19)** |
 | D4 | Link rewriting and degradation, including the impossible cases | **Approved — closure-driven `.md` → `.markdown` rewrite**, reusing ZCode semantics with a different mapping: rewrite only a Markdown link target that exactly equals a declared resource's relative path (closure-driven; `#fragment`/`?query`, titles, angle-form preserved; fenced/inline code untouched), mapping an in-closure `.md` path to the same path with a `.markdown` extension and passing any non-`.md` in-closure path (e.g. `.txt` assets) through unchanged; record one `resource-links-rewritten` degradation per resource-owning agent (Target `opencode`/`kilo`, identities = agent name, digest = `BodyDigest`, details quoting the harness glob and the extension guard, with the "no authored link required rewriting" variant). **Fail closed** with `SquadRenderValidationException` in the one newly-impossible case: an agent whose closure contains both `x.md` and `x.markdown` (the extension map would alias them). Skill-owned resources keep verbatim beside-principal projection (both skill scanners are `*/SKILL.md`, one level) | Forced by the shared rewriter contract and ADR 0021 precedent (recorded, closure-driven deviation). The revision-1 fail-closed case (canonical-skill directory collision) disappears with relocation. The `.md`+`.markdown` alias case is new and is the only way the extension map can make two authored paths collide; repo precedent is fail-closed because a merge would overwrite one principal's file. Links outside the declared closure are untouched by design; an authored `.markdown` link is already correct and its file projects verbatim | ANSWERED — human decision 2026-10-19 via conductor; matches the recommendation; **approved for execution ("Approve and execute", 2026-10-19)** |
 | D5 | Development mode | `test-first` | Default; no opt-out supplied. The rewritten contract tests are the RED evidence | Set by conductor packet 2026-10-19; **approved for execution ("Approve and execute", 2026-10-19)** |
 
@@ -272,7 +272,7 @@ Both scopes behave identically: the guard touches only the resource's own filena
 
 ### 4.3 Documentation changes
 
-- New `docs/adr/0037-flat-agent-dir-discovery-guarded-resources.md` (title working) —
+- New `docs/adr/0040-flat-agent-dir-discovery-guarded-resources.md` (title working) —
   Status / Context (the human's constraint and quote; the source-verified scanner facts
   from §2.4 with repo paths, branches and fetch dates; the symptom-class history) /
   Decision (co-location retained; `.md` → `.markdown` extension guard on targets whose
@@ -288,7 +288,7 @@ Both scopes behave identically: the guard touches only the resource's own filena
 - `docs/adr/README.md` — index row for 0037.
 - `docs/kyber-squad/architecture.md:428-457` — rewrite the exceptions list into the
   property-based rule (ZCode relocation per ADR 0021; OpenCode and Kilo co-located
-  extension guard per ADR 0037; Copilot global keeps its absolute-path form) and correct
+  extension guard per ADR 0040; Copilot global keeps its absolute-path form) and correct
   "only ZCode and Copilot (global) use today" to name the rewriter's four users plus the
   new guard helper.
 - Renderer class remarks (`OpenCodeRenderer.cs`, `KiloRenderer.cs`) — add a paragraph in
@@ -296,7 +296,7 @@ Both scopes behave identically: the guard touches only the resource's own filena
   path, glob) and dating the verification 2026-10-19.
 - **No todo is seeded** (D2 human decision): the other flat-file targets (Claude, Cursor,
   Copilot project scope, Codex, Pi, Factory, Devin, Antigravity) are out of scope with no
-  deferred-work record; ADR 0037's rule and the §2.4 mechanism inventory (extension
+  deferred-work record; ADR 0040's rule and the §2.4 mechanism inventory (extension
   guard, frontmatter opt-out, relocation) carry the knowledge for any future target.
 
 ## 5. Test contract (test-first)
@@ -346,7 +346,7 @@ Both scopes behave identically: the guard touches only the resource's own filena
 | T3 | Kilo integration | `KiloRenderer.cs` (loop, `RenderAgent`, remarks) | Kilo tests in the §5.1 filter green; whole filter green | T2 | `csharp-dev` |
 | T4 | Sweep remaining pinned assertions + full gates | any test pinning `.opencode/agents/<name>/…` or `.kilo/agents/<name>/…` resource literals (bounded search: `grep -rn "agents/.*/references/" tests/KyberWeave.Tests`, plus `SquadRootWrapperAgentTests`, `PullRequestSkillConsolidationTests`, squad filesystem/update contract tests) | Full suite green; whitespace + style format checks clean; install/update receipt contract still green (extension change alters owned-path lists; receipt recovery must replace old `.md` paths) | T3 | `test-dev` |
 | T5 | Governed documentation | `docs/adr/0037-*.md`, `docs/adr/README.md`, `docs/kyber-squad/architecture.md` | §5.3 docs gates zero findings; ADR follows 0021 shape and quotes the §2.4 globs; architecture bullet states the generalized rule accurately; **no todo is created** (D2) | T4 | `docs-dev` |
-| T6 | Review + closeout | whole change | `code-review` council over the accumulated change with findings fixed; completion summary with closeout mapping (D1/D3/D4 → ADR 0037 + architecture.md; D2 → todo; this plan archived by the finishing PR) | T5 | `code-review`, `docs-dev` |
+| T6 | Review + closeout | whole change | `code-review` council over the accumulated change with findings fixed; completion summary with closeout mapping (D1/D3/D4 → ADR 0040 + architecture.md; D2 → todo; this plan archived by the finishing PR) | T5 | `code-review`, `docs-dev` |
 
 ## 7. Dependency graph and concurrency
 
@@ -380,7 +380,7 @@ whole change. **MAX_CONCURRENCY: 1.**
 - **Degradation ordering drift** between renderers — pinned byte-exactly by the
   rewritten determinism tests.
 - **Out of scope**: the other eight flat-file targets — out by human decision (D2), with
-  **no todo seed**; ADR 0037 records the rule and the mechanism inventory for future
+  **no todo seed**; ADR 0040 records the rule and the mechanism inventory for future
   targets; converging ZCode/Copilot onto the new helper; skill-owned resource projection (correct as-is);
   any change to `SquadResourceProjection`, `SquadSourceLoader`, or the `.apm` skills
   product path; no new dependencies (Markdig/YamlDotNet unchanged).
@@ -404,7 +404,7 @@ The change shipped and this plan is archived by its finishing PR per KW-DOC-LIFE
 
 Closeout mapping:
 
-- **D1/D3/D4 → [ADR 0037](../adr/0037-flat-agent-dir-discovery-guarded-resources.md)** (new ADR
+- **D1/D3/D4 → [ADR 0040](../adr/0040-flat-agent-dir-discovery-guarded-resources.md)** (new ADR
   stating the property-based co-location rule with the source-verified scanner globs) and the
   **resource-projection bullet** in `docs/kyber-squad/architecture.md` (exceptions list
   generalized to the property-based rule; rewriter-user count corrected).
@@ -414,7 +414,7 @@ Closeout mapping:
 
 Completion summary: all tasks T1–T6 executed. RED contract tests authored (T1), the
 `SquadAgentResourceDiscoveryGuard` helper and OpenCode/Kilo renderer integration landed (T2/T3),
-stale assertions swept and the full suite passed 2681/2681 (T4), ADR 0037 + architecture.md
+stale assertions swept and the full suite passed 2681/2681 (T4), ADR 0040 + architecture.md
 updated with `docs validate` and `docs drift` zero findings (T5), and the code-review council ran
 over the change (T6). The council's two minor in-scope findings (degradation wording over-claim
 for text-only closures; a dead `out` overload) were fixed and pinned with tests before this PR.

@@ -13,6 +13,7 @@ import {
 } from '../lib/kyberApi.js'
 import { Skeleton } from './ui/skeleton.js'
 import { XmlFoldedText } from './SessionInspectorDrawer.js'
+import { SearchableContentView, type ContentViewMode } from './ContentViewToolbar.js'
 
 /**
  * Robust clipboard copy helper with fallback to document.execCommand('copy').
@@ -315,7 +316,7 @@ export function ContentPane({
   context,
   className,
 }: ContentPaneProps) {
-  const [viewMode, setViewMode] = useState<'formatted' | 'raw'>('formatted')
+  const [viewMode, setViewMode] = useState<ContentViewMode>('formatted')
 
   // Decision D4: Where content is not measurable, state the reason and show nothing.
   // Never render a placeholder that could be mistaken for content.
@@ -388,45 +389,27 @@ export function ContentPane({
         </div>
       )}
 
-      {/* Pane Toolbar: Format toggle */}
-      <div className="flex items-center justify-between text-xs pb-1">
-        <span className="text-[11px] font-mono text-tertiary-foreground">
-          {label ? `${label} · ` : ''}{text.length.toLocaleString()} chars
-        </span>
-        <div className="flex rounded border border-border bg-interactive-secondary p-0.5 text-xs">
-          <button
-            type="button"
-            onClick={() => setViewMode('formatted')}
-            className={cn(
-              'px-2 py-0.5 rounded-[4px] font-medium transition-colors',
-              viewMode === 'formatted' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
-            )}
-          >
-            Formatted
-          </button>
-          <button
-            type="button"
-            onClick={() => setViewMode('raw')}
-            className={cn(
-              'px-2 py-0.5 rounded-[4px] font-medium transition-colors',
-              viewMode === 'raw' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
-            )}
-          >
-            Raw
-          </button>
-        </div>
-      </div>
-
-      {/* Content Body */}
-      <div className="rounded border border-border bg-card p-3 max-h-[min(65vh,36rem)] min-h-[160px] overflow-auto">
-        {viewMode === 'formatted' ? (
-          <XmlFoldedText text={text} className="text-xs font-mono" />
-        ) : (
+      {/* Shared Formatted/Raw toolbar with search and exact Copy */}
+      <SearchableContentView
+        view={viewMode}
+        onViewChange={setViewMode}
+        text={text}
+        label={label}
+        viewPrefix="context-content-pane"
+        leading={
+          <span className="text-[11px] font-mono text-tertiary-foreground">
+            {label ? `${label} · ` : ''}{text.length.toLocaleString()} chars
+          </span>
+        }
+        copy={{ text, testId: 'context-content-pane-copy' }}
+        formatted={<XmlFoldedText text={text} className="text-xs font-mono" />}
+        raw={
           <pre className="text-xs font-mono whitespace-pre-wrap break-words text-foreground">
             {text}
           </pre>
-        )}
-      </div>
+        }
+        bodyClassName="rounded border border-border bg-card p-3 max-h-[min(65vh,36rem)] min-h-[160px] overflow-auto"
+      />
     </div>
   )
 }

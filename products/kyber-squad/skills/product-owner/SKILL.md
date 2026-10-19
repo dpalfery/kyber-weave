@@ -17,6 +17,17 @@ Read the specification index before opening a feature artifact. Load [spec autho
 | Tasks | Produce traceable tasks and the selected development-mode contract | [Tasks phase](./references/tasks-phase.md) |
 | Closeout | Verify delivery, migrate durable facts, and archive the spec | [Closeout phase](./references/closeout-phase.md) |
 
+## Discovery order
+
+Use the host's indexes before raw reads. Load the CodeGraph and kyber-weave documentation tools first, through the harness tool search when they are deferred.
+
+- Code: `codegraph_explore` first. It returns verbatim source with callers and blast radius, so do not re-read what it returned.
+- Documentation: `docs_explore`, `docs_for_symbol`, or `docs_glossary` before searching or opening documentation files.
+- Read or search a file directly only for what an index does not cover (configuration, infrastructure, files the docs index missed), when a tool reports the file stale, or to confirm one detail it did not return. When a tool or index is unavailable, fall back to direct reads and say so.
+- Report discovery in your final report: `Discovery: codegraph N, docs N, direct reads N`, with a reason for each direct read of indexed code.
+
+When the conductor's packet carries `autonomy: autonomous`, also read [autonomous decisions](./references/autonomy-decisions.md); it governs open decisions in every phase.
+
 ## Headless phase contract
 
 This skill never prompts the user and never runs an approval gate. Persist the assigned artifact and return its digest to `conductor`, which relays `GAPS` and `OPEN_QUESTIONS` and returns user decisions in a later invocation.
@@ -40,9 +51,11 @@ ARTIFACT: <path resolved from <specification-index>>
 SUMMARY: <concise persisted outcome>
 GAPS: <blocking gaps, or none>
 OPEN_QUESTIONS: <items for conductor to relay, or none>
+Discovery: codegraph N, docs N, direct reads N
+DIRECT_READ_REASONS: <path and reason for each direct read of indexed code, or none>
 ```
 
-The agent records phase approval only when the conductor supplies explicit user approval. A specification is Ready only after all phases are approved, the task artifact records `development-mode: test-first | standard`, the matching Test or verification contract is approved, and the conductor returns final **approve and execute** authorization.
+Supervised behaviour is unchanged. The agent records phase approval only when the conductor supplies explicit user approval, with a single exception: under resolved autonomy `autonomous`, an invocation carrying the conductor's explicit `AUTONOMOUS_APPROVAL: <gate id>` input counts as that approval and is recorded with provenance `autonomous: recommendation accepted`, never inferred from silence or from the mode alone. A specification is Ready only after all phases are approved, the task artifact records `development-mode: test-first | standard`, the matching Test or verification contract is approved, and the conductor returns final **approve and execute** authorization.
 
 ## Shelf life
 

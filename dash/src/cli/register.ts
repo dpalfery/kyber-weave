@@ -223,7 +223,56 @@ async function readStdinText(): Promise<string> {
  * `kyber otel` subcommand and the top-level `otel` alias so both paths run
  * identical service initialization and lifecycle management.
  */
-async function runOtel(opts: { port?: number; host?: string; db?: string }): Promise<never> {
+/**
+ * `kyberdash otel` without `--serve`: the receiver belongs to the one engine, so this attaches
+ * to it (starting it from this same executable when none runs) and turns the hosted receiver
+ * on. It never binds a second receiver.
+ */
+async function attachOtelToEngine(opts: { port?: number; host?: string; db?: string }): Promise<never> {
+  if ((opts.port !== undefined && opts.port !== 4318) || (opts.host !== undefined && opts.host !== '127.0.0.1')) {
+    process.stderr.write(
+      'kyberdash otel: the receiver is hosted by the KyberDash engine on 127.0.0.1:4318; a custom port or host is not supported.\n',
+    )
+    process.exit(2)
+  }
+  const { homedir } = await import('os')
+  const { join } = await import('path')
+  const { ensureEngine } = await import('../engine/ensure.js')
+  const { KYBERDASH_VERSION } = await import('./web.js')
+  const { resolveJobSpawnTarget, currentSpawnRuntime } = await import('./spawn-target.js')
+  const { runningAsSea } = await import('../sea.js')
+
+  const store = new CanonStore(resolveDbPath(opts.db))
+  try {
+    writeSetting(store, SETTING_KEYS.receiverHosted, 'on')
+  } finally {
+    store.close()
+  }
+  const target = resolveJobSpawnTarget(currentSpawnRuntime(runningAsSea()))
+  const result = await ensureEngine({
+    stateDir: join(homedir(), '.kyberdash'),
+    version: KYBERDASH_VERSION,
+    program: target.program,
+    programArgs: target.programArgs,
+  })
+  if (result.outcome === 'failed') {
+    process.stderr.write(`kyberdash otel: ${result.reason}\n`)
+    process.exit(1)
+  }
+  process.stdout.write(
+    `KyberDash engine ${result.outcome} (pid ${result.record.pid}, version ${result.record.version}); ` +
+    'the OTLP receiver is hosted on http://127.0.0.1:4318\n',
+  )
+  process.exit(0)
+}
+
+async function runOtel(opts: { port?: number; host?: string; db?: string; serve?: boolean }): Promise<never> {
+  if (opts.serve !== true) return attachOtelToEngine(opts)
+  // A receiver the engine started must not outlive it: if the engine is killed outright it
+  // cannot stop its child, and an orphan left holding the port is exactly the second
+  // instance this design forbids. The child watches its parent and leaves with it.
+  const parentPid = process.ppid
+  setInterval(() => { if (process.ppid !== parentPid) process.exit(0) }, 2_000).unref()
   const { startOtlpCollectorService } = await import('../otel/service.js')
   await startOtlpCollectorService({
     port: opts.port,
@@ -249,6 +298,7 @@ export function registerKyberCommands(program: Command, dependencies: KyberComma
     .option('--port <number>', 'Port to listen on (default: 4318)', parseInteger, 4318)
     .option('--host <host>', 'Host to bind to (default: 127.0.0.1)', '127.0.0.1')
     .option('--db <path>', 'Custom path for canon.db SQLite database')
+    .addOption(new Option('--serve', 'Run the receiver in this process (used by the engine; do not start by hand)').hideHelp())
     .action(runOtel)
 
   // Harness OpenTelemetry capture (T8: D3, D9, D11). The subgroup points the
@@ -805,5 +855,6 @@ export function registerKyberCommands(program: Command, dependencies: KyberComma
     .option('--port <number>', 'Port to listen on (default: 4318)', parseInteger, 4318)
     .option('--host <host>', 'Host to bind to (default: 127.0.0.1)', '127.0.0.1')
     .option('--db <path>', 'Custom path for canon.db SQLite database')
+    .addOption(new Option('--serve', 'Run the receiver in this process (used by the engine; do not start by hand)').hideHelp())
     .action(runOtel)
 }

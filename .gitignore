@@ -11,7 +11,7 @@ nupkg/
 # above, which is the .NET VSTest directory at the repo root.
 test-results/
 # Agent working notes, lint dumps, and screenshots. Never product.
-.agents-scratchpad/
+.agent_scratchpad/
 *.sarif
 .DS_Store
 /artifacts/
@@ -33,6 +33,10 @@ apm_modules/
 .cursor/**/*.env
 .cursor/**/*.env.*
 !.cursor/**/*.env.example
+
+# Agent harness worktrees are nested git checkouts, never source.
+.claude/worktrees/
+.kilo/worktrees/
 
 node_modules/
 

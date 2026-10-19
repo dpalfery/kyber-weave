@@ -12,7 +12,7 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
     private const string ReportWriteFailed = "KW-REVIEW-025";
 
     /// <inheritdoc />
-    protected override int Execute(CommandContext context, ReviewGatesSettings settings, CancellationToken cancellationToken)
+    public override int Execute(CommandContext context, ReviewGatesSettings settings, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
 

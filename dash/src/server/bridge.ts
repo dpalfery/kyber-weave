@@ -14,6 +14,7 @@ import {
 } from '../canon/measurability.js'
 import { dedupeTwinTurns } from '../canon/twin-dedupe.js'
 import { refreshProcessIsAlive } from '../canon/refresh-run.js'
+import { formatSessionTitle } from '../canon/naming.js'
 import {
   CanonStore,
   decompressRaw,
@@ -68,6 +69,8 @@ import {
   type ExecutionRow,
   type ExecutionTreeNode,
   type HarnessRollupRow,
+  type NotMeasurable,
+  notMeasurable,
 } from '../canon/types.js'
 import type { CostBasisMismatch } from '../canon/cost.js'
 import {
@@ -139,6 +142,14 @@ export type ComparisonTableResult = {
   problems: Array<{ severity: string; code: string; message: string }>
 }
 
+export type SessionRollup = {
+  turn_count: number
+  request_count: number
+  total_input: number
+  total_output: number
+  cost_usd: number | null
+}
+
 export type SessionSummary = {
   session_id: string
   harness: string
@@ -160,6 +171,14 @@ export type SessionSummary = {
   cost: { basis: string; status: string; value?: number; currency?: string }
   models: string[]
   problems: number
+  subagents?: SessionSummary[]
+  rollup?: SessionRollup
+  /**
+   * Set on a projected subagent row whose records are already inside its parent's own
+   * counters (the projection builds both from one merged record set), so a rollup must not
+   * add it a second time.
+   */
+  included_in_parent?: boolean
 }
 
 /** Cost facts needed by the shared report, read without loading raw span payloads. */
@@ -289,6 +308,7 @@ export type ParsedSummary = {
   schema_tokens_per_turn?: number | null
   cost?: CostBlock | null
   models?: string[] | null
+  included_in_parent?: boolean | null
 }
 
 export type SessionPayload = Record<string, unknown> & {
@@ -696,6 +716,12 @@ export type TurnContentResult = {
    */
   rawPacket: { spanAttributesPath: string; interactionPath?: string }
   sharedContext?: TurnContentSharedContext | null
+  /**
+   * The skills this turn had access to and invoked. Not a content block: it
+   * sits beside `blocks` and leaves them unchanged. The whole entry is declared
+   * not measurable when the session's payload carries no skills view.
+   */
+  skills?: TurnSkillsContent | NotMeasurable
 }
 
 /**
@@ -823,6 +849,9 @@ type TurnDescriptor = {
   turn?: unknown
   spanId?: string
   model?: string
+  /** The projected skills of this turn (names); read by the skills entry, never trusted blind. */
+  skills_listed?: unknown
+  skills_invoked?: unknown
 }
 
 /**
@@ -835,6 +864,64 @@ function turnTransportIndexOf(item: TurnDescriptor): number | undefined {
   if (typeof item.index === 'number' && Number.isFinite(item.index)) return item.index
   if (typeof item.turn === 'number' && Number.isFinite(item.turn)) return item.turn - 1
   return undefined
+}
+
+/** The turn's skills entry for the content route (T2), as one turn of the content response. */
+export type TurnSkillsContent = {
+  /** What the turn had access to; each with its row's first observed description as `text` when one exists. */
+  listed: Array<{ name: string; text?: string }> | NotMeasurable
+  /** The distinct skills the turn itself invoked; `[]` is a measured none. */
+  invoked: string[] | NotMeasurable
+}
+
+const isRecordValue = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+
+const isStringArray = (value: unknown): value is string[] =>
+  Array.isArray(value) && value.every((item) => typeof item === 'string')
+
+/**
+ * A turn's skills entry, read from the already-loaded session payload only.
+ * The narrow turn-content seam must not walk session records, so the payload
+ * carries what the projection already derived: `skills.rows[].description`
+ * and each turn's `skills_listed` / `skills_invoked`. A payload projected
+ * before skills existed has no `skills` key and is declared so.
+ *
+ * Known limit (accepted): `text` is the skill's first observed description in
+ * the session. A later listing that changes the description does not alter the
+ * text served for earlier turns.
+ */
+function skillsContentFromPayload(
+  payload: SessionPayload | null | undefined,
+  turn: TurnDescriptor | undefined,
+): TurnSkillsContent | NotMeasurable {
+  const skills = payload?.skills
+  if (!isRecordValue(skills)) return notMeasurable('session not yet projected with skills')
+  if (skills.availability === 'not_measurable') {
+    return notMeasurable(typeof skills.reason === 'string' ? skills.reason : 'Skills are not measurable for this session.')
+  }
+
+  const descriptions = new Map<string, string>()
+  if (Array.isArray(skills.rows)) {
+    for (const row of skills.rows) {
+      if (isRecordValue(row) && typeof row.name === 'string' && typeof row.description === 'string') {
+        descriptions.set(row.name, row.description)
+      }
+    }
+  }
+
+  const listed: TurnSkillsContent['listed'] = isStringArray(turn?.skills_listed)
+    ? turn.skills_listed.map((name) => {
+        const text = descriptions.get(name)
+        return text === undefined ? { name } : { name, text }
+      })
+    : notMeasurable('This turn has no skill listing in the projected session, so the skills it had access to are not measurable.')
+
+  const invoked: TurnSkillsContent['invoked'] = isStringArray(turn?.skills_invoked)
+    ? [...turn.skills_invoked]
+    : notMeasurable('Skill invocations are not measured for this session, so the skills this turn invoked are not measurable.')
+
+  return { listed, invoked }
 }
 
 /**
@@ -1189,6 +1276,40 @@ function buildIngestActivity(
   return { status: 'known', sources, lastReceivedAt }
 }
 
+/**
+ * A session's own counters plus its descendants', counted once. A child whose records are
+ * already inside this session's counters (`included_in_parent`) adds nothing, and neither
+ * does anything beneath it; every other child contributes its own rollup, leaf-first.
+ * `visiting` guards a malformed parent cycle from recursing forever.
+ */
+function computeSessionRollup(session: SessionSummary, visiting: Set<string> = new Set()): SessionRollup {
+  visiting.add(session.session_id)
+  let turnCount = session.turn_count ?? 0
+  let requestCount = session.request_count ?? 0
+  let totalInput = session.total_input ?? 0
+  let totalOutput = session.total_output ?? 0
+  let costUsdSum: number | null = session.cost_usd != null ? session.cost_usd : null
+
+  for (const child of session.subagents ?? []) {
+    if (child.included_in_parent === true || visiting.has(child.session_id)) continue
+    const rolled = child.rollup ?? computeSessionRollup(child, visiting)
+    turnCount += rolled.turn_count
+    requestCount += rolled.request_count
+    totalInput += rolled.total_input
+    totalOutput += rolled.total_output
+    if (rolled.cost_usd != null) costUsdSum = (costUsdSum ?? 0) + rolled.cost_usd
+  }
+  visiting.delete(session.session_id)
+
+  return {
+    turn_count: turnCount,
+    request_count: requestCount,
+    total_input: totalInput,
+    total_output: totalOutput,
+    cost_usd: costUsdSum,
+  }
+}
+
 export class KyberBridge {
   private canonDb?: DatabaseSync
   private readonly store?: CanonStore
@@ -1460,10 +1581,12 @@ export class KyberBridge {
 
   /**
    * List all available sessions from the canonical store, sorted by started DESC.
+   * Child subagent sessions are hierarchically nested under their parent session,
+   * with read-time spend and counters rolled up to the parent.
    */
   listSessions(limit?: number): SessionSummary[] {
     const db = this.getDb()
-    const list: SessionSummary[] = []
+    const rawSessions: SessionSummary[] = []
 
     // The canonical derived `session` cache is the only reporting authority.
     // Raw `records` are never synthesized into sessions here: projection
@@ -1524,10 +1647,22 @@ export class KyberBridge {
                   ...(typeof block.currency === 'string' ? { currency: block.currency } : {}),
                 }
               : { basis: 'unknown', status: 'no_rate' }
-          list.push({
+
+          const rawLabel = row.label ?? null
+          const label =
+            rawLabel && rawLabel.trim() !== ''
+              ? rawLabel
+              : formatSessionTitle({
+                  sessionId: row.session_id,
+                  agentName: row.agent_name,
+                  harness: row.harness,
+                  rawLabel: row.label,
+                })
+
+          rawSessions.push({
             session_id: row.session_id,
             harness: row.harness,
-            label: row.label ?? null,
+            label,
             is_subagent: Boolean(row.is_subagent),
             parent_session: row.parent_session ?? null,
             agent_name: row.agent_name ?? null,
@@ -1546,6 +1681,8 @@ export class KyberBridge {
             cost,
             models: Array.isArray(summ.models) ? summ.models : [],
             problems: problemsCount,
+            subagents: [],
+            ...(summ.included_in_parent === true ? { included_in_parent: true } : {}),
           })
         }
       } catch (err) {
@@ -1553,13 +1690,59 @@ export class KyberBridge {
       }
     }
 
+    // Index all sessions by session_id for fast parent lookup
+    const sessionMap = new Map<string, SessionSummary>()
+    for (const session of rawSessions) {
+      sessionMap.set(session.session_id, session)
+    }
+
+    // Attach each child to its parent. A child is not attached when that would close a cycle
+    // (the parent is the child or one of its descendants), so malformed ancestry cannot make
+    // sessions vanish from the list.
+    const attachedChildIds = new Set<string>()
+    const isAncestorOrSelf = (candidateId: string, ofId: string): boolean => {
+      const seen = new Set<string>()
+      for (let id: string | null | undefined = ofId; id != null && !seen.has(id); id = sessionMap.get(id)?.parent_session) {
+        if (id === candidateId) return true
+        seen.add(id)
+      }
+      return false
+    }
+
+    for (const session of rawSessions) {
+      const isChild = session.is_subagent || Boolean(session.parent_session)
+      if (!isChild || !session.parent_session) continue
+      const parent = sessionMap.get(session.parent_session)
+      if (parent === undefined || isAncestorOrSelf(session.session_id, parent.session_id)) continue
+      parent.subagents = parent.subagents ?? []
+      parent.subagents.push(session)
+      attachedChildIds.add(session.session_id)
+    }
+
+    // Every session keeps its own children (a chain A <- B <- C nests two deep), ordered by
+    // start. Rollups are computed leaf-first so a parent folds in already-rolled children.
+    for (const session of rawSessions) {
+      session.subagents = (session.subagents ?? []).sort((a, b) => (a.started ?? '').localeCompare(b.started ?? ''))
+    }
+    const rolledUp = new Set<string>()
+    const rollUp = (session: SessionSummary): void => {
+      if (rolledUp.has(session.session_id)) return
+      rolledUp.add(session.session_id)
+      for (const child of session.subagents ?? []) rollUp(child)
+      session.rollup = computeSessionRollup(session)
+    }
+    for (const session of rawSessions) rollUp(session)
+
+    // Filter to root sessions only
+    const rootSessions = rawSessions.filter((s) => !attachedChildIds.has(s.session_id))
+
     // Sort globally by started DESC
-    list.sort((a, b) => (b.started ?? '').localeCompare(a.started ?? ''))
+    rootSessions.sort((a, b) => (b.started ?? '').localeCompare(a.started ?? ''))
 
     if (typeof limit === 'number' && limit > 0) {
-      return list.slice(0, Math.floor(limit))
+      return rootSessions.slice(0, Math.floor(limit))
     }
-    return list
+    return rootSessions
   }
 
   /**
@@ -1850,9 +2033,11 @@ export class KyberBridge {
       ? (payload.turns as TurnDescriptor[])
       : []
     const payloadByIdentity = buildTransportIndex(turns, turnTransportIndexOf)
+    let payloadTurn: TurnDescriptor | undefined
     if (turns.length > 0) {
       const turnItem = lookupTransport(turns, payloadByIdentity, turnTransportIndexOf, turnIndex)
       if (turnItem) {
+        payloadTurn = turnItem
         if (typeof turnItem.spanId === 'string') targetSpanId = turnItem.spanId
         if (typeof turnItem.model === 'string') model = turnItem.model
       } else if (payloadByIdentity.size > 0) {
@@ -2129,6 +2314,7 @@ export class KyberBridge {
       rawPacket,
       ...(truncated ? { truncated, totalLength } : {}),
       sharedContext,
+      skills: skillsContentFromPayload(payload, payloadTurn),
     }
 
     return result

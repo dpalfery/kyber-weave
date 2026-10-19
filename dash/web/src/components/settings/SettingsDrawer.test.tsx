@@ -215,6 +215,67 @@ describe('SettingsDrawer: opening', () => {
   })
 })
 
+describe('SettingsDrawer: the configuration check', () => {
+  const summary = () => screen.getByTestId('settings-check-summary')
+
+  it('words the server verdict: harnesses needing attention and the issue count', async () => {
+    stubFetch({})
+    await openedDrawer()
+
+    // Fixture check: attention, 2 harnesses, 3 issues.
+    expect(summary().getAttribute('data-health')).toBe('attention')
+    expect(summary().textContent).toContain('2 harnesses need attention (3 issues)')
+  })
+
+  it('uses the singular for one harness and one issue', async () => {
+    const status = clone(statusMixed) as Json
+    status.check = { ...status.check, attention: 1, issueCount: 1 }
+    stubFetch({ status: () => ({ json: status }) })
+    await openedDrawer()
+
+    expect(summary().textContent).toContain('1 harness needs attention (1 issue)')
+  })
+
+  it('reports a clean check as no issues found', async () => {
+    const status = clone(statusMixed) as Json
+    status.check = { ...status.check, health: 'ok', enabled: 1, attention: 0, issueCount: 0 }
+    stubFetch({ status: () => ({ json: status }) })
+    await openedDrawer()
+
+    expect(summary().getAttribute('data-health')).toBe('ok')
+    expect(summary().textContent).toContain('1 enabled harness, no issues found')
+  })
+
+  it('reports that nothing is enabled when the check finds nothing to judge', async () => {
+    const status = clone(statusMixed) as Json
+    status.check = { ...status.check, health: 'off', enabled: 0, attention: 0, issueCount: 0 }
+    stubFetch({ status: () => ({ json: status }) })
+    await openedDrawer()
+
+    expect(summary().textContent).toContain('No harness collection is enabled')
+  })
+
+  it('shows no summary line when an older server sends no check', async () => {
+    const status = clone(statusMixed) as Json
+    delete status.check
+    stubFetch({ status: () => ({ json: status }) })
+    await openedDrawer()
+
+    expect(screen.queryByTestId('settings-check-summary')).toBeNull()
+  })
+
+  it('re-runs the check from the Check configuration button', async () => {
+    const mock = stubFetch({})
+    await openedDrawer()
+
+    const button = screen.getByTestId('settings-refresh-status-button')
+    expect(button.textContent).toBe('Check configuration')
+    fireEvent.click(button)
+
+    await waitFor(() => expect(getsTo(mock, '/api/kyber/capture')).toBe(2))
+  })
+})
+
 describe('SettingsDrawer: rows come only from the server', () => {
   it('lists every harness; managed rows get action buttons, status-only rows do not', async () => {
     stubFetch({})
@@ -239,8 +300,9 @@ describe('SettingsDrawer: rows come only from the server', () => {
     stubFetch({})
     await openedDrawer()
 
-    // Fixture: claude-code is `on`, copilot is `partial`, opencode is `off`.
-    expect(screen.getByTestId('settings-harness-state-claude-code').textContent).toBe('Enabled')
+    // Fixture: claude-code is `on` but its endpoint points elsewhere, copilot is `partial`,
+    // opencode is `off`. An `on` row with issues is not a plain green "Enabled".
+    expect(screen.getByTestId('settings-harness-state-claude-code').textContent).toBe('Enabled — needs attention')
     expect(screen.getByTestId('settings-harness-state-copilot').textContent).toBe('Needs setup')
     expect(screen.getByTestId('settings-harness-state-opencode').textContent).toBe('Disabled')
     expect(screen.getByTestId('settings-harness-state-codex').textContent).toBe('Read-only')

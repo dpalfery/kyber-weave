@@ -262,7 +262,7 @@ export class ReceiverHost {
     if (probe !== 'refused') return null
 
     try {
-      const child = this.spawner.spawn(this.program, [...this.programArgs, 'otel'])
+      const child = this.spawner.spawn(this.program, [...this.programArgs, 'otel', '--serve'])
       this.child = child
       // A child that exits frees us to start a replacement on the next poll.
       void child.exited.then(() => { if (this.child === child) this.child = null })

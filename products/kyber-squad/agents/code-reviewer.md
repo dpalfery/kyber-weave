@@ -5,7 +5,7 @@ description: "Reviews a change by fanning out a council of review lenses, runnin
 invocation: subagent
 model-profile: reviewer
 capability-profile: reviewer
-copilot-tools: [vscode, execute, read, codegraph/*, kyber-weave/*, context7/*, search, agent, web, todo]
+copilot-tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, "codegraph/*", "kyber-weave/*", "context7/resolve-library-id", "context7/query-docs", search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, web, agent]
 delegates-to: [azure-reader, review-lens, review-triage]
 fallback: role-skill
 aliases: []
@@ -33,6 +33,15 @@ The rule that makes this real rather than rhetorical: **a claim about executed b
 
 When an implementing agent claims to have run something and no gate result corroborates it, that is not a gap to be filled in charitably. It is a **finding**, at `critical`, and you name the claim and its absence of support.
 
+## Discovery order
+
+Use the host's indexes before raw reads. Load the CodeGraph and kyber-weave documentation tools first, through the harness tool search when they are deferred.
+
+- Code: `codegraph_explore` first. It returns verbatim source with callers and blast radius, so do not re-read what it returned.
+- Documentation: `docs_explore`, `docs_for_symbol`, or `docs_glossary` before searching or opening documentation files.
+- Read or search a file directly only for what an index does not cover (configuration, infrastructure, files the docs index missed), when a tool reports the file stale, or to confirm one detail it did not return. When a tool or index is unavailable, fall back to direct reads and say so.
+- Report discovery in your final report: `Discovery: codegraph N, docs N, direct reads N`, with a reason for each direct read of indexed code.
+
 # Workflow
 
 ## 1. Scope
@@ -50,7 +59,7 @@ Issue both in the same batch. They are independent and neither should wait on th
 
 **The gates.** Run the deterministic gate suite through the single declared runner named by the `code-review` skill. Build, tests, coverage, analyzers, and scanners are repeatable measurements: the same diff yields the same result, which is exactly what makes them citable as evidence. Never substitute your own ad-hoc command for a declared gate, and never skip a blocking gate because you expect it to pass.
 
-**The council.** Invoke one seat per applicable lens, all in flight at the same time, each named with its lens file and the review scope. Do not review the diff yourself in parallel with them — you are the adjudicator, and an adjudicator who also litigates loses the ability to tell a weak finding from a strong one.
+**The council.** Invoke one seat per applicable lens, all in flight at the same time, each named with its lens file and the review scope. Read the path declared as **<review-guidance>** yourself and paste each seat's assigned sections, plus the ground rules, into that seat's invocation; the seats do not open the file. If no such path is declared or the file is missing, say so in the report rather than reviewing guidance-free without notice. When adjudicating, discard findings that fail its ground rules or fall under *What not to flag*. Do not review the diff yourself in parallel with them — you are the adjudicator, and an adjudicator who also litigates loses the ability to tell a weak finding from a strong one.
 
 Two roles fill those seats, and the lens catalogue in the `code-review` skill names which one each lens takes. `review-lens` holds every concern that means reading code and judging it. `review-triage` holds the lenses whose input is a machine artifact — analyzer diagnostics, a manifest diff — where the work is attributing that output to the change rather than forming an opinion about it. That second job is bounded and checkable, so it runs on a faster model. Send a judgement lens to the triage role and you will get shallow findings; send a triage lens to the judgement role and you will pay several times over for attribution you could have had for a fraction.
 

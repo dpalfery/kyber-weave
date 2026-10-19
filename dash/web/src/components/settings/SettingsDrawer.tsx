@@ -7,6 +7,7 @@ import {
   postKyberCapture,
   updateKyberSettings,
   type KyberCaptureAction,
+  type KyberCaptureCheck,
   type KyberCaptureChange,
   type KyberCaptureEvent,
   type KyberCaptureRequest,
@@ -14,7 +15,7 @@ import {
   type KyberCaptureValue,
 } from '../../lib/kyberApi.js'
 import { DashboardPortSetting } from './DashboardPortSetting.js'
-import { HarnessCollectionList, type HarnessRowAlert } from './HarnessCollectionList.js'
+import { ATTENTION_TEXT, HarnessCollectionList, type HarnessRowAlert } from './HarnessCollectionList.js'
 
 export interface SettingsDrawerProps {
   open: boolean
@@ -131,6 +132,32 @@ interface PendingPreview {
   result: KyberCaptureResult
   /** A reset re-runs enable; the confirm wording says so. */
   reset: boolean
+}
+
+/**
+ * The check's one-line verdict. Every count and the verdict itself come from
+ * the server's `check` block; this only words and colours them.
+ */
+function CheckSummary({ check }: { check: KyberCaptureCheck }) {
+  const at = new Date(check.checkedAt)
+  const when = Number.isNaN(at.getTime()) ? '' : `Checked ${at.toLocaleTimeString()} · `
+  const text =
+    check.health === 'attention'
+      ? `${check.attention} ${check.attention === 1 ? 'harness needs' : 'harnesses need'} attention (${check.issueCount} ${check.issueCount === 1 ? 'issue' : 'issues'})`
+      : check.health === 'ok'
+        ? `${check.enabled} enabled ${check.enabled === 1 ? 'harness' : 'harnesses'}, no issues found`
+        : 'No harness collection is enabled'
+  return (
+    <p
+      role="status"
+      data-testid="settings-check-summary"
+      data-health={check.health}
+      className={`text-xs ${check.health === 'attention' ? `font-semibold ${ATTENTION_TEXT}` : check.health === 'ok' ? 'text-primary' : 'text-muted-foreground'}`}
+    >
+      {when}
+      {text}
+    </p>
+  )
 }
 
 /**
@@ -254,6 +281,7 @@ function SettingsContent() {
   }
 
   const managedOn = harnesses.filter((h) => h.mode === 'managed' && h.state === 'on').length
+  const check = status.data?.check ?? null
 
   return (
     <>
@@ -277,13 +305,15 @@ function SettingsContent() {
               disabled={status.isFetching}
               onClick={() => void status.refetch()}
             >
-              Refresh status
+              {status.isFetching && !status.isPending ? 'Checking…' : 'Check configuration'}
             </button>
           </div>
 
+          {check && <CheckSummary check={check} />}
+
           {status.isError && (
             <p role="alert" data-testid="settings-load-error" className="text-xs text-foreground">
-              The collection status could not be read, so no controls are shown. Use Refresh status to try again.
+              The collection status could not be read, so no controls are shown. Use Check configuration to try again.
             </p>
           )}
           {status.isPending && <p className="text-xs text-muted-foreground">Reading collection status…</p>}
@@ -356,7 +386,7 @@ function SettingsContent() {
             </p>
           )}
           <p className="mt-1 text-[11px] text-muted-foreground">
-            A newly started receiver can take several seconds to answer; use Refresh status to check again.
+            A newly started receiver can take several seconds to answer; use Check configuration to check again.
           </p>
         </section>
       )}

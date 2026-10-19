@@ -4,7 +4,7 @@ title: Todos
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-11
+last-reviewed: 2026-10-16
 ---
 
 # Todos
@@ -47,6 +47,14 @@ last-reviewed: YYYY-MM-DD
 | [tauri-glib-upstream-removal.md](tauri-glib-upstream-removal.md) | KyberDash | draft | Remove the patched GLib 0.18.5 source after a released Tauri GTK migration resolves the Linux tray graph to `glib >= 0.20.0` and the Linux gates pass. |
 | [claude-conductor-live-verification.md](claude-conductor-live-verification.md) | KyberSquad | draft | Verify PR #136's `/conductor` skill and retained subagent in a live Claude Code session; the renderer and CI checks do not establish runtime behaviour. |
 | [squad-lease-contention-cross-process.md](squad-lease-contention-cross-process.md) | KyberSquad | draft | `SquadDeploymentStateTests` lease-contention cases fail on a fixed 5-second wait when the machine is loaded; root cause not yet reproduced. |
+| [kyberdash-skills-view-follow-ups.md](kyberdash-skills-view-follow-ups.md) | KyberDash | draft | Non-blocking follow-ups from the skills view: inactive-skill finding volume, listing-delta payload growth, missing Pi, OpenCode, Copilot CLI and Claude Desktop captures, a live visual check, and small cleanups. |
+| [kyberdash-wipe-audit-retention-decision.md](kyberdash-wipe-audit-retention-decision.md) | KyberDash | draft | A wipe-all keeps `refresh_run`, `metadata`, `ingest_log`, `token_cache` and the window catalog by design; decide whether to supersede ADR 0032 decision 8 or add an opt-in hard reset. Reclamation itself is done. |
+| [kyberdash-quarantine-harness-index.md](kyberdash-quarantine-harness-index.md) | KyberDash | draft | `quarantine` by `harness` is the one read that scans; measure the wipe path before adding an index that taxes the busiest insert path, and consider payload retention instead. |
+| [kyberdash-opencode-log-correlation.md](kyberdash-opencode-log-correlation.md) | KyberDash | draft | OpenCode's spans are attributed now, but its `/v1/logs` `tool_result` rows still quarantine; correlate them so a tool span carries its own result and duration. |
+| [pi-emitter-tool-spans.md](pi-emitter-tool-spans.md) | KyberDash | draft | Pi's external emitter sends one span per turn and no tool spans, and caps the conversation at 262144 characters, so derived tool counts are a lower bound; decide whether the emitter comes in-repo. |
+| [kyberdash-copilot-env-override-decision.md](kyberdash-copilot-env-override-decision.md) | KyberDash | draft | `enable` writes Copilot's settings but not its `COPILOT_OTEL_ENABLED` override, and the status route cannot see the editor's environment; decide whether to manage it, surface it, or leave the CLI as the diagnostic. |
+| [squad-pack-single-target-render.md](squad-pack-single-target-render.md) | KyberSquad | draft | `kyber-weave squad pack` cannot render a single target to a directory, so the Copilot render total was verified only by invoking `CopilotRenderer` directly from a throwaway program; add single-target render support to `squad pack`. |
+| [adr-0022-conductor-shared-identity-errata.md](adr-0022-conductor-shared-identity-errata.md) | KyberSquad | draft | ADR 0022 decision 1 still calls the conductor a shared identity, but it is unoccupied and the shared list names only `product-owner` and `bug-crusher`; supersede the stale clause, since an accepted ADR is not edited in place. |
 
 Nine earlier open todos moved to GitHub issues #125–#133. The four that those issues
 left listed here while pull requests were open are closed below.

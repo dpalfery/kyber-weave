@@ -2,9 +2,9 @@
 id: dash/telemetry-inventory
 title: Telemetry inventory — harness signal and content availability
 doc-type: reference
-status: draft
+status: current
 owner: dpalfery
-last-reviewed: 2026-10-11
+last-reviewed: 2026-10-16
 ---
 
 # Telemetry inventory — verified harness signal and content availability
@@ -14,7 +14,7 @@ It does not treat an absent source as a zero: unavailable dimensions are
 serialized as `not_measurable` with a source-specific reason.
 
 Local-history ingest is `dash refresh` ([ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md)):
-schema **15** (`source_checkpoint`, `record_provenance`, `refresh_run` with
+schema **20** (`source_checkpoint`, `record_provenance`, `refresh_run` with
 `history_weeks`), UTC `--history-weeks` default 2,
 split client identities, Gemini never a stored harness id. `SURVEYED_HARNESSES` still names
 `gemini` as an E4 **survey family** for cache-counter vocabulary; that is not a coding-harness
@@ -51,7 +51,7 @@ Values are never summed across the two sources. `KyberBridge` reads `canon.db` o
 | pi | Reader support is implemented and respects OTLP/file source precedence. | No current live collection claim is made. |
 | Cursor | `cursorReader` extracts available user prompt, instructions, and tool context from SQLite storage without claiming an unobserved complete historical prefix. `cursor-hook` emits deterministic OTLP traces. | Window and pressure measured only when the bubble stores `contextWindow`; otherwise not measurable with reason. Unobserved historical buckets explicit `null` with reason. |
 | OpenCode | Its current disabled OTel configuration is represented as not collectable with a reason. KyberDash can now set the `opencode.jsonc` OpenTelemetry flag from the Settings drawer or `kyberdash kyber capture enable --harness opencode` (see [in-app enablement](#in-app-collection-enablement)). | The endpoint is read from the process environment, not the file, so `OTEL_EXPORTER_OTLP_ENDPOINT` must still be set by the owner where OpenCode launches. Owner enablement and a live turn are required before collection can be verified. |
-| Kilo Code | Local shared-runtime SQLite store (`~/.local/share/kilo/kilo.db`) and legacy store (`.../globalStorage/kilocode.kilo-code`) ingested via `createSqliteSessionParser` under harnesses `kilo-shared-runtime` and `kilo-vscode-legacy` (`KILO_PARSER_CONTRACT_VERSION` 2). Flat token fallbacks (`tokens_input`, `tokens_output`, `tokens_reasoning`, `tokens_cache_read`, `tokens_cache_write`) validated via `finiteOrUndefined`; `type: 'markdown'` parts recognized as substantive output. Zero-record checkpoints re-parsed on contract invalidation. When stored `parserContractVersion` differs from the descriptor, `recordCount` is rebuilt from live records attributed to that source plus records created in the pass; revision-token and `lastStatus` changes accumulate `(previous?.recordCount ?? 0) + created`. | Parsed from native SQLite tables (`session`, `message`, `part`); flat token counters and markdown part types supported. Undocumented live OTel surface remains uncollected. |
+| Kilo Code | Local shared-runtime SQLite store (`~/.local/share/kilo/kilo.db`) and legacy store (`.../globalStorage/kilocode.kilo-code`) ingested via `createSqliteSessionParser` under harnesses `kilo-shared-runtime` and `kilo-vscode-legacy` (`KILO_PARSER_CONTRACT_VERSION` 3). Flat token fallbacks (`tokens_input`, `tokens_output`, `tokens_reasoning`, `tokens_cache_read`, `tokens_cache_write`) validated via `finiteOrUndefined`; `type: 'markdown'` parts recognized as substantive output. Zero-record checkpoints re-parsed on contract invalidation. When stored `parserContractVersion` differs from the descriptor, `recordCount` is rebuilt from live records attributed to that source plus records created in the pass; revision-token and `lastStatus` changes accumulate `(previous?.recordCount ?? 0) + created`. | Parsed from native SQLite tables (`session`, `message`, `part`); flat token counters and markdown part types supported. Undocumented live OTel surface remains uncollected. |
 | Devin | File-source ingest reads CLI transcripts under `~/.local/share/devin/cli/transcripts/` and session metadata from `sessions.db`. Discovery and parse do not require `devin.acuUsdRate`; a missing or non-finite rate still yields token/tool calls with `costIsEstimated: true` (`costUSD: 0` is never a measured zero). Doctor names the missing rate when sessions exist. | Set `devin.acuUsdRate` in `~/.kyberdash/config.json` to price ACU usage; until then cost is unpriced, not absent. |
 | Warp | SQLite history under the Group Containers path opens through the read-only cache (`copyFileBestEffort`). Readable source bytes produce records even when copyfile(2) returns EPERM/EACCES; a true source EACCES/EPERM is surfaced to doctor as `permission-denied` (Full Disk Access on darwin) instead of empty sessions. Cache-dir write failures are not classified as source TCC denials. | Owner grants Full Disk Access (macOS) when the source path is TCC-denied; no fabricated rows. |
 
@@ -208,6 +208,45 @@ import path.
 | Antigravity | Deferred | Tracked in follow-up issue [#213](https://github.com/dpalfery/kyber-weave/issues/213). |
 | ZCode | Deferred | Tracked in follow-up issue [#214](https://github.com/dpalfery/kyber-weave/issues/214). |
 | OpenCode | Deferred | Tracked in follow-up issue [#215](https://github.com/dpalfery/kyber-weave/issues/215). |
+
+## Skill availability by harness
+
+Skills are measured as two independent facts per harness: the **listing** (the skills made
+available to the session) and the **invocation** (a skill actually loaded). Each side is
+either measured or absent with a reason; an absent side is never zero. The engine and the
+payload contract are in the [skills view contract](architecture.md#skills-view-contract).
+
+| Harness | Listed | Invoked | Enabling settings and sources | G0 verification (2026-10-13) |
+|---|---|---|---|---|
+| Claude Code (`claude-code`, `claude-cli`) | **Measured.** An `attachment` entry of type `skill_listing` in the session transcript JSONL (`~/.claude/projects/*/*.jsonl`) with `content` (`- name: description` lines), `skillCount`, `isInitial`, and `names[]`. The Claude transcript parser reads it through `dash/src/ingest/skill-listing.ts` (both the normal and large-line paths) into the raw attribute `kyber.skills.listed` (`{isInitial, skills: [{name, description?}]}`). An initial listing replaces the effective list; a later non-initial listing unions into it. | **Measured.** Assistant `tool_use` blocks named `Skill`, from `input.skill`, plus the stored `kyber.skills.invoked` attribute. | No sender setting. The data is read from the transcript by `dash refresh`, a file source. The Claude parser contract is `7` (`CLAUDE_PARSER_CONTRACT_VERSION` in `dash/src/refresh/registry.ts`). Descriptions survive the 14-day content purge because they are kept in raw attributes. | **Verified** from real transcripts on the owner's machine. Fixture: `dash/src/canon/fixtures/skills/claude-code/`. |
+| Claude Desktop (`claude-desktop`) | Not separately verified. It shares the Claude JSONL path, but no `skill_listing` was checked in a Desktop transcript. | Same extraction as Claude Code, if the transcript carries `Skill` calls (not separately verified). | As Claude Code, from the transcript. | **Unverified** for the listing. |
+| GitHub Copilot (`copilot`, source `github-copilot`) | **Measured** on `invoke_agent` spans from `github.copilot.context.skills`, a JSON-array string of names. This key is not `gen_ai.skills`. Descriptions come from the `<available_skills>` block in the system-prompt part, when that part is stored. A listing on a rollup `invoke_agent` applies to the turns directly under it. VS Code Copilot records no listing key; its listing is read from the `<skills>` block in the system-prompt part instead, and a prompt with no such block stays not measurable. | **Not measurable** unless a `skill` tool record exists. None exists in the owner's store, which holds only `view`, `task`, `bash`, and `edit` tool spans. | OTLP capture from Copilot ([in-app enablement](#in-app-collection-enablement)). Descriptions need the system-prompt part stored, which the content-enabled capture described in the Copilot Chat row provides. | **Verified** for the listing (one real `invoke_agent` span). Invocation is not measurable in the owner's store. Fixture: `dash/src/canon/fixtures/skills/copilot-chat/`. |
+| Copilot CLI (`copilot-cli`) | **Not separately verified.** The local store records Copilot CLI and Copilot Chat under the same `github-copilot` source, so they cannot be told apart there. The `events.jsonl` skill-request excerpt was not searched. | **Not separately verified.** It follows the Copilot rule above: not measurable unless a `skill` tool record exists. | Shares the Copilot OTLP and file sources above. | **Unverified** as a separate harness. Fixture README: `dash/src/canon/fixtures/skills/copilot-cli/`. |
+| Antigravity (`antigravity`) | **Measured** on `llm.invoke` spans. `gen_ai.skills` is one string, `Active Skills: a, b, ...`. The harness-reported `gen_ai.usage.skill_tokens` gives the per-turn resident size, which was identical on every turn in the owner's data. | **Not measurable.** No activation record exists in the store. | OTLP spans claimed by `antigravityAdapter` (see [Verified harness outcomes](#verified-harness-outcomes)). No separate skill setting was identified. | **Verified** for the listing (one real `llm.invoke` span). Invocation is not measurable. Fixture: `dash/src/canon/fixtures/skills/antigravity/`. |
+| Pi (`pi`) | **Not measurable**, with a reason that names the absent source. | Parser-extracted names only, where the Pi parser provides them, stored as raw `kyber.skills.invoked`. Wire format **unverified**. | Pi file-source ingest. The Pi parser contract was bumped for the skills work (`PI_PARSER_CONTRACT_VERSION` is `3`). | **Unverified.** The owner's store holds no Pi records. Fixture README: `dash/src/canon/fixtures/skills/pi/`. |
+| OpenCode (`opencode`) | **Not measurable**, with a reason that names the absent source. Wire format **unverified**. | Parser-extracted names only, where the OpenCode parser provides them, stored as raw `kyber.skills.invoked`. | OpenTelemetry enablement through [in-app enablement](#in-app-collection-enablement) (`opencode.jsonc`). The endpoint still comes from the process environment. | **Unverified.** The owner's store holds no OpenCode records. Fixture README: `dash/src/canon/fixtures/skills/opencode/`. |
+| Other file-ingested harnesses that record invoked names (Codex, Kilo Code, Cline CLI, CodeWhale, OpenClaude, DSH) | No listing source was verified for these in G0. They are **not measurable** until one is. | Parser-extracted names only, where the parser provides them, stored as raw `kyber.skills.invoked`. The parsers' contract versions were bumped for this work (Codex is `3`, Kilo is `3`). | Dot-folder or file-source ingest through `dash refresh`. | **Unverified.** |
+| Any other or unknown harness | **Not measurable**, with a reason. | Only where the parser supplies names. | None beyond the harness's own collection. | **Unverified.** |
+
+**Invoked names on the turn record.** For file-ingested harnesses, the parsers already extract
+skill names into `ParsedProviderCall.skills`. The synthesizer stores them on the turn record as
+the raw attribute `kyber.skills.invoked`. The list is de-duplicated and kept in first-seen order,
+and the key is absent when there are none. Absent means not measured, and `[]` on the payload is
+the measured none described in the [skills view contract](architecture.md#skills-view-contract).
+
+**Listing precedence (Claude Code).** An initial `skill_listing` (`isInitial: true`) replaces the
+effective list for the session. A later non-initial listing is unioned into it. A skill's
+description is the first one observed in the session.
+
+**Parser contracts.** The Claude family, Codex, Pi, Copilot, Kilo, OpenCode, Cline CLI,
+CodeWhale, OpenClaude, and DSH were bumped for the skill extraction. The current values are in
+`dash/src/refresh/registry.ts`. Advancing a contract makes existing checkpoints stale, so the
+next `dash refresh` re-reads them under the refresh window rules. Whether sessions older than
+that window gain a listing after a bump is **unverified**. See the [runbook](runbook.md#2a-local-harness-source-refresh-dash-refresh).
+
+**Fixtures.** The G0 captures are sanitized, real-shape records under
+`dash/src/canon/fixtures/skills/<harness>/`. Each folder has a README that states what was found
+or not found. The `claude-code` capture is read by the Claude `skill_listing` parser test.
 
 ## Antigravity aggregate-token investigation (T7)
 

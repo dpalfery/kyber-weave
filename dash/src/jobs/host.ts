@@ -13,6 +13,8 @@ import { spawn } from 'child_process'
 
 import type { CanonStore } from '../canon/store.js'
 import { SETTING_KEYS, readSetting } from '../settings/shared-settings.js'
+import { runTranscriptSync } from '../sync/transcript-sync.js'
+import type { TranscriptSyncOutcome } from '../sync/transcript-sync.js'
 import { acquireJobsLease } from './lease.js'
 import type { JobsLease } from './lease.js'
 
@@ -63,6 +65,8 @@ export type JobHostStatus = {
   readonly paused: boolean
   readonly hostedElsewhere: boolean
   readonly lastMaintenanceFailure: string | null
+  /** The last transcript sync's failure reason, or null once a pass completes or yields. */
+  readonly lastSyncFailure: string | null
 }
 
 export type JobHostOptions = {
@@ -79,6 +83,7 @@ export type JobHostOptions = {
   readonly spawner?: JobSpawner
   readonly tickIntervalMs?: number
   readonly maintenance: () => void | Promise<void>
+  readonly sync?: () => void | TranscriptSyncOutcome | Promise<void | TranscriptSyncOutcome>
 }
 
 const DEFAULT_TICK_INTERVAL_MS = 30_000
@@ -126,12 +131,14 @@ export class JobHost {
   private readonly spawner: JobSpawner
   private readonly tickIntervalMs: number
   private readonly maintenance: () => void | Promise<void>
+  private readonly sync?: () => void | TranscriptSyncOutcome | Promise<void | TranscriptSyncOutcome>
 
   private lease: JobsLease | null = null
   private intervalId: unknown = null
   private closed = false
   private tickInFlight: Promise<void> | null = null
   private maintenanceRunning = false
+  private syncRunning = false
 
   /** Reserved synchronously before any await so two requests cannot both start a child. */
   private busy = false
@@ -143,6 +150,7 @@ export class JobHost {
   private lastSuccessAt: string | null = null
   private lastFailure: string | null = null
   private lastMaintenanceFailure: string | null = null
+  private lastSyncFailure: string | null = null
 
   constructor(options: JobHostOptions) {
     this.store = options.store
@@ -153,6 +161,7 @@ export class JobHost {
     this.spawner = options.spawner ?? nodeSpawner
     this.tickIntervalMs = options.tickIntervalMs ?? DEFAULT_TICK_INTERVAL_MS
     this.maintenance = options.maintenance
+    this.sync = options.sync
   }
 
   /** Runs the first tick (which is the start-up refresh) and arms the interval. */
@@ -177,6 +186,7 @@ export class JobHost {
     if (!(await this.ensureLease()) || this.closed) return
 
     await this.runMaintenance()
+    await this.runSync()
 
     // Pause gates only this scheduled refresh: maintenance, manual jobs and the
     // receiver all keep working, so "pause" never freezes the UI's own actions.
@@ -203,6 +213,7 @@ export class JobHost {
       paused,
       hostedElsewhere: this.lease === null && !this.closed && this.leaseChecked,
       lastMaintenanceFailure: this.lastMaintenanceFailure,
+      lastSyncFailure: this.lastSyncFailure,
     }
   }
 
@@ -317,6 +328,27 @@ export class JobHost {
       this.lastMaintenanceFailure = err instanceof Error ? err.message : String(err)
     } finally {
       this.maintenanceRunning = false
+    }
+  }
+
+  private async runSync(): Promise<void> {
+    if (this.syncRunning || this.closed) return
+    this.syncRunning = true
+    try {
+      const outcome = this.sync
+        ? await this.sync()
+        : await runTranscriptSync({
+            store: this.store,
+            stateDir: this.stateDir,
+            clock: { now: () => this.clock.now() },
+          })
+      // A busy pass is a yield to a refresh, not a fault; only a failed outcome is recorded.
+      this.lastSyncFailure = outcome?.outcome === 'failed' ? outcome.reason : null
+    } catch (err) {
+      // A sync failure must not crash the scheduler tick, but it is surfaced in status.
+      this.lastSyncFailure = err instanceof Error ? err.message : String(err)
+    } finally {
+      this.syncRunning = false
     }
   }
 

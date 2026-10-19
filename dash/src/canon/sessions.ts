@@ -22,10 +22,12 @@ import { contextLimitOf, DEFAULT_CONTEXT_LIMIT } from './context-window.js'
 import { catalogWindowForRecords } from './model-window-catalog.js'
 import { groupByCanonicalHarness, harnessExportsCacheCounter, normalizeHarnessName, surveyFamily } from './measurability.js'
 import { dedupeTwinTurns } from './twin-dedupe.js'
+import { formatSessionTitle } from './naming.js'
 import { buildFindings } from './findings.js'
 import { buildHarnessRollup } from './harnesses.js'
 import { buildRuns } from './runs.js'
 import { CanonStore, type SessionRow } from './store.js'
+import { extractInvokedSkills, skillsForSession, type SkillsView } from './skills.js'
 import { activeTokenizer, createCachedCounter, loadO200kCounter } from './tokens.js'
 import { notMeasurable, type CanonicalRecord, type CostBlock, type Measurability, type MetricAvailability, type NotMeasurable } from './types.js'
 
@@ -42,6 +44,144 @@ const REPO_KEYS = ['vcs.repository.name', 'repo'] as const
 const BRANCH_KEYS = ['vcs.ref.head.name', 'branch'] as const
 const MODEL_KEYS = ['gen_ai.response.model', 'gen_ai.request.model', 'model'] as const
 
+/** `invoke_agent`, optionally followed by a space or colon and a target; never `invoke_agent_foo`. */
+const INVOKE_AGENT_NAME_RE = /^invoke_agent(?:[ :]|$)/
+
+function isInvokeAgentSpan(record: CanonicalRecord): boolean {
+  if (record.op === "agent.invoke") return true
+  const opName = attributeOf(record, ["gen_ai.operation.name"])
+  if (opName === "invoke_agent") return true
+  if (INVOKE_AGENT_NAME_RE.test(record.name)) return true
+  const toolName = attributeOf(record, ["gen_ai.tool.name", "tool.name"])
+  if (toolName === "invoke_agent") return true
+  return false
+}
+
+function collectDescendantRecords(
+  rootSpanId: string,
+  records: readonly CanonicalRecord[],
+): CanonicalRecord[] {
+  const childrenByParent = new Map<string, CanonicalRecord[]>()
+  for (const record of records) {
+    if (record.parentSpanId) {
+      const list = childrenByParent.get(record.parentSpanId) ?? []
+      list.push(record)
+      childrenByParent.set(record.parentSpanId, list)
+    }
+  }
+
+  const result: CanonicalRecord[] = []
+  const queue = [rootSpanId]
+  const seen = new Set<string>([rootSpanId])
+
+  while (queue.length > 0) {
+    const currentId = queue.shift()!
+    const children = childrenByParent.get(currentId) ?? []
+    for (const child of children) {
+      if (!seen.has(child.spanId)) {
+        seen.add(child.spanId)
+        result.push(child)
+        if (!isInvokeAgentSpan(child)) {
+          queue.push(child.spanId)
+        }
+      }
+    }
+  }
+
+  return result
+}
+
+function extractAgentName(invokeSpan: CanonicalRecord): string | null {
+  const attr = attributeOf(invokeSpan, AGENT_NAME_KEYS)
+  if (attr && attr.trim()) return attr.trim()
+  if (invokeSpan.name.startsWith("invoke_agent ")) {
+    const candidate = invokeSpan.name.slice("invoke_agent ".length).trim()
+    if (candidate) return candidate
+  }
+  return null
+}
+
+function extractTaskSummary(subagentRecords: readonly CanonicalRecord[]): string | undefined {
+  for (const record of subagentRecords) {
+    const toolName = attributeOf(record, ["gen_ai.tool.name", "tool.name"]) ?? record.name
+    const nameLower = toolName.toLowerCase()
+    if (nameLower === "task" || nameLower.endsWith(".task")) {
+      const raw = record.raw as Record<string, unknown> | null
+      const argsRaw =
+        raw?.["arguments"] ??
+        raw?.["gen_ai.tool.arguments"] ??
+        raw?.["tool.arguments"] ??
+        raw?.["tool_arguments"] ??
+        raw?.["parameters"]
+      let argsObj: Record<string, unknown> | null = null
+      if (typeof argsRaw === "string") {
+        try {
+          argsObj = JSON.parse(argsRaw)
+        } catch {
+          if (argsRaw.trim()) return argsRaw.trim()
+        }
+      } else if (argsRaw !== null && typeof argsRaw === "object") {
+        argsObj = argsRaw as Record<string, unknown>
+      }
+
+      if (argsObj !== null && typeof argsObj === "object") {
+        const desc =
+          argsObj["description"] ??
+          argsObj["task"] ??
+          argsObj["prompt"] ??
+          argsObj["task_description"] ??
+          argsObj["summary"]
+        if (typeof desc === "string" && desc.trim()) {
+          return desc.trim()
+        }
+      }
+    }
+  }
+
+  for (const record of subagentRecords) {
+    if (isInvokeAgentSpan(record)) {
+      const raw = record.raw as Record<string, unknown> | null
+      const argsRaw = raw?.["arguments"] ?? raw?.["gen_ai.agent.arguments"] ?? raw?.["task.description"]
+      if (typeof argsRaw === "string") {
+        try {
+          const parsed = JSON.parse(argsRaw) as Record<string, unknown> | null
+          const desc = parsed?.description ?? parsed?.task ?? parsed?.prompt
+          if (typeof desc === "string" && desc.trim()) return desc.trim()
+        } catch {
+          if (argsRaw.trim()) return argsRaw.trim()
+        }
+      } else if (argsRaw !== null && typeof argsRaw === "object") {
+        const desc =
+          (argsRaw as Record<string, unknown>)["description"] ?? (argsRaw as Record<string, unknown>)["task"]
+        if (typeof desc === "string" && desc.trim()) return desc.trim()
+      }
+    }
+  }
+
+  for (const record of subagentRecords) {
+    const promptAttr = attributeOf(record, ["gen_ai.prompt", "prompt"])
+    if (promptAttr && promptAttr.trim()) {
+      return promptAttr.trim()
+    }
+    if (record.parts && record.parts.length > 0) {
+      for (const part of record.parts) {
+        if (part.part === "conversation_history" && part.text && part.text.trim()) {
+          return part.text.trim()
+        }
+      }
+    }
+    if (
+      record.content &&
+      typeof record.content["conversation_history"] === "string" &&
+      record.content["conversation_history"].trim()
+    ) {
+      return record.content["conversation_history"].trim()
+    }
+  }
+
+  return undefined
+}
+
 function attributeOf(record: CanonicalRecord, keys: readonly string[]): string | undefined {
   const raw = record.raw
   if (raw === null || typeof raw !== 'object') return undefined
@@ -54,9 +194,149 @@ function attributeOf(record: CanonicalRecord, keys: readonly string[]): string |
   return undefined
 }
 
-/** A turn is a model call. Tool and structural spans are not turns. */
-function isTurn(record: CanonicalRecord): boolean {
-  return record.op === 'llm.invoke'
+/** Epoch ms, or NaN when the timestamp is absent or unparseable. Absent is never the epoch. */
+function parseTimestamp(ts: string | Date | unknown): number {
+  if (ts instanceof Date) return ts.getTime()
+  if (typeof ts === 'string') return Date.parse(ts)
+  return Number.NaN
+}
+
+/** Ascending by time; records with no usable timestamp sort after every timed record. */
+function compareTimestamps(a: unknown, b: unknown): number {
+  const tA = parseTimestamp(a)
+  const tB = parseTimestamp(b)
+  const aOk = Number.isFinite(tA)
+  const bOk = Number.isFinite(tB)
+  if (aOk && bOk) return tA - tB
+  if (aOk) return -1
+  if (bOk) return 1
+  return 0
+}
+
+/** First and last timestamps by time, ignoring records without a usable one. */
+function timestampBounds(records: readonly CanonicalRecord[]): {
+  started: string | Date
+  ended: string | Date
+} {
+  let min: CanonicalRecord['timestamp'] | undefined
+  let max: CanonicalRecord['timestamp'] | undefined
+  for (const record of records) {
+    const t = parseTimestamp(record.timestamp)
+    if (!Number.isFinite(t)) continue
+    if (min === undefined || t < parseTimestamp(min)) min = record.timestamp
+    if (max === undefined || t >= parseTimestamp(max)) max = record.timestamp
+  }
+  return { started: min ?? records[0]!.timestamp, ended: max ?? records[records.length - 1]!.timestamp }
+}
+
+function isClaudeHarness(harness: string): boolean {
+  const norm = normalizeHarnessName(harness)
+  return norm === 'claude' || norm === 'claude-code' || surveyFamily(harness) === 'claude-code'
+}
+
+function extractClaudeAgentId(record: CanonicalRecord): string | undefined {
+  const raw = record.raw as Record<string, unknown> | null
+  if (raw && typeof raw === 'object') {
+    const candidates = [
+      raw['agent_id'],
+      raw['agentId'],
+      raw['subagent_id'],
+      raw['subagentId'],
+      raw['agent.id'],
+      raw['gen_ai.agent.id'],
+    ]
+    for (const c of candidates) {
+      if (typeof c === 'string' && c.trim()) return c.trim()
+      if (typeof c === 'number') return String(c)
+    }
+  }
+  if (record.spanId.startsWith('agent-')) {
+    return record.spanId
+  }
+  return undefined
+}
+
+/**
+ * A Claude subagent's session id: `<parent session>#agent-<agentId>`, scoped by the session it
+ * ran under exactly as Copilot's `<parent>#<span>` is. An agent id is only unique within what
+ * the harness recorded, so an unscoped `agent-<id>` would let two parents that carry the same
+ * id upsert one row, last writer winning. A leading `agent-` on the id is not doubled.
+ */
+function claudeSubagentSessionId(parentSessionId: string, agentId: string): string {
+  const trimmed = agentId.trim()
+  const bare = trimmed.startsWith('agent-') ? trimmed.slice('agent-'.length) : trimmed
+  return `${parentSessionId}#agent-${bare}`
+}
+
+function extractClaudeAgentName(records: readonly CanonicalRecord[]): string | null {
+  for (const record of records) {
+    const raw = record.raw as Record<string, unknown> | null
+    if (!raw || typeof raw !== 'object') continue
+    const candidates = [
+      raw['agent_type'],
+      raw['agentType'],
+      raw['gen_ai.agent.name'],
+      raw['gen_ai.agent.type'],
+      raw['agent_name'],
+      raw['agentName'],
+      raw['agent.name'],
+      raw['agent'],
+    ]
+    for (const c of candidates) {
+      if (typeof c === 'string' && c.trim()) return c.trim()
+    }
+  }
+  for (const record of records) {
+    const extracted = extractAgentName(record)
+    if (extracted) return extracted
+  }
+  return null
+}
+
+function extractClaudeDescription(records: readonly CanonicalRecord[]): string | undefined {
+  for (const record of records) {
+    const raw = record.raw as Record<string, unknown> | null
+    if (!raw || typeof raw !== 'object') continue
+    const candidates = [
+      raw['description'],
+      raw['task_description'],
+      raw['taskDescription'],
+      raw['task'],
+      raw['gen_ai.agent.description'],
+      raw['summary'],
+      raw['prompt'],
+    ]
+    for (const c of candidates) {
+      if (typeof c === 'string' && c.trim()) return c.trim()
+    }
+  }
+  return extractTaskSummary(records)
+}
+
+
+/**
+ * A harness roll-up span: Copilot's `invoke_agent`, which carries the Σ of its
+ * child `chat` calls. New ingests label it `agent.invoke`; records stored
+ * before that still say `llm.invoke`, so the operation attribute is read too.
+ */
+function isRollup(record: CanonicalRecord): boolean {
+  if (record.op === 'agent.invoke') return true
+  return record.op === 'llm.invoke' && attributeOf(record, ['gen_ai.operation.name']) === 'invoke_agent'
+}
+
+/**
+ * The session's turns: its model calls. A roll-up is not one while the calls it
+ * summarises exist -- charting both double-counts every total and puts the
+ * whole loop's input ahead of the real, growing calls. A session holding only
+ * roll-ups (the child spans never arrived) keeps them as its turns rather than
+ * emptying. Tool and structural spans are never turns.
+ */
+function turnsOf(records: readonly CanonicalRecord[]): CanonicalRecord[] {
+  const calls = records.filter((record) => record.op === 'llm.invoke' && !isRollup(record))
+  if (calls.length > 0) return calls
+  return records.filter(
+    (record) => isRollup(record) && (measuredInput(record.tokens) > 0 || record.tokens.output > 0),
+  )
 }
 
 /**
@@ -279,7 +559,7 @@ function hasEvidence(records: readonly CanonicalRecord[]): boolean {
   // tokens and no content, which grouped by trace into 44 rows that looked
   // like sessions and were not. Requiring a turn is what distinguishes an
   // agent session from ambient telemetry that happened to share a trace.
-  const turns = records.filter(isTurn)
+  const turns = turnsOf(records)
   if (turns.length === 0) return false
 
   return turns.some(
@@ -327,6 +607,37 @@ export type AsadServer = {
   unused_cost: number
 }
 
+/**
+ * One skill on the session's skills view. `turns_listed` holds the payload
+ * turn indices (0-based) the skill was listed on. `invocations` is declared
+ * not measurable, never zero, when the harness has no invocation source.
+ */
+export type AsadSkillRow = {
+  name: string
+  listed: boolean
+  invocations: number | NotMeasurable
+  turns_listed: number[]
+  /** The first listing text observed for the skill in the session; absent when none carried one. */
+  description?: string
+  /** Tokens of `description` through the injected counter; absent with no description. */
+  derived_tokens?: number
+}
+
+/**
+ * The session's skills view. `reported_skill_tokens` is the harness's per-turn
+ * resident figure, never summed. The listed and uninvoked counts are each
+ * absent when the side they depend on is not measured.
+ */
+export type AsadSkillsPayload =
+  | {
+      measurable: true
+      reported_skill_tokens?: number
+      listed_count?: number
+      listed_uninvoked_count?: number
+      rows: AsadSkillRow[]
+    }
+  | NotMeasurable
+
 export type AsadSessionPayload = {
   id: string
   session_id: string
@@ -353,6 +664,11 @@ export type AsadSessionPayload = {
    * which a display layer must read as "unknown", never as "no mismatch".
    */
   costBasisMismatch: CostBasisMismatch | null
+  /**
+   * The skills view. Absent only on a row stored before this field existed,
+   * which a display layer must read as "unknown", never as "no skills".
+   */
+  skills?: AsadSkillsPayload
   requests: Array<Record<string, unknown>>
   servers: AsadServer[]
   coverage: Record<string, number>
@@ -375,7 +691,7 @@ export type AsadSessionPayload = {
 function repriceTurns(store: CanonStore, records: CanonicalRecord[]): CanonicalRecord[] {
   const changes: Array<{ spanId: string; cost: CostBlock }> = []
   const repriced = records.map((record) => {
-    if (record.op !== 'llm.invoke') return record
+    if (record.op !== 'llm.invoke' && !isRollup(record)) return record
     const model = attributeOf(record, MODEL_KEYS)
     let next: CostBlock
     if (isPublishedTableHarness(record.harness)) {
@@ -430,9 +746,191 @@ export async function buildSessions(store: CanonStore): Promise<BuildSessionsRep
         continue
       }
       const sessionId = identities.claim(key.key, harness)
-      store.upsertSession(buildSessionRow(sessionId, merged, countTokens, store))
+      const parentRow = buildSessionRow(sessionId, merged, countTokens, store, {
+        isSubagent: false,
+        parentSession: null,
+      })
+      store.upsertSession(parentRow)
       built.add(sessionId)
       report.built += 1
+
+      // Subagent session projection (Contract T1.1)
+      const isCopilot = isCopilotHarness(harness) || harness === "copilot"
+      if (isCopilot && !sessionId.includes("#")) {
+        const invokeSpans = merged.filter((r) => isInvokeAgentSpan(r) && r.spanId !== sessionId)
+        for (const invokeSpan of invokeSpans) {
+          const subagentId = `${sessionId}#${invokeSpan.spanId}`
+          const descendants = collectDescendantRecords(invokeSpan.spanId, merged)
+          const rootInvokeSpan: CanonicalRecord = {
+            ...invokeSpan,
+            parentSpanId: null,
+          }
+          const sortedDescendants = [...descendants].sort((a, b) => compareTimestamps(a.timestamp, b.timestamp))
+          if (sortedDescendants.length > 0) {
+            let earliest = rootInvokeSpan.timestamp
+            for (const d of sortedDescendants) {
+              const tD = d.timestamp instanceof Date ? d.timestamp.getTime() : Date.parse(String(d.timestamp))
+              const tE = earliest instanceof Date ? earliest.getTime() : Date.parse(String(earliest))
+              if (Number.isFinite(tD) && Number.isFinite(tE) && tD < tE) {
+                earliest = d.timestamp
+              }
+            }
+            rootInvokeSpan.timestamp = earliest
+          }
+          const subagentRecords = [rootInvokeSpan, ...sortedDescendants]
+
+          const agentName = extractAgentName(invokeSpan)
+          const taskSummary = extractTaskSummary(subagentRecords)
+          const label = formatSessionTitle({
+            agentName: agentName ?? undefined,
+            taskSummary,
+            sessionId: subagentId,
+            harness,
+          })
+
+          const subagentRow = buildSessionRow(
+            subagentId,
+            subagentRecords,
+            countTokens,
+            store,
+            {
+              includedInParent: true,
+              isSubagent: true,
+              parentSession: sessionId,
+              agentName,
+              label,
+            },
+          )
+
+          store.upsertSession(subagentRow)
+          built.add(subagentId)
+          report.built += 1
+        }
+      }
+
+      // Subagent session projection (Claude - Contract T2.2)
+      const isClaude = isClaudeHarness(harness) || merged.some((r) => isClaudeHarness(r.harness))
+      // Not for a native sidechain session (`agent-…`) or a row this projection already scoped (`…#…`).
+      if (isClaude && !sessionId.startsWith("agent-") && !sessionId.includes("#")) {
+        const recordAgentMap = new Map<string, string>()
+
+        for (const record of merged) {
+          const agentId = extractClaudeAgentId(record)
+          if (agentId) {
+            recordAgentMap.set(record.spanId, agentId)
+          }
+        }
+
+        for (const record of merged) {
+          const agentId = recordAgentMap.get(record.spanId)
+          if (agentId) {
+            const descendants = collectDescendantRecords(record.spanId, merged)
+            for (const desc of descendants) {
+              if (!recordAgentMap.has(desc.spanId)) {
+                recordAgentMap.set(desc.spanId, agentId)
+              }
+            }
+          }
+        }
+
+        const subagentGroups = new Map<string, CanonicalRecord[]>()
+        for (const record of merged) {
+          const agentId = recordAgentMap.get(record.spanId)
+          if (agentId) {
+            const subagentId = claudeSubagentSessionId(sessionId, agentId)
+            const list = subagentGroups.get(subagentId) ?? []
+            list.push(record)
+            subagentGroups.set(subagentId, list)
+          }
+        }
+
+        for (const [subagentId, groupRecords] of subagentGroups) {
+          if (groupRecords.length === 0) continue
+
+          const subagentSpanIds = new Set(groupRecords.map((r) => r.spanId))
+          const preparedRecords = groupRecords.map((r) => {
+            if (r.parentSpanId === null || !subagentSpanIds.has(r.parentSpanId)) {
+              return { ...r, parentSpanId: null }
+            }
+            return { ...r }
+          })
+
+          let rootIndex = preparedRecords.findIndex((r) => isInvokeAgentSpan(r) || r.op === 'agent.invoke')
+          if (rootIndex === -1 && preparedRecords.length > 0) {
+            rootIndex = 0
+          }
+          if (rootIndex >= 0) {
+            const rootSpanId = preparedRecords[rootIndex]!.spanId
+            for (let i = 0; i < preparedRecords.length; i++) {
+              const rec = preparedRecords[i]!
+              if (rec.spanId === rootSpanId) {
+                preparedRecords[i] = { ...rec, parentSpanId: null }
+              } else if (rec.parentSpanId === null || !subagentSpanIds.has(rec.parentSpanId)) {
+                preparedRecords[i] = { ...rec, parentSpanId: rootSpanId }
+              }
+            }
+            const currentRoot = preparedRecords.find((r) => r.spanId === rootSpanId)!
+            // The true earliest of the records that carry a usable timestamp, not whichever
+            // record happens to be first; a root with no usable timestamp takes it as well.
+            const earliest = preparedRecords
+              .filter((r) => Number.isFinite(parseTimestamp(r.timestamp)))
+              .sort((a, b) => compareTimestamps(a.timestamp, b.timestamp))[0]
+            if (
+              earliest !== undefined &&
+              !(parseTimestamp(currentRoot.timestamp) <= parseTimestamp(earliest.timestamp))
+            ) {
+              currentRoot.timestamp =
+                earliest.timestamp instanceof Date ? new Date(earliest.timestamp) : earliest.timestamp
+            }
+          }
+
+          preparedRecords.sort((a, b) => compareTimestamps(a.timestamp, b.timestamp))
+
+          const agentName = extractClaudeAgentName(preparedRecords)
+          const taskSummary = extractClaudeDescription(preparedRecords)
+          const label = formatSessionTitle({
+            agentName: agentName ?? undefined,
+            taskSummary,
+            sessionId: subagentId,
+            harness,
+          })
+
+          let parentSession = sessionId
+          for (const r of preparedRecords) {
+            const p = attributeOf(r, [
+              'parent_session_id',
+              'parent_session',
+              'parentSessionId',
+              'parentSession',
+              'gen_ai.parent_session_id',
+            ])
+            if (p && p.trim()) {
+              parentSession = p.trim()
+              break
+            }
+          }
+
+          const subagentRow = buildSessionRow(
+            subagentId,
+            preparedRecords,
+            countTokens,
+            store,
+            {
+              // Only when the parent is the session these records were merged under; a parent
+              // named by an attribute may be a different session whose counters do not hold them.
+              includedInParent: parentSession === sessionId,
+              isSubagent: true,
+              parentSession,
+              agentName,
+              label,
+            },
+          )
+
+          store.upsertSession(subagentRow)
+          built.add(subagentId)
+          report.built += 1
+        }
+      }
     }
   }
 
@@ -463,14 +961,24 @@ export async function buildSessions(store: CanonStore): Promise<BuildSessionsRep
   return report
 }
 
+export type BuildSessionRowOptions = {
+  /** The row's records are a subset of its parent's, so the parent's counters already include it. */
+  includedInParent?: boolean
+  isSubagent?: boolean
+  parentSession?: string | null
+  agentName?: string | null
+  label?: string | null
+}
+
 /** Build one session row from its records. Pure — exported for testing. */
 export function buildSessionRow(
   sessionId: string,
   records: readonly CanonicalRecord[],
   countTokens: (text: string) => number,
   store?: CanonStore,
+  options?: BuildSessionRowOptions,
 ): SessionRow {
-  const turnRecords = records.filter(isTurn)
+  const turnRecords = turnsOf(records)
   const first = records[0]!
   // The canonical harness, not the provider entry the record arrived under.
   // `run`, `execution` and `listHarnesses` are all keyed canonically, and
@@ -489,11 +997,21 @@ export function buildSessionRow(
   // omission is stated rather than hidden.
   const measuredTurns = turnRecords.filter((record) => measuredInput(record.tokens) > 0)
   const unmeasuredTurns = turnRecords.length - measuredTurns.length
-  const contextTurns: ContextTurn[] = measuredTurns.map((record) => ({
-    parts: partsOf(record),
-    inputTokens: measuredInput(record.tokens),
-    freshInput: record.tokens.freshInput,
-  }))
+  // Some harnesses (Copilot) send the system prompt on the first request only,
+  // yet every later request still carries it in its input. The last one seen
+  // stands in for turns that report none; a turn's own always wins. Done here,
+  // not in `analyzeContext`, which stays a pure per-turn bucketing.
+  let lastSystem: ContextPart[] = []
+  const contextTurns: ContextTurn[] = measuredTurns.map((record) => {
+    const parts = partsOf(record)
+    const own = parts.filter((part) => part.part === 'system_prompt')
+    if (own.length > 0) lastSystem = own
+    return {
+      parts: own.length > 0 ? parts : [...lastSystem, ...parts],
+      inputTokens: measuredInput(record.tokens),
+      freshInput: record.tokens.freshInput,
+    }
+  })
 
   // Same rule the finding detector uses (`contextLimitOf`): first turn record
   // to name a window wins, default otherwise, so a session row and a
@@ -706,14 +1224,26 @@ export function buildSessionRow(
   )
 
   const models = [...new Set(turnRecords.map((r) => attributeOf(r, MODEL_KEYS)).filter(Boolean))]
-  const started = records[0]!.timestamp
-  const ended = records[records.length - 1]!.timestamp
+  const { started, ended } = timestampBounds(records)
 
   let toolCalls: number | undefined = undefined
   let toolsInvoked: string[] | undefined = undefined
 
   if (toolRecords.length > 0) {
-    toolCalls = toolRecords.length
+    // A derived count can be a lower bound. When the collector truncated the
+    // conversation before its end, the tool records say so, and the summary
+    // must not turn that into a bare finite number: the dashboard reads a
+    // finite `tool_calls` as a measured one, and a figure that is not measured
+    // is omitted, never printed as exact — the rule `cache_hit_ratio` and
+    // `cache_creation_coverage` already follow here. The per-record caveat is
+    // where a reader learns why the count is absent.
+    const toolCallsLowerBound = toolRecords.some((record) => {
+      const availability = record.measurability?.tool_calls
+      return typeof availability === 'object' && availability.availability === 'not_measurable'
+    })
+    if (!toolCallsLowerBound) {
+      toolCalls = toolRecords.length
+    }
     toolsInvoked = Array.from(new Set(invocationsOf(records)))
   } else {
     const isClaude = harness === 'claude' || harness === 'claude-code' || surveyFamily(harness) === 'claude-code'
@@ -776,12 +1306,31 @@ export function buildSessionRow(
       ? turnRecords.filter((record) => record.tokens.cacheCreation > 0).length
       : undefined
 
+  // The skills view (T2). The engine decides what is listed and invoked; this
+  // only maps it onto the payload, numbering turns by their payload index.
+  // One fold yields both the view and the per-turn listing (T7 blocker 2).
+  const { view: skillsView, listed: skillsListed } = skillsForSession(
+    records,
+    turnRecords,
+    measurability ?? {},
+    countTokens,
+  )
+  const skillsInvoked =
+    'availability' in skillsView || skillsView.invocationsAvailability !== undefined
+      ? undefined
+      : invokedByTurnOf(records)
+  const skills = skillsPayloadOf(skillsView, firstDescriptionsOf(skillsListed, turnRecords), countTokens, turnRecords)
+
+  const rawAgentName = attributeOf(first, AGENT_NAME_KEYS) ?? null
+  const agentName = options?.agentName !== undefined ? options.agentName : rawAgentName
+  const label = options?.label !== undefined && options.label !== null ? options.label : first.name
+
   const payload: AsadSessionPayload = {
     id: sessionId,
     session_id: sessionId,
     harness,
-    label: first.name,
-    agent_name: attributeOf(first, AGENT_NAME_KEYS) ?? null,
+    label,
+    agent_name: agentName,
     repo: attributeOf(first, REPO_KEYS) ?? null,
     branch: attributeOf(first, BRANCH_KEYS) ?? null,
     span_count: records.length,
@@ -802,6 +1351,8 @@ export function buildSessionRow(
       ...(toolCalls !== undefined ? { tool_calls: toolCalls } : {}),
       ...(toolsInvoked !== undefined ? { tools_invoked: toolsInvoked } : {}),
       ...(toolsOffered !== undefined ? { tools_offered: toolsOffered } : {}),
+      ...skillsSummaryOf(skillsView),
+      ...(options?.includedInParent ? { included_in_parent: true } : {}),
     },
     // The analysis output, verbatim. `toolDefinitionsByServer` is a Map, which
     // JSON.stringify would silently render as {} — convert it explicitly so a
@@ -831,6 +1382,8 @@ export function buildSessionRow(
       cache_read: record.tokens.cacheRead,
       cache_creation: record.tokens.cacheCreation,
       reasoning: record.tokens.reasoning ?? null,
+      ...skillsListedOnTurn(skillsListed?.get(record.spanId)),
+      ...skillsInvokedOnTurn(skillsInvoked, record.spanId),
     })),
     // ASAD renders the session root's children; the synthetic root is an
     // analysis detail and is not part of the wire contract. The attribute maps
@@ -841,7 +1394,7 @@ export function buildSessionRow(
       .map((record) => ({
         request: record.spanId,
         timestamp: typeof record.timestamp === 'string' ? record.timestamp : record.timestamp.toISOString(),
-        turns: record.op === 'llm.invoke' ? 1 : 0,
+        turns: turnRecords.includes(record) ? 1 : 0,
         model: attributeOf(record, MODEL_KEYS) ?? null,
       })),
     servers,
@@ -862,22 +1415,28 @@ export function buildSessionRow(
     })),
     subagents: subagentSessions(timeline),
     auxiliary: auxiliarySpend(timeline),
-    measurability: measurability ?? {},
+    skills,
+    // A declared skills verdict is merged here with its reason, so the
+    // measurability map states why the skills view is absent.
+    measurability: { ...(measurability ?? {}), ...('availability' in skills ? { skills } : {}) },
   }
 
   const parentSessionAttr =
     attributeOf(first, ['parent_session', 'parent_session_id', 'gen_ai.parent_session_id', 'parentSession']) ?? null
   const isSubagent =
-    parentSessionAttr !== null ||
-    Boolean(attributeOf(first, ['gen_ai.is_subagent', 'is_subagent']))
+    options?.isSubagent !== undefined
+      ? options.isSubagent
+      : (parentSessionAttr !== null || Boolean(attributeOf(first, ['gen_ai.is_subagent', 'is_subagent'])))
+  const parentSession =
+    options?.parentSession !== undefined ? options.parentSession : parentSessionAttr
 
   return {
     sessionId,
     harness,
-    label: first.name,
+    label,
     isSubagent,
-    parentSession: parentSessionAttr,
-    agentName: attributeOf(first, AGENT_NAME_KEYS) ?? null,
+    parentSession,
+    agentName,
     repo: attributeOf(first, REPO_KEYS) ?? null,
     branch: attributeOf(first, BRANCH_KEYS) ?? null,
     started: typeof started === 'string' ? started : started.toISOString(),
@@ -885,6 +1444,101 @@ export function buildSessionRow(
     summary: payload.summary,
     payload,
   }
+}
+
+const byCodeUnit = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0)
+
+/**
+ * The first listing text observed for each skill, walking the turns in order.
+ * A later, different description never replaces it; a name no listing described
+ * is absent. Empty when the listing side is not measured.
+ */
+function firstDescriptionsOf(
+  listed: Map<string, Map<string, string | undefined>> | undefined,
+  turnRecords: readonly CanonicalRecord[],
+): Map<string, string> {
+  const first = new Map<string, string>()
+  if (listed === undefined) return first
+  for (const turn of turnRecords) {
+    for (const [name, description] of listed.get(turn.spanId) ?? []) {
+      if (description !== undefined && !first.has(name)) first.set(name, description)
+    }
+  }
+  return first
+}
+
+/** The distinct names each turn invoked, keyed by turn spanId. */
+function invokedByTurnOf(records: readonly CanonicalRecord[]): Map<string, string[]> | undefined {
+  const result = extractInvokedSkills(records)
+  if ('availability' in result) return undefined
+  const byTurn = new Map<string, Set<string>>()
+  for (const invocation of result.invocations) {
+    const names = byTurn.get(invocation.turnSpanId) ?? new Set<string>()
+    names.add(invocation.name)
+    byTurn.set(invocation.turnSpanId, names)
+  }
+  return new Map([...byTurn].map(([spanId, names]) => [spanId, [...names].sort(byCodeUnit)]))
+}
+
+/** A turn's `skills_invoked`: names it invoked, `[]` when measured and none. Absent when not measured. */
+function skillsInvokedOnTurn(invoked: Map<string, string[]> | undefined, spanId: string): { skills_invoked?: string[] } {
+  if (invoked === undefined) return {}
+  return { skills_invoked: invoked.get(spanId) ?? [] }
+}
+
+/** The engine's skills view on the payload: rows by name, turns as payload indices. */
+function skillsPayloadOf(
+  view: SkillsView,
+  firstDescriptions: ReadonlyMap<string, string>,
+  countTokens: (text: string) => number,
+  turnRecords: readonly CanonicalRecord[],
+): AsadSkillsPayload {
+  if ('availability' in view) return view
+  const indexBySpan = new Map<string, number>()
+  turnRecords.forEach((record, index) => {
+    if (!indexBySpan.has(record.spanId)) indexBySpan.set(record.spanId, index)
+  })
+  const rows: AsadSkillRow[] = [...view.rows]
+    .sort((a, b) => byCodeUnit(a.name, b.name))
+    .map((row) => {
+      const description = firstDescriptions.get(row.name)
+      return {
+        name: row.name,
+        listed: row.listed,
+        invocations: row.invocations ?? view.invocationsAvailability ?? notMeasurable('Skill invocations are not measurable.'),
+        turns_listed: row.turnSpanIds.flatMap((spanId) => indexBySpan.get(spanId) ?? []),
+        ...(description !== undefined ? { description, derived_tokens: countTokens(description) } : {}),
+      }
+    })
+  return {
+    measurable: true,
+    ...(view.reportedSkillTokens !== undefined ? { reported_skill_tokens: view.reportedSkillTokens } : {}),
+    listed_count: rows.filter((row) => row.listed).length,
+    // Counted only when both sides are measured: an unmeasured invocation side
+    // makes "listed and never invoked" unknowable, so it is not reported as zero.
+    ...(view.invocationsAvailability === undefined
+      ? { listed_uninvoked_count: rows.filter((row) => row.listed && row.invocations === 0).length }
+      : {}),
+    rows,
+  }
+}
+
+/** The summary's skill names: listed names always, invoked names only when measured. */
+function skillsSummaryOf(view: SkillsView): { skills_listed?: string[]; skills_invoked?: string[] } {
+  if ('availability' in view) return {}
+  const skillsListed = view.rows.filter((row) => row.listed).map((row) => row.name).sort(byCodeUnit)
+  if (view.invocationsAvailability !== undefined) return { skills_listed: skillsListed }
+  const skillsInvoked = view.rows
+    .filter((row) => row.invocations !== undefined && row.invocations > 0)
+    .map((row) => row.name)
+    .sort(byCodeUnit)
+  return { skills_listed: skillsListed, skills_invoked: skillsInvoked }
+}
+
+/** A turn's `skills_listed`, present only when that turn's listing is measured. */
+function skillsListedOnTurn(listed: Map<string, string | undefined> | undefined): { skills_listed?: string[] } {
+  if (listed === undefined) return {}
+  return { skills_listed: [...listed.keys()].sort(byCodeUnit) }
 }
 
 /**

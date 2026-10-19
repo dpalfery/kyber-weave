@@ -5,7 +5,7 @@ description: "Implements the data-access layer: ADO.NET repositories, IRepositor
 invocation: subagent
 model-profile: general
 capability-profile: worker
-copilot-tools: [vscode, execute, read, codegraph/*, kyber-weave/*, context7/*, edit, search, todo]
+copilot-tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, "codegraph/*", "kyber-weave/*", "context7/resolve-library-id", "context7/query-docs", search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename]
 delegates-to: []
 fallback: role-skill
 aliases: []
@@ -57,15 +57,24 @@ Deliver `IRepository<T>` implementations that satisfy the interfaces in the Cont
 5. Hand test authorship to `test-dev`.
 6. **Completion gate — diagnostics.** This is blocking, and it is not satisfied by a green build.
 
-   - **Isolate your build output before you run anything.** You may be one of several workers running this gate against the same projects at the same time. MSBuild, `dotnet format`, and `cleanupcode` all write into `obj/` and `bin/`, and two workers sharing them will corrupt each other's intermediate state and produce diagnostics that belong to neither change. Pass an artifacts path unique to your task on **every** dotnet invocation in this gate — `dotnet build --artifacts-path <agent-scratchpad>/<task-id>/artifacts`, and the equivalent `-p:BaseOutputPath=` / `-p:BaseIntermediateOutputPath=` where a command does not accept `--artifacts-path`. Cite the path you used in your completion digest. A gate run against shared output is not evidence, and a green result from one is not a pass.
+   - **Isolate your build output before you run anything.** You may be one of several workers running this gate against the same projects at the same time. MSBuild, `dotnet format`, and `cleanupcode` all write into `obj/` and `bin/`, and two workers sharing them will corrupt each other's intermediate state and produce diagnostics that belong to neither change. Pass an artifacts path unique to your task on **every** dotnet invocation in this gate — `dotnet build --artifacts-path .agent_scratchpad/<task-id>/artifacts`, and the equivalent `-p:BaseOutputPath=` / `-p:BaseIntermediateOutputPath=` where a command does not accept `--artifacts-path`. Cite the path you used in your completion digest. A gate run against shared output is not evidence, and a green result from one is not a pass.
    - **Scope any database your work binds, per run.** A migration applied against a shared development database, or a connection string pointing at one, is shared state between concurrent workers exactly the way `obj/` is. Where this gate or your verification touches a database, use a name unique to your task rather than the well-known one.
-   - **Baseline first.** Before the first edit, collect diagnostics for the complete contents of every file you are permitted to change, through the harness's language-diagnostics capability (`get_errors` in VS Code / Copilot). Write the output to the path declared as **<agent-scratchpad>** where the repository declares one, and cite that path in your completion digest. Without a baseline you cannot prove anything is pre-existing.
+   - **Baseline first.** Before the first edit, collect diagnostics for the complete contents of every file you are permitted to change, through the harness's language-diagnostics capability (`get_errors` in VS Code / Copilot). Write the output to the path declared as **.agent_scratchpad** where the repository declares one, and cite that path in your completion digest. Without a baseline you cannot prove anything is pre-existing.
    - **Fix deterministically before you sweep.** After the last edit and before re-collecting diagnostics, run the `resharper-clt` deterministic fix pass — `dotnet format` (apply), `dotnet format analyzers` (apply), then `dotnet jb cleanupcode` — each scoped with `--include` to the files you changed. This erases the mechanical findings outright: predefined type keywords, `var` where the standard forbids it, redundant qualifiers, unused usings, formatting. It is idempotent, so a re-run after rework is safe. What survives is the part that needs your judgement, and it is the only part worth a reviewer's pass.
    - **Sweep again after the last edit — over your files only.** Re-collect diagnostics for the complete contents of every file you edited or created: whole file, not only the changed methods or symbols. **Do not sweep workspace-wide.** Other workers are editing the same projects while you run, so a workspace-wide pass reads their half-finished state — it attributes their in-flight diagnostics to you, and the file-ownership rule then sends you to fix findings that are not yours and that move under you while you fix them. Workspace-wide analysis belongs to the end-of-run council, which runs against a quiescent tree.
    - **Every diagnostic counts:** compiler errors, nullable analysis, analyzer warnings, style warnings, redundant qualifiers and casts, possible multiple enumeration, namespace and file-location warnings, unused members, and dead-code findings.
    - **Fix every finding in your task scope.** If one is genuinely outside scope or unsafe to fix, escalate it in the completion digest with file, line, and reason. Never leave one silently open.
    - **Do not run ReSharper InspectCode.** It is no longer part of this gate. A solution-wide load, run twice by every worker, was both the dominant cost of the gate and its largest remaining source of contention. InspectCode now runs **once per run**, as the `inspectcode` review gate the host declares, and the `static-analysis-triage` lens attributes its findings to the accumulated diff. What you owe this gate is the deterministic fix pass above, which erases most of what InspectCode would otherwise report. Anything it does raise against your files returns to you as a rework item.
    - A scoped build, `tsc --noEmit`, `dotnet test`, or `git diff --check` measures something else. Report those separately; they do not clear this gate.
+
+## Discovery order
+
+Use the host's indexes before raw reads. Load the CodeGraph and kyber-weave documentation tools first, through the harness tool search when they are deferred.
+
+- Code: `codegraph_explore` first. It returns verbatim source with callers and blast radius, so do not re-read what it returned.
+- Documentation: `docs_explore`, `docs_for_symbol`, or `docs_glossary` before searching or opening documentation files.
+- Read or search a file directly only for what an index does not cover (configuration, infrastructure, files the docs index missed), when a tool reports the file stale, or to confirm one detail it did not return. When a tool or index is unavailable, fall back to direct reads and say so.
+- Report discovery in your final report: `Discovery: codegraph N, docs N, direct reads N`, with a reason for each direct read of indexed code.
 
 ## Hard rules
 

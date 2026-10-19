@@ -121,8 +121,8 @@ else
   step "tests (filtered)"
 fi
 
-step "build (Release, warnings-as-errors, AnalysisMode=all)"
-dotnet build KyberWeave.sln -c "${CONFIGURATION}"
+step "build (Release, warnings-as-errors, AnalysisMode=all, --no-incremental)"
+dotnet build KyberWeave.sln -c "${CONFIGURATION}" --no-incremental
 
 # A filter that matches nothing exits 0, which reads as a pass, so read the runner's own total.
 test_log="$(mktemp "${TMPDIR:-/tmp}/kw-fast-loop.XXXXXX")"

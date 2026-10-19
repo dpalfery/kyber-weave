@@ -31,6 +31,7 @@
       "items": {
         "enum": [
           "vscode",
+          "tool_search",
           "read",
           "todo",
           "codegraph/*",

@@ -6,7 +6,7 @@ status: current
 component: ReviewCouncil
 source-root: src/KyberWeave.Core/Review
 owner: dpalfery
-last-reviewed: 2026-09-27
+last-reviewed: 2026-10-16
 decided-by:
   - adr/0002-three-layer-review-council-verdict-engine
   - adr/0003-cross-file-duplication-and-prior-art-lenses
@@ -141,7 +141,7 @@ is recorded like any other evidence, and it exits 0 whether or not it finds anyt
 Fifteen concerns, but only **two** canonical agents carry them. The lens is a reference file;
 the agent is the seat that reads it.
 
-Fifteen agents would push the canonical roster from 20 to 35, clutter every harness's agent
+Fifteen agents would push the canonical roster from 22 to 37, clutter every harness's agent
 picker, and produce fifteen near-identical descriptions that would collide under
 `KW-AGENT-LINT-001` and `KW-SKILL-LINT-011`. As files, adding a lens is a Markdown file rather
 than a deployment — which is exactly what adding `prior-art` cost.

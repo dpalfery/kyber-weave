@@ -13,8 +13,10 @@ curl -fsSL https://raw.githubusercontent.com/dpalfery/kyber-weave/main/scripts/i
 
 Installs the latest release as self-contained binaries in `~/.local/bin` — no .NET runtime,
 no sudo, checksum-verified: the `kyber-weave` CLI, the `kyber-weave-mcp` server, and, from
-releases that publish it, the [`kyberdash`](docs/dash/README.md) observability binary. Already
-installed? `kyber-weave update`. [Install details →](docs/install.md)
+releases that publish it, the [`kyberdash`](docs/dash/README.md) observability binary. This
+one-liner and the Windows `.zip` are the only supported install paths: npm, Homebrew, and
+`dotnet tool` are not. Already installed? `kyber-weave update`, which also updates an installed
+KyberDash tray. [Install details →](docs/install.md) · [KyberDash adoption →](docs/dash/onboarding.md)
 
 **Windows users:** download the `.zip` archives from [Releases](https://github.com/dpalfery/kyber-weave/releases),
 verify the SHA-256 hash, and extract them to a directory on your PATH. See
@@ -34,7 +36,7 @@ Kyber-Weave provides five integrated features for agent governance and lifecycle
 
 1. **[DocGraph (Kyber-Docs)](#feature-1--docgraph)** — Typed, governed documentation corpus, drift detection, integrity analysis, and MCP graph retrieval.
 2. **[ContextHygiene](#feature-2--contexthygiene)** — Skill and harness agent linting, routing readiness scoring, parity drift detection, and security scanning.
-3. **[Kyber-Squad](#feature-3--kyber-squad)** — Unified multi-harness deployment and lifecycle control plane across 10 IDE/CLI harnesses with transactional recovery.
+3. **[Kyber-Squad](#feature-3--kyber-squad)** — Unified multi-harness deployment and lifecycle control plane across 12 IDE/CLI harnesses with transactional recovery.
 4. **[CI Pipelines](#feature-4--ci-pipelines)** — Unified diagnostic engine with stable `KW-*` rules, SARIF reporting, and GitHub Actions workflows.
 5. **[KyberDash](#feature-5--kyberdash)** — Local telemetry observability and context tuning for agentic workflows, across three local surfaces.
 
@@ -152,17 +154,17 @@ that was fixed in `.claude` and left broken in `.cursor`.
 
 Managing agent roles and skill sets across disparate developer environments leads to
 configuration drift, broken permissions, and fragmented workflows. Kyber-Squad provides a
-**single, unified lifecycle and deployment control plane** for deploying 21 canonical agents
+**single, unified lifecycle and deployment control plane** for deploying 22 canonical agents
 and 24 skills across 12 coding harnesses.
 
-**The canonical tree.** Maintains 21 canonical agent bodies and 24 canonical skills under
+**The canonical tree.** Maintains 22 canonical agent bodies and 24 canonical skills under
 [`products/kyber-squad/`](products/kyber-squad/README.md), governed by strict schemas, model
 profiles, and capability profiles. Generated target trees and APM packages are never tracked.
 
 **The compiler & lowering engine.** Normalizes definitions into AgentIR, enforces a semantic
 permission lattice (`deny < ask < allow`), and applies deterministic role-skill lowering (with
-shared conductor identities and prefixed `role-*` collision namespaces) for harnesses without
-native agent primitives.
+shared `product-owner` and `bug-crusher` identities and prefixed `role-*` collision namespaces)
+for harnesses without native agent primitives.
 
 **Transactional deployment.** Atomic, write-ahead deployments with cross-process OS mutex
 leasing (`kyber-weave-squad-<root-key>`), same-filesystem no-overwrite leaf claim/publish,
@@ -178,8 +180,8 @@ kyber-weave squad pack --format all --out ./dist # builds APM and Agent Plugins 
 
 | Harness Class | Supported Targets |
 |---|---|
-| Native Agents | Codex (`.codex`), Cursor (`.cursor`), Claude (`.claude`), GitHub Copilot (`.github`), OpenCode (`.opencode`), Kilo (`.kilo`), Pi (`.pi`), Factory Droids (`.factory`) |
-| Role-Skill Lowering | Antigravity, Warp |
+| Native Agents | Codex (`.codex`), Cursor (`.cursor`), Claude (`.claude`), GitHub Copilot (`.github`), OpenCode (`.opencode`), Kilo (`.kilo`), Antigravity (`.agents/`), Pi (`.pi`), Factory Droids (`.factory`), ZCode (`.zcode`), Devin (`.devin`), Command Code (`.commandcode`) |
+| Role-Skill Lowering | Warp |
 
 [Adoption & usage guide →](docs/kyber-squad/onboarding.md) · [Architecture →](docs/kyber-squad/architecture.md) · [Requirements & degradation →](docs/kyber-squad/requirements.md)
 
@@ -225,7 +227,7 @@ Installed by the same one-line installer as the CLI, from releases that publish 
 KyberDash began as a fork of the MIT-licensed CodeBurn project and is now first-party code
 under `dash/` ([ADR 0020](docs/adr/0020-kyberdash-one-time-fork.md)).
 
-[Overview →](docs/dash/README.md) · [Architecture →](docs/dash/architecture.md) · [Runbook →](docs/dash/runbook.md) · [Telemetry inventory →](docs/dash/telemetry-inventory.md) · [Install →](docs/install.md#kyberdash-and-the-version-floor)
+[Overview →](docs/dash/README.md) · [Adoption guide →](docs/dash/onboarding.md) · [Architecture →](docs/dash/architecture.md) · [Requirements →](docs/dash/requirements.md) · [Runbook →](docs/dash/runbook.md) · [Telemetry inventory →](docs/dash/telemetry-inventory.md) · [Install →](docs/install.md#kyberdash-and-the-version-floor)
 
 ---
 
@@ -233,7 +235,9 @@ under `dash/` ([ADR 0020](docs/adr/0020-kyberdash-one-time-fork.md)).
 
 Full corpus in [`docs/`](docs/README.md). Start with
 [the ontology](docs/documentation-ontology.md) if you want to understand the opinion, or
-[install](docs/install.md) if you want to run it.
+[install](docs/install.md) if you want to run it. The complete verb, flag, and exit-code
+surface of both binaries — plus every canonical install, update, and configure flow — is in
+[the CLI command surface](docs/cli-command-surface.md).
 
 ## Architecture
 
@@ -247,10 +251,10 @@ src/
     Diagnostics/            Feature 4 — rule ids, severities, reports
     CodeGraph/              read-only port over the CodeGraph index
     Configuration/ Text/ Parsing/
-  KyberWeave.Cli/         kyber-weave — skill | agent | squad | docs | update
+  KyberWeave.Cli/         kyber-weave — skill | agent | squad | docs | utilities | review | update
   KyberWeave.Mcp/         kyber-weave-mcp — stdio MCP server
 products/
-  kyber-squad/            canonical 21 agents, 24 skills, profiles, and schemas
+  kyber-squad/            canonical 22 agents, 24 skills, profiles, and schemas
 dash/                     Feature 5 — KyberDash, first-party since a one-time fork of CodeBurn
   src/ dash/                CLI engine, provider parsers, and the web dashboard
   kyber/                    analyzers, OTLP receiver, canon store

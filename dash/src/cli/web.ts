@@ -19,13 +19,14 @@ import { CanonStore } from '../canon/store.js'
 import { resolveCanonDbPath } from '../canon/paths.js'
 import { readSetting, SETTING_KEYS } from '../settings/shared-settings.js'
 import { JobHost, type JobSpawner } from '../jobs/host.js'
+import { acquireEngine, queryEngine, requestEngineShutdown, type EngineAttached, type EngineOwner, type EngineRecord } from '../engine/instance.js'
 import { ReceiverHost, type ReceiverProber } from '../jobs/receiver-host.js'
 import { runMaintenancePass } from '../refresh/folder-import.js'
 import type { CaptureRouteSettings } from '../server/capture-routes.js'
 import { formatValidViewForms, matchesViewPath } from '../server/view-paths.js'
 import { currentSpawnRuntime, resolveJobSpawnTarget } from './spawn-target.js'
 
-const KYBERDASH_VERSION = String(
+export const KYBERDASH_VERSION = String(
   (createRequire(import.meta.url)('../../package.json') as { version?: string }).version ?? '0.0.0',
 )
 
@@ -189,20 +190,120 @@ const SEA_NOT_BUILT_HINT_HTML =
 const DEV_NOT_BUILT_HINT_TEXT = 'Dashboard UI is not built. Run: cd dash && npm install && npm run build'
 const SEA_NOT_BUILT_HINT_TEXT = 'Dashboard UI is not embedded in this build. Install a release that includes it.'
 
-function openBrowser(url: string): void {
-  // execFile, not exec: the arguments go to the process as an argv array, so no
-  // shell parses them and there is no command string for a URL to break out of.
-  // This matters because the URL is no longer purely internal — `--view` puts a
-  // user-supplied path into it (runWebDashboard validates it against
-  // matchesViewPath first, but this must not depend on a check made elsewhere).
-  // On Windows `start` is a cmd builtin rather than an executable, so cmd is the
-  // program; the empty string is the window title `start` expects before a URL.
+/**
+ * Strictly validates and canonicalizes a URL targeting the local dashboard.
+ *
+ * Enforces loopback-only origins (`http://127.0.0.1:<1..65535>`), disallowing userinfo,
+ * fragments, path traversal (`..`), protocol-relative prefixes (`//`), and scheme injections (`://`),
+ * and requires the route to match the registered patterns in `view-paths.json`.
+ *
+ * Returns the canonical URL string (`http://127.0.0.1:<port>` or `http://127.0.0.1:<port>/<route>`),
+ * or `null` if validation fails.
+ */
+export function validateDashboardUrl(rawUrl: string): string | null {
+  if (typeof rawUrl !== 'string') return null
+  if (rawUrl.length === 0) return null
+  if (/\s|[\u0000-\u001f\u007f]/.test(rawUrl)) return null
+  if (rawUrl.includes('#') || rawUrl.includes('\\')) return null
+  if (!rawUrl.startsWith('http://')) return null
+
+  const afterScheme = rawUrl.slice(7)
+  const authorityEndRelative = afterScheme.search(/[/?]/)
+  const authority = authorityEndRelative === -1 ? afterScheme : afterScheme.slice(0, authorityEndRelative)
+  const rawTail = authorityEndRelative === -1 ? '' : afterScheme.slice(authorityEndRelative)
+
+  if (authority.includes('@') || authority.includes('\\') || authority.includes('%')) {
+    return null
+  }
+
+  const portMatch = /^127\.0\.0\.1:(\d+)$/.exec(authority)
+  if (!portMatch) return null
+
+  const portStr = portMatch[1]!
+  const port = Number(portStr)
+  if (!Number.isInteger(port) || String(port) !== portStr || port < 1 || port > 65535) {
+    return null
+  }
+
+  let parsed: URL
+  try {
+    parsed = new URL(rawUrl)
+  } catch {
+    return null
+  }
+
+  if (
+    parsed.protocol !== 'http:' ||
+    parsed.hostname !== '127.0.0.1' ||
+    parsed.username !== '' ||
+    parsed.password !== '' ||
+    parsed.hash !== ''
+  ) {
+    return null
+  }
+
+  if (rawTail === '' || rawTail === '/') {
+    return `http://127.0.0.1:${port}`
+  }
+
+  if (!rawTail.startsWith('/') || rawTail.startsWith('//')) {
+    return null
+  }
+
+  if (rawTail.includes('://')) {
+    return null
+  }
+
+  const qIdx = rawTail.indexOf('?')
+  const rawPath = qIdx === -1 ? rawTail : rawTail.slice(0, qIdx)
+
+  if (rawPath.includes('//')) {
+    return null
+  }
+
+  if (rawPath.split('/').some((segment) => segment === '..' || segment === '.')) {
+    return null
+  }
+
+  const view = `${parsed.pathname}${parsed.search}`
+  if (!matchesViewPath(view)) {
+    return null
+  }
+
+  return `http://127.0.0.1:${port}${view}`
+}
+
+/**
+ * Opens a dashboard URL in the default browser.
+ *
+ * Before dispatching to any system opener, the URL is strictly validated using
+ * `validateDashboardUrl` to ensure it targets a loopback origin (127.0.0.1:<1..65535>)
+ * and a registered route from `view-paths.json`. Any off-route, traversal, non-loopback,
+ * or malformed URL is refused without spawning any process.
+ *
+ * Platform dispatch uses `execFile` directly with argv arguments, avoiding any shell
+ * command parsing sink:
+ * - On macOS: `open <url>`
+ * - On Linux: `xdg-open <url>`
+ * - On Windows: `rundll32.exe url.dll,FileProtocolHandler <url>` rather than `cmd /c start`.
+ *   This eliminates the `cmd.exe` shell interpretation sink (remediating CodeQL alert 273),
+ *   preserves `&` in query parameters (such as `/compare?a=:runId&b=:runId` which `cmd.exe`
+ *   would otherwise interpret as a command separator), and validates the loopback origin
+ *   and route first.
+ */
+export function openBrowser(url: string): void {
+  const safeUrl = validateDashboardUrl(url)
+  if (!safeUrl) {
+    console.warn(`${BRAND.cliName}: refusing to open a URL outside the loopback dashboard routes`)
+    return
+  }
+
   const [program, args] =
     process.platform === 'darwin'
-      ? ['open', [url]]
+      ? ['open', [safeUrl]]
       : process.platform === 'win32'
-        ? ['cmd', ['/c', 'start', '', url]]
-        : ['xdg-open', [url]]
+        ? ['rundll32.exe', ['url.dll,FileProtocolHandler', safeUrl]]
+        : ['xdg-open', [safeUrl]]
   try {
     execFile(program!, args as string[], () => {
       /* a browser that fails to launch is not an error the server should raise */
@@ -301,18 +402,49 @@ export function portRefusalFor(port: number, code: string | undefined): Error | 
 }
 
 export class UnknownViewError extends Error {
+  readonly view: string
   readonly validForms: string
 
   constructor(view: string, validForms: string) {
     super(`unknown view "${view}". Valid forms: ${validForms}`)
     this.name = 'UnknownViewError'
+    this.view = view
     this.validForms = validForms
   }
 }
 
-function joinViewUrl(origin: string, view: string | undefined): string {
-  if (view === undefined || view.trim() === '' || view.trim() === '/') return origin
-  return `${origin}/${view.trim().replace(/^\/+/, '')}`
+export function joinViewUrl(origin: string, view: string | undefined): string {
+  const originMatch = /^http:\/\/127\.0\.0\.1:(\d+)\/?$/.exec(typeof origin === 'string' ? origin.trim() : '')
+  if (!originMatch) {
+    throw new UnknownViewError(origin, formatValidViewForms())
+  }
+  const portStr = originMatch[1]!
+  const port = Number(portStr)
+  if (!Number.isInteger(port) || String(port) !== portStr || port < 1 || port > 65535) {
+    throw new UnknownViewError(origin, formatValidViewForms())
+  }
+  const canonicalOrigin = `http://127.0.0.1:${port}`
+
+  if (view === undefined) return canonicalOrigin
+  const trimmedView = view.trim()
+  if (trimmedView === '' || trimmedView === '/') return canonicalOrigin
+
+  if (
+    view.includes('://') ||
+    view.startsWith('//') ||
+    view.includes('\\') ||
+    view.split('/').some((segment) => segment === '..' || segment === '.')
+  ) {
+    throw new UnknownViewError(view, formatValidViewForms())
+  }
+
+  const cleanPath = trimmedView.replace(/^\/+/, '')
+  const candidateUrl = `${canonicalOrigin}/${cleanPath}`
+  const validated = validateDashboardUrl(candidateUrl)
+  if (validated === null) {
+    throw new UnknownViewError(view, formatValidViewForms())
+  }
+  return validated
 }
 
 /**
@@ -777,6 +909,43 @@ function buildServices(stateDir: string, seams: HostedSeams): HostedServices {
   }
 }
 
+/**
+ * A live engine already holds this state dir. The caller attaches to it instead of
+ * starting a second one - there is exactly one engine per user.
+ */
+export class EngineAlreadyRunningError extends Error {
+  readonly record: EngineRecord
+  constructor(record: EngineRecord) {
+    super(`KyberDash is already running (pid ${record.pid}, version ${record.version}${record.url === undefined ? '' : `, ${record.url}`})`)
+    this.name = 'EngineAlreadyRunningError'
+    this.record = record
+  }
+}
+
+/** How long a newer engine waits for an older one to let go of the endpoint. */
+const ENGINE_HANDOFF_TIMEOUT_MS = 10_000
+
+async function takeEngine(
+  stateDir: string,
+  onShutdownRequested: () => void,
+): Promise<EngineOwner> {
+  const take = (): Promise<EngineOwner | EngineAttached> =>
+    acquireEngine({ stateDir, version: KYBERDASH_VERSION, onShutdownRequested })
+  let taken = await take()
+  if (taken.kind === 'attached' && taken.record.version !== KYBERDASH_VERSION && taken.record.pid > 0) {
+    // An engine from another build outlives its install. Replace it: the newer binary wins.
+    if (await requestEngineShutdown(stateDir)) {
+      const deadline = Date.now() + ENGINE_HANDOFF_TIMEOUT_MS
+      while (Date.now() < deadline && (await queryEngine(stateDir)) !== null) {
+        await new Promise<void>((resolve) => { setTimeout(resolve, 100) })
+      }
+      taken = await take()
+    }
+  }
+  if (taken.kind === 'attached') throw new EngineAlreadyRunningError(taken.record)
+  return taken
+}
+
 export async function runWebDashboard(opts: WebDashboardServices & {
   /**
    * The port for this run. `undefined` resolves from the persisted
@@ -786,6 +955,12 @@ export async function runWebDashboard(opts: WebDashboardServices & {
    */
   port?: number
   open: boolean
+  /**
+   * Enforce one engine per state dir: a live engine makes this start throw
+   * `EngineAlreadyRunningError`, and an older-version engine is replaced. Off for the
+   * in-process suites, which start several servers over temporary state dirs.
+   */
+  singleInstance?: boolean
   view?: string
   kyberBridge?: KyberBridge
   openUrl?: (url: string) => void
@@ -824,6 +999,15 @@ export async function runWebDashboard(opts: WebDashboardServices & {
   // Best-effort: a directory we cannot create is reported once, and the server still runs
   // (the lease takes the same directory and degrades to hosting no jobs if it cannot).
   const stateDirProblem = ensureStateDir(stateDir)
+  // One engine per user, enforced by the OS (a bound local endpoint), before anything else
+  // binds or writes. `requestStop` is late-bound: a peer's shutdown request can only arrive
+  // after the server below exists.
+  // A request that lands before the server is listening is remembered and honoured the moment it is.
+  let stopRequestedEarly = false
+  let requestStop = (): void => { stopRequestedEarly = true }
+  const engine: EngineOwner | null = opts.singleInstance === true && stateDirProblem === null
+    ? await takeEngine(stateDir, () => { requestStop() })
+    : null
   // Read-write: the hosts write settings, and the maintenance pass purges and reprojects.
   // The store is resolved up front (it is one handle per process, shared by every server),
   // so the settings routes work from the first accepted connection.
@@ -955,6 +1139,7 @@ export async function runWebDashboard(opts: WebDashboardServices & {
   try {
     requestedPort = resolveDashboardPort(opts.port, store)
   } catch (err) {
+    await engine?.release()
     bridge.close()
     closeDefaultStoreIfUnused(opts.store)
     throw err
@@ -979,7 +1164,9 @@ export async function runWebDashboard(opts: WebDashboardServices & {
     // A server that never bound never served, so it must not keep a host pair alive: the
     // share taken above goes back rather than leaving a lease held by a process with no
     // dashboard.
-  }).catch((err: unknown) => {
+  }).catch(async (err: unknown) => {
+    // The engine endpoint was taken above; a server that never bound must give it back.
+    await engine?.release()
     // Nothing was bound, so nothing was ever holding a host pair: there is no share to
     // give back yet (the pair is taken below, after the bind). The bridge above still
     // needs closing when the caller injected none: it opened its own sqlite handle, and
@@ -997,6 +1184,22 @@ export async function runWebDashboard(opts: WebDashboardServices & {
   // against `/meta`, so a tray can decide whether it understands this server before it
   // renders anything.
   const url = `http://127.0.0.1:${port}`
+  if (engine !== null) {
+    // A kill the process cannot intercept leaves a stale endpoint, which the next start
+    // clears. Everything the process can intercept (SIGTERM, exit) cleans up after itself.
+    process.once('exit', () => engine.releaseSync())
+    engine.update({ url })
+    requestStop = () => {
+      server.closeAllConnections?.()
+      server.close()
+      server.once('close', () => { setImmediate(() => process.exit(0)) })
+      setTimeout(() => process.exit(0), 5_000).unref()
+    }
+    // SIGTERM takes the same teardown as a peer's shutdown request: the server's close handler below
+    // gives back the hosts, server.json and the bridge before the process exits.
+    process.once('SIGTERM', () => requestStop())
+    if (stopRequestedEarly) requestStop()
+  }
   // Publish the attach point. Only over a file that is not a live other server's: the
   // jobs lease stands a second `kyberdash web` process down, but it does not stop that
   // process reaching this line, and a blind overwrite would hand the tray the standing
@@ -1044,6 +1247,7 @@ export async function runWebDashboard(opts: WebDashboardServices & {
   // the other's attach point. An unreadable, missing or foreign body is left alone.
   server.on('close', () => {
     process.off('SIGINT', onSigint)
+    void engine?.release().catch(() => {})
     const published = readServerRecord(serverFilePath)
     if (published !== null && published.pid === process.pid && (published.url === undefined || published.url === url)) {
       rmSync(serverFilePath, { force: true })

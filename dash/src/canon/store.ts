@@ -161,7 +161,17 @@ import {
  * corpus is the expensive thing here and re-collecting it is not always
  * possible.
  */
-export const SCHEMA_VERSION = 19
+export const SCHEMA_VERSION = 20
+
+/**
+ * How much of the write-ahead log the store keeps on disk once a checkpoint
+ * has reset it. SQLite's default (-1) never shrinks the WAL file, so it stays
+ * at whatever high-water mark a burst reached: after one folder import across
+ * 41 providers the sidecar sat at 145 MB beside a 442 MB database and stayed
+ * there. 32 MiB lets a burst ride without a checkpoint while bounding what a
+ * quiet store keeps.
+ */
+export const WAL_SIZE_LIMIT_BYTES = 32 * 1024 * 1024
 
 /**
  * Version of the diagnostic signal and finding detector suite (Decision D17).
@@ -179,9 +189,10 @@ export const SCHEMA_VERSION = 19
  * a store file that predates a generation keeps its old stamp until its
  * derived tables are rebuilt. Bump it whenever detector semantics change
  * and say so in the PR, so the stamp stays a truthful witness instead of a
- * forgotten counter.
+ * forgotten counter. 4 reads skill listings and invocations from canon/skills.ts
+ * (Skill tool calls and the invoked key) instead of prompt-text regexes and tool names.
  */
-export const DETECTOR_VERSION = 3
+export const DETECTOR_VERSION = 4
 
 /**
  * The whole schema, as code. `CREATE ... IF NOT EXISTS` throughout so
@@ -249,6 +260,11 @@ CREATE TABLE IF NOT EXISTS session (
   branch TEXT,
   started TEXT,
   ended TEXT,
+  synced_at TEXT,
+  sync_status TEXT DEFAULT 'pending',
+  settled_at TEXT,
+  transcript_path TEXT,
+  transcript_offset INTEGER DEFAULT 0,
   payload TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS session_by_started ON session (started);
@@ -790,6 +806,30 @@ export const MIGRATIONS: Record<number, (db: Database) => void> = {
       if (!pCols.includes('stack')) {
         db.exec('ALTER TABLE problems ADD COLUMN stack TEXT')
       }
+    }
+  },
+  // v19 -> v20: session sync progress and settling columns.
+  // Adds synced_at, sync_status, settled_at, transcript_path, transcript_offset.
+  // Each ADD COLUMN is presence-guarded so re-running migration 19 is idempotent
+  // and stores with pre-existing columns or missing tables don't throw.
+  19: (db: Database) => {
+    const hasSession = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='session'").get()
+    if (!hasSession) return
+    const cols = (db.prepare('PRAGMA table_info(session)').all() as { name: string }[]).map((c) => c.name)
+    if (!cols.includes('synced_at')) {
+      db.exec('ALTER TABLE session ADD COLUMN synced_at TEXT')
+    }
+    if (!cols.includes('sync_status')) {
+      db.exec("ALTER TABLE session ADD COLUMN sync_status TEXT DEFAULT 'pending'")
+    }
+    if (!cols.includes('settled_at')) {
+      db.exec('ALTER TABLE session ADD COLUMN settled_at TEXT')
+    }
+    if (!cols.includes('transcript_path')) {
+      db.exec('ALTER TABLE session ADD COLUMN transcript_path TEXT')
+    }
+    if (!cols.includes('transcript_offset')) {
+      db.exec('ALTER TABLE session ADD COLUMN transcript_offset INTEGER DEFAULT 0')
     }
   },
 }
@@ -1481,6 +1521,14 @@ export class CanonStore {
     // and WAL keeps batch commits cheap.
     this.db.exec('PRAGMA busy_timeout = 5000')
     this.db.exec('PRAGMA journal_mode = WAL')
+    // WAL's own default here is FULL, which fsyncs the sidecar on every commit
+    // — the dominant cost of a folder import, which commits per source unit.
+    // NORMAL is the documented pairing for WAL: a crash can lose the last
+    // commit, it cannot corrupt the database.
+    this.db.exec('PRAGMA synchronous = NORMAL')
+    // Bound the sidecar. Without this a checkpoint reclaims nothing on disk:
+    // the file keeps its high-water mark for the life of the database.
+    this.db.exec(`PRAGMA journal_size_limit = ${WAL_SIZE_LIMIT_BYTES}`)
 
     // Order matters. `SCHEMA_SQL` is every statement in its current shape,
     // and some of them — an index over a column a later version added —
@@ -2411,10 +2459,23 @@ export class CanonStore {
   upsertSession(row: SessionRow): void {
     this.db
       .prepare(
-        `INSERT OR REPLACE INTO session (
+        // An upsert, not INSERT OR REPLACE: a replace deletes the row, which would reset the
+        // transcript sync columns (offset, status, settled_at) that the sync job owns.
+        `INSERT INTO session (
            session_id, harness, label, is_subagent, parent_session,
            agent_name, repo, branch, started, ended, payload
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(session_id) DO UPDATE SET
+           harness = excluded.harness,
+           label = excluded.label,
+           is_subagent = excluded.is_subagent,
+           parent_session = excluded.parent_session,
+           agent_name = excluded.agent_name,
+           repo = excluded.repo,
+           branch = excluded.branch,
+           started = excluded.started,
+           ended = excluded.ended,
+           payload = excluded.payload`,
       )
       .run(
         row.sessionId,
@@ -2482,7 +2543,13 @@ export class CanonStore {
    * Delete the whole corpus: every wipe-by-harness row plus quarantine,
    * problems, predictions, and the log-enrichment tables. The operational
    * audit survives: `ingest_log`, `refresh_run`, `metadata` (stamped),
-   * `token_cache`, and the model-window catalog stay.
+   * `token_cache`, and the model-window catalog stay — `refresh_run` because
+   * ADR 0032 D8 keeps pre-wipe rows as audit history, `metadata` because it
+   * holds the shared settings as well as the schema stamps.
+   *
+   * The space is reclaimed after the delete transaction commits. Without it a
+   * wipe empties the tables but leaves the file at whatever size it grew to,
+   * which is what let a wiped store still occupy 442 MB on disk.
    */
   wipeAll(): StoreWipeReport {
     this.db.exec('BEGIN')
@@ -2517,7 +2584,23 @@ export class CanonStore {
       throw err
     }
     this.stampClean(['*'])
+    this.reclaimSpace()
     return report
+  }
+
+  /**
+   * Return the file to the size its contents actually need. `VACUUM` rewrites
+   * the database and cannot run inside a transaction, so it belongs after the
+   * wipe commits. The WAL is truncated on both sides of it: before, so the
+   * rewrite is not replaying a large sidecar; after, because in WAL mode
+   * `VACUUM` writes the rewritten database back *through* the WAL, so the last
+   * word on the sidecar has to come after it or the freed pages simply move
+   * from one file to the other. On a `:memory:` store all three are no-ops.
+   */
+  private reclaimSpace(): void {
+    this.db.exec('PRAGMA wal_checkpoint(TRUNCATE)')
+    this.db.exec('VACUUM')
+    this.db.exec('PRAGMA wal_checkpoint(TRUNCATE)')
   }
 
   /**
@@ -3825,8 +3908,24 @@ export class CanonStore {
     return this.db
   }
 
+  /**
+   * `PRAGMA optimize` is SQLite's own guidance for the last thing a connection
+   * does: it runs the bounded analysis a bulk import made worthwhile, so the
+   * planner reads statistics next time instead of guessing from a table's
+   * declared shape. It is cheap and self-limiting (`analysis_limit`), and it is
+   * the reason a post-import read does not pay for the import's index churn.
+   *
+   * The optimize cannot stand between the handle and its close: if the stats
+   * pass throws — a locked store, an I/O hiccup — the close still has to run,
+   * or the caller leaks the handle it was getting rid of. Hence the `finally`,
+   * not a plain sequence.
+   */
   close(): void {
-    this.db.close()
+    try {
+      this.db.exec('PRAGMA optimize')
+    } finally {
+      this.db.close()
+    }
   }
 }
 

@@ -386,7 +386,7 @@ public sealed class SquadReleaseClientTests : IDisposable
 
         string destination = Path.Combine(_temp.Path, "destination");
         string outside = Path.Combine(_temp.Path, "outside");
-        string state = Path.Combine(_temp.Path, ".kyber-weave");
+        string state = Path.Combine(_temp.Path, "home", ".kyber-weave", "squad", "global");
         Directory.CreateDirectory(destination);
         Directory.CreateDirectory(outside);
         Directory.CreateDirectory(state);
@@ -582,7 +582,7 @@ public sealed class SquadReleaseClientTests : IDisposable
 
     private void SeedStateOnly()
     {
-        string state = Path.Combine(_temp.Path, ".kyber-weave");
+        string state = Path.Combine(_temp.Path, "home", ".kyber-weave", "squad", "global");
         Directory.CreateDirectory(state);
         File.WriteAllText(Path.Combine(state, "squad.lock.yml"), "preserve lock");
         File.WriteAllText(Path.Combine(state, "squad.receipt.json"), "preserve receipt");

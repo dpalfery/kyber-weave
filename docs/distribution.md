@@ -5,7 +5,7 @@ doc-type: reference
 status: current
 component: Distribution
 owner: dpalfery
-last-reviewed: 2026-10-04
+last-reviewed: 2026-10-16
 ---
 
 # Distribution and release flow
@@ -71,7 +71,9 @@ install path is `scripts/install.sh` against GitHub Release assets. Neither carr
 KyberDash; adding it there would mean maintaining a second unpublished channel.
 
 `nuget.org` is never used. A `dotnet tool` package may go to GitHub Packages as an
-optional secondary channel for .NET specialists.
+optional secondary channel for .NET specialists and maintainers. It is **not an end-user
+install path**: that registry requires authentication, and [install.md](install.md)
+documents only `scripts/install.sh` and the Windows `.zip`.
 
 ## RID matrix
 
@@ -97,7 +99,7 @@ In addition to binary executables, each GitHub Release publishes two version-mat
 
 | Asset Name | Format | Contents |
 |---|---|---|
-| `kyber-squad-<version>.zip` | APM bundle | All 21 canonical agents with their 10 owned references, 24 skills with 68 supplemental resources, profiles, schemas, and `mcp.json` |
+| `kyber-squad-<version>.zip` | APM bundle | All 22 canonical agents with their 10 owned references, 24 skills with 68 supplemental resources, profiles, schemas, and `mcp.json` |
 | `kyber-squad-plugin-<version>.zip` | Agent Plugins v1 | All 24 portable skills, their 68 supplemental resources, and MCP server configuration; never agents or agent-owned resources |
 
 ### Packaging via `squad pack`
@@ -125,10 +127,9 @@ content stays in its skill directory as its durable home, portable policy lives 
 exact 24-file Copilot golden skill surface of the pinned Hotshot fixture is not a package
 contract.
 
-`products/kyber-squad/` is canonical and package authority. The root `.github/agents/`,
-`.github/skills/`, `.kyber-weave/squad.lock.yml`, and `.kyber-weave/squad.receipt.json` are an
-intentional stale self-deployment and its tracked state, not release-package inputs. This work
-leaves them untouched for a human refresh after a fresh Kyber-Weave release candidate.
+`products/kyber-squad/` is canonical and package authority. The repository no longer carries a
+project-level self-deployment: the root `.github/agents/`, `.github/skills/`,
+`.kyber-weave/squad.lock.yml`, and `.kyber-weave/squad.receipt.json` were removed.
 
 ### Version lockstep and toolchain validation
 
@@ -201,7 +202,7 @@ When a version containing a hyphen (`-`) is processed:
 
 - `.github/workflows/release.yml` passes `--prerelease` to `gh release create`. GitHub Releases marks the release as a pre-release, keeping it off `/releases/latest` so standard `install.sh` users stay on stable releases.
 - Release notes automatically include a pre-release callout banner highlighting the candidate version.
-- Nuget tool packages (`.nupkg`) carrying pre-release versions are published to GitHub Packages, allowing testing via `dotnet tool update --prerelease`.
+- Nuget tool packages (`.nupkg`) carrying pre-release versions are published to GitHub Packages, allowing testing via `dotnet tool update --prerelease`. This is a maintainer/testing channel only, not a supported end-user install path (see [Other published artifacts](#other-published-artifacts)).
 
 ### Binary versioning and inspection
 

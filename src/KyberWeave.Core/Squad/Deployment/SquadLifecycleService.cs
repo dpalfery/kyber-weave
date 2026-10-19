@@ -40,6 +40,11 @@ public sealed record SquadUninstallRequest(
     bool DryRun = false);
 
 /// <summary>The result of executing a Kyber-Squad lifecycle operation.</summary>
+/// <remarks>
+/// <see cref="Warnings"/> carries what a committed transaction could not finish, such as a registry
+/// write that failed after the deployment itself committed. The deployment is never rolled back for
+/// them, so a caller that prints only success has hidden the problem.
+/// </remarks>
 public sealed record SquadLifecycleResult(
     bool Success,
     SquadDeploymentPlan? Plan = null,
@@ -47,7 +52,8 @@ public sealed record SquadLifecycleResult(
     SquadLock? Lock = null,
     IReadOnlyList<SquadDegradation>? Degradations = null,
     IReadOnlyList<string>? Errors = null,
-    bool DryRun = false);
+    bool DryRun = false,
+    IReadOnlyList<string>? Warnings = null);
 
 /// <summary>
 /// Orchestrates install, update, and uninstall lifecycle operations for Kyber-Squad.
@@ -177,7 +183,6 @@ public sealed class SquadLifecycleService
                 .ToArray();
 
             SquadDeploymentPlan plan;
-            IReadOnlyList<SquadReceipt>? siblingReceipts = SiblingGlobalReceipts(targetRoot, request.Scope);
             if (existingReceipt is null)
             {
                 plan = SquadDeploymentPlan.CreateInstall(
@@ -189,7 +194,7 @@ public sealed class SquadLifecycleService
                     adopt: request.Adopt,
                     timeProvider: _timeProvider,
                     globalRoots: _globalRoots,
-                    siblingGlobalReceipts: siblingReceipts);
+                    siblingGlobalReceipts: []);
             }
             else
             {
@@ -203,7 +208,7 @@ public sealed class SquadLifecycleService
                     replaceManaged: false,
                     timeProvider: _timeProvider,
                     globalRoots: _globalRoots,
-                    siblingGlobalReceipts: siblingReceipts);
+                    siblingGlobalReceipts: []);
             }
 
             if (request.DryRun)
@@ -226,7 +231,8 @@ public sealed class SquadLifecycleService
                 Receipt: plan.Receipt,
                 Lock: plan.Lock,
                 Degradations: plan.Receipt.Degradations,
-                DryRun: false);
+                DryRun: false,
+                Warnings: transaction.Warnings);
         }
         finally
         {
@@ -336,7 +342,7 @@ public sealed class SquadLifecycleService
                 replaceManaged: request.ReplaceManaged,
                 timeProvider: _timeProvider,
                 globalRoots: _globalRoots,
-                siblingGlobalReceipts: SiblingGlobalReceipts(targetRoot, request.Scope));
+                siblingGlobalReceipts: []);
 
             if (request.DryRun)
             {
@@ -358,7 +364,8 @@ public sealed class SquadLifecycleService
                 Receipt: plan.Receipt,
                 Lock: plan.Lock,
                 Degradations: plan.Receipt.Degradations,
-                DryRun: false);
+                DryRun: false,
+                Warnings: transaction.Warnings);
         }
         finally
         {
@@ -398,7 +405,7 @@ public sealed class SquadLifecycleService
             scope: request.Scope,
             receipt: receipt,
             globalRoots: _globalRoots,
-            siblingGlobalReceipts: SiblingGlobalReceipts(targetRoot, request.Scope));
+            siblingGlobalReceipts: []);
 
         if (request.DryRun)
         {
@@ -420,15 +427,9 @@ public sealed class SquadLifecycleService
             Receipt: plan.ReceiptMutation == SquadStateMutation.Write ? plan.Receipt : null,
             Lock: plan.LockMutation == SquadStateMutation.Write ? plan.Lock : null,
             Degradations: plan.Receipt.Degradations,
-            DryRun: false));
+            DryRun: false,
+            Warnings: transaction.Warnings));
     }
-
-    private IReadOnlyList<SquadReceipt>? SiblingGlobalReceipts(
-        string targetRoot,
-        SquadDeploymentScope scope) =>
-        scope == SquadDeploymentScope.Global
-            ? _stateStore.ListOtherGlobalReceipts(targetRoot)
-            : null;
 
     /// <summary>
     /// Rejects any requested target with no registered renderer before the release is

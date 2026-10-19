@@ -1,230 +1,8 @@
-//! Renders badge text into the tray icon. Windows and most Linux panels cannot place a
-//! title next to a tray icon the way the macOS menubar does, so the number becomes the icon:
-//! a 4x7 pixel font drawn at the panel's native small-icon size, so it stays crisp instead
-//! of being a scaled-down bitmap.
-//!
-//! The macOS menu bar has room for the title *and* a glyph, so there the collector state
-//! rides a coloured KyberDash lightsaber drawn at runtime ([`render_lightsaber`]) instead of
-//! a number. Neither renderer derives status: both are handed the verdict
-//! `status_item::status_item_with_coverage` already read from the shared coverage API.
+//! Renders the native green/red lightsaber status icon on both desktop platforms.
+//! Collector state comes from `status_item::status_item_with_coverage`, which reads
+//! the shared coverage API; this module owns only the pixels.
 
 use tauri::image::Image;
-
-const GLYPH_HEIGHT: usize = 7;
-const BASE_ICON_SIZE: u32 = 16;
-const GLYPH_GAP: usize = 1;
-/// Brand accent on a light taskbar, the lighter ember on a dark one.
-const ACCENT_LIGHT_TASKBAR: [u8; 3] = [0xC9, 0x52, 0x1D];
-const ACCENT_DARK_TASKBAR: [u8; 3] = [0xF0, 0x8A, 0x55];
-
-struct Glyph {
-    width: usize,
-    rows: [&'static str; GLYPH_HEIGHT],
-}
-
-fn glyph(c: char) -> Option<Glyph> {
-    let g = |width: usize, rows: [&'static str; GLYPH_HEIGHT]| Some(Glyph { width, rows });
-    match c {
-        '0' => g(4, [".##.", "#..#", "#..#", "#..#", "#..#", "#..#", ".##."]),
-        '1' => g(3, [".#.", "##.", ".#.", ".#.", ".#.", ".#.", "###"]),
-        '2' => g(4, [".##.", "#..#", "...#", "..#.", ".#..", "#...", "####"]),
-        '3' => g(4, ["###.", "...#", "...#", ".##.", "...#", "...#", "###."]),
-        '4' => g(4, ["#..#", "#..#", "#..#", "####", "...#", "...#", "...#"]),
-        '5' => g(4, ["####", "#...", "#...", "###.", "...#", "...#", "###."]),
-        '6' => g(4, [".##.", "#...", "#...", "###.", "#..#", "#..#", ".##."]),
-        '7' => g(4, ["####", "...#", "..#.", "..#.", ".#..", ".#..", ".#.."]),
-        '8' => g(4, [".##.", "#..#", "#..#", ".##.", "#..#", "#..#", ".##."]),
-        '9' => g(4, [".##.", "#..#", "#..#", ".###", "...#", "...#", ".##."]),
-        '$' => g(4, ["..#.", ".###", "#.#.", ".##.", ".#.#", "###.", "..#."]),
-        'K' => g(4, ["#..#", "#.#.", "##..", "#...", "##..", "#.#.", "#..#"]),
-        'M' => g(4, ["#..#", "####", "####", "#..#", "#..#", "#..#", "#..#"]),
-        '.' => g(1, [".", ".", ".", ".", ".", ".", "#"]),
-        _ => None,
-    }
-}
-
-fn text_width(text: &str) -> usize {
-    let glyphs: Vec<Glyph> = text.chars().filter_map(glyph).collect();
-    if glyphs.is_empty() {
-        return 0;
-    }
-    glyphs.iter().map(|g| g.width).sum::<usize>() + GLYPH_GAP * (glyphs.len() - 1)
-}
-
-/// Draws `text` centred in a `size` x `size` RGBA icon. Prefers anti-aliased bold system
-/// text (far more legible at 16px than 1px pixel strokes); falls back to the pixel font
-/// when no usable font file is present.
-pub fn render(text: &str, size: u32, dark_taskbar: bool) -> Image<'static> {
-    let color = if dark_taskbar {
-        ACCENT_DARK_TASKBAR
-    } else {
-        ACCENT_LIGHT_TASKBAR
-    };
-    if let Some(image) = render_with_font(text, size, color) {
-        return image;
-    }
-    // The pixel font cannot shrink, so trim from the right until the string fits.
-    let mut trimmed: String = text.to_string();
-    while !fits(&trimmed) && trimmed.pop().is_some() {}
-    render_pixel_font(&trimmed, size, dark_taskbar)
-}
-
-/// Bold sans faces shipped with Windows, best first. Bahnschrift's condensed numerals fit
-/// four glyphs into 16px at a larger size than Segoe UI Bold does.
-#[cfg(target_os = "windows")]
-const FONT_CANDIDATES: [&str; 3] = [
-    r"C:\Windows\Fonts\bahnschrift.ttf",
-    r"C:\Windows\Fonts\segoeuib.ttf",
-    r"C:\Windows\Fonts\arialbd.ttf",
-];
-#[cfg(not(target_os = "windows"))]
-const FONT_CANDIDATES: [&str; 3] = [
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-    "/usr/share/fonts/TTF/DejaVuSans-Bold.ttf",
-    "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
-];
-
-/// Largest and smallest text sizes tried, as a fraction of the icon size.
-const FONT_MAX_FRACTION: f32 = 0.95;
-const FONT_MIN_FRACTION: f32 = 0.5;
-const FONT_STEP_PX: f32 = 0.5;
-
-/// Read and parsed once: the badge re-renders on every refresh and the font file does not
-/// change under a running session.
-fn font() -> Option<&'static fontdue::Font> {
-    static FONT: std::sync::OnceLock<Option<fontdue::Font>> = std::sync::OnceLock::new();
-    FONT.get_or_init(load_font).as_ref()
-}
-
-fn load_font() -> Option<fontdue::Font> {
-    for path in FONT_CANDIDATES {
-        if let Ok(bytes) = std::fs::read(path) {
-            if let Ok(font) = fontdue::Font::from_bytes(bytes, fontdue::FontSettings::default()) {
-                return Some(font);
-            }
-        }
-    }
-    None
-}
-
-struct Raster {
-    metrics: fontdue::Metrics,
-    bitmap: Vec<u8>,
-}
-
-fn layout(font: &fontdue::Font, text: &str, px: f32) -> (Vec<Raster>, f32, i32, i32) {
-    let glyphs: Vec<Raster> = text
-        .chars()
-        .map(|c| {
-            let (metrics, bitmap) = font.rasterize(c, px);
-            Raster { metrics, bitmap }
-        })
-        .collect();
-    let width: f32 = glyphs.iter().map(|g| g.metrics.advance_width).sum();
-    let top = glyphs
-        .iter()
-        .map(|g| g.metrics.height as i32 + g.metrics.ymin)
-        .max()
-        .unwrap_or(0);
-    let bottom = glyphs.iter().map(|g| g.metrics.ymin).min().unwrap_or(0);
-    (glyphs, width, top, bottom)
-}
-
-fn render_with_font(text: &str, size: u32, color: [u8; 3]) -> Option<Image<'static>> {
-    let font = font()?;
-    let limit = size as f32;
-    let mut px = limit * FONT_MAX_FRACTION;
-    let mut chosen = None;
-    while px >= limit * FONT_MIN_FRACTION {
-        let (glyphs, width, top, bottom) = layout(font, text, px);
-        let height = (top - bottom) as f32;
-        if width <= limit && height <= limit {
-            chosen = Some((glyphs, width, top, bottom));
-            break;
-        }
-        px -= FONT_STEP_PX;
-    }
-    let (glyphs, width, top, bottom) = chosen?;
-
-    let mut rgba = vec![0u8; (size * size * 4) as usize];
-    let height = top - bottom;
-    let x0 = ((limit - width) / 2.0).round();
-    let baseline = ((size as i32 - height) / 2) + top;
-    let mut pen = x0;
-    for g in &glyphs {
-        let gx = pen.round() as i32 + g.metrics.xmin;
-        let gy = baseline - g.metrics.height as i32 - g.metrics.ymin;
-        for row in 0..g.metrics.height {
-            for col in 0..g.metrics.width {
-                let alpha = g.bitmap[row * g.metrics.width + col];
-                if alpha == 0 {
-                    continue;
-                }
-                let px_x = gx + col as i32;
-                let px_y = gy + row as i32;
-                if px_x < 0 || px_y < 0 || px_x >= size as i32 || px_y >= size as i32 {
-                    continue;
-                }
-                let i = ((px_y as u32 * size + px_x as u32) * 4) as usize;
-                let existing = rgba[i + 3];
-                let merged = existing.max(alpha);
-                rgba[i] = color[0];
-                rgba[i + 1] = color[1];
-                rgba[i + 2] = color[2];
-                rgba[i + 3] = merged;
-            }
-        }
-        pen += g.metrics.advance_width;
-    }
-    Some(Image::new_owned(rgba, size, size))
-}
-
-fn render_pixel_font(text: &str, size: u32, dark_taskbar: bool) -> Image<'static> {
-    let size = size.max(BASE_ICON_SIZE);
-    let scale = (size / BASE_ICON_SIZE).max(1) as usize;
-    let mut rgba = vec![0u8; (size * size * 4) as usize];
-    let color = if dark_taskbar {
-        ACCENT_DARK_TASKBAR
-    } else {
-        ACCENT_LIGHT_TASKBAR
-    };
-
-    let width = text_width(text) * scale;
-    let height = GLYPH_HEIGHT * scale;
-    let mut x = (size as usize).saturating_sub(width) / 2;
-    let y0 = (size as usize).saturating_sub(height) / 2;
-
-    for g in text.chars().filter_map(glyph) {
-        for (row, bits) in g.rows.iter().enumerate() {
-            for (col, ch) in bits.chars().enumerate() {
-                if ch != '#' {
-                    continue;
-                }
-                for dy in 0..scale {
-                    for dx in 0..scale {
-                        let px = x + col * scale + dx;
-                        let py = y0 + row * scale + dy;
-                        if px < size as usize && py < size as usize {
-                            let i = (py * size as usize + px) * 4;
-                            rgba[i] = color[0];
-                            rgba[i + 1] = color[1];
-                            rgba[i + 2] = color[2];
-                            rgba[i + 3] = 0xFF;
-                        }
-                    }
-                }
-            }
-        }
-        x += (g.width + GLYPH_GAP) * scale;
-    }
-
-    Image::new_owned(rgba, size, size)
-}
-
-/// Whether the text fits the 16px pixel-font grid (the font path scales itself to fit).
-fn fits(text: &str) -> bool {
-    text_width(text) <= BASE_ICON_SIZE as usize
-}
 
 /// The panel's small-icon size in physical pixels (16 at 100%, 20 at 125%, 24 at 150%).
 #[cfg(target_os = "windows")]
@@ -234,7 +12,7 @@ pub fn small_icon_size() -> u32 {
     if px > 0 {
         px as u32
     } else {
-        BASE_ICON_SIZE
+        MIN_ICON_SIZE
     }
 }
 
@@ -243,55 +21,15 @@ pub fn small_icon_size() -> u32 {
     22
 }
 
-/// Windows keeps the taskbar theme separate from the app theme; the number must contrast
-/// with the taskbar, not the popover.
-#[cfg(target_os = "windows")]
-pub fn taskbar_is_dark() -> bool {
-    // Absolute `reg.exe` out of System32 -- this runs on every badge refresh, so a bare
-    // name here would be the single most reliably triggered planted-binary path.
-    let output = crate::supervisor::system_command("reg.exe")
-        .args([
-            "query",
-            r"HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize",
-            "/v",
-            "SystemUsesLightTheme",
-        ])
-        .output();
-    match output {
-        Ok(out) => {
-            let text = String::from_utf8_lossy(&out.stdout);
-            // "0x0" means the system (taskbar) uses the dark theme.
-            text.lines()
-                .any(|l| l.contains("SystemUsesLightTheme") && l.trim_end().ends_with("0x0"))
-        }
-        Err(_) => true,
-    }
-}
-
-#[cfg(not(target_os = "windows"))]
-pub fn taskbar_is_dark() -> bool {
-    true
-}
-
 // ---------------------------------------------------------------------------------------
 // The menu-bar lightsaber
 // ---------------------------------------------------------------------------------------
 
-/// The menu-bar collector glyph: the KyberDash lightsaber with a blade that glows green
-/// for a live collector and red for a down one.
-///
-/// Both states are the same saber -- the same hilt, the same silhouette, the same
-/// geometry. Only the blade's colour changes, so the icon never reads as a different
-/// status *kind* when it changes: a red saber is a live-shaped saber reporting trouble.
-///
-/// The silhouette is `icons/tray-template.svg`, the tray's own monochrome projection of the
-/// mark, because that asset is the one already drawn for menu-bar scale. The colours are
-/// the mark's own stops (`dash/web/public/kyberdash-logo.svg`, the source of the tokens in
-/// `dash/src/kyber.css`), stepped one notch darker for the reasons noted below.
-///
-/// The icon must be presented with template treatment OFF. A template image is tinted by
-/// macOS to match the menu bar, which is what destroyed the colour on the previous
-/// monochrome asset and would flatten the blade to the bar's own grey here.
+/// A compact diagonal status saber for the macOS menu bar and Windows tray.
+/// The handle is bottom-left and the blade top-right. Only the blade colour changes:
+/// green for a live collector, red otherwise, as reported by the shared coverage API.
+/// Flat fills and two grip marks stay readable at 16px; bloom and a white core would
+/// wash out the status colour at that size. Present with template treatment OFF.
 pub fn render_lightsaber(live: bool, size: u32) -> Image<'static> {
     let size = size.max(MIN_ICON_SIZE) as usize;
     // One viewBox unit is this many pixels; every length below is in viewBox units, so the
@@ -301,8 +39,6 @@ pub fn render_lightsaber(live: bool, size: u32) -> Image<'static> {
     let frame = SaberFrame::new(size, scale);
     let mut canvas = Canvas::new(size);
 
-    // The hilt goes down first so the blade's bloom falls *on* the emitter, the way light
-    // off a lit hilt does, instead of being clipped by it.
     let hilt = capsule(
         &frame,
         (HILT_FROM_U, AXIS_V),
@@ -310,13 +46,7 @@ pub fn render_lightsaber(live: bool, size: u32) -> Image<'static> {
         HILT_HALF,
         scale,
     );
-    paint(
-        &mut canvas,
-        &hilt,
-        &frame.u,
-        |u| mix_rgb(HILT_POMMEL, HILT_EMITTER, along(u, HILT_FROM_U, EMITTER_U)),
-        |_| 1.0,
-    );
+    paint(&mut canvas, &hilt, &frame.u, |_| HILT_METAL, |_| 1.0);
     for band in GRIP_BANDS_U {
         let tick = capsule(
             &frame,
@@ -334,50 +64,7 @@ pub fn render_lightsaber(live: bool, size: u32) -> Image<'static> {
         COLLAR_HALF,
         scale,
     );
-    paint(
-        &mut canvas,
-        &collar,
-        &frame.v,
-        |v| {
-            mix_rgb(
-                COLLAR_OUTER,
-                COLLAR_INNER,
-                along(v, AXIS_V - COLLAR_V, AXIS_V + COLLAR_V),
-            )
-        },
-        |_| 1.0,
-    );
-
-    // The blade, in the mark's own three passes -- a wide soft bloom, a tighter gradient,
-    // both blurred, then the blade body, then the white core over it. The bloom is clipped
-    // to the emitter and forward, so it lights the hilt's emitter end without running back
-    // down the grip.
-    let glow_forward = forward_of(&frame.u, EMITTER_U, scale);
-    for (half_width, blur, alpha) in [
-        (BLOOM_HALF, BLOOM_BLUR, BLOOM_ALPHA),
-        (MIDGLOW_HALF, MIDGLOW_BLUR, MIDGLOW_ALPHA),
-    ] {
-        let mask = glow_forward
-            .iter()
-            .zip(capsule(
-                &frame,
-                (EMITTER_U, AXIS_V),
-                (TIP_U, AXIS_V),
-                half_width,
-                scale,
-            ))
-            .map(|(keep, cover)| keep * cover)
-            .collect::<Vec<f32>>();
-        let glow = blur_glow(
-            &mask,
-            &frame.u,
-            |u| ramp(along(u, EMITTER_U, TIP_U), blade),
-            size,
-            ((size as f32 * blur).round() as usize).max(1),
-            alpha,
-        );
-        canvas.composite_glow(&glow);
-    }
+    paint(&mut canvas, &collar, &frame.v, |_| HILT_METAL, |_| 1.0);
 
     let body = capsule(
         &frame,
@@ -386,42 +73,11 @@ pub fn render_lightsaber(live: bool, size: u32) -> Image<'static> {
         BLADE_HALF,
         scale,
     );
-    paint(
-        &mut canvas,
-        &body,
-        &frame.u,
-        |u| ramp(along(u, EMITTER_U, TIP_U), blade),
-        |_| 1.0,
-    );
-    let core = capsule(
-        &frame,
-        (EMITTER_U, AXIS_V),
-        (TIP_U, AXIS_V),
-        CORE_HALF,
-        scale,
-    );
-    // The mark's core is solid white to the tip. On a light menu bar a white tip would
-    // disappear, so the core fades toward the tip and lets the coloured blade show through.
-    paint(
-        &mut canvas,
-        &core,
-        &frame.u,
-        |_| CORE,
-        |u| {
-            mix_f32(
-                CORE_ALPHA_EMITTER,
-                CORE_ALPHA_TIP,
-                along(u, EMITTER_U, TIP_U),
-            )
-        },
-    );
-
+    paint(&mut canvas, &body, &frame.u, |_| blade, |_| 1.0);
     canvas.into_image()
 }
 
-/// Side of the `icons/tray-template.svg` viewBox every length below is measured in. Taking
-/// the geometry from the shipped asset is what keeps the drawn saber and the static one
-/// from drifting apart silently: change a stroke there and the two are wrong together.
+/// Coordinate grid for the diagonal saber, independent of physical icon resolution.
 const SABER_VIEW: f32 = 36.0;
 /// Below this the strokes collide and the grip bands merge into the hilt.
 const MIN_ICON_SIZE: u32 = 16;
@@ -467,8 +123,8 @@ const EMITTER_U: f32 = -5.091;
 /// Blade tip, (29.4, 6.6).
 const TIP_U: f32 = 16.122;
 
-/// Half stroke widths: blade 3.2, emitter collar 4.4, hilt 4.8, grip band 1.25.
-const BLADE_HALF: f32 = 1.6;
+/// Bold strokes keep the blade and handle legible in a small status slot.
+const BLADE_HALF: f32 = 2.2;
 const HILT_HALF: f32 = 2.4;
 const COLLAR_HALF: f32 = 2.2;
 const BAND_HALF_U: f32 = 0.625;
@@ -478,45 +134,12 @@ const BAND_V: f32 = 1.697;
 /// The two grip ticks, centred on the hilt's own axis as they are on the asset's.
 const GRIP_BANDS_U: [f32; 2] = [-11.738, -8.909];
 
-/// The blade ramps, emitter to tip.
-///
-/// The mark's blade is #10b981 -> #34d399 -> #6ee7b7 and `dash/src/kyber.css` takes the
-/// darker stop of each ramp for its light mode, because an icon cannot re-render when macOS
-/// flips appearance and the lightest stop vanishes on a light menu bar. The red ramp is the
-/// mark's `switch` red stepped onto the same 600/500/400 ladder, so the two states differ in
-/// hue alone and read as the same saber lit a different colour.
-const BLADE_LIVE: [[u8; 3]; 3] = [[0x05, 0x96, 0x69], [0x10, 0xB9, 0x81], [0x34, 0xD3, 0x99]];
-const BLADE_DOWN: [[u8; 3]; 3] = [[0xB9, 0x1C, 0x1C], [0xDC, 0x26, 0x26], [0xEF, 0x44, 0x44]];
-/// Metallic hilt, pommel to emitter. Both stops are in the mark's `hilt-metal` gradient
-/// (#334155 -> #64748b -> #94a3b8 -> #475569). The menu bar keeps a wide value range
-/// because one icon has to read on two backgrounds without a template tint to bridge them:
-/// the dark pommel anchors the icon on a light menu bar, the light emitter end anchors it on
-/// a dark one, and the grip bands and gold collar carry contrast in the middle.
-const HILT_POMMEL: [u8; 3] = [0x47, 0x55, 0x69];
-const HILT_EMITTER: [u8; 3] = [0x94, 0xA3, 0xB8];
+/// Saturated flat colours survive both light and dark status bars.
+const BLADE_LIVE: [u8; 3] = [0x16, 0xD9, 0x32];
+const BLADE_DOWN: [u8; 3] = [0xF0, 0x30, 0x40];
+/// Cool silver handle and dark grip marks provide contrast on either appearance.
+const HILT_METAL: [u8; 3] = [0xB8, 0xC1, 0xCF];
 const HILT_BAND: [u8; 3] = [0x33, 0x41, 0x55];
-/// Emitter gold, the mark's #fbbf24 -> #d97706.
-const COLLAR_OUTER: [u8; 3] = [0xFB, 0xBF, 0x24];
-const COLLAR_INNER: [u8; 3] = [0xD9, 0x77, 0x06];
-/// The blade's hot core.
-const CORE: [u8; 3] = [0xFF, 0xFF, 0xFF];
-const CORE_ALPHA_EMITTER: f32 = 0.92;
-const CORE_ALPHA_TIP: f32 = 0.30;
-/// Outer energy bloom and mid glow: half width, blur as a fraction of the icon, opacity.
-///
-/// The mark's own bloom is wide and soft because a 512px logo has room for it. At a 22px
-/// menu-bar slot the same proportions swallow the whole icon and the saber stops reading as
-/// a saber, so these are pulled in until the halo hugs the blade: the glow has to announce
-/// the colour without becoming the shape.
-const BLOOM_HALF: f32 = 2.6;
-const BLOOM_BLUR: f32 = 0.028;
-const BLOOM_ALPHA: f32 = 0.30;
-const MIDGLOW_HALF: f32 = 1.9;
-const MIDGLOW_BLUR: f32 = 0.012;
-const MIDGLOW_ALPHA: f32 = 0.40;
-/// White core half width. Narrower than the mark's 0.9 so the blade's own colour still
-/// reads: a core that covers most of the blade turns it white at every size.
-const CORE_HALF: f32 = 0.65;
 
 /// Anti-aliased coverage of the capsule from `from` to `to` with the given radius, one
 /// value per pixel. The distance to a segment is exact, so the whole anti-aliasing rule is
@@ -548,42 +171,9 @@ fn capsule(
         .collect()
 }
 
-/// Coverage of the half-plane at or ahead of `from` along the blade, so the glow starts at
-/// the emitter and runs outward. A round cap at the emitter end would throw the blade's
-/// light back down the hilt and grey out the metal; light leaves the emitter forward.
-fn forward_of(frame_u: &[f32], from: f32, scale: f32) -> Vec<f32> {
-    frame_u
-        .iter()
-        .map(|&u| ((u - from) * scale + 0.5).clamp(0.0, 1.0))
-        .collect()
-}
-
-/// Position of a value along `[from, to]`, clamped: `t` for a colour ramp or an opacity.
-fn along(value: f32, from: f32, to: f32) -> f32 {
-    ((value - from) / (to - from)).clamp(0.0, 1.0)
-}
-
-fn mix_rgb(a: [u8; 3], b: [u8; 3], t: f32) -> [u8; 3] {
-    let mix = |x: u8, y: u8| {
-        (x as f32 + (y as f32 - x as f32) * t)
-            .round()
-            .clamp(0.0, 255.0) as u8
-    };
-    [mix(a[0], b[0]), mix(a[1], b[1]), mix(a[2], b[2])]
-}
-
+#[cfg(test)]
 fn mix_f32(a: f32, b: f32, t: f32) -> f32 {
     a + (b - a) * t
-}
-
-/// A three-stop ramp along the blade, the shape of the mark's `blade-glow` gradient.
-fn ramp(t: f32, stops: [[u8; 3]; 3]) -> [u8; 3] {
-    let t = t.clamp(0.0, 1.0) * 2.0;
-    if t <= 1.0 {
-        mix_rgb(stops[0], stops[1], t)
-    } else {
-        mix_rgb(stops[1], stops[2], t - 1.0)
-    }
 }
 
 /// A `size` x `size` straight-alpha RGBA buffer in 0..=1 channels.
@@ -615,31 +205,13 @@ impl Canvas {
         dst[3] = out_alpha;
     }
 
-    /// Composites a blurred, premultiplied glow over the canvas.
-    fn composite_glow(&mut self, glow: &[f32]) {
-        for index in 0..self.size * self.size {
-            let alpha = glow[index * 4 + 3];
-            if alpha <= 0.0 {
-                continue;
-            }
-            let source = [glow[index * 4], glow[index * 4 + 1], glow[index * 4 + 2]];
-            let dst = &mut self.px[index * 4..index * 4 + 4];
-            let dst_alpha = dst[3];
-            for channel in 0..3 {
-                dst[channel] = (source[channel] + dst[channel] * dst_alpha * (1.0 - alpha))
-                    / (alpha + dst_alpha * (1.0 - alpha));
-            }
-            dst[3] = alpha + dst_alpha * (1.0 - alpha);
-        }
-    }
-
     fn into_image(self) -> Image<'static> {
         let mut rgba = Vec::with_capacity(self.px.len());
         for pixel in self.px.chunks_exact(4) {
             let alpha = (pixel[3].clamp(0.0, 1.0) * 255.0).round() as u8;
             if alpha == 0 {
                 // A fully transparent pixel carries no colour. Without this a pixel the
-                // blur reached but that rounds away would keep a visible RGB underneath an
+                // coverage reached but that rounds away would keep a visible RGB underneath an
                 // alpha of zero, which is a latent bug waiting for a compositor that
                 // filters rather than blends.
                 rgba.extend_from_slice(&[0, 0, 0, 0]);
@@ -656,8 +228,7 @@ impl Canvas {
 
 /// Composites `coverage` over the canvas, picking each pixel's colour from `colour(u)` and
 /// its opacity from `opacity(u)`. Straight alpha throughout: the system composites the
-/// finished icon over the menu bar, and a "premultiply then over" shortcut here would tint
-/// the menu bar's own background into the glow.
+/// finished icon over the menu bar without baking its background into the edges.
 fn paint(
     canvas: &mut Canvas,
     coverage: &[f32],
@@ -683,107 +254,11 @@ fn paint(
     }
 }
 
-/// The blade's glow: `coverage` in the state's colour, convolved with an approximate
-/// Gaussian and returned as premultiplied RGBA.
-///
-/// Three box passes stand in for one Gaussian by the central limit theorem, and cost a
-/// constant per pixel per pass. That is the same idea as the `feGaussianBlur` the mark
-/// applies to its bloom, reached without a convolution or a new dependency; a radius in
-/// pixels is the whole reason it stays cheap at menu-bar size.
-fn blur_glow(
-    coverage: &[f32],
-    frame_u: &[f32],
-    colour: impl Fn(f32) -> [u8; 3],
-    size: usize,
-    radius: usize,
-    alpha: f32,
-) -> Vec<f32> {
-    let mut layer = vec![0.0f32; size * size * 4];
-    for (index, &cover) in coverage.iter().enumerate() {
-        let rgb = colour(frame_u[index]);
-        for channel in 0..3 {
-            layer[index * 4 + channel] = rgb[channel] as f32 / 255.0 * cover * alpha;
-        }
-        layer[index * 4 + 3] = cover * alpha;
-    }
-    let mut scratch = vec![0.0f32; size * size * 4];
-    for _ in 0..3 {
-        box_pass(&layer, &mut scratch, size, radius, true);
-        box_pass(&scratch, &mut layer, size, radius, false);
-    }
-    layer
-}
-
-/// One box blur pass along one axis over a premultiplied RGBA buffer. Normalising by the
-/// samples actually taken keeps a box that runs off the edge of the icon from darkening it.
-fn box_pass(src: &[f32], dst: &mut [f32], size: usize, radius: usize, horizontal: bool) {
-    for y in 0..size {
-        for x in 0..size {
-            let mut sum = [0.0f32; 4];
-            let mut samples = 0.0f32;
-            for offset in -(radius as isize)..=radius as isize {
-                let (sx, sy) = if horizontal {
-                    (x as isize + offset, y as isize)
-                } else {
-                    (x as isize, y as isize + offset)
-                };
-                if sx < 0 || sy < 0 || sx >= size as isize || sy >= size as isize {
-                    continue;
-                }
-                let base = (sy as usize * size + sx as usize) * 4;
-                for channel in 0..4 {
-                    sum[channel] += src[base + channel];
-                }
-                samples += 1.0;
-            }
-            let out = (y * size + x) * 4;
-            for channel in 0..4 {
-                dst[out + channel] = sum[channel] / samples;
-            }
-        }
-    }
-}
-
-/// Solid green/red disc for the Windows notification area.
-///
-/// Windows has no room beside the icon for both the pressure number and a glyph, so the
-/// down state replaces the badge with this rather than trying to fit the saber into a
-/// 16px slot next to nothing. It is deliberately *not* what the macOS menu bar shows.
-pub fn render_status_dot(live: bool, size: u32) -> Image<'static> {
-    /// Accessible green/red that survives both light and dark menu bars.
-    const LIVE: [u8; 3] = [0x22, 0xC5, 0x5E];
-    const DOWN: [u8; 3] = [0xEF, 0x44, 0x44];
-    let color = if live { LIVE } else { DOWN };
-    let size = size.max(MIN_ICON_SIZE);
-    let mut rgba = vec![0u8; (size * size * 4) as usize];
-    let centre = size as f32 / 2.0;
-    // A filled disc with a small transparent margin, so it reads as a glyph
-    // rather than a full-bleed square at 16px.
-    let radius = centre - 2.0;
-    for y in 0..size {
-        for x in 0..size {
-            let dx = x as f32 + 0.5 - centre;
-            let dy = y as f32 + 0.5 - centre;
-            if dx * dx + dy * dy <= radius * radius {
-                let i = ((y * size + x) * 4) as usize;
-                rgba[i] = color[0];
-                rgba[i + 1] = color[1];
-                rgba[i + 2] = color[2];
-                rgba[i + 3] = 0xFF;
-            }
-        }
-    }
-    Image::new_owned(rgba, size, size)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// The hilt is the same metal in both states, so this is the furthest back from the
-    /// emitter a pixel may sit and still be guaranteed no blade light has reached it: a
-    /// box blur is not causal, so the bloom does bleed a little past the emitter it starts
-    /// at. Below this line there is nothing but the mark's own hilt.
+    /// Compare the handle behind the emitter, clear of the blade's rounded cap.
     const HILT_CLEAR_OF_THE_EMITTER: f32 = EMITTER_U - 3.0;
     /// Below this alpha a pixel is invisible and whatever colour is stored under it cannot
     /// be observed, so it is compared by coverage alone.
@@ -836,9 +311,7 @@ mod tests {
     fn the_blade_carries_the_collector_colour() {
         for live in [true, false] {
             let image = render_lightsaber(live, 88);
-            // On the axis the white core sits over the blade, so look for the most
-            // saturated inked pixel anywhere between the emitter and the tip: that is the
-            // blade body showing through, and its hue is the whole status signal.
+            // Check saturated blade pixels: colour carries the collector status.
             let mut best = (0u8, [0u8; 4]);
             for step in 0..=60 {
                 let index = at(
@@ -971,53 +444,38 @@ mod tests {
     }
 
     #[test]
-    fn the_blade_glows_past_its_own_edge_and_falls_off() {
+    fn the_flat_blade_has_no_bloom_outside_its_edge() {
         for live in [true, false] {
-            let size = 88u32;
-            let image = render_lightsaber(live, size);
-            let frame_u = on_blade(0.6);
-            // `AXIS_V + BLADE_HALF` is the blade's own outline; past it there is nothing but
-            // glow, and it has to carry the collector hue or the status is not on screen.
-            let halo = pixel(&image, at(frame_u, AXIS_V + 2.2, size));
-            assert_hue(halo, live, "glow");
-            // And it is a falloff, not a hard second outline.
-            let near = alpha_at(&image, at(frame_u, AXIS_V + 2.2, size)) as i32;
-            let mid = alpha_at(&image, at(frame_u, AXIS_V + 3.0, size)) as i32;
-            let far = alpha_at(&image, at(frame_u, AXIS_V + 3.7, size)) as i32;
-            assert!(
-                near > mid && mid > far,
-                "the glow must fall off with distance from the blade: {near}, {mid}, {far}"
-            );
+            let image = render_lightsaber(live, 88);
+            assert_hue(pixel(&image, at(on_blade(0.6), AXIS_V, 88)), live, "blade");
+            assert_eq!(alpha_at(&image, at(on_blade(0.6), AXIS_V + 3.7, 88)), 0);
         }
     }
 
     #[test]
     fn it_reads_as_a_glyph_at_the_real_menu_bar_size() {
-        let size = small_icon_size();
-        assert!(
-            (16..=32).contains(&size),
-            "this test is written for the menu-bar slot, not {size}px"
-        );
-        for live in [true, false] {
-            let image = render_lightsaber(live, size);
-            let pixels = size as usize * size as usize;
-            let inked = (0..pixels)
-                .filter(|&index| alpha_at(&image, index) > 32)
-                .count();
-            let share = inked as f32 / pixels as f32;
-            // A glyph, not a dot (a filled disc would be ~0.4) and not a full-bleed square.
-            assert!(
-                (0.04..0.30).contains(&share),
-                "the icon must read as a glyph at {size}px, not a blob or a sheet: {share}"
-            );
-            // The saber is one continuous object: nothing along the blade is unpainted.
-            for step in 0..=40 {
-                let frame_u = mix_f32(HILT_FROM_U, TIP_U, step as f32 / 40.0);
+        for size in [16, 20, 22, 24, 32] {
+            for live in [true, false] {
+                let image = render_lightsaber(live, size);
+                let pixels = size as usize * size as usize;
+                let inked = (0..pixels)
+                    .filter(|&index| alpha_at(&image, index) > 32)
+                    .count();
+                let share = inked as f32 / pixels as f32;
+                // A glyph, not a dot (a filled disc would be ~0.4) and not a full-bleed square.
                 assert!(
-                    alpha_at(&image, at(frame_u, AXIS_V, size)) > 0,
-                    "the saber must be continuous from pommel to tip, but it is blank at \
-                     u={frame_u}"
+                    (0.04..0.30).contains(&share),
+                    "the icon must read as a glyph at {size}px, not a blob or a sheet: {share}"
                 );
+                // The saber is one continuous object: nothing along the blade is unpainted.
+                for step in 0..=40 {
+                    let frame_u = mix_f32(HILT_FROM_U, TIP_U, step as f32 / 40.0);
+                    assert!(
+                        alpha_at(&image, at(frame_u, AXIS_V, size)) > 0,
+                        "the saber must be continuous from pommel to tip, but it is blank at \
+                     u={frame_u}"
+                    );
+                }
             }
         }
     }
@@ -1166,28 +624,5 @@ mod tests {
         header[28..30].copy_from_slice(&24u16.to_le_bytes());
         header[34..38].copy_from_slice(&pixel_bytes.to_le_bytes());
         header
-    }
-
-    #[test]
-    fn the_status_dot_is_opaque_and_coloured() {
-        for live in [true, false] {
-            let image = render_status_dot(live, 22);
-            assert_eq!(image.width(), 22);
-            assert_eq!(image.height(), 22);
-            let rgba = image.rgba();
-            // The centre pixel is the disc: opaque and the expected colour.
-            let cx = 11u32;
-            let cy = 11u32;
-            let i = ((cy * 22 + cx) * 4) as usize;
-            let expected = if live {
-                [0x22u8, 0xC5, 0x5E]
-            } else {
-                [0xEFu8, 0x44, 0x44]
-            };
-            assert_eq!([rgba[i], rgba[i + 1], rgba[i + 2]], expected);
-            assert_eq!(rgba[i + 3], 0xFF);
-            // A corner pixel is outside the disc: transparent.
-            assert_eq!(rgba[3], 0x00);
-        }
     }
 }

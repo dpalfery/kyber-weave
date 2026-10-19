@@ -26,6 +26,7 @@ import {
   prettyPrintJsonNested,
   prettyPrintJsonLinesNested,
   TurnFullContentPanel,
+  narrowToolDefinitions,
   ToggleRawView,
   CopyExactButton,
   isTurnFullContentRequest,
@@ -36,8 +37,12 @@ import {
 } from './SessionInspectorDrawer.js'
 
 import { renderToStaticMarkup } from 'react-dom/server'
+import { SearchableContentView } from './ContentViewToolbar.js'
+import { groupIdenticalParts } from './SessionInspectorDrawer.js'
 import type { KyberSessionContentResult, KyberTurnContentResult } from '../lib/kyberApi.js'
 import { fetchKyberSessionContent, fetchTurnContentFull } from '../lib/kyberApi.js'
+import type { KyberSkillRow } from '../lib/kyberApi.js'
+import skillsFixtures from './fixtures/skills-payload.json'
 
 // Set up React 19 test hook dispatcher so components using hooks can be rendered in tests
 const reactInternals = (
@@ -1158,6 +1163,7 @@ const contentQueryKey = [
   contentRequest.sessionId,
   contentRequest.span,
   contentRequest.part,
+  'full',
 ]
 
 function renderDrawerWithQuery(
@@ -1287,6 +1293,195 @@ describe('SessionInspectorDrawer: Full-content endpoint', () => {
     expect(html).toContain('data-testid="context-bucket-inspector"')
   })
 })
+
+describe('SessionInspectorDrawer: identical captured parts in the bucket drill-down', () => {
+  it('renders byte-identical parts once with a count note and keeps distinct parts in capture order', () => {
+    const qc = createTestQueryClient()
+    const sharedPrompt = 'DEDUP_SHARED_PROMPT_8f3a. You are a coding agent. Follow every repository rule.'
+    const distinct = 'DEDUP_DISTINCT_PART_2b7c. A different context body.'
+    const body: KyberSessionContentResult = {
+      sessionId: contentRequest.sessionId,
+      spanId: contentRequest.span,
+      parts: [
+        { spanId: 'span-a', part: 'system_prompt', text: sharedPrompt },
+        { spanId: 'span-b', part: 'system_prompt', text: distinct },
+        { spanId: 'span-c', part: 'system_prompt', text: sharedPrompt },
+        { spanId: 'span-d', part: 'system_prompt', text: sharedPrompt },
+      ],
+    }
+    qc.setQueryData(contentQueryKey, body)
+
+    const html = unescapeHtml(renderDrawerWithQuery(qc))
+
+    // The shared prompt prints once, not once per captured span.
+    expect(html.split('DEDUP_SHARED_PROMPT_8f3a').length - 1).toBe(1)
+    expect(html).toContain('Identical in 3 captured spans')
+    expect(html.split('data-testid="drawer-content-duplicate-note"').length - 1).toBe(1)
+    // One shared toolbar per rendered block: three identical parts share one, the distinct part gets its own.
+    expect(html.split('-view-formatted"').length - 1).toBe(2)
+    expect(html.split('data-testid="drawer-content-0-view-formatted"').length - 1).toBe(1)
+    // The distinct part still renders, once, after the collapsed group it followed.
+    expect(html.split('DEDUP_DISTINCT_PART_2b7c').length - 1).toBe(1)
+    expect(html.indexOf('DEDUP_SHARED_PROMPT_8f3a')).toBeLessThan(html.indexOf('DEDUP_DISTINCT_PART_2b7c'))
+  })
+
+  it('keeps a truncated copy separate from a complete copy of the same text', () => {
+    const qc = createTestQueryClient()
+    const text = 'DEDUP_TRUNCATION_KEY_41e0. Shared body.'
+    const body: KyberSessionContentResult = {
+      sessionId: contentRequest.sessionId,
+      spanId: contentRequest.span,
+      parts: [
+        { spanId: 'span-a', part: 'system_prompt', text },
+        { spanId: 'span-b', part: 'system_prompt', text, truncated: true, totalLength: 900_000 },
+      ],
+    }
+    qc.setQueryData(contentQueryKey, body)
+
+    const html = unescapeHtml(renderDrawerWithQuery(qc))
+
+    expect(html.split('DEDUP_TRUNCATION_KEY_41e0').length - 1).toBe(2)
+    expect(html).not.toContain('data-testid="drawer-content-duplicate-note"')
+    expect(html).toContain('data-testid="drawer-content-truncated"')
+  })
+})
+
+describe('SessionInspectorDrawer: expansion placement and separators', () => {
+  it('compacts whitespace-only separators to a fixed short box without changing their text', () => {
+    const separator = '\n  \n\n  \n'
+    const raw = `<system>Section body alpha.</system>${separator}<context>Section body beta.</context>`
+    const html = renderHtml(React.createElement(XmlFoldedText, { text: raw }))
+
+    const openTag = html.match(/<div[^>]*data-testid="xml-folded-whitespace"[^>]*>/)?.[0] ?? ''
+    expect(openTag).not.toBe('')
+    const classes = (openTag.match(/class="([^"]*)"/)?.[1] ?? '').split(/\s+/)
+    expect(classes).toEqual(expect.arrayContaining(['h-2', 'overflow-hidden']))
+    expect(classes).not.toContain('my-1')
+    // The text node keeps every original code point.
+    expect(unescapeHtml(html)).toContain(separator)
+  })
+})
+
+describe('SessionInspectorDrawer: identical-part grouping keys', () => {
+  it('merges only parts that match on kind, truncation, and exact text', () => {
+    const groups = groupIdenticalParts([
+      { part: 'system_prompt', text: 'same body' },
+      { part: 'system_prompt', text: 'same body' },
+      { part: 'system_prompt', text: 'same body' },
+    ])
+    expect(groups).toHaveLength(1)
+    expect(groups[0]).toMatchObject({ index: 0, count: 3 })
+  })
+
+  it('does not merge different part kinds with identical bodies, including empty strings', () => {
+    const groups = groupIdenticalParts([
+      { part: 'system_prompt', text: '' },
+      { part: 'tool_result', text: '' },
+    ])
+    expect(groups.map((g) => g.count)).toEqual([1, 1])
+  })
+
+  it('keeps a truncated copy apart from a complete copy', () => {
+    const groups = groupIdenticalParts([
+      { part: 'system_prompt', text: 'body' },
+      { part: 'system_prompt', text: 'body', truncated: true, totalLength: 9 },
+    ])
+    expect(groups.map((g) => g.count)).toEqual([1, 1])
+  })
+
+  it('never merges different text even when the hash collides', () => {
+    // A constant hasher forces every part into one bucket, so only the exact
+    // text check separates them.
+    const groups = groupIdenticalParts(
+      [
+        { part: 'system_prompt', text: 'aaa' },
+        { part: 'system_prompt', text: 'bbb' },
+        { part: 'system_prompt', text: 'aaa' },
+      ],
+      () => 'collide',
+    )
+    expect(groups.map((g) => [g.index, g.count])).toEqual([
+      [0, 2],
+      [1, 1],
+    ])
+  })
+})
+
+describe('SessionInspectorDrawer: unserializable fallback payloads', () => {
+  it('shows an honest note instead of throwing when the fallback payload is circular', () => {
+    const circular: Record<string, unknown> = { label: 'loop' }
+    circular.self = circular
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0, retryOnMount: false } } })
+    const error = new Error('Request failed (500)')
+    const query = qc.getQueryCache().build(qc, {
+      queryKey: contentQueryKey,
+      queryFn: () => Promise.reject(error),
+    })
+    query.setState({
+      status: 'error',
+      error,
+      fetchStatus: 'idle',
+      data: undefined,
+      dataUpdatedAt: 0,
+      errorUpdatedAt: Date.now(),
+      isInvalidated: false,
+    })
+
+    const html = renderDrawerWithQuery(qc, { rawContent: { content: circular } as never })
+
+    expect(html).toContain('data-testid="drawer-content-unserializable"')
+    expect(html).toContain('content is not JSON-serializable')
+    expect(html).toContain('data-testid="drawer-content-fallback-note"')
+  })
+})
+
+describe('SessionInspectorDrawer: shared Formatted/Raw toolbar', () => {
+  it('offers search and exact Copy with the same labels on every full toolbar', () => {
+    const generic = renderHtml(React.createElement(InspectorContent, { data: { alpha: 'one', beta: 2 } }))
+    expect(generic).toContain('data-testid="inspector-content-search"')
+    expect(generic).toContain('data-testid="inspector-content-copy"')
+    expect(generic).toContain('>Formatted</button>')
+    expect(generic).toContain('>Raw</button>')
+    expect(generic).not.toContain('Raw JSON')
+    expect(generic).not.toContain('Copy JSON')
+
+    const json = renderHtml(React.createElement(JsonStringView, { text: COPILOT_TOOL_DEFINITIONS_RAW }))
+    expect(json).toContain('data-testid="json-string-view-search"')
+    expect(json).toContain('data-testid="json-string-view-copy"')
+    expect(json).toContain('>Formatted</button>')
+    expect(json).toContain('>Raw</button>')
+  })
+
+  it('keeps minimal embeddings free of a second toggle, search or Copy', () => {
+    const html = renderHtml(React.createElement(InspectorContent, { data: { alpha: 'one' }, suppressJsonControls: true }))
+    expect(html).not.toContain('inspector-content-search')
+    expect(html).not.toContain('inspector-content-copy')
+    expect(html).not.toContain('>Raw</button>')
+    expect(html).toContain('data-testid="inspector-content"')
+  })
+})
+
+/**
+ * Walks a directly-called element tree for the shared toolbar's copy source,
+ * resolved to the exact string the Copy button would write.
+ */
+function findCopySource(node: unknown): string | null {
+  if (node == null) return null
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const found = findCopySource(child)
+      if (found !== null) return found
+    }
+    return null
+  }
+  if (!React.isValidElement(node)) return null
+  const props = node.props as { copy?: { text: string | (() => string) }; children?: unknown }
+  if (node.type === SearchableContentView && props.copy) {
+    const source = props.copy.text
+    return typeof source === 'function' ? source() : source
+  }
+  return findCopySource(props.children)
+}
 
 function unescapeHtml(html: string): string {
   return html
@@ -1456,6 +1651,20 @@ describe('SessionInspectorDrawer: Copilot turn readability', () => {
     expect(formatted).not.toContain('9007199254740992')
     expect(formatted).toContain('data-testid="json-item-0"')
     expect(formatted).toContain('data-testid="json-item-1"')
+  })
+
+  it('wraps the formatted JSON view instead of scrolling it horizontally', () => {
+    const html = renderHtml(React.createElement(JsonStringView, { text: COPILOT_TOOL_DEFINITIONS_RAW }))
+    const single = renderHtml(React.createElement(JsonStringView, { text: '{"role":"system","content":"hello"}' }))
+    for (const markup of [html, single]) {
+      const pres = markup.match(/<pre[^>]*data-testid="json-(?:item-\d+|formatted)"/g) ?? []
+      expect(pres.length).toBeGreaterThan(0)
+      for (const pre of pres) {
+        expect(pre).toContain('whitespace-pre-wrap')
+        expect(pre).toContain('break-words')
+        expect(pre).not.toMatch(/whitespace-pre(?!-)/)
+      }
+    }
   })
 
   it('routes JSON strings to the structured view and prose to folded text', () => {
@@ -1749,43 +1958,10 @@ describe('SessionInspectorDrawer: nested JSON readability', () => {
     expect(unescapeHtml(rawHtml)).toContain(padded)
     expect(rawHtml).toContain('data-testid="json-raw"')
 
-    // Copy writes the exact original string, not the formatted expansion.
-    const written: string[] = []
-    const nav = (globalThis as { navigator?: unknown }).navigator
-    const hadNavigator = nav !== undefined
-    Object.defineProperty(globalThis, 'navigator', {
-      value: { clipboard: { writeText: (s: string) => { written.push(s); return Promise.resolve() } } },
-      configurable: true,
-    })
-    try {
-      const tree = React.createElement(JsonStringView, { text: padded, defaultView: 'raw' })
-      const rendered = (JsonStringView as (p: unknown) => unknown)({ text: padded, defaultView: 'raw' })
-      void tree
-      const buttons: React.ReactElement[] = []
-      const walk = (node: unknown): void => {
-        if (node == null) return
-        if (Array.isArray(node)) {
-          node.forEach(walk)
-          return
-        }
-        if (React.isValidElement(node)) {
-          const props = node.props as Record<string, unknown>
-          if (node.type === 'button' && props['children'] === 'Copy') buttons.push(node as React.ReactElement)
-          walk(props['children'])
-        }
-      }
-      walk(rendered)
-      expect(buttons.length).toBeGreaterThan(0)
-      ;(buttons[0]!.props as { onClick: () => void }).onClick()
-      expect(written).toEqual([padded])
-    } finally {
-      if (hadNavigator) {
-        Object.defineProperty(globalThis, 'navigator', { value: nav, configurable: true })
-      } else {
-        const g = globalThis as { navigator?: unknown }
-        delete g.navigator
-      }
-    }
+    // Copy is supplied by the shared toolbar with the exact original string,
+    // not the formatted expansion.
+    const rendered = (JsonStringView as (p: unknown) => unknown)({ text: padded, defaultView: 'raw' })
+    expect(findCopySource(rendered)).toBe(padded)
   })
 
   it('formats nested JSON-lines without losing any line', () => {
@@ -2625,41 +2801,9 @@ describe('SessionInspectorDrawer: root-encoded JSON strings', () => {
     expect(unescapeHtml(rawHtml)).toContain(ROOT_ENCODED)
     expect(rawHtml).toContain('data-testid="json-raw"')
 
-    // Copy writes the exact original outer text, not the expansion.
-    const written: string[] = []
-    const nav = (globalThis as { navigator?: unknown }).navigator
-    const hadNavigator = nav !== undefined
-    Object.defineProperty(globalThis, 'navigator', {
-      value: { clipboard: { writeText: (s: string) => { written.push(s); return Promise.resolve() } } },
-      configurable: true,
-    })
-    try {
-      const rendered = (JsonStringView as (p: unknown) => unknown)({ text: ROOT_ENCODED, defaultView: 'raw' })
-      const buttons: React.ReactElement[] = []
-      const walk = (node: unknown): void => {
-        if (node == null) return
-        if (Array.isArray(node)) {
-          node.forEach(walk)
-          return
-        }
-        if (React.isValidElement(node)) {
-          const props = node.props as Record<string, unknown>
-          if (node.type === 'button' && props['children'] === 'Copy') buttons.push(node as React.ReactElement)
-          walk(props['children'])
-        }
-      }
-      walk(rendered)
-      expect(buttons.length).toBeGreaterThan(0)
-      ;(buttons[0]!.props as { onClick: () => void }).onClick()
-      expect(written).toEqual([ROOT_ENCODED])
-    } finally {
-      if (hadNavigator) {
-        Object.defineProperty(globalThis, 'navigator', { value: nav, configurable: true })
-      } else {
-        const g = globalThis as { navigator?: unknown }
-        delete g.navigator
-      }
-    }
+    // Copy is supplied by the shared toolbar with the exact original outer text.
+    const rendered = (JsonStringView as (p: unknown) => unknown)({ text: ROOT_ENCODED, defaultView: 'raw' })
+    expect(findCopySource(rendered)).toBe(ROOT_ENCODED)
   })
 
   it('routes root-encoded strings to the structured view, prose stays folded', () => {
@@ -2707,5 +2851,205 @@ describe('SessionInspectorDrawer: lossless request builders', () => {
     } finally {
       restore()
     }
+  })
+})
+
+describe('SessionInspectorDrawer: skill pane (F2)', () => {
+  const SKILL_SESSION_ID = 'sess-skill-1'
+  const skillTurnKey = (turnIndex: number) => ['kyber-turn-content-full', SKILL_SESSION_ID, turnIndex]
+  const docsRow = { name: 'docs', listed: true, invocations: 5, turns_listed: [0, 1], derived_tokens: 38 }
+
+  // Visible text only, so assertions read what the operator reads.
+  const textOf = (html: string): string => html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ')
+
+  function seedSkillTurn(qc: QueryClient, turnIndex: number, skills: Record<string, unknown>) {
+    qc.setQueryData(skillTurnKey(turnIndex), {
+      sessionId: SKILL_SESSION_ID,
+      turnIndex,
+      blocks: [],
+      parts: [],
+      assembledText: '',
+      ...skills,
+    } as unknown as KyberTurnContentResult)
+  }
+
+  function renderSkillDrawer(
+    row: unknown,
+    options: { qc?: QueryClient; contentRequest?: { sessionId: string; turnIndex: number; full: true } } = {},
+  ): string {
+    return renderHtml(
+      <QueryClientProvider client={options.qc ?? createTestQueryClient()}>
+        <SessionInspectorDrawer
+          open={true}
+          onClose={() => {}}
+          title="Skill: docs"
+          rawContent={{ skill: row as KyberSkillRow }}
+          contentRequest={options.contentRequest}
+        />
+      </QueryClientProvider>,
+    )
+  }
+
+  it('shows the listed state, the invocation count, and the listed turns as 1-based numbers', () => {
+    const html = renderSkillDrawer(docsRow)
+    expect(html).toContain('data-testid="skill-drawer-pane"')
+    const text = textOf(html)
+    expect(text).toMatch(/listed/i)
+    expect(text).toMatch(/\b5\b/)
+    expect(text).toMatch(/1\D+2\b/)
+    expect(text).not.toMatch(/\b0\b/)
+    expect(html).not.toContain('turns_listed')
+  })
+
+  it('shows a row whose listing is not measurable as the reason, never as not listed', () => {
+    const row = {
+      ...docsRow,
+      listed: { availability: 'not_measurable', reason: 'LISTED_UNMEASURED_REASON_3a7f' },
+      turns_listed: [],
+    }
+    const html = renderSkillDrawer(row)
+    expect(html).toContain('data-testid="skill-drawer-pane"')
+    expect(textOf(html)).toContain('LISTED_UNMEASURED_REASON_3a7f')
+    expect(textOf(html)).not.toMatch(/not listed/i)
+  })
+
+  it('shows a row whose invocations are not measurable as the reason, never as never invoked', () => {
+    const row = {
+      ...docsRow,
+      invocations: { availability: 'not_measurable', reason: 'INVOCATION_UNMEASURED_REASON_8c2d' },
+    }
+    const html = renderSkillDrawer(row)
+    expect(html).toContain('data-testid="skill-drawer-pane"')
+    expect(textOf(html)).toContain('INVOCATION_UNMEASURED_REASON_8c2d')
+    expect(textOf(html)).not.toMatch(/never invoked|\b0\b/i)
+  })
+
+  it('shows the listing text from the turn-content skills entry for the listed skill', () => {
+    const qc = createTestQueryClient()
+    seedSkillTurn(qc, 0, skillsFixtures.turnContentSkills.listedWithText)
+    const html = renderSkillDrawer(docsRow, {
+      qc,
+      contentRequest: { sessionId: SKILL_SESSION_ID, turnIndex: 0, full: true },
+    })
+    expect(html).toContain('data-testid="skill-drawer-pane"')
+    expect(textOf(html)).toContain('DOCS_LISTING_TEXT: Use when writing or revising documentation.')
+    expect(textOf(html)).not.toContain('DEPLOY_LISTING_TEXT')
+  })
+
+  it('shows the reason when the turn-content listing is not measurable, not an empty pane', () => {
+    const qc = createTestQueryClient()
+    seedSkillTurn(qc, 0, skillsFixtures.turnContentSkills.listingNotMeasurable)
+    const html = renderSkillDrawer(docsRow, {
+      qc,
+      contentRequest: { sessionId: SKILL_SESSION_ID, turnIndex: 0, full: true },
+    })
+    expect(html).toContain('data-testid="skill-drawer-pane"')
+    expect(textOf(html)).toContain('the harness did not export the listing text for this turn')
+  })
+
+  it('shows the reason when the whole turn-content skills entry is not measurable', () => {
+    const qc = createTestQueryClient()
+    // Served shape: GET .../turn/:index/content => { skills: <entry> }, where the
+    // whole entry is the not-measurable verdict.
+    seedSkillTurn(qc, 0, { skills: skillsFixtures.turnContentSkills.entryNotMeasurable })
+    const html = renderSkillDrawer(docsRow, {
+      qc,
+      contentRequest: { sessionId: SKILL_SESSION_ID, turnIndex: 0, full: true },
+    })
+    expect(html).toContain('data-testid="skill-drawer-pane"')
+    expect(textOf(html)).toContain('skill listings were not exported for this session')
+  })
+
+  it('does not leave the pane silent when the listing text is missing', () => {
+    // The wording for a missing text is not pinned; the pane must say something
+    // about the listing rather than render nothing.
+    const qc = createTestQueryClient()
+    seedSkillTurn(qc, 0, skillsFixtures.turnContentSkills.textMissing)
+    const html = renderSkillDrawer(docsRow, {
+      qc,
+      contentRequest: { sessionId: SKILL_SESSION_ID, turnIndex: 0, full: true },
+    })
+    expect(html).toContain('data-testid="skill-drawer-pane"')
+    expect(textOf(html)).toMatch(/not (?:exported|available|recorded|measurable)/i)
+  })
+
+  // The served entry is not validated by the transport. A malformed entry must not
+  // take the drawer down, and must never be read as "not listed" or "never invoked".
+  const NEUTRAL_LISTING_NOTE = 'Listing text is not available for this turn.'
+  const malformedListingCases: Array<{
+    label: string
+    skills: Record<string, unknown>
+    listingNote: boolean
+    invokedLine: boolean
+    listingText?: string
+  }> = [
+    { label: 'an empty entry', skills: {}, listingNote: true, invokedLine: false },
+    {
+      label: 'listed undefined with a valid invoked array',
+      skills: { listed: undefined, invoked: ['docs'] },
+      listingNote: true,
+      invokedLine: true,
+    },
+    { label: 'listed and invoked both null', skills: { listed: null, invoked: null }, listingNote: true, invokedLine: false },
+    { label: 'listed a string and invoked a number', skills: { listed: 'docs', invoked: 5 }, listingNote: true, invokedLine: false },
+    {
+      label: 'a valid listed array with invoked missing',
+      skills: { listed: [{ name: 'docs', text: 'MALFORMED_CASE_LISTING_TEXT' }] },
+      listingNote: false,
+      invokedLine: false,
+      listingText: 'MALFORMED_CASE_LISTING_TEXT',
+    },
+    {
+      label: 'a valid listed array with invoked a string',
+      skills: { listed: [{ name: 'docs', text: 'STRING_INVOKED_LISTING_TEXT' }], invoked: 'docs' },
+      listingNote: false,
+      invokedLine: false,
+      listingText: 'STRING_INVOKED_LISTING_TEXT',
+    },
+  ]
+
+  it.each(malformedListingCases)(
+    'renders the pane without throwing for $label, and never coerces it to not listed or never invoked',
+    ({ skills, listingNote, invokedLine, listingText }) => {
+      const qc = createTestQueryClient()
+      seedSkillTurn(qc, 0, { skills })
+      let html = ''
+      expect(() => {
+        html = renderSkillDrawer(docsRow, {
+          qc,
+          contentRequest: { sessionId: SKILL_SESSION_ID, turnIndex: 0, full: true },
+        })
+      }).not.toThrow()
+      expect(html).toContain('data-testid="skill-drawer-pane"')
+      const text = textOf(html)
+      expect(text.includes(NEUTRAL_LISTING_NOTE)).toBe(listingNote)
+      expect(text.includes('Invoked in this turn.')).toBe(invokedLine)
+      if (listingText !== undefined) {
+        expect(text).toContain(listingText)
+      }
+      expect(text).not.toMatch(/never invoked|not listed/i)
+    },
+  )
+})
+
+describe('narrowToolDefinitions', () => {
+  const blob = JSON.stringify([
+    { type: 'function', name: 'apply_patch' },
+    { type: 'function', function: { name: 'read_file' } },
+    { type: 'function', name: 'grep' },
+  ])
+
+  it('keeps only the clicked tool', () => {
+    expect(JSON.parse(narrowToolDefinitions(blob, 'apply_patch'))).toEqual({ type: 'function', name: 'apply_patch' })
+    expect(JSON.parse(narrowToolDefinitions(blob, 'read_file'))).toEqual({
+      type: 'function',
+      function: { name: 'read_file' },
+    })
+  })
+
+  it('returns the text untouched when nothing matches, no name is given, or it is not JSON', () => {
+    expect(narrowToolDefinitions(blob, 'missing')).toBe(blob)
+    expect(narrowToolDefinitions(blob, undefined)).toBe(blob)
+    expect(narrowToolDefinitions('not json', 'grep')).toBe('not json')
   })
 })

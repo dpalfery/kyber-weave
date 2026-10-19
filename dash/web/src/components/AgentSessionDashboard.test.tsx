@@ -15,6 +15,11 @@ import { findContextTurn, findTurnByTransport } from '../lib/kyberApi.js'
 import { SessionInspectorDrawer } from './SessionInspectorDrawer.js'
 import type { TimelineNode } from './analysis/TimelineView.js'
 import type { KyberSessionContext } from '../lib/kyberApi.js'
+import skillsFixtures from './fixtures/skills-payload.json'
+import type { KyberTurnContentResult } from '../lib/kyberApi.js'
+import { readFileSync, readdirSync } from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 // Set up React 19 test hook dispatcher so components using hooks can be rendered in tests
 type ReactInternals = {
@@ -724,7 +729,7 @@ describe('AgentSessionDashboard: Assembly and Subpanels', () => {
   it('renders Execution Timeline with call tree and duration bars toggle', () => {
     const html = renderHtml(<AgentSessionDashboard session={sampleSession} />)
     expect(html).toContain('data-testid="execution-timeline-section"')
-    expect(html).toContain('4 · Execution Timeline &amp; Call Tree')
+    expect(html).toContain('5 · Execution Timeline &amp; Call Tree')
     expect(html).toContain('data-testid="timeline-tab-tree"')
     expect(html).toContain('data-testid="timeline-tab-bars"')
     expect(html).toContain('data-testid="timeline-tree-view"')
@@ -946,6 +951,7 @@ describe('AgentSessionDashboard: Interaction & Drawer Integration', () => {
         sessionId: 'sess-abc-123',
         span: 'turn-span-1',
         part: 'tool_definitions',
+        toolName: 'read_file',
       })
 
       const spanTree = renderWithState('bars')
@@ -1760,5 +1766,237 @@ describe('AgentSessionDashboard: whole-turn selection', () => {
         internals.H.useState = originalUseState
       }
     }
+  })
+})
+
+/** The markup from one section's test id up to the next section's test id. */
+function sectionOf(html: string, fromTestId: string, toTestId: string): string {
+  const start = html.indexOf(`data-testid="${fromTestId}"`)
+  const end = html.indexOf(`data-testid="${toTestId}"`)
+  expect(start).toBeGreaterThan(-1)
+  expect(end).toBeGreaterThan(start)
+  return html.slice(start, end)
+}
+
+describe('AgentSessionDashboard: Skills section (4 · Skills)', () => {
+  // The fixture's summary and skills blocks are merged onto the existing B1-shaped
+  // session. Its turns array is left alone: it is the per-turn spend list the rest
+  // of the dashboard already reads.
+  const realistic = skillsFixtures.realistic
+  const skillsSession = {
+    ...sampleSession,
+    summary: { ...sampleSession.summary, ...realistic.summary },
+    skills: realistic.skills,
+  } as unknown as AgentSessionPayload
+
+  it('numbers the skills section 4 and renumbers the execution timeline to 5', () => {
+    const html = renderHtml(<AgentSessionDashboard session={skillsSession} />)
+    expect(html).toContain('4 · Skills')
+    expect(html).toContain('5 · Execution Timeline &amp; Call Tree')
+    expect(html).not.toContain('4 · Execution Timeline')
+    expect(html.indexOf('3 · Tool &amp; Schema Cost Ranking')).toBeLessThan(html.indexOf('4 · Skills'))
+    expect(html.indexOf('4 · Skills')).toBeLessThan(html.indexOf('5 · Execution Timeline &amp; Call Tree'))
+  })
+
+  it('renders the skills-listed and skills-invoked tiles inside the skills section', () => {
+    const html = renderHtml(<AgentSessionDashboard session={skillsSession} />)
+    const section = sectionOf(html, 'skills-section', 'execution-timeline-section')
+    expect(section).toContain('data-testid="skills-tile-listed"')
+    expect(section).toContain('data-testid="skills-tile-invoked"')
+    expect(section).toContain('data-testid="skill-row-docs"')
+  })
+
+  it('reads a session with no skills key as not yet projected, never as no skills', () => {
+    const html = renderHtml(<AgentSessionDashboard session={sampleSession} />)
+    const section = sectionOf(html, 'skills-section', 'execution-timeline-section')
+    expect(section).toContain('not yet projected')
+    expect(section).not.toMatch(/no skills/i)
+  })
+
+  it('keeps the skills section free of currency figures and waste wording', () => {
+    const html = renderHtml(<AgentSessionDashboard session={skillsSession} />)
+    const section = sectionOf(html, 'skills-section', 'execution-timeline-section')
+    expect(section).not.toMatch(/[$€£¥]/)
+    expect(section).not.toMatch(/waste/i)
+  })
+
+  it('opens the skill drawer when a skill row is clicked', () => {
+    let capturedOpen = false
+    let capturedTitle = ''
+    let capturedContent: unknown = null
+
+    const reactInternals = internalsOf()
+    const origState = reactInternals?.H?.useState
+    if (reactInternals?.H) {
+      reactInternals.H.useState = (initial: unknown) => {
+        if (typeof initial === 'boolean') {
+          return [capturedOpen, (v: boolean) => { capturedOpen = v }]
+        }
+        if (initial === '') {
+          return [capturedTitle, (t: string) => { capturedTitle = t }]
+        }
+        return [capturedContent, (c: unknown) => { capturedContent = c }]
+      }
+    }
+
+    try {
+      const tree = AgentSessionDashboard({ session: skillsSession })
+      const skillRow = findElementByTestId(tree, 'skill-row-docs')
+      expect(skillRow).not.toBeNull()
+      expect((skillRow!.props as { onClick?: unknown }).onClick).toBeTypeOf('function')
+
+      ;(skillRow!.props as { onClick: () => void }).onClick()
+      expect(capturedOpen).toBe(true)
+      expect(capturedTitle).toBe('Skill: docs')
+      expect((capturedContent as { skill: { name: string } }).skill.name).toBe('docs')
+    } finally {
+      if (reactInternals?.H) {
+        reactInternals.H.useState = origState
+      }
+    }
+  })
+})
+
+/** Depth-first search over the element tree for the first element matching `predicate`. */
+function findElementWhere(node: unknown, predicate: (el: React.ReactElement) => boolean): React.ReactElement | null {
+  if (node == null) return null
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const found = findElementWhere(child, predicate)
+      if (found) return found
+    }
+    return null
+  }
+  if (!React.isValidElement(node)) return null
+  if (predicate(node)) return node
+  return findElementWhere((node.props as { children?: unknown }).children, predicate)
+}
+
+/**
+ * Clicks a skill row through the real wiring (SkillsPanel onSelectSkill ->
+ * openDrawerForSkill) and returns the props the dashboard hands its drawer.
+ * The hook shim is the same stateful one the whole-turn selection test uses.
+ */
+function openSkillDrawer(session: AgentSessionPayload, skillName: string): React.ComponentProps<typeof SessionInspectorDrawer> {
+  const internals = internalsOf()
+  const originalUseState = internals?.H?.useState
+  const state: unknown[] = []
+  let cursor = 0
+  const renderContent = () => {
+    cursor = 0
+    return AgentSessionContent({ session })
+  }
+  if (internals?.H) {
+    internals.H.useState = (initial: unknown) => {
+      const index = cursor++
+      if (!(index in state)) {
+        state[index] = typeof initial === 'function' ? (initial as () => unknown)() : initial
+      }
+      return [
+        state[index],
+        (next: unknown) => {
+          state[index] = typeof next === 'function' ? (next as (s: unknown) => unknown)(state[index]) : next
+        },
+      ]
+    }
+  }
+  try {
+    const panel = findElementWhere(renderContent(), (el) => typeof (el.props as { onSelectSkill?: unknown }).onSelectSkill === 'function')
+    expect(panel).not.toBeNull()
+    const row = session.skills && 'rows' in session.skills ? session.skills.rows.find((r) => r.name === skillName) : undefined
+    expect(row).toBeDefined()
+    ;(panel!.props as { onSelectSkill: (r: unknown) => void }).onSelectSkill(row)
+    const drawer = findElementWhere(renderContent(), (el) => el.type === SessionInspectorDrawer)
+    expect(drawer).not.toBeNull()
+    return drawer!.props as React.ComponentProps<typeof SessionInspectorDrawer>
+  } finally {
+    if (internals?.H) {
+      internals.H.useState = originalUseState
+    }
+  }
+}
+
+function turnContentBody(turnIndex: number, extra: Record<string, unknown>): KyberTurnContentResult {
+  return { sessionId: 'sess-abc-123', turnIndex, blocks: [], parts: [], assembledText: '', ...extra } as unknown as KyberTurnContentResult
+}
+
+describe('AgentSessionDashboard: skills headline comes from the served counts (F1, F4)', () => {
+  it('renders the served headline in the skills section, not a count of the rows', () => {
+    const served = skillsFixtures.servedCountsDifferFromRows
+    const session = {
+      ...sampleSession,
+      summary: { ...sampleSession.summary, ...served.summary },
+      skills: served.skills,
+    } as unknown as AgentSessionPayload
+    const html = renderHtml(<AgentSessionDashboard session={session} />)
+    const section = sectionOf(html, 'skills-section', 'execution-timeline-section')
+    expect(section).toContain('5 of 7 listed skills had no observed invocation')
+    expect(section).not.toContain('2 of 3 listed skills')
+  })
+
+  it('shows the no-skill line and no headline for a measurable payload with no rows', () => {
+    const empty = skillsFixtures.noRecordedSkills
+    const session = {
+      ...sampleSession,
+      summary: { ...sampleSession.summary, ...empty.summary },
+      skills: empty.skills,
+    } as unknown as AgentSessionPayload
+    const html = renderHtml(<AgentSessionDashboard session={session} />)
+    const section = sectionOf(html, 'skills-section', 'execution-timeline-section')
+    expect(section).toContain('No skill was recorded for this session.')
+    expect(section).not.toContain('data-testid="skills-headline"')
+    expect(section).not.toMatch(/had no observed invocation/)
+  })
+})
+
+describe('AgentSessionDashboard: skill drawer reads the first listed turn (F2)', () => {
+  it('titles the drawer with the skill and requests the lossless turn content for its first listed turn', () => {
+    const row = { name: 'docs', listed: true, invocations: 2, turns_listed: [1, 2], derived_tokens: 38 }
+    const session = { ...sampleSession, skills: { measurable: true, rows: [row] } } as unknown as AgentSessionPayload
+    const drawerProps = openSkillDrawer(session, 'docs')
+    expect(drawerProps.title).toBe('Skill: docs')
+
+    // Both turns are cached under the whole-turn key. Only the first listed turn
+    // may supply the listing text.
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
+    qc.setQueryData(
+      ['kyber-turn-content-full', 'sess-abc-123', 1],
+      turnContentBody(1, { skills: { listed: [{ name: 'docs', text: 'FIRST_LISTED_TURN_TEXT' }], invoked: ['docs'] } }),
+    )
+    qc.setQueryData(
+      ['kyber-turn-content-full', 'sess-abc-123', 2],
+      turnContentBody(2, { skills: { listed: [{ name: 'docs', text: 'LATER_LISTED_TURN_TEXT' }], invoked: ['docs'] } }),
+    )
+    const html = renderHtml(
+      <QueryClientProvider client={qc}>
+        <SessionInspectorDrawer {...drawerProps} />
+      </QueryClientProvider>,
+    )
+    expect(html).toContain('FIRST_LISTED_TURN_TEXT')
+    expect(html).not.toContain('LATER_LISTED_TURN_TEXT')
+  })
+})
+
+describe('KyberSessionTurnSkills (F3): exported types must be used or removed', () => {
+  // The repo already walks web/src as text in kyber.test.ts, so a source-level
+  // check is the established pattern here. It passes when the type is removed.
+  function sourceFiles(dir: string): string[] {
+    return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+      const full = path.join(dir, entry.name)
+      if (entry.isDirectory()) return sourceFiles(full)
+      return /\.(?:ts|tsx)$/.test(entry.name) && !/\.test\.(?:ts|tsx)$/.test(entry.name) ? [full] : []
+    })
+  }
+
+  it('has no exported KyberSessionTurnSkills that nothing in web/src references', () => {
+    const webSrc = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+    const files = sourceFiles(webSrc)
+    const declaredIn = files.filter((file) => /export type KyberSessionTurnSkills\b/.test(readFileSync(file, 'utf8')))
+    if (declaredIn.length === 0) return
+    const referencedIn = files.filter((file) => {
+      const text = readFileSync(file, 'utf8').replace(/export type KyberSessionTurnSkills\b[^\n]*/g, '')
+      return /\bKyberSessionTurnSkills\b/.test(text)
+    })
+    expect(referencedIn, `KyberSessionTurnSkills is exported from ${declaredIn.join(', ')} but unused`).not.toEqual([])
   })
 })

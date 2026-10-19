@@ -8,7 +8,7 @@ import { CanonStore } from './store.js'
 import { activeTokenizer, cacheKey, approximateO200kBase } from './tokens.js'
 import { buildSessionRow, buildSessions, mergeMeasurability } from './sessions.js'
 import type { AsadSessionPayload } from './sessions.js'
-import type { CanonicalRecord, SessionRow } from './types.js'
+import { notMeasurable, type CanonicalRecord, type ContentPart, type SessionRow } from './types.js'
 
 type SessionPayloadView = AsadSessionPayload & {
   context: AsadSessionPayload['context'] & {
@@ -708,6 +708,39 @@ describe('buildSessionRow', () => {
     expect(session.payload.summary).not.toHaveProperty('tools_invoked')
   })
 
+  it('omits tool_calls when the derived count is a lower bound', () => {
+    // A derived count can be a floor: Pi's collector caps the conversation, so
+    // its tool records say `tool_calls` is not measurable. The dashboard reads a
+    // finite number as a measured one, so the summary must omit it rather than
+    // print the floor as an exact total.
+    const truncated = toolInvoke('tool-1', 'turn-1', 'read', {
+      harness: 'pi',
+      source: 'pi-abc123',
+      sessionId: 'sess-pi-trunc',
+      measurability: { tool_calls: notMeasurable('pi truncated the exported conversation.') },
+    })
+
+    const session = sessionRow(buildSessionRow('sess-pi-trunc', [truncated], approximateO200kBase))
+
+    expect(session.summary?.tool_calls).toBeUndefined()
+    expect(session.payload.summary.tool_calls).toBeUndefined()
+    // The names observed are an observation, not a count, so they stay.
+    expect(session.summary?.tools_invoked).toEqual(['read'])
+  })
+
+  it('keeps tool_calls when every tool record measures it', () => {
+    const measured = toolInvoke('tool-1', 'turn-1', 'read', {
+      harness: 'pi',
+      source: 'pi-abc123',
+      sessionId: 'sess-pi-whole',
+      measurability: { tool_calls: 'measured' },
+    })
+
+    const session = sessionRow(buildSessionRow('sess-pi-whole', [measured], approximateO200kBase))
+
+    expect(session.summary?.tool_calls).toBe(1)
+  })
+
   it('preserves empty array tools_offered when empty tool definitions were observed (Thread 4)', () => {
     // Observed empty tool catalogue:
     const turnWithEmptyCatalog = turn('turn-empty-cat', [
@@ -1379,5 +1412,73 @@ describe('session cost totals (issue #186)', () => {
     )
 
     expect(problemsOf(row).map((p) => p.code)).toContain('COST_BASIS_MISMATCH')
+  })
+})
+
+describe('buildSessionRow — Copilot invoke_agent roll-up', () => {
+  const copilotTurn = (
+    spanId: string,
+    op: string,
+    name: string,
+    input: number,
+    parts: ContentPart[],
+    parentSpanId: string | null,
+  ) =>
+    turn(spanId, parts, {
+      harness: 'github-copilot',
+      source: 'github-copilot',
+      op,
+      name,
+      parentSpanId,
+      raw: { 'gen_ai.operation.name': op === 'tool.invoke' ? 'execute_tool' : name.split(' ')[0] },
+      tokens: tokens({ freshInput: input, reportedInput: input, output: 10, reportedOutput: 10 }),
+    })
+
+  const system = (tokensCount: number): ContentPart => ({ part: 'system_prompt', text: 'sys', tokens: tokensCount })
+  const history = (tokensCount: number): ContentPart => ({
+    part: 'conversation_history',
+    text: 'h',
+    tokens: tokensCount,
+  })
+
+  it('charts the chat calls as turns, not the roll-up, and does not double count', () => {
+    const rollup = copilotTurn('root', 'agent.invoke', 'invoke_agent architect', 496_000, [history(1)], null)
+    const chats = [
+      copilotTurn('c1', 'llm.invoke', 'chat gpt', 35_000, [system(20_000), history(100)], 'root'),
+      copilotTurn('c2', 'llm.invoke', 'chat gpt', 40_000, [history(200)], 'root'),
+      copilotTurn('c3', 'llm.invoke', 'chat gpt', 57_000, [history(300)], 'root'),
+    ]
+    const row = buildSessionRow('sess-1', [rollup, ...chats], approximateO200kBase)
+    const payload = sessionPayload(row)
+    const inputs = payload.context.turns?.map((t) => (t as { reported_input?: number }).reported_input)
+
+    expect(inputs).toEqual([35_000, 40_000, 57_000])
+    expect(payload.summary.turn_count ?? (row as unknown as { turnCount?: number }).turnCount).toBe(3)
+    expect(payload.summary.total_input).toBe(132_000)
+  })
+
+  it('also recognises a stored roll-up that still carries the old llm.invoke op', () => {
+    const rollup = copilotTurn('root', 'llm.invoke', 'invoke_agent architect', 496_000, [history(1)], null)
+    const chat = copilotTurn('c1', 'llm.invoke', 'chat gpt', 35_000, [system(20_000)], 'root')
+    const payload = sessionPayload(buildSessionRow('sess-1', [rollup, chat], approximateO200kBase))
+
+    expect(payload.context.turns).toHaveLength(1)
+  })
+
+  it('carries the system prompt onto every later turn that omits it', () => {
+    const chats = [
+      copilotTurn('c1', 'llm.invoke', 'chat gpt', 35_000, [system(20_000), history(100)], null),
+      copilotTurn('c2', 'llm.invoke', 'chat gpt', 40_000, [history(200)], null),
+    ]
+    const payload = sessionPayload(buildSessionRow('sess-1', chats, approximateO200kBase))
+
+    expect(payload.context.turns?.map((t) => t.buckets?.system_prompt)).toEqual([20_000, 20_000])
+  })
+
+  it('keeps a roll-up-only session as a turn rather than emptying it', () => {
+    const rollup = copilotTurn('root', 'agent.invoke', 'invoke_agent architect', 5_000, [history(100)], null)
+    const row = buildSessionRow('sess-1', [rollup], approximateO200kBase)
+
+    expect(sessionPayload(row).context.turns).toHaveLength(1)
   })
 })
