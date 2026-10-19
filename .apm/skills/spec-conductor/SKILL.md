@@ -97,6 +97,9 @@ tracking, ask `docs-dev` to move the status to an active value, and only then be
 This is the same gate as conductor's, applied to a spec instead of a plan. Nothing downstream
 starts without it.
 
+Under `autonomy: autonomous` (see `conductor`'s autonomy contract) you record that approval yourself in
+task tracking as `autonomous: recommendation accepted`; supervised behaviour is unchanged.
+
 **Also blocking: unresolved open questions.** A `product-owner` spec carries
 `[NEEDS CLARIFICATION]` markers, each naming how it resolves. Before sequencing, check which
 tasks depend on an unresolved one. Tasks that do not depend on it proceed; tasks that do are

@@ -47,6 +47,8 @@ OPTIONS: <a> / <b> / ...
 RECOMMENDED: <option> — <reason>
 ```
 
+Under `autonomy: autonomous`, decide per the autonomous-decisions reference and return only impactful escalations this way.
+
 Do not place an unapproved recommendation in the approved answer column until approved. When answered or approved, update the row in place: record the chosen answer, document any mitigating considerations or constraints, and record the explicit approval provenance (for example, `Approved by Hal <date>` or `User decision <date>`).
 
 If no interactive questions were needed during planning, the plan must still carry the permanent `## Decisions` table documenting the baseline choices, assumptions, and constraints that govern the implementation, and `PLAN_READY` includes `NO_QUESTIONS` with the concrete reason the request was already decision-complete. `NO_QUESTIONS` does not bypass authoring the permanent `## Decisions` table.

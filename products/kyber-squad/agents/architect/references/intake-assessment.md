@@ -61,6 +61,8 @@ Size alone is not decisive. A broad mechanical change with settled behavior may 
 
 Inspect enough governed documentation and code to support the recommendation. Surface unknowns rather than designing them away. Do not create a plan, specification, or todo mutation until the conductor returns the user's chosen path.
 
+Under `autonomy: autonomous` the conductor takes this recommendation as the choice, so make it decisively and keep `OPEN_QUESTIONS` for impactful escalations only.
+
 Return exactly:
 
 ```text

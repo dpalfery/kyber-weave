@@ -28,6 +28,7 @@ public sealed class SquadHotshotLifecycleCopilotGlobalLinksTests : IDisposable
         "spec-path.md",
         "intake-path.md",
         "execution-and-review.md",
+        "autonomy.md",
     ];
 
     private readonly TempDirectory _temp = new();

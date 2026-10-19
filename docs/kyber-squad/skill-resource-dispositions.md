@@ -10,9 +10,9 @@ last-reviewed: 2026-10-04
 
 # Skill-resource dispositions and policy-line ledger
 
-This reference is the content-preservation audit for the 68 supplemental files that sit
+This reference is the content-preservation audit for the 69 supplemental files that sit
 beside the 24 canonical `SKILL.md` files under `products/kyber-squad/skills/`. It exists so
-that, for every one of those 68 resources, a reader can answer three questions: what kind of
+that, for every one of those 69 resources, a reader can answer three questions: what kind of
 content it is, what happens to it, and — where it states a rule a host could reverse — where
 that rule now lives. It is a governed `reference` document (D5) and it outlives the plan that
 created it,
@@ -107,6 +107,7 @@ it stands, not this ledger's quotations of what it used to say.
 | `skills/maui-dev/references/theming.md` | technique | retain-in-place | rendered | — | MAUI platform technique; not a host-reversible policy (D2). |
 | `skills/pr-review-fix-comments/providers/azure-devops.md` | provider-guidance | retain-in-place | rendered | — | Provider-specific review-thread workflow; not a host-reversible policy (D2). |
 | `skills/pr-review-fix-comments/providers/github.md` | provider-guidance | retain-in-place | rendered | — | Provider-specific review-thread workflow; not a host-reversible policy (D2). |
+| `skills/product-owner/references/autonomy-decisions.md` | procedure | retain-in-place | rendered | — | Autonomous-mode decision rule and impactful-escalation marker; not a host-reversible policy (D2). |
 | `skills/product-owner/references/closeout-phase.md` | procedure | retain-in-place | rendered | — | Spec-closeout phase procedure; not a host-reversible policy (D2). |
 | `skills/product-owner/references/design-phase.md` | procedure | retain-in-place | rendered | — | Spec-design phase procedure; not a host-reversible policy (D2). |
 | `skills/product-owner/references/requirements-phase.md` | procedure | retain-in-place | rendered | — | Spec-requirements phase procedure; not a host-reversible policy (D2). |

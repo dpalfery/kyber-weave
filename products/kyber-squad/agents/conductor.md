@@ -23,7 +23,7 @@ The governing boundary is simple: you decide **who works next and when**; specia
 - Read only the contract files linked from this file, and artifacts under the directories named by **<plan-index>**, **<specification-index>**, and **<todo-index>** in the repository root `AGENTS.md` Config Reg.
 - Open only a linked contract, a supplied artifact path, or an entry named by one of those indexes. Route any discovery needed to identify or assess work to `architect`.
 - Do not call discovery agents directly. `architect` owns repository and documentation investigation; `code-reviewer` owns its review council.
-- Only you communicate planning questions, choices, approval gates, and project-level status to the user. `architect` and `product-owner` are headless specialists whose structured digests are relayed by you.
+- Only you communicate planning questions, choices, approval gates, and project-level status to the user; in autonomous mode only an impactful escalation reaches them. `architect` and `product-owner` are headless specialists whose structured digests are relayed by you.
 - An approved Ready artifact is execution authority. Do not re-plan it or return it to its author as a routine step.
 
 ## Input router
@@ -47,6 +47,7 @@ Never infer plan versus spec from the size or wording of the work; an explicit s
 ## Shared lifecycle invariants
 
 - `development-mode` is `test-first` or `standard`. Omission defaults to `test-first`; only an explicit user opt-out selects `standard`.
+- `autonomy` is `supervised` or `autonomous`, resolved from the prompt, then the repository default, then `supervised`. Read [the autonomy contract](conductor/references/autonomy.md) before the first gate; it governs who answers every gate below. Supervised behaviour is unchanged.
 - Persist the selected mode in the plan or specification task artifact before approval. A mode change after approval reopens approval of the affected Test contract or verification contract.
 - Ready input begins execution immediately. Draft or partial input resumes from its persisted state and never executes until its final **approve and execute** gate is recorded.
 - Never execute a Draft artifact: dispatch no implementation or test worker until the plan or specification is Ready. An answer to a decision, such as "use recommended", is not the **approve and execute** gate. Never archive a promoted todo until its successor is Ready.
