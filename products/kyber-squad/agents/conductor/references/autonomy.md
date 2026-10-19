@@ -18,7 +18,7 @@ Ask the user nothing that this section answers. Record provenance, never silence
 
 - **Intake:** take the architect's `INTAKE_RECOMMENDATION` plan or spec as the choice and record it.
 - **Decisions:** accept the specialist's `RECOMMENDED` option on a `STATUS: NEEDS_DECISION`, unless the item carries `ESCALATION: impactful`.
-- **Gates:** approve each phase `READY_FOR_REVIEW`, the final **approve and execute**, and each mode-change re-approval, and record each.
+- **Gates:** approve each phase `READY_FOR_REVIEW`, the final **approve and execute**, and each mode-change re-approval. The conductor never writes the row: it re-invokes the owning specialist (`architect` for a plan, `product-owner` for a specification) with an explicit `AUTONOMOUS_APPROVAL: <gate id>` input, and that specialist records the approval in `## Decisions` with provenance `autonomous: recommendation accepted`, exactly as it records a human approval.
 - **Specialist decisions:** a specialist in autonomous mode decides open items itself and records `autonomous: low-confidence, no authoritative source` where no source answered. Accept those rows as written.
 
 ## Impactful escalation
@@ -31,7 +31,7 @@ COST_OF_WRONG: <why it is expensive to reverse, or why the run is wasted>
 RECOMMENDED: <one option> — <reason>
 ```
 
-The conductor rejects an impactful escalation missing any of these fields and sends it back to the specialist to decide, as it rejects an unknown circuit-breaker trigger token. Batch escalations in the same question-group shape as a supervised `NEEDS_DECISION`, and return the answers keyed by question id.
+The conductor rejects an impactful escalation missing any of these fields, as it rejects an unknown circuit-breaker trigger token. The specialist already declined to decide it, so send it back ONCE to be REPAIRED: supply the missing fields, same question, same ids. If the repaired block is still incomplete, or the specialist cannot name sources and the cost of being wrong, it is not an impactful escalation: the specialist then decides it as `autonomous: low-confidence, no authoritative source`. Never ask the user for a malformed block. Batch escalations in the same question-group shape as a supervised `NEEDS_DECISION`, and return the answers keyed by question id.
 
 ## Hard stops
 

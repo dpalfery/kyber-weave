@@ -17,11 +17,18 @@ Persist the packet's `autonomy` in the task artifact next to `development-mode`.
 Return `READY_FOR_REVIEW`, `REQUIREMENTS_GAP`, or `DESIGN_GAP` with `ESCALATION: impactful`, listing each escalated item in `OPEN_QUESTIONS`. Every field below is required; the conductor sends back an escalation missing any:
 
 ```text
+STATUS: READY_FOR_REVIEW | REQUIREMENTS_GAP | DESIGN_GAP
+PHASE: requirements | design | tasks
+ARTIFACT: <path resolved from <specification-index>>
+SUMMARY: <concise persisted outcome>
+GAPS: <blocking gaps, or none>
 ESCALATION: impactful
 OPEN_QUESTIONS: [Qn] <decision> — OPTIONS: <a> / <b>
 SOURCES_SEARCHED: <what was searched and what it said>
 COST_OF_WRONG: <why it is expensive to reverse, or why the run is wasted>
 RECOMMENDED: <one option> — <reason>
+Discovery: codegraph N, docs N, direct reads N
+DIRECT_READ_REASONS: <path and reason for each direct read of indexed code, or none>
 ```
 
 Batch escalations in the usual group of up to four. A phase with no escalation returns its normal digest with `OPEN_QUESTIONS: none`.

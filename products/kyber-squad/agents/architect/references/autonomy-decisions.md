@@ -12,7 +12,7 @@ Persist the packet's `autonomy` in the plan next to `development-mode`. In auton
    - expensive to reverse (data-model or persistence shape, a public interface or contract, a dependency choice that spreads, a choice between architectures, anything whose wrong answer wastes the run): escalate.
 3. **Conflict.** A choice that conflicts with an already-accepted decision or a documented constraint: escalate.
 
-Record the source in `Mitigating and supporting information`; the conductor sets the row's approval provenance.
+Record the source in `Mitigating and supporting information`; `architect` sets the row's approval provenance when the conductor returns the answers, or the `AUTONOMOUS_APPROVAL` input, keyed by id.
 
 ## Escalation
 

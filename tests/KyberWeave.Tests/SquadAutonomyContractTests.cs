@@ -167,4 +167,62 @@ public sealed class SquadAutonomyContractTests
         AssertAll(Read("agents", "architect.md"), "never prompt the user directly", "**approve and execute**");
         AssertAll(Read("skills", "product-owner", "SKILL.md"), "never prompts the user", "**approve and execute**");
     }
+
+    [Fact]
+    public void MalformedImpactfulEscalationIsRepairedOnceNeverDecidedOrAskedOfTheUser()
+    {
+        string autonomy = Read("agents", "conductor", "references", "autonomy.md");
+        string bug = Read("skills", "bug-crusher", "SKILL.md");
+
+        AssertAll(autonomy,
+            "ONCE to be REPAIRED",
+            "same question, same ids",
+            "autonomous: low-confidence, no authoritative source",
+            "Never ask the user for a malformed block");
+        Assert.DoesNotContain("sends it back to the specialist to decide", autonomy, StringComparison.Ordinal);
+        AssertAll(bug, "ONCE to be REPAIRED", "autonomous: low-confidence, no authoritative source");
+        Assert.DoesNotContain("sending it back to `architect` to decide", bug, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ConductorNeverWritesApprovalRowsTheSpecialistRecordsAutonomousApproval()
+    {
+        string autonomy = Read("agents", "conductor", "references", "autonomy.md");
+        string plan = Read("agents", "conductor", "references", "plan-path.md");
+        string spec = Read("agents", "conductor", "references", "spec-path.md");
+        string architect = Read("agents", "architect.md");
+        string owner = Read("skills", "product-owner", "SKILL.md");
+
+        AssertAll(autonomy, "AUTONOMOUS_APPROVAL: <gate id>", "never writes the row");
+        AssertAll(plan, "AUTONOMOUS_APPROVAL: <gate id>", "`architect` records");
+        AssertAll(spec, "AUTONOMOUS_APPROVAL: <gate id>", "`product-owner` records");
+        Assert.DoesNotContain("conductor supplies the approval and records it", plan, StringComparison.Ordinal);
+        Assert.DoesNotContain("record the approval yourself", spec, StringComparison.Ordinal);
+        AssertAll(architect, "Never infer approval", "AUTONOMOUS_APPROVAL", "autonomous: recommendation accepted", "from silence or from the mode alone");
+        AssertAll(owner, "AUTONOMOUS_APPROVAL", "autonomous: recommendation accepted", "from silence or from the mode alone");
+        Assert.DoesNotContain("conductor supplies those approvals itself", owner, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AutonomousEscalationShapesCarryEveryRequiredFieldAndTheDigestEnvelope()
+    {
+        string planAuthoring = Read("agents", "architect", "references", "plan-authoring.md");
+        string architectRef = Read("agents", "architect", "references", "autonomy-decisions.md");
+        string ownerRef = Read("skills", "product-owner", "references", "autonomy-decisions.md");
+
+        AssertAll(planAuthoring,
+            "ESCALATION: impactful",
+            "SOURCES_SEARCHED",
+            "COST_OF_WRONG",
+            "autonomy-decisions.md");
+        AssertAll(architectRef, "STATUS: NEEDS_DECISION", "PLAN_FILE:", "QUESTION:", "OPTIONS:");
+        AssertAll(ownerRef,
+            "STATUS: READY_FOR_REVIEW",
+            "PHASE: requirements | design | tasks",
+            "ARTIFACT: <path resolved from <specification-index>>",
+            "SUMMARY:",
+            "GAPS:",
+            "Discovery: codegraph N, docs N, direct reads N",
+            "DIRECT_READ_REASONS:");
+    }
 }

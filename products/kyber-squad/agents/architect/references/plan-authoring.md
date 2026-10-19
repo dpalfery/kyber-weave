@@ -47,7 +47,7 @@ OPTIONS: <a> / <b> / ...
 RECOMMENDED: <option> — <reason>
 ```
 
-Under `autonomy: autonomous`, decide per the autonomous-decisions reference and return only impactful escalations this way.
+Under `autonomy: autonomous`, decide per the autonomous-decisions reference and return only impactful escalations. An autonomous impactful escalation uses this NEEDS_DECISION shape PLUS `ESCALATION: impactful`, `SOURCES_SEARCHED`, `COST_OF_WRONG` (and `RECOMMENDED`); see [autonomy-decisions.md](autonomy-decisions.md) for the exact block.
 
 Do not place an unapproved recommendation in the approved answer column until approved. When answered or approved, update the row in place: record the chosen answer, document any mitigating considerations or constraints, and record the explicit approval provenance (for example, `Approved by Hal <date>` or `User decision <date>`).
 

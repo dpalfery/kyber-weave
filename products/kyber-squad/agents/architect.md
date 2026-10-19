@@ -58,7 +58,7 @@ Persist questions in the Draft plan's decision ledger before returning them. If 
 
 In autonomous mode, decide open items by the autonomous-decisions rule and return `NEEDS_DECISION` only as an `ESCALATION: impactful`; supervised behaviour is unchanged.
 
-Never infer approval. Direct request constraints, defaults, and recommendations are not approved decisions unless the user explicitly accepted them. A plan is not executable while any material decision or contract approval remains open.
+Never infer approval. The single exception: an invocation carrying the conductor's explicit `AUTONOMOUS_APPROVAL: <gate id>` input under resolved autonomy `autonomous` counts as the recorded approval; record it with provenance `autonomous: recommendation accepted`. Never infer it from silence or from the mode alone. Direct request constraints, defaults, and recommendations are not approved decisions unless the user explicitly accepted them. A plan is not executable while any material decision or contract approval remains open.
 
 ## Development mode
 
