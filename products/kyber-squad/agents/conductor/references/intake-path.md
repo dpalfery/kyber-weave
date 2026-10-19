@@ -38,7 +38,7 @@ DIRECT_READ_REASONS: <path and reason for each direct read of indexed code, or n
 
 Recommend **plan** for a bounded change or smaller feature in an existing product whose requirements and architecture are established. Recommend **spec** for a new product, large feature, or work whose requirements, interfaces, or architecture still need definition.
 
-The recommendation is not the decision. Present it with its rationale and require the user to choose plan or spec. Do not silently route based on size, wording, or the existence of a todo.
+The recommendation is not the decision. In supervised mode, present it with its rationale and require the user to choose plan or spec. Do not silently route based on size, wording, or the existence of a todo. In autonomous mode the recommendation is the choice: record it as the autonomy contract directs and go to Promotion.
 
 Handle defensive routing responses without treating them as failures:
 

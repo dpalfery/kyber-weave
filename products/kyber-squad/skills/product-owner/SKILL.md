@@ -26,6 +26,8 @@ Use the host's indexes before raw reads. Load the CodeGraph and kyber-weave docu
 - Read or search a file directly only for what an index does not cover (configuration, infrastructure, files the docs index missed), when a tool reports the file stale, or to confirm one detail it did not return. When a tool or index is unavailable, fall back to direct reads and say so.
 - Report discovery in your final report: `Discovery: codegraph N, docs N, direct reads N`, with a reason for each direct read of indexed code.
 
+When the conductor's packet carries `autonomy: autonomous`, also read [autonomous decisions](./references/autonomy-decisions.md); it governs open decisions in every phase.
+
 ## Headless phase contract
 
 This skill never prompts the user and never runs an approval gate. Persist the assigned artifact and return its digest to `conductor`, which relays `GAPS` and `OPEN_QUESTIONS` and returns user decisions in a later invocation.
@@ -53,7 +55,7 @@ Discovery: codegraph N, docs N, direct reads N
 DIRECT_READ_REASONS: <path and reason for each direct read of indexed code, or none>
 ```
 
-The agent records phase approval only when the conductor supplies explicit user approval. A specification is Ready only after all phases are approved, the task artifact records `development-mode: test-first | standard`, the matching Test or verification contract is approved, and the conductor returns final **approve and execute** authorization.
+In autonomous mode the conductor supplies those approvals itself; supervised behaviour is unchanged. The agent records phase approval only when the conductor supplies explicit user approval. A specification is Ready only after all phases are approved, the task artifact records `development-mode: test-first | standard`, the matching Test or verification contract is approved, and the conductor returns final **approve and execute** authorization.
 
 ## Shelf life
 
