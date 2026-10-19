@@ -28,6 +28,24 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// are recorded as structured degradations with code <c>permission-not-expressible</c> rather
 /// than inventing unenforceable fields or silently dropping constraints (preventing capability widening).
 /// </para>
+/// <para>
+/// <b>Agent resources are projected beside their principal with a discovery-guard
+/// extension.</b> Kilo's agent loader scans every config root for
+/// <c>{agent,agents}/**/*.md</c> files with dotfiles and symlinks followed, and derives
+/// an entry name from each match's relative path (verified against
+/// <c>Kilo-Org/kilocode</c>, <c>packages/opencode/src/config/agent.ts</c> — the glob
+/// inherited verbatim from OpenCode v1.18.26 — on 2026-10-19), so projecting an
+/// agent's resource closure beside its principal with a <c>.md</c> extension would
+/// register every reference file as a phantom agent. Agent-owned <c>.md</c> resources
+/// therefore deploy with a <c>.markdown</c> extension — invisible to the
+/// <c>*.md</c>-only glob while staying co-located with, and readable beside, their owning
+/// agent — and the owner's authored links are rewritten <c>.md</c> to <c>.markdown</c>
+/// via the shared closure-driven rewriter. The deviation from the repository's "authored
+/// links resolve verbatim" rule is recorded as <c>resource-links-rewritten</c> so it is
+/// visible in the receipt. Skill resources keep the ordinary
+/// <see cref="SquadResourceProjection"/> treatment: skill discovery only admits
+/// <c>SKILL.md</c> one level deep and never mistakes them for agents.
+/// </para>
 /// </remarks>
 public sealed class KiloRenderer : ISquadRenderer
 {
@@ -103,7 +121,14 @@ public sealed class KiloRenderer : ISquadRenderer
                 source.ModelProfiles.Profiles,
                 request.Scope);
             files.Add(principal);
-            SquadResourceProjection.Append(files, principal, agent.Resources);
+            SquadAgentResourceDiscoveryGuard.Append(
+                files,
+                agent,
+                principal,
+                agent.Resources,
+                degradations,
+                SquadTargetCatalog.GetToken(SquadTarget.Kilo),
+                "{agent,agents}/**/*.md");
 
             SquadDegradationRecord? degradation = BuildDegradationRecord(
                 agent,
@@ -152,10 +177,15 @@ public sealed class KiloRenderer : ISquadRenderer
             frontmatter["model"] = model;
         }
 
+        // The composed agent file carries discovery-guarded links: an in-closure .md link
+        // is rewritten to .markdown so it still resolves after the guard renames the
+        // projection. Frontmatter is unchanged.
+        string body = SquadAgentResourceDiscoveryGuard.RewriteBody(agent);
+
         string content = SquadMarkdownDocument.Compose(
             YamlSerializer.Value!,
             frontmatter,
-            agent.InstructionBody);
+            body);
 
         string agentsDir = ResolvePrefixedDirectory(AgentsDirectory, scope);
         return new SquadDeploymentFile(
