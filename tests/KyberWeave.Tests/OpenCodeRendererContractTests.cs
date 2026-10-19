@@ -888,6 +888,42 @@ public sealed class OpenCodeRendererContractTests : IDisposable
         Assert.Contains("{agent,agents}/**/*.md", degradation.Details, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// A <c>.md</c> resource reached only transitively through a <c>.markdown</c> resource is
+    /// renamed on disk, but the body never links to it, so the degradation must report the
+    /// renamed file without claiming an authored link was rewritten.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_OpenCode_UnlinkedMarkdownResourceReportsRenameWithoutLinkRewrite()
+    {
+        using ResourceBearingSquadFixture fixture = ResourceBearingSquadFixture.CreateWithUnlinkedMarkdownResource();
+        SquadRendererRegistry registry = new([new OpenCodeRenderer()]);
+        SquadRenderRequest request = new(
+            fixture.ProductRoot,
+            [SquadTarget.OpenCode],
+            SquadDeploymentScope.Project);
+
+        SquadRenderResult result = await registry.RenderAsync(request);
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        // The .md resource is renamed beside its principal, invisible to discovery.
+        Assert.Contains(
+            result.Files,
+            file => file.RelativePath ==
+                $".opencode/agents/{ResourceBearingSquadFixture.AgentName}/references/notes.markdown");
+
+        SquadDegradationRecord degradation = Assert.Single(
+            result.Degradations,
+            record => string.Equals(record.Code, "resource-links-rewritten", StringComparison.Ordinal) &&
+                string.Equals(record.CanonicalIdentity, ResourceBearingSquadFixture.AgentName, StringComparison.Ordinal));
+        // The file was renamed, so the receipt says so…
+        Assert.Contains("projected with a '.markdown' extension", degradation.Details, StringComparison.Ordinal);
+        // …but no authored link was rewritten, so it must not claim one was.
+        Assert.DoesNotContain("authored links were rewritten", degradation.Details, StringComparison.Ordinal);
+        Assert.Contains("no authored link required rewriting", degradation.Details, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task RenderAsync_NativeSingleProjectionRule_SharedIdentityEmitsAgentAndSuppressesSkill()
     {

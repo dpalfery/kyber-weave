@@ -113,6 +113,26 @@ internal static class SquadAgentResourceDiscoveryGuard
                 resource.RelativePath,
                 StringComparison.Ordinal));
 
+        // Whether any authored link was actually rewritten is a separate fact: it is true only
+        // when the body links to an in-closure resource whose path the map changes. The shared
+        // rewriter's `changed` flag would over-report here (it is set for any matched link, even
+        // one whose path maps to itself), so track the real condition through the map instead.
+        bool anyLinkRewritten = false;
+        SquadResourceLinkRewriter.Rewrite(
+            agent.InstructionBody,
+            closure,
+            pathPart =>
+            {
+                string mapped = MapResourcePath(pathPart);
+                if (!string.Equals(mapped, pathPart, StringComparison.Ordinal))
+                {
+                    anyLinkRewritten = true;
+                }
+
+                return mapped;
+            },
+            out _);
+
         int separator = principal.RelativePath.LastIndexOf('/');
         string principalDirectory = separator < 0 ? string.Empty : principal.RelativePath[..separator];
         foreach (SquadResource resource in resources)
@@ -137,7 +157,10 @@ internal static class SquadAgentResourceDiscoveryGuard
             "projected beside their principal with a '.md' extension without registering as " +
             "phantom agents. " +
             (anyRenamed
-                ? "They are projected with a '.markdown' extension instead, and the agent's authored links were rewritten to '.markdown' so they still resolve."
-                : "They project verbatim because the scanner never matches non-markdown files, and no authored link required rewriting.")));
+                ? "They are projected with a '.markdown' extension instead"
+                : "They project verbatim because the scanner never matches non-markdown files") +
+            (anyLinkRewritten
+                ? ", and the agent's authored links were rewritten to '.markdown' so they still resolve."
+                : ", and no authored link required rewriting.")));
     }
 }

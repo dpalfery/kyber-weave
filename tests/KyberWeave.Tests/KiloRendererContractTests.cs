@@ -485,6 +485,40 @@ public sealed class KiloRendererContractTests : IDisposable
         Assert.Contains("{agent,agents}/**/*.md", degradation.Details, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// A <c>.md</c> resource reached only transitively through a <c>.markdown</c> resource is
+    /// renamed on disk, but the body never links to it, so the degradation must report the
+    /// renamed file without claiming an authored link was rewritten.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_Kilo_UnlinkedMarkdownResourceReportsRenameWithoutLinkRewrite()
+    {
+        using ResourceBearingSquadFixture fixture = ResourceBearingSquadFixture.CreateWithUnlinkedMarkdownResource();
+        KiloRenderer renderer = new();
+        SquadRenderRequest request = new(
+            fixture.ProductRoot,
+            [SquadTarget.Kilo],
+            SquadDeploymentScope.Project);
+
+        SquadRenderResult result = await renderer.RenderAsync(request);
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        Assert.Contains(
+            result.Files,
+            file => file.RelativePath ==
+                $".kilo/agents/{ResourceBearingSquadFixture.AgentName}/references/notes.markdown");
+
+        SquadDegradationRecord degradation = Assert.Single(
+            result.Degradations,
+            record => string.Equals(record.Code, "resource-links-rewritten", StringComparison.Ordinal) &&
+                      string.Equals(record.CanonicalIdentity, ResourceBearingSquadFixture.AgentName,
+                          StringComparison.Ordinal));
+        Assert.Contains("projected with a '.markdown' extension", degradation.Details, StringComparison.Ordinal);
+        Assert.DoesNotContain("authored links were rewritten", degradation.Details, StringComparison.Ordinal);
+        Assert.Contains("no authored link required rewriting", degradation.Details, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task RenderAsync_Kilo_ResolvesConcreteModelsAndSuppressesInheritedModels()
     {

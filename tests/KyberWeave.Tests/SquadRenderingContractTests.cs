@@ -330,6 +330,22 @@ internal sealed class ResourceBearingSquadFixture : IDisposable
         return fixture;
     }
 
+    /// <summary>
+    /// An agent whose body links only to a <c>.markdown</c> resource, which itself links to a
+    /// <c>.md</c> resource. The <c>.md</c> resource is renamed on disk (it ends in <c>.md</c>),
+    /// but no authored link in the body points at it, so the guard's degradation must not claim
+    /// a link was rewritten.
+    /// </summary>
+    internal static ResourceBearingSquadFixture CreateWithUnlinkedMarkdownResource()
+    {
+        ResourceBearingSquadFixture fixture = CreateBase();
+
+        fixture.AppendAgentLink("[Guide](bug-crusher-investigator/references/guide.markdown)");
+        fixture.WriteAgentResource("references/guide.markdown", "[Notes](notes.md)\n");
+        fixture.WriteAgentResource("references/notes.md", "notes\n");
+        return fixture;
+    }
+
     internal void WriteAgentResource(string relativePath, string content) =>
         Write($"agents/{AgentName}/{relativePath}", content);
 
