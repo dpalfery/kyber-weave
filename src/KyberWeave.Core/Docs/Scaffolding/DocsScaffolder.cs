@@ -155,10 +155,8 @@ public static class DocsScaffolder
                 standardContent, force));
         }
 
-        files.Add(WriteConfigReg(
-            root,
-            resolvedDocsRoot,
-            (loadedConfig.Config ?? KyberWeaveConfig.ProductDefaults).ConfigReg.Resolve(ontology)));
+        ConfigRegConfig configReg = (loadedConfig.Config ?? KyberWeaveConfig.ProductDefaults).ConfigReg;
+        files.Add(WriteConfigReg(root, resolvedDocsRoot, configReg.Resolve(ontology), configReg.Autonomy));
 
         return new ScaffoldResult(resolvedDocsRoot, resolution.Source, files);
     }
@@ -352,10 +350,11 @@ public static class DocsScaffolder
     private static ScaffoldedFile WriteConfigReg(
         string repoRoot,
         string docsRoot,
-        IReadOnlyList<ConfigRegEntry> entries)
+        IReadOnlyList<ConfigRegEntry> entries,
+        string? autonomy)
     {
         string absolute = RequireContained(repoRoot, AgentsFilePath, nameof(repoRoot));
-        string block = ConfigRegMarkdown.Render(entries);
+        string block = ConfigRegMarkdown.Render(entries, autonomy);
 
         if (!File.Exists(absolute))
         {

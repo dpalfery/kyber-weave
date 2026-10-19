@@ -821,6 +821,41 @@ public sealed class DocsScaffolderTests : IDisposable
     }
 
     [Fact]
+    public void RendersAutonomyAsAPropertyLineOnlyWhenTheKeyIsSet()
+    {
+        DocsScaffolder.Scaffold(_temp.Path, "docs");
+        Assert.DoesNotContain("<autonomy>", Read("AGENTS.md"), StringComparison.Ordinal);
+
+        WriteHostConfig("ontology:\n  docs-root: docs\nautonomy: autonomous\n");
+        DocsScaffolder.Scaffold(_temp.Path);
+
+        Assert.Contains("- **<autonomy>**: `autonomous`\n", Read("AGENTS.md"), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AutonomyRenderingIsIdempotentAndFollowsTheSetting()
+    {
+        WriteHostConfig("ontology:\n  docs-root: docs\nautonomy: supervised\n");
+        DocsScaffolder.Scaffold(_temp.Path);
+        string first = Read("AGENTS.md");
+
+        ScaffoldResult second = DocsScaffolder.Scaffold(_temp.Path);
+
+        Assert.Equal(first, Read("AGENTS.md"));
+        Assert.Contains(second.Files, f => f is { RelativePath: "AGENTS.md", Outcome: ScaffoldOutcome.Preserved });
+
+        WriteHostConfig("ontology:\n  docs-root: docs\nautonomy: autonomous\n");
+        DocsScaffolder.Scaffold(_temp.Path);
+        string agents = Read("AGENTS.md");
+        Assert.Contains("`autonomous`", agents, StringComparison.Ordinal);
+        Assert.DoesNotContain("`supervised`", agents, StringComparison.Ordinal);
+
+        WriteHostConfig("ontology:\n  docs-root: docs\n");
+        DocsScaffolder.Scaffold(_temp.Path);
+        Assert.DoesNotContain("<autonomy>", Read("AGENTS.md"), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void RerunningLeavesAnAlreadyCurrentRegistryAlone()
     {
         DocsScaffolder.Scaffold(_temp.Path, "docs");

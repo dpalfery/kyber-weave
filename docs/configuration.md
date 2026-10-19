@@ -9,6 +9,7 @@ code-refs:
   - KyberWeaveConfigLoader
   - OntologyConfig
   - SquadConfig
+  - ConfigRegConfig
 ---
 
 # Configuration
@@ -53,6 +54,8 @@ ontology:
 
 config-reg:
   auth-design: docs/reference/auth-design.md
+
+autonomy: supervised
 
 squad:
   bundle: full
@@ -185,6 +188,25 @@ keeps its ADRs elsewhere says so here. What it cannot do is remove a name, becau
 resolving properties by name cannot tell a missing one from a typo. Paths are
 repository-relative and must stay inside it; property names are slugs, since a skill types
 them by hand.
+
+### Autonomy
+
+A top-level `autonomy:` key tells agents how far they may go without stopping to ask:
+
+```yaml
+autonomy: autonomous
+```
+
+The values are `supervised` and `autonomous`; anything else is a configuration error. Agents
+are portable text and can only read the generated block of the repository root `AGENTS.md`,
+so when the key is set `docs init` renders it there as `- **<autonomy>**: \`autonomous\``,
+the same shape as the path properties. When the key is absent nothing is rendered, and agents
+treat the setting as `supervised`.
+
+It is a value, not a path, so `docs validate` never resolves it as one
+(`KW-CONFIG-REG-001`), but a missing or wrong `<autonomy>` line is a stale block
+(`KW-CONFIG-REG-002`). The name is reserved: declaring `autonomy` under `config-reg:` is
+rejected.
 
 `docs validate` reports a property pointing at nothing as `KW-CONFIG-REG-001` and a rendered
 block that no longer matches configuration as `KW-CONFIG-REG-002`, but only once a repository
