@@ -308,7 +308,7 @@ describe('Claude Code turn content end to end (T9/T10)', () => {
 })
 
 // T1 (Claude Code Desktop request bodies; plan
-// docs/plans/2026-10-19-claude-desktop-request-body-correlation.md, test-contract
+// docs/archive/plans/2026-10-19-claude-desktop-request-body-correlation.md, test-contract
 // row T1, the end-to-end case). The input is the sanitized T0 Desktop export
 // (fixtures/claude-desktop, D7): every body log is stamped with the active
 // PARENT span or the call's own span, and the logs are posted BEFORE the traces,

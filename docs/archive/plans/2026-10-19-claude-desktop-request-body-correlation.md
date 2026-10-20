@@ -2,7 +2,7 @@
 id: plans/2026-10-19-claude-desktop-request-body-correlation
 title: "Correlate Claude Code Desktop api_request_body Logs So System Prompt, Tools, and Skills Reach the Turn Inspector"
 doc-type: plan
-status: current
+status: complete
 component: KyberDash
 owner: dpalfery
 last-reviewed: 2026-10-19
@@ -11,7 +11,7 @@ development-mode: test-first
 
 # Correlate Claude Code Desktop api_request_body Logs So System Prompt, Tools, and Skills Reach the Turn Inspector
 
-**Status: Review required.** Re-approved 2026-10-19 under autonomous mode (D25, `AUTONOMOUS_APPROVAL: approve-and-execute`) after the T0 re-run. T0 is complete (D18); D19–D21 revised the Test contract and D22–D24 corrected wording, the residual and counts. Implementation (T1–T6) and the canonical documentation (T7, closeout in §9) are in place. T8, the owner live check, is open, so the plan stays in `docs/plans/` and is not archived.
+**Status: Complete — `[NOT LIVE-VERIFIED]`.** Re-approved 2026-10-19 under autonomous mode (D25, `AUTONOMOUS_APPROVAL: approve-and-execute`) after the T0 re-run. T0 is complete (D18); D19–D21 revised the Test contract and D22–D24 corrected wording, the residual and counts. Implementation (T1–T6) and the canonical documentation (T7, closeout in §9) are in place. T8, the owner live check on the real Claude Desktop app, was **not performed**; the owner asked for archival before it. The plan is archived in `docs/archive/plans/` with that check recorded as open, and nothing in it claims live verification (§9.4).
 Development mode: `test-first`.
 Autonomy: `autonomous`.
 
@@ -246,8 +246,10 @@ ADR waiver (D9).
 
 ## 9. Closeout (T7)
 
-The docs closeout ran on 2026-10-19. The plan is **not archived**: T8 is open, and the
-verification in §9.1 is not complete (see §9.4). The `## Decisions` section (§2) is unchanged.
+The closeout ran on 2026-10-19 and archived the plan with T8 recorded as not performed:
+`[NOT LIVE-VERIFIED]`. The `## Decisions` section (§2) is unchanged. The test suites and the
+`docs validate` and `docs drift` commands were not run by this closeout (§9.1); §9.4 lists what
+the archive record does and does not claim.
 
 ### 9.1 Acceptance criteria
 
@@ -257,10 +259,11 @@ verification in §9.1 is not complete (see §9.4). The `## Decisions` section (�
 | T1–T3 | RED tests in the named suites fail on pre-change code | Suites named in §4 | Not re-run by this closeout |
 | T4–T6 | GREEN: the same tests pass unmodified; existing suites pass | Implemented, uncommitted (`git diff`). Three test edits are a disclosed deviation (D26). Review fixes are in §9.5. | Not re-run by this closeout |
 | T7 | Docs describe the shipped contract; `docs validate` and `docs drift` report zero findings | §9.3 | Documentation done; the two checks not run here |
-| T8 | Owner live check (§4 T8 row) | None | Open (owner gate) |
+| T8 | Owner live check (§4 T8 row) | None. Not performed. Recorded as `[NOT LIVE-VERIFIED]` at owner request (§9.4). | Not performed (`[NOT LIVE-VERIFIED]`) |
 
 This closeout had no shell, so the named test suites, the dash gates, and the `docs validate` and
-`docs drift` commands were not executed. Their results are not claimed here.
+`docs drift` commands were not executed by it. Their results are not claimed here. The orchestrator
+runs them against the working tree; §9.4 item 2 lists the exact commands.
 
 ### 9.2 Closeout mapping
 
@@ -268,30 +271,51 @@ Every durable decision maps to a canonical destination. Anchors are in `docs/das
 
 | Decision | Durable content | Canonical destination |
 |---|---|---|
-| D1, D11, D12 | Trace-scoped nearest start within 2 s, end-of-call exclusion, ties stay pending | [telemetry inventory: Claude request-body correlation](../dash/telemetry-inventory.md#claude-request-body-correlation); [architecture: Claude request-body log correlation](../dash/architecture.md#claude-request-body-log-correlation) |
+| D1, D11, D12 | Trace-scoped nearest start within 2 s, end-of-call exclusion, ties stay pending | [telemetry inventory: Claude request-body correlation](../../dash/telemetry-inventory.md#claude-request-body-correlation); [architecture: Claude request-body log correlation](../../dash/architecture.md#claude-request-body-log-correlation) |
 | D2, D20 | One body per record; later body wins; claim under `raw['kyber.claude_request_body']` | Same two anchors |
-| D3 | 15-minute pending lifetime for Claude request-body logs; 5 s for others | [architecture: Claude request-body log correlation](../dash/architecture.md#claude-request-body-log-correlation) (pending lifetime) |
-| D4 | Receiver reads `session_id`, falling back to `session.id` | [architecture: Ingest layer](../dash/architecture.md#ingest-layer) (`OtlpReceiver` row) |
-| D5 | Startup relink, watermark, 14-day skip | [runbook §2i](../dash/runbook.md#2i-claude-request-body-relink-and-quarantined-count) |
-| D6, D14, D21 | Skill listing read from system-role request-body messages; optional `ContentPart.role` | [telemetry inventory: tool definitions and skill listings](../dash/telemetry-inventory.md#tool-definitions-and-skill-listings-from-request-bodies); [skill availability by harness](../dash/telemetry-inventory.md#skill-availability-by-harness); [architecture: message role on content parts](../dash/architecture.md#message-role-on-content-parts); [architecture: skills view known limits](../dash/architecture.md#skills-view-contract) |
-| D7 | Desktop sender shape: early arrival, interaction and tool-execution stamps, `session.id` | [telemetry inventory: Claude request-body correlation](../dash/telemetry-inventory.md#claude-request-body-correlation). The sanitized fixtures stay test-scoped in `dash/src/otel/fixtures/claude-desktop/` and are not linked from canonical docs. |
+| D3 | 15-minute pending lifetime for Claude request-body logs; 5 s for others | [architecture: Claude request-body log correlation](../../dash/architecture.md#claude-request-body-log-correlation) (pending lifetime) |
+| D4 | Receiver reads `session_id`, falling back to `session.id` | [architecture: Ingest layer](../../dash/architecture.md#ingest-layer) (`OtlpReceiver` row) |
+| D5 | Startup relink, watermark, 14-day skip | [runbook §2i](../../dash/runbook.md#2i-claude-request-body-relink-and-quarantined-count) |
+| D6, D14, D21 | Skill listing read from system-role request-body messages; optional `ContentPart.role` | [telemetry inventory: tool definitions and skill listings](../../dash/telemetry-inventory.md#tool-definitions-and-skill-listings-from-request-bodies); [skill availability by harness](../../dash/telemetry-inventory.md#skill-availability-by-harness); [architecture: message role on content parts](../../dash/architecture.md#message-role-on-content-parts); [architecture: skills view known limits](../../dash/architecture.md#skills-view-contract) |
+| D7 | Desktop sender shape: early arrival, interaction and tool-execution stamps, `session.id` | [telemetry inventory: Claude request-body correlation](../../dash/telemetry-inventory.md#claude-request-body-correlation). The sanitized fixtures stay test-scoped in `dash/src/otel/fixtures/claude-desktop/` and are not linked from canonical docs. |
 | D8 | Development mode `test-first` | Documentation waiver: a process setting recorded in the plan header, with no surviving architectural, operational, or behavioural invariant |
 | D9 | ADR decision | §9.3 |
 | D10, D17, D25 | Approval history | Plan `## Decisions` section (preserved). Documentation waiver: approval provenance is governance history with no surviving behavioural invariant. |
-| D13, D26 | Context-free bodies matched by session and pended for the full 15-minute window; a tool record never claims or shortens the wait (D26 removed the tool-invocation quarantine). D26's test edits are a governance record, documentation waiver: the behaviour is the D13 rule above. | [telemetry inventory: accepted residuals](../dash/telemetry-inventory.md#accepted-residuals); [architecture: Claude request-body log correlation](../dash/architecture.md#claude-request-body-log-correlation) |
-| D15 | Desktop model-call records are harness `claude-code` | [telemetry inventory: Claude request-body correlation](../dash/telemetry-inventory.md#claude-request-body-correlation) |
-| D16 | `.backup` snapshot method for measurement | [runbook §2i](../dash/runbook.md#2i-claude-request-body-relink-and-quarantined-count) (count procedure) |
-| D18, D22, D24 | Measured match rate, sub-agent parentage, snapshot counts | [telemetry inventory: accepted residuals](../dash/telemetry-inventory.md#accepted-residuals) (measured figures); [architecture: Claude request-body log correlation](../dash/architecture.md#claude-request-body-log-correlation) (parentage) |
-| D19 | `tools` only in sub-agent bodies; not-measurable reason otherwise | [telemetry inventory: tool definitions and skill listings](../dash/telemetry-inventory.md#tool-definitions-and-skill-listings-from-request-bodies) |
-| D23 | 0.44% trace-bearing residual, quarantined after TTL | [telemetry inventory: accepted residuals](../dash/telemetry-inventory.md#accepted-residuals); [runbook §2i](../dash/runbook.md#2i-claude-request-body-relink-and-quarantined-count) |
-| D20 (review F3) | Later body without `tools` drops the earlier body's `system_prompt` and `tool_definitions`; span-sourced `tool_definitions` also dropped once a body is claimed (known limit) | [architecture: Claude request-body log correlation](../dash/architecture.md#claude-request-body-log-correlation) (rule 5); [telemetry inventory: accepted residuals](../dash/telemetry-inventory.md#accepted-residuals) |
-| D5 (review F2, F4) | Relink pages bounded at 100 rows and 16 MiB; unreadable payloads skipped, kept in quarantine, one warning per pass | [runbook §2i](../dash/runbook.md#2i-claude-request-body-relink-and-quarantined-count) (startup cost, watermark); [telemetry inventory: accepted residuals](../dash/telemetry-inventory.md#accepted-residuals) |
+| D13, D26 | Context-free bodies matched by session and pended for the full 15-minute window; a tool record never claims or shortens the wait (D26 removed the tool-invocation quarantine). D26's test edits are a governance record, documentation waiver: the behaviour is the D13 rule above. | [telemetry inventory: accepted residuals](../../dash/telemetry-inventory.md#accepted-residuals); [architecture: Claude request-body log correlation](../../dash/architecture.md#claude-request-body-log-correlation) |
+| D15 | Desktop model-call records are harness `claude-code` | [telemetry inventory: Claude request-body correlation](../../dash/telemetry-inventory.md#claude-request-body-correlation) |
+| D16 | `.backup` snapshot method for measurement | [runbook §2i](../../dash/runbook.md#2i-claude-request-body-relink-and-quarantined-count) (count procedure) |
+| D18, D22, D24 | Measured match rate, sub-agent parentage, snapshot counts | [telemetry inventory: accepted residuals](../../dash/telemetry-inventory.md#accepted-residuals) (measured figures); [architecture: Claude request-body log correlation](../../dash/architecture.md#claude-request-body-log-correlation) (parentage) |
+| D19 | `tools` only in sub-agent bodies; not-measurable reason otherwise | [telemetry inventory: tool definitions and skill listings](../../dash/telemetry-inventory.md#tool-definitions-and-skill-listings-from-request-bodies) |
+| D23 | 0.44% trace-bearing residual, quarantined after TTL | [telemetry inventory: accepted residuals](../../dash/telemetry-inventory.md#accepted-residuals); [runbook §2i](../../dash/runbook.md#2i-claude-request-body-relink-and-quarantined-count) |
+| D20 (review F3) | Later body without `tools` drops the earlier body's `system_prompt` and `tool_definitions`; span-sourced `tool_definitions` also dropped once a body is claimed (known limit) | [architecture: Claude request-body log correlation](../../dash/architecture.md#claude-request-body-log-correlation) (rule 5); [telemetry inventory: accepted residuals](../../dash/telemetry-inventory.md#accepted-residuals) |
+| D5 (review F2, F4) | Relink pages bounded at 100 rows and 16 MiB; unreadable payloads skipped, kept in quarantine, one warning per pass | [runbook §2i](../../dash/runbook.md#2i-claude-request-body-relink-and-quarantined-count) (startup cost, watermark); [telemetry inventory: accepted residuals](../../dash/telemetry-inventory.md#accepted-residuals) |
 
 ### 9.3 ADR waiver and documentation updates
 
 no ADR — ADR waiver: refines the existing log-enrichment and quarantine architecture (ADR 0009,
 ADR 0035) with a correlation rule, a TTL constant, and an idempotent relink; no new boundary,
 dependency, or schema.
+
+Reasoning, checked at closeout against the ADR test (constrains future work, rejected alternatives
+that are not self-evident, expensive to revisit):
+
+- ADR 0009 decision 2 (enrichment on `(trace_id, span_id)`, falling back to `session_id` and a
+  timestamp window) remains true as a principle and is not edited, because accepted ADRs are not
+  edited. The detailed Claude rule (trace-scoped nearest start within 2 s, end-of-call exclusion,
+  session scope for context-free bodies, 15-minute TTL for request bodies) is a refinement carried
+  by [dash/architecture.md](../../dash/architecture.md#claude-request-body-log-correlation) and
+  [dash/telemetry-inventory.md](../../dash/telemetry-inventory.md#claude-request-body-correlation).
+- The two candidates for a record were D11 (nearest start) and D20 (later body wins). Both fail
+  the third test. The plan records each as cheap to reverse: D11 is one matcher function, and D20
+  is one timestamp comparison in the matcher. Reversing either changes no schema, no stored data
+  format, and no other component, so neither needs an ADR to constrain future work.
+- No new boundary, dependency, or schema: state lives in the existing `pending_logs`,
+  `quarantined_logs`, `enriched_logs`, `records.raw`, and `metadata` tables (no migration).
+- ADR 0035 (quarantine raw-packet evidence) is unchanged and still governs why quarantined bodies
+  are kept as evidence (D23).
+
+No ADR was written. Creating one would need the owner's approval under the ADR skill's rule, and
+the reasoning above does not call for one.
 
 Canonical documentation updated for T7:
 
@@ -302,21 +326,44 @@ Canonical documentation updated for T7:
   correlation with its flow diagram; message role on content parts; skills known limits; code refs.
 - `docs/dash/runbook.md`: new section 2i (startup relink, watermark, checking the quarantined count,
   rebuilding derived rows); code refs.
-- `docs/plans/README.md`: this plan's active-index row and the review date.
+- `docs/plans/README.md`: this plan's row moved from Active Plans to Archived Plans, with the
+  Active Plans empty state restored.
+- The owner-gate checklist for T8 is in `docs/dash/telemetry-inventory.md` (owner gate 1).
+- Code comments that cite this plan's path now cite `docs/archive/plans/`; comment-only edits in
+  `dash/src/canon/log-ingest.test.ts`, `dash/src/tools/backfill.relink.test.ts`,
+  `dash/src/otel/claude-content.e2e.test.ts`, and `dash/src/otel/fixtures/claude-desktop/README.md`.
 
 ### 9.4 Lifecycle gate
 
-The plan stays in `docs/plans/` with status Review required. It moves to `docs/archive/plans/` only
-after all of the following:
+The plan is archived with status `complete` and T8 recorded as not performed. This is the owner's
+decision of 2026-10-19: archive now, without the owner live check.
 
-1. T8 is confirmed by the owner, or the plan records `[NOT LIVE-VERIFIED]` for it (owner decision).
-2. The named suites and the dash gates (`npm --prefix dash run typecheck`, `lint`, `test`,
-   `check:reachable`) pass on the working tree, and the T1–T6 acceptance rows in §4 are checked
-   against that run.
-3. `docs validate . --merge-ready` and `docs drift .` report zero findings. While this plan sits in
-   `docs/plans/`, `--merge-ready` reports `KW-DOC-LIFECYCLE-003` for it, which is expected.
-4. The plan status becomes `Archived`, the plan index moves the row to the archive table with the
-   archive date and the canonical destinations above, and the file moves to `docs/archive/plans/`.
+Recorded as **`[NOT LIVE-VERIFIED]`**:
+
+- T8, the owner live check on the real Claude Desktop app against `~/.kyberdash/canon.db`, was not
+  performed. No live Claude Desktop request body has been observed after the fix, so the relink
+  count, the Desktop system prompt, the sub-agent tool definitions, and the body-sourced skill
+  listing are all unverified on the live store. The synthetic fixtures, the T0 measurement, and the
+  suites are the only evidence.
+- The owner checks to run after restarting the OTLP service (`kyberdash web` or `kyberdash otel`) are
+  in [telemetry inventory, owner gate 1](../../dash/telemetry-inventory.md#remaining-ownerruntime-gates):
+  the `Relinked N of M quarantined Claude request bodies in T ms` start-up line; a recent Desktop
+  main-thread turn showing its system prompt and the "no tools array" reason; a sub-agent turn showing
+  tool definitions; and a session whose body carried the skill listing showing it on the Skills view.
+  If a result differs from the D11 and D20 rules or the 15-minute TTL, the matcher is the first place
+  to look, and the rule (D11 or D20) is cheap to change in one function or comparison.
+
+Not claimed by this record:
+
+1. The named test suites and the dash gates (`npm --prefix dash run typecheck`, `lint`, `test`,
+   `check:reachable`) were not run by this closeout. The orchestrator must run them on the working
+   tree and confirm the T1–T6 acceptance rows of §4 before the archive is treated as verified.
+2. `dotnet run --project src/KyberWeave.Cli --no-build -c Release -- docs validate . --merge-ready`
+   and `docs validate .` and `docs drift .` were not run by this closeout. The plan is archived under
+   `KW-DOC-LIFECYCLE-003`, so `--merge-ready` is expected to pass once the file is out of
+   `docs/plans/`.
+3. The `## Decisions` table (§2) is preserved unchanged. D9 and the ADR waiver in §9.3 are the only
+   ADR decisions. No ADR was written.
 
 ### 9.5 Code review outcome
 
@@ -327,11 +374,11 @@ the `dash` gates and the named suites must run again before §9.4 item 2 can clo
 
 | Finding | Resolution | Where |
 |---|---|---|
-| F1: a context-free Claude body with a session id was quarantined at once when its session's nearest record was a `tool.invoke` | The exemption is removed. Every context-free body with a session id pends for the 15-minute window. The pre-D13 test was amended to expect pending (D26). | `dash/src/canon/log-ingest.ts` (`ingestLogBatch`); [telemetry inventory: accepted residuals](../dash/telemetry-inventory.md#accepted-residuals); [architecture: context-free bodies](../dash/architecture.md#claude-request-body-log-correlation) |
-| F2: the relink read quarantined rows without a bound | Pages are bounded at 100 rows and 16 MiB of stored payload. A page always holds at least one row, so one oversized row cannot stall the cursor. | `dash/src/canon/store.ts` (`quarantinedLogsAfter`); `dash/src/tools/backfill.ts` (`relinkQuarantinedClaudeLogs`); [runbook §2i](../dash/runbook.md#2i-claude-request-body-relink-and-quarantined-count) |
-| F3: a later body with no `tools` array left an earlier body's `system_prompt` and `tool_definitions`, which hid the not-measurable reason | When a later body wins over a claimed record, its `system_prompt` and `tool_definitions` parts replace the earlier ones wholesale. Known limit: a span-sourced `tool_definitions` part is dropped too, because parts carry no source marker. | `dash/src/canon/log-ingest.ts` (`enrichRecord`); [architecture: one body per record](../dash/architecture.md#claude-request-body-log-correlation); [telemetry inventory: accepted residuals](../dash/telemetry-inventory.md#accepted-residuals) |
-| F4: an unreadable quarantined payload could not be relinked | The row is skipped and stays in quarantine. The pass prints one warning per start with the count and up to ten log ids, never the payload. The watermark moves past the row, so later starts do not retry it. | `dash/src/canon/store.ts` (`quarantinedLogsAfter`); `dash/src/tools/backfill.ts`; [runbook §2i](../dash/runbook.md#2i-claude-request-body-relink-and-quarantined-count) |
+| F1: a context-free Claude body with a session id was quarantined at once when its session's nearest record was a `tool.invoke` | The exemption is removed. Every context-free body with a session id pends for the 15-minute window. The pre-D13 test was amended to expect pending (D26). | `dash/src/canon/log-ingest.ts` (`ingestLogBatch`); [telemetry inventory: accepted residuals](../../dash/telemetry-inventory.md#accepted-residuals); [architecture: context-free bodies](../../dash/architecture.md#claude-request-body-log-correlation) |
+| F2: the relink read quarantined rows without a bound | Pages are bounded at 100 rows and 16 MiB of stored payload. A page always holds at least one row, so one oversized row cannot stall the cursor. | `dash/src/canon/store.ts` (`quarantinedLogsAfter`); `dash/src/tools/backfill.ts` (`relinkQuarantinedClaudeLogs`); [runbook §2i](../../dash/runbook.md#2i-claude-request-body-relink-and-quarantined-count) |
+| F3: a later body with no `tools` array left an earlier body's `system_prompt` and `tool_definitions`, which hid the not-measurable reason | When a later body wins over a claimed record, its `system_prompt` and `tool_definitions` parts replace the earlier ones wholesale. Known limit: a span-sourced `tool_definitions` part is dropped too, because parts carry no source marker. | `dash/src/canon/log-ingest.ts` (`enrichRecord`); [architecture: one body per record](../../dash/architecture.md#claude-request-body-log-correlation); [telemetry inventory: accepted residuals](../../dash/telemetry-inventory.md#accepted-residuals) |
+| F4: an unreadable quarantined payload could not be relinked | The row is skipped and stays in quarantine. The pass prints one warning per start with the count and up to ten log ids, never the payload. The watermark moves past the row, so later starts do not retry it. | `dash/src/canon/store.ts` (`quarantinedLogsAfter`); `dash/src/tools/backfill.ts`; [runbook §2i](../../dash/runbook.md#2i-claude-request-body-relink-and-quarantined-count) |
 
-Not done by this closeout: the owner live check (T8) is open, so the plan stays `Review required` in
-`docs/plans/` and is not archived. The `dash` gates and the named test suites were not run by the
-documentation pass, and their results are not claimed here.
+Not done by this closeout: the owner live check (T8), which is recorded as `[NOT LIVE-VERIFIED]` in
+§9.4. The `dash` gates and the named test suites were not run by the documentation pass, and their
+results are not claimed here.

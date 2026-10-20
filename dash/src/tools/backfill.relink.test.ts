@@ -1,4 +1,4 @@
-// T2 of docs/plans/2026-10-19-claude-desktop-request-body-correlation.md (D5).
+// T2 of docs/archive/plans/2026-10-19-claude-desktop-request-body-correlation.md (D5).
 //
 // Claude Code Desktop api_request_body logs that the live matcher quarantined
 // before their model-call span arrived are relinked once, at OTLP service

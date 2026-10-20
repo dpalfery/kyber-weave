@@ -1,7 +1,7 @@
 # Claude Desktop OTLP fixtures
 
 Sanitized Claude Code Desktop (`service.name = claude-code-desktop`) export shapes for
-`docs/plans/2026-10-19-claude-desktop-request-body-correlation.md` (D7, T0).
+`docs/archive/plans/2026-10-19-claude-desktop-request-body-correlation.md` (D7, T0).
 
 - `traces.otlp.json` — two interactions. The first (trace `5a1e…0001`) holds the Desktop
   structure seen in a live store: the interaction span, three `claude_code.llm_request` children

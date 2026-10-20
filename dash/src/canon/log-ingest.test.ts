@@ -671,7 +671,7 @@ describe('ingestLogBatch (ADR 0009)', () => {
 
 // ---------------------------------------------------------------------------
 // Claude Code Desktop request-body correlation (T1; plan
-// docs/plans/2026-10-19-claude-desktop-request-body-correlation.md, D3, D4,
+// docs/archive/plans/2026-10-19-claude-desktop-request-body-correlation.md, D3, D4,
 // D11, D13, D19, D20). The Desktop sender stamps a body log with the active
 // PARENT span (the interaction, or a tool.execution), not with the model call
 // that sent the request, and it logs the body at request start while it
