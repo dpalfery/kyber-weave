@@ -327,6 +327,7 @@ export function relinkQuarantinedClaudeLogs(
   let scanned = 0
   let relinked = 0
   const unreadable: string[] = []
+  const failed: string[] = []
   let cursor = watermark
   let survivingMax = watermark
   for (;;) {
@@ -339,22 +340,38 @@ export function relinkQuarantinedClaudeLogs(
       .sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp))
     const removed = new Set<string>()
     for (const log of logs) {
-      const record = findLogTarget(store, log)
-      if (record === undefined) continue
-      if (Date.parse(String(record.timestamp)) < cutoffMs) continue
-      enrichRecord(store, record, log)
-      store.deleteQuarantinedLog(log.logId)
-      store.markLogEnriched(log.logId)
-      removed.add(log.logId)
-      relinked += 1
+      // One poison log must not abort the pass: its row stays quarantined, the
+      // failure is counted, and the rest of the page and later pages proceed.
+      try {
+        const record = findLogTarget(store, log)
+        if (record === undefined) continue
+        // An unparseable record timestamp is treated as expired, never as fresh.
+        const recordMs = record.timestamp instanceof Date ? record.timestamp.getTime() : Date.parse(String(record.timestamp))
+        if (!Number.isFinite(recordMs) || recordMs < cutoffMs) continue
+        enrichRecord(store, record, log)
+        store.deleteQuarantinedLog(log.logId)
+        store.markLogEnriched(log.logId)
+        removed.add(log.logId)
+        relinked += 1
+      } catch {
+        failed.push(log.logId)
+      }
     }
     for (const row of page) {
       if (!removed.has(row.logId)) survivingMax = Math.max(survivingMax, row.rowid)
     }
+    // Persisted per page so a crash or a later failure keeps the progress made.
+    store.setMetadata(CLAUDE_BODY_RELINK_WATERMARK_KEY, String(survivingMax))
     scanned += page.length
     cursor = page[page.length - 1]?.rowid ?? cursor
   }
   store.setMetadata(CLAUDE_BODY_RELINK_WATERMARK_KEY, String(survivingMax))
+  if (failed.length > 0) {
+    // Ids and a count only: the failing payload must not reach the console.
+    console.warn(
+      `Relink failed for ${failed.length} quarantined Claude row(s) (kept in quarantine): ${failed.slice(0, 10).join(', ')}${failed.length > 10 ? ', ...' : ''}`,
+    )
+  }
   if (unreadable.length > 0) {
     // Ids and a count only: the payload is the thing that could not be read.
     console.warn(

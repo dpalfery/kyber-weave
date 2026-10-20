@@ -38,15 +38,17 @@ import { stripIdentityAttributes } from './identity.js'
 const execFileAsync = promisify(execFile)
 
 /**
- * The conversation a log belongs to. `session_id` wins; Claude Code sends the
+ * The conversation a log belongs to. a non-empty `session_id` wins; Claude Code sends the
  * same identity as `session.id`, which the receiver used to ignore, leaving
  * every Claude log's session null (D4).
  */
 function sessionIdFromAttributes(attributes: Record<string, unknown>): string | null {
+  // An empty string is no identity: it must fall through to `session.id`
+  // rather than shadow it. Shared by the JSON and protobuf log decoders.
   const underscore = attributes.session_id
-  if (typeof underscore === 'string') return underscore
+  if (typeof underscore === 'string' && underscore.length > 0) return underscore
   const dotted = attributes['session.id']
-  return typeof dotted === 'string' ? dotted : null
+  return typeof dotted === 'string' && dotted.length > 0 ? dotted : null
 }
 
 /** The OTLP/HTTP standard port (R2.1). */

@@ -212,6 +212,7 @@ describe('relinkQuarantinedClaudeLogs — one-time relink of quarantined api_req
   })
 
   afterEach(() => {
+    vi.restoreAllMocks()
     store.close()
   })
 
@@ -492,6 +493,67 @@ describe('relinkQuarantinedClaudeLogs — one-time relink of quarantined api_req
 
     expect(second).toEqual({ scanned: 0, relinked: 0 })
     expect(snapshot(store, spanIds, logs.map((log) => log.logId))).toEqual(before)
+  })
+
+  it('isolates a log whose enrichment throws: later rows still relink, the poison row stays quarantined, one warning names ids only', () => {
+    const logs: OtlpLog[] = []
+    for (let i = 0; i < 3; i += 1) {
+      const trace = `${i}db1c2d3e4f506170ab1c2d3e4f50617`
+      store.upsert(callRecord(`a0000000000000d${i}`, trace, iso(T0), 1000))
+      logs.push(bodyLog(`log-relink-iso-${i}`, trace, null, T0 + 100 + i, requestBody(`Synthetic isolated ${i}.`)))
+    }
+    for (const log of logs) quarantine(store, log)
+    const original = store.setContent.bind(store)
+    vi.spyOn(store, 'setContent').mockImplementation((spanId, ...rest) => {
+      if (spanId === 'a0000000000000d1') throw new Error('Synthetic poison payload text')
+      return original(spanId, ...rest)
+    })
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+
+    const report = relinkQuarantinedClaudeLogs(store, { now: NOW })
+
+    expect(report.relinked).toBe(2)
+    expect(store.getQuarantinedLog('log-relink-iso-1')).toBeDefined()
+    expect(store.isLogEnriched('log-relink-iso-1')).toBe(false)
+    expect(store.getQuarantinedLog('log-relink-iso-0')).toBeUndefined()
+    expect(store.getQuarantinedLog('log-relink-iso-2')).toBeUndefined()
+    const failureWarnings = warn.mock.calls.map((args) => args.map(String).join(' ')).filter((line) => /failed/i.test(line))
+    expect(failureWarnings).toHaveLength(1)
+    expect(failureWarnings[0]).toContain('1')
+    expect(failureWarnings[0]).toContain('log-relink-iso-1')
+    expect(failureWarnings[0]).not.toContain('poison payload')
+  })
+
+  it('persists the watermark after every page, not only at the end', () => {
+    for (let i = 0; i < 3; i += 1) {
+      quarantine(store, bodyLog(`log-relink-wm-${i}`, SYNTH_TRACE_C, null, T0 + i, requestBody(`Synthetic wm ${i}.`)))
+    }
+    const writes: string[] = []
+    const original = store.setMetadata.bind(store)
+    vi.spyOn(store, 'setMetadata').mockImplementation((key, value) => {
+      if (key === WATERMARK_KEY) writes.push(value)
+      return original(key, value)
+    })
+
+    relinkQuarantinedClaudeLogs(store, { now: NOW, pageByteBudget: 1 })
+
+    // Three one-row pages, each persisted; the highest surviving rowid never goes backwards.
+    expect(writes.length).toBeGreaterThanOrEqual(3)
+    expect(writes.map(Number)).toEqual([...writes.map(Number)].sort((a, b) => a - b))
+    expect(store.getMetadata(WATERMARK_KEY)).toBe(writes[writes.length - 1])
+  })
+
+  it('treats a record with an unparseable timestamp as expired: the 14-day cutoff does not fail open', () => {
+    store.upsert(callRecord('a0000000000000h1', SYNTH_TRACE_A, 'not-a-timestamp', 1000))
+    const log = bodyLog('log-relink-bad-ts', SYNTH_TRACE_A, 'a0000000000000h1', T0 + 100, requestBody('Synthetic bad ts body.'))
+    quarantine(store, log)
+
+    const report = relinkQuarantinedClaudeLogs(store, { now: NOW })
+
+    expect(report.relinked).toBe(0)
+    expect(store.getQuarantinedLog(log.logId)).toBeDefined()
+    expect(store.isLogEnriched(log.logId)).toBe(false)
+    expect(systemPromptOf(store, 'a0000000000000h1')).toEqual([])
   })
 
   it('leaves quarantined rows that are not Claude request bodies untouched', () => {

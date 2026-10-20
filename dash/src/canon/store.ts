@@ -958,6 +958,24 @@ export type QuarantinedLog = {
   harness?: string
 }
 
+/** What the request-body matcher needs of a model call: no content, no raw. */
+export type ModelCallCandidate = {
+  spanId: string
+  timestamp: string
+  /** Null only if a legacy row stored none; the matcher treats that as unknown. */
+  durationMs: number | null
+}
+
+type CandidateRow = { span_id: unknown; timestamp: unknown; duration_ms: unknown }
+
+function toCandidate(row: CandidateRow): ModelCallCandidate {
+  return {
+    spanId: String(row.span_id),
+    timestamp: String(row.timestamp),
+    durationMs: typeof row.duration_ms === 'number' ? row.duration_ms : null,
+  }
+}
+
 export type RecordRow = {
   span_id: unknown
   trace_id: unknown
@@ -2113,28 +2131,34 @@ export class CanonStore {
   }
 
   /**
-   * Every `claude-code` model call (`llm.invoke`) in one trace. This is the
-   * candidate set for correlating a Claude request-body log that is stamped
-   * with a parent span rather than the call itself (D11); it reads through
-   * the `trace_id` index and never scans the table.
+   * The matcher's view of every `claude-code` model call (`llm.invoke`) in one
+   * trace: id, start and duration only. This is the candidate set for
+   * correlating a Claude request-body log stamped with a parent span rather
+   * than the call itself (D11); it reads through the `trace_id` index and never
+   * scans the table. The chosen call is fetched whole with `get`, so scoring a
+   * session never decompresses every candidate's raw payload and content.
    */
-  claudeModelCallsInTrace(traceId: string): CanonicalRecord[] {
+  claudeModelCallCandidatesInTrace(traceId: string): ModelCallCandidate[] {
     const rows = this.db
-      .prepare("SELECT * FROM records WHERE trace_id = ? AND harness = 'claude-code' AND op = 'llm.invoke'")
-      .all(traceId) as RecordRow[]
-    return rows.map(toRecord)
+      .prepare(
+        "SELECT span_id, timestamp, duration_ms FROM records WHERE trace_id = ? AND harness = 'claude-code' AND op = 'llm.invoke'",
+      )
+      .all(traceId) as CandidateRow[]
+    return rows.map(toCandidate)
   }
 
   /**
-   * Every `claude-code` model call in one session — the candidate set for a
+   * The same lightweight candidates for one session — the candidate set for a
    * Claude request-body log that carries no trace id (D13). Reads through the
    * `session_id` index.
    */
-  claudeModelCallsInSession(sessionId: string): CanonicalRecord[] {
+  claudeModelCallCandidatesInSession(sessionId: string): ModelCallCandidate[] {
     const rows = this.db
-      .prepare("SELECT * FROM records WHERE session_id = ? AND harness = 'claude-code' AND op = 'llm.invoke'")
-      .all(sessionId) as RecordRow[]
-    return rows.map(toRecord)
+      .prepare(
+        "SELECT span_id, timestamp, duration_ms FROM records WHERE session_id = ? AND harness = 'claude-code' AND op = 'llm.invoke'",
+      )
+      .all(sessionId) as CandidateRow[]
+    return rows.map(toCandidate)
   }
 
   /**

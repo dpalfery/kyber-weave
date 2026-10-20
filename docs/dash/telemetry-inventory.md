@@ -226,9 +226,9 @@ rest, including every main-thread body, do not.
   because an empty list would claim the call had no tools.
 - A later body for the same record that does carry `tools` clears that declaration.
 - A later body that wins over an earlier claimed body replaces the record's `tool_definitions`
-  parts even when it has no `tools` array, so the earlier body's tools cannot hide the reason. Parts
-  carry no source marker, so a `tool_definitions` part that came from the span is dropped in that
-  replacement too (see accepted residuals).
+  parts when the earlier body supplied them, even if the later body has no `tools` array, so the
+  earlier body's tools cannot hide the reason. The claim records which buckets its body supplied
+  (`suppliedBuckets`), so a `tool_definitions` part that came from the span is kept.
 - A body that does not parse yields the body-failure reason instead (see accepted residuals).
 
 **Skill listings.** Claude Code writes its skill listing into a `role: "system"` message: the line
@@ -265,7 +265,7 @@ current figures on the day it runs.
 |---|---|---|
 | A trace-bearing body with no call starting within 2 s | 15 of 3,413 (0.44%) | Waits the 15-minute TTL, then quarantines with the existing reason. The relink leaves it quarantined. The window is not widened: the nearest same-trace call is 3 to 53 s away, past the roughly 3-second call spacing, so a wider window would attach the body to the wrong call. The raw body stays in `quarantined_logs` as evidence. |
 | A context-free body with a session id and no call within 2 s in its session | None of the 43 context-free bodies in the snapshot lacked a unique nearest call. | Pends the full 15-minute window, then quarantines with the existing reason. A tool invocation is never a candidate, so a tool record neither claims the body nor shortens the wait. A body with no trace, span, or session id quarantines at once. |
-| A later body that replaces an earlier claimed body and has no `tools` array | Count not measured. | The record's `system_prompt` and `tool_definitions` parts are replaced, so the turn shows the not-measurable reason rather than the earlier body's tools. A span-sourced `tool_definitions` part is dropped too, because parts carry no source marker. |
+| A later body that replaces an earlier claimed body and has no `tools` array | Count not measured. | The buckets the earlier body supplied (recorded in the claim as `suppliedBuckets`) are replaced, so the turn shows the not-measurable reason rather than the earlier body's tools. Span-sourced parts in other buckets stay. A claim written before `suppliedBuckets` existed drops `system_prompt` and `tool_definitions` wholesale. |
 | A body cut at the sender's size limit (near 1 MB) | 39 of the 308 listing-bearing bodies, the only truncated subset counted | Does not parse, so it yields no parts, no listing, and no tool definitions. The reason names `CLAUDE_CODE_OTEL_CONTENT_MAX_LENGTH`. The raw packet is kept. |
 | A later body that is a side request rather than a retry | 50 records are the nearest match for two bodies | The later body wins. This is one comparison, and it is cheap to reverse if the wrong body shows. |
 | Quarantined rows left by the one-time startup relink | Rows that were unmatched, tied, older than the 14-day window, or whose stored payload does not parse, at that pass | They stay quarantined, and a later start does not retry them, because the watermark moves past them ([runbook §2i](runbook.md#2i-claude-request-body-relink-and-quarantined-count)). |

@@ -3,7 +3,7 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
-import { ingestLogBatch, reconcileExpiredPending, type OtlpLog } from './log-ingest.js'
+import { ingestLogBatch, nearestClaudeModelCall, reconcileExpiredPending, type OtlpLog } from './log-ingest.js'
 import { CanonStore } from './store.js'
 import type { CanonicalRecord } from './types.js'
 import { ingestBatch } from './ingest.js'
@@ -1027,6 +1027,9 @@ describe('Claude Desktop request-body correlation (T1)', () => {
       expect(partBuckets(call)).not.toContain('tool_definitions')
       expect(call?.content.tool_definitions).toBeUndefined()
       expect(call?.parts).toEqual([{ part: 'system_prompt', text: 'Synthetic later prompt.' }])
+      expect((call?.raw as Record<string, Record<string, unknown>>)['kyber.claude_request_body']?.suppliedBuckets).toEqual([
+        'system_prompt',
+      ])
       expect(call?.measurability?.tool_definitions).toMatchObject({
         availability: 'not_measurable',
         reason: expect.stringMatching(/tools array.*did not export tool definitions/i),
@@ -1079,6 +1082,140 @@ describe('Claude Desktop request-body correlation (T1)', () => {
         ]),
       )
       store.close()
+    })
+  })
+
+  describe('PR review round 1: supplied-bucket claims, tie-break, matcher edges', () => {
+    const TOOLS = [{ name: 'read_synthetic_file', description: 'Read synthetic fixture content.', input_schema: { type: 'object' } }]
+    const bodyLog = (logId: string, body: unknown, timestamp: string) =>
+      claudeRequestBodyLog(
+        { body: JSON.stringify(body) },
+        { logId, spanId: 'interaction-synthetic-1', sessionId: null, timestamp },
+      )
+    const claimOf = (store: CanonStore): Record<string, unknown> | undefined =>
+      (store.get(OTHER_SPAN_ID)?.raw as Record<string, unknown> | undefined)?.['kyber.claude_request_body'] as
+        | Record<string, unknown>
+        | undefined
+    const seed = (store: CanonStore, overrides: Partial<CanonicalRecord> = {}) =>
+      store.upsert(modelRecord({ spanId: OTHER_SPAN_ID, timestamp: AT, durationMs: 1_000, ...overrides }))
+
+    it('records which buckets the claiming body supplied', () => {
+      const store = new CanonStore(':memory:')
+      seed(store)
+      ingestLogBatch([bodyLog('log-a', { system: 'Synthetic.', tools: TOOLS, messages: [{ role: 'user', content: 'Hi.' }] }, '2026-09-04T10:00:00.010Z')], store)
+      expect([...((claimOf(store)?.suppliedBuckets as string[] | undefined) ?? [])].sort()).toEqual(
+        ['conversation_history', 'system_prompt', 'tool_definitions'],
+      )
+      store.close()
+    })
+
+    it('keeps span-sourced tool_definitions when a later tool-less body wins over an earlier tool-less body', () => {
+      const store = new CanonStore(':memory:')
+      seed(store, { parts: [{ part: 'tool_definitions', text: 'Synthetic span-sourced tool.' }] })
+
+      ingestLogBatch([bodyLog('log-first', { system: 'Synthetic first prompt.' }, '2026-09-04T10:00:00.010Z')], store)
+      ingestLogBatch([bodyLog('log-second', { system: 'Synthetic second prompt.' }, '2026-09-04T10:00:00.200Z')], store)
+
+      const call = store.get(OTHER_SPAN_ID)
+      expect(call?.parts).toEqual(
+        expect.arrayContaining([
+          { part: 'tool_definitions', text: 'Synthetic span-sourced tool.' },
+          { part: 'system_prompt', text: 'Synthetic second prompt.' },
+        ]),
+      )
+      expect(call?.parts?.filter((part) => part.part === 'system_prompt')).toHaveLength(1)
+      expect(call?.measurability?.tool_definitions).toBeUndefined()
+      store.close()
+    })
+
+    it('replaces, not stacks, the earlier body\'s conversation_history when the later body carries none', () => {
+      const store = new CanonStore(':memory:')
+      seed(store)
+
+      ingestLogBatch([bodyLog('log-first', { system: 'Synthetic first.', messages: [{ role: 'user', content: 'Synthetic earlier turn.' }] }, '2026-09-04T10:00:00.010Z')], store)
+      expect(partBuckets(store.get(OTHER_SPAN_ID))).toContain('conversation_history')
+      ingestLogBatch([bodyLog('log-second', { system: 'Synthetic second.' }, '2026-09-04T10:00:00.200Z')], store)
+
+      expect(partBuckets(store.get(OTHER_SPAN_ID))).not.toContain('conversation_history')
+      store.close()
+    })
+
+    it('falls back to dropping system_prompt and tool_definitions wholesale for a claim written before suppliedBuckets existed', () => {
+      const store = new CanonStore(':memory:')
+      seed(store, {
+        parts: [
+          { part: 'system_prompt', text: 'Synthetic legacy prompt.' },
+          { part: 'tool_definitions', text: 'Synthetic legacy tool.' },
+        ],
+      })
+      store.setRawEntry(OTHER_SPAN_ID, 'kyber.claude_request_body', {
+        logId: 'log-legacy',
+        timestamp: '2026-09-04T10:00:00.010Z',
+      })
+
+      ingestLogBatch([bodyLog('log-new', { system: 'Synthetic new prompt.' }, '2026-09-04T10:00:00.200Z')], store)
+
+      expect(store.get(OTHER_SPAN_ID)?.parts).toEqual([{ part: 'system_prompt', text: 'Synthetic new prompt.' }])
+      store.close()
+    })
+
+    it.each([
+      ['lower logId first', ['log-a', 'log-b']],
+      ['higher logId first', ['log-b', 'log-a']],
+    ] as const)('breaks an identical-timestamp tie by the higher logId, whichever arrives first (%s)', (_order, ids) => {
+      const store = new CanonStore(':memory:')
+      seed(store)
+      for (const id of ids) {
+        ingestLogBatch([bodyLog(id, { system: `Synthetic ${id}.` }, '2026-09-04T10:00:00.100Z')], store)
+      }
+      expect(store.get(OTHER_SPAN_ID)?.parts).toEqual([{ part: 'system_prompt', text: 'Synthetic log-b.' }])
+      expect(claimOf(store)?.logId).toBe('log-b')
+      expect(store.isLogEnriched('log-a')).toBe(true)
+      expect(store.isLogEnriched('log-b')).toBe(true)
+      store.close()
+    })
+
+    it('treats a claim with an unparseable timestamp as older than any valid body', () => {
+      const store = new CanonStore(':memory:')
+      seed(store, { parts: [{ part: 'system_prompt', text: 'Synthetic corrupt-claim prompt.' }] })
+      store.setRawEntry(OTHER_SPAN_ID, 'kyber.claude_request_body', { logId: 'log-corrupt', timestamp: 'not-a-time' })
+
+      ingestLogBatch([bodyLog('log-valid', { system: 'Synthetic valid prompt.' }, '2026-09-04T10:00:00.010Z')], store)
+
+      expect(store.get(OTHER_SPAN_ID)?.parts).toEqual([{ part: 'system_prompt', text: 'Synthetic valid prompt.' }])
+      expect(claimOf(store)?.logId).toBe('log-valid')
+      store.close()
+    })
+
+    describe('nearestClaudeModelCall end exclusion', () => {
+      const call = (spanId: string, timestamp: string, durationMs: unknown): CanonicalRecord =>
+        modelRecord({ spanId, timestamp, durationMs: durationMs as number })
+      const atPlus = (ms: number) => new Date(Date.parse(AT) + ms).toISOString()
+
+      it('does not exclude a call whose duration is missing', () => {
+        const picked = nearestClaudeModelCall([call('no-duration', AT, undefined)], atPlus(500))
+        expect(picked?.spanId).toBe('no-duration')
+      })
+
+      it('does not exclude a call whose duration is NaN', () => {
+        const picked = nearestClaudeModelCall([call('nan-duration', AT, Number.NaN)], atPlus(500))
+        expect(picked?.spanId).toBe('nan-duration')
+      })
+
+      it('still bounds an unknown-duration call by the start window', () => {
+        expect(nearestClaudeModelCall([call('missing', AT, undefined)], atPlus(2_500))).toBeUndefined()
+        expect(nearestClaudeModelCall([call('nan', AT, Number.NaN)], atPlus(2_500))).toBeUndefined()
+      })
+
+      it('still excludes a call with a finite duration that ended before the log', () => {
+        expect(nearestClaudeModelCall([call('ended', AT, 100)], atPlus(500))).toBeUndefined()
+      })
+
+      it('accepts a Date start timestamp', () => {
+        const dated = modelRecord({ spanId: 'dated', durationMs: 1_000 })
+        ;(dated as { timestamp: unknown }).timestamp = new Date(AT)
+        expect(nearestClaudeModelCall([dated], atPlus(500))?.spanId).toBe('dated')
+      })
     })
   })
 

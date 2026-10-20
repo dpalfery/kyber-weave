@@ -733,6 +733,47 @@ describe('OtlpReceiver session identity key (D4)', () => {
       'from-session-underscore',
     )
   })
+
+  /**
+   * The JSON decoder rejects an empty `stringValue` object outright, so an empty
+   * string reaches the session helper only as a bare JSON primitive (which
+   * hand-rolled senders do post) or over protobuf.
+   */
+  function jsonLogWithBareAttributes(attributes: Record<string, string>): string {
+    const parsed = JSON.parse(jsonLogWithAttributes([]))
+    parsed.resourceLogs[0].scopeLogs[0].logRecords[0].attributes = Object.entries(attributes).map(
+      ([key, value]) => ({ key, value }),
+    )
+    return JSON.stringify(parsed)
+  }
+
+  it('falls through an empty session_id to session.id, in either encoding', () => {
+    expect(
+      decodeOtlpLogJson(jsonLogWithBareAttributes({ session_id: '', 'session.id': 'from-session-dot' }))[0]?.sessionId,
+    ).toBe('from-session-dot')
+    expect(
+      decodeOtlpLogProtobuf(
+        protobufLogWithAttributes([
+          ['session_id', ''],
+          ['session.id', 'from-session-dot'],
+        ]),
+      )[0]?.sessionId,
+    ).toBe('from-session-dot')
+  })
+
+  it('reads a null session when both session keys are empty or absent, in either encoding', () => {
+    expect(decodeOtlpLogJson(jsonLogWithBareAttributes({ session_id: '', 'session.id': '' }))[0]?.sessionId).toBeNull()
+    expect(
+      decodeOtlpLogProtobuf(
+        protobufLogWithAttributes([
+          ['session_id', ''],
+          ['session.id', ''],
+        ]),
+      )[0]?.sessionId,
+    ).toBeNull()
+    expect(decodeOtlpLogJson(jsonLogWithAttributes([]))[0]?.sessionId).toBeNull()
+    expect(decodeOtlpLogProtobuf(protobufLogWithAttributes([]))[0]?.sessionId).toBeNull()
+  })
 })
 
 describe('OtlpReceiver parity between encodings', () => {

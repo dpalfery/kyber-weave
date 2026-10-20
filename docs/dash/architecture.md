@@ -75,7 +75,7 @@ code-refs:
   - runTranscriptSync
   - formatSessionTitle
   - relinkQuarantinedClaudeLogs
-  - claudeModelCallsInTrace
+  - claudeModelCallCandidatesInTrace
 ---
 
 # KyberDash architecture
@@ -224,12 +224,15 @@ scopes by trace, or by session for a body with no trace id, and never by parent.
 - **One body per record, later body wins.** A record already holding a body stays a candidate. The
   body with the later log timestamp supplies the body-derived parts; the earlier body is marked
   enriched as superseded and applies nothing. Neither waits or quarantines. The claim is stored by
-  `CanonStore.setRawEntry` under `raw['kyber.claude_request_body']`. When a later body replaces an
-  earlier claimed body, it replaces the record's `system_prompt` and `tool_definitions` parts
-  wholesale, even when it has no `tools` array, so the earlier body's tools cannot mask the
-  not-measurable reason. Other buckets merge per bucket as before. Parts carry no source marker, so
-  a `tool_definitions` part that came from the span rather than a body is dropped by the same
-  replacement once a body has been claimed and a later body wins. This is a known limit.
+  `CanonStore.setRawEntry` under `raw['kyber.claude_request_body']` with the log id, its timestamp,
+  the `request_body_id` when present, and `suppliedBuckets`, the buckets that body supplied. When a
+  later body replaces an earlier claimed body, it drops exactly the buckets the earlier body
+  supplied, even when the later body has no `tools` array, so the earlier body's tools or history
+  cannot mask the not-measurable reason or stack on the new body. Parts in any other bucket came from
+  the span or a transcript and stay. A claim written before `suppliedBuckets` existed falls back to
+  dropping `system_prompt` and `tool_definitions` wholesale. Two bodies with an identical timestamp
+  go to the higher log id, so arrival order never decides, and a claim whose timestamp does not parse
+  counts as older than any valid body.
 - **Pending lifetime.** `CLAUDE_REQUEST_BODY_PENDING_TTL_MS` (15 minutes) applies to body logs inside
   `reconcileExpiredPending`; every other log keeps `DEFAULT_PENDING_TTL_MS` (5 seconds).
 - **Context-free bodies.** A body with no trace id but a `session.id` pends against its session for
@@ -240,7 +243,10 @@ scopes by trace, or by session for a body with no trace id, and never by parent.
   measurable, naming the sender's omission; the turn inspector shows that reason, not an empty list.
 - **Startup relink.** `relinkQuarantinedClaudeLogs` (`dash/src/tools/backfill.ts`) runs once when the
   OTLP collector service starts, applying the same matcher to the quarantined backlog. Its procedure
-  is in the [runbook §2i](runbook.md#2i-claude-request-body-relink-and-quarantined-count).
+  is in the [runbook §2i](runbook.md#2i-claude-request-body-relink-and-quarantined-count). A log whose
+  enrichment throws is counted and left in quarantine without stopping the pass, the watermark is
+  written after every page, and a relink that enriched anything requests the derived-session
+  projection, as the live batch paths do.
 
 No schema changed: state lives in the existing `pending_logs`, `quarantined_logs`, `enriched_logs`,
 `records.raw`, and `metadata` tables. The matcher decides from the trace or session candidates and the log timestamp alone, and it never

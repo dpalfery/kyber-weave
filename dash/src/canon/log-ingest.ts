@@ -9,7 +9,7 @@ import {
   type ContentPart,
   type Measurability,
 } from './types.js'
-import { CanonStore } from './store.js'
+import { CanonStore, type ModelCallCandidate } from './store.js'
 
 export type { OtlpLog }
 
@@ -49,6 +49,13 @@ export type ClaudeRequestBodyClaim = {
   /** The claiming log's own timestamp, ISO; the later one wins. */
   timestamp: string
   requestBodyId?: string
+  /**
+   * The buckets this body supplied. A later winner drops exactly these from the
+   * record, so span-sourced parts in other buckets survive. Claims written
+   * before this field existed lack it and fall back to dropping
+   * system_prompt and tool_definitions wholesale.
+   */
+  suppliedBuckets?: CanonicalContentKey[]
 }
 
 type PendingLog = OtlpLog & { pendingSince?: number; harness?: string }
@@ -167,6 +174,25 @@ function readClaim(record: CanonicalRecord): ClaudeRequestBodyClaim | undefined 
     : undefined
 }
 
+/** A timestamp as epoch ms; an unparseable one is -Infinity, older than any valid time. */
+function timeOrOldest(value: string): number {
+  const ms = Date.parse(value)
+  return Number.isFinite(ms) ? ms : Number.NEGATIVE_INFINITY
+}
+
+/**
+ * Whether the claimed body keeps the record against an incoming one (D20): the
+ * later timestamp wins, an identical timestamp goes to the higher logId so
+ * arrival order never decides, and an unparseable timestamp (either side)
+ * counts as older than any valid one.
+ */
+function claimBeatsLog(claim: ClaudeRequestBodyClaim, log: OtlpLog): boolean {
+  const claimed = timeOrOldest(claim.timestamp)
+  const incoming = timeOrOldest(log.timestamp)
+  if (claimed !== incoming) return claimed > incoming
+  return claim.logId >= log.logId
+}
+
 /**
  * Apply one correlated log to its record. A Claude request body replaces the
  * body-derived buckets; when the record already holds a body the later log
@@ -186,7 +212,7 @@ export function enrichRecord(store: CanonStore, record: CanonicalRecord, log: Ot
     // D20: a body older than the one the record already holds is consumed,
     // not applied; arrival order never decides which request a call keeps.
     const claim = isRequestBodyEvent ? readClaim(record) : undefined
-    if (claim !== undefined && Date.parse(claim.timestamp) > Date.parse(log.timestamp)) return
+    if (claim !== undefined && claimBeatsLog(claim, log)) return
     // R3: the request JSON is `attributes.body`; the key this used to read,
     // `attributes['claude_code.api_request_body']`, is never emitted.
     const failure = isRequestBodyEvent ? claudeBodyFailureReason(log.attributes) : undefined
@@ -202,16 +228,18 @@ export function enrichRecord(store: CanonStore, record: CanonicalRecord, log: Ot
       // does not speak for survives the rewrite rather than being lost
       // until a re-settle.
       const supplied = new Set(parts.map((part) => part.part))
-      // A later body that wins over an already-claimed one replaces the
-      // earlier body wholesale: its system_prompt and tool_definitions go even
-      // where this body supplies no such bucket (no `tools` array), so the
-      // earlier body's tools cannot survive and mask the not-measurable reason
-      // (D19/D20). Other buckets (conversation_history, ...) are not body-owned.
-      const replacesEarlierBody = isRequestBodyEvent && claim !== undefined
+      // A later body that wins over an already-claimed one replaces what the
+      // earlier body supplied, so its tools (or history) cannot survive and mask
+      // the not-measurable reason (D19/D20). The claim records the buckets that
+      // body supplied; parts in any other bucket are span- or transcript-sourced
+      // and stay. A claim from before suppliedBuckets existed has no list and
+      // drops system_prompt and tool_definitions wholesale, as it always did.
+      const earlierSupplied: ReadonlySet<string> | undefined =
+        isRequestBodyEvent && claim !== undefined
+          ? new Set(claim.suppliedBuckets ?? ['system_prompt', 'tool_definitions'])
+          : undefined
       const preserved = (record.parts ?? []).filter(
-        (part) =>
-          !supplied.has(part.part) &&
-          !(replacesEarlierBody && (part.part === 'system_prompt' || part.part === 'tool_definitions')),
+        (part) => !supplied.has(part.part) && !(earlierSupplied?.has(part.part) ?? false),
       )
       const merged = [...preserved, ...parts]
       store.setContent(record.spanId, contentFromParts(merged), merged)
@@ -222,6 +250,7 @@ export function enrichRecord(store: CanonStore, record: CanonicalRecord, log: Ot
           logId: log.logId,
           timestamp: log.timestamp,
           ...(typeof requestBodyId === 'string' ? { requestBodyId } : {}),
+          suppliedBuckets: [...supplied] as CanonicalContentKey[],
         } satisfies ClaudeRequestBodyClaim)
       }
       return
@@ -265,19 +294,20 @@ function declareMeasurability(
  * distance, gives `undefined` so the caller leaves the log pending rather than
  * attach it to a guess. Shared by the live path and the quarantine relink.
  */
-export function nearestClaudeModelCall(
-  calls: readonly CanonicalRecord[],
-  logTimestamp: string,
-): CanonicalRecord | undefined {
+export function nearestClaudeModelCall<
+  T extends { timestamp: Date | string; durationMs?: number | null },
+>(calls: readonly T[], logTimestamp: string): T | undefined {
   const at = Date.parse(logTimestamp)
   if (Number.isNaN(at)) return undefined
-  const scored: { call: CanonicalRecord; distance: number }[] = []
+  const scored: { call: T; distance: number }[] = []
   for (const call of calls) {
-    const start = Date.parse(String(call.timestamp))
+    const start = call.timestamp instanceof Date ? call.timestamp.getTime() : Date.parse(String(call.timestamp))
     if (Number.isNaN(start)) continue
     const distance = Math.abs(start - at)
     if (distance > CLAUDE_BODY_MATCH_WINDOW_MS) continue
-    if (at > start + (call.durationMs ?? 0)) continue
+    // End exclusion needs a known duration; a missing or NaN one is unknown,
+    // not an instant. The start window above still bounds such a call.
+    if (typeof call.durationMs === 'number' && Number.isFinite(call.durationMs) && at > start + call.durationMs) continue
     scored.push({ call, distance })
   }
   scored.sort((a, b) => a.distance - b.distance)
@@ -285,6 +315,16 @@ export function nearestClaudeModelCall(
   if (best === undefined) return undefined
   if (runnerUp !== undefined && runnerUp.distance === best.distance) return undefined
   return best.call
+}
+
+/** Score lightweight candidates, then load only the chosen call whole. */
+function fetchChosen(
+  store: CanonStore,
+  candidates: readonly ModelCallCandidate[],
+  logTimestamp: string,
+): CanonicalRecord | undefined {
+  const chosen = nearestClaudeModelCall(candidates, logTimestamp)
+  return chosen === undefined ? undefined : store.get(chosen.spanId)
 }
 
 /**
@@ -315,10 +355,10 @@ export function findLogTarget(store: CanonStore, log: OtlpLog): CanonicalRecord 
   if (!isClaudeLog(log)) return legacySessionFallback(store, log)
   if (isClaudeRequestBodyLog(log)) {
     if (log.traceId !== null) {
-      return nearestClaudeModelCall(store.claudeModelCallsInTrace(log.traceId), log.timestamp)
+      return fetchChosen(store, store.claudeModelCallCandidatesInTrace(log.traceId), log.timestamp)
     }
     if (log.sessionId !== null) {
-      return nearestClaudeModelCall(store.claudeModelCallsInSession(log.sessionId), log.timestamp)
+      return fetchChosen(store, store.claudeModelCallCandidatesInSession(log.sessionId), log.timestamp)
     }
     return undefined
   }

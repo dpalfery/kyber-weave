@@ -9,6 +9,7 @@ import {
   type OtlpLog,
 } from '../canon/log-ingest.js'
 import { ingestBatch } from '../canon/ingest.js'
+import { CanonicalProjectionScheduler } from '../canon/projection.js'
 import { CanonStore } from '../canon/store.js'
 import { startOtlpCollectorService } from './service.js'
 import type { OtlpSpan } from './receiver.js'
@@ -533,6 +534,36 @@ describe('startOtlpCollectorService quarantined Claude body relink (D5)', () => 
       spy.mockRestore()
       await service.close()
       rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('requests the derived-session projection after a startup relink that enriched a call', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kw-service-relink-proj-'))
+    const dbPath = join(dir, 'canon.db')
+    seed(dbPath)
+    const request = vi.spyOn(CanonicalProjectionScheduler.prototype, 'request').mockResolvedValue(undefined)
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined)
+    const service = await startOtlpCollectorService({ port: 0, dbPath })
+    try {
+      expect(request).toHaveBeenCalledTimes(1)
+    } finally {
+      log.mockRestore()
+      request.mockRestore()
+      await service.close()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('does not request a projection when the startup relink enriched nothing', async () => {
+    const request = vi.spyOn(CanonicalProjectionScheduler.prototype, 'request').mockResolvedValue(undefined)
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined)
+    const service = await startOtlpCollectorService({ port: 0, dbPath: ':memory:' })
+    try {
+      expect(request).not.toHaveBeenCalled()
+    } finally {
+      log.mockRestore()
+      request.mockRestore()
+      await service.close()
     }
   })
 

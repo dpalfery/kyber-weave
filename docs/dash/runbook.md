@@ -571,7 +571,12 @@ hosts, or `kyberdash otel`), it runs `relinkQuarantinedClaudeLogs` once, after t
 - skips a body whose matched record is older than the 14-day content window. Its row stays
   quarantined, because the content it would attach has already been purged;
 - leaves unmatched, tied, and skipped rows in quarantine;
-- prints one line, `Relinked N of M quarantined Claude request bodies in T ms`. A failure is logged and
+- isolates each log: one whose matching or enrichment throws is counted, its row stays in quarantine,
+  and the pass continues. One warning at the end gives the count and up to ten log ids, never a
+  payload;
+- treats a matched record whose timestamp does not parse as expired, so its row stays quarantined;
+- prints one line, `Relinked N of M quarantined Claude request bodies in T ms`, and, when N is above
+  zero, requests the derived-session projection as the live batch paths do. A failure is logged and
   does not stop the service.
 
 **Startup cost.** The pass is synchronous and runs once per start, before the receiver accepts traffic.
@@ -584,7 +589,8 @@ prints one warning per start with the count and up to ten log ids, never the pay
 not stop the pass, and the watermark still moves past such a row, so later starts do not retry it.
 
 **The watermark.** The pass stores the highest rowid it left in quarantine in `metadata` under
-`claude_body_relink_watermark` (never lower than the previous value). A later start scans only rows
+`claude_body_relink_watermark` (never lower than the previous value), written after every page so a
+crash mid-pass keeps the progress made. A later start scans only rows
 above it, so a row the pass left in quarantine is **not retried by later starts**. The live path
 handles bodies that arrive while the service runs, and it does not re-match rows already in
 quarantine. No shipped command resets the watermark.
@@ -613,8 +619,9 @@ outlasts it. Bodies older than the 14-day window stay quarantined, so a store wi
 a higher count. This is expected, not a fault.
 
 **Derived session rows.** The relink changes stored records, not the derived session rows (the session
-payload, which includes the Skills view). Those are rebuilt by a projection: a `dash refresh`, an
-accepted OTLP batch, or a manual build. If a session still shows no skill listing after a restart,
+payload, which includes the Skills view). A relink that enriched at least one call requests the
+projection itself; otherwise a `dash refresh`, an accepted OTLP batch, or a manual build rebuilds
+them. If a session still shows no skill listing after a restart,
 run the build against the store:
 
 ```bash
