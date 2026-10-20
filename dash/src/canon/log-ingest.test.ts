@@ -1,12 +1,13 @@
 // Behavioural contract for ADR 0009 decisions 1–3. Logs enrich one existing
 // span-shaped record; they never establish a competing record population.
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
 import { ingestLogBatch, reconcileExpiredPending, type OtlpLog } from './log-ingest.js'
 import { CanonStore } from './store.js'
 import type { CanonicalRecord } from './types.js'
 import { ingestBatch } from './ingest.js'
-import { decodeOtlpLogJson, type OtlpSpan } from '../otel/receiver.js'
+import { decodeOtlpJson, decodeOtlpLogJson, type OtlpSpan } from '../otel/receiver.js'
 
 const TRACE_ID = '0af7651916cd43dd8448eb211c80319c'
 const MODEL_SPAN_ID = 'b7ad6b7169203331'
@@ -382,7 +383,7 @@ describe('ingestLogBatch (ADR 0009)', () => {
     store.close()
   })
 
-  it('quarantines an uncorrelated Claude body log rather than enriching a tool.invoke record', () => {
+  it('pends (D13) rather than quarantines a context-free Claude body, and never enriches a tool.invoke record', () => {
     const store = new CanonStore(':memory:')
     store.upsert(
       modelRecord({
@@ -408,8 +409,10 @@ describe('ingestLogBatch (ADR 0009)', () => {
     // is then the fallback enriching tool.invoke, not the outcome count.
     expect(store.get(OTHER_SPAN_ID)?.content).toEqual({})
     expect(store.get(OTHER_SPAN_ID)?.parts).toBeUndefined()
-    // With no legal target the log can only be quarantined.
-    expect(outcome).toEqual({ enriched: 0, pending: 0, quarantined: 1 })
+    // D13: a context-free Claude body naming its session is pended, not
+    // quarantined, even when the only in-window record is a tool span: its
+    // model call may simply not have arrived yet.
+    expect(outcome).toEqual({ enriched: 0, pending: 1, quarantined: 0 })
     store.close()
   })
 
@@ -662,6 +665,436 @@ describe('ingestLogBatch (ADR 0009)', () => {
     expect(ingestLogBatch(logs, store)).toEqual({ enriched: 2, pending: 0, quarantined: 0 })
     expect(store.get(MODEL_SPAN_ID)?.content).toMatchObject({ log_body: 'first-turn-body' })
     expect(store.get(OTHER_SPAN_ID)?.content).toMatchObject({ log_body: 'second-turn-body' })
+    store.close()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Claude Code Desktop request-body correlation (T1; plan
+// docs/plans/2026-10-19-claude-desktop-request-body-correlation.md, D3, D4,
+// D11, D13, D19, D20). The Desktop sender stamps a body log with the active
+// PARENT span (the interaction, or a tool.execution), not with the model call
+// that sent the request, and it logs the body at request start while it
+// exports the call's span only at call end. So the body usually arrives first.
+// ---------------------------------------------------------------------------
+
+/** The 15-minute window a Claude request-body log may wait for its call (D3). */
+const CLAUDE_BODY_PENDING_TTL_MS = 15 * 60 * 1000
+
+/** Desktop main-thread model call, child of the interaction; starts 26 ms into it. */
+const DESKTOP_MAIN_CALL = '0000000000000002'
+/** Desktop sub-agent model call, child of tool.execution 0000000000000006. */
+const DESKTOP_SUB_AGENT_CALL = '0000000000000007'
+
+/** The T0 Desktop fixture spans (sanitized; structure and timing only). */
+function desktopSpans(): OtlpSpan[] {
+  return decodeOtlpJson(
+    readFileSync(new URL('../otel/fixtures/claude-desktop/traces.otlp.json', import.meta.url), 'utf8'),
+  )
+}
+
+/**
+ * The six T0 body logs in file order: 0 and 1 stamped with the interaction span,
+ * 2 and 3 with the tool.execution span, 4 context-free (session.id only), 5
+ * stamped with a model call and truncated.
+ */
+function desktopBody(index: number): OtlpLog {
+  const logs = decodeOtlpLogJson(
+    readFileSync(new URL('../otel/fixtures/claude-desktop/logs.otlp.json', import.meta.url), 'utf8'),
+  )
+  const body = logs[index]
+  if (body === undefined) throw new Error(`the T0 fixture has no body log at index ${index}`)
+  return body
+}
+
+/** A Claude request body with a system prompt and no tools array (main-thread shape). */
+function systemBody(text: string): string {
+  return JSON.stringify({ system: [{ type: 'text', text }] })
+}
+
+/**
+ * A model-call span in the Desktop-shaped fixture session, starting at `startIso`.
+ * `sessionKey` names the attribute that carries the session: `session_id` by
+ * default, `session.id` for a span shaped like a real Claude Desktop record.
+ */
+function llmSpan(
+  spanId: string,
+  traceId: string,
+  startIso: string,
+  durationMs: number,
+  sessionKey: 'session_id' | 'session.id' = 'session_id',
+): OtlpSpan {
+  const start = BigInt(Date.parse(startIso)) * 1_000_000n
+  return {
+    traceId,
+    spanId,
+    parentSpanId: null,
+    name: 'claude_code.llm_request',
+    kind: 'client',
+    startTimeUnixNano: start.toString(),
+    endTimeUnixNano: (start + BigInt(durationMs) * 1_000_000n).toString(),
+    timestamp: startIso,
+    durationMs,
+    status: { code: 'ok' },
+    resource: { 'service.name': 'synthetic-test' },
+    attributes: {
+      'claude.deployment_mode': '1p',
+      input_tokens: 10,
+      output_tokens: 5,
+      [sessionKey]: SESSION_ID,
+    },
+    scope: {},
+  }
+}
+
+/** Body logs still parked in pending_logs (the parked interaction prompts are excluded). */
+function pendingBodies(store: CanonStore): unknown[] {
+  return store
+    .getPendingLogs()
+    .filter((row) => (row as { attributes?: Record<string, unknown> }).attributes?.['event.name'] === 'api_request_body')
+}
+
+/** Which buckets a record's parts supply. */
+function partBuckets(record: CanonicalRecord | undefined): string[] {
+  return (record?.parts ?? []).map((part) => part.part)
+}
+
+describe('Claude Desktop request-body correlation (T1)', () => {
+  it('enriches the main-thread call nearest a body stamped with the interaction span (D11)', () => {
+    const store = new CanonStore(':memory:')
+    ingestBatch(desktopSpans(), store)
+
+    // The body is stamped with the interaction span, which never becomes a
+    // record, so only the trace-scoped nearest-start rule can reach the call.
+    expect(ingestLogBatch([desktopBody(0)], store)).toEqual({ enriched: 1, pending: 0, quarantined: 0 })
+
+    expect(store.get(DESKTOP_MAIN_CALL)?.harness).toBe('claude-code')
+    expect(partBuckets(store.get(DESKTOP_MAIN_CALL))).toContain('system_prompt')
+    // The other main-thread call sits 3 s later in the same trace and must not take the body.
+    expect(partBuckets(store.get('0000000000000003'))).not.toContain('system_prompt')
+    store.close()
+  })
+
+  it('enriches the sub-agent call that is the child of a body stamped with its tool.execution span (D11)', () => {
+    const store = new CanonStore(':memory:')
+    ingestBatch(desktopSpans(), store)
+
+    // Body 2 is stamped with tool.execution 0000000000000006; its nearest
+    // model call in the trace is sub-agent call 0000000000000007, 1 ms after
+    // it starts. Main-thread call 0000000000000003 is 77 ms earlier and is only the runner-up.
+    expect(ingestLogBatch([desktopBody(2)], store)).toEqual({ enriched: 1, pending: 0, quarantined: 0 })
+
+    expect(partBuckets(store.get(DESKTOP_SUB_AGENT_CALL))).toEqual(
+      expect.arrayContaining(['system_prompt', 'tool_definitions']),
+    )
+    expect(partBuckets(store.get('0000000000000003'))).not.toContain('system_prompt')
+    store.close()
+  })
+
+  it('keeps a body that arrives before its span pending past 5 s, then enriches the call when the span lands', () => {
+    const store = new CanonStore(':memory:')
+    const t0 = Date.now()
+
+    expect(ingestLogBatch([desktopBody(0)], store, { now: () => t0 })).toEqual({
+      enriched: 0,
+      pending: 1,
+      quarantined: 0,
+    })
+    expect(ingestLogBatch([], store, { now: () => t0 + 5_001 })).toEqual({
+      enriched: 0,
+      pending: 0,
+      quarantined: 0,
+    })
+    expect(pendingBodies(store)).toHaveLength(1)
+
+    ingestBatch(desktopSpans(), store)
+
+    expect(partBuckets(store.get(DESKTOP_MAIN_CALL))).toContain('system_prompt')
+    expect(pendingBodies(store)).toEqual([])
+    expect(store.quarantinedLogCount()).toBe(0)
+    store.close()
+  })
+
+  it('does not choose a call that started within 2 s but ended before the body was logged (D11)', () => {
+    const store = new CanonStore(':memory:')
+    const t0 = Date.now()
+    // Earlier call: starts 1.5 s before the body and ends 1.0 s before it.
+    store.upsert(modelRecord({ spanId: OTHER_SPAN_ID, timestamp: '2026-09-04T09:59:58.500Z', durationMs: 500 }))
+    const body = claudeRequestBodyLog(
+      { body: systemBody('Synthetic body of the later call.') },
+      { logId: 'log-after-ended-call', spanId: 'interaction-synthetic-1', sessionId: null, timestamp: '2026-09-04T10:00:00.010Z' },
+    )
+
+    expect(ingestLogBatch([body], store, { now: () => t0 })).toEqual({ enriched: 0, pending: 1, quarantined: 0 })
+    expect(store.get(OTHER_SPAN_ID)?.parts).toBeUndefined()
+
+    // The body waits for its own call, which starts 10 ms before the body is logged.
+    ingestBatch([llmSpan(MODEL_SPAN_ID, TRACE_ID, AT, 300)], store)
+
+    expect(partBuckets(store.get(MODEL_SPAN_ID))).toContain('system_prompt')
+    expect(store.get(OTHER_SPAN_ID)?.parts).toBeUndefined()
+    store.close()
+  })
+
+  it('leaves a body pending when two calls are equally near it, and neither call is chosen (D11)', () => {
+    const store = new CanonStore(':memory:')
+    const t0 = Date.now()
+    store.upsert(modelRecord({ spanId: OTHER_SPAN_ID, timestamp: '2026-09-04T09:59:59.000Z', durationMs: 5_000 }))
+    store.upsert(modelRecord({ spanId: MODEL_SPAN_ID, timestamp: '2026-09-04T10:00:01.000Z', durationMs: 5_000 }))
+    const body = claudeRequestBodyLog(
+      { body: systemBody('Synthetic body between two calls.') },
+      { logId: 'log-tied', spanId: 'interaction-synthetic-1', sessionId: null, timestamp: AT },
+    )
+
+    expect(ingestLogBatch([body], store, { now: () => t0 })).toEqual({ enriched: 0, pending: 1, quarantined: 0 })
+    expect(store.get(OTHER_SPAN_ID)?.parts).toBeUndefined()
+    expect(store.get(MODEL_SPAN_ID)?.parts).toBeUndefined()
+    store.close()
+  })
+
+  it('keeps a body with no call within 2 s pending for the 15-minute Claude window, then quarantines it (D3, D23)', () => {
+    const store = new CanonStore(':memory:')
+    const t0 = Date.now()
+    // The only call is 5 s away from the body: outside the 2 s candidate window.
+    store.upsert(modelRecord({ spanId: OTHER_SPAN_ID, timestamp: AT, durationMs: 100 }))
+    const body = claudeRequestBodyLog(
+      { body: systemBody('Synthetic late body.') },
+      { logId: 'log-no-candidate', spanId: 'interaction-synthetic-1', sessionId: null, timestamp: '2026-09-04T10:00:05.000Z' },
+    )
+
+    expect(ingestLogBatch([body], store, { now: () => t0 })).toEqual({ enriched: 0, pending: 1, quarantined: 0 })
+    expect(ingestLogBatch([], store, { now: () => t0 + 5_001 })).toEqual({ enriched: 0, pending: 0, quarantined: 0 })
+    expect(pendingBodies(store), 'still waiting after the 5 s default expiry').toHaveLength(1)
+    expect(ingestLogBatch([], store, { now: () => t0 + CLAUDE_BODY_PENDING_TTL_MS - 1 })).toEqual({
+      enriched: 0,
+      pending: 0,
+      quarantined: 0,
+    })
+    expect(pendingBodies(store), 'still waiting one millisecond before the 15-minute window closes').toHaveLength(1)
+
+    expect(ingestLogBatch([], store, { now: () => t0 + CLAUDE_BODY_PENDING_TTL_MS })).toEqual({
+      enriched: 0,
+      pending: 0,
+      quarantined: 1,
+    })
+    expect(store.getQuarantinedLog('log-no-candidate')).toMatchObject({
+      reason: expect.stringMatching(/expir/i),
+    })
+    store.close()
+  })
+
+  it.each([
+    ['the earlier body arrives first', true],
+    ['the later body arrives first', false],
+  ] as const)(
+    'gives a call two bodies are nearest to the later body whichever arrives first (%s, D20)',
+    (_order, earlierFirst) => {
+      const store = new CanonStore(':memory:')
+      const t0 = Date.now()
+      store.upsert(modelRecord({ spanId: OTHER_SPAN_ID, timestamp: AT, durationMs: 1_000 }))
+      const earlier = claudeRequestBodyLog(
+        { body: systemBody('Synthetic earlier body.') },
+        { logId: 'log-body-earlier', spanId: 'interaction-synthetic-1', sessionId: null, timestamp: '2026-09-04T10:00:00.010Z' },
+      )
+      const later = claudeRequestBodyLog(
+        { body: systemBody('Synthetic later body.') },
+        { logId: 'log-body-later', spanId: 'interaction-synthetic-1', sessionId: null, timestamp: '2026-09-04T10:00:00.200Z' },
+      )
+      const [first, second] = earlierFirst ? [earlier, later] : [later, earlier]
+
+      expect(ingestLogBatch([first], store, { now: () => t0 })).toEqual({ enriched: 1, pending: 0, quarantined: 0 })
+      expect(ingestLogBatch([second], store, { now: () => t0 })).toEqual({ enriched: 1, pending: 0, quarantined: 0 })
+
+      const call = store.get(OTHER_SPAN_ID)
+      expect(call?.parts).toEqual([{ part: 'system_prompt', text: 'Synthetic later body.' }])
+      expect(store.isLogEnriched('log-body-earlier')).toBe(true)
+      expect(store.isLogEnriched('log-body-later')).toBe(true)
+      expect(pendingBodies(store)).toEqual([])
+      expect(store.quarantinedLogCount()).toBe(0)
+      expect((call?.raw as Record<string, unknown> | undefined)?.['kyber.claude_request_body']).toMatchObject({
+        logId: 'log-body-later',
+      })
+      store.close()
+    },
+  )
+
+  it('pends a context-free Claude body that carries only session.id, then enriches the session call when it lands (D13)', () => {
+    const store = new CanonStore(':memory:')
+    const t0 = Date.now()
+    const body = claudeRequestBodyLog(
+      { body: systemBody('Synthetic context-free body.') },
+      { logId: 'log-context-free', traceId: null, spanId: null, sessionId: SESSION_ID, timestamp: '2026-09-04T10:00:00.100Z' },
+    )
+
+    // Today this quarantines at once (no trace, no span); D13 pends it because its call arrives later.
+    expect(ingestLogBatch([body], store, { now: () => t0 })).toEqual({ enriched: 0, pending: 1, quarantined: 0 })
+
+    // Real Claude Desktop spans name their session with the session.id attribute, not session_id.
+    ingestBatch([llmSpan(MODEL_SPAN_ID, TRACE_ID, AT, 1_000, 'session.id')], store)
+
+    expect(partBuckets(store.get(MODEL_SPAN_ID))).toContain('system_prompt')
+    expect(pendingBodies(store)).toEqual([])
+    expect(store.quarantinedLogCount()).toBe(0)
+    store.close()
+  })
+
+  it('never chooses a session call that ended before a context-free body was logged (D13)', () => {
+    const store = new CanonStore(':memory:')
+    const t0 = Date.now()
+    store.upsert(modelRecord({ spanId: OTHER_SPAN_ID, timestamp: AT, durationMs: 500 }))
+    const body = claudeRequestBodyLog(
+      { body: systemBody('Synthetic late context-free body.') },
+      { logId: 'log-context-free-late', traceId: null, spanId: null, sessionId: SESSION_ID, timestamp: '2026-09-04T10:00:00.800Z' },
+    )
+
+    expect(ingestLogBatch([body], store, { now: () => t0 })).toEqual({ enriched: 0, pending: 1, quarantined: 0 })
+    expect(store.get(OTHER_SPAN_ID)?.parts).toBeUndefined()
+    store.close()
+  })
+
+  it('does not extend the session-time fallback to a non-Claude log (D4 scope)', () => {
+    const store = new CanonStore(':memory:')
+    const t0 = Date.now()
+    // A Claude model call in the same session, in a different trace.
+    store.upsert(modelRecord({ spanId: OTHER_SPAN_ID, traceId: 'different-trace', timestamp: AT }))
+    const openCodeLog = log({
+      logId: 'log-opencode-session',
+      traceId: 'opencode-trace',
+      spanId: 'opencode-span',
+      sessionId: SESSION_ID,
+      body: 'opencode.event',
+      attributes: {},
+      scope: { name: 'opencode' },
+    })
+
+    expect(ingestLogBatch([openCodeLog], store, { now: () => t0 })).toEqual({ enriched: 0, pending: 1, quarantined: 0 })
+    expect(store.get(OTHER_SPAN_ID)?.content).toEqual({})
+    expect(ingestLogBatch([], store, { now: () => t0 + 5_001 })).toEqual({ enriched: 0, pending: 0, quarantined: 1 })
+    store.close()
+  })
+
+  it('quarantines a context-free non-Claude log at once, as it does today (D4 scope)', () => {
+    const store = new CanonStore(':memory:')
+    const openCodeLog = log({
+      logId: 'log-opencode-context-free',
+      traceId: null,
+      spanId: null,
+      sessionId: 'no-such-session',
+      body: 'opencode.event',
+      attributes: {},
+      scope: { name: 'opencode' },
+    })
+
+    expect(ingestLogBatch([openCodeLog], store)).toEqual({ enriched: 0, pending: 0, quarantined: 1 })
+    store.close()
+  })
+
+  it('declares tool_definitions not measurable, naming the missing tools array, for a body that has a system prompt but no tools (D19)', () => {
+    const store = new CanonStore(':memory:')
+    store.upsert(modelRecord())
+
+    expect(
+      ingestLogBatch([claudeRequestBodyLog({ body: systemBody('Synthetic main-thread prompt.') })], store),
+    ).toEqual({ enriched: 1, pending: 0, quarantined: 0 })
+
+    const enriched = store.get(MODEL_SPAN_ID)
+    expect(enriched?.parts).toEqual([{ part: 'system_prompt', text: 'Synthetic main-thread prompt.' }])
+    expect(enriched?.measurability?.tool_definitions).toMatchObject({
+      availability: 'not_measurable',
+      reason: expect.stringMatching(/tools array.*did not export tool definitions/i),
+    })
+    store.close()
+  })
+
+  describe('a later winning body replaces the earlier body\'s buckets wholesale (D20, D19)', () => {
+    const TOOLS = [{ name: 'read_synthetic_file', description: 'Read synthetic fixture content.', input_schema: { type: 'object' } }]
+    const bodyLog = (logId: string, body: unknown, timestamp: string) =>
+      claudeRequestBodyLog(
+        { body: JSON.stringify(body) },
+        { logId, spanId: 'interaction-synthetic-1', sessionId: null, timestamp },
+      )
+
+    it('drops the earlier body\'s tool_definitions and declares the reason when the later body has no tools array', () => {
+      const store = new CanonStore(':memory:')
+      store.upsert(modelRecord({ spanId: OTHER_SPAN_ID, timestamp: AT, durationMs: 1_000 }))
+
+      ingestLogBatch([bodyLog('log-with-tools', { system: 'Synthetic early prompt.', tools: TOOLS }, '2026-09-04T10:00:00.010Z')], store)
+      expect(partBuckets(store.get(OTHER_SPAN_ID))).toContain('tool_definitions')
+
+      ingestLogBatch([bodyLog('log-no-tools', { system: 'Synthetic later prompt.' }, '2026-09-04T10:00:00.200Z')], store)
+
+      const call = store.get(OTHER_SPAN_ID)
+      expect(partBuckets(call)).not.toContain('tool_definitions')
+      expect(call?.content.tool_definitions).toBeUndefined()
+      expect(call?.parts).toEqual([{ part: 'system_prompt', text: 'Synthetic later prompt.' }])
+      expect(call?.measurability?.tool_definitions).toMatchObject({
+        availability: 'not_measurable',
+        reason: expect.stringMatching(/tools array.*did not export tool definitions/i),
+      })
+      store.close()
+    })
+
+    it('still gains tool_definitions, and clears the reason, when a later body with tools follows one without', () => {
+      const store = new CanonStore(':memory:')
+      store.upsert(modelRecord({ spanId: OTHER_SPAN_ID, timestamp: AT, durationMs: 1_000 }))
+
+      ingestLogBatch([bodyLog('log-no-tools', { system: 'Synthetic early prompt.' }, '2026-09-04T10:00:00.010Z')], store)
+      expect(store.get(OTHER_SPAN_ID)?.measurability?.tool_definitions).toMatchObject({ availability: 'not_measurable' })
+
+      ingestLogBatch([bodyLog('log-with-tools', { system: 'Synthetic later prompt.', tools: TOOLS }, '2026-09-04T10:00:00.200Z')], store)
+
+      const call = store.get(OTHER_SPAN_ID)
+      expect(partBuckets(call)).toEqual(expect.arrayContaining(['system_prompt', 'tool_definitions']))
+      expect(call?.measurability?.tool_definitions).toBeUndefined()
+      store.close()
+    })
+
+    it('never drops span-sourced parts: conversation_history survives, and so does a tool_definitions part when no body was claimed', () => {
+      const store = new CanonStore(':memory:')
+      store.upsert(
+        modelRecord({
+          spanId: OTHER_SPAN_ID,
+          timestamp: AT,
+          durationMs: 1_000,
+          parts: [
+            { part: 'conversation_history', text: 'Synthetic span-sourced history.' },
+            { part: 'tool_definitions', text: 'Synthetic span-sourced tool.' },
+          ],
+        }),
+      )
+
+      // First body: no claim exists yet, so only the buckets it supplies are replaced.
+      ingestLogBatch([bodyLog('log-first', { system: 'Synthetic first prompt.' }, '2026-09-04T10:00:00.010Z')], store)
+      expect(partBuckets(store.get(OTHER_SPAN_ID))).toEqual(
+        expect.arrayContaining(['conversation_history', 'tool_definitions', 'system_prompt']),
+      )
+
+      // Later body wins: body-sourced buckets go, the span-sourced history stays.
+      ingestLogBatch([bodyLog('log-second', { system: 'Synthetic second prompt.' }, '2026-09-04T10:00:00.200Z')], store)
+      const call = store.get(OTHER_SPAN_ID)
+      expect(call?.parts).toEqual(
+        expect.arrayContaining([
+          { part: 'conversation_history', text: 'Synthetic span-sourced history.' },
+          { part: 'system_prompt', text: 'Synthetic second prompt.' },
+        ]),
+      )
+      store.close()
+    })
+  })
+
+  it('does not declare tool_definitions not measurable when the body carries a tools array (D19)', () => {
+    const store = new CanonStore(':memory:')
+    store.upsert(modelRecord())
+    const request = {
+      system: [{ type: 'text', text: 'Synthetic sub-agent prompt.' }],
+      tools: [{ name: 'read_synthetic_file', description: 'Read synthetic fixture content.', input_schema: { type: 'object' } }],
+    }
+
+    ingestLogBatch([claudeRequestBodyLog({ body: JSON.stringify(request) })], store)
+
+    const enriched = store.get(MODEL_SPAN_ID)
+    expect(partBuckets(enriched)).toEqual(expect.arrayContaining(['system_prompt', 'tool_definitions']))
+    expect(enriched?.measurability?.tool_definitions).toBeUndefined()
     store.close()
   })
 })

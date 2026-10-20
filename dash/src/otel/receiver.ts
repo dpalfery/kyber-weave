@@ -37,6 +37,18 @@ import { stripIdentityAttributes } from './identity.js'
 
 const execFileAsync = promisify(execFile)
 
+/**
+ * The conversation a log belongs to. `session_id` wins; Claude Code sends the
+ * same identity as `session.id`, which the receiver used to ignore, leaving
+ * every Claude log's session null (D4).
+ */
+function sessionIdFromAttributes(attributes: Record<string, unknown>): string | null {
+  const underscore = attributes.session_id
+  if (typeof underscore === 'string') return underscore
+  const dotted = attributes['session.id']
+  return typeof dotted === 'string' ? dotted : null
+}
+
 /** The OTLP/HTTP standard port (R2.1). */
 export const DEFAULT_OTLP_PORT = 4318
 
@@ -574,8 +586,7 @@ export function decodeOtlpLogJson(body: string): OtlpLog[] {
         const record = expectObject(recordRaw, recordWhere)
         const time = nanosToBigInt(record.timeUnixNano, `${recordWhere}.timeUnixNano`)
         const attributes = stripIdentityAttributes(attributesFromJson(record.attributes, `${recordWhere}.attributes`))
-        const session = attributes.session_id
-        const sessionId = typeof session === 'string' ? session : null
+        const sessionId = sessionIdFromAttributes(attributes)
         const traceId = record.traceId === undefined || record.traceId === null || record.traceId === ''
           ? null : idToHex(record.traceId, 16, `${recordWhere}.traceId`)
         const spanId = record.spanId === undefined || record.spanId === null || record.spanId === ''
@@ -974,8 +985,7 @@ export function decodeOtlpLogProtobuf(body: Uint8Array): OtlpLog[] {
         const trace = pbBytes(logMessage, 9)
         const span = pbBytes(logMessage, 10)
         const attributes = stripIdentityAttributes(pbKeyValues(logMessage, 6))
-        const session = attributes.session_id
-        const sessionId = typeof session === 'string' ? session : null
+        const sessionId = sessionIdFromAttributes(attributes)
         const bodyMessage = pbMessage(logMessage, 5)
         const body = bodyMessage === undefined ? null : String(pbAnyValue(bodyMessage))
         const eventName = pbString(logMessage, 12)

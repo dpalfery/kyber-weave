@@ -6,7 +6,7 @@ component: KyberDash
 source-root: dash
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-18
+last-reviewed: 2026-10-19
 decided-by:
   - adr/0020-kyberdash-one-time-fork
   - adr/0008-kyberdash-single-canonical-store
@@ -74,6 +74,8 @@ code-refs:
   - listedByTurn
   - runTranscriptSync
   - formatSessionTitle
+  - relinkQuarantinedClaudeLogs
+  - claudeModelCallsInTrace
 ---
 
 # KyberDash architecture
@@ -176,7 +178,7 @@ the table above is the whole layout.
 |---|---|---|
 | Upstream provider parser | `dash/src/` | Existing. Produces parsed calls plus its deduplication set. Not modified. |
 | `Synthesizer` | `dash/src/synth/synth.ts` | Consumes parsed calls; emits canonical records with a declared measurability map. Extends upstream's cross-provider deduplication key rather than adding a parallel mechanism (R3). Implements child `tool.invoke` span extraction, 64KiB result truncation, and structured error status (contracts below). |
-| `OtlpReceiver` | `dash/src/otel/receiver.ts` | HTTP listener on the OTLP-standard port 4318 at `POST /v1/traces` and `POST /v1/logs`. It decodes JSON and protobuf to span and log shapes. Each decoded log gets a unique `deriveLogId` (correlation identity, timestamp, and payload digest) so duplicate deliveries of the same class do not collide. A log enriches its correlated span-shaped record and is never a parallel canonical record. |
+| `OtlpReceiver` | `dash/src/otel/receiver.ts` | HTTP listener on the OTLP-standard port 4318 at `POST /v1/traces` and `POST /v1/logs`. It decodes JSON and protobuf to span and log shapes. Each decoded log gets a unique `deriveLogId` (correlation identity, timestamp, and payload digest) so duplicate deliveries of the same class do not collide. A log enriches its correlated span-shaped record and is never a parallel canonical record. The session key is read from `session_id`, falling back to `session.id` (the key Claude Code sends), in both the JSON and protobuf decoders. |
 | `AspireSource` | `dash/src/otel/aspire.ts` | Optional. Reads spans exported from a running Aspire dashboard (R2.6), supervised with backoff. Records whose parent is missing are grouped by attribute rather than ancestry (R2.7). |
 | `IngestWriter` | `dash/src/otel/writer.ts` | Batches writes and owns backpressure so no record is dropped under load (R2.5). |
 
@@ -205,6 +207,63 @@ join the writer's existing store handle after the ingest call returns; there is 
 change and no second projection. An empty log reads as unknown downstream — "no receiver
 activity recorded" — never as stopped or running, because receiver liveness is not
 observable from the web server.
+
+### Claude request-body log correlation
+
+A Claude Code `api_request_body` log is written when a model request starts, but the
+`llm_request` span it describes is exported only when the request ends, so the log usually
+arrives first. The log is also stamped with the parent span that was active (the interaction, or
+the tool execution a sub-agent call follows), not with the call's own span. The matcher therefore
+scopes by trace, or by session for a body with no trace id, and never by parent. The contract:
+
+- **Exact span first.** A body whose `(traceId, spanId)` names a record enriches that record.
+- **Nearest start within the trace.** Otherwise the candidates are the `claude-code` `llm.invoke`
+  records in the trace (or the session). A candidate qualifies when its start is within 2 s of the
+  log and the call had not ended when the body was logged. The nearest start wins; a tie, or no
+  candidate, leaves the body pending.
+- **One body per record, later body wins.** A record already holding a body stays a candidate. The
+  body with the later log timestamp supplies the body-derived parts; the earlier body is marked
+  enriched as superseded and applies nothing. Neither waits or quarantines. The claim is stored by
+  `CanonStore.setRawEntry` under `raw['kyber.claude_request_body']`. When a later body replaces an
+  earlier claimed body, it replaces the record's `system_prompt` and `tool_definitions` parts
+  wholesale, even when it has no `tools` array, so the earlier body's tools cannot mask the
+  not-measurable reason. Other buckets merge per bucket as before. Parts carry no source marker, so
+  a `tool_definitions` part that came from the span rather than a body is dropped by the same
+  replacement once a body has been claimed and a later body wins. This is a known limit.
+- **Pending lifetime.** `CLAUDE_REQUEST_BODY_PENDING_TTL_MS` (15 minutes) applies to body logs inside
+  `reconcileExpiredPending`; every other log keeps `DEFAULT_PENDING_TTL_MS` (5 seconds).
+- **Context-free bodies.** A body with no trace id but a `session.id` pends against its session for
+  the full 15-minute window. Tool invocations are never candidates, so a tool record neither claims
+  the body nor quarantines it. A body with no trace id, no span id, and no session id quarantines at
+  once.
+- **Tool definitions.** A parseable body with no `tools` array declares `tool_definitions` not
+  measurable, naming the sender's omission; the turn inspector shows that reason, not an empty list.
+- **Startup relink.** `relinkQuarantinedClaudeLogs` (`dash/src/tools/backfill.ts`) runs once when the
+  OTLP collector service starts, applying the same matcher to the quarantined backlog. Its procedure
+  is in the [runbook §2i](runbook.md#2i-claude-request-body-relink-and-quarantined-count).
+
+No schema changed: state lives in the existing `pending_logs`, `quarantined_logs`, `enriched_logs`,
+`records.raw`, and `metadata` tables. The matcher decides from the trace or session candidates and the log timestamp alone, and it never
+attaches a body to a call that had already ended.
+
+```mermaid
+flowchart TD
+    LOG["Claude api_request_body log"] --> EXACT{"Exact traceId and spanId match a record?"}
+    EXACT -->|yes| ENRICH["Enrich that record"]
+    EXACT -->|no| SCOPE{"Log carries a traceId?"}
+    SCOPE -->|yes| TRACE["Candidates: claude-code llm.invoke in the trace"]
+    SCOPE -->|"no, session.id present"| SESSION["Candidates: claude-code llm.invoke in the session"]
+    SCOPE -->|"no session either"| ONCE["Quarantine at once"]
+    TRACE --> NEAR{"Started within 2 s and not ended before the log?"}
+    SESSION --> NEAR
+    NEAR -->|"one nearest start"| CLAIM["Enrich, or later body wins over the claim"]
+    NEAR -->|"none, or a tie"| PEND["Pending: 15 minutes for request bodies"]
+    PEND -->|"span arrives, retried per batch"| NEAR
+    PEND -->|"TTL expires"| EXPIRED["Quarantine: unmatched past pending expiry"]
+```
+
+Measured behaviour, residuals, and the counts behind them are in the
+[telemetry inventory](telemetry-inventory.md#claude-request-body-correlation).
 
 ## Local harness-source refresh
 
@@ -548,6 +607,9 @@ session payload; the narrow turn-content route never walks session records. A pa
 
 **Known limits.**
 
+- A listing read from a Claude request body (`system`-role message) is used only when the record has no
+  transcript listing, and never from a body cut at the sender's size limit, which does not parse. Records
+  enriched before the role field existed carry no role and show no body listing until re-enriched.
 - If a later listing in the same session changes a skill's description, earlier turns still show
   the first text observed.
 - After the 14-day content purge ([ADR 0018](../adr/0018-kyberdash-content-retention-purge.md)),
@@ -571,6 +633,16 @@ aggregate appears where present, with no currency. A "Not measurable" card shows
 a row opens a skill drawer with the listed and invoked state, the turns listed, and the listing
 text for the first turn listed. The unit tests render these states in a simulated DOM and the
 bundle builds. The states have not yet been checked against a live dashboard session.
+
+### Message role on content parts
+
+`ContentPart` carries an optional `role` (`'system' | 'user' | 'assistant'`). `parseClaudeApiRequestBody`
+sets it on parts derived from a request-body message, and only when that message carries one of those
+three roles. Parts from top-level fields (`system`, `tools`) and parts from role-less messages carry no
+role. The field is additive: it does not change any bucket, the compressed `parts_json` gains one
+optional key, and readers that predate it ignore it. The skills reader is the consumer: it trusts a
+listing only in a `system`-role message, so quoted text in a user or assistant message is not read as
+a listing. The rule is in the [telemetry inventory](telemetry-inventory.md#tool-definitions-and-skill-listings-from-request-bodies).
 
 ### `Measurability` and honest unobservability
 

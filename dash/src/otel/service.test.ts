@@ -467,3 +467,95 @@ describe('startOtlpCollectorService persistence-failure logging', () => {
     }
   })
 })
+
+describe('startOtlpCollectorService quarantined Claude body relink (D5)', () => {
+  const CALL_START = Date.now() - 60_000
+
+  function seed(dbPath: string): { spanId: string; logId: string } {
+    const store = new CanonStore(dbPath)
+    try {
+      store.upsert({
+        spanId: 'relink-svc-call',
+        traceId: 'relink-svc-trace',
+        parentSpanId: null,
+        source: 'synthetic-test',
+        harness: 'claude-code',
+        sessionId: 'relink-svc-session',
+        name: 'claude_code.llm_request',
+        op: 'llm.invoke',
+        kind: 'client',
+        timestamp: new Date(CALL_START).toISOString(),
+        durationMs: 1000,
+        status: 'ok',
+        tokens: { freshInput: 1, cacheRead: 0, cacheCreation: 0, output: 1, reportedInput: 1, reportedOutput: 1 },
+        content: {},
+        cost: { basis: 'unknown', status: 'no_rate' },
+      })
+      const log: OtlpLog = {
+        logId: 'relink-svc-log',
+        traceId: 'relink-svc-trace',
+        spanId: null,
+        sessionId: 'relink-svc-session',
+        timestamp: new Date(CALL_START + 50).toISOString(),
+        body: 'claude_code.api_request_body',
+        attributes: {
+          'event.name': 'api_request_body',
+          body: JSON.stringify({
+            system: [{ type: 'text', text: 'Synthetic service system prompt.' }],
+            messages: [{ role: 'user', content: 'Synthetic.' }],
+          }),
+        },
+        resource: {},
+        scope: {},
+      }
+      store.quarantineLog(log, 'identified log remained unmatched past pending expiry', 'claude-code')
+      return { spanId: 'relink-svc-call', logId: log.logId }
+    } finally {
+      store.close()
+    }
+  }
+
+  it('relinks a quarantined Claude body once at start and logs the elapsed time', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kw-service-relink-'))
+    const dbPath = join(dir, 'canon.db')
+    const { spanId, logId } = seed(dbPath)
+    const logged: string[] = []
+    const spy = vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+      logged.push(args.map(String).join(' '))
+    })
+    const service = await startOtlpCollectorService({ port: 0, dbPath })
+    try {
+      expect(service.canon.getQuarantinedLog(logId)).toBeUndefined()
+      expect(service.canon.isLogEnriched(logId)).toBe(true)
+      expect(service.canon.get(spanId)?.parts?.some((part) => part.part === 'system_prompt')).toBe(true)
+      expect(logged.some((line) => /Relinked 1 of 1 .* in \d+ ms/.test(line))).toBe(true)
+    } finally {
+      spy.mockRestore()
+      await service.close()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('keeps the service running and logs the error when the relink throws', async () => {
+    const errors: unknown[][] = []
+    const spy = vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+      errors.push(args)
+    })
+    const original = CanonStore.prototype.quarantinedLogsAfter
+    CanonStore.prototype.quarantinedLogsAfter = () => {
+      throw new Error('relink store failure')
+    }
+    try {
+      const service = await startOtlpCollectorService({ port: 0, dbPath: ':memory:' })
+      try {
+        expect(service.receiver.port).toBeGreaterThan(0)
+        expect(errors.some((args) => args.some((arg) => arg instanceof Error && arg.message === 'relink store failure'))).toBe(true)
+      } finally {
+        await service.close()
+      }
+    } finally {
+      CanonStore.prototype.quarantinedLogsAfter = original
+      spy.mockRestore()
+    }
+  })
+})

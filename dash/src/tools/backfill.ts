@@ -14,6 +14,13 @@
 // finds, so running it twice lands on the same rows.
 
 import { ingestBatch } from '../canon/ingest.js'
+import {
+  enrichRecord,
+  findLogTarget,
+  isClaudeRequestBodyLog,
+  type OtlpLog,
+} from '../canon/log-ingest.js'
+import { contentRetentionFloorMs } from '../canon/retention.js'
 import { CanonStore } from '../canon/store.js'
 import { canonicalParts, canonicalSessionId } from '../canon/adapters/copilot.js'
 import { observedNamespaces } from '../canon/adapters/quarantine.js'
@@ -278,4 +285,81 @@ export type RenormalizeReport = {
   unchanged: number
   /** Records no adapter claimed; left as they are rather than guessed at. */
   unclaimed: number
+}
+
+/** Metadata key: highest quarantined_logs rowid the relink pass has handled (D5). */
+export const CLAUDE_BODY_RELINK_WATERMARK_KEY = 'claude_body_relink_watermark'
+
+const RELINK_PAGE_SIZE = 100
+
+export type RelinkReport = {
+  /** Quarantined Claude rows read past the watermark. */
+  scanned: number
+  /** Rows relinked to a model call and removed from quarantine. */
+  relinked: number
+}
+
+function isStoredLog(value: unknown): value is OtlpLog {
+  if (typeof value !== 'object' || value === null) return false
+  const log = value as Record<string, unknown>
+  return typeof log.logId === 'string' && typeof log.timestamp === 'string'
+}
+
+/**
+ * Relink Claude Code api_request_body logs the live matcher quarantined before
+ * their model call arrived (D5). Rows above the stored rowid watermark are
+ * matched with the live rule (D11/D13/D20), in log-timestamp order within a
+ * page so the later body wins a contested call. A match enriches the call,
+ * leaves quarantine and is marked enriched; unmatched rows, and rows whose
+ * call is past the content-retention window, stay as evidence. The stored
+ * watermark is the highest rowid of a row that remains after the pass, so a
+ * second run reads nothing it has seen. It deliberately excludes deleted rows:
+ * SQLite reuses the rowid of a deleted top row, so a watermark past it would
+ * hide the next row quarantined into that slot.
+ */
+export function relinkQuarantinedClaudeLogs(
+  store: CanonStore,
+  options: { now: number; /** Payload bytes per page; defaults to the store's cap. */ pageByteBudget?: number },
+): RelinkReport {
+  const cutoffMs = contentRetentionFloorMs(new Date(options.now))
+  let watermark = Number(store.getMetadata(CLAUDE_BODY_RELINK_WATERMARK_KEY) ?? 0)
+  if (!Number.isFinite(watermark)) watermark = 0
+  let scanned = 0
+  let relinked = 0
+  const unreadable: string[] = []
+  let cursor = watermark
+  let survivingMax = watermark
+  for (;;) {
+    const page = store.quarantinedLogsAfter('claude-code', cursor, RELINK_PAGE_SIZE, options.pageByteBudget)
+    if (page.length === 0) break
+    for (const row of page) if (row.unreadable === true) unreadable.push(row.logId)
+    const logs = page
+      .flatMap((row) => (isStoredLog(row.log) ? [row.log] : []))
+      .filter(isClaudeRequestBodyLog)
+      .sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp))
+    const removed = new Set<string>()
+    for (const log of logs) {
+      const record = findLogTarget(store, log)
+      if (record === undefined) continue
+      if (Date.parse(String(record.timestamp)) < cutoffMs) continue
+      enrichRecord(store, record, log)
+      store.deleteQuarantinedLog(log.logId)
+      store.markLogEnriched(log.logId)
+      removed.add(log.logId)
+      relinked += 1
+    }
+    for (const row of page) {
+      if (!removed.has(row.logId)) survivingMax = Math.max(survivingMax, row.rowid)
+    }
+    scanned += page.length
+    cursor = page[page.length - 1]?.rowid ?? cursor
+  }
+  store.setMetadata(CLAUDE_BODY_RELINK_WATERMARK_KEY, String(survivingMax))
+  if (unreadable.length > 0) {
+    // Ids and a count only: the payload is the thing that could not be read.
+    console.warn(
+      `Relink skipped ${unreadable.length} quarantined Claude row(s) with an unreadable payload (kept in quarantine): ${unreadable.slice(0, 10).join(', ')}${unreadable.length > 10 ? ', ...' : ''}`,
+    )
+  }
+  return { scanned, relinked }
 }

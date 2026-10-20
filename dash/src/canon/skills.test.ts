@@ -19,6 +19,7 @@ import { fileURLToPath } from 'node:url'
 
 import { describe, expect, it, vi } from 'vitest'
 
+import { parseClaudeApiRequestBody } from './adapters/claude-code.js'
 import { turn } from './fixtures/records.js'
 import { buildSkillsView, extractInvokedSkills, extractListedSkills } from './skills.js'
 import { contentFromParts, notMeasurable } from './types.js'
@@ -867,5 +868,261 @@ describe('buildSkillsView, not measurable and wording', () => {
 
     expect(JSON.stringify(claudeListingView)).not.toMatch(/waste/i)
     expect(JSON.stringify(piView)).not.toMatch(/waste/i)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Claude request-body listing (D6, D14, D21)
+//
+// Claude Code Desktop writes its skill listing into a `role: "system"` message
+// of the API request body, not into a transcript attachment. The body parser
+// turns that message into a `conversation_history` part, and the role is what
+// separates the sender's reminder from text a user quoted. A listing is read
+// only from system-role parts and system-prompt parts. A body that does not
+// parse yields no parts, so no listing, and the reader never parses partial text.
+// ---------------------------------------------------------------------------
+
+/** The skill-listing reminder as the sender writes it inside a system-role message. */
+const BODY_LISTING_MARKER = 'The following skills are available for use with the Skill tool:'
+const BODY_LISTED = [
+  { name: 'synthetic-skill-alpha', description: 'Synthetic description for alpha.' },
+  { name: 'synthetic-skill-beta', description: 'Synthetic description for beta.' },
+]
+const BODY_LISTING_TEXT = [
+  BODY_LISTING_MARKER,
+  '',
+  ...BODY_LISTED.map((skill) => `- ${skill.name}: ${skill.description}`),
+].join('\n')
+
+/** The T0 Desktop OTLP fixture, sanitized; its `api_request_body` logs carry real request-body structure. */
+const DESKTOP_LOGS_PATH = join(
+  dirname(fileURLToPath(import.meta.url)),
+  '..',
+  'otel',
+  'fixtures',
+  'claude-desktop',
+  'logs.otlp.json',
+)
+
+/** The `api_request_body` log bodies in the T0 Desktop fixture, in file order. */
+function desktopRequestBodies(): string[] {
+  const exported = JSON.parse(readFileSync(DESKTOP_LOGS_PATH, 'utf8')) as {
+    resourceLogs: Array<{
+      scopeLogs: Array<{
+        logRecords: Array<{ attributes: Array<{ key: string; value: { stringValue?: string } }> }>
+      }>
+    }>
+  }
+  return exported.resourceLogs
+    .flatMap((resource) => resource.scopeLogs.flatMap((scope) => scope.logRecords))
+    .map((log) => log.attributes.find((attribute) => attribute.key === 'body')?.value.stringValue)
+    .filter((body): body is string => body !== undefined)
+}
+
+/** The one fixture body that carries the skill-listing reminder, failing by name if it is gone. */
+function desktopListingBody(): string {
+  const body = desktopRequestBodies().find((candidate) => candidate.includes(BODY_LISTING_MARKER))
+  expect(body, 'the T0 fixture should carry one body with the skill listing').toBeDefined()
+  return body!
+}
+
+/** A Claude model-call record whose parts came from a request body, with no transcript listing. */
+function bodyRecord(parts: ContentPart[], over: Partial<CanonicalRecord> = {}): CanonicalRecord {
+  return modelTurn('claude-code', 'body-turn', {
+    source: 'claude-code',
+    sessionId: CLAUDE_SESSION,
+    raw: {},
+    ...withParts(parts),
+    ...over,
+  })
+}
+
+describe('extractListedSkills, Claude request-body listing in a system-role message', () => {
+  it('reads the names and descriptions from a system-role part when no transcript listed the skills', () => {
+    const record = bodyRecord([{ part: 'conversation_history', text: BODY_LISTING_TEXT, role: 'system' }])
+
+    expect(extractListedSkills(record)).toMatchObject({ measurable: true, skills: BODY_LISTED })
+  })
+
+  it.each(['claude-code', 'claude-desktop'])(
+    'reads the body listing for a %s record, which the Claude family covers',
+    (harness) => {
+      const record = bodyRecord([{ part: 'conversation_history', text: BODY_LISTING_TEXT, role: 'system' }], {
+        harness,
+        source: harness,
+      })
+
+      expect(extractListedSkills(record)).toMatchObject({ measurable: true, skills: BODY_LISTED })
+    },
+  )
+
+  it('reads the listing from a system_prompt part that carries the marker', () => {
+    const record = bodyRecord([{ part: 'system_prompt', text: BODY_LISTING_TEXT }])
+
+    expect(extractListedSkills(record)).toMatchObject({ measurable: true, skills: BODY_LISTED })
+  })
+
+  it('reads the listing from the T0 Desktop fixture body, which keeps the sender structure', () => {
+    const record = bodyRecord(parseClaudeApiRequestBody(desktopListingBody()))
+
+    const result = extractListedSkills(record)
+    expect(result).toMatchObject({ measurable: true })
+    const skills = (result as { skills: ListedSkill[] }).skills
+    expect(namesOf(skills)).toEqual(Array.from({ length: 12 }, (_unused, index) => `sanitized-skill-${index + 1}`))
+  })
+
+  it.each(['user', 'assistant'] as const)(
+    'a listing quoted in %s message yields no listing',
+    (role) => {
+      const record = bodyRecord([{ part: 'conversation_history', text: BODY_LISTING_TEXT, role }])
+
+      expect(extractListedSkills(record)).toMatchObject({ availability: 'not_measurable' })
+      expect(extractListedSkills(record)).not.toHaveProperty('skills')
+    },
+  )
+
+  it('reads only the system-role listing when the marker is also quoted in a user message', () => {
+    const quoted = [BODY_LISTING_MARKER, '', '- synthetic-quoted-skill: Quoted by the user.'].join('\n')
+    const record = bodyRecord([
+      { part: 'conversation_history', text: quoted, role: 'user' },
+      { part: 'conversation_history', text: BODY_LISTING_TEXT, role: 'system' },
+    ])
+
+    expect(extractListedSkills(record)).toMatchObject({ measurable: true, skills: BODY_LISTED })
+  })
+
+  it('ignores a marker in a conversation_history part that carries no role', () => {
+    const record = bodyRecord([{ part: 'conversation_history', text: BODY_LISTING_TEXT }])
+    const result = extractListedSkills(record)
+
+    expect(result).toMatchObject({ availability: 'not_measurable' })
+    expect((result as NotMeasurable).reason).toMatch(/skill/i)
+  })
+
+  it('stays not measurable when the marker has no entries after it', () => {
+    const record = bodyRecord([
+      { part: 'conversation_history', text: `${BODY_LISTING_MARKER}\n\n`, role: 'system' },
+    ])
+
+    const result = extractListedSkills(record)
+
+    expect(result).toMatchObject({ availability: 'not_measurable' })
+    expect((result as NotMeasurable).reason).toMatch(/skill/i)
+    expect(result).not.toHaveProperty('skills')
+  })
+
+  it('does not read a system-role marker as a listing for a harness that is not Claude', () => {
+    const parts: ContentPart[] = [{ part: 'conversation_history', text: BODY_LISTING_TEXT, role: 'system' }]
+    const copilot = modelTurn('copilot', 'copilot-body-turn', { source: 'github-copilot', ...withParts(parts) })
+
+    expect(extractListedSkills(copilot)).toMatchObject({ availability: 'not_measurable' })
+  })
+
+  it('a truncated body that cuts the listing short yields no listing and no partial parse', () => {
+    const body = desktopListingBody()
+    const cutAt = body.indexOf('- sanitized-skill-6') + '- sanitized-skill-6'.length
+    const truncated = body.slice(0, cutAt)
+    expect(truncated).toContain(BODY_LISTING_MARKER)
+
+    const parts = parseClaudeApiRequestBody(truncated)
+    expect(parts).toEqual([])
+    expect(extractListedSkills(bodyRecord(parts))).toMatchObject({ availability: 'not_measurable' })
+  })
+
+  it('a transcript listing keeps priority over the body listing', () => {
+    const record = bodyRecord(
+      [{ part: 'conversation_history', text: BODY_LISTING_TEXT, role: 'system' }],
+      {
+        raw: {
+          [LISTED_KEY]: {
+            isInitial: true,
+            skills: [{ name: 'synthetic-transcript-skill', description: 'Listed by the transcript.' }],
+          },
+        },
+      },
+    )
+
+    expect(extractListedSkills(record)).toMatchObject({ measurable: true, skills: [{ name: 'synthetic-transcript-skill' }] })
+  })
+
+  it('feeds the skills view: body-listed skills become listed rows with a derived token count', () => {
+    const record = bodyRecord([{ part: 'conversation_history', text: BODY_LISTING_TEXT, role: 'system' }])
+
+    const view = buildSkillsView([record], [record], {}, characterCount()) as SkillsView
+
+    expect(rowNamed(view, 'synthetic-skill-alpha')).toMatchObject({ listed: true, turnsListed: 1 })
+    expect(rowNamed(view, 'synthetic-skill-alpha').derivedTokens).toBe(BODY_LISTED[0]!.description.length)
+  })
+})
+
+describe('extractListedSkills, request-body entry grammar', () => {
+  const listing = (...lines: string[]): CanonicalRecord =>
+    bodyRecord([{ part: 'conversation_history', text: [BODY_LISTING_MARKER, '', ...lines].join('\n'), role: 'system' }])
+
+  it('keeps a plugin-namespaced name whole and a description that itself contains a colon', () => {
+    const result = extractListedSkills(listing('- plugin:skill-name: Description with: a colon'))
+
+    expect(result).toMatchObject({
+      measurable: true,
+      skills: [{ name: 'plugin:skill-name', description: 'Description with: a colon' }],
+    })
+  })
+
+  it('splits the real namespaced listings on the first colon followed by whitespace', () => {
+    const result = extractListedSkills(
+      listing(
+        '- code-review:code-review: Code review a pull request',
+        '- engineering:debug: Structured debugging session: reproduce, isolate, diagnose',
+      ),
+    )
+
+    expect(result).toMatchObject({
+      skills: [
+        { name: 'code-review:code-review', description: 'Code review a pull request' },
+        { name: 'engineering:debug', description: 'Structured debugging session: reproduce, isolate, diagnose' },
+      ],
+    })
+  })
+
+  it('keeps a name whose internal colon is not followed by whitespace', () => {
+    const result = extractListedSkills(listing('- a:b:c: tail text'))
+
+    expect(result).toMatchObject({ skills: [{ name: 'a:b:c', description: 'tail text' }] })
+  })
+
+  it('reads a name with no description', () => {
+    const result = extractListedSkills(listing('- bare-skill:', '- other: Has one'))
+
+    expect(result).toMatchObject({
+      skills: [{ name: 'bare-skill' }, { name: 'other', description: 'Has one' }],
+    })
+  })
+
+  it('joins an indented continuation line onto the previous description and keeps later entries', () => {
+    const result = extractListedSkills(
+      listing('- first: Starts here', '  and wraps onto a second line', '    and a third', '- second: Plain', '- third: Last'),
+    )
+
+    expect(result).toMatchObject({
+      measurable: true,
+      skills: [
+        { name: 'first', description: 'Starts here and wraps onto a second line and a third' },
+        { name: 'second', description: 'Plain' },
+        { name: 'third', description: 'Last' },
+      ],
+    })
+  })
+
+  it('ends the listing at a blank line, so entries after it are not read', () => {
+    const result = extractListedSkills(listing('- one: First', '- two: Second', '', '- three: After the blank'))
+
+    expect(result).toMatchObject({ skills: [{ name: 'one' }, { name: 'two' }] })
+    expect((result as { skills: unknown[] }).skills).toHaveLength(2)
+  })
+
+  it('ends the listing at an unindented non-entry line', () => {
+    const result = extractListedSkills(listing('- one: First', 'Some other prose', '- two: Not read'))
+
+    expect((result as { skills: unknown[] }).skills).toHaveLength(1)
   })
 })

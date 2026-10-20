@@ -365,6 +365,8 @@ function readListing(record: CanonicalRecord): ListingResult {
   if (raw[ANTIGRAVITY_LISTING_KEY] !== undefined) return readAntigravityListing(record, raw[ANTIGRAVITY_LISTING_KEY])
   const fromPrompt = readSystemPromptListing(record)
   if (fromPrompt !== undefined) return fromPrompt
+  const fromBody = readRequestBodyListing(record)
+  if (fromBody !== undefined) return fromBody
   return notMeasurable(
     `No skill listing source is recorded for harness ${record.harness}: the record carries none of ${SKILLS_LISTED_KEY}, ${COPILOT_LISTING_KEY} or ${ANTIGRAVITY_LISTING_KEY}, so the skills listed are not measurable.`,
   )
@@ -433,6 +435,59 @@ function readSystemPromptListing(record: CanonicalRecord): ListingResult | undef
   const skills = [...xmlDescriptions(text)].map(([name, description]) => listedSkill(record, name, description))
   if (skills.length === 0) return undefined
   return { measurable: true, isInitial: true, skills: uniqueByName(skills) }
+}
+
+/** The marker Claude Code writes before the `- name: description` skill entries. */
+const BODY_LISTING_MARKER = 'The following skills are available for use with the Skill tool:'
+
+/**
+ * The listing a Claude request body carries (D14, D21): from `system_prompt`
+ * parts and system-role `conversation_history` parts only, so text a user or
+ * the assistant quoted, and parts with no recorded role, never count. A body
+ * that did not parse produced no parts, so there is nothing partial to read.
+ */
+function readRequestBodyListing(record: CanonicalRecord): ListingResult | undefined {
+  if (!isClaudeFamily(record) || record.parts === undefined) return undefined
+  for (const part of record.parts) {
+    const eligible = part.part === 'system_prompt' || (part.part === 'conversation_history' && part.role === 'system')
+    if (!eligible) continue
+    const skills = parseBodyListing(record, part.text)
+    if (skills.length > 0) return { measurable: true, isInitial: true, skills: uniqueByName(skills) }
+  }
+  return undefined
+}
+
+/**
+ * The `- name: description` entries that follow the marker. The name is the
+ * non-whitespace run before the first colon that is followed by whitespace or
+ * the end of the line, so a plugin-namespaced `plugin:skill` stays whole and a
+ * description may contain colons. An indented line continues the previous
+ * entry's description (joined with one space); a blank line or any other
+ * unindented non-entry line ends the listing.
+ */
+function parseBodyListing(record: CanonicalRecord, text: string): ListedSkill[] {
+  const at = text.indexOf(BODY_LISTING_MARKER)
+  if (at < 0) return []
+  const entries: Array<{ name: string; description: string }> = []
+  for (const line of text.slice(at + BODY_LISTING_MARKER.length).split('\n')) {
+    const trimmed = line.trim()
+    if (trimmed === '') {
+      if (entries.length > 0) break
+      continue
+    }
+    const last = entries[entries.length - 1]
+    if (last !== undefined && /^\s/.test(line)) {
+      last.description = last.description === '' ? trimmed : `${last.description} ${trimmed}`
+      continue
+    }
+    const entry = /^- (\S+?):(?:\s+(.*))?$/.exec(line.trimEnd())
+    if (entry === null) {
+      if (entries.length > 0) break
+      continue
+    }
+    entries.push({ name: entry[1]!, description: (entry[2] ?? '').trim() })
+  }
+  return entries.map((entry) => listedSkill(record, entry.name, nonEmptyString(entry.description)))
 }
 
 /** Skill names and optional descriptions from the system prompt's `<skill>` XML blocks. */

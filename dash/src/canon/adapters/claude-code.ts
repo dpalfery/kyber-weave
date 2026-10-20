@@ -98,14 +98,16 @@ export function parseClaudeApiRequestBody(body: unknown): ContentPart[] {
     for (const message of request.messages) {
       if (message === null || typeof message !== 'object') continue
       const content = (message as Record<string, unknown>).content
+      const role = messageRole((message as Record<string, unknown>).role)
+      const withRole = (part: ContentPart): ContentPart => (role === undefined ? part : { ...part, role })
       if (typeof content === 'string') {
-        parts.push({ part: 'conversation_history', text: content })
+        parts.push(withRole({ part: 'conversation_history', text: content }))
         continue
       }
       if (!Array.isArray(content)) {
         // A message with no readable content list is still turn evidence;
         // mirror copilot.ts and keep the whole message verbatim.
-        parts.push({ part: 'conversation_history', text: JSON.stringify(message) })
+        parts.push(withRole({ part: 'conversation_history', text: JSON.stringify(message) }))
         continue
       }
       for (const block of content) {
@@ -113,14 +115,21 @@ export function parseClaudeApiRequestBody(body: unknown): ContentPart[] {
         const blockRecord = block as Record<string, unknown>
         const text = contentBlockText(blockRecord)
         if (text === undefined) continue
-        parts.push({
-          part: blockRecord.type === 'tool_result' ? 'tool_result_content' : 'conversation_history',
-          text,
-        })
+        parts.push(
+          withRole({
+            part: blockRecord.type === 'tool_result' ? 'tool_result_content' : 'conversation_history',
+            text,
+          }),
+        )
       }
     }
   }
   return parts
+}
+
+/** The message role when it is one of the three the API defines; anything else is no role. */
+function messageRole(value: unknown): ContentPart['role'] {
+  return value === 'system' || value === 'user' || value === 'assistant' ? value : undefined
 }
 
 /**

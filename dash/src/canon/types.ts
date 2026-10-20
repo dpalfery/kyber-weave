@@ -130,6 +130,8 @@ export type ContentPart = {
   tokens?: number
   /** Ground-truth MCP server; `tool_definitions` parts only. */
   server?: string
+  /** Role of the request-body message this part came from; absent for top-level parts and role-less messages. */
+  role?: 'system' | 'user' | 'assistant'
   /** Position within the turn, so ordering survives a store round trip. */
   order?: number
 }

@@ -1501,6 +1501,9 @@ export type FindingsListOptions = {
   harness?: string
 }
 
+/** Payload bytes one quarantine page may hold; bounds startup memory for the relink pass. */
+const DEFAULT_QUARANTINE_PAGE_BYTES = 16 * 1024 * 1024
+
 export class CanonStore {
   private readonly db: Database
   private readonly upsertStatement: StatementSync
@@ -2110,6 +2113,46 @@ export class CanonStore {
   }
 
   /**
+   * Every `claude-code` model call (`llm.invoke`) in one trace. This is the
+   * candidate set for correlating a Claude request-body log that is stamped
+   * with a parent span rather than the call itself (D11); it reads through
+   * the `trace_id` index and never scans the table.
+   */
+  claudeModelCallsInTrace(traceId: string): CanonicalRecord[] {
+    const rows = this.db
+      .prepare("SELECT * FROM records WHERE trace_id = ? AND harness = 'claude-code' AND op = 'llm.invoke'")
+      .all(traceId) as RecordRow[]
+    return rows.map(toRecord)
+  }
+
+  /**
+   * Every `claude-code` model call in one session — the candidate set for a
+   * Claude request-body log that carries no trace id (D13). Reads through the
+   * `session_id` index.
+   */
+  claudeModelCallsInSession(sessionId: string): CanonicalRecord[] {
+    const rows = this.db
+      .prepare("SELECT * FROM records WHERE session_id = ? AND harness = 'claude-code' AND op = 'llm.invoke'")
+      .all(sessionId) as RecordRow[]
+    return rows.map(toRecord)
+  }
+
+  /**
+   * Store one entry under a key of a record's `raw` object without rewriting
+   * the rest of the row. A record with no `raw` gets a fresh object; a `raw`
+   * that is not a plain object is left alone and the call reports `false`.
+   */
+  setRawEntry(spanId: string, key: string, value: unknown): boolean {
+    const existing = this.get(spanId)
+    if (existing === undefined) return false
+    const raw: unknown = existing.raw
+    if (raw !== undefined && (typeof raw !== 'object' || raw === null || Array.isArray(raw))) return false
+    const next = { ...(raw as Record<string, unknown> | undefined), [key]: value }
+    this.db.prepare('UPDATE records SET raw = ? WHERE span_id = ?').run(compressRaw(next), spanId)
+    return true
+  }
+
+  /**
    * Find the nearest record in a session, bounded to avoid accidental joins.
    * `op` narrows the candidate set: the log-correlation fallback is only
    * allowed to land on a model call (R7) — an unfiltered nearest pick hands
@@ -2226,6 +2269,49 @@ export class CanonStore {
     // exposed beside the payload rather than written back into it.
     if (typeof row.harness === 'string') entry.harness = row.harness
     return entry
+  }
+
+  /**
+   * Quarantined logs tagged with `harness` whose rowid is above `afterRowid`,
+   * lowest rowid first, at most `limit`. The rowid is the insertion cursor a
+   * one-shot pass stores so it never re-reads rows it has already passed.
+   *
+   * A page stops once `maxPayloadBytes` of payload have been read, but always
+   * holds at least one row so a single oversized payload cannot stall the
+   * cursor. Sizes are read first, so a row past the cap is never loaded. A
+   * payload that does not parse is returned flagged `unreadable` rather than
+   * thrown or dropped: the caller must still move its cursor past it, and a
+   * throw here would pin the cursor below every later row.
+   */
+  quarantinedLogsAfter(
+    harness: string,
+    afterRowid: number,
+    limit: number,
+    maxPayloadBytes: number = DEFAULT_QUARANTINE_PAGE_BYTES,
+  ): { rowid: number; logId: string; log: unknown; unreadable?: true }[] {
+    const sizes = this.db
+      .prepare('SELECT rowid AS rowid, log_id, LENGTH(CAST(payload AS BLOB)) AS bytes FROM quarantined_logs WHERE harness = ? AND rowid > ? ORDER BY rowid LIMIT ?')
+      .all(harness, afterRowid, limit) as { rowid: number; log_id: string; bytes: number }[]
+    const readPayload = this.db.prepare('SELECT payload FROM quarantined_logs WHERE rowid = ?')
+    const page: { rowid: number; logId: string; log: unknown; unreadable?: true }[] = []
+    let total = 0
+    for (const size of sizes) {
+      if (page.length > 0 && total + size.bytes > maxPayloadBytes) break
+      total += size.bytes
+      const row = readPayload.get(size.rowid) as { payload: string } | undefined
+      if (row === undefined) continue
+      try {
+        page.push({ rowid: size.rowid, logId: size.log_id, log: JSON.parse(row.payload) as unknown })
+      } catch {
+        page.push({ rowid: size.rowid, logId: size.log_id, log: undefined, unreadable: true })
+      }
+    }
+    return page
+  }
+
+  /** Remove one quarantined log, for example once it has been correlated. */
+  deleteQuarantinedLog(logId: string): void {
+    this.db.prepare('DELETE FROM quarantined_logs WHERE log_id = ?').run(logId)
   }
 
   quarantinedLogCount(): number {

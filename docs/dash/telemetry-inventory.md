@@ -4,7 +4,7 @@ title: Telemetry inventory — harness signal and content availability
 doc-type: reference
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-16
+last-reviewed: 2026-10-19
 ---
 
 # Telemetry inventory — verified harness signal and content availability
@@ -26,7 +26,8 @@ filter. A Gemini selector **label** may remain in the UI.
 `POST /v1/logs`. Non-model spans are quarantined at ingest and cannot create derived
 sessions. A log correlates by `(trace_id, span_id)`, then by session and bounded timestamp
 window; it enriches one existing span-shaped record, is idempotent, and is quarantined if
-it remains unmatched. These are the durable decisions in [ADR 0009](../adr/0009-multi-signal-ingestion-span-shaped-record.md).
+it remains unmatched. Claude Code request-body logs follow a stricter rule, described in
+[Claude request-body correlation](#claude-request-body-correlation). These are the durable decisions in [ADR 0009](../adr/0009-multi-signal-ingestion-span-shaped-record.md).
 The Context **view** contract — ASAD only, payload from `canon.db`, harnesses in scope with
 reasons rather than zeros — is [ADR 0011](../adr/0011-asad-only-context-view-and-payload-contract.md).
 That view is reached from the **Sessions** rail, not a Context tab.
@@ -45,7 +46,7 @@ Values are never summed across the two sources. `KyberBridge` reads `canon.db` o
 | Copilot Chat | Content-enabled OTLP capture maps observed system instructions, messages, rules, skills, tool definitions, tool results, and session identity into canonical buckets. Input-message normalization separates input text from response envelopes without negative residuals. | Observed per-server schema availability remains source-dependent. |
 | Copilot CLI | SQLite ingest preserves its reported ASAD taxonomy, including `context_*_tokens` and `context_tier`. Persisted harness id is `copilot-cli`, not collapsed into `copilot`. | Omitted reported buckets remain unavailable rather than zero. |
 | Copilot VS Code | Native journal request replay into input-side `ReaderTurn` snapshots keyed by native request id via `copilotVscodeReader`. Reconstructs instructions and user message while excluding current model output from input context. | Window and pressure measured; unobserved buckets explicit `null` with reason. |
-| Claude Code (`claude-cli`, `claude-desktop`, `claude-code`) | Enhanced-telemetry counters; live OTLP content from the interaction span's `user_prompt` and the `api_request_body` log (see [Claude Code OTLP content (live)](#claude-code-otlp-content-live)); plus JSONL conversation and tool-result parts on file-synth (`synth:`) records when the Claude content reader is paired at ingest ([issue #216](https://github.com/dpalfery/kyber-weave/issues/216)). | `instruction_context` and `schema_cost` stay not measurable. Session files never carry `system_prompt` or `tool_definitions`; only the OTLP request body supplies those two. See [Claude Code OTLP content (live)](#claude-code-otlp-content-live) and [Claude Desktop and CLI file-synth parts](#claude-desktop-and-cli-file-synth-parts-issue-216). |
+| Claude Code (`claude-cli`, `claude-desktop`, `claude-code`) | Enhanced-telemetry counters; live OTLP content from the interaction span's `user_prompt` and the `api_request_body` log (see [Claude Code OTLP content (live)](#claude-code-otlp-content-live)); plus JSONL conversation and tool-result parts on file-synth (`synth:`) records when the Claude content reader is paired at ingest ([issue #216](https://github.com/dpalfery/kyber-weave/issues/216)). | `instruction_context` and `schema_cost` stay not measurable. Session files never carry `system_prompt` or `tool_definitions`; only the OTLP request body supplies those two, and it supplies `tool_definitions` only when the sender exported a `tools` array (sub-agent calls in Desktop). See [Claude Code OTLP content (live)](#claude-code-otlp-content-live) and [Claude Desktop and CLI file-synth parts](#claude-desktop-and-cli-file-synth-parts-issue-216). |
 | Codex | Dot-folder ingestion supplies the system prompt, instructions, conversation, tool results, and context window contained in rollout data. | Availability is limited to fields the source actually supplies. |
 | Codex OTLP (collector path) | Codex exports logs and spans only when the owner points its exporters at the collector. `codexAdapter` claims spans by fingerprint (`codex.*` namespace plus `gen_ai.usage.*`), never by `service.name` (`codex_cli_rs`, `codex_exec`, `codex-app-server`), so records are harness `codex` without a CLI/exec/app-server split. Sessions correlate on `conversation.id`. Only an allowlist (`model`, `slug`, `conversation.id`, `event.timestamp`, `gen_ai.usage.*`, `codex.usage.*`) is persisted; prompts, tool arguments/output, `user.email` and account ids are dropped. The adapter assumes cache-inclusive input; an exclusive payload fails validation with a negative fresh input instead of being miscounted. `model` is absent on the `handle_responses` span, so such a record has no model until log enrichment is built. | Owner-capture gates before production use of this path: (1) the exported span name of `handle_responses`, (2) whether log records carry `trace_id`/`span_id`, (3) the token convention. |
 | pi | Reader support is implemented and respects OTLP/file source precedence. | No current live collection claim is made. |
@@ -166,6 +167,109 @@ the sender sent until you wipe the `claude-code` harness or the whole database
 [ADR 0035](../adr/0035-kyberdash-quarantine-raw-packet-evidence.md)). The 14-day window is not
 "all prompt text expires" — raw packets outlive it by design.
 
+### Claude request-body correlation
+
+Claude Code logs its `api_request_body` event when a model request starts, but exports the
+`llm_request` span only when the request ends. The body therefore usually arrives first. The
+log also carries the parent span that was active when it was logged, not the call's own span:
+`claude_code.interaction` for a main-thread call, or `claude_code.tool.execution` when the call
+follows a tool call. Sub-agent `llm_request` records are children of `claude_code.tool.execution`
+and start about 115 ms after it ends. Correlation therefore scopes by **trace** (or by session,
+for a body with no trace id), not by parent span. Desktop model-call records are harness
+`claude-code`, so the existing enrichment gate admits them.
+
+The rule, in order:
+
+1. **Exact span.** A body whose `(traceId, spanId)` names a record enriches that record. The
+   Desktop capture never takes this path (0 of 3,413 trace-bearing bodies at the 2026-10-19
+   snapshot); the CLI shape does.
+2. **Trace-scoped nearest start.** Otherwise the candidates are the `claude-code` `llm.invoke`
+   records in the body's trace. A candidate qualifies when its start is within **2 seconds** of
+   the body's timestamp **and** the call had not ended when the body was logged (the body's
+   timestamp is no later than the start plus `durationMs`). The **nearest start** wins. A tie, or
+   no candidate, leaves the body pending. A call that ended before the body is never chosen, so
+   a body waits for its own call instead of attaching to an earlier one.
+3. **Session scope for context-free bodies.** A body with no trace id but with a `session.id`
+   uses the same rule over the session's `llm.invoke` records. The receiver reads the session key
+   from `session.id` as well as `session_id`, so both shapes populate it.
+4. **Pending.** A pending body is retried after every span batch and on the service's reconcile
+   timer. A Claude request-body log waits up to **15 minutes** (`CLAUDE_REQUEST_BODY_PENDING_TTL_MS`);
+   every other log keeps the 5-second default. On expiry a body that never matched is quarantined as
+   "identified log remained unmatched past pending expiry". A body with no trace id, no span id, and
+   no session id quarantines at once, because nothing can ever scope a match for it. A context-free
+   body that names a session always pends for the full window (rule 3), whatever records the session
+   holds.
+5. **One body per record: the later body wins.** A record that already holds a body stays a
+   candidate. When a second body matches it, the body with the **later log timestamp** supplies
+   the record's body-derived parts (the same per-bucket merge as before). The earlier body is
+   marked enriched as superseded and applies no parts. Neither body waits or is quarantined.
+   Arrival order does not matter; the comparison is by log timestamp. The claim (`logId`, the log
+   timestamp, and `request_body_id` when present) is kept in the record's `raw` under
+   `kyber.claude_request_body`.
+
+**Measured at the 2026-10-19 snapshot** (3,413 trace-bearing body logs): 3,398 (99.56%) resolve to
+a unique nearest candidate; no ties; 15 have no candidate; 0 resolve to a call that had already
+ended. A body is logged 1 ms after its call's start at the median and 7 ms at p95 (maximum 717 ms),
+never before it. Across all 3,456 body logs, including the 43 context-free ones, 98.32% resolve.
+
+### Tool definitions and skill listings from request bodies
+
+**Tool definitions.** Claude Code exports a `tools` array only in some bodies. In the snapshot,
+265 of the parseable bodies (7.8% of all body logs) carry one, and they are sub-agent calls. The
+rest, including every main-thread body, do not.
+
+- A parseable body with a `tools` array yields `tool_definitions` parts, one per tool, with the
+  `server` when the sender named it.
+- A parseable body with no `tools` array declares `tool_definitions` **not measurable**, with the
+  reason "This Claude Code request body carried no tools array, so the sender did not export tool
+  definitions for this call." The turn inspector shows that reason. It never shows an empty list,
+  because an empty list would claim the call had no tools.
+- A later body for the same record that does carry `tools` clears that declaration.
+- A later body that wins over an earlier claimed body replaces the record's `tool_definitions`
+  parts even when it has no `tools` array, so the earlier body's tools cannot hide the reason. Parts
+  carry no source marker, so a `tool_definitions` part that came from the span is dropped in that
+  replacement too (see accepted residuals).
+- A body that does not parse yields the body-failure reason instead (see accepted residuals).
+
+**Skill listings.** Claude Code writes its skill listing into a `role: "system"` message: the line
+"The following skills are available for use with the Skill tool:", a blank line, then `- name:
+description` entries. The body parser keeps that text as a `conversation_history` part and records
+the message role on the part ([message role on content parts](architecture.md#message-role-on-content-parts)).
+The skills reader takes a listing from a body only when all of the following hold:
+
+- The record has no transcript listing. A recorded `skills_listed` wins, then the Copilot,
+  Antigravity, and system-prompt readers run before the body reader.
+- The text is a `system_prompt` part, or a `conversation_history` part from a `system` message.
+  Text a user or the assistant quoted is ignored, and so are parts from messages with no recorded
+  role.
+- The entries parse: they are read from the marker to the first non-entry line after them.
+
+The listing is treated as initial, so it replaces the session's effective list. Claude Code sends a
+listing when it is (re)issued, and the session-level merge carries it across that session's later
+turns. A body cut at the sender's size limit does not parse, so it yields no listing. Stored parts
+written before the role field existed carry no role and are ignored, so a record enriched before
+this change shows no body listing until its body is enriched again. The startup relink does that
+for quarantined bodies ([runbook §2i](runbook.md#2i-claude-request-body-relink-and-quarantined-count)).
+
+### Accepted residuals
+
+Counts from the 2026-10-19 store snapshot. They grow with use, so the owner check reports the
+current figures on the day it runs.
+
+- 3,456 body logs, all quarantined before the fix: 3,413 with a trace id and 43 without.
+- 3,599 `claude-code` `llm.invoke` records.
+- 265 parseable bodies with a `tools` array.
+- 308 bodies with the skill listing: 269 parseable and 39 truncated.
+
+| Residual | Size | Handling |
+|---|---|---|
+| A trace-bearing body with no call starting within 2 s | 15 of 3,413 (0.44%) | Waits the 15-minute TTL, then quarantines with the existing reason. The relink leaves it quarantined. The window is not widened: the nearest same-trace call is 3 to 53 s away, past the roughly 3-second call spacing, so a wider window would attach the body to the wrong call. The raw body stays in `quarantined_logs` as evidence. |
+| A context-free body with a session id and no call within 2 s in its session | None of the 43 context-free bodies in the snapshot lacked a unique nearest call. | Pends the full 15-minute window, then quarantines with the existing reason. A tool invocation is never a candidate, so a tool record neither claims the body nor shortens the wait. A body with no trace, span, or session id quarantines at once. |
+| A later body that replaces an earlier claimed body and has no `tools` array | Count not measured. | The record's `system_prompt` and `tool_definitions` parts are replaced, so the turn shows the not-measurable reason rather than the earlier body's tools. A span-sourced `tool_definitions` part is dropped too, because parts carry no source marker. |
+| A body cut at the sender's size limit (near 1 MB) | 39 of the 308 listing-bearing bodies, the only truncated subset counted | Does not parse, so it yields no parts, no listing, and no tool definitions. The reason names `CLAUDE_CODE_OTEL_CONTENT_MAX_LENGTH`. The raw packet is kept. |
+| A later body that is a side request rather than a retry | 50 records are the nearest match for two bodies | The later body wins. This is one comparison, and it is cheap to reverse if the wrong body shows. |
+| Quarantined rows left by the one-time startup relink | Rows that were unmatched, tied, older than the 14-day window, or whose stored payload does not parse, at that pass | They stay quarantined, and a later start does not retry them, because the watermark moves past them ([runbook §2i](runbook.md#2i-claude-request-body-relink-and-quarantined-count)). |
+
 ### Enabling Claude Code content on the sender (Q2)
 
 KyberDash does not apply these settings automatically; they are the sender's opt-in, and the
@@ -218,8 +322,8 @@ payload contract are in the [skills view contract](architecture.md#skills-view-c
 
 | Harness | Listed | Invoked | Enabling settings and sources | G0 verification (2026-10-13) |
 |---|---|---|---|---|
-| Claude Code (`claude-code`, `claude-cli`) | **Measured.** An `attachment` entry of type `skill_listing` in the session transcript JSONL (`~/.claude/projects/*/*.jsonl`) with `content` (`- name: description` lines), `skillCount`, `isInitial`, and `names[]`. The Claude transcript parser reads it through `dash/src/ingest/skill-listing.ts` (both the normal and large-line paths) into the raw attribute `kyber.skills.listed` (`{isInitial, skills: [{name, description?}]}`). An initial listing replaces the effective list; a later non-initial listing unions into it. | **Measured.** Assistant `tool_use` blocks named `Skill`, from `input.skill`, plus the stored `kyber.skills.invoked` attribute. | No sender setting. The data is read from the transcript by `dash refresh`, a file source. The Claude parser contract is `7` (`CLAUDE_PARSER_CONTRACT_VERSION` in `dash/src/refresh/registry.ts`). Descriptions survive the 14-day content purge because they are kept in raw attributes. | **Verified** from real transcripts on the owner's machine. Fixture: `dash/src/canon/fixtures/skills/claude-code/`. |
-| Claude Desktop (`claude-desktop`) | Not separately verified. It shares the Claude JSONL path, but no `skill_listing` was checked in a Desktop transcript. | Same extraction as Claude Code, if the transcript carries `Skill` calls (not separately verified). | As Claude Code, from the transcript. | **Unverified** for the listing. |
+| Claude Code (`claude-code`, `claude-cli`) | **Measured.** An `attachment` entry of type `skill_listing` in the session transcript JSONL (`~/.claude/projects/*/*.jsonl`) with `content` (`- name: description` lines), `skillCount`, `isInitial`, and `names[]`. The Claude transcript parser reads it through `dash/src/ingest/skill-listing.ts` (both the normal and large-line paths) into the raw attribute `kyber.skills.listed` (`{isInitial, skills: [{name, description?}]}`). An initial listing replaces the effective list; a later non-initial listing unions into it. When the transcript records no listing, the listing is read from the OTLP request body (see [tool definitions and skill listings](#tool-definitions-and-skill-listings-from-request-bodies)). | **Measured.** Assistant `tool_use` blocks named `Skill`, from `input.skill`, plus the stored `kyber.skills.invoked` attribute. | No sender setting. The data is read from the transcript by `dash refresh`, a file source. The Claude parser contract is `7` (`CLAUDE_PARSER_CONTRACT_VERSION` in `dash/src/refresh/registry.ts`). Descriptions survive the 14-day content purge because they are kept in raw attributes. | **Verified** from real transcripts on the owner's machine. Fixture: `dash/src/canon/fixtures/skills/claude-code/`. |
+| Claude Desktop (`claude-desktop`) | **Measured from the OTLP request body** when the body carries the listing, and from the transcript when one is recorded (the transcript wins). Desktop model-call records are harness `claude-code`, so the body path applies to those records. The `claude-desktop` transcript path was not separately checked for a `skill_listing`. | Same extraction as Claude Code, if the transcript carries `Skill` calls (not separately verified). | As Claude Code: the transcript, or the request body. | **Body-sourced listing verified** on the 2026-10-19 store snapshot (308 bodies carry it). Not yet confirmed on a live turn (plan T8). Transcript listing still unverified. |
 | GitHub Copilot (`copilot`, source `github-copilot`) | **Measured** on `invoke_agent` spans from `github.copilot.context.skills`, a JSON-array string of names. This key is not `gen_ai.skills`. Descriptions come from the `<available_skills>` block in the system-prompt part, when that part is stored. A listing on a rollup `invoke_agent` applies to the turns directly under it. VS Code Copilot records no listing key; its listing is read from the `<skills>` block in the system-prompt part instead, and a prompt with no such block stays not measurable. | **Not measurable** unless a `skill` tool record exists. None exists in the owner's store, which holds only `view`, `task`, `bash`, and `edit` tool spans. | OTLP capture from Copilot ([in-app enablement](#in-app-collection-enablement)). Descriptions need the system-prompt part stored, which the content-enabled capture described in the Copilot Chat row provides. | **Verified** for the listing (one real `invoke_agent` span). Invocation is not measurable in the owner's store. Fixture: `dash/src/canon/fixtures/skills/copilot-chat/`. |
 | Copilot CLI (`copilot-cli`) | **Not separately verified.** The local store records Copilot CLI and Copilot Chat under the same `github-copilot` source, so they cannot be told apart there. The `events.jsonl` skill-request excerpt was not searched. | **Not separately verified.** It follows the Copilot rule above: not measurable unless a `skill` tool record exists. | Shares the Copilot OTLP and file sources above. | **Unverified** as a separate harness. Fixture README: `dash/src/canon/fixtures/skills/copilot-cli/`. |
 | Antigravity (`antigravity`) | **Measured** on `llm.invoke` spans. `gen_ai.skills` is one string, `Active Skills: a, b, ...`. The harness-reported `gen_ai.usage.skill_tokens` gives the per-turn resident size, which was identical on every turn in the owner's data. | **Not measurable.** No activation record exists in the store. | OTLP spans claimed by `antigravityAdapter` (see [Verified harness outcomes](#verified-harness-outcomes)). No separate skill setting was identified. | **Verified** for the listing (one real `llm.invoke` span). Invocation is not measurable. Fixture: `dash/src/canon/fixtures/skills/antigravity/`. |
@@ -236,7 +340,7 @@ the measured none described in the [skills view contract](architecture.md#skills
 
 **Listing precedence (Claude Code).** An initial `skill_listing` (`isInitial: true`) replaces the
 effective list for the session. A later non-initial listing is unioned into it. A skill's
-description is the first one observed in the session.
+description is the first one observed in the session. A listing read from a request body is used only when the record has no transcript listing.
 
 **Parser contracts.** The Claude family, Codex, Pi, Copilot, Kilo, OpenCode, Cline CLI,
 CodeWhale, OpenClaude, and DSH were bumped for the skill extraction. The current values are in
@@ -362,7 +466,7 @@ per-server schema bands.
    for one Claude Code process (no settings-file edit) and capture one `api_request_body`
    event, to verify the [Claude Code OTLP content](#claude-code-otlp-content-live) path against
    a live sender — and to record its `LogRecord.body`, attribute keys, scope name, and whether
-   `body_truncated` fired. Until then that section is **[NOT LIVE-VERIFIED]**, and live
+   `body_truncated` fired. Until then that section, including the [request-body correlation](#claude-request-body-correlation) and its tool-definition and skill-listing reads, is **[NOT LIVE-VERIFIED]** until the owner check in plan T8 runs, and live
    ground-truth per-server schema enrichment remains unverified.
 2. Register `codeburn kyber cursor-hook` alongside the owner's existing Cursor hooks and
    execute one turn. This repository does not edit `~/.cursor/hooks.json`.

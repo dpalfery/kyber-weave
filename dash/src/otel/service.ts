@@ -15,6 +15,7 @@ import {
   reconcileExpiredPending,
 } from '../canon/log-ingest.js'
 import type { CanonicalRecord } from '../canon/types.js'
+import { relinkQuarantinedClaudeLogs } from '../tools/backfill.js'
 
 /**
  * @deprecated Superseded by `ingestBatch`, which puts a span through the
@@ -103,6 +104,18 @@ export async function startOtlpCollectorService(opts: CollectorOptions = {}): Pr
   mkdirSync(dirname(dbPath), { recursive: true })
 
   const canon = new CanonStore(dbPath)
+
+  // One-time relink of Claude request bodies quarantined before their model
+  // call arrived (D5). A failure is logged and never stops the service.
+  try {
+    const startedAt = Date.now()
+    const report = relinkQuarantinedClaudeLogs(canon, { now: startedAt })
+    console.log(chalk.dim(
+      `[${new Date().toLocaleTimeString()}] Relinked ${report.relinked} of ${report.scanned} quarantined Claude request bodies in ${Date.now() - startedAt} ms`,
+    ))
+  } catch (err) {
+    console.error(chalk.red('[relink] quarantined Claude body relink failed; service continues:'), err)
+  }
 
   // Canonical projection (plan T20 → T21): accepted live work must reach the
   // same derived-session cache static refresh builds, so the collector owns

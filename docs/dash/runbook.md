@@ -6,13 +6,14 @@ status: current
 component: KyberDash
 source-root: dash
 owner: dpalfery
-last-reviewed: 2026-10-16
+last-reviewed: 2026-10-19
 code-refs:
   - registerKyberCommands
   - refreshHarnessSources
   - purgeExpiredContent
   - runTranscriptSync
   - formatSessionTitle
+  - relinkQuarantinedClaudeLogs
 ---
 
 # KyberDash runbook — Local development, execution, and testing
@@ -553,6 +554,72 @@ job (`dash/src/sync/transcript-sync.ts`):
   the sync job runs exclusively inside the CLI engine's `JobHost` under `kyberdash web`. The tray and
   the web dashboard contain no job runners or schedulers; they query the resulting sessions and rollups
   via `/api/kyber/*`.
+
+### 2i. Claude request-body relink and quarantined count
+
+Before the request-body correlation fix, a Claude Code `api_request_body` log that arrived before
+its model call was quarantined and never reconnected. The rule that now matches it is described in
+the [architecture](architecture.md#claude-request-body-log-correlation) and the
+[telemetry inventory](telemetry-inventory.md#claude-request-body-correlation).
+
+**What runs on start.** When the OTLP collector service starts (the receiver that `kyberdash web`
+hosts, or `kyberdash otel`), it runs `relinkQuarantinedClaudeLogs` once, after the store opens. The pass:
+
+- reads the `quarantined_logs` rows with `harness = 'claude-code'` above the watermark, in log
+  timestamp order, and applies the same matcher as the live path;
+- on a match, enriches the record, removes the quarantined row, and marks the log enriched;
+- skips a body whose matched record is older than the 14-day content window. Its row stays
+  quarantined, because the content it would attach has already been purged;
+- leaves unmatched, tied, and skipped rows in quarantine;
+- prints one line, `Relinked N of M quarantined Claude request bodies in T ms`. A failure is logged and
+  does not stop the service.
+
+**Startup cost.** The pass is synchronous and runs once per start, before the receiver accepts traffic.
+It reads quarantined rows in bounded pages: at most 100 rows and 16 MiB of stored payload per page. A
+page always holds at least one row, so one oversized payload cannot stall the pass, and memory stays
+flat however large the quarantine is. A store with a large backlog pays one scan; later starts scan
+nothing past the watermark. The elapsed time is in the `Relinked N of M ... in T ms` line. A
+quarantined row whose stored payload is not valid JSON is skipped and kept in quarantine. The pass
+prints one warning per start with the count and up to ten log ids, never the payload. The skip does
+not stop the pass, and the watermark still moves past such a row, so later starts do not retry it.
+
+**The watermark.** The pass stores the highest rowid it left in quarantine in `metadata` under
+`claude_body_relink_watermark` (never lower than the previous value). A later start scans only rows
+above it, so a row the pass left in quarantine is **not retried by later starts**. The live path
+handles bodies that arrive while the service runs, and it does not re-match rows already in
+quarantine. No shipped command resets the watermark.
+
+**Checking the quarantined count.** Snapshot the store first, so the query does not read a live WAL
+database (the same method the T0 measurement used):
+
+```bash
+sqlite3 ~/.kyberdash/canon.db ".backup /path/to/canon-copy.db"
+
+# Quarantined Claude request bodies, and why they were left there
+sqlite3 /path/to/canon-copy.db "SELECT reason, COUNT(*) FROM quarantined_logs WHERE harness = 'claude-code' GROUP BY reason;"
+
+# Bodies still waiting for a call
+sqlite3 /path/to/canon-copy.db "SELECT COUNT(*) FROM pending_logs WHERE harness = 'claude-code';"
+
+# The relink watermark (absent before the first pass)
+sqlite3 /path/to/canon-copy.db "SELECT value FROM metadata WHERE key = 'claude_body_relink_watermark';"
+```
+
+The per-reason counts are also in the Status panel and in `GET /api/kyber/coverage`. After a restart
+with a healthy sender, expect the count to fall to the accepted residual: about 0.44% of trace-bearing
+body logs, plus any context-free body that carries no session id, which quarantines at once. A
+context-free body that names a session pends for the 15-minute window and is counted only if it
+outlasts it. Bodies older than the 14-day window stay quarantined, so a store with older history keeps
+a higher count. This is expected, not a fault.
+
+**Derived session rows.** The relink changes stored records, not the derived session rows (the session
+payload, which includes the Skills view). Those are rebuilt by a projection: a `dash refresh`, an
+accepted OTLP batch, or a manual build. If a session still shows no skill listing after a restart,
+run the build against the store:
+
+```bash
+node dash/dist/cli.js kyber build --db ~/.kyberdash/canon.db
+```
 
 ### 3. Raw Content Backfill and Re-normalization
 

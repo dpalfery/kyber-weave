@@ -4,7 +4,7 @@ title: Kyber-Weave Plan Inventory
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-18
+last-reviewed: 2026-10-19
 ---
 
 # Kyber-Weave Plan Inventory
@@ -27,7 +27,9 @@ Closeout explicitly distinguishes between two waiver categories:
 
 ## Active Plans
 
-No active plans.
+| Plan | Status | Date | Goal |
+|---|---|---|---|
+| [2026-10-19-claude-desktop-request-body-correlation.md](2026-10-19-claude-desktop-request-body-correlation.md) | Review required (T0–T7 complete; T8 owner live check open; not archived, see plan §9) | 2026-10-19 | Correlate Claude Code Desktop `api_request_body` logs (stamped on the quarantined interaction or tool-execution span, arriving before the `llm_request` span) to exactly one `claude-code` `llm.invoke` record by nearest model-call start within 2 s in the trace (session-scoped for context-free logs), excluding calls that ended before the body, fix the receiver `session.id` key, extend the Claude body pending TTL, relink the quarantined backlog once at service start, and read Claude skill listings from the request body, so the turn inspector shows system prompt, tools, and skills as it does for Pi and Copilot. Development mode: test-first. Autonomy: autonomous. |
 
 Earlier history: pipeline T9 and spine S-docs harvested 2026-09-13 into [dash/architecture.md](../dash/architecture.md), [dash/runbook.md](../dash/runbook.md), [dash/telemetry-inventory.md](../dash/telemetry-inventory.md), [ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md), and [ADR 0018](../adr/0018-kyberdash-content-retention-purge.md). ADRs 0012–0015 remain the spine harvest (0014 notes that `kyber purge-content` was not shipped). Residual risks (T8 live-source coverage, findings client-side harness filter) live on the archived plans — they are not shipped claims.
 

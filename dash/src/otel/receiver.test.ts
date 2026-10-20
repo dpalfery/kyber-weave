@@ -664,6 +664,77 @@ describe('OtlpReceiver log signal (ADR 0009)', () => {
   })
 })
 
+/**
+ * Claude Code sends the conversation under `session.id`. The receiver read only
+ * `session_id`, so every log's sessionId was null and the session-time fallback
+ * was dead (D4). Both encodings read the same key, so both are pinned.
+ */
+describe('OtlpReceiver session identity key (D4)', () => {
+  function jsonLogWithAttributes(attributes: readonly (readonly [string, string])[]): string {
+    return JSON.stringify({
+      resourceLogs: [
+        {
+          resource: { attributes: [{ key: 'service.name', value: { stringValue: 'claude-code-desktop' } }] },
+          scopeLogs: [
+            {
+              scope: { name: 'com.anthropic.claude_code.events' },
+              logRecords: [
+                {
+                  timeUnixNano: '1756478400123456789',
+                  traceId: TRACE_ID,
+                  spanId: ROOT_SPAN_ID,
+                  body: { stringValue: 'claude_code.api_request_body' },
+                  attributes: attributes.map(([key, value]) => ({ key, value: { stringValue: value } })),
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    })
+  }
+
+  function protobufLogWithAttributes(attributes: readonly (readonly [string, string])[]): Uint8Array {
+    const resource = pbLengthDelimited(
+      1,
+      pbKeyValue({ key: 'service.name', value: { t: 'string', v: 'claude-code-desktop' } }),
+    )
+    const logRecord = [
+      ...pbFixed64Field(1, 1756478400123456789n),
+      ...pbSubmessage(5, pbValue({ t: 'string', v: 'claude_code.api_request_body' })),
+      ...attributes.flatMap(([key, v]) => pbLengthDelimited(6, pbKeyValue({ key, value: { t: 'string', v } }))),
+      ...pbBytesField(9, TRACE_ID),
+      ...pbBytesField(10, ROOT_SPAN_ID),
+    ]
+    const scopeLogs = [
+      ...pbSubmessage(1, [...pbStringField(1, 'com.anthropic.claude_code.events')]),
+      ...pbSubmessage(2, logRecord),
+    ]
+    return Uint8Array.from(pbSubmessage(1, [...pbSubmessage(1, resource), ...pbSubmessage(2, scopeLogs)]))
+  }
+
+  it('reads the session from session.id in the JSON encoding when no session_id is sent', () => {
+    const [log] = decodeOtlpLogJson(jsonLogWithAttributes([['session.id', 'session-desktop-1']]))
+    expect(log?.sessionId).toBe('session-desktop-1')
+  })
+
+  it('reads the session from session.id in the protobuf encoding when no session_id is sent', () => {
+    const [log] = decodeOtlpLogProtobuf(protobufLogWithAttributes([['session.id', 'session-desktop-1']]))
+    expect(log?.sessionId).toBe('session-desktop-1')
+  })
+
+  it('prefers session_id over session.id when a sender sends both, in either encoding', () => {
+    const attributes = [
+      ['session.id', 'from-session-dot'],
+      ['session_id', 'from-session-underscore'],
+    ] as const
+    expect(decodeOtlpLogJson(jsonLogWithAttributes(attributes))[0]?.sessionId).toBe('from-session-underscore')
+    expect(decodeOtlpLogProtobuf(protobufLogWithAttributes(attributes))[0]?.sessionId).toBe(
+      'from-session-underscore',
+    )
+  })
+})
+
 describe('OtlpReceiver parity between encodings', () => {
   it('stores identical records for the same fixture posted in each encoding', async () => {
     const json = await startReceiver()

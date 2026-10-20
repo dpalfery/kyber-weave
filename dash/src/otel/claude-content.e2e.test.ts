@@ -17,7 +17,7 @@
 //
 // RED: `assembledText === ""`, and no `rawPacket` pointers at all.
 
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import type { Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -304,5 +304,124 @@ describe('Claude Code turn content end to end (T9/T10)', () => {
     expect(interaction.status).toBe(200)
     const entry = (await interaction.json()) as QuarantineEntryBody
     expect(String(entry.rawPayload)).toContain('user_prompt')
+  })
+})
+
+// T1 (Claude Code Desktop request bodies; plan
+// docs/plans/2026-10-19-claude-desktop-request-body-correlation.md, test-contract
+// row T1, the end-to-end case). The input is the sanitized T0 Desktop export
+// (fixtures/claude-desktop, D7): every body log is stamped with the active
+// PARENT span or the call's own span, and the logs are posted BEFORE the traces,
+// the order the sender produces (a body is logged at request start, its span
+// exported at call end). So the early-arrival path runs for real.
+describe('Claude Desktop request bodies end to end (T1)', () => {
+  const FIXTURES = new URL('./fixtures/claude-desktop/', import.meta.url)
+
+  /** Main-thread call, child of the interaction. */
+  const MAIN_CALL_1 = '0000000000000002'
+  /** Main-thread call, child of the interaction, after a tool round. */
+  const MAIN_CALL_2 = '0000000000000003'
+  /** Main-thread call reached only by a context-free body (session.id, no trace). */
+  const MAIN_CALL_3 = '0000000000000004'
+  /** Sub-agent call, child of tool.execution 0000000000000006; its body carries tools. */
+  const SUB_AGENT_WITH_TOOLS = '0000000000000007'
+  /** Sub-agent call, child of tool.execution 0000000000000006; its body has no tools. */
+  const SUB_AGENT_NO_TOOLS = '0000000000000008'
+  /** Second interaction's call; its body is stamped with this span and truncated. */
+  const TRUNCATED_CALL = '000000000000000c'
+
+  let desktopRoot: string
+  let desktop: CollectorService
+  let desktopStatuses: { logs: number; traces: number } = { logs: 0, traces: 0 }
+
+  /** The `parts` buckets a stored call's body supplied. */
+  function partBuckets(record: { parts?: readonly { part: string }[] } | undefined): string[] {
+    return (record?.parts ?? []).map((part) => part.part)
+  }
+
+  /** Body logs still parked in pending_logs. */
+  function pendingBodies(): unknown[] {
+    return desktop.canon
+      .getPendingLogs()
+      .filter((row) => (row as { attributes?: Record<string, unknown> }).attributes?.['event.name'] === 'api_request_body')
+  }
+
+  beforeAll(async () => {
+    desktopRoot = mkdtempSync(join(tmpdir(), 'kyberdash-claude-desktop-e2e-'))
+    desktop = await startOtlpCollectorService({ port: 0, dbPath: join(desktopRoot, 'canon.db') })
+    const receiverUrl = `http://127.0.0.1:${desktop.receiver.port}`
+
+    const logsStatus = (
+      await post(`${receiverUrl}${OTLP_LOGS_PATH}`, readFileSync(new URL('./logs.otlp.json', FIXTURES), 'utf8'))
+    ).status
+    await desktop.writer.flush()
+    await desktop.scheduler.drain()
+
+    const tracesStatus = (
+      await post(`${receiverUrl}${OTLP_TRACES_PATH}`, readFileSync(new URL('./traces.otlp.json', FIXTURES), 'utf8'))
+    ).status
+    await desktop.writer.flush()
+    await desktop.scheduler.drain()
+
+    desktopStatuses = { logs: logsStatus, traces: tracesStatus }
+  })
+
+  afterAll(async () => {
+    await desktop.close()
+    rmSync(desktopRoot, { recursive: true, force: true })
+  })
+
+  it('accepts both Desktop posts and stores each model call as a claude-code llm.invoke record', () => {
+    expect(desktopStatuses).toEqual({ logs: 200, traces: 200 })
+    for (const spanId of [
+      MAIN_CALL_1,
+      MAIN_CALL_2,
+      MAIN_CALL_3,
+      SUB_AGENT_WITH_TOOLS,
+      SUB_AGENT_NO_TOOLS,
+      TRUNCATED_CALL,
+    ]) {
+      expect(desktop.canon.get(spanId), spanId).toMatchObject({ harness: 'claude-code', op: 'llm.invoke' })
+    }
+  })
+
+  it('puts the system prompt on each main-thread call, and says the tools array was not exported', () => {
+    for (const spanId of [MAIN_CALL_1, MAIN_CALL_2, MAIN_CALL_3]) {
+      const call = desktop.canon.get(spanId)
+      expect(partBuckets(call), `${spanId} parts`).toContain('system_prompt')
+      expect(call?.measurability?.tool_definitions, `${spanId} tool_definitions`).toMatchObject({
+        availability: 'not_measurable',
+        reason: expect.stringMatching(/tools array/i),
+      })
+    }
+  })
+
+  it('gives the sub-agent call whose body carried tools its tool definitions, and declares the other one', () => {
+    const withTools = desktop.canon.get(SUB_AGENT_WITH_TOOLS)
+    expect(partBuckets(withTools)).toEqual(expect.arrayContaining(['system_prompt', 'tool_definitions']))
+    expect(withTools?.measurability?.tool_definitions).toBeUndefined()
+
+    const noTools = desktop.canon.get(SUB_AGENT_NO_TOOLS)
+    expect(partBuckets(noTools)).toContain('system_prompt')
+    expect(noTools?.measurability?.tool_definitions).toMatchObject({
+      availability: 'not_measurable',
+      reason: expect.stringMatching(/tools array/i),
+    })
+  })
+
+  it('gives the truncated body no system prompt, and names the sender limit on the buckets it would have supplied', () => {
+    // Whatever the interaction prompt supplied stays on the call; the truncated
+    // body contributes no system prompt and says why it could not.
+    const call = desktop.canon.get(TRUNCATED_CALL)
+    expect(partBuckets(call)).not.toContain('system_prompt')
+    expect(call?.measurability?.system_prompt).toMatchObject({
+      availability: 'not_measurable',
+      reason: expect.stringMatching(/CLAUDE_CODE_OTEL_CONTENT_MAX_LENGTH/),
+    })
+  })
+
+  it('leaves no Claude body log pending or quarantined once the spans have landed', () => {
+    expect(desktop.canon.quarantinedLogCount()).toBe(0)
+    expect(pendingBodies()).toEqual([])
   })
 })
