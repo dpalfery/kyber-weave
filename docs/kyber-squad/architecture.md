@@ -16,6 +16,7 @@ decided-by:
   - adr/0028-devin-target-scoped-authoring-capability-profiles
   - adr/0034-factory-droid-entry-point-skill
   - adr/0037-squad-state-in-user-home
+  - adr/0040-flat-agent-dir-discovery-guarded-resources
 keywords:
   - multi-harness
   - deployment
@@ -549,10 +550,20 @@ and validates.
 - **Resource projection**: after each principal file, the renderer appends the owner's validated
   resource closure beside it — each resource at its artifact-relative path under the principal's
   directory — so authored relative links resolve verbatim in the deployed tree. A resource that
-  would alias another principal's output is a validation error, never an overwrite. There are
-  two target-specific exceptions to "verbatim":
-  - **ZCode** rewrites declared-resource links to `../skills/…` (ADR 0021); the rewrite stays
-    relative.
+  would alias another principal's output is a validation error, never an overwrite. The rule for
+  a target whose agent discovery registers nested markdown is property-based: an agent-owned
+  markdown resource must deploy in a form the harness scanner ignores, keeping it co-located
+  with its principal, with the deviation recorded as a `resource-links-rewritten` degradation.
+  The three target-specific forms of that rule today are:
+  - **ZCode** relocates agent resources under `.zcode/skills/<owner>/…` and rewrites
+    declared-resource links to `../skills/…` ([ADR 0021](../adr/0021-zcode-command-lowering-and-resource-relocation.md));
+    the rewrite stays relative.
+  - **OpenCode and Kilo** keep resources co-located beside their principal but deploy every
+    agent-owned `.md` resource with a `.markdown` extension, rewriting in-closure authored links
+    `.md` → `.markdown` ([ADR 0040](../adr/0040-flat-agent-dir-discovery-guarded-resources.md)).
+    Both scanners match only `{agent,agents}/**/*.md` recursively, so `.markdown` is invisible
+    to discovery while each file stays beside — and wholly owned by — its agent. An agent closure
+    holding both `x.md` and `x.markdown` fails closed rather than merging one path.
   - **Copilot, global scope only.** A global-scope agent is read from outside any workspace, so
     a relative link has no base the model can resolve. Each link in the agent body whose target
     exactly equals one of that agent's declared resource paths is rewritten to an absolute
@@ -573,9 +584,10 @@ and validates.
   naming the missing input, rather than shipping relative links. Rendered global content therefore
   embeds the machine's resolved root (`$COPILOT_HOME` or `~/.copilot`). The closure-driven rewrite
   lives in the internal `SquadResourceLinkRewriter` helper (taking the resources and a
-  target-path mapping), which only ZCode and Copilot (global) use today; `SquadResourceProjection`
-  is unchanged. No ADR — ADR waiver: a narrow, target-specific refinement of this rule following
-  the ADR 0021 pattern; this bullet is the record.
+  target-path mapping), which ZCode, Copilot (global), OpenCode, and Kilo use today —
+  OpenCode and Kilo through the `SquadAgentResourceDiscoveryGuard` extension-map wrapper,
+  and `SquadResourceProjection` is unchanged. No ADR for the Copilot-global form — ADR waiver: a narrow, target-specific refinement of this rule following
+  the ADR 0021 pattern; this bullet is its record.
 - **An omitted permission is not a withheld one on `opencode`.** Agent permissions merge with
   OpenCode's global config, whose documented behaviour is that most permissions default to
   `allow` (`external_directory` and `doom_loop` are the stated exceptions). A renderer that
