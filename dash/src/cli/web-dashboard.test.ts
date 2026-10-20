@@ -386,3 +386,94 @@ describe('web dashboard server: /api/kyber/* routes', () => {
     expect(body.error).toBe('Not found')
   })
 })
+
+// RED contract: the bounded session-summary route is admitted in the served
+// route table. `GET /api/kyber/session/:id/summary` answers the narrow shape
+// (tests before the route exists); an unknown id 404s like its siblings.
+describe('web dashboard server: GET /api/kyber/session/:id/summary (route admission)', () => {
+  let server: Server
+  let base: string
+
+  const ADMIT_SUMMARY = {
+    turn_count: 3,
+    request_count: 3,
+    total_input: 1200,
+    total_output: 400,
+    cost: { basis: 'published', status: 'priced', value: 0.05, currency: 'USD' },
+    models: ['gpt-4o'],
+    duration_ms: 300000,
+  }
+
+  beforeAll(async () => {
+    const db = new DatabaseSync(':memory:')
+    db.exec(`
+      CREATE TABLE session (
+        session_id TEXT PRIMARY KEY, harness TEXT NOT NULL, label TEXT,
+        is_subagent INTEGER DEFAULT 0, parent_session TEXT, agent_name TEXT,
+        repo TEXT, branch TEXT, started TEXT, ended TEXT, payload TEXT,
+        summary_json TEXT, problems_count INTEGER
+      );
+    `)
+    db.prepare(
+      'INSERT INTO session (session_id, harness, label, is_subagent, parent_session, agent_name, repo, branch, started, ended, payload, summary_json, problems_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    ).run(
+      'sess-admit-1',
+      'copilot',
+      'Admitted Summary Session',
+      0,
+      null,
+      'admit-agent',
+      'kyber-weave',
+      'main',
+      '2026-09-04T12:00:00.000Z',
+      '2026-09-04T12:05:00.000Z',
+      JSON.stringify({ id: 'sess-admit-1', summary: ADMIT_SUMMARY, problems: [], turns: [] }),
+      JSON.stringify(ADMIT_SUMMARY),
+      0,
+    )
+
+    const admitBridge = new KyberBridge({
+      canonDb: db,
+      ratesPath: join(tmpdir(), 'nonexistent-admit-rates.json'),
+    })
+    server = await runWebDashboard({ port: 0, open: false, kyberBridge: admitBridge, writeStdout: () => {} })
+    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
+  })
+
+  afterAll(async () => {
+    await new Promise<void>((resolve) => server.close(() => resolve()))
+  })
+
+  it('serves the bounded summary shape for a known session id', async () => {
+    const res = await fetch(`${base}/api/kyber/session/sess-admit-1/summary`)
+    expect(res.status).toBe(200)
+    expect(res.headers.get('content-type')).toContain('application/json')
+    expect(res.headers.get('cache-control')).toBe('no-store')
+
+    const body = (await res.json()) as Record<string, unknown>
+    expect(Object.keys(body).sort()).toEqual([
+      'agent_name',
+      'ended',
+      'harness',
+      'is_subagent',
+      'label',
+      'parent_session',
+      'problems_count',
+      'session_id',
+      'started',
+      'summary',
+    ])
+    expect(body.session_id).toBe('sess-admit-1')
+    expect(body.is_subagent).toBe(false)
+    expect(body.summary).toEqual(ADMIT_SUMMARY)
+    expect(body.problems_count).toBe(0)
+  })
+
+  it('404s an unknown summary id with the sibling error shape', async () => {
+    const res = await fetch(`${base}/api/kyber/session/sess-admit-missing/summary`)
+    expect(res.status).toBe(404)
+    expect(res.headers.get('content-type')).toContain('application/json')
+    expect(res.headers.get('cache-control')).toBe('no-store')
+    expect(await res.json()).toEqual({ error: 'Session not found' })
+  })
+})

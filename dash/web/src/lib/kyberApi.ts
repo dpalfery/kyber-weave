@@ -188,22 +188,74 @@ export interface KyberSessionSummary {
 }
 
 /**
- * The session payload fields ancestry needs. `runId` is optional because the
- * served document does not yet carry it — resolveAncestry reads it when present
- * rather than inventing a run by scanning other endpoints (R7.5).
+ * The bounded session summary `GET /api/kyber/session/:id/summary` serves:
+ * ten identity-and-summary keys, no payload, no lineage.
+ *
+ * WHY a second document for the same session: the detail route serves the
+ * whole session blob — up to 15.3 MB and a multi-second cold page-in for a
+ * session with 10,933 turns — while a consumer that needs a handful of
+ * identity fields pays for all of it. The bounded route answers the same
+ * question for a fraction of the cost.
+ *
+ * Every key but `harness` is read defensively (optional): the client resolves
+ * an id and a harness, and must not break on a key the body omits. `harness`
+ * is the one it cannot do without — without it there is no spine.
  */
-export type KyberSessionAncestry = {
-  id?: string
+export type KyberSessionSummaryDetail = {
+  /** The session's id, the spine's execution level. */
   session_id?: string
+  /** The harness that produced the session — the spine's harness level. */
   harness: string
+  /** The stored label, verbatim. The sessions list applies its own title fallback. */
+  label?: string | null
+  is_subagent?: boolean
+  parent_session?: string | null
+  agent_name?: string | null
+  started?: string | null
+  ended?: string | null
+  /** The session's summary object, parsed — never a JSON string. */
+  summary?: Record<string, unknown>
+  /** How many problems the session carries. */
+  problems_count?: number
+}
+
+/**
+ * What the ancestry consumer reads off the bounded summary.
+ *
+ * The lineage keys (`runId`, `run_id`, `executionId`, `execution_id`) are NOT
+ * part of the served shape: the `session` table has no such column and the
+ * session payload carries no such field either, so a link served here would be
+ * invented rather than measured — and an invented link would push a run level
+ * into the resolved spine that today's client never produces. They stay on
+ * the type because the resolver probes them defensively and must keep reading
+ * `undefined`, the same value it reads today, rather than having its
+ * resolution logic rewritten around a lineage it cannot verify (R7.5).
+ */
+export type KyberSessionAncestry = KyberSessionSummaryDetail & {
+  /**
+   * The detail route's legacy id key. The bounded route never serves it, so
+   * the resolver's `id ?? session_id` chain falls through to `session_id` and
+   * resolves the same identity it resolves today.
+   */
+  id?: string
   runId?: string
   run_id?: string
   executionId?: string
   execution_id?: string
 }
 
+/**
+ * One session's identity fields, from the bounded summary route.
+ *
+ * WHY this route and not the detail route: the detail route serves the entire
+ * session payload, and this consumer needs the identity fields only. The
+ * turns consumer (`fetchKyberSessionTurns`) still reads the detail route,
+ * because the turn rows live there and only there.
+ */
 export async function fetchKyberSession(sessionId: string): Promise<KyberSessionAncestry> {
-  return fetchJson<KyberSessionAncestry>(`/api/kyber/session/${encodeURIComponent(sessionId)}`)
+  return fetchJson<KyberSessionAncestry>(
+    `/api/kyber/session/${encodeURIComponent(sessionId)}/summary`,
+  )
 }
 
 /**

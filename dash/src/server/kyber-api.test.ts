@@ -2528,3 +2528,457 @@ describe('GET /api/kyber/compare/runs split-identity and honest availability (is
     }
   })
 })
+
+// RED contract for the bounded session-summary route (tests before the route
+// exists): `GET /api/kyber/session/:id/summary` serves the narrow identity +
+// materialized-summary shape so a consumer that needs a few fields stops
+// pulling the whole payload. The passthrough detail route is unchanged, and
+// the response deliberately carries no run/execution linkage.
+describe('GET /api/kyber/session/:id/summary (bounded session summary)', () => {
+  let server: Server
+  let base: string
+  let canonDb: DatabaseSync
+
+  const MATERIAL_SUMMARY = {
+    turn_count: 4,
+    request_count: 4,
+    total_input: 800,
+    total_output: 400,
+    total_cache_read: 100,
+    total_cache_creation: 50,
+    schema_tokens_per_turn: 150,
+    cost: { basis: 'published', status: 'priced', value: 0.04, currency: 'USD' },
+    models: ['gpt-4o'],
+    duration_ms: 600000,
+  }
+
+  // The materialized row's payload deliberately disagrees with its columns: a
+  // different summary, 99 problems instead of 3, and a 1500-turn array. The
+  // summary route must answer from the narrow columns, never this blob.
+  const hostileTurns = Array.from({ length: 1500 }, (_, index) => ({
+    index,
+    input: 10,
+    output: 5,
+    model: 'gpt-4o',
+  }))
+  const materializedPayload = {
+    id: 'sess-summary-1',
+    harness: 'copilot',
+    label: 'Summary Pinned Session',
+    summary: { ...MATERIAL_SUMMARY, turn_count: 999, total_input: 1 },
+    problems: Array.from({ length: 99 }, (_, index) => ({ code: `HOSTILE_${index}`, message: 'x'.repeat(50) })),
+    turns: hostileTurns,
+  }
+
+  const legacySummaryA = {
+    turn_count: 7,
+    request_count: 7,
+    total_input: 700,
+    total_output: 350,
+    cost: { basis: 'published', status: 'no_rate' },
+    models: ['gemini-1.5-pro'],
+    duration_ms: 420000,
+  }
+  const legacyPayloadA = {
+    id: 'sess-summary-legacy-a',
+    harness: 'gemini',
+    summary: legacySummaryA,
+    problems: [
+      { code: 'LEGACY_A1', message: 'first legacy problem' },
+      { code: 'LEGACY_A2', message: 'second legacy problem' },
+    ],
+    turns: [{ index: 0, input: 100, output: 50, model: 'gemini-1.5-pro' }],
+  }
+  const legacySummaryB = {
+    turn_count: 9,
+    request_count: 9,
+    total_input: 900,
+    total_output: 450,
+    cost: { basis: 'published', status: 'priced', value: 0.09, currency: 'USD' },
+    models: ['gpt-4o'],
+    duration_ms: 540000,
+  }
+  const legacyPayloadB = {
+    id: 'sess-summary-legacy-b',
+    harness: 'copilot',
+    summary: legacySummaryB,
+    problems: [],
+    turns: [{ index: 0, input: 100, output: 50, model: 'gpt-4o' }],
+  }
+
+  // Partial materialization, count missing: summary_json is set but
+  // problems_count is NULL. The payload carries two problems and a summary
+  // that deliberately disagrees with the column, so the route must answer
+  // the summary from the column and the count from this row's payload.
+  const partialCountPayload = {
+    id: 'sess-summary-partial-count',
+    harness: 'copilot',
+    label: 'Partial Count Session',
+    summary: { ...MATERIAL_SUMMARY, turn_count: 999 },
+    problems: [
+      { code: 'PARTIAL_C1', message: 'first partial problem' },
+      { code: 'PARTIAL_C2', message: 'second partial problem' },
+    ],
+    turns: [{ index: 0, input: 100, output: 50, model: 'gpt-4o' }],
+  }
+
+  // Partial materialization, summary missing: summary_json is NULL beside a
+  // real count. The payload genuinely has no summary — the writer's
+  // per-column NULL sentinel — so the summary derives as {} while the
+  // materialized count must survive.
+  const partialSummaryPayload = {
+    id: 'sess-summary-partial-summary',
+    harness: 'gemini',
+    label: 'Partial Summary Session',
+    problems: [
+      { code: 'PARTIAL_S1', message: 'first summary-missing problem' },
+      { code: 'PARTIAL_S2', message: 'second summary-missing problem' },
+      { code: 'PARTIAL_S3', message: 'third summary-missing problem' },
+      { code: 'PARTIAL_S4', message: 'fourth summary-missing problem' },
+    ],
+    turns: [{ index: 0, input: 100, output: 50, model: 'gemini-1.5-pro' }],
+  }
+
+  const EXPECTED_KEYS = [
+    'agent_name',
+    'ended',
+    'harness',
+    'is_subagent',
+    'label',
+    'parent_session',
+    'problems_count',
+    'session_id',
+    'started',
+    'summary',
+  ]
+
+  beforeAll(async () => {
+    canonDb = new DatabaseSync(':memory:')
+    canonDb.exec(`
+      CREATE TABLE session (
+        session_id TEXT PRIMARY KEY, harness TEXT NOT NULL, label TEXT,
+        is_subagent INTEGER DEFAULT 0, parent_session TEXT, agent_name TEXT,
+        repo TEXT, branch TEXT, started TEXT, ended TEXT, payload TEXT,
+        summary_json TEXT, problems_count INTEGER
+      );
+    `)
+    const insert =
+      'INSERT INTO session (session_id, harness, label, is_subagent, parent_session, agent_name, repo, branch, started, ended, payload, summary_json, problems_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    canonDb.prepare(insert).run(
+      'sess-summary-1',
+      'copilot',
+      'Summary Pinned Session',
+      0,
+      null,
+      'summary-agent',
+      'kyber-weave',
+      'main',
+      '2026-09-04T12:00:00.000Z',
+      '2026-09-04T12:10:00.000Z',
+      JSON.stringify(materializedPayload),
+      JSON.stringify(MATERIAL_SUMMARY),
+      3,
+    )
+    canonDb.prepare(insert).run(
+      'sess-summary-sub',
+      'copilot',
+      'Summary Subagent Session',
+      1,
+      'sess-summary-1',
+      'summary-agent',
+      'kyber-weave',
+      'main',
+      '2026-09-04T12:01:00.000Z',
+      '2026-09-04T12:02:00.000Z',
+      '{}',
+      JSON.stringify({ ...MATERIAL_SUMMARY, turn_count: 1 }),
+      1,
+    )
+    canonDb.prepare(insert).run(
+      'sess-summary-legacy-a',
+      'gemini',
+      'Legacy Summary Session A',
+      0,
+      null,
+      'legacy-agent',
+      'kyber-weave',
+      'main',
+      '2026-09-04T11:00:00.000Z',
+      '2026-09-04T11:05:00.000Z',
+      JSON.stringify(legacyPayloadA),
+      null,
+      null,
+    )
+    canonDb.prepare(insert).run(
+      'sess-summary-legacy-b',
+      'copilot',
+      'Legacy Summary Session B',
+      0,
+      null,
+      'legacy-agent',
+      'kyber-weave',
+      'main',
+      '2026-09-04T10:00:00.000Z',
+      '2026-09-04T10:05:00.000Z',
+      JSON.stringify(legacyPayloadB),
+      null,
+      null,
+    )
+    canonDb.prepare(insert).run(
+      'sess-summary-partial-count',
+      'copilot',
+      'Partial Count Session',
+      0,
+      null,
+      'partial-agent',
+      'kyber-weave',
+      'main',
+      '2026-09-04T11:30:00.000Z',
+      '2026-09-04T11:35:00.000Z',
+      JSON.stringify(partialCountPayload),
+      JSON.stringify(MATERIAL_SUMMARY),
+      null,
+    )
+    canonDb.prepare(insert).run(
+      'sess-summary-partial-summary',
+      'gemini',
+      'Partial Summary Session',
+      0,
+      null,
+      'partial-agent',
+      'kyber-weave',
+      'main',
+      '2026-09-04T11:20:00.000Z',
+      '2026-09-04T11:25:00.000Z',
+      JSON.stringify(partialSummaryPayload),
+      null,
+      4,
+    )
+
+    const summaryBridge = new KyberBridge({
+      canonDb,
+      ratesPath: join(tmpdir(), 'nonexistent-summary-rates.json'),
+    })
+    server = await runWebDashboard({ port: 0, open: false, kyberBridge: summaryBridge, writeStdout: () => {} })
+    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
+  })
+
+  afterAll(async () => {
+    await new Promise<void>((resolve) => server.close(() => resolve()))
+  })
+
+  function assertSummaryHeaders(res: Response) {
+    expect(res.headers.get('content-type')).toContain('application/json')
+    expect(res.headers.get('content-type')).toContain('charset=utf-8')
+    expect(res.headers.get('cache-control')).toBe('no-store')
+  }
+
+  it('serves the bounded shape with exact keys, a boolean is_subagent, an object summary, and a numeric problems_count', async () => {
+    const res = await fetch(`${base}/api/kyber/session/sess-summary-1/summary`)
+    expect(res.status).toBe(200)
+    assertSummaryHeaders(res)
+
+    const body = (await res.json()) as Record<string, unknown>
+    expect(Object.keys(body).sort()).toEqual(EXPECTED_KEYS)
+    expect(body).toEqual({
+      session_id: 'sess-summary-1',
+      harness: 'copilot',
+      label: 'Summary Pinned Session',
+      is_subagent: false,
+      parent_session: null,
+      agent_name: 'summary-agent',
+      started: '2026-09-04T12:00:00.000Z',
+      ended: '2026-09-04T12:10:00.000Z',
+      summary: MATERIAL_SUMMARY,
+      problems_count: 3,
+    })
+    expect(typeof body.is_subagent).toBe('boolean')
+    expect(typeof body.summary).toBe('object')
+    expect(typeof body.problems_count).toBe('number')
+    // The route answers from the materialized columns, not the blob: the
+    // payload disagrees on every derived fact and must not leak through.
+    expect(body.summary).not.toEqual(materializedPayload.summary)
+    expect(body.problems_count).not.toBe(materializedPayload.problems.length)
+
+    // A subagent row converts the INTEGER column to a real boolean and keeps
+    // its parent linkage.
+    const sub = await fetch(`${base}/api/kyber/session/sess-summary-sub/summary`)
+    expect(sub.status).toBe(200)
+    const subBody = (await sub.json()) as Record<string, unknown>
+    expect(Object.keys(subBody).sort()).toEqual(EXPECTED_KEYS)
+    expect(subBody.is_subagent).toBe(true)
+    expect(typeof subBody.is_subagent).toBe('boolean')
+    expect(subBody.parent_session).toBe('sess-summary-1')
+  })
+
+  it('serves no run/execution linkage key on the summary shape', async () => {
+    const res = await fetch(`${base}/api/kyber/session/sess-summary-1/summary`)
+    expect(res.status).toBe(200)
+
+    const body = (await res.json()) as Record<string, unknown>
+    for (const key of ['run_id', 'runId', 'execution_id', 'executionId']) {
+      expect(body, `summary must not serve linkage key ${key}`).not.toHaveProperty(key)
+    }
+    expect(body).not.toHaveProperty('turns')
+    expect(body).not.toHaveProperty('payload')
+  })
+
+  it('404s for an unknown id with the sibling error shape', async () => {
+    const res = await fetch(`${base}/api/kyber/session/sess-does-not-exist/summary`)
+    expect(res.status).toBe(404)
+    assertSummaryHeaders(res)
+    expect(await res.json()).toEqual({ error: 'Session not found' })
+  })
+
+  it('400s a malformed percent-encoded id instead of throwing', async () => {
+    // A stray `%` is a client error, not a server fault: the id is decoded
+    // with the shared helper, so the answer is the 400 shape the quarantine
+    // and problem routes give for the same fault — never the 500 an uncaught
+    // URIError would surface as.
+    const res = await fetch(`${base}/api/kyber/session/foo%ZZ/summary`)
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ error: 'Malformed session id' })
+  })
+
+  it('reads a materialized row without touching the payload blob', () => {
+    const db = new DatabaseSync(':memory:')
+    db.exec(`
+      CREATE TABLE session (
+        session_id TEXT PRIMARY KEY, harness TEXT NOT NULL, label TEXT,
+        is_subagent INTEGER DEFAULT 0, parent_session TEXT, agent_name TEXT,
+        repo TEXT, branch TEXT, started TEXT, ended TEXT, payload TEXT,
+        summary_json TEXT, problems_count INTEGER
+      );
+    `)
+    db.prepare(
+      'INSERT INTO session (session_id, harness, label, is_subagent, parent_session, agent_name, repo, branch, started, ended, payload, summary_json, problems_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    ).run(
+      'sess-sum-probe',
+      'copilot',
+      'Probe Session',
+      0,
+      null,
+      'probe-agent',
+      'kyber-weave',
+      'main',
+      '2026-09-04T12:00:00.000Z',
+      '2026-09-04T12:10:00.000Z',
+      JSON.stringify(materializedPayload),
+      JSON.stringify(MATERIAL_SUMMARY),
+      3,
+    )
+    const statements: string[] = []
+    const originalPrepare = db.prepare.bind(db)
+    db.prepare = ((sql: string) => {
+      statements.push(sql)
+      return (originalPrepare as (sql: string) => unknown)(sql)
+    }) as typeof db.prepare
+    const bridge = new KyberBridge({ canonDb: db })
+    try {
+      // getSessionSummary does not exist until the GREEN phase implements the
+      // route's backing method; the structural cast keeps typecheck green
+      // while the call fails for exactly that missing behavior.
+      type SummaryBridge = { getSessionSummary: (sessionId: string) => unknown }
+      const summary = (bridge as unknown as SummaryBridge).getSessionSummary('sess-sum-probe')
+      expect(summary).toMatchObject({ session_id: 'sess-sum-probe', problems_count: 3 })
+      const probed = statements.filter((sql) => sql.includes('FROM session'))
+      expect(probed.length).toBeGreaterThan(0)
+      for (const sql of probed) {
+        expect(sql).not.toContain('payload')
+      }
+    } finally {
+      bridge.close()
+    }
+  })
+
+  it('falls back per id for legacy rows whose summary_json is NULL', async () => {
+    const resA = await fetch(`${base}/api/kyber/session/sess-summary-legacy-a/summary`)
+    expect(resA.status).toBe(200)
+    assertSummaryHeaders(resA)
+    const bodyA = (await resA.json()) as Record<string, unknown>
+    expect(Object.keys(bodyA).sort()).toEqual(EXPECTED_KEYS)
+    expect(bodyA.summary).toEqual(legacySummaryA)
+    expect(bodyA.problems_count).toBe(2)
+    expect(typeof bodyA.problems_count).toBe('number')
+
+    // Scoped to the requested id: the sibling legacy row derives its own
+    // facts, including a zero problems_count that must stay a number.
+    const resB = await fetch(`${base}/api/kyber/session/sess-summary-legacy-b/summary`)
+    expect(resB.status).toBe(200)
+    const bodyB = (await resB.json()) as Record<string, unknown>
+    expect(bodyB.summary).toEqual(legacySummaryB)
+    expect(bodyB.problems_count).toBe(0)
+    expect(typeof bodyB.problems_count).toBe('number')
+  })
+
+  it('derives a NULL problems_count from the payload while serving the materialized summary', async () => {
+    // The per-column sentinel regression pin: summary_json is materialized
+    // but problems_count is NULL, so the route must not coerce the missing
+    // count to 0 — the payload's problems array carries the true count.
+    const res = await fetch(`${base}/api/kyber/session/sess-summary-partial-count/summary`)
+    expect(res.status).toBe(200)
+    assertSummaryHeaders(res)
+
+    const body = (await res.json()) as Record<string, unknown>
+    expect(Object.keys(body).sort()).toEqual(EXPECTED_KEYS)
+    // The materialized column wins for the summary: the payload's summary
+    // disagrees on turn_count and must not leak through.
+    expect(body.summary).toEqual(MATERIAL_SUMMARY)
+    expect(body.summary).not.toEqual(partialCountPayload.summary)
+    // The missing count comes from this row's payload: two problems, not 0.
+    expect(body.problems_count).toBe(2)
+    expect(typeof body.problems_count).toBe('number')
+  })
+
+  it('keeps the materialized count when only summary_json is NULL', async () => {
+    // The mirror half of the per-column contract: the payload genuinely has
+    // no summary, so the summary derives as {} while the materialized count
+    // survives the fallback path.
+    const res = await fetch(`${base}/api/kyber/session/sess-summary-partial-summary/summary`)
+    expect(res.status).toBe(200)
+    assertSummaryHeaders(res)
+
+    const body = (await res.json()) as Record<string, unknown>
+    expect(Object.keys(body).sort()).toEqual(EXPECTED_KEYS)
+    expect(body.summary).toEqual({})
+    expect(body.problems_count).toBe(4)
+    expect(typeof body.problems_count).toBe('number')
+  })
+
+  it('agrees with the sessions list on problems_count for partially materialized rows', async () => {
+    // Cross-surface consistency: the list path already implements the
+    // per-column semantics, so it is the reference the bounded route must
+    // match for the same session.
+    const listRes = await fetch(`${base}/api/kyber/sessions`)
+    expect(listRes.status).toBe(200)
+    const listBody = (await listRes.json()) as { sessions: Array<Record<string, unknown>> }
+
+    const partialListed = listBody.sessions.find((s) => s.session_id === 'sess-summary-partial-count')
+    expect(partialListed).toBeDefined()
+    expect(partialListed?.problems).toBe(2)
+    const partialSummary = (await (
+      await fetch(`${base}/api/kyber/session/sess-summary-partial-count/summary`)
+    ).json()) as { problems_count: unknown }
+    expect(partialSummary.problems_count).toBe(partialListed?.problems)
+
+    // A fully materialized row already agrees; pinned so the per-column fix
+    // cannot regress it.
+    const fullListed = listBody.sessions.find((s) => s.session_id === 'sess-summary-1')
+    expect(fullListed).toBeDefined()
+    expect(fullListed?.problems).toBe(3)
+    const fullSummary = (await (
+      await fetch(`${base}/api/kyber/session/sess-summary-1/summary`)
+    ).json()) as { problems_count: unknown }
+    expect(fullSummary.problems_count).toBe(fullListed?.problems)
+  })
+
+  it('leaves the passthrough detail route byte-identical, including a large turns array', async () => {
+    const res = await fetch(`${base}/api/kyber/session/sess-summary-1`)
+    expect(res.status).toBe(200)
+    assertSummaryHeaders(res)
+
+    const body = (await res.json()) as unknown
+    expect(JSON.stringify(body)).toBe(JSON.stringify(materializedPayload))
+    expect((body as { turns: unknown[] }).turns).toHaveLength(1500)
+  })
+})

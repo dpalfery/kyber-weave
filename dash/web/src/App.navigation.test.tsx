@@ -19,7 +19,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 import type { ContextDoctorProps } from '@/pages/ContextDoctor'
 import type { KyberHarnessSummary, KyberRunSummary, KyberSessionSummary } from '@/lib/kyberApi'
-import { fetchHarnesses, fetchKyberSession, fetchKyberSessions, fetchRuns } from '@/lib/kyberApi'
+import { fetchHarnesses, fetchKyberSession, fetchKyberSessionTurns, fetchKyberSessions, fetchRuns } from '@/lib/kyberApi'
 
 // No DashboardTools mock: PI's header tools are mounted for real, because the
 // defect this suite guards is what a narrow row does to those two controls. A
@@ -434,5 +434,84 @@ describe('navigation surface', () => {
     expect(probe.dataset.selectRun).toBe('present')
     expect(probe.dataset.selectFinding).toBe('present')
     expect(probe.dataset.selectTurn).toBe('present')
+  })
+})
+
+describe('session deep links consume the bounded summary route', () => {
+  /**
+   * The bounded shape GET /api/kyber/session/:id/summary serves: the ten
+   * identity-and-summary keys, no lineage, no payload. The ancestry consumer
+   * needs nothing more — and the detail payload (up to 15.3 MB for one
+   * session) never reaches it. The stored label is blank on purpose: the
+   * sessions list applies a formatSessionTitle fallback for that, but the
+   * ancestry path needs identity fields only, so the stack must resolve
+   * either way.
+   */
+  const summaryBody = () => ({
+    session_id: 'sess-codex-1',
+    harness: 'codex',
+    label: '',
+    is_subagent: false,
+    parent_session: null,
+    agent_name: null,
+    started: '2026-03-01T12:00:00.000Z',
+    ended: '2026-03-02T12:00:00.000Z',
+    summary: {},
+    problems_count: 0,
+  })
+
+  it('requests the bounded summary route instead of the full session payload', async () => {
+    // The module mock above replaces fetchKyberSession for the shell tests,
+    // so the real consumer is reached past it to pin the request URL.
+    const actual = await vi.importActual<typeof import('@/lib/kyberApi')>('@/lib/kyberApi')
+    const fetchMock = vi.fn(async (_url: string) => new Response(JSON.stringify(summaryBody()), {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+    try {
+      await actual.fetchKyberSession('sess-codex-1')
+    } finally {
+      vi.unstubAllGlobals()
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/kyber/session/sess-codex-1/summary')
+  })
+
+  it('resolves a session deep link to doctor → harness → execution, with no run level', async () => {
+    window.history.replaceState(null, '', '/')
+    mockedSession.mockResolvedValue(summaryBody() as Awaited<ReturnType<typeof fetchKyberSession>>)
+    renderApp({ initialPath: '/session/sess-codex-1' })
+    await waitFor(() => {
+      const state = window.history.state as { stack?: Array<{ level: string }> } | null
+      expect(state?.stack?.map((node) => node.level)).toEqual(['context-doctor', 'harness', 'execution'])
+    })
+    const stack = (window.history.state as { stack: Array<Record<string, unknown>> }).stack
+    expect(stack).toHaveLength(3)
+    expect(stack[1]).toMatchObject({ level: 'harness', harnessId: 'codex' })
+    expect(stack[2]).toMatchObject({ level: 'execution', executionId: 'sess-codex-1', harnessId: 'codex' })
+    // The bounded shape carries no lineage: a run level here would be a
+    // behavior change disguised as a fix, not the missing link restored.
+    expect(stack.some((node) => node.level === 'run')).toBe(false)
+  })
+
+  it('keeps the turns consumer on the detail route, still reading body.turns', async () => {
+    // fetchKyberSessionTurns is TurnDetail's inspector feed, not the ancestry
+    // consumer: it needs the turns array only the detail route serves, so the
+    // switch must not repoint it. The module mock above leaves this export
+    // real, so the static import reaches the true consumer.
+    const turns = [{ index: 0 }, { index: 1 }]
+    const fetchMock = vi.fn(async (_url: string) => new Response(JSON.stringify({ turns }), {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+    let rows: unknown
+    try {
+      rows = await fetchKyberSessionTurns('sess-codex-1')
+    } finally {
+      vi.unstubAllGlobals()
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/kyber/session/sess-codex-1')
+    expect(rows).toEqual(turns)
   })
 })

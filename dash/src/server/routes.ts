@@ -99,6 +99,29 @@ function parseSessionContentPath(pathname: string): string | null {
 }
 
 /**
+ * `/api/kyber/session/:id/summary` — the bounded session summary.
+ *
+ * <remarks>
+ * Everything between the prefix and the `/summary` suffix is the session id,
+ * so an encoded id stays intact. `null` means this is not the summary route,
+ * so the detail route below can still claim the path.
+ *
+ * The id comes back raw, not decoded: the caller decodes it with
+ * {@link decodePathId}, which reports a malformed percent-encoding as a client
+ * error instead of letting a `URIError` escape as a 500. The quarantine and
+ * problem routes decode their id the same way, for the same reason.
+ * </remarks>
+ */
+function parseSessionSummaryPath(pathname: string): string | null {
+  const prefix = '/api/kyber/session/'
+  const suffix = '/summary'
+  if (!pathname.startsWith(prefix) || !pathname.endsWith(suffix)) return null
+  const middle = pathname.slice(prefix.length, pathname.length - suffix.length)
+  if (!middle || middle.endsWith('/')) return null
+  return middle
+}
+
+/**
  * `/api/kyber/span/:spanId/attributes` — the harness-emitted attribute map for
  * one span (R9.2). Session payloads no longer carry these inline; see
  * `CanonStore.spanAttributes`.
@@ -904,6 +927,40 @@ export function handleKyberRequest(
       return true
     }
     sendKyberJson(res, 200, body)
+    return true
+  }
+
+  // The bounded session summary. Must run before the /session/:id detail route
+  // below, which would otherwise treat ".../summary" as part of the session id
+  // and 404 it. Additive: the detail route itself is untouched.
+  const summarySessionId = parseSessionSummaryPath(url.pathname)
+  if (summarySessionId !== null) {
+    if (req.method !== 'GET') {
+      sendKyberJson(res, 405, { error: 'Method Not Allowed' })
+      return true
+    }
+    // Decoded with the shared helper, so a malformed percent-encoding is the
+    // client error it is — the 400 shape the quarantine and problem routes
+    // give for the same fault — and never the 500 an uncaught URIError
+    // surfaces as.
+    const sessionId = decodePathId(summarySessionId)
+    if (sessionId === null) {
+      sendKyberJson(res, 400, { error: 'Malformed session id' })
+      return true
+    }
+    if (!sessionId) {
+      sendKyberJson(res, 400, { error: 'Missing session id' })
+      return true
+    }
+    // No run or execution linkage is served: neither the `session` table nor
+    // the session payload holds such a field, so a link here would be invented
+    // rather than measured.
+    const summary = bridge.getSessionSummary(sessionId)
+    if (!summary) {
+      sendKyberJson(res, 404, { error: 'Session not found' })
+      return true
+    }
+    sendKyberJson(res, 200, summary)
     return true
   }
 

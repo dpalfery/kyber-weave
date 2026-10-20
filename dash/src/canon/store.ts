@@ -161,7 +161,7 @@ import {
  * corpus is the expensive thing here and re-collecting it is not always
  * possible.
  */
-export const SCHEMA_VERSION = 20
+export const SCHEMA_VERSION = 21
 
 /**
  * How much of the write-ahead log the store keeps on disk once a checkpoint
@@ -265,9 +265,25 @@ CREATE TABLE IF NOT EXISTS session (
   settled_at TEXT,
   transcript_path TEXT,
   transcript_offset INTEGER DEFAULT 0,
+  -- Materialized summary of the payload: the serialized $.summary object
+  -- and the json_array_length($.problems) of the payload's problem list.
+  -- Both are nullable and carry no DEFAULT on purpose: NULL is the legacy
+  -- sentinel meaning "not materialized", so a reader knows to derive the
+  -- value from the payload instead of mistaking it for an empty summary or
+  -- a zero problem count.
+  summary_json TEXT,
+  problems_count INTEGER,
   payload TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS session_by_started ON session (started);
+-- The covering index for the sessions list is not here: it lives in
+-- createSessionDenormIndex, because it cannot be unconditional DDL in this
+-- constant. A store that predates the current session shape carries its own
+-- older session table, and an index over columns that table does not have
+-- cannot be created at all -- the store would fail to open rather than
+-- migrate. The constructor runs it right after this schema, and the v20 ->
+-- v21 migration runs it inside its own step, so both creation paths have it.
+
 -- Derived runs: group executions into user-initiated units of work.
 -- Grouping basis (explicit or derived) and rule are recorded per row (D13).
 CREATE TABLE IF NOT EXISTS run (
@@ -439,6 +455,79 @@ CREATE TABLE IF NOT EXISTS model_context_window_catalog_vendor (
   last_error TEXT
 );
 ` + SOURCE_STATE_SQL + REFRESH_RUN_SQL
+
+/**
+ * The columns the sessions-list covering index carries, in order.
+ *
+ * `started` leads, descending, so the scan answers the reader's
+ * `ORDER BY started DESC` with no sort step. The rest follow the reader's
+ * select list in reader order, so the index alone answers the whole list
+ * query.
+ *
+ * The DDL below names these columns in this order; the guard in
+ * `createSessionDenormIndex` needs them by name, to decide whether a store's
+ * session table can carry the index at all.
+ */
+const SESSION_DENORM_INDEX_COLUMNS = [
+  'started',
+  'session_id',
+  'harness',
+  'label',
+  'is_subagent',
+  'parent_session',
+  'agent_name',
+  'repo',
+  'branch',
+  'ended',
+  'summary_json',
+  'problems_count',
+] as const
+
+/**
+ * The covering index for the sessions list, as DDL.
+ *
+ * <remarks>
+ * The index is what makes the denormalization worth anything. `ALTER TABLE`
+ * appends the materialized columns after `payload`, so a table-row read for
+ * `summary_json` still walks the payload's overflow chain: on the measured
+ * corpus the denormalization alone moved the cost rather than removing it.
+ * An index carrying the reader's whole select list answers the list query
+ * from the index alone.
+ *
+ * The rowid every SQLite index carries keeps the entries unique, so the
+ * leading `started DESC` needs no tiebreaker of its own.
+ */
+const SESSION_DENORM_INDEX_SQL = `CREATE INDEX IF NOT EXISTS session_denorm_idx
+  ON session (started DESC, session_id, harness, label, is_subagent,
+              parent_session, agent_name, repo, branch, ended,
+              summary_json, problems_count)`
+
+/**
+ * Create the covering index for the sessions list, when the session table
+ * can carry it.
+ *
+ * <remarks>
+ * Two creation paths, one DDL: the v20 -> v21 migration runs it inside its
+ * own step, so the index lands with the columns it covers and with the
+ * version stamp; the constructor runs it after the schema, so a fresh store
+ * is born with it. `IF NOT EXISTS` makes both idempotent, so the
+ * constructor's run on every open is a no-op once the index exists.
+ *
+ * The session table's shape is not the current schema's for every store: a
+ * store that predates it carries its own older table, and an index over
+ * columns that table does not have cannot be created at all. Such a store
+ * gains nothing from the index — the reader's own statement names the same
+ * columns, so it cannot read that table either — and failing the open over
+ * it would be worse than leaving it without the index. So the creation is
+ * skipped, and the store opens and migrates as it always did.
+ */
+function createSessionDenormIndex(db: Database): void {
+  const hasSession = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='session'").get()
+  if (!hasSession) return
+  const cols = (db.prepare('PRAGMA table_info(session)').all() as { name: string }[]).map((c) => c.name)
+  if (!SESSION_DENORM_INDEX_COLUMNS.every((column) => cols.includes(column))) return
+  db.exec(SESSION_DENORM_INDEX_SQL)
+}
 
 /** Map a `refresh_run` row out of SQLite's column names. */
 function toRefreshRunRow(row: Record<string, unknown>): RefreshRunRow {
@@ -831,6 +920,44 @@ export const MIGRATIONS: Record<number, (db: Database) => void> = {
     if (!cols.includes('transcript_offset')) {
       db.exec('ALTER TABLE session ADD COLUMN transcript_offset INTEGER DEFAULT 0')
     }
+  },
+  // v20 -> v21: materialized session summary columns.
+  // `summary_json` holds the serialized `$.summary` object of the session
+  // payload and `problems_count` the payload's `json_array_length($.problems)`,
+  // so a reader can serve them without reparsing the payload.
+  // Neither column carries a DEFAULT: NULL is the legacy sentinel meaning
+  // "not materialized" — a row that predates the columns must be derived from
+  // its payload, never read as an empty summary or a zero problem count. A
+  // DEFAULT would erase exactly that distinction.
+  // Each ADD COLUMN is presence-guarded, as migration 19's are: re-running the
+  // step, or opening a store an off-main build already stamped 21, must not
+  // die on "duplicate column name".
+  20: (db: Database) => {
+    const hasSession = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='session'").get()
+    if (!hasSession) return
+    const cols = (db.prepare('PRAGMA table_info(session)').all() as { name: string }[]).map((c) => c.name)
+    if (!cols.includes('summary_json')) {
+      db.exec('ALTER TABLE session ADD COLUMN summary_json TEXT')
+    }
+    if (!cols.includes('problems_count')) {
+      db.exec('ALTER TABLE session ADD COLUMN problems_count INTEGER')
+    }
+    // The covering index for the sessions list, created in this step, right
+    // after the columns it covers: the constructor runs the migration first
+    // -- the columns have to exist before an index can cover them -- and the
+    // schema second, so the index has to be created here to land with the
+    // columns and the version stamp, in one step.
+    createSessionDenormIndex(db)
+    // The planner's cost information for `session`: real statistics for the
+    // covering index and the table as the corpus grows, and the same plan on
+    // every path — which is what the contract's EXPLAIN pin asserts. The
+    // covering index above is the mechanism, not these statistics: on this
+    // build the planner already picks it with no `sqlite_stat1` rows at all.
+    //
+    // They are written here, inside the step's transaction, rather than at
+    // connection open: the reader opens the store read-only and a read-only
+    // connection cannot write `sqlite_stat1`.
+    db.exec('ANALYZE session')
   },
 }
 
@@ -1304,6 +1431,48 @@ export function toSessionRow(row: SessionDbRow): SessionRow {
   }
 }
 
+/**
+ * The two materialized summary columns of one session row, derived from the
+ * serialized payload the row stores.
+ *
+ * `summary_json` is the serialized `$.summary` object; `problems_count` is the
+ * length of the `$.problems` array. A payload carrying no such value writes
+ * NULL for that column: NULL is the "not materialized" sentinel, so the reader
+ * derives the value from the payload and lands on the answer it would have
+ * derived anyway. A fabricated `{}` or `0` would instead claim an empty
+ * summary, and a measured zero problem count, for a payload that was never
+ * measured.
+ *
+ * Derived from the serialized payload rather than from the caller's object, so
+ * the columns are exactly the `$.summary` and `$.problems` the stored payload
+ * holds -- the two cannot disagree.
+ */
+function materializeSessionSummary(payloadJson: string): {
+  summary_json: string | null
+  problems_count: number | null
+} {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(payloadJson)
+  } catch {
+    return { summary_json: null, problems_count: null }
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    return { summary_json: null, problems_count: null }
+  }
+  const record = parsed as Record<string, unknown>
+  const summary = record.summary
+  const problems = record.problems
+  return {
+    // A payload that carries no summary, or a null one, has no summary to
+    // materialize: NULL, never the string "null" and never an empty object.
+    summary_json: summary === undefined || summary === null ? null : JSON.stringify(summary),
+    // Only an array has a length to count. A missing or non-array `problems`
+    // is "never measured", not a count of zero.
+    problems_count: Array.isArray(problems) ? problems.length : null,
+  }
+}
+
 export type RunDbRow = {
   run_id: unknown
   harness: unknown
@@ -1564,6 +1733,13 @@ export class CanonStore {
 
     this.db.exec(SCHEMA_SQL)
 
+    // The covering index for the sessions list, created here so a fresh store
+    // is born with it: it lives outside `SCHEMA_SQL` because its DDL is
+    // unconditional and a store whose session table predates the columns it
+    // covers cannot carry it. Presence-guarded, so this is a no-op on every
+    // open once the index exists.
+    createSessionDenormIndex(this.db)
+
     if (existing === undefined) {
       this.db
         .prepare('INSERT INTO metadata (key, value) VALUES (?, ?)')
@@ -1571,6 +1747,18 @@ export class CanonStore {
       this.db
         .prepare('INSERT INTO metadata (key, value) VALUES (?, ?)')
         .run('detector_version', String(DETECTOR_VERSION))
+      // The planner's cost information for `session`, written from creation
+      // rather than whenever an optimizer happens to run: real statistics for
+      // the covering index and the table as the corpus grows, and the same
+      // plan on every path — which is what the contract's EXPLAIN pin
+      // asserts. The covering index is the mechanism, not these statistics:
+      // on this build the planner already picks it with no `sqlite_stat1`
+      // rows at all.
+      //
+      // A fresh store's session table is empty and SQLite skips empty
+      // tables, so this creates `sqlite_stat1` without a row for `session`;
+      // the close-time `PRAGMA optimize` populates it once rows exist.
+      this.db.exec('ANALYZE session')
     }
 
     this.upsertStatement = this.db.prepare(UPSERT_RECORD_SQL)
@@ -2415,15 +2603,70 @@ export class CanonStore {
   }
 
   /**
-   * A session's measured input and output totals, read out of the stored
-   * payload without parsing it.
+   * A session's measured input and output totals, read out of the materialized
+   * `summary_json` column, with the stored payload as the legacy fallback.
    *
    * The delegation-overhead dimension needs two numbers per execution and was
    * parsing the whole payload for each — the most expensive way to read
-   * `summary.total_input`. A total the session recorded as not measurable is
-   * not a number, and comes back here as `undefined` rather than a coerced 0.
+   * `summary.total_input`. The `session` table now carries that summary as the
+   * `summary_json` column, written from the same payload in the same statement
+   * (see `upsertSession`), so the common case answers from a small column and
+   * never reads the payload blob.
+   *
+   * A row written before the materialization existed carries NULL there, and
+   * only such a row falls back to the payload — per row, not per query, so a
+   * mixed corpus leaves the materialized rows alone and reads each legacy
+   * row's payload once.
+   *
+   * A total the session recorded as not measurable is not a number, and comes
+   * back here as `undefined` rather than a coerced 0.
    */
   sessionTokenTotals(sessionId: string): { input: number; output: number } | undefined {
+    const row = this.db
+      .prepare(
+        // The column first, and the same extraction the payload path used:
+        // `summary_json` holds the same `$.summary` object the payload holds,
+        // so reading `$.total_input` out of it answers exactly what
+        // `$.summary.total_input` out of the payload answers, without the
+        // blob. `payload` is not named here at all — naming it, even inside
+        // `json_extract`, makes SQLite read and parse the whole payload of
+        // every row this read touches.
+        `SELECT summary_json,
+                json_extract(summary_json, '$.total_input') AS input,
+                json_extract(summary_json, '$.total_output') AS output
+         FROM session WHERE session_id = ?`,
+      )
+      .get(sessionId) as { summary_json: unknown; input: unknown; output: unknown } | undefined
+    if (row === undefined) return undefined
+    // NULL is the "not materialized" sentinel: this row predates the
+    // materialization, so its totals still live in its payload.
+    if (row.summary_json === null || row.summary_json === undefined) {
+      return this.sessionTokenTotalsFromPayload(sessionId)
+    }
+    // Open thread harnesses.ts:416 — a total the session recorded as
+    // not_measurable is an object, not a number. Coercing it to 0 invents a
+    // measured zero for the delegation denominator; unknown stays unknown.
+    if (typeof row.input !== 'number' || typeof row.output !== 'number') return undefined
+    return {
+      input: row.input,
+      output: row.output,
+    }
+  }
+
+  /**
+   * One session's token totals, read out of its own stored payload.
+   *
+   * <remarks>
+   * The legacy path: a row whose `summary_json` is NULL was written before
+   * the materialization existed, so the payload is the only place its totals
+   * can come from. The statement is scoped to the one id, so it reads one
+   * row's payload and never the table's, and `json_extract` keeps the blob
+   * inside SQLite — only the extracted fragment crosses into JS.
+   * </remarks>
+   */
+  private sessionTokenTotalsFromPayload(
+    sessionId: string,
+  ): { input: number; output: number } | undefined {
     const row = this.db
       .prepare(
         `SELECT json_extract(payload, '$.summary.total_input') AS input,
@@ -2432,9 +2675,6 @@ export class CanonStore {
       )
       .get(sessionId) as { input: unknown; output: unknown } | undefined
     if (row === undefined) return undefined
-    // Open thread harnesses.ts:416 — a total the session recorded as
-    // not_measurable is an object, not a number. Coercing it to 0 invents a
-    // measured zero for the delegation denominator; unknown stays unknown.
     if (typeof row.input !== 'number' || typeof row.output !== 'number') return undefined
     return {
       input: row.input,
@@ -2567,14 +2807,27 @@ export class CanonStore {
    * replaced wholesale rather than merged.
    */
   upsertSession(row: SessionRow): void {
+    // One payload, one serialization: the stored blob and the two materialized
+    // columns are derived from the same object, so the columns cannot drift
+    // from the payload they describe.
+    const payload = JSON.stringify(row.payload)
+    const { summary_json, problems_count } = materializeSessionSummary(payload)
+
     this.db
       .prepare(
         // An upsert, not INSERT OR REPLACE: a replace deletes the row, which would reset the
-        // transcript sync columns (offset, status, settled_at) that the sync job owns.
+        // transcript sync columns (offset, status, settled_at) that the sync job owns. Those
+        // five -- synced_at, sync_status, settled_at, transcript_path, transcript_offset --
+        // belong to the sync job alone: this statement never names them, so a re-upsert
+        // cannot disturb them.
+        //
+        // `payload`, `summary_json` and `problems_count` are the projection's, and this one
+        // statement writes all three: the columns take their new values from `excluded`, so
+        // an insert and a re-upsert materialize exactly what the stored payload holds.
         `INSERT INTO session (
            session_id, harness, label, is_subagent, parent_session,
-           agent_name, repo, branch, started, ended, payload
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           agent_name, repo, branch, started, ended, summary_json, problems_count, payload
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(session_id) DO UPDATE SET
            harness = excluded.harness,
            label = excluded.label,
@@ -2585,6 +2838,8 @@ export class CanonStore {
            branch = excluded.branch,
            started = excluded.started,
            ended = excluded.ended,
+           summary_json = excluded.summary_json,
+           problems_count = excluded.problems_count,
            payload = excluded.payload`,
       )
       .run(
@@ -2598,7 +2853,9 @@ export class CanonStore {
         row.branch ?? null,
         row.started ?? null,
         row.ended ?? null,
-        JSON.stringify(row.payload),
+        summary_json,
+        problems_count,
+        payload,
       )
   }
 

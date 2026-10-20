@@ -181,6 +181,33 @@ export type SessionSummary = {
   included_in_parent?: boolean
 }
 
+/**
+ * One session's identity and summary, without its payload.
+ *
+ * <remarks>
+ * The bounded shape `GET /api/kyber/session/:id/summary` serves. It carries
+ * no run or execution linkage: the `session` table has no such column and the
+ * session payload carries no such field either, so a link served here would be
+ * invented rather than measured.
+ * </remarks>
+ */
+export type SessionSummaryDetail = {
+  session_id: string
+  harness: string
+  /** The stored label, the same string the session payload carries. */
+  label: string | null
+  /** The `INTEGER` column as a boolean, as the session list reports it. */
+  is_subagent: boolean
+  parent_session: string | null
+  agent_name: string | null
+  started: string | null
+  ended: string | null
+  /** The session's summary object, parsed — never a JSON string. */
+  summary: Record<string, unknown>
+  /** How many problems the session carries. */
+  problems_count: number
+}
+
 /** Cost facts needed by the shared report, read without loading raw span payloads. */
 export type SessionCostContribution = {
   sessionId: string
@@ -759,6 +786,193 @@ interface SessionDbRow {
   problems_count?: number | null
   payload?: string | null
 }
+
+/**
+ * One row's summary, as an object.
+ *
+ * <remarks>
+ * The stored summary is a JSON string; the served shape is the object it
+ * encodes. A summary that is not an object, or that does not parse, is an
+ * absent summary — never a fabricated one.
+ * </remarks>
+ */
+function parseSummaryObject(value: string | object | null | undefined): Record<string, unknown> {
+  if (typeof value === 'object' && value !== null) return value as Record<string, unknown>
+  if (typeof value !== 'string' || value === '') return {}
+  try {
+    const parsed = JSON.parse(value) as unknown
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+    return parsed as Record<string, unknown>
+  } catch {
+    return {}
+  }
+}
+
+/**
+ * One row's summary and problem count, read out of its own payload.
+ *
+ * <remarks>
+ * The reading the session list already makes for a row it cannot serve from
+ * the materialized columns, narrowed to one row.
+ * </remarks>
+ */
+function summaryFromPayload(payload: string | null | undefined): {
+  summary: Record<string, unknown>
+  problems_count: number
+} {
+  if (typeof payload !== 'string' || payload === '') return { summary: {}, problems_count: 0 }
+  try {
+    const parsed = JSON.parse(payload) as { summary?: unknown; problems?: unknown } | null
+    if (parsed === null || typeof parsed !== 'object') return { summary: {}, problems_count: 0 }
+    return {
+      summary: parseSummaryObject(parsed.summary as string | object | null | undefined),
+      problems_count: Array.isArray(parsed.problems) ? parsed.problems.length : 0,
+    }
+  } catch {
+    return { summary: {}, problems_count: 0 }
+  }
+}
+
+/**
+ * Whether a row is missing either of the two materialized summary columns.
+ *
+ * <remarks>
+ * NULL is the writer's per-column "not materialized" sentinel, so a row is
+ * never whole or empty: a payload carrying a problems array and no summary is
+ * written as a NULL summary beside a real count, and a payload carrying a
+ * summary and no problems array is written as a NULL count beside a real
+ * summary. A row is complete only when it carries both columns.
+ */
+function isMissingSessionColumn(row: SessionDbRow): boolean {
+  return (
+    row.summary_json === null ||
+    row.summary_json === undefined ||
+    row.problems_count === null ||
+    row.problems_count === undefined
+  )
+}
+
+/**
+ * Fill a row's missing materialized columns from a legacy reading.
+ *
+ * <remarks>
+ * Only what the row is missing is filled in: a materialized value is never
+ * replaced by the payload's, and a value the payload does not carry leaves
+ * the row's own NULL in place. The session list and the bounded summary route
+ * both merge through this, so the two surfaces cannot drift apart on what a
+ * NULL column means.
+ */
+function fillMissingSessionColumns(
+  row: SessionDbRow,
+  legacy: { summary_json?: string | object | null; problems_count?: number | null },
+): void {
+  if (row.summary_json === null || row.summary_json === undefined) {
+    row.summary_json = legacy.summary_json ?? null
+  }
+  if (row.problems_count === null || row.problems_count === undefined) {
+    row.problems_count = legacy.problems_count ?? null
+  }
+}
+
+/**
+ * The session list, read from the materialized columns only.
+ *
+ * <remarks>
+ * `summary_json` and `problems_count` carry the two facts the list needs out
+ * of the payload blob (the serialized `$.summary`, and the length of
+ * `$.problems`), so a materialized corpus is served without reading a byte of
+ * `payload`. The statement is column-only on purpose: naming `payload` here
+ * at all — even inside `json_extract` — makes SQLite read and parse the whole
+ * blob of every row, which is what made a list request cost the size of the
+ * payload store.
+ * </remarks>
+ */
+const SESSION_LIST_SELECT =
+  'SELECT session_id, harness, label, is_subagent, parent_session, agent_name, ' +
+  'repo, branch, started, ended, summary_json, problems_count ' +
+  'FROM session ORDER BY started DESC'
+
+/**
+ * The legacy subset: rows missing a materialized value.
+ *
+ * <remarks>
+ * The predicate is the load-bearing part: it confines the payload read to the
+ * rows that are not fully materialized, so a corpus where every row carries
+ * both values never issues this statement at all. It covers a row missing
+ * *either* value, because NULL is the writer's per-column "not materialized"
+ * sentinel — a payload with a problems array and no summary is written as a
+ * NULL summary beside a real count, and a payload with no problems array is
+ * written as a NULL count beside a real summary. The extracted values are
+ * merged back into the primary rows by `session_id`, and a value the row
+ * already carries is never overwritten.
+ * </remarks>
+ */
+const SESSION_LIST_LEGACY_SELECT =
+  "SELECT session_id, json_extract(payload, '$.summary') AS summary_json, " +
+  "json_array_length(json_extract(payload, '$.problems')) AS problems_count " +
+  'FROM session WHERE summary_json IS NULL OR problems_count IS NULL'
+
+/**
+ * The last resort: the whole payload, parsed in JS.
+ *
+ * <remarks>
+ * Taken when the SQLite build has no JSON functions (the legacy fallback
+ * cannot run) or when the schema predates the materialized columns (the
+ * primary statement cannot run). Unchanged from the pre-materialization
+ * reader, so a database the fast path cannot serve still lists.
+ * </remarks>
+ */
+const SESSION_LIST_PAYLOAD_SELECT =
+  'SELECT session_id, harness, label, is_subagent, parent_session, agent_name, ' +
+  'repo, branch, started, ended, payload ' +
+  'FROM session ORDER BY started DESC'
+
+/**
+ * One session's identity columns and its materialized summary.
+ *
+ * <remarks>
+ * The narrow read the bounded summary is built on. `payload` is not named
+ * here: a session's blob is unbounded — 15.3 MB for a 10,933-turn session —
+ * and this read answers from the columns alone.
+ * </remarks>
+ */
+const SESSION_SUMMARY_SELECT =
+  'SELECT session_id, harness, label, is_subagent, parent_session, agent_name, ' +
+  'started, ended, summary_json, problems_count ' +
+  'FROM session WHERE session_id = ?'
+
+/**
+ * The legacy subset for one row: the summary and the problem count read out
+ * of that row's own payload.
+ *
+ * <remarks>
+ * Transitional, and scoped to the requested id — the `WHERE` clause is that
+ * same single id, so this reads one row's payload and never the table's. It
+ * is issued only for a row that is missing *either* materialized value, since
+ * NULL is the writer's per-column "not materialized" sentinel, so a fully
+ * materialized corpus never runs it. `json_extract` keeps the blob inside
+ * SQLite: only the extracted fragment crosses into JS.
+ * </remarks>
+ */
+const SESSION_SUMMARY_LEGACY_SELECT =
+  "SELECT json_extract(payload, '$.summary') AS summary_json, " +
+  "json_array_length(json_extract(payload, '$.problems')) AS problems_count " +
+  'FROM session WHERE session_id = ?'
+
+/**
+ * The last resort for one row: its payload, parsed in JS.
+ *
+ * <remarks>
+ * Taken when the schema predates the materialized columns (the narrow read
+ * cannot run) or when the SQLite build has no JSON functions (the legacy
+ * extraction cannot run). One row only, so it is never worse than the detail
+ * route's whole-payload read.
+ * </remarks>
+ */
+const SESSION_SUMMARY_PAYLOAD_SELECT =
+  'SELECT session_id, harness, label, is_subagent, parent_session, agent_name, ' +
+  'started, ended, payload ' +
+  'FROM session WHERE session_id = ?'
 
 interface QuarantineDbRow {
   span_id: string
@@ -1594,31 +1808,18 @@ export class KyberBridge {
     // so a record-only group is not yet a session and must not appear.
     if (this.hasTable(db, 'session')) {
       try {
-        let rows: SessionDbRow[] = []
-        try {
-          // Fast path: use json_extract so we don't pull large payload blobs across the bridge
-          rows = db!
-            .prepare(
-              'SELECT session_id, harness, label, is_subagent, parent_session, agent_name, repo, branch, started, ended, ' +
-                "json_extract(payload, '$.summary') as summary_json, " +
-                "json_array_length(json_extract(payload, '$.problems')) as problems_count " +
-                'FROM session ORDER BY started DESC'
-            )
-            .all() as unknown as SessionDbRow[]
-        } catch {
-          // Fallback if SQLite json functions are unavailable
-          rows = db!
-            .prepare(
-              'SELECT session_id, harness, label, is_subagent, parent_session, agent_name, repo, branch, started, ended, payload ' +
-                'FROM session ORDER BY started DESC'
-            )
-            .all() as unknown as SessionDbRow[]
-        }
-
+        const rows = this.readSessionListRows(db!)
         for (const row of rows) {
           let summ: ParsedSummary | null = null
           let problemsCount = 0
 
+          // The two materialized columns are independent facts. A payload can
+          // carry a problems array without a summary, and the writer stores
+          // that as a NULL summary beside a real count; a payload can carry a
+          // summary without a problems array, and the writer stores that as a
+          // NULL count beside a real summary. So neither column gates the
+          // other: a missing summary never hides a count, and a missing count
+          // never discards a summary.
           if (row.summary_json !== undefined && row.summary_json !== null) {
             if (typeof row.summary_json === 'string') {
               try {
@@ -1627,11 +1828,17 @@ export class KyberBridge {
             } else if (typeof row.summary_json === 'object') {
               summ = row.summary_json as ParsedSummary
             }
+          }
+          if (row.problems_count !== undefined && row.problems_count !== null) {
             problemsCount = Number(row.problems_count) || 0
           } else if (typeof row.payload === 'string') {
+            // Last resort only: a row that reached here without a materialized
+            // count was read by the payload statement, because this SQLite
+            // build has no JSON functions or the schema predates the
+            // materialized columns.
             try {
               const p = JSON.parse(row.payload) as { summary?: ParsedSummary; problems?: unknown[] }
-              summ = p?.summary ?? null
+              summ = summ ?? p?.summary ?? null
               problemsCount = Array.isArray(p?.problems) ? p.problems.length : 0
             } catch {}
           }
@@ -1740,9 +1947,79 @@ export class KyberBridge {
     rootSessions.sort((a, b) => (b.started ?? '').localeCompare(a.started ?? ''))
 
     if (typeof limit === 'number' && limit > 0) {
+      // The limit stays here, after the nesting and the rollup: a SQL-side
+      // LIMIT would count rows, not roots, and would cut the children of a
+      // returned parent out of the tree (and out of its rolled-up counters).
       return rootSessions.slice(0, Math.floor(limit))
     }
     return rootSessions
+  }
+
+  /**
+   * Read the rows the session list is built from, without touching the
+   * `payload` blob unless a row forces it.
+   *
+   * <remarks>
+   * Three shapes, in order:
+   *
+   * 1. The materialized read — the whole table, columns only.
+   * 2. The legacy fallback — issued only when the primary result carries a
+   *    row that is missing a materialized value, i.e. a row written before
+   *    the materialization existed, not yet re-projected, or holding a
+   *    payload the writer could not materialize both values for. It reads the
+   *    payload of exactly those rows and is merged back by `session_id`.
+   * 3. The payload read — the last resort, unchanged: taken when the SQLite
+   *    build has no JSON functions (the fallback cannot run) or when the
+   *    schema predates the materialized columns (the primary cannot run).
+   * </remarks>
+   */
+  private readSessionListRows(db: DatabaseSync): SessionDbRow[] {
+    let primary: SessionDbRow[]
+    try {
+      primary = db.prepare(SESSION_LIST_SELECT).all() as unknown as SessionDbRow[]
+    } catch {
+      // A schema without the materialized columns: only the payload read can
+      // serve it.
+      return this.readSessionListRowsFromPayload(db)
+    }
+
+    // A row is complete when it carries both materialized values. The
+    // fallback covers every row that does not, and the two values are read
+    // independently downstream — so a row that is missing one of them keeps
+    // the other.
+    const incomplete = primary.filter((row) => isMissingSessionColumn(row))
+    if (incomplete.length === 0) return primary
+
+    let legacy: SessionDbRow[]
+    try {
+      legacy = db.prepare(SESSION_LIST_LEGACY_SELECT).all() as unknown as SessionDbRow[]
+    } catch {
+      // No JSON functions in this SQLite build: the fallback cannot run, so
+      // the payload read is the only way to serve the rows it would have
+      // completed.
+      return this.readSessionListRowsFromPayload(db)
+    }
+
+    const extracted = new Map(legacy.map((row) => [row.session_id, row]))
+    for (const row of incomplete) {
+      const legacyRow = extracted.get(row.session_id)
+      if (legacyRow === undefined) continue
+      // Only what the row is missing is filled in, one column at a time.
+      fillMissingSessionColumns(row, legacyRow)
+    }
+    return primary
+  }
+
+  /**
+   * The last resort: every row's payload, parsed in JS.
+   *
+   * <remarks>
+   * Unchanged from the pre-materialization reader, so a database the fast
+   * path cannot serve still lists.
+   * </remarks>
+   */
+  private readSessionListRowsFromPayload(db: DatabaseSync): SessionDbRow[] {
+    return db.prepare(SESSION_LIST_PAYLOAD_SELECT).all() as unknown as SessionDbRow[]
   }
 
   /**
@@ -1881,6 +2158,142 @@ export class KyberBridge {
     }
 
     return null
+  }
+
+  /**
+   * One session's identity and summary, read without its payload.
+   *
+   * <remarks>
+   * The bounded read behind `GET /api/kyber/session/:id/summary`. A consumer
+   * that needs a handful of identity fields should not pay for the whole
+   * session blob — 15.3 MB and a multi-second cold page-in for a session with
+   * 10,933 turns, to learn a handful of fields.
+   *
+   * The answer is bounded by construction, so no `_clip` is applied here. The
+   * detail route clips because its payload is unbounded; clipping a summary
+   * would only risk truncating a measured figure.
+   *
+   * A row that predates the materialization — or one the writer could not
+   * materialize both values for — is read out of that one row's payload, the
+   * transitional shape the session list already falls back to. The fallback
+   * is per column, exactly as the list merges it: the payload fills only the
+   * column the row is missing, so a materialized value is never replaced by
+   * the payload's. The shape carries no run or execution linkage — neither
+   * the `session` table nor the session payload holds such a field, so
+   * serving one would invent a link the client does not have today.
+   * </remarks>
+   */
+  getSessionSummary(sessionId: string): SessionSummaryDetail | undefined {
+    const id = sessionId.trim()
+    if (!id) return undefined
+
+    const db = this.getDb()
+    if (!this.hasTable(db, 'session')) return undefined
+
+    let row: SessionDbRow | undefined
+    try {
+      row = db!.prepare(SESSION_SUMMARY_SELECT).get(id) as SessionDbRow | undefined
+    } catch {
+      // A schema without the materialized columns: this row's own payload is
+      // the only place its summary lives.
+      return this.readSessionSummaryFromPayload(db!, id)
+    }
+    if (row === undefined) return undefined
+
+    // The two materialized columns are independent facts, and NULL is the
+    // writer's per-column "not materialized" sentinel: a missing count never
+    // discards a materialized summary, and a missing summary never hides a
+    // materialized count. So the row is resolved column by column, the same
+    // way the session list resolves it — a row carrying both is served from
+    // the columns alone, with no payload read at all, and a row missing
+    // either one falls back to that one row's payload for the missing
+    // column only.
+    if (isMissingSessionColumn(row)) {
+      const legacy = this.readSessionSummaryLegacy(db!, id)
+      if (legacy === undefined) return undefined
+      fillMissingSessionColumns(row, legacy)
+    }
+
+    return this.buildSessionSummary(row, {
+      summary:
+        row.summary_json === null || row.summary_json === undefined
+          ? {}
+          : parseSummaryObject(row.summary_json),
+      problems_count: Number(row.problems_count) || 0,
+    })
+  }
+
+  /**
+   * The two materialized columns of one row, read out of that row's payload.
+   *
+   * <remarks>
+   * Returned as columns, not as served facts, so the caller merges them per
+   * column: a value the row already carries is never replaced by the
+   * payload's, and a value the payload does not carry leaves the row's own
+   * NULL in place.
+   */
+  private readSessionSummaryLegacy(
+    db: DatabaseSync,
+    sessionId: string,
+  ): { summary_json?: string | object | null; problems_count?: number | null } | undefined {
+    try {
+      const row = db
+        .prepare(SESSION_SUMMARY_LEGACY_SELECT)
+        .get(sessionId) as { summary_json?: string | null; problems_count?: number | null } | undefined
+      if (row === undefined) return undefined
+      return {
+        summary_json: row.summary_json ?? null,
+        problems_count: row.problems_count ?? null,
+      }
+    } catch {
+      // No JSON functions in this SQLite build: the extraction cannot run, so
+      // this row's payload is the only way to serve it.
+      const row = db.prepare(SESSION_SUMMARY_PAYLOAD_SELECT).get(sessionId) as SessionDbRow | undefined
+      if (row === undefined) return undefined
+      const facts = summaryFromPayload(row.payload)
+      return { summary_json: facts.summary, problems_count: facts.problems_count }
+    }
+  }
+
+  /**
+   * One row's summary, parsed from its own payload.
+   *
+   * <remarks>
+   * The last resort, and the same reading the session list makes when the
+   * materialized columns cannot serve it. One row only, so it never costs
+   * more than the detail route's whole-payload read.
+   * </remarks>
+   */
+  private readSessionSummaryFromPayload(
+    db: DatabaseSync,
+    sessionId: string,
+  ): SessionSummaryDetail | undefined {
+    const row = db.prepare(SESSION_SUMMARY_PAYLOAD_SELECT).get(sessionId) as SessionDbRow | undefined
+    if (row === undefined) return undefined
+    return this.buildSessionSummary(row, summaryFromPayload(row.payload))
+  }
+
+  /**
+   * The served shape, from one row's columns plus its summary facts.
+   */
+  private buildSessionSummary(
+    row: SessionDbRow,
+    facts: { summary: Record<string, unknown>; problems_count: number },
+  ): SessionSummaryDetail {
+    return {
+      session_id: row.session_id,
+      harness: row.harness,
+      label: row.label ?? null,
+      // The column is an INTEGER; the session list reports it as a boolean,
+      // and so does this.
+      is_subagent: Boolean(row.is_subagent),
+      parent_session: row.parent_session ?? null,
+      agent_name: row.agent_name ?? null,
+      started: row.started ?? null,
+      ended: row.ended ?? null,
+      summary: facts.summary,
+      problems_count: facts.problems_count,
+    }
   }
 
   /**
