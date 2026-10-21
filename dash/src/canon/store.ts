@@ -3293,11 +3293,15 @@ export class CanonStore {
    * statement over the expired set does the same work in one transaction.
    *
    * The cutoff is an ISO instant and the stored timestamps are ISO instants
-   * (`writeRecord` normalizes a `Date` on the way in), so the comparison is
-   * the same instant the epoch comparison used to make. `content_json` is
-   * `'{}'` for a record with no content and `parts_json` holds the parts, so
-   * "has content" is "either column says so" — an already-purged row matches
-   * neither and is left alone, which keeps the purge idempotent.
+   * (`writeRecord` normalizes a `Date` on the way in, but passes a string
+   * through verbatim), so the comparison is on instants — `datetime()` on
+   * both sides — rather than on strings, which would retain a row like
+   * `2026-08-29T13:00:00+02:00` past a noon-Z cutoff it predates.
+   * `content_json` is `'{}'` for a record with no content and `parts_json`
+   * holds the parts (the empty array stored as `'[]'`), so "has content" is
+   * "either column holds a non-empty value" — an already-purged row, or one
+   * that never held content, matches neither and is left alone, which keeps
+   * the purge idempotent.
    *
    * The records-write marker moves only when a row actually changed: the
    * marker is the corpus's change signal, and a purge that changed nothing
@@ -3309,8 +3313,8 @@ export class CanonStore {
       const info = this.db
         .prepare(
           `UPDATE records SET content_json = '{}', parts_json = NULL
-           WHERE timestamp < ?
-             AND ((content_json IS NOT NULL AND content_json <> '{}') OR parts_json IS NOT NULL)`,
+           WHERE datetime(timestamp) < datetime(?)
+             AND ((content_json IS NOT NULL AND content_json <> '{}') OR (parts_json IS NOT NULL AND parts_json <> '[]'))`,
         )
         .run(cutoffUtc)
       const purged = typeof info.changes === 'number' ? info.changes : Number(info.changes) || 0

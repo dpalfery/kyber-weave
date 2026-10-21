@@ -128,6 +128,51 @@ describe('purgeExpiredContent', () => {
     expect(staleParts!.raw).not.toBeNull()
     expect(decompressRaw(staleParts!.raw as Uint8Array)).toEqual({ keep: 'stale-parts-raw' })
   })
+
+  it('compares instants, not strings, so a non-Z offset timestamp purges by its instant', () => {
+    // A row stored verbatim with an offset names the same instant as its Z
+    // form; a lexical comparison retains it while the epoch comparison the
+    // purge replaced would purge it. 13:00+02:00 is 11:00Z, before the noon
+    // cutoff, but sorts after it as a string.
+    const path = tempStorePath()
+    const store = new CanonStore(path)
+    try {
+      store.upsertMany([
+        record({
+          spanId: 'offset-stale',
+          timestamp: '2026-08-29T13:00:00+02:00',
+          content: { system_prompt: 'stale' },
+        }),
+      ])
+      const result = purgeExpiredContent(store, new Date('2026-09-12T12:00:00.000Z'))
+      expect(result.purged).toBe(1)
+    } finally {
+      store.close()
+    }
+    const columns = loadColumns(path)
+    expect(columns.get('offset-stale')!.content_json).toBe('{}')
+  })
+
+  it('leaves rows with no stored content alone, even when parts_json holds the empty array', () => {
+    const path = tempStorePath()
+    const store = new CanonStore(path)
+    try {
+      store.upsertMany([
+        record({
+          spanId: 'empty-parts',
+          timestamp: '2026-08-20T12:00:00.000Z',
+          content: {},
+          parts: [],
+        }),
+      ])
+      const before = loadColumns(path).get('empty-parts')!
+      expect(before.parts_json).not.toBeNull()
+      const result = purgeExpiredContent(store, new Date('2026-09-12T12:00:00.000Z'))
+      expect(result.purged).toBe(0)
+    } finally {
+      store.close()
+    }
+  })
 })
 
 describe('purgeExpiredContent runs in one transaction', () => {
