@@ -9,6 +9,7 @@ import https from 'https'
 import { getCacheDir, readExistingTextFile } from '../ingest/cache-dir.js'
 import { calculateCost } from '../pricing/models.js'
 import { isSqliteAvailable, isSqliteBusyError, openDatabase } from '../ingest/sqlite.js'
+import { attachTranscriptActivity } from './antigravity-transcript.js'
 import type { ProbeRoot, Provider, SessionSource, SessionParser, ParsedProviderCall } from './types.js'
 
 type AntigravityConversationRoot = {
@@ -1384,6 +1385,22 @@ function withFallbackTimestamp(call: ParsedProviderCall, fallbackTimestamp: stri
 }
 
 function createParser(source: SessionSource, seenKeys: Set<string>): SessionParser {
+  return {
+    async *parse(): AsyncGenerator<ParsedProviderCall> {
+      // The transcript is read fresh on every parse, so cached calls pick up new
+      // tool activity without a cache-version bump or an mtime on the transcript.
+      const calls: ParsedProviderCall[] = []
+      for await (const call of createRawParser(source, seenKeys).parse()) calls.push(call)
+      await attachTranscriptActivity(calls, {
+        preferredRoot: antigravityAppDataDirFromSourcePath(source.path),
+        mode: isAntigravityStatusLineEventsPath(source.path) ? 'following' : 'nearest',
+      })
+      yield* calls
+    },
+  }
+}
+
+function createRawParser(source: SessionSource, seenKeys: Set<string>): SessionParser {
   return {
     async *parse(): AsyncGenerator<ParsedProviderCall> {
       if (isAntigravityStatusLineEventsPath(source.path)) {
