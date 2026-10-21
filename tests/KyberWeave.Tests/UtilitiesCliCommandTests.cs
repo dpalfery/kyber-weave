@@ -11,9 +11,9 @@ namespace KyberWeave.Tests;
 /// Pins the four verbs — <c>deploy</c>, <c>status</c>, <c>doctor</c>, and <c>remove</c> — as an
 /// operator reaches them: an argv in, an exit code and rendered output out. It pins the exit-2
 /// client-input refusal for the dropped OpenCode target (D9) and for an unknown target, that a deploy
-/// with no <c>--target</c> covers Claude Code, <c>agy</c>, and Pi while a targeted deploy covers
-/// exactly one, that activation guidance names absolute paths and states the operator applies the
-/// edit, that <c>--dry-run</c> writes nothing, and that no verb ever creates, names, or modifies a
+/// with no <c>--target</c> covers Claude Code, <c>agy</c>, Pi, and Command Code while a targeted deploy
+/// covers exactly one, that activation guidance names absolute paths and states the operator applies
+/// the edit, that <c>--dry-run</c> writes nothing, and that no verb ever creates, names, or modifies a
 /// harness settings file (A4, C2, D5).
 /// </summary>
 /// <remarks>
@@ -26,7 +26,8 @@ namespace KyberWeave.Tests;
 /// </para>
 /// <para>
 /// Each case runs in an isolated temporary home with <c>HOME</c>, <c>USERPROFILE</c>, and the three
-/// documented harness-root overrides pointed into it, and with <c>PATH</c> replaced by a stub
+/// documented harness-root overrides pointed into it (Command Code honours no override and resolves
+/// from the isolated home itself), and with <c>PATH</c> replaced by a stub
 /// directory this suite owns, so doctor's harness and prerequisite probes are deterministic and no
 /// case can read or write the operator's real harness configuration. The deployable artifacts come
 /// from a synthetic product tree inside a temporary checkout, which is the seam this implementation
@@ -68,8 +69,8 @@ public sealed class UtilitiesCliCommandTests : IDisposable
     /// <summary>The four verbs the branch must register.</summary>
     private static readonly string[] Verbs = ["deploy", "status", "doctor", "remove"];
 
-    /// <summary>The three harnesses this slice keeps (D9), as the CLI's own target tokens.</summary>
-    private static readonly string[] HarnessTokens = ["claude", "agy", "pi"];
+    /// <summary>The four harnesses this slice keeps (D9), as the CLI's own target tokens.</summary>
+    private static readonly string[] HarnessTokens = ["claude", "agy", "pi", "commandcode"];
 
     /// <summary>
     /// The two harnesses whose artifact is a command their host runs directly, so the deployed file
@@ -79,7 +80,7 @@ public sealed class UtilitiesCliCommandTests : IDisposable
 
     /// <summary>Every executable doctor probes, other than the optional <c>kyberdash</c> (C8).</summary>
     private static readonly string[] StubExecutables =
-        ["claude", "agy", "pi", "bash", "jq", "git", "awk", "python3", "node"];
+        ["claude", "agy", "pi", "cmd", "bash", "jq", "git", "awk", "python3", "node"];
 
     /// <summary>Every runtime prerequisite the T0 inventory declares, for the healthy-doctor case.</summary>
     private static readonly string[] DeclaredPrerequisites = ["bash", "jq", "git", "awk", "python3", "node"];
@@ -94,7 +95,8 @@ public sealed class UtilitiesCliCommandTests : IDisposable
     [
         ".claude/settings.json",
         ".gemini/antigravity-cli/settings.json",
-        ".pi/agent/settings.json"
+        ".pi/agent/settings.json",
+        ".commandcode/config.json"
     ];
 
     private readonly TempDirectory _temp = new();
@@ -169,7 +171,7 @@ public sealed class UtilitiesCliCommandTests : IDisposable
     }
 
     [Fact]
-    public void DeployWithNoTargetStagesAllThreeHarnesses()
+    public void DeployWithNoTargetStagesAllFourHarnesses()
     {
         CliResult run = Run("utilities", "statusline", "deploy");
 
@@ -189,6 +191,8 @@ public sealed class UtilitiesCliCommandTests : IDisposable
     [InlineData("-t", "agy")]
     [InlineData("--target", "pi")]
     [InlineData("-t", "pi")]
+    [InlineData("--target", "commandcode")]
+    [InlineData("-t", "commandcode")]
     public void DeployWithATargetStagesExactlyThatHarness(string targetOption, string token)
     {
         CliResult run = Run("utilities", "statusline", "deploy", targetOption, token);
@@ -219,6 +223,8 @@ public sealed class UtilitiesCliCommandTests : IDisposable
         Assert.Contains(Compact($"\"command\": \"{DeployedPath("claude")}\""), output, StringComparison.Ordinal);
         Assert.Contains(Compact($"\"command\": \"{DeployedPath("agy")}\""), output, StringComparison.Ordinal);
         Assert.Contains(Compact($"\"extensions\": [\"{DeployedPath("pi")}\"]"), output, StringComparison.Ordinal);
+        Assert.Contains(Compact(DeployedPath("commandcode")), output, StringComparison.Ordinal);
+        Assert.Contains(Compact("~/.commandcode/mods/"), output, StringComparison.Ordinal);
         Assert.Contains(Compact(ApplyYourselfLine), output, StringComparison.Ordinal);
         Assert.DoesNotContain("\"command\":\"~", output, StringComparison.Ordinal);
         Assert.DoesNotContain("\"extensions\":[\"~", output, StringComparison.Ordinal);
@@ -421,7 +427,7 @@ public sealed class UtilitiesCliCommandTests : IDisposable
 
         CliResult run = RunIn(
             _checkout,
-            StubBinWithout("agy", "pi", "python3", "node"),
+            StubBinWithout("agy", "pi", "cmd", "python3", "node"),
             "utilities",
             "statusline",
             "doctor");
@@ -606,6 +612,7 @@ public sealed class UtilitiesCliCommandTests : IDisposable
             "claude" => ".claude",
             "agy" => ".gemini/antigravity-cli",
             "pi" => ".pi/agent",
+            "commandcode" => ".commandcode",
             _ => throw new ArgumentOutOfRangeException(
                 nameof(token),
                 token,
@@ -620,6 +627,7 @@ public sealed class UtilitiesCliCommandTests : IDisposable
             "claude" => "claude",
             "agy" => "antigravity",
             "pi" => "pi",
+            "commandcode" => "commandcode",
             _ => throw new ArgumentOutOfRangeException(
                 nameof(token),
                 token,
@@ -634,6 +642,7 @@ public sealed class UtilitiesCliCommandTests : IDisposable
             "claude" => "statusline.sh",
             "agy" => "statusline.py",
             "pi" => "statusbar.ts",
+            "commandcode" => "statusbar.ts",
             _ => throw new ArgumentOutOfRangeException(
                 nameof(token),
                 token,
@@ -648,6 +657,7 @@ public sealed class UtilitiesCliCommandTests : IDisposable
             "claude" => "#!/bin/sh\necho synthetic-claude-statusline\n",
             "agy" => "#!/usr/bin/env python3\nprint(\"synthetic-agy-statusline\")\n",
             "pi" => "export default function activate() { /* synthetic pi status bar */ }\n",
+            "commandcode" => "export default function (cmd) { /* synthetic commandcode status bar */ }\n",
             _ => throw new ArgumentOutOfRangeException(
                 nameof(token),
                 token,
