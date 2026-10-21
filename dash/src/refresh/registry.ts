@@ -40,8 +40,17 @@ const KILO_PARSER_CONTRACT_VERSION = '3'
 // to the providers named in SKILLS_CONTRACT_PROVIDER_NAMES; the VS Code
 // `cline` descriptor and hermes do not fill skills and keep their versions.
 const SKILLS_CONTRACT_VERSION = '2'
+// v2: Antigravity's own contract, split from the default. Tool definitions are
+// measured only on records whose paired turn carries catalogue definitions, and
+// a transcript-covered call states its empty skills list (D6, D8). Stale
+// checkpoints under v1 re-synthesize so those declarations upsert over them.
+const ANTIGRAVITY_PARSER_CONTRACT_VERSION = '2'
+// v3: Copilot's own contract, moved out of the shared skills contract, which
+// stopped at v2 for Copilot's invoked skills. Copilot CLI's system prompt and
+// conversation history are now lifted per record, and its tool_definitions is
+// declared not measurable (D8), so checkpoints under v2 re-synthesize.
+const COPILOT_PARSER_CONTRACT_VERSION = '3'
 const SKILLS_CONTRACT_PROVIDER_NAMES: ReadonlySet<string> = new Set([
-  'copilot',
   'opencode',
   'cline-cli',
   'codewhale',
@@ -96,6 +105,12 @@ export function parserContractVersionFor(partial: { providerName: string; harnes
   }
   if (partial.providerName === 'pi' || partial.harnessId === 'pi') {
     return PI_PARSER_CONTRACT_VERSION
+  }
+  if (partial.providerName === 'antigravity') {
+    return ANTIGRAVITY_PARSER_CONTRACT_VERSION
+  }
+  if (partial.providerName === 'copilot') {
+    return COPILOT_PARSER_CONTRACT_VERSION
   }
   if (SKILLS_CONTRACT_PROVIDER_NAMES.has(partial.providerName)) {
     return SKILLS_CONTRACT_VERSION

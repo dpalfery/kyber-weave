@@ -18,7 +18,7 @@
 //     (VS Code Copilot): the listing is read from that block.
 //   - Everything else: the listing is not measurable, with a reason.
 
-import { harnessFamily } from './measurability.js'
+import { harnessFamily, normalizeHarnessName } from './measurability.js'
 import { SKILLS_INVOKED_KEY, SKILLS_LISTED_KEY, isNotMeasurable, notMeasurable } from './types.js'
 import type { CanonicalRecord, ContentPart, Measurability, NotMeasurable } from './types.js'
 
@@ -35,6 +35,8 @@ const ANTIGRAVITY_SKILL_TOKENS_KEY = 'gen_ai.usage.skill_tokens'
  * `claude-desktop`; `harnessFamily` folds every Claude front-end onto this id.
  */
 const CLAUDE_FAMILY = 'claude-code'
+/** Antigravity's family id; `harnessFamily` folds `antigravity-cli` and `antigravity-ide` onto it. */
+const ANTIGRAVITY_FAMILY = 'antigravity'
 const SKILL_TOOL_NAMES: ReadonlySet<string> = new Set(['Skill', 'skill'])
 const SKILL_TOOL_OP = 'tool.invoke'
 const AGENT_ROLLUP_OP = 'agent.invoke'
@@ -79,6 +81,12 @@ export type MeasuredSkillsView = {
   reportedSkillTokens?: number
   /** Set when the invocation source is unmeasurable; `invocations` is then omitted per row. */
   invocationsAvailability?: NotMeasurable
+  /**
+   * Set only for an Antigravity session where some turns carry the invoked key and
+   * some do not (D30): the invocation figures cover `measuredTurns` of `totalTurns`.
+   * Absent when every turn, or no turn, is covered, so the figures read as before.
+   */
+  invocationsCoverage?: { measuredTurns: number; totalTurns: number }
 }
 
 /** `buildSkillsView(records, turnRecords, measurability, countTokens)`. */
@@ -143,6 +151,14 @@ export function extractInvokedSkills(records: readonly CanonicalRecord[]): Invok
       isClaudeFamily(record) || isSkillToolCall(record) || Array.isArray(rawOf(record)[SKILLS_INVOKED_KEY]),
   )
   if (!hasInvocationSource) {
+    // Antigravity has no Skill tool call: its invocations come from the transcript
+    // (see providers/antigravity-transcript.ts). A session with no such key has no
+    // transcript behind it, so the reason says where the figure would have come from.
+    if (records.some((record) => harnessFamily(record.harness) === ANTIGRAVITY_FAMILY)) {
+      return notMeasurable(
+        `No skill invocation is recorded: the Antigravity records carry no ${SKILLS_INVOKED_KEY} key. Skill invocations are read from the conversation transcript, and none was available for this session, so skills invoked are not measurable.`,
+      )
+    }
     return notMeasurable(
       `No skill invocation is recorded: the records carry no Skill tool call and no ${SKILLS_INVOKED_KEY} key, so skills invoked are not measurable.`,
     )
@@ -290,6 +306,15 @@ function measuredView(
   const reportedSkillTokens = latestReportedSkillTokens(turns)
   if (reportedSkillTokens !== undefined) view.reportedSkillTokens = reportedSkillTokens
   if (invocationsAvailability !== undefined) view.invocationsAvailability = invocationsAvailability
+  // Antigravity counts an invocation only on a turn that carries the key (D30), so
+  // a partly covered session says how many turns its figures cover.
+  if (invocationsAvailability === undefined) {
+    const antigravityTurns = turns.filter((turn) => harnessFamily(turn.harness) === ANTIGRAVITY_FAMILY)
+    const measuredTurns = antigravityTurns.filter((turn) => Array.isArray(rawOf(turn)[SKILLS_INVOKED_KEY])).length
+    if (measuredTurns > 0 && measuredTurns < antigravityTurns.length) {
+      view.invocationsCoverage = { measuredTurns, totalTurns: antigravityTurns.length }
+    }
+  }
   return view
 }
 
@@ -626,6 +651,9 @@ function latestReportedSkillTokens(turns: readonly CanonicalRecord[]): number | 
 // ---------------------------------------------------------------------------
 
 function isSkillToolCall(record: CanonicalRecord): boolean {
+  // A Copilot CLI session-level tool named `skill` is not a skill invocation (D26):
+  // no turn of that session carries a skill record, so the reason stays unchanged.
+  if (normalizeHarnessName(record.harness) === 'copilot-cli') return false
   return record.op === SKILL_TOOL_OP && SKILL_TOOL_NAMES.has(record.name)
 }
 

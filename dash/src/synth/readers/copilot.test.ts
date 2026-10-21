@@ -1,17 +1,25 @@
 // Copilot CLI's data.db records ASAD's context taxonomy directly. These
 // synthetic rows contain only neutral labels and counts, never CLI history.
-import { describe, expect, it, expectTypeOf } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, expectTypeOf, vi } from 'vitest'
 import { DatabaseSync } from 'node:sqlite'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { join } from 'node:path'
 
 import {
   copilotCliReader,
   loadCopilotCliCalls,
   parseCopilotCliContextRow,
 } from './copilot.js'
-import type { ContentReader } from './types.js'
+import type { ContentReader, ReaderTurn } from './types.js'
+import { openDatabase } from '../../ingest/sqlite.js'
+
+// Wraps the real opener so a test can count how often the session store is opened.
+// The wrapped behaviour is unchanged: every other test still reads a real SQLite file.
+vi.mock('../../ingest/sqlite.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../ingest/sqlite.js')>()
+  return { ...actual, openDatabase: vi.fn(actual.openDatabase) }
+})
 
 const CLI_CONTEXT_ROW = {
   id: 'synthetic-copilot-cli-session',
@@ -159,59 +167,143 @@ describe('loadCopilotCliCalls: absent cost_usd is not a harness figure (issue #1
   })
 })
 
-describe('copilotCliReader events.jsonl journal', () => {
-  const ROOT_PROMPT = 'Root prompt.\n<available_skills>\n<skill><name>alpha</name><description>Does alpha.</description><location>/x/alpha</location></skill>\n</available_skills>'
-  const SUB_PROMPT = 'Subagent prompt.'
+// D23: the content reader resolves each session's journal at
+// `<home>/.copilot/session-state/<sessionId>/events.jsonl` by exact directory
+// name. HOME is redirected into a scratch tree so no real CLI history is read.
+describe('copilotCliReader session journal (D23)', () => {
+  const ROOT_STALE = 'Stale root prompt, superseded by the latest root system.message.'
+  const ROOT_S1 = 'Root prompt.\n<available_skills>\n<skill><name>alpha</name><description>Does alpha.</description><location>/x/alpha</location></skill>\n</available_skills>'
+  const SUB_S1 = 'Subagent prompt that no canon record may carry.'
 
-  function journal(lines: readonly object[]): string {
-    const dir = mkdtempSync(join(tmpdir(), 'copilot-journal-'))
-    const sessionDir = join(dir, 'session-1')
-    mkdirSync(sessionDir)
-    const file = join(sessionDir, 'events.jsonl')
-    writeFileSync(file, lines.map((l) => JSON.stringify(l)).join('\n') + '\n')
+  let home = ''
+
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), 'copilot-journal-home-'))
+    vi.stubEnv('HOME', home)
+  })
+
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    rmSync(home, { recursive: true, force: true })
+  })
+
+  function writeJournal(sessionDirName: string, lines: readonly object[]): string {
+    const dir = join(home, '.copilot', 'session-state', sessionDirName)
+    mkdirSync(dir, { recursive: true })
+    const file = join(dir, 'events.jsonl')
+    writeFileSync(file, lines.map((line) => JSON.stringify(line)).join('\n') + '\n')
     return file
   }
 
-  async function collect(file: string) {
-    const turns = []
+  function writeStore(sessionIds: readonly string[]): string {
+    const dir = join(home, '.copilot')
+    mkdirSync(dir, { recursive: true })
+    const file = join(dir, 'session-store.db')
+    const db = new DatabaseSync(file)
+    try {
+      db.exec('CREATE TABLE sessions (id TEXT, cwd TEXT, repository TEXT);')
+      const insert = db.prepare('INSERT INTO sessions (id, cwd, repository) VALUES (?, ?, ?)')
+      for (const id of sessionIds) insert.run(id, `/synthetic/${id}`, `synthetic/${id}`)
+    } finally {
+      db.close()
+    }
+    return file
+  }
+
+  async function collect(file: string): Promise<ReaderTurn[]> {
+    const turns: ReaderTurn[] = []
     for await (const turn of copilotCliReader.read(file)) turns.push(turn)
     return turns
   }
 
-  it('pairs each assistant.message with the system prompt of its own agent', async () => {
-    const file = journal([
-      { type: 'system.message', data: { role: 'system', content: ROOT_PROMPT } },
-      { type: 'assistant.message', data: { messageId: 'm1' } },
-      { type: 'system.message', agentId: 'sub-a', data: { role: 'system', content: SUB_PROMPT } },
-      { type: 'assistant.message', agentId: 'sub-a', data: { messageId: 'm2' } },
-      { type: 'assistant.message', data: { messageId: 'm3' } },
+  function systemPromptsOf(turn: ReaderTurn): string[] {
+    return turn.parts.filter((part) => part.part === 'system_prompt').map((part) => part.text)
+  }
+
+  function s1Journal(): string {
+    return writeJournal('S1', [
+      { type: 'system.message', data: { role: 'system', content: ROOT_STALE } },
+      { type: 'system.message', data: { role: 'system', content: ROOT_S1 } },
+      { type: 'system.message', agentId: 'agent-sub-1', data: { role: 'system', content: SUB_S1 } },
+      { type: 'assistant.message', data: { messageId: 'msg-s1-root' } },
+      { type: 'assistant.message', agentId: 'agent-sub-1', data: { messageId: 'msg-s1-sub' } },
+      { type: 'assistant.message', data: { messageId: 'msg-s1-root-2' } },
     ])
-    try {
-      const turns = await collect(file)
-      expect(turns.map((t) => t.nativeRecordId)).toEqual(['m1', 'm3', 'm2'])
-      expect(turns.every((t) => t.sessionId === 'session-1')).toBe(true)
-      expect(turns[0]!.parts).toEqual([{ part: 'system_prompt', text: ROOT_PROMPT, order: 0 }])
-      expect(turns[2]!.parts).toEqual([{ part: 'system_prompt', text: SUB_PROMPT, order: 0 }])
-      expect(turns[1]!.parts[0]).toMatchObject({ text: ROOT_PROMPT })
-      expect(turns.some((t) => t.toolsOffered !== undefined)).toBe(false)
-    } finally {
-      rmSync(dirname(dirname(file)), { recursive: true, force: true })
+  }
+
+  it('attaches the latest root prompt to every turn of the session and never the subagent prompt', async () => {
+    const turns = await collect(s1Journal())
+
+    expect(turns.length).toBeGreaterThan(0)
+    for (const turn of turns) {
+      expect(turn.sessionId).toBe('S1')
+      expect(systemPromptsOf(turn)).toEqual([ROOT_S1])
     }
+    expect(JSON.stringify(turns)).not.toContain(SUB_S1)
   })
 
-  it('emits no prompt part when no system.message preceded the turn', async () => {
-    const file = journal([
-      { type: 'assistant.message', agentId: 'sub-b', data: { messageId: 'm1' } },
-      { type: 'system.message', data: { role: 'system', content: ROOT_PROMPT } },
-    ])
-    try {
-      expect((await collect(file))[0]!.parts).toEqual([])
-    } finally {
-      rmSync(dirname(dirname(file)), { recursive: true, force: true })
-    }
+  it('reads the session journals a store path names and attaches each root prompt', async () => {
+    const store = writeStore(['S1', 'S2'])
+    s1Journal()
+
+    const turns = await collect(store)
+    const s1Turns = turns.filter((turn) => turn.sessionId === 'S1')
+
+    expect(s1Turns.length).toBeGreaterThan(0)
+    for (const turn of s1Turns) expect(systemPromptsOf(turn)).toEqual([ROOT_S1])
   })
 
-  it('yields nothing for a database path', async () => {
-    expect(await collect('/nonexistent/data.db')).toEqual([])
+  it('resolves a session journal by exact directory name, never by prefix', async () => {
+    const store = writeStore(['S1', 'S3'])
+    s1Journal()
+    writeJournal('pending-session:S3', [
+      { type: 'system.message', data: { role: 'system', content: 'PENDING prompt for a different directory.' } },
+      { type: 'assistant.message', data: { messageId: 'msg-pending' } },
+    ])
+
+    const turns = await collect(store)
+
+    // Positive control: S1 really resolves, so the S3 assertions are not vacuous.
+    expect(turns.filter((turn) => turn.sessionId === 'S1').some((turn) => systemPromptsOf(turn).length > 0)).toBe(true)
+    expect(turns.filter((turn) => turn.sessionId === 'S3').flatMap(systemPromptsOf)).toEqual([])
+    expect(JSON.stringify(turns)).not.toContain('PENDING prompt')
+  })
+
+  it('attaches no prompt part when a session journal holds only a subagent prompt', async () => {
+    const file = writeJournal('S7', [
+      { type: 'system.message', agentId: 'agent-sub-7', data: { role: 'system', content: SUB_S1 } },
+      { type: 'assistant.message', agentId: 'agent-sub-7', data: { messageId: 'msg-s7-sub' } },
+    ])
+
+    const turns = await collect(file)
+
+    expect(turns.flatMap(systemPromptsOf)).toEqual([])
+  })
+
+  it('opens the session store once for several journals read one after another, not once per journal', async () => {
+    // Three sessions in the store, each with its own journal: the store names all three.
+    writeStore(['s1', 's2', 's3'])
+    const journals = ['s1', 's2', 's3'].map((id) => writeJournal(id, [
+      { type: 'system.message', data: { role: 'system', content: `Root prompt for ${id}.` } },
+      { type: 'assistant.message', data: { messageId: `msg-${id}` } },
+    ]))
+    const storePath = join(home, '.copilot', 'session-store.db')
+
+    const open = vi.mocked(openDatabase)
+    open.mockClear()
+    for (const journal of journals) await collect(journal)
+
+    const storeOpens = open.mock.calls.filter(([path]) => path === storePath)
+    expect(storeOpens, 'opens of the session store across three journal reads').toHaveLength(1)
+  })
+
+  it('yields nothing for an absent session store', async () => {
+    expect(await collect(join(home, '.copilot', 'missing-session-store.db'))).toEqual([])
+  })
+
+  it('does not report tools offered: the journal holds no tool schemas', async () => {
+    const turns = await collect(s1Journal())
+
+    expect(turns.some((turn) => turn.toolsOffered !== undefined)).toBe(false)
   })
 })

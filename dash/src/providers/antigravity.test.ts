@@ -1,13 +1,16 @@
-import { mkdtemp, mkdir, readFile, rm, stat, utimes, writeFile } from 'fs/promises'
+import { mkdtemp, mkdir, readFile, rename, rm, stat, truncate, utimes, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { createRequire } from 'node:module'
 import { describe, expect, it } from 'vitest'
 
+import { MAX_SESSION_FILE_BYTES } from '../ingest/fs-utils.js'
 import { isSqliteAvailable } from '../ingest/sqlite.js'
 import {
   antigravityAppDataDirFromSourcePath,
+  antigravityCacheFileName,
   antigravityCascadeIdFromPath,
+  flushAntigravityCache,
   getAgent,
   isAntigravityCascadeId,
   createAntigravityProvider,
@@ -772,5 +775,156 @@ describe('cascade ids crossing the network boundary', () => {
 
   it('parses ids from paths without throwing, so one odd filename cannot abort ingest', () => {
     expect(() => antigravityCascadeIdFromPath('/tmp/../../weird name!.pb')).not.toThrow()
+  })
+})
+
+// Synthetic segment fixture: three gen_metadata rows whose last_step_index values are
+// 2, 5 and 8, beside a transcript whose PLANNER_RESPONSE steps sit at 3, 6 and 9 with
+// a different tool name each. See tests/fixtures/antigravity-transcript/README.md.
+const SEGMENTS_FIXTURE_URL = new URL('../../tests/fixtures/antigravity-transcript/gen-metadata.json', import.meta.url)
+const SEGMENTS_TRANSCRIPT_URL = new URL(
+  '../../tests/fixtures/antigravity-transcript/brain/fixture-segments/.system_generated/logs/transcript.jsonl',
+  import.meta.url,
+)
+
+describe('agy-step pairing from last_step_index', () => {
+  async function withSegmentsHome(run: (tempHome: string, dbPath: string) => Promise<void>): Promise<void> {
+    const tempHome = await mkdtemp(join(tmpdir(), 'codeburn-antigravity-segments-'))
+    const previousCacheDir = process.env['KYBERDASH_CACHE_DIR']
+    process.env['KYBERDASH_CACHE_DIR'] = join(tempHome, 'cache')
+    try {
+      const fixture = JSON.parse(await readFile(SEGMENTS_FIXTURE_URL, 'utf-8')) as CurrentCliFixture
+      const conversationsDir = join(tempHome, '.gemini', 'antigravity-cli', 'conversations')
+      const logsDir = join(tempHome, '.gemini', 'antigravity-cli', 'brain', fixture.conversationId, '.system_generated', 'logs')
+      await mkdir(conversationsDir, { recursive: true })
+      await mkdir(logsDir, { recursive: true })
+      await writeFile(join(logsDir, 'transcript.jsonl'), await readFile(SEGMENTS_TRANSCRIPT_URL, 'utf-8'))
+      const dbPath = join(conversationsDir, `${fixture.conversationId}.db`)
+      createCurrentAntigravityCliDb(dbPath, fixture)
+      await run(tempHome, dbPath)
+    } finally {
+      if (previousCacheDir === undefined) delete process.env['KYBERDASH_CACHE_DIR']
+      else process.env['KYBERDASH_CACHE_DIR'] = previousCacheDir
+      await rm(tempHome, { recursive: true, force: true })
+    }
+  }
+
+  // No isSqliteAvailable() guard here: a silent early return would pass without proving anything.
+  it('stamps each call with the agy-step id of its last_step_index and attaches only its own segment', async () => {
+    await withSegmentsHome(async (_home, dbPath) => {
+      const calls = await collectAntigravityCalls({ path: dbPath, project: 'antigravity-cli', provider: 'antigravity' })
+
+      expect(calls.map((c) => c.pairingId)).toEqual(['agy-step:2', 'agy-step:5', 'agy-step:8'])
+      // Each call owns (lsi[N], lsi[N+1]]: the PLANNER step at lsi+1 is its own tool, never its predecessor's.
+      expect(calls.map((c) => c.tools)).toEqual([['run_command'], ['view_file'], ['grep_search']])
+    })
+  })
+})
+
+describe('cached calls carry no transcript activity once the transcript is gone (F1)', () => {
+  type CachedSegments = {
+    tempHome: string
+    cacheDir: string
+    dbPath: string
+    transcriptPath: string
+    source: { path: string; project: string; provider: string }
+  }
+
+  /** A conversation db with its transcript beside it, and a cache directory of its own. */
+  async function withCachedSegments(run: (fx: CachedSegments) => Promise<void>): Promise<void> {
+    const tempHome = await mkdtemp(join(tmpdir(), 'codeburn-antigravity-cache-activity-'))
+    const previousCacheDir = process.env['KYBERDASH_CACHE_DIR']
+    const cacheDir = join(tempHome, 'cache')
+    process.env['KYBERDASH_CACHE_DIR'] = cacheDir
+    try {
+      const fixture = JSON.parse(await readFile(SEGMENTS_FIXTURE_URL, 'utf-8')) as CurrentCliFixture
+      const conversationsDir = join(tempHome, '.gemini', 'antigravity-cli', 'conversations')
+      const logsDir = join(tempHome, '.gemini', 'antigravity-cli', 'brain', fixture.conversationId, '.system_generated', 'logs')
+      await mkdir(conversationsDir, { recursive: true })
+      await mkdir(logsDir, { recursive: true })
+      const transcriptPath = join(logsDir, 'transcript.jsonl')
+      await writeFile(transcriptPath, await readFile(SEGMENTS_TRANSCRIPT_URL, 'utf-8'))
+      const dbPath = join(conversationsDir, `${fixture.conversationId}.db`)
+      createCurrentAntigravityCliDb(dbPath, fixture)
+      await run({ tempHome, cacheDir, dbPath, transcriptPath, source: { path: dbPath, project: 'antigravity-cli', provider: 'antigravity' } })
+    } finally {
+      if (previousCacheDir === undefined) delete process.env['KYBERDASH_CACHE_DIR']
+      else process.env['KYBERDASH_CACHE_DIR'] = previousCacheDir
+      await rm(tempHome, { recursive: true, force: true })
+    }
+  }
+
+  /** What the transcript contributed to the fixture's three calls, which must be gone. */
+  function expectNoTranscriptActivity(calls: ParsedProviderCall[]): void {
+    expect(calls.map((c) => c.pairingId)).toEqual(['agy-step:2', 'agy-step:5', 'agy-step:8'])
+    for (const call of calls) {
+      expect(call.tools, `tools on ${call.pairingId}`).toEqual([])
+      expect(call.toolSequence ?? [], `toolSequence on ${call.pairingId}`).toEqual([])
+      expect(call.skills ?? [], `skills on ${call.pairingId}`).toEqual([])
+    }
+    expect(JSON.stringify(calls), 'a command from the vanished transcript').not.toContain('synthetic-command')
+  }
+
+  it('serves no tools, toolSequence or skills from a vanished transcript on a cache-hit parse', async () => {
+    await withCachedSegments(async (fx) => {
+      const first = await collectAntigravityCalls(fx.source)
+      // Precondition: the transcript really was attached on the first parse.
+      expect(first.map((c) => c.tools)).toEqual([['run_command'], ['view_file'], ['grep_search']])
+      await flushAntigravityCache(undefined, fx.cacheDir)
+
+      await rm(fx.transcriptPath)
+      const second = await collectAntigravityCalls(fx.source)
+
+      expectNoTranscriptActivity(second)
+    })
+  })
+
+  it('serves no transcript activity when the transcript has become unreadable rather than absent', async () => {
+    await withCachedSegments(async (fx) => {
+      await collectAntigravityCalls(fx.source)
+      await flushAntigravityCache(undefined, fx.cacheDir)
+
+      // A directory of the transcript's name cannot be read as a file, so the read fails.
+      await rm(fx.transcriptPath)
+      await mkdir(fx.transcriptPath)
+      const second = await collectAntigravityCalls(fx.source)
+
+      expectNoTranscriptActivity(second)
+    })
+  })
+
+  it('serves no transcript activity when the transcript has grown past the session-file cap (F1 with F2)', async () => {
+    await withCachedSegments(async (fx) => {
+      await collectAntigravityCalls(fx.source)
+      await flushAntigravityCache(undefined, fx.cacheDir)
+
+      // The valid leading lines stay in place: only the size can make this transcript absent.
+      await truncate(fx.transcriptPath, MAX_SESSION_FILE_BYTES + 1)
+      const second = await collectAntigravityCalls(fx.source)
+
+      expectNoTranscriptActivity(second)
+    })
+  })
+
+  it('persists the same cache file whether or not a transcript was attached at parse time', async () => {
+    await withCachedSegments(async (fx) => {
+      // Parse with the transcript present, then persist the cache.
+      await collectAntigravityCalls(fx.source)
+      await flushAntigravityCache(undefined, fx.cacheDir)
+      const withTranscript = await readFile(join(fx.cacheDir, antigravityCacheFileName()), 'utf-8')
+
+      // Parse the same database with no transcript, into a cache of its own.
+      const withoutDir = join(fx.tempHome, 'cache-without-transcript')
+      await rename(fx.transcriptPath, `${fx.transcriptPath}.away`)
+      process.env['KYBERDASH_CACHE_DIR'] = withoutDir
+      await collectAntigravityCalls(fx.source)
+      await flushAntigravityCache(undefined, withoutDir)
+      const withoutTranscript = await readFile(join(withoutDir, antigravityCacheFileName()), 'utf-8')
+
+      // Transcript activity is a read-time overlay. It must not be written into the cache.
+      expect(withTranscript.length).toBeGreaterThan(0)
+      expect(withTranscript).not.toContain('synthetic-command')
+      expect(withTranscript).toEqual(withoutTranscript)
+    })
   })
 })

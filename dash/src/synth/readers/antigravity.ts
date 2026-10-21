@@ -1,4 +1,4 @@
-// Antigravity MCP tool catalogue.
+// Antigravity MCP tool catalogue, and the per-call tool activity of a conversation.
 //
 // Antigravity's conversation store (`<root>/conversations/<cascade>.db`)
 // records usage, steps and tool *invocations*; it carries no system prompt and
@@ -17,12 +17,18 @@
 //     store cannot prove.
 //   * A missing or empty directory, an unreadable file, or a file without a
 //     string `name` contributes nothing — absent stays absent.
+//
+// Tool activity is one turn per model call, keyed `agy-step:<last_step_index>`.
+// The call's own steps come from its transcript segment, the same segmentation
+// the provider uses, so a turn names only the tools its own generation made.
 
 import { readdir, readFile, stat } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 
 import type { ContentPart } from '../../canon/types.js'
-import type { ContentReader, ReaderTurn } from './types.js'
+import { antigravityCallStepIndexes, antigravityCascadeIdFromPath } from '../../providers/antigravity.js'
+import { agyStepId, readTranscript, segmentTranscript } from '../../providers/antigravity-transcript.js'
+import type { ContentReader, ReaderToolCall, ReaderToolResult, ReaderTurn } from './types.js'
 
 /** A single schema file larger than this is skipped rather than read whole. */
 const MAX_SCHEMA_FILE_BYTES = 1_048_576
@@ -95,6 +101,8 @@ export async function readAntigravityMcpCatalogue(root: string): Promise<Content
       part: 'tool_definitions',
       text: JSON.stringify(definitions),
       server,
+      // A snapshot of the directory, not a record of what the model had resident.
+      resident: false,
       order: parts.length,
     })
   }
@@ -102,6 +110,10 @@ export async function readAntigravityMcpCatalogue(root: string): Promise<Content
 }
 
 export const antigravityReader: ContentReader = {
+  // A call's id is its agy-step key, so turns pair by id. A call whose segment is
+  // missing keeps its own turn rather than inheriting a neighbour's position.
+  positionalPairingUnsafe: true,
+
   async *read(filePath: string): AsyncGenerator<ReaderTurn> {
     const root = antigravityRootFromConversationPath(filePath)
     if (root === undefined) return
@@ -110,9 +122,39 @@ export const antigravityReader: ContentReader = {
     } catch {
       return
     }
-    const parts = await readAntigravityMcpCatalogue(root)
-    if (parts.length === 0) return
-    yield { parts }
+    const catalogue = await readAntigravityMcpCatalogue(root)
+    // The provider's own decoder yields the call boundaries, so the reader and the
+    // attached calls agree on each segment.
+    const lastStepIndexes = await antigravityCallStepIndexes(filePath)
+    if (lastStepIndexes.length === 0) {
+      if (catalogue.length > 0) yield { parts: catalogue }
+      return
+    }
+
+    const transcript = await readTranscript(antigravityCascadeIdFromPath(filePath), [root])
+    const segments = transcript === undefined ? undefined : segmentTranscript(transcript, lastStepIndexes)
+
+    for (const [i, lastStepIndex] of lastStepIndexes.entries()) {
+      const nativeRecordId = agyStepId(lastStepIndex)
+      const segment = segments?.[i]
+      const toolCalls: ReaderToolCall[] = (segment?.calls ?? []).map((call, k) => ({
+        id: `${nativeRecordId}:${k}`,
+        name: call.name,
+        arguments: call.args,
+      }))
+      const [only] = toolCalls
+      // segmentTranscript sets a result only for a segment with exactly one tool call.
+      const toolResults: ReaderToolResult[] = segment?.result !== undefined && only !== undefined
+        ? [{ toolCallId: only.id, content: segment.result }]
+        : []
+      yield {
+        // The catalogue is a session snapshot, so it rides on the first call's turn.
+        parts: i === 0 ? catalogue : [],
+        nativeRecordId,
+        ...(toolCalls.length > 0 ? { toolCalls } : {}),
+        ...(toolResults.length > 0 ? { toolResults } : {}),
+      }
+    }
   },
 }
 

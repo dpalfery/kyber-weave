@@ -111,6 +111,10 @@ export interface ToolRow {
   result_tokens?: number | null
   in_definitions?: boolean
   results_not_recorded?: number | null
+  /** The invocation's arguments, as the engine previewed them. Absent when not carried. */
+  arguments_preview?: string | null
+  /** The invocation's result, as the engine previewed it. Absent when not carried. */
+  result_preview?: string | null
 }
 
 export interface ServerRow {
@@ -259,6 +263,19 @@ export const TIMELINE_OP_COLORS: Record<string, string> = {
 
 /** Drawer-content key carrying the "definitions not exported" notice; never rendered as data. */
 const TOOL_DEFINITION_UNAVAILABLE_KEY = 'definitionUnavailableNotice'
+
+/**
+ * Copilot CLI journals carry no tool schemas at all. Its system prompt's
+ * `<tools>` section is usage guidance, so the notice says so rather than
+ * presenting that section as the offered tool set.
+ */
+const COPILOT_TOOL_DEFINITIONS_REASON =
+  "Copilot CLI session journals carry no tool schemas; the system prompt's <tools> section is usage guidance, not the offered tool set."
+
+function toolDefinitionsUnavailableReason(harness: string | undefined): string {
+  if (harness === 'copilot' || harness === 'copilot-cli') return COPILOT_TOOL_DEFINITIONS_REASON
+  return `${harness || 'This harness'} does not export tool definitions for this session, so only the invocation row is shown.`
+}
 
 function drawerNoticeOf(content: unknown): string | undefined {
   if (content === null || typeof content !== 'object') return undefined
@@ -633,7 +650,7 @@ export function AgentSessionContent({
         setDrawerContent({
           tool,
           definition: null,
-          [TOOL_DEFINITION_UNAVAILABLE_KEY]: `${session?.harness || 'This harness'} does not export tool definitions for this session, so only the invocation row is shown.`,
+          [TOOL_DEFINITION_UNAVAILABLE_KEY]: toolDefinitionsUnavailableReason(session?.harness),
         })
         setDrawerOpen(true)
         return

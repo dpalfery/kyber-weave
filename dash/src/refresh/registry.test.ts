@@ -440,3 +440,27 @@ describe('HarnessSourceRegistry', () => {
     expect(sourceKeyFor('pi', digested)).not.toContain('/Users/dave')
   })
 })
+
+// ---------------------------------------------------------------------------
+// D12 — the Antigravity and Copilot parser contracts move apart
+// ---------------------------------------------------------------------------
+
+describe('parserContractVersionFor — Antigravity and Copilot contracts (D12)', () => {
+  it('assigns Antigravity contract version 2 for its provider and every Antigravity harness', () => {
+    expect(parserContractVersionFor({ providerName: 'antigravity', harnessId: 'antigravity' })).toBe('2')
+    expect(parserContractVersionFor({ providerName: 'antigravity', harnessId: 'antigravity-cli' })).toBe('2')
+    expect(parserContractVersionFor({ providerName: 'antigravity', harnessId: 'antigravity-ide' })).toBe('2')
+  })
+
+  it('assigns Copilot contract version 3 for the copilot provider, whatever the harness', () => {
+    expect(parserContractVersionFor({ providerName: 'copilot', harnessId: 'copilot-cli' })).toBe('3')
+    expect(parserContractVersionFor({ providerName: 'copilot', harnessId: 'copilot-vscode' })).toBe('3')
+    expect(parserContractVersionFor({ providerName: 'copilot', harnessId: 'copilot-jetbrains' })).toBe('3')
+  })
+
+  it('leaves the other skills-contract providers on contract version 2', () => {
+    for (const providerName of ['opencode', 'cline-cli', 'codewhale', 'openclaude', 'dsh']) {
+      expect(parserContractVersionFor({ providerName, harnessId: providerName })).toBe('2')
+    }
+  })
+})

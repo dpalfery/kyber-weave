@@ -263,3 +263,89 @@ describe('SkillsPanel: display rules', () => {
     expect(within(root as HTMLElement).getByTestId('skill-row-docs')).toBeTruthy()
   })
 })
+
+describe('SkillsPanel: Antigravity invocation count beside description and token bar', () => {
+  const skills = {
+    listed_count: 1,
+    listed_uninvoked_count: 0,
+    rows: [
+      {
+        name: 'docs',
+        listed: true,
+        invocations: 5,
+        turns_listed: [],
+        derived_tokens: 38,
+        description: 'Use when writing or revising documentation.',
+      },
+    ],
+  }
+
+  it('shows the invocation count, the description, and the token bar on the same row', () => {
+    render(<SkillsPanel skills={asSkills(skills)} summary={asSummary({ skills_listed: ['docs'], skills_invoked: ['docs'] })} />)
+    const docs = rowOf('docs')
+    expect(docs.textContent).toContain('invoked · 5')
+    expect(within(docs).getByTestId('skill-description-docs').textContent).toContain(
+      'Use when writing or revising documentation.',
+    )
+    expect(within(docs).getByTestId('skill-token-bar-docs')).toBeTruthy()
+  })
+})
+
+describe('SkillsPanel: invocations measured on some turns (D30)', () => {
+  // The realistic payload with the server's coverage statement added: invocations were
+  // measured on 2 of the session's 3 turns, the third carrying no transcript record.
+  const realistic = fixtureOf('realistic').skills as Record<string, unknown>
+
+  it('states the measured turn count beside the counts when invocations cover some turns', () => {
+    const { container } = render(
+      <SkillsPanel
+        skills={asSkills({ ...realistic, invocationsCoverage: { measuredTurns: 2, totalTurns: 3 } })}
+        summary={asSummary(fixtureOf('realistic').summary)}
+      />,
+    )
+    const root = container.querySelector('[data-testid="skills-panel"]') as HTMLElement
+    expect(root).not.toBeNull()
+    expect(root.textContent?.replace(/\s+/g, ' ')).toContain('Invocations measured on 2 of 3 turns')
+  })
+
+  it('renders the realistic payload without the coverage statement when the server sends none', () => {
+    const { container } = mount('realistic')
+    expect(container.textContent?.replace(/\s+/g, ' ')).not.toContain('Invocations measured on')
+  })
+})
+
+describe('SkillsPanel: Copilot CLI listing with invocations not measurable', () => {
+  const reason = 'Copilot CLI session journals do not record skill invocations'
+  const notMeasurable = { availability: 'not_measurable', reason }
+  const skills = {
+    rows: [
+      {
+        name: 'docs',
+        listed: true,
+        invocations: notMeasurable,
+        turns_listed: [],
+        description: 'Use when writing or revising documentation.',
+      },
+      {
+        name: 'deploy',
+        listed: true,
+        invocations: notMeasurable,
+        turns_listed: [],
+        description: 'Deploy the service to staging.',
+      },
+    ],
+  }
+
+  it('lists each skill name with its description from the payload', () => {
+    render(<SkillsPanel skills={asSkills(skills)} summary={asSummary({ skills_listed: ['docs', 'deploy'] })} />)
+    expect(rowOf('docs').textContent).toContain('Use when writing or revising documentation.')
+    expect(rowOf('deploy').textContent).toContain('Deploy the service to staging.')
+  })
+
+  it('shows the harness reason for invocations, never zero or never invoked', () => {
+    render(<SkillsPanel skills={asSkills(skills)} summary={asSummary({ skills_listed: ['docs', 'deploy'] })} />)
+    const docs = rowOf('docs')
+    expect(docs.textContent).toContain(reason)
+    expect(docs.textContent).not.toMatch(/never invoked|no observed invocation|invoked · 0/i)
+  })
+})

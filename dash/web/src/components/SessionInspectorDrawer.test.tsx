@@ -3076,3 +3076,243 @@ describe('resolveSharedDisplay: per-request billing header', () => {
     expect(resolved!.parts[0].collapsedTurns).toEqual([0, 1, 2])
   })
 })
+
+// ---------------------------------------------------------------------------
+// Antigravity and Copilot CLI payloads (synthetic). These pin the display
+// contract the implementer must meet; see the report for the field names.
+// ---------------------------------------------------------------------------
+
+/** Visible text: tags dropped first, then entities decoded, whitespace collapsed. */
+function visibleTextOf(html: string): string {
+  return html
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#x27;/g, "'")
+    .replace(/&amp;/g, '&')
+    .replace(/\s+/g, ' ')
+}
+
+describe('SessionInspectorDrawer: Antigravity tool invocation preview', () => {
+  const toolRow = {
+    name: 'read_file',
+    server: 'antigravity',
+    invocations: 4,
+    arguments_preview: '{"path":"README.md"}',
+    result_preview: '# Kyber Weave',
+  }
+
+  it('shows the argument and result previews when the invocation carries them', () => {
+    const html = renderHtml(
+      <QueryClientProvider client={createTestQueryClient()}>
+        <SessionInspectorDrawer
+          open={true}
+          onClose={() => {}}
+          title="Tool: read_file"
+          rawContent={{ tool: toolRow, definition: null }}
+        />
+      </QueryClientProvider>,
+    )
+    expect(html).toContain('data-testid="tool-arguments-preview"')
+    expect(visibleTextOf(html)).toContain('README.md')
+    expect(html).toContain('data-testid="tool-result-preview"')
+    expect(visibleTextOf(html)).toContain('# Kyber Weave')
+  })
+
+  it('shows no preview block when the invocation carries no preview', () => {
+    const html = renderHtml(
+      <QueryClientProvider client={createTestQueryClient()}>
+        <SessionInspectorDrawer
+          open={true}
+          onClose={() => {}}
+          title="Tool: read_file"
+          rawContent={{ tool: { name: 'read_file', server: 'antigravity', invocations: 4 }, definition: null }}
+        />
+      </QueryClientProvider>,
+    )
+    expect(html).not.toContain('data-testid="tool-arguments-preview"')
+    expect(html).not.toContain('data-testid="tool-result-preview"')
+  })
+})
+
+describe('SessionInspectorDrawer: MCP catalogue tool definitions', () => {
+  it('labels a definition flagged resident:false as offered (MCP catalogue), never as resident', () => {
+    const html = renderHtml(
+      <TurnContentSections
+        content={{
+          tool_definitions: [{ name: 'github_search', description: 'Search repositories', resident: false }],
+        }}
+      />,
+    )
+    const text = visibleTextOf(html)
+    expect(text).toContain('offered (MCP catalogue)')
+    expect(text).not.toMatch(/\bresident\b/i)
+  })
+
+  it('does not label a resident definition as an MCP catalogue offer', () => {
+    const html = renderHtml(
+      <TurnContentSections
+        content={{
+          tool_definitions: [{ name: 'read_file', description: 'Read a file', resident: true }],
+        }}
+      />,
+    )
+    expect(visibleTextOf(html)).not.toContain('offered (MCP catalogue)')
+  })
+})
+
+// The tool drawer opens a content request for `tool_definitions` naming the
+// tool (AgentSessionDashboard.openDrawerForTool), so a real session's offered
+// definition reaches the drawer through FullContentPanel, not through the
+// payload's `definition` object. The residency flag must survive to that panel.
+describe('SessionInspectorDrawer: MCP catalogue tool definitions on the content route', () => {
+  const SESSION_ID = 'sess-mcp-content-001'
+  const SPAN_ID = 'span-mcp-tools-1'
+  const MCP_DEFINITION = JSON.stringify({ name: 'github_search', description: 'Search repositories' })
+  const BUILT_IN_DEFINITION = JSON.stringify({ name: 'read_file', description: 'Read a file' })
+
+  /** Renders the tool drawer over one cached content part for `toolName`. */
+  function renderToolContent(part: Record<string, unknown>, toolName: string): string {
+    const qc = createTestQueryClient()
+    const body = {
+      sessionId: SESSION_ID,
+      spanId: SPAN_ID,
+      parts: [{ spanId: SPAN_ID, part: 'tool_definitions', ...part }],
+    } as unknown as KyberSessionContentResult
+    qc.setQueryData(['kyber-session-content', SESSION_ID, SPAN_ID, 'tool_definitions', 'full'], body)
+    return renderHtml(
+      <QueryClientProvider client={qc}>
+        <SessionInspectorDrawer
+          open={true}
+          onClose={() => {}}
+          title={`Tool: ${toolName}`}
+          contentRequest={{ sessionId: SESSION_ID, span: SPAN_ID, part: 'tool_definitions', toolName }}
+        />
+      </QueryClientProvider>,
+    )
+  }
+
+  it('labels a non-resident tool_definitions part as offered (MCP catalogue) on the content route', () => {
+    // RED: FullContentPanel renders part.text only and never reads part.resident,
+    // so no offered label reaches the drawer.
+    const html = renderToolContent({ text: MCP_DEFINITION, resident: false }, 'github_search')
+    expect(html).toContain('data-testid="tool-definition-offered-label"')
+    expect(visibleTextOf(html)).toContain('offered (MCP catalogue)')
+  })
+
+  it('states the non-resident label without calling the definition resident', () => {
+    // The label text is the whole claim in the header; it must not say "resident"
+    // in any form, since the definition is the one the model was not keeping.
+    const html = renderToolContent({ text: MCP_DEFINITION, resident: false }, 'github_search')
+    const label = /data-testid="tool-definition-offered-label"[^>]*>([^<]*)</.exec(html)?.[1]
+    expect(label).toBe('offered (MCP catalogue)')
+  })
+
+  it('does not label a resident or unmarked tool_definitions part as offered', () => {
+    // Guard: a normal definition must stay unlabelled once the label exists.
+    const resident = renderToolContent({ text: BUILT_IN_DEFINITION, resident: true }, 'read_file')
+    const unmarked = renderToolContent({ text: BUILT_IN_DEFINITION }, 'read_file')
+    for (const html of [resident, unmarked]) {
+      expect(visibleTextOf(html)).toContain('Read a file')
+      expect(html).not.toContain('data-testid="tool-definition-offered-label"')
+      expect(visibleTextOf(html)).not.toContain('offered (MCP catalogue)')
+    }
+  })
+})
+
+// The whole-turn content route (TurnFullContentPanel) renders an additional,
+// non-block part through TurnContentPartView. A tool_definitions part there
+// carries the same residency flag as the session route, and must be labelled
+// the same way: offered-but-not-resident is said by the label, never resident.
+describe('SessionInspectorDrawer: MCP catalogue tool definitions on the turn content route', () => {
+  const TURN_SESSION_ID = 'sess-mcp-turn-001'
+  const TURN_INDEX = 2
+  const MCP_DEFINITION = JSON.stringify({ name: 'github_search', description: 'Search repositories' })
+  const BUILT_IN_DEFINITION = JSON.stringify({ name: 'read_file', description: 'Read a file' })
+  const OFFERED_LABEL = 'data-testid="tool-definition-offered-label"'
+
+  /**
+   * Renders the whole-turn panel over one tool_definitions part that sits
+   * outside every block, so it reaches TurnContentPartView. `extra` carries the
+   * residency flag under test; omitting it models an unmarked part.
+   */
+  function renderTurnToolPart(extra: Record<string, unknown>, text: string): string {
+    const qc = createTestQueryClient()
+    const part = { id: 'part-mcp-tools-0', spanId: 'span-mcp-turn-1', part: 'tool_definitions', label: 'Tools', text, tokens: 0, ...extra }
+    const body = {
+      sessionId: TURN_SESSION_ID,
+      turnIndex: TURN_INDEX,
+      spanId: 'span-mcp-turn-1',
+      model: 'gpt-5',
+      blocks: [],
+      parts: [part],
+      assembledText: text,
+      sharedContext: null,
+    } as unknown as KyberTurnContentResult
+    qc.setQueryData(['kyber-turn-content-full', TURN_SESSION_ID, TURN_INDEX], body)
+    return renderHtml(
+      <QueryClientProvider client={qc}>
+        <TurnFullContentPanel
+          request={{ sessionId: TURN_SESSION_ID, turnIndex: TURN_INDEX, full: true }}
+          turn={{ fresh: 1, cache_read: 0, cache_creation: 0 } as unknown as Parameters<typeof TurnFullContentPanel>[0]['turn']}
+        />
+      </QueryClientProvider>,
+    )
+  }
+
+  it('labels a non-resident tool_definitions part as offered (MCP catalogue) on the turn content route', () => {
+    // RED: TurnContentPartView renders part.label and text only and never reads
+    // part.resident, so no offered label reaches the whole-turn panel.
+    const html = renderTurnToolPart({ resident: false }, MCP_DEFINITION)
+    expect(html).toContain('data-testid="turn-part-tool_definitions-0"')
+    expect(html).toContain(OFFERED_LABEL)
+    expect(visibleTextOf(html)).toContain('offered (MCP catalogue)')
+  })
+
+  it('states the turn-route label without calling the definition resident', () => {
+    // RED for the same reason. The label element's own text is the whole claim,
+    // so it is read in isolation rather than from the surrounding panel.
+    const html = renderTurnToolPart({ resident: false }, MCP_DEFINITION)
+    const label = new RegExp(`${OFFERED_LABEL}[^>]*>([^<]*)<`).exec(html)?.[1]
+    expect(label).toBe('offered (MCP catalogue)')
+    expect(label).not.toMatch(/\bresident\b/i)
+  })
+
+  it('does not label a resident or unmarked tool_definitions part as offered on the turn content route', () => {
+    // Guard: an ordinary definition must stay unlabelled once the label exists.
+    const resident = renderTurnToolPart({ resident: true }, BUILT_IN_DEFINITION)
+    const unmarked = renderTurnToolPart({}, BUILT_IN_DEFINITION)
+    for (const html of [resident, unmarked]) {
+      expect(html).toContain('data-testid="turn-part-tool_definitions-0"')
+      expect(html).not.toContain(OFFERED_LABEL)
+      expect(visibleTextOf(html)).not.toContain('offered (MCP catalogue)')
+    }
+  })
+})
+
+describe('SessionInspectorDrawer: Copilot CLI root system prompt', () => {
+  const COPILOT_SESSION_ID = 'sess-copilot-root'
+  const ROOT_PROMPT = 'You are the GitHub Copilot CLI coding agent. Prefer small, verifiable edits.'
+
+  it('shows the root system prompt text in the system-prompt section', () => {
+    const qc = createTestQueryClient()
+    // The session-level system_prompt request carries no span.
+    qc.setQueryData(['kyber-session-content', COPILOT_SESSION_ID, undefined, 'system_prompt', 'full'], {
+      sessionId: COPILOT_SESSION_ID,
+      parts: [{ spanId: 'root', part: 'system_prompt', text: ROOT_PROMPT }],
+    })
+
+    const html = renderHtml(
+      <QueryClientProvider client={qc}>
+        <SessionInspectorDrawer
+          open={true}
+          onClose={() => {}}
+          title="Session · system_prompt"
+          contentRequest={{ sessionId: COPILOT_SESSION_ID, part: 'system_prompt' }}
+        />
+      </QueryClientProvider>,
+    )
+    expect(visibleTextOf(html)).toContain(ROOT_PROMPT)
+  })
+})

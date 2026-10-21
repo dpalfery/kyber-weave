@@ -51,6 +51,8 @@ export interface ReaderToolCall {
   arguments: Record<string, unknown> | string
   timestamp?: string
   durationMs?: number
+  /** The subagent that made the call, when the transcript names one; absent for the root agent. */
+  agentId?: string
 }
 
 /**

@@ -18,6 +18,7 @@ import {
   emptyCache,
   fingerprintFile,
   loadCache,
+  PROVIDER_PARSE_VERSIONS,
   mergeCallByDedupKey,
   reconcileFile,
   saveCache,
@@ -278,6 +279,17 @@ describe('computeEnvFingerprint', () => {
     expect(computeEnvFingerprint('copilot')).not.toBe(computeEnvFingerprint('unknown-provider'))
     expect(computeEnvFingerprint('kiro')).not.toBe(computeEnvFingerprint('unknown-provider'))
     expect(computeEnvFingerprint('warp')).not.toBe(computeEnvFingerprint('unknown-provider'))
+  })
+
+  // RED: the antigravity segment attribution (lsi-segment design, T7) changed what a
+  // cached session stores (tools and skills per call), and cached sessions store those
+  // verbatim, so they never re-attribute on their own. The label must move so the
+  // envFingerprint changes and the stale section is discarded. Mirrors the codex
+  // pattern (codex-mcp-skills-v1): the label is distinct from the pre-T7 label.
+  it('moves the antigravity parse version off the pre-segment label', () => {
+    const label = PROVIDER_PARSE_VERSIONS['antigravity']
+    expect(label).toBeTruthy()
+    expect(label).not.toBe('worktree-project-grouping-v5')
   })
 })
 

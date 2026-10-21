@@ -531,3 +531,24 @@ describe('parseHarnessFilter — only declared spellings resolve', () => {
     }
   })
 })
+
+// ---------------------------------------------------------------------------
+// D8 — Copilot CLI declarations: the journal's own limits, named as such
+// ---------------------------------------------------------------------------
+
+describe('Copilot CLI declarations (D8)', () => {
+  it('declares Copilot CLI tool_definitions not measurable, naming why the journal cannot carry schemas', () => {
+    expect(measurabilityFor('copilot-cli').tool_definitions).toEqual({
+      availability: 'not_measurable',
+      reason:
+        "Copilot CLI session journals carry no tool schemas; the system prompt's <tools> section is usage guidance, not the offered tool set.",
+    })
+  })
+
+  it('names Copilot CLI, not the generic copilot family, as the reason its system_prompt is not measurable', () => {
+    expect(measurabilityFor('copilot-cli').system_prompt).toMatchObject({
+      availability: 'not_measurable',
+      reason: expect.stringMatching(/Copilot CLI/),
+    })
+  })
+})

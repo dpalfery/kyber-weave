@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 
 import { CanonStore, decompressRaw } from './store.js'
+import { measurabilityFor } from './measurability.js'
 import { CONTENT_RETENTION_DAYS, contentRetentionFloorMs, purgeExpiredContent } from './retention.js'
 import type { CanonicalRecord, TokenUsage } from './types.js'
 
@@ -244,5 +245,60 @@ describe('purgeExpiredContent runs in one transaction', () => {
     } finally {
       store.close()
     }
+  })
+})
+
+describe('purgeExpiredContent leaves a lifted measurability declaration as stated (D29)', () => {
+  it('empties the parts of an expired Copilot CLI carrier and its tool child, and states the same measurability after the purge', () => {
+    // The purge clears content and parts. It must not rewrite the measurability a record
+    // carries: a carrier's lifted system_prompt stays measured, and its tool child's
+    // system_prompt stays not measurable with the declared reason, after the content is gone.
+    const path = tempStorePath()
+    const store = new CanonStore(path)
+    const now = new Date('2026-09-12T12:00:00.000Z')
+    const carrierMeasurability = { ...measurabilityFor('copilot-cli'), system_prompt: 'measured' as const }
+    const childMeasurability = { ...measurabilityFor('copilot-cli'), duration: 'measured' as const }
+    try {
+      store.upsertMany([
+        record({
+          spanId: 'cli-carrier',
+          harness: 'copilot-cli',
+          source: 'copilot-cli',
+          name: 'copilot:gpt-5',
+          op: 'llm.invoke',
+          timestamp: '2026-08-20T12:00:00.000Z',
+          content: { system_prompt: 'root prompt' },
+          parts: [{ part: 'system_prompt', text: 'root prompt', order: 0 }],
+          measurability: carrierMeasurability,
+        }),
+        record({
+          spanId: 'cli-carrier-tool',
+          parentSpanId: 'cli-carrier',
+          harness: 'copilot-cli',
+          source: 'copilot-cli',
+          name: 'view',
+          op: 'tool.invoke',
+          timestamp: '2026-08-20T12:00:01.000Z',
+          content: {},
+          parts: [{ part: 'tool_result_content', text: 'file body', order: 0 }],
+          measurability: childMeasurability,
+        }),
+      ])
+
+      const result = purgeExpiredContent(store, now)
+      expect(result.purged).toBe(2)
+
+      expect(store.get('cli-carrier')?.measurability).toEqual(carrierMeasurability)
+      expect(store.get('cli-carrier-tool')?.measurability).toEqual(childMeasurability)
+      expect(store.get('cli-carrier-tool')?.measurability?.['system_prompt']).toEqual(
+        measurabilityFor('copilot-cli')['system_prompt'],
+      )
+    } finally {
+      store.close()
+    }
+
+    const columns = loadColumns(path)
+    expect(columns.get('cli-carrier')!.parts_json).toBeNull()
+    expect(columns.get('cli-carrier-tool')!.parts_json).toBeNull()
   })
 })

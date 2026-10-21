@@ -195,6 +195,12 @@ export function SkillsPanel({ skills, summary, onSelectSkill, className }: Skill
             {headline}
           </p>
         )}
+        {skills.invocationsCoverage !== undefined && (
+          <p data-testid="skills-invocations-coverage" className="mt-1 text-xs text-muted-foreground">
+            Invocations measured on {skills.invocationsCoverage.measuredTurns} of {skills.invocationsCoverage.totalTurns}{' '}
+            turns
+          </p>
+        )}
         {typeof skills.reported_skill_tokens === 'number' && (
           <p data-testid="skills-reported-tokens" className="mt-1 text-xs text-muted-foreground">
             Reported by the harness:{' '}

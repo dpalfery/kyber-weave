@@ -516,6 +516,14 @@ export interface KyberCostBasisMismatch {
 export interface KyberToolDefinitionShadow {
   name?: string
   function?: { name?: string }
+  /**
+   * False when the definition is an MCP catalogue entry the session offered
+   * without keeping it resident in the model's context. Absent or true means
+   * the definition was resident.
+   */
+  resident?: boolean
+  /** Whether the session offered this definition to the model. */
+  offered?: boolean
   [key: string]: unknown
 }
 
@@ -562,6 +570,11 @@ export interface KyberSessionContentPart {
   server?: string
   truncated?: boolean
   totalLength?: number
+  /**
+   * `false` on a tool definition the turn offered without keeping resident.
+   * Absent means resident; the drawer labels only the `false` case.
+   */
+  resident?: false
 }
 
 export interface KyberSessionContentResult {
@@ -594,6 +607,12 @@ export interface KyberTurnContentPart {
   truncated?: boolean
   totalLength?: number
   order?: number
+  /**
+   * False when a `tool_definitions` part is an MCP catalogue entry the session
+   * offered without keeping it resident in the model's context. Absent or true
+   * means the definition was resident.
+   */
+  resident?: boolean
   /**
    * Exact-match recurrence against earlier captured turns of this session
    * (same part kind, whole source text). Capture-only — never a cache claim.
@@ -2084,6 +2103,8 @@ export type KyberSkillsBlock =
       listed_count?: number
       /** Served count of listed skills with no observed invocation; absent when not measured. */
       listed_uninvoked_count?: number
+      /** Turns on which invocations were measured, out of the session's turns; absent when the server states no coverage. */
+      invocationsCoverage?: { measuredTurns: number; totalTurns: number }
       rows: KyberSkillRow[]
     }
   | KyberSkillAvailability

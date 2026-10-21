@@ -25,10 +25,17 @@
 // live corpus that is ~10,933 x 64 KB, about 1.4 GB as UTF-16.
 //
 // Three pins, none of them a duration or a heap threshold:
-//   1. The projection's OUTPUT is unchanged: the derived tables, the context
+//   1. The projection's OUTPUT is pinned: the derived tables, the context
 //      analysis buckets, the tool definitions, the skills listing and the
-//      published timeline are byte-identical to what the same corpus derives
-//      today. This is the anti-regression pin; it passes before and after.
+//      published timeline are byte-identical to what the same corpus derived
+//      before. The pin moved ONCE, on 2026-10-21, for the Antigravity
+//      transcript reason copy: the two leaves `$.sessions.0.payload.skills.rows.0.invocations.reason`
+//      and `$.sessions.0.payload.skills.rows.1.invocations.reason` now read
+//      "Skill invocations are read from the conversation transcript, and none
+//      was available for this session" instead of the earlier wording. A
+//      structural diff of the derived output, main against the branch, shows no
+//      other leaf differs; everything else is unchanged. This is the
+//      anti-regression pin.
 //   2. The projection holds ONE record's decompressed parts at a time: the
 //      number of simultaneously-live decompressed parts sets stays bounded,
 //      measured by instrumenting the parts materialization path.
@@ -285,18 +292,21 @@ describe("the projection's parts discipline", () => {
   it('derives the same tables, buckets, tool definitions, skills listing and timeline', async () => {
     // The anti-regression pin: the projection's whole output for a corpus
     // whose parts carry text is byte-identical to the output the same corpus
-    // derives today. The digest is over the derived sessions, runs,
-    // executions, rollups and findings — the tables the projection writes.
+    // derived before, except for the two Antigravity skill-invocation reason
+    // leaves noted in the file header (re-pinned 2026-10-21). The digest is
+    // over the derived sessions, runs, executions, rollups and findings — the
+    // tables the projection writes.
     const store = seedStore(corpus(6))
 
     await projectCanonicalStore(store)
 
     const digest = createHash('sha256').update(derivedSnapshot(store)).digest('hex')
-    // The digest the implementation BEFORE the reduction produced for this
-    // corpus, byte for byte: the derived sessions, runs, executions, rollups
-    // and findings are the same table the same corpus derived before.
+    // The digest of the derived tables for this corpus as of 2026-10-21. It
+    // differs from the earlier pin only in `$.sessions.0.payload.skills.rows.{0,1}.invocations.reason`,
+    // the Antigravity transcript reason copy in dash/src/canon/skills.ts
+    // `extractInvokedSkills`; every other leaf matches the earlier output.
     expect(digest).toBe(
-      'e2e5f9decca7a8c833a70f03af4e7202fa2fa0b7ac483cfdc7eb119f85fc8eaf',
+      '2bcd880430f11af2dd23abfbb9fe7c28c1765509edcaccbb0129d3ad4742bc22',
     )
   })
 

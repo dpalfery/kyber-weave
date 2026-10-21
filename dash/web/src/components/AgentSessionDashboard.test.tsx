@@ -1990,7 +1990,7 @@ describe('AgentSessionDashboard: tool drawer when the harness exports no definit
       ...sampleSession,
       harness: 'antigravity-cli',
       summary: { ...sampleSession.summary, tools_offered: undefined },
-      turns: sampleSession.turns.map(({ has_tool_defs: _h, content: _c, ...turn }: Record<string, unknown>) => turn),
+      turns: sampleSession.turns?.map(({ has_tool_defs: _h, content: _c, ...turn }: Record<string, unknown>) => turn),
     } as unknown as AgentSessionPayload
 
     const render = () => {
@@ -2040,5 +2040,128 @@ describe('AgentSessionDashboard: tool drawer when the harness exports no definit
         internals.H.useState = originalUseState
       }
     }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Antigravity and Copilot CLI payloads (synthetic). These pin the display
+// contract the implementer must meet; see the report for the field names.
+// ---------------------------------------------------------------------------
+
+/**
+ * The reason the tool-definitions area states for a Copilot CLI session. The
+ * `<tools>` section of the system prompt is usage guidance, so a reader must
+ * not take it for the offered tool set.
+ */
+const COPILOT_TOOL_DEFINITIONS_REASON =
+  "Copilot CLI session journals carry no tool schemas; the system prompt's <tools> section is usage guidance, not the offered tool set."
+
+/** Visible text: tags dropped, entities decoded, whitespace collapsed. */
+function visibleTextOf(html: string): string {
+  return html
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#x27;/g, "'")
+    .replace(/&amp;/g, '&')
+    .replace(/\s+/g, ' ')
+}
+
+/** The markup from one tool row's testid up to the next tool row. */
+function toolRowHtml(html: string, name: string): string {
+  const start = html.indexOf(`data-testid="tool-row-${name}"`)
+  if (start < 0) return ''
+  const next = html.indexOf('data-testid="tool-row-', start + 1)
+  return html.slice(start, next < 0 ? undefined : next)
+}
+
+type DrawerProps = { contentRequest?: unknown; rawContent?: Record<string, unknown>; children?: unknown }
+
+function drawerElementIn(node: unknown): React.ReactElement | null {
+  if (node == null) return null
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const found = drawerElementIn(child)
+      if (found) return found
+    }
+    return null
+  }
+  if (!React.isValidElement(node)) return null
+  if (node.type === SessionInspectorDrawer) return node
+  return drawerElementIn((node.props as { children?: unknown }).children)
+}
+
+/** Clicks a tool row and returns the props the dashboard hands its inspector drawer. */
+function openToolDrawer(session: AgentSessionPayload, toolName: string): DrawerProps {
+  const internals = internalsOf()
+  const originalUseState = internals?.H?.useState
+  const state: unknown[] = []
+  let stateCursor = 0
+
+  if (internals?.H) {
+    internals.H.useState = (initial: unknown) => {
+      const index = stateCursor++
+      if (!(index in state)) {
+        state[index] = typeof initial === 'function' ? (initial as () => unknown)() : initial
+      }
+      return [
+        state[index],
+        (next: unknown) => {
+          state[index] = typeof next === 'function' ? (next as (s: unknown) => unknown)(state[index]) : next
+        },
+      ]
+    }
+  }
+
+  const render = () => {
+    stateCursor = 0
+    return AgentSessionContent({ session })
+  }
+
+  try {
+    ;(findElementByTestId(render(), `tool-row-${toolName}`)!.props as { onClick: () => void }).onClick()
+    return drawerElementIn(render())!.props as DrawerProps
+  } finally {
+    if (internals?.H) {
+      internals.H.useState = originalUseState
+    }
+  }
+}
+
+describe('AgentSessionDashboard: Antigravity tools list', () => {
+  // Invoked tools carry their counts; a tool never invoked still appears, with 0.
+  const antigravity = {
+    ...sampleSession,
+    harness: 'antigravity-cli',
+    tools: [
+      { name: 'read_file', server: 'antigravity', invocations: 4, in_definitions: false },
+      { name: 'grep_search', server: 'antigravity', invocations: 2, in_definitions: false },
+      { name: 'unused_tool', server: 'antigravity', invocations: 0, in_definitions: false },
+    ],
+  } as unknown as AgentSessionPayload
+
+  it('lists each invoked tool beside its invocation count', () => {
+    const html = renderHtml(<AgentSessionContent session={antigravity} />)
+    expect(visibleTextOf(toolRowHtml(html, 'read_file'))).toMatch(/read_file.*\b4\b/)
+    expect(visibleTextOf(toolRowHtml(html, 'grep_search'))).toMatch(/grep_search.*\b2\b/)
+  })
+})
+
+describe('AgentSessionDashboard: Copilot CLI tool definitions reason', () => {
+  it('states the Copilot reason verbatim in the tool-definitions area, and issues no content request', () => {
+    const copilot = {
+      ...sampleSession,
+      harness: 'copilot',
+      turns: [],
+      summary: { ...sampleSession.summary, tools_offered: undefined },
+    } as unknown as AgentSessionPayload
+
+    const props = openToolDrawer(copilot, 'read_file')
+
+    expect(props.contentRequest).toBeUndefined()
+    expect(visibleTextOf(renderHtml(<>{props.children as React.ReactNode}</>))).toContain(
+      COPILOT_TOOL_DEFINITIONS_REASON,
+    )
   })
 })
