@@ -64,6 +64,12 @@ once-per-run review gate, and a per-task run loads the whole solution.
 A gate that cannot run for a reason outside the task is not a failure to fix. Report it as
 skipped with its reason, and do not claim a pass for it.
 
+A whole-project gate, one whose argv has no `{changed}` (for example `dash-typecheck` or
+`dotnet-build`), can fail on a file this task never touched while another worker is still
+editing. When that happens, re-run the gate once after the other change settles, or rebase
+onto the latest base, before counting the failure as rework or escalating. Report the re-run
+in the completion digest beside the `TASK_GATE:` line, not inside its fixed fields.
+
 ## Escalation
 
 When the 2-cycle cap is reached and the gate still fails, return this instead of a pass:

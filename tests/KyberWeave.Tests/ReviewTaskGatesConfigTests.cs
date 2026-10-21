@@ -20,6 +20,7 @@
 //   Known tokens: changed, task.
 
 using KyberWeave.Core.Configuration;
+using KyberWeave.Core.Review;
 using Xunit;
 using YamlDotNet.Core;
 
@@ -400,6 +401,41 @@ public sealed class ReviewTaskGatesConfigTests
         ];
 
         Assert.All(notDevelopers, agent => Assert.DoesNotContain(agent, taskGates.Keys));
+    }
+
+    /// <summary>
+    /// A change to the solution file, a NuGet.config, or an .editorconfig changes what the build
+    /// compiles and how the analyzers read it, so the build gate must run for it. The format gates
+    /// must not match those files: <c>dotnet format</c> given a solution in <c>--include</c> checks
+    /// nothing and exits 0, so a format gate that matched the solution would pass without checking.
+    /// </summary>
+    [Fact]
+    public void SolutionAndBuildConfigChangesRunTheBuildGateButNotTheFormatGates()
+    {
+        IReadOnlyList<ReviewTaskGate> gates = RepositoryTaskGates()["csharp-dev"];
+        string[] buildInputs =
+        [
+            "KyberWeave.sln",
+            "KyberWeave.slnx",
+            "NuGet.config",
+            "src/KyberWeave.Core/NuGet.config",
+            ".editorconfig"
+        ];
+
+        ReviewTaskGate build = Assert.Single(gates, gate => gate.Id == "dotnet-build");
+        foreach (string path in buildInputs)
+        {
+            Assert.True(
+                build.Include.Any(pattern => PathGlob.IsMatch(pattern, path)),
+                $"dotnet-build should run for a change to '{path}'.");
+        }
+
+        foreach (ReviewTaskGate format in gates.Where(gate => gate.Id.StartsWith("format-", StringComparison.Ordinal)))
+        {
+            Assert.DoesNotContain(
+                buildInputs,
+                path => format.Include.Any(pattern => PathGlob.IsMatch(pattern, path)));
+        }
     }
 
     private static IReadOnlyDictionary<string, IReadOnlyList<ReviewTaskGate>> RepositoryTaskGates()

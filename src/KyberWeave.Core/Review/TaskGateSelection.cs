@@ -116,6 +116,10 @@ public static class TaskGateSelection
     /// <param name="changed">The repository-relative changed paths, already validated with <see cref="ValidatePath"/>.</param>
     /// <param name="task">The validated <c>--task</c> slug, or <see langword="null"/> when none was given.</param>
     /// <param name="currentOs"><c>windows</c> or <c>unix</c>, for the gate's <c>os</c> filter.</param>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="currentOs"/> is neither <c>windows</c> nor <c>unix</c>. Any other host value would
+    /// be read as unix, so it is refused rather than guessed at.
+    /// </exception>
     public static TaskGatePlan Plan(
         IReadOnlyList<ReviewTaskGate> gates,
         IReadOnlyList<string> changed,
@@ -125,6 +129,8 @@ public static class TaskGateSelection
         ArgumentNullException.ThrowIfNull(gates);
         ArgumentNullException.ThrowIfNull(changed);
         ArgumentException.ThrowIfNullOrWhiteSpace(currentOs);
+        if (currentOs is not ("windows" or "unix"))
+            throw new ArgumentException($"currentOs must be 'windows' or 'unix', not '{currentOs}'.", nameof(currentOs));
 
         // Matching uses the separator-normalized form. What reaches argv is the path as it was given,
         // because on unix a backslash is part of a file name and rewriting it would name another file.
@@ -139,6 +145,15 @@ public static class TaskGateSelection
 
         foreach (ReviewTaskGate gate in gates)
         {
+            // A gate with no program has nothing to start. The loader refuses this where the operator wrote it;
+            // a caller that builds the record directly is refused here by name, and the other gates still plan.
+            if (gate.Run.Count == 0)
+            {
+                refusals.Add(
+                    $"Task gate '{gate.Id}' run has no command. Declare it as a list: run: [dotnet, format, KyberWeave.sln].");
+                continue;
+            }
+
             // A command that is a changed file would execute the file, so it is refused whether or not
             // the gate applies to this change. It is a defect in the configuration, not in the change.
             if (gate.Run[0] == ChangedToken || (gate.Fix.Count > 0 && gate.Fix[0] == ChangedToken))

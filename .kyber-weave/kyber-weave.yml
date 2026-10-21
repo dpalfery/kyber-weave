@@ -158,6 +158,12 @@ review:
   # `include` decides whether a gate runs at all: a gate whose globs match no changed file is
   # reported as skipped, not run. Globs are quoted because a bare `*` opens a YAML alias in a
   # flow sequence, and `{` would be read as a flow mapping.
+  #
+  # A gate whose argv has no `{changed}` is a whole-project check: it checks the entire working
+  # tree, not only the files this task changed. dash-typecheck, dash-lint, tray-ui-typecheck,
+  # cargo-fmt, cargo-clippy, and dotnet-build are of that kind. Another worker's concurrent edit
+  # can therefore fail one of them on a file this task never touched. The task-gate skill re-runs
+  # such a failure once after the other change settles, before it counts as rework.
   task-gates:
     # .NET. The format gates are the review.gates format checks in their per-change form. `fix`
     # is the form `--fix` applies first; the verify form then decides, so a fix that does not
@@ -181,7 +187,11 @@ review:
         fix: [dotnet, format, KyberWeave.sln, analyzers, --severity, warn, --include, "{changed}"]
       - &dotnet-build
         id: dotnet-build
-        include: *net-paths
+        # The build is the one gate a solution-only change must reach: a .sln, NuGet.config, or
+        # .editorconfig changes what compiles and how analyzers read it. The format gates keep the
+        # source-only *net-paths, because `dotnet format` given a solution in --include checks
+        # nothing and exits 0.
+        include: &net-build-paths ["**/*.cs", "**/*.csproj", "**/*.props", "**/*.targets", "**/*.sln*", "**/NuGet.config", "**/.editorconfig"]
         run: [dotnet, build, KyberWeave.sln, -c, Release, --artifacts-path, ".agent_scratchpad/{task}/artifacts"]
     dal-dev:
       - *fmt-whitespace
