@@ -2,9 +2,9 @@
 // synthetic rows contain only neutral labels and counts, never CLI history.
 import { describe, expect, it, expectTypeOf } from 'vitest'
 import { DatabaseSync } from 'node:sqlite'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 
 import {
   copilotCliReader,
@@ -156,5 +156,62 @@ describe('loadCopilotCliCalls: absent cost_usd is not a harness figure (issue #1
       },
     )
     expect(basis).not.toBe('harness')
+  })
+})
+
+describe('copilotCliReader events.jsonl journal', () => {
+  const ROOT_PROMPT = 'Root prompt.\n<available_skills>\n<skill><name>alpha</name><description>Does alpha.</description><location>/x/alpha</location></skill>\n</available_skills>'
+  const SUB_PROMPT = 'Subagent prompt.'
+
+  function journal(lines: readonly object[]): string {
+    const dir = mkdtempSync(join(tmpdir(), 'copilot-journal-'))
+    const sessionDir = join(dir, 'session-1')
+    mkdirSync(sessionDir)
+    const file = join(sessionDir, 'events.jsonl')
+    writeFileSync(file, lines.map((l) => JSON.stringify(l)).join('\n') + '\n')
+    return file
+  }
+
+  async function collect(file: string) {
+    const turns = []
+    for await (const turn of copilotCliReader.read(file)) turns.push(turn)
+    return turns
+  }
+
+  it('pairs each assistant.message with the system prompt of its own agent', async () => {
+    const file = journal([
+      { type: 'system.message', data: { role: 'system', content: ROOT_PROMPT } },
+      { type: 'assistant.message', data: { messageId: 'm1' } },
+      { type: 'system.message', agentId: 'sub-a', data: { role: 'system', content: SUB_PROMPT } },
+      { type: 'assistant.message', agentId: 'sub-a', data: { messageId: 'm2' } },
+      { type: 'assistant.message', data: { messageId: 'm3' } },
+    ])
+    try {
+      const turns = await collect(file)
+      expect(turns.map((t) => t.nativeRecordId)).toEqual(['m1', 'm3', 'm2'])
+      expect(turns.every((t) => t.sessionId === 'session-1')).toBe(true)
+      expect(turns[0]!.parts).toEqual([{ part: 'system_prompt', text: ROOT_PROMPT, order: 0 }])
+      expect(turns[2]!.parts).toEqual([{ part: 'system_prompt', text: SUB_PROMPT, order: 0 }])
+      expect(turns[1]!.parts[0]).toMatchObject({ text: ROOT_PROMPT })
+      expect(turns.some((t) => t.toolsOffered !== undefined)).toBe(false)
+    } finally {
+      rmSync(dirname(dirname(file)), { recursive: true, force: true })
+    }
+  })
+
+  it('emits no prompt part when no system.message preceded the turn', async () => {
+    const file = journal([
+      { type: 'assistant.message', agentId: 'sub-b', data: { messageId: 'm1' } },
+      { type: 'system.message', data: { role: 'system', content: ROOT_PROMPT } },
+    ])
+    try {
+      expect((await collect(file))[0]!.parts).toEqual([])
+    } finally {
+      rmSync(dirname(dirname(file)), { recursive: true, force: true })
+    }
+  })
+
+  it('yields nothing for a database path', async () => {
+    expect(await collect('/nonexistent/data.db')).toEqual([])
   })
 })
