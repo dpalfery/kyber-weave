@@ -4,7 +4,7 @@ title: Todos
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-16
+last-reviewed: 2026-10-21
 ---
 
 # Todos
@@ -58,6 +58,17 @@ last-reviewed: YYYY-MM-DD
 | [task-gate-test-project-mapping.md](task-gate-test-project-mapping.md) | KyberSquad | draft | Map a task's changed files to the touched test project so task gates can run only the relevant tests; the single test project takes about 25 minutes with coverage, so none run per task today. |
 | [adr-in-place-cleanup.md](adr-in-place-cleanup.md) | DocGraph | draft | ADRs 0007, 0008, 0016, 0020, 0023 and 0033 still keep superseded history that the in-place-edit policy says to remove; also decide whether `docs/archive/adrs/` stays. |
 | [task-gate-config-review.md](task-gate-config-review.md) | KyberSquad | draft | Confirm `sql-database-architect` and `github-devops` should run the .NET gate set, and finish verifying `dotnet format --include` with project files on Linux and Windows. |
+| [copilot-cli-output-tokens-skipped-messages.md](copilot-cli-output-tokens-skipped-messages.md) | KyberDash | draft | Copilot CLI 1.0.81 and later omit `outputTokens`, so the parser defaults it to 0 and skips 3,821 of 5,605 journal messages; decide an accounting-safe way to ingest them. |
+| [copilot-cli-journal-refresh-window.md](copilot-cli-journal-refresh-window.md) | KyberDash | draft | 1,784 Copilot CLI journal messages dated 2026-06 to 2026-09 fall outside the refresh window and are never read; decide a wider one-off import or documented window guidance. |
+| [copilot-cli-placeholder-session-rows.md](copilot-cli-placeholder-session-rows.md) | KyberDash | draft | Session-store `sessions` rows become `unknown`-model, $0 canon records, and `data.db` is never discovered; decide whether the placeholders should exist or carry real figures. |
+| [antigravity-family-scope-resolve-harness.md](antigravity-family-scope-resolve-harness.md) | KyberDash | draft | `resolveHarnessScope` checks the descriptor id before family expansion, so `--harness antigravity` never includes `antigravity-cli` or `-ide`; expand a family with no descriptor of its own. |
+| [antigravity-cli-backfill-import-picker.md](antigravity-cli-backfill-import-picker.md) | KyberDash | draft | Backfill `antigravity-cli` with a two-week window so eight transcript-bearing OTLP-only sessions gain file records, and let the import picker offer harnesses that hold no samples yet. |
+| [antigravity-slug-session-bridge.md](antigravity-slug-session-bridge.md) | KyberDash | draft | Four OTLP Antigravity sessions carry a slug session id with no conversation or brain directory; decide whether a bridge is possible or the limit is permanent. |
+| [antigravity-harness-label-session-join.md](antigravity-harness-label-session-join.md) | KyberDash | draft | Verify that the session view joins OTLP `antigravity` and file `antigravity-cli` records that share one session id, and fix the view only if it splits them. |
+| [readsessionfile-stat-before-cap.md](readsessionfile-stat-before-cap.md) | KyberDash | draft | `readSessionFile` reads the whole file before it checks the 128 MiB cap, so an oversize file is fully allocated before it is rejected; stat first or stream to the cap. |
+| [transcript-segment-single-sweep.md](transcript-segment-single-sweep.md) | KyberDash | draft | `segmentTranscript` filters every step once per call, O(calls x steps); replace it with one sorted sweep if conversations grow large enough to measure. |
+| [antigravity-file-session-skill-listing.md](antigravity-file-session-skill-listing.md) | KyberDash | draft | File-only Antigravity sessions have no skill listing, since it exists only on OTLP spans; surface it from OTLP when the labels join, or document the panel as listing-free. |
+| [antigravity-offered-label-per-definition.md](antigravity-offered-label-per-definition.md) | KyberDash | draft | A mixed tool-definitions block carries one `offered (MCP catalogue)` label for every member; label per definition and add a block-member test. |
 
 Nine earlier open todos moved to GitHub issues #125–#133. The four that those issues
 left listed here while pull requests were open are closed below.
