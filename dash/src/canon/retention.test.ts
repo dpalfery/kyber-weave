@@ -129,3 +129,75 @@ describe('purgeExpiredContent', () => {
     expect(decompressRaw(staleParts!.raw as Uint8Array)).toEqual({ keep: 'stale-parts-raw' })
   })
 })
+
+describe('purgeExpiredContent runs in one transaction', () => {
+  it('issues a single BEGIN/COMMIT pair with every content UPDATE inside it', () => {
+    // WHY: the purge walked `spanIds` and called `setContent` per expired row -
+    // one autocommit UPDATE per row (9,740 expired ids measured in production).
+    // The fix is structural, not a duration: the statements must run inside one
+    // transaction. A stopwatch would pin the machine, not the behaviour; the
+    // statement stream pins the behaviour on any machine.
+    // RED today: the purge issues no transaction statements at all, so the
+    // single-BEGIN/COMMIT assertion fails.
+    const store = new CanonStore(':memory:')
+    try {
+      store.upsertMany([
+        record({ spanId: 'txn-fresh', timestamp: '2026-09-10T12:00:00.000Z', content: { system_prompt: 'fresh' } }),
+        record({ spanId: 'txn-stale-1', timestamp: '2026-08-20T12:00:00.000Z', content: { system_prompt: 'one' } }),
+        record({ spanId: 'txn-stale-2', timestamp: '2026-08-20T12:00:00.000Z', content: { system_prompt: 'two' } }),
+        record({
+          spanId: 'txn-stale-3',
+          timestamp: '2026-08-20T12:00:00.000Z',
+          content: { system_prompt: 'three' },
+          parts: [{ part: 'system_prompt', text: 'three', order: 0 }],
+        }),
+      ])
+
+      // The raw handle, as `projection.test.ts` reaches it: the store owns no
+      // transaction API of its own, so the BEGIN/COMMIT must be visible here.
+      const db = (store as unknown as { db: DatabaseSync }).db
+      const events: Array<{ kind: 'exec' | 'prepare'; sql: string }> = []
+      const originalPrepare = db.prepare.bind(db)
+      const originalExec = db.exec.bind(db)
+      db.prepare = ((sql: string) => {
+        events.push({ kind: 'prepare', sql })
+        return originalPrepare(sql)
+      }) as typeof db.prepare
+      db.exec = ((sql: string) => {
+        events.push({ kind: 'exec', sql })
+        return originalExec(sql)
+      }) as typeof db.exec
+      try {
+        const result = purgeExpiredContent(store, new Date('2026-09-12T12:00:00.000Z'))
+        expect(result.purged).toBe(3)
+      } finally {
+        db.prepare = originalPrepare
+        db.exec = originalExec
+      }
+
+      const isBegin = (sql: string): boolean => sql.trim().toUpperCase() === 'BEGIN'
+      const isCommit = (sql: string): boolean => sql.trim().toUpperCase() === 'COMMIT'
+      const isRollback = (sql: string): boolean => sql.trim().toUpperCase() === 'ROLLBACK'
+      const execs = events.filter((event) => event.kind === 'exec')
+      expect(execs.filter((event) => isBegin(event.sql))).toHaveLength(1)
+      expect(execs.filter((event) => isCommit(event.sql))).toHaveLength(1)
+      expect(execs.filter((event) => isRollback(event.sql))).toHaveLength(0)
+
+      const beginAt = events.findIndex((event) => event.kind === 'exec' && isBegin(event.sql))
+      const commitAt = events.findIndex((event) => event.kind === 'exec' && isCommit(event.sql))
+      expect(beginAt).toBeGreaterThanOrEqual(0)
+      expect(commitAt).toBeGreaterThan(beginAt)
+      const updates = events.filter((event) => /^UPDATE\s+records\b/i.test(event.sql))
+      // Three expired rows collapse into the set-based statement(s); whatever
+      // their number, none may run as an autocommit write outside the pair.
+      expect(updates.length).toBeGreaterThan(0)
+      for (const update of updates) {
+        const at = events.indexOf(update)
+        expect(at).toBeGreaterThan(beginAt)
+        expect(at).toBeLessThan(commitAt)
+      }
+    } finally {
+      store.close()
+    }
+  })
+})

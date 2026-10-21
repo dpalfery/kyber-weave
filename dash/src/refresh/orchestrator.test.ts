@@ -250,7 +250,7 @@ describe('refreshHarnessSources', () => {
       expect(store.listAll().map((record) => record.harness).sort()).toEqual(['antigravity'])
       expect(store.listAll().some((record) => record.harness === 'gemini')).toBe(false)
       expect(store.getProblems().some((problem) => problem.code === PROVIDER_PARSE_ERROR)).toBe(true)
-      expect(store.listSessions().map((session) => session.harness)).toEqual(['antigravity'])
+      expect(store.countSessionsByHarness()).toEqual({ antigravity: 1 })
       expect(store.listRuns().map((run) => run.harness)).toEqual(['antigravity'])
       expect(store.getHarnessRollup('antigravity')).toMatchObject({ harness: 'antigravity', sampleCount: 1 })
       expect(store.getHarnessRollup('gemini')).toBeUndefined()

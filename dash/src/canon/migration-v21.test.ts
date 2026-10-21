@@ -143,7 +143,7 @@ function v20StoreAt(options?: { withV21Columns?: boolean }): string {
 
 describe('schema migration v20 -> v21 (session summary materialization)', () => {
   it('pins SCHEMA_VERSION to 21 and defines migration 20 as its own step', () => {
-    expect(SCHEMA_VERSION).toBe(21)
+    expect(SCHEMA_VERSION).toBe(22)
     expect(MIGRATIONS[20]).toBeTypeOf('function')
   })
 
@@ -153,12 +153,15 @@ describe('schema migration v20 -> v21 (session summary materialization)', () => 
     const path = join(dir, 'canon.db')
     const store = new CanonStore(path)
     try {
-      expect(store.getMetadata('schema_version')).toBe('21')
+      expect(store.getMetadata('schema_version')).toBe('22')
 
       const cols = tableInfo(path, 'session')
-      // Exactly the pre-existing columns plus the two new ones — no more.
-      expect(cols.map((c) => c.name).sort()).toEqual(
-        [...V20_SESSION_COLUMNS, 'summary_json', 'problems_count'].sort(),
+      // The v21 columns are present. Pinned as containment, not an exact
+      // set: later versions add their own columns (v22's
+      // `context_limit_source`), and a v21 file pins what v21 introduced
+      // rather than freezing the schema against later versions.
+      expect(cols.map((c) => c.name)).toEqual(
+        expect.arrayContaining([...V20_SESSION_COLUMNS, 'summary_json', 'problems_count']),
       )
 
       const colMap = new Map(cols.map((c) => [c.name, c]))
@@ -197,11 +200,11 @@ describe('schema migration v20 -> v21 (session summary materialization)', () => 
     }
   })
 
-  it('upgrades a v20 store to 21, adding the columns and leaving the legacy row not materialized', () => {
+  it('upgrades a v20 store to 21, adding the columns; the v22 step materializes the legacy row', () => {
     const path = v20StoreAt()
     const store = new CanonStore(path)
     try {
-      expect(store.getMetadata('schema_version')).toBe('21')
+      expect(store.getMetadata('schema_version')).toBe('22')
 
       const cols = tableInfo(path, 'session')
       expect(cols.map((c) => c.name)).toEqual(
@@ -220,8 +223,9 @@ describe('schema migration v20 -> v21 (session summary materialization)', () => 
         dflt_value: null,
       })
 
-      // The legacy row survives intact, and its new columns read NULL:
-      // a row that predates the columns is not materialized.
+      // The legacy row survives intact. This store opens all the way to 22,
+      // and the v22 step materializes every row it walks -- so the row this
+      // store ends up holding carries the writer's own values, not NULL.
       const db = new DatabaseSync(path)
       try {
         const row = db
@@ -242,10 +246,33 @@ describe('schema migration v20 -> v21 (session summary materialization)', () => 
         expect(row.harness).toBe('claude-code')
         expect(row.label).toBe('Legacy Session')
         expect(row.payload).toBe(LEGACY_PAYLOAD)
-        expect(row.summary_json).toBeNull()
-        expect(row.problems_count).toBeNull()
+        expect(row.summary_json).toBe(
+          JSON.stringify({ title: 'Legacy session', outcome: 'shipped' }),
+        )
+        expect(row.problems_count).toBe(1)
       } finally {
         db.close()
+      }
+
+      // The v21 step ON ITS OWN still leaves the legacy row unmaterialized:
+      // a row that predates the columns reads NULL until a later step -- or
+      // the writer -- materializes it. That distinction is the whole reason
+      // the columns carry no DEFAULT.
+      const legacy = new DatabaseSync(':memory:')
+      try {
+        legacy.exec(V20_SESSION_TABLE_SQL)
+        legacy
+          .prepare('INSERT INTO session (session_id, harness, payload) VALUES (?, ?, ?)')
+          .run('sess-legacy-v20', 'claude-code', LEGACY_PAYLOAD)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        MIGRATIONS[20](legacy as any)
+        const stepRow = legacy
+          .prepare('SELECT summary_json, problems_count FROM session WHERE session_id = ?')
+          .get('sess-legacy-v20') as { summary_json: string | null; problems_count: number | null }
+        expect(stepRow.summary_json).toBeNull()
+        expect(stepRow.problems_count).toBeNull()
+      } finally {
+        legacy.close()
       }
     } finally {
       store.close()
@@ -258,7 +285,7 @@ describe('schema migration v20 -> v21 (session summary materialization)', () => 
 
     const reopened = new CanonStore(path)
     try {
-      expect(reopened.getMetadata('schema_version')).toBe('21')
+      expect(reopened.getMetadata('schema_version')).toBe('22')
     } finally {
       reopened.close()
     }
@@ -268,8 +295,12 @@ describe('schema migration v20 -> v21 (session summary materialization)', () => 
     for (const name of ['summary_json', 'problems_count']) {
       expect(cols.filter((c) => c.name === name)).toHaveLength(1)
     }
-    expect(cols.map((c) => c.name).sort()).toEqual(
-      [...V20_SESSION_COLUMNS, 'summary_json', 'problems_count'].sort(),
+    // The v21 columns are present exactly once. Pinned as containment, not
+    // an exact set, for the same reason as the fresh-store assertion above:
+    // later versions add their own columns, and a v21 file pins what v21
+    // introduced rather than freezing the schema against later versions.
+    expect(cols.map((c) => c.name)).toEqual(
+      expect.arrayContaining([...V20_SESSION_COLUMNS, 'summary_json', 'problems_count']),
     )
   })
 
@@ -279,7 +310,7 @@ describe('schema migration v20 -> v21 (session summary materialization)', () => 
     const path = v20StoreAt({ withV21Columns: true })
     const store = new CanonStore(path)
     try {
-      expect(store.getMetadata('schema_version')).toBe('21')
+      expect(store.getMetadata('schema_version')).toBe('22')
       expect(tableInfo(path, 'session').map((c) => c.name)).toEqual(
         expect.arrayContaining(['summary_json', 'problems_count']),
       )
@@ -315,7 +346,7 @@ describe('schema migration v20 -> v21 (session summary materialization)', () => 
     const store = new CanonStore(path)
     try {
       expect(store.getMetadata('schema_version')).toBe(String(SCHEMA_VERSION))
-      expect(SCHEMA_VERSION).toBe(21)
+      expect(SCHEMA_VERSION).toBe(22)
     } finally {
       store.close()
     }
@@ -460,7 +491,7 @@ describe('session_denorm_idx covering index and planner statistics (index contra
     const path = v20StoreAt()
     const store = new CanonStore(path)
     try {
-      expect(store.getMetadata('schema_version')).toBe('21')
+      expect(store.getMetadata('schema_version')).toBe('22')
     } finally {
       store.close()
     }
@@ -545,7 +576,7 @@ describe('session_denorm_idx covering index and planner statistics (index contra
     const path = v20StoreAt()
     const store = new CanonStore(path)
     try {
-      expect(store.getMetadata('schema_version')).toBe('21')
+      expect(store.getMetadata('schema_version')).toBe('22')
     } finally {
       store.close()
     }
@@ -565,7 +596,7 @@ describe('session_denorm_idx covering index and planner statistics (index contra
 
     const reopened = new CanonStore(path)
     try {
-      expect(reopened.getMetadata('schema_version')).toBe('21')
+      expect(reopened.getMetadata('schema_version')).toBe('22')
     } finally {
       reopened.close()
     }

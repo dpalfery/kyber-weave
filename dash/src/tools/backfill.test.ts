@@ -362,7 +362,7 @@ describe('renormalizeRecords — retained raw evidence', () => {
     // And rebuilding projections cleanly re-projects the remaining Claude record without Gemini
     await buildSessions(store)
     expect(store.getSessionPayload(`gemini:${traceId}`)).toBeUndefined()
-    expect(store.listSessions().some((s) => s.harness === 'gemini')).toBe(false)
+    expect(store.countSessionsByHarness()['gemini'] ?? 0).toBe(0)
     store.close()
   })
 })

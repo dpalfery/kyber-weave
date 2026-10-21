@@ -17,10 +17,10 @@ import { refreshProcessIsAlive } from '../canon/refresh-run.js'
 import { formatSessionTitle } from '../canon/naming.js'
 import {
   CanonStore,
-  decompressRaw,
   normalizeHistoryWeeks,
   problemsHarnessWhere,
   quarantineHarnessWhere,
+  readSessionSummaryFigures,
   systemPromptTextsFromContentColumns,
   toFinding,
   toPrediction,
@@ -34,7 +34,17 @@ import {
   type HarnessRollupDbRow,
   type ExecutionDbRow,
   type QuarantineEntryDetail,
+  type SessionSummaryFigureRow,
 } from '../canon/store.js'
+import { decompressColumn } from '../canon/compressed-column.js'
+import {
+  SESSION_PAYLOAD_FRAGMENTS_SELECT,
+  SESSION_PAYLOAD_SELECT,
+  SESSION_TURNS_SELECT,
+  parseJsonObject,
+  sessionTurnsOf,
+  turnObjectOf,
+} from '../canon/session-read.js'
 import { sourceDisplayName, type SourceKind } from '../canon/measurability.js'
 import {
   toSourceCheckpoint,
@@ -206,6 +216,51 @@ export type SessionSummaryDetail = {
   summary: Record<string, unknown>
   /** How many problems the session carries. */
   problems_count: number
+}
+
+/**
+ * One turn's measured counters, read without the session's payload.
+ *
+ * <remarks>
+ * The four counters the turn inspector renders. A counter the stored row does
+ * not carry is absent, never a zero: a zero would claim the harness measured
+ * nothing, and absence is what the row actually says.
+ */
+export type SessionTurnFigures = {
+  /** The turn's own index, as the stored row names it. */
+  index: number
+  input?: number
+  output?: number
+  fresh?: number
+  cache_read?: number
+}
+
+/**
+ * One session's timeline, read as a narrow fragment of its payload.
+ *
+ * <remarks>
+ * `timeline` is the payload's own value, so the served bytes are the bytes
+ * the whole-payload read produced. A session that carries no timeline serves
+ * `undefined`, which the route answers as the empty timeline it served
+ * before.
+ */
+export type SessionTimelineRead = {
+  timeline: unknown
+}
+
+/**
+ * One session's persisted context analysis, read as a narrow fragment of its
+ * payload.
+ *
+ * <remarks>
+ * `context` is the payload's own `context` block — where the per-turn
+ * pressure, buckets and residual live — and `lastTurnIndex` the index of the
+ * session's last turn, which is the fallback for a turn the analysis does not
+ * number itself.
+ */
+export type SessionContextRead = {
+  context: Record<string, unknown> | undefined
+  lastTurnIndex: number | undefined
 }
 
 /** Cost facts needed by the shared report, read without loading raw span payloads. */
@@ -809,6 +864,48 @@ function parseSummaryObject(value: string | object | null | undefined): Record<s
 }
 
 /**
+ * One JSON value, parsed from the text SQLite's JSON functions return.
+ *
+ * <remarks>
+ * `NULL` — an absent path — is no value at all. A JSON `null` is a value and
+ * stays one, so a timeline that is null is served as null rather than as
+ * absent.
+ */
+function parseJsonValue(value: unknown): unknown {
+  if (typeof value !== 'string') return undefined
+  try {
+    return JSON.parse(value) as unknown
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * One turn row's measured counters.
+ *
+ * <remarks>
+ * The counters are taken as the row holds them. A counter the row does not
+ * carry stays absent, because a zero would claim the harness measured
+ * nothing — and absence is what the row actually says.
+ */
+function turnFiguresOf(turn: Record<string, unknown>, turnIndex: number): SessionTurnFigures {
+  const index = turn['index']
+  return {
+    index: typeof index === 'number' && Number.isFinite(index) ? index : turnIndex,
+    input: turnCounter(turn, 'input'),
+    output: turnCounter(turn, 'output'),
+    fresh: turnCounter(turn, 'fresh'),
+    cache_read: turnCounter(turn, 'cache_read'),
+  }
+}
+
+/** One measured counter, or `undefined` when the row carries no finite one. */
+function turnCounter(turn: Record<string, unknown>, key: string): number | undefined {
+  const value = turn[key]
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+}
+
+/**
  * One row's summary and problem count, read out of its own payload.
  *
  * <remarks>
@@ -972,6 +1069,89 @@ const SESSION_SUMMARY_LEGACY_SELECT =
 const SESSION_SUMMARY_PAYLOAD_SELECT =
   'SELECT session_id, harness, label, is_subagent, parent_session, agent_name, ' +
   'started, ended, payload ' +
+  'FROM session WHERE session_id = ?'
+
+/**
+ * One turn row, read from the turns table.
+ *
+ * <remarks>
+ * A session's turns live in `session_turn`, one row each, indexed by
+ * `(session_id, turn_index)`. One turn is therefore a seek — not the session
+ * blob, which held 10,933 turn rows and 15.3 MB for the corpus's largest
+ * session.
+ */
+const SESSION_TURN_SELECT =
+  'SELECT turn_json FROM session_turn WHERE session_id = ? AND turn_index = ?'
+
+/**
+ * Whether a session has turn rows of its own.
+ *
+ * <remarks>
+ * The load-bearing part of the legacy fallback below: a session whose turns
+ * are split out no longer carries them in its payload, so an index with no
+ * row is simply out of range — and saying so must not cost a payload read.
+ */
+const SESSION_TURN_ROWS_SELECT =
+  'SELECT 1 AS present FROM session_turn WHERE session_id = ? LIMIT 1'
+
+/**
+ * The legacy turn read: one turn out of a payload that still carries its turns.
+ *
+ * <remarks>
+ * `json_each` walks the payload's own turn array inside SQLite, so only the
+ * one matching turn crosses into JS. The identity rule is the writer's own: a
+ * turn that names an `index` is that turn, and a turn that names none is its
+ * position — the rule the turns table itself was built with, so the two paths
+ * answer for the same turn.
+ *
+ * The array check is load-bearing: a `turns` key that is not an array is a
+ * malformed payload, and walking it as one would answer for a turn that does
+ * not exist.
+ */
+const SESSION_TURN_LEGACY_SELECT =
+  'SELECT t.value AS turn_json FROM session s, json_each(json_extract(s.payload, \'$.turns\')) AS t ' +
+  "WHERE s.session_id = ? AND json_type(s.payload, '$.turns') = 'array' AND COALESCE(" +
+  "CASE WHEN json_type(t.value, '$.index') IN ('integer', 'real') " +
+  "THEN CAST(json_extract(t.value, '$.index') AS INTEGER) END, " +
+  'CAST(t.key AS INTEGER)) = ? LIMIT 1'
+
+/**
+ * Whether a derived session row exists.
+ *
+ * <remarks>
+ * Membership only: a seek on the session table's primary key, and the whole
+ * of what "does this session exist" needs. The session's content is not part
+ * of that answer — a reader that took it from the payload would decompress
+ * the blob and reassemble every turn of the session out of `session_turn` to
+ * learn what the row's key already carries.
+ */
+const SESSION_EXISTS_SELECT = 'SELECT 1 FROM session WHERE session_id = ?'
+
+/**
+ * One session's timeline, read as a narrow fragment of its payload.
+ *
+ * <remarks>
+ * `->` hands over the JSON text of the value at the path, so the timeline
+ * crosses into JS and the blob around it does not — and the text is the
+ * value's own JSON, so a timeline of any JSON type is served byte for byte
+ * as the whole-payload read served it. The timeline is session metadata: it
+ * lives beside the turns, not inside them, so it survives the payload split
+ * intact.
+ */
+const SESSION_TIMELINE_SELECT =
+  "SELECT (payload -> '$.timeline') AS timeline_json FROM session WHERE session_id = ?"
+
+/**
+ * One session's context analysis, read as narrow fragments of its payload.
+ *
+ * <remarks>
+ * Both fragments are taken by SQLite's JSON functions: the persisted context
+ * block, and the index of the session's last turn. The blob around them never
+ * crosses into JS.
+ */
+const SESSION_CONTEXT_SELECT =
+  "SELECT json_extract(payload, '$.context') AS context_json, " +
+  "json_extract(payload, '$.turns[#-1].index') AS last_turn_index " +
   'FROM session WHERE session_id = ?'
 
 interface QuarantineDbRow {
@@ -1251,14 +1431,16 @@ function partsFromRecord(record: CanonicalRecord): ContentPart[] {
 
 function partsFromRow(row: Record<string, unknown>): ContentPart[] {
   if (row.parts_json !== null && row.parts_json !== undefined) {
-    try {
-      const parts = decompressRaw(row.parts_json as Uint8Array) as ContentPart[]
-      if (Array.isArray(parts) && parts.length > 0) {
-        return [...parts].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
-      }
-    } catch {
-      // Fall through to content_json — a corrupt blob is not an empty session.
+    // The column holds the deflated parts, and the plain JSON a row written
+    // before the compression landed holds. Both are read here, so a pre-change
+    // row keeps its parts — the fall-through to `content_json` below would
+    // lose them, because that column is '{}' on a parts-carrying row.
+    const parts = decompressColumn(row.parts_json)
+    if (Array.isArray(parts) && parts.length > 0) {
+      return [...parts].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
     }
+    // A column that holds nothing usable falls through to content_json — a
+    // corrupt blob is not an empty session.
   }
   if (typeof row.content_json === 'string' && row.content_json !== '' && row.content_json !== '{}') {
     try {
@@ -1767,6 +1949,30 @@ export class KyberBridge {
     return this.canonDb
   }
 
+  /**
+   * The handle the session reads go through.
+   *
+   * <remarks>
+   * The store's handle when a store is injected: the store owns the sessions,
+   * and a bridge that carries both a store and a handle of its own reads the
+   * sessions from the store — the two can be different databases, and the
+   * store's is the one that holds them. The store's handle also outlives the
+   * bridge: closing drops the bridge's reference to it, not the handle.
+   *
+   * Without a store, the bridge's own handle — which it stops using once it
+   * has closed.
+   */
+  private sessionHandle(): DatabaseSync | undefined {
+    if (this.store && typeof this.store.getDatabase === 'function') {
+      try {
+        return this.store.getDatabase()
+      } catch {
+        return undefined
+      }
+    }
+    return this.getDb()
+  }
+
   private hasTable(db: DatabaseSync | undefined, tableName: string): boolean {
     if (!db) return false
     try {
@@ -2129,24 +2335,53 @@ export class KyberBridge {
    * Get the full precomputed view payload for a given session ID.
    * The canonical session payload is returned without route-level adaptation.
    * Strings longer than maxLen are safely truncated to prevent oversized JSON responses.
+   *
+   * <remarks>
+   * The session's turns are read from `session_turn` — one range scan for the
+   * whole session, however many turns it holds — and the rest of the session
+   * from the payload row without them. A session's blob was 15.3 MB for a
+   * 10,933-turn session, and reading it whole to serve its turns is what the
+   * split exists to stop.
+   *
+   * Both shapes are in the store at once, and both are served the same way.
+   * A row whose payload still carries a `turns` array was written before the
+   * split, or by a build that still writes whole payloads: its turns are the
+   * ones it carries, and they are the fresh ones — a re-write by such a build
+   * leaves the split rows behind it stale. A row without one has had its
+   * turns split out, and they are read from the turns table. The payload's
+   * own `turns` key is the signal, because it is the one thing the split
+   * leaves behind: the migration removed the key and moved the turns, and the
+   * writer drops the key as it writes the rows.
+   *
+   * The turns are re-attached at the end of the payload, because the split
+   * took the key out and nothing records where it stood.
+   * </remarks>
    */
   getSessionPayload<T = SessionPayload>(sessionId: string): T | null {
     if (!sessionId) return null
 
-    if (this.store) {
-      const payload = this.store.getSessionPayload(sessionId)
-      return payload === undefined ? null : (_clip(payload) as T)
+    const db = this.sessionHandle()
+    if (this.hasTable(db, 'session')) {
+      const assembled = this.readSessionWithTurns(db!, sessionId)
+      if (assembled !== undefined) return assembled === null ? null : (_clip(assembled) as T)
     }
 
-    const db = this.getDb()
+    // The whole payload, as the store holds it: the last resort for a handle
+    // that cannot serve the split read — a schema without the JSON functions
+    // the fragments are taken with, or a store that answers the payload
+    // itself. The turns are attached back from the turns table, so this path
+    // serves the same session the split read does.
+    if (this.store) {
+      const payload = this.store.getSessionPayload(sessionId)
+      if (payload === undefined) return null
+      return _clip(this.attachSessionTurns(db, payload as SessionPayload, sessionId)) as T
+    }
     if (this.hasTable(db, 'session')) {
       try {
-        const row = db!
-          .prepare('SELECT payload FROM session WHERE session_id = ?')
-          .get(sessionId) as { payload: string } | undefined
-        if (row && typeof row.payload === 'string') {
-          const parsed = JSON.parse(row.payload) as unknown
-          return _clip(parsed) as T
+        const row = db!.prepare(SESSION_PAYLOAD_SELECT).get(sessionId) as { payload?: unknown } | undefined
+        if (row !== undefined && typeof row.payload === 'string') {
+          const payload = JSON.parse(row.payload) as SessionPayload
+          return _clip(this.attachSessionTurns(db!, payload, sessionId)) as T
         }
       } catch (err) {
         console.warn(
@@ -2158,6 +2393,73 @@ export class KyberBridge {
     }
 
     return null
+  }
+
+  /**
+   * One session's payload with its turns back, read from the split store.
+   *
+   * <remarks>
+   * `null` when the store holds no such session, and `undefined` when this
+   * handle cannot serve the split read at all — the caller's whole-payload
+   * read is the fallback then.
+   */
+  private readSessionWithTurns(
+    db: DatabaseSync,
+    sessionId: string,
+  ): Record<string, unknown> | null | undefined {
+    let row: { payload_json?: unknown; turns_type?: unknown; turns_json?: unknown } | undefined
+    try {
+      row = db.prepare(SESSION_PAYLOAD_FRAGMENTS_SELECT).get(sessionId) as typeof row
+    } catch {
+      // This handle cannot take the payload apart — no JSON functions in its
+      // SQLite build, or a schema the fragments do not fit.
+      return undefined
+    }
+    if (row === undefined) return null
+    const payload = parseJsonObject(row.payload_json)
+    if (payload === undefined) return undefined
+
+    // The turns: the payload's own when it still carries them, the split rows
+    // when they have been moved out. The range scan is issued either way — it
+    // is one indexed lookup that answers whether the session has turn rows of
+    // its own, and hands over every one of them when it does.
+    //
+    // Which of the two wins is the shared contract's rule, not this reader's:
+    // the store's reader and the bridge's reader must answer alike, so the
+    // decision lives in one place (`canon/session-read.ts`).
+    const splitTurns = this.readSessionTurnRows(db, sessionId)
+    payload['turns'] = sessionTurnsOf(row.turns_type, row.turns_json, splitTurns)
+    return payload
+  }
+
+  /**
+   * One session's turns, read from the turns table in one range scan.
+   *
+   * <remarks>
+   * `undefined` when the store carries no turns table at all: the table is
+   * materialized on demand, so a store that never held a turn row may not
+   * have one — and a session in such a store has no turns anywhere.
+   */
+  private readSessionTurnRows(
+    db: DatabaseSync,
+    sessionId: string,
+  ): Array<Record<string, unknown>> | undefined {
+    if (!this.hasTable(db, 'session_turn')) return undefined
+    let rows: Array<{ turn_json?: unknown }>
+    try {
+      rows = db.prepare(SESSION_TURNS_SELECT).all(sessionId) as Array<{ turn_json?: unknown }>
+    } catch {
+      return undefined
+    }
+    const turns: Array<Record<string, unknown>> = []
+    for (const row of rows) {
+      const turn = turnObjectOf(row.turn_json)
+      // A row that does not parse is not a turn: it is dropped rather than
+      // served as an empty object, which would read as "measured, and there
+      // was nothing there".
+      if (turn !== undefined) turns.push(turn)
+    }
+    return turns
   }
 
   /**
@@ -2293,6 +2595,109 @@ export class KyberBridge {
       ended: row.ended ?? null,
       summary: facts.summary,
       problems_count: facts.problems_count,
+    }
+  }
+
+  /**
+   * One turn's measured counters, read without the session's payload.
+   *
+   * <remarks>
+   * The bounded read behind `GET /api/kyber/session/:id/turn/:index`. A
+   * consumer that needs one turn's counters should not pay for the session
+   * blob: the detail route served 10,933 turn rows to read four numbers.
+   *
+   * A session whose turns were never split out of their payload — a row
+   * written before the split — is read the transitional way, with SQLite
+   * walking the payload's own turn array and handing over the one turn that
+   * matches. The identity rule is the writer's own, so both paths answer for
+   * the same turn.
+   * </remarks>
+   */
+  getSessionTurnFigures(sessionId: string, turnIndex: number): SessionTurnFigures | null {
+    if (!sessionId || !Number.isInteger(turnIndex) || turnIndex < 0) return null
+    const db = this.getDb()
+    if (!db || !this.hasTable(db, 'session')) return null
+
+    if (this.hasTable(db, 'session_turn')) {
+      const row = db.prepare(SESSION_TURN_SELECT).get(sessionId, turnIndex) as
+        | { turn_json?: unknown }
+        | undefined
+      const turn = row === undefined ? undefined : turnObjectOf(row.turn_json)
+      if (turn !== undefined) return turnFiguresOf(turn, turnIndex)
+      // No row for that index. A session that has turn rows of its own is
+      // split, and its payload no longer carries them: the index is out of
+      // range, and no payload is read to say so.
+      if (db.prepare(SESSION_TURN_ROWS_SELECT).get(sessionId) !== undefined) return null
+    }
+
+    // A session written before the split still carries its turns in the
+    // payload. That is the transitional read, and it hands over one turn.
+    const legacy = db.prepare(SESSION_TURN_LEGACY_SELECT).get(sessionId, turnIndex) as
+      | { turn_json?: unknown }
+      | undefined
+    if (legacy === undefined) return null
+    const turn = turnObjectOf(legacy.turn_json)
+    return turn === undefined ? null : turnFiguresOf(turn, turnIndex)
+  }
+
+  /**
+   * One session's timeline, read without the session's payload.
+   *
+   * <remarks>
+   * The bounded read behind `GET /api/kyber/timeline`. The timeline is
+   * session metadata: it lives beside the turns, not inside them, so it
+   * survives the payload split — and reading it never needs the turns that
+   * were the blob's bulk.
+   *
+   * `null` when the store holds no such session: the route's 404. The
+   * timeline itself is the payload's own value, so the served bytes are the
+   * bytes the whole-payload read produced.
+   * </remarks>
+   */
+  getSessionTimeline(sessionId: string): SessionTimelineRead | null {
+    if (!sessionId) return null
+    const db = this.getDb()
+    if (!db || !this.hasTable(db, 'session')) return null
+
+    const row = db.prepare(SESSION_TIMELINE_SELECT).get(sessionId) as
+      | { timeline_json?: unknown }
+      | undefined
+    if (row === undefined) return null
+    const timeline = parseJsonValue(row.timeline_json)
+    // Clipped at the depth the timeline sat at inside the payload, so the
+    // served bytes are the bytes the whole-payload read produced.
+    return { timeline: timeline === undefined ? undefined : _clip(timeline, MAX_STRING_LENGTH, 1) }
+  }
+
+  /**
+   * One session's persisted context analysis, read without the session's payload.
+   *
+   * <remarks>
+   * The bounded read behind the report's latest-session block. The context
+   * analysis — the per-turn pressure, buckets, residual and tool-definition
+   * sources — lives in the payload's `context` key, while the payload also
+   * carries the session's whole turn list, which this block needs none of.
+   *
+   * `null` when the store holds no such session.
+   * </remarks>
+   */
+  getSessionContext(sessionId: string): SessionContextRead | null {
+    if (!sessionId) return null
+    const db = this.getDb()
+    if (!db || !this.hasTable(db, 'session')) return null
+
+    const row = db.prepare(SESSION_CONTEXT_SELECT).get(sessionId) as
+      | { context_json?: unknown; last_turn_index?: unknown }
+      | undefined
+    if (row === undefined) return null
+    const context = parseJsonObject(row.context_json)
+    const lastTurnIndex = row.last_turn_index
+    return {
+      // Clipped at the depth the context block sat at inside the payload, so
+      // the derived figures are the ones the whole-payload read produced.
+      context: context === undefined ? undefined : _clip(context, MAX_STRING_LENGTH, 1),
+      lastTurnIndex:
+        typeof lastTurnIndex === 'number' && Number.isFinite(lastTurnIndex) ? lastTurnIndex : undefined,
     }
   }
 
@@ -3047,22 +3452,51 @@ export class KyberBridge {
 
 
   /**
+   * Whether a derived `session` row exists for `sessionId`.
+   *
+   * <remarks>
+   * Membership only, and deliberately so. "Does this session exist" is
+   * answered by the session table's key: the row's presence is the fact, and
+   * the session's content is not part of the answer. The check used to ask the
+   * store for the session's payload, and that read is the split reader — it
+   * decompresses the blob and reassembles every turn of the session out of
+   * `session_turn`, 10,933 of them on the corpus's largest session — so every
+   * existence check cost a full read of the session it was only sizing up.
+   *
+   * The seek costs the same whatever the session holds, so a session's size no
+   * longer decides what an existence check pays.
+   */
+  private sessionRowExists(db: DatabaseSync | undefined, sessionId: string): boolean {
+    if (!this.hasTable(db, 'session')) return false
+    try {
+      return db!.prepare(SESSION_EXISTS_SELECT).get(sessionId) !== undefined
+    } catch {
+      // Older or partial schemas still fall through to the records check.
+      return false
+    }
+  }
+
+  /**
    * A session is known if a derived row exists or any record keys to it.
    * The session table is cheap; records are the fallback for a corpus that
    * has not been built into `session` yet. Checking the table first avoids
    * clipping a large payload just to decide whether to 404.
+   *
+   * <remarks>
+   * The derived row is probed, never read: the session's payload and its turns
+   * are the answer to a different question, and reading them here made every
+   * existence check reassemble the whole session before the caller could ask
+   * for any of it.
+   *
+   * The store's handle is probed first — it is the one that holds the
+   * sessions. The bridge's own handle is probed as well, for a bridge that
+   * carries both a store and a handle of its own.
    */
   private sessionKnown(sessionId: string): boolean {
-    if (this.store?.getSessionPayload(sessionId) !== undefined) return true
-    const db = this.getDb()
-    if (this.hasTable(db, 'session')) {
-      try {
-        const row = db!.prepare('SELECT 1 FROM session WHERE session_id = ?').get(sessionId)
-        if (row) return true
-      } catch {
-        // Older or partial schemas still fall through to the records check.
-      }
-    }
+    const sessionDb = this.sessionHandle()
+    if (this.sessionRowExists(sessionDb, sessionId)) return true
+    const ownDb = this.getDb()
+    if (ownDb !== sessionDb && this.sessionRowExists(ownDb, sessionId)) return true
     // Records without a derived session row still make the session real —
     // otherwise a span miss on an unbuilt session would 404 as "unknown".
     if (this.store) return this.store.recordsForSession(sessionId).length > 0
@@ -4190,7 +4624,7 @@ export class KyberBridge {
     }
     if (!this.hasTable(db, 'session')) return 0
     try {
-      const conds = [`json_extract(payload, '$.context.contextLimitSource') IN ('default', 'absent')`]
+      const conds = [this.sessionWindowSourceCondition(db!)]
       const params: (string | number)[] = []
       if (harness !== undefined && harness !== '') {
         conds.push('LOWER(harness) = LOWER(?)')
@@ -4204,6 +4638,30 @@ export class KyberBridge {
       console.warn('[KyberBridge] Failed counting unknown-window sessions:', err)
       return 0
     }
+  }
+
+  /**
+   * The condition that selects the sessions whose context window no source
+   * reported.
+   *
+   * Schema v22 materializes the window provenance into a `context_limit_source`
+   * column, and the column carries the payload's `$.context.contextLimitSource`
+   * verbatim, so the two paths count the same rows: a payload with no source
+   * leaves the column NULL, and `NULL IN ('default', 'absent')` is not true,
+   * so such a session is not counted either way.
+   *
+   * The payload expression stays the fallback for a database whose session
+   * table predates the column -- a handle opened without the store that would
+   * have migrated it -- so the count still answers there instead of failing on
+   * a missing column.
+   */
+  private sessionWindowSourceCondition(db: DatabaseSync): string {
+    const columns = (db.prepare('PRAGMA table_info(session)').all() as Array<{ name: string }>).map(
+      (column) => column.name,
+    )
+    return columns.includes('context_limit_source')
+      ? `context_limit_source IN ('default', 'absent')`
+      : `json_extract(payload, '$.context.contextLimitSource') IN ('default', 'absent')`
   }
 
   /**
@@ -4516,81 +4974,54 @@ export class KyberBridge {
    * carried as USD only when its block names USD (or predates currency, as
    * the legacy `usd` shape does); any other currency is omitted rather than
    * mislabelled (review follow-up: Copilot C4).
+   *
+   * Both paths read the figures out of the materialized `summary_json`
+   * column, and only a row written before the materialization existed — a
+   * row whose `summary_json` is NULL — falls back to its own payload. The
+   * read is the store's own (`readSessionSummaryFigures`), so the store mode
+   * and the direct-DB mode cannot drift apart on what a session's figures
+   * are.
    */
   sessionSummaryFigures(sessionIds: readonly string[]): SessionSummaryFigures {
     const uniqueIds = [...new Set(sessionIds)].filter((id) => id.length > 0)
     const out: SessionSummaryFigures = new Map()
     if (uniqueIds.length === 0) return out
 
-    type SummaryRow = {
-      session_id: unknown
-      turn_count: unknown
-      total_input: unknown
-      total_output: unknown
-      cost_status: unknown
-      cost_value: unknown
-      cost_currency: unknown
-      cost_usd: unknown
-    }
-    const readRows = (): SummaryRow[] => {
-      if (this.store) {
-        return this.store.sessionSummaryFigures(uniqueIds).map((row) => ({
-          session_id: row.sessionId,
-          turn_count: row.turnCount,
-          total_input: row.totalInput,
-          total_output: row.totalOutput,
-          cost_status: row.costStatus,
-          cost_value: row.costValue,
-          cost_currency: row.costCurrency,
-          cost_usd: row.costUsdLegacy,
-        }))
-      }
-      const db = this.getDb()
-      if (!this.hasTable(db, 'session')) return []
-      const rows: SummaryRow[] = []
-      const chunkSize = 900
-      for (let offset = 0; offset < uniqueIds.length; offset += chunkSize) {
-        const chunk = uniqueIds.slice(offset, offset + chunkSize)
-        const placeholders = chunk.map(() => '?').join(', ')
-        try {
-          rows.push(
-            ...(db!
-              .prepare(
-                `SELECT session_id,
-                        json_extract(payload, '$.summary.turn_count') AS turn_count,
-                        json_extract(payload, '$.summary.total_input') AS total_input,
-                        json_extract(payload, '$.summary.total_output') AS total_output,
-                        json_extract(payload, '$.summary.cost.status') AS cost_status,
-                        json_extract(payload, '$.summary.cost.value') AS cost_value,
-                        json_extract(payload, '$.summary.cost.currency') AS cost_currency,
-                        json_extract(payload, '$.summary.cost.usd') AS cost_usd
-                 FROM session WHERE session_id IN (${placeholders})`,
-              )
-              .all(...chunk) as SummaryRow[]),
-          )
-        } catch (err) {
-          console.warn('[KyberBridge] Failed querying session summaries from canon.db:', err)
-          return []
-        }
-      }
-      return rows
-    }
-
-    const figure = (value: unknown): number | undefined =>
-      typeof value === 'number' && Number.isFinite(value) ? value : undefined
-    for (const row of readRows()) {
-      if (typeof row.session_id !== 'string') continue
-      const cost = pricedUsd(row.cost_status, row.cost_value, row.cost_currency, row.cost_usd)
-      out.set(row.session_id, {
-        ...(figure(row.turn_count) !== undefined ? { turnCount: figure(row.turn_count)! } : {}),
-        ...(figure(row.total_input) !== undefined ? { totalInput: figure(row.total_input)! } : {}),
-        ...(figure(row.total_output) !== undefined ? { totalOutput: figure(row.total_output)! } : {}),
+    for (const row of this.readSessionSummaryFigureRows(uniqueIds)) {
+      const cost = pricedUsd(row.costStatus, row.costValue, row.costCurrency, row.costUsdLegacy)
+      out.set(row.sessionId, {
+        ...(row.turnCount !== undefined ? { turnCount: row.turnCount } : {}),
+        ...(row.totalInput !== undefined ? { totalInput: row.totalInput } : {}),
+        ...(row.totalOutput !== undefined ? { totalOutput: row.totalOutput } : {}),
         ...(cost !== undefined ? { costUsd: cost } : {}),
         // Re-review #2 (Kilo B): the status a bare figure cannot carry.
-        ...(row.cost_status === 'partial' && cost !== undefined ? { costPartial: true as const } : {}),
+        ...(row.costStatus === 'partial' && cost !== undefined ? { costPartial: true as const } : {}),
       })
     }
     return out
+  }
+
+  /**
+   * The figures of a set of sessions, read from whichever handle this bridge
+   * has.
+   *
+   * <remarks>
+   * With a store injected, the store's own reader answers; without one, this
+   * bridge's handle does. Both are the same read, so the two paths agree.
+   * A direct read that fails leaves the figures empty rather than taking the
+   * caller down with it.
+   * </remarks>
+   */
+  private readSessionSummaryFigureRows(sessionIds: readonly string[]): SessionSummaryFigureRow[] {
+    if (this.store) return this.store.sessionSummaryFigures(sessionIds)
+    const db = this.getDb()
+    if (!this.hasTable(db, 'session')) return []
+    try {
+      return readSessionSummaryFigures(db!, sessionIds)
+    } catch (err) {
+      console.warn('[KyberBridge] Failed querying session summaries from canon.db:', err)
+      return []
+    }
   }
 
   /**
@@ -4632,12 +5063,64 @@ export class KyberBridge {
       bySession.set(sessionId, group)
     }
     for (const [sessionId, group] of bySession) {
-      const payload = this.getSessionPayload(sessionId)
+      const payload = this.readSessionBlobPayload(sessionId)
       if (payload === null) continue
       for (const execution of group) {
         yield { execution, payload }
       }
     }
+  }
+
+  /**
+   * One session's whole payload, as the store holds it.
+   *
+   * <remarks>
+   * The run digest reads whole sessions, one at a time, and wants the blob
+   * the store holds: the store's own read is the canonical one, and the
+   * digest's laziness contract — one payload parsed per pulled session — is
+   * measured against it. A session whose turns have been split out of the
+   * payload gets them attached back from the turns table, so the digest sees
+   * the same session the detail route serves.
+   */
+  private readSessionBlobPayload(sessionId: string): SessionPayload | null {
+    const db = this.sessionHandle()
+    if (this.store) {
+      const payload = this.store.getSessionPayload(sessionId)
+      if (payload === undefined) return null
+      return _clip(this.attachSessionTurns(db, payload as SessionPayload, sessionId))
+    }
+    if (!this.hasTable(db, 'session')) return null
+    try {
+      const row = db!.prepare(SESSION_PAYLOAD_SELECT).get(sessionId) as { payload?: unknown } | undefined
+      if (row === undefined || typeof row.payload !== 'string') return null
+      const payload = JSON.parse(row.payload) as SessionPayload
+      return _clip(this.attachSessionTurns(db, payload, sessionId))
+    } catch (err) {
+      console.warn(
+        '[KyberBridge] Error reading session payload from canon.db for %s: %s',
+        logId(sessionId),
+        logErr(err),
+      )
+      return null
+    }
+  }
+
+  /**
+   * Attach the session's split-out turns to a payload that carries none.
+   *
+   * <remarks>
+   * A payload that still carries its turns is left alone: those are its own
+   * turns, and they are the fresh ones.
+   */
+  private attachSessionTurns(
+    db: DatabaseSync | undefined,
+    payload: SessionPayload,
+    sessionId: string,
+  ): SessionPayload {
+    if (Array.isArray(payload.turns) || db === undefined) return payload
+    const turns = this.readSessionTurnRows(db, sessionId)
+    if (turns !== undefined) payload.turns = turns
+    return payload
   }
 
   /**

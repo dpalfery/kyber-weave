@@ -168,7 +168,16 @@ review:
       - ".kyber-weave/kyber-weave.yml"
       - "**/*secret*"
       - "**/*credential*"
-    max-reviewable-lines: 10000
+    # Raised from 10000 to 20000 because one delivery — the KyberDash sessions-list payload
+    # independence (schema v21 and v22 with the session-turn split, the covering index, the
+    # bounded read routes, the engine's maintenance-pass fix, the CLI's vacuum command, and
+    # their tests and documentation) — reached roughly 17,400 changed lines. The owner
+    # reviewed that single unit and approved it rather than splitting it (PR 397), which is
+    # the remedy this ceiling's own documentation names: "Split the change or have a human
+    # review it." A change to this file is human-only by the policy above, and that approval
+    # is what authorised the widening; 20,000 stays a real attention limit, not a rubber
+    # stamp for whatever comes next.
+    max-reviewable-lines: 20000
     major-count-blocks: 3
     min-confidence: 7
 

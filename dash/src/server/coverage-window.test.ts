@@ -150,10 +150,10 @@ describe('coverage window RED (PR #230 review-response)', () => {
     }
   })
 
-  it('thread 4150228523: store branch uses narrow session-time columns, never listSessions()', async () => {
+  it('thread 4150228523: store branch uses narrow session-time columns, never the full session table', async () => {
     // Store-branch seam: getLatestSessionTimeByHarness must read only the
     // narrow (harness, started, ended) columns via the payload-free
-    // listSessionTimeColumns() seam — never the full listSessions() table
+    // listSessionTimeColumns() seam — never the full session table
     // materialization (SELECT * + payload parse).
     const store = new CanonStore(':memory:')
     try {
@@ -174,7 +174,7 @@ describe('coverage window RED (PR #230 review-response)', () => {
         payload: {},
       })
       const bridge = new KyberBridge({ canonPath: ':memory:', store })
-      const listSpy = vi.spyOn(store, 'listSessions')
+      const listSpy = vi.spyOn(store, 'iterateSessions')
       const server = await runWebDashboard({ port: 0, open: false, kyberBridge: bridge, writeStdout: () => {} })
       try {
         const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`

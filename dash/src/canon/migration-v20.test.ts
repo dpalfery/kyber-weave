@@ -110,7 +110,7 @@ function v19StoreAt(options?: { withV20Columns?: boolean }): string {
 
 describe('schema migration v19 -> v20 (session sync progress and settling)', () => {
   it('pins SCHEMA_VERSION to 21 and defines migration 19', () => {
-    expect(SCHEMA_VERSION).toBe(21)
+    expect(SCHEMA_VERSION).toBe(22)
     expect(MIGRATIONS[19]).toBeTypeOf('function')
   })
 
@@ -120,7 +120,7 @@ describe('schema migration v19 -> v20 (session sync progress and settling)', () 
     const path = join(dir, 'canon.db')
     const store = new CanonStore(path)
     try {
-      expect(store.getMetadata('schema_version')).toBe('21')
+      expect(store.getMetadata('schema_version')).toBe('22')
 
       const cols = tableInfo(path, 'session')
       const colMap = new Map(cols.map((c) => [c.name, c]))
@@ -181,7 +181,7 @@ describe('schema migration v19 -> v20 (session sync progress and settling)', () 
     const path = v19StoreAt()
     const store = new CanonStore(path)
     try {
-      expect(store.getMetadata('schema_version')).toBe('21')
+      expect(store.getMetadata('schema_version')).toBe('22')
 
       const cols = tableInfo(path, 'session')
       const colNames = cols.map((c) => c.name)
@@ -242,7 +242,7 @@ describe('schema migration v19 -> v20 (session sync progress and settling)', () 
     // Migration is idempotent: reopening leaves metadata and columns intact
     const reopened = new CanonStore(path)
     try {
-      expect(reopened.getMetadata('schema_version')).toBe('21')
+      expect(reopened.getMetadata('schema_version')).toBe('22')
     } finally {
       reopened.close()
     }
@@ -253,7 +253,7 @@ describe('schema migration v19 -> v20 (session sync progress and settling)', () 
     const path = v19StoreAt({ withV20Columns: true })
     const store = new CanonStore(path)
     try {
-      expect(store.getMetadata('schema_version')).toBe('21')
+      expect(store.getMetadata('schema_version')).toBe('22')
       const colNames = tableInfo(path, 'session').map((c) => c.name)
       expect(colNames).toEqual(
         expect.arrayContaining([

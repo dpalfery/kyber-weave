@@ -29,7 +29,7 @@ function tempStorePath(): string {
 
 describe('store migration to the current schema: incoming-evidence columns', () => {
   it('pins SCHEMA_VERSION at 21 (evidence columns plus harness scoping)', () => {
-    expect(SCHEMA_VERSION).toBe(21)
+    expect(SCHEMA_VERSION).toBe(22)
   })
 
   it('adds the evidence columns to a v17 store without touching existing rows', () => {

@@ -331,8 +331,7 @@ describe('Claude subagent session projection and task naming (Contract T2.2)', (
     store.upsertMany([parentTurn, spawn1, chat1, spawn2, chat2])
     await buildSessions(store)
 
-    const sessions = store.listSessions()
-    expect(sessions.length, 'Must project 1 parent session and 2 subagent sessions').toBe(3)
+    expect(store.sessionCount(), 'Must project 1 parent session and 2 subagent sessions').toBe(3)
 
     const sub1 = querySessionDbRow(store, expectedSubagentId1)
     expect(sub1, `Subagent row in session table must exist for ${expectedSubagentId1}`).toBeDefined()

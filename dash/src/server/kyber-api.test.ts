@@ -1273,32 +1273,7 @@ describe('Backend Contract Tests: /api/kyber/* Endpoints', () => {
     })
   })
 
-  describe('Backward-compatible endpoints (/context, /schema, /timeline)', () => {
-    it('GET /api/kyber/context returns context analysis JSON', async () => {
-      const res = await fetch(`${base}/api/kyber/context?id=sess-copilot-001`)
-      expect(res.status).toBe(200)
-      assertStandardKyberHeaders(res)
-
-      const body = (await res.json()) as {
-        measurable: boolean
-        contextLimit: number
-        turns: unknown[]
-      }
-      expect(body.measurable).toBe(true)
-      expect(body.contextLimit).toBe(200000)
-      expect(Array.isArray(body.turns)).toBe(true)
-      expect(body.turns.length).toBeGreaterThan(0)
-    })
-
-    it('GET /api/kyber/schema returns the canonical payload schema unchanged', async () => {
-      const res = await fetch(`${base}/api/kyber/schema?id=sess-copilot-001`)
-      expect(res.status).toBe(200)
-      assertStandardKyberHeaders(res)
-
-      const body = await res.json()
-      expect(body).toEqual(copilotPayload.schema)
-    })
-
+  describe('Backward-compatible endpoint (/timeline)', () => {
     it('GET /api/kyber/timeline returns execution timeline root tree node', async () => {
       const res = await fetch(`${base}/api/kyber/timeline?id=sess-copilot-001`)
       expect(res.status).toBe(200)
@@ -1319,12 +1294,13 @@ describe('Backend Contract Tests: /api/kyber/* Endpoints', () => {
     })
 
     it('backward-compatible endpoints default to first available session when no id is given', async () => {
-      const res = await fetch(`${base}/api/kyber/context`)
+      const res = await fetch(`${base}/api/kyber/timeline`)
       expect(res.status).toBe(200)
       assertStandardKyberHeaders(res)
 
-      const body = (await res.json()) as { measurable: boolean }
-      expect(body.measurable).toBe(true)
+      // The newest session's timeline, served without an id.
+      const body = (await res.json()) as { spanId?: string }
+      expect(body.spanId).toBe('span-root-copilot')
     })
   })
 
@@ -1383,8 +1359,6 @@ describe('Backend Contract Tests: /api/kyber/* Endpoints', () => {
         { url: `${base}/api/kyber/quarantine`, methods: ['POST', 'PUT', 'DELETE'] },
         { url: `${base}/api/kyber/problems`, methods: ['POST', 'PUT', 'DELETE'] },
         { url: `${base}/api/kyber/meta`, methods: ['POST', 'PUT', 'DELETE'] },
-        { url: `${base}/api/kyber/context`, methods: ['POST', 'PUT', 'DELETE'] },
-        { url: `${base}/api/kyber/schema`, methods: ['POST', 'PUT', 'DELETE'] },
         { url: `${base}/api/kyber/timeline`, methods: ['POST', 'PUT', 'DELETE'] },
       ]
 

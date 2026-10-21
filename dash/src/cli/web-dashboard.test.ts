@@ -303,11 +303,6 @@ describe('web dashboard server: /api/kyber/* routes', () => {
     expect(deleteRes.status).toBe(405)
     expect(deleteRes.headers.get('cache-control')).toBe('no-store')
     expect(await deleteRes.json()).toEqual({ error: 'Method Not Allowed' })
-
-    const postContext = await fetch(`${base}/api/kyber/context`, { method: 'POST' })
-    expect(postContext.status).toBe(405)
-    expect(postContext.headers.get('cache-control')).toBe('no-store')
-    expect(await postContext.json()).toEqual({ error: 'Method Not Allowed' })
   })
 
   it('GET /api/kyber/compare returns comparison table', async () => {
@@ -351,23 +346,7 @@ describe('web dashboard server: /api/kyber/* routes', () => {
     expect(body.rates).toBeDefined()
   })
 
-  it('backward-compatible endpoints /context, /schema, /timeline return JSON', async () => {
-    const ctx = await fetch(`${base}/api/kyber/context`)
-    expect(ctx.status).toBe(200)
-    expect(ctx.headers.get('content-type')).toContain('application/json')
-    expect(ctx.headers.get('cache-control')).toBe('no-store')
-    const ctxBody = (await ctx.json()) as { measurable?: boolean }
-    expect(ctxBody).toBeDefined()
-    expect(ctxBody.measurable).toBe(true)
-
-    const schema = await fetch(`${base}/api/kyber/schema`)
-    expect(schema.status).toBe(200)
-    expect(schema.headers.get('content-type')).toContain('application/json')
-    expect(schema.headers.get('cache-control')).toBe('no-store')
-    const schemaBody = (await schema.json()) as { measurable?: boolean }
-    expect(schemaBody).toBeDefined()
-    expect(schemaBody.measurable).toBe(true)
-
+  it('backward-compatible endpoint /timeline returns JSON', async () => {
     const timeline = await fetch(`${base}/api/kyber/timeline`)
     expect(timeline.status).toBe(200)
     expect(timeline.headers.get('content-type')).toContain('application/json')

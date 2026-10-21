@@ -532,7 +532,7 @@ describe('projectCanonicalStore: projection-time repricing (issue #186, U9)', ()
   // raw_payload + problems stack) merged underneath — none of the steps since
   // 16 is a pricing migration.
   it('pins SCHEMA_VERSION at 21 (quarantine evidence and harness columns; still no pricing migration)', () => {
-    expect(SCHEMA_VERSION).toBe(21)
+    expect(SCHEMA_VERSION).toBe(22)
   })
 
   it('reprices a stale {unknown,no_rate} claude-code turn, rewrites cost_json, and the session cost agrees', async () => {

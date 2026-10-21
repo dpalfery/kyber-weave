@@ -272,6 +272,15 @@ function turnContent(over: TurnPacketPointers = {}): KyberTurnContentResult & Tu
   }
 }
 
+/** The turn page, mounted with the query client the page's own tests use. */
+function renderTurn() {
+  renderDom(
+    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })}>
+      <TurnDetail runId="run-raw-packet" turnIndex={0} />
+    </QueryClientProvider>,
+  )
+}
+
 /** The request target `fetchSpanAttributes` resolves for its argument (id or path). */
 function requestedSpanPath(arg: unknown): string {
   const value = String(arg)
@@ -293,7 +302,14 @@ describe('TurnDetail raw packet disclosure (B7)', () => {
     rawPacketApi.fetchQuarantineEntry.mockReset()
 
     rawPacketApi.fetchRun.mockResolvedValue(RUN_WITH_PACKET)
-    rawPacketApi.fetchKyberSessionTurns.mockResolvedValue([])
+    // The bounded per-turn route answers one row, not the session's list of
+    // them: the page reads the turn it displays and nothing else. This row
+    // carries no counters, so the inspector header renders its absent state.
+    rawPacketApi.fetchKyberSessionTurns.mockResolvedValue({
+      session_id: 'sess-raw-packet',
+      turn_index: 0,
+      index: 0,
+    })
     rawPacketApi.fetchSpanAttributes.mockResolvedValue(rawPacketApi.spanAttributes)
     rawPacketApi.fetchQuarantineEntry.mockResolvedValue(rawPacketApi.quarantineEntry)
   })
@@ -301,14 +317,6 @@ describe('TurnDetail raw packet disclosure (B7)', () => {
   afterEach(() => {
     cleanup()
   })
-
-  function renderTurn() {
-    renderDom(
-      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })}>
-        <TurnDetail runId="run-raw-packet" turnIndex={0} />
-      </QueryClientProvider>,
-    )
-  }
 
   /** The disclosure's toggle — a button by contract, a `<summary>` if T12 used `<details>`. */
   function openDisclosure(): HTMLElement {
@@ -452,5 +460,72 @@ describe('TurnDetail raw packet disclosure (B7)', () => {
       expect(screen.getByTestId('page-turn')).toBeTruthy()
     })
     expect(screen.queryByTestId('raw-packet-disclosure')).toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The inspector header's measured counters (issue #184, Q3).
+//
+// The page displays one turn, so it reads one turn: the bounded per-turn
+// route, not the session's whole payload — which carried up to 10,933 turn
+// rows to describe the four counters the header renders.
+// ---------------------------------------------------------------------------
+describe('TurnDetail measured counters (bounded per-turn read)', () => {
+  beforeEach(() => {
+    rawPacketApi.fetchRun.mockReset()
+    rawPacketApi.fetchTurnContent.mockReset()
+    rawPacketApi.fetchKyberSessionTurns.mockReset()
+
+    rawPacketApi.fetchRun.mockResolvedValue(RUN_WITH_PACKET)
+    rawPacketApi.fetchTurnContent.mockResolvedValue(turnContent())
+  })
+
+  afterEach(() => {
+    cleanup()
+  })
+
+  it('asks for the turn it displays, and renders that turn\'s counters', async () => {
+    rawPacketApi.fetchKyberSessionTurns.mockResolvedValue({
+      session_id: 'sess-raw-packet',
+      turn_index: 0,
+      index: 0,
+      input: 900,
+      output: 130,
+      fresh: 50,
+      cache_read: 860,
+    })
+    renderTurn()
+
+    // The bounded read, for this turn alone: the session id and the turn
+    // index, never the session's whole payload.
+    await waitFor(() => {
+      expect(rawPacketApi.fetchKyberSessionTurns).toHaveBeenCalledWith('sess-raw-packet', 0)
+    })
+
+    // The same counters the header renders, from the row the route served.
+    const figures = await screen.findByTestId('turn-token-figures')
+    expect(figures.textContent).toContain('In 900')
+    expect(figures.textContent).toContain('Out 130')
+    expect(figures.textContent).toContain('Fresh 50')
+    expect(figures.textContent).toContain('Cache 860')
+  })
+
+  it('renders no counters when the route answers no row for that turn', async () => {
+    // An unknown session or a turn index past the end is the route's 404:
+    // the counters stay absent, as they did when the payload answered with
+    // no such row.
+    rawPacketApi.fetchKyberSessionTurns.mockRejectedValue(
+      new KyberApiError(404, '/api/kyber/session/sess-raw-packet/turn/0'),
+    )
+    renderTurn()
+
+    await waitFor(() => {
+      expect(rawPacketApi.fetchKyberSessionTurns).toHaveBeenCalledWith('sess-raw-packet', 0)
+    })
+    await waitFor(() => {
+      expect(screen.getByTestId('context-inspector')).toBeTruthy()
+    })
+    expect(screen.queryByTestId('turn-token-figures')).toBeNull()
+    expect(screen.getByTestId('turn-token-figures-absent')).toBeTruthy()
   })
 })

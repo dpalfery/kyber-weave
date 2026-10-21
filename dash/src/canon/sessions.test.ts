@@ -1116,7 +1116,7 @@ describe('buildSessions token cache', () => {
 describe('canonical harness on derived sessions', () => {
   // `run`, `execution` and `listHarnesses` are all keyed by the canonical
   // harness. Storing the raw provider entry on the session meant the rollup's
-  // `listSessions(harness)` never matched those sessions: on the measured
+  // per-harness session listing never matched those sessions: on the measured
   // corpus the claude-code scorecard computed context pressure, cache hit rate
   // and tool yield from 1 session while 58 more sat under `claude`, and still
   // reported 59 samples because that count comes from runs.
@@ -1172,8 +1172,9 @@ describe('canonical harness on derived sessions', () => {
 
     await buildSessions(store)
 
-    expect(store.listSessions('cursor')).toHaveLength(1)
-    expect(store.listSessions('cursor-agent')).toHaveLength(0)
+    const sessionCounts = store.countSessionsByHarness()
+    expect(sessionCounts['cursor'] ?? 0).toBe(1)
+    expect(sessionCounts['cursor-agent'] ?? 0).toBe(0)
     store.close()
   })
 
@@ -1189,8 +1190,9 @@ describe('canonical harness on derived sessions', () => {
 
     expect(report.built).toBe(1)
     expect(store.sessionCount()).toBe(1)
-    expect(store.listSessions('cursor')).toHaveLength(1)
-    expect(store.listSessions('cursor-agent')).toHaveLength(0)
+    const sessionCounts = store.countSessionsByHarness()
+    expect(sessionCounts['cursor'] ?? 0).toBe(1)
+    expect(sessionCounts['cursor-agent'] ?? 0).toBe(0)
     const runs = store.listRuns()
     expect(runs).toHaveLength(1)
     for (const run of runs) {
@@ -1254,11 +1256,14 @@ describe('canonical harness on derived sessions', () => {
     const report = await buildSessions(store)
     expect(report.built).toBe(1)
 
-    const sessions = store.listSessions('cursor')
-    expect(sessions).toHaveLength(1)
-    const payload = sessionPayload({ payload: store.getSessionPayload(sessions[0]!.sessionId) })
+    const sessionIds = store.builtSessionIds()
+    expect(sessionIds).toHaveLength(1)
+    const sessionId = sessionIds[0]!
+    // The one session is attributed to the canonical harness, not the alias.
+    expect(store.sessionHarness(sessionId)).toBe('cursor')
+    const payload = sessionPayload({ payload: store.getSessionPayload(sessionId) })
     expect(payload.summary.total_output).toBe(45)
-    expect(store.sessionTokenTotals(sessions[0]!.sessionId)?.output).toBe(45)
+    expect(store.sessionTokenTotals(sessionId)?.output).toBe(45)
     // Without the join the three raw rows would sum to 90; prove the store
     // still holds all three provenance rows while the derived total is once.
     expect(store.recordsForSession(sessionKey)).toHaveLength(3)

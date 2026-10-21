@@ -284,8 +284,7 @@ describe('Copilot subagent span projection and task naming (Contract T1.1)', () 
     store.upsertMany([parentTurn, invoke1, chat1, taskTool1, invoke2, chat2, taskTool2])
     await buildSessions(store)
 
-    const sessions = store.listSessions()
-    expect(sessions.length, 'Must project 1 parent session and 2 subagent sessions').toBe(3)
+    expect(store.sessionCount(), 'Must project 1 parent session and 2 subagent sessions').toBe(3)
 
     const sub1 = querySessionDbRow(store, expectedSubagentId1)
     expect(sub1).toBeDefined()

@@ -12,7 +12,7 @@
 // The output shape is the payload the dashboard already consumes, so the
 // frontend does not move when the source of truth does.
 
-import { analyzeContext, type ContextPart, type ContextTurn } from '../analysis/context.js'
+import { analyzeContext, reduceContextParts, type ContextPart, type ContextTurn } from '../analysis/context.js'
 import { rankSchemas, type ToolDefinition } from '../analysis/schema.js'
 import { auxiliarySpend, buildTimeline, subagentSessions } from '../analysis/timeline.js'
 import { costBasisMismatchOf, measuredInput, sumCosts, type CostBasisMismatch } from './cost.js'
@@ -23,13 +23,13 @@ import { catalogWindowForRecords } from './model-window-catalog.js'
 import { groupByCanonicalHarness, harnessExportsCacheCounter, normalizeHarnessName, surveyFamily } from './measurability.js'
 import { dedupeTwinTurns } from './twin-dedupe.js'
 import { formatSessionTitle } from './naming.js'
-import { buildFindings } from './findings.js'
+import { buildFindingsYielding } from './findings.js'
 import { buildHarnessRollup } from './harnesses.js'
 import { buildRuns } from './runs.js'
-import { CanonStore, type SessionRow } from './store.js'
-import { extractInvokedSkills, skillsForSession, type SkillsView } from './skills.js'
+import { CanonStore, releaseRecordParts, type ProjectedSessionRecord, type SessionRow } from './store.js'
+import { extractInvokedSkills, readListingOf, skillsForSession, type ListingResult, type SkillsView } from './skills.js'
 import { activeTokenizer, createCachedCounter, loadO200kCounter } from './tokens.js'
-import { notMeasurable, type CanonicalRecord, type CostBlock, type Measurability, type MetricAvailability, type NotMeasurable } from './types.js'
+import { notMeasurable, type CanonicalRecord, type ContentPart, type CostBlock, type Measurability, type MetricAvailability, type NotMeasurable } from './types.js'
 
 // The default window and the reported-window rule moved to
 // `./context-window.js` so the finding detector can read the same derivation
@@ -46,6 +46,81 @@ const MODEL_KEYS = ['gen_ai.response.model', 'gen_ai.request.model', 'model'] as
 
 /** `invoke_agent`, optionally followed by a space or colon and a target; never `invoke_agent_foo`. */
 const INVOKE_AGENT_NAME_RE = /^invoke_agent(?:[ :]|$)/
+
+// ---------------------------------------------------------------------------
+// The projection's payload discipline
+//
+// WHY: a record's payload is the harness's whole span attribute map, and the
+// projection reads a handful of attributes out of it. On the measured corpus
+// one session held 10,933 model calls whose payloads inflated and parsed to
+// 1.5 GB, and the projection held every one of them at once: `toRecord` makes
+// the payload a lazy property (the `defineLazy` pattern, for a 3.5 GB peak)
+// and that property CACHES what it computed, so the first reader of a
+// record's payload kept it alive for as long as the record was — and the
+// record was as long as the session.
+//
+// The fix follows the two precedents already in this tree. `iterateSessions`
+// became a generator so a caller can stream sessions instead of materializing
+// them; the store's `recordsForSessionProjected` is the same move for a
+// session's payloads: the records are still held (the helpers below need the
+// whole session), but each record's payload is reduced to the attributes the
+// projection reads and the payload itself is released before the next record
+// is touched.
+//
+// WHAT survives the reduction: every key (the timeline's evidence scan reads
+// the key names, and a key that names the evidence IS evidence) and every
+// value the readers look up. WHAT does not: the harness's payload — the
+// prompt, the conversation, the tool catalogue — under keys no reader asks
+// for. The reduction is verified against the timeline's own reading, so a
+// value that carried the evidence is kept rather than silently lost.
+// ---------------------------------------------------------------------------
+
+/** The timeline node a span occupies, wherever the tree put it. */
+function timelineNodeFor(
+  node: ReturnType<typeof buildTimeline>,
+  spanId: string,
+): ReturnType<typeof buildTimeline> | undefined {
+  if (node.spanId === spanId) return node
+  for (const child of node.children) {
+    const found = timelineNodeFor(child, spanId)
+    if (found !== undefined) return found
+  }
+  return undefined
+}
+
+/**
+ * The timeline's evidence reading of one record: whether the record reads as
+ * subagent evidence, and whether it reads as auxiliary evidence.
+ *
+ * The timeline decides this from the record's payload — every key and every
+ * string value — and the answer decides which subtree the record lands in, so
+ * the persisted timeline changes when the answer changes.
+ */
+function evidenceReadingOf(record: CanonicalRecord): { subagent: boolean; auxiliary: boolean } {
+  const node = timelineNodeFor(buildTimeline([record]), record.spanId)
+  return { subagent: node?.isSubagent === true, auxiliary: node?.isAuxiliary === true }
+}
+
+/**
+ * Adopt the reduced attributes for one record, unless the reduction moved the
+ * timeline's evidence reading.
+ *
+ * WHY the comparison: the timeline reads the evidence out of the payload, and
+ * a record whose evidence the reduction dropped would move between the
+ * conversation and the auxiliary group — a different persisted timeline. Such
+ * a record keeps its whole payload instead; the reduction is a bound on the
+ * working set, never a change to the answer.
+ */
+function adoptProjectedAttributes(projected: ProjectedSessionRecord): void {
+  const { record, attributes } = projected
+  const payload = record.raw
+  const before = evidenceReadingOf(record)
+  record.raw = attributes
+  const after = evidenceReadingOf(record)
+  if (before.subagent === after.subagent && before.auxiliary === after.auxiliary) return
+  record.raw = payload
+}
+
 
 function isInvokeAgentSpan(record: CanonicalRecord): boolean {
   if (record.op === "agent.invoke") return true
@@ -101,7 +176,10 @@ function extractAgentName(invokeSpan: CanonicalRecord): string | null {
   return null
 }
 
-function extractTaskSummary(subagentRecords: readonly CanonicalRecord[]): string | undefined {
+function extractTaskSummary(
+  subagentRecords: readonly CanonicalRecord[],
+  views: ReadonlyMap<string, RecordPartsView>,
+): string | undefined {
   for (const record of subagentRecords) {
     const toolName = attributeOf(record, ["gen_ai.tool.name", "tool.name"]) ?? record.name
     const nameLower = toolName.toLowerCase()
@@ -163,20 +241,10 @@ function extractTaskSummary(subagentRecords: readonly CanonicalRecord[]): string
     if (promptAttr && promptAttr.trim()) {
       return promptAttr.trim()
     }
-    if (record.parts && record.parts.length > 0) {
-      for (const part of record.parts) {
-        if (part.part === "conversation_history" && part.text && part.text.trim()) {
-          return part.text.trim()
-        }
-      }
-    }
-    if (
-      record.content &&
-      typeof record.content["conversation_history"] === "string" &&
-      record.content["conversation_history"].trim()
-    ) {
-      return record.content["conversation_history"].trim()
-    }
+    // The conversation history's own text, read on demand: the reduction
+    // released it, and only a subagent's label needs it.
+    const summary = viewOf(views, record).taskSummary()
+    if (summary !== undefined) return summary
   }
 
   return undefined
@@ -293,7 +361,10 @@ function extractClaudeAgentName(records: readonly CanonicalRecord[]): string | n
   return null
 }
 
-function extractClaudeDescription(records: readonly CanonicalRecord[]): string | undefined {
+function extractClaudeDescription(
+  records: readonly CanonicalRecord[],
+  views: ReadonlyMap<string, RecordPartsView>,
+): string | undefined {
   for (const record of records) {
     const raw = record.raw as Record<string, unknown> | null
     if (!raw || typeof raw !== 'object') continue
@@ -310,7 +381,7 @@ function extractClaudeDescription(records: readonly CanonicalRecord[]): string |
       if (typeof c === 'string' && c.trim()) return c.trim()
     }
   }
-  return extractTaskSummary(records)
+  return extractTaskSummary(records, views)
 }
 
 
@@ -345,9 +416,12 @@ function turnsOf(records: readonly CanonicalRecord[]): CanonicalRecord[] {
  * harness-reported counts intact; records carrying only the flat content map
  * are converted key by key, which loses nothing they had.
  */
-function partsOf(record: CanonicalRecord): ContextPart[] {
-  if (record.parts !== undefined && record.parts.length > 0) {
-    return record.parts.map((part) => ({
+function partsOf(
+  record: CanonicalRecord,
+  parts: readonly ContentPart[] | undefined,
+): ContextPart[] {
+  if (parts !== undefined && parts.length > 0) {
+    return parts.map((part) => ({
       part: part.part,
       text: part.text,
       ...(part.tokens !== undefined ? { tokens: part.tokens } : {}),
@@ -357,6 +431,220 @@ function partsOf(record: CanonicalRecord): ContextPart[] {
   return Object.entries(record.content)
     .filter((entry): entry is [ContextPart['part'], string] => typeof entry[1] === 'string')
     .map(([part, text]) => ({ part, text }))
+}
+
+/**
+ * What a record's parts said, reduced to the values the derived views read.
+ *
+ * WHY: the parts carry the turn's text, and the readers need the VALUES — the
+ * composition's bucket contributions, the tool catalogue, the skills listing —
+ * not the text of every part. The text is the session's working set: on the
+ * measured corpus ~10,933 turns x 64 KB of text, about 1.4 GB as UTF-16, and
+ * it was held all at once because the record that owned a parts set lived as
+ * long as the session.
+ *
+ * So each record's parts are read once, reduced to these values, and
+ * RELEASED: the record keeps the counts, the store keeps the text, and only
+ * one record's parts are in memory at a time. The release is a release, not a
+ * destruction — a reader that genuinely needs the raw text (the twin
+ * collapse's content transplant, a subagent's task summary) asks the record
+ * for it again.
+ */
+export type RecordPartsView = {
+  /** The record carries parts. */
+  hasParts: boolean
+  /** The parts as the composition consumes them: the text counted, then released. */
+  contextParts: ContextPart[]
+  /** The tool definitions the record offered, with their token cost. */
+  toolDefinitions: Array<{ name: string; server?: string; tokens: number }>
+  /** The tool names the record offered, in the order they were offered. */
+  offeredToolNames: string[]
+  /** The record offered tool definitions at all, named or not. */
+  hasDefinitionParts: boolean
+  /** The skills listing the record states. */
+  listing: ListingResult
+  /** The buckets the record carries non-empty parts for. */
+  carriedBuckets: Set<string>
+  /**
+   * The task summary the record's conversation history carries.
+   *
+   * Read on demand: it is the conversation's own text, and only a subagent's
+   * label needs it — deriving it for every turn would hold a second copy of
+   * the text the reduction just released.
+   */
+  taskSummary: () => string | undefined
+}
+
+/**
+ * The record's parts, reduced to the values the derived views read, and
+ * released.
+ *
+ * The reduction happens where the text is in hand: the composition's counts
+ * are made here, the tool catalogue is parsed here, and the skills listing is
+ * read here. What leaves is a handful of numbers and names per record.
+ */
+function reduceRecordParts(
+  record: CanonicalRecord,
+  countTokens: (text: string) => number,
+): RecordPartsView {
+  const parts = record.parts
+  const effective = partsOf(record, parts)
+  const contextParts = reduceContextParts(effective, { countTokens })
+
+  const carriedBuckets = new Set<string>()
+  for (const part of effective) {
+    if (part.text !== '') carriedBuckets.add(part.part)
+  }
+
+  // The tool definitions, from the parts that carry them. The catalogue ranks
+  // the named ones; the offered names are what the session's summary lists.
+  const definitions: Array<{ text: string; server?: string; catalogue: boolean }> = []
+  if (parts !== undefined && parts.length > 0) {
+    for (const part of parts) {
+      if (part.part !== 'tool_definitions' && (part.part as string) !== 'tool_definition') continue
+      definitions.push({
+        text: part.text,
+        catalogue: part.part === 'tool_definitions',
+        ...(part.server !== undefined ? { server: part.server } : {}),
+      })
+    }
+  } else {
+    // A record without parts carries the definitions in its flat content.
+    const content = record.content as Record<string, unknown>
+    if (typeof content['tool_definitions'] === 'string') {
+      definitions.push({ text: content['tool_definitions'], catalogue: false })
+    }
+    if (typeof content['tool_definition'] === 'string') {
+      definitions.push({ text: content['tool_definition'], catalogue: false })
+    }
+  }
+  const toolDefinitions: Array<{ name: string; server?: string; tokens: number }> = []
+  const offeredToolNames: string[] = []
+  const seenOffered = new Set<string>()
+  for (const definition of definitions) {
+    for (const tool of extractToolDefinitionsFromText(definition.text)) {
+      const name = tool.name.trim()
+      if (name === '') continue
+      if (!seenOffered.has(name)) {
+        seenOffered.add(name)
+        offeredToolNames.push(name)
+      }
+      if (!definition.catalogue) continue
+      toolDefinitions.push({
+        name,
+        ...(definition.server !== undefined ? { server: definition.server } : {}),
+        tokens: countTokens(tool.text),
+      })
+    }
+  }
+
+  const listing = readListingOf(record, parts)
+
+  const view: RecordPartsView = {
+    hasParts: parts !== undefined && parts.length > 0,
+    contextParts,
+    toolDefinitions,
+    offeredToolNames,
+    hasDefinitionParts: definitions.length > 0,
+    listing,
+    carriedBuckets,
+    taskSummary: () => taskSummaryOf(record),
+  }
+
+  // The text has been counted, parsed and read. The record keeps the values;
+  // the store keeps the text, for a reader that asks for it again.
+  releaseRecordParts(record)
+  return view
+}
+
+/**
+ * The task summary a record's conversation history carries.
+ *
+ * The conversation's own text, read on demand: only a subagent's label needs
+ * it, and a session's turns would otherwise hold a second copy of the text the
+ * reduction released. The parts are released again on the way out.
+ */
+function taskSummaryOf(record: CanonicalRecord): string | undefined {
+  try {
+    const parts = record.parts
+    if (parts !== undefined && parts.length > 0) {
+      for (const part of parts) {
+        if (part.part === 'conversation_history' && part.text && part.text.trim()) {
+          return part.text.trim()
+        }
+      }
+    }
+    const content = record.content
+    if (
+      content &&
+      typeof content['conversation_history'] === 'string' &&
+      content['conversation_history'].trim()
+    ) {
+      return content['conversation_history'].trim()
+    }
+    return undefined
+  } finally {
+    releaseRecordParts(record)
+  }
+}
+
+/**
+ * The twin collapse's own reading of a record, where it merged one.
+ *
+ * The collapse can hand a keeper the parts of its twin, so the keeper's
+ * reduced values are stale afterwards: they are derived again from the merged
+ * parts. A record the collapse left alone keeps its values, and the parts it
+ * re-read to judge whether it had any are released again.
+ */
+function refreshMergedViews(
+  merged: readonly CanonicalRecord[],
+  original: readonly CanonicalRecord[],
+  views: Map<string, RecordPartsView>,
+  countTokens: (text: string) => number,
+): void {
+  const before = new Set(original)
+  for (const record of merged) {
+    if (before.has(record)) {
+      releaseRecordParts(record)
+      continue
+    }
+    views.set(record.spanId, reduceRecordParts(record, countTokens))
+  }
+}
+
+/**
+ * The records' reduced parts, one view per record.
+ *
+ * The projection reduces every record of the session before the readers run,
+ * so the whole session's text is never in memory at once.
+ */
+function deriveRecordViews(
+  records: readonly CanonicalRecord[],
+  countTokens: (text: string) => number,
+): Map<string, RecordPartsView> {
+  const views = new Map<string, RecordPartsView>()
+  for (const record of records) {
+    views.set(record.spanId, reduceRecordParts(record, countTokens))
+  }
+  return views
+}
+
+/**
+ * The record's reduced parts.
+ *
+ * Every record the readers touch carries a view: the projection reduces them
+ * all before the readers run, and a caller that passes records it did not
+ * reduce gets them reduced here.
+ */
+function viewOf(
+  views: ReadonlyMap<string, RecordPartsView>,
+  record: CanonicalRecord,
+): RecordPartsView {
+  const view = views.get(record.spanId)
+  if (view === undefined) {
+    throw new Error(`no reduced parts for record ${record.spanId}`)
+  }
+  return view
 }
 
 /**
@@ -405,11 +693,14 @@ function unavailableFor(measurability: Measurability | undefined, metric: string
  * normalize time — before parts reached the record by another route, such
  * as a request-body log or the interaction prompt — still says.
  */
-function carriedBucketsOf(records: readonly CanonicalRecord[]): Set<string> {
+function carriedBucketsOf(
+  records: readonly CanonicalRecord[],
+  views: ReadonlyMap<string, RecordPartsView>,
+): Set<string> {
   const carried = new Set<string>()
   for (const record of records) {
-    for (const part of partsOf(record)) {
-      if (part.text !== '') carried.add(part.part)
+    for (const bucket of viewOf(views, record).carriedBuckets) {
+      carried.add(bucket)
     }
   }
   return carried
@@ -447,37 +738,33 @@ function compositionDeclaration(
  */
 function toolDefinitionsOf(
   records: readonly CanonicalRecord[],
-  countTokens: (text: string) => number,
+  views: ReadonlyMap<string, RecordPartsView>,
 ): ToolDefinition[] {
   const byName = new Map<string, ToolDefinition>()
   for (const record of records) {
-    for (const part of record.parts ?? []) {
-      if (part.part !== 'tool_definitions') continue
-      for (const tool of expandDefinitions(part.text)) {
-        // Unnamed definitions (unparseable blobs, schemaless entries) stay
-        // out of the name-keyed ranking: every one would collapse into a
-        // single blank-named row, silently dropping all but the first
-        // blob's cost. Their residence is already counted in the
-        // `tool_definitions` context bucket, so nothing is lost by skipping.
-        if (!tool.name) continue
-        const existing = byName.get(tool.name)
-        if (existing === undefined) {
-          byName.set(tool.name, {
-            name: tool.name,
-            // A part's server applies to what it carried; an aggregate blob
-            // that named no server yields tools with no server, which the
-            // ranking reports as built-in rather than grouping by a guess.
-            ...(part.server !== undefined ? { server: part.server } : {}),
-            // Per-tool cost is always derived. The harness's aggregate
-            // `tool_tokens` covers the whole blob and cannot be divided
-            // across N tools without inventing the split -- it is used for
-            // the context bucket total, not for this ranking.
-            tokens: countTokens(tool.text),
-            turnsResident: 1,
-          })
-        } else {
-          existing.turnsResident = (existing.turnsResident ?? 0) + 1
-        }
+    for (const definition of viewOf(views, record).toolDefinitions) {
+      // Unnamed definitions (unparseable blobs, schemaless entries) stay
+      // out of the name-keyed ranking: every one would collapse into a
+      // single blank-named row, silently dropping all but the first
+      // blob's cost. Their residence is already counted in the
+      // `tool_definitions` context bucket, so nothing is lost by skipping.
+      const existing = byName.get(definition.name)
+      if (existing === undefined) {
+        byName.set(definition.name, {
+          name: definition.name,
+          // A part's server applies to what it carried; an aggregate blob
+          // that named no server yields tools with no server, which the
+          // ranking reports as built-in rather than grouping by a guess.
+          ...(definition.server !== undefined ? { server: definition.server } : {}),
+          // Per-tool cost is always derived. The harness's aggregate
+          // `tool_tokens` covers the whole blob and cannot be divided
+          // across N tools without inventing the split -- it is used for
+          // the context bucket total, not for this ranking.
+          tokens: definition.tokens,
+          turnsResident: 1,
+        })
+      } else {
+        existing.turnsResident = (existing.turnsResident ?? 0) + 1
       }
     }
   }
@@ -527,10 +814,6 @@ function extractToolDefinitionsFromText(text: string): { name: string; text: str
   return results
 }
 
-function expandDefinitions(text: string): { name: string; text: string }[] {
-  return extractToolDefinitionsFromText(text)
-}
-
 /** Tool names the session actually called, from its tool spans. */
 function invocationsOf(records: readonly CanonicalRecord[]): string[] {
   return records
@@ -538,20 +821,10 @@ function invocationsOf(records: readonly CanonicalRecord[]): string[] {
     .map((record) => attributeOf(record, ["gen_ai.tool.name", "tool.name"]) ?? record.name)
 }
 
-/** Offered tool names declared in tool-definition parts across the session. */
-function extractOfferedToolNames(parts: readonly { text: string }[]): string[] {
-  const names = new Set<string>()
-  for (const part of parts) {
-    for (const def of extractToolDefinitionsFromText(part.text)) {
-      if (def.name && def.name.trim()) {
-        names.add(def.name.trim())
-      }
-    }
-  }
-  return Array.from(names)
-}
-
-function hasEvidence(records: readonly CanonicalRecord[]): boolean {
+function hasEvidence(
+  records: readonly CanonicalRecord[],
+  views: ReadonlyMap<string, RecordPartsView>,
+): boolean {
   // A session is a conversation with a model. A trace carrying no model call
   // is not one, however many spans it holds: the receiver ingests everything
   // sent to it, including the HTTP client and server spans emitted by
@@ -566,8 +839,11 @@ function hasEvidence(records: readonly CanonicalRecord[]): boolean {
     (record) =>
       measuredInput(record.tokens) > 0 ||
       record.tokens.output > 0 ||
-      (record.parts?.length ?? 0) > 0 ||
-      Object.keys(record.content).length > 0,
+      viewOf(views, record).hasParts ||
+      // A record WITHOUT parts: its flat content is the only evidence left,
+      // and the store read it eagerly for such a row, so asking for it here
+      // costs nothing. A record WITH parts is already counted above.
+      (!viewOf(views, record).hasParts && Object.keys(record.content).length > 0),
   )
 }
 
@@ -703,7 +979,13 @@ function repriceTurns(store: CanonStore, records: CanonicalRecord[]): CanonicalR
     }
     if (JSON.stringify(next) === JSON.stringify(record.cost)) return record
     changes.push({ spanId: record.spanId, cost: next })
-    return { ...record, cost: next }
+    // The record is repriced in place rather than copied. A copy would spread
+    // the record, and spreading a record READS its lazy fields — the payload
+    // and the parts — so the copy would hold a whole decompressed parts set
+    // for as long as the session, which is the working set this projection
+    // just released.
+    record.cost = next
+    return record
   })
   if (changes.length > 0) store.setCosts(changes)
   return repriced
@@ -714,8 +996,17 @@ function repriceTurns(store: CanonStore, records: CanonicalRecord[]): CanonicalR
  *
  * Rebuilding is always safe: the `session` table is a cache over `records`,
  * and every row is replaced wholesale.
+ *
+ * `options.yieldToLoop` is called between sessions (and between the runs and
+ * findings phases), so a rebuild over a real corpus hands the event loop back
+ * between units of work instead of holding it for the whole pass. The
+ * projection injects it; a direct build (tooling, tests) does not interleave.
  */
-export async function buildSessions(store: CanonStore): Promise<BuildSessionsReport> {
+export async function buildSessions(
+  store: CanonStore,
+  options?: BuildSessionsOptions,
+): Promise<BuildSessionsReport> {
+  const yieldToLoop = options?.yieldToLoop ?? (async () => {})
   // Counted through the store's `token_cache` memo, not the bare encoder. The
   // memo is what R4.6 provisioned the table for, and passing the raw counter
   // here is why it had never held a row: a rebuild re-tokenized every part of
@@ -727,13 +1018,30 @@ export async function buildSessions(store: CanonStore): Promise<BuildSessionsRep
   const identities = store.sessionIdentities()
 
   for (const key of store.sessionKeys()) {
-    const grouped = groupByCanonicalHarness(repriceTurns(store, store.recordsForSession(key.key)))
+    // Before the unit, not after: a session that is skipped still consumed a
+    // turn, and the waiter's wait is bounded by one session either way.
+    await yieldToLoop()
+    // The session's payloads are reduced as they are read: the records stay
+    // (the twin collapse, the descendant collection and the subagent
+    // projection need the whole session), their decompressed telemetry does
+    // not.
+    const records: CanonicalRecord[] = []
+    for (const projected of store.recordsForSessionProjected(key.key)) {
+      adoptProjectedAttributes(projected)
+      records.push(projected.record)
+    }
+    const grouped = groupByCanonicalHarness(repriceTurns(store, records))
     if (grouped.size === 0) {
       report.skipped += 1
       continue
     }
+    // The parts are reduced and released the same way the payloads are: a
+    // record's parts are read once, reduced to the values the readers need,
+    // and dropped, so the session's decompressed text is never in memory all
+    // at once. The views are what the readers read instead.
+    const views = deriveRecordViews(records, countTokens)
     for (const [harness, records] of grouped) {
-      if (records.length === 0 || !hasEvidence(records)) {
+      if (records.length === 0 || !hasEvidence(records, views)) {
         report.skipped += 1
         continue
       }
@@ -741,7 +1049,12 @@ export async function buildSessions(store: CanonStore): Promise<BuildSessionsRep
       // ADR 0009 D4): collapse same-turn observations before the row sums
       // them, or the merged session double-counts one conversation.
       const merged = dedupeTwinTurns(records, key.key)
-      if (merged.length === 0 || !hasEvidence(merged)) {
+      // The collapse may hand a keeper its twin's parts, so the keeper's
+      // reduced values are stale afterwards: they are derived again from the
+      // merged parts. A record the collapse left alone keeps its values, and
+      // the parts it re-read to judge whether it had any are released again.
+      refreshMergedViews(merged, records, views, countTokens)
+      if (merged.length === 0 || !hasEvidence(merged, views)) {
         report.skipped += 1
         continue
       }
@@ -749,6 +1062,7 @@ export async function buildSessions(store: CanonStore): Promise<BuildSessionsRep
       const parentRow = buildSessionRow(sessionId, merged, countTokens, store, {
         isSubagent: false,
         parentSession: null,
+        parts: views,
       })
       store.upsertSession(parentRow)
       built.add(sessionId)
@@ -780,7 +1094,7 @@ export async function buildSessions(store: CanonStore): Promise<BuildSessionsRep
           const subagentRecords = [rootInvokeSpan, ...sortedDescendants]
 
           const agentName = extractAgentName(invokeSpan)
-          const taskSummary = extractTaskSummary(subagentRecords)
+          const taskSummary = extractTaskSummary(subagentRecords, views)
           const label = formatSessionTitle({
             agentName: agentName ?? undefined,
             taskSummary,
@@ -799,6 +1113,7 @@ export async function buildSessions(store: CanonStore): Promise<BuildSessionsRep
               parentSession: sessionId,
               agentName,
               label,
+              parts: views,
             },
           )
 
@@ -887,7 +1202,7 @@ export async function buildSessions(store: CanonStore): Promise<BuildSessionsRep
           preparedRecords.sort((a, b) => compareTimestamps(a.timestamp, b.timestamp))
 
           const agentName = extractClaudeAgentName(preparedRecords)
-          const taskSummary = extractClaudeDescription(preparedRecords)
+          const taskSummary = extractClaudeDescription(preparedRecords, views)
           const label = formatSessionTitle({
             agentName: agentName ?? undefined,
             taskSummary,
@@ -923,6 +1238,7 @@ export async function buildSessions(store: CanonStore): Promise<BuildSessionsRep
               parentSession,
               agentName,
               label,
+              parts: views,
             },
           )
 
@@ -948,7 +1264,7 @@ export async function buildSessions(store: CanonStore): Promise<BuildSessionsRep
   }
 
   // Rebuild run and execution tables over canonical records (D13, ADR 0008)
-  await buildRuns(store)
+  await buildRuns(store, { yieldToLoop })
 
   // Everything downstream of `run` is a cache over the same records, so it is
   // rebuilt here too. Leaving rollups and findings to the refresh path alone
@@ -956,9 +1272,20 @@ export async function buildSessions(store: CanonStore): Promise<BuildSessionsRep
   // harness endpoint 404s on a missing rollup and the scorecard then reads as
   // "telemetry missing" for telemetry that was collected and never aggregated.
   report.rollups = buildHarnessRollup(store).length
-  report.findings = buildFindings(store).findingsBuilt
+  report.findings = (await buildFindingsYielding(store, yieldToLoop)).findingsBuilt
 
   return report
+}
+
+/** How a build hands the event loop back between units of work. */
+export type BuildSessionsOptions = {
+  /**
+   * Called between units of work (a session, a run, a run's findings).
+   *
+   * The projection injects a real yield so a pending HTTP handler is not
+   * starved by a rebuild; a direct build has nothing to interleave with.
+   */
+  readonly yieldToLoop?: () => Promise<void>
 }
 
 export type BuildSessionRowOptions = {
@@ -968,6 +1295,14 @@ export type BuildSessionRowOptions = {
   parentSession?: string | null
   agentName?: string | null
   label?: string | null
+  /**
+   * The records' reduced parts, one view per record.
+   *
+   * The projection reduces every record's parts before the readers run — the
+   * text is the session's working set, and a record that held it lived as
+   * long as the session. A caller with no views gets them reduced here.
+   */
+  parts?: ReadonlyMap<string, RecordPartsView>
 }
 
 /** Build one session row from its records. Pure — exported for testing. */
@@ -978,6 +1313,13 @@ export function buildSessionRow(
   store?: CanonStore,
   options?: BuildSessionRowOptions,
 ): SessionRow {
+  // The reduced parts, one view per record. The projection hands them over
+  // (it reduced them before the twin collapse ran); a direct build reduces
+  // them here, and releases each record's text as it goes.
+  const views = new Map<string, RecordPartsView>(options?.parts ?? [])
+  for (const record of records) {
+    if (!views.has(record.spanId)) views.set(record.spanId, reduceRecordParts(record, countTokens))
+  }
   const turnRecords = turnsOf(records)
   const first = records[0]!
   // The canonical harness, not the provider entry the record arrived under.
@@ -1003,7 +1345,7 @@ export function buildSessionRow(
   // not in `analyzeContext`, which stays a pure per-turn bucketing.
   let lastSystem: ContextPart[] = []
   const contextTurns: ContextTurn[] = measuredTurns.map((record) => {
-    const parts = partsOf(record)
+    const parts = viewOf(views, record).contextParts
     const own = parts.filter((part) => part.part === 'system_prompt')
     if (own.length > 0) lastSystem = own
     return {
@@ -1029,7 +1371,7 @@ export function buildSessionRow(
   // window (G1-Q2 = (b)).
   const analysisLimit = window.contextLimit > 0 ? window.contextLimit : DEFAULT_CONTEXT_LIMIT
   const measurability = mergeMeasurability(records)
-  const carriedBuckets = carriedBucketsOf(records)
+  const carriedBuckets = carriedBucketsOf(records, views)
   const context = analyzeContext(contextTurns, {
     contextLimit: analysisLimit,
     contextLimitSource: window.contextLimitSource,
@@ -1039,7 +1381,7 @@ export function buildSessionRow(
       : {}),
   })
 
-  const definitions = toolDefinitionsOf(records, countTokens)
+  const definitions = toolDefinitionsOf(records, views)
   const schema = rankSchemas(definitions, turnRecords.length, invocationsOf(records), undefined, measurability)
   const toolRecords = records.filter((r) => r.op === 'tool.invoke')
 
@@ -1254,30 +1596,22 @@ export function buildSessionRow(
     }
   }
 
-  const definitionParts: Array<{ text: string }> = []
+  // The tool names the session's records offered, in the order they were
+  // offered. The names come from the reduced parts: the catalogue's text was
+  // parsed where it was in hand, and the text itself was released.
+  const offeredToolNames: string[] = []
+  const seenOfferedToolNames = new Set<string>()
+  let hasDefinitionParts = false
   for (const record of records) {
-    if (record.parts !== undefined && record.parts.length > 0) {
-      for (const p of record.parts) {
-        if (p.part === 'tool_definitions' || (p.part as string) === 'tool_definition') {
-          definitionParts.push(p)
-        }
-      }
-    } else if (record.content !== undefined) {
-      const content = record.content
-      if (typeof content['tool_definitions'] === 'string') {
-        definitionParts.push({ text: content['tool_definitions'] })
-      }
-      const rawContent = content as Record<string, unknown>
-      if (typeof rawContent['tool_definition'] === 'string') {
-        definitionParts.push({ text: rawContent['tool_definition'] as string })
-      }
+    const view = viewOf(views, record)
+    if (view.hasDefinitionParts) hasDefinitionParts = true
+    for (const name of view.offeredToolNames) {
+      if (seenOfferedToolNames.has(name)) continue
+      seenOfferedToolNames.add(name)
+      offeredToolNames.push(name)
     }
   }
-
-  let toolsOffered: string[] | undefined = undefined
-  if (definitionParts.length > 0) {
-    toolsOffered = extractOfferedToolNames(definitionParts)
-  }
+  const toolsOffered: string[] | undefined = hasDefinitionParts ? offeredToolNames : undefined
 
   // Issue #185: the session tiles read `cache_hit_ratio` and
   // `cache_creation_coverage`, which no writer ever emitted — one derivation
@@ -1314,6 +1648,7 @@ export function buildSessionRow(
     turnRecords,
     measurability ?? {},
     countTokens,
+    listingsOf(records, views),
   )
   const skillsInvoked =
     'availability' in skillsView || skillsView.invocationsAvailability !== undefined
@@ -1447,6 +1782,23 @@ export function buildSessionRow(
 }
 
 const byCodeUnit = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0)
+
+/**
+ * The reduced listings, one per record.
+ *
+ * The listing is read out of the system prompt's text, so it is derived
+ * where the text is in hand and handed to the skills fold as a value.
+ */
+function listingsOf(
+  records: readonly CanonicalRecord[],
+  views: ReadonlyMap<string, RecordPartsView>,
+): Map<string, ListingResult> {
+  const listings = new Map<string, ListingResult>()
+  for (const record of records) {
+    listings.set(record.spanId, viewOf(views, record).listing)
+  }
+  return listings
+}
 
 /**
  * The first listing text observed for each skill, walking the turns in order.
