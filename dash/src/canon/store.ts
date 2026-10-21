@@ -4155,10 +4155,12 @@ export class CanonStore {
     let row: { payload_json?: unknown; turns_type?: unknown; turns_json?: unknown } | undefined
     try {
       row = this.db.prepare(SESSION_PAYLOAD_FRAGMENTS_SELECT).get(sessionId) as typeof row
-    } catch {
+    } catch (err) {
       // This handle cannot take the payload apart -- no JSON functions in its
-      // SQLite build, or a blob that is not JSON.
-      return undefined
+      // SQLite build. Anything else (a locked store, I/O, corruption) is not
+      // a missing capability and must not read as an empty session.
+      if (err instanceof Error && /no such function/i.test(err.message)) return undefined
+      throw err
     }
     if (row === undefined) return null
     const payload = parseJsonObject(row.payload_json)
@@ -4183,15 +4185,21 @@ export class CanonStore {
    * <remarks>
    * `undefined` when the store carries no turns table at all: the table is
    * materialized on demand, so a store that never held a turn row may not
-   * have one -- and a session in such a store has no turns anywhere.
+   * have one -- and a session in such a store has no turns anywhere. Any
+   * other read failure is rethrown rather than served as an empty turn list.
    */
   private sessionTurnRows(sessionId: string): Array<Record<string, unknown>> | undefined {
     if (!this.hasSessionTurnTable()) return undefined
     let rows: Array<{ turn_json?: unknown }>
     try {
       rows = this.db.prepare(SESSION_TURNS_SELECT).all(sessionId) as Array<{ turn_json?: unknown }>
-    } catch {
-      return undefined
+    } catch (err) {
+      // The table is materialized on demand, so a race that drops it between
+      // the existence check and the range scan reads as no turns. Anything
+      // else (a locked store, I/O, corruption) must not launder a session
+      // with turns on disk into one served as empty.
+      if (err instanceof Error && /no such table/i.test(err.message)) return undefined
+      throw err
     }
     const turns: Array<Record<string, unknown>> = []
     for (const row of rows) {

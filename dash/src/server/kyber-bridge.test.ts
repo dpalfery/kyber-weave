@@ -2306,6 +2306,8 @@ describe('KyberBridge: unknown-window session owner semantics (thread-4)', () =>
         prepare: (sql: string) => {
           if (sql.includes('sqlite_master')) return { get: () => ({ '1': 1 }) }
           if (sql.includes('SELECT harness')) throw new Error('harness column unreadable')
+          if (sql.includes('json_remove')) throw new Error('no such function: json_remove')
+          if (sql.includes('FROM session_turn')) return { all: () => [] }
           if (sql.includes('SELECT payload')) {
             return { get: () => ({ payload: JSON.stringify(payloadWithSource(source)) }) }
           }

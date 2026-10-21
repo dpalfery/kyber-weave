@@ -383,3 +383,31 @@ describe('session writer splits turns into session_turn', () => {
     }
   })
 })
+
+describe('session turn read failure handling', () => {
+  it('rethrows a turn-table read error instead of serving the session with no turns', async () => {
+    const { CanonStore: Store } = await import('./store.js')
+    const store = new Store(':memory:')
+    try {
+      const payload = sessionPayload('sess-err', THREE_TURNS)
+      writeSession(store as unknown as CanonStore, 'sess-err', payload)
+      const db = (store as unknown as { getDatabase: () => { prepare: (sql: string) => unknown } }).getDatabase()
+      const originalPrepare = db.prepare.bind(db)
+      db.prepare = ((sql: string) => {
+        if (typeof sql === 'string' && sql.includes('FROM session_turn')) {
+          throw new Error('database is locked')
+        }
+        return originalPrepare(sql)
+      }) as typeof db.prepare
+      try {
+        expect(() => (store as unknown as { getSessionPayload: (id: string) => unknown }).getSessionPayload('sess-err')).toThrow(
+          /database is locked/,
+        )
+      } finally {
+        db.prepare = originalPrepare
+      }
+    } finally {
+      store.close()
+    }
+  })
+})
