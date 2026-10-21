@@ -229,7 +229,16 @@ export function SchemaCostRanking({ schema, tools, onSelectTool, className }: Sc
     )
   }
 
-  const payloadRows = new Map((tools ?? []).map((row) => [row.name, row] as const))
+  // Two servers can offer a tool of the same name, so rows are keyed by name and
+  // server; a row naming no server stays reachable by name alone.
+  const rowKey = (name: string, server: string | undefined) => `${name}\u0000${server ?? ''}`
+  const payloadRows = new Map<string, NonNullable<typeof tools>[number]>()
+  for (const row of tools ?? []) {
+    const key = rowKey(row.name, serverOf(row))
+    if (!payloadRows.has(key)) payloadRows.set(key, row)
+  }
+  const payloadRowOf = (tool: { name: string; server?: string | null }) =>
+    payloadRows.get(rowKey(tool.name, serverOf(tool))) ?? payloadRows.get(rowKey(tool.name, undefined))
   const invocationCounts = new Map<string, number>()
   for (const row of tools ?? []) {
     if (typeof row.invocations === 'number' && Number.isFinite(row.invocations) && row.invocations >= 0) invocationCounts.set(row.name, row.invocations)
@@ -295,7 +304,7 @@ export function SchemaCostRanking({ schema, tools, onSelectTool, className }: Sc
 
   const select = (tool: DisplayTool) => {
     if (!onSelectTool) return
-    const original = payloadRows.get(tool.name)
+    const original = payloadRowOf(tool)
     // Prefer the payload row so the inspector sees invocations the ranking
     // never had to invent. A never-invoked tool with no row is 0 calls, which
     // is measured; an invoked tool with no count is not passed as 0.
@@ -346,7 +355,7 @@ export function SchemaCostRanking({ schema, tools, onSelectTool, className }: Sc
         {ranked.map((tool) => {
           const never = !tool.invoked
           const callCount = invocationCounts.get(tool.name)
-          const payloadRow = payloadRows.get(tool.name)
+          const payloadRow = payloadRowOf(tool)
           const schemaTokens =
             typeof payloadRow?.schema_tokens === 'number' &&
             Number.isFinite(payloadRow.schema_tokens) &&

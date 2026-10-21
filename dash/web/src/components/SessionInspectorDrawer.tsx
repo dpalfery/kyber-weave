@@ -2480,6 +2480,8 @@ export function orphanTurnParts(data: KyberTurnContentResult): KyberTurnContentP
  * no bytes and stay skipped.
  */
 const VOLATILE_HEADER_PREFIX = 'x-anthropic-billing-header:'
+// Anchored test, so a large prompt is never copied just to look at its first line.
+const VOLATILE_HEADER_PATTERN = new RegExp(`^\\s*${VOLATILE_HEADER_PREFIX}`, 'i')
 
 export function resolveSharedDisplay(
   data: KyberTurnContentResult,
@@ -2508,7 +2510,7 @@ export function resolveSharedDisplay(
   let billingIdx = -1
   for (const sp of shared.parts) {
     if (sp.text === '') continue
-    if (sp.text.trimStart().toLowerCase().startsWith(VOLATILE_HEADER_PREFIX)) {
+    if (VOLATILE_HEADER_PATTERN.test(sp.text)) {
       if (billingIdx === -1) {
         billingIdx = parts.length
         parts.push({ ...sp, collapsedTurns: sp.turnIndex !== undefined ? [sp.turnIndex] : [] })
