@@ -22,7 +22,7 @@
 // The call's own steps come from its transcript segment, the same segmentation
 // the provider uses, so a turn names only the tools its own generation made.
 
-import { readdir, readFile, stat } from 'node:fs/promises'
+import { open, readdir, stat } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 
 import type { ContentPart } from '../../canon/types.js'
@@ -53,15 +53,21 @@ export function antigravityRootFromConversationPath(filePath: string): string | 
 }
 
 async function readToolSchema(path: string): Promise<Record<string, unknown> | undefined> {
+  // Open once and check the open handle, never the path, so the file cannot change
+  // between the check and the read.
+  let handle: Awaited<ReturnType<typeof open>> | undefined
   try {
-    const info = await stat(path)
+    handle = await open(path, 'r')
+    const info = await handle.stat()
     if (!info.isFile() || info.size > MAX_SCHEMA_FILE_BYTES) return undefined
-    const parsed: unknown = JSON.parse(await readFile(path, 'utf-8'))
+    const parsed: unknown = JSON.parse(await handle.readFile('utf-8'))
     return isRecord(parsed) && typeof parsed['name'] === 'string' && parsed['name'].trim() !== ''
       ? parsed
       : undefined
   } catch {
     return undefined
+  } finally {
+    await handle?.close()
   }
 }
 

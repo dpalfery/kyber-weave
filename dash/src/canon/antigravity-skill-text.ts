@@ -2,7 +2,7 @@
 // description a skill row shows is read from the skill's own SKILL.md on this
 // machine. A skill no root holds has no description, never an invented one.
 
-import { readFileSync, statSync } from 'node:fs'
+import { closeSync, fstatSync, openSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
@@ -42,22 +42,26 @@ export function skillDescriptionOf(markdown: string): string | undefined {
 
 /** The description one SKILL.md file holds, read through the mtime-keyed cache. */
 function descriptionAt(path: string): string | undefined {
-  let stats: ReturnType<typeof statSync>
+  // Open once and check the open handle, never the path, so the file cannot change
+  // between the check and the read.
+  let fd: number
   try {
-    stats = statSync(path)
+    fd = openSync(path, 'r')
   } catch {
     return undefined
   }
-  const hit = cache.get(path)
-  if (hit !== undefined && hit.mtimeMs === stats.mtimeMs && hit.size === stats.size) return hit.description
-  let description: string | undefined
   try {
-    description = skillDescriptionOf(readFileSync(path, 'utf8'))
+    const stats = fstatSync(fd)
+    const hit = cache.get(path)
+    if (hit !== undefined && hit.mtimeMs === stats.mtimeMs && hit.size === stats.size) return hit.description
+    const description = skillDescriptionOf(readFileSync(fd, 'utf8'))
+    cache.set(path, { mtimeMs: stats.mtimeMs, size: stats.size, description })
+    return description
   } catch {
     return undefined
+  } finally {
+    closeSync(fd)
   }
-  cache.set(path, { mtimeMs: stats.mtimeMs, size: stats.size, description })
-  return description
 }
 
 /** The description of a named Antigravity skill, or undefined when no SKILL.md holds one. */
