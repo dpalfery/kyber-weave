@@ -386,17 +386,19 @@ describe('the engine migrates the canon store at startup, without blocking', () 
     }
 
     const rows = sessionRows(path)
-    expect(rows).toHaveLength(3)
-    for (const row of rows) {
-      expect(row['summary_json'], 'the summary column must be materialized').not.toBeNull()
-      expect(row['problems_count'], 'the problems count must be materialized').not.toBeNull()
-      expect(row['context_limit_source'], 'the window provenance must be materialized').not.toBeNull()
-      const payload = JSON.parse(row['payload'] as string) as Record<string, unknown>
-      expect(payload, 'the turns must have left the payload').not.toHaveProperty('turns')
+    try {
+      expect(rows).toHaveLength(3)
+      for (const row of rows) {
+        expect(row['summary_json'], 'the summary column must be materialized').not.toBeNull()
+        expect(row['problems_count'], 'the problems count must be materialized').not.toBeNull()
+        expect(row['context_limit_source'], 'the window provenance must be materialized').not.toBeNull()
+        const payload = JSON.parse(row['payload'] as string) as Record<string, unknown>
+        expect(payload, 'the turns must have left the payload').not.toHaveProperty('turns')
+      }
+      expect(turnRows(path)).toHaveLength(9)
+    } finally {
+      await stopEngine(engine.server)
     }
-    expect(turnRows(path)).toHaveLength(9)
-
-    await stopEngine(engine.server)
   })
 
   it('leaves a store that needs no migration alone', async () => {
@@ -408,11 +410,13 @@ describe('the engine migrates the canon store at startup, without blocking', () 
 
     const engine = await startEngine(path, yields)
 
-    expect(yields.count, 'a current store must not be walked').toBe(0)
-    expect(schemaVersionOf(path)).toBe(String(SCHEMA_VERSION))
-    expect(sessionRows(path)).toHaveLength(4)
-
-    await stopEngine(engine.server)
+    try {
+      expect(yields.count, 'a current store must not be walked').toBe(0)
+      expect(schemaVersionOf(path)).toBe(String(SCHEMA_VERSION))
+      expect(sessionRows(path)).toHaveLength(4)
+    } finally {
+      await stopEngine(engine.server)
+    }
   })
 
   it('keeps the synchronous constructor path working', async () => {
