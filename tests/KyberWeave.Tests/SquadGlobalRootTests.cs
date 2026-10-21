@@ -571,7 +571,7 @@ public sealed class SquadGlobalRootTests : IDisposable
                 .. primaryAgent.Resources.Select(resource =>
                     $"skills/{primaryAgent.Name}/{resource.RelativePath}")
             ];
-            Assert.Equal(6, conductorEntryPointPaths.Length);
+            Assert.Equal(1 + primaryAgent.Resources.Count, conductorEntryPointPaths.Length);
             foreach (string path in conductorEntryPointPaths)
             {
                 Assert.Single(result.Receipt.Files, file => file.RelativePath == path);

@@ -192,14 +192,21 @@ public sealed class CodexRenderer : ISquadRenderer
     }
 
     private static SquadDeploymentFile RenderSkill(SquadSkill skill, SquadDeploymentScope scope)
+        => RenderSkillDocument(skill.Name, skill.Description, skill.InstructionBody, scope);
+
+    private static SquadDeploymentFile RenderSkillDocument(
+        string name,
+        string description,
+        string instructionBody,
+        SquadDeploymentScope scope)
     {
-        string singleLineDescription = string.Join(" ", skill.Description.Split(
+        string singleLineDescription = string.Join(" ", description.Split(
             ['\r', '\n'],
             StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
 
         Dictionary<string, object?> frontmatter = new(StringComparer.Ordinal)
         {
-            ["name"] = skill.Name,
+            ["name"] = name,
             ["description"] = singleLineDescription,
             ["license"] = "MIT"
         };
@@ -207,12 +214,12 @@ public sealed class CodexRenderer : ISquadRenderer
         string content;
         lock (SerializerLock)
         {
-            content = SquadMarkdownDocument.Compose(YamlSerializer, frontmatter, skill.InstructionBody);
+            content = SquadMarkdownDocument.Compose(YamlSerializer, frontmatter, instructionBody);
         }
 
         string skillsDir = ResolvePrefixedDirectory(SkillsDirectory, scope);
         return new SquadDeploymentFile(
-            $"{skillsDir}/{skill.Name}/SKILL.md",
+            $"{skillsDir}/{name}/SKILL.md",
             Encoding.UTF8.GetBytes(content),
             "codex");
     }
@@ -224,30 +231,7 @@ public sealed class CodexRenderer : ISquadRenderer
     private static SquadDeploymentFile RenderPrimaryAgentEntryPointSkill(
         SquadAgent agent,
         SquadDeploymentScope scope)
-    {
-        string singleLineDescription = string.Join(" ", agent.Description.Split(
-            ['\r', '\n'],
-            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
-
-        Dictionary<string, object?> frontmatter = new(StringComparer.Ordinal)
-        {
-            ["name"] = agent.Name,
-            ["description"] = singleLineDescription,
-            ["license"] = "MIT"
-        };
-
-        string content;
-        lock (SerializerLock)
-        {
-            content = SquadMarkdownDocument.Compose(YamlSerializer, frontmatter, agent.InstructionBody);
-        }
-
-        string skillsDir = ResolvePrefixedDirectory(SkillsDirectory, scope);
-        return new SquadDeploymentFile(
-            $"{skillsDir}/{agent.Name}/SKILL.md",
-            Encoding.UTF8.GetBytes(content),
-            "codex");
-    }
+        => RenderSkillDocument(agent.Name, agent.Description, agent.InstructionBody, scope);
 
     private static string? ResolveCodexModel(
         SquadAgent agent,

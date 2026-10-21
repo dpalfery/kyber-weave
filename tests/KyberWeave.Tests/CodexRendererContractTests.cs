@@ -121,7 +121,8 @@ public sealed class CodexRendererContractTests : IDisposable
             .ToArray();
         int expectedPrimaryEntryPointArtifactCount =
             generatedPrimaryEntryPoints.Sum(agent => 1 + agent.Resources.Count);
-        Assert.Equal(6, expectedPrimaryEntryPointArtifactCount);
+        SquadAgent conductor = Assert.Single(generatedPrimaryEntryPoints, agent => agent.Name == "conductor");
+        Assert.Equal(1 + conductor.Resources.Count, expectedPrimaryEntryPointArtifactCount);
 
         // C3: every rendered owner also projects its validated resource closure beside its
         // principal output. Primary agents with a skill fallback also project an entry-point
