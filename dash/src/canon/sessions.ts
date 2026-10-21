@@ -267,7 +267,7 @@ const SIDE_AGENT_NAMES: ReadonlySet<string> = new Set([
 
 function isSideAgentTurn(record: CanonicalRecord): boolean {
   const name = attributeOf(record, ['gen_ai.agent.name'])
-  return name !== undefined && (SIDE_AGENT_NAMES.has(name) || name.startsWith('tool/runSubagent'))
+  return name !== undefined && (SIDE_AGENT_NAMES.has(name) || name === 'tool/runSubagent' || name.startsWith('tool/runSubagent-'))
 }
 
 function attributeOf(record: CanonicalRecord, keys: readonly string[]): string | undefined {
@@ -1383,10 +1383,12 @@ export function buildSessionRow(
   // compaction finding built from the same records can never disagree.
   // Catalog replaces only that default. A reported or declared window stays
   // what the records said; the 200K constant is not relabelled as catalog.
-  const telemetryWindow = contextLimitOf(contextRecords.length > 0 ? contextRecords : records)
+  // One filtered set for both lookups so the telemetry and catalog windows agree.
+  const windowRecords = contextRecords.length > 0 ? contextRecords : records
+  const telemetryWindow = contextLimitOf(windowRecords)
   const window =
     telemetryWindow.contextLimitSource === 'default' && store !== undefined
-      ? (catalogWindowForRecords(records, store) ?? telemetryWindow)
+      ? (catalogWindowForRecords(windowRecords, store) ?? telemetryWindow)
       : telemetryWindow
   // `analyzeContext` rejects a non-positive limit. An absent bridge window
   // has none: composition still buckets against the placeholder, and the
