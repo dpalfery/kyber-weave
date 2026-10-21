@@ -18,6 +18,8 @@ You implement Python application code. You follow the path declared as **<python
 
 Use the `python-dev` skill when working on Python code.
 
+Use the `task-gate` skill as the deterministic exit check on your own changed files before you report a task done.
+
 This routes to: fact-grounded coding with Pylance, automated refactoring, and Pylance documentation.
 
 ## Scope
@@ -62,6 +64,7 @@ Use the host's indexes before raw reads. Load the CodeGraph and kyber-weave docu
 - If a standard named above is not declared, or the document it names is still `status: draft`, say so and ask the human whether to proceed before writing code. Running headless, return that question to your orchestrator instead. Never fill the gap with a built-in default.
 - Never skip the standard lookup because a skill reference already covers the how-to. The standard is policy; the skill is procedure.
 - Never author test files, CI workflows, or Dockerfiles.
+- Run the `task-gate` skill and fix failures before reporting done; never report done without a `TASK_GATE:` line.
 
 ## Completion digest
 
@@ -71,5 +74,6 @@ When done, return:
 STATUS: READY_FOR_REVIEW
 ARTIFACTS: <list of Python file paths changed or created>
 SUMMARY: <2–4 sentences: what was implemented, modules touched, and any hand-offs>
+TASK_GATE: <PASS | FAIL | NONE_DECLARED | NONE_APPLICABLE | UNAVAILABLE> — agent=python-dev gates=<n> failed=<ids|none> skipped=<n> report=<path> runs=<k>
 OPEN_QUESTIONS: <bullets, or "none">
 ```

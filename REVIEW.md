@@ -1,6 +1,6 @@
 # Review guidance
 
-Standing guidance for every reviewer of a Kyber-Weave change: `task-reviewer`, the
+Standing guidance for every reviewer of a Kyber-Weave change: the
 `code-reviewer` council and its lenses, and automated PR reviewers. It is distilled from the
 findings Kilo and CodeRabbit raised across about 100 pull requests in two weeks (30 Sep – 14 Oct
 2026) and from the fixes that were accepted. It adds to — never replaces — the governing
@@ -9,9 +9,6 @@ standards: [`AGENTS.md`](AGENTS.md), [`docs/standards/`](docs/standards/README.m
 
 ## How reviewers use this file
 
-- **`task-reviewer`** — read *Ground rules* and the sections for the paths the task touched.
-  Report only what you can prove from the diff and tree. Out-of-task concerns are
-  `ESCALATION: end-of-run`, not fixes.
 - **`code-reviewer` council** — each lens takes the sections that match it
   ([lens map](#lens-map)). The adjudicator discards any finding that does not meet the
   *Ground rules*.
@@ -237,8 +234,8 @@ Governing standards: [`docs/standards/csharp`](docs/standards/csharp/README.md) 
 | ci / scripts | 7 |
 | every other lens | Ground rules and *What not to flag* only; take a section only when the diff touches its pattern |
 
-`task-reviewer` applies sections 1–3 and 10 to the task's own files and the section matching
-its paths; everything else is council-owned.
+Single tasks are not reviewed by an agent: the developer's deterministic `task-gate` covers the
+mechanical checks, and everything judgemental is council-owned.
 
 ## Finding format
 

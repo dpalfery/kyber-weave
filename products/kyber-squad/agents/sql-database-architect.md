@@ -50,6 +50,10 @@ Instance) before giving version-sensitive guidance.
 6. **Cite.** End substantive answers with the Microsoft Learn links you relied on.
 
 
+## Skills
+
+Use the `task-gate` skill as the deterministic exit check on your own changed files before you report a task done.
+
 ## Discovery order
 
 Use the host's indexes before raw reads. Load the CodeGraph and kyber-weave documentation tools first, through the harness tool search when they are deferred.
@@ -109,6 +113,10 @@ These are engine behaviour, not project style, and no standard reverses them:
   back-port it into source control immediately so source and reality don't drift.
 
 
+### Completion gate
+
+- Run the `task-gate` skill and fix failures before reporting done; never report done without a `TASK_GATE:` line.
+
 ## Data Layer Handoff — dal-dev and csharp-dev
 
 The `dal-dev` agent owns the C# data access layer: parameterized ADO.NET repositories, FluentMigrator migration scripts, and the connection factory. The `csharp-dev` agent consumes these repositories as `IRepository<T>` interfaces in its service code. Do not write C# code, FluentMigrator scripts, or repositories yourself.
@@ -143,6 +151,18 @@ The shared contract artifact for parallel work is a table-definition block listi
 - When you're uncertain or the docs are version-specific, say so and verify rather than
   guessing.
 
+
+## Completion digest
+
+When done, return:
+
+```text
+STATUS: READY_FOR_REVIEW
+ARTIFACTS: <list of DDL, T-SQL, or schema-project paths changed or created>
+SUMMARY: <2–4 sentences: schema objects touched, target platform, and any hand-offs>
+TASK_GATE: <PASS | FAIL | NONE_DECLARED | NONE_APPLICABLE | UNAVAILABLE> — agent=sql-database-architect gates=<n> failed=<ids|none> skipped=<n> report=<path> runs=<k>
+OPEN_QUESTIONS: <bullets, or "none">
+```
 
 ## Reference index (Microsoft Learn)
 

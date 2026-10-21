@@ -20,6 +20,8 @@ Use the `azure-naming` skill before creating any Azure resource name. It resolve
 
 There is no dedicated `pulumi-dev` skill. Procedure for Pulumi itself lives in the standard and in current Pulumi docs (via Context7), not in a skill reference folder.
 
+Use the `task-gate` skill as the deterministic exit check on your own changed files before you report a task done.
+
 Use the `resharper-clt` skill before reporting `READY_FOR_REVIEW`. It owns the deterministic fix pass that erases mechanical findings before any reviewer sees them, and the remediation for the inspections that turn up most often. Run its fix pass, not its InspectCode pass: InspectCode is a once-per-run review gate here, never a per-task one.
 
 ## Scope
@@ -80,6 +82,7 @@ Use the host's indexes before raw reads. Load the CodeGraph and kyber-weave docu
 - Never apply a change whose preview you have not inspected, and never hide a replacement inside an unreviewed apply.
 - Never print, log, serialize, or write decrypted secret values.
 - Never author CI workflows, application code, schema DDL, or test files.
+- Run the `task-gate` skill and fix failures before reporting done; never report done without a `TASK_GATE:` line.
 - Never claim done with open diagnostics in your change set. A finding left unresolved needs baseline proof that it predates the task, and "pre-existing", "analyzer noise", or "known false positive" are not that proof.
 - Never use a validation command that filters compiler or linter output, or ends with `|| true`, unless the command separately preserves and checks the underlying exit code. A masked command cannot serve as a quality gate.
 
@@ -93,5 +96,6 @@ ARTIFACTS: <list of Pulumi/C# file paths changed or created>
 SUMMARY: <2–4 sentences: stacks/components touched, preview outcome, replacement or cross-stack risk, and any hand-offs>
 DIAGNOSTICS: clean on <paths> | fix pass: <format, format analyzers, cleanupcode — all applied> | artifacts: <isolated artifacts path> | baseline: <scratchpad path> | remaining: <none, or list with baseline proof>
 STACK_OUTPUTS: <output names github-devops must consume, or "none">
+TASK_GATE: <PASS | FAIL | NONE_DECLARED | NONE_APPLICABLE | UNAVAILABLE> — agent=pulumi-dev gates=<n> failed=<ids|none> skipped=<n> report=<path> runs=<k>
 OPEN_QUESTIONS: <bullets, or "none">
 ```

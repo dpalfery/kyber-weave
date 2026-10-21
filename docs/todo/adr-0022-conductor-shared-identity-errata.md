@@ -26,11 +26,12 @@ primary shared identity). The clause is stale — `conductor` was removed from
 `shared-identities` in commit `d184cd7` (2026-09-08), before ADR 0022 was accepted
 (2026-09-23).
 
-An accepted ADR is a historical record and must not be edited to change what it says, so the
-wording is left in place. The Antigravity reclassification decision itself is unaffected:
+An accepted ADR is edited in place to state only the decision in force, so the stale clause is
+corrected in ADR 0022 itself rather than superseded by a new record. The Antigravity
+reclassification decision itself is unaffected:
 decision 3 correctly renders `conductor` as a native primary agent. This todo was recorded
 during the corpus two-audience remediation, which corrected the same claim in the root
 `README.md`.
 
-This todo is complete when the stale clause is superseded by a new ADR or an errata note that
-states the conductor is an unoccupied identity, rather than amended in place.
+This todo is complete when ADR 0022 decision 1 no longer names the conductor as a shared
+identity and states that it is an unoccupied identity.

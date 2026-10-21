@@ -5,7 +5,7 @@ source-commit: 677c3a876ba9c62f1083608596b238c9deaff167
 selected-baseline: .github/agents/tauri-dev.agent.md
 sources:
   .github/agents/tauri-dev.agent.md: 30f08182e6c42869088f2df5cc36aa6162182a97fa6576342b9ca2fff47051ad
-final-body-sha256: d5c7af6b485b7c68abb1d04baf5c4c36b8125dca9b8118913c168e6d202623dc
+final-body-sha256: 158774f6c4c34754c4a8797c222dee3b86c26b35c3d13ab3c775309b447d3ba2
 ---
 # tauri-dev migration
 

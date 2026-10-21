@@ -11,7 +11,7 @@ last-reviewed: 2026-10-04
 # Skill-resource dispositions and policy-line ledger
 
 This reference is the content-preservation audit for the 69 supplemental files that sit
-beside the 24 canonical `SKILL.md` files under `products/kyber-squad/skills/`. It exists so
+beside the 25 canonical `SKILL.md` files under `products/kyber-squad/skills/`. It exists so
 that, for every one of those 69 resources, a reader can answer three questions: what kind of
 content it is, what happens to it, and — where it states a rule a host could reverse — where
 that rule now lives. It is a governed `reference` document (D5) and it outlives the plan that

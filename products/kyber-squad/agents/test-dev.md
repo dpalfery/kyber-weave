@@ -18,6 +18,8 @@ You author and maintain the automated test suite. You follow the path declared a
 
 Use the `test-dev` skill when working on tests.
 
+Use the `task-gate` skill as the deterministic exit check on your own changed files before you report a task done.
+
 This routes to: unit-test patterns, integration-test patterns, E2E/Playwright patterns, mock-usage analysis, and test maintainability.
 
 Use the `resharper-clt` skill before reporting `READY_FOR_REVIEW` **when the test work is C# / .NET**. It owns the deterministic fix pass that erases mechanical findings before any reviewer sees them, and the remediation for the inspections that turn up most often. Run its fix pass, not its InspectCode pass: InspectCode is a once-per-run review gate here, never a per-task one. When the host language is not C# / .NET, the fix pass does not apply either.
@@ -88,6 +90,7 @@ Use the host's indexes before raw reads. Load the CodeGraph and kyber-weave docu
 - Never use a validation command that filters compiler or linter output, or ends with `|| true`, unless the command separately preserves and checks the underlying exit code. A masked command cannot serve as a quality gate.
 - Never enter an unconstrained test-fix loop. If 3 iterations on the same failure cluster fail to converge, or if an oscillation or invariant contradiction occurs, trip the circuit breaker and escalate.
 - Never weaken test assertions or assert contradictory invariants to force green runs.
+- Run the `task-gate` skill and fix failures before reporting done; never report done without a `TASK_GATE:` line.
 
 ## Completion digest
 
@@ -98,6 +101,7 @@ STATUS: READY_FOR_REVIEW
 ARTIFACTS: <list of test file paths>
 SUMMARY: <2–4 sentences: what layers are covered, test count, any notable gaps>
 DIAGNOSTICS: clean on <paths> | fix pass: <format, format analyzers, cleanupcode — all applied, or skipped (not C# / .NET)> | artifacts: <isolated artifacts path> | baseline: <scratchpad path> | remaining: <none, or list with baseline proof>
+TASK_GATE: <PASS | FAIL | NONE_DECLARED | NONE_APPLICABLE | UNAVAILABLE> — agent=test-dev gates=<n> failed=<ids|none> skipped=<n> report=<path> runs=<k>
 COVERAGE_GAPS: <untested branches or scenarios, or "none">
 ```
 

@@ -55,7 +55,6 @@ public sealed partial class HotshotGoldenContractTests
         "review-lens",        // Discovery order: indexes before raw reads
         "review-triage",      // Discovery order: indexes before raw reads
         "sql-database-architect", // Worker-packet scope rule: packet is whole scope (issue #278)
-        "task-reviewer",
         "tauri-dev",          // Worker-packet scope rule: packet is whole scope (issue #278)
         "test-dev"            // JEV checkpoints and iteration circuit-breaker (issue #249)
     ];
@@ -87,6 +86,7 @@ public sealed partial class HotshotGoldenContractTests
     [
         "bug-crusher",
         "code-review", // pre-push self-review gate added; exempts the whole skill directory, pinned by CodeReviewSkillRetainsSelfReviewTriggerAndGate
+        "architecture-decision-record", // body evolution pending; pinned by EvolvedSkillIdentitiesDivergeFromGoldenBytes
         "create-pull-request", // combined with create-pull-request-github; provider selection and neutral layer
         "pr-review-fix-comments", // provider files now rendered (plan 2026-09-28)
         "product-owner",
@@ -102,7 +102,7 @@ public sealed partial class HotshotGoldenContractTests
     /// Skills authored in Kyber-Squad have no Hotshot baseline; the canonical inventory
     /// and resource-delivery contracts cover them without altering historical golden bytes.
     /// </summary>
-    private static readonly string[] CanonicalOnlySkillIdentities = ["code-review-loop"];
+    private static readonly string[] CanonicalOnlySkillIdentities = ["code-review-loop", "task-gate"];
 
     /// <summary>
     /// Agents authored in Kyber-Squad have no Hotshot baseline, so the golden manifest cannot
@@ -117,6 +117,7 @@ public sealed partial class HotshotGoldenContractTests
     [
         "architect-v3",
         "conductor-v3",
+        "task-reviewer",
         "task-reviewer-v3"
     ];
 
@@ -285,6 +286,40 @@ public sealed partial class HotshotGoldenContractTests
         Assert.Contains("self-review gate before pushing", skill.Description, StringComparison.Ordinal);
         Assert.Contains("## Pre-push self-review gate", skill.InstructionBody, StringComparison.Ordinal);
         Assert.Contains("major-or-worse", skill.InstructionBody, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// An evolved skill is exempt from the golden byte comparison for its whole directory. One that still
+    /// matches golden exempts nothing real, so it must fail until its body diverges and the name is kept honest.
+    /// </summary>
+    [Fact]
+    public void EvolvedSkillIdentitiesDivergeFromGoldenBytes()
+    {
+        HotshotGoldenManifest manifest = ReadManifest();
+        List<string> mismatches = [];
+
+        foreach (GoldenSkillEntry expected in manifest.Skills)
+        {
+            string name = SkillName(expected.Path);
+            if (!EvolvedSkillIdentities.Contains(name, StringComparer.Ordinal))
+            {
+                continue;
+            }
+
+            string canonicalPath = Path.Combine(ProductRoot, "skills", name, "SKILL.md");
+            if (!File.Exists(canonicalPath))
+            {
+                mismatches.Add($"evolved skill '{name}' has no canonical SKILL.md");
+                continue;
+            }
+
+            if (string.Equals(Sha256(File.ReadAllBytes(canonicalPath)), expected.FileSha256, StringComparison.Ordinal))
+            {
+                mismatches.Add($"evolved skill '{name}' matches golden; remove it from the list");
+            }
+        }
+
+        Assert.Empty(mismatches);
     }
 
     [Fact]

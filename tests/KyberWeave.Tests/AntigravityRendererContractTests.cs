@@ -1079,7 +1079,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
             string model = RequireScalar(frontmatter, "model");
             string expectedModel = agent.Name is "architect" or "product-owner" or
                 "sql-database-architect" or "bug-crusher-investigator" or "code-reviewer" or
-                "review-lens" or "review-triage" or "task-reviewer"
+                "review-lens" or "review-triage"
                 ? "pro"
                 : "flash";
 

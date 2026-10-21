@@ -1,7 +1,7 @@
 # Kyber-Squad Canonical Source Tree
 
 Kyber-Squad is the canonical source tree for unified agent and skill governance and deployment.
-It maintains a target-neutral, declarative catalog of **22 canonical agents** and **24 canonical skills**,
+It maintains a target-neutral, declarative catalog of **21 canonical agents** and **25 canonical skills**,
 governed by explicit schemas, model profiles, semantic capability profiles, and fallback lowering rules.
 
 `products/kyber-squad/` is the canonical and package authority from which target-native agent and
@@ -32,7 +32,7 @@ products/kyber-squad/
 │   ├── models.yml                      # Model tiers, aliases, and temperature parameters
 │   ├── capabilities.yml                # Capability taxonomy and permission assignments
 │   └── fallbacks.yml                   # Lowering rules and collision resolution for fallback harnesses
-├── agents/                             # 22 canonical agent definition files plus owned references
+├── agents/                             # 21 canonical agent definition files plus owned references
 │   ├── architect.md
 │   ├── architect/                      # Progressive-disclosure references (Markdown)
 │   ├── azure-reader.md
@@ -54,11 +54,9 @@ products/kyber-squad/
 │   ├── review-lens.md
 │   ├── review-triage.md
 │   ├── sql-database-architect.md
-│   ├── task-reviewer.md
-│   ├── task-reviewer/                  # Progressive-disclosure references (Markdown)
 │   ├── tauri-dev.md
 │   └── test-dev.md
-├── skills/                             # 24 canonical skill directories; 92 recursive files
+├── skills/                             # 25 canonical skill directories; 94 recursive files
 │   ├── app-docs-standard/
 │   ├── architecture-decision-record/
 │   ├── azure-cli/
@@ -82,8 +80,9 @@ products/kyber-squad/
 │   ├── second-brain/
 │   ├── security-review/
 │   ├── setup-dev-environment/
+│   ├── task-gate/
 │   └── test-dev/
-└── migration/                          # 19 Hotshot import and baseline verification logs
+└── migration/                          # 18 Hotshot import and baseline verification logs
     └── <agent-name>.md
 ```
 
@@ -91,7 +90,7 @@ products/kyber-squad/
 
 ## Canonical Components
 
-### 1. Agents (22 Canonical Roles)
+### 1. Agents (21 Canonical Roles)
 
 Each agent in `agents/<name>.md` contains LF-normalized UTF-8 Markdown with strict YAML frontmatter conforming to `schemas/agent.schema.json`:
 
@@ -117,15 +116,15 @@ An agent body may link local Markdown resources beneath the agent's own director
 `conductor/references/*.md`); those links stay authored verbatim and resolve at the deployment
 target (see [Resource Closures](#6-resource-closures-and-progressive-disclosure)).
 
-### 2. Skills (24 Canonical Skills)
+### 2. Skills (25 Canonical Skills)
 
-The 24 canonical skill directories under `skills/` adhere to the Agent Skills open standard
+The 25 canonical skill directories under `skills/` adhere to the Agent Skills open standard
 (`SKILL.md`, optional `scripts/`, `references/`, and asset files). `code-review-loop` is authored
 in Kyber-Squad. Every imported raw `SKILL.md` except the six explicitly evolved skills
 (`bug-crusher`, `code-review`, `product-owner`, `second-brain`,
 `create-pull-request`, and `pr-review-fix-comments`) is byte-identical to the designated
 Hotshot golden copy; `create-pull-request-github` is retired into `create-pull-request`. The canonical
-tree also retains 68 supplemental resources, for 92 skill-tree files in total; recursive APM and
+tree also retains 69 supplemental resources, for 94 skill-tree files in total; recursive APM and
 Agent Plugins packages preserve those resources and their local references.
 
 `code-review-loop` completes an authorized code review feedback cycle: validated fixes,
@@ -133,10 +132,14 @@ pushed commit links in replies, resolved threads, and a requested re-review. Its
 `code-review-loop.md` workflow ships beside `SKILL.md`. `pr-review-fix-comments` remains the
 workflow for step-by-step approvals.
 
+`task-gate` is the deterministic exit check every developer agent runs before it reports a
+task done. It runs the `kyber-weave review gates` command scoped to the task's own changed
+files, applies the fixes within a 2-cycle cap, and reports one `TASK_GATE:` digest line.
+
 Renderers project every file an owner's Markdown links reach beside its principal output, with
 authored relative links preserved, so the former dangling-reference defect is closed for every
 linked resource: a fresh Copilot render now emits the 46 principal files plus each owner's linked
-resources (123 files total). Every skill resource reaches every render except
+resources (121 files total). Every skill resource reaches every render except
 `skills/setup-dev-environment/agents/openai.yaml`, which is packaged-only Codex skill-UI metadata.
 The tracked root `.github/` self-deployment predates resource delivery and remains a stale
 snapshot until a human refreshes it after a release candidate; packages and fresh renders carry
@@ -171,11 +174,11 @@ and it routes plans, specifications, todos, and open requests through one intake
 
 ### 5. Migration Logs (`migration/`)
 
-The `migration/` directory contains 19 per-agent Hotshot import reports recording baseline
+The `migration/` directory contains 18 per-agent Hotshot import reports recording baseline
 sources, SHA-256 hashes, retained additions, excluded harness mechanics, resolved permission
 policies, and final normalized instruction digests. `review-lens` and `review-triage` are
 canonical-only roles and therefore have no Hotshot migration record. The retired test-first
-duplicates (`conductor-v3`, `architect-v3`, `task-reviewer-v3`) have no separate reports: each
+duplicates (`conductor-v3`, `architect-v3`) have no separate reports: each
 was folded into its canonical counterpart's report, which retains the retired source hash and a
 refreshed final-body digest for the consolidated instruction body.
 

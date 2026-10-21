@@ -65,8 +65,8 @@ implemented and registered renderers today.
 ```mermaid
 flowchart TD
     subgraph CanonicalSource["Canonical Product Source (products/kyber-squad/)"]
-        Agents["22 Canonical Agents\n(agents/*.md)"]
-        Skills["24 Canonical Skills\n(skills/*)"]
+        Agents["21 Canonical Agents\n(agents/*.md)"]
+        Skills["25 Canonical Skills\n(skills/*)"]
         Profiles["Models, Capabilities, Fallbacks\n(profiles/*.yml)"]
         Schemas["JSON Schemas\n(schemas/*.json)"]
     end
@@ -112,8 +112,8 @@ Kyber-Squad treats agent and skill definitions as strictly typed, immutable sour
 - **Canonical Agent Definitions**: Authored in `products/kyber-squad/agents/<name>.md` with closed YAML frontmatter and LF-normalized UTF-8 bodies.
 - **Normalization Pipeline**: `SquadSourceLoader` parses frontmatter against `schemas/agent.schema.json`, validates capability bindings, computes an immutable SHA-256 instruction digest over the normalized body, and emits a structured `AgentIR` model.
 - **Strict Invariants**: Loaders reject undeclared profiles, missing capabilities, invalid invocation modes, path traversal attempts, or unrecognized frontmatter keys.
-- **Canonical Skills and Resources**: `SquadSourceLoader` loads the 24 top-level `SKILL.md`
-  identities. The canonical tree separately retains 68 supplemental files, giving 92 recursive
+- **Canonical Skills and Resources**: `SquadSourceLoader` loads the 25 top-level `SKILL.md`
+  identities. The canonical tree separately retains 69 supplemental files, giving 94 recursive
   skill-tree files; `SquadPacker` carries that complete recursive tree into both package formats.
 
 ---
@@ -655,8 +655,8 @@ and validates.
   directory that sidecar would need). Each tells the role to initialise a destination that
   does not exist before editing. `architect`'s `PLAN_READY`
   contract and `product-owner`'s `SPEC_FINALIZED` contract require `docs validate` and
-  `docs drift` to pass. `docs-dev` and `task-reviewer` deliberately name no
-  Devin profile and keep narrowing: neither has an execution-dependent completion contract, and a
+  `docs drift` to pass. `docs-dev` deliberately names no
+  Devin profile and keeps narrowing: it has no an execution-dependent completion contract, and a
   grant with no reader is not made. With `filesystem.write: allow` beside the shell, these two roles
   also no longer raise `capability-not-isolable` on Devin. The conductor's `intake-path`, `plan-path`,
   and `spec-path` references pre-create an empty destination before dispatching, and again before
@@ -683,7 +683,7 @@ and validates.
 - **Copilot emit today**: `CopilotRenderer` writes each agent's
   `.github/agents/<name>.agent.md` and each skill's `.github/skills/<name>/SKILL.md`, then
   `SquadResourceProjection.Append` places every file that owner's Markdown links reach beside
-  the principal. A fresh Copilot render is 123 files — 22 agents, 24 skills, plus projected
+  the principal. A fresh Copilot render is 121 files — 21 agents, 25 skills, plus projected
   closures — with authored relative links resolving in the output; every skill resource
   reaches this render except `skills/setup-dev-environment/agents/openai.yaml`, which stays
   packaged-only Codex skill-UI metadata. That count is the current
@@ -695,7 +695,7 @@ and validates.
   six explicitly evolved skills (`bug-crusher`, `code-review`, `product-owner`, `second-brain`,
   `create-pull-request`, and `pr-review-fix-comments`) still matches Hotshot golden bytes;
   `create-pull-request-github` is retired into `create-pull-request`. Canonical source and both
-  recursive package formats retain all 68 skill resources (92 files under
+  recursive package formats retain all 69 skill resources (94 files under
   `products/kyber-squad/skills/`) and resolve the retained references. Every retained resource
   now has a reviewed disposition in the
   [skill-resource dispositions audit](skill-resource-dispositions.md): non-policy content stays
@@ -761,20 +761,19 @@ The worker's inner 3-iteration cap applies to each implementation or rework disp
 
 ### Task session continuity
 
-Each implementation task keeps its original worker session through review fixes and
+Each implementation task keeps its original worker session through task-gate rework and
 verification when the current harness supports continuation. The conductor records
-the task identity, specialist type, actual `worker-session-id`, and a separate
-`reviewer-session-id` on the execution artifact. Calling the same role by name does
-not by itself resume a conversation. The same independent reviewer can continue the
-second and third audit passes with its prior findings and current evidence; it never
-shares the author's conversation.
+the task identity, specialist type, and actual `worker-session-id` on the execution
+artifact. Calling the same role by name does not by itself resume a conversation.
+No reviewer session exists: a missing or failing `TASK_GATE:` line is rejected back to
+the original worker.
 
 Self-contained packets define scope and support recovery; they do not require every
 dispatch to discard history. The conductor retains a recovery brief with decisions,
 failed approaches, evidence, findings, and retry tallies. It replaces a session only
 when continuation is unsupported, the session cannot be recovered, or its context is
 unreliable. A busy owner waits in the queue. Unrelated tasks use separate sessions,
-and retained sessions stay available until task audits and run-level findings settle.
+and retained sessions stay available until task gates and run-level findings settle.
 
 Continuation is a harness capability, not a guarantee made by a renderer or model.
 Stateless delegation uses the recovery brief; resumable delegation uses its returned

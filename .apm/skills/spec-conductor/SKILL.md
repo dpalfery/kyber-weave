@@ -43,7 +43,7 @@ these deltas.
 | §1 Classify & route | **Narrowed.** The input is a spec bundle. Routing is task-to-specialist only. |
 | §2 Technical planning (architect) | **Replaced by §1–§2 below.** No architect round-trip. |
 | §3 Delegate — parallel worker pools | **Inherited verbatim.** |
-| §4 Review & verify — the task ladder | **Inherited verbatim**, including the three-pass limit, the findings collection, and the single end-of-run `code-reviewer` run. |
+| §4 Review & verify — the developer exit gate | **Inherited verbatim**, including the `TASK_GATE:` rejection and circuit-breaker rules, the findings collection, and the single end-of-run `code-reviewer` run. |
 | Plan closeout | **Replaced by §7 below.** The spec carries its own closeout task; do not add a second one. |
 | §5 Consolidate | **Inherited verbatim.** |
 
