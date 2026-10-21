@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { cn, fmtNum, fmtTokens } from '../lib/utils.js'
+import { cn } from '../lib/utils.js'
 import { renderCost } from '../../../src/canon/cost.js'
 import type { CostBasis, CostBlock, CostStatus } from '../../../src/canon/types.js'
 import type { KyberCostBasisMismatch } from '../lib/kyberApi.js'
@@ -200,128 +200,6 @@ export function extractCostBlocks(props: SessionCostPanelProps): CostBlock[] {
   return [{ basis: 'unknown', status: 'no_rate' }]
 }
 
-/**
- * The measured token totals behind pricing, moved up into Session Overview.
- * This is the same section previously rendered at the bottom of the cost
- * panel: same source fields, same honest-ratio derivation, same labels and
- * test ids — only the placement changed, so it renders wherever the Sessions
- * page overview grouping puts it rather than only below the detail sections.
- */
-export function SessionTokenTotals({ summary }: { summary: SessionCostSummary }) {
-  // Token totals from payload.summary
-  const totalInput = typeof summary.total_input === 'number' ? summary.total_input : null
-  const totalOutput = typeof summary.total_output === 'number' ? summary.total_output : null
-  const totalCacheRead = typeof summary.total_cache_read === 'number' ? summary.total_cache_read : null
-  const totalCacheCreation = typeof summary.total_cache_creation === 'number' ? summary.total_cache_creation : null
-
-  // Cache hit ratio: compute honestly from total_cache_read / total_input if total_input > 0,
-  // or use explicit summary.cache_hit_ratio if present. Never fabricate 0% if unmeasured.
-  const cacheHitRatio = useMemo(() => {
-    if (typeof summary.cache_hit_ratio === 'number' && Number.isFinite(summary.cache_hit_ratio)) {
-      return summary.cache_hit_ratio
-    }
-    if (totalInput !== null && totalCacheRead !== null && totalInput > 0) {
-      return totalCacheRead / totalInput
-    }
-    return null
-  }, [summary.cache_hit_ratio, totalInput, totalCacheRead])
-
-  return (
-    <div data-testid="cost-tokens-section" className="mt-4 border-t border-border pt-3">
-      <div className="flex items-center justify-between mb-2">
-        <h4 className="text-xs font-semibold uppercase tracking-wider text-heading">
-          Underlying Token Totals
-        </h4>
-        <span className="text-[11px] text-tertiary-foreground">
-          Measured tokens behind pricing
-        </span>
-      </div>
-
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5 text-xs">
-        {/* Total Input */}
-        <div className="rounded border border-border bg-card p-2.5">
-          <div className="text-[10px] uppercase tracking-wider text-tertiary-foreground">
-            Total Input
-          </div>
-          <div
-            data-testid="token-total-input"
-            className="mt-1 text-base font-semibold tabular-nums text-foreground"
-          >
-            {totalInput !== null ? fmtTokens(totalInput) : 'not measurable'}
-          </div>
-          <div className="text-[10px] text-tertiary-foreground truncate">
-            {totalInput !== null ? `${fmtNum(totalInput)} tokens` : 'not measurable'}
-          </div>
-        </div>
-
-        {/* Total Output */}
-        <div className="rounded border border-border bg-card p-2.5">
-          <div className="text-[10px] uppercase tracking-wider text-tertiary-foreground">
-            Total Output
-          </div>
-          <div
-            data-testid="token-total-output"
-            className="mt-1 text-base font-semibold tabular-nums text-chart-5"
-          >
-            {totalOutput !== null ? fmtTokens(totalOutput) : 'not measurable'}
-          </div>
-          <div className="text-[10px] text-tertiary-foreground truncate">
-            {totalOutput !== null ? `${fmtNum(totalOutput)} tokens` : 'not measurable'}
-          </div>
-        </div>
-
-        {/* Cache Read */}
-        <div className="rounded border border-border bg-card p-2.5">
-          <div className="text-[10px] uppercase tracking-wider text-tertiary-foreground">
-            Cache Read
-          </div>
-          <div
-            data-testid="token-total-cache-read"
-            className="mt-1 text-base font-semibold tabular-nums text-chart-2"
-          >
-            {totalCacheRead !== null ? fmtTokens(totalCacheRead) : 'not measurable'}
-          </div>
-          <div className="text-[10px] text-tertiary-foreground truncate">
-            {totalCacheRead !== null ? `${fmtNum(totalCacheRead)} tokens` : 'not measurable'}
-          </div>
-        </div>
-
-        {/* Cache Creation */}
-        <div className="rounded border border-border bg-card p-2.5">
-          <div className="text-[10px] uppercase tracking-wider text-tertiary-foreground">
-            Cache Creation
-          </div>
-          <div
-            data-testid="token-total-cache-creation"
-            className="mt-1 text-base font-semibold tabular-nums text-chart-6"
-          >
-            {totalCacheCreation !== null ? fmtTokens(totalCacheCreation) : 'not measurable'}
-          </div>
-          <div className="text-[10px] text-tertiary-foreground truncate">
-            {totalCacheCreation !== null ? `${fmtNum(totalCacheCreation)} tokens` : 'not measurable'}
-          </div>
-        </div>
-
-        {/* Cache Hit Ratio */}
-        <div className="rounded border border-border bg-card p-2.5 col-span-2 sm:col-span-1">
-          <div className="text-[10px] uppercase tracking-wider text-tertiary-foreground">
-            Cache Hit Ratio
-          </div>
-          <div
-            data-testid="token-cache-hit-ratio"
-            className="mt-1 text-base font-semibold tabular-nums text-foreground"
-          >
-            {cacheHitRatio !== null ? `${(cacheHitRatio * 100).toFixed(1)}%` : 'not measurable'}
-          </div>
-          <div className="text-[10px] text-tertiary-foreground truncate">
-            {cacheHitRatio !== null ? 'cache_read ÷ input' : 'not measurable'}
-          </div>
-        </div>
-      </div>
-    </div>
-  )
-}
-
 export function SessionCostPanel({ session, cost, costs, className }: SessionCostPanelProps) {
   const blocks = useMemo(() => extractCostBlocks({ session, cost, costs }), [session, cost, costs])
   const summary = session?.summary ?? {}
@@ -501,9 +379,6 @@ export function SessionCostPanel({ session, cost, costs, className }: SessionCos
           </div>
         </div>
       )}
-
-      {/* Underlying Token Totals moved up into Session Overview; SessionTokenTotals
-          renders that same section there, so no separate lower copy remains. */}
     </div>
   )
 }

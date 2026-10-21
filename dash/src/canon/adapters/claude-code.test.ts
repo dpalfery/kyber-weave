@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  claudeCodeAdapter,
   claudeApiRequestBodyFailureReason,
   parseClaudeApiRequestBody,
 } from './claude-code.js'
@@ -289,5 +290,28 @@ describe('parseClaudeApiRequestBody — message roles on parts (D21)', () => {
 
     expect(parts).toHaveLength(1)
     expect(parts[0]).not.toHaveProperty('role')
+  })
+})
+
+describe('claudeCodeAdapter.normalize — tool spans', () => {
+  const span = (name: string, attributes: Record<string, unknown>) => ({
+    spanId: name,
+    traceId: 't',
+    name,
+    kind: 'internal',
+    source: 'otel',
+    attributes: { 'session.id': 's', ...attributes },
+  })
+
+  it('classifies a claude_code.tool span as tool.invoke, once', () => {
+    const tool = claudeCodeAdapter.normalize(
+      span('claude_code.tool', { 'span.type': 'tool', tool_name: 'Bash' }) as never,
+    )
+    expect(tool.op).toBe('tool.invoke')
+
+    const execution = claudeCodeAdapter.normalize(
+      span('claude_code.tool.execution', { 'span.type': 'tool.execution' }) as never,
+    )
+    expect(execution.op).not.toBe('tool.invoke')
   })
 })

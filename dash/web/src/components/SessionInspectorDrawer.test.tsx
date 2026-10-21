@@ -3053,3 +3053,26 @@ describe('narrowToolDefinitions', () => {
     expect(narrowToolDefinitions('not json', 'grep')).toBe('not json')
   })
 })
+
+describe('resolveSharedDisplay: per-request billing header', () => {
+  it('folds every turn copy of the billing header into one entry and leaves prompts alone', () => {
+    const header = (n: number) => `x-anthropic-billing-header: cc_version=1; cc_prev_req=req_${n}; cc_turn_index=1;`
+    const data = {
+      turnIndex: 99,
+      parts: [],
+      blocks: [],
+      sharedContext: {
+        parts: [
+          { text: header(0), spanId: 's0', turnIndex: 0 },
+          { text: 'real prompt', spanId: 's0', turnIndex: 0 },
+          { text: header(1), spanId: 's1', turnIndex: 1 },
+          { text: header(2), spanId: 's2', turnIndex: 2 },
+        ],
+        seenBefore: true,
+      },
+    } as unknown as KyberTurnContentResult
+    const resolved = resolveSharedDisplay(data)
+    expect(resolved!.parts.map((p) => p.text)).toEqual([header(2), 'real prompt'])
+    expect(resolved!.parts[0].collapsedTurns).toEqual([0, 1, 2])
+  })
+})
