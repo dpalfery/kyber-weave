@@ -56,6 +56,15 @@ internal static class UtilitiesStatusLineActivationGuidance
                 "Pi auto-loads extensions from '~/.pi/agent/extensions/', which Kyber Utilities never",
                 "writes to. If a collector package still registers its own footer, you may see two."
             ],
+            StatusLineTarget.CommandCode =>
+            [
+                "Command Code: copy this staged mod into your mods directory, then reload:",
+                $"  cp \"{commandAbsolutePath}\" ~/.commandcode/mods/kyber-statusline.ts",
+                "  /reload",
+                "(or trial-run it first with: cmd --mod \"" + commandAbsolutePath + "\")",
+                "Command Code auto-loads mods from '~/.commandcode/mods/', which Kyber Utilities never",
+                "writes to. Pick the row's items with /statusline; this mod's segment renders after the built-ins."
+            ],
             _ => throw new ArgumentOutOfRangeException(
                 nameof(target),
                 target,

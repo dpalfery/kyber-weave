@@ -25,9 +25,10 @@ internal static class UtilitiesStatusLineArtifacts
     ///     The file a harness's activation snippet names, relative to the target's artifact directory.
     /// </summary>
     /// <remarks>
-    ///     Claude and <c>agy</c> run a command, so the snippet names the script; Pi loads an extension,
-    ///     so it names the module. The plan and the artifact contract suite pin these names, so a change
-    ///     here moves together with <c>products/kyber-utilities/statusline/</c>.
+    ///     Claude and <c>agy</c> run a command, so the snippet names the script; Pi loads an extension
+    ///     and Command Code loads a mod, so each names the module. The plan and the artifact contract
+    ///     suite pin these names, so a change here moves together with
+    ///     <c>products/kyber-utilities/statusline/</c>.
     /// </remarks>
     public static string PrimaryFileName(StatusLineTarget target)
     {
@@ -36,6 +37,7 @@ internal static class UtilitiesStatusLineArtifacts
             StatusLineTarget.Claude => "statusline.sh",
             StatusLineTarget.Agy => "statusline.py",
             StatusLineTarget.Pi => "statusbar.ts",
+            StatusLineTarget.CommandCode => "statusbar.ts",
             _ => throw new ArgumentOutOfRangeException(
                 nameof(target),
                 target,
