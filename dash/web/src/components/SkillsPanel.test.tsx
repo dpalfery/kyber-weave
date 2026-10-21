@@ -64,12 +64,11 @@ describe('SkillsPanel: rows from the payload', () => {
     expect(releaseNotes.textContent).toMatch(/invoked/i)
   })
 
-  it('shows the turns a skill was listed in as 1-based turn numbers, not transport indices', () => {
+  it('does not list turn numbers on a skill row', () => {
     mount('realistic')
-    // turns_listed [0, 1, 2] in transport is turns 1, 2 and 3 on screen.
     const text = rowOf('docs').textContent ?? ''
-    expect(text).toMatch(/1\D+2\D+3/)
-    expect(text).not.toMatch(/0\D+1\D+2/)
+    expect(text).not.toMatch(/turns? 1/i)
+    expect(text).not.toMatch(/Listed in turn/)
   })
 
   it('labels a derived token figure as derived on its row', () => {

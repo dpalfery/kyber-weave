@@ -27,6 +27,7 @@ import { buildFindingsYielding } from './findings.js'
 import { buildHarnessRollup } from './harnesses.js'
 import { buildRuns } from './runs.js'
 import { CanonStore, releaseRecordParts, type ProjectedSessionRecord, type SessionRow } from './store.js'
+import { antigravitySkillDescription } from './antigravity-skill-text.js'
 import { extractInvokedSkills, readListingOf, skillsForSession, type ListingResult, type SkillsView } from './skills.js'
 import { activeTokenizer, createCachedCounter, loadO200kCounter } from './tokens.js'
 import { notMeasurable, type CanonicalRecord, type ContentPart, type CostBlock, type Measurability, type MetricAvailability, type NotMeasurable } from './types.js'
@@ -1677,7 +1678,17 @@ export function buildSessionRow(
     'availability' in skillsView || skillsView.invocationsAvailability !== undefined
       ? undefined
       : invokedByTurnOf(records)
-  const skills = skillsPayloadOf(skillsView, firstDescriptionsOf(skillsListed, turnRecords), countTokens, turnRecords)
+  const skillDescriptions = firstDescriptionsOf(skillsListed, turnRecords)
+  if (skillsListed !== undefined && String(harness).includes('antigravity')) {
+    // Antigravity's listing is names only; the description comes from the skill's SKILL.md.
+    for (const names of skillsListed.values()) {
+      for (const name of names.keys()) {
+        const text = skillDescriptions.has(name) ? undefined : antigravitySkillDescription(name)
+        if (text !== undefined) skillDescriptions.set(name, text)
+      }
+    }
+  }
+  const skills = skillsPayloadOf(skillsView, skillDescriptions, countTokens, turnRecords)
 
   const rawAgentName = attributeOf(first, AGENT_NAME_KEYS) ?? null
   const agentName = options?.agentName !== undefined ? options.agentName : rawAgentName

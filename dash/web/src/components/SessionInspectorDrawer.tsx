@@ -3257,7 +3257,15 @@ function listingNamed(listed: unknown[], skillName: string): { text?: unknown } 
  * `skills` entry. Uses the same query as the whole-turn panel so both share
  * the cached response.
  */
-function SkillListingSection({ skillName, request }: { skillName: string; request: TurnFullContentRequest }) {
+function SkillListingSection({
+  skillName,
+  request,
+  description,
+}: {
+  skillName: string
+  request: TurnFullContentRequest
+  description?: string
+}) {
   const turnQuery = useQuery({
     queryKey: ['kyber-turn-content-full', request.sessionId, request.turnIndex],
     queryFn: () => fetchTurnContentFull(request.sessionId, request.turnIndex),
@@ -3295,9 +3303,14 @@ function SkillListingSection({ skillName, request }: { skillName: string; reques
     if (listing === undefined) {
       listingBody = <p className="text-xs text-tertiary-foreground">This turn&apos;s listing does not name {skillName}.</p>
     } else if (typeof listing.text !== 'string' || listing.text.length === 0) {
-      listingBody = (
-        <p className="text-xs text-tertiary-foreground">The listing text for this skill was not recorded in this turn.</p>
-      )
+      listingBody =
+        typeof description === 'string' && description.length > 0 ? (
+          <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-muted/40 p-2 font-mono text-[11px] text-foreground">
+            {description}
+          </pre>
+        ) : (
+          <p className="text-xs text-tertiary-foreground">The listing text for this skill was not recorded in this turn.</p>
+        )
     } else {
       listingBody = (
         <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-muted/40 p-2 font-mono text-[11px] text-foreground">
@@ -3354,7 +3367,7 @@ function SkillDrawerPane({ row, request }: { row: KyberSkillRow; request: TurnFu
       {invocationsReason !== null && <NotMeasurableNote reason={invocationsReason} />}
       {hasTurns && <p className="text-xs text-muted-foreground">{skillTurnLabel(row.turns_listed)}</p>}
 
-      {request !== null && hasTurns && <SkillListingSection skillName={row.name} request={request} />}
+      {request !== null && hasTurns && <SkillListingSection skillName={row.name} request={request} description={row.description} />}
       {!hasTurns && row.listed === true && (
         <p className="text-xs text-tertiary-foreground">No turn lists this skill, so there is no listing text to read.</p>
       )}

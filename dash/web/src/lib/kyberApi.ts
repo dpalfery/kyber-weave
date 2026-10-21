@@ -2070,6 +2070,8 @@ export type KyberSkillRow = {
   turns_listed: number[]
   /** Engine-derived token estimate; labelled as derived wherever it is shown. */
   derived_tokens?: number
+  /** The skill description: from the listing, or the skill file for names-only harnesses. */
+  description?: string
 }
 
 /** The session payload's `skills` block: measured rows, or a whole-block not-measurable verdict. */

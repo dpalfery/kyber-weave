@@ -2890,13 +2890,13 @@ describe('SessionInspectorDrawer: skill pane (F2)', () => {
     )
   }
 
-  it('shows the listed state, the invocation count, and the listed turns as 1-based numbers', () => {
+  it('shows the listed state, the invocation count, and how many turns listed it', () => {
     const html = renderSkillDrawer(docsRow)
     expect(html).toContain('data-testid="skill-drawer-pane"')
     const text = textOf(html)
     expect(text).toMatch(/listed/i)
     expect(text).toMatch(/\b5\b/)
-    expect(text).toMatch(/1\D+2\b/)
+    expect(text).toMatch(/Listed in \d+ turns?/)
     expect(text).not.toMatch(/\b0\b/)
     expect(html).not.toContain('turns_listed')
   })
