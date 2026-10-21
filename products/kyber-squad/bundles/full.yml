@@ -20,7 +20,6 @@ agents:
   - review-lens
   - review-triage
   - sql-database-architect
-  - task-reviewer
   - tauri-dev
   - test-dev
 skills:
@@ -47,4 +46,5 @@ skills:
   - second-brain
   - security-review
   - setup-dev-environment
+  - task-gate
   - test-dev

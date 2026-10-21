@@ -27,7 +27,8 @@
     "lint": "eslint .",
     "verify:upgrade": "node scripts/upgrade-path/run.mjs",
     "prepublishOnly": "npm run build:cli",
-    "report:fixtures": "tsx src/tools/report-fixtures.ts"
+    "report:fixtures": "tsx src/tools/report-fixtures.ts",
+    "memory:store": "tsx src/tools/store-memory.ts"
   },
   "keywords": [
     "claude-code",

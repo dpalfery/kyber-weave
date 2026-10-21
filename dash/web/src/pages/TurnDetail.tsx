@@ -110,12 +110,25 @@ export function TurnDetail({
     retry: false,
   })
   // Measured per-turn counters for the inspector header (issue #184, Q3).
-  const { data: sessionTurns } = useQuery({
-    queryKey: ['kyber-session-turns', sessionId],
-    queryFn: () => fetchKyberSessionTurns(sessionId!),
+  //
+  // The bounded per-turn route answers this turn's row alone. The page used
+  // to read the session's whole payload for these four numbers — up to 10,933
+  // turn rows to describe one turn — and the row it displays is the only one
+  // it ever needed.
+  const { data: sessionTurn } = useQuery({
+    queryKey: ['kyber-session-turn', sessionId, turnIndex],
+    queryFn: () => fetchKyberSessionTurns(sessionId!, turnIndex),
     enabled: !!sessionId,
+    // An unknown session, or a turn index past the end, is an answer and not
+    // a transient failure: the request is not retried and the counters stay
+    // absent, exactly as they did when the payload answered with no such row.
+    retry: false,
   })
-  const turnTokens = turnRowFigures(findSessionTurnRow(sessionTurns, turnIndex))
+  // The strict lookup still applies to the one row the route served: a row
+  // that does not name this turn is no row, never a neighbour (issue #184).
+  const turnTokens = turnRowFigures(
+    findSessionTurnRow(sessionTurn === undefined ? undefined : [sessionTurn], turnIndex),
+  )
 
   const recordedBlocks = useMemo(
     () => data?.blocks.filter((block) =>

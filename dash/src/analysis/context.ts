@@ -80,7 +80,15 @@ export {
 export type ContextPart = {
   /** The part type; one of the five R7.1 bucket names. */
   part: CanonicalContentKey
-  /** The part's text, as the normalization layer reconstructed it. */
+  /**
+   * The part's text, as the normalization layer reconstructed it.
+   *
+   * A REDUCED part — one whose text was already counted and released, so the
+   * projection's working set is the counts rather than the text — carries an
+   * empty text and its count in `tokens` instead. The counts it leaves behind
+   * are the ones the composition is derived from, so a reduced part and the
+   * part it came from bucket identically.
+   */
   text: string
   /**
    * The part's token count when a counter measured it. Absent means the
@@ -95,6 +103,27 @@ export type ContextPart = {
    * are reported separately rather than grouped by a guess.
    */
   server?: string
+  /**
+   * Whether `tokens` was derived by tokenization rather than measured.
+   *
+   * A raw part carries no count at all when the harness measured none, and
+   * the analysis derives one from the text — the residual's attribution
+   * depends on knowing that (R7.3). A reduced part carries the derived count
+   * in `tokens`, so this flag is what keeps that attribution.
+   */
+  derived?: boolean
+  /**
+   * The tokens of the instruction blocks stripped out of this part's text.
+   *
+   * Present only on a reduced part whose text carried them: the split
+   * between the carrier bucket and the instruction bucket is made once, where
+   * the text was in hand, and the two halves are counted here.
+   */
+  instructionTokens?: number
+  /**
+   * How many instruction blocks were stripped out of this part's text.
+   */
+  strippedCount?: number
 }
 
 /** One turn of a session, as the analysis consumes it. */
@@ -304,6 +333,84 @@ function stripInstructionBlocks(
 }
 
 /**
+ * The options the reduction counts with.
+ */
+export type ContextReductionOptions = {
+  /**
+   * The tokenizer used to count a part that carries no measured count.
+   * Defaults to the `o200k_base` approximation (R4.6), the same default the
+   * analysis itself uses.
+   */
+  countTokens?: (text: string) => number
+  /** Instruction-block delimiters; defaults to system-reminder fences. */
+  instructionMarkers?: InstructionBlockMarkers
+}
+
+/**
+ * The parts' contribution to the composition, with their text released.
+ *
+ * WHY: a session's turns carry tens of kilobytes of text each, and the
+ * projection read every one of them at once — the decompressed parts were the
+ * session's working set, and the record that held them lived as long as the
+ * session. The composition needs the parts' COUNTS, not their text: the
+ * bucket each part falls into, how many tokens it contributed, how many
+ * instruction blocks were stripped out of it, and which server a tool
+ * definition arrived under. Those are derived here, where the text is in
+ * hand, and the text is dropped.
+ *
+ * A reduced part buckets exactly as the part it came from: the carrier bucket
+ * keeps the remainder of a stripped part and the instruction bucket keeps the
+ * blocks, the count is the measured one where the harness measured it and the
+ * counted one where it did not, and `derived` says which — so the residual's
+ * attribution (R7.3) is unchanged.
+ */
+export function reduceContextParts(
+  parts: readonly ContextPart[],
+  options: ContextReductionOptions = {},
+): ContextPart[] {
+  const markers = options.instructionMarkers ?? SYSTEM_REMINDER_MARKERS
+  const countTokens = options.countTokens ?? approximateO200kBase
+  return parts.map((part) => {
+    // Instruction fences ride inside history and tool results; stripping them
+    // anywhere else would miscount a system prompt that happens to quote a
+    // fence, so the strip applies to the carrier buckets only.
+    const strippable = part.part === 'conversation_history' || part.part === 'tool_result_content'
+    const containsMarkers =
+      strippable && part.text.includes(markers.open) && part.text.includes(markers.close)
+    if (containsMarkers) {
+      // A measured whole-part count cannot be split without deriving the
+      // pieces, so the split is always derived — and that derivation is
+      // precisely what a tokenizer-drift attribution of the turn's residual
+      // would be claiming (R7.3).
+      const { blocks, remainder } = stripInstructionBlocks(part.text, markers)
+      const remainderTokens = countTokens(remainder)
+      let instructionTokens = 0
+      for (const block of blocks) instructionTokens += countTokens(block)
+      return {
+        part: part.part,
+        text: '',
+        tokens: remainderTokens,
+        derived: true,
+        instructionTokens,
+        strippedCount: blocks.length,
+        ...(part.server !== undefined ? { server: part.server } : {}),
+      }
+    }
+    // A part with no text and no measured count contributes nothing and
+    // carries no structure: its count stays absent, so the composition reads
+    // it exactly as it read the part.
+    const structure = part.text !== '' || part.tokens !== undefined
+    return {
+      part: part.part,
+      text: '',
+      ...(structure ? { tokens: part.tokens ?? countTokens(part.text) } : {}),
+      ...(part.tokens === undefined ? { derived: true } : {}),
+      ...(part.server !== undefined ? { server: part.server } : {}),
+    }
+  })
+}
+
+/**
  * Analyze a session's context composition and pressure (R7).
  *
  * Each turn is bucketed by part type across the five canonical buckets
@@ -397,8 +504,17 @@ export function analyzeContext(turns: readonly ContextTurn[], options: ContextCo
         tokens = partTokens
       } else {
         tokens = part.tokens ?? countTokens(part.text)
-        if (part.tokens === undefined) derivedThisTurn = true
+        if (part.tokens === undefined || part.derived === true) derivedThisTurn = true
         buckets[part.part] += tokens
+        // A REDUCED part carries the instruction blocks that were stripped out
+        // of its text, already counted: the carrier bucket keeps the
+        // remainder and the instruction bucket keeps the blocks, exactly as
+        // the split above does for a part whose text is still in hand.
+        if (part.instructionTokens !== undefined) {
+          buckets.instruction_context += part.instructionTokens
+          strippedCount += part.strippedCount ?? 0
+          strippedTokens += part.instructionTokens
+        }
       }
 
       // Server resolution reads ground truth only (the schema-cost rule,

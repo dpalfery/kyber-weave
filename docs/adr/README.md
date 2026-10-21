@@ -4,14 +4,17 @@ title: Architecture decision records
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-16
+last-reviewed: 2026-10-20
 ---
 
 # Architecture decision records
 
 One record per architectural decision: what was decided, the alternatives that were rejected,
-and why. An ADR is never edited to say something else — a decision that changes is recorded in
-a new ADR that supersedes the old one.
+and why. An ADR states only the decision in force. When a decision changes, the ADR is edited in
+place to say what is true now; outdated or superseded content is removed rather than kept as
+history, because git holds the history. An `Amended <date>` note with a one-line reason is
+optional. A new ADR is written only for a decision on a different subject that replaces an
+existing record.
 
 ## Inventory
 
@@ -21,7 +24,7 @@ a new ADR that supersedes the old one.
 | [0002](0002-three-layer-review-council-verdict-engine.md) | [Three-Layer Code Review Council with Deterministic Verdict Engine](0002-three-layer-review-council-verdict-engine.md) | Accepted | 2026-08-22 | Replace serial review prompt with deterministic gate scripts (`review.gates`), parallel specialist review lenses, and a deterministic unit-tested verdict engine (`KW-REVIEW-*`). |
 | [0003](0003-cross-file-duplication-and-prior-art-lenses.md) | [Cross-File Duplication Detection and Prior-Art Retrieval in Code Review](0003-cross-file-duplication-and-prior-art-lenses.md) | Accepted | 2026-08-22 | Promote InspectCode redundancies to warnings, introduce `prior-art` lens for CodeGraph pre-lookup, and implement `review duplicates` normalized statement clustering for `duplicate-implementation` lens. |
 | [0004](0004-solution-level-static-analysis-and-noise-suppression.md) | [Solution-Level Static Analysis Configuration and Clean Code Policy](0004-solution-level-static-analysis-and-noise-suppression.md) | Accepted | 2026-08-22 | Eliminate source `#pragma` clutter via root `KyberWeave.sln.DotSettings`, maintain `TreatWarningsAsErrors`, and enforce modern C# 12/13 idioms without `var` collection expressions. |
-| [0005](0005-task-level-fast-review.md) | [Deterministic Fixes and Task-Level Review Ahead of the Council](0005-task-level-fast-review.md) | Accepted | 2026-08-22 | Fix mechanical defects deterministically in the worker completion gate (`dotnet format`, analyzer fixes, `cleanupcode --include`), give single tasks to `task-reviewer` for up to three PASS/FAIL passes, and run `code-reviewer` once per run — never per task unless a human asks. |
+| [0005](0005-task-level-fast-review.md) | [Deterministic Agent Exit Gate Ahead of the Council](0005-task-level-fast-review.md) | Accepted | 2026-08-22 | Developer agents run a deterministic exit gate (`task-gate` skill, `review.task-gates` keyed by agent, `kyber-weave review gates --agent`) that fixes then verifies, with two fix-and-rerun cycles before circuit-breaker escalation; `code-reviewer` is the single review, run once per run. Amended 2026-10-20: the per-task LLM audit roughly tripled task time; a deterministic exit gate replaces it. |
 | [0007](0007-kyberdash-agent-session-analysis-integration.md) | [KyberDash Agent Session Analysis Integration, Dual-Database Architecture, and Navigation Topology](0007-kyberdash-agent-session-analysis-integration.md) | Accepted | 2026-09-03 | Embed deep agent session analysis into Context Explorer, streamline top navigation to 5 tabs, establish dual-database SQLite bridge (`~/.kyberdash/canon.db` and fallback `sessions.db`), and implement formal `/api/kyber/*` REST contract. |
 | [0008](0008-kyberdash-single-canonical-store.md) | [Single Canonical Store; Supersede ADR 0007 D4](0008-kyberdash-single-canonical-store.md) | Accepted | 2026-09-03 | Restore `canon.db` as the only store with derived cached sessions, retire the `sessions.db` fallback, and store content once as compressed parts with the flat map derived on read. |
 | [0009](0009-multi-signal-ingestion-span-shaped-record.md) | [Multi-Signal Ingestion into a Span-Shaped Canonical Record](0009-multi-signal-ingestion-span-shaped-record.md) | Accepted | 2026-09-04 | Serve `/v1/logs` as an enrichment path onto one span-shaped record, quarantine uncorrelated logs and non-model spans, and fix OTel/dot-folder source precedence at one turn. |
@@ -56,17 +59,18 @@ a new ADR that supersedes the old one.
 | [0038](0038-post-run-transcript-sync-subagent-hierarchy.md) | [Post-Run Transcript Synchronization and Stable-Identity Subagent Session Hierarchy](0038-post-run-transcript-sync-subagent-hierarchy.md) | Accepted | 2026-10-14 | Stable subagent session IDs (`agent-<agentId>`, `<parent>#<spanId>`), read-time spend rollups with granular counter preservation, honest `<agent name> · <task summary>` title synthesis, Schema v20, and engine-hosted post-run transcript synchronization with 30-min settlement, 24h timeout, and refresh lock arbitration. |
 | [0039](0039-single-instance-engine.md) | [One KyberDash Engine per User: OS-Enforced Single Instance, Ensure-or-Attach, Version Handoff](0039-single-instance-engine.md) | Accepted | 2026-10-16 | One engine per user via an OS-bound IPC endpoint plus an `engine.json` record; `ensureEngine` attaches, starts from the caller's executable, or replaces a different-version engine; `kyberdash otel` is an attach alias and the receiver is only the engine's child. |
 | [0040](0040-flat-agent-dir-discovery-guarded-resources.md) | [Flat Agent-Directory Discovery Guard for OpenCode and Kilo](0040-flat-agent-dir-discovery-guarded-resources.md) | Accepted | 2026-10-19 | Agent-owned `.md` resources on `opencode` and `kilo` deploy co-located beside their principal with a `.markdown` extension — invisible to both harnesses' recursive `{agent,agents}/**/*.md` scanners — with in-closure authored links rewritten, the deviation recorded as `resource-links-rewritten`, and the `x.md`+`x.markdown` alias failing closed. States the property-based rule for any future target whose scanner registers nested markdown. |
+| [0041](0041-kyberdash-retire-legacy-context-schema-routes.md) | [Retire the Uncalled Context and Schema Routes; Supersede ADR 0007 D3 in Part](0041-kyberdash-retire-legacy-context-schema-routes.md) | Accepted | 2026-10-20 | Delete `GET /api/kyber/context` and `GET /api/kyber/schema` (no live caller; each read a whole session payload to serve kilobytes); deleted paths answer the generic 404 for every method; `/api/kyber/timeline` and all other ADR 0007 D3 endpoints stand. |
 
 ## Writing one
 
 Frontmatter is `doc-type: adr`, which requires only the base keys. Cite it from the documents
-it decided with `decided-by: [<id>]`, and supersede a previous record with
-`supersedes: [<id>]` — both are validated, so a reference to a record that does not exist
-fails `KW-DOC-SPEC-006`.
+it decided with `decided-by: [<id>]`. Name a record in `supersedes: [<id>]` only when the new
+record genuinely replaces that record's subject; both fields are validated, so a reference to a
+record that does not exist fails `KW-DOC-SPEC-006`.
 
-A record superseded in part stays here, current, and the new record says which of its
-decisions it replaces — as [ADR 0008](0008-kyberdash-single-canonical-store.md) does for
-ADR 0007 D4. A record superseded in full moves to `archive/adrs/`, which is outside the corpus
-and never returned as current guidance. Its id stops resolving once it moves, so the record
-that replaces it names it in prose and links the archived path rather than listing it in
-`supersedes`, and every live link to it is repointed at the archive.
+A changed decision edits its record in place. The superseded wording is removed, not struck
+through or kept beside the new text. A record wholly replaced by one on a different subject moves
+to `archive/adrs/`, which is outside the corpus and never returned as current guidance. Its id
+stops resolving once it moves, so the record that replaces it names it in prose and links the
+archived path rather than listing it in `supersedes`, and every live link to it is repointed at
+the archive.

@@ -228,7 +228,7 @@ describe('startOtlpCollectorService canonical projection', () => {
       // Records alone are not the projection: the derived session and its
       // persisted payload exist without any static refresh having run.
       expect(service.canon.getSessionPayload(TRACE_ID)).toMatchObject({ harness: 'claude-code' })
-      expect(service.canon.listSessions().map((session) => session.sessionId)).toContain(TRACE_ID)
+      expect(service.canon.builtSessionIds()).toContain(TRACE_ID)
       expect(service.canon.listRefreshRuns()).toEqual([])
     } finally {
       await service.close()

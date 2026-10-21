@@ -22,8 +22,8 @@ code-refs:
 # Kyber-Squad adoption and usage guide
 
 `kyber-weave squad` is the unified lifecycle and deployment control plane for agent ecosystems.
-It manages the installation, update, inspection, and uninstallation of **22 canonical agents** and
-**24 canonical skills**, with transactional recovery and state governance. Twelve harness targets
+It manages the installation, update, inspection, and uninstallation of **21 canonical agents** and
+**25 canonical skills**, with transactional recovery and state governance. Twelve harness targets
 are declared; all twelve are currently implemented and registered.
 
 ---
@@ -314,7 +314,7 @@ frontier model:
 | `deep-planning` | `claude-opus-5-5-high` | bug-crusher-investigator, sql-database-architect |
 | `general` | `swe-2-high` | dal-dev, github-devops, product-owner, pulumi-dev, tauri-dev |
 | `fast` | `deepseek-v4-1-flash-high` | azure-reader, csharp-dev, docs-dev, maui-dev, python-dev, react-dev, research-agent, test-dev |
-| `reviewer` | `grok-4-7-high` | code-reviewer, review-lens, review-triage, task-reviewer |
+| `reviewer` | `grok-4-7-high` | code-reviewer, review-lens, review-triage |
 
 The `conductor` skill runs on whatever you select in the model picker; Fusion is Devin's
 recommendation there. A model outside your organization's allowlist is an administrator
@@ -769,12 +769,12 @@ kyber-weave squad pack --format all --out ./artifacts
 
 Running `squad pack` outside the repository root fails immediately with a diagnostic directing the operator to rerun the command from the Kyber-Weave repository root (or run `squad install` if deploying agents and skills to a project).
 
-Both archive formats recurse through each skill directory. They contain all 24 canonical
-`SKILL.md` files plus the 68 retained supplemental resources, and retained local skill references
-must resolve in the extracted package. The APM archive additionally contains the 22 canonical
+Both archive formats recurse through each skill directory. They contain all 25 canonical
+`SKILL.md` files plus the 69 retained supplemental resources, and retained local skill references
+must resolve in the extracted package. The APM archive additionally contains the 21 canonical
 agents with their 10 owned reference files; the Agent Plugins archive never contains agents or
 agent-owned resources. A fresh deployment renders every file an owner's Markdown links reach
-beside its principal — 123 files on Copilot today — with authored relative links resolving inside
+beside its principal — 121 files on Copilot today — with authored relative links resolving inside
 the target output; every skill resource reaches this render except
 `skills/setup-dev-environment/agents/openai.yaml`, which stays packaged-only Codex skill-UI
 metadata. The tracked root `.github/` self-deployment predates resource delivery and is refreshed

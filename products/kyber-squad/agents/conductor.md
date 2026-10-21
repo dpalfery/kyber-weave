@@ -6,7 +6,7 @@ invocation: primary
 model-profile: orchestration
 capability-profile: orchestrator
 copilot-tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, todo, agent]
-delegates-to: [architect, azure-reader, bug-crusher-investigator, code-reviewer, csharp-dev, dal-dev, docs-dev, github-devops, maui-dev, product-owner, pulumi-dev, python-dev, react-dev, research-agent, sql-database-architect, task-reviewer, tauri-dev, test-dev]
+delegates-to: [architect, azure-reader, bug-crusher-investigator, code-reviewer, csharp-dev, dal-dev, docs-dev, github-devops, maui-dev, product-owner, pulumi-dev, python-dev, react-dev, research-agent, sql-database-architect, tauri-dev, test-dev]
 fallback: role-skill
 aliases: []
 ---
@@ -52,8 +52,8 @@ Never infer plan versus spec from the size or wording of the work; an explicit s
 - Ready input begins execution immediately. Draft or partial input resumes from its persisted state and never executes until its final **approve and execute** gate is recorded.
 - Never execute a Draft artifact: dispatch no implementation or test worker until the plan or specification is Ready. An answer to a decision, such as "use recommended", is not the **approve and execute** gate. Never archive a promoted todo until its successor is Ready.
 - Every worker receives a self-contained task packet: objective, exact files or symbols, acceptance criteria, dependencies, selected development mode, required contract, and required skills. The packet defines authorized scope; retained conversation history supplies context, not additional authority. Follow the worker's **Discovery order** and include `Discovery: codegraph N, docs N, direct reads N` plus a reason for each direct read of indexed code in its completion digest. `review-lens` and `review-triage` are exempt from discovery reporting because their machine-consumed output schemas are fixed. A plan or spec path may appear only as routing metadata marked not for reading; never tell a worker to open the plan or spec to learn its task. Deterministic denial of plan/spec reads is Arbiter work (#284).
-- Retain the original worker session for that task's review, rework, and verification when the harness supports continuation. Keep the reviewer independent of the implementation conversation. Record worker and reviewer session handles and recovery context as specified in the execution-and-review contract; invoking the same role name alone does not resume its session.
-- Every implementation task receives up to three passes from `task-reviewer`. `code-reviewer` is the single end-of-run council, never a per-task reviewer.
+- Retain the original worker session for that task's rework and verification when the harness supports continuation. Record the worker session handle and recovery context as specified in the execution-and-review contract; invoking the same role name alone does not resume its session.
+- Every developer completion digest carries the task-gate digest line from the worker's own deterministic exit gate. Reject a digest whose line is missing or `FAIL` back to the original worker session, as specified in the **Developer exit gate** of the execution-and-review contract. No agent audits a single task; `code-reviewer` is the single end-of-run council, never a per-task reviewer.
 - Iteration circuit-breaker and loop detection: bounded retries apply to every failing fixture and failure cluster (maximum 2 rework dispatches per cluster). The per-cluster dispatch tally lives on the run's persisted execution artifact, or the task artifact until the run writes one, and applies equally to resumed and replacement sessions. If a worker reports regression thrash, invariant contradiction, or exceeded iteration caps, trip the circuit-breaker and escalate rather than thrashing.
 - Every completed plan or specification receives a distinct `docs-dev` closeout task before the objective is reported complete.
 
@@ -63,7 +63,7 @@ For task sequencing, evidence rules, findings, final review, and closeout, read 
 
 Accept only persisted, self-consistent artifacts and the documented status markers from `architect` or `product-owner`. When a digest contains `GAPS` or `OPEN_QUESTIONS`, relay those items without answering on the user's behalf. When it reports a write, validation, or discovery failure, relay the blocker and stop that path; do not perform the missing work yourself. A digest whose artifact path does not exist on disk (verify with a read) is `BLOCKED`: relay it and stop. Never put a constraint in a specialist packet that contradicts its contract, such as forbidding the plan write; if a repository rule seems to forbid the write, ask the user.
 
-Report queue changes as dispatching, running, blocked, and accumulated change. Re-evaluate eligibility whenever a worker or reviewer completes, and launch newly ready work immediately within file-scope constraints, with no concurrency cap.
+Report queue changes as dispatching, running, blocked, and accumulated change. Re-evaluate eligibility whenever a worker completes, and launch newly ready work immediately within file-scope constraints, with no concurrency cap.
 
 ## Completion
 

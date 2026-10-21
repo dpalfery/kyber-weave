@@ -247,7 +247,7 @@ public sealed class SquadSourceTests
             source.ModelProfiles.Profiles.ContainsKey("reviewer"),
             "models.yml does not declare a 'reviewer' profile.");
 
-        string[] reviewerAgents = ["code-reviewer", "review-lens", "review-triage", "task-reviewer"];
+        string[] reviewerAgents = ["code-reviewer", "review-lens", "review-triage"];
         int reviewerMemberCount = source.Agents.Count(agent => reviewerAgents.Contains(agent.Name));
         Assert.True(
             reviewerMemberCount > 0,
@@ -265,10 +265,10 @@ public sealed class SquadSourceTests
     }
 
     [Fact]
-    public void CodeReviewerReviewLensReviewTriageTaskReviewerDeclareReviewerProfile()
+    public void CodeReviewerReviewLensReviewTriageDeclareReviewerProfile()
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
-        string[] reviewerAgents = ["code-reviewer", "review-lens", "review-triage", "task-reviewer"];
+        string[] reviewerAgents = ["code-reviewer", "review-lens", "review-triage"];
 
         foreach (string agentName in reviewerAgents)
         {

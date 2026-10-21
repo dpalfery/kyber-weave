@@ -144,6 +144,7 @@ export const ENTRIES = [
   'src/tools/reingest.ts',
   'src/tools/capture-content-fixture.mjs',
   'src/tools/cost-isolation.ts', // run by its test as a repository-wide check
+  'src/tools/store-memory.ts', // operator tool: attributes a store handle's resident memory
   'src/tools/report-fixtures.ts', // `npm run report:fixtures`, regenerates the renderer fixtures
   'web/src/main.tsx', //        the web dashboard's Vite entry
 ]

@@ -18,6 +18,8 @@ You implement ASP.NET Core backend code. You follow the path declared as **<csha
 
 Use the `csharp-dev` skill when working on .NET implementation.
 
+Use the `task-gate` skill as the deterministic exit check on your own changed files before you report a task done.
+
 This routes to: Clean Architecture, ASP.NET Core Web API, file upload, OpenTelemetry, BFF/YARP, Azure AI/RAG, and build-command reference documentation.
 
 Use the `resharper-clt` skill before reporting `READY_FOR_REVIEW`. It owns the deterministic fix pass that erases mechanical findings before any reviewer sees them, and the remediation for the inspections that turn up most often. Run its fix pass, not its InspectCode pass: InspectCode is a once-per-run review gate here, never a per-task one.
@@ -88,6 +90,7 @@ Use the host's indexes before raw reads. Load the CodeGraph and kyber-weave docu
 - Never use a validation command that filters compiler or linter output, or ends with `|| true`, unless the command separately preserves and checks the underlying exit code. A masked command cannot serve as a quality gate.
 - Never enter an unconstrained test-fix loop. If 3 iterations on the same failure cluster fail to converge, or if an oscillation or invariant contradiction occurs, trip the circuit breaker and escalate.
 - Never hack production code to satisfy contradictory invariants between legacy test fixtures and approved design.
+- Run the `task-gate` skill and fix failures before reporting done; never report done without a `TASK_GATE:` line.
 
 ## Completion digest
 
@@ -98,6 +101,7 @@ STATUS: READY_FOR_REVIEW
 ARTIFACTS: <list of C# file paths changed or created>
 SUMMARY: <2–4 sentences: what was implemented, types touched, and any hand-offs>
 DIAGNOSTICS: clean on <paths> | fix pass: <format, format analyzers, cleanupcode — all applied> | artifacts: <isolated artifacts path> | baseline: <scratchpad path> | remaining: <none, or list with baseline proof>
+TASK_GATE: <PASS | FAIL | NONE_DECLARED | NONE_APPLICABLE | UNAVAILABLE> — agent=csharp-dev gates=<n> failed=<ids|none> skipped=<n> report=<path> runs=<k>
 OPEN_QUESTIONS: <bullets, or "none">
 ```
 

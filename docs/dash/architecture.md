@@ -6,7 +6,7 @@ component: KyberDash
 source-root: dash
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-19
+last-reviewed: 2026-10-20
 decided-by:
   - adr/0020-kyberdash-one-time-fork
   - adr/0008-kyberdash-single-canonical-store
@@ -22,6 +22,7 @@ decided-by:
   - adr/0033-kyberdash-surfaces-are-display-layers
   - adr/0035-kyberdash-quarantine-raw-packet-evidence
   - adr/0038-post-run-transcript-sync-subagent-hierarchy
+  - adr/0041-kyberdash-retire-legacy-context-schema-routes
 keywords:
   - dashboard
   - codeburn
@@ -76,6 +77,9 @@ code-refs:
   - formatSessionTitle
   - relinkQuarantinedClaudeLogs
   - claudeModelCallCandidatesInTrace
+  - upsertSession
+  - getSessionSummary
+  - fetchKyberSession
 ---
 
 # KyberDash architecture
@@ -382,8 +386,30 @@ log enrichment mark a serialized `CanonicalProjectionScheduler` dirty instead:
   10 minutes, so derived sessions trail the last accepted batch by roughly the idle
   window after the stream quiets, and worst-case by the 10-minute caps.
 
+The scheduled maintenance pass — the retention purge followed by the shared
+projection — once held the main thread for ~26 s every 30 s: a full corpus
+re-projection blocking every HTTP handler, so a request's latency was `max(handler
+cost, time left in the current block)`. It now yields between units of work (per
+session, per run key, per finding batch), so a handler waits on at most one unit plus
+its own cost; it skips the projection entirely when the corpus is unchanged, through a
+change-detection gate over a records-write marker (bumped by every records write —
+ingest, wipe, and the projection's own repricing write-back, which converges because
+a stable corpus writes nothing), the detector version, a parser-contract fingerprint,
+a pricing fingerprint, and the store's schema version; and it purges expired content
+in one set-based transaction rather than a per-record N+1. The purge keeps its
+time-based cadence — its trigger is the retention deadline, not a records change. A
+failed child refresh no longer records bundled source as its summary: the recorded
+`lastFailure` names the actual error from the child's captured stderr, retained in a
+bounded on-disk artifact.
+
+The projection holds one decompressed payload and one decompressed parts set at a
+time; the per-run readers are the exception — they still hold a run's parts while
+serving it.
+
 `KyberBridge.listSessions()` (`dash/src/server/bridge.ts`) reads only the canonical derived
-`session` cache. Raw `records` are never synthesized into sessions for reporting: until the
+`session` cache — and only the twelve columns the `session_denorm_idx` covering index
+carries, never `payload` (see [Materialized session summary columns and the sessions-list covering index](#materialized-session-summary-columns-and-the-sessions-list-covering-index-schema-21)).
+Raw `records` are never synthesized into sessions for reporting: until the
 projection has turned accepted spans into derived rows, a record-only group is not a session
 and appears on no report surface or selector inventory.
 
@@ -666,13 +692,14 @@ measured independently from whether individual composition buckets are available
 
 `CanonStore` (`dash/src/canon/store.ts`) is SQLite through the runtime's built-in module —
 upstream already depends on it for two providers, so no new dependency is introduced. The
-schema is a version-controlled constant executed on construction, currently at version 20;
+schema is a version-controlled constant executed on construction, currently at version 22;
 metadata carries the schema version, and a store built by an older version is migrated in
 place on open rather than rebuilt. Idempotent upsert is keyed on the
 record identifier, which makes re-ingest idempotent (R2.5). The tables are `records`,
 `session`, `run`, `execution`, `token_cache`, `quarantine`, `pending_logs`,
 `quarantined_logs`, `enriched_logs`, `problems`, `ingest_log`, `metadata`,
-`harness_rollup`, `finding`, `prediction`, `source_checkpoint`, `record_provenance`, and `refresh_run`.
+`harness_rollup`, `finding`, `prediction`, `source_checkpoint`, `record_provenance`, `refresh_run`,
+and `session_turn`.
 Schema 11 added checkpointing and provenance ([ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md)),
 schema 12 added `refresh_run`, schema 13 introduced `problem_key` with unique indexing, schema 14 rekeyed that identity by span, code, and location,
 schema 15 made finding estimated waste nullable (`estimated_waste_tokens INTEGER` NULL for coverage-gap findings with unmeasured estimates),
@@ -680,7 +707,9 @@ schema 16 added `history_weeks INTEGER` to `refresh_run`,
 schema 17 added trace metadata columns (`source`, `name`, `timestamp` to `quarantine`; `session_id`, `harness`, `timestamp` to `problems`),
 schema 18 added `quarantine.raw_payload` — the decoded packet a quarantined span is filed with, kept after the record is deleted so the turn inspector can still show what the sender sent ([ADR 0035](../adr/0035-kyberdash-quarantine-raw-packet-evidence.md)),
 schema 19 added a nullable `harness` to `quarantine`, `pending_logs`, and `quarantined_logs`, so a per-harness wipe can scope those rows rather than missing them, and
-schema 20 added sync progress and settling columns (`synced_at TEXT`, `sync_status TEXT DEFAULT 'pending'`, `settled_at TEXT`, `transcript_path TEXT`, `transcript_offset INTEGER DEFAULT 0`) to `session` for post-run transcript synchronization ([ADR 0038](../adr/0038-post-run-transcript-sync-subagent-hierarchy.md)).
+schema 20 added sync progress and settling columns (`synced_at TEXT`, `sync_status TEXT DEFAULT 'pending'`, `settled_at TEXT`, `transcript_path TEXT`, `transcript_offset INTEGER DEFAULT 0`) to `session` for post-run transcript synchronization ([ADR 0038](../adr/0038-post-run-transcript-sync-subagent-hierarchy.md)), and
+schema 21 added the materialized session summary columns (`summary_json TEXT`, `problems_count INTEGER`, both nullable with no `DEFAULT`) to `session`, plus the `session_denorm_idx` covering index and planner statistics — see [Materialized session summary columns and the sessions-list covering index](#materialized-session-summary-columns-and-the-sessions-list-covering-index-schema-21) — and
+schema 22 split turns into `session_turn` and added the `context_limit_source` column — see [Session turn split and the narrow-read columns](#session-turn-split-and-the-narrow-read-columns-schema-22).
 Every `ADD COLUMN` in those steps is presence-guarded, so a store that already carries the column — such as one stamped by an off-main build — reaches the identical final shape instead of failing on a duplicate column ([ADR 0035](../adr/0035-kyberdash-quarantine-raw-packet-evidence.md)).
 `commitSourceUnit` writes records, provenance, and the unit checkpoint together. The raw
 column is compressed (R12.4); the measured cost of not doing
@@ -692,11 +721,186 @@ where the source names no session it falls back to the trace id. `parts_json` ho
 deflate-compressed structured content parts, each with its canonical bucket, its text, an
 optional harness-reported token count, and an optional ground-truth MCP server name. Where
 parts are present they are the authority: the flat content map is derived from them on read,
-so the same text is never stored twice.
+so the same text is never stored twice. Turn rows and record parts share one codec
+contract: content is stored compressed (deflate, level 6) and read back through a
+tolerant codec, and a value whose deflated form is not smaller is stored as plain
+text instead — the measured "does not pay" boundary is ~74 bytes. Measured on
+40,621 realistic turns, level 6 stores 7.82 MB against 15.31 MB plain (0.51×), at
+~364 ms of deflate and ~146 ms of inflate for a full-corpus read.
 
 The `session` table holds derived sessions, one row per conversation. Each payload is built by
 running the analysis layer (`analyzeContext`, `rankSchemas`, `buildTimeline`) over the
 records, and the table is a cache: dropping every row and rebuilding loses nothing.
+
+#### Materialized session summary columns and the sessions-list covering index (schema 21)
+
+The sessions list once read the entire `payload` blob of every session row to compute two
+values — `json_extract(payload, '$.summary')` and
+`json_array_length(json_extract(payload, '$.problems'))` — with no SQL `LIMIT`. On a corpus
+whose payloads total tens of megabytes, every list request demand-paged the whole payload
+store (measured 15.6–26.1 s cold, intermittently, as the machine's own background I/O
+evicted the page cache). Schema 21 materializes both values at write time so the list never
+reads `payload`.
+
+**Columns.** `session` gains `summary_json TEXT` and `problems_count INTEGER`, both nullable
+with no `DEFAULT`. `NULL` is the per-column sentinel meaning "this column was not
+materialized", never "this row is whole": a row that predates the columns keeps `NULL`
+until the projection rewrites it, and the reader derives such rows from `payload` instead
+of misreading them as an empty summary or a zero count. A `DEFAULT` would erase exactly
+that distinction. The migration is presence-guarded and idempotent with no backfill; legacy
+rows self-heal on the next projection rebuild, and the legacy state is never worse than the
+pre-change baseline.
+
+**The writer owns those columns.** `upsertSession` derives both values from the same
+serialized payload it writes, in the same statement, so they cannot drift from `payload`.
+The column-ownership split with the transcript-sync job is preserved: the upsert names none
+of `synced_at`, `sync_status`, `settled_at`, `transcript_path`, or `transcript_offset`, so
+a re-upsert leaves the sync job's columns intact.
+
+**The reader reads those columns only.** `KyberBridge.listSessions` selects the twelve
+index-covered columns and orders by `started DESC`, with a legacy fallback
+(`WHERE summary_json IS NULL OR problems_count IS NULL`) that serves unmaterialized rows
+from `payload`; the pre-existing full-payload read stays as the last resort when JSON
+functions are unavailable. The `?limit` slice still applies after subagent nesting and
+rollup — deliberately not pushed into SQL, because a SQL-level limit would cut the children
+of returned parents and change the rollup output. `buildContextReport` inherits the fix
+through this method, and `sessionTokenTotals` reads `summary_json` first with a per-row
+payload fallback, keeping its `not_measurable`-stays-`undefined` contract.
+
+**The covering index is the mechanism, not the columns alone.** `ALTER TABLE … ADD COLUMN`
+appends the new columns after `payload`, so a table-row read for `summary_json` still
+traverses the payload's overflow chain — the denormalization alone relocates the cost without
+an index (cold unchanged, ~18 ms warm). `session_denorm_idx` over the reader's exact column
+list turns the list into an index-only scan
+(`SCAN session USING COVERING INDEX session_denorm_idx`, 211 pages / ~864 KB). The lesson
+carries forward: every future payload-derived field needs the column *plus* an index that
+covers its reader, and the reader's SELECT must stay inside the index's columns — adding a
+column to one without the other silently brings the payload walk back. The index DDL lives
+in one module-scope constant (`SESSION_DENORM_INDEX_SQL`), applied by the presence-guarded
+`createSessionDenormIndex` helper from both the migration step and the constructor's
+fresh-create path — never inline in `SCHEMA_SQL`, whose unconditional DDL would fail to open
+a store whose `session` table predates the reader's columns. Planner statistics
+(`ANALYZE session` in the migration and on fresh creation, maintained thereafter by the
+existing close-time `PRAGMA optimize`) are hygiene and determinism for the planner's cost
+model, not the index's unlock: the index alone flips the plan on the supported build. A
+read-only connection cannot write `sqlite_stat1`, which is why the writer is the only place
+the statistics are written.
+
+**Rejected alternatives (all measured, do not revisit).** Extracting only `$.summary`
+still materializes the whole blob (0.077 s vs 0.072 s warm); `PRAGMA cache_size`,
+`mmap_size`, and `temp_store` tuning moved nothing on either end; an expression index
+over `json_extract(payload, …)` matched the read but cost 3.5× per-refresh upserts and
+hard-fails the INSERT on malformed JSON; a separate summary table and a payload-last
+rebuild matched the read at higher migration or write-site cost; `VACUUM` halves the
+file with list latency unchanged, because freelist pages are never read.
+
+**One adjudicated exception to byte-identity.** A row carrying `problems` but no
+`summary` — a shape the payload builder never writes — reports its true materialized
+count, where the pre-change JSON-capable path reported `0` (that path's own bug; its
+no-JSON fallback already reported the true count). The two columns are consumed
+independently downstream and the legacy merge fills only what a row is missing, so a
+materialized value is never overwritten by the payload.
+
+**The bounded summary route.** `GET /api/kyber/session/:id/summary` serves the ten-key
+bounded shape (`session_id`, `harness`, `label`, `is_subagent`, `parent_session`,
+`agent_name`, `started`, `ended`, `summary`, `problems_count`) from the columns, with a
+per-row legacy fallback and no `_clip` — the content is bounded by construction. The
+fallback is per column, not whole-row: a row is incomplete when either materialized
+column is NULL, and only the missing column is filled from the payload — through the
+same `isMissingSessionColumn` / `fillMissingSessionColumns` mechanism the sessions list
+uses, so the two surfaces cannot disagree on `problems_count`. It serves
+no run or execution linkage, deliberately: those fields exist in neither the payload nor
+the table, and serving them would push a `{level:'run'}` spine entry that does not exist
+today. The web client's `fetchKyberSession` targets this route, so deep-link ancestry
+lookup stops pulling the whole payload; the resolved spine stays
+`[doctor, harness, execution]` with no run level. Deployment coupling: the web client
+requires the engine's new route — against an older engine the request 404s and the client
+degrades to a not-found spine rather than crashing, so server and client ship together.
+
+**Measured result.** Cold list 37.5–47.2 ms against the < 1 s target; warm median 2.174 ms
+against ≤ 10 ms. List output is byte-identical across the materialized, forced-legacy,
+index-dropped, and pre-change-reader states (279,991 bytes), and all 7 harness-filtered
+responses match the pre-change reader. The index is not a write tax (full projection within
+0.5% with or without it), and the legacy state self-heals on the next projection rebuild.
+
+#### Session turn split and the narrow-read columns (schema 22)
+
+The sessions list no longer reads `payload` at all; the detail path still did — one
+whole-blob read per session to reach a single turn. Schema 22 removes that read by
+moving the turns out of the blob:
+
+```sql
+CREATE TABLE IF NOT EXISTS session_turn (
+  session_id TEXT NOT NULL,
+  turn_index INTEGER NOT NULL,
+  turn_json TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS session_turn_by_session ON session_turn (session_id, turn_index);
+ALTER TABLE session ADD COLUMN context_limit_source TEXT; -- presence-guarded; NULL = not materialized
+```
+
+`session_turn` holds one row per turn; `turn_json` is the deflated turn JSON (zlib,
+level 6), compressed from birth. The column's declared type stays `TEXT` while SQLite's
+dynamic typing keeps the deflated bytes a `BLOB` value in that column all the same, and
+readers tell the two stored forms apart by the storage class the value comes back with;
+the `(session_id, turn_index)` index is deliberately not unique because a legacy payload
+may repeat an index. `session.payload` is rewritten without the `turns`
+key — every other top-level key byte-identical, in its original order — so metadata
+readers see the same document minus turns. The migration also populates
+`context_limit_source` from `payload.context.contextLimitSource` on every row it
+rewrites, and the writer materializes it on every write thereafter, so a fresh corpus
+is never under-counted.
+
+The table shape is the read shape: the detail path reassembles `{...metadata,
+turns}` with one ordered range scan per session — no per-turn N+1 — and `_clip`
+applies to the assembled document exactly as before. A per-turn read served from the
+payload would still pay the whole-blob server cost (`json_extract` materializes the
+row), so the bounded per-turn read below is born reading one `session_turn` row.
+Readers discriminate the two stored turn forms by SQLite's storage class, so a row
+written before the change still reads.
+
+The migration is presence-guarded and idempotent — a row whose payload carries no
+`turns` key is skipped, so re-running on a split store writes nothing — in one
+transaction per step, like every migration before it. Older binaries refuse a v22
+store by design (fail-closed).
+
+The per-column `NULL` sentinel carries over from schema 21: a `NULL`
+`context_limit_source` means "this column was not materialized", never "this row is
+whole". A row with a NULL source is not counted by `countUnknownWindowSessions`,
+matching the old `NULL IN ('default','absent')` behavior of the payload expression
+the column replaced.
+
+`session_denorm_idx` stays load-bearing: the split shrinks the largest payloads but
+leaves their non-turn keys (`problems`, `reconciliation`, `timeline`, `requests`) at
+MB scale, so the payload overflow chain persists and the list remains an index-only
+scan. Steady-state passes skip unchanged turn rows, and the full-rebuild write budget
+is ≤ baseline + 750 ms (deflate level 1 is the escape hatch if the gate misses).
+
+**Measured corpus.** 336 sessions, 79.6 MB of payload holding 40,621 turns; after the
+split the payload total is 48.3 MB and `session_turn` holds 40,719 rows over 9,031
+pages (36,990,976 bytes).
+
+**Deployment fact.** A store must be migrated to v22 by the new build before the list
+is fast: the v21 migration added the materialized columns without backfilling them,
+so until the new build's projection — or the v22 migration — rewrites a row, its
+columns stay NULL and the reader serves it from payload. Deploy the new build first;
+the migration lands on open.
+
+**Operator reclamation.** `kyberdash dash vacuum` reclaims the freelist the split
+leaves behind. `--dry-run` reports the reclaimable space from SQLite's own
+`page_count`/`freelist_count`/`page_size` counters, opening the store read-only —
+the file's size and mtime are unchanged afterwards. A real run reports the before
+size, the after size, the reclaimed bytes, and the freelist count it reclaimed; it
+holds the same writer lock a refresh holds, and it refuses a store it cannot open
+with the store's own upgrade message. Measured: the live store is 3.33 GB with a
+286,441-page freelist of 813,331 pages (~35% dead). There is no recurring vacuum
+cadence — freelist pages are never read (`VACUUM` halves the file with list latency
+unchanged), and the quarantine family is evidence retention by design under the
+existing purge policy ([ADR 0018](../adr/0018-kyberdash-content-retention-purge.md)),
+so retention is unchanged. The one-time live vacuum is an owner-operated step: stop
+the engine, run `kyberdash dash vacuum`, start the engine. In WAL mode the main file
+is rewritten only at the final checkpoint, so the engine must be stopped, not merely
+idle.
 
 #### Subagent session hierarchy and read-time spend rollups (ADR 0038)
 
@@ -1011,7 +1215,9 @@ compares three implementations (design D2, Requirement 11.14;
 `dash/src/cli/report-api-parity.test.ts` proves CLI and REST equality).
 
 The builder reads only what the shared projection derived. The latest-session section reads
-the persisted session payload through `getSessionPayload()`, so a measurable session shows
+the materialized columns (`summary_json` and the columns the report consumes) instead of
+the payload blob — the report response is unchanged, and the tray's `/api/kyber/report`
+endpoint no longer reaches a full payload read — so a measurable session shows
 measured latest-turn context while a truly absent context keeps the honest
 "harness exported no message structure" reason rather than a fabricated figure.
 `coverage.harnesses` is selector/navigation metadata required by Requirement 8.8: the
@@ -1234,7 +1440,10 @@ The web dashboard server wires HTTP requests directly to `KyberBridge`:
 | `/api/kyber/runs` | `GET` | `{ runs: RunRow[] }` | List runs newest-first; supports `?harness=`. Each row carries `started`, `harness`, measured `turnCount` when derivable, and optional `label` for Compare inventory labels. |
 | `/api/kyber/run/:id` | `GET` | `{ run, executionTree, executions, findings, turns, scorecard }` | Complete run detail with parent/child execution tree, executions enriched with `turnCount` and `costUsd`, `turns` list (`RunTurnRow[]` with model, tokens, pressure, `cacheHitRatio`, timestamp, and per-turn `costUsd`), and run-scoped `scorecard` (`RunScorecard`). |
 | `/api/kyber/sessions` | `GET` | `{ sessions: SessionSummary[] }` | List sessions; supports `?limit=` and `?harness=`. |
-| `/api/kyber/session/:id` | `GET` | `SessionPayload` | Full session payload with turns, context, tools, and timeline. Summary emits `cache_hit_ratio` and `cache_creation_coverage` from single engine writer. Additively carries `summary.skills_listed`, `summary.skills_invoked`, `skills`, and per-turn `turns[i].skills_listed` / `turns[i].skills_invoked` ([skills view contract](#skills-view-contract)). |
+| `/api/kyber/session/:id` | `GET` | `SessionPayload` | Full session payload with turns, context, tools, and timeline. Summary emits `cache_hit_ratio` and `cache_creation_coverage` from single engine writer. Additively carries `summary.skills_listed`, `summary.skills_invoked`, `skills`, and per-turn `turns[i].skills_listed` / `turns[i].skills_invoked` ([skills view contract](#skills-view-contract)). Since schema 22 the served document is assembled — the metadata payload plus one ordered `session_turn` scan — with identical content and unchanged `_clip` bounds. |
+| `/api/kyber/session/:id/summary` | `GET` | Bounded session summary (`session_id`, `harness`, `label`, `is_subagent`, `parent_session`, `agent_name`, `started`, `ended`, `summary`, `problems_count`) | Bounded ancestry lookup served from the materialized columns without touching `payload`; 404 for an unknown id. No run or execution linkage is served, deliberately ([below](#materialized-session-summary-columns-and-the-sessions-list-covering-index-schema-21)). |
+| `/api/kyber/session/:id/turn/:index` | `GET` | Bounded per-turn figures | One turn's figures served from a single `session_turn` row — 404 for an unknown turn under the strict 0-based identity lookup. The turn page's counters query reads kilobytes here instead of the whole payload (up to 10,933 turns) it once fetched for one row's counters. |
+| `/api/kyber/timeline` | `GET` | Session timeline | The stored session `timeline` served from the payload directly, without the whole-blob `getSessionPayload` reassembly; the shape the client already parses is unchanged. |
 | `/api/kyber/session/:id/content` | `GET` | `SessionContent` | Full canonical content for an inspected session part. |
 | `/api/kyber/session/:id/turn/:index/content` | `GET` | `TurnContentResult` | Full unclipped assembled context for a specific turn ([ADR 0014](../adr/0014-unclipped-turn-inspection-and-copy-out-protocol.md)). Uses 0-based `:index`; strict resolution returns 404 for out-of-bounds turn indices, and 200 with empty parts when the turn exists but recorded no content. `?full=true` is the explicit lossless path — no default-budget truncation, no large-number sentinel — backing the whole-turn inspector; each part annotates recurrence against earlier captured turns by whole-text sha256 with no normalization, and `sharedContext` unions turn-span system prompts with non-turn session prompts, each tagged with its contributing `turnIndex` ([ordered, API-seen turn context](#ordered-api-seen-turn-context)). Additively carries `parentSpanId` and `rawPacket: { spanAttributesPath, interactionPath? }` — the packet pointers the turn view discloses; `interactionPath` is present only when the parent's quarantine row kept a payload ([ADR 0035](../adr/0035-kyberdash-quarantine-raw-packet-evidence.md)). Additively carries a `skills` entry, `{listed: [{name, text?}], invoked: [names]}`, where either side or the whole entry may be `{availability: 'not_measurable', reason}` ([skills view contract](#skills-view-contract)). |
 | `/api/kyber/findings` | `GET` | `{ findings: Finding[], total, limit, offset, detectorCounts, unknownWindowSessions }` | Ranked findings; supports `?runId=`, `?sessionId=`, `?harness=`, `?detector=`, `?limit=`, `?offset=`. `total` describes the narrowed set; `detectorCounts` cover the run/session/harness scope ignoring paging and the detector filter so filter chips never evaporate; `unknownWindowSessions` counts sessions with an unreported context window in scope. |
@@ -1258,7 +1467,7 @@ The web dashboard server wires HTTP requests directly to `KyberBridge`:
 | `/api/kyber/clean` | `POST` | `CleanReport` | User-initiated database clean ([ADR 0032](../adr/0032-kyberdash-user-initiated-clean.md)). Body carries exactly one scope (`all: true` or a non-empty `harnesses` list), explicit `confirm: true`, and the optional `reingestWeeks` window (1–52; absent or null means no re-ingest, which is the default). 200 with the wipe counts and re-ingest summary; 400 invalid body/scope; 405 non-POST; 409 lock busy; 413 body over 64KB; 500 bounded failure. |
 | `/api/kyber/import-history` | `POST` | `202 { accepted: true }` · `409 { error }` · `500 { error }` | One-off folder history import ([§2c](../dash/runbook.md#2c-import-folder-history-dash-import-history) of the runbook). The **request body** is `{ weeks?, harness? \| harnesses? }` — `weeks` defaults to 1 and is capped at 52, and the singular and plural harness keys are mutually exclusive (either may be omitted, meaning every readable harness). Never reads or changes `settings.folder_import.scheduled`. 400 invalid payload; 409 `{ error }` when a job is already running here; 500 `{ error }` when the spawn itself failed. Like refresh, it answers once the job is taken, so the outcome is read from `GET /api/kyber/jobs`. |
 
-All `/api/kyber/*` responses return standard headers (`content-type: application/json; charset=utf-8`, `cache-control: no-store`). Unrecognized `/api/kyber/*` routes return HTTP 404 JSON (guaranteed never to fall through to SPA HTML), and non-GET requests return HTTP 405 Method Not Allowed.
+All `/api/kyber/*` responses return standard headers (`content-type: application/json; charset=utf-8`, `cache-control: no-store`). Unrecognized `/api/kyber/*` routes return HTTP 404 JSON (guaranteed never to fall through to SPA HTML), and non-GET requests return HTTP 405 Method Not Allowed. `GET /api/kyber/context` and `GET /api/kyber/schema` are gone — deleted with no live caller ([ADR 0041](../adr/0041-kyberdash-retire-legacy-context-schema-routes.md)) — and answer this generic 404 like any unknown path; a non-GET on either answers 404 rather than 405.
 
 ### User-initiated database clean (ADR 0032)
 
@@ -1374,6 +1583,7 @@ project; the measured rationale the retirement would otherwise take with it is p
 - [ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md) — harness-source jobs, split client identity, schema-11 checkpoints, and `dash refresh`.
 - [ADR 0018](../adr/0018-kyberdash-content-retention-purge.md) — stored content with a 14-day automatic purge after refresh.
 - [ADR 0038](../adr/0038-post-run-transcript-sync-subagent-hierarchy.md) — post-run transcript synchronization, stable-identity subagent session hierarchy, Schema v20, and read-time spend rollups.
+- [ADR 0041](../adr/0041-kyberdash-retire-legacy-context-schema-routes.md) — the legacy context and schema routes are deleted with no live caller; the timeline clause of ADR 0007 D3 stands.
 - [Relocation over context deletion standard](../rules/relocation-over-deletion.md) — diagnostic recommendations prioritize moving and progressive disclosure over context removal (D8).
 - [Honest unobservability standard](../rules/honest-unobservability.md) — missing telemetry and coverage gaps are explicit and never coerced to zero.
 - [Secondary cost display standard](../rules/secondary-cost-display.md) — cost is strictly a derived secondary metric behind token and latency health (D9).

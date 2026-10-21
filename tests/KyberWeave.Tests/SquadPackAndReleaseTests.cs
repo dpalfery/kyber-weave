@@ -7,6 +7,7 @@ using System.Xml.Linq;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Docs.Scaffolding;
 using KyberWeave.Core.Squad.Model;
+using KyberWeave.Core.Squad.Packaging;
 using KyberWeave.Mcp;
 using KyberWeave.Tests.Fakes;
 using Xunit;
@@ -45,7 +46,6 @@ public sealed class SquadPackAndReleaseTests : IDisposable
         "review-lens",
         "review-triage",
         "sql-database-architect",
-        "task-reviewer",
         "tauri-dev",
         "test-dev"
     ];
@@ -75,6 +75,7 @@ public sealed class SquadPackAndReleaseTests : IDisposable
         "second-brain",
         "security-review",
         "setup-dev-environment",
+        "task-gate",
         "test-dev"
     ];
 
@@ -144,15 +145,15 @@ public sealed class SquadPackAndReleaseTests : IDisposable
         Assert.Contains(entryNames, name => name == "profiles/fallbacks.yml");
         Assert.Contains(entryNames, name => name == "mcp.json");
 
-        // Presence of all 21 canonical agents
-        Assert.Equal(21, CanonicalAgents.Length);
+        // Presence of all 20 canonical agents
+        Assert.Equal(20, CanonicalAgents.Length);
         foreach (string agent in CanonicalAgents)
         {
             Assert.Contains(entryNames, name => name == $"agents/{agent}.md");
         }
 
-        // Presence of all 24 canonical skills
-        Assert.Equal(24, CanonicalSkills.Length);
+        // Presence of all 25 canonical skills
+        Assert.Equal(25, CanonicalSkills.Length);
         foreach (string skill in CanonicalSkills)
         {
             Assert.Contains(entryNames, name => name == $"skills/{skill}/SKILL.md" || name.StartsWith($"skills/{skill}/", StringComparison.Ordinal));
@@ -170,6 +171,23 @@ public sealed class SquadPackAndReleaseTests : IDisposable
             name.StartsWith(".pi/", StringComparison.OrdinalIgnoreCase) ||
             name.StartsWith(".zcode/", StringComparison.OrdinalIgnoreCase) ||
             name.StartsWith(".devin/", StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// The stub-tree tests above prove the packer's shape, not the shipped inventory. This packs the
+    /// real canonical source so the APM package must carry the <c>task-gate</c> exit gate and must
+    /// not carry the retired <c>task-reviewer</c> in any entry.
+    /// </summary>
+    [Fact]
+    public void Pack_Apm_CanonicalSourceShipsTaskGateAndNoRetiredTaskReviewer()
+    {
+        string productRoot = Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+        string archivePath = SquadPacker.PackApm(productRoot, _temp.Path, "task-gate-inventory");
+        using ZipArchive archive = ZipFile.OpenRead(archivePath);
+        List<string> entryNames = archive.Entries.Select(entry => entry.FullName).ToList();
+
+        Assert.Contains("skills/task-gate/SKILL.md", entryNames);
+        Assert.DoesNotContain(entryNames, name => name.Contains("task-reviewer", StringComparison.Ordinal));
     }
 
     /// <summary>
@@ -285,7 +303,7 @@ public sealed class SquadPackAndReleaseTests : IDisposable
             }
         }
 
-        // Portable components only: contains all 24 canonical skills
+        // Portable components only: contains all 25 canonical skills
         foreach (string skill in CanonicalSkills)
         {
             Assert.Contains(entryNames, name => name == $"skills/{skill}/SKILL.md" || name.StartsWith($"skills/{skill}/", StringComparison.Ordinal));

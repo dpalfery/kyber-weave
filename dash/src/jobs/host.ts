@@ -10,6 +10,8 @@
 // inside the child keeps arbitrating with terminal-started refreshes.
 
 import { spawn } from 'child_process'
+import { mkdirSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 
 import type { CanonStore } from '../canon/store.js'
 import { SETTING_KEYS, readSetting } from '../settings/shared-settings.js'
@@ -23,7 +25,19 @@ export const REFRESH_BUSY_EXIT_CODE = 3
 
 const MINUTE_MS = 60_000
 const FAILURE_SUMMARY_MAX = 200
-const STDERR_CAP = 8192
+/**
+ * How much of a child's stderr is kept, in memory and in the on-disk artifact.
+ *
+ * The tail is kept, not the head: a child's error is written last (the
+ * message, then the stack), and a stack that runs through a packaged CLI
+ * carries the whole bundle in every frame, so the head of that stderr is the
+ * least informative part of it.
+ */
+const STDERR_CAP = 256 * 1024
+/** Where a failed child's stderr is kept, under the state dir this host owns. */
+const FAILURE_ARTIFACT_DIR = 'failures'
+/** How many failure artifacts are kept; the oldest are dropped. */
+const FAILURE_ARTIFACTS_KEPT = 10
 
 export type ChildResult = { readonly code: number | null; readonly stderr: string }
 
@@ -99,7 +113,11 @@ const realClock: JobClock = {
   clearInterval: (id) => { clearInterval(id as NodeJS.Timeout) },
 }
 
-/** Spawns a real child, keeping only the tail of stderr: that is all a failure summary needs. */
+/**
+ * Spawns a real child, keeping only the tail of stderr: that is all a failure
+ * summary needs, and the artifact that records the failure keeps the same
+ * bounded tail.
+ */
 export const nodeSpawner: JobSpawner = {
   spawn(program, args) {
     const child = spawn(program, [...args], { stdio: ['ignore', 'ignore', 'pipe'] })
@@ -116,9 +134,39 @@ export const nodeSpawner: JobSpawner = {
   },
 }
 
-/** The footer shows this, so it must be one readable line, not someone else's stack trace. */
+/**
+ * Whether a stderr line names an error.
+ *
+ * `Error:`, `TypeError:`, `Error [ERR_...]:` and the rest of the family. A
+ * stack frame never matches: it starts with `at `, and the name it mentions
+ * is not the line's own leading word.
+ */
+function isErrorLine(line: string): boolean {
+  return /^(?:[A-Za-z][A-Za-z0-9_]{0,64})?(?:Error|Exception)\b/.test(line)
+}
+
+/**
+ * The footer shows this, so it must be one readable line, and it must be the
+ * ERROR rather than whatever the child's stderr happened to open with.
+ *
+ * WHY the first line is not enough: a child that dies inside the packaged
+ * CLI writes a stack trace whose frames name the bundle it was running from,
+ * and that bundle is a base64 blob of megabytes. The first line of that
+ * stderr is a fragment of the blob, which decodes to the bundle's own source
+ * and says nothing at all about the failure — the recorded reason for a
+ * refresh that had been failing for hours was commander.js internals. The
+ * error is the line that names it, and that is the line an operator needs.
+ */
 function summarize(stderr: string, fallback: string): string {
-  const line = stderr.split('\n').map(l => l.trim()).find(l => l !== '')
+  const lines = stderr
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line !== '')
+  // A bundle URL names the program, not the failure: it is the first line of
+  // a packaged child's stderr and it is megabytes long.
+  const meaningful = lines.filter((line) => !line.startsWith('data:'))
+  const error = meaningful.find(isErrorLine)
+  const line = error ?? meaningful[0]
   return line === undefined ? fallback : line.slice(0, FAILURE_SUMMARY_MAX)
 }
 
@@ -309,12 +357,69 @@ export class JobHost {
       return { outcome: 'busy' }
     }
     const reason = summarize(result.stderr, result.code === null ? 'terminated' : `exit ${result.code}`)
+    // The evidence goes to disk before the reason is recorded: a failure that
+    // cannot be diagnosed after the fact is the failure this whole path
+    // exists to prevent.
+    const artifact = this.writeFailureArtifact(kind, result.stderr, stamp)
     if (isRefresh) {
       // The last success time survives the failure.
       this.refreshState = 'failed'
-      this.lastFailure = `${reason} at ${stamp}`
+      this.lastFailure =
+        artifact === null ? `${reason} at ${stamp}` : `${reason} at ${stamp} (stderr: ${artifact})`
     }
     return { outcome: 'failed', reason }
+  }
+
+  /**
+   * Write the child's stderr to a bounded artifact under the state dir.
+   *
+   * WHY an artifact at all: the summary is one line, and a line is not enough
+   * to diagnose a failure whose stack is thousands of lines long. The
+   * artifact is the rest of the evidence, kept where the host already owns
+   * the filesystem, and bounded so a child that spewed megabytes cannot fill
+   * the disk.
+   *
+   * Returns the artifact's path, or null when it could not be written: a
+   * failure to keep the evidence must never replace the failure itself.
+   */
+  private writeFailureArtifact(kind: string, stderr: string, stamp: string): string | null {
+    const directory = join(this.stateDir, FAILURE_ARTIFACT_DIR)
+    try {
+      mkdirSync(directory, { recursive: true })
+      // A file name safe everywhere: the stamp's colons are not.
+      const name = `${kind}-${stamp.replace(/[:.]/g, '-')}.stderr.log`
+      const path = join(directory, name)
+      writeFileSync(path, stderr.slice(-STDERR_CAP), 'utf8')
+      this.pruneFailureArtifacts(directory)
+      return path
+    } catch {
+      return null
+    }
+  }
+
+  /** Keep the newest artifacts; a host that fails every tick must not fill the disk. */
+  private pruneFailureArtifacts(directory: string): void {
+    try {
+      const names = readdirSync(directory).filter((name) => name.endsWith('.stderr.log'))
+      // Newest by file time, not by kind: names are `{kind}-{stamp}.stderr.log`,
+      // so a plain sort() orders every `clean-…` before every `refresh-…` and
+      // evicts a fresh clean file while keeping a stale refresh one.
+      const byAge = names
+        .map((name) => {
+          try {
+            return { name, mtimeMs: statSync(join(directory, name)).mtimeMs }
+          } catch {
+            return { name, mtimeMs: 0 }
+          }
+        })
+        .sort((a, b) => a.mtimeMs - b.mtimeMs || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+        .map((entry) => entry.name)
+      for (const name of byAge.slice(0, Math.max(0, byAge.length - FAILURE_ARTIFACTS_KEPT))) {
+        unlinkSync(join(directory, name))
+      }
+    } catch {
+      // Pruning is housekeeping: a failure to prune must not fail the failure.
+    }
   }
 
   private async runMaintenance(): Promise<void> {

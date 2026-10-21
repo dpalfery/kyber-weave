@@ -188,30 +188,83 @@ export interface KyberSessionSummary {
 }
 
 /**
- * The session payload fields ancestry needs. `runId` is optional because the
- * served document does not yet carry it — resolveAncestry reads it when present
- * rather than inventing a run by scanning other endpoints (R7.5).
+ * The bounded session summary `GET /api/kyber/session/:id/summary` serves:
+ * ten identity-and-summary keys, no payload, no lineage.
+ *
+ * WHY a second document for the same session: the detail route serves the
+ * whole session blob — up to 15.3 MB and a multi-second cold page-in for a
+ * session with 10,933 turns — while a consumer that needs a handful of
+ * identity fields pays for all of it. The bounded route answers the same
+ * question for a fraction of the cost.
+ *
+ * Every key but `harness` is read defensively (optional): the client resolves
+ * an id and a harness, and must not break on a key the body omits. `harness`
+ * is the one it cannot do without — without it there is no spine.
  */
-export type KyberSessionAncestry = {
-  id?: string
+export type KyberSessionSummaryDetail = {
+  /** The session's id, the spine's execution level. */
   session_id?: string
+  /** The harness that produced the session — the spine's harness level. */
   harness: string
+  /** The stored label, verbatim. The sessions list applies its own title fallback. */
+  label?: string | null
+  is_subagent?: boolean
+  parent_session?: string | null
+  agent_name?: string | null
+  started?: string | null
+  ended?: string | null
+  /** The session's summary object, parsed — never a JSON string. */
+  summary?: Record<string, unknown>
+  /** How many problems the session carries. */
+  problems_count?: number
+}
+
+/**
+ * What the ancestry consumer reads off the bounded summary.
+ *
+ * The lineage keys (`runId`, `run_id`, `executionId`, `execution_id`) are NOT
+ * part of the served shape: the `session` table has no such column and the
+ * session payload carries no such field either, so a link served here would be
+ * invented rather than measured — and an invented link would push a run level
+ * into the resolved spine that today's client never produces. They stay on
+ * the type because the resolver probes them defensively and must keep reading
+ * `undefined`, the same value it reads today, rather than having its
+ * resolution logic rewritten around a lineage it cannot verify (R7.5).
+ */
+export type KyberSessionAncestry = KyberSessionSummaryDetail & {
+  /**
+   * The detail route's legacy id key. The bounded route never serves it, so
+   * the resolver's `id ?? session_id` chain falls through to `session_id` and
+   * resolves the same identity it resolves today.
+   */
+  id?: string
   runId?: string
   run_id?: string
   executionId?: string
   execution_id?: string
 }
 
+/**
+ * One session's identity fields, from the bounded summary route.
+ *
+ * WHY this route and not the detail route: the detail route serves the entire
+ * session payload, and this consumer needs the identity fields only. The
+ * turns consumer (`fetchKyberSessionTurns`) reads the bounded per-turn route
+ * for one turn, and the detail route for a session's whole list of them.
+ */
 export async function fetchKyberSession(sessionId: string): Promise<KyberSessionAncestry> {
-  return fetchJson<KyberSessionAncestry>(`/api/kyber/session/${encodeURIComponent(sessionId)}`)
+  return fetchJson<KyberSessionAncestry>(
+    `/api/kyber/session/${encodeURIComponent(sessionId)}/summary`,
+  )
 }
 
 /**
  * Measured per-turn token figures from the session turn row (issue #184, Q3).
  * Every field is a harness-measured counter or null; consumers render what is
- * measured and state absence plainly — never estimate from text. The rows
- * themselves come from the full session payload (`GET /api/kyber/session/:id`),
- * which the inspector header reads for measured counters only.
+ * measured and state absence plainly — never estimate from text. A single
+ * turn's row comes from the bounded per-turn route, which the turn page
+ * reads; the whole list of a session's rows still comes from the full session
+ * payload (`GET /api/kyber/session/:id`).
  */
 export interface TurnTokenFigures {
   input?: number | null
@@ -220,7 +273,46 @@ export interface TurnTokenFigures {
   cacheRead?: number | null
 }
 
-export async function fetchKyberSessionTurns(sessionId: string): Promise<KyberSessionTurnRow[]> {
+/**
+ * One turn's row, from the bounded per-turn route.
+ *
+ * <remarks>
+ * The same row shape the detail route serves for one turn, so a consumer that
+ * already reads the detail route's rows reads this one unchanged — but from
+ * `GET /api/kyber/session/:id/turn/:index`, which answers one turn instead of
+ * the session's whole payload.
+ */
+export type KyberSessionTurn = KyberSessionTurnRow & {
+  /** The session the turn belongs to. */
+  session_id: string
+  /** The turn's index in that session. */
+  turn_index: number
+}
+
+/**
+ * A session's turn rows, or one turn's row.
+ *
+ * <remarks>
+ * With a turn index, the read is the bounded per-turn route: one row, never
+ * the session's whole payload — which is what a single turn's counters cost
+ * before (up to 10,933 turn rows to read four numbers). Without one, the read
+ * is still the detail route's turns array, the shape a list-style consumer
+ * expects.
+ */
+export async function fetchKyberSessionTurns(sessionId: string): Promise<KyberSessionTurnRow[]>
+export async function fetchKyberSessionTurns(
+  sessionId: string,
+  turnIndex: number,
+): Promise<KyberSessionTurn>
+export async function fetchKyberSessionTurns(
+  sessionId: string,
+  turnIndex?: number,
+): Promise<KyberSessionTurnRow[] | KyberSessionTurn> {
+  if (turnIndex !== undefined) {
+    return fetchJson<KyberSessionTurn>(
+      `/api/kyber/session/${encodeURIComponent(sessionId)}/turn/${turnIndex}`,
+    )
+  }
   const body = await fetchJson<{ turns?: KyberSessionTurnRow[] }>(`/api/kyber/session/${encodeURIComponent(sessionId)}`)
   return Array.isArray(body.turns) ? body.turns : []
 }
