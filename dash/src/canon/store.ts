@@ -2889,7 +2889,15 @@ export class CanonStore {
           // returns a promise here — the only step that can yields does so
           // only when a caller hands it a yield seam, and this path never
           // does — so this is a guard, not a branch.
-          void outcome.catch(() => undefined)
+          void outcome.catch((asyncErr: unknown) => {
+            // The sync path cannot await the step, so its rejection would
+            // otherwise vanish behind the guard below. Report it rather than
+            // swallowing it with a no-op.
+            console.error(
+              `canon store migration step ${version} -> ${version + 1} rejected asynchronously: ` +
+                `${asyncErr instanceof Error ? (asyncErr.stack ?? asyncErr.message) : String(asyncErr)}`,
+            )
+          })
           throw new Error(
             `canon store migration step ${version} -> ${version + 1} is asynchronous; ` +
               'the synchronous open path cannot run it',
