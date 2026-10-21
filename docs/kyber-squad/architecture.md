@@ -112,8 +112,8 @@ Kyber-Squad treats agent and skill definitions as strictly typed, immutable sour
 - **Canonical Agent Definitions**: Authored in `products/kyber-squad/agents/<name>.md` with closed YAML frontmatter and LF-normalized UTF-8 bodies.
 - **Normalization Pipeline**: `SquadSourceLoader` parses frontmatter against `schemas/agent.schema.json`, validates capability bindings, computes an immutable SHA-256 instruction digest over the normalized body, and emits a structured `AgentIR` model.
 - **Strict Invariants**: Loaders reject undeclared profiles, missing capabilities, invalid invocation modes, path traversal attempts, or unrecognized frontmatter keys.
-- **Canonical Skills and Resources**: `SquadSourceLoader` loads the 25 top-level `SKILL.md`
-  identities. The canonical tree separately retains 69 supplemental files, giving 94 recursive
+- **Canonical Skills and Resources**: `SquadSourceLoader` loads the 27 top-level `SKILL.md`
+  identities. The canonical tree separately retains 78 supplemental files, giving 105 recursive
   skill-tree files; `SquadPacker` carries that complete recursive tree into both package formats.
 
 ---
@@ -143,10 +143,10 @@ Targets without native agent primitives use **agent-to-role-skill lowering**, go
 this projection; Antigravity was previously classified as fallback and has been reclassified to native
 ([ADR 0022](../adr/0022-antigravity-native-agents.md)).
 
-The current canonical agent and skill namespaces intersect at eight names. Two of those
+The current canonical agent and skill namespaces intersect at ten names. Two of those
 intersections — `product-owner` and `bug-crusher` — are **primary shared identities**: root agents
 whose body is a thin wrapper pointing at the same-name canonical skill, which carries the role
-([ADR 0036](../adr/0036-primary-agent-canonical-skill-entry-point.md)). The remaining six are
+([ADR 0036](../adr/0036-primary-agent-canonical-skill-entry-point.md)). The remaining eight are
 distinct-body collisions. The primary shared identities reuse the canonical skill as their entry
 point, so no `role-` projection is generated for them:
 
@@ -155,7 +155,7 @@ flowchart TD
     Intersection{"Agent & Skill Name\nIntersection Check"}
 
     Intersection -->|"Two Primary Shared Identities\n(product-owner, bug-crusher)"| SharedPath["Thin Wrapper: Canonical Skill\nIs the Entry Point"]
-    Intersection -->|"Six Distinct-Body Collisions\n(csharp-dev, dal-dev, etc.)"| CollisionPath["Distinct Workflows & Roles"]
+    Intersection -->|"Eight Distinct-Body Collisions\n(csharp-dev, dal-dev, etc.)"| CollisionPath["Distinct Workflows & Roles"]
     Intersection -->|"No Skill Collision\n(conductor)"| UnoccupiedPath["Unoccupied Identity"]
 
     SharedPath --> SharedCheck{"Target Native\nAgent Support?"}
@@ -182,7 +182,7 @@ flowchart TD
      canonical skill and no duplicate; a target that lowers a primary onto a skill or command
      (Cursor, Pi, ZCode, Devin, Warp) reuses the canonical skill and emits no projection of its own.
    - No `role-<name>` projection is generated, and no skill projection is suppressed.
-2. **Distinct-Body Collisions (`csharp-dev`, `dal-dev`, `github-devops`, `maui-dev`, `python-dev`, `test-dev`)**:
+2. **Distinct-Body Collisions (`csharp-dev`, `dal-dev`, `github-devops`, `go-dev`, `maui-dev`, `python-dev`, `rust-dev`, `test-dev`)**:
    - The canonical skill and agent serve distinct functions.
    - On fallback targets, the canonical skill stays at `<name>`, and the agent instruction body is projected to `role-<name>`.
    - `role-` is reserved exclusively for generated projections; no canonical source file may use the `role-` prefix.
@@ -683,7 +683,7 @@ and validates.
 - **Copilot emit today**: `CopilotRenderer` writes each agent's
   `.github/agents/<name>.agent.md` and each skill's `.github/skills/<name>/SKILL.md`, then
   `SquadResourceProjection.Append` places every file that owner's Markdown links reach beside
-  the principal. A fresh Copilot render is 121 files — 21 agents, 25 skills, plus projected
+  the principal. A fresh Copilot render is 134 files — 23 agents, 27 skills, plus projected
   closures — with authored relative links resolving in the output; every skill resource
   reaches this render except `skills/setup-dev-environment/agents/openai.yaml`, which stays
   packaged-only Codex skill-UI metadata. That count is the current

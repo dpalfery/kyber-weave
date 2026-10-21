@@ -11,6 +11,7 @@ agents:
   - dal-dev
   - docs-dev
   - github-devops
+  - go-dev
   - maui-dev
   - product-owner
   - pulumi-dev
@@ -19,6 +20,7 @@ agents:
   - research-agent
   - review-lens
   - review-triage
+  - rust-dev
   - sql-database-architect
   - tauri-dev
   - test-dev
@@ -37,12 +39,14 @@ skills:
   - dp-code-reviewer
   - github-cli
   - github-devops
+  - go-dev
   - lm-studio-cli
   - maui-dev
   - pr-review-fix-comments
   - product-owner
   - python-dev
   - resharper-clt
+  - rust-dev
   - second-brain
   - security-review
   - setup-dev-environment

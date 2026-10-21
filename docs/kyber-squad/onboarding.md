@@ -22,8 +22,8 @@ code-refs:
 # Kyber-Squad adoption and usage guide
 
 `kyber-weave squad` is the unified lifecycle and deployment control plane for agent ecosystems.
-It manages the installation, update, inspection, and uninstallation of **21 canonical agents** and
-**25 canonical skills**, with transactional recovery and state governance. Twelve harness targets
+It manages the installation, update, inspection, and uninstallation of **23 canonical agents** and
+**27 canonical skills**, with transactional recovery and state governance. Twelve harness targets
 are declared; all twelve are currently implemented and registered.
 
 ---
@@ -312,7 +312,7 @@ frontier model:
 |---|---|---|
 | `architect` | `claude-opus-5-5-high` | architect |
 | `deep-planning` | `claude-opus-5-5-high` | bug-crusher-investigator, sql-database-architect |
-| `general` | `swe-2-high` | dal-dev, github-devops, product-owner, pulumi-dev, tauri-dev |
+| `general` | `swe-2-high` | dal-dev, github-devops, go-dev, product-owner, pulumi-dev, rust-dev, tauri-dev |
 | `fast` | `deepseek-v4-1-flash-high` | azure-reader, csharp-dev, docs-dev, maui-dev, python-dev, react-dev, research-agent, test-dev |
 | `reviewer` | `grok-4-7-high` | code-reviewer, review-lens, review-triage |
 
@@ -774,7 +774,7 @@ Both archive formats recurse through each skill directory. They contain all 25 c
 must resolve in the extracted package. The APM archive additionally contains the 21 canonical
 agents with their 10 owned reference files; the Agent Plugins archive never contains agents or
 agent-owned resources. A fresh deployment renders every file an owner's Markdown links reach
-beside its principal — 121 files on Copilot today — with authored relative links resolving inside
+beside its principal — 134 files on Copilot today — with authored relative links resolving inside
 the target output; every skill resource reaches this render except
 `skills/setup-dev-environment/agents/openai.yaml`, which stays packaged-only Codex skill-UI
 metadata. The tracked root `.github/` self-deployment predates resource delivery and is refreshed

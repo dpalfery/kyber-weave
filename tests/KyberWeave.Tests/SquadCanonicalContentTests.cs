@@ -54,10 +54,12 @@ public sealed class SquadCanonicalContentTests
         "csharp-dev",
         "dal-dev",
         "github-devops",
+        "go-dev",
         "maui-dev",
         "pulumi-dev",
         "python-dev",
         "react-dev",
+        "rust-dev",
         "sql-database-architect",
         "tauri-dev",
         "test-dev"
@@ -91,10 +93,12 @@ public sealed class SquadCanonicalContentTests
     ];
 
     /// <summary>
-    /// Review-council workers are canonical-only roles and are deliberately excluded from
-    /// Hotshot migration provenance.
+    /// Agents authored after the Hotshot migration — the review-council workers, `bug-crusher`,
+    /// and the Rust and Go specialists — are canonical-only roles and are deliberately excluded
+    /// from Hotshot migration provenance.
     /// </summary>
-    private static readonly string[] ExpectedNewAgents = ["bug-crusher", "review-lens", "review-triage"];
+    private static readonly string[] ExpectedNewAgents =
+        ["bug-crusher", "go-dev", "review-lens", "review-triage", "rust-dev"];
 
     private static readonly string[] ExpectedAgents =
         [.. ExpectedMigratedAgents.Concat(ExpectedNewAgents).Order(StringComparer.Ordinal)];
@@ -115,12 +119,14 @@ public sealed class SquadCanonicalContentTests
         "dp-code-reviewer",
         "github-cli",
         "github-devops",
+        "go-dev",
         "lm-studio-cli",
         "maui-dev",
         "pr-review-fix-comments",
         "product-owner",
         "python-dev",
         "resharper-clt",
+        "rust-dev",
         "second-brain",
         "security-review",
         "setup-dev-environment",
@@ -140,9 +146,11 @@ public sealed class SquadCanonicalContentTests
         "csharp-dev",
         "dal-dev",
         "github-devops",
+        "go-dev",
         "maui-dev",
         "product-owner",
         "python-dev",
+        "rust-dev",
         "test-dev"
     ];
 
@@ -157,8 +165,10 @@ public sealed class SquadCanonicalContentTests
         "csharp-dev",
         "dal-dev",
         "github-devops",
+        "go-dev",
         "maui-dev",
         "python-dev",
+        "rust-dev",
         "test-dev"
     ];
 
@@ -396,12 +406,14 @@ public sealed class SquadCanonicalContentTests
     [InlineData("dal-dev")]
     [InlineData("docs-dev")]
     [InlineData("github-devops")]
+    [InlineData("go-dev")]
     [InlineData("maui-dev")]
     [InlineData("pulumi-dev")]
     [InlineData("python-dev")]
     [InlineData("react-dev")]
     [InlineData("review-lens")]
     [InlineData("review-triage")]
+    [InlineData("rust-dev")]
     [InlineData("sql-database-architect")]
     [InlineData("tauri-dev")]
     [InlineData("test-dev")]
@@ -632,10 +644,12 @@ public sealed class SquadCanonicalContentTests
     [InlineData("csharp-dev")]
     [InlineData("dal-dev")]
     [InlineData("github-devops")]
+    [InlineData("go-dev")]
     [InlineData("maui-dev")]
     [InlineData("pulumi-dev")]
     [InlineData("python-dev")]
     [InlineData("react-dev")]
+    [InlineData("rust-dev")]
     [InlineData("sql-database-architect")]
     [InlineData("tauri-dev")]
     [InlineData("test-dev")]

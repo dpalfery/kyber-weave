@@ -39,7 +39,7 @@ Modifying local developer environments or repository-level agent configurations 
 
 | Capability | How It Solves the Problem | Command |
 |---|---|---|
-| **Canonical AgentIR Compilation** | Compiles 21 canonical agents and 25 skills — each projecting its validated resource closure beside the rendered principal — for all twelve registered renderers while retaining a governed twelve-target catalog. | `kyber-weave squad install` |
+| **Canonical AgentIR Compilation** | Compiles 23 canonical agents and 27 skills — each projecting its validated resource closure beside the rendered principal — for all twelve registered renderers while retaining a governed twelve-target catalog. | `kyber-weave squad install` |
 | **Transactional Engine & Atomic Rollback** | Creates pre-execution rollback manifests and tracks deployed files in the lock and receipt under `~/.kyber-weave/squad/`, with a registry of project installs—restores clean state on any failure. | `kyber-weave squad install` · `uninstall` |
 | **Capability Lattice & Degradation** | Intelligently maps subagent hierarchies, permissions, and tool access to each harness's exact feature set, emitting structured degradation warnings when a feature is unsupported. | `kyber-weave squad doctor` |
 | **Distributed Concurrency Leases** | Uses cross-process mutex leasing to ensure concurrent CI jobs or IDE instances cannot corrupt deployment state. | Integrated in all `squad` verbs |
@@ -64,8 +64,8 @@ another review. The existing
 `pr-review-fix-comments` skill supports step-by-step approvals.
 
 A fresh GitHub Copilot render projects each owner's linked resources beside its principal:
-21 `.github/agents/<name>.agent.md` files, 25 `.github/skills/<name>/SKILL.md` files, and the
-linked resources, 121 files total, with authored relative links resolving in the output. Every
+23 `.github/agents/<name>.agent.md` files, 27 `.github/skills/<name>/SKILL.md` files, and the
+linked resources, 134 files total, with authored relative links resolving in the output. Every
 skill resource reaches every render except `skills/setup-dev-environment/agents/openai.yaml`,
 which is packaged-only Codex skill-UI metadata. Every retained resource now has a reviewed
 disposition in the [skill-resource dispositions audit](skill-resource-dispositions.md):

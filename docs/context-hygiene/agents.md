@@ -55,9 +55,9 @@ definitions in `products/kyber-squad/` and compiles them into target-native conf
 for all twelve currently implemented and registered renderers: `copilot`, `cursor`, `claude`, `codex`,
 `antigravity`, `opencode`, `kilo`, `pi`, `factory`, `warp`, `zcode`, and `devin`.
 
-The current agent namespace intersects the 24-skill namespace at eight names. Two of those
+The current agent namespace intersects the 27-skill namespace at ten names. Two of those
 intersections (`product-owner` and `bug-crusher`) are primary shared identities whose root-agent
-body is a thin pointer at the same-name canonical skill; the remaining six are distinct-body
+body is a thin pointer at the same-name canonical skill; the remaining eight are distinct-body
 collisions. Fallback targets preserve each colliding skill and lower its agent to `role-<name>`;
 unoccupied agents, including `conductor`, lower to same-name role skills.
 

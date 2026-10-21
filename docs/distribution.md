@@ -99,7 +99,7 @@ In addition to binary executables, each GitHub Release publishes two version-mat
 
 | Asset Name | Format | Contents |
 |---|---|---|
-| `kyber-squad-<version>.zip` | APM bundle | All 21 canonical agents with their 10 owned references, 25 skills with 69 supplemental resources, profiles, schemas, and `mcp.json` |
+| `kyber-squad-<version>.zip` | APM bundle | All 23 canonical agents with their 10 owned references, 27 skills with 78 supplemental resources, profiles, schemas, and `mcp.json` |
 | `kyber-squad-plugin-<version>.zip` | Agent Plugins v1 | All 25 portable skills, their 69 supplemental resources, and MCP server configuration; never agents or agent-owned resources |
 
 ### Packaging via `squad pack`
