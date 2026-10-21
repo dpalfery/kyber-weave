@@ -859,9 +859,17 @@ export function registerKyberCommands(program: Command, dependencies: KyberComma
     .exitOverride(settingsUsageExit)
     .action(async (opts: { db?: string; json?: boolean }) => {
       const write = dependencies.write ?? ((line: string) => process.stdout.write(`${line}\n`))
-      const store = await openVerbStore(resolveDbPath(opts.db), dependencies.createStore, {
-        yield: dependencies.migrationYield,
-      })
+      const writeError = dependencies.writeError ?? ((line: string) => process.stderr.write(`${line}\n`))
+      let store: CanonStore | undefined
+      try {
+        store = await openVerbStore(resolveDbPath(opts.db), dependencies.createStore, {
+          yield: dependencies.migrationYield,
+        })
+      } catch (err) {
+        writeError(`kyberdash: settings show failed: ${err instanceof Error ? err.message : String(err)}`)
+        process.exitCode = 1
+        return
+      }
       try {
         const values = readAllSettings(store)
         if (opts.json === true) {
@@ -883,6 +891,7 @@ export function registerKyberCommands(program: Command, dependencies: KyberComma
     .exitOverride(settingsUsageExit)
     .action(async (key: string, value: string, opts: { db?: string }) => {
       const write = dependencies.write ?? ((line: string) => process.stdout.write(`${line}\n`))
+      const writeError = dependencies.writeError ?? ((line: string) => process.stderr.write(`${line}\n`))
       const settingKey = SETTING_NAMES[key]
       if (settingKey === undefined) {
         throw new CommanderError(2, 'commander.invalidArgument', unknownSettingMessage(key))
@@ -914,9 +923,16 @@ export function registerKyberCommands(program: Command, dependencies: KyberComma
                 }
                 return onOff
               })()
-      const store = await openVerbStore(resolveDbPath(opts.db), dependencies.createStore, {
-        yield: dependencies.migrationYield,
-      })
+      let store: CanonStore | undefined
+      try {
+        store = await openVerbStore(resolveDbPath(opts.db), dependencies.createStore, {
+          yield: dependencies.migrationYield,
+        })
+      } catch (err) {
+        writeError(`kyberdash: settings set failed: ${err instanceof Error ? err.message : String(err)}`)
+        process.exitCode = 1
+        return
+      }
       try {
         writeSetting(store, settingKey, parsed)
         // The canonical value, not the raw argument: `05` and `5` store the same row, and an
