@@ -45,10 +45,11 @@ const SKILLS_CONTRACT_VERSION = '2'
 // a transcript-covered call states its empty skills list (D6, D8). Stale
 // checkpoints under v1 re-synthesize so those declarations upsert over them.
 const ANTIGRAVITY_PARSER_CONTRACT_VERSION = '2'
-// v3: Copilot's own contract, moved out of the shared skills contract, which
-// stopped at v2 for Copilot's invoked skills. Copilot CLI's system prompt and
-// conversation history are now lifted per record, and its tool_definitions is
-// declared not measurable (D8), so checkpoints under v2 re-synthesize.
+// v3: Copilot's own contract, moved out of the shared skills contract. Copilot
+// CLI's system_prompt is now measured per record, on the records whose paired
+// journal turn carries it (D-C), so its measurability differs from v2. That
+// changed declaration requires re-deriving stored records, so checkpoints under
+// v2 re-synthesize. Copilot is kept at 3 for that reason alone.
 const COPILOT_PARSER_CONTRACT_VERSION = '3'
 const SKILLS_CONTRACT_PROVIDER_NAMES: ReadonlySet<string> = new Set([
   'opencode',
@@ -68,6 +69,10 @@ const CURSOR_PARSER_CONTRACT_VERSION = '2'
 // declared-window payload upserts over stale rows (ADR 0016 repair contract).
 // v3: invoked skill names onto turn records (`kyber.skills.invoked`).
 const PI_PARSER_CONTRACT_VERSION = '3'
+// v2: content reader registered (one turn per assistant message, keyed by the
+// message id) and assistant calls stamped with that id as pairingId for pairing.
+// Version-invalidated checkpoints re-open the unit so the parts upsert (ADR 0016).
+const COMMANDCODE_PARSER_CONTRACT_VERSION = '2'
 
 const CLAUDE_HARNESS_IDS = ['claude-cli', 'claude-desktop', 'claude-unclassified'] as const
 const KILO_HARNESS_IDS = ['kilo-shared-runtime', 'kilo-vscode-legacy'] as const
@@ -111,6 +116,9 @@ export function parserContractVersionFor(partial: { providerName: string; harnes
   }
   if (partial.providerName === 'copilot') {
     return COPILOT_PARSER_CONTRACT_VERSION
+  }
+  if (partial.providerName === 'commandcode' || partial.harnessId === 'commandcode') {
+    return COMMANDCODE_PARSER_CONTRACT_VERSION
   }
   if (SKILLS_CONTRACT_PROVIDER_NAMES.has(partial.providerName)) {
     return SKILLS_CONTRACT_VERSION
@@ -606,6 +614,7 @@ const READER_HARNESS_IDS = new Set([
   'copilot-vscode',
   'cursor',
   'cursor-agent',
+  'commandcode',
   ...KILO_HARNESS_IDS,
   'opencode',
   'pi',

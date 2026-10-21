@@ -511,13 +511,10 @@ export function synthesizeCall(
   const harness = harnessIdFor(call, envelope)
   const sessionId = nativeSessionIdFor(call, envelope)
   const provenance = provenanceFor(call, envelope, ordinal)
-  // The declaration hint selects a measurability declaration only; it is not a
-  // fact about the call, so it stays out of the record's raw attributes.
-  const { measuredAs, ...declarableCall } = call
   const rawCall = readerTurn === undefined
-    ? declarableCall
+    ? call
     : {
-        ...declarableCall,
+        ...call,
         ...(readerTurn.contextWindow !== undefined ? { contextWindow: readerTurn.contextWindow } : {}),
         // A declared window rides under the dedicated declared key alone:
         // filing it under `contextWindow` would promote configured
@@ -536,7 +533,7 @@ export function synthesizeCall(
   const absentOutputReason = copilotAbsentOutputReason(call)
   const carriedKeys = new Set((readerTurn?.parts ?? []).map((part) => part.part))
   const measurability = {
-    ...measurabilityForRecord(call.provider, harness, carriedKeys, measuredAs),
+    ...measurabilityForRecord(call.provider, harness, carriedKeys),
     ...(absentOutputReason !== undefined ? { output: notMeasurable(absentOutputReason) } : {}),
   }
 
@@ -741,7 +738,6 @@ export function synthesizeToolCall(
     'gen_ai.tool.name': toolCall.name,
     'gen_ai.tool.call_id': toolCall.id,
     'gen_ai.tool.status': status,
-    ...(toolCall.agentId !== undefined ? { 'gen_ai.agent.id': toolCall.agentId } : {}),
     ...(resultBytes !== undefined
       ? { 'gen_ai.tool.result_bytes': resultBytes }
       : {}),
@@ -829,7 +825,6 @@ export function synthesizeToolCall(
         provider,
         parentRecord.harness,
         new Set(toolResult?.content !== undefined ? ['tool_result_content'] : []),
-        call?.measuredAs,
       ),
       duration: durationAvailability,
     },

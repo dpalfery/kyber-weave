@@ -937,12 +937,14 @@ filters, so narrowing one page's scope never touches the A/B selectors.
     - *Antigravity and Copilot CLI.* Antigravity shows the listed names, and each skill's description
       and derived tokens when its `SKILL.md` is on this machine. Its invoked counts are the `SKILL.md`
       reads the conversation transcript recorded; a read is not proof the skill was followed. Copilot
-      CLI shows the listed names, descriptions and derived tokens from the root system prompt in its
-      journal, which `dash refresh` reads. Copilot CLI invocation is always not measurable. Session-level
-      tool records are shown, but skill loads are not counted from them, and a tool named `skill` does
-      not make Copilot CLI invocations measurable.
+      CLI shows the listed names, descriptions and derived tokens from the `<available_skills>` block
+      of the system prompt in its journal, which `dash refresh` reads. Its invoked counts come from the
+      `skill` tool requests the parser reads on each message; a session with none shows not measurable.
+      Copilot CLI tool invocations are not ingested yet (todo
+      [copilot-cli-tool-invocations-per-message](../todo/copilot-cli-tool-invocations-per-message.md)).
     - *Not measurable or empty.* A "Not measurable" card means the source was not read: no transcript
-      for an Antigravity session, or no root system prompt in the journal for Copilot CLI. For that
+      for an Antigravity session, or no system prompt in the journal for Copilot CLI (a session older than
+      the 14-day content purge keeps no prompt). For that
       side the payload carries a not-measurable object, not a count. A count of `0` is a measured
       none: the transcript or journal was read and no skill was invoked.
     - *Partly covered Antigravity sessions.* A turn the transcript does not cover shows no

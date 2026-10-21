@@ -728,3 +728,16 @@ waiver of the plan index policy, with its reason.
 - Whether each todo has the owner's acceptance is not recorded (§12.8).
 - F5 is not identified (§12.2).
 - D25's inspector label is not in the code (§12.7).
+
+### 12.14 Merge reconciliation (2026-10-21)
+
+On merging `origin/main` (PR #406 already on main), main's squash of the same two Copilot CLI commits
+was kept over this branch's rewrite. Per the owner's decision that main wins, the Copilot CLI reader
+decisions D20 and D23–D26 were superseded by main's per-message reader: one turn per
+`assistant.message`, keyed by `messageId`, carrying the agent's latest `system.message`, with root
+events carrying no `agentId` and subagents getting their own prompt. D24 is reduced to the `.jsonl`
+fallback guard in `callsAndTurns`, and D25 (session-level tool calls) is deferred to
+`docs/todo/copilot-cli-tool-invocations-per-message.md`. The `measuredAs` hint, store-owned tools, the
+store memo (F3) and `copilotCliTurnsPerCall` were removed. The per-record lift (D8) stays for Copilot CLI
+`system_prompt` only. The Antigravity work and the D29–D30 rules are unchanged. Sections 1 to 12.13
+describe the pre-merge state and are not rewritten.

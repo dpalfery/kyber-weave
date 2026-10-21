@@ -1,7 +1,7 @@
 ---
 schema: kyber-squad.agent/v1
 name: tauri-dev
-description: "Implements the Rust/Tauri v2 desktop core: commands, the IPC contract, state, async, sidecar integration, and the capabilities/security model. Use when the change is under src-tauri or in a .rs file of a Tauri app. Do not use when the change is the WebView UI that consumes the IPC contract rather than the native core."
+description: "Implements the Rust/Tauri v2 desktop core: commands, the IPC contract, state, async, sidecar integration, and the capabilities/security model. Use when the change is under src-tauri or in a .rs file of a Tauri app. Do not use for Rust outside a Tauri app — CLIs, daemons, and library crates (rust-dev) — or when the change is the WebView UI that consumes the IPC contract rather than the native core."
 invocation: subagent
 model-profile: general
 capability-profile: worker

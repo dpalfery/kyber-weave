@@ -22,8 +22,8 @@ code-refs:
 # Kyber-Squad adoption and usage guide
 
 `kyber-weave squad` is the unified lifecycle and deployment control plane for agent ecosystems.
-It manages the installation, update, inspection, and uninstallation of **21 canonical agents** and
-**25 canonical skills**, with transactional recovery and state governance. Twelve harness targets
+It manages the installation, update, inspection, and uninstallation of **23 canonical agents** and
+**27 canonical skills**, with transactional recovery and state governance. Twelve harness targets
 are declared; all twelve are currently implemented and registered.
 
 ---
@@ -77,7 +77,7 @@ Kyber-Squad declares twelve coding-harness targets:
 
 | Target Token | Input Aliases | Strong Project Marker | Projection | Renderer Status |
 |---|---|---|---|---|
-| `codex` | — | `.codex/` | Native agents | Implemented and registered |
+| `codex` | — | `.codex/` | Native agents + primary-agent entry-point skills | Implemented and registered |
 | `cursor` | — | `.cursor/` | Native agents | Implemented and registered |
 | `claude` | — | `.claude/` | Native agents + primary-agent entry-point skill | Implemented and registered |
 | `copilot` | `github-copilot` | `.github/copilot-instructions.md`, `.github/instructions/`, `.github/agents/`, `.github/prompts/`, `.github/hooks/` | Native agents | Implemented and registered |
@@ -94,7 +94,7 @@ Kyber-Squad declares twelve coding-harness targets:
 **Renderer coverage today**: this is the declared roster, not the set that currently installs.
 Rendering canonical source into a harness's native files is Kyber-Weave's own code (see
 [architecture.md](architecture.md#8-rendering)) — as of this writing `claude` (native subagents with primary-agent entry-point skill), `copilot` (native), `cursor` (native),
-`codex` (native), `antigravity` (native: `.agents/agents/<name>/agent.md` + `.agents/skills/<name>/SKILL.md`, [ADR 0022](../adr/0022-antigravity-native-agents.md)), `opencode` (native), `kilo` (native), `pi` (native subagents with primary-agent lowering), `factory` (native), `warp` (fallback role-skill lowering to `.warp/skills/`), `zcode` (native subagents and skills, with primary agents lowered to slash commands), and `devin` (native subagents and skills, with primary agents lowered to a skill), and `commandcode` (native agents and skills, with primary agents also rendered as an entry-point skill) have renderers. All thirteen declared targets are covered. `kyber-weave squad doctor` reports current coverage.
+`codex` (native agents with primary-agent entry-point skills), `antigravity` (native: `.agents/agents/<name>/agent.md` + `.agents/skills/<name>/SKILL.md`, [ADR 0022](../adr/0022-antigravity-native-agents.md)), `opencode` (native), `kilo` (native), `pi` (native subagents with primary-agent lowering), `factory` (native), `warp` (fallback role-skill lowering to `.warp/skills/`), `zcode` (native subagents and skills, with primary agents lowered to slash commands), and `devin` (native subagents and skills, with primary agents lowered to a skill), and `commandcode` (native agents and skills, with primary agents also rendered as an entry-point skill) have renderers. All thirteen declared targets are covered. `kyber-weave squad doctor` reports current coverage.
 
 ### Detection Rules
 
@@ -107,6 +107,21 @@ Rendering canonical source into a harness's native files is Kyber-Weave's own co
 - **Deployment root selection**: The root comes from the positional `[path]`, which defaults to the current directory (`.`); `--path <PATH>` wins over that default. Supplying both a non-default positional and `--path` is rejected with **exit code 2** and a hint naming both forms. Under `--global` the root is the home directory and this selection is ignored, with a warning.
 - **Update**: An explicit `--target` list is the complete desired deployment target set and takes precedence over the existing receipt. When `--target` is omitted, update reuses the receipt roster. Update never auto-detects filesystem markers.
 - **Uninstall**: Uses the recorded target roster from the existing deployment receipt and never performs marker detection.
+
+### Codex notes
+
+Codex keeps each agent as a native TOML file at `.codex/agents/<name>.toml`. For a primary
+agent without a same-name canonical skill, Kyber-Squad also derives an entry-point skill at
+`.codex/skills/<name>/SKILL.md` from the agent description and instruction body, with the
+agent's resource files beside it. This gives Codex a skill entry point for primary roles such
+as `conductor` without removing the native agent file.
+
+The primary shared identities `product-owner` and `bug-crusher` use their existing canonical
+skills as entry points; Kyber-Squad emits no second derived skill for them. If another primary
+agent has a same-name canonical skill but is not declared a shared identity, rendering fails
+closed because both artifacts would claim the same skill path. In global scope, Codex output
+uses `agents/<name>.toml` and `skills/<name>/SKILL.md` under the target root, without the
+project `.codex/` prefix.
 
 ### Claude notes
 
@@ -312,7 +327,7 @@ frontier model:
 |---|---|---|
 | `architect` | `claude-opus-5-5-high` | architect |
 | `deep-planning` | `claude-opus-5-5-high` | bug-crusher-investigator, sql-database-architect |
-| `general` | `swe-2-high` | dal-dev, github-devops, product-owner, pulumi-dev, tauri-dev |
+| `general` | `swe-2-high` | dal-dev, github-devops, go-dev, product-owner, pulumi-dev, rust-dev, tauri-dev |
 | `fast` | `deepseek-v4-1-flash-high` | azure-reader, csharp-dev, docs-dev, maui-dev, python-dev, react-dev, research-agent, test-dev |
 | `reviewer` | `grok-4-7-high` | code-reviewer, review-lens, review-triage |
 
@@ -769,12 +784,12 @@ kyber-weave squad pack --format all --out ./artifacts
 
 Running `squad pack` outside the repository root fails immediately with a diagnostic directing the operator to rerun the command from the Kyber-Weave repository root (or run `squad install` if deploying agents and skills to a project).
 
-Both archive formats recurse through each skill directory. They contain all 25 canonical
-`SKILL.md` files plus the 69 retained supplemental resources, and retained local skill references
-must resolve in the extracted package. The APM archive additionally contains the 21 canonical
+Both archive formats recurse through each skill directory. They contain all 27 canonical
+`SKILL.md` files plus the 78 retained supplemental resources, and retained local skill references
+must resolve in the extracted package. The APM archive additionally contains the 23 canonical
 agents with their 10 owned reference files; the Agent Plugins archive never contains agents or
 agent-owned resources. A fresh deployment renders every file an owner's Markdown links reach
-beside its principal — 121 files on Copilot today — with authored relative links resolving inside
+beside its principal — 134 files on Copilot today — with authored relative links resolving inside
 the target output; every skill resource reaches this render except
 `skills/setup-dev-environment/agents/openai.yaml`, which stays packaged-only Codex skill-UI
 metadata. The tracked root `.github/` self-deployment predates resource delivery and is refreshed
@@ -784,7 +799,7 @@ its skill directory as its durable home, portable policy lives in the
 `products/kyber-squad/standards/` templates, and nothing was deleted.
 
 Rendered `.github` trees are deployment output and are not added to the canonical product tree by
-`squad pack` or the golden synchronization.
+`squad pack`.
 
 `products/kyber-squad/` is the canonical and package authority. The repository no longer carries a
 project-level self-deployment: the root `.github/agents/`, `.github/skills/`,

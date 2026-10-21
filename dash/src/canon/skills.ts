@@ -18,7 +18,7 @@
 //     (VS Code Copilot): the listing is read from that block.
 //   - Everything else: the listing is not measurable, with a reason.
 
-import { harnessFamily, normalizeHarnessName } from './measurability.js'
+import { harnessFamily } from './measurability.js'
 import { SKILLS_INVOKED_KEY, SKILLS_LISTED_KEY, isNotMeasurable, notMeasurable } from './types.js'
 import type { CanonicalRecord, ContentPart, Measurability, NotMeasurable } from './types.js'
 
@@ -651,9 +651,6 @@ function latestReportedSkillTokens(turns: readonly CanonicalRecord[]): number | 
 // ---------------------------------------------------------------------------
 
 function isSkillToolCall(record: CanonicalRecord): boolean {
-  // A Copilot CLI session-level tool named `skill` is not a skill invocation (D26):
-  // no turn of that session carries a skill record, so the reason stays unchanged.
-  if (normalizeHarnessName(record.harness) === 'copilot-cli') return false
   return record.op === SKILL_TOOL_OP && SKILL_TOOL_NAMES.has(record.name)
 }
 

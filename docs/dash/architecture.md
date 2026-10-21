@@ -469,11 +469,10 @@ Two readers attach activity to records by pairing, and neither pairs by time.
   sessions only. OTLP-only sessions get no transcript activity unless their conversation database is
   imported under the `antigravity-cli` harness. The contract, the coverage rule, and the
   owner-store observation are in the [telemetry inventory](telemetry-inventory.md#antigravity-transcript-pairing).
-- **Copilot CLI.** The session's root system prompt is one reader turn, and every canon record of
-  the session carries a copy of it. The records are the session-store placeholder rows and the
-  shutdown rollups, and which of them a refresh yields depends on its window. A placeholder row is
-  `unknown`-model, $0 and not a per-message record. Journal assistant messages are not ingested as
-  records. Tool calls attach at session granularity to one record. See the
+- **Copilot CLI.** The reader yields one turn per journal `assistant.message`, keyed by its
+  `messageId`, and each turn carries the latest `system.message` the agent (root or subagent) wrote
+  before it. The provider pairs each call with the turn of its own message. Journal tool invocations
+  are not yet ingested as records; that follow-up is a todo. See the
   [Copilot CLI journal](telemetry-inventory.md#copilot-cli-journal-and-system-prompt).
 
 Declared limits that a reader can measure on some records only are lifted per record, as described
@@ -648,9 +647,9 @@ view, and each row's `invocations`). `[]` is a measured none. Per-harness source
     - `listed` is always a boolean. It is `true` when a measured listing named the skill on at
       least one turn, and `false` for a skill that was only invoked.
     - `invocations` is a number when invocation is measured, and `0` is a measured none. For
-      Copilot CLI it is always `{availability: 'not_measurable', reason}`. For Antigravity it is that
-      object when no record of the session carries `kyber.skills.invoked`, and a number otherwise,
-      counted over the measured turns (see `invocationsCoverage`).
+      Copilot CLI and Antigravity it is that
+      object when no record of the session carries `kyber.skills.invoked`, and a number otherwise.
+      Antigravity counts over the measured turns (see `invocationsCoverage`).
       An unmeasured side is never omitted from the row and never reported as `0`.
     - `turns_listed` holds 0-based transport indices (the issue #184 numbering), and is `[]` when
       the skill was listed on no turn.
@@ -662,8 +661,9 @@ view, and each row's `invocations`). `[]` is a measured none. Per-harness source
   Antigravity turn it is absent unless that turn's record carries `kyber.skills.invoked` as an array,
   so a turn the transcript did not cover is never shown as a measured none.
 - `measurability.skills` is set only when the whole `skills` view is `not_measurable`, and then
-  carries that same reason. A partly measured view (Copilot CLI always, and Antigravity when no
-  record of the session carries the invoked key) leaves `measurability.skills` unset. Its unmeasured side shows per row (the
+  carries that same reason. A partly measured view (Antigravity when no
+  record of the session carries the invoked key, or Copilot CLI when a listing is measured but no
+  record carries the invoked key) leaves `measurability.skills` unset. Its unmeasured side shows per row (the
   `invocations` object) and by the absent `summary.skills_invoked`, turn `skills_invoked`, and
   `listed_uninvoked_count` keys.
 
@@ -737,8 +737,8 @@ measured independently from whether individual composition buckets are available
   to `measured` on a record only where that record's paired reader turn carries parts of the key.
   This applies to `copilot-cli`, `antigravity`, `antigravity-cli` and `antigravity-ide`
   (`PER_RECORD_LIFT_HARNESSES`, `measurabilityForRecord` in `dash/src/canon/measurability.ts`). A
-  sibling turn the reader did not pair keeps the declared reason. Copilot CLI never lifts
-  `tool_definitions` or `skills_invoked`. Other readers keep their declaration whole.
+  sibling turn the reader did not pair keeps the declared reason. Copilot CLI lifts only
+  `system_prompt`; `tool_definitions` is never lifted. Other readers keep their declaration whole.
 - **Child records (D29).** A `tool.invoke` child is not a paired reader turn, so it does not inherit
   its parent's lifted state. For a harness in the per-record lift set, `measurabilityForChild` gives
   each child the declared reason for every key it does not carry itself. `tool_result_content` is

@@ -967,21 +967,6 @@ describe('buildSkillsView, Antigravity invocations per covered turn (D30)', () =
   })
 })
 
-// The Copilot CLI invocation reason (D21, D26) must not change when a session-level
-// tool.invoke happens to be named `skill`: no turn of that session carries a skill record.
-describe('extractInvokedSkills, copilot-cli session-level skill tool (D26 guard)', () => {
-  it('reports invocations not measurable, with the same reason as a session with no skill record', () => {
-    const withoutSkillRecord = extractInvokedSkills([modelTurn('copilot-cli', 'cli-turn')])
-    const withSessionLevelSkill = extractInvokedSkills([
-      modelTurn('copilot-cli', 'cli-turn'),
-      toolCall('copilot-cli', 'cli-skill', 'cli-session-root', 'skill', { skill: 'alpha' }),
-    ])
-
-    expect(withoutSkillRecord).toMatchObject({ availability: 'not_measurable' })
-    expect(withSessionLevelSkill).toEqual(withoutSkillRecord)
-  })
-})
-
 describe('buildSkillsView, not measurable and wording', () => {
   it('a Pi session returns not_measurable with a reason naming skills, never rows', () => {
     const pi = modelTurn('pi', 'pi-turn', { source: 'pi', raw: {} })

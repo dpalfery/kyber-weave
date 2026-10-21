@@ -32,6 +32,7 @@ import {
   prefixAvailability,
   schemaRankingAvailability,
   sourceDisplayName,
+  sourceSpellingsForHarness,
 } from './measurability.js'
 
 // ---------------------------------------------------------------------------
@@ -529,6 +530,28 @@ describe('parseHarnessFilter — only declared spellings resolve', () => {
     for (const spelling of ['kilo', 'kilo-code', 'Kilo-Shared-Runtime', 'kilo-vscode-legacy']) {
       expect(parseHarnessFilter(spelling).kind).toBe('harness')
     }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The command-code alias — the hyphenated spelling is one harness with commandcode
+// ---------------------------------------------------------------------------
+
+describe('command-code alias — folds onto the commandcode id', () => {
+  it('normalizes the hyphenated spelling onto the commandcode id, so one harness has one id', () => {
+    // Before the fold `command-code` normalized to itself: a second id for one
+    // harness, which the owner-folds in normalizeHarnessName exist to prevent.
+    expect(normalizeHarnessName('command-code')).toBe('commandcode')
+  })
+
+  it('resolves the ?harness=command-code filter to the commandcode id', () => {
+    expect(parseHarnessFilter('command-code')).toEqual({ kind: 'harness', id: 'commandcode' })
+  })
+
+  it('matches rows stored under the hyphenated spelling when filtering by commandcode', () => {
+    // A row written as `command-code` is a commandcode row, so the stored-source
+    // expansion the quarantine and problems filters use must include it.
+    expect(sourceSpellingsForHarness('commandcode')).toContain('command-code')
   })
 })
 

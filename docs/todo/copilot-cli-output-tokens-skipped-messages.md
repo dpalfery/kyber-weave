@@ -15,9 +15,10 @@ From Copilot CLI 1.0.81 onward, `assistant.message` events in `events.jsonl` no 
 (`dash/src/providers/copilot.ts`, around lines 1028 and 1035). On the owner's store that accounts for
 3,821 of 5,605 journal messages, so those messages never become records.
 
-The per-message record set is therefore empty for these sessions, and the Copilot CLI tool and skill
-attribution is session-level as a result. Journal calls are not ingested (plan D20), so any change
-must weigh the session's cost and token totals against the rollups.
+The per-message record set is therefore empty for these sessions. Their messages carry no per-message
+call, so they yield no skill invocation and no tool invocation either, and the follow-up
+[copilot-cli-tool-invocations-per-message](copilot-cli-tool-invocations-per-message.md) inherits that
+gap. Any change must weigh the session's cost and token totals against the rollups.
 
 Decide on an accounting-safe way to ingest these messages. It interacts with the session-store
 placeholder rows and the shutdown rollups (see [copilot-cli-placeholder-session-rows](copilot-cli-placeholder-session-rows.md)).

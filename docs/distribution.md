@@ -99,8 +99,8 @@ In addition to binary executables, each GitHub Release publishes two version-mat
 
 | Asset Name | Format | Contents |
 |---|---|---|
-| `kyber-squad-<version>.zip` | APM bundle | All 21 canonical agents with their 10 owned references, 25 skills with 69 supplemental resources, profiles, schemas, and `mcp.json` |
-| `kyber-squad-plugin-<version>.zip` | Agent Plugins v1 | All 25 portable skills, their 69 supplemental resources, and MCP server configuration; never agents or agent-owned resources |
+| `kyber-squad-<version>.zip` | APM bundle | All 23 canonical agents with their 10 owned references, 27 skills with 78 supplemental resources, profiles, schemas, and `mcp.json` |
+| `kyber-squad-plugin-<version>.zip` | Agent Plugins v1 | All 27 portable skills, their 78 supplemental resources, and MCP server configuration; never agents or agent-owned resources |
 
 ### Packaging via `squad pack`
 
@@ -119,12 +119,12 @@ kyber-weave squad pack --format all --out ./artifacts
 
 `squad pack` requires the current working directory to be the repository root containing `KyberWeave.sln` and `products/kyber-squad/squad.yml`. It does not fall back to embedded binaries or network sources.
 
-Both formats package `skills/` recursively: 25 `SKILL.md` files plus 69 retained resources, for
-94 skill-tree files. Every retained resource has a reviewed disposition in the
+Both formats package `skills/` recursively: 27 `SKILL.md` files plus 78 retained resources, for
+105 skill-tree files. Every retained resource has a reviewed disposition in the
 [skill-resource dispositions audit](kyber-squad/skill-resource-dispositions.md): non-policy
 content stays in its skill directory as its durable home, portable policy lives in the
-`products/kyber-squad/standards/` templates, and nothing was deleted; their omission from the
-exact 24-file Copilot golden skill surface of the pinned Hotshot fixture is not a package
+`products/kyber-squad/standards/` templates, and nothing was deleted; their omission from a
+fixed 24-file Copilot skill surface is not a package
 contract.
 
 `products/kyber-squad/` is canonical and package authority. The repository no longer carries a

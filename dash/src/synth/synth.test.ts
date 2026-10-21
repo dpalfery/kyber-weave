@@ -609,19 +609,6 @@ describe('D8 — Copilot CLI measurability is lifted per paired reader turn', ()
     })
   })
 
-  it('measures conversation_history only on a record whose paired turn carries one', () => {
-    const paired = copilotCliRecord({
-      parts: [{ part: 'conversation_history', text: 'run the parity check' }],
-    })
-    expect(paired.measurability?.['conversation_history']).toBe('measured')
-
-    const unpaired = copilotCliRecord(undefined)
-    expect(unpaired.measurability?.['conversation_history']).toMatchObject({
-      availability: 'not_measurable',
-      reason: expect.stringMatching(/Copilot CLI/),
-    })
-  })
-
   it('keeps tool_definitions not measurable with the journal-specific reason, even when the system prompt quotes a <tools> section', () => {
     // The `<tools>` block in a Copilot CLI system prompt is usage guidance, not
     // the offered tool set, so a turn carrying it must not lift tool_definitions.
@@ -1625,10 +1612,9 @@ describe('Task 5 — child tool.invoke span generation and result truncation', (
 // ---------------------------------------------------------------------------
 // D29 — a tool.invoke child is not a paired reader turn. It takes its own
 // duration and tool_result_content, but a key a lift harness declares not
-// measurable (system_prompt on Copilot CLI, tool_definitions on Antigravity)
-// stays not measurable on the child: the child carries no parts of that key.
-// Before the fix the child copied the carrier's measured system_prompt, so the
-// session's root prompt looked as if every tool call had carried it.
+// measurable (tool_definitions on Antigravity) stays not measurable on the
+// child: the child carries no parts of that key, so it does not inherit the
+// carrier's lifted state.
 // ---------------------------------------------------------------------------
 
 /** A carrier call paired with its reader turn, plus the parsed call a child is built from. */
@@ -1640,25 +1626,6 @@ function pairedCarrier(harnessId: string, readerTurn: ReaderTurn): { parent: Can
 }
 
 describe('D29 — a tool.invoke child does not inherit a lifted key it cannot carry', () => {
-  it('keeps a Copilot CLI child system_prompt not measurable, with the declared reason, while its carrier measured it', () => {
-    const { parent, parsed } = pairedCarrier('copilot-cli', {
-      parts: [{ part: 'system_prompt', text: 'You are GitHub Copilot CLI.' }],
-    })
-    expect(parent.measurability?.['system_prompt']).toBe('measured')
-
-    const child = synthesizeToolCall(
-      parent,
-      { id: 'tc-view', name: 'view', arguments: { path: 'a.txt' } },
-      { toolCallId: 'tc-view', content: 'file body' },
-      0,
-      parsed,
-    )
-
-    expect(child.measurability?.['system_prompt']).toEqual(measurabilityFor('copilot-cli')['system_prompt'])
-    expect(child.measurability?.['system_prompt']).toMatchObject({ availability: 'not_measurable' })
-    expect(child.measurability?.['tool_definitions']).toEqual(measurabilityFor('copilot-cli')['tool_definitions'])
-  })
-
   it('keeps an Antigravity CLI child tool_definitions not measurable, with the Antigravity reason, while its carrier measured the catalogue', () => {
     const { parent, parsed } = pairedCarrier('antigravity-cli', {
       parts: [{ part: 'tool_definitions', text: '{"name":"alpha_lookup"}', server: 'srv-a' }],
@@ -1678,7 +1645,6 @@ describe('D29 — a tool.invoke child does not inherit a lifted key it cannot ca
   })
 
   const liftHarnesses: Array<{ harnessId: string; readerTurn: ReaderTurn }> = [
-    { harnessId: 'copilot-cli', readerTurn: { parts: [{ part: 'system_prompt', text: 'You are GitHub Copilot CLI.' }] } },
     {
       harnessId: 'antigravity-cli',
       readerTurn: { parts: [{ part: 'tool_definitions', text: '{"name":"alpha_lookup"}', server: 'srv-a' }] },

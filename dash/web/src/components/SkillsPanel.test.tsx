@@ -313,39 +313,3 @@ describe('SkillsPanel: invocations measured on some turns (D30)', () => {
     expect(container.textContent?.replace(/\s+/g, ' ')).not.toContain('Invocations measured on')
   })
 })
-
-describe('SkillsPanel: Copilot CLI listing with invocations not measurable', () => {
-  const reason = 'Copilot CLI session journals do not record skill invocations'
-  const notMeasurable = { availability: 'not_measurable', reason }
-  const skills = {
-    rows: [
-      {
-        name: 'docs',
-        listed: true,
-        invocations: notMeasurable,
-        turns_listed: [],
-        description: 'Use when writing or revising documentation.',
-      },
-      {
-        name: 'deploy',
-        listed: true,
-        invocations: notMeasurable,
-        turns_listed: [],
-        description: 'Deploy the service to staging.',
-      },
-    ],
-  }
-
-  it('lists each skill name with its description from the payload', () => {
-    render(<SkillsPanel skills={asSkills(skills)} summary={asSummary({ skills_listed: ['docs', 'deploy'] })} />)
-    expect(rowOf('docs').textContent).toContain('Use when writing or revising documentation.')
-    expect(rowOf('deploy').textContent).toContain('Deploy the service to staging.')
-  })
-
-  it('shows the harness reason for invocations, never zero or never invoked', () => {
-    render(<SkillsPanel skills={asSkills(skills)} summary={asSummary({ skills_listed: ['docs', 'deploy'] })} />)
-    const docs = rowOf('docs')
-    expect(docs.textContent).toContain(reason)
-    expect(docs.textContent).not.toMatch(/never invoked|no observed invocation|invoked · 0/i)
-  })
-})

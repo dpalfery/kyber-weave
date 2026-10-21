@@ -42,6 +42,7 @@ import { opencodeReader } from './readers/opencode.js'
 import { cursorReader } from './readers/cursor.js'
 import { piReader } from './readers/pi.js'
 import { antigravityReader } from './readers/antigravity.js'
+import { commandcodeReader } from './readers/commandcode.js'
 import type { ContentReader, ReaderTurn, SourceRecordEnvelope } from './readers/types.js'
 import { isExcludedHarness, Synthesizer } from './synth.js'
 import type { DateRange } from '../types.js'
@@ -123,53 +124,18 @@ export const PROVIDER_READERS: ReadonlyMap<string, ContentReader> = new Map([
   ['antigravity', antigravityReader],
   ['antigravity-cli', antigravityReader],
   ['antigravity-ide', antigravityReader],
+  ['commandcode', commandcodeReader],
 ])
 
 function readerFor(identity: string): ContentReader | undefined {
   return PROVIDER_READERS.get(identity)
 }
 
-/**
- * The Copilot CLI reader yields one turn per session, but pairing is one turn
- * per record: `matchingTurns` pairs each turn at most once. Every call of a
- * session therefore gets its own copy of that session's turn, so each record
- * carries the session's root prompt (D23). The session's tool calls and results
- * hang off one record only: the earliest the load holds for the session, which
- * is the placeholder row, or the earliest shutdown rollup when there is none
- * (D25). Never one copy per rollup leg.
- */
-function copilotCliTurnsPerCall(
-  calls: readonly ParsedProviderCall[],
-  turns: readonly ReaderTurn[],
-): Array<ReaderTurn | undefined> {
-  const bySession = new Map<string, ReaderTurn>()
-  for (const turn of turns) {
-    if (turn.sessionId !== undefined && !bySession.has(turn.sessionId)) bySession.set(turn.sessionId, turn)
-  }
-  const instantOf = (call: ParsedProviderCall): number => {
-    const instant = Date.parse(call.timestamp)
-    return Number.isNaN(instant) ? Number.POSITIVE_INFINITY : instant
-  }
-  const carrier = new Map<string, { index: number; at: number }>()
-  calls.forEach((call, index) => {
-    if (!bySession.has(call.sessionId)) return
-    const at = instantOf(call)
-    const held = carrier.get(call.sessionId)
-    if (held === undefined || at < held.at) carrier.set(call.sessionId, { index, at })
-  })
-  return calls.map((call, index) => {
-    const turn = bySession.get(call.sessionId)
-    if (turn === undefined) return undefined
-    if (carrier.get(call.sessionId)?.index === index) return turn
-    return { sessionId: turn.sessionId, parts: turn.parts }
-  })
-}
-
 function callsAndTurns(
   provider: string,
   load: ProviderLoad,
   reader: ContentReader | undefined,
-): Promise<readonly [ParsedProviderCall[], ReadonlyArray<ReaderTurn | undefined> | undefined]> {
+): Promise<readonly [ParsedProviderCall[], ReaderTurn[] | undefined]> {
   // Two providers supply no calls through the streaming parser seam, for
   // different reasons, and both would otherwise synthesize zero records:
   //   * Copilot CLI records its ASAD context taxonomy in SQLite rather than in
@@ -178,12 +144,13 @@ function callsAndTurns(
   //     `createSessionParser` yields nothing — because the vendored aggregation
   //     reads those transcripts by its own path.
   // In both cases the on-disk source IS the record, so the counters are read
-  // straight off it here. Only a session store carries those counters; a
-  // journal path (`events.jsonl`) does not, so its calls stay empty and the
-  // content reader alone runs (D24).
+  // straight off it here.
   const calls = load.calls.length === 0
     ? provider === 'copilot' || provider === 'copilot-cli'
-      ? load.filePath.endsWith('.db') ? loadCopilotCliCalls(load.filePath) : []
+      // A `.jsonl` path is Copilot CLI's events journal, not the SQLite session
+      // store the loader opens, so the journal path must not reach the loader; its
+      // calls stay empty and the content reader alone runs (D24).
+      ? !load.filePath.endsWith('.jsonl') ? loadCopilotCliCalls(load.filePath) : []
       : provider === 'claude' || provider === 'claude-code' || provider.startsWith('claude-')
         ? loadClaudeCalls(load.filePath)
         : load.calls
@@ -192,13 +159,7 @@ function callsAndTurns(
   return (async () => {
     const turns: ReaderTurn[] = []
     for await (const turn of reader.read(load.filePath, load.dateRange)) turns.push(turn)
-    if (reader !== copilotCliReader) return [calls, turns] as const
-    // Calls the Copilot CLI reader supplies are the CLI's own records, but they
-    // arrive under the shared `copilot` label. The declaration hint lets their
-    // records take the CLI's measurability declaration (D26) without changing
-    // their provider, harness, cost or grouping.
-    const declared = calls.map((call): ParsedProviderCall => ({ ...call, measuredAs: 'copilot-cli' }))
-    return [declared, copilotCliTurnsPerCall(declared, turns)] as const
+    return [calls, turns] as const
   })()
 }
 
@@ -223,12 +184,12 @@ function callsAndTurns(
  */
 function matchingTurns(
   calls: readonly ParsedProviderCall[],
-  turns: readonly (ReaderTurn | undefined)[],
+  turns: readonly ReaderTurn[],
   positionalPairingUnsafe: boolean,
 ): Array<ReaderTurn | undefined> {
   const turnsById = new Map<string, ReaderTurn>()
   for (const turn of turns) {
-    if (turn !== undefined && turn.nativeRecordId !== undefined && !turnsById.has(turn.nativeRecordId)) {
+    if (turn.nativeRecordId !== undefined && !turnsById.has(turn.nativeRecordId)) {
       turnsById.set(turn.nativeRecordId, turn)
     }
   }

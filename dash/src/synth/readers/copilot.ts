@@ -4,15 +4,13 @@
 // taxonomy. Preserve its optional fields exactly: a missing bucket is unknown,
 // not a zero-valued measurement.
 
-import { existsSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 
-import type { ContentPart } from '../../canon/types.js'
 import type { ParsedProviderCall } from '../../providers/types.js'
 import { readSessionFile } from '../../ingest/fs-utils.js'
 import { openDatabase } from '../../ingest/sqlite.js'
-import type { ContentReader, ReaderToolCall, ReaderToolResult, ReaderTurn } from './types.js'
+import type { ContentReader, ReaderTurn } from './types.js'
 
 const CONTEXT_FIELDS = [
   'context_system_tokens',
@@ -112,37 +110,23 @@ function eventAgentId(event: Record<string, unknown>): string {
   return typeof event['agentId'] === 'string' ? event['agentId'] : ''
 }
 
-/** What one session's `events.jsonl` journal says about its root prompt and tool use. */
-type JournalSession = {
-  /** The root agent's latest `system.message`; a subagent's prompt never lands here. */
-  prompt?: string
-  /** Every tool request the session made, root and subagent alike. */
-  toolCalls: ReaderToolCall[]
-  /** Every tool execution the journal completed, joined to a call by `toolCallId`. */
-  toolResults: ReaderToolResult[]
-}
-
-function toolRequestOf(request: unknown, agentId: string): ReaderToolCall | undefined {
-  if (!isRecord(request)) return undefined
-  const id = stringValue(request['toolCallId'])
-  const name = stringValue(request['name'], stringValue(request['toolName']))
-  if (id === '' || name === '') return undefined
-  const args = request['arguments']
-  return {
-    id,
-    name,
-    arguments: typeof args === 'string' || isRecord(args) ? args : {},
-    ...(agentId !== '' ? { agentId } : {}),
-  }
-}
-
 /**
- * Parse one `events.jsonl` journal. The latest root `system.message` is the
- * prompt in force; subagent events contribute tool calls and results only.
- * The journal holds no tool schemas, so tool definitions are not read from it.
+ * Read a Copilot CLI `events.jsonl` journal into one turn per `assistant.message`.
+ * Each turn carries the `system.message` last recorded for the same agent
+ * (root events have no `agentId`, subagent events name theirs), so a subagent's
+ * call never inherits the root prompt. Turns are keyed by `messageId`, which the
+ * provider parser stamps on its calls as `pairingId`. Root turns are yielded
+ * before subagent turns, see below. Tool definitions are not
+ * measured: the journal holds no tool schemas, and the prompt's `<tools>`
+ * section is usage guidance for a subset of tools, not the offered tool set.
  */
-function readJournal(text: string): JournalSession {
-  const session: JournalSession = { toolCalls: [], toolResults: [] }
+async function* readEventsJournal(filePath: string): AsyncGenerator<ReaderTurn> {
+  const root: ReaderTurn[] = []
+  const subagent: ReaderTurn[] = []
+  const sessionId = basename(dirname(filePath))
+  const promptByAgent = new Map<string, string>()
+  const text = await readSessionFile(filePath)
+  if (text === null) return
   for (const line of text.split('\n')) {
     if (line.trim() === '') continue
     let event: unknown
@@ -153,147 +137,38 @@ function readJournal(text: string): JournalSession {
     }
     if (!isRecord(event) || !isRecord(event['data'])) continue
     const data = event['data']
-    const root = eventAgentId(event) === ''
     if (event['type'] === 'system.message') {
       const content = data['content']
-      if (root && typeof content === 'string' && content !== '') session.prompt = content
-    } else if (event['type'] === 'assistant.message') {
-      const requests = Array.isArray(data['toolRequests']) ? data['toolRequests'] : []
-      for (const request of requests) {
-        const call = toolRequestOf(request, eventAgentId(event))
-        if (call !== undefined) session.toolCalls.push(call)
-      }
-    } else if (event['type'] === 'tool.execution_complete') {
-      const toolCallId = stringValue(data['toolCallId'])
-      if (toolCallId === '') continue
-      const result: Record<string, unknown> = isRecord(data['result']) ? data['result'] : {}
-      session.toolResults.push({
-        toolCallId,
-        content: stringValue(result['content']),
-        ...(data['success'] === false ? { isError: true } : {}),
-      })
+      if (typeof content === 'string' && content !== '') promptByAgent.set(eventAgentId(event), content)
+      continue
     }
-  }
-  return session
-}
-
-/**
- * The session's single turn: its root prompt as one `system_prompt` part, and its
- * tool calls and results. Absent when the journal holds neither.
- */
-function sessionTurnOf(sessionId: string, session: JournalSession, withTools: boolean): ReaderTurn | undefined {
-  const parts: ContentPart[] = session.prompt === undefined
-    ? []
-    : [{ part: 'system_prompt', text: session.prompt, order: 0 }]
-  const toolCalls = withTools ? session.toolCalls : []
-  const toolResults = withTools ? session.toolResults : []
-  if (parts.length === 0 && toolCalls.length === 0) return undefined
-  return {
-    sessionId,
-    parts,
-    ...(toolCalls.length > 0 ? { toolCalls } : {}),
-    ...(toolResults.length > 0 ? { toolResults } : {}),
-  }
-}
-
-/** The session store the CLI keeps beside its journals: `<home>/.copilot/session-store.db`. */
-function sessionStorePath(): string {
-  return join(homedir(), '.copilot', 'session-store.db')
-}
-
-/** The journal a session directory name resolves to: `<home>/.copilot/session-state/<sessionId>/events.jsonl`. */
-function journalPathOf(sessionId: string): string {
-  return join(homedir(), '.copilot', 'session-state', sessionId, 'events.jsonl')
-}
-
-/**
- * The last session store read, so consecutive journal reads do not reopen the same
- * store (F3). One entry, keyed by the store's fingerprint: a rewritten store misses
- * and is read again, and no other store is kept.
- */
-let storeIdsMemo: { storePath: string; fingerprint: string; ids: string[] } | undefined
-
-/**
- * What a store's contents look like from the outside: the database and its hot
- * `-wal` file, each by mtime and size. A write may land in the WAL alone, so the
- * main file's stats are not enough. Undefined when the store is absent.
- */
-function storeFingerprint(storePath: string): string | undefined {
-  if (!existsSync(storePath)) return undefined
-  const part = (path: string): string => {
-    try {
-      const stats = statSync(path)
-      return `${stats.mtimeMs}:${stats.size}`
-    } catch {
-      return '-'
+    if (event['type'] !== 'assistant.message') continue
+    const messageId = data['messageId']
+    if (typeof messageId !== 'string' || messageId === '') continue
+    const prompt = promptByAgent.get(eventAgentId(event))
+    const turn: ReaderTurn = {
+      sessionId,
+      nativeRecordId: messageId,
+      parts: prompt === undefined ? [] : [{ part: 'system_prompt', text: prompt, order: 0 }],
     }
+    ;(eventAgentId(event) === '' ? root : subagent).push(turn)
   }
-  return `${part(storePath)}|${part(`${storePath}-wal`)}`
-}
-
-/**
- * Canonical session ids a session store names, in store order. Each id names its
- * journal directory exactly, so an id that could address another directory
- * (a separator, `.` or `..`) is skipped rather than resolved.
- */
-function storeSessionIds(storePath: string): string[] {
-  const fingerprint = storeFingerprint(storePath)
-  if (fingerprint === undefined) return []
-  if (storeIdsMemo?.storePath === storePath && storeIdsMemo.fingerprint === fingerprint) return [...storeIdsMemo.ids]
-  const db = openDatabase(storePath)
-  let rows: SqliteRow[]
-  try {
-    rows = db.query<SqliteRow>('SELECT * FROM sessions')
-  } finally {
-    db.close()
-  }
-  const ids = new Set<string>()
-  for (const row of rows) {
-    const sessionId = stringValue(row.session_id, stringValue(row.id))
-    if (sessionId === '' || sessionId === '.' || sessionId === '..' || /[\\/]/.test(sessionId)) continue
-    ids.add(sessionId)
-  }
-  storeIdsMemo = { storePath, fingerprint, ids: [...ids] }
-  return [...ids]
-}
-
-/**
- * Yield the session's one turn, if its journal exists and carries anything.
- * `withTools` is false when a session store row owns the session's tool records.
- */
-async function* readSessionTurn(filePath: string, sessionId: string, withTools: boolean): AsyncGenerator<ReaderTurn> {
-  if (!existsSync(filePath)) return
-  const text = await readSessionFile(filePath)
-  if (text === null) return
-  const turn = sessionTurnOf(sessionId, readJournal(text), withTools)
-  if (turn !== undefined) yield turn
+  // Root turns lead so any positional fallback (calls with no messageId, such as
+  // the shutdown rollup legs) stays within the root agent's turns; a call beyond
+  // the turn list pairs to nothing and carries counters only.
+  yield* root
+  yield* subagent
 }
 
 /**
  * Copilot CLI's counters live in SQLite (parsed above); its transcript content
- * lives in each session's `events.jsonl` journal. A `.jsonl` path names one
- * journal, whose session is its directory name. A `.db` path names a session
- * store, whose sessions each resolve to their own journal by exact directory
- * name. Each session yields one turn; a database path never yields content
- * from its counter rows.
- *
- * Tool records have one owner per session (D25). A session with a row in the
- * session store is owned by the store unit, which attaches them to its
- * placeholder row; a journal read for that session carries the prompt only.
- * A session with no store row has its tool records emitted from its journal.
+ * lives in `<session>/events.jsonl`. Only the journal yields turns — a database
+ * path yields nothing rather than inventing content from counter rows.
  */
 export const copilotCliReader: ContentReader = {
   async *read(filePath: string): AsyncGenerator<ReaderTurn> {
-    if (filePath.endsWith('.jsonl')) {
-      const sessionId = basename(dirname(filePath))
-      const storeOwns = storeSessionIds(sessionStorePath()).includes(sessionId)
-      yield* readSessionTurn(filePath, sessionId, !storeOwns)
-      return
-    }
-    if (!filePath.endsWith('.db')) return
-    for (const sessionId of storeSessionIds(filePath)) {
-      yield* readSessionTurn(journalPathOf(sessionId), sessionId, true)
-    }
+    if (!filePath.endsWith('.jsonl')) return
+    yield* readEventsJournal(filePath)
   },
 }
 

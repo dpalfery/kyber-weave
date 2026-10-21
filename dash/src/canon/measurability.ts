@@ -103,12 +103,14 @@ export const READER_UNMEASURABLE: ReadonlyMap<string, readonly string[]> = new M
   ['cursor', ['schema_cost', 'conversation_history', 'system_prompt', 'tool_definitions']],
   ['cursor-agent', ['schema_cost', 'conversation_history', 'system_prompt', 'tool_definitions']],
   ['pi', ['schema_cost', 'system_prompt', 'instruction_context', 'tool_definitions', 'tool_result_content']],
-  // Copilot CLI's journal carries the system prompt and conversation history
-  // only on the turns it pairs with a reader turn, so those two keys are lifted
-  // per record (see `measurabilityForRecord`). It carries no tool schemas: the
-  // `<tools>` block in its system prompt is usage guidance, so tool_definitions
-  // is never lifted.
-  ['copilot-cli', ['schema_cost', 'skills_invoked', ...CANONICAL_CONTENT_KEYS]],
+  ['commandcode', ['schema_cost', 'system_prompt', 'instruction_context', 'tool_definitions']],
+  // Copilot CLI's journal carries the system prompt only on the turns it pairs
+  // with a reader turn, so system_prompt stays declared here and is lifted per
+  // record (see `measurabilityForRecord`). Its other keys keep the copilot
+  // family's declaration. The journal carries no tool schemas: the `<tools>`
+  // block in its system prompt is usage guidance, so tool_definitions is never
+  // lifted.
+  ['copilot-cli', ['schema_cost', ...CANONICAL_CONTENT_KEYS]],
   // Antigravity exports MCP tool schemas (the `mcp/<server>/<tool>.json`
   // catalogue) as tool_definitions, but not built-in tool schemas, the system
   // prompt, or skill text. The catalogue is a directory snapshot, not a
@@ -128,14 +130,6 @@ export const READER_UNMEASURABLE: ReadonlyMap<string, readonly string[]> = new M
  */
 const COPILOT_CLI_TOOL_DEFINITIONS_REASON =
   "Copilot CLI session journals carry no tool schemas; the system prompt's <tools> section is usage guidance, not the offered tool set."
-
-/**
- * The reason Copilot CLI's skills_invoked is declared not measurable. The skill
- * listing is measured from the root prompt, but the per-message calls that
- * would record a turn's skill invocations are not ingested (D26).
- */
-const COPILOT_CLI_SKILLS_INVOKED_REASON =
-  'Skill invocations are not measurable for Copilot CLI: per-message journal calls are not ingested, so the skills a turn invoked are not recorded.'
 
 /** The reason Antigravity's tool_definitions is not measurable on a turn with no paired catalogue. */
 const ANTIGRAVITY_TOOL_DEFINITIONS_REASON =
@@ -157,7 +151,7 @@ const PER_RECORD_LIFT_HARNESSES: ReadonlySet<string> = new Set([
 
 /** Keys a reader never lifts, however its paired turn reads (D8). */
 const NEVER_LIFTED: ReadonlyMap<string, ReadonlySet<string>> = new Map([
-  ['copilot-cli', new Set(['tool_definitions', 'skills_invoked'])],
+  ['copilot-cli', new Set(['tool_definitions'])],
 ])
 
 /**
@@ -302,6 +296,8 @@ export function normalizeHarnessName(harness: string): string {
     return 'kilo-shared-runtime'
   }
   if (lower === 'kimicode' || lower === 'kimi-code') return 'kimi-code'
+  // The npm package is published as `command-code`; the provider, registry and reader all use `commandcode`.
+  if (lower === 'commandcode' || lower === 'command-code') return 'commandcode'
   return lower
 }
 
@@ -430,12 +426,8 @@ export function measurabilityFor(
             ? ANTIGRAVITY_TOOL_DEFINITIONS_REASON
           : metric === 'tool_definitions' && provider === 'copilot-cli'
             ? COPILOT_CLI_TOOL_DEFINITIONS_REASON
-          : metric === 'skills_invoked' && provider === 'copilot-cli'
-            ? COPILOT_CLI_SKILLS_INVOKED_REASON
           : metric === 'system_prompt' && provider === 'copilot-cli'
             ? 'Copilot CLI session journals carry the system prompt only on turns the journal pairs with a reader turn.'
-          : metric === 'conversation_history' && provider === 'copilot-cli'
-            ? 'Copilot CLI session journals carry the conversation history only on turns the journal pairs with a reader turn.'
           : metric === 'system_prompt' && provider === 'copilot-vscode'
             ? 'VS Code Copilot chat-session files do not store the runtime system prompt.'
             : metric === 'tool_definitions' && provider === 'copilot-vscode'
@@ -471,24 +463,20 @@ export function measurabilityFor(
  * provider stands, except that a declared key the paired reader turn carried
  * parts of is measured on this record alone: a sibling turn the journal did not
  * pair keeps the declared reason. Copilot CLI is declared on its own, because
- * its journal limits differ from the copilot family's.
- *
- * `measuredAs` (a declaration-only hint on the call) selects the reader family
- * whose declaration and per-record rules apply, for calls that reach a record
- * under a shared label such as `copilot`. It changes nothing else on the record.
+ * its journal limits differ from the copilot family's. The harness id decides
+ * the declaration, so a Copilot CLI envelope takes the CLI's declaration even
+ * though its calls arrive under the shared `copilot` provider label.
  */
 export function measurabilityForRecord(
   provider: string,
   harnessId: string,
   carriedKeys: ReadonlySet<string>,
-  measuredAs?: string,
 ): Measurability {
   const harness = normalizeHarnessName(harnessId)
-  const family = measuredAs ?? (harness === 'copilot-cli' ? 'copilot-cli' : provider)
+  const family = harness === 'copilot-cli' ? 'copilot-cli' : provider
   const declared = measurabilityFor(family)
-  const lifted = measuredAs ?? harness
-  if (!PER_RECORD_LIFT_HARNESSES.has(lifted)) return declared
-  const neverLifted = NEVER_LIFTED.get(lifted) ?? new Set<string>()
+  if (!PER_RECORD_LIFT_HARNESSES.has(harness)) return declared
+  const neverLifted = NEVER_LIFTED.get(harness) ?? new Set<string>()
   const stamped: Measurability = { ...declared }
   for (const key of carriedKeys) {
     if (key in stamped && !neverLifted.has(key)) stamped[key] = 'measured'
@@ -508,14 +496,12 @@ export function measurabilityForChild(
   provider: string,
   harnessId: string,
   childCarriedKeys: ReadonlySet<string>,
-  measuredAs?: string,
 ): Measurability {
   const harness = normalizeHarnessName(harnessId)
-  const lifted = measuredAs ?? harness
-  if (!PER_RECORD_LIFT_HARNESSES.has(lifted)) return { ...parent }
-  const family = measuredAs ?? (harness === 'copilot-cli' ? 'copilot-cli' : provider)
+  if (!PER_RECORD_LIFT_HARNESSES.has(harness)) return { ...parent }
+  const family = harness === 'copilot-cli' ? 'copilot-cli' : provider
   const declared = measurabilityFor(family)
-  const neverLifted = NEVER_LIFTED.get(lifted) ?? new Set<string>()
+  const neverLifted = NEVER_LIFTED.get(harness) ?? new Set<string>()
   const stamped: Measurability = { ...parent }
   for (const [key, value] of Object.entries(declared)) {
     if (typeof value !== 'object') continue

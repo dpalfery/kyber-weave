@@ -12,8 +12,9 @@ last-reviewed: 2026-08-16
 
 How tests are written in this repository. Agents and skills resolve this document as
 `<test-coding-standard>`. Language-level C# in test files follows
-`<csharp-coding-standard>`; Python and frontend tests follow `<python-coding-standard>`
-and `<react-coding-standard>` the same way.
+`<csharp-coding-standard>`; Python, Rust, Go, and frontend tests follow
+`<python-coding-standard>`, `<rust-coding-standard>`, `<go-coding-standard>`, and
+`<react-coding-standard>` the same way.
 
 ## Authority & status
 
@@ -51,6 +52,35 @@ to proceed on it, exactly as it does when no standard is declared.
 - **Naming:** `test_<unit>_<scenario>` snake_case.
 - **Coverage:** meet the coverage floor the host declares under `review.coverage` in its Kyber-Weave configuration and `kyber-weave review gates` reports, or `>80%` line
   coverage with `pytest-cov` when that property is absent.
+
+### Rust
+
+- **Runner:** `cargo nextest run` when the repository has adopted it, otherwise `cargo test`.
+  Doctests still need `cargo test --doc`; nextest does not run them.
+- **Placement:** unit tests in a `#[cfg(test)] mod tests` beside the code; integration tests
+  that use only the public API in the crate's `tests/` directory.
+- **Table-driven cases:** a slice of `(name, input, expected)` cases looped with the case name
+  in the assertion message, or `rstest` when the repository already takes it.
+- **Fakes:** substitute dependencies through traits. Prefer a hand-written fake to a mocking
+  crate; adopt `mockall` only where the standard says so.
+- **Naming:** `<unit>_<scenario>_<expected>` snake_case.
+- **`unwrap` is allowed in tests** — a panic is the failure report. Tests that exercise an
+  error path assert on the error variant with `matches!`, not on the message string.
+- **Async:** `#[tokio::test]`; time-dependent tests use `tokio::time::pause` rather than real
+  sleeps.
+
+### Go
+
+- **Runner:** `go test ./...`, always with `-race` where cgo is available.
+- **Table-driven tests:** a slice of named cases, each run as `t.Run(tc.name, ...)` so a
+  failure names its case. Mark independent subtests `t.Parallel()`.
+- **Fakes:** substitute dependencies through small interfaces with hand-written fakes. No
+  mocking framework unless the standard names one.
+- **Assertions:** the standard library (`if got != want { t.Errorf("…: got %v, want %v", …) }`)
+  and `go-cmp` for structural diffs, unless the repository already uses `testify`.
+- **Helpers** call `t.Helper()`; cleanup uses `t.Cleanup`, temp files use `t.TempDir()`.
+- **Package:** black-box tests in `package foo_test` by default; internal `package foo` tests
+  only for unexported logic that cannot be reached otherwise.
 
 ### Frontend
 
@@ -105,4 +135,6 @@ HTTP.
 dotnet test --filter <TestClass>
 dotnet test
 pytest tests/<module>
+cargo nextest run --workspace --locked   # or: cargo test --workspace --locked
+go test -race ./...
 ```

@@ -109,12 +109,6 @@ export type ParsedProviderCall = {
   // each turn at most once, with the pairing claim winning so the
   // usage-carrying span receives the reader parts and window.
   pairingId?: string
-  // Declaration-only hint: the reader family whose measurability declaration
-  // and per-record rules apply to this call's record. It affects ONLY that
-  // lookup (canon/measurability.ts measurabilityForRecord). It never changes
-  // provider, harness, cost, grouping, dedup, or span identity, and synthesis
-  // strips it from the record's raw attributes.
-  measuredAs?: 'copilot-cli'
   toolSequence?: ToolCall[][]
   userMessage: string
   sessionId: string
