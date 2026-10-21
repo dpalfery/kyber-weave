@@ -4,7 +4,7 @@ import { describe, expect, it, expectTypeOf } from 'vitest'
 import { DatabaseSync } from 'node:sqlite'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 
 import {
   copilotCliReader,
@@ -195,7 +195,7 @@ describe('copilotCliReader events.jsonl journal', () => {
       expect(turns[1]!.parts[0]).toMatchObject({ text: ROOT_PROMPT })
       expect(turns.some((t) => t.toolsOffered !== undefined)).toBe(false)
     } finally {
-      rmSync(join(file, '..', '..'), { recursive: true, force: true })
+      rmSync(dirname(dirname(file)), { recursive: true, force: true })
     }
   })
 
@@ -207,7 +207,7 @@ describe('copilotCliReader events.jsonl journal', () => {
     try {
       expect((await collect(file))[0]!.parts).toEqual([])
     } finally {
-      rmSync(join(file, '..', '..'), { recursive: true, force: true })
+      rmSync(dirname(dirname(file)), { recursive: true, force: true })
     }
   })
 
