@@ -325,7 +325,7 @@ export const claudeCodeAdapter: HarnessAdapter = {
       record.op === 'unspecified' &&
       raw.attributes['span.type'] === 'tool' &&
       typeof raw.attributes.tool_name === 'string' &&
-      raw.attributes.tool_name !== ''
+      raw.attributes.tool_name.trim() !== ''
     ) {
       record.op = 'tool.invoke'
     }

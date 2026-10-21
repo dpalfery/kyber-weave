@@ -2508,7 +2508,7 @@ export function resolveSharedDisplay(
   let billingIdx = -1
   for (const sp of shared.parts) {
     if (sp.text === '') continue
-    if (sp.text.trimStart().startsWith(VOLATILE_HEADER_PREFIX)) {
+    if (sp.text.trimStart().toLowerCase().startsWith(VOLATILE_HEADER_PREFIX)) {
       if (billingIdx === -1) {
         billingIdx = parts.length
         parts.push({ ...sp, collapsedTurns: sp.turnIndex !== undefined ? [sp.turnIndex] : [] })
@@ -2516,7 +2516,9 @@ export function resolveSharedDisplay(
         const prev = parts[billingIdx]
         parts[billingIdx] = {
           ...sp,
-          collapsedTurns: [...(prev.collapsedTurns ?? []), ...(sp.turnIndex !== undefined ? [sp.turnIndex] : [])],
+          collapsedTurns: [
+            ...new Set([...(prev.collapsedTurns ?? []), ...(sp.turnIndex !== undefined ? [sp.turnIndex] : [])]),
+          ].sort((a, b) => a - b),
         }
       }
       continue
@@ -2529,7 +2531,9 @@ export function resolveSharedDisplay(
         continue
       }
     }
-    parts.push(sp)
+    // collapsedTurns is display state this function owns; never trust it off the wire.
+    const { collapsedTurns: _wire, ...plain } = sp
+    parts.push(plain)
   }
   if (parts.length === 0) return null
   return { parts, seenBefore: shared.seenBefore }

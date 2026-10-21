@@ -229,6 +229,7 @@ export function SchemaCostRanking({ schema, tools, onSelectTool, className }: Sc
     )
   }
 
+  const payloadRows = new Map((tools ?? []).map((row) => [row.name, row] as const))
   const invocationCounts = new Map<string, number>()
   for (const row of tools ?? []) {
     if (typeof row.invocations === 'number' && Number.isFinite(row.invocations) && row.invocations >= 0) invocationCounts.set(row.name, row.invocations)
@@ -294,7 +295,7 @@ export function SchemaCostRanking({ schema, tools, onSelectTool, className }: Sc
 
   const select = (tool: DisplayTool) => {
     if (!onSelectTool) return
-    const original = tools?.find((row) => row.name === tool.name)
+    const original = payloadRows.get(tool.name)
     // Prefer the payload row so the inspector sees invocations the ranking
     // never had to invent. A never-invoked tool with no row is 0 calls, which
     // is measured; an invoked tool with no count is not passed as 0.
@@ -345,9 +346,11 @@ export function SchemaCostRanking({ schema, tools, onSelectTool, className }: Sc
         {ranked.map((tool) => {
           const never = !tool.invoked
           const callCount = invocationCounts.get(tool.name)
-          const payloadRow = tools?.find((row) => row.name === tool.name)
+          const payloadRow = payloadRows.get(tool.name)
           const schemaTokens =
-            typeof payloadRow?.schema_tokens === 'number' && payloadRow.schema_tokens > 0
+            typeof payloadRow?.schema_tokens === 'number' &&
+            Number.isFinite(payloadRow.schema_tokens) &&
+            payloadRow.schema_tokens > 0
               ? payloadRow.schema_tokens
               : undefined
           const turnsResident = payloadRow?.turns_resident
@@ -400,7 +403,7 @@ export function SchemaCostRanking({ schema, tools, onSelectTool, className }: Sc
                       title="Tokens in the tool's name, description and input schema, re-sent every turn"
                     >
                       {fmtTokens(schemaTokens)} tok
-                      {typeof turnsResident === 'number' && turnsResident > 0 ? ` × ${turnsResident} turns` : ''}
+                      {typeof turnsResident === 'number' && Number.isInteger(turnsResident) && turnsResident > 0 ? ` × ${turnsResident} turns` : ''}
                     </span>
                   )}
                   <span className="font-semibold text-foreground">

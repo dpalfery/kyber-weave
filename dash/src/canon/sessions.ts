@@ -818,7 +818,9 @@ function extractToolDefinitionsFromText(text: string): { name: string; text: str
 function invocationsOf(records: readonly CanonicalRecord[]): string[] {
   return records
     .filter((record) => record.op === "tool.invoke")
-    .map((record) => attributeOf(record, ["gen_ai.tool.name", "tool.name", "tool_name"]) ?? record.name)
+    .map((record) => (attributeOf(record, ["gen_ai.tool.name", "tool.name", "tool_name"]) ?? record.name).trim())
+    // A nameless span falls back to the generic op name; neither is a tool identity.
+    .filter((name) => name !== "" && name !== "tool.invoke")
 }
 
 function hasEvidence(
@@ -1388,7 +1390,7 @@ export function buildSessionRow(
   const invocationCounts = new Map<string, number>()
   const errorCounts = new Map<string, number>()
   for (const record of toolRecords) {
-    const name = attributeOf(record, ['gen_ai.tool.name', 'tool.name', 'tool_name']) ?? record.name
+    const name = (attributeOf(record, ['gen_ai.tool.name', 'tool.name', 'tool_name']) ?? record.name).trim()
     if (!name) continue
     invocationCounts.set(name, (invocationCounts.get(name) ?? 0) + 1)
     const isError =

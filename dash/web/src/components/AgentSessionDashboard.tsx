@@ -687,7 +687,7 @@ export function AgentSessionContent({
   const schemaPayload = (session as { schema?: SchemaCostAnalysis }).schema
   const isSchemaMeasurable =
     schemaPayload?.measurable === true ||
-    toolRows.some((t) => t.in_definitions || typeof t.total_schema_cost === 'number')
+    toolRows.some((t) => t.in_definitions || (typeof t.total_schema_cost === 'number' && Number.isFinite(t.total_schema_cost)))
 
   // Which content-route request the drawer should issue for what it is
   // showing: a whole-turn lossless request, an explicit span selection, the
