@@ -294,9 +294,16 @@ function rowsForSession(
 }
 
 function tryParseJsonObject(value: unknown): Record<string, unknown> | undefined {
-  if (typeof value !== 'string') return undefined
   try {
-    const parsed: unknown = JSON.parse(value)
+    const text =
+      typeof value === 'string'
+        ? value
+        : value instanceof Uint8Array
+          ? // eslint-disable-next-line @typescript-eslint/no-require-imports
+            require('node:zlib').inflateSync(Buffer.from(value)).toString('utf8')
+          : undefined
+    if (text === undefined) return undefined
+    const parsed: unknown = JSON.parse(text)
     if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
       return parsed as Record<string, unknown>
     }

@@ -281,8 +281,17 @@ function turnRowsOf(store: CanonStore, sessionId: string): Array<{ index: number
     .prepare(
       'SELECT turn_index, turn_json FROM session_turn WHERE session_id = ? ORDER BY turn_index',
     )
-    .all(sessionId) as Array<{ turn_index: number; turn_json: string }>
-  return rows.map((row) => ({ index: row.turn_index, turn: JSON.parse(row.turn_json) }))
+    .all(sessionId) as Array<{ turn_index: number; turn_json: unknown }>
+  return rows.map((row) => ({
+    index: row.turn_index,
+    turn:
+      typeof row.turn_json === 'string'
+        ? JSON.parse(row.turn_json)
+        : JSON.parse(
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            require('node:zlib').inflateSync(Buffer.from(row.turn_json as Uint8Array)).toString('utf8'),
+          ),
+  }))
 }
 
 /** The original payload with only the `turns` key removed, key order otherwise preserved. */
@@ -433,6 +442,50 @@ describe('schema migration v21 -> v22 (materialized summary columns)', () => {
       ])
       expect(turnRowsOf(store, 'sess-plain')).toEqual([{ index: 0, turn: ONE_TURN[0] }])
       expect(turnRowsOf(store, 'sess-object-problems')).toEqual([])
+    } finally {
+      store.close()
+    }
+  })
+})
+
+describe('v22 backfill compresses turn rows like the live writer', () => {
+  it('stores a large migrated turn deflated, readable back to the same turn', async () => {
+    const { inflateSync } = await import('node:zlib')
+    const dir = mkdtempSync(join(tmpdir(), 'kyber-migration-v22-compress-'))
+    dirs.push(dir)
+    const path = join(dir, 'canon.db')
+    new CanonStore(path).close()
+    const db = new DatabaseSync(path)
+    try {
+      db.exec('DROP TABLE IF EXISTS session;')
+      db.exec(V21_SESSION_TABLE_SQL)
+      db.exec(V21_SESSION_DENORM_INDEX_SQL)
+      db.prepare('UPDATE metadata SET value = ? WHERE key = ?').run('21', 'schema_version')
+      const bigTurn = { index: 0, spanId: 'span-big', text: 'x'.repeat(5000) }
+      const payload = {
+        id: 'sess-big',
+        session_id: 'sess-big',
+        harness: 'claude-code',
+        label: 'Session sess-big',
+        turns: [bigTurn],
+      }
+      db.prepare(
+        `INSERT INTO session (session_id, harness, label, is_subagent, started, ended, payload)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      ).run('sess-big', 'claude-code', 'Session sess-big', 0, '2026-10-14T10:00:00.000Z', '2026-10-14T10:30:00.000Z', JSON.stringify(payload))
+    } finally {
+      db.close()
+    }
+    const store = new CanonStore(path)
+    try {
+      const row = store
+        .getDatabase()
+        .prepare('SELECT turn_json FROM session_turn WHERE session_id = ?')
+        .get('sess-big') as { turn_json: unknown } | undefined
+      expect(row).toBeDefined()
+      expect(row!.turn_json).toBeInstanceOf(Uint8Array)
+      const inflated = JSON.parse(inflateSync(Buffer.from(row!.turn_json as Uint8Array)).toString('utf8'))
+      expect(inflated).toEqual({ index: 0, spanId: 'span-big', text: 'x'.repeat(5000) })
     } finally {
       store.close()
     }

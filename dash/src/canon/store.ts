@@ -1424,7 +1424,7 @@ function backfillOneSession(backfill: SessionTurnBackfill, sessionId: string): v
   backfill.deleteTurns.run(sessionId)
   if (Array.isArray(turns)) {
     for (const [position, turn] of turns.entries()) {
-      backfill.insertTurn.run(sessionId, turnIndexOf(turn, position), JSON.stringify(turn))
+      backfill.insertTurn.run(sessionId, turnIndexOf(turn, position), compressColumn(turn))
     }
   }
   delete payload['turns']
