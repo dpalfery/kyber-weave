@@ -181,7 +181,6 @@ describe('commandcode provider pairing', () => {
     const root = mkdtempSync(join(tmpdir(), 'kyber-commandcode-pairing-'))
     tempRoots.push(root)
     const dir = join(root, 'users-synthetic-project')
-    const { mkdirSync } = await import('node:fs')
     mkdirSync(dir, { recursive: true })
     const entries = [
       header,
