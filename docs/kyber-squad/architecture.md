@@ -687,13 +687,13 @@ and validates.
   closures — with authored relative links resolving in the output; every skill resource
   reaches this render except `skills/setup-dev-environment/agents/openai.yaml`, which stays
   packaged-only Codex skill-UI metadata. That count is the current
-  contract in [requirements](requirements.md) (KS-001 and the golden-render requirement). The
-  Hotshot-era 48-file Copilot tree that omitted resources is historical, not current
+  contract in [requirements](requirements.md) (KS-001 and the render requirement). The
+  earlier 48-file Copilot tree that omitted resources is historical, not current
   behaviour.
-- **Skill golden bytes and retained resources**: `code-review-loop` is authored in Kyber-Squad
-  and has no Hotshot baseline. Every imported canonical raw `SKILL.md` except the
+- **Skill canonical bytes and retained resources**: `code-review-loop` is authored in Kyber-Squad.
+  Every imported canonical raw `SKILL.md` except the
   six explicitly evolved skills (`bug-crusher`, `code-review`, `product-owner`, `second-brain`,
-  `create-pull-request`, and `pr-review-fix-comments`) still matches Hotshot golden bytes;
+  `create-pull-request`, and `pr-review-fix-comments`) still matches the canonical bytes;
   `create-pull-request-github` is retired into `create-pull-request`. Canonical source and both
   recursive package formats retain all 69 skill resources (94 files under
   `products/kyber-squad/skills/`) and resolve the retained references. Every retained resource
@@ -843,7 +843,7 @@ Operational contracts remain in
 `products/kyber-squad/agents/test-dev.md`, and
 `products/kyber-squad/agents/github-devops.md`.
 Regression pins live in `tests/KyberWeave.Tests/SquadCanonicalContentTests.cs` and
-`HotshotGoldenContractTests.cs`.
+`tests/KyberWeave.Tests/Squad/CopilotRendererTests.cs`.
 
 ---
 
