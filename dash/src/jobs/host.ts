@@ -10,7 +10,7 @@
 // inside the child keeps arbitrating with terminal-started refreshes.
 
 import { spawn } from 'child_process'
-import { mkdirSync, readdirSync, unlinkSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import type { CanonStore } from '../canon/store.js'
@@ -400,8 +400,21 @@ export class JobHost {
   /** Keep the newest artifacts; a host that fails every tick must not fill the disk. */
   private pruneFailureArtifacts(directory: string): void {
     try {
-      const names = readdirSync(directory).filter((name) => name.endsWith('.stderr.log')).sort()
-      for (const name of names.slice(0, Math.max(0, names.length - FAILURE_ARTIFACTS_KEPT))) {
+      const names = readdirSync(directory).filter((name) => name.endsWith('.stderr.log'))
+      // Newest by file time, not by kind: names are `{kind}-{stamp}.stderr.log`,
+      // so a plain sort() orders every `clean-…` before every `refresh-…` and
+      // evicts a fresh clean file while keeping a stale refresh one.
+      const byAge = names
+        .map((name) => {
+          try {
+            return { name, mtimeMs: statSync(join(directory, name)).mtimeMs }
+          } catch {
+            return { name, mtimeMs: 0 }
+          }
+        })
+        .sort((a, b) => a.mtimeMs - b.mtimeMs || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+        .map((entry) => entry.name)
+      for (const name of byAge.slice(0, Math.max(0, byAge.length - FAILURE_ARTIFACTS_KEPT))) {
         unlinkSync(join(directory, name))
       }
     } catch {
