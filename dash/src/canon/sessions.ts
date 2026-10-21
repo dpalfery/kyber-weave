@@ -1391,7 +1391,8 @@ export function buildSessionRow(
   const errorCounts = new Map<string, number>()
   for (const record of toolRecords) {
     const name = (attributeOf(record, ['gen_ai.tool.name', 'tool.name', 'tool_name']) ?? record.name).trim()
-    if (!name) continue
+    // Same filter as `invocationsOf`: a nameless span carries the generic op name.
+    if (!name || name === 'tool.invoke') continue
     invocationCounts.set(name, (invocationCounts.get(name) ?? 0) + 1)
     const isError =
       record.status === 'error' ||
