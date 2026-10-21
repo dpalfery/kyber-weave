@@ -1094,6 +1094,7 @@ function createJsonlParser(
             speed: 'standard' as const,
             deduplicationKey: dedupKey,
             userMessage: pendingUserMessage,
+            ...(messageId ? { pairingId: messageId } : {}),
           }
           pendingUserMessage = ''
         }
