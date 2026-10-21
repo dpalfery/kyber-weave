@@ -98,7 +98,9 @@ func TestParsePort(t *testing.T) {
 
 - Failure messages read `Func(input) = got, want want`.
 - `t.Fatalf` stops the subtest when continuing is meaningless; `t.Errorf` records and continues.
-- On a `go` directive below 1.22, copy `tc := tc` before `t.Parallel()`.
+- On a `go` directive below 1.22, add `tc := tc` as the first line of the loop body, before
+  `t.Run` — not inside the subtest closure, where every parallel subtest has already captured
+  the shared variable. From Go 1.22 each iteration has its own `tc` and the copy is redundant.
 
 ### Fakes through interfaces
 

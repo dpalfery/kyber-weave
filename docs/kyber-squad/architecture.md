@@ -695,7 +695,7 @@ and validates.
   six explicitly evolved skills (`bug-crusher`, `code-review`, `product-owner`, `second-brain`,
   `create-pull-request`, and `pr-review-fix-comments`) still matches the canonical bytes;
   `create-pull-request-github` is retired into `create-pull-request`. Canonical source and both
-  recursive package formats retain all 69 skill resources (94 files under
+  recursive package formats retain all 78 skill resources (105 files under
   `products/kyber-squad/skills/`) and resolve the retained references. Every retained resource
   now has a reviewed disposition in the
   [skill-resource dispositions audit](skill-resource-dispositions.md): non-policy content stays

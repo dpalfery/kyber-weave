@@ -40,19 +40,28 @@ Whether the crate is async at all, and which runtime it uses, is decided by
 ## Graceful shutdown (daemons)
 
 ```rust
-let token = CancellationToken::new();
-let mut tasks = JoinSet::new();
-tasks.spawn(worker(token.clone()));
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let token = CancellationToken::new();
+    let mut tasks = JoinSet::new();
+    tasks.spawn(worker(token.clone()));
 
-tokio::select! {
-    _ = tokio::signal::ctrl_c() => {}
-    _ = terminate_signal() => {} // SIGTERM on Unix; a no-op future on Windows
-}
-token.cancel();
-while let Some(res) = tasks.join_next().await {
-    res??; // surface both panics and errors
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {}
+        _ = terminate_signal() => {} // SIGTERM on Unix; a no-op future on Windows
+    }
+    token.cancel();
+    while let Some(res) = tasks.join_next().await {
+        // Outer `?`: JoinError — the task panicked or was aborted.
+        // Inner `?`: the worker's own error. Both propagate out of main.
+        res??;
+    }
+    Ok(())
 }
 ```
+
+`worker` returns `anyhow::Result<()>` here; with a typed error, map the `JoinError` explicitly
+instead of relying on `?` to convert it.
 
 Handle `SIGTERM` behind `#[cfg(unix)]`; on Windows, `tokio::signal::windows::ctrl_close`
 covers the service-stop case.

@@ -32,6 +32,7 @@ channel nobody writes is a leak the race detector will not find.
 g, ctx := errgroup.WithContext(ctx)
 g.SetLimit(8)
 for _, item := range items {
+    item := item // required below Go 1.22; harmless (and removable) from 1.22 on
     g.Go(func() error { return process(ctx, item) })
 }
 if err := g.Wait(); err != nil {
@@ -40,7 +41,8 @@ if err := g.Wait(); err != nil {
 ```
 
 The first error cancels `ctx` for the rest. Go 1.22+ gives each loop iteration its own
-`item`; on an older `go` directive, copy it before capturing.
+`item`; below 1.22 every closure would share one variable and process the last item, which is
+what the `item := item` copy prevents. Check the module's `go` directive before deleting it.
 
 ## Shared state
 
@@ -56,10 +58,19 @@ ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SI
 defer stop()
 
 srv := &http.Server{Addr: addr, Handler: h}
-go func() { <-ctx.Done(); _ = srv.Shutdown(context.Background()) }()
+shutdownErr := make(chan error, 1)
+go func() {
+    <-ctx.Done()
+    // Bound the drain: Shutdown waits for every in-flight connection, so an unbounded
+    // context lets one hung client block the process from exiting.
+    sctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+    defer cancel()
+    shutdownErr <- srv.Shutdown(sctx)
+}()
 if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
     return err
 }
+return <-shutdownErr // wait for the drain to finish before main returns
 ```
 
 `syscall.SIGTERM` exists on Windows but is never delivered there; `os.Interrupt` covers Ctrl+C

@@ -769,9 +769,9 @@ kyber-weave squad pack --format all --out ./artifacts
 
 Running `squad pack` outside the repository root fails immediately with a diagnostic directing the operator to rerun the command from the Kyber-Weave repository root (or run `squad install` if deploying agents and skills to a project).
 
-Both archive formats recurse through each skill directory. They contain all 25 canonical
-`SKILL.md` files plus the 69 retained supplemental resources, and retained local skill references
-must resolve in the extracted package. The APM archive additionally contains the 21 canonical
+Both archive formats recurse through each skill directory. They contain all 27 canonical
+`SKILL.md` files plus the 78 retained supplemental resources, and retained local skill references
+must resolve in the extracted package. The APM archive additionally contains the 23 canonical
 agents with their 10 owned reference files; the Agent Plugins archive never contains agents or
 agent-owned resources. A fresh deployment renders every file an owner's Markdown links reach
 beside its principal — 134 files on Copilot today — with authored relative links resolving inside

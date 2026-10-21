@@ -25,7 +25,7 @@ and registered today: `copilot`, `cursor`, `claude`, `codex`, `antigravity`, `op
 Deploying multi-agent workflows across modern engineering environments breaks down in three key ways:
 
 ### 1. The Multi-Harness Fragmentation Tax
-Every coding harness uses its own configuration format, folder layout, and prompt syntax (`.cursorrules`, `.claude/agents`, `.github/copilot-instructions.md`, TOML, JSON). Manually duplicating 22 specialized agent roles and 25 skills across multiple tools guarantees silent configuration drift, outdated prompts, and inconsistent behaviors across developers.
+Every coding harness uses its own configuration format, folder layout, and prompt syntax (`.cursorrules`, `.claude/agents`, `.github/copilot-instructions.md`, TOML, JSON). Manually duplicating 23 specialized agent roles and 27 skills across multiple tools guarantees silent configuration drift, outdated prompts, and inconsistent behaviors across developers.
 
 ### 2. Differing Capability Boundaries & Tool Permissions
 Harnesses have wildly different capabilities: some support restricted subagent spawning or granular MCP permissions; others allow only flat prompt injection. Without a formalized capability lattice, agents fail unexpectedly or gain unintended permissions when deployed to less restrictive harnesses.
@@ -52,9 +52,9 @@ Modifying local developer environments or repository-level agent configurations 
 The canonical product contains 25 `SKILL.md` files. `code-review-loop` is authored in Kyber-Squad;
 every imported skill except the six explicitly evolved skills (`bug-crusher`, `code-review`,
 `product-owner`, `second-brain`, `create-pull-request`, and `pr-review-fix-comments`) matches
-the designated canonical copy byte for byte. It also retains 69 supplemental references, scripts, provider
-instructions, and metadata files, for 94 files under
-`products/kyber-squad/skills/`. Recursive APM and Agent Plugins packages carry all 94 files and
+the designated canonical copy byte for byte. It also retains 78 supplemental references, scripts, provider
+instructions, and metadata files, for 105 files under
+`products/kyber-squad/skills/`. Recursive APM and Agent Plugins packages carry all 105 files and
 preserve each retained local reference.
 
 The [code-review-loop skill](../../products/kyber-squad/skills/code-review-loop/SKILL.md)

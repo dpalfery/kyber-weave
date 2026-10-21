@@ -128,7 +128,7 @@ in Kyber-Squad. Every imported raw `SKILL.md` except the six explicitly evolved 
 (`bug-crusher`, `code-review`, `product-owner`, `second-brain`,
 `create-pull-request`, and `pr-review-fix-comments`) is byte-identical to the designated
 canonical copy; the retired `create-pull-request-github` is folded into `create-pull-request`. The canonical
-tree also retains 69 supplemental resources, for 94 skill-tree files in total; recursive APM and
+tree also retains 78 supplemental resources, for 105 skill-tree files in total; recursive APM and
 Agent Plugins packages preserve those resources and their local references.
 
 `code-review-loop` completes an authorized code review feedback cycle: validated fixes,
