@@ -31,13 +31,17 @@ import { resolveCanonDbPath } from '../canon/paths.js'
 import { attributeStoreMemory } from '../canon/store-memory.js'
 
 /** Parse the tool's own arguments. Kept here so the tool stays a tool. */
-function parseArgs(argv: readonly string[]): { path: string; mmap: boolean } {
+export function parseArgs(argv: readonly string[]): { path: string; mmap: boolean } {
   let path: string | undefined
   let mmap = false
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index]
     if (arg === '--db') {
-      path = argv[index + 1]
+      const value = argv[index + 1]
+      if (value === undefined || value.startsWith('-')) {
+        throw new Error('--db requires a value')
+      }
+      path = value
       index += 1
       continue
     }
