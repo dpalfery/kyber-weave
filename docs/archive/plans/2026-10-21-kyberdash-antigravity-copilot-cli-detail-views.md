@@ -154,8 +154,8 @@ and takes the reader-local alternative, which is cheap to reverse.
 |---|---|---|---|
 | C1 | main checkout, `main` at `6b30f533` | uncommitted | 7 files plus `dash/src/canon/antigravity-skill-text.ts`: the `SKILL.md` descriptions, the `SkillsPanel` description and token bar, the drawer fallback, `kyberApi.ts`, and tests. The plan files sit beside them and are committed separately. |
 | C2 | `.claude/worktrees/agent-a70a652852dc16a9e`, branch `worktree-agent-a70a652852dc16a9e` | uncommitted | MCP catalogue reader, registration, Antigravity measurability row, "does not export tool definitions" notice, inventory section |
-| C3 | `/Users/dave/git/claude-worktree/kyber-weave/sleepy-greider-7c478b`, branch `feat/copilot-cli-system-prompt` | clean, 2 commits: `06961940`, `28e45733` (PR #406 review fixes) | `readEventsJournal`, `pairingId: messageId`, tests, inventory line |
-| C4 | `/Users/dave/git/claude-worktree/kyber-weave/musing-swirles-a2efcb`, branch `claude/musing-swirles-a2efcb` | uncommitted | `antigravity.ts` (+17 lines, `attachTranscriptActivity`, time-based), `antigravity-transcript.ts` and its test, `telemetry-inventory.md` |
+| C3 | a separate worktree, branch `feat/copilot-cli-system-prompt` | clean, 2 commits: `06961940`, `28e45733` (PR #406 review fixes) | `readEventsJournal`, `pairingId: messageId`, tests, inventory line |
+| C4 | a separate worktree, branch `claude/musing-swirles-a2efcb` | uncommitted | `antigravity.ts` (+17 lines, `attachTranscriptActivity`, time-based), `antigravity-transcript.ts` and its test, `telemetry-inventory.md` |
 
 The other worktrees are unrelated and are not touched.
 
@@ -258,7 +258,7 @@ The other worktrees are unrelated and are not touched.
 
 ## 4. Test Contract (test-first)
 
-The runner root is `/Users/dave/git/personal/claude/kyber-weave/dash`. Every fixture is
+The runner root is the repository's `dash/` directory. Every fixture is
 synthetic (D14).
 
 Tests assert observable output:

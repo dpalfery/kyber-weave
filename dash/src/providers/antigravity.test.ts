@@ -928,3 +928,40 @@ describe('cached calls carry no transcript activity once the transcript is gone 
     })
   })
 })
+
+describe('a conversation database outside any .gemini folder reads no transcript from the real HOME', () => {
+  it('attaches nothing when the database path names no .gemini ancestor, even if HOME holds a transcript for its id', async () => {
+    const temp = await mkdtemp(join(tmpdir(), 'codeburn-antigravity-stray-db-'))
+    const previousHome = process.env['HOME']
+    const previousCacheDir = process.env['KYBERDASH_CACHE_DIR']
+    try {
+      const fixture = JSON.parse(await readFile(SEGMENTS_FIXTURE_URL, 'utf-8')) as CurrentCliFixture
+      // A HOME that does hold a transcript for the conversation id...
+      const home = join(temp, 'home')
+      const logsDir = join(home, '.gemini', 'antigravity-cli', 'brain', fixture.conversationId, '.system_generated', 'logs')
+      await mkdir(logsDir, { recursive: true })
+      await writeFile(join(logsDir, 'transcript.jsonl'), await readFile(SEGMENTS_TRANSCRIPT_URL, 'utf-8'))
+      // ...and a database for that id that does not sit under any .gemini folder.
+      const strayDir = join(temp, 'elsewhere', 'conversations')
+      await mkdir(strayDir, { recursive: true })
+      const dbPath = join(strayDir, `${fixture.conversationId}.db`)
+      createCurrentAntigravityCliDb(dbPath, fixture)
+      process.env['HOME'] = home
+      process.env['KYBERDASH_CACHE_DIR'] = join(temp, 'cache')
+
+      const calls = await collectAntigravityCalls({ path: dbPath, project: 'antigravity-cli', provider: 'antigravity' })
+
+      expect(calls.map((c) => c.pairingId)).toEqual(['agy-step:2', 'agy-step:5', 'agy-step:8'])
+      for (const call of calls) {
+        expect(call.tools).toEqual([])
+        expect(call.skills).toBeUndefined()
+      }
+    } finally {
+      if (previousHome === undefined) delete process.env['HOME']
+      else process.env['HOME'] = previousHome
+      if (previousCacheDir === undefined) delete process.env['KYBERDASH_CACHE_DIR']
+      else process.env['KYBERDASH_CACHE_DIR'] = previousCacheDir
+      await rm(temp, { recursive: true, force: true })
+    }
+  })
+})

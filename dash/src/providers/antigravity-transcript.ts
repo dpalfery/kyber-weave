@@ -320,15 +320,15 @@ export async function attachTranscriptActivity(
 
     ordered.forEach(([, call], i) => {
       const segment = segments[i]!
+      // An uncovered call has no transcript behind it, so it carries nothing: no tools
+      // and no skills. Steps that happen to lie in its open range (a transcript that
+      // starts after the call's own output) are not evidence about it, and tools
+      // without a skills claim would read as an invocation that is unknown.
+      if (!segment.covered) return
       call.tools = segment.steps.flatMap((s) => s.tools)
       call.toolSequence = segment.steps.map((s) => s.toolSequence)
       // An empty list on a covered call is a measured none (D6): the transcript
-      // was read for this segment and named no skill. An uncovered call has no
-      // transcript behind it, so it never gets a list at all.
-      if (!segment.covered) {
-        delete call.skills
-        return
-      }
+      // was read for this segment and named no skill.
       call.skills = [...new Set(segment.steps.flatMap((s) => s.skills))]
     })
   }

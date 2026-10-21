@@ -4,7 +4,7 @@ import { join } from 'node:path'
 
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 
-import { antigravitySkillDescription, skillDescriptionOf } from './antigravity-skill-text.js'
+import { antigravitySkillDescription, MAX_SKILL_FILE_BYTES, skillDescriptionOf } from './antigravity-skill-text.js'
 
 // Synthetic SKILL.md content only. The skill roots live under a temp HOME that the
 // `homedir` mock returns, so the test never reads the developer's own ~/.gemini.
@@ -143,6 +143,17 @@ describe('antigravitySkillDescription', () => {
     )
 
     expect(antigravitySkillDescription('synthetic-late')).toBe('Written after the first miss.')
+  })
+
+  it('reads no description from a SKILL.md larger than the size cap, and one at the cap still reads', async () => {
+    const head = '---\ndescription: Held in a file of a chosen size.\n---\n'
+    const big = join(homeRoot.dir, '.gemini', 'config', 'skills', 'synthetic-oversize')
+    await writeSkill(big, head + 'x'.repeat(MAX_SKILL_FILE_BYTES + 1 - head.length))
+    expect(antigravitySkillDescription('synthetic-oversize')).toBeUndefined()
+
+    const atCap = join(homeRoot.dir, '.gemini', 'config', 'skills', 'synthetic-at-cap')
+    await writeSkill(atCap, head + 'x'.repeat(MAX_SKILL_FILE_BYTES - head.length))
+    expect(antigravitySkillDescription('synthetic-at-cap')).toBe('Held in a file of a chosen size.')
   })
 
   it('picks up an edited description once the SKILL.md mtime changes', async () => {

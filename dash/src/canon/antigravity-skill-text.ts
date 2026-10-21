@@ -6,6 +6,9 @@ import { closeSync, fstatSync, openSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
+/** A SKILL.md over this size has no description read from it: a skill file is a short document. */
+export const MAX_SKILL_FILE_BYTES = 256 * 1024
+
 const APP_DIRS = ['antigravity', 'antigravity-ide', 'antigravity-cli'] as const
 /**
  * Descriptions read so far, by SKILL.md path. An entry is good only while the file's
@@ -52,6 +55,7 @@ function descriptionAt(path: string): string | undefined {
   }
   try {
     const stats = fstatSync(fd)
+    if (stats.size > MAX_SKILL_FILE_BYTES) return undefined
     const hit = cache.get(path)
     if (hit !== undefined && hit.mtimeMs === stats.mtimeMs && hit.size === stats.size) return hit.description
     const description = skillDescriptionOf(readFileSync(fd, 'utf8'))

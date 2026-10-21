@@ -154,6 +154,26 @@ describe('attachTranscriptActivity (agy-step segments)', () => {
     }, fromStepSix, 'fixture-segments')
   })
 
+  it('gives an uncovered segment no tools and no skills, even when later steps lie in its open range', async () => {
+    // The transcript starts at step 9, after the planner step (6) that is this call's own
+    // output. The last call's range is open above, so steps 9 and 10 fall inside it, but
+    // the transcript does not cover the call: it must carry nothing from them (a call with
+    // tools and no skills claim would read as an invocation that is unknown).
+    const fromStepNine = (await readFile(FIXTURE_TRANSCRIPT, 'utf-8'))
+      .split(/\r?\n/)
+      .filter((line) => line.trim() !== '')
+      .filter((line) => (JSON.parse(line) as { step_index: number }).step_index >= 9)
+      .join('\n')
+    await withTranscript(async (home) => {
+      const calls = [segmentCall(5, 'fixture-segments')]
+      await attachTranscriptActivity(calls, { home })
+
+      expect(calls[0]!.tools).toEqual([])
+      expect(calls[0]!.toolSequence ?? []).toEqual([])
+      expect(calls[0]!.skills).toBeUndefined()
+    }, fromStepNine, 'fixture-segments')
+  })
+
   it('states no skills for a call before the transcript starts (measured none is not claimed there), and measured none for a covered call', async () => {
     // T2(b), mid-conversation: the transcript starts at step 6. The call at lsi 2 owns
     // (2, 5], which the transcript does not cover, so it carries no skills key at all.

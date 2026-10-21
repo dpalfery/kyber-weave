@@ -1427,10 +1427,13 @@ function createParser(source: SessionSource, seenKeys: Set<string>): SessionPars
       for await (const call of createRawParser(source, seenKeys).parse()) calls.push({ ...call })
       // The transcript is the one beside this database, so the source path, not the
       // machine's home directory, names where it lives.
-      await attachTranscriptActivity(calls, {
-        preferredRoot: antigravityAppDataDirFromSourcePath(source.path),
-        home: homeOfConversationPath(source.path),
-      })
+      // A database outside any `.gemini` folder has no transcript beside it, so it reads
+      // none: falling back to the machine's own home would pair it with an unrelated
+      // conversation's transcript.
+      const home = homeOfConversationPath(source.path)
+      if (home !== undefined) {
+        await attachTranscriptActivity(calls, { preferredRoot: antigravityAppDataDirFromSourcePath(source.path), home })
+      }
       yield* calls
     },
   }
