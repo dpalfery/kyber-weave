@@ -830,17 +830,21 @@ whole-blob read per session to reach a single turn. Schema 22 removes that read 
 moving the turns out of the blob:
 
 ```sql
-CREATE TABLE session_turn (
+CREATE TABLE IF NOT EXISTS session_turn (
   session_id TEXT NOT NULL,
   turn_index INTEGER NOT NULL,
-  turn_json BLOB NOT NULL,
-  PRIMARY KEY (session_id, turn_index)
-) WITHOUT ROWID; -- plus the non-unique session_turn_by_session index
+  turn_json TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS session_turn_by_session ON session_turn (session_id, turn_index);
 ALTER TABLE session ADD COLUMN context_limit_source TEXT; -- presence-guarded; NULL = not materialized
 ```
 
 `session_turn` holds one row per turn; `turn_json` is the deflated turn JSON (zlib,
-level 6), compressed from birth. `session.payload` is rewritten without the `turns`
+level 6), compressed from birth. The column's declared type stays `TEXT` while SQLite's
+dynamic typing keeps the deflated bytes a `BLOB` value in that column all the same, and
+readers tell the two stored forms apart by the storage class the value comes back with;
+the `(session_id, turn_index)` index is deliberately not unique because a legacy payload
+may repeat an index. `session.payload` is rewritten without the `turns`
 key — every other top-level key byte-identical, in its original order — so metadata
 readers see the same document minus turns. The migration also populates
 `context_limit_source` from `payload.context.contextLimitSource` on every row it
