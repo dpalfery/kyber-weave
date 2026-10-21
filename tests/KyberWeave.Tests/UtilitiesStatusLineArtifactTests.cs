@@ -719,6 +719,59 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
         Assert.DoesNotContain(CanaryValue, result.StandardError, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void CommandCodeModRendersNonFiniteNumbersAsAbsentAndKeepsTheLastGoodTurn()
+    {
+        string artifact = RequireArtifact(CommandCodeArtifactRelativePath);
+        string node = RequireRuntime("node");
+        Sandbox sandbox = new(_temp);
+        string reportPath = Path.Combine(sandbox.RecordDirectory, "commandcode-report-poison.json");
+
+        ProcessResult result = RunCommandCodeHarness(sandbox, node, artifact, reportPath, "tui", "CC_POISON_TURN=1");
+
+        AssertSucceeded(result, "CommandCode");
+        string[] status = ReportStrings(File.ReadAllText(reportPath), "setStatus");
+        Assert.True(status.Length > 0, "The CommandCode mod recorded no cmd.ui.setStatus call in TUI mode.");
+        string rendered = string.Join("\n", status);
+        Assert.DoesNotContain("NaN", rendered, StringComparison.Ordinal);
+        Assert.DoesNotContain("Infinity", rendered, StringComparison.Ordinal);
+        AssertRendersValue(rendered, "⏳", "turn count");
+        AssertRendersValue(rendered, "turn #3", "the last good turn survives a non-finite turn number");
+    }
+
+    [Fact]
+    public void CommandCodeModClearsItsSegmentWhenTheHostOmitsCapabilities()
+    {
+        string artifact = RequireArtifact(CommandCodeArtifactRelativePath);
+        string node = RequireRuntime("node");
+        Sandbox sandbox = new(_temp);
+        string reportPath = Path.Combine(sandbox.RecordDirectory, "commandcode-report-nocaps.json");
+
+        ProcessResult result = RunCommandCodeHarness(sandbox, node, artifact, reportPath, "tui", "CC_NO_CAPS=1");
+
+        AssertSucceeded(result, "CommandCode");
+        string[] status = ReportStrings(File.ReadAllText(reportPath), "setStatus");
+        Assert.True(status.Length > 0, "The CommandCode mod recorded no cmd.ui.setStatus call without capabilities.");
+        Assert.True(status.All(text => string.IsNullOrWhiteSpace(text)),
+            "The CommandCode mod must clear its segment when the host omits capabilities, so a stale bar " +
+            "never survives:\n" + string.Join("\n", status));
+    }
+
+    [Fact]
+    public void CommandCodeModSurvivesHookRegistrationFailure()
+    {
+        string artifact = RequireArtifact(CommandCodeArtifactRelativePath);
+        string node = RequireRuntime("node");
+        Sandbox sandbox = new(_temp);
+        string reportPath = Path.Combine(sandbox.RecordDirectory, "commandcode-report-hooks-throw.json");
+
+        ProcessResult result = RunCommandCodeHarness(sandbox, node, artifact, reportPath, "tui", "CC_HOOKS_THROW=1");
+
+        // A host that rejects hook registration must not take the session down: the node test
+        // asserting registration would throw on a factory failure, so a zero exit is the evidence.
+        AssertSucceeded(result, "CommandCode");
+    }
+
     // -----------------------------------------------------------------------------------------
     // Portability and privacy: the static rules every artifact must satisfy (C6).
     // -----------------------------------------------------------------------------------------
@@ -963,7 +1016,8 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
         string node,
         string artifactPath,
         string reportPath,
-        string mode)
+        string mode,
+        string? extraEnvironment = null)
     {
         ProcessStartInfo startInfo = new(node)
         {
@@ -981,6 +1035,13 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
         startInfo.Environment["CC_FIXTURE"] = FixturePath(CommandCodeFixture);
         startInfo.Environment["CC_REPORT"] = reportPath;
         startInfo.Environment["CC_MODE"] = mode;
+        if (extraEnvironment is not null)
+            foreach (string pair in extraEnvironment.Split(';', StringSplitOptions.RemoveEmptyEntries))
+            {
+                string[] parts = pair.Split('=', 2);
+                if (parts.Length == 2)
+                    startInfo.Environment[parts[0]] = parts[1];
+            }
         return ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(30));
     }
 
@@ -1464,9 +1525,16 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
 
                                                       const fixture = JSON.parse(readFileSync(process.env.CC_FIXTURE, 'utf8'))
                                                       const tuiMode = process.env.CC_MODE === 'tui'
+                                                      const noCaps = process.env.CC_NO_CAPS === '1'
+                                                      const hooksThrow = process.env.CC_HOOKS_THROW === '1'
+                                                      const poisonTurn = process.env.CC_POISON_TURN === '1'
 
                                                       const hooks = {}
                                                       const state = new Map()
+                                                      const uiBase = {
+                                                        setStatus: (text) => { report.setStatus.push(text === null ? '' : String(text)) },
+                                                        notify: () => {},
+                                                      }
                                                       const cmd = {
                                                         cwd: fixture.cwd,
                                                         getSessionName: () => undefined,
@@ -1482,12 +1550,11 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
                                                           subscribe: () => ({ dispose() {} }),
                                                         },
                                                         exec: async () => ({ stdout: 'kyber/synthetic-branch\\n', code: 0 }),
-                                                        ui: {
-                                                          capabilities: { status: tuiMode },
-                                                          setStatus: (text) => { report.setStatus.push(text === null ? '' : String(text)) },
-                                                          notify: () => {},
+                                                        ui: noCaps ? uiBase : { ...uiBase, capabilities: { status: tuiMode } },
+                                                        hooks: (registered) => {
+                                                          if (hooksThrow) throw new Error('synthetic hooks rejection')
+                                                          Object.assign(hooks, registered)
                                                         },
-                                                        hooks: (registered) => { Object.assign(hooks, registered) },
                                                         on: () => ({ dispose() {} }),
                                                       }
 
@@ -1500,6 +1567,7 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
                                                         const factory = module.default
                                                         assert.equal(typeof factory, 'function', 'the mod must default-export a factory function')
                                                         factory(cmd)
+                                                        if (hooksThrow) return
                                                         assert.equal(typeof hooks.onSessionStart, 'function', 'the mod must register onSessionStart')
                                                         assert.equal(typeof hooks.onTurnEnd, 'function', 'the mod must register onTurnEnd')
                                                         await hooks.onSessionStart({ source: 'startup' })
@@ -1510,6 +1578,13 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
                                                         })
                                                         if (next && typeof next === 'object') {
                                                           for (const [key, value] of Object.entries(next)) state.set(key, value)
+                                                        }
+                                                        if (poisonTurn) {
+                                                          await hooks.onTurnEnd({
+                                                            turnNumber: NaN,
+                                                            hadToolCalls: true,
+                                                            usage: { inputTokens: NaN, outputTokens: Infinity, cachedTokens: -5, totalTokens: 1e21 },
+                                                          })
                                                         }
                                                       })
                                                       """;

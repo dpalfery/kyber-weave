@@ -49,9 +49,9 @@ type ModLike = {
 
 const STATE_PREFIX = 'kyber-statusline:';
 
-/** Format a number in compact "k" notation. */
+/** Format a number in compact "k" notation. Non-finite values render as absent, never NaN. */
 export function fmtK(val: number | undefined): string {
-  if (val === undefined) return '--';
+  if (val === undefined || !Number.isFinite(val)) return '--';
   if (val >= 1000) return (val / 1000).toFixed(1) + 'k';
   return val.toString();
 }
@@ -170,18 +170,32 @@ function saveState(cmd: ModLike, state: BarState): void {
   cmd.state.set(STATE_PREFIX + 'turns', state.turnCount);
 }
 
+/** Whether the host renders status segments. Tolerant of hosts that omit the surface. */
+function statusVisible(cmd: ModLike): boolean {
+  try {
+    return cmd.ui?.capabilities?.status === true;
+  } catch {
+    return false;
+  }
+}
+
+/** Best-effort clear that never throws, even when the host surface is absent. */
+function clearStatus(cmd: ModLike): void {
+  try {
+    cmd.ui?.setStatus?.(null);
+  } catch {
+    // Swallow — the status line is best-effort.
+  }
+}
+
 function paint(cmd: ModLike, summary: {
   repo?: string;
   model?: string;
   state: BarState;
 }): void {
   try {
-    if (!cmd.ui.capabilities.status) {
-      try {
-        cmd.ui.setStatus(null);
-      } catch {
-        // Swallow — the status line is best-effort.
-      }
+    if (!statusVisible(cmd)) {
+      clearStatus(cmd);
       return;
     }
     cmd.ui.setStatus(renderStatusBar(summary.state, summary));
@@ -211,7 +225,8 @@ export default function (cmd: ModLike): void {
     paint(cmd, { repo, model, state });
   };
 
-  cmd.hooks({
+  try {
+    cmd.hooks({
     onSessionStart: () => {
       try {
         state = loadState(cmd);
@@ -243,7 +258,8 @@ export default function (cmd: ModLike): void {
     onTurnEnd: (args) => {
       try {
         addUsage(state, args?.usage);
-        if (typeof args?.turnNumber === 'number') state.turnCount = args.turnNumber;
+        const turn = args?.turnNumber;
+        if (typeof turn === 'number' && Number.isInteger(turn) && turn >= 0) state.turnCount = turn;
         try {
           model = cmd.getModel?.() ?? model;
         } catch {
@@ -256,4 +272,9 @@ export default function (cmd: ModLike): void {
       return undefined;
     },
   });
+  } catch {
+    // A host that rejects hook registration must not take the session down.
+    // Best-effort clear so no stale bar from a previous load survives.
+    clearStatus(cmd);
+  }
 }
