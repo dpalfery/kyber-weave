@@ -262,7 +262,10 @@ describe('session writer splits turns into session_turn', () => {
       const rows = turnRows(store, 'sess-rewrite')
       expect(rows).toHaveLength(1)
       expect(rows[0]).toMatchObject({ session_id: 'sess-rewrite', turn_index: 0 })
-      expect(rows[0]!.turn_json).toBeInstanceOf(Uint8Array)
+      // The round-trip value, not the stored form: this turn's JSON is 55
+      // bytes, exactly on compressColumn's tie — macOS zlib squeezes it to 53
+      // (deflated wins) while linux zlib ties at 55 (plain wins) — and the
+      // readers accept both forms, so the form is not a contract.
       expect(inflatedTurn(rows[0]!.turn_json)).toEqual(replacement[0])
     } finally {
       store.close()
