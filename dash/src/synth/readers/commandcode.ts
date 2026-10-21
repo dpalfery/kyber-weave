@@ -38,7 +38,13 @@ function toolResultText(content: unknown): string {
   if (content === null || content === undefined) return ''
   const items = Array.isArray(content) ? content : [content]
   return items
-    .map((item) => (isRecord(item) && typeof item['text'] === 'string' ? item['text'] : JSON.stringify(item)))
+    .map((item) =>
+      typeof item === 'string'
+        ? item
+        : isRecord(item) && typeof item['text'] === 'string'
+          ? item['text']
+          : JSON.stringify(item),
+    )
     .filter((text) => text !== '')
     .join('\n')
 }

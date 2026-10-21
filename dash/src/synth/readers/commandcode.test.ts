@@ -126,6 +126,28 @@ describe('commandcode reader', () => {
     expect(turns[0]?.toolResults).toEqual([{ toolCallId: 'call-1', content: 'file.txt', isError: false }])
   })
 
+  it('keeps plain strings in array tool_result content unquoted', async () => {
+    const path = writeSession([
+      header,
+      userText('u1', 'run it'),
+      assistant('a1', [{ type: 'tool_use', id: 'call-1', name: 'shell_command', input: { command: 'ls' } }]),
+      {
+        type: 'message',
+        id: 'r1',
+        parentId: 'a1',
+        timestamp: '2026-10-21T10:00:03.000Z',
+        message: {
+          role: 'user',
+          content: [{ type: 'tool_result', tool_use_id: 'call-1', content: ['file.txt'] }],
+        },
+      },
+    ])
+
+    const turns = await readTurns(path)
+
+    expect(turns[0]?.toolResults).toEqual([{ toolCallId: 'call-1', content: 'file.txt', isError: false }])
+  })
+
   it('emits nothing for a transcript without assistant messages', async () => {
     const path = writeSession([header, userText('u1', 'only a prompt')])
     expect(await readTurns(path)).toEqual([])
