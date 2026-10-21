@@ -137,6 +137,7 @@ describe('HarnessSourceRegistry', () => {
       'codex-cli',
       'codex-desktop',
       'codex-unclassified',
+      'commandcode',
       'copilot-cli',
       'kilo-shared-runtime',
       'kilo-vscode-legacy',

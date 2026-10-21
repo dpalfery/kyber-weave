@@ -41,6 +41,7 @@ import { kiloReader } from './readers/kilo.js'
 import { opencodeReader } from './readers/opencode.js'
 import { cursorReader } from './readers/cursor.js'
 import { piReader } from './readers/pi.js'
+import { commandcodeReader } from './readers/commandcode.js'
 import type { ContentReader, ReaderTurn, SourceRecordEnvelope } from './readers/types.js'
 import { isExcludedHarness, Synthesizer } from './synth.js'
 import type { DateRange } from '../types.js'
@@ -119,6 +120,7 @@ export const PROVIDER_READERS: ReadonlyMap<string, ContentReader> = new Map([
   ['cursor', cursorReader],
   ['cursor-agent', cursorReader],
   ['pi', piReader],
+  ['commandcode', commandcodeReader],
 ])
 
 function readerFor(identity: string): ContentReader | undefined {

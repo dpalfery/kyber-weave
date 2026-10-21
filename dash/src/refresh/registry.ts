@@ -59,6 +59,10 @@ const CURSOR_PARSER_CONTRACT_VERSION = '2'
 // declared-window payload upserts over stale rows (ADR 0016 repair contract).
 // v3: invoked skill names onto turn records (`kyber.skills.invoked`).
 const PI_PARSER_CONTRACT_VERSION = '3'
+// v2: content reader registered (one turn per assistant message, keyed by the
+// message id) and assistant calls stamped with that id as pairingId for pairing.
+// Version-invalidated checkpoints re-open the unit so the parts upsert (ADR 0016).
+const COMMANDCODE_PARSER_CONTRACT_VERSION = '2'
 
 const CLAUDE_HARNESS_IDS = ['claude-cli', 'claude-desktop', 'claude-unclassified'] as const
 const KILO_HARNESS_IDS = ['kilo-shared-runtime', 'kilo-vscode-legacy'] as const
@@ -96,6 +100,9 @@ export function parserContractVersionFor(partial: { providerName: string; harnes
   }
   if (partial.providerName === 'pi' || partial.harnessId === 'pi') {
     return PI_PARSER_CONTRACT_VERSION
+  }
+  if (partial.providerName === 'commandcode' || partial.harnessId === 'commandcode') {
+    return COMMANDCODE_PARSER_CONTRACT_VERSION
   }
   if (SKILLS_CONTRACT_PROVIDER_NAMES.has(partial.providerName)) {
     return SKILLS_CONTRACT_VERSION
@@ -588,6 +595,7 @@ const READER_HARNESS_IDS = new Set([
   'copilot-vscode',
   'cursor',
   'cursor-agent',
+  'commandcode',
   ...KILO_HARNESS_IDS,
   'opencode',
   'pi',

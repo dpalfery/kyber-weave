@@ -65,6 +65,9 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
     private const string ClaudeArtifactRelativePath = StatusLineRootRelativePath + "/claude/statusline.sh";
     private const string AgyArtifactRelativePath = StatusLineRootRelativePath + "/antigravity/statusline.py";
     private const string PiArtifactRelativePath = StatusLineRootRelativePath + "/pi/statusbar.ts";
+    private const string CommandCodeArtifactRelativePath =
+        StatusLineRootRelativePath + "/commandcode/statusbar.ts";
+    private const string CommandCodeHarnessFileName = "commandcode-harness.mjs";
 
     private const string FixtureRootRelativePath = "tests/KyberWeave.Tests/Fixtures/statusline";
     private const string ClaudeFixture = "claude-statusline.json";
@@ -74,6 +77,7 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
     private const string AgyWithoutUsageFixture = "agy-statusline-without-usage.json";
     private const string AgyWithoutModelFixture = "agy-statusline-without-model.json";
     private const string PiFixture = "pi-statusline.json";
+    private const string CommandCodeFixture = "commandcode-statusline.json";
 
     private const string SyntheticUser = "kyber-synthetic-user";
     private const string SyntheticHost = "kyber-synthetic-host";
@@ -94,6 +98,8 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
 
     private const string PiModelDisplayName = "Kyber Synthetic Pi Model";
     private const string PiWorkspaceName = "kyber-pi-workspace";
+    private const string CommandCodeModelDisplayName = "Kyber Synthetic CommandCode Model";
+    private const string CommandCodeWorkspaceName = "kyber-commandcode-workspace";
 
     private static readonly string[] ExpectedKyberdashArguments = ["kyber", "antigravity-statusline"];
     private static readonly string[] NetworkCommands = ["curl", "wget", "nc"];
@@ -613,6 +619,160 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
     }
 
     // -----------------------------------------------------------------------------------------
+    // CommandCode: the mod, run through a node --test harness with a stub ModApi.
+    // -----------------------------------------------------------------------------------------
+
+    [Fact]
+    public void CommandCodeModRendersEverySegmentTheInventoryDeclaresInTuiMode()
+    {
+        string artifact = RequireArtifact(CommandCodeArtifactRelativePath);
+        string node = RequireRuntime("node");
+        Sandbox sandbox = new(_temp);
+        string reportPath = Path.Combine(sandbox.RecordDirectory, "commandcode-report-tui.json");
+
+        ProcessResult result = RunCommandCodeHarness(sandbox, node, artifact, reportPath, "tui");
+
+        AssertSucceeded(result, "CommandCode");
+        string report = File.ReadAllText(reportPath);
+        string[] status = ReportStrings(report, "setStatus");
+        string rendered = string.Join("\n", status);
+        Assert.True(status.Length > 0, "The CommandCode mod recorded no cmd.ui.setStatus call in TUI mode.");
+        AssertRendersValue(rendered, "CC", "CC badge");
+        AssertRendersValue(rendered, "📁", "repository name");
+        AssertRendersValue(rendered, CommandCodeWorkspaceName, "repository name");
+        AssertRendersValue(rendered, "🌿", "git branch");
+        AssertRendersValue(rendered, SyntheticBranch, "git branch");
+        AssertRendersValue(rendered, "🤖", "model");
+        AssertRendersValue(rendered, CommandCodeModelDisplayName, "model");
+        AssertRendersValue(rendered, "⚡", "token section");
+        AssertRendersLabel(rendered, "in:", "token breakdown");
+        AssertRendersLabel(rendered, "out:", "token breakdown");
+        AssertRendersValue(rendered, "742", "token total");
+        AssertRendersValue(rendered, "⏳", "turn count");
+        AssertRendersValue(rendered, "3", "turn count");
+        AssertRendersValue(rendered, "│", "compact footer separators");
+    }
+
+    [Fact]
+    public void CommandCodeModClearsItsSegmentOutsideTuiMode()
+    {
+        string artifact = RequireArtifact(CommandCodeArtifactRelativePath);
+        string node = RequireRuntime("node");
+        Sandbox sandbox = new(_temp);
+        string reportPath = Path.Combine(sandbox.RecordDirectory, "commandcode-report-plain.json");
+
+        ProcessResult result = RunCommandCodeHarness(sandbox, node, artifact, reportPath, "plain");
+
+        AssertSucceeded(result, "CommandCode");
+        string report = File.ReadAllText(reportPath);
+        string[] status = ReportStrings(report, "setStatus");
+        Assert.True(status.Length > 0, "The CommandCode mod recorded no cmd.ui.setStatus call outside TUI mode.");
+        Assert.True(status.All(text => string.IsNullOrWhiteSpace(text)),
+            "The CommandCode mod must clear its status segment outside TUI mode, so a stale bar never " +
+            "survives a headless run:\n" + string.Join("\n", status));
+    }
+
+    [Fact]
+    public void CommandCodeModOmitsTheCostSegmentBecauseNoCostApiExists()
+    {
+        string artifact = RequireArtifact(CommandCodeArtifactRelativePath);
+        string source = File.ReadAllText(artifact);
+        Assert.DoesNotContain("💰", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("costUsd", source, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("totalCost", source, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void CommandCodeModMakesNoNetworkCallAndWritesNoFile()
+    {
+        string artifact = RequireArtifact(CommandCodeArtifactRelativePath);
+        foreach (string marker in ForbiddenNetworkMarkers)
+        {
+            Assert.False(
+                File.ReadAllText(artifact).Contains(marker, StringComparison.OrdinalIgnoreCase),
+                $"The CommandCode mod contains a network call marker ('{marker}'); the import opens no socket (C8).");
+        }
+
+        string[] modules = [artifact];
+        Assert.True(modules.Length > 0, "The CommandCode mod has no TypeScript module.");
+        foreach (string module in modules)
+        {
+            Assert.False(
+                File.ReadAllText(module).Contains("fs.write", StringComparison.OrdinalIgnoreCase),
+                $"The mod writes through the fs module; the status line must write no file.");
+        }
+    }
+
+    [Fact]
+    public void CommandCodeModDoesNotEchoAnEnvironmentValueIntoItsOutput()
+    {
+        string artifact = RequireArtifact(CommandCodeArtifactRelativePath);
+        string node = RequireRuntime("node");
+        Sandbox sandbox = new(_temp);
+        string reportPath = Path.Combine(sandbox.RecordDirectory, "commandcode-report-canary.json");
+
+        ProcessResult result = RunCommandCodeHarness(sandbox, node, artifact, reportPath, "tui");
+
+        AssertSucceeded(result, "CommandCode");
+        string rendered = string.Join("\n", ReportStrings(File.ReadAllText(reportPath), "setStatus"));
+        Assert.DoesNotContain(CanaryValue, rendered, StringComparison.Ordinal);
+        Assert.DoesNotContain(CanaryValue, result.StandardError, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CommandCodeModRendersNonFiniteNumbersAsAbsentAndKeepsTheLastGoodTurn()
+    {
+        string artifact = RequireArtifact(CommandCodeArtifactRelativePath);
+        string node = RequireRuntime("node");
+        Sandbox sandbox = new(_temp);
+        string reportPath = Path.Combine(sandbox.RecordDirectory, "commandcode-report-poison.json");
+
+        ProcessResult result = RunCommandCodeHarness(sandbox, node, artifact, reportPath, "tui", "CC_POISON_TURN=1");
+
+        AssertSucceeded(result, "CommandCode");
+        string[] status = ReportStrings(File.ReadAllText(reportPath), "setStatus");
+        Assert.True(status.Length > 0, "The CommandCode mod recorded no cmd.ui.setStatus call in TUI mode.");
+        string rendered = string.Join("\n", status);
+        Assert.DoesNotContain("NaN", rendered, StringComparison.Ordinal);
+        Assert.DoesNotContain("Infinity", rendered, StringComparison.Ordinal);
+        AssertRendersValue(rendered, "⏳", "turn count");
+        AssertRendersValue(rendered, "turn #3", "the last good turn survives a non-finite turn number");
+    }
+
+    [Fact]
+    public void CommandCodeModClearsItsSegmentWhenTheHostOmitsCapabilities()
+    {
+        string artifact = RequireArtifact(CommandCodeArtifactRelativePath);
+        string node = RequireRuntime("node");
+        Sandbox sandbox = new(_temp);
+        string reportPath = Path.Combine(sandbox.RecordDirectory, "commandcode-report-nocaps.json");
+
+        ProcessResult result = RunCommandCodeHarness(sandbox, node, artifact, reportPath, "tui", "CC_NO_CAPS=1");
+
+        AssertSucceeded(result, "CommandCode");
+        string[] status = ReportStrings(File.ReadAllText(reportPath), "setStatus");
+        Assert.True(status.Length > 0, "The CommandCode mod recorded no cmd.ui.setStatus call without capabilities.");
+        Assert.True(status.All(text => string.IsNullOrWhiteSpace(text)),
+            "The CommandCode mod must clear its segment when the host omits capabilities, so a stale bar " +
+            "never survives:\n" + string.Join("\n", status));
+    }
+
+    [Fact]
+    public void CommandCodeModSurvivesHookRegistrationFailure()
+    {
+        string artifact = RequireArtifact(CommandCodeArtifactRelativePath);
+        string node = RequireRuntime("node");
+        Sandbox sandbox = new(_temp);
+        string reportPath = Path.Combine(sandbox.RecordDirectory, "commandcode-report-hooks-throw.json");
+
+        ProcessResult result = RunCommandCodeHarness(sandbox, node, artifact, reportPath, "tui", "CC_HOOKS_THROW=1");
+
+        // A host that rejects hook registration must not take the session down: the node test
+        // asserting registration would throw on a factory failure, so a zero exit is the evidence.
+        AssertSucceeded(result, "CommandCode");
+    }
+
+    // -----------------------------------------------------------------------------------------
     // Portability and privacy: the static rules every artifact must satisfy (C6).
     // -----------------------------------------------------------------------------------------
 
@@ -623,7 +783,8 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
         [
             RequireArtifact(ClaudeArtifactRelativePath),
             RequireArtifact(AgyArtifactRelativePath),
-            RequireArtifact(PiArtifactRelativePath)
+            RequireArtifact(PiArtifactRelativePath),
+            RequireArtifact(CommandCodeArtifactRelativePath)
         ];
         foreach (string artifact in artifacts)
         {
@@ -850,6 +1011,40 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
         return ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(30));
     }
 
+    private static ProcessResult RunCommandCodeHarness(
+        Sandbox sandbox,
+        string node,
+        string artifactPath,
+        string reportPath,
+        string mode,
+        string? extraEnvironment = null)
+    {
+        ProcessStartInfo startInfo = new(node)
+        {
+            WorkingDirectory = sandbox.WorkDirectory,
+            UseShellExecute = false,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true
+        };
+        startInfo.ArgumentList.Add("--test");
+        startInfo.ArgumentList.Add(sandbox.CommandCodeHarnessPath);
+        sandbox.ConfigureEnvironment(startInfo, false);
+        startInfo.Environment["CC_ARTIFACT"] = artifactPath;
+        startInfo.Environment["CC_FIXTURE"] = FixturePath(CommandCodeFixture);
+        startInfo.Environment["CC_REPORT"] = reportPath;
+        startInfo.Environment["CC_MODE"] = mode;
+        if (extraEnvironment is not null)
+            foreach (string pair in extraEnvironment.Split(';', StringSplitOptions.RemoveEmptyEntries))
+            {
+                string[] parts = pair.Split('=', 2);
+                if (parts.Length == 2)
+                    startInfo.Environment[parts[0]] = parts[1];
+            }
+        return ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(30));
+    }
+
     // -----------------------------------------------------------------------------------------
     // Helpers: assertions.
     // -----------------------------------------------------------------------------------------
@@ -1036,6 +1231,8 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
             File.WriteAllText(GitBranchFile, SyntheticBranch + "\n");
             File.WriteAllText(GitPorcelainFile, SyntheticPorcelainDirty);
             File.WriteAllText(HarnessPath, PiHarnessScript);
+            CommandCodeHarnessPath = Path.Combine(temp.Path, CommandCodeHarnessFileName);
+            File.WriteAllText(CommandCodeHarnessPath, CommandCodeHarnessScript);
 
             WriteStub(Path.Combine(StubDirectory, "git"), GitStubScript);
             WriteStub(Path.Combine(StubDirectory, "hostname"), HostnameStubScript);
@@ -1077,6 +1274,8 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
         public string SocketAuditLogFile { get; }
 
         public string HarnessPath { get; }
+
+        public string CommandCodeHarnessPath { get; }
 
         public IReadOnlyList<string> RuntimeDirectories { get; }
 
@@ -1310,4 +1509,83 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
                                              await activate(context)
                                            })
                                            """;
+
+    /// <summary>
+    /// The stub ModApi the CommandCode mod is driven through. It records
+    /// <c>cmd.ui.setStatus</c> calls, captures the registered hooks, answers identity getters from
+    /// the fixture, and fires <c>onSessionStart</c> then <c>onTurnEnd</c> with the fixture payload.
+    /// </summary>
+    private const string CommandCodeHarnessScript = """
+                                                      import { after, test } from 'node:test'
+                                                      import assert from 'node:assert/strict'
+                                                      import { readFileSync, writeFileSync } from 'node:fs'
+                                                      import { pathToFileURL } from 'node:url'
+
+                                                      const report = { setStatus: [], error: null }
+
+                                                      const fixture = JSON.parse(readFileSync(process.env.CC_FIXTURE, 'utf8'))
+                                                      const tuiMode = process.env.CC_MODE === 'tui'
+                                                      const noCaps = process.env.CC_NO_CAPS === '1'
+                                                      const hooksThrow = process.env.CC_HOOKS_THROW === '1'
+                                                      const poisonTurn = process.env.CC_POISON_TURN === '1'
+
+                                                      const hooks = {}
+                                                      const state = new Map()
+                                                      const uiBase = {
+                                                        setStatus: (text) => { report.setStatus.push(text === null ? '' : String(text)) },
+                                                        notify: () => {},
+                                                      }
+                                                      const cmd = {
+                                                        cwd: fixture.cwd,
+                                                        getSessionName: () => undefined,
+                                                        getModel: () => fixture.model,
+                                                        getContextUsage: () => ({
+                                                          tokens: fixture.usage?.totalTokens ?? null,
+                                                          contextWindow: fixture.contextWindow ?? null,
+                                                          percent: null,
+                                                        }),
+                                                        state: {
+                                                          get: (key) => (state.has(key) ? state.get(key) : undefined),
+                                                          set: (key, value) => { state.set(key, value) },
+                                                          subscribe: () => ({ dispose() {} }),
+                                                        },
+                                                        exec: async () => ({ stdout: 'kyber/synthetic-branch\\n', code: 0 }),
+                                                        ui: noCaps ? uiBase : { ...uiBase, capabilities: { status: tuiMode } },
+                                                        hooks: (registered) => {
+                                                          if (hooksThrow) throw new Error('synthetic hooks rejection')
+                                                          Object.assign(hooks, registered)
+                                                        },
+                                                        on: () => ({ dispose() {} }),
+                                                      }
+
+                                                      after(() => {
+                                                        writeFileSync(process.env.CC_REPORT, JSON.stringify(report))
+                                                      })
+
+                                                      test('the mod registers and renders against the stub ModApi', async () => {
+                                                        const module = await import(pathToFileURL(process.env.CC_ARTIFACT).href)
+                                                        const factory = module.default
+                                                        assert.equal(typeof factory, 'function', 'the mod must default-export a factory function')
+                                                        factory(cmd)
+                                                        if (hooksThrow) return
+                                                        assert.equal(typeof hooks.onSessionStart, 'function', 'the mod must register onSessionStart')
+                                                        assert.equal(typeof hooks.onTurnEnd, 'function', 'the mod must register onTurnEnd')
+                                                        await hooks.onSessionStart({ source: 'startup' })
+                                                        const next = await hooks.onTurnEnd({
+                                                          turnNumber: fixture.turnNumber,
+                                                          hadToolCalls: true,
+                                                          usage: fixture.usage,
+                                                        })
+                                                        if (next && typeof next === 'object') {
+                                                          for (const [key, value] of Object.entries(next)) state.set(key, value)
+                                                        }
+                                                        if (poisonTurn) {
+                                                          await hooks.onTurnEnd({
+                                                            turnNumber: NaN,
+                                                            hadToolCalls: true,
+                                                            usage: { inputTokens: NaN, outputTokens: Infinity, cachedTokens: -5, totalTokens: 1e21 },
+                                                          })
+                                                        }
+                                                      })
+                                                      """;
 }

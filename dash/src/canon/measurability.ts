@@ -103,6 +103,7 @@ export const READER_UNMEASURABLE: ReadonlyMap<string, readonly string[]> = new M
   ['cursor', ['schema_cost', 'conversation_history', 'system_prompt', 'tool_definitions']],
   ['cursor-agent', ['schema_cost', 'conversation_history', 'system_prompt', 'tool_definitions']],
   ['pi', ['schema_cost', 'system_prompt', 'instruction_context', 'tool_definitions', 'tool_result_content']],
+  ['commandcode', ['schema_cost', 'system_prompt', 'instruction_context', 'tool_definitions']],
 ])
 
 /**
@@ -247,6 +248,8 @@ export function normalizeHarnessName(harness: string): string {
     return 'kilo-shared-runtime'
   }
   if (lower === 'kimicode' || lower === 'kimi-code') return 'kimi-code'
+  // The npm package is published as `command-code`; the provider, registry and reader all use `commandcode`.
+  if (lower === 'commandcode' || lower === 'command-code') return 'commandcode'
   return lower
 }
 

@@ -229,6 +229,10 @@ function createParser(source: SessionSource, seenKeys: Set<string>): SessionPars
           timestamp,
           speed: 'standard',
           deduplicationKey: dedupKey,
+          // The assistant message id is a pairing key only (D5). It stays out of
+          // `turnId` so record identity keeps the digest it shipped with; the reader
+          // pairs on it, and envelopes never carry it as nativeRecordId.
+          ...(entry.id ? { pairingId: entry.id } : {}),
           userMessage: pendingUserMessage,
           sessionId,
         }
