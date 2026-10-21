@@ -253,8 +253,8 @@ public sealed class PiRendererContractTests : IDisposable
             {
                 "architect" => "zai/glm-5.3",
                 "deep-planning" => "zai/glm-5.3",
-                "fast" => "opencode/muse-spark-1.3-contributor-free",
-                "general" => "opencode/muse-spark-1.3-contributor-free",
+                "fast" => "opencode-go/muse-spark-1.3-contributor",
+                "general" => "opencode-go/muse-spark-1.3-contributor",
                 "reviewer" => "opencode-go/kimi-k2.7-code",
                 "orchestration" => "inherit",
                 _ => throw new InvalidOperationException($"Unknown profile '{agent.ModelProfile}' for agent '{agent.Name}'.")
@@ -982,8 +982,8 @@ public sealed class PiRendererContractTests : IDisposable
     /// with their approved thinking levels. Against the real corpus, the D2 profiles resolve to:
     /// deep-planning → model <c>zai/glm-5.3</c>, thinking <c>high</c>;
     /// reviewer → <c>opencode-go/kimi-k2.7-code</c>, <c>high</c>;
-    /// general → <c>opencode/muse-spark-1.3-contributor-free</c>, <c>medium</c>;
-    /// fast → <c>opencode/muse-spark-1.3-contributor-free</c>, <c>low</c>;
+    /// general → <c>opencode-go/muse-spark-1.3-contributor</c>, <c>medium</c>;
+    /// fast → <c>opencode-go/muse-spark-1.3-contributor</c>, <c>low</c>;
     /// orchestration → no model, no thinking.
     /// This contract pins the approved mapping directly from the plan.
     /// </summary>
@@ -991,8 +991,8 @@ public sealed class PiRendererContractTests : IDisposable
     [InlineData("architect", "zai/glm-5.3", "high")]
     [InlineData("deep-planning", "zai/glm-5.3", "high")]
     [InlineData("reviewer", "opencode-go/kimi-k2.7-code", "high")]
-    [InlineData("general", "opencode/muse-spark-1.3-contributor-free", "medium")]
-    [InlineData("fast", "opencode/muse-spark-1.3-contributor-free", "low")]
+    [InlineData("general", "opencode-go/muse-spark-1.3-contributor", "medium")]
+    [InlineData("fast", "opencode-go/muse-spark-1.3-contributor", "low")]
     public async Task RenderAsync_Pi_CanonicalProfilesEmitApprovedThinkingLevels(
         string profileName,
         string expectedModel,
