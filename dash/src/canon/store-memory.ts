@@ -105,6 +105,8 @@ const PAYLOAD_COLUMNS: ReadonlyArray<{ table: string; column: string }> = [
   { table: 'quarantined_logs', column: 'payload' },
   { table: 'pending_logs', column: 'payload' },
   { table: 'session', column: 'summary_json' },
+  { table: 'session', column: 'payload' },
+  { table: 'session_turn', column: 'turn_json' },
 ]
 
 /** Sample this process's memory. */
@@ -211,7 +213,7 @@ function hasColumn(db: InstanceType<typeof DatabaseSync>, table: string, column:
 /** The size of one stored value, whether SQLite returned it as text or as bytes. */
 function byteLength(value: unknown): number {
   if (value === null || value === undefined) return 0
-  if (typeof value === 'string') return value.length
+  if (typeof value === 'string') return Buffer.byteLength(value, 'utf8')
   if (value instanceof Uint8Array) return value.byteLength
   return 0
 }

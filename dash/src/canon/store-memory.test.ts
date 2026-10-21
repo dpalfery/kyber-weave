@@ -109,3 +109,69 @@ describe('the store memory attribution', () => {
     expect(report.holder).toBe('heap')
   })
 })
+
+describe('store memory bulk columns and byte sizes', () => {
+  it('counts session payload and turn rows in bytesRead', async () => {
+    const { attributeStoreMemory } = await import('./store-memory.js')
+    const path = join(mkdtempSync(join(tmpdir(), 'kyberdash-mem-bulk-')), 'canon.db')
+    const store = new CanonStore(path)
+    store.close()
+    const bulkPayload = JSON.stringify({ id: 'sess-bulk', bulk: 'x'.repeat(200_000) })
+    const bulkTurn = JSON.stringify({ index: 0, text: 'y'.repeat(100_000) })
+    const db = new DatabaseSync(path)
+    try {
+      db.exec(
+        `CREATE TABLE IF NOT EXISTS session_turn (
+           session_id TEXT NOT NULL,
+           turn_index INTEGER NOT NULL,
+           turn_json TEXT NOT NULL
+         )`,
+      )
+      db.prepare(
+        `INSERT INTO session (session_id, harness, label, payload) VALUES (?, ?, ?, ?)`,
+      ).run('sess-bulk', 'claude-code', 'Session sess-bulk', bulkPayload)
+      db.prepare(
+        `INSERT INTO session_turn (session_id, turn_index, turn_json) VALUES (?, ?, ?)`,
+      ).run('sess-bulk', 0, bulkTurn)
+    } finally {
+      db.close()
+    }
+    try {
+      const report = attributeStoreMemory(path)
+      // The session payload and its split turn row are the bulk post-v22;
+      // a reader that skips them understates what reading the store faults in.
+      expect(report.bytesRead).toBeGreaterThanOrEqual(
+        Buffer.byteLength(bulkPayload, 'utf8') + Buffer.byteLength(bulkTurn, 'utf8'),
+      )
+    } finally {
+      rmSync(join(path, '..'), { recursive: true, force: true })
+    }
+  })
+
+  it('counts multibyte strings in utf8 bytes, not UTF-16 units', async () => {
+    const { attributeStoreMemory } = await import('./store-memory.js')
+    const path = join(mkdtempSync(join(tmpdir(), 'kyberdash-mem-cjk-')), 'canon.db')
+    const store = new CanonStore(path)
+    store.close()
+    const db = new DatabaseSync(path)
+    const cjk = 'あ'.repeat(10_000)
+    const expected = Buffer.byteLength(cjk, 'utf8')
+    expect(expected).toBeGreaterThan(cjk.length)
+    try {
+      db.prepare('INSERT INTO quarantine (span_id, namespaces, reason, raw_payload) VALUES (?, ?, ?, ?)').run(
+        'span-cjk',
+        '["gen_ai"]',
+        'unclaimed',
+        cjk,
+      )
+    } finally {
+      db.close()
+    }
+    try {
+      const report = attributeStoreMemory(path)
+      expect(report.bytesRead).toBeGreaterThanOrEqual(expected)
+    } finally {
+      rmSync(join(path, '..'), { recursive: true, force: true })
+    }
+  })
+})
