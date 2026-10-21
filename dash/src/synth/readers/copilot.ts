@@ -4,11 +4,11 @@
 // taxonomy. Preserve its optional fields exactly: a missing bucket is unknown,
 // not a zero-valued measurement.
 
-import { readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 
 import type { ParsedProviderCall } from '../../providers/types.js'
+import { readSessionFile } from '../../ingest/fs-utils.js'
 import { openDatabase } from '../../ingest/sqlite.js'
 import type { ContentReader, ReaderTurn } from './types.js'
 
@@ -116,7 +116,7 @@ function eventAgentId(event: Record<string, unknown>): string {
  * (root events have no `agentId`, subagent events name theirs), so a subagent's
  * call never inherits the root prompt. Turns are keyed by `messageId`, which the
  * provider parser stamps on its calls as `pairingId`. Root turns are yielded
- * before subagent turns so position-paired calls land on the root prompt. Tool definitions are not
+ * before subagent turns, see below. Tool definitions are not
  * measured: the journal holds no tool schemas, and the prompt's `<tools>`
  * section is usage guidance for a subset of tools, not the offered tool set.
  */
@@ -125,7 +125,8 @@ async function* readEventsJournal(filePath: string): AsyncGenerator<ReaderTurn> 
   const subagent: ReaderTurn[] = []
   const sessionId = basename(dirname(filePath))
   const promptByAgent = new Map<string, string>()
-  const text = await readFile(filePath, 'utf8')
+  const text = await readSessionFile(filePath)
+  if (text === null) return
   for (const line of text.split('\n')) {
     if (line.trim() === '') continue
     let event: unknown
@@ -152,8 +153,9 @@ async function* readEventsJournal(filePath: string): AsyncGenerator<ReaderTurn> 
     }
     ;(eventAgentId(event) === '' ? root : subagent).push(turn)
   }
-  // Calls without a messageId (the shutdown rollup legs) pair by position, and a
-  // rollup describes the session, so the root agent's turns lead.
+  // Root turns lead so any positional fallback (calls with no messageId, such as
+  // the shutdown rollup legs) stays within the root agent's turns; a call beyond
+  // the turn list pairs to nothing and carries counters only.
   yield* root
   yield* subagent
 }
