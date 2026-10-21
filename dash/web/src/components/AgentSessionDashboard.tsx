@@ -9,7 +9,7 @@ import { SessionSpendCharts, CONTEXT_BUCKET_LABELS } from './SessionSpendCharts.
 import { SchemaCostRanking, type SchemaCostAnalysis, type SchemaCostToolRow } from './SchemaCostRanking.js'
 import { SkillsPanel } from './SkillsPanel.js'
 import { TimelineView, type TimelineNode, type CostBlock } from './analysis/TimelineView.js'
-import { SessionCostPanel, SessionTokenTotals } from './SessionCostPanel.js'
+import { SessionCostPanel } from './SessionCostPanel.js'
 import { findContextTurn, findTurnByTransport } from '../lib/kyberApi.js'
 import type {
   KyberContextBucket,
@@ -682,8 +682,12 @@ export function AgentSessionContent({
 
   // Tool definitions grouping
   const toolRows = session.tools || []
-  const schemaOffered = toolRows.filter((t) => t.in_definitions)
-  const isSchemaMeasurable = schemaOffered.length > 0
+  // The server serialises resident cost on every offered row and does not emit
+  // `in_definitions`, so a priced row is as good a signal as the legacy flag.
+  const schemaPayload = (session as { schema?: SchemaCostAnalysis }).schema
+  const isSchemaMeasurable =
+    schemaPayload?.measurable === true ||
+    toolRows.some((t) => t.in_definitions || typeof t.total_schema_cost === 'number')
 
   // Which content-route request the drawer should issue for what it is
   // showing: a whole-turn lossless request, an explicit span selection, the
@@ -1131,11 +1135,6 @@ export function AgentSessionContent({
             </div>
           </Card>
         </div>
-
-        {/* Moved, not duplicated: the same Underlying Token Totals section from
-            the lower cost panel, kept inside Session Overview above the later
-            detail sections. */}
-        <SessionTokenTotals summary={u} />
       </div>
 
       {/* ---------------------------------------------------------------------

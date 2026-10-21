@@ -2479,6 +2479,8 @@ export function orphanTurnParts(data: KyberTurnContentResult): KyberTurnContentP
  * is not a turn and must never be guessed as one. Empty-text entries carry
  * no bytes and stay skipped.
  */
+const VOLATILE_HEADER_PREFIX = 'x-anthropic-billing-header:'
+
 export function resolveSharedDisplay(
   data: KyberTurnContentResult,
 ): { parts: NonNullable<KyberTurnContentResult['sharedContext']>['parts']; seenBefore: boolean } | null {
@@ -2499,8 +2501,26 @@ export function resolveSharedDisplay(
     }
   }
   const parts: NonNullable<KyberTurnContentResult['sharedContext']>['parts'] = []
+  // The billing header is a per-request line whose only change between turns is
+  // its request-id chain. Every turn's copy is folded into the latest one so a
+  // long session shows it once, labelled with the turns it covers, instead of
+  // once per turn. Real prompt text is never folded.
+  let billingIdx = -1
   for (const sp of shared.parts) {
     if (sp.text === '') continue
+    if (sp.text.trimStart().startsWith(VOLATILE_HEADER_PREFIX)) {
+      if (billingIdx === -1) {
+        billingIdx = parts.length
+        parts.push({ ...sp, collapsedTurns: sp.turnIndex !== undefined ? [sp.turnIndex] : [] })
+      } else {
+        const prev = parts[billingIdx]
+        parts[billingIdx] = {
+          ...sp,
+          collapsedTurns: [...(prev.collapsedTurns ?? []), ...(sp.turnIndex !== undefined ? [sp.turnIndex] : [])],
+        }
+      }
+      continue
+    }
     const isOwnOccurrence = sp.turnIndex !== undefined && sp.turnIndex === data.turnIndex
     if (isOwnOccurrence) {
       const remaining = ownCounts.get(sp.text) ?? 0
@@ -2915,7 +2935,9 @@ export function TurnFullContentPanel({
                         className="shrink-0 rounded bg-muted border border-border px-1.5 py-0.5 font-mono text-[10px] font-semibold text-muted-foreground"
                         data-testid={`shared-session-context-part-${idx}-source`}
                       >
-                        {part.turnIndex !== undefined ? `Turn ${part.turnIndex}` : 'Session scope'}
+                        {part.collapsedTurns !== undefined && part.collapsedTurns.length > 1
+                          ? `${part.collapsedTurns.length} turns (${part.collapsedTurns[0]}–${part.collapsedTurns[part.collapsedTurns.length - 1]}) · latest shown, varies per request`
+                          : part.turnIndex !== undefined ? `Turn ${part.turnIndex}` : 'Session scope'}
                       </span>
                     </div>
                     {part.truncated === true ? (

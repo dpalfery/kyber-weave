@@ -52,6 +52,9 @@ export type SchemaCostToolRow = {
   server?: string | null
   is_mcp?: boolean
   total_schema_cost?: number | null
+  /** Tokens in the tool's name + description + input schema, per turn. */
+  schema_tokens?: number
+  turns_resident?: number
   invoked?: boolean
   invocations?: number
   in_definitions?: boolean
@@ -342,6 +345,12 @@ export function SchemaCostRanking({ schema, tools, onSelectTool, className }: Sc
         {ranked.map((tool) => {
           const never = !tool.invoked
           const callCount = invocationCounts.get(tool.name)
+          const payloadRow = tools?.find((row) => row.name === tool.name)
+          const schemaTokens =
+            typeof payloadRow?.schema_tokens === 'number' && payloadRow.schema_tokens > 0
+              ? payloadRow.schema_tokens
+              : undefined
+          const turnsResident = payloadRow?.turns_resident
           const hasCost = tool.cost !== undefined
           const pct = hasCost && maxCost !== undefined && maxCost > 0 ? (tool.cost! / maxCost) * 100 : undefined
 
@@ -383,8 +392,20 @@ export function SchemaCostRanking({ schema, tools, onSelectTool, className }: Sc
                     </span>
                   )}
                 </div>
-                <span className="shrink-0 font-semibold tabular-nums text-foreground">
-                  {hasCost ? fmtTokens(tool.cost) : 'not measurable'}
+                <span className="flex shrink-0 items-baseline gap-2 tabular-nums">
+                  {schemaTokens !== undefined && (
+                    <span
+                      data-testid={`tool-schema-tokens-${tool.name}`}
+                      className="text-tertiary-foreground"
+                      title="Tokens in the tool's name, description and input schema, re-sent every turn"
+                    >
+                      {fmtTokens(schemaTokens)} tok
+                      {typeof turnsResident === 'number' && turnsResident > 0 ? ` × ${turnsResident} turns` : ''}
+                    </span>
+                  )}
+                  <span className="font-semibold text-foreground">
+                    {hasCost ? fmtTokens(tool.cost) : 'not measurable'}
+                  </span>
                 </span>
               </div>
               <div className="mt-2 h-2 w-full overflow-hidden rounded-sm bg-muted">

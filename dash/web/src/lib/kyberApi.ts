@@ -645,7 +645,15 @@ export interface KyberTurnContentResult {
    * duplicates of the turn's own parts.
    */
   sharedContext?: {
-    parts: Array<{ text: string; spanId?: string; turnIndex?: number; truncated?: boolean; totalLength?: number }>
+    parts: Array<{
+      text: string
+      spanId?: string
+      turnIndex?: number
+      truncated?: boolean
+      totalLength?: number
+      /** Display only: source turns folded into this entry (volatile per-request header lines). */
+      collapsedTurns?: number[]
+    }>
     seenBefore: boolean
   } | null
   /** The skills this turn listed and invoked; absent on a turn that predates the skills projection. */

@@ -316,6 +316,19 @@ export const claudeCodeAdapter: HarnessAdapter = {
    */
   normalize(raw) {
     const record = baseRecord(this, raw)
+    // Claude Code names a tool call `claude_code.tool` with `span.type=tool` and
+    // `tool_name`, not the GenAI `gen_ai.tool.name` canonicalOp keys on. Without
+    // this the call is `unspecified`, the session reports zero tool calls, and
+    // every offered tool reads as never called. The child `tool.execution`
+    // span is the same call and is left alone so it is not counted twice.
+    if (
+      record.op === 'unspecified' &&
+      raw.attributes['span.type'] === 'tool' &&
+      typeof raw.attributes.tool_name === 'string' &&
+      raw.attributes.tool_name !== ''
+    ) {
+      record.op = 'tool.invoke'
+    }
     const counters = readUsageCounters(raw.attributes)
     record.tokens = exclusiveConvention({
       input: counters.input,

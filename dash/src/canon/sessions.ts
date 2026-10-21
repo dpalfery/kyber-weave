@@ -127,7 +127,7 @@ function isInvokeAgentSpan(record: CanonicalRecord): boolean {
   const opName = attributeOf(record, ["gen_ai.operation.name"])
   if (opName === "invoke_agent") return true
   if (INVOKE_AGENT_NAME_RE.test(record.name)) return true
-  const toolName = attributeOf(record, ["gen_ai.tool.name", "tool.name"])
+  const toolName = attributeOf(record, ["gen_ai.tool.name", "tool.name", "tool_name"])
   if (toolName === "invoke_agent") return true
   return false
 }
@@ -181,7 +181,7 @@ function extractTaskSummary(
   views: ReadonlyMap<string, RecordPartsView>,
 ): string | undefined {
   for (const record of subagentRecords) {
-    const toolName = attributeOf(record, ["gen_ai.tool.name", "tool.name"]) ?? record.name
+    const toolName = attributeOf(record, ["gen_ai.tool.name", "tool.name", "tool_name"]) ?? record.name
     const nameLower = toolName.toLowerCase()
     if (nameLower === "task" || nameLower.endsWith(".task")) {
       const raw = record.raw as Record<string, unknown> | null
@@ -818,7 +818,7 @@ function extractToolDefinitionsFromText(text: string): { name: string; text: str
 function invocationsOf(records: readonly CanonicalRecord[]): string[] {
   return records
     .filter((record) => record.op === "tool.invoke")
-    .map((record) => attributeOf(record, ["gen_ai.tool.name", "tool.name"]) ?? record.name)
+    .map((record) => attributeOf(record, ["gen_ai.tool.name", "tool.name", "tool_name"]) ?? record.name)
 }
 
 function hasEvidence(
@@ -1388,7 +1388,7 @@ export function buildSessionRow(
   const invocationCounts = new Map<string, number>()
   const errorCounts = new Map<string, number>()
   for (const record of toolRecords) {
-    const name = attributeOf(record, ['gen_ai.tool.name', 'tool.name']) ?? record.name
+    const name = attributeOf(record, ['gen_ai.tool.name', 'tool.name', 'tool_name']) ?? record.name
     if (!name) continue
     invocationCounts.set(name, (invocationCounts.get(name) ?? 0) + 1)
     const isError =
@@ -1420,21 +1420,16 @@ export function buildSessionRow(
     const turnsResident = definition?.turnsResident ?? turnRecords.length
     const invocationsCount = invocationCounts.get(tool.name) ?? 0
     const errorCount = errorCounts.get(tool.name) ?? 0
-    if (toolRecords.length > 0) {
-      return {
-        name: tool.name,
-        schema_tokens: schemaTokens,
-        invocations: invocationsCount,
-        turns_resident: turnsResident,
-        errors: errorCount,
-        ...(tool.cost !== undefined ? { total_schema_cost: tool.cost } : {}),
-        ...(definition?.server !== undefined ? { server: definition.server } : {}),
-      }
-    }
+    // A row always carries its name, server and resident cost: a session with
+    // no tool calls still offered definitions, and the ranking is about those.
     return {
+      name: tool.name,
       schema_tokens: schemaTokens,
       invocations: invocationsCount,
       turns_resident: turnsResident,
+      errors: errorCount,
+      ...(tool.cost !== undefined ? { total_schema_cost: tool.cost } : {}),
+      ...(definition?.server !== undefined ? { server: definition.server } : {}),
     }
   })
 
