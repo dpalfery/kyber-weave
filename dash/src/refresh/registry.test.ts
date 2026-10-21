@@ -131,6 +131,9 @@ describe('HarnessSourceRegistry', () => {
   it('keeps an explicit content capability disposition for every harness descriptor', () => {
     const expectedHarnessIds = [...REQUIRED_HARNESS_IDS, ...REMAINING_HARNESS_IDS]
     const existingReaderHarnessIds = new Set([
+      'antigravity',
+      'antigravity-cli',
+      'antigravity-ide',
       'claude-cli',
       'claude-desktop',
       'claude-unclassified',

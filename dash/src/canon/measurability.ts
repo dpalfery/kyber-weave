@@ -103,6 +103,14 @@ export const READER_UNMEASURABLE: ReadonlyMap<string, readonly string[]> = new M
   ['cursor', ['schema_cost', 'conversation_history', 'system_prompt', 'tool_definitions']],
   ['cursor-agent', ['schema_cost', 'conversation_history', 'system_prompt', 'tool_definitions']],
   ['pi', ['schema_cost', 'system_prompt', 'instruction_context', 'tool_definitions', 'tool_result_content']],
+  // Antigravity exports MCP tool schemas (the `mcp/<server>/<tool>.json`
+  // catalogue) as tool_definitions, but not built-in tool schemas, the system
+  // prompt, or skill text. The catalogue is a directory snapshot, not a
+  // resident-context measurement, so schema_cost stays unmeasurable.
+  ...['antigravity', 'antigravity-cli', 'antigravity-ide'].map((id): [string, readonly string[]] => [
+    id,
+    ['schema_cost', ...CANONICAL_CONTENT_KEYS.filter((key) => key !== 'tool_definitions')],
+  ]),
 ])
 
 /**

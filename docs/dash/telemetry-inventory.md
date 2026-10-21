@@ -352,6 +352,35 @@ that window gain a listing after a bump is **unverified**. See the [runbook](run
 `dash/src/canon/fixtures/skills/<harness>/`. Each folder has a README that states what was found
 or not found. The `claude-code` capture is read by the Claude `skill_listing` parser test.
 
+## Antigravity tool definitions and system prompt
+
+**Verdict: partly recoverable.** Inspected read-only against a real `~/.gemini/antigravity*`
+tree (counts and shapes only; no content is committed).
+
+| Item | On disk? | Where / why |
+|---|---|---|
+| MCP tool schemas (name, description, `parameters`) | **Yes** | `<root>/mcp/<serverName>/<toolName>.json`, beside an `instructions.md` per server. The agent's own prompt text (stored in the conversation DB) says each MCP server directory holds "tool schemas", read on demand; "eagerly loaded" tools are additionally registered natively. |
+| Built-in tool schemas (`list_dir`, `run_command`, ...) | **No** | Defined inside the language-server binary. Absent from the conversation DB (`steps`, `gen_metadata`, `executor_metadata`, `trajectory_metadata_blob`), `cli.log`, `log/`, `brain/`, `builtin/` and the `GetCascadeTrajectoryGeneratorMetadata` response shape the provider already parses. Only invocations survive, as tool name plus JSON arguments in `steps.step_payload`. |
+| System prompt | **No** | `gen_metadata` rows hold the model, token counters and request ids only. |
+| Skill text | Partly | `builtin/skills` holds skill files, not what the model was shown. Not wired. |
+
+**What KyberDash does.** `dash/src/synth/readers/antigravity.ts` reads the MCP schema
+directory of the root that owns a conversation DB (`antigravity`, `antigravity-cli`,
+`antigravity-ide`) and emits one `tool_definitions` part per server, with `server` set from
+the directory name. It attaches them to the session's first turn only. Limits, stated so
+they are not read as more than they are:
+
+- The catalogue is a **snapshot of the directory at ingest time**, not a per-turn record. A
+  server added or removed after the session ran is reflected anyway.
+- It is the catalogue the agent *could reach*, not proof of what was resident in context on any
+  turn, which is why `schema_cost` stays unmeasurable for Antigravity.
+- Built-in tools, the system prompt and skill text stay unmeasurable. A session with no MCP
+  directory shows the dashboard's "does not export tool definitions" banner and a tool drawer
+  that says so instead of a blank panel.
+- Invoked tool names are not yet extracted (the provider emits `tools: []`), so the Tools list
+  shows offered MCP tools with zero recorded invocations. The names exist in
+  `steps.step_payload`; surfacing them is a separate change.
+
 ## Antigravity aggregate-token investigation (T7)
 
 **Verdict: (a), for aggregate counters.** Antigravity's September 4 statusline spans

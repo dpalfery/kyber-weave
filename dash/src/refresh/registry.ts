@@ -580,6 +580,9 @@ export type HarnessContentCapability = {
 }
 
 const READER_HARNESS_IDS = new Set([
+  'antigravity',
+  'antigravity-cli',
+  'antigravity-ide',
   ...CLAUDE_HARNESS_IDS,
   'codex-cli',
   'codex-desktop',

@@ -1976,3 +1976,69 @@ describe('KyberSessionTurnSkills (F3): exported types must be used or removed', 
     expect(referencedIn, `KyberSessionTurnSkills is exported from ${declaredIn.join(', ')} but unused`).not.toEqual([])
   })
 })
+
+describe('AgentSessionDashboard: tool drawer when the harness exports no definitions', () => {
+  it('shows an honest notice and issues no content request', () => {
+    const internals = internalsOf()
+    const originalUseState = internals?.H?.useState
+    const state: unknown[] = []
+    let stateCursor = 0
+
+    // Synthetic Antigravity-shaped session: tool rows, but no turn carries
+    // definitions and the summary lists no offered tools.
+    const session = {
+      ...sampleSession,
+      harness: 'antigravity-cli',
+      summary: { ...sampleSession.summary, tools_offered: undefined },
+      turns: sampleSession.turns.map(({ has_tool_defs: _h, content: _c, ...turn }: Record<string, unknown>) => turn),
+    } as unknown as AgentSessionPayload
+
+    const render = () => {
+      stateCursor = 0
+      return AgentSessionContent({ session })
+    }
+    const drawerFrom = (node: unknown): React.ReactElement | null => {
+      if (node == null) return null
+      if (Array.isArray(node)) {
+        for (const child of node) {
+          const found = drawerFrom(child)
+          if (found) return found
+        }
+        return null
+      }
+      if (!React.isValidElement(node)) return null
+      if (node.type === SessionInspectorDrawer) return node
+      return drawerFrom((node.props as { children?: unknown }).children)
+    }
+
+    if (internals?.H) {
+      internals.H.useState = (initial: unknown) => {
+        const index = stateCursor++
+        if (!(index in state)) {
+          state[index] = typeof initial === 'function' ? (initial as () => unknown)() : initial
+        }
+        return [
+          state[index],
+          (next: unknown) => {
+            state[index] = typeof next === 'function' ? (next as (s: unknown) => unknown)(state[index]) : next
+          },
+        ]
+      }
+    }
+
+    try {
+      ;(findElementByTestId(render(), 'tool-row-read_file')!.props as { onClick: () => void }).onClick()
+      const drawer = drawerFrom(render())!
+      const props = drawer.props as { contentRequest?: unknown; rawContent?: Record<string, unknown>; children?: unknown }
+      expect(props.contentRequest).toBeUndefined()
+      expect(props.rawContent).not.toHaveProperty('definitionUnavailableNotice')
+      const html = renderHtml(<>{props.children as React.ReactNode}</>)
+      expect(html).toContain('data-testid="tool-definition-unavailable"')
+      expect(html).toContain('antigravity-cli does not export tool definitions')
+    } finally {
+      if (internals?.H) {
+        internals.H.useState = originalUseState
+      }
+    }
+  })
+})

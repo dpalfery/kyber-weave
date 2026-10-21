@@ -257,6 +257,21 @@ export const TIMELINE_OP_COLORS: Record<string, string> = {
   embeddings: '#8b5cf6', // purple
 }
 
+/** Drawer-content key carrying the "definitions not exported" notice; never rendered as data. */
+const TOOL_DEFINITION_UNAVAILABLE_KEY = 'definitionUnavailableNotice'
+
+function drawerNoticeOf(content: unknown): string | undefined {
+  if (content === null || typeof content !== 'object') return undefined
+  const notice = (content as Record<string, unknown>)[TOOL_DEFINITION_UNAVAILABLE_KEY]
+  return typeof notice === 'string' ? notice : undefined
+}
+
+function stripNotice<T>(content: T): T {
+  if (content === null || typeof content !== 'object') return content
+  const { [TOOL_DEFINITION_UNAVAILABLE_KEY]: _notice, ...rest } = content as Record<string, unknown>
+  return rest as T
+}
+
 function adaptTimelineNode(node: SessionTimelineNode, parentId: string | null = null): TimelineNode {
   const rawCost = (node.cost ?? {}) as Partial<CostBlock> & { cost_usd?: number | null }
   const cost: CostBlock = {
@@ -611,6 +626,19 @@ export function AgentSessionContent({
         ? defs.find((d) => (d.name || d.function?.name) === tool.name)
         : undefined
 
+      // No turn carries definitions and the session lists no offered tools:
+      // the harness exported none. Say so instead of issuing a content request
+      // that can only come back empty and read as a load failure.
+      if (!turnWithDefs && !Array.isArray(session?.summary?.tools_offered)) {
+        setDrawerContent({
+          tool,
+          definition: null,
+          [TOOL_DEFINITION_UNAVAILABLE_KEY]: `${session?.harness || 'This harness'} does not export tool definitions for this session, so only the invocation row is shown.`,
+        })
+        setDrawerOpen(true)
+        return
+      }
+
       setDrawerContent({
         tool,
         definition: def ?? null,
@@ -693,6 +721,7 @@ export function AgentSessionContent({
   // showing: a whole-turn lossless request, an explicit span selection, the
   // tool-definition drawer, a bucket drill-down onto its turn's span, or the
   // span the drawer is inspecting.
+  const drawerNotice = drawerNoticeOf(drawerContent)
   const drawerContentRequest = (() => {
     const sessionId = session.id ?? session.session_id
     if (!sessionId) return undefined
@@ -1391,9 +1420,18 @@ export function AgentSessionContent({
         onClose={() => setDrawerOpen(false)}
         title={drawerTitle}
         subtitle={drawerSubtitle}
-        rawContent={drawerContent}
+        rawContent={drawerNotice === undefined ? drawerContent : stripNotice(drawerContent)}
         contentRequest={drawerContentRequest}
-      />
+      >
+        {drawerNotice !== undefined && (
+          <p
+            className="rounded border border-border bg-card px-3 py-2 text-xs text-tertiary-foreground"
+            data-testid="tool-definition-unavailable"
+          >
+            {drawerNotice}
+          </p>
+        )}
+      </SessionInspectorDrawer>
     </div>
   )
 }
