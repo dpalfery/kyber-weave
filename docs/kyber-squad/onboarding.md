@@ -784,7 +784,7 @@ its skill directory as its durable home, portable policy lives in the
 `products/kyber-squad/standards/` templates, and nothing was deleted.
 
 Rendered `.github` trees are deployment output and are not added to the canonical product tree by
-`squad pack` or the golden synchronization.
+`squad pack`.
 
 `products/kyber-squad/` is the canonical and package authority. The repository no longer carries a
 project-level self-deployment: the root `.github/agents/`, `.github/skills/`,

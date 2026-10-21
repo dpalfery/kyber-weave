@@ -123,8 +123,8 @@ Both formats package `skills/` recursively: 24 `SKILL.md` files plus 68 retained
 92 skill-tree files. Every retained resource has a reviewed disposition in the
 [skill-resource dispositions audit](kyber-squad/skill-resource-dispositions.md): non-policy
 content stays in its skill directory as its durable home, portable policy lives in the
-`products/kyber-squad/standards/` templates, and nothing was deleted; their omission from the
-exact 24-file Copilot golden skill surface of the pinned Hotshot fixture is not a package
+`products/kyber-squad/standards/` templates, and nothing was deleted; their omission from a
+fixed 24-file Copilot skill surface is not a package
 contract.
 
 `products/kyber-squad/` is canonical and package authority. The repository no longer carries a

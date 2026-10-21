@@ -83,7 +83,7 @@ products/kyber-squad/
 │   ├── security-review/
 │   ├── setup-dev-environment/
 │   └── test-dev/
-└── migration/                          # 19 Hotshot import and baseline verification logs
+└── migration/                          # 19 import and baseline verification logs
     └── <agent-name>.md
 ```
 
@@ -124,7 +124,7 @@ The 24 canonical skill directories under `skills/` adhere to the Agent Skills op
 in Kyber-Squad. Every imported raw `SKILL.md` except the six explicitly evolved skills
 (`bug-crusher`, `code-review`, `product-owner`, `second-brain`,
 `create-pull-request`, and `pr-review-fix-comments`) is byte-identical to the designated
-Hotshot golden copy; `create-pull-request-github` is retired into `create-pull-request`. The canonical
+canonical copy; the retired `create-pull-request-github` is folded into `create-pull-request`. The canonical
 tree also retains 68 supplemental resources, for 92 skill-tree files in total; recursive APM and
 Agent Plugins packages preserve those resources and their local references.
 
@@ -171,10 +171,10 @@ and it routes plans, specifications, todos, and open requests through one intake
 
 ### 5. Migration Logs (`migration/`)
 
-The `migration/` directory contains 19 per-agent Hotshot import reports recording baseline
+The `migration/` directory contains 19 per-agent import reports recording baseline
 sources, SHA-256 hashes, retained additions, excluded harness mechanics, resolved permission
 policies, and final normalized instruction digests. `review-lens` and `review-triage` are
-canonical-only roles and therefore have no Hotshot migration record. The retired test-first
+canonical-only roles and therefore have no migration record. The retired test-first
 duplicates (`conductor-v3`, `architect-v3`, `task-reviewer-v3`) have no separate reports: each
 was folded into its canonical counterpart's report, which retains the retired source hash and a
 refreshed final-body digest for the consolidated instruction body.

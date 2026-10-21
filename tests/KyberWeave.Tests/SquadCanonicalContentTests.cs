@@ -665,6 +665,22 @@ public sealed class SquadCanonicalContentTests
                 $"'{name}' was authored after the migration and must not claim a migration baseline."));
     }
 
+    /// <summary>
+    /// <c>code-review</c> carries the pre-push self-review trigger and gate. Nothing else
+    /// pins this section, so deleting this test returns it to no coverage.
+    /// </summary>
+    [Fact]
+    public void CodeReviewSkillRetainsSelfReviewTriggerAndGate()
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSkill? skill = source.Skills.FirstOrDefault(candidate => candidate.Name == "code-review");
+
+        Assert.NotNull(skill);
+        Assert.Contains("self-review gate before pushing", skill.Description, StringComparison.Ordinal);
+        Assert.Contains("## Pre-push self-review gate", skill.InstructionBody, StringComparison.Ordinal);
+        Assert.Contains("major-or-worse", skill.InstructionBody, StringComparison.Ordinal);
+    }
+
     private static string ProductRoot =>
         Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
 
