@@ -2,7 +2,7 @@
 id: plans/2026-10-21-commandcode-collector-kyberdash
 title: "Complete Command Code in KyberDash — content reader, documentation, and filter-alias repair"
 doc-type: plan
-status: draft
+status: complete
 component: KyberDash
 owner: dpalfery
 last-reviewed: 2026-10-21
