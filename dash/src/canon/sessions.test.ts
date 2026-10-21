@@ -188,6 +188,31 @@ describe('buildSessionRow', () => {
     expect(payload.summary.tools_offered).toEqual([])
   })
 
+  it('leaves side-agent calls out of the context series so the latest turn is the main agent', () => {
+    // Copilot's background todo tracker runs a tiny gpt-4o-mini request after
+    // the main agent's turn; it must not become the session's latest turn nor
+    // supply the system prompt carried forward.
+    const row = buildSessionRow(
+      'sess-1',
+      [
+        turn('main', [{ part: 'system_prompt', text: 'main agent prompt', tokens: 13000 }], {
+          tokens: tokens({ freshInput: 78000, reportedInput: 78000 }),
+          timestamp: '2026-10-17T19:02:14.115Z',
+          raw: { 'gen_ai.agent.name': 'panel/editAgent' },
+        }),
+        turn('side', [{ part: 'system_prompt', text: 'background tracker', tokens: 900 }], {
+          tokens: tokens({ freshInput: 1935, reportedInput: 1935 }),
+          timestamp: '2026-10-17T19:02:14.120Z',
+          raw: { 'gen_ai.agent.name': 'backgroundTodoAgent' },
+        }),
+      ],
+      approximateO200kBase,
+    )
+    const turns = sessionPayload(row).context.turns
+    expect(turns).toHaveLength(1)
+    expect(turns?.[0]?.buckets?.system_prompt).toBe(13000)
+  })
+
   it('prefers a harness-reported count over tokenizing the text', () => {
     const row = buildSessionRow(
       'sess-1',

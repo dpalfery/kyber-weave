@@ -250,6 +250,26 @@ function extractTaskSummary(
   return undefined
 }
 
+/**
+ * Copilot runs small side agents inside the same conversation: background
+ * todo tracking, progress messages, title and commit-message generation, and
+ * `runSubagent` children. Each has its own system prompt, model and window, so
+ * mixing them into the main agent's turn series makes the latest turn read as
+ * a 2K-token request and carries the wrong system prompt forward. They still
+ * count towards spend; they are only left out of the context-window analysis.
+ */
+const SIDE_AGENT_NAMES: ReadonlySet<string> = new Set([
+  'backgroundTodoAgent',
+  'progressMessages',
+  'title',
+  'gitCommitMessageGenerator',
+])
+
+function isSideAgentTurn(record: CanonicalRecord): boolean {
+  const name = attributeOf(record, ['gen_ai.agent.name'])
+  return name !== undefined && (SIDE_AGENT_NAMES.has(name) || name.startsWith('tool/runSubagent'))
+}
+
 function attributeOf(record: CanonicalRecord, keys: readonly string[]): string | undefined {
   const raw = record.raw
   if (raw === null || typeof raw !== 'object') return undefined
@@ -1337,8 +1357,11 @@ export function buildSessionRow(
   // zero yields a negative residual, which is not a finding about the model's
   // context, only about the absent counter. The count is reported so the
   // omission is stated rather than hidden.
-  const measuredTurns = turnRecords.filter((record) => measuredInput(record.tokens) > 0)
-  const unmeasuredTurns = turnRecords.length - measuredTurns.length
+  const mainThreadRecords = turnRecords.filter((record) => !isSideAgentTurn(record))
+  // A session made only of side-agent turns keeps them rather than charting nothing.
+  const contextRecords = mainThreadRecords.length > 0 ? mainThreadRecords : turnRecords
+  const measuredTurns = contextRecords.filter((record) => measuredInput(record.tokens) > 0)
+  const unmeasuredTurns = contextRecords.length - measuredTurns.length
   // Some harnesses (Copilot) send the system prompt on the first request only,
   // yet every later request still carries it in its input. The last one seen
   // stands in for turns that report none; a turn's own always wins. Done here,
@@ -1360,7 +1383,7 @@ export function buildSessionRow(
   // compaction finding built from the same records can never disagree.
   // Catalog replaces only that default. A reported or declared window stays
   // what the records said; the 200K constant is not relabelled as catalog.
-  const telemetryWindow = contextLimitOf(records)
+  const telemetryWindow = contextLimitOf(contextRecords.length > 0 ? contextRecords : records)
   const window =
     telemetryWindow.contextLimitSource === 'default' && store !== undefined
       ? (catalogWindowForRecords(records, store) ?? telemetryWindow)
