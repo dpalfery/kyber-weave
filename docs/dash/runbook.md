@@ -6,7 +6,7 @@ status: current
 component: KyberDash
 source-root: dash
 owner: dpalfery
-last-reviewed: 2026-10-19
+last-reviewed: 2026-10-21
 code-refs:
   - registerKyberCommands
   - refreshHarnessSources
@@ -347,6 +347,29 @@ The dashboard reaches it at `POST /api/kyber/import-history` with a body carryin
 `{weeks?, harness | harnesses}`, from the Maintenance panel's **Import folder history**
 control; the tray reaches the same route from its popover.
 
+**Importing `antigravity-cli`.** `--harness antigravity` selects only the `~/.gemini/antigravity`
+descriptor. `antigravity-cli` and `antigravity-ide` are separate descriptors, so name them
+explicitly. To import the `antigravity-cli` conversations, name that harness and use a window of at
+least 2 weeks. The window is counted in whole weeks back from the run, so an older conversation is
+not read:
+
+```bash
+node dash/dist/cli.js dash import-history --weeks 2 --harness antigravity-cli
+```
+
+The dashboard's import picker offers only harnesses that already hold samples (`sampleCount > 0`,
+`dash/web/src/components/maintenance/MaintenancePanel.tsx`). Until `antigravity-cli` holds samples,
+the command above is the way to import it. The picker cannot offer it today (todo
+[antigravity-cli-backfill-import-picker](../todo/antigravity-cli-backfill-import-picker.md)).
+
+A `--harness antigravity` import, or a refresh run with that id, does not include `antigravity-cli`
+or `antigravity-ide`. The family scope is shadowed by the descriptor id (todo
+[antigravity-family-scope-resolve-harness](../todo/antigravity-family-scope-resolve-harness.md)), so
+name each descriptor. Use a window of at least two weeks, so that the chosen conversation falls inside it.
+After an import, the transcript activity appears only for sessions whose conversation database was
+imported. OTLP-only sessions with no conversation database, and those with a slug session id, get
+no transcript activity (see the [telemetry inventory](telemetry-inventory.md#antigravity-transcript-pairing)).
+
 ### 2d. Shared settings and Pause
 
 For the user-facing configure surface — the shipped `kyberdash dash settings` commands and
@@ -478,6 +501,13 @@ validate before touching the live store:
 ```bash
 node dash/dist/cli.js kyber build --db /tmp/canon.db
 ```
+
+**Antigravity descriptions after an edit.** Antigravity skill descriptions are read from each skill's
+`SKILL.md` when its session payload is built. The lookup is cached by file path and revalidated by
+the file's mtime and size, so an edited `SKILL.md` is read again with no engine restart. The new
+text appears on the next projection pass that rebuilds the session. To see an edit at once, run
+`kyber build`, which calls `buildSessions` directly. The maintenance pass alone may skip projection
+while the corpus is unchanged, so it may not show the edit until the next pass.
 
 **Capture fixtures.** The sanitized G0 captures live in `dash/src/canon/fixtures/skills/<harness>/`,
 one folder for each of `claude-code`, `copilot-chat`, `copilot-cli`, `antigravity`, `pi`, and
@@ -904,6 +934,22 @@ filters, so narrowing one page's scope never touches the A/B selectors.
     text for the first turn listed. Per-harness availability is in the
     [telemetry inventory](telemetry-inventory.md#skill-availability-by-harness); the payload is in
     the [skills view contract](architecture.md#skills-view-contract).
+    - *Antigravity and Copilot CLI.* Antigravity shows the listed names, and each skill's description
+      and derived tokens when its `SKILL.md` is on this machine. Its invoked counts are the `SKILL.md`
+      reads the conversation transcript recorded; a read is not proof the skill was followed. Copilot
+      CLI shows the listed names, descriptions and derived tokens from the root system prompt in its
+      journal, which `dash refresh` reads. Copilot CLI invocation is always not measurable. Session-level
+      tool records are shown, but skill loads are not counted from them, and a tool named `skill` does
+      not make Copilot CLI invocations measurable.
+    - *Not measurable or empty.* A "Not measurable" card means the source was not read: no transcript
+      for an Antigravity session, or no root system prompt in the journal for Copilot CLI. For that
+      side the payload carries a not-measurable object, not a count. A count of `0` is a measured
+      none: the transcript or journal was read and no skill was invoked.
+    - *Partly covered Antigravity sessions.* A turn the transcript does not cover shows no
+      `skills_invoked` and is not counted as a none. When only some turns are covered, the invoked
+      figures cover those turns, and the panel reads "Invocations measured on X of Y turns". A fully
+      covered session shows no such line; the coverage rule is in the
+      [telemetry inventory](telemetry-inventory.md#antigravity-transcript-pairing).
   - *Execution Timeline / Call Tree* (`5 · Execution Timeline`): Hierarchical span call tree with duration, status badges, and auxiliary flags.
   - *Inspector Drawer (`SessionInspectorDrawer`)*: Slide-out drawer with XML tag folding (`<instructions>`, `<environment_info>`, `<context>`) and formatted tool call/result trees.
 - **Compare**: Phase-aligned run comparison (`page-compare`), reached from the top
@@ -1204,6 +1250,9 @@ as a detached background hand-off — it cannot delay or corrupt the status line
 it silently when `kyberdash` is not on `PATH`. Do not edit `agy` settings to call it
 directly, and do not replace or edit an existing status-line implementation as part of this
 setup.
+
+The recorder writes no transcript path, and a status-line row carries no pairing id, so a
+status-line row gets no transcript tool calls or skill reads.
 
 The command is implemented and synthetically verified, but it collects nothing until the
 owner deploys the `agy` variant and activates it by hand. No live collection is claimed

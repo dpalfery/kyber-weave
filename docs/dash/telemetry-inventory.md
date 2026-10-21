@@ -4,7 +4,7 @@ title: Telemetry inventory — harness signal and content availability
 doc-type: reference
 status: current
 owner: dpalfery
-last-reviewed: 2026-10-19
+last-reviewed: 2026-10-21
 ---
 
 # Telemetry inventory — verified harness signal and content availability
@@ -42,9 +42,9 @@ Values are never summed across the two sources. `KyberBridge` reads `canon.db` o
 
 | Harness/source | Verified collection outcome | Availability or gate |
 |---|---|---|
-| Gemini statusline / Antigravity | Gemini **model** attribution recognizes `gen_ai.system = "gemini"`; non-model trace noise is quarantined. Antigravity roots (`antigravity` / `antigravity-cli` / `antigravity-ide`) are distinct harness jobs. The `kyberdash kyber antigravity-statusline` recorder appends `agy` payloads to `antigravity-statusline.jsonl`, which refresh resolves to harness **`antigravity-cli`** — the recorder path attributes there, not to `gemini`. OTLP spans asserting `gen_ai.agent.name = "antigravity"` are claimed by `antigravityAdapter` as harness **`antigravity`**, with `geminiAdapter` yielding. Canonical records must not use harness `gemini`. Legacy `gemini`-attributed records from source `agy` are not automatically migrated, but records with sufficient Antigravity evidence can be re-attributed through source-scoped repair (`kyber renormalize --source agy`), while genuine agent-name-less spans remain quarantined as `excluded_harness`. | Tool names are available; per-server schemas remain source-dependent. |
+| Gemini statusline / Antigravity | Gemini **model** attribution recognizes `gen_ai.system = "gemini"`; non-model trace noise is quarantined. Antigravity roots (`antigravity` / `antigravity-cli` / `antigravity-ide`) are distinct harness jobs. The `kyberdash kyber antigravity-statusline` recorder appends `agy` payloads to `antigravity-statusline.jsonl`, which refresh resolves to harness **`antigravity-cli`** — the recorder path attributes there, not to `gemini`. OTLP spans asserting `gen_ai.agent.name = "antigravity"` are claimed by `antigravityAdapter` as harness **`antigravity`**, with `geminiAdapter` yielding. Canonical records must not use harness `gemini`. Legacy `gemini`-attributed records from source `agy` are not automatically migrated, but records with sufficient Antigravity evidence can be re-attributed through source-scoped repair (`kyber renormalize --source agy`), while genuine agent-name-less spans remain quarantined as `excluded_harness`. | Tool calls and inferred skill reads come from the conversation transcript; MCP tool schemas come from the `mcp/` catalogue. See [Antigravity transcript pairing](#antigravity-transcript-pairing) and [Antigravity tool definitions and system prompt](#antigravity-tool-definitions-and-system-prompt). |
 | Copilot Chat | Content-enabled OTLP capture maps observed system instructions, messages, rules, skills, tool definitions, tool results, and session identity into canonical buckets. Input-message normalization separates input text from response envelopes without negative residuals. | Observed per-server schema availability remains source-dependent. |
-| Copilot CLI | SQLite ingest preserves its reported ASAD taxonomy, including `context_*_tokens` and `context_tier`. Persisted harness id is `copilot-cli`, not collapsed into `copilot`. | Omitted reported buckets remain unavailable rather than zero. The `events.jsonl` journal supplies the system prompt per agent; tool definitions are not measurable. |
+| Copilot CLI | SQLite ingest preserves its reported ASAD taxonomy, including `context_*_tokens` and `context_tier`. Persisted harness id is `copilot-cli`, not collapsed into `copilot`. | Omitted reported buckets remain unavailable rather than zero. The `events.jsonl` journal supplies the root agent's system prompt; tool definitions are not measurable. See [Copilot CLI journal and system prompt](#copilot-cli-journal-and-system-prompt). |
 | Copilot VS Code | Native journal request replay into input-side `ReaderTurn` snapshots keyed by native request id via `copilotVscodeReader`. Reconstructs instructions and user message while excluding current model output from input context. | Window and pressure measured; unobserved buckets explicit `null` with reason. |
 | Claude Code (`claude-cli`, `claude-desktop`, `claude-code`) | Enhanced-telemetry counters; live OTLP content from the interaction span's `user_prompt` and the `api_request_body` log (see [Claude Code OTLP content (live)](#claude-code-otlp-content-live)); plus JSONL conversation and tool-result parts on file-synth (`synth:`) records when the Claude content reader is paired at ingest ([issue #216](https://github.com/dpalfery/kyber-weave/issues/216)). | `instruction_context` and `schema_cost` stay not measurable. Session files never carry `system_prompt` or `tool_definitions`; only the OTLP request body supplies those two, and it supplies `tool_definitions` only when the sender exported a `tools` array (sub-agent calls in Desktop). See [Claude Code OTLP content (live)](#claude-code-otlp-content-live) and [Claude Desktop and CLI file-synth parts](#claude-desktop-and-cli-file-synth-parts-issue-216). |
 | Codex | Dot-folder ingestion supplies the system prompt, instructions, conversation, tool results, and context window contained in rollout data. | Availability is limited to fields the source actually supplies. |
@@ -307,9 +307,10 @@ import path.
 |---|---|---|
 | Claude Code / Desktop | **Implemented** | Extracted by Claude reader (`dash/src/synth/readers/claude.ts`) and synthesized into child `tool.invoke` spans; results bounded at 64KiB with `truncated: true` and original byte count recorded in `gen_ai.tool.result_bytes`. Structured error status preserved. |
 | Codex | Deferred | Tracked in follow-up issue [#210](https://github.com/dpalfery/kyber-weave/issues/210). |
-| Copilot CLI & VS Code | Deferred | Tracked in follow-up issue [#211](https://github.com/dpalfery/kyber-weave/issues/211). |
+| Copilot CLI | **Implemented** (CLI journal, session-level attachment) | Child `tool.invoke` records come from the `events.jsonl` journal's `toolRequests`, joined to `tool.execution_complete` on `toolCallId`. They attach at session granularity, never per message, because Copilot CLI records are session rows and rollups (see [Copilot CLI journal and system prompt](#copilot-cli-journal-and-system-prompt)). Subagent calls are included and carry `gen_ai.agent.id`. |
+| Copilot VS Code | Deferred | Tracked in follow-up issue [#211](https://github.com/dpalfery/kyber-weave/issues/211). |
 | Cursor | Deferred | Tracked in follow-up issue [#212](https://github.com/dpalfery/kyber-weave/issues/212). |
-| Antigravity | Deferred | Tracked in follow-up issue [#213](https://github.com/dpalfery/kyber-weave/issues/213). |
+| Antigravity | **Implemented** (`transcript.jsonl`, paired by `last_step_index`, `.db` sources) | Tool calls come from `PLANNER_RESPONSE.tool_calls` and results from `GENERIC` steps, paired to a model call by the lsi rule in [Antigravity transcript pairing](#antigravity-transcript-pairing). Covers file-based sessions only. The status-line source is a non-goal, and OTLP-only sessions get no transcript activity (residual). Tracked under [#213](https://github.com/dpalfery/kyber-weave/issues/213). |
 | ZCode | Deferred | Tracked in follow-up issue [#214](https://github.com/dpalfery/kyber-weave/issues/214). |
 | OpenCode | Deferred | Tracked in follow-up issue [#215](https://github.com/dpalfery/kyber-weave/issues/215). |
 
@@ -325,8 +326,8 @@ payload contract are in the [skills view contract](architecture.md#skills-view-c
 | Claude Code (`claude-code`, `claude-cli`) | **Measured.** An `attachment` entry of type `skill_listing` in the session transcript JSONL (`~/.claude/projects/*/*.jsonl`) with `content` (`- name: description` lines), `skillCount`, `isInitial`, and `names[]`. The Claude transcript parser reads it through `dash/src/ingest/skill-listing.ts` (both the normal and large-line paths) into the raw attribute `kyber.skills.listed` (`{isInitial, skills: [{name, description?}]}`). An initial listing replaces the effective list; a later non-initial listing unions into it. When the transcript records no listing, the listing is read from the OTLP request body (see [tool definitions and skill listings](#tool-definitions-and-skill-listings-from-request-bodies)). | **Measured.** Assistant `tool_use` blocks named `Skill`, from `input.skill`, plus the stored `kyber.skills.invoked` attribute. | No sender setting. The data is read from the transcript by `dash refresh`, a file source. The Claude parser contract is `7` (`CLAUDE_PARSER_CONTRACT_VERSION` in `dash/src/refresh/registry.ts`). Descriptions survive the 14-day content purge because they are kept in raw attributes. | **Verified** from real transcripts on the owner's machine. Fixture: `dash/src/canon/fixtures/skills/claude-code/`. |
 | Claude Desktop (`claude-desktop`) | **Measured from the OTLP request body** when the body carries the listing, and from the transcript when one is recorded (the transcript wins). Desktop model-call records are harness `claude-code`, so the body path applies to those records. The `claude-desktop` transcript path was not separately checked for a `skill_listing`. | Same extraction as Claude Code, if the transcript carries `Skill` calls (not separately verified). | As Claude Code: the transcript, or the request body. | **Body-sourced listing verified** on the 2026-10-19 store snapshot (308 bodies carry it). Not yet confirmed on a live turn (owner gate 1). Transcript listing still unverified. |
 | GitHub Copilot (`copilot`, source `github-copilot`) | **Measured** on `invoke_agent` spans from `github.copilot.context.skills`, a JSON-array string of names. This key is not `gen_ai.skills`. Descriptions come from the `<available_skills>` block in the system-prompt part, when that part is stored. A listing on a rollup `invoke_agent` applies to the turns directly under it. VS Code Copilot records no listing key; its listing is read from the `<skills>` block in the system-prompt part instead, and a prompt with no such block stays not measurable. | **Not measurable** unless a `skill` tool record exists. None exists in the owner's store, which holds only `view`, `task`, `bash`, and `edit` tool spans. | OTLP capture from Copilot ([in-app enablement](#in-app-collection-enablement)). Descriptions need the system-prompt part stored, which the content-enabled capture described in the Copilot Chat row provides. | **Verified** for the listing (one real `invoke_agent` span). Invocation is not measurable in the owner's store. Fixture: `dash/src/canon/fixtures/skills/copilot-chat/`. |
-| Copilot CLI (`copilot-cli`) | **Measured** from `system.message` events in `~/.copilot/session-state/<id>/events.jsonl`. The reader attaches the prompt of the same agent (root events carry no `agentId`, subagent events name theirs) to each `assistant.message` turn as a `system_prompt` part, and the skills engine parses the `<available_skills>` block for names, descriptions and derived tokens. Root turns lead, so calls without a message id (rollup legs) that pair by position stay within the root agent's turns; a call past the turn list gets no prompt. | **Not separately verified.** It follows the Copilot rule above: not measurable unless a `skill` tool record exists. | Reads the journal by `dash refresh`, a file source. No sender setting. | **Verified** on a real session on the owner's machine (2026-10-21). Tool definitions are **not measurable**: the journal holds no tool schemas, and the prompt's `<tools>` section is guidance for a subset of tools, not the offered set. |
-| Antigravity (`antigravity`) | **Measured** on `llm.invoke` spans. `gen_ai.skills` is one string, `Active Skills: a, b, ...`. The harness-reported `gen_ai.usage.skill_tokens` gives the per-turn resident size, which was identical on every turn in the owner's data. | **Inferred from the conversation transcript** (`<root>/brain/<conversationId>/.system_generated/logs/transcript.jsonl`): a `view_file` tool call whose `AbsolutePath` ends in `SKILL.md` counts as one invocation of the skill named by that file's directory. Antigravity writes no dedicated skill step, so this is an inference (a read is not proof the skill was followed). It is recorded on the turn as `kyber.skills.invoked`; a turn with no such read carries no key, and a missing transcript yields nothing, never a measured zero. Transcript tool calls (`PLANNER_RESPONSE.tool_calls`) also fill the turn's tool list. They are attached to turns by timestamp (nearest generation; status-line snapshots take the following snapshot), since the transcript carries no usage. | OTLP spans claimed by `antigravityAdapter` (see [Verified harness outcomes](#verified-harness-outcomes)). No separate skill setting was identified. | **Verified** for the listing (one real `llm.invoke` span). Invocation is inferred from transcript `SKILL.md` reads. Fixture: `dash/src/canon/fixtures/skills/antigravity/`. |
+| Copilot CLI (`copilot-cli`) | **Measured** from the `<available_skills>` block of the root agent's system prompt, the latest root `system.message` in `~/.copilot/session-state/<id>/events.jsonl`. Names, descriptions and derived tokens come from that block. Subagent prompts are not read. | **Not measurable.** The `skills_invoked` declaration is never lifted for `copilot-cli` (`NEVER_LIFTED` in `dash/src/canon/measurability.ts`), and `isSkillToolCall` in `dash/src/canon/skills.ts` excludes `copilot-cli` records. A `skill` tool call in the journal therefore produces no count and does not make invocations measurable. The journal's tool requests attach at session granularity only (see [Copilot CLI journal and system prompt](#copilot-cli-journal-and-system-prompt)). Session-level tool records are shown, but skill loads are not counted from them. | Reads the journal by `dash refresh`, a file source. No sender setting. Parser contract `3`. | **Verified** on a real session on the owner's machine (2026-10-21). Tool definitions are **not measurable**: the journal holds no tool schemas, and the prompt's `<tools>` section is guidance for a subset of tools, not the offered set. |
+| Antigravity (`antigravity`, `antigravity-cli`, `antigravity-ide`) | **Measured** on `llm.invoke` spans from `gen_ai.skills`, one string `Active Skills: a, b, ...`. The listing carries names only; descriptions come from each skill's `SKILL.md` (see [Antigravity skill descriptions](#antigravity-skill-descriptions)). `gen_ai.usage.skill_tokens` is the harness-reported per-turn resident size, identical on every turn in the owner's data. The conversation-database path sets no listing key, so a session has a listing only where OTLP spans supplied one. | **Inferred from the conversation transcript** (`<root>/brain/<conversationId>/.system_generated/logs/transcript.jsonl`): a `view_file` whose path's basename is `SKILL.md` counts as one read of the skill named by its parent directory. A read is not proof the skill was followed. A call the transcript covers carries the reads of its own segment as `kyber.skills.invoked`, and `[]` when the transcript was read and named no skill. A turn without the key is not measured. Where no record of a session carries that key, invocation is **not measurable**, with a reason that names the transcript. Where only some turns carry it, invocations are measured over those turns, and the view says how many there are. See [Antigravity transcript pairing](#antigravity-transcript-pairing). | OTLP spans claimed by `antigravityAdapter` (see [Verified harness outcomes](#verified-harness-outcomes)), and the conversation databases read by `dash refresh`, with the transcript read beside each database. No separate skill setting. Parser contract `2`, parse cache version `6`. | **Verified** for the listing (one real `llm.invoke` span). Invocation is inferred from transcript `SKILL.md` reads. Fixture: `dash/src/canon/fixtures/skills/antigravity/`. |
 | Pi (`pi`) | **Not measurable**, with a reason that names the absent source. | Parser-extracted names only, where the Pi parser provides them, stored as raw `kyber.skills.invoked`. Wire format **unverified**. | Pi file-source ingest. The Pi parser contract was bumped for the skills work (`PI_PARSER_CONTRACT_VERSION` is `3`). | **Unverified.** The owner's store holds no Pi records. Fixture README: `dash/src/canon/fixtures/skills/pi/`. |
 | OpenCode (`opencode`) | **Not measurable**, with a reason that names the absent source. Wire format **unverified**. | Parser-extracted names only, where the OpenCode parser provides them, stored as raw `kyber.skills.invoked`. | OpenTelemetry enablement through [in-app enablement](#in-app-collection-enablement) (`opencode.jsonc`). The endpoint still comes from the process environment. | **Unverified.** The owner's store holds no OpenCode records. Fixture README: `dash/src/canon/fixtures/skills/opencode/`. |
 | Other file-ingested harnesses that record invoked names (Codex, Kilo Code, Cline CLI, CodeWhale, OpenClaude, DSH) | No listing source was verified for these in G0. They are **not measurable** until one is. | Parser-extracted names only, where the parser provides them, stored as raw `kyber.skills.invoked`. The parsers' contract versions were bumped for this work (Codex is `3`, Kilo is `3`). | Dot-folder or file-source ingest through `dash refresh`. | **Unverified.** |
@@ -335,8 +336,10 @@ payload contract are in the [skills view contract](architecture.md#skills-view-c
 **Invoked names on the turn record.** For file-ingested harnesses, the parsers already extract
 skill names into `ParsedProviderCall.skills`. The synthesizer stores them on the turn record as
 the raw attribute `kyber.skills.invoked`. The list is de-duplicated and kept in first-seen order,
-and the key is absent when there are none. Absent means not measured, and `[]` on the payload is
-the measured none described in the [skills view contract](architecture.md#skills-view-contract).
+and the key is absent when there are none. The one exception is the Antigravity family: a call the
+transcript covers keeps `[]`, which is a measured none, while an uncovered call has no key. Absent
+means not measured, and `[]` on the payload is the measured none described in the
+[skills view contract](architecture.md#skills-view-contract).
 
 **Listing precedence (Claude Code).** An initial `skill_listing` (`isInitial: true`) replaces the
 effective list for the session. A later non-initial listing is unioned into it. A skill's
@@ -362,24 +365,214 @@ tree (counts and shapes only; no content is committed).
 | MCP tool schemas (name, description, `parameters`) | **Yes** | `<root>/mcp/<serverName>/<toolName>.json`, beside an `instructions.md` per server. The agent's own prompt text (stored in the conversation DB) says each MCP server directory holds "tool schemas", read on demand; "eagerly loaded" tools are additionally registered natively. |
 | Built-in tool schemas (`list_dir`, `run_command`, ...) | **No** | Defined inside the language-server binary. Absent from the conversation DB (`steps`, `gen_metadata`, `executor_metadata`, `trajectory_metadata_blob`), `cli.log`, `log/`, `brain/`, `builtin/` and the `GetCascadeTrajectoryGeneratorMetadata` response shape the provider already parses. Only invocations survive, as tool name plus JSON arguments in `steps.step_payload`. |
 | System prompt | **No** | `gen_metadata` rows hold the model, token counters and request ids only. |
-| Skill text | Partly | `builtin/skills` holds skill files, not what the model was shown. Not wired. |
+| Skill text | Partly | Each skill's `SKILL.md` is on disk under the skill roots and is read for descriptions only (see [Antigravity skill descriptions](#antigravity-skill-descriptions)). The text the model was shown is not recorded. |
 
-**What KyberDash does.** `dash/src/synth/readers/antigravity.ts` reads the MCP schema
-directory of the root that owns a conversation DB (`antigravity`, `antigravity-cli`,
-`antigravity-ide`) and emits one `tool_definitions` part per server, with `server` set from
-the directory name. It attaches them to the session's first turn only. Limits, stated so
-they are not read as more than they are:
+**What KyberDash does.** `dash/src/synth/readers/antigravity.ts` (`readAntigravityMcpCatalogue`)
+reads `<root>/mcp/<server>/<tool>.json` for the root that owns a conversation database
+(`antigravity`, `antigravity-cli`, `antigravity-ide`) and emits one `tool_definitions` part per
+server, with `server` set from the directory name and `text` a JSON array of the schemas. Each
+part carries `resident: false`: the catalogue is what the session was offered, not proof that
+the model had it in context. The parts attach to the session's first call turn only. A file
+over 1 MiB, a file that does not parse, and a file without a non-empty string `name` are skipped;
+at most 2,000 files are read per server.
+
+Limits, stated so they are not read as more than they are:
 
 - The catalogue is a **snapshot of the directory at ingest time**, not a per-turn record. A
   server added or removed after the session ran is reflected anyway.
-- It is the catalogue the agent *could reach*, not proof of what was resident in context on any
-  turn, which is why `schema_cost` stays unmeasurable for Antigravity.
-- Built-in tools, the system prompt and skill text stay unmeasurable. A session with no MCP
-  directory shows the dashboard's "does not export tool definitions" banner and a tool drawer
-  that says so instead of a blank panel.
-- Invoked tool names are not yet extracted (the provider emits `tools: []`), so the Tools list
-  shows offered MCP tools with zero recorded invocations. The names exist in
-  `steps.step_payload`; surfacing them is a separate change.
+- Because the parts are `resident: false`, they add no tokens to the resident context composition
+  (`dash/src/analysis/context.ts`). They are counted as offered (`TurnPressure.nonResidentToolDefinitions`).
+  The session inspector labels such a block `offered (MCP catalogue)`; a block that mixes
+  catalogue and resident parts carries one label for the whole block (todo
+  [antigravity-offered-label-per-definition](../todo/antigravity-offered-label-per-definition.md)).
+- Built-in tools, the system prompt and the skill text the model was shown stay unmeasurable.
+  A session with no MCP directory shows the dashboard's "does not export tool definitions"
+  banner and a tool drawer that says so instead of a blank panel.
+- Tool invocations are not read from this directory. They come from the transcript, per call
+  (see [Antigravity transcript pairing](#antigravity-transcript-pairing)).
+
+Parser contract `2` (`ANTIGRAVITY_PARSER_CONTRACT_VERSION` in `dash/src/refresh/registry.ts`) and
+parse cache version `6` (`CACHE_VERSION` in `dash/src/providers/antigravity.ts`). The session-cache
+parse label is `worktree-project-grouping-v5-agy-step-segments-v1` (`dash/src/ingest/session-cache.ts`).
+The transcript is read on every parse rather than cached, so new tool activity appears without a
+version bump.
+
+## Antigravity transcript pairing
+
+Tool calls and skill reads come from the conversation transcript,
+`<root>/brain/<conversationId>/.system_generated/logs/transcript.jsonl`, parsed by
+`dash/src/providers/antigravity-transcript.ts`. The transcript carries no token counts, so its
+steps are attached to a model call by step index, never by time. The protobuf `steps.step_payload`
+column is not decoded, and the top-level protobuf field #2 is never used for pairing.
+
+The transcript is read on every parse, through the shared capped reader (`readSessionFile`, 128 MiB,
+`MAX_SESSION_FILE_BYTES`). The reader reads the whole file before it checks the cap (todo
+[readsessionfile-stat-before-cap](../todo/readsessionfile-stat-before-cap.md)). A transcript over
+the cap is treated as absent: its calls get no tool or
+skill activity, and the skip is logged only under `KYBERDASH_VERBOSE=1`. The provider attaches
+activity to shallow copies of the cached calls and clears the transcript-derived fields (`tools`,
+`toolSequence`, `skills`) on every call with a pairing id before any lookup. The session cache
+therefore never holds transcript-derived data, and a transcript that has since vanished, grown past
+the cap or become unreadable leaves no stale activity behind.
+
+The pairing contract:
+
+- A `PLANNER_RESPONSE` step's `tool_calls` gives `{name, args}`. Every `args` value is JSON-encoded
+  twice and is decoded before use. A `GENERIC` step holds a tool's output.
+- Each model call is keyed by `gen_metadata.last_step_index`, stored on the `chatModel` attribute
+  `last_step_index` (field #20). It is the last step the model saw as input. The model's own
+  `PLANNER_RESPONSE` is at `last_step_index + 1`.
+- Call N owns the steps whose index is in `(lsi[N], lsi[N+1]]`. The upper bound is inclusive, so
+  step `lsi[N+1]` is call N's own output. The last call's range is open above.
+- The provider stamps the call with the pairing id `agy-step:<lsi>`, and the reader pairs turns on
+  that id.
+- A `GENERIC` step gives a call's result only when the segment holds exactly one call. A shared
+  output cannot be attributed among several calls.
+- A call before a mid-conversation transcript start is **uncovered**: it contributes no tool calls and
+  no skills key. A call without a pairing id, such as a status-line snapshot, gets nothing, and the
+  status-line recorder writes no transcript path. No time-based attachment exists.
+- **Coverage.** A call's segment is covered when the transcript holds a step at or before `lsi + 1`
+  and one after `lsi` (`segmentTranscript` sets `covered`). The provider is the only source of
+  coverage: it is the one place that knows whether the transcript reaches a call.
+
+What a paired call carries:
+
+- **Tool calls** become `tool.invoke` child records of that call's turn, in transcript order.
+- **Skill reads.** A `view_file` whose path's basename is `SKILL.md` names the skill by its parent
+  directory. The name must match `^[\w.-]+$`, and `.` and `..` are rejected. A `grep` whose search
+  path ends in `SKILL.md` names no skill. A skill read twice in one segment is held once in
+  `kyber.skills.invoked`, while both reads stay in the tool sequence.
+
+What the Skills view shows, as implemented:
+
+- A covered call carries `skills` on the parsed call: the names its segment's `SKILL.md` reads, or
+  `[]` when none was read. An uncovered call has no `skills` at all (`attachTranscriptActivity`
+  removes the field).
+- The synthesizer keeps that array for the Antigravity family whatever reader turn paired the call,
+  so `kyber.skills.invoked: []` is stored as a measured none. Every other provider still drops an
+  empty array, because for them an empty list is an absence (`invokedSkillsOf` in
+  `dash/src/synth/synth.ts`).
+- Per turn, the Skills view counts a turn only where its record carries `kyber.skills.invoked` as
+  an array. A turn without the key has no `skills_invoked` in the payload, so it is never read as a
+  measured none (`skillsInvokedOnTurn` in `dash/src/canon/sessions.ts`).
+- Invocation is measured for a session only when some record in it carries the key. Otherwise the
+  Skills view reports invocation as not measurable, and the reason names the transcript.
+- Where some Antigravity turns carry the key and some do not, the invocation figures (and
+  `listed_uninvoked_count`) cover the measured turns only. The payload then carries
+  `invocationsCoverage: { measuredTurns, totalTurns }`, and the Skills panel reads "Invocations
+  measured on X of Y turns". The key is set only when `0 < measuredTurns < totalTurns`, so a fully
+  covered session omits it and so does a session with no measured turn
+  (`buildSkillsView` in `dash/src/canon/skills.ts`).
+
+**What the transcript reader reaches (OTLP-only sessions).** The reader works only on file-based
+sessions, that is, on conversation databases that a refresh has imported. It does not reach sessions
+that exist only as OTLP spans. On the owner's store, 2026-10-21, 13 Antigravity sessions were
+OTLP-only:
+
+- Up to 8 of them have a conversation database under `~/.gemini/antigravity-cli/conversations/`
+  with transcript coverage. These gain transcript activity only after `antigravity-cli` is imported
+  (see the backfill below). One further database is empty, with no transcript.
+- Four have slug `gen_ai.session.id` values equal to `copilot_chat.chat_session_id`, with no
+  conversation id and no brain directory. They cannot be joined.
+- OTLP records stay harness `antigravity` by design. File records of the CLI root are harness
+  `antigravity-cli`. Whether the session view joins the two labels on one session id is
+  **unverified** (todo [antigravity-harness-label-session-join](../todo/antigravity-harness-label-session-join.md)).
+- File records carry no skill listing, so a file-only session's Skills panel shows the listing as not
+  measurable. The listing exists only on OTLP spans (todo
+  [antigravity-file-session-skill-listing](../todo/antigravity-file-session-skill-listing.md)).
+
+The cause of the OTLP-only gap is recorded as a finding, not a fix: `--harness antigravity` never
+includes `antigravity-cli` or `antigravity-ide`, because the family scope is shadowed by the
+descriptor id (todo [antigravity-family-scope-resolve-harness](../todo/antigravity-family-scope-resolve-harness.md)).
+The backfill is in the [runbook §2c](runbook.md#2c-import-folder-history-dash-import-history).
+
+## Antigravity skill descriptions
+
+The listing names skills only. A skill's description is read from its own `SKILL.md` frontmatter
+(`description`, with folded scalars joined by single spaces) by
+`dash/src/canon/antigravity-skill-text.ts`. The roots are tried in order, and the first `SKILL.md`
+that holds a description wins:
+
+1. `~/.gemini/config/skills/<name>/`
+2. For each of `antigravity`, `antigravity-ide` and `antigravity-cli`: `~/.gemini/<root>/skills/<name>/`,
+   then `~/.gemini/<root>/builtin/skills/<name>/`.
+
+A skill that no root holds has no description and no `derived_tokens`. Nothing is invented. The
+lookup runs for Antigravity sessions when the session payload is built (`buildSessionRow` in
+`dash/src/canon/sessions.ts`).
+
+The cache is keyed by the `SKILL.md` path and is valid only while that file's mtime and size are
+unchanged, so an edited description is read again on the next payload build with no restart. An
+absent `SKILL.md` is never stored, so a skill that appears later is picked up. A file that exists
+is cached under its mtime and size even when it holds no description, so that answer stands until
+the file changes. A name of `.` or `..`, or any name outside `^[\w.-]+$`, is refused before any
+path is built. The new text reaches the screen when that session's payload is next built, which is
+the next projection pass that rebuilds it: `kyber build`, or a refresh or accepted OTLP batch that
+projects. The maintenance pass alone may skip projection while the corpus is unchanged (see
+[runbook §2g](runbook.md#2g-skills-view-rebuild-and-capture-fixtures)).
+
+## Copilot CLI journal and system prompt
+
+Copilot CLI keeps its counters in `~/.copilot/session-store.db` and its transcript in
+`~/.copilot/session-state/<sessionId>/events.jsonl`. `dash/src/synth/readers/copilot.ts` reads the
+journal.
+
+- **System prompt.** The root agent's latest `system.message` is the prompt in force. Root events
+  carry no `agentId`; subagent events do, and their prompts are not read. A session is matched to
+  its journal by exact directory name, never by prefix. An id that contains a separator, `.` or
+  `..` is skipped.
+- **One copy per record.** The session's one reader turn carries the prompt as one `system_prompt`
+  part. Pairing is one turn per record, so every canon record of the session carries that copy.
+  Subagent prompts are not attached.
+- **Journal calls are not ingested as records.** The journal's assistant messages do not become
+  canon records (D20). Ingesting them would change the session's record set and its cost and token
+  totals against the rollups, so the reader attaches the prompt and the tools instead.
+- **Which records a session has depends on the refresh window (D23).** The records the Sessions view
+  lists come from the session store and the shutdown rollups, and the window decides their shape:
+  - A narrow window (T13 saw six weeks) yields one placeholder row per session. Each row has model
+    `unknown`, $0, and the key `copilot:<id>:<id>`. In that run 29 placeholders carried the root
+    prompt as measured and 31 were not measurable with the Copilot CLI reason. Nine shutdown
+    rollups from three sessions were also present.
+  - A wider window (T13 saw eight weeks) yields per-request rows instead, 2,439 of them, and each
+    carries the root prompt.
+  - In both cases every canon record of a session carries that session's root prompt. A session
+    with no `events.jsonl` keeps its records with no parts, and shows the not-measurable reasons
+    below.
+- **No `data.db` discovery.** The `data.db` file is never discovered by the reader (todo
+  [copilot-cli-placeholder-session-rows](../todo/copilot-cli-placeholder-session-rows.md)).
+- **Only `.db` paths are opened as SQLite.** A `.jsonl` path is read as a journal. The empty-load
+  fallback goes through `loadCopilotCliCalls` for `.db` paths only (`dash/src/synth/provider.ts`).
+- **Tool calls.** Journal `toolRequests` join `tool.execution_complete` on `toolCallId`. They attach
+  at session granularity, as child `tool.invoke` records of one record: the session's placeholder
+  row in the session store when it has one, otherwise the earliest shutdown rollup. They never go
+  per rollup leg. Subagent calls are included and carry `gen_ai.agent.id`. Per-message tool
+  attribution is not available, because no session has per-message records. Tool attribution is
+  therefore session-level, and it depends on the `outputTokens` todo
+  ([copilot-cli-output-tokens-skipped-messages](../todo/copilot-cli-output-tokens-skipped-messages.md)).
+- **Tool definitions** are not measurable. The journal holds no tool schemas, and the `<tools>`
+  section of the prompt is usage guidance, not the offered set.
+- **Skills.** The listing is measured from `<available_skills>` in the root prompt. Invocation is
+  not measurable, with the reason that per-message journal calls are not ingested, so the skills a
+  turn invoked are not recorded (see the skill availability table above). Session-level tool records
+  are shown, but skill loads are not counted from them.
+- **Empty journal units.** A journal unit with no calls still produces no records. The
+  `copilot`/`copilot-cli` empty-load fallback into `loadCopilotCliCalls` runs only for a `.db` path,
+  so a `.jsonl` path is never opened as SQLite (`dash/src/synth/provider.ts`).
+- **`measuredAs`.** The `ParsedProviderCall.measuredAs: 'copilot-cli'` hint on calls this reader
+  supplies selects only the measurability declaration (`measurabilityForRecord`). It changes no
+  provider, harness, cost or grouping.
+
+Known upstream issues, not fixed by this change. Each is filed as a todo:
+
+- Copilot CLI 1.0.81 and later, as the owner reports, omit `outputTokens`. The parser reads the
+  missing value as 0 and skips the message (`dash/src/providers/copilot.ts`, around lines 1028–1035).
+  Todo [copilot-cli-output-tokens-skipped-messages](../todo/copilot-cli-output-tokens-skipped-messages.md).
+- Journal messages outside the refresh window are not read. Todo
+  [copilot-cli-journal-refresh-window](../todo/copilot-cli-journal-refresh-window.md).
+- The session store's `sessions` table yields `$0`, `unknown`-model placeholder rows, and `data.db`
+  is never discovered. Todo [copilot-cli-placeholder-session-rows](../todo/copilot-cli-placeholder-session-rows.md).
+
+Parser contract `3` (`COPILOT_PARSER_CONTRACT_VERSION` in `dash/src/refresh/registry.ts`).
 
 ## Antigravity aggregate-token investigation (T7)
 
