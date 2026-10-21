@@ -200,8 +200,8 @@ implementation phase.
   `HotshotGoldenContractTests.cs` regression-pin line → `SquadCanonicalContentTests.cs`/
   `CopilotRendererTests.cs`), `docs/kyber-squad/README.md`, `docs/kyber-squad/onboarding.md`,
   `docs/distribution.md`, `docs/context-hygiene/skills.md`, and `products/kyber-squad/README.md`.
-  Preserve current facts (123-file Copilot render, 68 resources/92 files, 24 skills, 22 agents,
-  evolved-skills list, 19 migration reports) while removing the Hotshot-golden framing. Do not edit
+  Preserve current facts (121-file Copilot render, 69 resources/94 files, 25 skills, 21 agents,
+  evolved-skills list, 18 migration reports) while removing the Hotshot-golden framing. Do not edit
   `docs/archive/`. Acceptance: reworded, both docs checks clean (Test contract T5). Depends: none
   (parallel; the `HotshotGoldenContractTests.cs`-name removal is deterministic).
 
@@ -237,7 +237,7 @@ T5 ───────────────────┘
 
 - **Silent coverage loss** if a golden assertion is dropped that no owning class actually covers.
   Mitigated by the §3 audit and by T2 moving the one orphan before T3 deletes.
-- **Docs reword falsifies a fact** (e.g., dropping the 123-file/68-resource counts). Mitigated by
+- **Docs reword falsifies a fact** (e.g., dropping the 121-file/69-resource counts). Mitigated by
   T5's explicit "preserve current facts" acceptance.
 - **`docs drift` skips** when no CodeGraph index exists in this checkout; recorded as skipped, not
   passed, per AGENTS.md.
@@ -285,8 +285,8 @@ roster (`SquadCanonicalContentTests`), and the migration provenance all predate 
 remain. D6 rewords ADR 0017/0025 provenance only; D1/D4/D5/D7 explicitly keep existing behavior
 and names.
 
-**Documentation waiver:** none needed. The canonical facts (123-file Copilot render, 68
-resources/92 files, 24 skills, 22 agents, 19 migration reports, deterministic tool order,
+**Documentation waiver:** none needed. The canonical facts (121-file Copilot render, 69
+resources/94 files, 25 skills, 21 agents, 18 migration reports, deterministic tool order,
 migration provenance) are already documented in `docs/kyber-squad/`, `docs/distribution.md`,
 `docs/context-hygiene/skills.md`, and `products/kyber-squad/README.md`; T5 reworded them to
 neutral/canonical phrasing without changing facts.
