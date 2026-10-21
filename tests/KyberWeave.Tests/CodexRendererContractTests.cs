@@ -30,10 +30,12 @@ public sealed class CodexRendererContractTests : IDisposable
     /// Shared identities are read from the loaded fallback profile so the test follows the
     /// same generic single-projection contract as the renderer.
     /// </summary>
-    private static HashSet<string> SharedIdentities(SquadSource source) =>
-        source.FallbackProfiles.Profiles.Values
+    private static HashSet<string> SharedIdentities(SquadSource source)
+    {
+        return source.FallbackProfiles.Profiles.Values
             .SelectMany(profile => profile.SharedIdentities)
             .ToHashSet(StringComparer.Ordinal);
+    }
 
     /// <summary>
     /// The shared identities whose canonical skill is suppressed: those carried by a subagent,
@@ -41,12 +43,17 @@ public sealed class CodexRendererContractTests : IDisposable
     /// canonical skill as the entry point, so it is emitted. Delegated to the renderer's own
     /// resolver so the test cannot drift from the contract.
     /// </summary>
-    private static HashSet<string> SuppressedSkillIdentities(SquadSource source) =>
-        SquadSharedIdentityProjection.SuppressedSkillIdentities(source, SharedIdentities(source));
+    private static HashSet<string> SuppressedSkillIdentities(SquadSource source)
+    {
+        return SquadSharedIdentityProjection.SuppressedSkillIdentities(source, SharedIdentities(source));
+    }
 
     private readonly TempDirectory _temp = new();
 
-    public void Dispose() => _temp.Dispose();
+    public void Dispose()
+    {
+        _temp.Dispose();
+    }
 
     [Fact]
     public void SupportedTargets_IsExactlyCodex()
@@ -61,9 +68,9 @@ public sealed class CodexRendererContractTests : IDisposable
     {
         SquadRendererRegistry registry = new([new CodexRenderer()]);
         SquadRenderRequest request = new(
-            SourceDirectory: ProductRoot,
-            Targets: [SquadTarget.Claude, SquadTarget.Codex],
-            Scope: SquadDeploymentScope.Project);
+            ProductRoot,
+            [SquadTarget.Claude, SquadTarget.Codex],
+            SquadDeploymentScope.Project);
 
         SquadRenderResult result = await registry.RenderAsync(request);
 
@@ -78,9 +85,9 @@ public sealed class CodexRendererContractTests : IDisposable
     {
         CodexRenderer renderer = new();
         SquadRenderRequest request = new(
-            SourceDirectory: ProductRoot,
-            Targets: [SquadTarget.Copilot],
-            Scope: SquadDeploymentScope.Project);
+            ProductRoot,
+            [SquadTarget.Copilot],
+            SquadDeploymentScope.Project);
 
         await Assert.ThrowsAsync<ArgumentException>(() => renderer.RenderAsync(request));
     }
@@ -93,9 +100,9 @@ public sealed class CodexRendererContractTests : IDisposable
         HashSet<string> suppressedSkillIdentities = SuppressedSkillIdentities(source);
         SquadRendererRegistry registry = new([new CodexRenderer()]);
         SquadRenderRequest request = new(
-            SourceDirectory: ProductRoot,
-            Targets: [SquadTarget.Codex],
-            Scope: SquadDeploymentScope.Project);
+            ProductRoot,
+            [SquadTarget.Codex],
+            SquadDeploymentScope.Project);
 
         SquadRenderResult result = await registry.RenderAsync(request);
 
@@ -103,13 +110,29 @@ public sealed class CodexRendererContractTests : IDisposable
 
         int suppressedSkillCount = source.Skills.Count(skill => suppressedSkillIdentities.Contains(skill.Name));
         int expectedSkillCount = source.Skills.Count - suppressedSkillCount;
+        SquadAgent[] generatedPrimaryEntryPoints = source.Agents
+            .Where(agent =>
+                agent.Invocation == SquadInvocation.Primary &&
+                string.Equals(
+                    source.FallbackProfiles.Profiles[agent.Fallback].NoPrimaryAgent,
+                    "skill",
+                    StringComparison.Ordinal) &&
+                !source.Skills.Any(skill => string.Equals(skill.Name, agent.Name, StringComparison.Ordinal)))
+            .ToArray();
+        int expectedPrimaryEntryPointArtifactCount =
+            generatedPrimaryEntryPoints.Sum(agent => 1 + agent.Resources.Count);
+        SquadAgent conductor = Assert.Single(generatedPrimaryEntryPoints, agent => agent.Name == "conductor");
+        Assert.Equal(1 + conductor.Resources.Count, expectedPrimaryEntryPointArtifactCount);
 
         // C3: every rendered owner also projects its validated resource closure beside its
-        // principal output, so the corpus count is principals plus emitted closures.
+        // principal output. Primary agents with a skill fallback also project an entry-point
+        // skill and its validated resource closure.
         int expectedFileCount = source.Agents.Count + source.Agents.Sum(agent => agent.Resources.Count)
-            + expectedSkillCount
-            + source.Skills.Where(skill => !suppressedSkillIdentities.Contains(skill.Name))
-                .Sum(skill => skill.Resources.Count);
+                                                    + expectedSkillCount
+                                                    + source.Skills.Where(skill =>
+                                                            !suppressedSkillIdentities.Contains(skill.Name))
+                                                        .Sum(skill => skill.Resources.Count)
+                                                    + expectedPrimaryEntryPointArtifactCount;
         Assert.Equal(expectedFileCount, result.Files.Count);
 
         Assert.All(result.Files, f =>
@@ -209,6 +232,40 @@ public sealed class CodexRendererContractTests : IDisposable
             Assert.Equal(expectedSkillBody, skillBody);
         }
 
+        foreach (SquadAgent agent in generatedPrimaryEntryPoints)
+        {
+            SquadDeploymentFile entryPointSkill = Assert.Single(
+                result.Files,
+                file => file.RelativePath == $".codex/skills/{agent.Name}/SKILL.md");
+            (YamlMappingNode frontmatter, string skillBody) = SplitFrontmatter(
+                Encoding.UTF8.GetString(entryPointSkill.Content.Span),
+                agent.Name);
+
+            Assert.Equal(agent.Name, RequireScalar(frontmatter, "name", agent.Name));
+            string expectedDescription = string.Join(" ", agent.Description.Split(
+                ['\r', '\n'],
+                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+            Assert.Equal(expectedDescription, RequireScalar(frontmatter, "description", agent.Name));
+            Assert.Equal("MIT", RequireScalar(frontmatter, "license", agent.Name));
+
+            string expectedBody = agent.InstructionBody.Replace("\r\n", "\n", StringComparison.Ordinal);
+            if (!expectedBody.EndsWith('\n'))
+            {
+                expectedBody += "\n";
+            }
+
+            Assert.Equal(expectedBody, skillBody);
+
+            foreach (SquadResource resource in agent.Resources)
+            {
+                SquadDeploymentFile resourceFile = Assert.Single(
+                    result.Files,
+                    file => file.RelativePath == $".codex/skills/{agent.Name}/{resource.RelativePath}");
+                ReadOnlySpan<byte> expectedBytes = Encoding.UTF8.GetBytes(resource.Content);
+                Assert.True(expectedBytes.SequenceEqual(resourceFile.Content.Span));
+            }
+        }
+
         // Degradations: every agent with non-deny capability profile must carry 'permission-not-expressible'
         string[] capabilityVocabulary = [.. source.CapabilityProfiles.Capabilities.Order(StringComparer.Ordinal)];
         string[] expectedDegraded = source.Agents
@@ -248,13 +305,64 @@ public sealed class CodexRendererContractTests : IDisposable
     }
 
     [Fact]
+    public async Task RenderAsync_Codex_GlobalScopePlacesThePrimaryAgentEntryPointSkillUnderSkills()
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadAgent primaryAgent = Assert.Single(source.Agents, agent => agent.Name == "conductor");
+        SquadRenderRequest request = new(
+            ProductRoot,
+            [SquadTarget.Codex],
+            SquadDeploymentScope.Global);
+
+        SquadRenderResult result = await new CodexRenderer().RenderAsync(request);
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        string expectedAgentBody = primaryAgent.InstructionBody.Replace("\r\n", "\n", StringComparison.Ordinal);
+        if (!expectedAgentBody.EndsWith('\n'))
+        {
+            expectedAgentBody += "\n";
+        }
+
+        SquadDeploymentFile agentFile = Assert.Single(
+            result.Files,
+            file => file.RelativePath == $"agents/{primaryAgent.Name}.toml");
+        ParsedTomlAgent parsedAgent = ParseCodexAgentToml(
+            Encoding.UTF8.GetString(agentFile.Content.Span),
+            primaryAgent.Name);
+        Assert.Equal(primaryAgent.Name, parsedAgent.Name);
+        Assert.Equal(expectedAgentBody, parsedAgent.DeveloperInstructions);
+
+        SquadDeploymentFile skillFile = Assert.Single(
+            result.Files,
+            file => file.RelativePath == $"skills/{primaryAgent.Name}/SKILL.md");
+        (YamlMappingNode frontmatter, string skillBody) = SplitFrontmatter(
+            Encoding.UTF8.GetString(skillFile.Content.Span),
+            primaryAgent.Name);
+        Assert.Equal(primaryAgent.Name, RequireScalar(frontmatter, "name", primaryAgent.Name));
+        Assert.Equal("MIT", RequireScalar(frontmatter, "license", primaryAgent.Name));
+        Assert.Equal(expectedAgentBody, skillBody);
+
+        foreach (SquadResource resource in primaryAgent.Resources)
+        {
+            Assert.Single(
+                result.Files,
+                file => file.RelativePath == $"skills/{primaryAgent.Name}/{resource.RelativePath}");
+        }
+
+        Assert.DoesNotContain(
+            result.Files,
+            file => file.RelativePath.StartsWith(".codex/", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task RenderAsync_IsDeterministic()
     {
         SquadRendererRegistry registry = new([new CodexRenderer()]);
         SquadRenderRequest request = new(
-            SourceDirectory: ProductRoot,
-            Targets: [SquadTarget.Codex],
-            Scope: SquadDeploymentScope.Project);
+            ProductRoot,
+            [SquadTarget.Codex],
+            SquadDeploymentScope.Project);
 
         SquadRenderResult first = await registry.RenderAsync(request);
         SquadRenderResult second = await registry.RenderAsync(request);
@@ -270,7 +378,8 @@ public sealed class CodexRendererContractTests : IDisposable
 
             Assert.Equal(file1.RelativePath, file2.RelativePath);
             Assert.Equal(file1.Target, file2.Target);
-            Assert.True(file1.Content.Span.SequenceEqual(file2.Content.Span), $"Content differed for file '{file1.RelativePath}'.");
+            Assert.True(file1.Content.Span.SequenceEqual(file2.Content.Span),
+                $"Content differed for file '{file1.RelativePath}'.");
         }
 
         Assert.Equal(first.Degradations.Count, second.Degradations.Count);
@@ -297,17 +406,17 @@ public sealed class CodexRendererContractTests : IDisposable
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
         HashSet<string> sharedIdentities = SharedIdentities(source);
         string probe = source.Skills
-            .Select(skill => skill.Name)
-            .Where(name => !sharedIdentities.Contains(name))
-            .OrderBy(name => name, StringComparer.Ordinal)
-            .FirstOrDefault()
-            ?? throw new InvalidOperationException(
-                $"Corpus at '{ProductRoot}' declares no non-suppressed skills.");
+                           .Select(skill => skill.Name)
+                           .Where(name => !sharedIdentities.Contains(name))
+                           .OrderBy(name => name, StringComparer.Ordinal)
+                           .FirstOrDefault()
+                       ?? throw new InvalidOperationException(
+                           $"Corpus at '{ProductRoot}' declares no non-suppressed skills.");
 
         SquadRenderResult result = await new CodexRenderer().RenderAsync(new SquadRenderRequest(
-            SourceDirectory: ProductRoot,
-            Targets: [SquadTarget.Codex],
-            Scope: SquadDeploymentScope.Project));
+            ProductRoot,
+            [SquadTarget.Codex],
+            SquadDeploymentScope.Project));
 
         SquadDeploymentFile rendered = Assert.Single(
             result.Files,
@@ -340,9 +449,9 @@ public sealed class CodexRendererContractTests : IDisposable
         string sourceRoot = WriteMinimalSquadSource(_temp.Path, fixtureBody);
 
         SquadRenderResult result = await new CodexRenderer().RenderAsync(new SquadRenderRequest(
-            SourceDirectory: sourceRoot,
-            Targets: [SquadTarget.Codex],
-            Scope: SquadDeploymentScope.Project));
+            sourceRoot,
+            [SquadTarget.Codex],
+            SquadDeploymentScope.Project));
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
         SquadDeploymentFile agentFile = Assert.Single(
@@ -494,64 +603,64 @@ public sealed class CodexRendererContractTests : IDisposable
     private static string WriteMinimalSquadSource(string root, string agentBody)
     {
         Write(root, "squad.yml", """
-            schema: kyber-squad.squad/v1
-            name: kyber-squad
-            version-source: kyber-weave-assembly
-            default-bundle: full
-            bundles:
-              full: bundles/full.yml
-            profiles:
-              models: profiles/models.yml
-              capabilities: profiles/capabilities.yml
-              fallbacks: profiles/fallbacks.yml
-            toolchain: toolchain.yml
-            mcp: mcp.json
-            """);
+                                 schema: kyber-squad.squad/v1
+                                 name: kyber-squad
+                                 version-source: kyber-weave-assembly
+                                 default-bundle: full
+                                 bundles:
+                                   full: bundles/full.yml
+                                 profiles:
+                                   models: profiles/models.yml
+                                   capabilities: profiles/capabilities.yml
+                                   fallbacks: profiles/fallbacks.yml
+                                 toolchain: toolchain.yml
+                                 mcp: mcp.json
+                                 """);
         Write(root, "bundles/full.yml", """
-            schema: kyber-squad.bundle/v1
-            name: full
-            agents:
-              - escape-probe
-            skills: []
-            """);
+                                        schema: kyber-squad.bundle/v1
+                                        name: full
+                                        agents:
+                                          - escape-probe
+                                        skills: []
+                                        """);
         Write(root, "profiles/models.yml", """
-            schema: kyber-squad.model-profiles/v1
-            profiles:
-              general:
-                default: inherit
-            """);
+                                           schema: kyber-squad.model-profiles/v1
+                                           profiles:
+                                             general:
+                                               default: inherit
+                                           """);
         Write(root, "profiles/capabilities.yml", """
-            schema: kyber-squad.capability-profiles/v1
-            capabilities:
-              - filesystem.read
-            profiles:
-              worker:
-                permissions:
-                  filesystem.read: deny
-            """);
+                                                 schema: kyber-squad.capability-profiles/v1
+                                                 capabilities:
+                                                   - filesystem.read
+                                                 profiles:
+                                                   worker:
+                                                     permissions:
+                                                       filesystem.read: deny
+                                                 """);
         Write(root, "profiles/fallbacks.yml", """
-            schema: kyber-squad.fallback-profiles/v1
-            profiles:
-              role-skill:
-                no-primary-agent: skill
-                no-agent-primitive: skill
-            """);
+                                              schema: kyber-squad.fallback-profiles/v1
+                                              profiles:
+                                                role-skill:
+                                                  no-primary-agent: skill
+                                                  no-agent-primitive: skill
+                                              """);
         Write(root, "toolchain.yml", """
-            schema: kyber-squad.toolchain/v1
-            required-features:
-              - agent-ir/v1
-            validated-release: null
-            """);
+                                     schema: kyber-squad.toolchain/v1
+                                     required-features:
+                                       - agent-ir/v1
+                                     validated-release: null
+                                     """);
         Write(root, "mcp.json", """
-            {
-              "mcpServers": {
-                "kyber-weave": {
-                  "command": "kyber-weave-mcp",
-                  "args": ["--repo-root", "."]
-                }
-              }
-            }
-            """);
+                                {
+                                  "mcpServers": {
+                                    "kyber-weave": {
+                                      "command": "kyber-weave-mcp",
+                                      "args": ["--repo-root", "."]
+                                    }
+                                  }
+                                }
+                                """);
         Write(root, "agents/escape-probe.md",
             "---\n" +
             "schema: kyber-squad.agent/v1\n" +
@@ -572,62 +681,62 @@ public sealed class CodexRendererContractTests : IDisposable
         Write(root, "schemas/model-profiles.schema.json", MinimalSchema);
         Write(root, "schemas/capability-profiles.schema.json", MinimalSchema);
         Write(root, "schemas/fallback-profiles.schema.json", """
-            {
-              "$schema": "https://json-schema.org/draft/2020-12/schema",
-              "$id": "https://kyber-weave.dev/schemas/kyber-squad/fallback-profiles/v1",
-              "type": "object",
-              "additionalProperties": false,
-              "required": ["schema", "profiles"],
-              "properties": {
-                "schema": { "const": "kyber-squad.fallback-profiles/v1" },
-                "profiles": {
-                  "type": "object",
-                  "additionalProperties": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "required": ["no-primary-agent", "no-agent-primitive"],
-                    "properties": {
-                      "no-primary-agent": { "enum": ["skill", "omit"] },
-                      "no-agent-primitive": { "enum": ["skill", "omit"] },
-                      "body-source": { "const": "agent" },
-                      "output-identity": {
-                        "type": "object",
-                        "additionalProperties": false,
-                        "required": ["unoccupied", "shared", "collision", "prefix"],
-                        "properties": {
-                          "unoccupied": { "const": "agent-name" },
-                          "shared": { "const": "reuse-skill" },
-                          "collision": { "const": "role-prefixed-agent-name" },
-                          "prefix": { "const": "role-" }
-                        }
-                      },
-                      "shared-identities": {
-                        "type": "array",
-                        "uniqueItems": true,
-                        "items": { "type": "string", "minLength": 1 }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-            """);
+                                                             {
+                                                               "$schema": "https://json-schema.org/draft/2020-12/schema",
+                                                               "$id": "https://kyber-weave.dev/schemas/kyber-squad/fallback-profiles/v1",
+                                                               "type": "object",
+                                                               "additionalProperties": false,
+                                                               "required": ["schema", "profiles"],
+                                                               "properties": {
+                                                                 "schema": { "const": "kyber-squad.fallback-profiles/v1" },
+                                                                 "profiles": {
+                                                                   "type": "object",
+                                                                   "additionalProperties": {
+                                                                     "type": "object",
+                                                                     "additionalProperties": false,
+                                                                     "required": ["no-primary-agent", "no-agent-primitive"],
+                                                                     "properties": {
+                                                                       "no-primary-agent": { "enum": ["skill", "omit"] },
+                                                                       "no-agent-primitive": { "enum": ["skill", "omit"] },
+                                                                       "body-source": { "const": "agent" },
+                                                                       "output-identity": {
+                                                                         "type": "object",
+                                                                         "additionalProperties": false,
+                                                                         "required": ["unoccupied", "shared", "collision", "prefix"],
+                                                                         "properties": {
+                                                                           "unoccupied": { "const": "agent-name" },
+                                                                           "shared": { "const": "reuse-skill" },
+                                                                           "collision": { "const": "role-prefixed-agent-name" },
+                                                                           "prefix": { "const": "role-" }
+                                                                         }
+                                                                       },
+                                                                       "shared-identities": {
+                                                                         "type": "array",
+                                                                         "uniqueItems": true,
+                                                                         "items": { "type": "string", "minLength": 1 }
+                                                                       }
+                                                                     }
+                                                                   }
+                                                                 }
+                                                               }
+                                                             }
+                                                             """);
 
         return root;
     }
 
     private const string MinimalSchema = """
-        {
-          "$schema": "https://json-schema.org/draft/2020-12/schema",
-          "type": "object"
-        }
-        """;
+                                         {
+                                           "$schema": "https://json-schema.org/draft/2020-12/schema",
+                                           "type": "object"
+                                         }
+                                         """;
 
     private static void Write(string root, string relativePath, string content)
     {
         string path = Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar));
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllText(path, content, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+        File.WriteAllText(path, content, new UTF8Encoding(false));
     }
 
     private static (YamlMappingNode Frontmatter, string Body) SplitFrontmatter(string text, string identity)
@@ -660,6 +769,6 @@ public sealed class CodexRendererContractTests : IDisposable
         }
 
         return Assert.IsType<YamlScalarNode>(value).Value
-            ?? throw new InvalidOperationException($"'{identity}' key '{key}' has a null scalar value.");
+               ?? throw new InvalidOperationException($"'{identity}' key '{key}' has a null scalar value.");
     }
 }

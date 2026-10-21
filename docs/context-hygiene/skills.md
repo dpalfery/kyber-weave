@@ -149,8 +149,8 @@ harness targets. All twelve renderers are implemented and registered (`copilot`,
 `codex`, `antigravity`, `opencode`, `kilo`, `pi`, `factory`, `warp`, `zcode`, and `devin`).
 
 Every raw `SKILL.md` except the six explicitly evolved skills (`bug-crusher`, `code-review`, `product-owner`,
-`second-brain`, `create-pull-request`, and `pr-review-fix-comments`) matches the Hotshot golden
-bytes; the golden `create-pull-request-github` skill is retired into `create-pull-request`.
+`second-brain`, `create-pull-request`, and `pr-review-fix-comments`) matches the canonical
+bytes; the retired `create-pull-request-github` skill is folded into `create-pull-request`.
 Canonical storage and recursive Squad packages preserve 69 supplemental resources, for 94
 skill-tree files. Renderers project every file a Markdown link reaches beside the rendered
 principal, so those references resolve when deployed; every skill resource reaches its render

@@ -120,13 +120,13 @@ Kyber-Squad enforces a strict non-broadening guarantee across all translations:
 
 If a target harness cannot guarantee the containment or authorization boundaries specified in an agent's capability profile, the engine will narrow the permission or omit the component entirely.
 
-## Golden-render and knowledge-retention requirement
+## Render and knowledge-retention requirement
 
-`code-review-loop` is authored in Kyber-Squad and has no Hotshot baseline. Every imported
+`code-review-loop` is authored in Kyber-Squad. Every imported
 canonical raw `SKILL.md` except the six explicitly evolved skills (`bug-crusher`, `code-review`,
 `product-owner`, `second-brain`, `create-pull-request`, and `pr-review-fix-comments`) matches the
-Hotshot golden bytes, as does every non-evolved agent body. The golden `create-pull-request-github`
-skill is retired into `create-pull-request`, and the three retired `-v3` agent identities survive
+canonical bytes, as does every non-evolved agent body. The retired `create-pull-request-github`
+skill is folded into `create-pull-request`, and the three retired `-v3` agent identities survive
 only as folded provenance in their canonical migration reports. Renderers project every file an
 owner's Markdown links reach beside its principal output, so a fresh Copilot render emits 123
 files with no dangling link; every skill resource reaches this render except
