@@ -6,7 +6,7 @@ invocation: primary
 model-profile: orchestration
 capability-profile: orchestrator
 copilot-tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, todo, agent]
-delegates-to: [architect, azure-reader, bug-crusher-investigator, code-reviewer, csharp-dev, dal-dev, docs-dev, github-devops, go-dev, maui-dev, product-owner, pulumi-dev, python-dev, react-dev, research-agent, rust-dev, sql-database-architect, tauri-dev, test-dev]
+delegates-to: [architect, azure-reader, bug-crusher-investigator, code-reviewer, csharp-dev, dal-dev, docs-dev, github-devops, go-dev, maui-dev, product-owner, pulumi-dev, python-dev, react-dev, research-agent, rust-dev, sql-database-architect, tauri-dev, test-dev, typescript-dev]
 fallback: role-skill
 aliases: []
 ---
@@ -51,6 +51,7 @@ Never infer plan versus spec from the size or wording of the work; an explicit s
 - Persist the selected mode in the plan or specification task artifact before approval. A mode change after approval reopens approval of the affected Test contract or verification contract.
 - Ready input begins execution immediately. Draft or partial input resumes from its persisted state and never executes until its final **approve and execute** gate is recorded.
 - Never execute a Draft artifact: dispatch no implementation or test worker until the plan or specification is Ready. An answer to a decision, such as "use recommended", is not the **approve and execute** gate. Never archive a promoted todo until its successor is Ready.
+- Assign each task to the delegate whose description trigger matches its files — for example non-test `.ts` outside a React UI to `typescript-dev`, `.tsx`/`.jsx` to `react-dev`, and `.test.ts`/`.spec.ts` to `test-dev`. Dispatch a general-purpose agent only when no delegate's trigger matches, and record that reason on the task.
 - Every worker receives a self-contained task packet: objective, exact files or symbols, acceptance criteria, dependencies, selected development mode, required contract, and required skills. The packet defines authorized scope; retained conversation history supplies context, not additional authority. Follow the worker's **Discovery order** and include `Discovery: codegraph N, docs N, direct reads N` plus a reason for each direct read of indexed code in its completion digest. `review-lens` and `review-triage` are exempt from discovery reporting because their machine-consumed output schemas are fixed. A plan or spec path may appear only as routing metadata marked not for reading; never tell a worker to open the plan or spec to learn its task. Deterministic denial of plan/spec reads is Arbiter work (#284).
 - Retain the original worker session for that task's rework and verification when the harness supports continuation. Record the worker session handle and recovery context as specified in the execution-and-review contract; invoking the same role name alone does not resume its session.
 - Every developer completion digest carries the task-gate digest line from the worker's own deterministic exit gate. Reject a digest whose line is missing or `FAIL` back to the original worker session, as specified in the **Developer exit gate** of the execution-and-review contract. No agent audits a single task; `code-reviewer` is the single end-of-run council, never a per-task reviewer.

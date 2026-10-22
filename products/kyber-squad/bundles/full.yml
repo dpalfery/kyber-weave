@@ -24,6 +24,7 @@ agents:
   - sql-database-architect
   - tauri-dev
   - test-dev
+  - typescript-dev
 skills:
   - app-docs-standard
   - architecture-decision-record
@@ -52,3 +53,4 @@ skills:
   - setup-dev-environment
   - task-gate
   - test-dev
+  - typescript-dev

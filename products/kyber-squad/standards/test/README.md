@@ -82,6 +82,22 @@ to proceed on it, exactly as it does when no standard is declared.
 - **Package:** black-box tests in `package foo_test` by default; internal `package foo` tests
   only for unexported logic that cannot be reached otherwise.
 
+### TypeScript (Node)
+
+- **Runner:** Vitest (`vitest run`), unless the repository already uses `node:test` or Jest.
+- **Placement:** `<module>.test.ts` beside the module, or under `tests/` when the package keeps
+  them there. Match the package.
+- **Fakes:** pass substitutes through the parameters the code already takes (database handle,
+  clock, file-system root). `vi.mock` of a module is a last resort; a test that needs it is a
+  sign the code constructs its own dependencies.
+- **Data access:** run queries against a real in-memory or temporary-file database built from
+  the production schema, not a mocked driver.
+- **Time:** `vi.useFakeTimers()` and `vi.setSystemTime()` instead of real sleeps; restore in
+  `afterEach`.
+- **Files:** a fresh `mkdtemp` directory per test, removed in `afterEach`.
+- **Absent values:** where a value can be unmeasured, at least one case asserts it stays
+  `null`/`undefined` through to the output, and is not reported as `0`.
+
 ### Frontend
 
 - **Unit / component:** Vitest + React Testing Library.
@@ -137,4 +153,5 @@ dotnet test
 pytest tests/<module>
 cargo nextest run --workspace --locked   # or: cargo test --workspace --locked
 go test -race ./...
+npx vitest run <path>
 ```

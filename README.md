@@ -154,10 +154,10 @@ that was fixed in `.claude` and left broken in `.cursor`.
 
 Managing agent roles and skill sets across disparate developer environments leads to
 configuration drift, broken permissions, and fragmented workflows. Kyber-Squad provides a
-**single, unified lifecycle and deployment control plane** for deploying 23 canonical agents
-and 27 skills across 12 coding harnesses.
+**single, unified lifecycle and deployment control plane** for deploying 24 canonical agents
+and 28 skills across 12 coding harnesses.
 
-**The canonical tree.** Maintains 23 canonical agent bodies and 27 canonical skills under
+**The canonical tree.** Maintains 24 canonical agent bodies and 28 canonical skills under
 [`products/kyber-squad/`](products/kyber-squad/README.md), governed by strict schemas, model
 profiles, and capability profiles. Generated target trees and APM packages are never tracked.
 
@@ -254,7 +254,7 @@ src/
   KyberWeave.Cli/         kyber-weave — skill | agent | squad | docs | utilities | review | update
   KyberWeave.Mcp/         kyber-weave-mcp — stdio MCP server
 products/
-  kyber-squad/            canonical 23 agents, 27 skills, profiles, and schemas
+  kyber-squad/            canonical 24 agents, 28 skills, profiles, and schemas
 dash/                     Feature 5 — KyberDash, first-party since a one-time fork of CodeBurn
   src/ dash/                CLI engine, provider parsers, and the web dashboard
   kyber/                    analyzers, OTLP receiver, canon store

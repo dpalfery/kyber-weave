@@ -142,8 +142,8 @@ layout for each runtime is APM's problem rather than a second copy of that mappi
 
 While ContextHygiene validates individual skill specifications, scores routing readiness,
 and scans instruction surfaces, **[Kyber-Squad](../kyber-squad/architecture.md)** acts as the
-unified multi-harness deployment control plane. Kyber-Squad maintains 27 canonical skills
-(alongside 23 canonical agent roles and lowering rules) under `products/kyber-squad/` and
+unified multi-harness deployment control plane. Kyber-Squad maintains 28 canonical skills
+(alongside 24 canonical agent roles and lowering rules) under `products/kyber-squad/` and
 manages their transactional deployment, drift tracking, and lifecycle. Its catalog declares twelve
 harness targets. All twelve renderers are implemented and registered (`copilot`, `cursor`, `claude`,
 `codex`, `antigravity`, `opencode`, `kilo`, `pi`, `factory`, `warp`, `zcode`, and `devin`).
@@ -151,7 +151,7 @@ harness targets. All twelve renderers are implemented and registered (`copilot`,
 Every raw `SKILL.md` except the six explicitly evolved skills (`bug-crusher`, `code-review`, `product-owner`,
 `second-brain`, `create-pull-request`, and `pr-review-fix-comments`) matches the canonical
 bytes; the retired `create-pull-request-github` skill is folded into `create-pull-request`.
-Canonical storage and recursive Squad packages preserve 78 supplemental resources, for 105
+Canonical storage and recursive Squad packages preserve 82 supplemental resources, for 110
 skill-tree files. Renderers project every file a Markdown link reaches beside the rendered
 principal, so those references resolve when deployed; every skill resource reaches its render
 except `skills/setup-dev-environment/agents/openai.yaml`, which stays packaged-only Codex
@@ -161,9 +161,9 @@ retained resource has a reviewed disposition in the
 content stays in its skill directory as its durable home, portable policy lives in the
 `products/kyber-squad/standards/` templates, and nothing was deleted.
 
-The agent and skill namespaces intersect at ten names. Two of those intersections
+The agent and skill namespaces intersect at eleven names. Two of those intersections
 (`product-owner` and `bug-crusher`) are primary shared identities whose root-agent body is a thin
-pointer at the same-name canonical skill; the remaining eight are distinct-body collisions. Fallback
+pointer at the same-name canonical skill; the remaining nine are distinct-body collisions. Fallback
 rendering keeps each distinct-body collision's skill at `<name>` and lowers its agent to
 `role-<name>`, while a primary shared identity reuses its canonical skill as the entry point;
 agents with unoccupied skill identities, including `conductor`, lower to same-name role skills.
